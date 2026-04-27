@@ -1,0 +1,17 @@
+[package]
+name = "stutter-ebpf"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+stutter-common = { path = "../stutter-common" }
+
+aya-ebpf = { workspace = true }
+aya-log-ebpf = { workspace = true }
+
+[build-dependencies]
+which = { workspace = true }
+
+[[bin]]
+name = "stutter"
+path = "src/main.rs"

@@ -1,0 +1,8 @@
+[target."cfg(all())"]
+runner = "doas"
+
+[target.bpfel-unknown-none]
+linker = "bpf-linker"
+
+[target.bpfeb-unknown-none]
+linker = "bpf-linker"
