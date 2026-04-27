@@ -1,11 +1,15 @@
-use std::{collections::BTreeMap, time::Duration};
+mod process_tree;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 
 use aya::{
     Ebpf,
-    maps::{HashMap as AyaHashMap, RingBuf},
+    maps::{HashMap as AyaHashMap, MapData, RingBuf},
     programs::TracePoint,
 };
-use log::info;
+use log::{debug, info, warn};
 use stutter_common::{EVENT_RUNNABLE_LATENCY, SchedulerEvent};
 use tokio::{
     io::unix::AsyncFd,
@@ -25,6 +29,7 @@ struct SpikeRecord {
 #[derive(Debug)]
 struct Config {
     target_pids: Vec<u32>,
+    tree_pids: Vec<u32>,
     summary_period_ms: u64,
     spike_threshold_ns: u64,
     verbose: bool,
@@ -96,7 +101,7 @@ struct CpuSnapshot {
     per_cpu: Vec<CpuLine>,
 }
 
-const TARGET_PIDS_MAX: usize = 128;
+const TARGET_PIDS_MAX: usize = 1024;
 const MAX_EXACT_SAMPLES: usize = 65_536;
 
 impl LatencyStats {
@@ -289,7 +294,7 @@ impl ProcessStats {
             });
 
             self.top_spikes
-                .sort_unstable_by(|a, b| b.latency_ns.cmp(&a.latency_ns));
+                .sort_unstable_by_key(|spike| std::cmp::Reverse(spike.latency_ns));
 
             self.top_spikes.truncate(16);
         }
@@ -309,6 +314,7 @@ fn percentile_from_sorted(samples: &[u64], percentile: f64) -> u64 {
 
 fn parse_config() -> anyhow::Result<Config> {
     let mut target_pids = Vec::new();
+    let mut tree_pids = Vec::new();
     let mut summary_period_ms = 1_000;
     let mut spike_threshold_ns = 1_000_000;
     let mut verbose = false;
@@ -317,6 +323,19 @@ fn parse_config() -> anyhow::Result<Config> {
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--tree-pid" => {
+                let Some(value) = args.next() else {
+                    anyhow::bail!("{arg} requires a PID value");
+                };
+
+                let pid = value.parse::<u32>()?;
+
+                if pid == 0 {
+                    anyhow::bail!("--tree-pid must be greater than zero");
+                }
+
+                tree_pids.push(pid);
+            }
             "--pid" | "-p" => {
                 let Some(value) = args.next() else {
                     anyhow::bail!("{arg} requires a PID value");
@@ -361,7 +380,7 @@ fn parse_config() -> anyhow::Result<Config> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: stutter --pid <PID> [--pid <PID> ...] [--summary-ms <MS>] [--spike-us <US>] [--verbose]"
+                    "Usage: stutter --pid <PID> [--pid <PID> ...] [--tree-pid <PID> ...] [--summary-ms <MS>] [--spike-us <US>] [--verbose]"
                 );
                 std::process::exit(0);
             }
@@ -371,12 +390,15 @@ fn parse_config() -> anyhow::Result<Config> {
         }
     }
 
-    if target_pids.is_empty() {
-        anyhow::bail!("at least one --pid <PID> is required");
+    if target_pids.is_empty() && tree_pids.is_empty() {
+        anyhow::bail!("at least one --pid <PID> or --tree-pid <PID> is required");
     }
 
     target_pids.sort_unstable();
     target_pids.dedup();
+
+    tree_pids.sort_unstable();
+    tree_pids.dedup();
 
     if target_pids.len() > TARGET_PIDS_MAX {
         anyhow::bail!(
@@ -388,6 +410,7 @@ fn parse_config() -> anyhow::Result<Config> {
 
     Ok(Config {
         target_pids,
+        tree_pids,
         summary_period_ms,
         spike_threshold_ns,
         verbose,
@@ -523,6 +546,95 @@ fn print_session_summaries(stats_by_pid: &mut BTreeMap<u32, ProcessStats>) {
     }
 }
 
+fn refresh_target_pids(
+    config: &Config,
+    active_target_pids: &mut BTreeSet<u32>,
+    target_pid_map: &mut AyaHashMap<MapData, u32, u8>,
+) -> anyhow::Result<()> {
+    let processes = process_tree::scan_processes();
+
+    let mut desired_processes = BTreeSet::new();
+
+    for pid in &config.target_pids {
+        desired_processes.insert(*pid);
+    }
+
+    for root_pid in &config.tree_pids {
+        desired_processes.insert(*root_pid);
+        desired_processes.extend(process_tree::descendants_of(*root_pid, &processes));
+    }
+
+    let mut desired_tasks = BTreeSet::new();
+    let mut task_owner: BTreeMap<u32, u32> = BTreeMap::new();
+
+    for pid in &desired_processes {
+        let tids = process_tree::thread_ids_of(*pid);
+
+        if tids.is_empty() {
+            desired_tasks.insert(*pid);
+            task_owner.insert(*pid, *pid);
+        } else {
+            for tid in tids {
+                desired_tasks.insert(tid);
+                task_owner.insert(tid, *pid);
+            }
+        }
+    }
+
+    if desired_tasks.len() > TARGET_PIDS_MAX {
+        anyhow::bail!(
+            "too many target tasks after tree/thread expansion: got {}, but TARGET_PIDS supports at most {}",
+            desired_tasks.len(),
+            TARGET_PIDS_MAX
+        );
+    }
+
+    for tid in desired_tasks.difference(active_target_pids) {
+        target_pid_map.insert(*tid, 1, 0).map_err(|e| {
+            anyhow::anyhow!(
+                "failed to insert TID {tid} into TARGET_PIDS during tree refresh \
+                 (map full? eBPF TARGET_PIDS max_entries is {TARGET_PIDS_MAX}): {e}"
+            )
+        })?;
+
+        if let Some(owner_pid) = task_owner.get(tid) {
+            if let Some(proc_info) = processes.get(owner_pid) {
+                info!(
+                    "tree_target_added tid={} process_pid={} ppid={} comm={}",
+                    tid, proc_info.pid, proc_info.ppid, proc_info.comm
+                );
+                debug!(
+                    "tree_target_added_cmdline tid={} process_pid={} cmdline={}",
+                    tid, proc_info.pid, proc_info.cmdline
+                );
+            } else {
+                info!("tree_target_added tid={} process_pid={}", tid, owner_pid);
+            }
+        } else {
+            info!("tree_target_added tid={tid}");
+        }
+    }
+
+    for tid in active_target_pids.difference(&desired_tasks) {
+        match target_pid_map.remove(tid) {
+            Ok(()) => info!("tree_target_removed tid={tid}"),
+            Err(e) => warn!("tree_target_remove_failed tid={tid} err={e}"),
+        }
+    }
+
+    *active_target_pids = desired_tasks;
+
+    debug!(
+        "tree_refresh_complete active_tasks={} manual_roots={} tree_roots={} process_count={}",
+        active_target_pids.len(),
+        config.target_pids.len(),
+        config.tree_pids.len(),
+        desired_processes.len(),
+    );
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -544,24 +656,16 @@ async fn main() -> anyhow::Result<()> {
         "/stutter"
     )))?;
 
-    {
-        let mut target_pid_map: AyaHashMap<_, u32, u8> = AyaHashMap::try_from(
-            ebpf.map_mut("TARGET_PIDS")
-                .expect("TARGET_PIDS map not found"),
-        )?;
-
-        for pid in &config.target_pids {
-            target_pid_map.insert(pid, 1, 0).map_err(|e| {
-                anyhow::anyhow!(
-                    "failed to insert PID {pid} into TARGET_PIDS \
-                     (map full? eBPF TARGET_PIDS max_entries is {TARGET_PIDS_MAX}): {e}"
-                )
-            })?;
-        }
-    }
-
     attach_tracepoint(&mut ebpf, "sched_wakeup", "sched", "sched_wakeup")?;
     attach_tracepoint(&mut ebpf, "sched_switch", "sched", "sched_switch")?;
+
+    let target_pid_map = ebpf
+        .take_map("TARGET_PIDS")
+        .expect("TARGET_PIDS map not found");
+    let mut target_pid_map: AyaHashMap<MapData, u32, u8> = AyaHashMap::try_from(target_pid_map)?;
+
+    let mut active_target_pids = BTreeSet::new();
+    refresh_target_pids(&config, &mut active_target_pids, &mut target_pid_map)?;
 
     let ring_buf = ebpf.take_map("EVENTS").expect("EVENTS map not found");
     let ring_buf = RingBuf::try_from(ring_buf)?;
@@ -573,8 +677,13 @@ async fn main() -> anyhow::Result<()> {
     summary_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     summary_tick.tick().await;
 
+    let mut tree_tick = interval(Duration::from_secs(1));
+    tree_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    tree_tick.tick().await;
+
     println!("Attached to sched_wakeup + sched_switch.");
-    println!("Tracking PIDs: {:?}", config.target_pids);
+    println!("Tracking manual PIDs: {:?}", config.target_pids);
+    println!("Tracking tree roots: {:?}", config.tree_pids);
     println!("Summary period: {}ms", config.summary_period_ms);
     println!(
         "Spike threshold: {}",
@@ -585,6 +694,11 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         tokio::select! {
+            _ = tree_tick.tick(), if !config.tree_pids.is_empty() => {
+                if let Err(e) = refresh_target_pids(&config, &mut active_target_pids, &mut target_pid_map) {
+                    warn!("tree_refresh_failed err={e}");
+                }
+            }
             _ = signal::ctrl_c() => {
                 print_interval_summaries(&mut stats_by_pid);
                 print_session_summaries(&mut stats_by_pid);
