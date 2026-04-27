@@ -11,9 +11,12 @@ stutter-common = { path = "../stutter-common", features = ["user"] }
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true }
 aya-log = { workspace = true }
+clap = { workspace = true }
 env_logger = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true, features = [
     "macros",
     "rt",

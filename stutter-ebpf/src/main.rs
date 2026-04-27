@@ -109,12 +109,12 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
     Ok(0)
 }
 
-#[cfg(not(test))]
+#[unsafe(link_section = "license")]
+#[unsafe(no_mangle)]
+static LICENSE: [u8; 13] = *b"Dual MIT/GPL\0";
+
+#[cfg(all(not(test), target_arch = "bpf"))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
-
-#[unsafe(link_section = "license")]
-#[unsafe(no_mangle)]
-static LICENSE: [u8; 13] = *b"Dual MIT/GPL\0";
