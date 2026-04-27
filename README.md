@@ -165,33 +165,3 @@ Unknown `.exe` processes are no longer automatically treated as critical game ta
 The userspace crates are dual-licensed MIT OR Apache-2.0.
 
 The eBPF code is dual-licensed MIT OR GPL-2.0.
-
-````
-
-Run this after replacing/adding the files:
-
-```bash
-cd ~/Desktop/stutter
-
-RUSTUP_TOOLCHAIN=nightly cargo fmt
-RUSTUP_TOOLCHAIN=nightly cargo build
-RUSTUP_TOOLCHAIN=nightly cargo clippy --all-targets -- -D warnings
-````
-
-Then smoke-test:
-
-```bash
-RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
-  --pid "$(pgrep -n sway)" \
-  --summary-ms 1000
-```
-
-And tree-test:
-
-```bash
-sh -c 'sleep 1000 & sleep 1000 & wait' &
-ROOT=$!
-
-RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
-  --tree-pid "$ROOT" \
-  --summary-ms 1000
