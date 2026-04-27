@@ -2,7 +2,7 @@
 #![no_main]
 
 use aya_ebpf::{
-    helpers::{bpf_get_smp_processor_id, bpf_ktime_get_ns},
+    helpers::{bpf_get_current_pid_tgid, bpf_get_smp_processor_id, bpf_ktime_get_ns},
     macros::{map, tracepoint},
     maps::{HashMap, RingBuf},
     programs::TracePointContext,
@@ -16,7 +16,7 @@ static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 static TARGET_PIDS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(1024, 0);
 
 #[map]
-static WAKEUP_TIMES: HashMap<u32, u64> = HashMap::<u32, u64>::with_max_entries(4096, 0);
+static WAKEUP_TIMES: HashMap<u32, u64> = HashMap::<u32, u64>::with_max_entries(16_384, 0);
 
 #[tracepoint]
 pub fn sched_wakeup(ctx: TracePointContext) -> u32 {
@@ -34,16 +34,18 @@ pub fn sched_switch(ctx: TracePointContext) -> u32 {
     }
 }
 
+#[tracepoint]
+pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
+    let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
+    let _ = WAKEUP_TIMES.remove(&tid);
+    0
+}
+
 fn is_target_pid(pid: u32) -> bool {
     unsafe { TARGET_PIDS.get(&pid).is_some() }
 }
 
 fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
-    // sched_wakeup format:
-    // comm[16]    offset 8
-    // pid         offset 24
-    // prio        offset 28
-    // target_cpu  offset 32
     let pid: i32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
 
     if pid <= 0 {

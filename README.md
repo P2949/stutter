@@ -1,57 +1,197 @@
 # stutter
 
-## Prerequisites
+`stutter` is a Linux scheduler runnable-latency profiler built with Rust + Aya eBPF.
 
-1. stable rust toolchains: `rustup toolchain install stable`
-1. nightly rust toolchains: `rustup toolchain install nightly --component rust-src`
-1. (if cross-compiling) rustup target: `rustup target add ${ARCH}-unknown-linux-musl`
-1. (if cross-compiling) LLVM: (e.g.) `brew install llvm` (on macOS)
-1. (if cross-compiling) C toolchain: (e.g.) [`brew install filosottile/musl-cross/musl-cross`](https://github.com/FiloSottile/homebrew-musl-cross) (on macOS)
-1. bpf-linker: `cargo install bpf-linker` (`--no-default-features` on macOS)
+It measures:
 
-## Build & Run
+```text
+sched_wakeup timestamp -> sched_switch timestamp = runnable latency
+````
 
-Use `cargo build`, `cargo check`, etc. as normal. Run your program with:
+That answers:
 
-```shell
-cargo run --release
+```text
+Was this task ready to run but delayed before getting CPU time?
 ```
 
-Cargo build scripts are used to automatically build the eBPF correctly and include it in the
-program.
+## Requirements
 
-## Cross-compiling on macOS
+* Linux with eBPF support
+* Rust stable + nightly
+* `rust-src` for nightly
+* `bpf-linker`
+* privileges to load eBPF programs
 
-Cross compilation should work on both Intel and Apple Silicon Macs.
+Install basics:
 
-```shell
-CC=${ARCH}-linux-musl-gcc cargo build --package stutter --release \
-  --target=${ARCH}-unknown-linux-musl \
-  --config=target.${ARCH}-unknown-linux-musl.linker=\"${ARCH}-linux-musl-gcc\"
+```bash
+rustup toolchain install stable
+rustup toolchain install nightly --component rust-src
+cargo install bpf-linker
 ```
-The cross-compiled program `target/${ARCH}-unknown-linux-musl/release/stutter` can be
-copied to a Linux server or VM and run there.
+
+On this project, use the explicit toolchain environment if Gentoo/system Rust interferes:
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo build
+```
+
+## Build
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo fmt
+RUSTUP_TOOLCHAIN=nightly cargo build
+RUSTUP_TOOLCHAIN=nightly cargo clippy --all-targets -- -D warnings
+```
+
+## Monitor manual PIDs
+
+```bash
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
+  --pid "$(pgrep -n sway)" \
+  --summary-ms 1000
+```
+
+Older legacy form still works:
+
+```bash
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- \
+  --pid "$(pgrep -n sway)"
+```
+
+## Monitor a process tree
+
+Use this for Proton/Wine/game trees:
+
+```bash
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
+  --tree-pid <root-pid>
+```
+
+The monitor periodically scans `/proc`, finds descendant processes, expands each process into `/proc/<pid>/task/<tid>`, and updates the eBPF `TARGET_PIDS` map dynamically.
+
+## Inspect a tree before tracing
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo run -- inspect-tree \
+  --tree-pid <root-pid>
+```
+
+Example expected shape:
+
+```text
+root 128848 gamescope [GameScope]
+└─ 128879 reaper [Helper]
+   └─ 128951 pv-adverb [SteamRuntime]
+      ├─ 129004 wineserver [WineServer]
+      └─ 129076 KingdomCome.exe [Game]
+         ├─ 129096 JobSystem_Worke [Game]
+         ├─ 129213 RenderThread [Game]
+         └─ ...
+```
+
+## Record a run
+
+```bash
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- record \
+  --tree-pid <root-pid> \
+  --duration 300 \
+  --run-name kcd-test
+```
+
+Default output:
+
+```text
+~/.local/state/stutter/runs/<timestamp>_<run-name>/
+  metadata.json
+  session.json
+  interval.json
+  tree_events.json
+```
+
+## Generate a report
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo run -- report \
+  ~/.local/state/stutter/runs/<run-dir>
+```
+
+JSON output:
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo run -- report \
+  --json \
+  ~/.local/state/stutter/runs/<run-dir>
+```
+
+## Important interpretation notes
+
+For real stutter diagnosis, prioritize:
+
+```text
+max
+over_1ms
+over_2ms
+over_5ms
+session_spike
+```
+
+If `truncated_samples > 0`, then `p95` and `p99` are based only on the stored exact sample window. The report marks this as:
+
+```text
+percentile_scope=capped_prefix
+```
+
+When capped, trust `max` and threshold counters more than p95/p99.
+
+## Current task classes
+
+```text
+Game
+GameHelper
+Launcher
+WineServer
+GameScope
+Compositor
+SteamRuntime
+Helper
+Unknown
+```
+
+Unknown `.exe` processes are no longer automatically treated as critical game tasks. Known launchers/helpers are separated from likely game binaries.
 
 ## License
 
-With the exception of eBPF code, stutter is distributed under the terms
-of either the [MIT license] or the [Apache License] (version 2.0), at your
-option.
+The userspace crates are dual-licensed MIT OR Apache-2.0.
 
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in this crate by you, as defined in the Apache-2.0 license, shall
-be dual licensed as above, without any additional terms or conditions.
+The eBPF code is dual-licensed MIT OR GPL-2.0.
 
-### eBPF
+````
 
-All eBPF code is distributed under either the terms of the
-[GNU General Public License, Version 2] or the [MIT license], at your
-option.
+Run this after replacing/adding the files:
 
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in this project by you, as defined in the GPL-2 license, shall be
-dual licensed as above, without any additional terms or conditions.
+```bash
+cd ~/Desktop/stutter
 
-[Apache license]: LICENSE-APACHE
-[MIT license]: LICENSE-MIT
-[GNU General Public License, Version 2]: LICENSE-GPL2
+RUSTUP_TOOLCHAIN=nightly cargo fmt
+RUSTUP_TOOLCHAIN=nightly cargo build
+RUSTUP_TOOLCHAIN=nightly cargo clippy --all-targets -- -D warnings
+````
+
+Then smoke-test:
+
+```bash
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
+  --pid "$(pgrep -n sway)" \
+  --summary-ms 1000
+```
+
+And tree-test:
+
+```bash
+sh -c 'sleep 1000 & sleep 1000 & wait' &
+ROOT=$!
+
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
+  --tree-pid "$ROOT" \
+  --summary-ms 1000
