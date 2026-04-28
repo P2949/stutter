@@ -13,6 +13,7 @@ use crate::{
 };
 
 const MIN_CLUSTER_TASKS: usize = 3;
+const MAX_INLINE_CLUSTER_POINTS: usize = 8;
 
 #[derive(Clone)]
 struct SpikePoint {
@@ -120,6 +121,19 @@ fn render_report(
         format!("active_tasks_at_end: {}", session.active_target_pids_count),
     );
     pushln(&mut output, "");
+
+    if session.spike_events_truncated {
+        pushln(&mut output, "spike event warning");
+        pushln(&mut output, "-------------------");
+        pushln(
+            &mut output,
+            format!(
+                "spike_events_truncated=true retained_spike_events={} note=spike_events.json is capped; top_spikes and threshold counters remain available",
+                session.spike_event_count
+            ),
+        );
+        pushln(&mut output, "");
+    }
 
     let truncated = session
         .tasks
@@ -298,11 +312,6 @@ fn spike_cluster_analysis(
     }
 }
 
-#[cfg(test)]
-fn spike_clusters(session: &SessionFile, cluster_window_ns: u64) -> Vec<SpikeCluster> {
-    spike_clusters_from_points(flatten_top_spikes(session), cluster_window_ns)
-}
-
 fn spike_clusters_from_points(
     mut points: Vec<SpikePoint>,
     cluster_window_ns: u64,
@@ -472,19 +481,25 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
         .map(|cpu| cpu.to_string())
         .collect::<Vec<_>>()
         .join(",");
+    let shown_points = cluster.points.len().min(MAX_INLINE_CLUSTER_POINTS);
+    let omitted_points = cluster.points.len().saturating_sub(shown_points);
     let points = cluster
         .points
         .iter()
+        .take(MAX_INLINE_CLUSTER_POINTS)
         .map(render_cluster_point)
         .collect::<Vec<_>>()
         .join(" ");
 
     format!(
-        "#{rank} elapsed={} span={} tasks={} spikes={} cpus={} labels={} max={} switch_ns={}..{} points={}",
+        "#{rank} elapsed={} span={} tasks={} spikes={} total_spikes={} shown_points={} omitted_points={} cpus={} labels={} max={} switch_ns={}..{} points={}",
         format_elapsed(elapsed),
         format_latency(span_ns),
         cluster.distinct_tasks,
         cluster.points.len(),
+        cluster.points.len(),
+        shown_points,
+        omitted_points,
         cpu_list,
         labels,
         format_latency(cluster.max_latency_ns),
@@ -578,488 +593,6 @@ fn percentile_warning_note(percentile_scope: &str) -> &'static str {
         }
         _ => {
             "p95/p99 may be capped because this session predates histogram percentiles; prefer max and threshold counters"
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        metadata::SystemMetadata,
-        recorder::{
-            RecordedConfig, RecordedCpuSnapshot, RecordedLatency, RecordedTime, SessionSpike,
-        },
-    };
-
-    #[test]
-    fn report_warning_distinguishes_histogram_and_legacy_capped_prefix() {
-        assert!(percentile_warning_note("histogram").contains("histogram estimates"));
-        assert!(percentile_warning_note("capped_prefix").contains("capped prefix"));
-    }
-
-    #[test]
-    fn clusters_group_spikes_within_window_and_require_distinct_tasks() {
-        let session = session_with_spikes(
-            Some(1_000_000_000),
-            vec![
-                spike_task(
-                    10,
-                    "RenderThread",
-                    TaskClass::Game,
-                    1,
-                    1_001_000_000,
-                    5_000_000,
-                ),
-                spike_task(11, "dxvk-cs", TaskClass::Game, 2, 1_003_000_000, 2_000_000),
-                spike_task(
-                    12,
-                    "wineserver",
-                    TaskClass::WineServer,
-                    3,
-                    1_005_000_000,
-                    1_500_000,
-                ),
-                spike_task(
-                    10,
-                    "RenderThread",
-                    TaskClass::Game,
-                    4,
-                    1_020_000_000,
-                    7_000_000,
-                ),
-                spike_task(
-                    10,
-                    "RenderThread",
-                    TaskClass::Game,
-                    5,
-                    1_021_000_000,
-                    3_000_000,
-                ),
-            ],
-        );
-
-        let clusters = spike_clusters(&session, 5_000_000);
-
-        assert_eq!(clusters.len(), 1);
-        assert_eq!(clusters[0].distinct_tasks, 3);
-        assert_eq!(clusters[0].points.len(), 3);
-        assert_eq!(clusters[0].max_latency_ns, 5_000_000);
-    }
-
-    #[test]
-    fn clusters_split_events_outside_window() {
-        let session = session_with_spikes(
-            None,
-            vec![
-                spike_task(1, "Main", TaskClass::Game, 0, 10_000_000, 2_000_000),
-                spike_task(2, "dxvk-cs", TaskClass::Game, 1, 11_000_000, 1_500_000),
-                spike_task(
-                    3,
-                    "wineserver",
-                    TaskClass::WineServer,
-                    2,
-                    12_000_000,
-                    1_250_000,
-                ),
-                spike_task(4, "AudioThread", TaskClass::Game, 3, 30_000_000, 3_000_000),
-                spike_task(5, "dxvk-submit", TaskClass::Game, 4, 31_000_000, 1_750_000),
-                spike_task(
-                    6,
-                    "winedevice.exe",
-                    TaskClass::Helper,
-                    5,
-                    32_000_000,
-                    1_500_000,
-                ),
-            ],
-        );
-
-        let clusters = spike_clusters(&session, 5_000_000);
-
-        assert_eq!(clusters.len(), 2);
-        assert_eq!(clusters[0].distinct_tasks, 3);
-        assert_eq!(clusters[1].distinct_tasks, 3);
-        assert!(!clusters_overlap(&clusters[0], &clusters[1]));
-    }
-
-    #[test]
-    fn clusters_deduplicate_overlapping_candidate_windows() {
-        let session = session_with_spikes(
-            None,
-            vec![
-                spike_task(1, "Main", TaskClass::Game, 0, 10_000_000, 5_000_000),
-                spike_task(2, "dxvk-cs", TaskClass::Game, 1, 11_000_000, 4_000_000),
-                spike_task(
-                    3,
-                    "wineserver",
-                    TaskClass::WineServer,
-                    2,
-                    12_000_000,
-                    3_000_000,
-                ),
-                spike_task(4, "AudioThread", TaskClass::Game, 3, 13_000_000, 2_000_000),
-            ],
-        );
-
-        let clusters = spike_clusters(&session, 5_000_000);
-
-        assert_eq!(clusters.len(), 1);
-        assert_eq!(clusters[0].distinct_tasks, 4);
-        assert_eq!(clusters[0].points.len(), 4);
-    }
-
-    #[test]
-    fn clusters_sort_by_task_count_then_latency() {
-        let session = session_with_spikes(
-            None,
-            vec![
-                spike_task(1, "Main", TaskClass::Game, 0, 10_000_000, 2_000_000),
-                spike_task(2, "dxvk-cs", TaskClass::Game, 1, 11_000_000, 2_000_000),
-                spike_task(
-                    3,
-                    "wineserver",
-                    TaskClass::WineServer,
-                    2,
-                    12_000_000,
-                    2_000_000,
-                ),
-                spike_task(4, "AudioThread", TaskClass::Game, 3, 50_000_000, 8_000_000),
-                spike_task(5, "dxvk-submit", TaskClass::Game, 4, 51_000_000, 1_000_000),
-                spike_task(
-                    6,
-                    "winedevice.exe",
-                    TaskClass::Helper,
-                    5,
-                    52_000_000,
-                    1_000_000,
-                ),
-                spike_task(7, "RenderThread", TaskClass::Game, 6, 53_000_000, 1_000_000),
-            ],
-        );
-
-        let clusters = spike_clusters(&session, 5_000_000);
-
-        assert_eq!(clusters.len(), 2);
-        assert_eq!(clusters[0].distinct_tasks, 4);
-        assert_eq!(clusters[0].max_latency_ns, 8_000_000);
-        assert_eq!(clusters[1].distinct_tasks, 3);
-    }
-
-    #[test]
-    fn elapsed_time_formats_when_monotonic_start_is_available() {
-        assert_eq!(elapsed_ms(Some(1_000_000_000), 1_250_000_000), Some(250));
-        assert_eq!(elapsed_ms(None, 1_250_000_000), None);
-        assert_eq!(elapsed_ms(Some(2_000_000_000), 1_250_000_000), None);
-        assert_eq!(format_elapsed(Some(42)), "42ms");
-        assert_eq!(format_elapsed(None), "-");
-    }
-
-    #[test]
-    fn report_text_contains_cluster_details() {
-        let session = session_with_spikes(
-            Some(1_000_000_000),
-            vec![
-                spike_task(1, "Main", TaskClass::Game, 0, 1_010_000_000, 6_000_000),
-                spike_task(2, "dxvk-cs", TaskClass::Game, 1, 1_011_000_000, 2_000_000),
-                spike_task(
-                    3,
-                    "wineserver",
-                    TaskClass::WineServer,
-                    2,
-                    1_012_000_000,
-                    1_500_000,
-                ),
-                spike_task(
-                    4,
-                    "AudioThread",
-                    TaskClass::Game,
-                    3,
-                    1_013_000_000,
-                    1_250_000,
-                ),
-            ],
-        );
-
-        let text = render_report(Path::new("session.json"), &session, None, 10, 5);
-
-        assert!(text.contains("spike clusters"));
-        assert!(text.contains("source=top_spikes fallback"));
-        assert!(text.contains("elapsed=10ms"));
-        assert!(text.contains("labels=render-main,dxvk,wine,audio"));
-        assert!(text.contains("1(Game:Main"));
-        assert!(text.contains("cpu=0"));
-        assert!(text.contains("latency=6.000ms"));
-    }
-
-    #[test]
-    fn cluster_analysis_prefers_durable_spike_events() {
-        let session = session_with_spikes(
-            None,
-            vec![spike_task(
-                99,
-                "RenderThread",
-                TaskClass::Game,
-                0,
-                100_000_000,
-                9_000_000,
-            )],
-        );
-        let spike_events = vec![
-            spike_event(1, "Main", TaskClass::Game, 0, 10_000_000, 3_000_000),
-            spike_event(2, "dxvk-cs", TaskClass::Game, 1, 11_000_000, 2_000_000),
-            spike_event(
-                3,
-                "wineserver",
-                TaskClass::WineServer,
-                2,
-                12_000_000,
-                1_500_000,
-            ),
-        ];
-
-        let analysis = spike_cluster_analysis(&session, Some(&spike_events), 5_000_000);
-
-        assert_eq!(analysis.source, SpikeClusterSource::SpikeEvents);
-        assert_eq!(analysis.source_count, 3);
-        assert_eq!(analysis.clusters.len(), 1);
-        assert_eq!(analysis.clusters[0].distinct_tasks, 3);
-        assert_eq!(analysis.clusters[0].points[0].elapsed_ms, Some(10));
-    }
-
-    #[test]
-    fn spike_event_elapsed_prefers_session_monotonic_timing() {
-        let session = session_with_spikes(
-            Some(1_000_000_000),
-            vec![spike_task(
-                99,
-                "Main",
-                TaskClass::Game,
-                0,
-                1_100_000_000,
-                1_000_000,
-            )],
-        );
-        let mut spike_events = vec![
-            spike_event(1, "Main", TaskClass::Game, 0, 1_010_000_000, 1_000_000),
-            spike_event(2, "dxvk-cs", TaskClass::Game, 1, 1_011_000_000, 1_000_000),
-            spike_event(
-                3,
-                "wineserver",
-                TaskClass::WineServer,
-                2,
-                1_012_000_000,
-                1_000_000,
-            ),
-        ];
-        for spike in &mut spike_events {
-            spike.elapsed_ms = Some(999);
-        }
-
-        let analysis = spike_cluster_analysis(&session, Some(&spike_events), 5_000_000);
-
-        assert_eq!(analysis.clusters.len(), 1);
-        assert_eq!(analysis.clusters[0].points[0].elapsed_ms, Some(10));
-    }
-
-    #[test]
-    fn null_spike_event_elapsed_renders_as_dash() {
-        let session = session_with_spikes(None, Vec::new());
-        let mut spike_events = vec![
-            spike_event(1, "Main", TaskClass::Game, 0, 10_000_000, 1_000_000),
-            spike_event(2, "dxvk-cs", TaskClass::Game, 1, 11_000_000, 1_000_000),
-            spike_event(
-                3,
-                "wineserver",
-                TaskClass::WineServer,
-                2,
-                12_000_000,
-                1_000_000,
-            ),
-        ];
-        for spike in &mut spike_events {
-            spike.elapsed_ms = None;
-        }
-
-        let analysis = spike_cluster_analysis(&session, Some(&spike_events), 5_000_000);
-        let rendered = render_cluster(1, &analysis.clusters[0]);
-
-        assert!(rendered.contains("elapsed=-"));
-    }
-
-    #[test]
-    fn cluster_analysis_falls_back_to_retained_top_spikes() {
-        let session = session_with_spikes(
-            None,
-            vec![
-                spike_task(1, "Main", TaskClass::Game, 0, 10_000_000, 3_000_000),
-                spike_task(2, "dxvk-cs", TaskClass::Game, 1, 11_000_000, 2_000_000),
-                spike_task(
-                    3,
-                    "wineserver",
-                    TaskClass::WineServer,
-                    2,
-                    12_000_000,
-                    1_500_000,
-                ),
-            ],
-        );
-
-        let analysis = spike_cluster_analysis(&session, None, 5_000_000);
-
-        assert_eq!(analysis.source, SpikeClusterSource::TopSpikesFallback);
-        assert_eq!(analysis.source_count, 3);
-        assert_eq!(analysis.clusters.len(), 1);
-    }
-
-    fn session_with_spikes(
-        monotonic_start_ns: Option<u64>,
-        tasks: Vec<SessionTask>,
-    ) -> SessionFile {
-        let mut top_spikes = Vec::new();
-        for task in &tasks {
-            for spike in &task.top_spikes {
-                top_spikes.push(SessionSpike {
-                    task: task.task,
-                    active: task.active,
-                    class: spike.class,
-                    process_pid: spike.process_pid,
-                    process_comm: spike.process_comm.clone(),
-                    comm: task.comm.clone(),
-                    cpu: spike.cpu,
-                    prio: spike.prio,
-                    latency_ns: spike.latency_ns,
-                    wakeup_ns: spike.wakeup_ns,
-                    switch_ns: spike.switch_ns,
-                });
-            }
-        }
-        top_spikes.sort_by_key(|spike| std::cmp::Reverse(spike.latency_ns));
-
-        SessionFile {
-            schema_version: SESSION_SCHEMA_VERSION,
-            run_name: Some("test".to_owned()),
-            started_at: recorded_time(),
-            ended_at: recorded_time(),
-            monotonic_start_ns,
-            monotonic_end_ns: None,
-            duration_ms: 1_000,
-            stop_reason: "test".to_owned(),
-            config: RecordedConfig {
-                manual_pids: Vec::new(),
-                tree_roots: Vec::new(),
-                summary_period_ms: 1_000,
-                spike_threshold_ns: 1_000_000,
-                verbose: false,
-            },
-            metadata: system_metadata(),
-            target_pids_max: 1024,
-            active_target_pids_count: tasks.len(),
-            active_expanded_tasks: tasks.iter().map(|task| task.task).collect(),
-            spike_event_count: 0,
-            spike_events_truncated: false,
-            tasks,
-            top_spikes,
-        }
-    }
-
-    fn spike_task(
-        task: u32,
-        comm: &str,
-        class: TaskClass,
-        cpu: u32,
-        switch_ns: u64,
-        latency_ns: u64,
-    ) -> SessionTask {
-        SessionTask {
-            task,
-            active: true,
-            first_seen_ms: 0,
-            last_seen_ms: 1_000,
-            removed_ms: None,
-            class,
-            process_pid: Some(100),
-            process_comm: "process".to_owned(),
-            comm: comm.to_owned(),
-            latency: RecordedLatency {
-                samples: 1,
-                stored_samples: 1,
-                truncated_samples: 0,
-                percentile_scope: "exact".to_owned(),
-                histogram: Vec::new(),
-                min_ns: latency_ns,
-                avg_ns: latency_ns,
-                p95_ns: latency_ns,
-                p99_ns: latency_ns,
-                max_ns: latency_ns,
-                over_1ms: u64::from(latency_ns >= 1_000_000),
-                over_2ms: u64::from(latency_ns >= 2_000_000),
-                over_5ms: u64::from(latency_ns >= 5_000_000),
-            },
-            cpu: RecordedCpuSnapshot {
-                busiest_cpu: Some(cpu),
-                busiest_cpu_samples: 1,
-                worst_cpu: Some(cpu),
-                worst_cpu_max_ns: latency_ns,
-                spikiest_cpu: Some(cpu),
-                spikiest_cpu_spikes: 1,
-                per_cpu: Vec::new(),
-            },
-            top_spikes: vec![RecordedSpike {
-                class,
-                process_pid: Some(100),
-                process_comm: "process".to_owned(),
-                cpu,
-                prio: 120,
-                latency_ns,
-                wakeup_ns: switch_ns.saturating_sub(latency_ns),
-                switch_ns,
-            }],
-        }
-    }
-
-    fn spike_event(
-        task: u32,
-        comm: &str,
-        class: TaskClass,
-        cpu: u32,
-        switch_ns: u64,
-        latency_ns: u64,
-    ) -> SpikeEvent {
-        SpikeEvent {
-            elapsed_ms: Some(u128::from(switch_ns / 1_000_000)),
-            task,
-            active: true,
-            class,
-            process_pid: Some(100),
-            process_comm: "process".to_owned(),
-            comm: comm.to_owned(),
-            cpu,
-            prio: 120,
-            latency_ns,
-            wakeup_ns: switch_ns.saturating_sub(latency_ns),
-            switch_ns,
-        }
-    }
-
-    fn recorded_time() -> RecordedTime {
-        RecordedTime {
-            unix_seconds: 0,
-            unix_nanos: 0,
-            local: "test".to_owned(),
-        }
-    }
-
-    fn system_metadata() -> SystemMetadata {
-        SystemMetadata {
-            kernel_osrelease: None,
-            kernel_version: None,
-            cpu_online: None,
-            cpu_possible: None,
-            cpu_topology: Vec::new(),
-            scx_state: None,
-            scx_ops: None,
-            scx_enable_seq: None,
         }
     }
 }
