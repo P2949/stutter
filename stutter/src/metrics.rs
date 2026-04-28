@@ -7,6 +7,11 @@ use stutter_common::SchedulerEvent;
 use crate::process_tree::{TaskClass, TaskInfo};
 
 pub const MAX_EXACT_SAMPLES: usize = 65_536;
+pub const LATENCY_HISTOGRAM_BUCKETS_NS: [u64; 15] = [
+    1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000, 200_000, 500_000, 1_000_000, 2_000_000,
+    5_000_000, 10_000_000, 20_000_000, 50_000_000,
+];
+pub const LATENCY_HISTOGRAM_BUCKET_COUNT: usize = LATENCY_HISTOGRAM_BUCKETS_NS.len() + 1;
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct SpikeRecord {
@@ -36,6 +41,7 @@ pub struct TaskStats {
     pub top_spikes: Vec<SpikeRecord>,
 }
 
+#[derive(Clone)]
 pub struct LatencyStats {
     pub count: u64,
     pub min_ns: u64,
@@ -46,6 +52,7 @@ pub struct LatencyStats {
     pub over_5ms: u64,
     pub samples_ns: Vec<u64>,
     pub samples_truncated: u64,
+    pub histogram: LatencyHistogram,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -59,9 +66,21 @@ pub struct CpuStatsSet {
     pub by_cpu: BTreeMap<u32, CpuStats>,
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LatencyHistogramBucket {
+    pub upper_bound_ns: Option<u64>,
+    pub count: u64,
+}
+
+#[derive(Clone)]
+pub struct LatencyHistogram {
+    buckets: [u64; LATENCY_HISTOGRAM_BUCKET_COUNT],
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LatencySnapshot {
     pub count: u64,
+    pub stored_samples: u64,
     pub min_ns: u64,
     pub avg_ns: u64,
     pub max_ns: u64,
@@ -71,6 +90,8 @@ pub struct LatencySnapshot {
     pub over_2ms: u64,
     pub over_5ms: u64,
     pub samples_truncated: u64,
+    pub percentile_scope: String,
+    pub histogram: Vec<LatencyHistogramBucket>,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -118,6 +139,58 @@ pub struct IntervalRecord {
     pub worst_cpu_max_ns: u64,
     pub spikiest_cpu: Option<u32>,
     pub spikiest_cpu_spikes: u64,
+    #[serde(default)]
+    pub percentile_scope: String,
+    #[serde(default)]
+    pub histogram: Vec<LatencyHistogramBucket>,
+}
+
+impl LatencyHistogram {
+    pub fn new() -> Self {
+        Self {
+            buckets: [0; LATENCY_HISTOGRAM_BUCKET_COUNT],
+        }
+    }
+
+    pub fn record(&mut self, latency_ns: u64) {
+        let bucket_idx = LATENCY_HISTOGRAM_BUCKETS_NS
+            .iter()
+            .position(|upper_bound_ns| latency_ns <= *upper_bound_ns)
+            .unwrap_or(LATENCY_HISTOGRAM_BUCKET_COUNT - 1);
+
+        self.buckets[bucket_idx] += 1;
+    }
+
+    pub fn percentile_upper_bound(&self, total_count: u64, percentile: f64) -> Option<u64> {
+        if total_count == 0 {
+            return Some(0);
+        }
+
+        let rank = ((total_count as f64 * percentile).ceil() as u64).max(1);
+        let mut cumulative = 0;
+
+        for (idx, count) in self.buckets.iter().copied().enumerate() {
+            cumulative += count;
+            if cumulative >= rank {
+                return LATENCY_HISTOGRAM_BUCKETS_NS.get(idx).copied();
+            }
+        }
+
+        None
+    }
+
+    pub fn snapshot(&self) -> Vec<LatencyHistogramBucket> {
+        let mut buckets = Vec::with_capacity(LATENCY_HISTOGRAM_BUCKET_COUNT);
+
+        for (idx, count) in self.buckets.iter().copied().enumerate() {
+            buckets.push(LatencyHistogramBucket {
+                upper_bound_ns: LATENCY_HISTOGRAM_BUCKETS_NS.get(idx).copied(),
+                count,
+            });
+        }
+
+        buckets
+    }
 }
 
 impl LatencyStats {
@@ -132,10 +205,13 @@ impl LatencyStats {
             over_5ms: 0,
             samples_ns: Vec::with_capacity(4096),
             samples_truncated: 0,
+            histogram: LatencyHistogram::new(),
         }
     }
 
     pub fn record(&mut self, latency_ns: u64) {
+        self.histogram.record(latency_ns);
+
         if self.count == 0 {
             self.min_ns = latency_ns;
             self.max_ns = latency_ns;
@@ -170,18 +246,42 @@ impl LatencyStats {
         }
 
         self.samples_ns.sort_unstable();
+        let percentile_scope = if self.samples_truncated > 0 {
+            "histogram"
+        } else {
+            "exact"
+        };
+
+        let (p95_ns, p99_ns) = if self.samples_truncated > 0 {
+            (
+                self.histogram
+                    .percentile_upper_bound(self.count, 0.95)
+                    .unwrap_or(self.max_ns),
+                self.histogram
+                    .percentile_upper_bound(self.count, 0.99)
+                    .unwrap_or(self.max_ns),
+            )
+        } else {
+            (
+                percentile_from_sorted(&self.samples_ns, 0.95),
+                percentile_from_sorted(&self.samples_ns, 0.99),
+            )
+        };
 
         Some(LatencySnapshot {
             count: self.count,
+            stored_samples: self.stored_samples(),
             min_ns: self.min_ns,
             avg_ns: (self.sum_ns / self.count as u128) as u64,
             max_ns: self.max_ns,
-            p95_ns: percentile_from_sorted(&self.samples_ns, 0.95),
-            p99_ns: percentile_from_sorted(&self.samples_ns, 0.99),
+            p95_ns,
+            p99_ns,
             over_1ms: self.over_1ms,
             over_2ms: self.over_2ms,
             over_5ms: self.over_5ms,
             samples_truncated: self.samples_truncated,
+            percentile_scope: percentile_scope.to_owned(),
+            histogram: self.histogram.snapshot(),
         })
     }
 
@@ -391,13 +491,13 @@ pub fn print_latency_line(
     label: &str,
     task: u32,
     comm: &str,
-    latency: LatencySnapshot,
+    latency: &LatencySnapshot,
     cpu: &CpuSnapshot,
 ) {
     let percentile_note = if latency.samples_truncated > 0 {
-        " percentile_scope=capped"
+        format!(" percentile_scope={}", latency.percentile_scope)
     } else {
-        ""
+        String::new()
     };
 
     info!(
@@ -405,7 +505,7 @@ pub fn print_latency_line(
         task,
         comm,
         latency.count,
-        latency.count.min(MAX_EXACT_SAMPLES as u64),
+        latency.stored_samples,
         latency.samples_truncated,
         format_latency(latency.min_ns),
         format_latency(latency.avg_ns),
@@ -437,9 +537,9 @@ pub fn print_interval_summaries(
 
         let cpu = stats.interval_cpu.snapshot_and_reset();
 
-        print_latency_line("summary", *task, &stats.comm, latency, &cpu);
+        print_latency_line("summary", *task, &stats.comm, &latency, &cpu);
         interval_records.push(interval_record_from_snapshot(
-            elapsed_ms, *task, stats, latency, &cpu,
+            elapsed_ms, *task, stats, &latency, &cpu,
         ));
     }
 }
@@ -452,12 +552,12 @@ pub fn print_session_summaries(stats_by_task: &mut BTreeMap<u32, TaskStats>) {
 
         let cpu = stats.session_cpu.snapshot();
 
-        print_latency_line("session", *task, &stats.comm, latency, &cpu);
+        print_latency_line("session", *task, &stats.comm, &latency, &cpu);
 
         if latency.samples_truncated > 0 {
             info!(
-                "session_percentile_warning task={} comm={} truncated_samples={} note=\"p95/p99 are based only on stored_samples; prefer max and over_1ms/over_2ms/over_5ms for this task\"",
-                task, stats.comm, latency.samples_truncated
+                "session_percentile_warning task={} comm={} truncated_samples={} percentile_scope={} note=\"p95/p99 are histogram estimates across the full session; prefer max and over_1ms/over_2ms/over_5ms for exact spike counts\"",
+                task, stats.comm, latency.samples_truncated, latency.percentile_scope
             );
         }
 
@@ -492,7 +592,7 @@ pub fn interval_record_from_snapshot(
     elapsed_ms: u128,
     task: u32,
     stats: &TaskStats,
-    latency: LatencySnapshot,
+    latency: &LatencySnapshot,
     cpu: &CpuSnapshot,
 ) -> IntervalRecord {
     IntervalRecord {
@@ -504,7 +604,7 @@ pub fn interval_record_from_snapshot(
         process_pid: stats.process_pid,
         process_comm: stats.process_comm.clone(),
         samples: latency.count,
-        stored_samples: latency.count.min(MAX_EXACT_SAMPLES as u64),
+        stored_samples: latency.stored_samples,
         truncated_samples: latency.samples_truncated,
         min_ns: latency.min_ns,
         avg_ns: latency.avg_ns,
@@ -520,6 +620,8 @@ pub fn interval_record_from_snapshot(
         worst_cpu_max_ns: cpu.worst_cpu_max_ns,
         spikiest_cpu: cpu.spikiest_cpu,
         spikiest_cpu_spikes: cpu.spikiest_cpu_spikes,
+        percentile_scope: latency.percentile_scope.clone(),
+        histogram: latency.histogram.clone(),
     }
 }
 
@@ -532,5 +634,93 @@ impl fmt::Debug for TaskStats {
             .field("process_pid", &self.process_pid)
             .field("active", &self.active)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn histogram_records_boundaries_and_overflow() {
+        let mut histogram = LatencyHistogram::new();
+
+        histogram.record(1_000);
+        histogram.record(1_001);
+        histogram.record(60_000_000);
+
+        let buckets = histogram.snapshot();
+
+        assert_eq!(buckets[0].upper_bound_ns, Some(1_000));
+        assert_eq!(buckets[0].count, 1);
+        assert_eq!(buckets[1].upper_bound_ns, Some(2_000));
+        assert_eq!(buckets[1].count, 1);
+        assert_eq!(buckets.last().unwrap().upper_bound_ns, None);
+        assert_eq!(buckets.last().unwrap().count, 1);
+    }
+
+    #[test]
+    fn histogram_percentile_uses_conservative_bucket_upper_bound() {
+        let mut histogram = LatencyHistogram::new();
+
+        for _ in 0..95 {
+            histogram.record(1_000);
+        }
+        for _ in 0..5 {
+            histogram.record(1_500_000);
+        }
+
+        assert_eq!(histogram.percentile_upper_bound(100, 0.95), Some(1_000));
+        assert_eq!(histogram.percentile_upper_bound(100, 0.99), Some(2_000_000));
+    }
+
+    #[test]
+    fn untruncated_snapshot_uses_exact_percentiles() {
+        let mut stats = LatencyStats::new();
+
+        stats.record(1_234);
+        stats.record(9_876);
+
+        let snapshot = stats.snapshot().unwrap();
+
+        assert_eq!(snapshot.percentile_scope, "exact");
+        assert_eq!(snapshot.stored_samples, 2);
+        assert_eq!(snapshot.samples_truncated, 0);
+        assert_eq!(snapshot.p95_ns, 9_876);
+        assert_eq!(snapshot.p99_ns, 9_876);
+    }
+
+    #[test]
+    fn truncated_snapshot_uses_histogram_percentiles() {
+        let mut stats = LatencyStats::new();
+
+        for _ in 0..MAX_EXACT_SAMPLES {
+            stats.record(1_000);
+        }
+        for _ in 0..4_000 {
+            stats.record(2_000_000);
+        }
+
+        let snapshot = stats.snapshot().unwrap();
+
+        assert_eq!(snapshot.percentile_scope, "histogram");
+        assert_eq!(snapshot.samples_truncated, 4_000);
+        assert_eq!(snapshot.p95_ns, 2_000_000);
+        assert_eq!(snapshot.p99_ns, 2_000_000);
+    }
+
+    #[test]
+    fn snapshot_and_reset_clears_histogram_state() {
+        let mut stats = LatencyStats::new();
+
+        stats.record(1_000);
+        assert!(stats.snapshot_and_reset().is_some());
+        stats.record(60_000_000);
+
+        let snapshot = stats.snapshot().unwrap();
+
+        assert_eq!(snapshot.count, 1);
+        assert_eq!(snapshot.histogram[0].count, 0);
+        assert_eq!(snapshot.histogram.last().unwrap().count, 1);
     }
 }
