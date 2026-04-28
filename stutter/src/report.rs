@@ -282,7 +282,7 @@ fn spike_cluster_analysis(
     let (source, points) = match spike_events {
         Some(spike_events) => (
             SpikeClusterSource::SpikeEvents,
-            flatten_spike_events(spike_events),
+            flatten_spike_events(session, spike_events),
         ),
         None => (
             SpikeClusterSource::TopSpikesFallback,
@@ -352,7 +352,7 @@ fn spike_clusters_from_points(
     selected
 }
 
-fn flatten_spike_events(spike_events: &[SpikeEvent]) -> Vec<SpikePoint> {
+fn flatten_spike_events(session: &SessionFile, spike_events: &[SpikeEvent]) -> Vec<SpikePoint> {
     spike_events
         .iter()
         .map(|spike| SpikePoint {
@@ -364,7 +364,8 @@ fn flatten_spike_events(spike_events: &[SpikeEvent]) -> Vec<SpikePoint> {
             latency_ns: spike.latency_ns,
             wakeup_ns: spike.wakeup_ns,
             switch_ns: spike.switch_ns,
-            elapsed_ms: Some(spike.elapsed_ms),
+            elapsed_ms: elapsed_ms(session.monotonic_start_ns, spike.switch_ns)
+                .or(spike.elapsed_ms),
         })
         .collect()
 }
@@ -827,6 +828,66 @@ mod tests {
     }
 
     #[test]
+    fn spike_event_elapsed_prefers_session_monotonic_timing() {
+        let session = session_with_spikes(
+            Some(1_000_000_000),
+            vec![spike_task(
+                99,
+                "Main",
+                TaskClass::Game,
+                0,
+                1_100_000_000,
+                1_000_000,
+            )],
+        );
+        let mut spike_events = vec![
+            spike_event(1, "Main", TaskClass::Game, 0, 1_010_000_000, 1_000_000),
+            spike_event(2, "dxvk-cs", TaskClass::Game, 1, 1_011_000_000, 1_000_000),
+            spike_event(
+                3,
+                "wineserver",
+                TaskClass::WineServer,
+                2,
+                1_012_000_000,
+                1_000_000,
+            ),
+        ];
+        for spike in &mut spike_events {
+            spike.elapsed_ms = Some(999);
+        }
+
+        let analysis = spike_cluster_analysis(&session, Some(&spike_events), 5_000_000);
+
+        assert_eq!(analysis.clusters.len(), 1);
+        assert_eq!(analysis.clusters[0].points[0].elapsed_ms, Some(10));
+    }
+
+    #[test]
+    fn null_spike_event_elapsed_renders_as_dash() {
+        let session = session_with_spikes(None, Vec::new());
+        let mut spike_events = vec![
+            spike_event(1, "Main", TaskClass::Game, 0, 10_000_000, 1_000_000),
+            spike_event(2, "dxvk-cs", TaskClass::Game, 1, 11_000_000, 1_000_000),
+            spike_event(
+                3,
+                "wineserver",
+                TaskClass::WineServer,
+                2,
+                12_000_000,
+                1_000_000,
+            ),
+        ];
+        for spike in &mut spike_events {
+            spike.elapsed_ms = None;
+        }
+
+        let analysis = spike_cluster_analysis(&session, Some(&spike_events), 5_000_000);
+        let rendered = render_cluster(1, &analysis.clusters[0]);
+
+        assert!(rendered.contains("elapsed=-"));
+    }
+
+    #[test]
     fn cluster_analysis_falls_back_to_retained_top_spikes() {
         let session = session_with_spikes(
             None,
@@ -966,7 +1027,7 @@ mod tests {
         latency_ns: u64,
     ) -> SpikeEvent {
         SpikeEvent {
-            elapsed_ms: u128::from(switch_ns / 1_000_000),
+            elapsed_ms: Some(u128::from(switch_ns / 1_000_000)),
             task,
             active: true,
             class,

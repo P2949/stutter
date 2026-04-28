@@ -189,7 +189,8 @@ pub struct SessionSpike {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SpikeEvent {
-    pub elapsed_ms: u128,
+    #[serde(default)]
+    pub elapsed_ms: Option<u128>,
     pub task: u32,
     pub active: bool,
     pub class: TaskClass,
@@ -204,9 +205,13 @@ pub struct SpikeEvent {
 }
 
 impl SpikeEvent {
-    pub fn from_task_stats(elapsed_ms: u128, stats: &TaskStats, event: &SchedulerEvent) -> Self {
+    pub fn from_task_stats(
+        monotonic_start_ns: Option<u64>,
+        stats: &TaskStats,
+        event: &SchedulerEvent,
+    ) -> Self {
         Self {
-            elapsed_ms,
+            elapsed_ms: elapsed_ms_from_monotonic(monotonic_start_ns, event.switch_ns),
             task: event.pid,
             active: stats.active,
             class: stats.class,
@@ -222,7 +227,7 @@ impl SpikeEvent {
     }
 }
 
-pub const SESSION_SCHEMA_VERSION: u32 = 6;
+pub const SESSION_SCHEMA_VERSION: u32 = 7;
 
 pub struct FinalizeRecordingInput<'a> {
     pub recording: &'a RecordingRun,
@@ -263,6 +268,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     let tree_events = input.tree_events;
     let spike_events = input.spike_events;
     let ended_at = SystemTime::now();
+    let monotonic_end_ns = monotonic_now_ns();
     let duration_ms = recording.started_instant.elapsed().as_millis();
     let metadata = collect_system_metadata();
 
@@ -326,7 +332,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         started_at: recorded_time(recording.started_at),
         ended_at: recorded_time(ended_at),
         monotonic_start_ns: recording.monotonic_start_ns,
-        monotonic_end_ns: monotonic_now_ns(),
+        monotonic_end_ns,
         duration_ms,
         stop_reason: stop_reason.to_owned(),
         config: RecordedConfig {
@@ -352,7 +358,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         started_at: recorded_time(recording.started_at),
         ended_at: recorded_time(ended_at),
         monotonic_start_ns: recording.monotonic_start_ns,
-        monotonic_end_ns: monotonic_now_ns(),
+        monotonic_end_ns,
         duration_ms,
         metadata,
         target_pids_max: TARGET_PIDS_MAX,
@@ -510,11 +516,40 @@ fn sanitize_run_name(name: &str) -> String {
 }
 
 fn monotonic_now_ns() -> Option<u64> {
-    fs::read_to_string("/proc/uptime")
-        .ok()
-        .and_then(|value| value.split_whitespace().next().map(str::to_owned))
-        .and_then(|seconds| seconds.parse::<f64>().ok())
-        .map(|seconds| (seconds * 1_000_000_000.0) as u64)
+    let mut timespec = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+
+    // SAFETY: clock_gettime writes to the provided valid timespec pointer and
+    // does not retain it after the call.
+    let result = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut timespec) };
+    if result != 0 {
+        return None;
+    }
+
+    timespec_to_ns(timespec)
+}
+
+fn timespec_to_ns(timespec: libc::timespec) -> Option<u64> {
+    if timespec.tv_sec < 0 || timespec.tv_nsec < 0 {
+        return None;
+    }
+
+    let seconds = u64::try_from(timespec.tv_sec).ok()?;
+    let nanos = u64::try_from(timespec.tv_nsec).ok()?;
+    if nanos >= 1_000_000_000 {
+        return None;
+    }
+
+    seconds.checked_mul(1_000_000_000)?.checked_add(nanos)
+}
+
+fn elapsed_ms_from_monotonic(monotonic_start_ns: Option<u64>, switch_ns: u64) -> Option<u128> {
+    let start_ns = monotonic_start_ns?;
+    switch_ns
+        .checked_sub(start_ns)
+        .map(|elapsed_ns| u128::from(elapsed_ns / 1_000_000))
 }
 
 fn write_json<T: ?Sized + Serialize>(path: PathBuf, value: &T) -> anyhow::Result<()> {
@@ -591,7 +626,7 @@ mod tests {
     }
 
     #[test]
-    fn session_serializes_schema_six_latency_histogram_and_spike_events() {
+    fn session_serializes_schema_seven_latency_histogram_and_spike_events() {
         let dir = temp_test_dir("latency-histogram");
         fs::create_dir_all(&dir).unwrap();
 
@@ -619,7 +654,7 @@ mod tests {
         let interval_records = Vec::new();
         let tree_events = Vec::new();
         let spike_events = vec![SpikeEvent {
-            elapsed_ms: 12,
+            elapsed_ms: Some(12),
             task: 7,
             active: true,
             class: TaskClass::Helper,
@@ -654,13 +689,15 @@ mod tests {
                 .unwrap();
 
         assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
-        assert_eq!(session.schema_version, 6);
+        assert_eq!(session.schema_version, 7);
+        assert_eq!(session.monotonic_end_ns, metadata.monotonic_end_ns);
         assert_eq!(session.spike_event_count, 1);
         assert_eq!(metadata.spike_event_count, 1);
         assert!(!session.spike_events_truncated);
         assert!(!metadata.spike_events_truncated);
         assert_eq!(recorded_spike_events.len(), 1);
         assert_eq!(recorded_spike_events[0].task, 7);
+        assert_eq!(recorded_spike_events[0].elapsed_ms, Some(12));
         assert_eq!(recorded_spike_events[0].latency_ns, 2_000_000);
         assert_eq!(session.tasks.len(), 1);
 
@@ -685,6 +722,61 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    #[test]
+    fn timespec_conversion_rejects_invalid_values() {
+        assert_eq!(
+            timespec_to_ns(libc::timespec {
+                tv_sec: 1,
+                tv_nsec: 2_000,
+            }),
+            Some(1_000_002_000)
+        );
+        assert_eq!(
+            timespec_to_ns(libc::timespec {
+                tv_sec: -1,
+                tv_nsec: 0,
+            }),
+            None
+        );
+        assert_eq!(
+            timespec_to_ns(libc::timespec {
+                tv_sec: 0,
+                tv_nsec: -1,
+            }),
+            None
+        );
+        assert_eq!(
+            timespec_to_ns(libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 1_000_000_000,
+            }),
+            None
+        );
+        assert_eq!(
+            timespec_to_ns(libc::timespec {
+                tv_sec: (u64::MAX / 1_000_000_000 + 1) as libc::time_t,
+                tv_nsec: 0,
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn spike_event_elapsed_uses_monotonic_switch_timestamp() {
+        let mut stats = crate::metrics::TaskStats::new(7, "RenderThread".to_owned(), 0);
+        stats.apply_task_info(&task_info(7));
+        let event = scheduler_event(7, 1_500_000_000, 1_000_000);
+
+        let spike = SpikeEvent::from_task_stats(Some(1_000_000_000), &stats, &event);
+        assert_eq!(spike.elapsed_ms, Some(500));
+
+        let spike = SpikeEvent::from_task_stats(None, &stats, &event);
+        assert_eq!(spike.elapsed_ms, None);
+
+        let spike = SpikeEvent::from_task_stats(Some(2_000_000_000), &stats, &event);
+        assert_eq!(spike.elapsed_ms, None);
+    }
+
     fn task_info(tid: u32) -> TaskInfo {
         TaskInfo {
             tid,
@@ -704,5 +796,18 @@ mod tests {
             .as_nanos();
         path.push(format!("stutter-{name}-{unique}"));
         path
+    }
+
+    fn scheduler_event(pid: u32, switch_ns: u64, latency_ns: u64) -> SchedulerEvent {
+        SchedulerEvent {
+            kind: stutter_common::EVENT_RUNNABLE_LATENCY,
+            pid,
+            cpu: 1,
+            prio: 120,
+            wakeup_ns: switch_ns.saturating_sub(latency_ns),
+            switch_ns,
+            latency_ns,
+            comm: [0; 16],
+        }
     }
 }
