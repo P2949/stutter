@@ -6,6 +6,9 @@ mod process_tree;
 mod recorder;
 mod report;
 
+#[cfg(test)]
+mod regression_tests;
+
 use std::{collections::BTreeMap, future, time::Instant};
 
 use aya::maps::{HashMap as AyaHashMap, MapData};
