@@ -7,13 +7,14 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use stutter_common::SchedulerEvent;
 
 use crate::{
     TARGET_PIDS_MAX,
     cli::{Config, RecordingConfig},
     metadata::{SystemMetadata, collect_system_metadata},
     metrics::{
-        CpuLine, CpuSnapshot, IntervalRecord as MetricsIntervalRecord, MAX_EXACT_SAMPLES,
+        CpuLine, CpuSnapshot, IntervalRecord as MetricsIntervalRecord, LatencyHistogramBucket,
         SpikeRecord, TaskStats,
     },
     process_tree::{TaskClass, TaskInfo},
@@ -71,6 +72,10 @@ pub struct SessionFile {
     pub target_pids_max: usize,
     pub active_target_pids_count: usize,
     pub active_expanded_tasks: Vec<u32>,
+    #[serde(default)]
+    pub spike_event_count: usize,
+    #[serde(default)]
+    pub spike_events_truncated: bool,
     pub tasks: Vec<SessionTask>,
     pub top_spikes: Vec<SessionSpike>,
 }
@@ -88,6 +93,10 @@ pub struct MetadataFile {
     pub target_pids_max: usize,
     pub active_target_pids_count: usize,
     pub active_expanded_tasks: Vec<u32>,
+    #[serde(default)]
+    pub spike_event_count: usize,
+    #[serde(default)]
+    pub spike_events_truncated: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -128,6 +137,8 @@ pub struct RecordedLatency {
     pub stored_samples: u64,
     pub truncated_samples: u64,
     pub percentile_scope: String,
+    #[serde(default)]
+    pub histogram: Vec<LatencyHistogramBucket>,
     pub min_ns: u64,
     pub avg_ns: u64,
     pub p95_ns: u64,
@@ -176,7 +187,42 @@ pub struct SessionSpike {
     pub switch_ns: u64,
 }
 
-pub const SESSION_SCHEMA_VERSION: u32 = 4;
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SpikeEvent {
+    pub elapsed_ms: u128,
+    pub task: u32,
+    pub active: bool,
+    pub class: TaskClass,
+    pub process_pid: Option<u32>,
+    pub process_comm: String,
+    pub comm: String,
+    pub cpu: u32,
+    pub prio: i32,
+    pub latency_ns: u64,
+    pub wakeup_ns: u64,
+    pub switch_ns: u64,
+}
+
+impl SpikeEvent {
+    pub fn from_task_stats(elapsed_ms: u128, stats: &TaskStats, event: &SchedulerEvent) -> Self {
+        Self {
+            elapsed_ms,
+            task: event.pid,
+            active: stats.active,
+            class: stats.class,
+            process_pid: stats.process_pid,
+            process_comm: stats.process_comm.clone(),
+            comm: stats.comm.clone(),
+            cpu: event.cpu,
+            prio: event.prio,
+            latency_ns: event.latency_ns,
+            wakeup_ns: event.wakeup_ns,
+            switch_ns: event.switch_ns,
+        }
+    }
+}
+
+pub const SESSION_SCHEMA_VERSION: u32 = 6;
 
 pub struct FinalizeRecordingInput<'a> {
     pub recording: &'a RecordingRun,
@@ -186,6 +232,7 @@ pub struct FinalizeRecordingInput<'a> {
     pub stats_by_task: &'a BTreeMap<u32, TaskStats>,
     pub interval_records: &'a [IntervalRecord],
     pub tree_events: &'a [TreeEvent],
+    pub spike_events: &'a [SpikeEvent],
 }
 
 pub fn prepare_recording(config: &Config) -> anyhow::Result<Option<RecordingRun>> {
@@ -214,6 +261,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     let stats_by_task = input.stats_by_task;
     let interval_records = input.interval_records;
     let tree_events = input.tree_events;
+    let spike_events = input.spike_events;
     let ended_at = SystemTime::now();
     let duration_ms = recording.started_instant.elapsed().as_millis();
     let metadata = collect_system_metadata();
@@ -291,7 +339,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         metadata: metadata.clone(),
         target_pids_max: TARGET_PIDS_MAX,
         active_target_pids_count: active_targets.len(),
-        active_expanded_tasks,
+        active_expanded_tasks: active_expanded_tasks.clone(),
+        spike_event_count: spike_events.len(),
+        spike_events_truncated: false,
         tasks,
         top_spikes,
     };
@@ -307,13 +357,16 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         metadata,
         target_pids_max: TARGET_PIDS_MAX,
         active_target_pids_count: active_targets.len(),
-        active_expanded_tasks: active_targets.keys().copied().collect(),
+        active_expanded_tasks: active_expanded_tasks.clone(),
+        spike_event_count: spike_events.len(),
+        spike_events_truncated: false,
     };
 
     write_json(recording.run_dir.join("session.json"), &session)?;
     write_json(recording.run_dir.join("metadata.json"), &metadata_file)?;
     write_json(recording.run_dir.join("interval.json"), interval_records)?;
     write_json(recording.run_dir.join("tree_events.json"), tree_events)?;
+    write_json(recording.run_dir.join("spike_events.json"), spike_events)?;
 
     println!("recording written to {}", recording.run_dir.display());
     Ok(())
@@ -342,6 +395,7 @@ fn clone_latency_stats(stats: &TaskStats) -> TaskStats {
             over_5ms: stats.session_latency.over_5ms,
             samples_ns: stats.session_latency.samples_ns.clone(),
             samples_truncated: stats.session_latency.samples_truncated,
+            histogram: stats.session_latency.histogram.clone(),
         },
         session_cpu: crate::metrics::CpuStatsSet {
             by_cpu: stats.session_cpu.by_cpu.clone(),
@@ -351,18 +405,12 @@ fn clone_latency_stats(stats: &TaskStats) -> TaskStats {
 }
 
 fn recorded_latency(latency: crate::metrics::LatencySnapshot) -> RecordedLatency {
-    let stored_samples = latency.count.min(MAX_EXACT_SAMPLES as u64);
-    let percentile_scope = if latency.samples_truncated > 0 {
-        "capped_prefix"
-    } else {
-        "complete"
-    };
-
     RecordedLatency {
         samples: latency.count,
-        stored_samples,
+        stored_samples: latency.stored_samples,
         truncated_samples: latency.samples_truncated,
-        percentile_scope: percentile_scope.to_owned(),
+        percentile_scope: latency.percentile_scope,
+        histogram: latency.histogram,
         min_ns: latency.min_ns,
         avg_ns: latency.avg_ns,
         p95_ns: latency.p95_ns,
@@ -474,4 +522,187 @@ fn write_json<T: ?Sized + Serialize>(path: PathBuf, value: &T) -> anyhow::Result
     file.write_all(&serde_json::to_vec_pretty(value)?)?;
     file.write_all(b"\n")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::BTreeMap,
+        fs,
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    };
+
+    use super::*;
+    use crate::process_tree::TaskClass;
+
+    #[test]
+    fn metadata_uses_sorted_active_expanded_tasks() {
+        let dir = temp_test_dir("metadata-sorted");
+        fs::create_dir_all(&dir).unwrap();
+
+        let recording = RecordingRun {
+            run_name: Some("test".to_owned()),
+            run_dir: dir.clone(),
+            started_at: UNIX_EPOCH,
+            started_instant: Instant::now(),
+            monotonic_start_ns: Some(1_000),
+        };
+        let config = Config {
+            target_pids: vec![9, 1, 4],
+            tree_pids: vec![],
+            summary_period_ms: 1_000,
+            spike_threshold_ns: 1_000_000,
+            verbose: false,
+            recording: None,
+            max_duration: Some(Duration::from_secs(1)),
+        };
+        let active_targets =
+            BTreeMap::from([(9, task_info(9)), (1, task_info(1)), (4, task_info(4))]);
+        let stats_by_task = BTreeMap::new();
+        let interval_records = Vec::new();
+        let tree_events = Vec::new();
+        let spike_events = Vec::new();
+
+        finalize_recording(FinalizeRecordingInput {
+            recording: &recording,
+            config: &config,
+            stop_reason: "test",
+            active_targets: &active_targets,
+            stats_by_task: &stats_by_task,
+            interval_records: &interval_records,
+            tree_events: &tree_events,
+            spike_events: &spike_events,
+        })
+        .unwrap();
+
+        let session: SessionFile =
+            serde_json::from_str(&fs::read_to_string(dir.join("session.json")).unwrap()).unwrap();
+        let metadata: MetadataFile =
+            serde_json::from_str(&fs::read_to_string(dir.join("metadata.json")).unwrap()).unwrap();
+
+        assert_eq!(session.active_expanded_tasks, vec![1, 4, 9]);
+        assert_eq!(metadata.active_expanded_tasks, vec![1, 4, 9]);
+        assert_eq!(session.spike_event_count, 0);
+        assert_eq!(metadata.spike_event_count, 0);
+        assert!(!session.spike_events_truncated);
+        assert!(!metadata.spike_events_truncated);
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn session_serializes_schema_six_latency_histogram_and_spike_events() {
+        let dir = temp_test_dir("latency-histogram");
+        fs::create_dir_all(&dir).unwrap();
+
+        let recording = RecordingRun {
+            run_name: Some("histogram-test".to_owned()),
+            run_dir: dir.clone(),
+            started_at: UNIX_EPOCH,
+            started_instant: Instant::now(),
+            monotonic_start_ns: Some(1_000),
+        };
+        let config = Config {
+            target_pids: vec![7],
+            tree_pids: vec![],
+            summary_period_ms: 1_000,
+            spike_threshold_ns: 1_000_000,
+            verbose: false,
+            recording: None,
+            max_duration: Some(Duration::from_secs(1)),
+        };
+        let active_targets = BTreeMap::from([(7, task_info(7))]);
+        let mut stats = crate::metrics::TaskStats::new(7, "worker".to_owned(), 0);
+        stats.session_latency.record(1_000);
+        stats.session_latency.record(2_000_000);
+        let stats_by_task = BTreeMap::from([(7, stats)]);
+        let interval_records = Vec::new();
+        let tree_events = Vec::new();
+        let spike_events = vec![SpikeEvent {
+            elapsed_ms: 12,
+            task: 7,
+            active: true,
+            class: TaskClass::Helper,
+            process_pid: Some(7),
+            process_comm: "task-7".to_owned(),
+            comm: "worker".to_owned(),
+            cpu: 1,
+            prio: 120,
+            latency_ns: 2_000_000,
+            wakeup_ns: 10,
+            switch_ns: 2_000_010,
+        }];
+
+        finalize_recording(FinalizeRecordingInput {
+            recording: &recording,
+            config: &config,
+            stop_reason: "test",
+            active_targets: &active_targets,
+            stats_by_task: &stats_by_task,
+            interval_records: &interval_records,
+            tree_events: &tree_events,
+            spike_events: &spike_events,
+        })
+        .unwrap();
+
+        let session: SessionFile =
+            serde_json::from_str(&fs::read_to_string(dir.join("session.json")).unwrap()).unwrap();
+        let metadata: MetadataFile =
+            serde_json::from_str(&fs::read_to_string(dir.join("metadata.json")).unwrap()).unwrap();
+        let recorded_spike_events: Vec<SpikeEvent> =
+            serde_json::from_str(&fs::read_to_string(dir.join("spike_events.json")).unwrap())
+                .unwrap();
+
+        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
+        assert_eq!(session.schema_version, 6);
+        assert_eq!(session.spike_event_count, 1);
+        assert_eq!(metadata.spike_event_count, 1);
+        assert!(!session.spike_events_truncated);
+        assert!(!metadata.spike_events_truncated);
+        assert_eq!(recorded_spike_events.len(), 1);
+        assert_eq!(recorded_spike_events[0].task, 7);
+        assert_eq!(recorded_spike_events[0].latency_ns, 2_000_000);
+        assert_eq!(session.tasks.len(), 1);
+
+        let latency = &session.tasks[0].latency;
+        assert_eq!(latency.percentile_scope, "exact");
+        assert_eq!(latency.stored_samples, 2);
+        assert_eq!(
+            latency.histogram.len(),
+            crate::metrics::LATENCY_HISTOGRAM_BUCKET_COUNT
+        );
+        assert_eq!(latency.histogram[0].count, 1);
+        assert_eq!(
+            latency
+                .histogram
+                .iter()
+                .find(|bucket| bucket.upper_bound_ns == Some(2_000_000))
+                .unwrap()
+                .count,
+            1
+        );
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn task_info(tid: u32) -> TaskInfo {
+        TaskInfo {
+            tid,
+            process_pid: tid,
+            process_ppid: 1,
+            comm: format!("task-{tid}"),
+            process_comm: format!("task-{tid}"),
+            class: TaskClass::Helper,
+        }
+    }
+
+    fn temp_test_dir(name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!("stutter-{name}-{unique}"));
+        path
+    }
 }

@@ -6,7 +6,7 @@ It measures:
 
 ```text
 sched_wakeup timestamp -> sched_switch timestamp = runnable latency
-````
+```
 
 That answers:
 
@@ -107,12 +107,22 @@ Default output:
   session.json
   interval.json
   tree_events.json
+  spike_events.json
 ```
 
 ## Generate a report
 
 ```bash
 RUSTUP_TOOLCHAIN=nightly cargo run -- report \
+  ~/.local/state/stutter/runs/<run-dir>
+```
+
+Show more rows or tighten spike cluster grouping:
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo run -- report \
+  --top 25 \
+  --cluster-ms 2 \
   ~/.local/state/stutter/runs/<run-dir>
 ```
 
@@ -123,6 +133,8 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- report \
   --json \
   ~/.local/state/stutter/runs/<run-dir>
 ```
+
+Reports use `spike_events.json` for spike cluster detection when it is present. Older runs without that file still report clusters from retained per-task `top_spikes`.
 
 ## Important interpretation notes
 
@@ -136,13 +148,13 @@ over_5ms
 session_spike
 ```
 
-If `truncated_samples > 0`, then `p95` and `p99` are based only on the stored exact sample window. The report marks this as:
+If `truncated_samples > 0`, newer recordings estimate `p95` and `p99` from fixed histogram buckets across the full session. The report marks this as:
 
 ```text
-percentile_scope=capped_prefix
+percentile_scope=histogram
 ```
 
-When capped, trust `max` and threshold counters more than p95/p99.
+Histogram percentiles are approximate bucket upper bounds. `max` and threshold counters remain exact. Older recordings may still show `percentile_scope=capped_prefix`; for those, trust `max` and threshold counters more than p95/p99.
 
 ## Current task classes
 

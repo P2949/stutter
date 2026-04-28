@@ -72,9 +72,13 @@ struct ReportArgs {
     #[arg(long, default_value_t = 10, value_name = "N")]
     top: usize,
 
+    #[arg(long = "cluster-ms", default_value_t = 5, value_name = "MS")]
+    cluster_window_ms: u64,
+
     path: PathBuf,
 }
 
+#[derive(Debug)]
 pub enum AppCommand {
     Monitor(Config),
     InspectTree {
@@ -84,6 +88,7 @@ pub enum AppCommand {
         path: PathBuf,
         json: bool,
         top: usize,
+        cluster_window_ms: u64,
     },
 }
 
@@ -120,6 +125,10 @@ where
             args, false, None,
         )?)),
         Some(Command::Record(args)) => {
+            if matches!(args.duration, Some(0)) {
+                anyhow::bail!("--duration must be greater than zero");
+            }
+
             let max_duration = args.duration.map(Duration::from_secs);
             Ok(AppCommand::Monitor(config_from_monitor_args(
                 args.monitor,
@@ -139,10 +148,14 @@ where
             if args.top == 0 {
                 anyhow::bail!("--top must be greater than zero");
             }
+            if args.cluster_window_ms == 0 {
+                anyhow::bail!("--cluster-ms must be greater than zero");
+            }
             Ok(AppCommand::Report {
                 path: args.path,
                 json: args.json,
                 top: args.top,
+                cluster_window_ms: args.cluster_window_ms,
             })
         }
         None => Ok(AppCommand::Monitor(config_from_monitor_args(
@@ -218,4 +231,57 @@ fn validate_pids(flag: &str, pids: &[u32]) -> anyhow::Result<()> {
         anyhow::bail!("{flag} must be greater than zero");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_zero_duration_record() {
+        let err = parse_app_command_from(["stutter", "record", "--pid", "42", "--duration", "0"])
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--duration must be greater than zero")
+        );
+    }
+
+    #[test]
+    fn parses_report_cluster_window_and_top() {
+        let command = parse_app_command_from([
+            "stutter",
+            "report",
+            "--cluster-ms",
+            "5",
+            "--top",
+            "25",
+            "/tmp/run",
+        ])
+        .unwrap();
+
+        let AppCommand::Report {
+            top,
+            cluster_window_ms,
+            ..
+        } = command
+        else {
+            panic!("expected report command");
+        };
+
+        assert_eq!(top, 25);
+        assert_eq!(cluster_window_ms, 5);
+    }
+
+    #[test]
+    fn rejects_zero_report_cluster_window() {
+        let err = parse_app_command_from(["stutter", "report", "--cluster-ms", "0", "/tmp/run"])
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--cluster-ms must be greater than zero")
+        );
+    }
 }
