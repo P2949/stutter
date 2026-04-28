@@ -36,6 +36,17 @@ struct RefreshTargetTasksInput<'a> {
     recording_started: Option<Instant>,
 }
 
+struct HandleEventInput<'a> {
+    event: SchedulerEvent,
+    config: &'a Config,
+    started: Instant,
+    active_targets: &'a BTreeMap<u32, TaskInfo>,
+    known_targets: &'a BTreeMap<u32, TaskInfo>,
+    stats_by_task: &'a mut BTreeMap<u32, metrics::TaskStats>,
+    monotonic_start_ns: Option<u64>,
+    spike_events: Option<&'a mut Vec<SpikeEvent>>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -66,6 +77,7 @@ async fn run_monitor(config: Config) -> anyhow::Result<()> {
     let mut interval_records: Vec<IntervalRecord> = Vec::new();
     let mut tree_events: Vec<TreeEvent> = Vec::new();
     let mut spike_events = recording.as_ref().map(|_| Vec::<SpikeEvent>::new());
+    let recording_monotonic_start_ns = recording.as_ref().and_then(|run| run.monotonic_start_ns);
 
     let started = Instant::now();
 
@@ -146,15 +158,16 @@ async fn run_monitor(config: Config) -> anyhow::Result<()> {
                         (item.as_ptr() as *const SchedulerEvent).read_unaligned()
                     };
 
-                    handle_event(
+                    handle_event(HandleEventInput {
                         event,
-                        &config,
+                        config: &config,
                         started,
-                        &active_targets,
-                        &known_targets,
-                        &mut stats_by_task,
-                        spike_events.as_mut(),
-                    );
+                        active_targets: &active_targets,
+                        known_targets: &known_targets,
+                        stats_by_task: &mut stats_by_task,
+                        monotonic_start_ns: recording_monotonic_start_ns,
+                        spike_events: spike_events.as_mut(),
+                    });
                 }
 
                 guard.clear_ready();
@@ -181,15 +194,18 @@ async fn run_monitor(config: Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_event(
-    event: SchedulerEvent,
-    config: &Config,
-    started: Instant,
-    active_targets: &BTreeMap<u32, TaskInfo>,
-    known_targets: &BTreeMap<u32, TaskInfo>,
-    stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
-    spike_events: Option<&mut Vec<SpikeEvent>>,
-) {
+fn handle_event(input: HandleEventInput<'_>) {
+    let HandleEventInput {
+        event,
+        config,
+        started,
+        active_targets,
+        known_targets,
+        stats_by_task,
+        monotonic_start_ns,
+        spike_events,
+    } = input;
+
     match event.kind {
         EVENT_RUNNABLE_LATENCY => {
             let comm = metrics::comm_to_string(&event.comm);
@@ -217,7 +233,11 @@ fn handle_event(
             if event.latency_ns >= config.spike_threshold_ns
                 && let Some(spike_events) = spike_events
             {
-                spike_events.push(SpikeEvent::from_task_stats(elapsed_ms, stats, &event));
+                spike_events.push(SpikeEvent::from_task_stats(
+                    monotonic_start_ns,
+                    stats,
+                    &event,
+                ));
             }
 
             if config.verbose {
@@ -421,27 +441,29 @@ mod tests {
         let mut stats_by_task =
             BTreeMap::from([(7, metrics::TaskStats::new(7, "?".to_owned(), 0))]);
 
-        handle_event(
-            scheduler_event(7, "real-name"),
-            &config,
-            Instant::now(),
-            &active_targets,
-            &known_targets,
-            &mut stats_by_task,
-            None,
-        );
+        handle_event(HandleEventInput {
+            event: scheduler_event(7, "real-name"),
+            config: &config,
+            started: Instant::now(),
+            active_targets: &active_targets,
+            known_targets: &known_targets,
+            stats_by_task: &mut stats_by_task,
+            monotonic_start_ns: None,
+            spike_events: None,
+        });
 
         assert_eq!(stats_by_task.get(&7).unwrap().comm, "real-name");
 
-        handle_event(
-            scheduler_event(7, "later-name"),
-            &config,
-            Instant::now(),
-            &active_targets,
-            &known_targets,
-            &mut stats_by_task,
-            None,
-        );
+        handle_event(HandleEventInput {
+            event: scheduler_event(7, "later-name"),
+            config: &config,
+            started: Instant::now(),
+            active_targets: &active_targets,
+            known_targets: &known_targets,
+            stats_by_task: &mut stats_by_task,
+            monotonic_start_ns: None,
+            spike_events: None,
+        });
 
         assert_eq!(stats_by_task.get(&7).unwrap().comm, "real-name");
     }
@@ -465,26 +487,28 @@ mod tests {
         let mut stats_by_task = BTreeMap::new();
         let mut spike_events = Vec::new();
 
-        handle_event(
-            scheduler_event_with_latency(7, "RenderThread", 999_999),
-            &config,
-            Instant::now(),
-            &active_targets,
-            &known_targets,
-            &mut stats_by_task,
-            Some(&mut spike_events),
-        );
+        handle_event(HandleEventInput {
+            event: scheduler_event_with_latency(7, "RenderThread", 999_999),
+            config: &config,
+            started: Instant::now(),
+            active_targets: &active_targets,
+            known_targets: &known_targets,
+            stats_by_task: &mut stats_by_task,
+            monotonic_start_ns: Some(100),
+            spike_events: Some(&mut spike_events),
+        });
         assert!(spike_events.is_empty());
 
-        handle_event(
-            scheduler_event_with_latency(7, "RenderThread", 1_000_000),
-            &config,
-            Instant::now(),
-            &active_targets,
-            &known_targets,
-            &mut stats_by_task,
-            Some(&mut spike_events),
-        );
+        handle_event(HandleEventInput {
+            event: scheduler_event_with_latency(7, "RenderThread", 1_000_000),
+            config: &config,
+            started: Instant::now(),
+            active_targets: &active_targets,
+            known_targets: &known_targets,
+            stats_by_task: &mut stats_by_task,
+            monotonic_start_ns: Some(100),
+            spike_events: Some(&mut spike_events),
+        });
 
         assert_eq!(spike_events.len(), 1);
         let spike = &spike_events[0];
@@ -499,6 +523,7 @@ mod tests {
         assert_eq!(spike.latency_ns, 1_000_000);
         assert_eq!(spike.wakeup_ns, 100);
         assert_eq!(spike.switch_ns, 1_000_100);
+        assert_eq!(spike.elapsed_ms, Some(1));
     }
 
     fn task_stats_with_info(
