@@ -230,9 +230,13 @@ pub fn target_snapshot_at(
     }
 
     let mut tasks = expand_tasks_at(proc_root, &process_roots, &processes);
+    let mut seen_process_pids = tasks
+        .values()
+        .map(|task| task.process_pid)
+        .collect::<BTreeSet<_>>();
 
     for pid in &process_roots {
-        if !tasks.values().any(|task| task.process_pid == *pid) {
+        if seen_process_pids.insert(*pid) {
             tasks.insert(*pid, fallback_task_info(*pid, processes.get(pid)));
         }
     }
@@ -272,6 +276,14 @@ pub fn diff_tasks(
             });
         }
     }
+
+    diffs.sort_by_key(|diff| {
+        let action_rank = match diff.action {
+            TargetDiffAction::Removed => 0,
+            TargetDiffAction::Added => 1,
+        };
+        (action_rank, diff.task.tid)
+    });
 
     diffs
 }

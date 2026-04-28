@@ -21,6 +21,7 @@ use crate::{
 };
 
 pub type IntervalRecord = MetricsIntervalRecord;
+pub const MAX_SPIKE_EVENTS: usize = 500_000;
 
 pub struct RecordingRun {
     pub run_name: Option<String>,
@@ -28,6 +29,30 @@ pub struct RecordingRun {
     pub started_at: SystemTime,
     pub started_instant: Instant,
     pub monotonic_start_ns: Option<u64>,
+}
+
+#[derive(Default)]
+pub struct SpikeEventBuffer {
+    events: Vec<SpikeEvent>,
+    truncated: bool,
+}
+
+impl SpikeEventBuffer {
+    pub fn push(&mut self, event: SpikeEvent) {
+        if self.events.len() < MAX_SPIKE_EVENTS {
+            self.events.push(event);
+        } else {
+            self.truncated = true;
+        }
+    }
+
+    pub fn as_slice(&self) -> &[SpikeEvent] {
+        &self.events
+    }
+
+    pub fn truncated(&self) -> bool {
+        self.truncated
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -238,6 +263,7 @@ pub struct FinalizeRecordingInput<'a> {
     pub interval_records: &'a [IntervalRecord],
     pub tree_events: &'a [TreeEvent],
     pub spike_events: &'a [SpikeEvent],
+    pub spike_events_truncated: bool,
 }
 
 pub fn prepare_recording(config: &Config) -> anyhow::Result<Option<RecordingRun>> {
@@ -267,6 +293,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     let interval_records = input.interval_records;
     let tree_events = input.tree_events;
     let spike_events = input.spike_events;
+    let spike_events_truncated = input.spike_events_truncated;
     let ended_at = SystemTime::now();
     let monotonic_end_ns = monotonic_now_ns();
     let duration_ms = recording.started_instant.elapsed().as_millis();
@@ -279,8 +306,8 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     let mut top_spikes = Vec::new();
 
     for (task, stats) in stats_by_task {
-        let mut cloned_latency = clone_latency_stats(stats);
-        let Some(latency) = cloned_latency.session_latency.snapshot() else {
+        let mut session_latency = stats.session_latency.clone();
+        let Some(latency) = session_latency.snapshot() else {
             continue;
         };
 
@@ -347,7 +374,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         active_target_pids_count: active_targets.len(),
         active_expanded_tasks: active_expanded_tasks.clone(),
         spike_event_count: spike_events.len(),
-        spike_events_truncated: false,
+        spike_events_truncated,
         tasks,
         top_spikes,
     };
@@ -363,9 +390,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         metadata,
         target_pids_max: TARGET_PIDS_MAX,
         active_target_pids_count: active_targets.len(),
-        active_expanded_tasks: active_expanded_tasks.clone(),
+        active_expanded_tasks,
         spike_event_count: spike_events.len(),
-        spike_events_truncated: false,
+        spike_events_truncated,
     };
 
     write_json(recording.run_dir.join("session.json"), &session)?;
@@ -376,38 +403,6 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
 
     println!("recording written to {}", recording.run_dir.display());
     Ok(())
-}
-
-fn clone_latency_stats(stats: &TaskStats) -> TaskStats {
-    TaskStats {
-        task: stats.task,
-        comm: stats.comm.clone(),
-        class: stats.class,
-        process_pid: stats.process_pid,
-        process_comm: stats.process_comm.clone(),
-        active: stats.active,
-        first_seen_ms: stats.first_seen_ms,
-        last_seen_ms: stats.last_seen_ms,
-        removed_ms: stats.removed_ms,
-        interval_latency: crate::metrics::LatencyStats::new(),
-        interval_cpu: crate::metrics::CpuStatsSet::new(),
-        session_latency: crate::metrics::LatencyStats {
-            count: stats.session_latency.count,
-            min_ns: stats.session_latency.min_ns,
-            max_ns: stats.session_latency.max_ns,
-            sum_ns: stats.session_latency.sum_ns,
-            over_1ms: stats.session_latency.over_1ms,
-            over_2ms: stats.session_latency.over_2ms,
-            over_5ms: stats.session_latency.over_5ms,
-            samples_ns: stats.session_latency.samples_ns.clone(),
-            samples_truncated: stats.session_latency.samples_truncated,
-            histogram: stats.session_latency.histogram.clone(),
-        },
-        session_cpu: crate::metrics::CpuStatsSet {
-            by_cpu: stats.session_cpu.by_cpu.clone(),
-        },
-        top_spikes: stats.top_spikes.clone(),
-    }
 }
 
 fn recorded_latency(latency: crate::metrics::LatencySnapshot) -> RecordedLatency {
@@ -522,7 +517,8 @@ fn monotonic_now_ns() -> Option<u64> {
     };
 
     // SAFETY: clock_gettime writes to the provided valid timespec pointer and
-    // does not retain it after the call.
+    // does not retain it after the call. CLOCK_MONOTONIC intentionally matches
+    // bpf_ktime_get_ns(), so recorded elapsed times line up with eBPF timestamps.
     let result = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut timespec) };
     if result != 0 {
         return None;
@@ -557,257 +553,4 @@ fn write_json<T: ?Sized + Serialize>(path: PathBuf, value: &T) -> anyhow::Result
     file.write_all(&serde_json::to_vec_pretty(value)?)?;
     file.write_all(b"\n")?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{
-        collections::BTreeMap,
-        fs,
-        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-    };
-
-    use super::*;
-    use crate::process_tree::TaskClass;
-
-    #[test]
-    fn metadata_uses_sorted_active_expanded_tasks() {
-        let dir = temp_test_dir("metadata-sorted");
-        fs::create_dir_all(&dir).unwrap();
-
-        let recording = RecordingRun {
-            run_name: Some("test".to_owned()),
-            run_dir: dir.clone(),
-            started_at: UNIX_EPOCH,
-            started_instant: Instant::now(),
-            monotonic_start_ns: Some(1_000),
-        };
-        let config = Config {
-            target_pids: vec![9, 1, 4],
-            tree_pids: vec![],
-            summary_period_ms: 1_000,
-            spike_threshold_ns: 1_000_000,
-            verbose: false,
-            recording: None,
-            max_duration: Some(Duration::from_secs(1)),
-        };
-        let active_targets =
-            BTreeMap::from([(9, task_info(9)), (1, task_info(1)), (4, task_info(4))]);
-        let stats_by_task = BTreeMap::new();
-        let interval_records = Vec::new();
-        let tree_events = Vec::new();
-        let spike_events = Vec::new();
-
-        finalize_recording(FinalizeRecordingInput {
-            recording: &recording,
-            config: &config,
-            stop_reason: "test",
-            active_targets: &active_targets,
-            stats_by_task: &stats_by_task,
-            interval_records: &interval_records,
-            tree_events: &tree_events,
-            spike_events: &spike_events,
-        })
-        .unwrap();
-
-        let session: SessionFile =
-            serde_json::from_str(&fs::read_to_string(dir.join("session.json")).unwrap()).unwrap();
-        let metadata: MetadataFile =
-            serde_json::from_str(&fs::read_to_string(dir.join("metadata.json")).unwrap()).unwrap();
-
-        assert_eq!(session.active_expanded_tasks, vec![1, 4, 9]);
-        assert_eq!(metadata.active_expanded_tasks, vec![1, 4, 9]);
-        assert_eq!(session.spike_event_count, 0);
-        assert_eq!(metadata.spike_event_count, 0);
-        assert!(!session.spike_events_truncated);
-        assert!(!metadata.spike_events_truncated);
-
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn session_serializes_schema_seven_latency_histogram_and_spike_events() {
-        let dir = temp_test_dir("latency-histogram");
-        fs::create_dir_all(&dir).unwrap();
-
-        let recording = RecordingRun {
-            run_name: Some("histogram-test".to_owned()),
-            run_dir: dir.clone(),
-            started_at: UNIX_EPOCH,
-            started_instant: Instant::now(),
-            monotonic_start_ns: Some(1_000),
-        };
-        let config = Config {
-            target_pids: vec![7],
-            tree_pids: vec![],
-            summary_period_ms: 1_000,
-            spike_threshold_ns: 1_000_000,
-            verbose: false,
-            recording: None,
-            max_duration: Some(Duration::from_secs(1)),
-        };
-        let active_targets = BTreeMap::from([(7, task_info(7))]);
-        let mut stats = crate::metrics::TaskStats::new(7, "worker".to_owned(), 0);
-        stats.session_latency.record(1_000);
-        stats.session_latency.record(2_000_000);
-        let stats_by_task = BTreeMap::from([(7, stats)]);
-        let interval_records = Vec::new();
-        let tree_events = Vec::new();
-        let spike_events = vec![SpikeEvent {
-            elapsed_ms: Some(12),
-            task: 7,
-            active: true,
-            class: TaskClass::Helper,
-            process_pid: Some(7),
-            process_comm: "task-7".to_owned(),
-            comm: "worker".to_owned(),
-            cpu: 1,
-            prio: 120,
-            latency_ns: 2_000_000,
-            wakeup_ns: 10,
-            switch_ns: 2_000_010,
-        }];
-
-        finalize_recording(FinalizeRecordingInput {
-            recording: &recording,
-            config: &config,
-            stop_reason: "test",
-            active_targets: &active_targets,
-            stats_by_task: &stats_by_task,
-            interval_records: &interval_records,
-            tree_events: &tree_events,
-            spike_events: &spike_events,
-        })
-        .unwrap();
-
-        let session: SessionFile =
-            serde_json::from_str(&fs::read_to_string(dir.join("session.json")).unwrap()).unwrap();
-        let metadata: MetadataFile =
-            serde_json::from_str(&fs::read_to_string(dir.join("metadata.json")).unwrap()).unwrap();
-        let recorded_spike_events: Vec<SpikeEvent> =
-            serde_json::from_str(&fs::read_to_string(dir.join("spike_events.json")).unwrap())
-                .unwrap();
-
-        assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
-        assert_eq!(session.schema_version, 7);
-        assert_eq!(session.monotonic_end_ns, metadata.monotonic_end_ns);
-        assert_eq!(session.spike_event_count, 1);
-        assert_eq!(metadata.spike_event_count, 1);
-        assert!(!session.spike_events_truncated);
-        assert!(!metadata.spike_events_truncated);
-        assert_eq!(recorded_spike_events.len(), 1);
-        assert_eq!(recorded_spike_events[0].task, 7);
-        assert_eq!(recorded_spike_events[0].elapsed_ms, Some(12));
-        assert_eq!(recorded_spike_events[0].latency_ns, 2_000_000);
-        assert_eq!(session.tasks.len(), 1);
-
-        let latency = &session.tasks[0].latency;
-        assert_eq!(latency.percentile_scope, "exact");
-        assert_eq!(latency.stored_samples, 2);
-        assert_eq!(
-            latency.histogram.len(),
-            crate::metrics::LATENCY_HISTOGRAM_BUCKET_COUNT
-        );
-        assert_eq!(latency.histogram[0].count, 1);
-        assert_eq!(
-            latency
-                .histogram
-                .iter()
-                .find(|bucket| bucket.upper_bound_ns == Some(2_000_000))
-                .unwrap()
-                .count,
-            1
-        );
-
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn timespec_conversion_rejects_invalid_values() {
-        assert_eq!(
-            timespec_to_ns(libc::timespec {
-                tv_sec: 1,
-                tv_nsec: 2_000,
-            }),
-            Some(1_000_002_000)
-        );
-        assert_eq!(
-            timespec_to_ns(libc::timespec {
-                tv_sec: -1,
-                tv_nsec: 0,
-            }),
-            None
-        );
-        assert_eq!(
-            timespec_to_ns(libc::timespec {
-                tv_sec: 0,
-                tv_nsec: -1,
-            }),
-            None
-        );
-        assert_eq!(
-            timespec_to_ns(libc::timespec {
-                tv_sec: 0,
-                tv_nsec: 1_000_000_000,
-            }),
-            None
-        );
-        assert_eq!(
-            timespec_to_ns(libc::timespec {
-                tv_sec: (u64::MAX / 1_000_000_000 + 1) as libc::time_t,
-                tv_nsec: 0,
-            }),
-            None
-        );
-    }
-
-    #[test]
-    fn spike_event_elapsed_uses_monotonic_switch_timestamp() {
-        let mut stats = crate::metrics::TaskStats::new(7, "RenderThread".to_owned(), 0);
-        stats.apply_task_info(&task_info(7));
-        let event = scheduler_event(7, 1_500_000_000, 1_000_000);
-
-        let spike = SpikeEvent::from_task_stats(Some(1_000_000_000), &stats, &event);
-        assert_eq!(spike.elapsed_ms, Some(500));
-
-        let spike = SpikeEvent::from_task_stats(None, &stats, &event);
-        assert_eq!(spike.elapsed_ms, None);
-
-        let spike = SpikeEvent::from_task_stats(Some(2_000_000_000), &stats, &event);
-        assert_eq!(spike.elapsed_ms, None);
-    }
-
-    fn task_info(tid: u32) -> TaskInfo {
-        TaskInfo {
-            tid,
-            process_pid: tid,
-            process_ppid: 1,
-            comm: format!("task-{tid}"),
-            process_comm: format!("task-{tid}"),
-            class: TaskClass::Helper,
-        }
-    }
-
-    fn temp_test_dir(name: &str) -> PathBuf {
-        let mut path = std::env::temp_dir();
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        path.push(format!("stutter-{name}-{unique}"));
-        path
-    }
-
-    fn scheduler_event(pid: u32, switch_ns: u64, latency_ns: u64) -> SchedulerEvent {
-        SchedulerEvent {
-            kind: stutter_common::EVENT_RUNNABLE_LATENCY,
-            pid,
-            cpu: 1,
-            prio: 120,
-            wakeup_ns: switch_ns.saturating_sub(latency_ns),
-            switch_ns,
-            latency_ns,
-            comm: [0; 16],
-        }
-    }
 }

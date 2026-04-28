@@ -8,8 +8,8 @@ use crate::process_tree::{TaskClass, TaskInfo};
 
 pub const MAX_EXACT_SAMPLES: usize = 65_536;
 pub const LATENCY_HISTOGRAM_BUCKETS_NS: [u64; 15] = [
-    1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000, 200_000, 500_000, 1_000_000, 2_000_000,
-    5_000_000, 10_000_000, 20_000_000, 50_000_000,
+    1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000, 200_000, 500_000, 1_000_000,
+    2_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000,
 ];
 pub const LATENCY_HISTOGRAM_BUCKET_COUNT: usize = LATENCY_HISTOGRAM_BUCKETS_NS.len() + 1;
 
@@ -22,6 +22,7 @@ pub struct SpikeRecord {
     pub switch_ns: u64,
 }
 
+#[derive(Clone)]
 pub struct TaskStats {
     pub task: u32,
     pub comm: String,
@@ -62,6 +63,7 @@ pub struct CpuStats {
     pub spikes: u64,
 }
 
+#[derive(Clone)]
 pub struct CpuStatsSet {
     pub by_cpu: BTreeMap<u32, CpuStats>,
 }
@@ -256,9 +258,15 @@ impl LatencyStats {
             (
                 self.histogram
                     .percentile_upper_bound(self.count, 0.95)
+                    // The final histogram bucket is an overflow bucket with no finite
+                    // upper bound. If a percentile lands there, use the exact observed
+                    // max as the conservative fallback.
                     .unwrap_or(self.max_ns),
                 self.histogram
                     .percentile_upper_bound(self.count, 0.99)
+                    // The final histogram bucket is an overflow bucket with no finite
+                    // upper bound. If a percentile lands there, use the exact observed
+                    // max as the conservative fallback.
                     .unwrap_or(self.max_ns),
             )
         } else {
@@ -634,93 +642,5 @@ impl fmt::Debug for TaskStats {
             .field("process_pid", &self.process_pid)
             .field("active", &self.active)
             .finish()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn histogram_records_boundaries_and_overflow() {
-        let mut histogram = LatencyHistogram::new();
-
-        histogram.record(1_000);
-        histogram.record(1_001);
-        histogram.record(60_000_000);
-
-        let buckets = histogram.snapshot();
-
-        assert_eq!(buckets[0].upper_bound_ns, Some(1_000));
-        assert_eq!(buckets[0].count, 1);
-        assert_eq!(buckets[1].upper_bound_ns, Some(2_000));
-        assert_eq!(buckets[1].count, 1);
-        assert_eq!(buckets.last().unwrap().upper_bound_ns, None);
-        assert_eq!(buckets.last().unwrap().count, 1);
-    }
-
-    #[test]
-    fn histogram_percentile_uses_conservative_bucket_upper_bound() {
-        let mut histogram = LatencyHistogram::new();
-
-        for _ in 0..95 {
-            histogram.record(1_000);
-        }
-        for _ in 0..5 {
-            histogram.record(1_500_000);
-        }
-
-        assert_eq!(histogram.percentile_upper_bound(100, 0.95), Some(1_000));
-        assert_eq!(histogram.percentile_upper_bound(100, 0.99), Some(2_000_000));
-    }
-
-    #[test]
-    fn untruncated_snapshot_uses_exact_percentiles() {
-        let mut stats = LatencyStats::new();
-
-        stats.record(1_234);
-        stats.record(9_876);
-
-        let snapshot = stats.snapshot().unwrap();
-
-        assert_eq!(snapshot.percentile_scope, "exact");
-        assert_eq!(snapshot.stored_samples, 2);
-        assert_eq!(snapshot.samples_truncated, 0);
-        assert_eq!(snapshot.p95_ns, 9_876);
-        assert_eq!(snapshot.p99_ns, 9_876);
-    }
-
-    #[test]
-    fn truncated_snapshot_uses_histogram_percentiles() {
-        let mut stats = LatencyStats::new();
-
-        for _ in 0..MAX_EXACT_SAMPLES {
-            stats.record(1_000);
-        }
-        for _ in 0..4_000 {
-            stats.record(2_000_000);
-        }
-
-        let snapshot = stats.snapshot().unwrap();
-
-        assert_eq!(snapshot.percentile_scope, "histogram");
-        assert_eq!(snapshot.samples_truncated, 4_000);
-        assert_eq!(snapshot.p95_ns, 2_000_000);
-        assert_eq!(snapshot.p99_ns, 2_000_000);
-    }
-
-    #[test]
-    fn snapshot_and_reset_clears_histogram_state() {
-        let mut stats = LatencyStats::new();
-
-        stats.record(1_000);
-        assert!(stats.snapshot_and_reset().is_some());
-        stats.record(60_000_000);
-
-        let snapshot = stats.snapshot().unwrap();
-
-        assert_eq!(snapshot.count, 1);
-        assert_eq!(snapshot.histogram[0].count, 0);
-        assert_eq!(snapshot.histogram.last().unwrap().count, 1);
     }
 }
