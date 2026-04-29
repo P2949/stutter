@@ -1,6 +1,7 @@
 #![no_std]
 
 pub const EVENT_RUNNABLE_LATENCY: u32 = 1;
+pub const EVENT_IRQ_LATENCY: u32 = 2;
 
 pub const DROP_WAKEUP_TIMES_INSERT_FAILED: u32 = 0;
 pub const DROP_RINGBUF_RESERVE_FAILED: u32 = 1;
@@ -21,3 +22,17 @@ pub struct SchedulerEvent {
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for SchedulerEvent {}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct IrqEvent {
+    pub kind: u32,
+    pub irq: u32,
+    pub cpu: u32,
+    pub enter_ns: u64,
+    pub exit_ns: u64,
+    pub duration_ns: u64,
+}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for IrqEvent {}

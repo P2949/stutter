@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, fs, path::Path};
 
+use anyhow::Context;
 use aya::{
     Ebpf,
     maps::{HashMap as AyaHashMap, MapData, PerCpuArray, RingBuf},
@@ -14,6 +15,7 @@ pub struct LoadedEbpf {
     ebpf: Ebpf,
     pub events: AsyncFd<RingBuf<MapData>>,
     pub target_pid_map: AyaHashMap<MapData, u32, u8>,
+    pub target_irq_map: Option<AyaHashMap<MapData, u32, u8>>,
     drop_counters: PerCpuArray<MapData, u64>,
 }
 
@@ -65,11 +67,20 @@ pub fn load_and_attach() -> anyhow::Result<LoadedEbpf> {
         "sched",
         "sched_process_exit",
     )?;
+    if tracepoints.irq_handler {
+        attach_tracepoint(&mut ebpf, "irq_handler_entry", "irq", "irq_handler_entry")?;
+        attach_tracepoint(&mut ebpf, "irq_handler_exit", "irq", "irq_handler_exit")?;
+    }
 
     let target_pid_map = AyaHashMap::try_from(
         ebpf.take_map("TARGET_PIDS")
             .ok_or_else(|| anyhow::anyhow!("TARGET_PIDS map not found"))?,
     )?;
+
+    let target_irq_map = ebpf
+        .take_map("TARGET_IRQS")
+        .map(AyaHashMap::try_from)
+        .transpose()?;
 
     let drop_counters = PerCpuArray::try_from(
         ebpf.take_map("DROP_COUNTERS")
@@ -87,6 +98,7 @@ pub fn load_and_attach() -> anyhow::Result<LoadedEbpf> {
         ebpf,
         events,
         target_pid_map,
+        target_irq_map,
         drop_counters,
     })
 }
@@ -117,6 +129,7 @@ fn drop_counter_value(counters: &PerCpuArray<MapData, u64>, key: u32) -> u64 {
 
 struct TracepointAvailability {
     sched_wakeup_new: bool,
+    irq_handler: bool,
 }
 
 fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointAvailability> {
@@ -132,7 +145,15 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         &events_root.join("sched/sched_switch/format"),
         &[("next_comm", 40), ("next_pid", 56), ("next_prio", 60)],
     )?;
-    Ok(TracepointAvailability { sched_wakeup_new })
+    let irq_handler = events_root.join("irq/irq_handler_entry/format").exists()
+        && events_root.join("irq/irq_handler_exit/format").exists();
+    if !irq_handler {
+        log::warn!("IRQ tracepoint formats missing; continuing without IRQ latency probe");
+    }
+    Ok(TracepointAvailability {
+        sched_wakeup_new,
+        irq_handler,
+    })
 }
 
 fn validate_optional_tracepoint_format_at(
@@ -156,10 +177,10 @@ fn validate_tracepoint_format_at(
     expected_offsets: &[(&str, usize)],
 ) -> anyhow::Result<()> {
     let format = fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("failed to read tracepoint format {}: {e}", path.display()))?;
-    validate_tracepoint_format(&format, expected_offsets).map_err(|e| {
-        anyhow::anyhow!(
-            "tracepoint format {} does not match eBPF offsets: {e}",
+        .with_context(|| format!("failed to read tracepoint format {}", path.display()))?;
+    validate_tracepoint_format(&format, expected_offsets).with_context(|| {
+        format!(
+            "tracepoint format {} does not match eBPF offsets",
             path.display()
         )
     })

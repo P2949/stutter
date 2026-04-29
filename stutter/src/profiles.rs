@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
+    fs, io,
     path::Path,
 };
 
@@ -27,7 +27,6 @@ pub struct ProfileClassRule {
 #[derive(Default)]
 pub struct ProfileApplyCache {
     known_correct: BTreeSet<ProfileApplyCacheKey>,
-    refresh_counter: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -44,14 +43,18 @@ struct PlannedAffinityChange {
 }
 
 pub fn load_first_profile(path: &Path) -> anyhow::Result<Profile> {
-    let data = fs::read_to_string(path)
-        .with_context(|| format!("failed to read profile {}", path.display()))?;
-    parse_profiles(&data)?.into_iter().next().ok_or_else(|| {
+    load_profiles(path)?.into_iter().next().ok_or_else(|| {
         anyhow::anyhow!(
             "profile file {} did not contain [[profile]]",
             path.display()
         )
     })
+}
+
+pub fn load_profiles(path: &Path) -> anyhow::Result<Vec<Profile>> {
+    let data = fs::read_to_string(path)
+        .with_context(|| format!("failed to read profile {}", path.display()))?;
+    parse_profiles(&data).with_context(|| format!("failed to parse profile {}", path.display()))
 }
 
 pub fn apply_profile_to_tree(
@@ -79,36 +82,51 @@ fn apply_profile_to_tree_with_cache(
 ) -> anyhow::Result<Vec<AffinityRecord>> {
     let snapshot = process_tree::target_snapshot(&[], &[tree_pid]);
     let planned = planned_affinity_changes(&snapshot.tasks, profile, cache.as_deref_mut())?;
-    let mut records = planned
-        .iter()
-        .map(|planned| planned.record.clone())
-        .collect::<Vec<_>>();
-
-    records.sort_by_key(|record| record.tid);
-    if records.is_empty() {
-        return Ok(records);
+    if planned.is_empty() {
+        return Ok(Vec::new());
     }
 
     let restore_path = affinity::default_restore_path();
-    affinity::save_merged_restore_state(&restore_path, &records, force_restore_overwrite)?;
+    let mut applied_records = Vec::new();
 
     for planned in &planned {
         match affinity::set_affinity_raw(planned.record.tid, &planned.record.applied_mask) {
             Ok(()) => {
+                applied_records.push(planned.record.clone());
                 if let Some(cache) = cache.as_deref_mut() {
                     cache.known_correct.insert(planned.cache_key.clone());
                 }
             }
             Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
-                // Ignore dead threads during application. They won't end up in records since we filter them below.
-                // Wait, if they are already in `records`, we should probably remove them.
-                // We'll leave them in records, it's fine, the restore process will skip them.
+                // The task exited between planning and application; no affinity changed.
             }
-            Err(err) => anyhow::bail!("failed to set affinity for TID {}: {err}", planned.record.tid),
+            Err(err) => {
+                if !applied_records.is_empty() {
+                    applied_records.sort_by_key(|record| record.tid);
+                    affinity::save_merged_restore_state(
+                        &restore_path,
+                        &applied_records,
+                        force_restore_overwrite,
+                    )?;
+                }
+                anyhow::bail!(
+                    "failed to set affinity for TID {}: {err}",
+                    planned.record.tid
+                );
+            }
         }
     }
 
-    Ok(records)
+    applied_records.sort_by_key(|record| record.tid);
+    if !applied_records.is_empty() {
+        affinity::save_merged_restore_state(
+            &restore_path,
+            &applied_records,
+            force_restore_overwrite,
+        )?;
+    }
+
+    Ok(applied_records)
 }
 
 fn planned_affinity_changes(
@@ -116,7 +134,7 @@ fn planned_affinity_changes(
     profile: &Profile,
     cache: Option<&mut ProfileApplyCache>,
 ) -> anyhow::Result<Vec<PlannedAffinityChange>> {
-    planned_affinity_changes_with_reader(tasks, profile, cache, affinity::read_allowed_mask)
+    planned_affinity_changes_with_reader(tasks, profile, cache, affinity::read_allowed_mask_raw)
 }
 
 fn planned_affinity_changes_with_reader<F>(
@@ -126,15 +144,8 @@ fn planned_affinity_changes_with_reader<F>(
     mut read_allowed_mask: F,
 ) -> anyhow::Result<Vec<PlannedAffinityChange>>
 where
-    F: FnMut(u32) -> anyhow::Result<CpuMask>,
+    F: FnMut(u32) -> io::Result<CpuMask>,
 {
-    if let Some(cache_ref) = cache.as_deref_mut() {
-        cache_ref.refresh_counter = cache_ref.refresh_counter.wrapping_add(1);
-        if cache_ref.refresh_counter % 5 == 0 {
-            cache_ref.known_correct.clear();
-        }
-    }
-
     let mut planned = Vec::new();
     let mut seen_cache_keys = BTreeSet::new();
 
@@ -163,10 +174,15 @@ where
 
         let original_mask = match read_allowed_mask(task.tid) {
             Ok(mask) => mask,
-            Err(err) if err.downcast_ref::<std::io::Error>().is_some_and(|io_err| io_err.raw_os_error() == Some(libc::ESRCH)) => {
+            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
                 continue; // Task is dead, skip it.
             }
-            Err(err) => return Err(err),
+            Err(err) => {
+                return Err(anyhow::anyhow!(
+                    "failed to read CPU affinity for TID {}: {err}",
+                    task.tid
+                ));
+            }
         };
         if original_mask == rule.affinity {
             if let Some(cache) = cache.as_mut() {

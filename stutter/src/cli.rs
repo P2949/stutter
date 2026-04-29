@@ -23,8 +23,9 @@ enum Command {
     Record(RecordArgs),
     InspectTree(InspectTreeArgs),
     Report(ReportArgs),
-    Restore,
+    Restore(RestoreArgs),
     ApplyProfile(ApplyProfileArgs),
+    Tune(TuneArgs),
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -65,8 +66,29 @@ pub struct MonitorArgs {
     #[arg(long)]
     persistent: bool,
 
+    #[arg(long = "watch-poll-ms", default_value_t = 2_000)]
+    watch_poll_ms: u64,
+
+    #[arg(long = "watch-timeout-seconds", value_name = "SECONDS")]
+    watch_timeout_seconds: Option<u64>,
+
     #[arg(long = "csv", value_name = "PATH")]
     csv_path: Option<PathBuf>,
+
+    #[arg(long = "irq-latency")]
+    irq_latency: bool,
+
+    #[arg(long = "irq", value_name = "IRQ")]
+    irqs: Vec<u32>,
+
+    #[arg(long = "hwmon")]
+    hwmon: bool,
+
+    #[arg(long = "mangohud-log", value_name = "PATH")]
+    mangohud_log: Option<PathBuf>,
+
+    #[arg(long = "tui")]
+    tui: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -89,6 +111,9 @@ struct ReportArgs {
     #[arg(long)]
     json: bool,
 
+    #[arg(long = "html", value_name = "PATH")]
+    html: Option<PathBuf>,
+
     #[arg(long, default_value_t = 10, value_name = "N")]
     top: usize,
 
@@ -96,6 +121,12 @@ struct ReportArgs {
     cluster_window_ms: u64,
 
     path: PathBuf,
+}
+
+#[derive(Args, Debug, Clone)]
+struct RestoreArgs {
+    #[arg(long = "dry-run")]
+    dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -119,10 +150,27 @@ struct ApplyProfileArgs {
     refresh_ms: u64,
 }
 
+#[derive(Args, Debug, Clone)]
+struct TuneArgs {
+    #[arg(long = "tree-pid", value_name = "PID")]
+    tree_pid: u32,
+
+    #[arg(long = "profiles", value_name = "FILE")]
+    profiles: PathBuf,
+
+    #[arg(long = "epoch-seconds", default_value_t = 120)]
+    epoch_seconds: u64,
+
+    #[arg(long = "warmup-seconds", default_value_t = 30)]
+    warmup_seconds: u64,
+}
+
 #[derive(Debug)]
 pub enum AppCommand {
-    Monitor(Config),
-    Restore,
+    Monitor(Box<Config>),
+    Restore {
+        dry_run: bool,
+    },
     ApplyProfile {
         tree_pid: u32,
         profile: PathBuf,
@@ -137,8 +185,15 @@ pub enum AppCommand {
     Report {
         path: PathBuf,
         json: bool,
+        html: Option<PathBuf>,
         top: usize,
         cluster_window_ms: u64,
+    },
+    Tune {
+        tree_pid: u32,
+        profiles: PathBuf,
+        epoch_seconds: u64,
+        warmup_seconds: u64,
     },
 }
 
@@ -150,9 +205,17 @@ pub struct Config {
     pub spike_threshold_ns: u64,
     pub verbose: bool,
     pub task_filters: TaskFilters,
+    pub keep_missing_pid: bool,
     pub watch_process: Option<String>,
     pub persistent: bool,
+    pub watch_poll_ms: u64,
+    pub watch_timeout: Option<Duration>,
     pub csv_path: Option<PathBuf>,
+    pub irq_latency: bool,
+    pub irqs: Vec<u32>,
+    pub hwmon: bool,
+    pub mangohud_log: Option<PathBuf>,
+    pub tui: bool,
     pub recording: Option<RecordingConfig>,
     pub max_duration: Option<Duration>,
 }
@@ -175,20 +238,20 @@ where
     let cli = Cli::try_parse_from(args)?;
 
     match cli.command {
-        Some(Command::Monitor(args)) => Ok(AppCommand::Monitor(config_from_monitor_args(
-            args, false, None,
-        )?)),
+        Some(Command::Monitor(args)) => Ok(AppCommand::Monitor(Box::new(
+            config_from_monitor_args(args, false, None)?,
+        ))),
         Some(Command::Record(args)) => {
             if matches!(args.duration, Some(0)) {
                 anyhow::bail!("--duration must be greater than zero");
             }
 
             let max_duration = args.duration.map(Duration::from_secs);
-            Ok(AppCommand::Monitor(config_from_monitor_args(
+            Ok(AppCommand::Monitor(Box::new(config_from_monitor_args(
                 args.monitor,
                 true,
                 max_duration,
-            )?))
+            )?)))
         }
         Some(Command::InspectTree(args)) => {
             if args.tree_pid == 0 {
@@ -208,11 +271,14 @@ where
             Ok(AppCommand::Report {
                 path: args.path,
                 json: args.json,
+                html: args.html,
                 top: args.top,
                 cluster_window_ms: args.cluster_window_ms,
             })
         }
-        Some(Command::Restore) => Ok(AppCommand::Restore),
+        Some(Command::Restore(args)) => Ok(AppCommand::Restore {
+            dry_run: args.dry_run,
+        }),
         Some(Command::ApplyProfile(args)) => {
             if args.tree_pid == 0 {
                 anyhow::bail!("--tree-pid must be greater than zero");
@@ -232,11 +298,28 @@ where
                 refresh_ms: args.refresh_ms,
             })
         }
-        None => Ok(AppCommand::Monitor(config_from_monitor_args(
+        Some(Command::Tune(args)) => {
+            if args.tree_pid == 0 {
+                anyhow::bail!("--tree-pid must be greater than zero");
+            }
+            if args.epoch_seconds == 0 {
+                anyhow::bail!("--epoch-seconds must be greater than zero");
+            }
+            if args.warmup_seconds >= args.epoch_seconds {
+                anyhow::bail!("--warmup-seconds must be less than --epoch-seconds");
+            }
+            Ok(AppCommand::Tune {
+                tree_pid: args.tree_pid,
+                profiles: args.profiles,
+                epoch_seconds: args.epoch_seconds,
+                warmup_seconds: args.warmup_seconds,
+            })
+        }
+        None => Ok(AppCommand::Monitor(Box::new(config_from_monitor_args(
             cli.legacy_monitor,
             false,
             None,
-        )?)),
+        )?))),
     }
 }
 
@@ -255,6 +338,12 @@ fn config_from_monitor_args(
     if args.spike_threshold_us == 0 {
         anyhow::bail!("--spike-us must be greater than zero");
     }
+    if args.watch_poll_ms == 0 {
+        anyhow::bail!("--watch-poll-ms must be greater than zero");
+    }
+    if matches!(args.watch_timeout_seconds, Some(0)) {
+        anyhow::bail!("--watch-timeout-seconds must be greater than zero");
+    }
 
     if args.target_pids.is_empty() && args.tree_pids.is_empty() && args.watch_process.is_none() {
         anyhow::bail!(
@@ -270,6 +359,8 @@ fn config_from_monitor_args(
     args.include_comm.dedup();
     args.exclude_comm.sort();
     args.exclude_comm.dedup();
+    args.irqs.sort_unstable();
+    args.irqs.dedup();
 
     validate_comm_patterns("--include-comm", &args.include_comm)?;
     validate_comm_patterns("--exclude-comm", &args.exclude_comm)?;
@@ -314,9 +405,17 @@ fn config_from_monitor_args(
             include_comm: args.include_comm,
             exclude_comm: args.exclude_comm,
         },
+        keep_missing_pid: args.keep_missing_pid,
         watch_process: args.watch_process,
         persistent: args.persistent,
+        watch_poll_ms: args.watch_poll_ms,
+        watch_timeout: args.watch_timeout_seconds.map(Duration::from_secs),
         csv_path: args.csv_path,
+        irq_latency: args.irq_latency,
+        irqs: args.irqs,
+        hwmon: args.hwmon,
+        mangohud_log: args.mangohud_log,
+        tui: args.tui,
         recording,
         max_duration,
     })
@@ -356,6 +455,8 @@ mod tests {
         let command = parse_app_command_from([
             "stutter",
             "report",
+            "--html",
+            "/tmp/report.html",
             "--cluster-ms",
             "5",
             "--top",
@@ -366,6 +467,7 @@ mod tests {
 
         let AppCommand::Report {
             top,
+            html,
             cluster_window_ms,
             ..
         } = command
@@ -374,6 +476,7 @@ mod tests {
         };
 
         assert_eq!(top, 25);
+        assert_eq!(html, Some(PathBuf::from("/tmp/report.html")));
         assert_eq!(cluster_window_ms, 5);
     }
 
@@ -433,7 +536,7 @@ mod tests {
     #[test]
     fn parses_restore_and_apply_profile_commands() {
         let restore = parse_app_command_from(["stutter", "restore"]).unwrap();
-        assert!(matches!(restore, AppCommand::Restore));
+        assert!(matches!(restore, AppCommand::Restore { dry_run: false }));
 
         let apply = parse_app_command_from([
             "stutter",
@@ -497,6 +600,96 @@ mod tests {
         assert!(watch);
         assert!(keep_applied);
         assert_eq!(refresh_ms, 250);
+    }
+
+    #[test]
+    fn parses_keep_missing_pid_and_watch_controls() {
+        let command = parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--keep-missing-pid",
+            "--watch-poll-ms",
+            "500",
+            "--watch-timeout-seconds",
+            "3",
+        ])
+        .unwrap();
+
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+
+        assert!(config.keep_missing_pid);
+        assert_eq!(config.watch_poll_ms, 500);
+        assert_eq!(config.watch_timeout, Some(Duration::from_secs(3)));
+    }
+
+    #[test]
+    fn parses_restore_dry_run() {
+        let command = parse_app_command_from(["stutter", "restore", "--dry-run"]).unwrap();
+        assert!(matches!(command, AppCommand::Restore { dry_run: true }));
+    }
+
+    #[test]
+    fn parses_correlation_flags_and_tui() {
+        let command = parse_app_command_from([
+            "stutter",
+            "record",
+            "--pid",
+            "42",
+            "--irq-latency",
+            "--irq",
+            "137",
+            "--hwmon",
+            "--mangohud-log",
+            "/tmp/mango.csv",
+            "--tui",
+        ])
+        .unwrap();
+
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+
+        assert!(config.irq_latency);
+        assert_eq!(config.irqs, vec![137]);
+        assert!(config.hwmon);
+        assert_eq!(config.mangohud_log, Some(PathBuf::from("/tmp/mango.csv")));
+        assert!(config.tui);
+    }
+
+    #[test]
+    fn parses_tune_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "tune",
+            "--tree-pid",
+            "42",
+            "--profiles",
+            "/tmp/profiles.toml",
+            "--epoch-seconds",
+            "60",
+            "--warmup-seconds",
+            "10",
+        ])
+        .unwrap();
+
+        let AppCommand::Tune {
+            tree_pid,
+            profiles,
+            epoch_seconds,
+            warmup_seconds,
+        } = command
+        else {
+            panic!("expected tune command");
+        };
+
+        assert_eq!(tree_pid, 42);
+        assert_eq!(profiles, PathBuf::from("/tmp/profiles.toml"));
+        assert_eq!(epoch_seconds, 60);
+        assert_eq!(warmup_seconds, 10);
     }
 
     #[test]

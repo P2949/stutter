@@ -13,8 +13,8 @@ use crate::{
     metrics,
     process_tree::{self, TargetDiffAction, TaskClass, TaskInfo},
     recorder::{
-        self, FinalizeRecordingInput, RecordingRun, SESSION_SCHEMA_VERSION, SessionFile,
-        SpikeEvent, SpikeEventBuffer,
+        self, FinalizeRecordingInput, FrameEvent, GpuSample, IrqEventRecord, RecordingRun,
+        SESSION_SCHEMA_VERSION, SessionFile, SpikeEvent, SpikeEventBuffer,
     },
 };
 
@@ -137,8 +137,9 @@ fn event_comm_updates_only_unknown_existing_name() {
     let known_targets = BTreeMap::new();
     let mut stats_by_task = BTreeMap::from([(7, metrics::TaskStats::new(7, "?".to_owned(), 0))]);
 
+    let first_event = scheduler_event(7, "real-name");
     super::handle_event(super::HandleEventInput {
-        event: scheduler_event(7, "real-name"),
+        event: &first_event,
         config: &config,
         started: Instant::now(),
         active_targets: &active_targets,
@@ -150,8 +151,9 @@ fn event_comm_updates_only_unknown_existing_name() {
 
     assert_eq!(stats_by_task.get(&7).unwrap().comm, "real-name");
 
+    let second_event = scheduler_event(7, "later-name");
     super::handle_event(super::HandleEventInput {
-        event: scheduler_event(7, "later-name"),
+        event: &second_event,
         config: &config,
         started: Instant::now(),
         active_targets: &active_targets,
@@ -175,8 +177,9 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
     let mut stats_by_task = BTreeMap::new();
     let mut spike_events = SpikeEventBuffer::default();
 
+    let below_threshold = scheduler_event_with_latency(7, "RenderThread", 999_999);
     super::handle_event(super::HandleEventInput {
-        event: scheduler_event_with_latency(7, "RenderThread", 999_999),
+        event: &below_threshold,
         config: &config,
         started: Instant::now(),
         active_targets: &active_targets,
@@ -187,8 +190,9 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
     });
     assert!(spike_events.as_slice().is_empty());
 
+    let at_threshold = scheduler_event_with_latency(7, "RenderThread", 1_000_000);
     super::handle_event(super::HandleEventInput {
-        event: scheduler_event_with_latency(7, "RenderThread", 1_000_000),
+        event: &at_threshold,
         config: &config,
         started: Instant::now(),
         active_targets: &active_targets,
@@ -339,6 +343,26 @@ fn diff_tasks_orders_removed_before_added_by_tid() {
 }
 
 #[test]
+fn classify_task_known_classes() {
+    assert_eq!(
+        process_tree::classify_task("gamescope", "gamescope", ""),
+        TaskClass::GameScope
+    );
+    assert_eq!(
+        process_tree::classify_task("sway", "sway", ""),
+        TaskClass::Compositor
+    );
+    assert_eq!(
+        process_tree::classify_task("wineserver", "wineserver", ""),
+        TaskClass::WineServer
+    );
+    assert_eq!(
+        process_tree::classify_task("steamwebhelper", "steamwebhelper", ""),
+        TaskClass::Helper
+    );
+}
+
+#[test]
 fn target_snapshot_adds_fallback_without_o_n_squared_duplicate_scan_behavior() {
     let dir = temp_test_dir("proc-snapshot-fallback");
     create_fake_proc(&dir, 10, 1, "root", "root", &[10]);
@@ -366,13 +390,32 @@ fn target_snapshot_does_not_add_unknown_fallback_for_missing_tree_root() {
 }
 
 #[test]
-fn target_snapshot_keeps_manual_missing_pid_fallback() {
+fn target_snapshot_drops_manual_missing_pid_by_default() {
     let dir = temp_test_dir("proc-missing-manual-pid");
     fs::create_dir_all(&dir).unwrap();
 
     let snapshot = process_tree::target_snapshot_at(&dir, &[42], &[]);
 
     assert!(!snapshot.tasks.contains_key(&42));
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn target_snapshot_keeps_manual_missing_pid_when_requested() {
+    let dir = temp_test_dir("proc-keep-missing-manual-pid");
+    fs::create_dir_all(&dir).unwrap();
+
+    let snapshot = process_tree::target_snapshot_filtered_at_with_options(
+        &dir,
+        &[42],
+        &[],
+        &process_tree::TaskFilters::default(),
+        true,
+    );
+
+    let task = snapshot.tasks.get(&42).unwrap();
+    assert_eq!(task.comm, "?");
+    assert_eq!(task.class, TaskClass::Unknown);
     fs::remove_dir_all(dir).ok();
 }
 
@@ -432,6 +475,9 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         spike_events: &spike_events,
         spike_events_truncated: true,
         scx_events: &[],
+        irq_events: &[],
+        gpu_samples: &[],
+        frame_events: &[],
         drop_counters,
     })
     .unwrap();
@@ -683,6 +729,9 @@ fn report_reads_recorded_session_and_spike_events() {
         spike_events: &spike_events,
         spike_events_truncated: false,
         scx_events: &[],
+        irq_events: &[],
+        gpu_samples: &[],
+        frame_events: &[],
         drop_counters: DropCountersSnapshot::default(),
     })
     .unwrap();
@@ -738,6 +787,9 @@ fn report_cluster_output_caps_inline_points() {
         spike_events: &spike_events,
         spike_events_truncated: false,
         scx_events: &[],
+        irq_events: &[],
+        gpu_samples: &[],
+        frame_events: &[],
         drop_counters: DropCountersSnapshot::default(),
     })
     .unwrap();
@@ -746,7 +798,14 @@ fn report_cluster_output_caps_inline_points() {
     let session: SessionFile =
         serde_json::from_str(&fs::read_to_string(&session_path).unwrap()).unwrap();
 
-    let output = crate::report::render_report(&session_path, &session, Some(&spike_events), 10, 5);
+    let output = crate::report::render_report(
+        &session_path,
+        &session,
+        Some(&spike_events),
+        &crate::report::RunArtifacts::default(),
+        10,
+        5,
+    );
 
     assert!(output.contains("total_spikes=10"));
     assert!(output.contains("shown_points=8"));
@@ -755,6 +814,76 @@ fn report_cluster_output_caps_inline_points() {
     assert!(output.contains("107("));
     assert!(!output.contains("108("));
     assert!(!output.contains("109("));
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn report_correlates_artifacts_with_spike_clusters() {
+    let dir = temp_test_dir("report-correlation");
+    fs::create_dir_all(&dir).unwrap();
+    let session_path = dir.join("session.json");
+    let session = minimal_session_for_report();
+    let spike_events = (0..3)
+        .map(|idx| SpikeEvent {
+            elapsed_ms: Some(10 + idx),
+            task: 10 + idx as u32,
+            active: true,
+            class: TaskClass::Game,
+            process_pid: Some(10 + idx as u32),
+            process_comm: "game".to_owned(),
+            comm: if idx == 0 {
+                "RenderThread".to_owned()
+            } else {
+                format!("worker-{idx}")
+            },
+            cpu: idx as u32,
+            prio: 120,
+            latency_ns: 1_000_000,
+            wakeup_ns: 1_000_000 + idx as u64 * 100,
+            switch_ns: 10_000_000 + idx as u64 * 100,
+        })
+        .collect::<Vec<_>>();
+    let artifacts = crate::report::RunArtifacts {
+        irq_events: vec![IrqEventRecord {
+            elapsed_ms: Some(10),
+            irq: 137,
+            cpu: 0,
+            enter_ns: 9_999_900,
+            exit_ns: 10_000_200,
+            duration_ns: 300,
+        }],
+        gpu_samples: vec![GpuSample {
+            elapsed_ms: 11,
+            gpu_busy_percent: Some(91),
+            vram_used_bytes: None,
+            vram_total_bytes: None,
+            gpu_clock_mhz: Some(2200),
+            mem_clock_mhz: Some(1000),
+            temp_millidegrees: Some(61000),
+            power_microwatts: Some(120_000_000),
+        }],
+        frame_events: vec![FrameEvent {
+            elapsed_ms: 11,
+            frametime_ms: 22.5,
+        }],
+    };
+
+    let output = crate::report::render_report(
+        &session_path,
+        &session,
+        Some(&spike_events),
+        &artifacts,
+        10,
+        5,
+    );
+
+    assert!(output.contains("irq overlap"));
+    assert!(output.contains("irqs=137"));
+    assert!(output.contains("gpu near clusters"));
+    assert!(output.contains("gpu_busy=91"));
+    assert!(output.contains("frame overlap"));
+    assert!(output.contains("max_frametime_ms=22.500"));
 
     fs::remove_dir_all(dir).ok();
 }
@@ -810,12 +939,87 @@ fn test_config(
         spike_threshold_ns: 1_000_000,
         verbose: false,
         task_filters: process_tree::TaskFilters::default(),
+        keep_missing_pid: false,
         watch_process: None,
         persistent: false,
+        watch_poll_ms: 2_000,
+        watch_timeout: None,
         csv_path: None,
+        irq_latency: false,
+        irqs: Vec::new(),
+        hwmon: false,
+        mangohud_log: None,
+        tui: false,
         recording: None,
         max_duration,
     }
+}
+
+fn minimal_session_for_report() -> SessionFile {
+    serde_json::from_value(serde_json::json!({
+        "schema_version": SESSION_SCHEMA_VERSION,
+        "run_name": "report-correlation",
+        "started_at": {
+            "unix_seconds": 0,
+            "unix_nanos": 0,
+            "system_time_debug": "SystemTime { tv_sec: 0, tv_nsec: 0 }"
+        },
+        "ended_at": {
+            "unix_seconds": 0,
+            "unix_nanos": 0,
+            "system_time_debug": "SystemTime { tv_sec: 0, tv_nsec: 0 }"
+        },
+        "monotonic_start_ns": 0,
+        "monotonic_end_ns": 20_000_000,
+        "duration_ms": 20,
+        "stop_reason": "test",
+        "config": {
+            "manual_pids": [],
+            "tree_roots": [],
+            "include_comm": [],
+            "exclude_comm": [],
+            "watch_process": null,
+            "persistent": false,
+            "keep_missing_pid": false,
+            "watch_poll_ms": 2000,
+            "watch_timeout_ms": null,
+            "csv_path": null,
+            "irq_latency": true,
+            "irqs": [137],
+            "hwmon": true,
+            "mangohud_log": null,
+            "tui": false,
+            "summary_period_ms": 1000,
+            "spike_threshold_ns": 1_000_000,
+            "verbose": false
+        },
+        "metadata": {
+            "kernel_osrelease": null,
+            "kernel_version": null,
+            "cpu_online": null,
+            "cpu_possible": null,
+            "cpu_topology": [],
+            "scx_state": null,
+            "scx_ops": null,
+            "scx_enable_seq": null
+        },
+        "target_pids_max": 1024,
+        "active_target_pids_count": 0,
+        "active_expanded_tasks": [],
+        "spike_event_count": 3,
+        "spike_events_truncated": false,
+        "scx_event_count": 0,
+        "irq_event_count": 1,
+        "gpu_sample_count": 1,
+        "frame_event_count": 1,
+        "drop_counters": {
+            "wakeup_times_insert_failed": 0,
+            "ringbuf_reserve_failed": 0
+        },
+        "tasks": [],
+        "top_spikes": []
+    }))
+    .unwrap()
 }
 
 fn task_stats_with_info(

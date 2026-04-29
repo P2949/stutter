@@ -6,7 +6,7 @@ use stutter_common::SchedulerEvent;
 
 use crate::process_tree::{TaskClass, TaskInfo};
 
-pub const MAX_EXACT_SAMPLES: usize = 65_536;
+pub const MAX_EXACT_SAMPLES: usize = 4_096;
 pub const LATENCY_HISTOGRAM_BUCKETS_NS: [u64; 15] = [
     1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000, 200_000, 500_000, 1_000_000, 2_000_000,
     5_000_000, 10_000_000, 20_000_000, 50_000_000,
@@ -44,7 +44,7 @@ pub struct TaskStats {
     pub top_spikes: Vec<SpikeRecord>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct LatencyStats {
     pub count: u64,
     pub min_ns: u64,
@@ -58,14 +58,14 @@ pub struct LatencyStats {
     pub histogram: LatencyHistogram,
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct CpuStats {
     pub samples: u64,
     pub max_ns: u64,
     pub spikes: u64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct CpuStatsSet {
     pub by_cpu: BTreeMap<u32, CpuStats>,
 }
@@ -197,20 +197,15 @@ impl LatencyHistogram {
     }
 }
 
+impl Default for LatencyHistogram {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LatencyStats {
     pub fn new() -> Self {
-        Self {
-            count: 0,
-            min_ns: 0,
-            max_ns: 0,
-            sum_ns: 0,
-            over_1ms: 0,
-            over_2ms: 0,
-            over_5ms: 0,
-            samples_ns: Vec::with_capacity(4096),
-            samples_truncated: 0,
-            histogram: LatencyHistogram::new(),
-        }
+        Self::default()
     }
 
     pub fn record(&mut self, latency_ns: u64) {
@@ -307,14 +302,6 @@ impl LatencyStats {
 }
 
 impl CpuStats {
-    pub fn new() -> Self {
-        Self {
-            samples: 0,
-            max_ns: 0,
-            spikes: 0,
-        }
-    }
-
     pub fn record(&mut self, latency_ns: u64, spike_threshold_ns: u64) {
         self.samples += 1;
         self.max_ns = self.max_ns.max(latency_ns);
@@ -327,15 +314,13 @@ impl CpuStats {
 
 impl CpuStatsSet {
     pub fn new() -> Self {
-        Self {
-            by_cpu: BTreeMap::new(),
-        }
+        Self::default()
     }
 
     pub fn record(&mut self, cpu: u32, latency_ns: u64, spike_threshold_ns: u64) {
         self.by_cpu
             .entry(cpu)
-            .or_insert_with(CpuStats::new)
+            .or_default()
             .record(latency_ns, spike_threshold_ns);
     }
 
