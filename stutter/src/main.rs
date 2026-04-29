@@ -178,6 +178,8 @@ async fn run_monitor(config: Config) -> anyhow::Result<()> {
         }
     };
 
+    let drop_counters = loaded.snapshot_drop_counters();
+    log_drop_counters(&drop_counters);
     print_session_summaries(&mut stats_by_task);
 
     if let Some(recording) = recording {
@@ -200,6 +202,7 @@ async fn run_monitor(config: Config) -> anyhow::Result<()> {
             tree_events: &tree_events,
             spike_events: spike_events_slice,
             spike_events_truncated,
+            drop_counters,
         })?;
     }
 
@@ -292,6 +295,16 @@ fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Result<()
         );
     }
 
+    handle_same_tid_replacements(
+        active_targets,
+        &desired_tasks,
+        known_targets,
+        stats_by_task,
+        tree_events,
+        elapsed_ms,
+        recording_started,
+    );
+
     for diff in process_tree::diff_tasks(active_targets, &desired_tasks) {
         match diff.action {
             TargetDiffAction::Added => {
@@ -358,6 +371,56 @@ fn should_replace_unknown_comm(current: &str, incoming: &str) -> bool {
     (current == "?" || current.is_empty()) && incoming != "?" && !incoming.is_empty()
 }
 
+fn handle_same_tid_replacements(
+    active_targets: &BTreeMap<u32, TaskInfo>,
+    desired_tasks: &BTreeMap<u32, TaskInfo>,
+    known_targets: &mut BTreeMap<u32, TaskInfo>,
+    stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
+    tree_events: &mut Vec<TreeEvent>,
+    elapsed_ms: u128,
+    recording_started: Option<Instant>,
+) {
+    for (tid, desired_task) in desired_tasks {
+        let Some(active_task) = active_targets.get(tid) else {
+            continue;
+        };
+
+        if same_task_info(active_task, desired_task) {
+            continue;
+        }
+
+        known_targets.insert(*tid, desired_task.clone());
+        reset_stats_for_task_change(stats_by_task, *tid, desired_task, elapsed_ms);
+
+        if let Some(started) = recording_started {
+            tree_events.push(TreeEvent::from_task(started, "replaced", desired_task));
+        }
+
+        warn!(
+            "tree_target_replaced tid={} old_process_pid={} old_comm={} old_class={} new_process_pid={} new_comm={} new_class={}",
+            tid,
+            active_task.process_pid,
+            active_task.comm,
+            active_task.class,
+            desired_task.process_pid,
+            desired_task.comm,
+            desired_task.class,
+        );
+    }
+}
+
+fn reset_stats_for_task_change(
+    stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
+    tid: u32,
+    task_info: &TaskInfo,
+    elapsed_ms: u128,
+) {
+    let mut stats = metrics::TaskStats::new(tid, task_info.comm.clone(), elapsed_ms);
+    stats.apply_task_info(task_info);
+    stats.active = true;
+    stats_by_task.insert(tid, stats);
+}
+
 fn reactivate_or_reset_stats(
     stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
     tid: u32,
@@ -382,4 +445,27 @@ fn same_logical_task(stats: &metrics::TaskStats, task_info: &TaskInfo) -> bool {
         && stats.process_comm == task_info.process_comm
         && stats.comm == task_info.comm
         && stats.class == task_info.class
+}
+
+fn same_task_info(left: &TaskInfo, right: &TaskInfo) -> bool {
+    left.tid == right.tid
+        && left.process_pid == right.process_pid
+        && left.process_ppid == right.process_ppid
+        && left.comm == right.comm
+        && left.process_comm == right.process_comm
+        && left.class == right.class
+}
+
+fn log_drop_counters(drop_counters: &ebpf_loader::DropCountersSnapshot) {
+    if drop_counters.total() == 0 {
+        debug!("ebpf_drop_counters total=0");
+        return;
+    }
+
+    warn!(
+        "ebpf_drop_counters total={} wakeup_times_insert_failed={} ringbuf_reserve_failed={}",
+        drop_counters.total(),
+        drop_counters.wakeup_times_insert_failed,
+        drop_counters.ringbuf_reserve_failed,
+    );
 }

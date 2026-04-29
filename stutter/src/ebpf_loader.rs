@@ -17,7 +17,7 @@ pub struct LoadedEbpf {
     drop_counters: AyaHashMap<MapData, u32, u64>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DropCountersSnapshot {
     pub wakeup_times_insert_failed: u64,
     pub ringbuf_reserve_failed: u64,
@@ -126,11 +126,18 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn validate_tracepoint_format_at(path: &Path, expected_offsets: &[(&str, usize)]) -> anyhow::Result<()> {
+fn validate_tracepoint_format_at(
+    path: &Path,
+    expected_offsets: &[(&str, usize)],
+) -> anyhow::Result<()> {
     let format = fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("failed to read tracepoint format {}: {e}", path.display()))?;
-    validate_tracepoint_format(&format, expected_offsets)
-        .map_err(|e| anyhow::anyhow!("tracepoint format {} does not match eBPF offsets: {e}", path.display()))
+    validate_tracepoint_format(&format, expected_offsets).map_err(|e| {
+        anyhow::anyhow!(
+            "tracepoint format {} does not match eBPF offsets: {e}",
+            path.display()
+        )
+    })
 }
 
 fn validate_tracepoint_format(format: &str, expected_offsets: &[(&str, usize)]) -> anyhow::Result<()> {
@@ -186,10 +193,19 @@ fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, usize> {
 
 fn field_name_from_part(field_part: &str) -> Option<String> {
     let declaration = field_part.strip_prefix("field:")?.trim();
-    let declaration = declaration.split_whitespace().last()?;
-    let declaration = declaration.strip_suffix(']')?.rsplit_once('[').map_or(declaration, |(name, _)| name);
-    let declaration = declaration.trim_start_matches('*');
-    Some(declaration.to_owned())
+    let token = declaration.split_whitespace().last()?;
+    let token = token.trim_start_matches('*');
+
+    let field_name = match token.split_once('[') {
+        Some((name, _)) => name,
+        None => token,
+    };
+
+    if field_name.is_empty() {
+        return None;
+    }
+
+    Some(field_name.to_owned())
 }
 
 fn raise_memlock_limit() {
