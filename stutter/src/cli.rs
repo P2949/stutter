@@ -109,6 +109,9 @@ struct ApplyProfileArgs {
     #[arg(long)]
     watch: bool,
 
+    #[arg(long = "keep-applied")]
+    keep_applied: bool,
+
     #[arg(long = "refresh-ms", default_value_t = 1_000)]
     refresh_ms: u64,
 }
@@ -122,6 +125,7 @@ pub enum AppCommand {
         profile: PathBuf,
         force: bool,
         watch: bool,
+        keep_applied: bool,
         refresh_ms: u64,
     },
     InspectTree {
@@ -218,6 +222,7 @@ where
                 profile: args.profile,
                 force: args.force,
                 watch: args.watch,
+                keep_applied: args.keep_applied,
                 refresh_ms: args.refresh_ms,
             })
         }
@@ -264,6 +269,9 @@ fn config_from_monitor_args(
     validate_comm_patterns("--exclude-comm", &args.exclude_comm)?;
     if matches!(args.watch_process.as_deref(), Some("")) {
         anyhow::bail!("--watch-process must not be empty");
+    }
+    if args.persistent && args.watch_process.is_none() {
+        anyhow::bail!("--persistent requires --watch-process");
     }
 
     if args.target_pids.len() > TARGET_PIDS_MAX {
@@ -436,6 +444,7 @@ mod tests {
             profile,
             force,
             watch,
+            keep_applied,
             refresh_ms,
         } = apply
         else {
@@ -446,6 +455,7 @@ mod tests {
         assert_eq!(profile, PathBuf::from("/tmp/profile.toml"));
         assert!(!force);
         assert!(!watch);
+        assert!(!keep_applied);
         assert_eq!(refresh_ms, 1_000);
     }
 
@@ -460,6 +470,7 @@ mod tests {
             "/tmp/profile.toml",
             "--force",
             "--watch",
+            "--keep-applied",
             "--refresh-ms",
             "250",
         ])
@@ -468,6 +479,7 @@ mod tests {
         let AppCommand::ApplyProfile {
             force,
             watch,
+            keep_applied,
             refresh_ms,
             ..
         } = command
@@ -477,6 +489,18 @@ mod tests {
 
         assert!(force);
         assert!(watch);
+        assert!(keep_applied);
         assert_eq!(refresh_ms, 250);
+    }
+
+    #[test]
+    fn rejects_persistent_without_watch_process() {
+        let err = parse_app_command_from(["stutter", "monitor", "--pid", "42", "--persistent"])
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--persistent requires --watch-process")
+        );
     }
 }

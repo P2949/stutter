@@ -1,15 +1,19 @@
 use std::{
     collections::BTreeMap,
-    env, fs,
+    env, fmt, fs, io,
     path::{Path, PathBuf},
 };
 
 use anyhow::Context;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
+    de::{Error as DeError, Visitor},
+};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct CpuMask(pub u64);
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct CpuMask {
+    words: Vec<u64>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AffinityRecord {
@@ -24,11 +28,11 @@ pub struct RestoreState {
     pub records: Vec<AffinityRecord>,
 }
 
-pub const RESTORE_SCHEMA_VERSION: u32 = 1;
+pub const RESTORE_SCHEMA_VERSION: u32 = 2;
 
 impl CpuMask {
     pub fn parse(value: &str) -> anyhow::Result<Self> {
-        let mut mask = 0u64;
+        let mut mask = Self::empty();
 
         for part in value
             .split(',')
@@ -48,27 +52,93 @@ impl CpuMask {
             }
 
             for cpu in start..=end {
-                mask |= 1u64 << cpu;
+                mask.set(cpu);
             }
         }
 
-        if mask == 0 {
+        if mask.is_empty() {
             anyhow::bail!("CPU mask must contain at least one CPU");
         }
 
-        Ok(Self(mask))
+        Ok(mask)
     }
 
-    fn to_cpu_set(self) -> libc::cpu_set_t {
+    pub fn is_empty(&self) -> bool {
+        self.words.iter().all(|word| *word == 0)
+    }
+
+    pub fn to_range_string(&self) -> String {
+        let cpus = self.cpus();
+        let mut ranges = Vec::new();
+        let mut idx = 0;
+
+        while idx < cpus.len() {
+            let start = cpus[idx];
+            let mut end = start;
+            idx += 1;
+
+            while idx < cpus.len() && cpus[idx] == end + 1 {
+                end = cpus[idx];
+                idx += 1;
+            }
+
+            if start == end {
+                ranges.push(start.to_string());
+            } else {
+                ranges.push(format!("{start}-{end}"));
+            }
+        }
+
+        ranges.join(",")
+    }
+
+    fn empty() -> Self {
+        Self { words: Vec::new() }
+    }
+
+    fn from_legacy_bits(bits: u64) -> Self {
+        if bits == 0 {
+            Self::empty()
+        } else {
+            Self { words: vec![bits] }
+        }
+    }
+
+    fn set(&mut self, cpu: u32) {
+        let word_idx = cpu as usize / 64;
+        if self.words.len() <= word_idx {
+            self.words.resize(word_idx + 1, 0);
+        }
+        self.words[word_idx] |= 1u64 << (cpu % 64);
+    }
+
+    fn contains(&self, cpu: u32) -> bool {
+        let word_idx = cpu as usize / 64;
+        self.words
+            .get(word_idx)
+            .is_some_and(|word| *word & (1u64 << (cpu % 64)) != 0)
+    }
+
+    fn cpus(&self) -> Vec<u32> {
+        let mut cpus = Vec::new();
+        for cpu in 0..cpu_set_size() {
+            if self.contains(cpu) {
+                cpus.push(cpu);
+            }
+        }
+        cpus
+    }
+
+    fn to_cpu_set(&self) -> libc::cpu_set_t {
         let mut set = unsafe { std::mem::zeroed::<libc::cpu_set_t>() };
         unsafe {
             libc::CPU_ZERO(&mut set);
         }
 
-        for cpu in 0..64 {
-            if self.0 & (1u64 << cpu) != 0 {
+        for cpu in 0..cpu_set_size() {
+            if self.contains(cpu) {
                 unsafe {
-                    libc::CPU_SET(cpu, &mut set);
+                    libc::CPU_SET(cpu as usize, &mut set);
                 }
             }
         }
@@ -77,15 +147,57 @@ impl CpuMask {
     }
 
     fn from_cpu_set(set: &libc::cpu_set_t) -> Self {
-        let mut mask = 0u64;
+        let mut mask = Self::empty();
 
-        for cpu in 0..64 {
-            if unsafe { libc::CPU_ISSET(cpu, set) } {
-                mask |= 1u64 << cpu;
+        for cpu in 0..cpu_set_size() {
+            if unsafe { libc::CPU_ISSET(cpu as usize, set) } {
+                mask.set(cpu);
             }
         }
 
-        Self(mask)
+        mask
+    }
+}
+
+impl Serialize for CpuMask {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_range_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for CpuMask {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct CpuMaskVisitor;
+
+        impl Visitor<'_> for CpuMaskVisitor {
+            type Value = CpuMask;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a CPU range string or legacy numeric CPU mask")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                CpuMask::parse(value).map_err(E::custom)
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                Ok(CpuMask::from_legacy_bits(value))
+            }
+        }
+
+        deserializer.deserialize_any(CpuMaskVisitor)
     }
 }
 
@@ -110,6 +222,10 @@ pub fn read_allowed_mask(tid: u32) -> anyhow::Result<CpuMask> {
 }
 
 pub fn set_affinity(tid: u32, mask: CpuMask) -> anyhow::Result<()> {
+    set_affinity_raw(tid, &mask).map_err(|err| affinity_set_error(tid, err))
+}
+
+fn set_affinity_raw(tid: u32, mask: &CpuMask) -> io::Result<()> {
     let set = mask.to_cpu_set();
     let result = unsafe {
         libc::sched_setaffinity(
@@ -120,25 +236,37 @@ pub fn set_affinity(tid: u32, mask: CpuMask) -> anyhow::Result<()> {
     };
 
     if result != 0 {
-        anyhow::bail!(
-            "failed to set CPU affinity for TID {tid}: {}",
-            std::io::Error::last_os_error()
-        );
+        return Err(io::Error::last_os_error());
     }
 
     Ok(())
 }
 
-pub fn restore_all(records: &[AffinityRecord]) -> Vec<anyhow::Error> {
+#[derive(Debug, Default, Eq, PartialEq)]
+pub struct RestoreSummary {
+    pub restored: usize,
+    pub skipped_dead: usize,
+    pub errors: usize,
+}
+
+pub fn restore_all(records: &[AffinityRecord]) -> (RestoreSummary, Vec<anyhow::Error>) {
+    let mut summary = RestoreSummary::default();
     let mut errors = Vec::new();
 
     for record in records {
-        if let Err(err) = set_affinity(record.tid, record.original_mask) {
-            errors.push(err);
+        match set_affinity_raw(record.tid, &record.original_mask) {
+            Ok(()) => summary.restored += 1,
+            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
+                summary.skipped_dead += 1;
+            }
+            Err(err) => {
+                summary.errors += 1;
+                errors.push(affinity_set_error(record.tid, err));
+            }
         }
     }
 
-    errors
+    (summary, errors)
 }
 
 pub fn default_restore_path() -> PathBuf {
@@ -187,7 +315,7 @@ pub fn save_merged_restore_state(
         merged
             .entry(record.tid)
             .and_modify(|existing| {
-                existing.applied_mask = record.applied_mask;
+                existing.applied_mask = record.applied_mask.clone();
             })
             .or_insert_with(|| record.clone());
     }
@@ -204,9 +332,9 @@ pub fn load_restore_state(path: &Path) -> anyhow::Result<RestoreState> {
     Ok(state)
 }
 
-pub fn restore_saved(path: &Path) -> anyhow::Result<usize> {
+pub fn restore_saved(path: &Path) -> anyhow::Result<RestoreSummary> {
     let state = load_restore_state(path)?;
-    let errors = restore_all(&state.records);
+    let (summary, errors) = restore_all(&state.records);
 
     if !errors.is_empty() {
         anyhow::bail!(
@@ -217,7 +345,7 @@ pub fn restore_saved(path: &Path) -> anyhow::Result<usize> {
     }
 
     fs::remove_file(path).ok();
-    Ok(state.records.len())
+    Ok(summary)
 }
 
 fn parse_cpu(value: &str) -> anyhow::Result<u32> {
@@ -225,10 +353,22 @@ fn parse_cpu(value: &str) -> anyhow::Result<u32> {
         .trim()
         .parse::<u32>()
         .with_context(|| format!("invalid CPU id {value:?}"))?;
-    if cpu >= 64 {
-        anyhow::bail!("CPU id {cpu} is outside the supported 0..63 range");
+    let max_cpus = cpu_set_size();
+    if cpu >= max_cpus {
+        anyhow::bail!(
+            "CPU id {cpu} is outside the supported 0..{} range",
+            max_cpus.saturating_sub(1)
+        );
     }
     Ok(cpu)
+}
+
+fn cpu_set_size() -> u32 {
+    libc::CPU_SETSIZE as u32
+}
+
+fn affinity_set_error(tid: u32, err: io::Error) -> anyhow::Error {
+    anyhow::anyhow!("failed to set CPU affinity for TID {tid}: {err}")
 }
 
 #[cfg(test)]
@@ -237,12 +377,28 @@ mod tests {
 
     #[test]
     fn parses_cpu_mask_ranges_and_lists() {
-        assert_eq!(CpuMask::parse("0-2,5").unwrap(), CpuMask(0b100111));
+        assert_eq!(CpuMask::parse("0-2,5").unwrap().to_range_string(), "0-2,5");
     }
 
     #[test]
     fn rejects_empty_cpu_mask() {
         assert!(CpuMask::parse("").is_err());
+    }
+
+    #[test]
+    fn parses_cpu_ids_above_63() {
+        let mask = CpuMask::parse("0,64").unwrap();
+
+        assert_eq!(mask.to_range_string(), "0,64");
+    }
+
+    #[test]
+    fn serializes_ranges_and_deserializes_legacy_numeric_masks() {
+        let mask = CpuMask::parse("0-2,5").unwrap();
+        assert_eq!(serde_json::to_string(&mask).unwrap(), r#""0-2,5""#);
+
+        let legacy: CpuMask = serde_json::from_str("39").unwrap();
+        assert_eq!(legacy.to_range_string(), "0-2,5");
     }
 
     #[test]
@@ -254,8 +410,8 @@ mod tests {
             &path,
             &[AffinityRecord {
                 tid: 7,
-                original_mask: CpuMask(0b1111),
-                applied_mask: CpuMask(0b0011),
+                original_mask: CpuMask::parse("0-3").unwrap(),
+                applied_mask: CpuMask::parse("0-1").unwrap(),
             }],
         )
         .unwrap();
@@ -264,18 +420,55 @@ mod tests {
             &path,
             &[AffinityRecord {
                 tid: 7,
-                original_mask: CpuMask(0b0011),
-                applied_mask: CpuMask(0b0001),
+                original_mask: CpuMask::parse("0-1").unwrap(),
+                applied_mask: CpuMask::parse("0").unwrap(),
             }],
             false,
         )
         .unwrap();
 
         let state = load_restore_state(&path).unwrap();
+        assert_eq!(state.schema_version, RESTORE_SCHEMA_VERSION);
         assert_eq!(state.records.len(), 1);
-        assert_eq!(state.records[0].original_mask, CpuMask(0b1111));
-        assert_eq!(state.records[0].applied_mask, CpuMask(0b0001));
+        assert_eq!(state.records[0].original_mask.to_range_string(), "0-3");
+        assert_eq!(state.records[0].applied_mask.to_range_string(), "0");
 
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn restore_all_skips_dead_tids() {
+        let (summary, errors) = restore_all(&[AffinityRecord {
+            tid: i32::MAX as u32,
+            original_mask: CpuMask::parse("0").unwrap(),
+            applied_mask: CpuMask::parse("0").unwrap(),
+        }]);
+
+        assert_eq!(summary.restored, 0);
+        assert_eq!(summary.skipped_dead, 1);
+        assert_eq!(summary.errors, 0);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn restore_saved_deletes_file_when_only_dead_tids_are_skipped() {
+        let dir = temp_dir("affinity-restore-dead");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("restore.json");
+        save_restore_state(
+            &path,
+            &[AffinityRecord {
+                tid: i32::MAX as u32,
+                original_mask: CpuMask::parse("0").unwrap(),
+                applied_mask: CpuMask::parse("0").unwrap(),
+            }],
+        )
+        .unwrap();
+
+        let summary = restore_saved(&path).unwrap();
+
+        assert_eq!(summary.skipped_dead, 1);
+        assert!(!path.exists());
         fs::remove_dir_all(dir).ok();
     }
 

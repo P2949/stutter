@@ -354,6 +354,29 @@ fn target_snapshot_adds_fallback_without_o_n_squared_duplicate_scan_behavior() {
 }
 
 #[test]
+fn target_snapshot_does_not_add_unknown_fallback_for_missing_tree_root() {
+    let dir = temp_test_dir("proc-missing-tree-root");
+    fs::create_dir_all(&dir).unwrap();
+
+    let snapshot = process_tree::target_snapshot_at(&dir, &[], &[42]);
+
+    assert!(snapshot.tasks.is_empty());
+    assert!(snapshot.process_roots.is_empty());
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn target_snapshot_keeps_manual_missing_pid_fallback() {
+    let dir = temp_test_dir("proc-missing-manual-pid");
+    fs::create_dir_all(&dir).unwrap();
+
+    let snapshot = process_tree::target_snapshot_at(&dir, &[42], &[]);
+
+    assert_eq!(snapshot.tasks.get(&42).unwrap().comm, "?");
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
 fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters() {
     let dir = temp_test_dir("recording-schema");
     fs::create_dir_all(&dir).unwrap();
@@ -509,6 +532,42 @@ fn watch_process_selection_prefers_exact_then_executable_then_highest_pid() {
     create_fake_proc(&dir, 30, 1, "helper", "/bin/bar target", &[30]);
 
     assert_eq!(super::find_process_by_pattern_at(&dir, "target"), Some(30));
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn watch_process_selection_treats_wine_backslashes_as_path_separators() {
+    let dir = temp_test_dir("watch-wine-path");
+    create_fake_proc(
+        &dir,
+        10,
+        1,
+        "helper",
+        r#"Z:\home\p2949\Games\KingdomCome.exe"#,
+        &[10],
+    );
+    create_fake_proc(&dir, 20, 1, "other", "/bin/other KingdomCome.exe", &[20]);
+
+    assert_eq!(
+        super::find_process_by_pattern_at(&dir, "KingdomCome.exe"),
+        Some(10)
+    );
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn tree_root_starttime_change_is_stale() {
+    let mut roots = BTreeMap::new();
+    roots.insert(42, Some(100));
+
+    let dir = temp_test_dir("root-starttime-stale");
+    create_fake_proc(&dir, 42, 1, "game", "game", &[42]);
+
+    let current = process_tree::process_starttime_at(&dir, 42);
+    assert_eq!(current, Some(420));
+    assert_ne!(roots.get(&42).copied().flatten(), current);
 
     fs::remove_dir_all(dir).ok();
 }

@@ -66,8 +66,11 @@ async fn main() -> anyhow::Result<()> {
         AppCommand::Monitor(config) => run_monitor(config).await,
         AppCommand::Restore => {
             let path = affinity::default_restore_path();
-            let restored = affinity::restore_saved(&path)?;
-            println!("restored {restored} affinity record(s)");
+            let summary = affinity::restore_saved(&path)?;
+            println!(
+                "restored {} affinity record(s); skipped_dead={}",
+                summary.restored, summary.skipped_dead
+            );
             Ok(())
         }
         AppCommand::ApplyProfile {
@@ -75,8 +78,9 @@ async fn main() -> anyhow::Result<()> {
             profile,
             force,
             watch,
+            keep_applied,
             refresh_ms,
-        } => apply_profile_command(tree_pid, profile, force, watch, refresh_ms).await,
+        } => apply_profile_command(tree_pid, profile, force, watch, keep_applied, refresh_ms).await,
         AppCommand::InspectTree { tree_pid } => {
             let rendered = process_tree::render_tree(tree_pid)?;
             print!("{rendered}");
@@ -96,10 +100,28 @@ async fn apply_profile_command(
     profile_path: PathBuf,
     force: bool,
     watch: bool,
+    keep_applied: bool,
     refresh_ms: u64,
 ) -> anyhow::Result<()> {
     let profile = profiles::load_first_profile(&profile_path)?;
-    let records = profiles::apply_profile_to_tree(tree_pid, &profile, force)?;
+    let mut cache = profiles::ProfileApplyCache::default();
+    let initial_apply = if watch {
+        profiles::apply_profile_to_tree_cached(tree_pid, &profile, force, &mut cache)
+    } else {
+        profiles::apply_profile_to_tree(tree_pid, &profile, force)
+    };
+    let records = match initial_apply {
+        Ok(records) => records,
+        Err(err) => {
+            if watch
+                && !keep_applied
+                && let Err(restore_err) = restore_profile_watch_on_exit()
+            {
+                warn!("profile_watch_restore_after_error_failed err={restore_err:#}");
+            }
+            return Err(err);
+        }
+    };
     println!(
         "applied profile affinity to {} task(s); restore with: stutter restore",
         records.len()
@@ -117,11 +139,30 @@ async fn apply_profile_command(
     loop {
         tokio::select! {
             _ = signal::ctrl_c() => {
-                println!("stopped profile watch; restore with: stutter restore");
+                if keep_applied {
+                    println!("stopped profile watch; restore with: stutter restore");
+                } else {
+                    restore_profile_watch_on_exit()?;
+                }
                 return Ok(());
             }
             _ = tick.tick() => {
-                let records = profiles::apply_profile_to_tree(tree_pid, &profile, false)?;
+                let records = match profiles::apply_profile_to_tree_cached(
+                    tree_pid,
+                    &profile,
+                    false,
+                    &mut cache,
+                ) {
+                    Ok(records) => records,
+                    Err(err) => {
+                        if !keep_applied
+                            && let Err(restore_err) = restore_profile_watch_on_exit()
+                        {
+                            warn!("profile_watch_restore_after_error_failed err={restore_err:#}");
+                        }
+                        return Err(err);
+                    }
+                };
                 if !records.is_empty() {
                     info!("profile_watch_applied tasks={}", records.len());
                 }
@@ -130,8 +171,44 @@ async fn apply_profile_command(
     }
 }
 
+fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
+    let path = affinity::default_restore_path();
+    if !path.exists() {
+        println!("stopped profile watch; no restore file was written");
+        return Ok(());
+    }
+
+    let summary = affinity::restore_saved(&path)?;
+    println!(
+        "stopped profile watch; restored {} affinity record(s); skipped_dead={}",
+        summary.restored, summary.skipped_dead
+    );
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WatchProcessState {
+    None,
+    Running(u32),
+    Waiting,
+}
+
+impl WatchProcessState {
+    fn running_pid(self) -> Option<u32> {
+        match self {
+            Self::Running(pid) => Some(pid),
+            Self::None | Self::Waiting => None,
+        }
+    }
+}
+
 async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
-    let mut watched_root_pid = resolve_watch_process(&mut config).await?;
+    let mut watch_state = match resolve_watch_process(&mut config).await? {
+        Some(pid) => WatchProcessState::Running(pid),
+        None => WatchProcessState::None,
+    };
+    let had_tree_roots = !config.tree_pids.is_empty();
+    let mut tree_root_starttimes = capture_tree_root_starttimes(&config.tree_pids);
 
     let recording = prepare_recording(&config)?;
     let mut loaded = ebpf_loader::load_and_attach()?;
@@ -166,6 +243,10 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     let mut tree_tick = interval(Duration::from_secs(1));
     tree_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     tree_tick.tick().await;
+
+    let mut watch_tick = interval(Duration::from_secs(2));
+    watch_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    watch_tick.tick().await;
 
     let mut scx_tick = interval(Duration::from_secs(1));
     scx_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -209,10 +290,11 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
             }
 
             _ = tree_tick.tick(), if !config.tree_pids.is_empty() => {
-                if let Some(root_pid) = watched_root_pid
-                    && !process_pid_exists(root_pid)
+                if let Some(root_pid) = watch_state.running_pid()
+                    && tree_root_is_stale(root_pid, &tree_root_starttimes)
                 {
                     remove_watch_tree_pid(&mut config, root_pid);
+                    tree_root_starttimes.remove(&root_pid);
                     refresh_target_tasks(RefreshTargetTasksInput {
                         config: &config,
                         active_targets: &mut active_targets,
@@ -228,9 +310,36 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                         break "watched_process_exit".to_owned();
                     }
 
-                    match wait_for_watch_process(&mut config).await? {
-                        Some(root_pid) => watched_root_pid = Some(root_pid),
-                        None => break "ctrl_c".to_owned(),
+                    watch_state = WatchProcessState::Waiting;
+                    info!("watch_process_waiting_for_relaunch");
+                    continue;
+                }
+
+                let removed_roots = remove_stale_tree_roots(
+                    &mut config,
+                    &mut tree_root_starttimes,
+                    watch_state.running_pid(),
+                );
+                if !removed_roots.is_empty() {
+                    for root in &removed_roots {
+                        info!("tree_root_removed pid={root}");
+                    }
+                    refresh_target_tasks(RefreshTargetTasksInput {
+                        config: &config,
+                        active_targets: &mut active_targets,
+                        known_targets: &mut known_targets,
+                        stats_by_task: &mut stats_by_task,
+                        tree_events: &mut tree_events,
+                        target_pid_map: &mut loaded.target_pid_map,
+                        elapsed_ms: started.elapsed().as_millis(),
+                        recording_started: recording.as_ref().map(|run| run.started_instant),
+                    })?;
+
+                    if had_tree_roots
+                        && config.tree_pids.is_empty()
+                        && !matches!(watch_state, WatchProcessState::Waiting)
+                    {
+                        break "tree_root_exit".to_owned();
                     }
                 }
 
@@ -244,6 +353,32 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     elapsed_ms: started.elapsed().as_millis(),
                     recording_started: recording.as_ref().map(|run| run.started_instant),
                 })?;
+            }
+
+            _ = watch_tick.tick(), if matches!(watch_state, WatchProcessState::Waiting) => {
+                let Some(pattern) = config.watch_process.clone() else {
+                    continue;
+                };
+
+                // This full /proc scan runs only while waiting for the watched process
+                // to appear or relaunch. Once running, the monitor follows the root PID.
+                if let Some(pid) = find_process_by_pattern_at(Path::new("/proc"), &pattern) {
+                    add_watch_tree_pid(&mut config, pid);
+                    tree_root_starttimes.insert(pid, process_root_starttime(pid));
+                    watch_state = WatchProcessState::Running(pid);
+                    info!("watch_process_relaunched pattern={} pid={}", pattern, pid);
+
+                    refresh_target_tasks(RefreshTargetTasksInput {
+                        config: &config,
+                        active_targets: &mut active_targets,
+                        known_targets: &mut known_targets,
+                        stats_by_task: &mut stats_by_task,
+                        tree_events: &mut tree_events,
+                        target_pid_map: &mut loaded.target_pid_map,
+                        elapsed_ms: started.elapsed().as_millis(),
+                        recording_started: recording.as_ref().map(|run| run.started_instant),
+                    })?;
+                }
             }
 
             _ = scx_tick.tick() => {
@@ -370,8 +505,48 @@ fn remove_watch_tree_pid(config: &mut Config, pid: u32) {
     config.tree_pids.retain(|tree_pid| *tree_pid != pid);
 }
 
-fn process_pid_exists(pid: u32) -> bool {
-    Path::new("/proc").join(pid.to_string()).exists()
+fn capture_tree_root_starttimes(tree_pids: &[u32]) -> BTreeMap<u32, Option<u64>> {
+    tree_pids
+        .iter()
+        .map(|pid| (*pid, process_root_starttime(*pid)))
+        .collect()
+}
+
+fn process_root_starttime(pid: u32) -> Option<u64> {
+    process_tree::process_starttime_at(Path::new("/proc"), pid)
+}
+
+fn tree_root_is_stale(pid: u32, root_starttimes: &BTreeMap<u32, Option<u64>>) -> bool {
+    let current = process_root_starttime(pid);
+    let expected = root_starttimes.get(&pid).copied().flatten();
+
+    current.is_none() || expected.is_some_and(|expected| current != Some(expected))
+}
+
+fn remove_stale_tree_roots(
+    config: &mut Config,
+    root_starttimes: &mut BTreeMap<u32, Option<u64>>,
+    watched_pid: Option<u32>,
+) -> Vec<u32> {
+    let mut removed = Vec::new();
+
+    for pid in config.tree_pids.clone() {
+        if Some(pid) == watched_pid {
+            continue;
+        }
+        if tree_root_is_stale(pid, root_starttimes) {
+            removed.push(pid);
+            root_starttimes.remove(&pid);
+        }
+    }
+
+    if !removed.is_empty() {
+        config
+            .tree_pids
+            .retain(|tree_pid| !removed.contains(tree_pid));
+    }
+
+    removed
 }
 
 fn find_process_by_pattern_at(proc_root: &Path, pattern: &str) -> Option<u32> {
@@ -399,6 +574,7 @@ fn process_match_score(pattern: &str, comm: &str, cmdline: &str) -> Option<u8> {
 
 fn cmdline_executable_basename(cmdline: &str) -> Option<String> {
     let executable = cmdline.split_whitespace().next()?;
+    let executable = executable.replace('\\', "/");
     PathBuf::from(executable)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
