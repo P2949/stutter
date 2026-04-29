@@ -33,6 +33,7 @@ thiserror = { version = "2", default-features = false }
 tokio = { version = "1.40.0", default-features = false }
 toml = { version = "0.8", default-features = true }
 which = { version = "6.0.0", default-features = false }
+regex = "1"
 
 [profile.release.package.stutter-ebpf]
 debug = 2

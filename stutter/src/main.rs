@@ -39,14 +39,19 @@ use tokio::{
     signal, task,
     time::{Duration, MissedTickBehavior, interval, sleep},
 };
+use std::os::unix::fs::MetadataExt;
 
 pub const TARGET_PIDS_MAX: usize = 1024;
+
+type TaskExeInodesMap = BTreeMap<u32, (u64, u64, Option<u64>)>;
 
 struct RefreshTargetTasksInput<'a> {
     config: &'a Config,
     active_targets: &'a mut BTreeMap<u32, TaskInfo>,
     known_targets: &'a mut BTreeMap<u32, TaskInfo>,
     stats_by_task: &'a mut BTreeMap<u32, metrics::TaskStats>,
+    // Maps TID -> (exe_dev, exe_ino, optional_process_starttime_ticks)
+    task_exe_inodes: &'a mut TaskExeInodesMap,
     tree_events: &'a mut Vec<TreeEvent>,
     target_pid_map: &'a mut AyaHashMap<MapData, u32, u8>,
     elapsed_ms: u128,
@@ -471,20 +476,32 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     let mut tree_root_starttimes = capture_tree_root_starttimes(&config.tree_pids);
 
     let recording = prepare_recording(&config)?;
-    let mut loaded = ebpf_loader::load_and_attach()?;
+    let mut loaded = ebpf_loader::load_and_attach().map_err(anyhow::Error::new)?;
     configure_target_irqs(&mut loaded, &config)?;
 
     let mut active_targets: BTreeMap<u32, TaskInfo> = BTreeMap::new();
     let mut known_targets: BTreeMap<u32, TaskInfo> = BTreeMap::new();
     let mut stats_by_task: BTreeMap<u32, metrics::TaskStats> = BTreeMap::new();
+    let mut task_exe_inodes: TaskExeInodesMap = BTreeMap::new();
     let mut interval_records: Vec<IntervalRecord> = Vec::new();
     let mut tree_events: Vec<TreeEvent> = Vec::new();
     let mut spike_events = recording.as_ref().map(|_| SpikeEventBuffer::default());
     let mut irq_events: Vec<IrqEventRecord> = Vec::new();
     let mut gpu_samples = Vec::new();
+    // NOTE: The following mutable collections (`active_targets`, `known_targets`,
+    // `stats_by_task`, `interval_records`, `tree_events`, `spike_events`, and
+    // `irq_events`) are intentionally confined to the main monitoring task.
+    // Blocking work (e.g., `spawn_blocking`) returns state back to this task
+    // and does not mutate these collections concurrently. If future changes
+    // introduce background mutation, protect these with `Arc<Mutex<_>>` or
+    // message passing to avoid data races.
     let mut scx_tracker = scx::ScxTracker::default();
     let recording_monotonic_start_ns = recording.as_ref().and_then(|run| run.monotonic_start_ns);
-    let hwmon_reader = config.hwmon.then(hwmon::HwmonReader::discover).flatten();
+    let mut hwmon_reader = if config.hwmon {
+        hwmon::HwmonReader::discover_at(config.hwmon_root.as_deref())
+    } else {
+        None
+    };
     if config.hwmon && hwmon_reader.is_none() {
         warn!("hwmon_requested_but_no_gpu_hwmon_found");
     }
@@ -497,6 +514,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
         active_targets: &mut active_targets,
         known_targets: &mut known_targets,
         stats_by_task: &mut stats_by_task,
+        task_exe_inodes: &mut task_exe_inodes,
         tree_events: &mut tree_events,
         target_pid_map: &mut loaded.target_pid_map,
         elapsed_ms: started.elapsed().as_millis(),
@@ -575,6 +593,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                         active_targets: &mut active_targets,
                         known_targets: &mut known_targets,
                         stats_by_task: &mut stats_by_task,
+                        task_exe_inodes: &mut task_exe_inodes,
                         tree_events: &mut tree_events,
                         target_pid_map: &mut loaded.target_pid_map,
                         elapsed_ms: started.elapsed().as_millis(),
@@ -605,6 +624,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                         active_targets: &mut active_targets,
                         known_targets: &mut known_targets,
                         stats_by_task: &mut stats_by_task,
+                        task_exe_inodes: &mut task_exe_inodes,
                         tree_events: &mut tree_events,
                         target_pid_map: &mut loaded.target_pid_map,
                         elapsed_ms: started.elapsed().as_millis(),
@@ -625,6 +645,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     active_targets: &mut active_targets,
                     known_targets: &mut known_targets,
                     stats_by_task: &mut stats_by_task,
+                    task_exe_inodes: &mut task_exe_inodes,
                     tree_events: &mut tree_events,
                     target_pid_map: &mut loaded.target_pid_map,
                     elapsed_ms: started.elapsed().as_millis(),
@@ -651,6 +672,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                         active_targets: &mut active_targets,
                         known_targets: &mut known_targets,
                         stats_by_task: &mut stats_by_task,
+                        task_exe_inodes: &mut task_exe_inodes,
                         tree_events: &mut tree_events,
                         target_pid_map: &mut loaded.target_pid_map,
                         elapsed_ms: started.elapsed().as_millis(),
@@ -665,8 +687,18 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
             }
 
             _ = hwmon_tick.tick(), if hwmon_reader.is_some() => {
-                if let Some(reader) = &hwmon_reader {
-                    gpu_samples.push(reader.sample(started.elapsed().as_millis()));
+                if let Some(mut reader) = hwmon_reader.take() {
+                    let elapsed = started.elapsed().as_millis();
+
+                    let (sample, returned_reader) = task::spawn_blocking(move || {
+                        let s = reader.sample(elapsed);
+                        (s, reader)
+                    })
+                    .await
+                    .map_err(|err| anyhow::anyhow!("hwmon worker failed: {err}"))?;
+
+                    gpu_samples.push(sample);
+                    hwmon_reader = Some(returned_reader);
                 }
             }
 
@@ -1048,6 +1080,7 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
         active_targets,
         known_targets,
         stats_by_task,
+        task_exe_inodes,
         tree_events,
         target_pid_map,
         elapsed_ms,
@@ -1083,6 +1116,7 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
         &desired_tasks,
         known_targets,
         stats_by_task,
+        task_exe_inodes,
         tree_events,
         elapsed_ms,
         recording_started,
@@ -1105,7 +1139,7 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
                     tree_events.push(TreeEvent::from_task(started, "added", diff.task));
                 }
 
-                reactivate_or_reset_stats(stats_by_task, tid, diff.task, elapsed_ms);
+                reactivate_or_reset_stats_inner(stats_by_task, Some(&*task_exe_inodes), tid, diff.task, elapsed_ms);
 
                 info!(
                     "tree_target_added tid={} process_pid={} ppid={} comm={} class={}",
@@ -1154,11 +1188,13 @@ fn should_replace_unknown_comm(current: &str, incoming: &str) -> bool {
     (current == "?" || current.is_empty()) && incoming != "?" && !incoming.is_empty()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_same_tid_replacements(
     active_targets: &BTreeMap<u32, TaskInfo>,
     desired_tasks: &BTreeMap<u32, TaskInfo>,
     known_targets: &mut BTreeMap<u32, TaskInfo>,
     stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
+    task_exe_inodes: &mut TaskExeInodesMap,
     tree_events: &mut Vec<TreeEvent>,
     elapsed_ms: u128,
     recording_started: Option<Instant>,
@@ -1173,7 +1209,7 @@ fn handle_same_tid_replacements(
         }
 
         known_targets.insert(*tid, desired_task.clone());
-        reset_stats_for_task_change(stats_by_task, *tid, desired_task, elapsed_ms);
+        reset_stats_for_task_change(stats_by_task, task_exe_inodes, *tid, desired_task, elapsed_ms);
 
         if let Some(started) = recording_started {
             tree_events.push(TreeEvent::from_task(started, "replaced", desired_task));
@@ -1194,6 +1230,7 @@ fn handle_same_tid_replacements(
 
 fn reset_stats_for_task_change(
     stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
+    task_exe_inodes: &mut TaskExeInodesMap,
     tid: u32,
     task_info: &TaskInfo,
     elapsed_ms: u128,
@@ -1202,10 +1239,17 @@ fn reset_stats_for_task_change(
     stats.apply_task_info(task_info);
     stats.active = true;
     stats_by_task.insert(tid, stats);
+
+    if let Some((dev, ino, start)) = get_proc_exe_info(task_info.process_pid) {
+        task_exe_inodes.insert(tid, (dev, ino, start));
+    } else {
+        task_exe_inodes.remove(&tid);
+    }
 }
 
-fn reactivate_or_reset_stats(
+fn reactivate_or_reset_stats_inner(
     stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
+    task_exe_inodes: Option<&TaskExeInodesMap>,
     tid: u32,
     task_info: &TaskInfo,
     elapsed_ms: u128,
@@ -1214,7 +1258,7 @@ fn reactivate_or_reset_stats(
         return;
     };
 
-    if stats.removed_ms.is_some() && !same_logical_task(stats, task_info) {
+    if stats.removed_ms.is_some() && !same_logical_task(stats, task_info, task_exe_inodes) {
         *stats = metrics::TaskStats::new(tid, task_info.comm.clone(), elapsed_ms); // Reset stats for a new logical task
     }
 
@@ -1223,10 +1267,26 @@ fn reactivate_or_reset_stats(
     stats.removed_ms = None;
 }
 
+// Backwards-compatible wrapper used by tests and other callers that don't need
+// the optional `/proc/<pid>/exe` inode-based disambiguation.
+#[allow(dead_code)]
+fn reactivate_or_reset_stats(
+    stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
+    tid: u32,
+    task_info: &TaskInfo,
+    elapsed_ms: u128,
+) {
+    reactivate_or_reset_stats_inner(stats_by_task, None, tid, task_info, elapsed_ms);
+}
+
 // Determines if two tasks (identified by TID and process PID) represent the same logical entity
 // based on stable identifiers. Mutable fields like comm, process_comm, and class are considered
 // metadata and not part of the identity for this comparison.
-fn same_logical_task(stats: &metrics::TaskStats, task_info: &TaskInfo) -> bool {
+fn same_logical_task(
+    stats: &metrics::TaskStats,
+    task_info: &TaskInfo,
+    task_exe_inodes: Option<&TaskExeInodesMap>,
+) -> bool {
     if stats.task != task_info.tid {
         return false;
     }
@@ -1251,11 +1311,55 @@ fn same_logical_task(stats: &metrics::TaskStats, task_info: &TaskInfo) -> bool {
         || task_info.process_starttime_ticks.is_some()
         || stats.task_starttime_ticks.is_some()
         || task_info.task_starttime_ticks.is_some();
+    if has_any_starttime {
+        return true;
+    }
 
-    has_any_starttime
-        || (stats.comm == task_info.comm
-            && stats.process_comm == task_info.process_comm
-            && stats.class == task_info.class)
+    // Fall back to matching by comm/process_comm/class. If the caller provided
+    // a map of previously observed `/proc/<pid>/exe` inodes for tasks, use that
+    // to disambiguate PID reuse: if the stored inode differs from the current
+    // process `/proc/<pid>/exe` inode, treat as a different logical task.
+    if stats.comm == task_info.comm
+        && stats.process_comm == task_info.process_comm
+        && stats.class == task_info.class
+    {
+        if let Some(inodes) = task_exe_inodes
+            && let Some(&(dev, ino, prev_start)) = inodes.get(&stats.task)
+        {
+            if let Some((cur_dev, cur_ino, cur_start)) = get_proc_exe_info(task_info.process_pid) {
+                if cur_dev != dev || cur_ino != ino {
+                    return false;
+                }
+
+                let merged_cur_start = cur_start
+                    .or(task_info.process_starttime_ticks)
+                    .or(task_info.task_starttime_ticks);
+
+                if let (Some(prev), Some(cur)) = (prev_start, merged_cur_start) && prev != cur {
+                    return false;
+                }
+            } else if let Some(prev) = prev_start
+                && let Some(cur) = task_info.process_starttime_ticks.or(task_info.task_starttime_ticks)
+                && prev != cur
+            {
+                        if prev != cur {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    false
+}
+
+fn get_proc_exe_info(pid: u32) -> Option<(u64, u64, Option<u64>)> {
+    let path = Path::new("/proc").join(pid.to_string()).join("exe");
+    let metadata = fs::metadata(path).ok()?;
+    let start = process_tree::process_starttime_at(Path::new("/proc"), pid);
+    Some((metadata.dev(), metadata.ino(), start))
 }
 
 fn same_task_info(left: &TaskInfo, right: &TaskInfo) -> bool {

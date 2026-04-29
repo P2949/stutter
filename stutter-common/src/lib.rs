@@ -36,3 +36,8 @@ pub struct IrqEvent {
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for IrqEvent {}
+
+// Compile-time layout assertions to ensure eBPF and userspace agree on struct sizes.
+// These will fail the build if the sizes change unexpectedly.
+const _: [(); core::mem::size_of::<SchedulerEvent>()] = [(); 56];
+const _: [(); core::mem::size_of::<IrqEvent>()] = [(); 40];

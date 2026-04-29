@@ -1,4 +1,5 @@
 use std::{collections::BTreeMap, fmt};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use log::info;
 use serde::{Deserialize, Serialize};
@@ -57,6 +58,8 @@ pub struct LatencyStats {
     pub samples_truncated: u64,
     pub histogram: LatencyHistogram,
 }
+
+static HISTOGRAM_TRUNCATED_WARNED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct CpuStats {
@@ -236,6 +239,14 @@ impl LatencyStats {
             self.samples_ns.push(latency_ns);
         } else {
             self.samples_truncated += 1;
+            // Log a single warning for histogram overflow to aid users diagnosing
+            // missing exact percentiles due to sample truncation.
+            if HISTOGRAM_TRUNCATED_WARNED
+                .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
+                log::warn!("latency_samples_truncated warning: storing only {} exact samples; future percentiles will use histogram approximation", MAX_EXACT_SAMPLES);
+            }
         }
     }
 

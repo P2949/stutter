@@ -80,11 +80,11 @@ pub fn irq_handler_exit(ctx: TracePointContext) -> u32 {
 }
 
 fn is_target_pid(pid: u32) -> bool {
-    unsafe { TARGET_PIDS.get(pid).is_some() }
+    unsafe { TARGET_PIDS.get(&pid).is_some() }
 }
 
 fn is_target_irq(irq: u32) -> bool {
-    unsafe { TARGET_IRQS.get(irq).is_some() }
+    unsafe { TARGET_IRQS.get(&irq).is_some() }
 }
 
 fn irq_key(irq: u32, cpu: u32) -> u64 {

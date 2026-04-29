@@ -84,6 +84,9 @@ pub struct MonitorArgs {
     #[arg(long = "hwmon")]
     hwmon: bool,
 
+    #[arg(long = "hwmon-root", value_name = "PATH")]
+    hwmon_root: Option<PathBuf>,
+
     #[arg(long = "mangohud-log", value_name = "PATH")]
     mangohud_log: Option<PathBuf>,
 
@@ -214,6 +217,7 @@ pub struct Config {
     pub irq_latency: bool,
     pub irqs: Vec<u32>,
     pub hwmon: bool,
+    pub hwmon_root: Option<PathBuf>,
     pub mangohud_log: Option<PathBuf>,
     pub tui: bool,
     pub recording: Option<RecordingConfig>,
@@ -414,6 +418,7 @@ fn config_from_monitor_args(
         irq_latency: args.irq_latency,
         irqs: args.irqs,
         hwmon: args.hwmon,
+        hwmon_root: args.hwmon_root,
         mangohud_log: args.mangohud_log,
         tui: args.tui,
         recording,
