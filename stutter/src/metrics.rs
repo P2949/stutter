@@ -301,7 +301,6 @@ impl LatencyStats {
         Some(snapshot)
     }
 
-    #[allow(dead_code)]
     pub fn stored_samples(&self) -> u64 {
         self.count.min(MAX_EXACT_SAMPLES as u64)
     }

@@ -202,6 +202,12 @@ impl<'de> Deserialize<'de> for CpuMask {
 }
 
 pub fn read_allowed_mask(tid: u32) -> anyhow::Result<CpuMask> {
+    read_allowed_mask_raw(tid).map_err(|err| {
+        anyhow::anyhow!("failed to read CPU affinity for TID {tid}: {err}")
+    })
+}
+
+pub fn read_allowed_mask_raw(tid: u32) -> io::Result<CpuMask> {
     let mut set = unsafe { std::mem::zeroed::<libc::cpu_set_t>() };
     let result = unsafe {
         libc::sched_getaffinity(
@@ -212,20 +218,15 @@ pub fn read_allowed_mask(tid: u32) -> anyhow::Result<CpuMask> {
     };
 
     if result != 0 {
-        anyhow::bail!(
-            "failed to read CPU affinity for TID {tid}: {}",
-            std::io::Error::last_os_error()
-        );
+        return Err(io::Error::last_os_error());
     }
 
     Ok(CpuMask::from_cpu_set(&set))
 }
 
-pub fn set_affinity(tid: u32, mask: CpuMask) -> anyhow::Result<()> {
-    set_affinity_raw(tid, &mask).map_err(|err| affinity_set_error(tid, err))
-}
 
-fn set_affinity_raw(tid: u32, mask: &CpuMask) -> io::Result<()> {
+
+pub fn set_affinity_raw(tid: u32, mask: &CpuMask) -> io::Result<()> {
     let set = mask.to_cpu_set();
     let result = unsafe {
         libc::sched_setaffinity(

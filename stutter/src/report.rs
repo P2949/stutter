@@ -291,7 +291,7 @@ pub(crate) fn render_report(
     pushln(&mut output, "");
 
     let cluster_window_ns = cluster_window_ms.saturating_mul(1_000_000);
-    let cluster_analysis = spike_cluster_analysis(session, spike_events, cluster_window_ns);
+    let cluster_analysis = spike_cluster_analysis(session, spike_events, cluster_window_ns, top);
 
     pushln(&mut output, "spike clusters");
     pushln(&mut output, "--------------");
@@ -342,6 +342,7 @@ fn spike_cluster_analysis(
     session: &SessionFile,
     spike_events: Option<&[SpikeEvent]>,
     cluster_window_ns: u64,
+    top: usize,
 ) -> SpikeClusterAnalysis {
     let (source, points) = match spike_events {
         Some(spike_events) => (
@@ -358,13 +359,14 @@ fn spike_cluster_analysis(
     SpikeClusterAnalysis {
         source,
         source_count,
-        clusters: spike_clusters_from_points(points, cluster_window_ns),
+        clusters: spike_clusters_from_points(points, cluster_window_ns, top),
     }
 }
 
 fn spike_clusters_from_points(
     mut points: Vec<SpikePoint>,
     cluster_window_ns: u64,
+    top: usize,
 ) -> Vec<SpikeCluster> {
     points.sort_by_key(|point| point.switch_ns);
 
@@ -426,6 +428,7 @@ fn spike_clusters_from_points(
     });
 
     let mut selected_candidates = Vec::new();
+    let max_selected = top.saturating_mul(4).min(MAX_CLUSTER_CANDIDATES); // Cap it. Using MAX_CLUSTER_CANDIDATES as upper bound if top is small.
 
     'candidate: for candidate in candidates {
         for existing in &selected_candidates {
@@ -434,6 +437,9 @@ fn spike_clusters_from_points(
             }
         }
         selected_candidates.push(candidate);
+        if selected_candidates.len() >= max_selected {
+            break;
+        }
     }
 
     selected_candidates

@@ -19,7 +19,7 @@ static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 static TARGET_PIDS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(1024, 0);
 
 #[map]
-static WAKEUP_TIMES: HashMap<u32, u64> = HashMap::<u32, u64>::with_max_entries(16_384, 0);
+static WAKEUP_TIMES: HashMap<u32, u64> = HashMap::<u32, u64>::with_max_entries(131_072, 0);
 
 #[map]
 static DROP_COUNTERS: PerCpuArray<u64> = PerCpuArray::<u64>::with_max_entries(DROP_COUNTERS_MAX, 0);
@@ -51,12 +51,12 @@ pub fn sched_switch(ctx: TracePointContext) -> u32 {
 #[tracepoint]
 pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
-    let _ = WAKEUP_TIMES.remove(&tid);
+    let _ = WAKEUP_TIMES.remove(tid);
     0
 }
 
 fn is_target_pid(pid: u32) -> bool {
-    unsafe { TARGET_PIDS.get(&pid).is_some() }
+    unsafe { TARGET_PIDS.get(pid).is_some() }
 }
 
 fn increment_drop_counter(reason: u32) {
@@ -84,7 +84,7 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
 
     let now = unsafe { bpf_ktime_get_ns() };
 
-    if WAKEUP_TIMES.insert(&pid, &now, 0).is_err() {
+    if WAKEUP_TIMES.insert(pid, now, 0).is_err() {
         increment_drop_counter(DROP_WAKEUP_TIMES_INSERT_FAILED);
     }
 
@@ -107,9 +107,8 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
 
     let _ = WAKEUP_TIMES.remove(&pid);
 
-    if !is_target_pid(pid) {
-        return Ok(0);
-    }
+    // Check if this PID is a target before further processing
+    if !is_target_pid(pid) { return Ok(0); }
 
     let switch_ns = unsafe { bpf_ktime_get_ns() };
     let latency_ns = switch_ns.saturating_sub(wakeup_ns);

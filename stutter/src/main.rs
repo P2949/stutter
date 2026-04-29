@@ -565,11 +565,18 @@ fn process_match_score(pattern: &str, comm: &str, cmdline: &str) -> Option<u8> {
         return Some(3);
     }
 
-    if cmdline_executable_basename(cmdline).as_deref() == Some(pattern) {
+    if cmdline_executable_basename(cmdline)
+        .as_deref()
+        .map(|s| s.to_lowercase())
+        == Some(pattern.to_lowercase())
+    {
         return Some(2);
     }
 
-    (comm.contains(pattern) || cmdline.contains(pattern)).then_some(1)
+    let pattern_lower = pattern.to_lowercase();
+    (comm.to_lowercase().contains(&pattern_lower)
+        || cmdline.to_lowercase().contains(&pattern_lower))
+    .then_some(1)
 }
 
 fn cmdline_executable_basename(cmdline: &str) -> Option<String> {
@@ -806,7 +813,7 @@ fn reactivate_or_reset_stats(
     };
 
     if stats.removed_ms.is_some() && !same_logical_task(stats, task_info) {
-        *stats = metrics::TaskStats::new(tid, task_info.comm.clone(), elapsed_ms);
+        *stats = metrics::TaskStats::new(tid, task_info.comm.clone(), elapsed_ms); // Reset stats for a new logical task
     }
 
     stats.apply_task_info(task_info);
@@ -814,23 +821,42 @@ fn reactivate_or_reset_stats(
     stats.removed_ms = None;
 }
 
+// Determines if two tasks (identified by TID and process PID) represent the same logical entity
+// based on stable identifiers. Mutable fields like comm, process_comm, and class are considered
+// metadata and not part of the identity for this comparison.
 fn same_logical_task(stats: &metrics::TaskStats, task_info: &TaskInfo) -> bool {
-    stats.process_pid == Some(task_info.process_pid)
-        && stats.process_comm == task_info.process_comm
-        && stats.process_starttime_ticks == task_info.process_starttime_ticks
-        && stats.task_starttime_ticks == task_info.task_starttime_ticks
-        && stats.comm == task_info.comm
-        && stats.class == task_info.class
+    // TID is implicit from the map key (stats.task == task_info.tid)
+
+    // Process PID must match
+    if stats.process_pid != Some(task_info.process_pid) {
+        return false;
+    }
+
+    // Start-time ticks are the primary identity. If they differ, it's a new task.
+    if stats.process_starttime_ticks != task_info.process_starttime_ticks { return false; }
+    if stats.task_starttime_ticks != task_info.task_starttime_ticks { return false; }
+
+    // If all stable identifiers match, it's the same logical task.
+    true
 }
 
 fn same_task_info(left: &TaskInfo, right: &TaskInfo) -> bool {
-    left.tid == right.tid
-        && left.process_pid == right.process_pid
-        && left.process_ppid == right.process_ppid
+    if left.tid != right.tid || left.process_pid != right.process_pid {
+        return false;
+    }
+
+    if left.process_starttime_ticks.is_some()
+        || right.process_starttime_ticks.is_some()
+        || left.task_starttime_ticks.is_some()
+        || right.task_starttime_ticks.is_some()
+    {
+        return left.process_starttime_ticks == right.process_starttime_ticks
+            && left.task_starttime_ticks == right.task_starttime_ticks;
+    }
+
+    left.process_ppid == right.process_ppid
         && left.comm == right.comm
         && left.process_comm == right.process_comm
-        && left.process_starttime_ticks == right.process_starttime_ticks
-        && left.task_starttime_ticks == right.task_starttime_ticks
         && left.class == right.class
 }
 
