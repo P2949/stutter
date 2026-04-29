@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::Path,
 };
@@ -14,6 +14,7 @@ use crate::{
 
 const MIN_CLUSTER_TASKS: usize = 3;
 const MAX_INLINE_CLUSTER_POINTS: usize = 8;
+const MAX_CLUSTER_CANDIDATES: usize = 4096;
 
 #[derive(Clone)]
 struct SpikePoint {
@@ -47,6 +48,15 @@ struct SpikeClusterAnalysis {
     source: SpikeClusterSource,
     source_count: usize,
     clusters: Vec<SpikeCluster>,
+}
+
+#[derive(Clone)]
+struct SpikeClusterCandidate {
+    start_idx: usize,
+    end_idx: usize,
+    distinct_tasks: usize,
+    min_switch_ns: u64,
+    max_latency_ns: u64,
 }
 
 pub fn print_report(
@@ -358,43 +368,74 @@ fn spike_clusters_from_points(
     points.sort_by_key(|point| point.switch_ns);
 
     let mut candidates = Vec::new();
+    let mut task_counts = BTreeMap::<u32, usize>::new();
+    let mut max_latency_candidates = std::collections::VecDeque::<usize>::new();
+    let mut left_idx = 0;
 
-    for start_idx in 0..points.len() {
-        let start_ns = points[start_idx].switch_ns;
-        let max_ns = start_ns.saturating_add(cluster_window_ns);
-        let mut end_idx = start_idx;
+    for right_idx in 0..points.len() {
+        *task_counts.entry(points[right_idx].task).or_default() += 1;
 
-        while end_idx < points.len() && points[end_idx].switch_ns <= max_ns {
-            end_idx += 1;
+        while max_latency_candidates
+            .back()
+            .is_some_and(|idx| points[*idx].latency_ns <= points[right_idx].latency_ns)
+        {
+            max_latency_candidates.pop_back();
+        }
+        max_latency_candidates.push_back(right_idx);
+
+        while left_idx <= right_idx
+            && points[right_idx]
+                .switch_ns
+                .saturating_sub(points[left_idx].switch_ns)
+                > cluster_window_ns
+        {
+            decrement_task_count(&mut task_counts, points[left_idx].task);
+            if max_latency_candidates.front() == Some(&left_idx) {
+                max_latency_candidates.pop_front();
+            }
+            left_idx += 1;
         }
 
-        let window = &points[start_idx..end_idx];
-        let distinct_tasks = distinct_task_count(window);
-        if distinct_tasks < MIN_CLUSTER_TASKS {
-            continue;
+        if task_counts.len() >= MIN_CLUSTER_TASKS {
+            let max_latency_ns = max_latency_candidates
+                .front()
+                .map(|idx| points[*idx].latency_ns)
+                .unwrap_or(0);
+            retain_cluster_candidate(
+                &mut candidates,
+                SpikeClusterCandidate {
+                    start_idx: left_idx,
+                    end_idx: right_idx + 1,
+                    distinct_tasks: task_counts.len(),
+                    min_switch_ns: points[left_idx].switch_ns,
+                    max_latency_ns,
+                },
+            );
         }
-
-        candidates.push(cluster_from_points(window.to_vec(), distinct_tasks));
     }
 
-    candidates.sort_by_key(|cluster| {
+    candidates.sort_by_key(|candidate| {
         (
-            std::cmp::Reverse(cluster.distinct_tasks),
-            std::cmp::Reverse(cluster.max_latency_ns),
-            std::cmp::Reverse(cluster.points.len()),
-            cluster.min_switch_ns,
+            std::cmp::Reverse(candidate.distinct_tasks),
+            std::cmp::Reverse(candidate.max_latency_ns),
+            std::cmp::Reverse(candidate.end_idx.saturating_sub(candidate.start_idx)),
+            candidate.min_switch_ns,
         )
     });
 
     let mut selected = Vec::new();
 
     'candidate: for candidate in candidates {
+        let cluster = cluster_from_points(
+            points[candidate.start_idx..candidate.end_idx].to_vec(),
+            candidate.distinct_tasks,
+        );
         for existing in &selected {
-            if clusters_overlap(existing, &candidate) {
+            if clusters_overlap(existing, &cluster) {
                 continue 'candidate;
             }
         }
-        selected.push(candidate);
+        selected.push(cluster);
     }
 
     selected
@@ -459,12 +500,54 @@ fn elapsed_ms(monotonic_start_ns: Option<u64>, switch_ns: u64) -> Option<u128> {
         .map(|elapsed_ns| u128::from(elapsed_ns / 1_000_000))
 }
 
-fn distinct_task_count(points: &[SpikePoint]) -> usize {
-    points
+fn decrement_task_count(task_counts: &mut BTreeMap<u32, usize>, task: u32) {
+    let Some(count) = task_counts.get_mut(&task) else {
+        return;
+    };
+    *count -= 1;
+    if *count == 0 {
+        task_counts.remove(&task);
+    }
+}
+
+fn retain_cluster_candidate(
+    candidates: &mut Vec<SpikeClusterCandidate>,
+    candidate: SpikeClusterCandidate,
+) {
+    if candidates.len() < MAX_CLUSTER_CANDIDATES {
+        candidates.push(candidate);
+        return;
+    }
+
+    let Some((worst_idx, worst_candidate)) = candidates
         .iter()
-        .map(|point| point.task)
-        .collect::<HashSet<_>>()
-        .len()
+        .enumerate()
+        .min_by(|(_, left), (_, right)| compare_cluster_candidates(left, right))
+    else {
+        return;
+    };
+
+    if compare_cluster_candidates(&candidate, worst_candidate).is_gt() {
+        candidates[worst_idx] = candidate;
+    }
+}
+
+fn compare_cluster_candidates(
+    left: &SpikeClusterCandidate,
+    right: &SpikeClusterCandidate,
+) -> std::cmp::Ordering {
+    (
+        left.distinct_tasks,
+        left.max_latency_ns,
+        left.end_idx.saturating_sub(left.start_idx),
+        std::cmp::Reverse(left.min_switch_ns),
+    )
+        .cmp(&(
+            right.distinct_tasks,
+            right.max_latency_ns,
+            right.end_idx.saturating_sub(right.start_idx),
+            std::cmp::Reverse(right.min_switch_ns),
+        ))
 }
 
 fn cluster_from_points(mut points: Vec<SpikePoint>, distinct_tasks: usize) -> SpikeCluster {

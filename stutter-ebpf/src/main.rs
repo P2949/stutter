@@ -4,7 +4,7 @@
 use aya_ebpf::{
     helpers::{bpf_get_current_pid_tgid, bpf_get_smp_processor_id, bpf_ktime_get_ns},
     macros::{map, tracepoint},
-    maps::{HashMap, RingBuf},
+    maps::{HashMap, PerCpuArray, RingBuf},
     programs::TracePointContext,
 };
 use stutter_common::{
@@ -22,8 +22,7 @@ static TARGET_PIDS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(1024
 static WAKEUP_TIMES: HashMap<u32, u64> = HashMap::<u32, u64>::with_max_entries(16_384, 0);
 
 #[map]
-static DROP_COUNTERS: HashMap<u32, u64> =
-    HashMap::<u32, u64>::with_max_entries(DROP_COUNTERS_MAX, 0);
+static DROP_COUNTERS: PerCpuArray<u64> = PerCpuArray::<u64>::with_max_entries(DROP_COUNTERS_MAX, 0);
 
 #[tracepoint]
 pub fn sched_wakeup(ctx: TracePointContext) -> u32 {
@@ -61,9 +60,13 @@ fn is_target_pid(pid: u32) -> bool {
 }
 
 fn increment_drop_counter(reason: u32) {
-    let current = unsafe { DROP_COUNTERS.get(&reason).copied().unwrap_or(0) };
-    let next = current.saturating_add(1);
-    let _ = DROP_COUNTERS.insert(&reason, &next, 0);
+    let Some(counter) = DROP_COUNTERS.get_ptr_mut(reason) else {
+        return;
+    };
+
+    unsafe {
+        *counter = (*counter).saturating_add(1);
+    }
 }
 
 fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {

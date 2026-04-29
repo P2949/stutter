@@ -102,6 +102,15 @@ struct ApplyProfileArgs {
 
     #[arg(long = "profile", value_name = "FILE")]
     profile: PathBuf,
+
+    #[arg(long)]
+    force: bool,
+
+    #[arg(long)]
+    watch: bool,
+
+    #[arg(long = "refresh-ms", default_value_t = 1_000)]
+    refresh_ms: u64,
 }
 
 #[derive(Debug)]
@@ -111,6 +120,9 @@ pub enum AppCommand {
     ApplyProfile {
         tree_pid: u32,
         profile: PathBuf,
+        force: bool,
+        watch: bool,
+        refresh_ms: u64,
     },
     InspectTree {
         tree_pid: u32,
@@ -198,9 +210,15 @@ where
             if args.tree_pid == 0 {
                 anyhow::bail!("--tree-pid must be greater than zero");
             }
+            if args.refresh_ms == 0 {
+                anyhow::bail!("--refresh-ms must be greater than zero");
+            }
             Ok(AppCommand::ApplyProfile {
                 tree_pid: args.tree_pid,
                 profile: args.profile,
+                force: args.force,
+                watch: args.watch,
+                refresh_ms: args.refresh_ms,
             })
         }
         None => Ok(AppCommand::Monitor(config_from_monitor_args(
@@ -413,11 +431,52 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::ApplyProfile { tree_pid, profile } = apply else {
+        let AppCommand::ApplyProfile {
+            tree_pid,
+            profile,
+            force,
+            watch,
+            refresh_ms,
+        } = apply
+        else {
             panic!("expected apply profile command");
         };
 
         assert_eq!(tree_pid, 42);
         assert_eq!(profile, PathBuf::from("/tmp/profile.toml"));
+        assert!(!force);
+        assert!(!watch);
+        assert_eq!(refresh_ms, 1_000);
+    }
+
+    #[test]
+    fn parses_apply_profile_force_watch_and_refresh() {
+        let command = parse_app_command_from([
+            "stutter",
+            "apply-profile",
+            "--tree-pid",
+            "42",
+            "--profile",
+            "/tmp/profile.toml",
+            "--force",
+            "--watch",
+            "--refresh-ms",
+            "250",
+        ])
+        .unwrap();
+
+        let AppCommand::ApplyProfile {
+            force,
+            watch,
+            refresh_ms,
+            ..
+        } = command
+        else {
+            panic!("expected apply profile command");
+        };
+
+        assert!(force);
+        assert!(watch);
+        assert_eq!(refresh_ms, 250);
     }
 }

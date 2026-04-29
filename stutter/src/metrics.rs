@@ -29,6 +29,8 @@ pub struct TaskStats {
     pub class: TaskClass,
     pub process_pid: Option<u32>,
     pub process_comm: String,
+    pub process_starttime_ticks: Option<u64>,
+    pub task_starttime_ticks: Option<u64>,
     pub active: bool,
     pub first_seen_ms: u128,
     pub last_seen_ms: u128,
@@ -402,6 +404,8 @@ impl TaskStats {
             class,
             process_pid: None,
             process_comm: String::new(),
+            process_starttime_ticks: None,
+            task_starttime_ticks: None,
             active: true,
             first_seen_ms: elapsed_ms,
             last_seen_ms: elapsed_ms,
@@ -418,8 +422,10 @@ impl TaskStats {
         self.class = task_info.class;
         self.process_pid = Some(task_info.process_pid);
         self.process_comm = task_info.process_comm.clone();
+        self.process_starttime_ticks = task_info.process_starttime_ticks;
+        self.task_starttime_ticks = task_info.task_starttime_ticks;
 
-        if self.comm == "?" || self.comm.is_empty() {
+        if should_replace_comm_from_task_info(&self.comm, task_info) {
             self.comm = task_info.comm.clone();
         }
     }
@@ -450,6 +456,12 @@ impl TaskStats {
             self.top_spikes.truncate(16);
         }
     }
+}
+
+fn should_replace_comm_from_task_info(current: &str, task_info: &TaskInfo) -> bool {
+    (current == "?" || current.is_empty())
+        || current == task_info.process_comm
+        || current == "wine64-preloader"
 }
 
 fn percentile_from_sorted(samples: &[u64], percentile: f64) -> u64 {

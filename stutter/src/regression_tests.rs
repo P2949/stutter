@@ -109,6 +109,28 @@ fn same_reused_tid_reactivates_without_clearing_stats() {
 }
 
 #[test]
+fn same_tid_same_names_different_starttime_resets_stats() {
+    let mut stats_by_task = BTreeMap::from([(
+        42,
+        task_stats_with_info(42, 100, "game", "worker", TaskClass::Game, 10),
+    )]);
+    {
+        let stats = stats_by_task.get_mut(&42).unwrap();
+        stats.removed_ms = Some(50);
+        stats.session_latency.record(3_000_000);
+    }
+
+    let mut new_task = task_info(42, 100, "game", "worker", TaskClass::Game);
+    new_task.task_starttime_ticks = Some(999);
+    super::reactivate_or_reset_stats(&mut stats_by_task, 42, &new_task, 77);
+
+    let stats = stats_by_task.get(&42).unwrap();
+    assert_eq!(stats.first_seen_ms, 77);
+    assert_eq!(stats.session_latency.count, 0);
+    assert_eq!(stats.task_starttime_ticks, Some(999));
+}
+
+#[test]
 fn event_comm_updates_only_unknown_existing_name() {
     let config = test_config(vec![7], vec![], None);
     let active_targets = BTreeMap::new();
@@ -462,6 +484,93 @@ fn target_snapshot_filters_include_and_exclude_comm_patterns() {
 }
 
 #[test]
+fn proc_stat_starttime_handles_comm_with_parentheses() {
+    let stat = "123 (name with ) paren) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 98765 0";
+
+    assert_eq!(process_tree::parse_proc_stat_starttime(stat), Some(98_765));
+}
+
+#[test]
+fn watch_process_selection_prefers_exact_then_executable_then_highest_pid() {
+    let dir = temp_test_dir("watch-select");
+    create_fake_proc(&dir, 10, 1, "helper", "/games/KingdomCome", &[10]);
+    create_fake_proc(&dir, 20, 1, "KingdomCome", "/runtime/helper", &[20]);
+    create_fake_proc(&dir, 30, 1, "other", "/bin/other KingdomCome", &[30]);
+
+    assert_eq!(
+        super::find_process_by_pattern_at(&dir, "KingdomCome"),
+        Some(20)
+    );
+
+    fs::remove_dir_all(&dir).ok();
+
+    let dir = temp_test_dir("watch-highest");
+    create_fake_proc(&dir, 10, 1, "helper", "/bin/foo target", &[10]);
+    create_fake_proc(&dir, 30, 1, "helper", "/bin/bar target", &[30]);
+
+    assert_eq!(super::find_process_by_pattern_at(&dir, "target"), Some(30));
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn old_session_task_without_starttime_fields_deserializes() {
+    let task: recorder::SessionTask = serde_json::from_value(serde_json::json!({
+        "task": 7,
+        "active": true,
+        "first_seen_ms": 0,
+        "last_seen_ms": 1,
+        "removed_ms": null,
+        "class": "Game",
+        "process_pid": 7,
+        "process_comm": "game",
+        "comm": "worker",
+        "latency": {
+            "samples": 1,
+            "stored_samples": 1,
+            "truncated_samples": 0,
+            "percentile_scope": "exact",
+            "histogram": [],
+            "min_ns": 1,
+            "avg_ns": 1,
+            "p95_ns": 1,
+            "p99_ns": 1,
+            "max_ns": 1,
+            "over_1ms": 0,
+            "over_2ms": 0,
+            "over_5ms": 0
+        },
+        "cpu": {
+            "busiest_cpu": null,
+            "busiest_cpu_samples": 0,
+            "worst_cpu": null,
+            "worst_cpu_max_ns": 0,
+            "spikiest_cpu": null,
+            "spikiest_cpu_spikes": 0,
+            "per_cpu": []
+        },
+        "top_spikes": []
+    }))
+    .unwrap();
+
+    assert_eq!(task.process_starttime_ticks, None);
+    assert_eq!(task.task_starttime_ticks, None);
+}
+
+#[test]
+fn recorded_time_accepts_legacy_local_field() {
+    let recorded: recorder::RecordedTime = serde_json::from_str(
+        r#"{"unix_seconds":0,"unix_nanos":0,"local":"SystemTime { tv_sec: 0, tv_nsec: 0 }"}"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        recorded.system_time_debug,
+        "SystemTime { tv_sec: 0, tv_nsec: 0 }"
+    );
+}
+
+#[test]
 fn report_reads_recorded_session_and_spike_events() {
     let dir = temp_test_dir("report-smoke");
     fs::create_dir_all(&dir).unwrap();
@@ -676,6 +785,8 @@ fn task_info(
         process_ppid: 1,
         comm: comm.to_owned(),
         process_comm: process_comm.to_owned(),
+        process_starttime_ticks: Some(u64::from(process_pid) * 10),
+        task_starttime_ticks: Some(u64::from(tid) * 10),
         class,
     }
 }
@@ -748,10 +859,18 @@ fn create_fake_proc(
     )
     .unwrap();
     fs::write(proc_dir.join("cmdline"), cmdline.as_bytes()).unwrap();
+    fs::write(proc_dir.join("stat"), fake_stat(name, u64::from(pid) * 10)).unwrap();
 
     for tid in tids {
         let task_dir = proc_dir.join("task").join(tid.to_string());
         fs::create_dir_all(&task_dir).unwrap();
         fs::write(task_dir.join("comm"), format!("{name}-{tid}\n")).unwrap();
+        fs::write(task_dir.join("stat"), fake_stat(name, u64::from(*tid) * 10)).unwrap();
     }
+}
+
+fn fake_stat(comm: &str, starttime: u64) -> String {
+    let mut fields = vec!["0".to_owned(); 18];
+    fields.push(starttime.to_string());
+    format!("1 ({comm}) S {}\n", fields.join(" "))
 }

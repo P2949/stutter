@@ -12,7 +12,12 @@ mod scx;
 #[cfg(test)]
 mod regression_tests;
 
-use std::{collections::BTreeMap, future, path::Path, time::Instant};
+use std::{
+    collections::BTreeMap,
+    future,
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 use aya::maps::{HashMap as AyaHashMap, MapData};
 use cli::{AppCommand, Config, parse_app_command};
@@ -65,14 +70,13 @@ async fn main() -> anyhow::Result<()> {
             println!("restored {restored} affinity record(s)");
             Ok(())
         }
-        AppCommand::ApplyProfile { tree_pid, profile } => {
-            let records = profiles::apply_profile_to_tree(tree_pid, &profile)?;
-            println!(
-                "applied profile affinity to {} task(s); restore with: stutter restore",
-                records.len()
-            );
-            Ok(())
-        }
+        AppCommand::ApplyProfile {
+            tree_pid,
+            profile,
+            force,
+            watch,
+            refresh_ms,
+        } => apply_profile_command(tree_pid, profile, force, watch, refresh_ms).await,
         AppCommand::InspectTree { tree_pid } => {
             let rendered = process_tree::render_tree(tree_pid)?;
             print!("{rendered}");
@@ -87,8 +91,47 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
+async fn apply_profile_command(
+    tree_pid: u32,
+    profile_path: PathBuf,
+    force: bool,
+    watch: bool,
+    refresh_ms: u64,
+) -> anyhow::Result<()> {
+    let profile = profiles::load_first_profile(&profile_path)?;
+    let records = profiles::apply_profile_to_tree(tree_pid, &profile, force)?;
+    println!(
+        "applied profile affinity to {} task(s); restore with: stutter restore",
+        records.len()
+    );
+
+    if !watch {
+        println!("apply-profile is one-shot; use --watch to keep applying to new threads");
+        return Ok(());
+    }
+
+    let mut tick = interval(Duration::from_millis(refresh_ms));
+    tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    tick.tick().await;
+
+    loop {
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                println!("stopped profile watch; restore with: stutter restore");
+                return Ok(());
+            }
+            _ = tick.tick() => {
+                let records = profiles::apply_profile_to_tree(tree_pid, &profile, false)?;
+                if !records.is_empty() {
+                    info!("profile_watch_applied tasks={}", records.len());
+                }
+            }
+        }
+    }
+}
+
 async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
-    resolve_watch_process(&mut config).await?;
+    let mut watched_root_pid = resolve_watch_process(&mut config).await?;
 
     let recording = prepare_recording(&config)?;
     let mut loaded = ebpf_loader::load_and_attach()?;
@@ -128,8 +171,9 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     scx_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     scx_tick.tick().await;
 
-    let duration_future = async {
-        if let Some(max_duration) = config.max_duration {
+    let max_duration = config.max_duration;
+    let duration_future = async move {
+        if let Some(max_duration) = max_duration {
             sleep(max_duration).await;
         } else {
             future::pending::<()>().await;
@@ -165,6 +209,31 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
             }
 
             _ = tree_tick.tick(), if !config.tree_pids.is_empty() => {
+                if let Some(root_pid) = watched_root_pid
+                    && !process_pid_exists(root_pid)
+                {
+                    remove_watch_tree_pid(&mut config, root_pid);
+                    refresh_target_tasks(RefreshTargetTasksInput {
+                        config: &config,
+                        active_targets: &mut active_targets,
+                        known_targets: &mut known_targets,
+                        stats_by_task: &mut stats_by_task,
+                        tree_events: &mut tree_events,
+                        target_pid_map: &mut loaded.target_pid_map,
+                        elapsed_ms: started.elapsed().as_millis(),
+                        recording_started: recording.as_ref().map(|run| run.started_instant),
+                    })?;
+
+                    if !config.persistent {
+                        break "watched_process_exit".to_owned();
+                    }
+
+                    match wait_for_watch_process(&mut config).await? {
+                        Some(root_pid) => watched_root_pid = Some(root_pid),
+                        None => break "ctrl_c".to_owned(),
+                    }
+                }
+
                 refresh_target_tasks(RefreshTargetTasksInput {
                     config: &config,
                     active_targets: &mut active_targets,
@@ -245,15 +314,27 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn resolve_watch_process(config: &mut Config) -> anyhow::Result<()> {
+async fn resolve_watch_process(config: &mut Config) -> anyhow::Result<Option<u32>> {
     let Some(pattern) = config.watch_process.clone() else {
-        return Ok(());
+        return Ok(None);
     };
 
-    if let Some(pid) = find_process_by_pattern(&pattern) {
+    if let Some(pid) = find_process_by_pattern_at(Path::new("/proc"), &pattern) {
         add_watch_tree_pid(config, pid);
-        return Ok(());
+        return Ok(Some(pid));
     }
+
+    wait_for_watch_process(config)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("stopped while waiting for --watch-process {pattern}"))
+        .map(Some)
+}
+
+async fn wait_for_watch_process(config: &mut Config) -> anyhow::Result<Option<u32>> {
+    let pattern = config
+        .watch_process
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("internal error: watch_process missing"))?;
 
     info!(
         "watch_process_waiting pattern={} persistent={}",
@@ -266,13 +347,13 @@ async fn resolve_watch_process(config: &mut Config) -> anyhow::Result<()> {
     loop {
         tokio::select! {
             _ = signal::ctrl_c() => {
-                anyhow::bail!("stopped while waiting for --watch-process {pattern}");
+                return Ok(None);
             }
             _ = tick.tick() => {
-                if let Some(pid) = find_process_by_pattern(&pattern) {
+                if let Some(pid) = find_process_by_pattern_at(Path::new("/proc"), &pattern) {
                     add_watch_tree_pid(config, pid);
                     info!("watch_process_found pattern={} pid={}", pattern, pid);
-                    return Ok(());
+                    return Ok(Some(pid));
                 }
             }
         }
@@ -285,12 +366,42 @@ fn add_watch_tree_pid(config: &mut Config, pid: u32) {
     config.tree_pids.dedup();
 }
 
-fn find_process_by_pattern(pattern: &str) -> Option<u32> {
-    process_tree::scan_processes_at(Path::new("/proc"))
+fn remove_watch_tree_pid(config: &mut Config, pid: u32) {
+    config.tree_pids.retain(|tree_pid| *tree_pid != pid);
+}
+
+fn process_pid_exists(pid: u32) -> bool {
+    Path::new("/proc").join(pid.to_string()).exists()
+}
+
+fn find_process_by_pattern_at(proc_root: &Path, pattern: &str) -> Option<u32> {
+    process_tree::scan_processes_at(proc_root)
         .into_iter()
-        .find_map(|(pid, process)| {
-            (process.comm.contains(pattern) || process.cmdline.contains(pattern)).then_some(pid)
+        .filter_map(|(pid, process)| {
+            let score = process_match_score(pattern, &process.comm, &process.cmdline)?;
+            Some((score, pid))
         })
+        .max_by_key(|(score, pid)| (*score, *pid))
+        .map(|(_, pid)| pid)
+}
+
+fn process_match_score(pattern: &str, comm: &str, cmdline: &str) -> Option<u8> {
+    if comm == pattern {
+        return Some(3);
+    }
+
+    if cmdline_executable_basename(cmdline).as_deref() == Some(pattern) {
+        return Some(2);
+    }
+
+    (comm.contains(pattern) || cmdline.contains(pattern)).then_some(1)
+}
+
+fn cmdline_executable_basename(cmdline: &str) -> Option<String> {
+    let executable = cmdline.split_whitespace().next()?;
+    PathBuf::from(executable)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
 }
 
 fn handle_event(input: HandleEventInput<'_>) {
@@ -530,6 +641,8 @@ fn reactivate_or_reset_stats(
 fn same_logical_task(stats: &metrics::TaskStats, task_info: &TaskInfo) -> bool {
     stats.process_pid == Some(task_info.process_pid)
         && stats.process_comm == task_info.process_comm
+        && stats.process_starttime_ticks == task_info.process_starttime_ticks
+        && stats.task_starttime_ticks == task_info.task_starttime_ticks
         && stats.comm == task_info.comm
         && stats.class == task_info.class
 }
@@ -540,6 +653,8 @@ fn same_task_info(left: &TaskInfo, right: &TaskInfo) -> bool {
         && left.process_ppid == right.process_ppid
         && left.comm == right.comm
         && left.process_comm == right.process_comm
+        && left.process_starttime_ticks == right.process_starttime_ticks
+        && left.task_starttime_ticks == right.task_starttime_ticks
         && left.class == right.class
 }
 
