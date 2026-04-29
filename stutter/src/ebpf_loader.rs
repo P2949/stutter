@@ -47,52 +47,64 @@ impl LoadedEbpf {
     }
 }
 
-pub fn load_and_attach() -> anyhow::Result<LoadedEbpf> {
+pub fn load_and_attach() -> Result<LoadedEbpf, crate::error::StutterError> {
     raise_memlock_limit();
-    let tracepoints = validate_tracepoint_formats(Path::new("/sys/kernel/tracing/events"))?;
+    let tracepoints = validate_tracepoint_formats(Path::new("/sys/kernel/tracing/events"))
+        .map_err(|e| crate::error::StutterError::TracepointOffsetMismatch(e.to_string()))?;
 
     let mut ebpf = Ebpf::load(aya::include_bytes_aligned!(concat!(
         env!("OUT_DIR"),
         "/stutter"
-    )))?;
+    )))
+    .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
-    attach_tracepoint(&mut ebpf, "sched_wakeup", "sched", "sched_wakeup")?;
+    attach_tracepoint(&mut ebpf, "sched_wakeup", "sched", "sched_wakeup")
+        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     if tracepoints.sched_wakeup_new {
-        attach_tracepoint(&mut ebpf, "sched_wakeup_new", "sched", "sched_wakeup_new")?;
+        attach_tracepoint(&mut ebpf, "sched_wakeup_new", "sched", "sched_wakeup_new")
+            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
-    attach_tracepoint(&mut ebpf, "sched_switch", "sched", "sched_switch")?;
+    attach_tracepoint(&mut ebpf, "sched_switch", "sched", "sched_switch")
+        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     attach_tracepoint(
         &mut ebpf,
         "sched_process_exit",
         "sched",
         "sched_process_exit",
-    )?;
+    )
+    .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     if tracepoints.irq_handler {
-        attach_tracepoint(&mut ebpf, "irq_handler_entry", "irq", "irq_handler_entry")?;
-        attach_tracepoint(&mut ebpf, "irq_handler_exit", "irq", "irq_handler_exit")?;
+        attach_tracepoint(&mut ebpf, "irq_handler_entry", "irq", "irq_handler_entry")
+            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        attach_tracepoint(&mut ebpf, "irq_handler_exit", "irq", "irq_handler_exit")
+            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
 
     let target_pid_map = AyaHashMap::try_from(
         ebpf.take_map("TARGET_PIDS")
-            .ok_or_else(|| anyhow::anyhow!("TARGET_PIDS map not found"))?,
-    )?;
+            .ok_or_else(|| crate::error::StutterError::EbpfLoad("TARGET_PIDS map not found".to_owned()))?,
+    )
+    .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
     let target_irq_map = ebpf
         .take_map("TARGET_IRQS")
         .map(AyaHashMap::try_from)
-        .transpose()?;
+        .transpose()
+        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
     let drop_counters = PerCpuArray::try_from(
         ebpf.take_map("DROP_COUNTERS")
-            .ok_or_else(|| anyhow::anyhow!("DROP_COUNTERS map not found"))?,
-    )?;
+            .ok_or_else(|| crate::error::StutterError::EbpfLoad("DROP_COUNTERS map not found".to_owned()))?,
+    )
+    .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
     let events = RingBuf::try_from(
         ebpf.take_map("EVENTS")
-            .ok_or_else(|| anyhow::anyhow!("EVENTS map not found"))?,
-    )?;
+            .ok_or_else(|| crate::error::StutterError::EbpfLoad("EVENTS map not found".to_owned()))?,
+    )
+    .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
-    let events = AsyncFd::new(events)?;
+    let events = AsyncFd::new(events).map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
     Ok(LoadedEbpf {
         ebpf,
@@ -178,34 +190,29 @@ fn validate_tracepoint_format_at(
 ) -> anyhow::Result<()> {
     let format = fs::read_to_string(path)
         .with_context(|| format!("failed to read tracepoint format {}", path.display()))?;
-    validate_tracepoint_format(&format, expected_offsets).with_context(|| {
-        format!(
-            "tracepoint format {} does not match eBPF offsets",
-            path.display()
-        )
-    })
-}
 
-fn validate_tracepoint_format(
-    format: &str,
-    expected_offsets: &[(&str, usize)],
-) -> anyhow::Result<()> {
-    let offsets = parse_tracepoint_offsets(format);
+    let offsets = parse_tracepoint_offsets(&format);
 
     for (field, expected_offset) in expected_offsets {
         let Some(actual_offset) = offsets.get(*field) else {
-            anyhow::bail!("missing field {field}");
+            anyhow::bail!(
+                "tracepoint format {} missing field {field}; expected offset {expected_offset};\n\nThis usually means your kernel's tracepoint layout differs from the eBPF program's assumptions. Try rebuilding the eBPF program against your current kernel headers or upgrading your kernel. If that doesn't help, please open an issue providing your kernel version and the contents of {}.",
+                path.display(), path.display()
+            );
         };
 
         if *actual_offset != *expected_offset {
             anyhow::bail!(
-                "field {field} offset mismatch: expected {expected_offset}, got {actual_offset}"
+                "tracepoint format {} field {field} offset mismatch: expected {expected_offset}, got {actual_offset};\n\nThis indicates the kernel tracepoint layout changed. Try building the eBPF program for your running kernel (ensure you have rust-src and bpf-linker available) or upgrade your kernel. If the problem persists, please open an issue and include the format file contents: {}",
+                path.display(), path.display()
             );
         }
     }
 
     Ok(())
 }
+
+
 
 fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, usize> {
     let mut offsets = BTreeMap::new();
@@ -238,6 +245,28 @@ fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, usize> {
     }
 
     offsets
+}
+
+#[allow(dead_code)]
+fn validate_tracepoint_format(
+    format: &str,
+    expected_offsets: &[(&str, usize)],
+) -> anyhow::Result<()> {
+    let offsets = parse_tracepoint_offsets(format);
+
+    for (field, expected_offset) in expected_offsets {
+        let Some(actual_offset) = offsets.get(*field) else {
+            anyhow::bail!("missing field {field}");
+        };
+
+        if *actual_offset != *expected_offset {
+            anyhow::bail!(
+                "field {field} offset mismatch: expected {expected_offset}, got {actual_offset}"
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn field_name_from_part(field_part: &str) -> Option<String> {

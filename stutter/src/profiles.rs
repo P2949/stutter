@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::Context;
 use serde::Deserialize;
+use regex::Regex;
 
 use crate::{
     affinity::{self, AffinityRecord, CpuMask},
@@ -153,12 +154,30 @@ where
         let Some(rule) = profile.classes.get(&task.class) else {
             continue;
         };
-        if !rule.match_comm.is_empty()
-            && !rule
-                .match_comm
-                .iter()
-                .any(|pattern| task.comm.contains(pattern) || task.process_comm.contains(pattern))
-        {
+        if !rule.match_comm.is_empty() && !rule.match_comm.iter().any(|pattern| {
+            let comms = [&task.comm, task.process_comm.as_ref()];
+            // Treat patterns like `/.../` as explicit regex; otherwise attempt regex if
+            // it contains common regex metacharacters, else do substring match.
+            if pattern.len() >= 2 && pattern.starts_with('/') && pattern.ends_with('/') {
+                match Regex::new(&pattern[1..pattern.len() - 1]) {
+                    Ok(re) => comms.iter().any(|c| re.is_match(c)),
+                    Err(err) => {
+                        log::warn!("invalid profile regex '{}': {err}", pattern);
+                        false
+                    }
+                }
+            } else if pattern.chars().any(|c| ".^$*+?()[]{}|\\".contains(c)) {
+                match Regex::new(pattern) {
+                    Ok(re) => comms.iter().any(|c| re.is_match(c)),
+                    Err(err) => {
+                        log::warn!("invalid profile regex '{}': {err}", pattern);
+                        false
+                    }
+                }
+            } else {
+                comms.iter().any(|c| c.contains(pattern))
+            }
+        }) {
             continue;
         }
 

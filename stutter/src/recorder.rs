@@ -7,6 +7,8 @@ use std::{
 };
 
 use anyhow::Context;
+use crate::error::StutterError;
+use std::io;
 use serde::{Deserialize, Serialize};
 use stutter_common::SchedulerEvent;
 
@@ -381,7 +383,10 @@ pub fn prepare_recording(config: &Config) -> anyhow::Result<Option<RecordingRun>
 
     let started_at = SystemTime::now();
     let run_dir = resolve_run_dir(recording, started_at, env::var_os("HOME"));
-    ensure_empty_dir(&run_dir)?;
+    if let Err(err) = ensure_empty_dir(&run_dir) {
+        let io_err = io::Error::other(err);
+        return Err(anyhow::Error::new(StutterError::RecordWrite(io_err)));
+    }
 
     Ok(Some(RecordingRun {
         run_name: recording.run_name.clone(),
@@ -533,18 +538,34 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         drop_counters,
     };
 
-    write_json(recording.run_dir.join("session.json"), &session)?;
-    write_json(recording.run_dir.join("metadata.json"), &metadata_file)?;
-    write_json(recording.run_dir.join("interval.json"), interval_records)?;
-    write_json(recording.run_dir.join("tree_events.json"), tree_events)?;
-    write_json(recording.run_dir.join("spike_events.json"), spike_events)?;
-    write_json(recording.run_dir.join("scx_events.json"), scx_events)?;
-    write_json(recording.run_dir.join("irq_events.json"), irq_events)?;
-    write_json(recording.run_dir.join("gpu_samples.json"), gpu_samples)?;
+    // Map any write errors to `StutterError::RecordWrite` so callers can decide
+    // whether a failed recording should be treated as fatal.
+    let map_write_err = |e: anyhow::Error| -> anyhow::Error {
+        let io_err = io::Error::other(e.to_string());
+        anyhow::Error::new(StutterError::RecordWrite(io_err))
+    };
+
+    write_json(recording.run_dir.join("session.json"), &session)
+        .map_err(map_write_err)?;
+    write_json(recording.run_dir.join("metadata.json"), &metadata_file)
+        .map_err(map_write_err)?;
+    write_json(recording.run_dir.join("interval.json"), interval_records)
+        .map_err(map_write_err)?;
+    write_json(recording.run_dir.join("tree_events.json"), tree_events)
+        .map_err(map_write_err)?;
+    write_json(recording.run_dir.join("spike_events.json"), spike_events)
+        .map_err(map_write_err)?;
+    write_json(recording.run_dir.join("scx_events.json"), scx_events)
+        .map_err(map_write_err)?;
+    write_json(recording.run_dir.join("irq_events.json"), irq_events)
+        .map_err(map_write_err)?;
+    write_json(recording.run_dir.join("gpu_samples.json"), gpu_samples)
+        .map_err(map_write_err)?;
     write_json(
         recording.run_dir.join("frame_correlation.json"),
         frame_events,
-    )?;
+    )
+    .map_err(map_write_err)?;
 
     println!("recording written to {}", recording.run_dir.display());
     Ok(())

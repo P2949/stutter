@@ -59,11 +59,13 @@ fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
     let mut stats_by_task = BTreeMap::from([(42, stats)]);
 
     let mut tree_events = Vec::new();
+    let mut task_exe_inodes: BTreeMap<u32, (u64, u64, Option<u64>)> = BTreeMap::new();
     super::handle_same_tid_replacements(
         &active_targets,
         &desired_tasks,
         &mut known_targets,
         &mut stats_by_task,
+        &mut task_exe_inodes,
         &mut tree_events,
         77,
         Some(Instant::now()),
@@ -948,6 +950,7 @@ fn test_config(
         irq_latency: false,
         irqs: Vec::new(),
         hwmon: false,
+        hwmon_root: None,
         mangohud_log: None,
         tui: false,
         recording: None,

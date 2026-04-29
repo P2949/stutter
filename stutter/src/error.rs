@@ -13,7 +13,7 @@ pub enum StutterError {
     TracepointOffsetMismatch(String),
     #[error("affinity denied")]
     AffinityDenied(#[source] io::Error),
-    #[error("record write failed")]
+    #[error("record write failed: {0}")]
     RecordWrite(#[source] io::Error),
     #[error("profile parse failed: {0}")]
     ProfileParse(String),

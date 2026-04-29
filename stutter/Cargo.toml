@@ -27,6 +27,7 @@ tokio = { workspace = true, features = [
     "signal",
     "time",
 ] }
+regex = { workspace = true }
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }

@@ -17,7 +17,7 @@ pub fn render_status(
     }
 
     let mut output = format!(
-        "stutter live active_tasks={} tracked_stats={}\n",
+        "stutter live active_tasks={} tracked_stats={} tui_mode=plain_text\n",
         active_targets.len(),
         stats.len()
     );

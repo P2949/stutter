@@ -136,6 +136,21 @@ RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- record \
   --mangohud-log /path/to/MangoHud.csv
 ```
 
+Hardware monitoring notes:
+
+- You can override the hwmon discovery path with `--hwmon-root /path/to/hwmon` when the automatic
+  detection doesn't find your GPU sensors.
+- Frequent hwmon sampling uses cached file descriptors internally; if you see warnings about
+  `latency_samples_truncated`, that means stutter is storing a bounded number of exact samples
+  and will fall back to histogram-based percentile estimates for p95/p99.
+
+TUI notes:
+
+- The `--tui` flag currently renders a plain-text status summary (non-interactive).
+  It prints aggregated counts and a simple bar graph per task class. If you need an
+  interactive terminal UI with live histograms, please open an issue or contribute
+  to the `tui.rs` module.
+
 ## Generate a report
 
 ```bash
@@ -238,6 +253,69 @@ Unknown
 ```
 
 Unknown `.exe` processes are no longer automatically treated as critical game tasks. Known launchers/helpers are separated from likely game binaries.
+
+## Performance guidance
+
+- Prefer `--summary-ms` / `--epoch` values that match the latency scale you care about. Shorter summary windows (100-500ms) increase sample frequency and reporter work; longer windows reduce overhead.
+- Use `--hwmon` and `--irq-latency` only when you need those signals; sensor reads are cached but still impose blocking syscalls and should be sampled via the monitor's blocking worker.
+- If you see significant overhead, lower the monitor sampling rate, drop unneeded `--tree-pid` roots, or increase eBPF map sizes (rebuild the eBPF program with larger constants) to reduce map churn.
+
+## Recording JSON schema (short)
+
+- `metadata.json`: run metadata and CLI flags used.
+- `session.json`: per-task summary, histogram buckets, and `percentile_scope` telling whether exact samples were used or histogram-based percentiles.
+- `interval.json`: periodic interval summaries used by the `report` command.
+- `spike_events.json`: detected spike clusters used for HTML report generation.
+
+For programmatic consumption, inspect the example outputs in a sample run directory created under `~/.local/state/stutter/runs/`.
+
+## CLI flags (quick reference)
+
+- `--pid <PID>`: add a manual TID/PID to monitor (can repeat).
+- `--tree-pid <PID>`: monitor an entire process tree rooted at `PID` (expands into per-task TIDs).
+- `--watch-process <COMM>`: poll `/proc` for a process whose name/comm matches `<COMM>` and automatically follow its tree; combine with `--persistent` to keep waiting across restarts.
+- `--persistent`: use with `--watch-process` to continue monitoring across relaunches.
+- `--summary-ms <MS>`: interval for interval summaries written to `interval.json` and printed to the TUI.
+- `--spike-us <US>`: spike detection threshold in microseconds (e.g., `--spike-us 1000` for 1ms).
+- `--irq-latency`: enable IRQ latency tracing and record `irq_events.json`.
+- `--irq <IRQ>`: add an IRQ number to target for IRQ latency measurement (can repeat).
+- `--hwmon`: enable GPU hwmon sampling; combines with `--hwmon-root` to override discovery.
+- `--hwmon-root <PATH>`: override hwmon discovery path when automatic detection fails.
+- `--mangohud-log <PATH>`: provide a MangoHud CSV to correlate frame times.
+- `--tui`: print a plain-text TUI status line periodically (non-interactive).
+
+## What TUI prints (example)
+
+The current `--tui` mode prints a compact status block like:
+
+```
+stutter live active_tasks=3 tracked_stats=4 tui_mode=plain_text
+class=Game        samples=123     max=12.345ms ################################
+class=Helper      samples=42      max=2.100ms  ########
+```
+
+The header includes `active_tasks` (number of monitored TIDs) and `tracked_stats` (per-task stats stored). Each `class=...` line shows aggregated `samples` and the observed `max` latency with a small ASCII bar.
+
+## Generated JSON files (overview)
+
+- `metadata.json` — run metadata: CLI flags, `run_name`, timestamps, and schema version.
+- `session.json` — per-task summary for the full session. Contains per-task histograms, sample counts, `max`, `percentile_scope` (either `capped_prefix` or `histogram` depending on whether exact samples were retained), and task identity fields (tid, process_pid, comm, class).
+- `interval.json` — periodic interval summaries matching `--summary-ms`, used by `report` for time-windowed analysis.
+- `spike_events.json` — detected latency spike clusters used by the HTML report and cluster summaries.
+- `irq_events.json` — IRQ enter/exit capture when `--irq-latency` is enabled.
+- `gpu_samples.json` — periodic hwmon samples when `--hwmon` is enabled.
+
+If you need machine-readable schemas, open a recorded run under `~/.local/state/stutter/runs/<run-dir>/` and inspect the files; they are stable across releases but may add fields in minor versions.
+
+## TID reuse detection (what we do)
+
+To reduce false positives when a TID/PID number is recycled by the kernel, `stutter` now combines multiple heuristics:
+
+- Prefer `starttime` fields read from `/proc/[pid]/stat` when available (these are clock-ticks since boot).
+- Compare the `/proc/[pid]/exe` file metadata (device + inode) between the previously-observed logical task and the newly-observed PID/TID. If the exe inode differs, we treat it as a different logical task.
+- When available, we compare the previously-observed process starttime with the current one to further disambiguate.
+
+These checks reduce collisions compared to relying on `starttime` alone, but in extremely constrained environments (shared containers or odd boot-time adjustments) collisions remain possible. For the most robust detection you can combine exe inode checks with cgroup membership or an explicit profile that targets executable paths.
 
 ## License
 
