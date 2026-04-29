@@ -98,7 +98,7 @@ fn apply_profile_to_tree_with_cache(
                 }
             }
             Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
-                // The task exited between planning and application; no affinity changed.
+                // ESRCH during set_affinity is fine because restore_all skips dead TIDs.
             }
             Err(err) => {
                 if !applied_records.is_empty() {
@@ -329,8 +329,8 @@ mod tests {
             tid: 7,
             process_pid: 7,
             process_ppid: 1,
-            comm: "RenderThread".to_owned(),
-            process_comm: "game".to_owned(),
+            comm: "RenderThread".into(),
+            process_comm: "game".into(),
             process_starttime_ticks: Some(70),
             task_starttime_ticks: Some(70),
             class: TaskClass::Game,

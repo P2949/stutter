@@ -64,6 +64,19 @@ struct HandleEventInput<'a> {
     spike_events: Option<&'a mut SpikeEventBuffer>,
 }
 
+struct DrainBpfEventsInput<'a> {
+    guard: tokio::io::unix::AsyncFdReadyMutGuard<'a, aya::maps::RingBuf<aya::maps::MapData>>,
+    config: &'a Config,
+    started: Instant,
+    active_targets: &'a BTreeMap<u32, TaskInfo>,
+    known_targets: &'a BTreeMap<u32, TaskInfo>,
+    stats_by_task: &'a mut BTreeMap<u32, metrics::TaskStats>,
+    recording_monotonic_start_ns: Option<u64>,
+    spike_events: &'a mut Option<SpikeEventBuffer>,
+    irq_events: &'a mut Vec<IrqEventRecord>,
+}
+
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -658,46 +671,18 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
             }
 
             ready = loaded.events.readable_mut() => {
-                let mut guard = ready?;
-                let rb = guard.get_inner_mut();
-
-                while let Some(item) = rb.next() {
-                    if item.len() < std::mem::size_of::<u32>() {
-                        warn!("short_bpf_event len={}", item.len());
-                        continue;
-                    }
-                    let kind = unsafe { *(item.as_ptr() as *const u32) };
-                    match kind {
-                        EVENT_RUNNABLE_LATENCY => {
-                            if item.len() < std::mem::size_of::<SchedulerEvent>() {
-                                warn!("short_scheduler_event len={}", item.len());
-                                continue;
-                            }
-                            let event = unsafe { &*(item.as_ptr() as *const SchedulerEvent) };
-                            handle_event(HandleEventInput {
-                                event,
-                                config: &config,
-                                started,
-                                active_targets: &active_targets,
-                                known_targets: &known_targets,
-                                stats_by_task: &mut stats_by_task,
-                                monotonic_start_ns: recording_monotonic_start_ns,
-                                spike_events: spike_events.as_mut(),
-                            });
-                        }
-                        EVENT_IRQ_LATENCY => {
-                            if item.len() < std::mem::size_of::<IrqEvent>() {
-                                warn!("short_irq_event len={}", item.len());
-                                continue;
-                            }
-                            let event = unsafe { &*(item.as_ptr() as *const IrqEvent) };
-                            handle_irq_event(recording_monotonic_start_ns, event, &mut irq_events);
-                        }
-                        other => warn!("unknown_bpf_event kind={other} len={}", item.len()),
-                    }
-                }
-
-                guard.clear_ready();
+                let guard = ready?; // This guard is consumed by the DrainBpfEventsInput struct.
+                drain_bpf_events(DrainBpfEventsInput {
+                    guard,
+                    config: &config,
+                    started,
+                    active_targets: &active_targets,
+                    known_targets: &known_targets,
+                    stats_by_task: &mut stats_by_task,
+                    recording_monotonic_start_ns,
+                    spike_events: &mut spike_events,
+                    irq_events: &mut irq_events,
+                });
             }
         }
     };
@@ -912,6 +897,61 @@ fn cmdline_executable_basename_lower(cmdline: &str) -> Option<String> {
     PathBuf::from(executable)
         .file_name()
         .map(|name| name.to_string_lossy().to_ascii_lowercase())
+}
+
+fn drain_bpf_events(
+    input: DrainBpfEventsInput<'_>,
+) {
+    let DrainBpfEventsInput {
+        mut guard,
+        config,
+        started,
+        active_targets,
+        known_targets,
+        stats_by_task,
+        recording_monotonic_start_ns,
+        spike_events,
+        irq_events,
+    } = input;
+
+    while let Some(item) = guard.get_inner_mut().next() {
+        if item.len() < std::mem::size_of::<u32>() {
+            warn!("short_bpf_event len={}", item.len());
+            continue;
+        }
+        let kind = unsafe { *(item.as_ptr() as *const u32) };
+        match kind {
+            EVENT_RUNNABLE_LATENCY => {
+                if item.len() < std::mem::size_of::<SchedulerEvent>() {
+                    warn!("short_scheduler_event len={}", item.len());
+                    continue;
+                }
+                let event =
+                    unsafe { std::ptr::read_unaligned(item.as_ptr() as *const SchedulerEvent) };
+                handle_event(HandleEventInput {
+                    event: &event,
+                    config,
+                    started,
+                    active_targets,
+                    known_targets,
+                    stats_by_task,
+                    monotonic_start_ns: recording_monotonic_start_ns,
+                    spike_events: spike_events.as_mut(),
+                });
+            }
+            EVENT_IRQ_LATENCY => {
+                if item.len() < std::mem::size_of::<IrqEvent>() {
+                    warn!("short_irq_event len={}", item.len());
+                    continue;
+                }
+                let event = unsafe { std::ptr::read_unaligned(item.as_ptr() as *const IrqEvent) };
+                handle_irq_event(recording_monotonic_start_ns, &event, irq_events);
+            }
+            other => warn!("unknown_bpf_event kind={other} len={}", item.len()),
+        }
+    }
+
+    guard.clear_ready();
 }
 
 fn handle_event(input: HandleEventInput<'_>) {
@@ -1236,10 +1276,16 @@ fn same_task_info(left: &TaskInfo, right: &TaskInfo) -> bool {
         return false;
     }
 
-    left.process_ppid == right.process_ppid
-        && left.comm == right.comm
-        && left.process_comm == right.process_comm
-        && left.class == right.class
+    let has_any_starttime = left.process_starttime_ticks.is_some()
+        || right.process_starttime_ticks.is_some()
+        || left.task_starttime_ticks.is_some()
+        || right.task_starttime_ticks.is_some();
+
+    has_any_starttime
+        || (left.process_ppid == right.process_ppid
+            && left.comm == right.comm
+            && left.process_comm == right.process_comm
+            && left.class == right.class)
 }
 
 fn log_drop_counters(drop_counters: &ebpf_loader::DropCountersSnapshot) {

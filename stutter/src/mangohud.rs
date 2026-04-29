@@ -1,41 +1,55 @@
-use std::{fs, path::Path};
+use std::{fs, io::BufRead, path::Path};
 
 use anyhow::Context;
 
 use crate::recorder::FrameEvent;
 
 pub fn read_frame_events(path: &Path) -> anyhow::Result<Vec<FrameEvent>> {
-    let data = fs::read_to_string(path)
+    let file = fs::File::open(path)
         .with_context(|| format!("failed to read MangoHud log {}", path.display()))?;
-    Ok(parse_frame_events(&data))
+    let reader = std::io::BufReader::new(file);
+    parse_frame_events(reader.lines())
 }
 
-pub fn parse_frame_events(data: &str) -> Vec<FrameEvent> {
-    let mut lines = data.lines().filter(|line| !line.trim().is_empty());
+pub fn parse_frame_events<I>(mut lines: I) -> anyhow::Result<Vec<FrameEvent>>
+where
+    I: Iterator<Item = std::io::Result<String>>,
+{
     let Some(header) = lines.next() else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    let headers = split_csv_line(header);
+    let header = header?;
+    if header.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let headers = split_csv_line(&header);
     let elapsed_idx = find_header(&headers, &["elapsed_ms", "time_ms", "ms"]);
     let frametime_idx = find_header(&headers, &["frametime", "frametime_ms", "frame_time"]);
 
-    lines
-        .filter_map(|line| {
-            let columns = split_csv_line(line);
-            let frametime_ms = frametime_idx
-                .and_then(|idx| columns.get(idx))
-                .and_then(|value| value.parse::<f64>().ok())?;
+    let mut events = Vec::new();
+    for line in lines {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let columns = split_csv_line(&line);
+        if let Some(frametime_ms) = frametime_idx
+            .and_then(|idx| columns.get(idx))
+            .and_then(|value| value.parse::<f64>().ok())
+        {
             let elapsed_ms = elapsed_idx
                 .and_then(|idx| columns.get(idx))
                 .and_then(|value| value.parse::<f64>().ok())
                 .map(|value| value.max(0.0) as u128)
                 .unwrap_or(0);
-            Some(FrameEvent {
+            events.push(FrameEvent {
                 elapsed_ms,
                 frametime_ms,
-            })
-        })
-        .collect()
+            });
+        }
+    }
+
+    Ok(events)
 }
 
 fn find_header(headers: &[String], candidates: &[&str]) -> Option<usize> {
@@ -46,28 +60,9 @@ fn find_header(headers: &[String], candidates: &[&str]) -> Option<usize> {
 }
 
 fn split_csv_line(line: &str) -> Vec<String> {
-    let mut values = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    let mut chars = line.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '"' if in_quotes && chars.peek() == Some(&'"') => {
-                current.push('"');
-                chars.next();
-            }
-            '"' => in_quotes = !in_quotes,
-            ',' if !in_quotes => {
-                values.push(current.trim().to_owned());
-                current.clear();
-            }
-            _ => current.push(ch),
-        }
-    }
-
-    values.push(current.trim().to_owned());
-    values
+    line.split(',')
+        .map(|s| s.trim().to_owned())
+        .collect()
 }
 
 #[cfg(test)]
@@ -76,7 +71,8 @@ mod tests {
 
     #[test]
     fn parses_header_based_frametime_csv() {
-        let events = parse_frame_events("elapsed_ms,frametime_ms\n10,16.7\n20,33.4\n");
+        let data = "elapsed_ms,frametime_ms\n10,16.7\n20,33.4\n";
+        let events = parse_frame_events(data.lines().map(|s| Ok(s.to_owned()))).unwrap();
 
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].elapsed_ms, 10);

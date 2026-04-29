@@ -86,7 +86,7 @@ pub struct TreeEvent {
     pub process_pid: u32,
     pub process_ppid: u32,
     pub comm: String,
-    pub process_comm: String,
+    pub process_comm: std::sync::Arc<str>,
     pub class: TaskClass,
 }
 
@@ -219,7 +219,7 @@ pub struct SessionTask {
     pub removed_ms: Option<u128>,
     pub class: TaskClass,
     pub process_pid: Option<u32>,
-    pub process_comm: String,
+    pub process_comm: std::sync::Arc<str>,
     #[serde(default)]
     pub process_starttime_ticks: Option<u64>,
     #[serde(default)]
@@ -263,7 +263,7 @@ pub struct RecordedCpuSnapshot {
 pub struct RecordedSpike {
     pub class: TaskClass,
     pub process_pid: Option<u32>,
-    pub process_comm: String,
+    pub process_comm: std::sync::Arc<str>,
     pub cpu: u32,
     pub prio: i32,
     pub latency_ns: u64,
@@ -277,7 +277,7 @@ pub struct SessionSpike {
     pub active: bool,
     pub class: TaskClass,
     pub process_pid: Option<u32>,
-    pub process_comm: String,
+    pub process_comm: std::sync::Arc<str>,
     pub comm: String,
     pub cpu: u32,
     pub prio: i32,
@@ -294,7 +294,7 @@ pub struct SpikeEvent {
     pub active: bool,
     pub class: TaskClass,
     pub process_pid: Option<u32>,
-    pub process_comm: String,
+    pub process_comm: std::sync::Arc<str>,
     pub comm: String,
     pub cpu: u32,
     pub prio: i32,
@@ -752,11 +752,7 @@ fn csv_escape(value: &str) -> String {
 }
 
 fn write_json<T: ?Sized + Serialize>(path: PathBuf, value: &T) -> anyhow::Result<()> {
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| anyhow::anyhow!("invalid output path {}", path.display()))?
-        .to_string_lossy();
-    let tmp_path = path.with_file_name(format!("{file_name}.tmp"));
+    let tmp_path = path.with_file_name(format!("{}.tmp", path.file_name().unwrap_or_default().to_string_lossy()));
     let mut file = fs::File::create(&tmp_path)
         .with_context(|| format!("failed to create temp JSON {}", tmp_path.display()))?;
     file.write_all(&serde_json::to_vec_pretty(value)?)
