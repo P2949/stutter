@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
 };
@@ -166,6 +167,35 @@ pub fn save_restore_state(path: &Path, records: &[AffinityRecord]) -> anyhow::Re
     Ok(())
 }
 
+pub fn save_merged_restore_state(
+    path: &Path,
+    records: &[AffinityRecord],
+    force_overwrite: bool,
+) -> anyhow::Result<()> {
+    if force_overwrite || !path.exists() {
+        return save_restore_state(path, records);
+    }
+
+    let existing = load_restore_state(path)?;
+    let mut merged = BTreeMap::new();
+
+    for record in existing.records {
+        merged.insert(record.tid, record);
+    }
+
+    for record in records {
+        merged
+            .entry(record.tid)
+            .and_modify(|existing| {
+                existing.applied_mask = record.applied_mask;
+            })
+            .or_insert_with(|| record.clone());
+    }
+
+    let records = merged.into_values().collect::<Vec<_>>();
+    save_restore_state(path, &records)
+}
+
 pub fn load_restore_state(path: &Path) -> anyhow::Result<RestoreState> {
     let data = fs::read_to_string(path)
         .with_context(|| format!("failed to read restore file {}", path.display()))?;
@@ -213,5 +243,52 @@ mod tests {
     #[test]
     fn rejects_empty_cpu_mask() {
         assert!(CpuMask::parse("").is_err());
+    }
+
+    #[test]
+    fn merged_restore_state_preserves_earliest_original_mask() {
+        let dir = temp_dir("affinity-merge");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("restore.json");
+        save_restore_state(
+            &path,
+            &[AffinityRecord {
+                tid: 7,
+                original_mask: CpuMask(0b1111),
+                applied_mask: CpuMask(0b0011),
+            }],
+        )
+        .unwrap();
+
+        save_merged_restore_state(
+            &path,
+            &[AffinityRecord {
+                tid: 7,
+                original_mask: CpuMask(0b0011),
+                applied_mask: CpuMask(0b0001),
+            }],
+            false,
+        )
+        .unwrap();
+
+        let state = load_restore_state(&path).unwrap();
+        assert_eq!(state.records.len(), 1);
+        assert_eq!(state.records[0].original_mask, CpuMask(0b1111));
+        assert_eq!(state.records[0].applied_mask, CpuMask(0b0001));
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "stutter-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        dir
     }
 }

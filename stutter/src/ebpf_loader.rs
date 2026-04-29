@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fs, path::Path};
 
 use aya::{
     Ebpf,
-    maps::{HashMap as AyaHashMap, MapData, RingBuf},
+    maps::{HashMap as AyaHashMap, MapData, PerCpuArray, RingBuf},
     programs::TracePoint,
 };
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ pub struct LoadedEbpf {
     ebpf: Ebpf,
     pub events: AsyncFd<RingBuf<MapData>>,
     pub target_pid_map: AyaHashMap<MapData, u32, u8>,
-    drop_counters: AyaHashMap<MapData, u32, u64>,
+    drop_counters: PerCpuArray<MapData, u64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -47,7 +47,7 @@ impl LoadedEbpf {
 
 pub fn load_and_attach() -> anyhow::Result<LoadedEbpf> {
     raise_memlock_limit();
-    validate_tracepoint_formats(Path::new("/sys/kernel/tracing/events"))?;
+    let tracepoints = validate_tracepoint_formats(Path::new("/sys/kernel/tracing/events"))?;
 
     let mut ebpf = Ebpf::load(aya::include_bytes_aligned!(concat!(
         env!("OUT_DIR"),
@@ -55,7 +55,9 @@ pub fn load_and_attach() -> anyhow::Result<LoadedEbpf> {
     )))?;
 
     attach_tracepoint(&mut ebpf, "sched_wakeup", "sched", "sched_wakeup")?;
-    attach_tracepoint(&mut ebpf, "sched_wakeup_new", "sched", "sched_wakeup_new")?;
+    if tracepoints.sched_wakeup_new {
+        attach_tracepoint(&mut ebpf, "sched_wakeup_new", "sched", "sched_wakeup_new")?;
+    }
     attach_tracepoint(&mut ebpf, "sched_switch", "sched", "sched_switch")?;
     attach_tracepoint(
         &mut ebpf,
@@ -69,7 +71,7 @@ pub fn load_and_attach() -> anyhow::Result<LoadedEbpf> {
             .ok_or_else(|| anyhow::anyhow!("TARGET_PIDS map not found"))?,
     )?;
 
-    let drop_counters = AyaHashMap::try_from(
+    let drop_counters = PerCpuArray::try_from(
         ebpf.take_map("DROP_COUNTERS")
             .ok_or_else(|| anyhow::anyhow!("DROP_COUNTERS map not found"))?,
     )?;
@@ -106,16 +108,23 @@ fn attach_tracepoint(
     Ok(())
 }
 
-fn drop_counter_value(counters: &AyaHashMap<MapData, u32, u64>, key: u32) -> u64 {
-    counters.get(&key, 0).unwrap_or(0)
+fn drop_counter_value(counters: &PerCpuArray<MapData, u64>, key: u32) -> u64 {
+    counters
+        .get(&key, 0)
+        .map(|values| values.iter().copied().sum())
+        .unwrap_or(0)
 }
 
-fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<()> {
+struct TracepointAvailability {
+    sched_wakeup_new: bool,
+}
+
+fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointAvailability> {
     validate_tracepoint_format_at(
         &events_root.join("sched/sched_wakeup/format"),
         &[("pid", 24), ("prio", 28)],
     )?;
-    validate_tracepoint_format_at(
+    let sched_wakeup_new = validate_optional_tracepoint_format_at(
         &events_root.join("sched/sched_wakeup_new/format"),
         &[("pid", 24), ("prio", 28)],
     )?;
@@ -123,7 +132,23 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<()> {
         &events_root.join("sched/sched_switch/format"),
         &[("next_comm", 40), ("next_pid", 56), ("next_prio", 60)],
     )?;
-    Ok(())
+    Ok(TracepointAvailability { sched_wakeup_new })
+}
+
+fn validate_optional_tracepoint_format_at(
+    path: &Path,
+    expected_offsets: &[(&str, usize)],
+) -> anyhow::Result<bool> {
+    if !path.exists() {
+        log::warn!(
+            "optional tracepoint format missing: {}; continuing without sched_wakeup_new",
+            path.display()
+        );
+        return Ok(false);
+    }
+
+    validate_tracepoint_format_at(path, expected_offsets)?;
+    Ok(true)
 }
 
 fn validate_tracepoint_format_at(
@@ -276,5 +301,31 @@ field:int next_prio; offset:60; size:4; signed:1;
         let err = validate_tracepoint_format("field:int pid; offset:24;", &[("next_pid", 56)])
             .unwrap_err();
         assert!(err.to_string().contains("missing field next_pid"));
+    }
+
+    #[test]
+    fn optional_tracepoint_format_missing_is_not_an_error() {
+        let dir = temp_dir("optional-tracepoint");
+        fs::create_dir_all(&dir).unwrap();
+
+        let available =
+            validate_optional_tracepoint_format_at(&dir.join("missing/format"), &[("pid", 24)])
+                .unwrap();
+
+        assert!(!available);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "stutter-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        dir
     }
 }

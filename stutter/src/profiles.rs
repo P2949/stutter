@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, fs, path::Path};
 
 use anyhow::Context;
+use serde::Deserialize;
 
 use crate::{
     affinity::{self, AffinityRecord, CpuMask},
@@ -32,11 +33,11 @@ pub fn load_first_profile(path: &Path) -> anyhow::Result<Profile> {
 
 pub fn apply_profile_to_tree(
     tree_pid: u32,
-    profile_path: &Path,
+    profile: &Profile,
+    force_restore_overwrite: bool,
 ) -> anyhow::Result<Vec<AffinityRecord>> {
-    let profile = load_first_profile(profile_path)?;
     let snapshot = process_tree::target_snapshot(&[], &[tree_pid]);
-    let mut records = planned_affinity_records(&snapshot.tasks, &profile)?;
+    let mut records = planned_affinity_records(&snapshot.tasks, profile)?;
 
     records.sort_by_key(|record| record.tid);
     if records.is_empty() {
@@ -44,7 +45,7 @@ pub fn apply_profile_to_tree(
     }
 
     let restore_path = affinity::default_restore_path();
-    affinity::save_restore_state(&restore_path, &records)?;
+    affinity::save_merged_restore_state(&restore_path, &records, force_restore_overwrite)?;
 
     for record in &records {
         affinity::set_affinity(record.tid, record.applied_mask)?;
@@ -88,84 +89,12 @@ fn planned_affinity_records(
 }
 
 fn parse_profiles(data: &str) -> anyhow::Result<Vec<Profile>> {
-    let mut profiles = Vec::new();
-    let mut current_profile: Option<Profile> = None;
-    let mut current_class: Option<TaskClass> = None;
-
-    for raw_line in data.lines() {
-        let line = raw_line
-            .split_once('#')
-            .map_or(raw_line, |(line, _)| line)
-            .trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        if line == "[[profile]]" {
-            if let Some(profile) = current_profile.take() {
-                profiles.push(validate_profile(profile)?);
-            }
-            current_profile = Some(Profile {
-                name: String::new(),
-                classes: BTreeMap::new(),
-            });
-            current_class = None;
-            continue;
-        }
-
-        if let Some(class_name) = line
-            .strip_prefix("[profile.classes.")
-            .and_then(|line| line.strip_suffix(']'))
-        {
-            current_class = Some(parse_task_class(class_name)?);
-            let profile = current_profile
-                .as_mut()
-                .ok_or_else(|| anyhow::anyhow!("class table appeared before [[profile]]"))?;
-            profile
-                .classes
-                .entry(current_class.unwrap())
-                .or_insert(ProfileClassRule {
-                    affinity: CpuMask(0),
-                    match_comm: Vec::new(),
-                });
-            continue;
-        }
-
-        let (key, value) = line
-            .split_once('=')
-            .ok_or_else(|| anyhow::anyhow!("invalid profile line: {line}"))?;
-        let key = key.trim();
-        let value = value.trim();
-
-        let profile = current_profile
-            .as_mut()
-            .ok_or_else(|| anyhow::anyhow!("key {key} appeared before [[profile]]"))?;
-
-        match (current_class, key) {
-            (None, "name") => profile.name = parse_string(value)?,
-            (Some(class), "affinity") => {
-                profile
-                    .classes
-                    .get_mut(&class)
-                    .expect("class rule should exist")
-                    .affinity = CpuMask::parse(&parse_string(value)?)?;
-            }
-            (Some(class), "match_comm") => {
-                profile
-                    .classes
-                    .get_mut(&class)
-                    .expect("class rule should exist")
-                    .match_comm = parse_string_array(value)?;
-            }
-            _ => anyhow::bail!("unsupported profile key {key}"),
-        }
-    }
-
-    if let Some(profile) = current_profile {
-        profiles.push(validate_profile(profile)?);
-    }
-
-    Ok(profiles)
+    let file = toml::from_str::<ProfilesFile>(data)?;
+    file.profile
+        .into_iter()
+        .map(ProfileToml::try_into_profile)
+        .map(|profile| profile.and_then(validate_profile))
+        .collect()
 }
 
 fn validate_profile(profile: Profile) -> anyhow::Result<Profile> {
@@ -178,6 +107,47 @@ fn validate_profile(profile: Profile) -> anyhow::Result<Profile> {
         }
     }
     Ok(profile)
+}
+
+#[derive(Deserialize)]
+struct ProfilesFile {
+    #[serde(default)]
+    profile: Vec<ProfileToml>,
+}
+
+#[derive(Deserialize)]
+struct ProfileToml {
+    name: String,
+    #[serde(default)]
+    classes: BTreeMap<String, ProfileClassToml>,
+}
+
+#[derive(Deserialize)]
+struct ProfileClassToml {
+    affinity: String,
+    #[serde(default)]
+    match_comm: Vec<String>,
+}
+
+impl ProfileToml {
+    fn try_into_profile(self) -> anyhow::Result<Profile> {
+        let mut classes = BTreeMap::new();
+
+        for (class_name, rule) in self.classes {
+            classes.insert(
+                parse_task_class(&class_name)?,
+                ProfileClassRule {
+                    affinity: CpuMask::parse(&rule.affinity)?,
+                    match_comm: rule.match_comm,
+                },
+            );
+        }
+
+        Ok(Profile {
+            name: self.name,
+            classes,
+        })
+    }
 }
 
 fn parse_task_class(value: &str) -> anyhow::Result<TaskClass> {
@@ -195,34 +165,6 @@ fn parse_task_class(value: &str) -> anyhow::Result<TaskClass> {
     }
 }
 
-fn parse_string(value: &str) -> anyhow::Result<String> {
-    let value = value.trim();
-    let Some(value) = value
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-    else {
-        anyhow::bail!("expected quoted string, got {value}");
-    };
-    Ok(value.to_owned())
-}
-
-fn parse_string_array(value: &str) -> anyhow::Result<Vec<String>> {
-    let value = value.trim();
-    let Some(inner) = value
-        .strip_prefix('[')
-        .and_then(|value| value.strip_suffix(']'))
-    else {
-        anyhow::bail!("expected string array, got {value}");
-    };
-
-    inner
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(parse_string)
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,7 +174,7 @@ mod tests {
         let profiles = parse_profiles(
             r#"
             [[profile]]
-            name = "kcd"
+            name = "kcd # not a comment"
 
             [profile.classes.Game]
             affinity = "0-3"
@@ -242,7 +184,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(profiles.len(), 1);
-        assert_eq!(profiles[0].name, "kcd");
+        assert_eq!(profiles[0].name, "kcd # not a comment");
         let rule = profiles[0].classes.get(&TaskClass::Game).unwrap();
         assert_eq!(rule.affinity, CpuMask(0b1111));
         assert_eq!(rule.match_comm, vec!["RenderThread", "Main"]);

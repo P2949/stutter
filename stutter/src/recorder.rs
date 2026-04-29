@@ -177,7 +177,8 @@ pub struct RecordedConfig {
 pub struct RecordedTime {
     pub unix_seconds: u64,
     pub unix_nanos: u32,
-    pub local: String,
+    #[serde(alias = "local")]
+    pub system_time_debug: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -190,6 +191,10 @@ pub struct SessionTask {
     pub class: TaskClass,
     pub process_pid: Option<u32>,
     pub process_comm: String,
+    #[serde(default)]
+    pub process_starttime_ticks: Option<u64>,
+    #[serde(default)]
+    pub task_starttime_ticks: Option<u64>,
     pub comm: String,
     pub latency: RecordedLatency,
     pub cpu: RecordedCpuSnapshot,
@@ -292,7 +297,7 @@ impl SpikeEvent {
     }
 }
 
-pub const SESSION_SCHEMA_VERSION: u32 = 11;
+pub const SESSION_SCHEMA_VERSION: u32 = 12;
 
 pub struct FinalizeRecordingInput<'a> {
     pub recording: &'a RecordingRun,
@@ -366,6 +371,8 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             class: stats.class,
             process_pid: stats.process_pid,
             process_comm: stats.process_comm.clone(),
+            process_starttime_ticks: stats.process_starttime_ticks,
+            task_starttime_ticks: stats.task_starttime_ticks,
             comm: stats.comm.clone(),
             latency: recorded_latency(latency),
             cpu: recorded_cpu(cpu),
@@ -589,13 +596,13 @@ fn recorded_time(time: SystemTime) -> RecordedTime {
     RecordedTime {
         unix_seconds: duration.as_secs(),
         unix_nanos: duration.subsec_nanos(),
-        local: format!("{time:?}"),
+        system_time_debug: format!("{time:?}"),
     }
 }
 
 fn timestamp_for_path(time: SystemTime) -> String {
     let duration = time.duration_since(UNIX_EPOCH).unwrap_or_default();
-    duration.as_secs().to_string()
+    format!("{}_{:09}", duration.as_secs(), duration.subsec_nanos())
 }
 
 fn sanitize_run_name(name: &str) -> String {

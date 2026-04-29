@@ -43,6 +43,10 @@ impl ScxTracker {
     }
 
     fn record_snapshot(&mut self, snapshot: ScxSnapshot, elapsed_ms: u128) {
+        if snapshot.is_empty() {
+            return;
+        }
+
         if self.last.as_ref() == Some(&snapshot) {
             return;
         }
@@ -54,6 +58,12 @@ impl ScxTracker {
             enable_seq: snapshot.enable_seq.clone(),
         });
         self.last = Some(snapshot);
+    }
+}
+
+impl ScxSnapshot {
+    fn is_empty(&self) -> bool {
+        self.state.is_none() && self.ops.is_none() && self.enable_seq.is_none()
     }
 }
 
@@ -96,6 +106,18 @@ mod tests {
         assert_eq!(tracker.events()[0].ops.as_deref(), Some("scx_lavd"));
         assert_eq!(tracker.events()[1].ops.as_deref(), Some("scx_p2dq"));
 
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn skips_empty_scx_snapshot() {
+        let root = temp_dir("scx-empty");
+        fs::create_dir_all(&root).unwrap();
+
+        let mut tracker = ScxTracker::default();
+        tracker.sample_at(&root, 0);
+
+        assert!(tracker.events().is_empty());
         fs::remove_dir_all(root).ok();
     }
 

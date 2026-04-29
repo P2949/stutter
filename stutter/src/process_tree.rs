@@ -12,6 +12,7 @@ pub struct ProcInfo {
     pub ppid: u32,
     pub comm: String,
     pub cmdline: String,
+    pub starttime_ticks: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
@@ -57,6 +58,8 @@ pub struct TaskInfo {
     pub process_ppid: u32,
     pub comm: String,
     pub process_comm: String,
+    pub process_starttime_ticks: Option<u64>,
+    pub task_starttime_ticks: Option<u64>,
     pub class: TaskClass,
 }
 
@@ -155,11 +158,14 @@ fn read_proc_info_at(proc_root: &Path, pid: u32) -> Option<ProcInfo> {
         })
         .unwrap_or_default();
 
+    let starttime_ticks = stat_starttime_at(&proc_root.join(pid.to_string()).join("stat"));
+
     Some(ProcInfo {
         pid,
         ppid: ppid?,
         comm: comm?,
         cmdline,
+        starttime_ticks,
     })
 }
 
@@ -348,14 +354,17 @@ pub fn expand_tasks_at(
         if tids.is_empty() {
             tasks.insert(
                 *pid,
-                task_info_from_proc(*pid, *pid, &proc_info.comm, proc_info),
+                task_info_from_proc(proc_root, *pid, *pid, &proc_info.comm, proc_info),
             );
             continue;
         }
 
         for tid in tids {
             let comm = task_comm_at(proc_root, *pid, tid).unwrap_or_else(|| proc_info.comm.clone());
-            tasks.insert(tid, task_info_from_proc(tid, *pid, &comm, proc_info));
+            tasks.insert(
+                tid,
+                task_info_from_proc(proc_root, tid, *pid, &comm, proc_info),
+            );
         }
     }
 
@@ -364,27 +373,61 @@ pub fn expand_tasks_at(
 
 fn fallback_task_info(pid: u32, proc_info: Option<&ProcInfo>) -> TaskInfo {
     match proc_info {
-        Some(proc_info) => task_info_from_proc(pid, pid, &proc_info.comm, proc_info),
+        Some(proc_info) => {
+            task_info_from_proc(Path::new("/proc"), pid, pid, &proc_info.comm, proc_info)
+        }
         None => TaskInfo {
             tid: pid,
             process_pid: pid,
             process_ppid: 0,
             comm: "?".to_owned(),
             process_comm: "?".to_owned(),
+            process_starttime_ticks: None,
+            task_starttime_ticks: None,
             class: TaskClass::Unknown,
         },
     }
 }
 
-fn task_info_from_proc(tid: u32, process_pid: u32, comm: &str, proc_info: &ProcInfo) -> TaskInfo {
+fn task_info_from_proc(
+    proc_root: &Path,
+    tid: u32,
+    process_pid: u32,
+    comm: &str,
+    proc_info: &ProcInfo,
+) -> TaskInfo {
+    let task_starttime_ticks = if tid == process_pid {
+        proc_info.starttime_ticks
+    } else {
+        stat_starttime_at(
+            &proc_root
+                .join(process_pid.to_string())
+                .join("task")
+                .join(tid.to_string())
+                .join("stat"),
+        )
+    };
+
     TaskInfo {
         tid,
         process_pid,
         process_ppid: proc_info.ppid,
         comm: comm.to_owned(),
         process_comm: proc_info.comm.clone(),
+        process_starttime_ticks: proc_info.starttime_ticks,
+        task_starttime_ticks,
         class: classify_task(comm, &proc_info.comm, &proc_info.cmdline),
     }
+}
+
+fn stat_starttime_at(path: &Path) -> Option<u64> {
+    let stat = fs::read_to_string(path).ok()?;
+    parse_proc_stat_starttime(&stat)
+}
+
+pub fn parse_proc_stat_starttime(stat: &str) -> Option<u64> {
+    let (_, after_comm) = stat.rsplit_once(") ")?;
+    after_comm.split_whitespace().nth(19)?.parse().ok()
 }
 
 fn comm_pattern_matches(pattern: &str, task: &TaskInfo) -> bool {
