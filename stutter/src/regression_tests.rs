@@ -38,7 +38,7 @@ fn reused_tid_with_different_task_resets_stats_after_removal() {
     assert_eq!(stats.last_seen_ms, 77);
     assert_eq!(stats.session_latency.count, 0);
     assert_eq!(stats.process_pid, Some(200));
-    assert_eq!(stats.process_comm, "new-game");
+    assert_eq!(stats.process_comm, "new-game".into());
     assert_eq!(stats.comm, "new-thread");
     assert_eq!(stats.class, TaskClass::Helper);
     assert!(stats.active);
@@ -74,7 +74,7 @@ fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
     assert_eq!(stats.last_seen_ms, 77);
     assert_eq!(stats.session_latency.count, 0);
     assert_eq!(stats.process_pid, Some(200));
-    assert_eq!(stats.process_comm, "new-helper");
+    assert_eq!(stats.process_comm, "new-helper".into());
     assert_eq!(stats.comm, "new-worker");
     assert_eq!(stats.class, TaskClass::Helper);
     assert!(stats.active);
@@ -208,7 +208,7 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
     assert!(spike.active);
     assert_eq!(spike.class, TaskClass::Game);
     assert_eq!(spike.process_pid, Some(77));
-    assert_eq!(spike.process_comm, "KingdomCome.exe");
+    assert_eq!(spike.process_comm, "KingdomCome.exe".into());
     assert_eq!(spike.comm, "RenderThread");
     assert_eq!(spike.cpu, 0);
     assert_eq!(spike.prio, 120);
@@ -451,8 +451,8 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         active: true,
         class: TaskClass::Helper,
         process_pid: Some(7),
-        process_comm: "task-7".to_owned(),
-        comm: "worker".to_owned(),
+        process_comm: "task-7".into(),
+        comm: "worker".into(),
         cpu: 1,
         prio: 120,
         latency_ns: 2_000_000,
@@ -709,8 +709,8 @@ fn report_reads_recorded_session_and_spike_events() {
         active: true,
         class: TaskClass::Game,
         process_pid: Some(7),
-        process_comm: "KingdomCome.exe".to_owned(),
-        comm: "RenderThread".to_owned(),
+        process_comm: "KingdomCome.exe".into(),
+        comm: "RenderThread".into(),
         cpu: 0,
         prio: 120,
         latency_ns: 6_000_000,
@@ -766,8 +766,8 @@ fn report_cluster_output_caps_inline_points() {
             active: true,
             class: TaskClass::Helper,
             process_pid: Some(100 + idx as u32),
-            process_comm: format!("proc-{idx}"),
-            comm: format!("worker-{idx}"),
+            process_comm: format!("proc-{}", idx).into(),
+            comm: format!("worker-{}", idx),
             cpu: idx as u32 % 4,
             prio: 120,
             latency_ns: 1_000_000 + idx as u64,
@@ -831,11 +831,11 @@ fn report_correlates_artifacts_with_spike_clusters() {
             active: true,
             class: TaskClass::Game,
             process_pid: Some(10 + idx as u32),
-            process_comm: "game".to_owned(),
+            process_comm: "game".to_owned().into(),
             comm: if idx == 0 {
                 "RenderThread".to_owned()
             } else {
-                format!("worker-{idx}")
+                format!("worker-{}", idx)
             },
             cpu: idx as u32,
             prio: 120,
@@ -1046,8 +1046,8 @@ fn task_info(
         tid,
         process_pid,
         process_ppid: 1,
-        comm: comm.to_owned(),
-        process_comm: process_comm.to_owned(),
+        comm: comm.into(),
+        process_comm: process_comm.into(),
         process_starttime_ticks: Some(u64::from(process_pid) * 10),
         task_starttime_ticks: Some(u64::from(tid) * 10),
         class,
@@ -1083,8 +1083,8 @@ fn spike_event(task: u32, switch_ns: u64) -> SpikeEvent {
         active: true,
         class: TaskClass::Helper,
         process_pid: Some(task),
-        process_comm: format!("proc-{task}"),
-        comm: format!("worker-{task}"),
+        process_comm: format!("proc-{}", task).into(),
+        comm: format!("worker-{}", task),
         cpu: 0,
         prio: 120,
         latency_ns: 1_000_000,

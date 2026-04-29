@@ -6,7 +6,7 @@ use stutter_common::SchedulerEvent;
 
 use crate::process_tree::{TaskClass, TaskInfo};
 
-pub const MAX_EXACT_SAMPLES: usize = 4_096;
+pub const MAX_EXACT_SAMPLES: usize = 1_024;
 pub const LATENCY_HISTOGRAM_BUCKETS_NS: [u64; 15] = [
     1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000, 200_000, 500_000, 1_000_000, 2_000_000,
     5_000_000, 10_000_000, 20_000_000, 50_000_000,
@@ -28,7 +28,7 @@ pub struct TaskStats {
     pub comm: String,
     pub class: TaskClass,
     pub process_pid: Option<u32>,
-    pub process_comm: String,
+    pub process_comm: std::sync::Arc<str>,
     pub process_starttime_ticks: Option<u64>,
     pub task_starttime_ticks: Option<u64>,
     pub active: bool,
@@ -125,7 +125,7 @@ pub struct IntervalRecord {
     pub class: TaskClass,
     pub comm: String,
     pub process_pid: Option<u32>,
-    pub process_comm: String,
+    pub process_comm: std::sync::Arc<str>,
     pub samples: u64,
     pub stored_samples: u64,
     pub truncated_samples: u64,
@@ -387,7 +387,7 @@ impl TaskStats {
             comm,
             class,
             process_pid: None,
-            process_comm: String::new(),
+            process_comm: std::sync::Arc::from(""),
             process_starttime_ticks: None,
             task_starttime_ticks: None,
             active: true,
@@ -444,7 +444,7 @@ impl TaskStats {
 
 fn should_replace_comm_from_task_info(current: &str, task_info: &TaskInfo) -> bool {
     (current == "?" || current.is_empty())
-        || current == task_info.process_comm
+        || current == task_info.process_comm.as_ref()
         || current == "wine64-preloader"
 }
 
