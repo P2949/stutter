@@ -201,10 +201,9 @@ impl<'de> Deserialize<'de> for CpuMask {
     }
 }
 
+#[allow(dead_code)]
 pub fn read_allowed_mask(tid: u32) -> anyhow::Result<CpuMask> {
-    read_allowed_mask_raw(tid).map_err(|err| {
-        anyhow::anyhow!("failed to read CPU affinity for TID {tid}: {err}")
-    })
+    read_allowed_mask_raw(tid).with_context(|| format!("failed to read CPU affinity for TID {tid}"))
 }
 
 pub fn read_allowed_mask_raw(tid: u32) -> io::Result<CpuMask> {
@@ -223,8 +222,6 @@ pub fn read_allowed_mask_raw(tid: u32) -> io::Result<CpuMask> {
 
     Ok(CpuMask::from_cpu_set(&set))
 }
-
-
 
 pub fn set_affinity_raw(tid: u32, mask: &CpuMask) -> io::Result<()> {
     let set = mask.to_cpu_set();
@@ -471,6 +468,23 @@ mod tests {
         assert_eq!(summary.skipped_dead, 1);
         assert!(!path.exists());
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn can_round_trip_current_thread_affinity_when_allowed() {
+        let Ok(current) = read_allowed_mask_raw(0) else {
+            return;
+        };
+        if current.is_empty() {
+            return;
+        }
+
+        let Ok(()) = set_affinity_raw(0, &current) else {
+            return;
+        };
+
+        let reread = read_allowed_mask_raw(0).unwrap();
+        assert_eq!(reread, current);
     }
 
     fn temp_dir(name: &str) -> PathBuf {

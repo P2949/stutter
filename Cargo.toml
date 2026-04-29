@@ -29,6 +29,7 @@ libc = { version = "0.2.159", default-features = false }
 log = { version = "0.4.22", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
+thiserror = { version = "2", default-features = false }
 tokio = { version = "1.40.0", default-features = false }
 toml = { version = "0.8", default-features = true }
 which = { version = "6.0.0", default-features = false }

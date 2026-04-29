@@ -75,10 +75,12 @@ For launchers where the PID changes between runs, watch for the process name:
 ```bash
 RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
   --watch-process KingdomCome.exe \
-  --persistent
+  --persistent \
+  --watch-poll-ms 2000 \
+  --watch-timeout-seconds 120
 ```
 
-`--watch-process` scans `/proc` only while waiting for the process to appear or relaunch. Once a process is found, `stutter` follows that root PID and its descendants. `--persistent` requires `--watch-process`; if the watched process exits, stale TIDs are removed and the monitor waits for the next matching launch. Note that `--duration` begins after the watched process is found, not while waiting for it.
+`--watch-process` scans `/proc` only while waiting for the process to appear or relaunch. Once a process is found, `stutter` follows that root PID and its descendants. `--persistent` requires `--watch-process`; if the watched process exits, stale TIDs are removed and the monitor waits for the next matching launch. Note that `--duration` begins after the watched process is found, not while waiting for it. Missing manual `--pid` targets are dropped with a warning by default; add `--keep-missing-pid` if you want an unknown fallback task retained.
 
 ## Inspect a tree before tracing
 
@@ -118,6 +120,20 @@ Default output:
   interval.json
   tree_events.json
   spike_events.json
+  scx_events.json
+  irq_events.json
+  gpu_samples.json
+  frame_correlation.json
+```
+
+Optional correlation inputs:
+
+```bash
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- record \
+  --tree-pid <root-pid> \
+  --irq-latency --irq 137 \
+  --hwmon \
+  --mangohud-log /path/to/MangoHud.csv
 ```
 
 ## Generate a report
@@ -146,6 +162,14 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- report \
 
 Reports use `spike_events.json` for spike cluster detection when it is present. Older runs without that file still report clusters from retained per-task `top_spikes`.
 
+Generate a self-contained HTML report:
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo run -- report \
+  --html report.html \
+  ~/.local/state/stutter/runs/<run-dir>
+```
+
 ## Apply and restore affinity profiles
 
 Apply a TOML profile to the current process tree:
@@ -169,6 +193,12 @@ Watch mode restores the original masks on Ctrl-C by default. Add `--keep-applied
 
 ```bash
 RUSTUP_TOOLCHAIN=nightly cargo run -- restore
+```
+
+Audit a pending restore file without applying it:
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo run -- restore --dry-run
 ```
 
 `apply-profile --force` discards an existing restore file. Without `--force`, new records are merged into the existing restore file while preserving the earliest original mask for each TID.

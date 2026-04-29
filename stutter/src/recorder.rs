@@ -6,6 +6,7 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use stutter_common::SchedulerEvent;
 
@@ -126,6 +127,12 @@ pub struct SessionFile {
     #[serde(default)]
     pub scx_event_count: usize,
     #[serde(default)]
+    pub irq_event_count: usize,
+    #[serde(default)]
+    pub gpu_sample_count: usize,
+    #[serde(default)]
+    pub frame_event_count: usize,
+    #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
     pub tasks: Vec<SessionTask>,
     pub top_spikes: Vec<SessionSpike>,
@@ -151,6 +158,12 @@ pub struct MetadataFile {
     #[serde(default)]
     pub scx_event_count: usize,
     #[serde(default)]
+    pub irq_event_count: usize,
+    #[serde(default)]
+    pub gpu_sample_count: usize,
+    #[serde(default)]
+    pub frame_event_count: usize,
+    #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
 }
 
@@ -167,7 +180,23 @@ pub struct RecordedConfig {
     #[serde(default)]
     pub persistent: bool,
     #[serde(default)]
+    pub keep_missing_pid: bool,
+    #[serde(default)]
+    pub watch_poll_ms: u64,
+    #[serde(default)]
+    pub watch_timeout_ms: Option<u128>,
+    #[serde(default)]
     pub csv_path: Option<PathBuf>,
+    #[serde(default)]
+    pub irq_latency: bool,
+    #[serde(default)]
+    pub irqs: Vec<u32>,
+    #[serde(default)]
+    pub hwmon: bool,
+    #[serde(default)]
+    pub mangohud_log: Option<PathBuf>,
+    #[serde(default)]
+    pub tui: bool,
     pub summary_period_ms: u64,
     pub spike_threshold_ns: u64,
     pub verbose: bool,
@@ -297,7 +326,36 @@ impl SpikeEvent {
     }
 }
 
-pub const SESSION_SCHEMA_VERSION: u32 = 12;
+#[derive(Clone, Serialize, Deserialize)]
+pub struct IrqEventRecord {
+    #[serde(default)]
+    pub elapsed_ms: Option<u128>,
+    pub irq: u32,
+    pub cpu: u32,
+    pub enter_ns: u64,
+    pub exit_ns: u64,
+    pub duration_ns: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct GpuSample {
+    pub elapsed_ms: u128,
+    pub gpu_busy_percent: Option<u32>,
+    pub vram_used_bytes: Option<u64>,
+    pub vram_total_bytes: Option<u64>,
+    pub gpu_clock_mhz: Option<u32>,
+    pub mem_clock_mhz: Option<u32>,
+    pub temp_millidegrees: Option<u32>,
+    pub power_microwatts: Option<u64>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct FrameEvent {
+    pub elapsed_ms: u128,
+    pub frametime_ms: f64,
+}
+
+pub const SESSION_SCHEMA_VERSION: u32 = 13;
 
 pub struct FinalizeRecordingInput<'a> {
     pub recording: &'a RecordingRun,
@@ -310,6 +368,9 @@ pub struct FinalizeRecordingInput<'a> {
     pub spike_events: &'a [SpikeEvent],
     pub spike_events_truncated: bool,
     pub scx_events: &'a [ScxEvent],
+    pub irq_events: &'a [IrqEventRecord],
+    pub gpu_samples: &'a [GpuSample],
+    pub frame_events: &'a [FrameEvent],
     pub drop_counters: DropCountersSnapshot,
 }
 
@@ -342,6 +403,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     let spike_events = input.spike_events;
     let spike_events_truncated = input.spike_events_truncated;
     let scx_events = input.scx_events;
+    let irq_events = input.irq_events;
+    let gpu_samples = input.gpu_samples;
+    let frame_events = input.frame_events;
     let drop_counters = input.drop_counters;
     let ended_at = SystemTime::now();
     let monotonic_end_ns = monotonic_now_ns();
@@ -420,7 +484,15 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             exclude_comm: config.task_filters.exclude_comm.clone(),
             watch_process: config.watch_process.clone(),
             persistent: config.persistent,
+            keep_missing_pid: config.keep_missing_pid,
+            watch_poll_ms: config.watch_poll_ms,
+            watch_timeout_ms: config.watch_timeout.map(|timeout| timeout.as_millis()),
             csv_path: config.csv_path.clone(),
+            irq_latency: config.irq_latency,
+            irqs: config.irqs.clone(),
+            hwmon: config.hwmon,
+            mangohud_log: config.mangohud_log.clone(),
+            tui: config.tui,
             summary_period_ms: config.summary_period_ms,
             spike_threshold_ns: config.spike_threshold_ns,
             verbose: config.verbose,
@@ -432,6 +504,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         spike_event_count: spike_events.len(),
         spike_events_truncated,
         scx_event_count: scx_events.len(),
+        irq_event_count: irq_events.len(),
+        gpu_sample_count: gpu_samples.len(),
+        frame_event_count: frame_events.len(),
         drop_counters: drop_counters.clone(),
         tasks,
         top_spikes,
@@ -452,6 +527,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         spike_event_count: spike_events.len(),
         spike_events_truncated,
         scx_event_count: scx_events.len(),
+        irq_event_count: irq_events.len(),
+        gpu_sample_count: gpu_samples.len(),
+        frame_event_count: frame_events.len(),
         drop_counters,
     };
 
@@ -461,6 +539,12 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     write_json(recording.run_dir.join("tree_events.json"), tree_events)?;
     write_json(recording.run_dir.join("spike_events.json"), spike_events)?;
     write_json(recording.run_dir.join("scx_events.json"), scx_events)?;
+    write_json(recording.run_dir.join("irq_events.json"), irq_events)?;
+    write_json(recording.run_dir.join("gpu_samples.json"), gpu_samples)?;
+    write_json(
+        recording.run_dir.join("frame_correlation.json"),
+        frame_events,
+    )?;
 
     println!("recording written to {}", recording.run_dir.display());
     Ok(())
@@ -668,11 +752,25 @@ fn csv_escape(value: &str) -> String {
 }
 
 fn write_json<T: ?Sized + Serialize>(path: PathBuf, value: &T) -> anyhow::Result<()> {
-    let tmp_path = path.with_extension("tmp");
-    let mut file = fs::File::create(&tmp_path)?;
-    file.write_all(&serde_json::to_vec_pretty(value)?)?;
-    file.write_all(b"\n")?;
-    file.sync_all()?;
-    fs::rename(tmp_path, path)?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("invalid output path {}", path.display()))?
+        .to_string_lossy();
+    let tmp_path = path.with_file_name(format!("{file_name}.tmp"));
+    let mut file = fs::File::create(&tmp_path)
+        .with_context(|| format!("failed to create temp JSON {}", tmp_path.display()))?;
+    file.write_all(&serde_json::to_vec_pretty(value)?)
+        .with_context(|| format!("failed to write temp JSON {}", tmp_path.display()))?;
+    file.write_all(b"\n")
+        .with_context(|| format!("failed to finish temp JSON {}", tmp_path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to sync temp JSON {}", tmp_path.display()))?;
+    fs::rename(&tmp_path, &path).with_context(|| {
+        format!(
+            "failed to atomically rename {} to {}",
+            tmp_path.display(),
+            path.display()
+        )
+    })?;
     Ok(())
 }

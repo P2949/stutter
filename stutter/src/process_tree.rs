@@ -93,16 +93,23 @@ impl TaskFilters {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetDiffAction {
     Added,
     Removed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub struct TargetDiff {
     pub action: TargetDiffAction,
     pub task: TaskInfo,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TargetDiffRef<'a> {
+    pub action: TargetDiffAction,
+    pub task: &'a TaskInfo,
 }
 
 pub fn scan_processes_at(proc_root: &Path) -> BTreeMap<u32, ProcInfo> {
@@ -239,12 +246,28 @@ pub fn target_snapshot(manual_pids: &[u32], tree_pids: &[u32]) -> TargetSnapshot
     target_snapshot_at(Path::new("/proc"), manual_pids, tree_pids)
 }
 
+#[allow(dead_code)]
 pub fn target_snapshot_with_filters(
     manual_pids: &[u32],
     tree_pids: &[u32],
     filters: &TaskFilters,
 ) -> TargetSnapshot {
     target_snapshot_filtered_at(Path::new("/proc"), manual_pids, tree_pids, filters)
+}
+
+pub fn target_snapshot_with_options(
+    manual_pids: &[u32],
+    tree_pids: &[u32],
+    filters: &TaskFilters,
+    keep_missing_pid: bool,
+) -> TargetSnapshot {
+    target_snapshot_filtered_at_with_options(
+        Path::new("/proc"),
+        manual_pids,
+        tree_pids,
+        filters,
+        keep_missing_pid,
+    )
 }
 
 pub fn target_snapshot_at(
@@ -261,14 +284,31 @@ pub fn target_snapshot_filtered_at(
     tree_pids: &[u32],
     filters: &TaskFilters,
 ) -> TargetSnapshot {
+    target_snapshot_filtered_at_with_options(proc_root, manual_pids, tree_pids, filters, false)
+}
+
+pub fn target_snapshot_filtered_at_with_options(
+    proc_root: &Path,
+    manual_pids: &[u32],
+    tree_pids: &[u32],
+    filters: &TaskFilters,
+    keep_missing_pid: bool,
+) -> TargetSnapshot {
     let processes = scan_processes_at(proc_root);
     let mut requested_roots = BTreeSet::new();
     let mut process_roots = BTreeSet::new();
+    let mut missing_manual_pids = Vec::new();
 
     for pid in manual_pids {
         if processes.contains_key(pid) {
             requested_roots.insert(*pid);
             process_roots.insert(*pid);
+        } else {
+            log::warn!("manual_pid_not_found pid={pid}");
+            if keep_missing_pid {
+                requested_roots.insert(*pid);
+                missing_manual_pids.push(*pid);
+            }
         }
     }
 
@@ -281,6 +321,22 @@ pub fn target_snapshot_filtered_at(
     }
 
     let mut tasks = expand_tasks_at(proc_root, &process_roots, &processes);
+
+    for pid in missing_manual_pids {
+        let task = TaskInfo {
+            tid: pid,
+            process_pid: pid,
+            process_ppid: 0,
+            comm: "?".to_owned(),
+            process_comm: "?".to_owned(),
+            process_starttime_ticks: None,
+            task_starttime_ticks: None,
+            class: TaskClass::Unknown,
+        };
+        if filters.allows(&task) {
+            tasks.insert(pid, task);
+        }
+    }
 
     for task in tasks.values_mut() {
         if task.class == TaskClass::Unknown && !requested_roots.contains(&task.process_pid) {
@@ -296,26 +352,40 @@ pub fn target_snapshot_filtered_at(
     }
 }
 
+#[allow(dead_code)]
 pub fn diff_tasks(
     old_tasks: &BTreeMap<u32, TaskInfo>,
     new_tasks: &BTreeMap<u32, TaskInfo>,
 ) -> Vec<TargetDiff> {
+    diff_tasks_ref(old_tasks, new_tasks)
+        .into_iter()
+        .map(|diff| TargetDiff {
+            action: diff.action,
+            task: diff.task.clone(),
+        })
+        .collect()
+}
+
+pub fn diff_tasks_ref<'a>(
+    old_tasks: &'a BTreeMap<u32, TaskInfo>,
+    new_tasks: &'a BTreeMap<u32, TaskInfo>,
+) -> Vec<TargetDiffRef<'a>> {
     let mut diffs = Vec::new();
 
-    for tid in new_tasks.keys() {
+    for (tid, task) in new_tasks {
         if !old_tasks.contains_key(tid) {
-            diffs.push(TargetDiff {
+            diffs.push(TargetDiffRef {
                 action: TargetDiffAction::Added,
-                task: new_tasks[tid].clone(),
+                task,
             });
         }
     }
 
-    for tid in old_tasks.keys() {
+    for (tid, task) in old_tasks {
         if !new_tasks.contains_key(tid) {
-            diffs.push(TargetDiff {
+            diffs.push(TargetDiffRef {
                 action: TargetDiffAction::Removed,
-                task: old_tasks[tid].clone(),
+                task,
             });
         }
     }

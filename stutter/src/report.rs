@@ -9,7 +9,10 @@ use anyhow::Context;
 use crate::{
     metrics::format_latency,
     process_tree::TaskClass,
-    recorder::{RecordedSpike, SESSION_SCHEMA_VERSION, SessionFile, SessionTask, SpikeEvent},
+    recorder::{
+        FrameEvent, GpuSample, IrqEventRecord, RecordedSpike, SESSION_SCHEMA_VERSION, SessionFile,
+        SessionTask, SpikeEvent,
+    },
 };
 
 const MIN_CLUSTER_TASKS: usize = 3;
@@ -50,6 +53,13 @@ struct SpikeClusterAnalysis {
     clusters: Vec<SpikeCluster>,
 }
 
+#[derive(Default)]
+pub(crate) struct RunArtifacts {
+    pub(crate) irq_events: Vec<IrqEventRecord>,
+    pub(crate) gpu_samples: Vec<GpuSample>,
+    pub(crate) frame_events: Vec<FrameEvent>,
+}
+
 #[derive(Clone)]
 struct SpikeClusterCandidate {
     start_idx: usize,
@@ -81,6 +91,7 @@ pub fn print_report(
     }
 
     let spike_events = load_spike_events(&session_path)?;
+    let artifacts = load_run_artifacts(&session_path)?;
 
     print!(
         "{}",
@@ -88,6 +99,7 @@ pub fn print_report(
             &session_path,
             &session,
             spike_events.as_deref(),
+            &artifacts,
             top,
             cluster_window_ms
         )
@@ -96,10 +108,253 @@ pub fn print_report(
     Ok(())
 }
 
+pub fn write_html_report(
+    path: &Path,
+    html_path: &Path,
+    top: usize,
+    cluster_window_ms: u64,
+) -> anyhow::Result<()> {
+    let session_path = if path.is_dir() {
+        path.join("session.json")
+    } else {
+        path.to_path_buf()
+    };
+    let data = fs::read_to_string(&session_path)
+        .with_context(|| format!("failed to read {}", session_path.display()))?;
+    let session: SessionFile = serde_json::from_str(&data)
+        .with_context(|| format!("failed to parse {}", session_path.display()))?;
+    let spike_events = load_spike_events(&session_path)?;
+    let artifacts = load_run_artifacts(&session_path)?;
+    let text_report = render_report(
+        &session_path,
+        &session,
+        spike_events.as_deref(),
+        &artifacts,
+        top,
+        cluster_window_ms,
+    );
+    let html = render_html_report(
+        &session,
+        spike_events.as_deref(),
+        &artifacts,
+        &text_report,
+        top,
+    );
+    if let Some(parent) = html_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(html_path, html)
+        .with_context(|| format!("failed to write HTML report {}", html_path.display()))?;
+    Ok(())
+}
+
+fn render_html_report(
+    session: &SessionFile,
+    spike_events: Option<&[SpikeEvent]>,
+    artifacts: &RunArtifacts,
+    text_report: &str,
+    top: usize,
+) -> String {
+    let mut tasks = session
+        .tasks
+        .iter()
+        .filter(|task| task.latency.samples > 0)
+        .collect::<Vec<_>>();
+    tasks.sort_by_key(|task| std::cmp::Reverse(task.latency.max_ns));
+    tasks.truncate(top);
+
+    let labels = tasks
+        .iter()
+        .map(|task| json_string(&format!("{}:{}", task.task, task.comm)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let max_values = tasks
+        .iter()
+        .map(|task| task.latency.max_ns.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let spike_points = spike_events
+        .map(|events| {
+            events
+                .iter()
+                .take(512)
+                .map(|event| {
+                    format!(
+                        "{{x:{},y:{},label:{}}}",
+                        event
+                            .elapsed_ms
+                            .unwrap_or(u128::from(event.switch_ns / 1_000_000)),
+                        event.latency_ns as f64 / 1_000_000.0,
+                        json_string(&format!("{}:{}", event.task, event.comm))
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| {
+            session
+                .top_spikes
+                .iter()
+                .take(128)
+                .map(|spike| {
+                    format!(
+                        "{{x:{},y:{},label:{}}}",
+                        spike.switch_ns / 1_000_000,
+                        spike.latency_ns as f64 / 1_000_000.0,
+                        json_string(&format!("{}:{}", spike.task, spike.comm))
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .join(",");
+    let cpu_points = tasks
+        .iter()
+        .flat_map(|task| {
+            task.cpu.per_cpu.iter().map(move |cpu| {
+                format!(
+                    "{{task:{},cpu:{},value:{}}}",
+                    task.task,
+                    cpu.cpu,
+                    cpu.max_ns as f64 / 1_000_000.0
+                )
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let gpu_points = artifacts
+        .gpu_samples
+        .iter()
+        .filter_map(|sample| {
+            sample
+                .gpu_busy_percent
+                .map(|busy| format!("{{x:{},y:{}}}", sample.elapsed_ms, busy))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!(
+        r#"<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>stutter report</title>
+<style>
+body {{ font-family: system-ui, sans-serif; margin: 24px; color: #202124; }}
+canvas {{ width: 100%; max-width: 960px; height: 320px; border: 1px solid #ddd; }}
+section {{ margin-bottom: 28px; }}
+pre {{ white-space: pre-wrap; background: #f6f8fa; padding: 16px; overflow: auto; }}
+</style>
+</head>
+<body>
+<h1>stutter report</h1>
+<section><h2>Task Max Latency</h2><canvas id="latency"></canvas></section>
+<section><h2>Spike Timeline</h2><canvas id="spikes"></canvas></section>
+<section><h2>Per-CPU Heatmap</h2><canvas id="cpu"></canvas></section>
+<section><h2>GPU Busy</h2><canvas id="gpu"></canvas></section>
+<pre>{}</pre>
+<script>
+const labels = [{}];
+const values = [{}];
+const spikes = [{}];
+const cpuPoints = [{}];
+const gpuPoints = [{}];
+
+function setup(id) {{
+  const canvas = document.getElementById(id);
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.clientWidth * devicePixelRatio;
+  canvas.height = canvas.clientHeight * devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  return [canvas, ctx, canvas.clientWidth, canvas.clientHeight];
+}}
+
+let [canvas, ctx, w, h] = setup('latency');
+const max = Math.max(1, ...values);
+ctx.fillStyle = '#f8fbff';
+ctx.fillRect(0, 0, w, h);
+values.forEach((value, idx) => {{
+  const barW = Math.max(8, (w - 80) / Math.max(1, values.length) - 6);
+  const x = 50 + idx * (barW + 6);
+  const barH = (h - 70) * value / max;
+  ctx.fillStyle = '#2563eb';
+  ctx.fillRect(x, h - 40 - barH, barW, barH);
+  ctx.save();
+  ctx.translate(x, h - 28);
+  ctx.rotate(-Math.PI / 5);
+  ctx.fillStyle = '#333';
+  ctx.font = '11px system-ui';
+  ctx.fillText(labels[idx], 0, 0);
+  ctx.restore();
+}});
+ctx.fillStyle = '#111';
+ctx.font = '13px system-ui';
+ctx.fillText('Top task max latency (ns)', 16, 22);
+
+[canvas, ctx, w, h] = setup('spikes');
+drawScatter(ctx, w, h, spikes, 'Scheduler spikes (ms)', '#dc2626');
+
+[canvas, ctx, w, h] = setup('gpu');
+drawScatter(ctx, w, h, gpuPoints, 'GPU busy %', '#16a34a');
+
+[canvas, ctx, w, h] = setup('cpu');
+ctx.fillStyle = '#fff7ed';
+ctx.fillRect(0, 0, w, h);
+const maxCpu = Math.max(1, ...cpuPoints.map(p => p.value));
+cpuPoints.forEach((p, idx) => {{
+  const x = 40 + (idx % 32) * 24;
+  const y = 40 + Math.floor(idx / 32) * 22;
+  const alpha = Math.max(0.15, p.value / maxCpu);
+  ctx.fillStyle = `rgba(234,88,12,${{alpha}})`;
+  ctx.fillRect(x, y, 20, 18);
+}});
+ctx.fillStyle = '#111';
+ctx.font = '13px system-ui';
+ctx.fillText('Per-task CPU max latency heatmap', 16, 22);
+
+function drawScatter(ctx, w, h, points, title, color) {{
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#111';
+  ctx.font = '13px system-ui';
+  ctx.fillText(title, 16, 22);
+  const maxX = Math.max(1, ...points.map(p => p.x));
+  const maxY = Math.max(1, ...points.map(p => p.y));
+  ctx.fillStyle = color;
+  points.forEach(p => {{
+    const x = 40 + (w - 70) * p.x / maxX;
+    const y = h - 35 - (h - 70) * p.y / maxY;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }});
+}}
+</script>
+</body>
+</html>"#,
+        html_escape(text_report),
+        labels,
+        max_values,
+        spike_points,
+        cpu_points,
+        gpu_points
+    )
+}
+
+fn json_string(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_owned())
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 pub(crate) fn render_report(
     session_path: &Path,
     session: &SessionFile,
     spike_events: Option<&[SpikeEvent]>,
+    artifacts: &RunArtifacts,
     top: usize,
     cluster_window_ms: u64,
 ) -> String {
@@ -181,6 +436,24 @@ pub(crate) fn render_report(
         pushln(
             &mut output,
             format!("scx_events: {}", session.scx_event_count),
+        );
+        pushln(&mut output, "");
+    }
+    if session.irq_event_count > 0 || session.gpu_sample_count > 0 || session.frame_event_count > 0
+    {
+        pushln(&mut output, "correlation artifacts");
+        pushln(&mut output, "---------------------");
+        pushln(
+            &mut output,
+            format!("irq_events: {}", session.irq_event_count),
+        );
+        pushln(
+            &mut output,
+            format!("gpu_samples: {}", session.gpu_sample_count),
+        );
+        pushln(
+            &mut output,
+            format!("frame_events: {}", session.frame_event_count),
         );
         pushln(&mut output, "");
     }
@@ -313,6 +586,14 @@ pub(crate) fn render_report(
     for (idx, cluster) in cluster_analysis.clusters.iter().take(top).enumerate() {
         pushln(&mut output, render_cluster(idx + 1, cluster));
     }
+    pushln(&mut output, "");
+    render_correlation_sections(
+        &mut output,
+        &cluster_analysis.clusters,
+        artifacts,
+        cluster_window_ns,
+        top,
+    );
 
     output
 }
@@ -331,6 +612,31 @@ fn load_spike_events(session_path: &Path) -> anyhow::Result<Option<Vec<SpikeEven
     let events = serde_json::from_str(&data)
         .with_context(|| format!("failed to parse {}", spike_events_path.display()))?;
     Ok(Some(events))
+}
+
+fn load_run_artifacts(session_path: &Path) -> anyhow::Result<RunArtifacts> {
+    let Some(run_dir) = session_path.parent() else {
+        return Ok(RunArtifacts::default());
+    };
+
+    Ok(RunArtifacts {
+        irq_events: load_artifact_vec(&run_dir.join("irq_events.json"))?,
+        gpu_samples: load_artifact_vec(&run_dir.join("gpu_samples.json"))?,
+        frame_events: load_artifact_vec(&run_dir.join("frame_correlation.json"))?,
+    })
+}
+
+fn load_artifact_vec<T>(path: &Path) -> anyhow::Result<Vec<T>>
+where
+    T: serde::de::DeserializeOwned,
+{
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let data =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    serde_json::from_str(&data).with_context(|| format!("failed to parse {}", path.display()))
 }
 
 fn pushln(output: &mut String, line: impl AsRef<str>) {
@@ -595,6 +901,146 @@ fn render_cluster_source(analysis: &SpikeClusterAnalysis, cluster_window_ms: u64
         "{source} count={} window_ms={} min_tasks={}",
         analysis.source_count, cluster_window_ms, MIN_CLUSTER_TASKS
     )
+}
+
+fn render_correlation_sections(
+    output: &mut String,
+    clusters: &[SpikeCluster],
+    artifacts: &RunArtifacts,
+    cluster_window_ns: u64,
+    top: usize,
+) {
+    if !artifacts.irq_events.is_empty() {
+        pushln(output, "irq overlap");
+        pushln(output, "-----------");
+        for (rank, cluster) in clusters.iter().take(top).enumerate() {
+            let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
+            let max_ns = cluster.max_switch_ns.saturating_add(cluster_window_ns);
+            let matches = artifacts
+                .irq_events
+                .iter()
+                .filter(|event| event.exit_ns >= min_ns && event.enter_ns <= max_ns)
+                .collect::<Vec<_>>();
+            if matches.is_empty() {
+                continue;
+            }
+            let max_duration = matches
+                .iter()
+                .map(|event| event.duration_ns)
+                .max()
+                .unwrap_or(0);
+            let irq_list = matches
+                .iter()
+                .map(|event| event.irq)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(|irq| irq.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            pushln(
+                output,
+                format!(
+                    "cluster=#{} matches={} irqs={} max_duration={} window_ns={}..{}",
+                    rank + 1,
+                    matches.len(),
+                    irq_list,
+                    format_latency(max_duration),
+                    min_ns,
+                    max_ns
+                ),
+            );
+        }
+        pushln(output, "");
+    }
+
+    if !artifacts.gpu_samples.is_empty() {
+        pushln(output, "gpu near clusters");
+        pushln(output, "-----------------");
+        for (rank, cluster) in clusters.iter().take(top).enumerate() {
+            let Some(elapsed) = cluster_elapsed(cluster) else {
+                continue;
+            };
+            let Some(sample) = nearest_gpu_sample(elapsed, &artifacts.gpu_samples) else {
+                continue;
+            };
+            pushln(
+                output,
+                format!(
+                    "cluster=#{} sample_elapsed={} gpu_busy={} gpu_clock_mhz={} mem_clock_mhz={} temp_mC={} power_uW={}",
+                    rank + 1,
+                    format_elapsed(Some(sample.elapsed_ms)),
+                    format_option(sample.gpu_busy_percent),
+                    format_option(sample.gpu_clock_mhz),
+                    format_option(sample.mem_clock_mhz),
+                    format_option(sample.temp_millidegrees),
+                    format_option(sample.power_microwatts),
+                ),
+            );
+        }
+        pushln(output, "");
+    }
+
+    if !artifacts.frame_events.is_empty() {
+        pushln(output, "frame overlap");
+        pushln(output, "-------------");
+        for (rank, cluster) in clusters.iter().take(top).enumerate() {
+            let Some((min_elapsed, max_elapsed)) = cluster_elapsed_range(cluster) else {
+                continue;
+            };
+            let padding_ms = u128::from(cluster_window_ns / 1_000_000).max(1);
+            let min_elapsed = min_elapsed.saturating_sub(padding_ms);
+            let max_elapsed = max_elapsed.saturating_add(padding_ms);
+            let matches = artifacts
+                .frame_events
+                .iter()
+                .filter(|frame| frame.elapsed_ms >= min_elapsed && frame.elapsed_ms <= max_elapsed)
+                .collect::<Vec<_>>();
+            if matches.is_empty() {
+                continue;
+            }
+            let max_frame = matches
+                .iter()
+                .map(|frame| frame.frametime_ms)
+                .fold(0.0_f64, f64::max);
+            pushln(
+                output,
+                format!(
+                    "cluster=#{} frames={} max_frametime_ms={:.3} elapsed={}..{}",
+                    rank + 1,
+                    matches.len(),
+                    max_frame,
+                    min_elapsed,
+                    max_elapsed
+                ),
+            );
+        }
+        pushln(output, "");
+    }
+}
+
+fn nearest_gpu_sample(elapsed_ms: u128, samples: &[GpuSample]) -> Option<&GpuSample> {
+    samples
+        .iter()
+        .min_by_key(|sample| sample.elapsed_ms.abs_diff(elapsed_ms))
+        .filter(|sample| sample.elapsed_ms.abs_diff(elapsed_ms) <= 50)
+}
+
+fn cluster_elapsed_range(cluster: &SpikeCluster) -> Option<(u128, u128)> {
+    let mut elapsed = cluster.points.iter().filter_map(|point| point.elapsed_ms);
+    let first = elapsed.next()?;
+    let mut min_elapsed = first;
+    let mut max_elapsed = first;
+    for value in elapsed {
+        min_elapsed = min_elapsed.min(value);
+        max_elapsed = max_elapsed.max(value);
+    }
+    Some((min_elapsed, max_elapsed))
+}
+
+fn format_option<T: std::fmt::Display>(value: Option<T>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_owned())
 }
 
 fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
