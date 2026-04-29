@@ -118,6 +118,37 @@ pub(crate) fn render_report(
     );
     pushln(
         &mut output,
+        format!("include_comm: {:?}", session.config.include_comm),
+    );
+    pushln(
+        &mut output,
+        format!("exclude_comm: {:?}", session.config.exclude_comm),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "watch_process: {}",
+            session.config.watch_process.as_deref().unwrap_or("-")
+        ),
+    );
+    pushln(
+        &mut output,
+        format!("persistent: {}", session.config.persistent),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "csv_path: {}",
+            session
+                .config
+                .csv_path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "-".to_owned())
+        ),
+    );
+    pushln(
+        &mut output,
         format!("active_tasks_at_end: {}", session.active_target_pids_count),
     );
     pushln(&mut output, "");
@@ -131,6 +162,14 @@ pub(crate) fn render_report(
                 "spike_events_truncated=true retained_spike_events={} note=spike_events.json is capped; top_spikes and threshold counters remain available",
                 session.spike_event_count
             ),
+        );
+        pushln(&mut output, "");
+    }
+
+    if session.scx_event_count > 0 {
+        pushln(
+            &mut output,
+            format!("scx_events: {}", session.scx_event_count),
         );
         pushln(&mut output, "");
     }
@@ -373,7 +412,8 @@ fn flatten_spike_events(session: &SessionFile, spike_events: &[SpikeEvent]) -> V
             latency_ns: spike.latency_ns,
             wakeup_ns: spike.wakeup_ns,
             switch_ns: spike.switch_ns,
-            elapsed_ms: elapsed_ms(session.monotonic_start_ns, spike.switch_ns).or(spike.elapsed_ms),
+            elapsed_ms: elapsed_ms(session.monotonic_start_ns, spike.switch_ns)
+                .or(spike.elapsed_ms),
         })
         .collect()
 }

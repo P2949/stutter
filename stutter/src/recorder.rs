@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     env, fs,
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -19,11 +19,13 @@ use crate::{
         SpikeRecord, TaskStats,
     },
     process_tree::{TaskClass, TaskInfo},
+    scx::ScxEvent,
 };
 
 pub type IntervalRecord = MetricsIntervalRecord;
 pub const MAX_SPIKE_EVENTS: usize = 500_000;
 
+#[derive(Debug)]
 pub struct RecordingRun {
     pub run_name: Option<String>,
     pub run_dir: PathBuf,
@@ -122,6 +124,8 @@ pub struct SessionFile {
     #[serde(default)]
     pub spike_events_truncated: bool,
     #[serde(default)]
+    pub scx_event_count: usize,
+    #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
     pub tasks: Vec<SessionTask>,
     pub top_spikes: Vec<SessionSpike>,
@@ -145,6 +149,8 @@ pub struct MetadataFile {
     #[serde(default)]
     pub spike_events_truncated: bool,
     #[serde(default)]
+    pub scx_event_count: usize,
+    #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
 }
 
@@ -152,6 +158,16 @@ pub struct MetadataFile {
 pub struct RecordedConfig {
     pub manual_pids: Vec<u32>,
     pub tree_roots: Vec<u32>,
+    #[serde(default)]
+    pub include_comm: Vec<String>,
+    #[serde(default)]
+    pub exclude_comm: Vec<String>,
+    #[serde(default)]
+    pub watch_process: Option<String>,
+    #[serde(default)]
+    pub persistent: bool,
+    #[serde(default)]
+    pub csv_path: Option<PathBuf>,
     pub summary_period_ms: u64,
     pub spike_threshold_ns: u64,
     pub verbose: bool,
@@ -276,7 +292,7 @@ impl SpikeEvent {
     }
 }
 
-pub const SESSION_SCHEMA_VERSION: u32 = 7;
+pub const SESSION_SCHEMA_VERSION: u32 = 11;
 
 pub struct FinalizeRecordingInput<'a> {
     pub recording: &'a RecordingRun,
@@ -288,6 +304,7 @@ pub struct FinalizeRecordingInput<'a> {
     pub tree_events: &'a [TreeEvent],
     pub spike_events: &'a [SpikeEvent],
     pub spike_events_truncated: bool,
+    pub scx_events: &'a [ScxEvent],
     pub drop_counters: DropCountersSnapshot,
 }
 
@@ -319,6 +336,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     let tree_events = input.tree_events;
     let spike_events = input.spike_events;
     let spike_events_truncated = input.spike_events_truncated;
+    let scx_events = input.scx_events;
     let drop_counters = input.drop_counters;
     let ended_at = SystemTime::now();
     let monotonic_end_ns = monotonic_now_ns();
@@ -391,6 +409,11 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         config: RecordedConfig {
             manual_pids: config.target_pids.clone(),
             tree_roots: config.tree_pids.clone(),
+            include_comm: config.task_filters.include_comm.clone(),
+            exclude_comm: config.task_filters.exclude_comm.clone(),
+            watch_process: config.watch_process.clone(),
+            persistent: config.persistent,
+            csv_path: config.csv_path.clone(),
             summary_period_ms: config.summary_period_ms,
             spike_threshold_ns: config.spike_threshold_ns,
             verbose: config.verbose,
@@ -401,6 +424,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         active_expanded_tasks: active_expanded_tasks.clone(),
         spike_event_count: spike_events.len(),
         spike_events_truncated,
+        scx_event_count: scx_events.len(),
         drop_counters: drop_counters.clone(),
         tasks,
         top_spikes,
@@ -420,6 +444,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         active_expanded_tasks,
         spike_event_count: spike_events.len(),
         spike_events_truncated,
+        scx_event_count: scx_events.len(),
         drop_counters,
     };
 
@@ -428,8 +453,55 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     write_json(recording.run_dir.join("interval.json"), interval_records)?;
     write_json(recording.run_dir.join("tree_events.json"), tree_events)?;
     write_json(recording.run_dir.join("spike_events.json"), spike_events)?;
+    write_json(recording.run_dir.join("scx_events.json"), scx_events)?;
 
     println!("recording written to {}", recording.run_dir.display());
+    Ok(())
+}
+
+pub fn write_interval_csv(path: &Path, interval_records: &[IntervalRecord]) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut file = fs::File::create(path)?;
+    writeln!(
+        file,
+        "elapsed_ms,task,active,class,comm,process_pid,process_comm,samples,stored_samples,truncated_samples,min_ns,avg_ns,p95_ns,p99_ns,max_ns,over_1ms,over_2ms,over_5ms,busiest_cpu,busiest_cpu_samples,worst_cpu,worst_cpu_max_ns,spikiest_cpu,spikiest_cpu_spikes,percentile_scope"
+    )?;
+
+    for record in interval_records {
+        writeln!(
+            file,
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            record.elapsed_ms,
+            record.task,
+            record.active,
+            record.class,
+            csv_escape(&record.comm),
+            option_u32(record.process_pid),
+            csv_escape(&record.process_comm),
+            record.samples,
+            record.stored_samples,
+            record.truncated_samples,
+            record.min_ns,
+            record.avg_ns,
+            record.p95_ns,
+            record.p99_ns,
+            record.max_ns,
+            record.over_1ms,
+            record.over_2ms,
+            record.over_5ms,
+            option_u32(record.busiest_cpu),
+            record.busiest_cpu_samples,
+            option_u32(record.worst_cpu),
+            record.worst_cpu_max_ns,
+            option_u32(record.spikiest_cpu),
+            record.spikiest_cpu_spikes,
+            csv_escape(&record.percentile_scope),
+        )?;
+    }
+
     Ok(())
 }
 
@@ -574,6 +646,18 @@ fn elapsed_ms_from_monotonic(monotonic_start_ns: Option<u64>, switch_ns: u64) ->
     switch_ns
         .checked_sub(start_ns)
         .map(|elapsed_ns| u128::from(elapsed_ns / 1_000_000))
+}
+
+fn option_u32(value: Option<u32>) -> String {
+    value.map(|value| value.to_string()).unwrap_or_default()
+}
+
+fn csv_escape(value: &str) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_owned()
+    }
 }
 
 fn write_json<T: ?Sized + Serialize>(path: PathBuf, value: &T) -> anyhow::Result<()> {

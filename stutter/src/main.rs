@@ -1,15 +1,18 @@
+mod affinity;
 mod cli;
 mod ebpf_loader;
 mod metadata;
 mod metrics;
 mod process_tree;
+mod profiles;
 mod recorder;
 mod report;
+mod scx;
 
 #[cfg(test)]
 mod regression_tests;
 
-use std::{collections::BTreeMap, future, time::Instant};
+use std::{collections::BTreeMap, future, path::Path, time::Instant};
 
 use aya::maps::{HashMap as AyaHashMap, MapData};
 use cli::{AppCommand, Config, parse_app_command};
@@ -56,6 +59,20 @@ async fn main() -> anyhow::Result<()> {
 
     match parse_app_command()? {
         AppCommand::Monitor(config) => run_monitor(config).await,
+        AppCommand::Restore => {
+            let path = affinity::default_restore_path();
+            let restored = affinity::restore_saved(&path)?;
+            println!("restored {restored} affinity record(s)");
+            Ok(())
+        }
+        AppCommand::ApplyProfile { tree_pid, profile } => {
+            let records = profiles::apply_profile_to_tree(tree_pid, &profile)?;
+            println!(
+                "applied profile affinity to {} task(s); restore with: stutter restore",
+                records.len()
+            );
+            Ok(())
+        }
         AppCommand::InspectTree { tree_pid } => {
             let rendered = process_tree::render_tree(tree_pid)?;
             print!("{rendered}");
@@ -70,7 +87,9 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn run_monitor(config: Config) -> anyhow::Result<()> {
+async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
+    resolve_watch_process(&mut config).await?;
+
     let recording = prepare_recording(&config)?;
     let mut loaded = ebpf_loader::load_and_attach()?;
 
@@ -80,9 +99,11 @@ async fn run_monitor(config: Config) -> anyhow::Result<()> {
     let mut interval_records: Vec<IntervalRecord> = Vec::new();
     let mut tree_events: Vec<TreeEvent> = Vec::new();
     let mut spike_events = recording.as_ref().map(|_| SpikeEventBuffer::default());
+    let mut scx_tracker = scx::ScxTracker::default();
     let recording_monotonic_start_ns = recording.as_ref().and_then(|run| run.monotonic_start_ns);
 
     let started = Instant::now();
+    scx_tracker.sample(0);
 
     refresh_target_tasks(RefreshTargetTasksInput {
         config: &config,
@@ -102,6 +123,10 @@ async fn run_monitor(config: Config) -> anyhow::Result<()> {
     let mut tree_tick = interval(Duration::from_secs(1));
     tree_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     tree_tick.tick().await;
+
+    let mut scx_tick = interval(Duration::from_secs(1));
+    scx_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    scx_tick.tick().await;
 
     let duration_future = async {
         if let Some(max_duration) = config.max_duration {
@@ -150,6 +175,10 @@ async fn run_monitor(config: Config) -> anyhow::Result<()> {
                     elapsed_ms: started.elapsed().as_millis(),
                     recording_started: recording.as_ref().map(|run| run.started_instant),
                 })?;
+            }
+
+            _ = scx_tick.tick() => {
+                scx_tracker.sample(started.elapsed().as_millis());
             }
 
             ready = loaded.events.readable_mut() => {
@@ -202,12 +231,66 @@ async fn run_monitor(config: Config) -> anyhow::Result<()> {
             tree_events: &tree_events,
             spike_events: spike_events_slice,
             spike_events_truncated,
+            scx_events: scx_tracker.events(),
             drop_counters,
         })?;
     }
 
+    if let Some(csv_path) = &config.csv_path {
+        recorder::write_interval_csv(csv_path, &interval_records)?;
+        println!("wrote interval CSV: {}", csv_path.display());
+    }
+
     info!("exiting stop_reason={stop_reason}");
     Ok(())
+}
+
+async fn resolve_watch_process(config: &mut Config) -> anyhow::Result<()> {
+    let Some(pattern) = config.watch_process.clone() else {
+        return Ok(());
+    };
+
+    if let Some(pid) = find_process_by_pattern(&pattern) {
+        add_watch_tree_pid(config, pid);
+        return Ok(());
+    }
+
+    info!(
+        "watch_process_waiting pattern={} persistent={}",
+        pattern, config.persistent
+    );
+
+    let mut tick = interval(Duration::from_secs(2));
+    tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                anyhow::bail!("stopped while waiting for --watch-process {pattern}");
+            }
+            _ = tick.tick() => {
+                if let Some(pid) = find_process_by_pattern(&pattern) {
+                    add_watch_tree_pid(config, pid);
+                    info!("watch_process_found pattern={} pid={}", pattern, pid);
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
+fn add_watch_tree_pid(config: &mut Config, pid: u32) {
+    config.tree_pids.push(pid);
+    config.tree_pids.sort_unstable();
+    config.tree_pids.dedup();
+}
+
+fn find_process_by_pattern(pattern: &str) -> Option<u32> {
+    process_tree::scan_processes_at(Path::new("/proc"))
+        .into_iter()
+        .find_map(|(pid, process)| {
+            (process.comm.contains(pattern) || process.cmdline.contains(pattern)).then_some(pid)
+        })
 }
 
 fn handle_event(input: HandleEventInput<'_>) {
@@ -284,7 +367,11 @@ fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Result<()
         recording_started,
     } = input;
 
-    let snapshot = process_tree::target_snapshot(&config.target_pids, &config.tree_pids);
+    let snapshot = process_tree::target_snapshot_with_filters(
+        &config.target_pids,
+        &config.tree_pids,
+        &config.task_filters,
+    );
     let desired_tasks = snapshot.tasks;
 
     if desired_tasks.len() > TARGET_PIDS_MAX {

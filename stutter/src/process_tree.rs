@@ -66,6 +66,30 @@ pub struct TargetSnapshot {
     pub tasks: BTreeMap<u32, TaskInfo>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TaskFilters {
+    pub include_comm: Vec<String>,
+    pub exclude_comm: Vec<String>,
+}
+
+impl TaskFilters {
+    fn allows(&self, task: &TaskInfo) -> bool {
+        if self
+            .exclude_comm
+            .iter()
+            .any(|pattern| comm_pattern_matches(pattern, task))
+        {
+            return false;
+        }
+
+        self.include_comm.is_empty()
+            || self
+                .include_comm
+                .iter()
+                .any(|pattern| comm_pattern_matches(pattern, task))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetDiffAction {
     Added,
@@ -209,10 +233,27 @@ pub fn target_snapshot(manual_pids: &[u32], tree_pids: &[u32]) -> TargetSnapshot
     target_snapshot_at(Path::new("/proc"), manual_pids, tree_pids)
 }
 
+pub fn target_snapshot_with_filters(
+    manual_pids: &[u32],
+    tree_pids: &[u32],
+    filters: &TaskFilters,
+) -> TargetSnapshot {
+    target_snapshot_filtered_at(Path::new("/proc"), manual_pids, tree_pids, filters)
+}
+
 pub fn target_snapshot_at(
     proc_root: &Path,
     manual_pids: &[u32],
     tree_pids: &[u32],
+) -> TargetSnapshot {
+    target_snapshot_filtered_at(proc_root, manual_pids, tree_pids, &TaskFilters::default())
+}
+
+pub fn target_snapshot_filtered_at(
+    proc_root: &Path,
+    manual_pids: &[u32],
+    tree_pids: &[u32],
+    filters: &TaskFilters,
 ) -> TargetSnapshot {
     let processes = scan_processes_at(proc_root);
     let mut requested_roots = BTreeSet::new();
@@ -246,6 +287,8 @@ pub fn target_snapshot_at(
             task.class = TaskClass::Helper;
         }
     }
+
+    tasks.retain(|_, task| filters.allows(task));
 
     TargetSnapshot {
         process_roots,
@@ -342,6 +385,10 @@ fn task_info_from_proc(tid: u32, process_pid: u32, comm: &str, proc_info: &ProcI
         process_comm: proc_info.comm.clone(),
         class: classify_task(comm, &proc_info.comm, &proc_info.cmdline),
     }
+}
+
+fn comm_pattern_matches(pattern: &str, task: &TaskInfo) -> bool {
+    !pattern.is_empty() && (task.comm.contains(pattern) || task.process_comm.contains(pattern))
 }
 
 pub fn classify_task(comm: &str, process_comm: &str, cmdline: &str) -> TaskClass {
