@@ -56,6 +56,7 @@ struct SpikeClusterCandidate {
     end_idx: usize,
     distinct_tasks: usize,
     min_switch_ns: u64,
+    max_switch_ns: u64,
     max_latency_ns: u64,
 }
 
@@ -408,6 +409,7 @@ fn spike_clusters_from_points(
                     end_idx: right_idx + 1,
                     distinct_tasks: task_counts.len(),
                     min_switch_ns: points[left_idx].switch_ns,
+                    max_switch_ns: points[right_idx].switch_ns,
                     max_latency_ns,
                 },
             );
@@ -423,22 +425,26 @@ fn spike_clusters_from_points(
         )
     });
 
-    let mut selected = Vec::new();
+    let mut selected_candidates = Vec::new();
 
     'candidate: for candidate in candidates {
-        let cluster = cluster_from_points(
-            points[candidate.start_idx..candidate.end_idx].to_vec(),
-            candidate.distinct_tasks,
-        );
-        for existing in &selected {
-            if clusters_overlap(existing, &cluster) {
+        for existing in &selected_candidates {
+            if cluster_candidates_overlap(existing, &candidate) {
                 continue 'candidate;
             }
         }
-        selected.push(cluster);
+        selected_candidates.push(candidate);
     }
 
-    selected
+    selected_candidates
+        .into_iter()
+        .map(|candidate| {
+            cluster_from_points(
+                points[candidate.start_idx..candidate.end_idx].to_vec(),
+                candidate.distinct_tasks,
+            )
+        })
+        .collect()
 }
 
 fn flatten_spike_events(session: &SessionFile, spike_events: &[SpikeEvent]) -> Vec<SpikePoint> {
@@ -570,7 +576,7 @@ fn cluster_from_points(mut points: Vec<SpikePoint>, distinct_tasks: usize) -> Sp
     }
 }
 
-fn clusters_overlap(left: &SpikeCluster, right: &SpikeCluster) -> bool {
+fn cluster_candidates_overlap(left: &SpikeClusterCandidate, right: &SpikeClusterCandidate) -> bool {
     left.min_switch_ns <= right.max_switch_ns && right.min_switch_ns <= left.max_switch_ns
 }
 

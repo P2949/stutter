@@ -272,8 +272,10 @@ pub fn target_snapshot_filtered_at(
 
     for root_pid in tree_pids {
         requested_roots.insert(*root_pid);
-        process_roots.insert(*root_pid);
-        process_roots.extend(descendants_of(*root_pid, &processes));
+        if processes.contains_key(root_pid) {
+            process_roots.insert(*root_pid);
+            process_roots.extend(descendants_of(*root_pid, &processes));
+        }
     }
 
     let mut tasks = expand_tasks_at(proc_root, &process_roots, &processes);
@@ -423,6 +425,10 @@ fn task_info_from_proc(
 fn stat_starttime_at(path: &Path) -> Option<u64> {
     let stat = fs::read_to_string(path).ok()?;
     parse_proc_stat_starttime(&stat)
+}
+
+pub fn process_starttime_at(proc_root: &Path, pid: u32) -> Option<u64> {
+    stat_starttime_at(&proc_root.join(pid.to_string()).join("stat"))
 }
 
 pub fn parse_proc_stat_starttime(stat: &str) -> Option<u64> {

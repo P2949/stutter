@@ -70,6 +70,16 @@ RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
 
 The monitor periodically scans `/proc`, finds descendant processes, expands each process into `/proc/<pid>/task/<tid>`, and updates the eBPF `TARGET_PIDS` map dynamically.
 
+For launchers where the PID changes between runs, watch for the process name:
+
+```bash
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
+  --watch-process KingdomCome.exe \
+  --persistent
+```
+
+`--watch-process` scans `/proc` only while waiting for the process to appear or relaunch. Once a process is found, `stutter` follows that root PID and its descendants. `--persistent` requires `--watch-process`; if the watched process exits, stale TIDs are removed and the monitor waits for the next matching launch.
+
 ## Inspect a tree before tracing
 
 ```bash
@@ -135,6 +145,33 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- report \
 ```
 
 Reports use `spike_events.json` for spike cluster detection when it is present. Older runs without that file still report clusters from retained per-task `top_spikes`.
+
+## Apply and restore affinity profiles
+
+Apply a TOML profile to the current process tree:
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo run -- apply-profile \
+  --tree-pid <root-pid> \
+  --profile profile.toml
+```
+
+By default this is one-shot. Use `--watch` to keep applying the profile to new threads:
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo run -- apply-profile \
+  --tree-pid <root-pid> \
+  --profile profile.toml \
+  --watch
+```
+
+Watch mode restores the original masks on Ctrl-C by default. Add `--keep-applied` to leave the profile active and restore later:
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo run -- restore
+```
+
+`apply-profile --force` discards an existing restore file. Without `--force`, new records are merged into the existing restore file while preserving the earliest original mask for each TID.
 
 ## Important interpretation notes
 
