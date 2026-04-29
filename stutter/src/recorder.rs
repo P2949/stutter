@@ -12,6 +12,7 @@ use stutter_common::SchedulerEvent;
 use crate::{
     TARGET_PIDS_MAX,
     cli::{Config, RecordingConfig},
+    ebpf_loader::DropCountersSnapshot,
     metadata::{SystemMetadata, collect_system_metadata},
     metrics::{
         CpuLine, CpuSnapshot, IntervalRecord as MetricsIntervalRecord, LatencyHistogramBucket,
@@ -31,15 +32,34 @@ pub struct RecordingRun {
     pub monotonic_start_ns: Option<u64>,
 }
 
-#[derive(Default)]
 pub struct SpikeEventBuffer {
     events: Vec<SpikeEvent>,
     truncated: bool,
+    max_events: usize,
+}
+
+impl Default for SpikeEventBuffer {
+    fn default() -> Self {
+        Self {
+            events: Vec::new(),
+            truncated: false,
+            max_events: MAX_SPIKE_EVENTS,
+        }
+    }
 }
 
 impl SpikeEventBuffer {
+    #[cfg(test)]
+    pub fn with_max_events(max_events: usize) -> Self {
+        Self {
+            events: Vec::new(),
+            truncated: false,
+            max_events,
+        }
+    }
+
     pub fn push(&mut self, event: SpikeEvent) {
-        if self.events.len() < MAX_SPIKE_EVENTS {
+        if self.events.len() < self.max_events {
             self.events.push(event);
         } else {
             self.truncated = true;
@@ -101,6 +121,8 @@ pub struct SessionFile {
     pub spike_event_count: usize,
     #[serde(default)]
     pub spike_events_truncated: bool,
+    #[serde(default)]
+    pub drop_counters: DropCountersSnapshot,
     pub tasks: Vec<SessionTask>,
     pub top_spikes: Vec<SessionSpike>,
 }
@@ -122,6 +144,8 @@ pub struct MetadataFile {
     pub spike_event_count: usize,
     #[serde(default)]
     pub spike_events_truncated: bool,
+    #[serde(default)]
+    pub drop_counters: DropCountersSnapshot,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -264,6 +288,7 @@ pub struct FinalizeRecordingInput<'a> {
     pub tree_events: &'a [TreeEvent],
     pub spike_events: &'a [SpikeEvent],
     pub spike_events_truncated: bool,
+    pub drop_counters: DropCountersSnapshot,
 }
 
 pub fn prepare_recording(config: &Config) -> anyhow::Result<Option<RecordingRun>> {
@@ -294,6 +319,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     let tree_events = input.tree_events;
     let spike_events = input.spike_events;
     let spike_events_truncated = input.spike_events_truncated;
+    let drop_counters = input.drop_counters;
     let ended_at = SystemTime::now();
     let monotonic_end_ns = monotonic_now_ns();
     let duration_ms = recording.started_instant.elapsed().as_millis();
@@ -375,6 +401,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         active_expanded_tasks: active_expanded_tasks.clone(),
         spike_event_count: spike_events.len(),
         spike_events_truncated,
+        drop_counters: drop_counters.clone(),
         tasks,
         top_spikes,
     };
@@ -393,6 +420,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         active_expanded_tasks,
         spike_event_count: spike_events.len(),
         spike_events_truncated,
+        drop_counters,
     };
 
     write_json(recording.run_dir.join("session.json"), &session)?;

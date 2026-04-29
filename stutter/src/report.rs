@@ -85,7 +85,7 @@ pub fn print_report(
     Ok(())
 }
 
-fn render_report(
+pub(crate) fn render_report(
     session_path: &Path,
     session: &SessionFile,
     spike_events: Option<&[SpikeEvent]>,
@@ -373,8 +373,7 @@ fn flatten_spike_events(session: &SessionFile, spike_events: &[SpikeEvent]) -> V
             latency_ns: spike.latency_ns,
             wakeup_ns: spike.wakeup_ns,
             switch_ns: spike.switch_ns,
-            elapsed_ms: elapsed_ms(session.monotonic_start_ns, spike.switch_ns)
-                .or(spike.elapsed_ms),
+            elapsed_ms: elapsed_ms(session.monotonic_start_ns, spike.switch_ns).or(spike.elapsed_ms),
         })
         .collect()
 }

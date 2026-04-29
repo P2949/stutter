@@ -8,11 +8,13 @@ use std::{
 use stutter_common::{EVENT_RUNNABLE_LATENCY, SchedulerEvent};
 
 use crate::{
-    cli::Config,
+    cli::{Config, RecordingConfig},
+    ebpf_loader::DropCountersSnapshot,
     metrics,
     process_tree::{self, TargetDiffAction, TaskClass, TaskInfo},
     recorder::{
-        self, FinalizeRecordingInput, RecordingRun, SESSION_SCHEMA_VERSION, SessionFile, SpikeEvent,
+        self, FinalizeRecordingInput, RecordingRun, SESSION_SCHEMA_VERSION, SessionFile,
+        SpikeEvent, SpikeEventBuffer,
     },
 };
 
@@ -41,6 +43,47 @@ fn reused_tid_with_different_task_resets_stats_after_removal() {
     assert_eq!(stats.class, TaskClass::Helper);
     assert!(stats.active);
     assert_eq!(stats.removed_ms, None);
+}
+
+#[test]
+fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
+    let old_task = task_info(42, 100, "old-game", "old-worker", TaskClass::Game);
+    let new_task = task_info(42, 200, "new-helper", "new-worker", TaskClass::Helper);
+
+    let active_targets = BTreeMap::from([(42, old_task.clone())]);
+    let desired_tasks = BTreeMap::from([(42, new_task.clone())]);
+    let mut known_targets = active_targets.clone();
+
+    let mut stats = task_stats_with_info(42, 100, "old-game", "old-worker", TaskClass::Game, 10);
+    stats.session_latency.record(5_000_000);
+    let mut stats_by_task = BTreeMap::from([(42, stats)]);
+
+    let mut tree_events = Vec::new();
+    super::handle_same_tid_replacements(
+        &active_targets,
+        &desired_tasks,
+        &mut known_targets,
+        &mut stats_by_task,
+        &mut tree_events,
+        77,
+        Some(Instant::now()),
+    );
+
+    let stats = stats_by_task.get(&42).unwrap();
+    assert_eq!(stats.first_seen_ms, 77);
+    assert_eq!(stats.last_seen_ms, 77);
+    assert_eq!(stats.session_latency.count, 0);
+    assert_eq!(stats.process_pid, Some(200));
+    assert_eq!(stats.process_comm, "new-helper");
+    assert_eq!(stats.comm, "new-worker");
+    assert_eq!(stats.class, TaskClass::Helper);
+    assert!(stats.active);
+
+    assert_eq!(known_targets.get(&42), Some(&new_task));
+    assert_eq!(tree_events.len(), 1);
+    assert_eq!(tree_events[0].action, "replaced");
+    assert_eq!(tree_events[0].tid, 42);
+    assert_eq!(tree_events[0].process_pid, 200);
 }
 
 #[test]
@@ -108,7 +151,7 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
     )]);
     let known_targets = BTreeMap::new();
     let mut stats_by_task = BTreeMap::new();
-    let mut spike_events = recorder::SpikeEventBuffer::default();
+    let mut spike_events = SpikeEventBuffer::default();
 
     super::handle_event(super::HandleEventInput {
         event: scheduler_event_with_latency(7, "RenderThread", 999_999),
@@ -147,6 +190,20 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
     assert_eq!(spike.wakeup_ns, 100);
     assert_eq!(spike.switch_ns, 1_000_100);
     assert_eq!(spike.elapsed_ms, Some(1));
+}
+
+#[test]
+fn spike_event_buffer_caps_and_marks_truncated() {
+    let mut buffer = SpikeEventBuffer::with_max_events(2);
+
+    buffer.push(spike_event(1, 1_000));
+    buffer.push(spike_event(2, 2_000));
+    buffer.push(spike_event(3, 3_000));
+
+    assert_eq!(buffer.as_slice().len(), 2);
+    assert!(buffer.truncated());
+    assert_eq!(buffer.as_slice()[0].task, 1);
+    assert_eq!(buffer.as_slice()[1].task, 2);
 }
 
 #[test]
@@ -275,7 +332,7 @@ fn target_snapshot_adds_fallback_without_o_n_squared_duplicate_scan_behavior() {
 }
 
 #[test]
-fn recording_serializes_sorted_tasks_schema_histogram_and_spikes() {
+fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters() {
     let dir = temp_test_dir("recording-schema");
     fs::create_dir_all(&dir).unwrap();
 
@@ -314,6 +371,10 @@ fn recording_serializes_sorted_tasks_schema_histogram_and_spikes() {
         wakeup_ns: 10,
         switch_ns: 2_000_010,
     }];
+    let drop_counters = DropCountersSnapshot {
+        wakeup_times_insert_failed: 2,
+        ringbuf_reserve_failed: 3,
+    };
 
     recorder::finalize_recording(FinalizeRecordingInput {
         recording: &recording,
@@ -325,6 +386,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_and_spikes() {
         tree_events: &tree_events,
         spike_events: &spike_events,
         spike_events_truncated: true,
+        drop_counters,
     })
     .unwrap();
 
@@ -342,6 +404,10 @@ fn recording_serializes_sorted_tasks_schema_histogram_and_spikes() {
     assert_eq!(metadata.spike_event_count, 1);
     assert!(session.spike_events_truncated);
     assert!(metadata.spike_events_truncated);
+    assert_eq!(session.drop_counters.total(), 5);
+    assert_eq!(metadata.drop_counters.total(), 5);
+    assert_eq!(session.drop_counters.wakeup_times_insert_failed, 2);
+    assert_eq!(session.drop_counters.ringbuf_reserve_failed, 3);
     assert_eq!(recorded_spike_events.len(), 1);
     assert_eq!(recorded_spike_events[0].task, 7);
     assert_eq!(
@@ -410,11 +476,95 @@ fn report_reads_recorded_session_and_spike_events() {
         tree_events: &[],
         spike_events: &spike_events,
         spike_events_truncated: false,
+        drop_counters: DropCountersSnapshot::default(),
     })
     .unwrap();
 
     crate::report::print_report(&dir, false, 10, 5).unwrap();
     crate::report::print_report(&dir, true, 10, 5).unwrap();
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn report_cluster_output_caps_inline_points() {
+    let dir = temp_test_dir("report-cluster-cap");
+    fs::create_dir_all(&dir).unwrap();
+
+    let recording = RecordingRun {
+        run_name: Some("cluster-cap-test".to_owned()),
+        run_dir: dir.clone(),
+        started_at: UNIX_EPOCH,
+        started_instant: Instant::now(),
+        monotonic_start_ns: Some(1_000_000_000),
+    };
+
+    let config = test_config(vec![7], vec![], Some(Duration::from_secs(1)));
+    let active_targets: BTreeMap<u32, TaskInfo> = BTreeMap::new();
+    let stats_by_task: BTreeMap<u32, metrics::TaskStats> = BTreeMap::new();
+
+    let spike_events = (0..10)
+        .map(|idx| SpikeEvent {
+            elapsed_ms: Some(idx),
+            task: 100 + idx as u32,
+            active: true,
+            class: TaskClass::Helper,
+            process_pid: Some(100 + idx as u32),
+            process_comm: format!("proc-{idx}"),
+            comm: format!("worker-{idx}"),
+            cpu: idx as u32 % 4,
+            prio: 120,
+            latency_ns: 1_000_000 + idx as u64,
+            wakeup_ns: 1_000_000_000 + idx as u64 * 100_000,
+            switch_ns: 1_001_000_000 + idx as u64 * 100_000,
+        })
+        .collect::<Vec<_>>();
+
+    recorder::finalize_recording(FinalizeRecordingInput {
+        recording: &recording,
+        config: &config,
+        stop_reason: "test",
+        active_targets: &active_targets,
+        stats_by_task: &stats_by_task,
+        interval_records: &[],
+        tree_events: &[],
+        spike_events: &spike_events,
+        spike_events_truncated: false,
+        drop_counters: DropCountersSnapshot::default(),
+    })
+    .unwrap();
+
+    let session_path = dir.join("session.json");
+    let session: SessionFile =
+        serde_json::from_str(&fs::read_to_string(&session_path).unwrap()).unwrap();
+
+    let output = crate::report::render_report(&session_path, &session, Some(&spike_events), 10, 5);
+
+    assert!(output.contains("total_spikes=10"));
+    assert!(output.contains("shown_points=8"));
+    assert!(output.contains("omitted_points=2"));
+    assert!(output.contains("100("));
+    assert!(output.contains("107("));
+    assert!(!output.contains("108("));
+    assert!(!output.contains("109("));
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn prepare_recording_refuses_to_overwrite_existing_output_dir() {
+    let dir = temp_test_dir("recording-existing-dir");
+    fs::create_dir_all(&dir).unwrap();
+
+    let mut config = test_config(vec![7], vec![], None);
+    config.recording = Some(RecordingConfig {
+        run_name: Some("collision-test".to_owned()),
+        out_dir: Some(dir.clone()),
+    });
+
+    let err = recorder::prepare_recording(&config).unwrap_err();
+
+    assert!(err.to_string().contains("output directory already exists"));
 
     fs::remove_dir_all(dir).ok();
 }
@@ -484,6 +634,23 @@ fn scheduler_event_with_latency(pid: u32, comm: &str, latency_ns: u64) -> Schedu
         switch_ns: 100 + latency_ns,
         latency_ns,
         comm: comm_bytes,
+    }
+}
+
+fn spike_event(task: u32, switch_ns: u64) -> SpikeEvent {
+    SpikeEvent {
+        elapsed_ms: Some(u128::from(switch_ns / 1_000_000)),
+        task,
+        active: true,
+        class: TaskClass::Helper,
+        process_pid: Some(task),
+        process_comm: format!("proc-{task}"),
+        comm: format!("worker-{task}"),
+        cpu: 0,
+        prio: 120,
+        latency_ns: 1_000_000,
+        wakeup_ns: switch_ns.saturating_sub(1_000_000),
+        switch_ns,
     }
 }
 
