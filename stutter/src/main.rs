@@ -20,26 +20,26 @@ mod regression_tests;
 use std::{
     collections::BTreeMap,
     fs, future,
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use aya::maps::{HashMap as AyaHashMap, MapData};
-use cli::{AppCommand, Config, parse_app_command};
+use cli::{parse_app_command, AppCommand, Config};
 use log::{debug, info, warn};
 use metrics::{format_latency, print_event, print_interval_summaries, print_session_summaries};
 use process_tree::{TargetDiffAction, TaskInfo};
 use recorder::{
-    FinalizeRecordingInput, IntervalRecord, IrqEventRecord, SpikeEventBuffer, TreeEvent,
-    finalize_recording, prepare_recording,
+    finalize_recording, prepare_recording, FinalizeRecordingInput, IntervalRecord, IrqEventRecord,
+    SpikeEventBuffer, TreeEvent,
 };
 use serde::Serialize;
 use stutter_common::{EVENT_IRQ_LATENCY, EVENT_RUNNABLE_LATENCY, IrqEvent, SchedulerEvent};
 use tokio::{
     signal, task,
-    time::{Duration, MissedTickBehavior, interval, sleep},
+    time::{interval, sleep, Duration, MissedTickBehavior},
 };
-use std::os::unix::fs::MetadataExt;
 
 pub const TARGET_PIDS_MAX: usize = 1024;
 
@@ -50,7 +50,6 @@ struct RefreshTargetTasksInput<'a> {
     active_targets: &'a mut BTreeMap<u32, TaskInfo>,
     known_targets: &'a mut BTreeMap<u32, TaskInfo>,
     stats_by_task: &'a mut BTreeMap<u32, metrics::TaskStats>,
-    // Maps TID -> (exe_dev, exe_ino, optional_process_starttime_ticks)
     task_exe_inodes: &'a mut TaskExeInodesMap,
     tree_events: &'a mut Vec<TreeEvent>,
     target_pid_map: &'a mut AyaHashMap<MapData, u32, u8>,
@@ -80,7 +79,6 @@ struct DrainBpfEventsInput<'a> {
     spike_events: &'a mut Option<SpikeEventBuffer>,
     irq_events: &'a mut Vec<IrqEventRecord>,
 }
-
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -138,6 +136,7 @@ async fn main() -> anyhow::Result<()> {
 fn print_restore_dry_run(path: &Path) -> anyhow::Result<()> {
     let state = affinity::load_restore_state(path)?;
     println!("restore dry-run file={}", path.display());
+
     for record in state.records {
         match affinity::read_allowed_mask_raw(record.tid) {
             Ok(current) => println!(
@@ -159,6 +158,7 @@ fn print_restore_dry_run(path: &Path) -> anyhow::Result<()> {
             ),
         }
     }
+
     Ok(())
 }
 
@@ -185,20 +185,23 @@ async fn tune_command(
             "tune candidate={} state=CandidateWarmup warmup_seconds={}",
             profile.name, warmup_seconds
         );
-        let records =
-            match apply_profile_to_tree_blocking(tree_pid, profile.clone(), idx == 0).await {
-                Ok(records) => records,
-                Err(err) => {
-                    restore_tune_on_error();
-                    return Err(err);
-                }
-            };
+
+        let records = match apply_profile_to_tree_blocking(tree_pid, profile.clone(), idx == 0).await
+        {
+            Ok(records) => records,
+            Err(err) => {
+                restore_tune_on_error();
+                return Err(err);
+            }
+        };
+
         sleep(Duration::from_secs(warmup_seconds)).await;
 
         println!(
             "tune candidate={} state=CandidateMeasure measure_seconds={}",
             profile.name, measure_seconds
         );
+
         sleep(Duration::from_secs(measure_seconds)).await;
 
         let score = scorer::score_from_interval_records(&[]);
@@ -220,6 +223,7 @@ async fn tune_command(
         {
             best_idx = results.len();
         }
+
         results.push(result);
     }
 
@@ -227,6 +231,7 @@ async fn tune_command(
         .get(best_idx)
         .map(|result| result.profile.clone())
         .unwrap_or_default();
+
     let summary = TuneSummary {
         schema_version: 1,
         tree_pid,
@@ -236,10 +241,12 @@ async fn tune_command(
         best_profile,
         candidates: results,
     };
+
     let summary_path = default_tune_summary_path();
     if let Some(parent) = summary_path.parent() {
         fs::create_dir_all(parent)?;
     }
+
     fs::write(&summary_path, serde_json::to_vec_pretty(&summary)?)?;
 
     println!(
@@ -247,6 +254,7 @@ async fn tune_command(
         summary.best_profile,
         summary_path.display()
     );
+
     Ok(())
 }
 
@@ -292,6 +300,7 @@ fn default_tune_summary_path() -> PathBuf {
     let mut path = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
+
     path.push(".local");
     path.push("state");
     path.push("stutter");
@@ -316,6 +325,7 @@ async fn apply_profile_command(
 ) -> anyhow::Result<()> {
     let profile = profiles::load_first_profile(&profile_path)?;
     let mut cache = profiles::ProfileApplyCache::default();
+
     let records = if watch {
         match apply_profile_to_tree_cached_blocking(tree_pid, profile.clone(), force, cache).await {
             Ok((records, updated_cache)) => {
@@ -323,7 +333,9 @@ async fn apply_profile_command(
                 records
             }
             Err(err) => {
-                if !keep_applied && let Err(restore_err) = restore_profile_watch_on_exit() {
+                if !keep_applied
+                    && let Err(restore_err) = restore_profile_watch_on_exit()
+                {
                     warn!("profile_watch_restore_after_error_failed err={restore_err:#}");
                 }
                 return Err(err);
@@ -332,6 +344,7 @@ async fn apply_profile_command(
     } else {
         apply_profile_to_tree_blocking(tree_pid, profile.clone(), force).await?
     };
+
     println!(
         "applied profile affinity to {} task(s); restore with: stutter restore",
         records.len()
@@ -362,7 +375,9 @@ async fn apply_profile_command(
                     profile.clone(),
                     false,
                     cache,
-                ).await;
+                )
+                .await;
+
                 let records = match result {
                     Ok((records, updated_cache)) => {
                         cache = updated_cache;
@@ -377,6 +392,7 @@ async fn apply_profile_command(
                         return Err(err);
                     }
                 };
+
                 if !records.is_empty() {
                     info!("profile_watch_applied tasks={}", records.len());
                 }
@@ -421,6 +437,7 @@ fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
         "stopped profile watch; restored {} affinity record(s); skipped_dead={}",
         summary.restored, summary.skipped_dead
     );
+
     Ok(())
 }
 
@@ -472,6 +489,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
         Some(pid) => WatchProcessState::Running(pid),
         None => WatchProcessState::None,
     };
+
     let had_tree_roots = !config.tree_pids.is_empty();
     let mut tree_root_starttimes = capture_tree_root_starttimes(&config.tree_pids);
 
@@ -488,20 +506,19 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     let mut spike_events = recording.as_ref().map(|_| SpikeEventBuffer::default());
     let mut irq_events: Vec<IrqEventRecord> = Vec::new();
     let mut gpu_samples = Vec::new();
-    // NOTE: The following mutable collections (`active_targets`, `known_targets`,
-    // `stats_by_task`, `interval_records`, `tree_events`, `spike_events`, and
-    // `irq_events`) are intentionally confined to the main monitoring task.
-    // Blocking work (e.g., `spawn_blocking`) returns state back to this task
-    // and does not mutate these collections concurrently. If future changes
-    // introduce background mutation, protect these with `Arc<Mutex<_>>` or
-    // message passing to avoid data races.
+
+    // These mutable collections are intentionally confined to the main monitoring task.
+    // Blocking work returns state to this task and does not mutate these collections
+    // concurrently. Future background mutation should use Arc<Mutex<_>> or messages.
     let mut scx_tracker = scx::ScxTracker::default();
     let recording_monotonic_start_ns = recording.as_ref().and_then(|run| run.monotonic_start_ns);
+
     let mut hwmon_reader = if config.hwmon {
         hwmon::HwmonReader::discover_at(config.hwmon_root.as_deref())
     } else {
         None
     };
+
     if config.hwmon && hwmon_reader.is_none() {
         warn!("hwmon_requested_but_no_gpu_hwmon_found");
     }
@@ -577,6 +594,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     elapsed_ms,
                     &mut interval_records,
                 );
+
                 if config.tui {
                     println!("{}", tui::render_status(&active_targets, &stats_by_task));
                 }
@@ -588,6 +606,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                 {
                     remove_watch_tree_pid(&mut config, root_pid);
                     tree_root_starttimes.remove(&root_pid);
+
                     refresh_target_tasks(RefreshTargetTasksInput {
                         config: &config,
                         active_targets: &mut active_targets,
@@ -615,10 +634,12 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     &mut tree_root_starttimes,
                     watch_state.running_pid(),
                 );
+
                 if !removed_roots.is_empty() {
                     for root in &removed_roots {
                         info!("tree_root_removed pid={root}");
                     }
+
                     refresh_target_tasks(RefreshTargetTasksInput {
                         config: &config,
                         active_targets: &mut active_targets,
@@ -659,8 +680,6 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     continue;
                 };
 
-                // This full /proc scan runs only while waiting for the watched process
-                // to appear or relaunch. Once running, the monitor follows the root PID.
                 if let Some(pid) = find_process_by_pattern_at(Path::new("/proc"), &pattern) {
                     add_watch_tree_pid(&mut config, pid);
                     tree_root_starttimes.insert(pid, process_root_starttime(pid));
@@ -691,8 +710,8 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     let elapsed = started.elapsed().as_millis();
 
                     let (sample, returned_reader) = task::spawn_blocking(move || {
-                        let s = reader.sample(elapsed);
-                        (s, reader)
+                        let sample = reader.sample(elapsed);
+                        (sample, reader)
                     })
                     .await
                     .map_err(|err| anyhow::anyhow!("hwmon worker failed: {err}"))?;
@@ -703,7 +722,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
             }
 
             ready = loaded.events.readable_mut() => {
-                let guard = ready?; // This guard is consumed by the DrainBpfEventsInput struct.
+                let guard = ready?;
                 drain_bpf_events(DrainBpfEventsInput {
                     guard,
                     config: &config,
@@ -804,6 +823,7 @@ async fn wait_for_watch_process(config: &mut Config) -> anyhow::Result<Option<u3
 
     let mut tick = interval(Duration::from_millis(config.watch_poll_ms));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
     let watch_timeout = config.watch_timeout;
     let timeout_future = async move {
         if let Some(timeout) = watch_timeout {
@@ -875,6 +895,7 @@ fn remove_stale_tree_roots(
         if Some(pid) == watched_pid {
             continue;
         }
+
         if tree_root_is_stale(pid, root_starttimes) {
             removed.push(pid);
             root_starttimes.remove(&pid);
@@ -892,6 +913,7 @@ fn remove_stale_tree_roots(
 
 fn find_process_by_pattern_at(proc_root: &Path, pattern: &str) -> Option<u32> {
     let pattern_lower = pattern.to_ascii_lowercase();
+
     process_tree::scan_processes_at(proc_root)
         .into_iter()
         .filter_map(|(pid, process)| {
@@ -910,10 +932,14 @@ fn process_match_score(
     cmdline: &str,
 ) -> Option<u8> {
     if comm == pattern {
-        return Some(3);
+        return Some(4);
     }
 
     let comm_lower = comm.to_ascii_lowercase();
+    if comm_lower == pattern_lower {
+        return Some(3);
+    }
+
     let cmdline_lower = cmdline.to_ascii_lowercase();
     let exe_basename_lower = cmdline_executable_basename_lower(cmdline);
     if exe_basename_lower.as_deref() == Some(pattern_lower) {
@@ -926,14 +952,13 @@ fn process_match_score(
 fn cmdline_executable_basename_lower(cmdline: &str) -> Option<String> {
     let executable = cmdline.split_whitespace().next()?;
     let executable = executable.replace('\\', "/");
+
     PathBuf::from(executable)
         .file_name()
         .map(|name| name.to_string_lossy().to_ascii_lowercase())
 }
 
-fn drain_bpf_events(
-    input: DrainBpfEventsInput<'_>,
-) {
+fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
     let DrainBpfEventsInput {
         mut guard,
         config,
@@ -951,15 +976,18 @@ fn drain_bpf_events(
             warn!("short_bpf_event len={}", item.len());
             continue;
         }
-        let kind = unsafe { *(item.as_ptr() as *const u32) };
+
+        let kind = unsafe { (item.as_ptr() as *const u32).read_unaligned() };
         match kind {
             EVENT_RUNNABLE_LATENCY => {
                 if item.len() < std::mem::size_of::<SchedulerEvent>() {
                     warn!("short_scheduler_event len={}", item.len());
                     continue;
                 }
+
                 let event =
-                    unsafe { std::ptr::read_unaligned(item.as_ptr() as *const SchedulerEvent) };
+                    unsafe { (item.as_ptr() as *const SchedulerEvent).read_unaligned() };
+
                 handle_event(HandleEventInput {
                     event: &event,
                     config,
@@ -976,7 +1004,8 @@ fn drain_bpf_events(
                     warn!("short_irq_event len={}", item.len());
                     continue;
                 }
-                let event = unsafe { std::ptr::read_unaligned(item.as_ptr() as *const IrqEvent) };
+
+                let event = unsafe { (item.as_ptr() as *const IrqEvent).read_unaligned() };
                 handle_irq_event(recording_monotonic_start_ns, &event, irq_events);
             }
             other => warn!("unknown_bpf_event kind={other} len={}", item.len()),
@@ -1091,6 +1120,7 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
     let tree_pids = config.tree_pids.clone();
     let filters = config.task_filters.clone();
     let keep_missing_pid = config.keep_missing_pid;
+
     let snapshot = task::spawn_blocking(move || {
         process_tree::target_snapshot_with_options(
             &target_pids,
@@ -1101,11 +1131,12 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
     })
     .await
     .map_err(|err| anyhow::anyhow!("target snapshot worker failed: {err}"))?;
+
     let desired_tasks = snapshot.tasks;
 
     if desired_tasks.len() > TARGET_PIDS_MAX {
         anyhow::bail!(
-            "too many target tasks after tree/thread expansion: got {}, but TARGET_PIDS supports at most {}; try a narrower --tree-pid root or increase both userspace TARGET_PIDS_MAX and the eBPF TARGET_PIDS max entries together",
+            "too many target tasks after tree/thread expansion: got {}, but TARGET_PIDS supports at most {}; try a narrower --tree-pid root or increase both userspace TARGET_PIDS_MAX and the eBPF TARGET_PIDS max_entries together",
             desired_tasks.len(),
             TARGET_PIDS_MAX
         );
@@ -1139,7 +1170,13 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
                     tree_events.push(TreeEvent::from_task(started, "added", diff.task));
                 }
 
-                reactivate_or_reset_stats_inner(stats_by_task, Some(&*task_exe_inodes), tid, diff.task, elapsed_ms);
+                reactivate_or_reset_stats_inner(
+                    stats_by_task,
+                    Some(&mut *task_exe_inodes),
+                    tid,
+                    diff.task,
+                    elapsed_ms,
+                );
 
                 info!(
                     "tree_target_added tid={} process_pid={} ppid={} comm={} class={}",
@@ -1209,7 +1246,13 @@ fn handle_same_tid_replacements(
         }
 
         known_targets.insert(*tid, desired_task.clone());
-        reset_stats_for_task_change(stats_by_task, task_exe_inodes, *tid, desired_task, elapsed_ms);
+        reset_stats_for_task_change(
+            stats_by_task,
+            task_exe_inodes,
+            *tid,
+            desired_task,
+            elapsed_ms,
+        );
 
         if let Some(started) = recording_started {
             tree_events.push(TreeEvent::from_task(started, "replaced", desired_task));
@@ -1240,35 +1283,38 @@ fn reset_stats_for_task_change(
     stats.active = true;
     stats_by_task.insert(tid, stats);
 
-    if let Some((dev, ino, start)) = get_proc_exe_info(task_info.process_pid) {
-        task_exe_inodes.insert(tid, (dev, ino, start));
-    } else {
-        task_exe_inodes.remove(&tid);
-    }
+    update_task_exe_info(task_exe_inodes, tid, task_info);
 }
 
 fn reactivate_or_reset_stats_inner(
     stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
-    task_exe_inodes: Option<&TaskExeInodesMap>,
+    task_exe_inodes: Option<&mut TaskExeInodesMap>,
     tid: u32,
     task_info: &TaskInfo,
     elapsed_ms: u128,
 ) {
-    let Some(stats) = stats_by_task.get_mut(&tid) else {
-        return;
-    };
+    let should_reset = stats_by_task.get(&tid).is_some_and(|stats| {
+        stats.removed_ms.is_some()
+            && !same_logical_task(stats, task_info, task_exe_inodes.as_deref())
+    });
 
-    if stats.removed_ms.is_some() && !same_logical_task(stats, task_info, task_exe_inodes) {
-        *stats = metrics::TaskStats::new(tid, task_info.comm.clone(), elapsed_ms); // Reset stats for a new logical task
+    if should_reset {
+        let mut stats = metrics::TaskStats::new(tid, task_info.comm.clone(), elapsed_ms);
+        stats.apply_task_info(task_info);
+        stats_by_task.insert(tid, stats);
     }
 
-    stats.apply_task_info(task_info);
-    stats.active = true;
-    stats.removed_ms = None;
+    if let Some(stats) = stats_by_task.get_mut(&tid) {
+        stats.apply_task_info(task_info);
+        stats.active = true;
+        stats.removed_ms = None;
+    }
+
+    if let Some(inodes) = task_exe_inodes {
+        update_task_exe_info(inodes, tid, task_info);
+    }
 }
 
-// Backwards-compatible wrapper used by tests and other callers that don't need
-// the optional `/proc/<pid>/exe` inode-based disambiguation.
 #[allow(dead_code)]
 fn reactivate_or_reset_stats(
     stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
@@ -1279,9 +1325,6 @@ fn reactivate_or_reset_stats(
     reactivate_or_reset_stats_inner(stats_by_task, None, tid, task_info, elapsed_ms);
 }
 
-// Determines if two tasks (identified by TID and process PID) represent the same logical entity
-// based on stable identifiers. Mutable fields like comm, process_comm, and class are considered
-// metadata and not part of the identity for this comparison.
 fn same_logical_task(
     stats: &metrics::TaskStats,
     task_info: &TaskInfo,
@@ -1290,6 +1333,7 @@ fn same_logical_task(
     if stats.task != task_info.tid {
         return false;
     }
+
     if stats.process_pid != Some(task_info.process_pid) {
         return false;
     }
@@ -1301,64 +1345,86 @@ fn same_logical_task(
     {
         return false;
     }
+
     if let (Some(left), Some(right)) = (stats.task_starttime_ticks, task_info.task_starttime_ticks)
         && left != right
     {
         return false;
     }
 
-    let has_any_starttime = stats.process_starttime_ticks.is_some()
-        || task_info.process_starttime_ticks.is_some()
-        || stats.task_starttime_ticks.is_some()
-        || task_info.task_starttime_ticks.is_some();
-    if has_any_starttime {
+    let has_strong_starttime_match = stats
+        .process_starttime_ticks
+        .zip(task_info.process_starttime_ticks)
+        .is_some()
+        || stats
+            .task_starttime_ticks
+            .zip(task_info.task_starttime_ticks)
+            .is_some();
+
+    if has_strong_starttime_match {
         return true;
     }
 
-    // Fall back to matching by comm/process_comm/class. If the caller provided
-    // a map of previously observed `/proc/<pid>/exe` inodes for tasks, use that
-    // to disambiguate PID reuse: if the stored inode differs from the current
-    // process `/proc/<pid>/exe` inode, treat as a different logical task.
-    if stats.comm == task_info.comm
-        && stats.process_comm == task_info.process_comm
-        && stats.class == task_info.class
+    if stats.comm != task_info.comm
+        || stats.process_comm != task_info.process_comm
+        || stats.class != task_info.class
     {
-        if let Some(inodes) = task_exe_inodes
-            && let Some(&(dev, ino, prev_start)) = inodes.get(&stats.task)
-        {
-            if let Some((cur_dev, cur_ino, cur_start)) = get_proc_exe_info(task_info.process_pid) {
-                if cur_dev != dev || cur_ino != ino {
+        return false;
+    }
+
+    if let Some(inodes) = task_exe_inodes
+        && let Some(&(dev, ino, previous_start)) = inodes.get(&stats.task)
+    {
+        match get_proc_exe_info(task_info.process_pid) {
+            Some((current_dev, current_ino, current_start)) => {
+                if current_dev != dev || current_ino != ino {
                     return false;
                 }
 
-                let merged_cur_start = cur_start
+                let current_start = current_start
                     .or(task_info.process_starttime_ticks)
                     .or(task_info.task_starttime_ticks);
 
-                if let (Some(prev), Some(cur)) = (prev_start, merged_cur_start) && prev != cur {
+                if let (Some(previous), Some(current)) = (previous_start, current_start)
+                    && previous != current
+                {
                     return false;
                 }
-            } else if let Some(prev) = prev_start
-                && let Some(cur) = task_info.process_starttime_ticks.or(task_info.task_starttime_ticks)
-                && prev != cur
-            {
-                        if prev != cur {
-                            return false;
-                        }
-                    }
+            }
+            None => {
+                let current_start = task_info
+                    .process_starttime_ticks
+                    .or(task_info.task_starttime_ticks);
+
+                if let (Some(previous), Some(current)) = (previous_start, current_start)
+                    && previous != current
+                {
+                    return false;
                 }
             }
         }
-        return true;
     }
 
-    false
+    true
+}
+
+fn update_task_exe_info(
+    task_exe_inodes: &mut TaskExeInodesMap,
+    tid: u32,
+    task_info: &TaskInfo,
+) {
+    if let Some(exe_info) = get_proc_exe_info(task_info.process_pid) {
+        task_exe_inodes.insert(tid, exe_info);
+    } else {
+        task_exe_inodes.remove(&tid);
+    }
 }
 
 fn get_proc_exe_info(pid: u32) -> Option<(u64, u64, Option<u64>)> {
     let path = Path::new("/proc").join(pid.to_string()).join("exe");
     let metadata = fs::metadata(path).ok()?;
     let start = process_tree::process_starttime_at(Path::new("/proc"), pid);
+
     Some((metadata.dev(), metadata.ino(), start))
 }
 
@@ -1373,6 +1439,7 @@ fn same_task_info(left: &TaskInfo, right: &TaskInfo) -> bool {
     {
         return false;
     }
+
     if let (Some(left_start), Some(right_start)) =
         (left.task_starttime_ticks, right.task_starttime_ticks)
         && left_start != right_start
@@ -1380,12 +1447,16 @@ fn same_task_info(left: &TaskInfo, right: &TaskInfo) -> bool {
         return false;
     }
 
-    let has_any_starttime = left.process_starttime_ticks.is_some()
-        || right.process_starttime_ticks.is_some()
-        || left.task_starttime_ticks.is_some()
-        || right.task_starttime_ticks.is_some();
+    let has_strong_starttime_match = left
+        .process_starttime_ticks
+        .zip(right.process_starttime_ticks)
+        .is_some()
+        || left
+            .task_starttime_ticks
+            .zip(right.task_starttime_ticks)
+            .is_some();
 
-    has_any_starttime
+    has_strong_starttime_match
         || (left.process_ppid == right.process_ppid
             && left.comm == right.comm
             && left.process_comm == right.process_comm
