@@ -266,8 +266,10 @@ pub fn target_snapshot_filtered_at(
     let mut process_roots = BTreeSet::new();
 
     for pid in manual_pids {
-        requested_roots.insert(*pid);
-        process_roots.insert(*pid);
+        if processes.contains_key(pid) {
+            requested_roots.insert(*pid);
+            process_roots.insert(*pid);
+        }
     }
 
     for root_pid in tree_pids {
@@ -279,16 +281,6 @@ pub fn target_snapshot_filtered_at(
     }
 
     let mut tasks = expand_tasks_at(proc_root, &process_roots, &processes);
-    let mut seen_process_pids = tasks
-        .values()
-        .map(|task| task.process_pid)
-        .collect::<BTreeSet<_>>();
-
-    for pid in &process_roots {
-        if seen_process_pids.insert(*pid) {
-            tasks.insert(*pid, fallback_task_info(*pid, processes.get(pid)));
-        }
-    }
 
     for task in tasks.values_mut() {
         if task.class == TaskClass::Unknown && !requested_roots.contains(&task.process_pid) {
@@ -371,24 +363,6 @@ pub fn expand_tasks_at(
     }
 
     tasks
-}
-
-fn fallback_task_info(pid: u32, proc_info: Option<&ProcInfo>) -> TaskInfo {
-    match proc_info {
-        Some(proc_info) => {
-            task_info_from_proc(Path::new("/proc"), pid, pid, &proc_info.comm, proc_info)
-        }
-        None => TaskInfo {
-            tid: pid,
-            process_pid: pid,
-            process_ppid: 0,
-            comm: "?".to_owned(),
-            process_comm: "?".to_owned(),
-            process_starttime_ticks: None,
-            task_starttime_ticks: None,
-            class: TaskClass::Unknown,
-        },
-    }
 }
 
 fn task_info_from_proc(

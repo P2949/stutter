@@ -372,7 +372,7 @@ fn target_snapshot_keeps_manual_missing_pid_fallback() {
 
     let snapshot = process_tree::target_snapshot_at(&dir, &[42], &[]);
 
-    assert_eq!(snapshot.tasks.get(&42).unwrap().comm, "?");
+    assert!(!snapshot.tasks.contains_key(&42));
     fs::remove_dir_all(dir).ok();
 }
 

@@ -56,6 +56,9 @@ pub struct MonitorArgs {
     #[arg(long = "exclude-comm", value_name = "PATTERN")]
     exclude_comm: Vec<String>,
 
+    #[arg(long = "keep-missing-pid")]
+    keep_missing_pid: bool,
+
     #[arg(long = "watch-process", value_name = "COMM")]
     watch_process: Option<String>,
 
@@ -216,6 +219,9 @@ where
             }
             if args.refresh_ms == 0 {
                 anyhow::bail!("--refresh-ms must be greater than zero");
+            }
+            if args.keep_applied && !args.watch {
+                anyhow::bail!("--keep-applied requires --watch");
             }
             Ok(AppCommand::ApplyProfile {
                 tree_pid: args.tree_pid,

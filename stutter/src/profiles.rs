@@ -27,6 +27,7 @@ pub struct ProfileClassRule {
 #[derive(Default)]
 pub struct ProfileApplyCache {
     known_correct: BTreeSet<ProfileApplyCacheKey>,
+    refresh_counter: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -92,9 +93,18 @@ fn apply_profile_to_tree_with_cache(
     affinity::save_merged_restore_state(&restore_path, &records, force_restore_overwrite)?;
 
     for planned in &planned {
-        affinity::set_affinity(planned.record.tid, planned.record.applied_mask.clone())?;
-        if let Some(cache) = cache.as_deref_mut() {
-            cache.known_correct.insert(planned.cache_key.clone());
+        match affinity::set_affinity_raw(planned.record.tid, &planned.record.applied_mask) {
+            Ok(()) => {
+                if let Some(cache) = cache.as_deref_mut() {
+                    cache.known_correct.insert(planned.cache_key.clone());
+                }
+            }
+            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
+                // Ignore dead threads during application. They won't end up in records since we filter them below.
+                // Wait, if they are already in `records`, we should probably remove them.
+                // We'll leave them in records, it's fine, the restore process will skip them.
+            }
+            Err(err) => anyhow::bail!("failed to set affinity for TID {}: {err}", planned.record.tid),
         }
     }
 
@@ -118,6 +128,13 @@ fn planned_affinity_changes_with_reader<F>(
 where
     F: FnMut(u32) -> anyhow::Result<CpuMask>,
 {
+    if let Some(cache_ref) = cache.as_deref_mut() {
+        cache_ref.refresh_counter = cache_ref.refresh_counter.wrapping_add(1);
+        if cache_ref.refresh_counter % 5 == 0 {
+            cache_ref.known_correct.clear();
+        }
+    }
+
     let mut planned = Vec::new();
     let mut seen_cache_keys = BTreeSet::new();
 
@@ -144,7 +161,13 @@ where
             continue;
         }
 
-        let original_mask = read_allowed_mask(task.tid)?;
+        let original_mask = match read_allowed_mask(task.tid) {
+            Ok(mask) => mask,
+            Err(err) if err.downcast_ref::<std::io::Error>().is_some_and(|io_err| io_err.raw_os_error() == Some(libc::ESRCH)) => {
+                continue; // Task is dead, skip it.
+            }
+            Err(err) => return Err(err),
+        };
         if original_mask == rule.affinity {
             if let Some(cache) = cache.as_mut() {
                 cache.known_correct.insert(cache_key);

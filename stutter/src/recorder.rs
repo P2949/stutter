@@ -668,8 +668,11 @@ fn csv_escape(value: &str) -> String {
 }
 
 fn write_json<T: ?Sized + Serialize>(path: PathBuf, value: &T) -> anyhow::Result<()> {
-    let mut file = fs::File::create(path)?;
+    let tmp_path = path.with_extension("tmp");
+    let mut file = fs::File::create(&tmp_path)?;
     file.write_all(&serde_json::to_vec_pretty(value)?)?;
     file.write_all(b"\n")?;
+    file.sync_all()?;
+    fs::rename(tmp_path, path)?;
     Ok(())
 }

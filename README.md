@@ -78,7 +78,7 @@ RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
   --persistent
 ```
 
-`--watch-process` scans `/proc` only while waiting for the process to appear or relaunch. Once a process is found, `stutter` follows that root PID and its descendants. `--persistent` requires `--watch-process`; if the watched process exits, stale TIDs are removed and the monitor waits for the next matching launch.
+`--watch-process` scans `/proc` only while waiting for the process to appear or relaunch. Once a process is found, `stutter` follows that root PID and its descendants. `--persistent` requires `--watch-process`; if the watched process exits, stale TIDs are removed and the monitor waits for the next matching launch. Note that `--duration` begins after the watched process is found, not while waiting for it.
 
 ## Inspect a tree before tracing
 
