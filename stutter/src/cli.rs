@@ -2,7 +2,7 @@ use std::{ffi::OsString, path::PathBuf, time::Duration};
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::TARGET_PIDS_MAX;
+use crate::{TARGET_PIDS_MAX, process_tree::TaskFilters};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -23,6 +23,8 @@ enum Command {
     Record(RecordArgs),
     InspectTree(InspectTreeArgs),
     Report(ReportArgs),
+    Restore,
+    ApplyProfile(ApplyProfileArgs),
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -47,6 +49,21 @@ pub struct MonitorArgs {
 
     #[arg(long = "out-dir", alias = "out", value_name = "PATH")]
     out_dir: Option<PathBuf>,
+
+    #[arg(long = "include-comm", value_name = "PATTERN")]
+    include_comm: Vec<String>,
+
+    #[arg(long = "exclude-comm", value_name = "PATTERN")]
+    exclude_comm: Vec<String>,
+
+    #[arg(long = "watch-process", value_name = "COMM")]
+    watch_process: Option<String>,
+
+    #[arg(long)]
+    persistent: bool,
+
+    #[arg(long = "csv", value_name = "PATH")]
+    csv_path: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -78,9 +95,23 @@ struct ReportArgs {
     path: PathBuf,
 }
 
+#[derive(Args, Debug, Clone)]
+struct ApplyProfileArgs {
+    #[arg(long = "tree-pid", value_name = "PID")]
+    tree_pid: u32,
+
+    #[arg(long = "profile", value_name = "FILE")]
+    profile: PathBuf,
+}
+
 #[derive(Debug)]
 pub enum AppCommand {
     Monitor(Config),
+    Restore,
+    ApplyProfile {
+        tree_pid: u32,
+        profile: PathBuf,
+    },
     InspectTree {
         tree_pid: u32,
     },
@@ -99,6 +130,10 @@ pub struct Config {
     pub summary_period_ms: u64,
     pub spike_threshold_ns: u64,
     pub verbose: bool,
+    pub task_filters: TaskFilters,
+    pub watch_process: Option<String>,
+    pub persistent: bool,
+    pub csv_path: Option<PathBuf>,
     pub recording: Option<RecordingConfig>,
     pub max_duration: Option<Duration>,
 }
@@ -158,6 +193,16 @@ where
                 cluster_window_ms: args.cluster_window_ms,
             })
         }
+        Some(Command::Restore) => Ok(AppCommand::Restore),
+        Some(Command::ApplyProfile(args)) => {
+            if args.tree_pid == 0 {
+                anyhow::bail!("--tree-pid must be greater than zero");
+            }
+            Ok(AppCommand::ApplyProfile {
+                tree_pid: args.tree_pid,
+                profile: args.profile,
+            })
+        }
         None => Ok(AppCommand::Monitor(config_from_monitor_args(
             cli.legacy_monitor,
             false,
@@ -182,14 +227,26 @@ fn config_from_monitor_args(
         anyhow::bail!("--spike-us must be greater than zero");
     }
 
-    if args.target_pids.is_empty() && args.tree_pids.is_empty() {
-        anyhow::bail!("at least one --pid <PID> or --tree-pid <PID> is required");
+    if args.target_pids.is_empty() && args.tree_pids.is_empty() && args.watch_process.is_none() {
+        anyhow::bail!(
+            "at least one --pid <PID>, --tree-pid <PID>, or --watch-process <COMM> is required"
+        );
     }
 
     args.target_pids.sort_unstable();
     args.target_pids.dedup();
     args.tree_pids.sort_unstable();
     args.tree_pids.dedup();
+    args.include_comm.sort();
+    args.include_comm.dedup();
+    args.exclude_comm.sort();
+    args.exclude_comm.dedup();
+
+    validate_comm_patterns("--include-comm", &args.include_comm)?;
+    validate_comm_patterns("--exclude-comm", &args.exclude_comm)?;
+    if matches!(args.watch_process.as_deref(), Some("")) {
+        anyhow::bail!("--watch-process must not be empty");
+    }
 
     if args.target_pids.len() > TARGET_PIDS_MAX {
         anyhow::bail!(
@@ -221,6 +278,13 @@ fn config_from_monitor_args(
         summary_period_ms: args.summary_period_ms,
         spike_threshold_ns,
         verbose: args.verbose,
+        task_filters: TaskFilters {
+            include_comm: args.include_comm,
+            exclude_comm: args.exclude_comm,
+        },
+        watch_process: args.watch_process,
+        persistent: args.persistent,
+        csv_path: args.csv_path,
         recording,
         max_duration,
     })
@@ -229,6 +293,13 @@ fn config_from_monitor_args(
 fn validate_pids(flag: &str, pids: &[u32]) -> anyhow::Result<()> {
     if pids.contains(&0) {
         anyhow::bail!("{flag} must be greater than zero");
+    }
+    Ok(())
+}
+
+fn validate_comm_patterns(flag: &str, patterns: &[String]) -> anyhow::Result<()> {
+    if patterns.iter().any(|pattern| pattern.is_empty()) {
+        anyhow::bail!("{flag} patterns must not be empty");
     }
     Ok(())
 }
@@ -275,6 +346,48 @@ mod tests {
     }
 
     #[test]
+    fn parses_include_and_exclude_comm_filters() {
+        let command = parse_app_command_from([
+            "stutter",
+            "record",
+            "--tree-pid",
+            "42",
+            "--include-comm",
+            "RenderThread",
+            "--exclude-comm",
+            "steamwebhelper",
+        ])
+        .unwrap();
+
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+
+        assert_eq!(config.task_filters.include_comm, vec!["RenderThread"]);
+        assert_eq!(config.task_filters.exclude_comm, vec!["steamwebhelper"]);
+    }
+
+    #[test]
+    fn parses_watch_process_without_explicit_pid() {
+        let command = parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--watch-process",
+            "KingdomCome",
+            "--csv",
+            "/tmp/stutter.csv",
+        ])
+        .unwrap();
+
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+
+        assert_eq!(config.watch_process.as_deref(), Some("KingdomCome"));
+        assert_eq!(config.csv_path, Some(PathBuf::from("/tmp/stutter.csv")));
+    }
+
+    #[test]
     fn rejects_zero_report_cluster_window() {
         let err = parse_app_command_from(["stutter", "report", "--cluster-ms", "0", "/tmp/run"])
             .unwrap_err();
@@ -283,5 +396,28 @@ mod tests {
             err.to_string()
                 .contains("--cluster-ms must be greater than zero")
         );
+    }
+
+    #[test]
+    fn parses_restore_and_apply_profile_commands() {
+        let restore = parse_app_command_from(["stutter", "restore"]).unwrap();
+        assert!(matches!(restore, AppCommand::Restore));
+
+        let apply = parse_app_command_from([
+            "stutter",
+            "apply-profile",
+            "--tree-pid",
+            "42",
+            "--profile",
+            "/tmp/profile.toml",
+        ])
+        .unwrap();
+
+        let AppCommand::ApplyProfile { tree_pid, profile } = apply else {
+            panic!("expected apply profile command");
+        };
+
+        assert_eq!(tree_pid, 42);
+        assert_eq!(profile, PathBuf::from("/tmp/profile.toml"));
     }
 }

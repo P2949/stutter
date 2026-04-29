@@ -386,6 +386,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         tree_events: &tree_events,
         spike_events: &spike_events,
         spike_events_truncated: true,
+        scx_events: &[],
         drop_counters,
     })
     .unwrap();
@@ -402,6 +403,8 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     assert_eq!(metadata.active_expanded_tasks, vec![1, 4, 9]);
     assert_eq!(session.spike_event_count, 1);
     assert_eq!(metadata.spike_event_count, 1);
+    assert_eq!(session.scx_event_count, 0);
+    assert_eq!(metadata.scx_event_count, 0);
     assert!(session.spike_events_truncated);
     assert!(metadata.spike_events_truncated);
     assert_eq!(session.drop_counters.total(), 5);
@@ -420,6 +423,41 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         2
     );
 
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn target_snapshot_filters_include_and_exclude_comm_patterns() {
+    let dir = temp_test_dir("proc-snapshot-filters");
+    create_fake_proc(&dir, 10, 1, "game", "KingdomCome.exe", &[10, 11, 12]);
+    fs::write(dir.join("10/task/10/comm"), "RenderThread\n").unwrap();
+    fs::write(dir.join("10/task/11/comm"), "AudioThread\n").unwrap();
+    fs::write(dir.join("10/task/12/comm"), "steamwebhelper\n").unwrap();
+
+    let filters = process_tree::TaskFilters {
+        include_comm: vec!["Thread".to_owned()],
+        exclude_comm: vec!["steamwebhelper".to_owned()],
+    };
+    let snapshot = process_tree::target_snapshot_filtered_at(&dir, &[], &[10], &filters);
+
+    assert!(
+        snapshot
+            .tasks
+            .values()
+            .any(|task| task.comm == "RenderThread")
+    );
+    assert!(
+        snapshot
+            .tasks
+            .values()
+            .any(|task| task.comm == "AudioThread")
+    );
+    assert!(
+        !snapshot
+            .tasks
+            .values()
+            .any(|task| task.comm == "steamwebhelper")
+    );
     fs::remove_dir_all(dir).ok();
 }
 
@@ -476,6 +514,7 @@ fn report_reads_recorded_session_and_spike_events() {
         tree_events: &[],
         spike_events: &spike_events,
         spike_events_truncated: false,
+        scx_events: &[],
         drop_counters: DropCountersSnapshot::default(),
     })
     .unwrap();
@@ -530,6 +569,7 @@ fn report_cluster_output_caps_inline_points() {
         tree_events: &[],
         spike_events: &spike_events,
         spike_events_truncated: false,
+        scx_events: &[],
         drop_counters: DropCountersSnapshot::default(),
     })
     .unwrap();
@@ -548,6 +588,27 @@ fn report_cluster_output_caps_inline_points() {
     assert!(!output.contains("108("));
     assert!(!output.contains("109("));
 
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn interval_csv_writer_outputs_header_and_rows() {
+    let dir = temp_test_dir("interval-csv");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("interval.csv");
+    let mut stats = metrics::TaskStats::new(7, "worker,quoted".to_owned(), 0);
+    stats.apply_task_info(&task_info(7, 7, "proc", "worker,quoted", TaskClass::Helper));
+    let mut latency = metrics::LatencyStats::new();
+    latency.record(1_000_000);
+    let latency = latency.snapshot().unwrap();
+    let cpu = metrics::CpuStatsSet::new().snapshot();
+    let record = metrics::interval_record_from_snapshot(123, 7, &stats, &latency, &cpu);
+
+    recorder::write_interval_csv(&path, &[record]).unwrap();
+    let csv = fs::read_to_string(&path).unwrap();
+
+    assert!(csv.starts_with("elapsed_ms,task,active"));
+    assert!(csv.contains("\"worker,quoted\""));
     fs::remove_dir_all(dir).ok();
 }
 
@@ -580,6 +641,10 @@ fn test_config(
         summary_period_ms: 1_000,
         spike_threshold_ns: 1_000_000,
         verbose: false,
+        task_filters: process_tree::TaskFilters::default(),
+        watch_process: None,
+        persistent: false,
+        csv_path: None,
         recording: None,
         max_duration,
     }

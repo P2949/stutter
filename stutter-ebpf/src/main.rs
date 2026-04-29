@@ -22,7 +22,8 @@ static TARGET_PIDS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(1024
 static WAKEUP_TIMES: HashMap<u32, u64> = HashMap::<u32, u64>::with_max_entries(16_384, 0);
 
 #[map]
-static DROP_COUNTERS: HashMap<u32, u64> = HashMap::<u32, u64>::with_max_entries(DROP_COUNTERS_MAX, 0);
+static DROP_COUNTERS: HashMap<u32, u64> =
+    HashMap::<u32, u64>::with_max_entries(DROP_COUNTERS_MAX, 0);
 
 #[tracepoint]
 pub fn sched_wakeup(ctx: TracePointContext) -> u32 {

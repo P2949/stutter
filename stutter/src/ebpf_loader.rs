@@ -140,7 +140,10 @@ fn validate_tracepoint_format_at(
     })
 }
 
-fn validate_tracepoint_format(format: &str, expected_offsets: &[(&str, usize)]) -> anyhow::Result<()> {
+fn validate_tracepoint_format(
+    format: &str,
+    expected_offsets: &[(&str, usize)],
+) -> anyhow::Result<()> {
     let offsets = parse_tracepoint_offsets(format);
 
     for (field, expected_offset) in expected_offsets {
