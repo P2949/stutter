@@ -19,7 +19,7 @@ mod tui;
 mod regression_tests;
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs, future,
     path::{Path, PathBuf},
     sync::{
@@ -260,25 +260,30 @@ async fn tune_command(
             profile.name, measure_seconds
         );
 
-        let (applied_tasks, run_dir, interval_records, frame_events) =
-            match measure_tune_candidate(TuneMeasureInput {
-                tree_pid,
-                profile: profile.clone(),
-                epoch_seconds,
-                warmup_seconds,
-                shared_hwmon: shared_hwmon.clone(),
-                mangohud_log: mangohud_log.clone(),
-                force_restore_overwrite: idx == 0,
-                tune_output_dir: tune_output_dir.clone(),
-            })
-            .await
-            {
-                Ok(res) => res,
-                Err(err) => {
-                    restore_tune_on_error();
-                    return Err(err);
-                }
-            };
+        let TuneMeasureResult {
+            applied_tasks,
+            run_dir,
+            interval_records,
+            frame_events,
+            coverage,
+        } = match measure_tune_candidate(TuneMeasureInput {
+            tree_pid,
+            profile: profile.clone(),
+            epoch_seconds,
+            warmup_seconds,
+            shared_hwmon: shared_hwmon.clone(),
+            mangohud_log: mangohud_log.clone(),
+            force_restore_overwrite: idx == 0,
+            tune_output_dir: tune_output_dir.clone(),
+        })
+        .await
+        {
+            Ok(res) => res,
+            Err(err) => {
+                restore_tune_on_error();
+                return Err(err);
+            }
+        };
 
         let mut score =
             scorer::score_from_interval_records_and_frames(&interval_records, &frame_events);
@@ -293,7 +298,8 @@ async fn tune_command(
         const TUNE_MIN_SAMPLES: u64 = 50;
         let interval_count = interval_records.len();
         let sample_count: u64 = interval_records.iter().map(|r| r.samples).sum();
-        if interval_count < TUNE_MIN_INTERVALS || sample_count < TUNE_MIN_SAMPLES {
+        let mut valid = interval_count >= TUNE_MIN_INTERVALS && sample_count >= TUNE_MIN_SAMPLES;
+        if !valid {
             warn!(
                 "tune_candidate_insufficient_data profile={} intervals={} samples={}",
                 profile.name, interval_count, sample_count
@@ -302,7 +308,20 @@ async fn tune_command(
             score.total = u64::MAX / 4;
         }
 
-        let valid = interval_count >= TUNE_MIN_INTERVALS && sample_count >= TUNE_MIN_SAMPLES;
+        if coverage.unique_scored_tasks == 0 {
+            warn!(
+                "tune_candidate_no_scored_tasks profile={} tracked_tasks={}",
+                profile.name, coverage.unique_tracked_tasks
+            );
+            score.total = u64::MAX / 4;
+            valid = false;
+        }
+        if coverage.drop_counter_total > 0 {
+            warn!(
+                "tune_candidate_drop_counters_nonzero profile={} drops={}",
+                profile.name, coverage.drop_counter_total
+            );
+        }
 
         let result = TuneCandidateSummary {
             profile: profile.name.clone(),
@@ -320,6 +339,7 @@ async fn tune_command(
             frame_count: frame_events.len(),
             frame_max_ms: frame_max,
             frame_p99_ms: frame_p99,
+            coverage,
             valid,
         };
 
@@ -362,6 +382,7 @@ async fn tune_command(
             );
         }
     }
+    check_tune_coverage_comparability(&results)?;
 
     let min_frames = results.iter().map(|r| r.frame_count).min().unwrap_or(0);
     let max_frames = results.iter().map(|r| r.frame_count).max().unwrap_or(0);
@@ -432,14 +453,15 @@ struct TuneMeasureInput {
     tune_output_dir: PathBuf,
 }
 
-async fn measure_tune_candidate(
-    input: TuneMeasureInput,
-) -> anyhow::Result<(
-    usize,
-    PathBuf,
-    Vec<IntervalRecord>,
-    Vec<crate::recorder::FrameEvent>,
-)> {
+struct TuneMeasureResult {
+    applied_tasks: usize,
+    run_dir: PathBuf,
+    interval_records: Vec<IntervalRecord>,
+    frame_events: Vec<crate::recorder::FrameEvent>,
+    coverage: TuneCoverageMetrics,
+}
+
+async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<TuneMeasureResult> {
     let TuneMeasureInput {
         tree_pid,
         profile,
@@ -558,7 +580,19 @@ async fn measure_tune_candidate(
     };
     frame_events.retain(|f| f.elapsed_ms >= warmup_ms);
 
-    Ok((applied_tasks, run_dir, interval_records, frame_events))
+    let session_path = run_dir.join("session.json");
+    let session_data = fs::read_to_string(&session_path)
+        .with_context(|| format!("failed to read session.json from {}", run_dir.display()))?;
+    let session: recorder::SessionFile = serde_json::from_str(&session_data)?;
+    let coverage = tune_coverage_metrics(&session, &interval_records);
+
+    Ok(TuneMeasureResult {
+        applied_tasks,
+        run_dir,
+        interval_records,
+        frame_events,
+        coverage,
+    })
 }
 
 async fn tune_profile_refresh_loop(
@@ -689,12 +723,148 @@ struct TuneCandidateSummary {
     frame_count: usize,
     frame_max_ms: f64,
     frame_p99_ms: f64,
+    coverage: TuneCoverageMetrics,
     valid: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+struct TuneCoverageMetrics {
+    unique_tracked_tasks: usize,
+    unique_scored_tasks: usize,
+    active_target_min: usize,
+    active_target_max: usize,
+    removed_task_count: usize,
+    drop_counter_total: u64,
 }
 
 fn result_is_better(candidate: &TuneCandidateSummary, current_best: &TuneCandidateSummary) -> bool {
     (candidate.score_total, candidate.max_latency_ns)
         < (current_best.score_total, current_best.max_latency_ns)
+}
+
+fn tune_coverage_metrics(
+    session: &recorder::SessionFile,
+    interval_records: &[IntervalRecord],
+) -> TuneCoverageMetrics {
+    let unique_tracked_tasks = session.tasks.len();
+    let unique_scored_tasks = session
+        .tasks
+        .iter()
+        .filter(|task| scorer::class_contributes_to_score(task.class))
+        .map(|task| task.task)
+        .collect::<BTreeSet<_>>()
+        .len();
+    let removed_task_count = session
+        .tasks
+        .iter()
+        .filter(|task| !task.active || task.removed_ms.is_some())
+        .count();
+
+    let mut active_by_elapsed: BTreeMap<u128, usize> = BTreeMap::new();
+    for record in interval_records.iter().filter(|record| record.active) {
+        *active_by_elapsed.entry(record.elapsed_ms).or_default() += 1;
+    }
+    let (active_target_min, active_target_max) = if active_by_elapsed.is_empty() {
+        (
+            session.active_target_pids_count,
+            session.active_target_pids_count,
+        )
+    } else {
+        (
+            active_by_elapsed.values().copied().min().unwrap_or(0),
+            active_by_elapsed.values().copied().max().unwrap_or(0),
+        )
+    };
+
+    TuneCoverageMetrics {
+        unique_tracked_tasks,
+        unique_scored_tasks,
+        active_target_min,
+        active_target_max,
+        removed_task_count,
+        drop_counter_total: session.drop_counters.total(),
+    }
+}
+
+fn check_tune_coverage_comparability(results: &[TuneCandidateSummary]) -> anyhow::Result<()> {
+    check_tune_metric_ratio(
+        "unique tracked tasks",
+        results
+            .iter()
+            .map(|result| result.coverage.unique_tracked_tasks),
+    )?;
+    check_tune_metric_ratio(
+        "unique scored tasks",
+        results
+            .iter()
+            .map(|result| result.coverage.unique_scored_tasks),
+    )?;
+    check_tune_metric_ratio(
+        "active target minimum",
+        results
+            .iter()
+            .map(|result| result.coverage.active_target_min),
+    )?;
+    check_tune_metric_ratio(
+        "active target maximum",
+        results
+            .iter()
+            .map(|result| result.coverage.active_target_max),
+    )?;
+
+    let min_removed = results
+        .iter()
+        .map(|result| result.coverage.removed_task_count)
+        .min()
+        .unwrap_or(0);
+    let max_removed = results
+        .iter()
+        .map(|result| result.coverage.removed_task_count)
+        .max()
+        .unwrap_or(0);
+    if max_removed > min_removed {
+        warn!(
+            "tune_candidates_removed_task_counts_differ min={} max={}",
+            min_removed, max_removed
+        );
+    }
+
+    let max_drops = results
+        .iter()
+        .map(|result| result.coverage.drop_counter_total)
+        .max()
+        .unwrap_or(0);
+    if max_drops > 0 {
+        warn!("tune_candidates_drop_counters_nonzero max_drops={max_drops}");
+    }
+
+    Ok(())
+}
+
+fn check_tune_metric_ratio(label: &str, values: impl Iterator<Item = usize>) -> anyhow::Result<()> {
+    let values = values.collect::<Vec<_>>();
+    let min_value = values.iter().copied().min().unwrap_or(0);
+    let max_value = values.iter().copied().max().unwrap_or(0);
+    if min_value == 0 && max_value > 0 {
+        anyhow::bail!(
+            "tune candidates are not comparable: {} is zero for some candidates but nonzero for others (max={})",
+            label,
+            max_value
+        );
+    }
+    if min_value > 0 {
+        let ratio = (max_value as f64) / (min_value as f64);
+        if ratio > 2.0 {
+            anyhow::bail!(
+                "tune candidates are not comparable: {} varies by more than 2x across candidates (min={} max={} ratio={:.2})",
+                label,
+                min_value,
+                max_value,
+                ratio
+            );
+        }
+    }
+    Ok(())
 }
 
 fn restore_tune_on_error() {
@@ -2142,7 +2312,7 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
 
     if desired_tasks.len() > max_tasks {
         anyhow::bail!(
-            "too many target tasks after tree/thread expansion: got {}, but --max-tasks is set to {}; try a narrower --tree-pid root or increase --max-tasks",
+            "too many target tasks after tree/cgroup/thread expansion: got {}, but --max-tasks is set to {}; try a narrower --tree-pid/--cgroupv2 target or increase --max-tasks",
             desired_tasks.len(),
             max_tasks
         );
@@ -2208,9 +2378,19 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
             TargetDiffAction::Removed => {
                 let tid = diff.task.tid;
 
+                let remove_label = if cgroup_refresh_active {
+                    "cgroup_target_removed"
+                } else {
+                    "tree_target_removed"
+                };
+                let remove_failed_label = if cgroup_refresh_active {
+                    "cgroup_target_remove_failed"
+                } else {
+                    "tree_target_remove_failed"
+                };
                 match target_pid_map.remove(&tid) {
-                    Ok(()) => info!("tree_target_removed tid={tid} class={}", diff.task.class),
-                    Err(e) => warn!("tree_target_remove_failed tid={tid} err={e}"),
+                    Ok(()) => info!("{remove_label} tid={tid} class={}", diff.task.class),
+                    Err(e) => warn!("{remove_failed_label} tid={tid} err={e}"),
                 }
 
                 if let Some(started) = recording_started {

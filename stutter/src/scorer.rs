@@ -13,15 +13,20 @@ pub struct StutterScore {
     pub frame_p99_ms: f64,
 }
 
+pub fn class_contributes_to_score(class: TaskClass) -> bool {
+    matches!(
+        class,
+        TaskClass::Game | TaskClass::GameHelper | TaskClass::WineServer | TaskClass::GameScope
+    )
+}
+
 pub fn score_from_interval_records(records: &[IntervalRecord]) -> StutterScore {
     let mut score = StutterScore::default();
 
-    for record in records.iter().filter(|record| {
-        matches!(
-            record.class,
-            TaskClass::Game | TaskClass::GameHelper | TaskClass::WineServer | TaskClass::GameScope
-        )
-    }) {
+    for record in records
+        .iter()
+        .filter(|record| class_contributes_to_score(record.class))
+    {
         score.over_1ms = score.over_1ms.saturating_add(record.over_1ms);
         score.over_2ms = score.over_2ms.saturating_add(record.over_2ms);
         score.over_5ms = score.over_5ms.saturating_add(record.over_5ms);

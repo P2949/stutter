@@ -289,7 +289,9 @@ impl CompiledPattern {
         if let Some(regex) = &self.regex {
             regex.is_match(value)
         } else {
-            value.contains(&self.raw)
+            value
+                .to_ascii_lowercase()
+                .contains(&self.raw.to_ascii_lowercase())
         }
     }
 }
@@ -430,10 +432,12 @@ mod tests {
     fn match_comm_treats_metacharacters_as_literals_unless_slash_delimited() {
         let literal = CompiledPattern::new("KingdomCome.exe".to_owned()).unwrap();
         assert!(literal.matches("KingdomCome.exe"));
+        assert!(literal.matches("kingdomcome.exe"));
         assert!(!literal.matches("KingdomComeXexe"));
 
         let regex = CompiledPattern::new("/KingdomCome[.]exe$/".to_owned()).unwrap();
         assert!(regex.matches("KingdomCome.exe"));
+        assert!(!regex.matches("kingdomcome.exe"));
         assert!(!regex.matches("KingdomComeXexe"));
 
         let literal_bracket = CompiledPattern::new("[".to_owned()).unwrap();
