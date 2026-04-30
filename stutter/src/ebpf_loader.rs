@@ -10,7 +10,7 @@ use aya::{
 use serde::{Deserialize, Serialize};
 use stutter_common::{
     DROP_BLOCK_START_INSERT_FAILED, DROP_IRQ_START_TIMES_INSERT_FAILED,
-    DROP_RINGBUF_RESERVE_FAILED, DROP_WAKER_MAP_INSERT_FAILED, DROP_WAKEUP_TIMES_INSERT_FAILED,
+    DROP_RINGBUF_RESERVE_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_TIMES_INSERT_FAILED,
 };
 use tokio::io::unix::AsyncFd;
 
@@ -74,7 +74,7 @@ impl LoadedEbpf {
             ),
             waker_map_insert_failed: drop_counter_value(
                 &self.drop_counters,
-                DROP_WAKER_MAP_INSERT_FAILED,
+                DROP_WAKEUP_DATA_INSERT_FAILED,
             ),
             block_start_insert_failed: drop_counter_value(
                 &self.drop_counters,
@@ -236,6 +236,14 @@ pub fn load_and_attach(
         pids.sort_unstable();
         pids.dedup();
 
+        if pids.len() > crate::TARGET_PIDS_MAX {
+            return Err(crate::error::StutterError::EbpfLoad(format!(
+                "cgroup target prepopulation failed: cgroup has {} tasks but target_pids_max is {}",
+                pids.len(),
+                crate::TARGET_PIDS_MAX
+            )));
+        }
+
         let mut failed_inserts = 0usize;
         for pid in pids.iter() {
             if target_pid_map.insert(*pid, 1, 0).is_err() {
@@ -247,14 +255,6 @@ pub fn load_and_attach(
             return Err(crate::error::StutterError::EbpfLoad(format!(
                 "cgroup target prepopulation failed: {} tasks failed to insert (target_pids_max={}); use a smaller cgroup or explicitly set --allow-partial-cgroup (if supported)",
                 failed_inserts,
-                crate::TARGET_PIDS_MAX
-            )));
-        }
-
-        if pids.len() > crate::TARGET_PIDS_MAX {
-            return Err(crate::error::StutterError::EbpfLoad(format!(
-                "cgroup target prepopulation failed: cgroup has {} tasks but target_pids_max is {}",
-                pids.len(),
                 crate::TARGET_PIDS_MAX
             )));
         }
@@ -528,43 +528,33 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
     let mut block_rq_has_rwbs = false;
 
     if block_rq_issue.exists() && block_rq_complete.exists() {
-        // Parse offsets and ensure required fields exist. `rwbs` and a
-        // request pointer are optional — presence improves correlation but
-        // must not make the whole probe fatal if absent.
-        let issue_fmt = fs::read_to_string(&block_rq_issue)
-            .with_context(|| format!("failed to read {}", block_rq_issue.display()))?;
-        let complete_fmt = fs::read_to_string(&block_rq_complete)
-            .with_context(|| format!("failed to read {}", block_rq_complete.display()))?;
-
-        let issue_offsets = parse_tracepoint_offsets(&issue_fmt);
-        let complete_offsets = parse_tracepoint_offsets(&complete_fmt);
-
-        let issue_ok = issue_offsets.contains_key("dev")
-            && issue_offsets.contains_key("sector")
-            && issue_offsets.contains_key("nr_sector");
-        let complete_ok = complete_offsets.contains_key("dev")
-            && complete_offsets.contains_key("sector")
-            && complete_offsets.contains_key("nr_sector");
+        let issue_ok = validate_tracepoint_format_at(
+            &block_rq_issue,
+            &[("dev", 8), ("sector", 16)],
+        ).is_ok();
+        let complete_ok = validate_tracepoint_format_at(
+            &block_rq_complete,
+            &[("dev", 8), ("sector", 16), ("nr_sector", 24)],
+        ).is_ok();
 
         if issue_ok && complete_ok {
-            // Require `rwbs` in the complete tracepoint so the eBPF program's
-            // assumptions about offsets hold. If `rwbs` is missing the kernel
-            // layout differs and we must disable block I/O attachment to avoid
-            // tracepoint read errors in the eBPF program.
-            if complete_offsets.contains_key("rwbs") {
+            // Check for optional rwbs field at the expected offset
+            let complete_fmt = fs::read_to_string(&block_rq_complete)
+                .with_context(|| format!("failed to read {}", block_rq_complete.display()))?;
+            let complete_offsets = parse_tracepoint_offsets(&complete_fmt);
+
+            if complete_offsets.get("rwbs") == Some(&32) {
                 block_rq = true;
                 block_rq_has_rwbs = true;
             } else {
                 log::warn!(
-                    "block I/O tracepoint present but missing `rwbs` in block_rq_complete; disabling block I/O attachment to avoid eBPF/tracepoint mismatch"
+                    "block I/O tracepoint present but `rwbs` is not at offset 32 in block_rq_complete; disabling block I/O attachment to avoid eBPF/tracepoint mismatch"
                 );
-                block_rq = false;
             }
         } else {
             log::warn!(
-                "block I/O tracepoint missing required fields; continuing without block I/O correlation"
+                "block I/O tracepoint missing required fields or layout mismatch; continuing without block I/O correlation"
             );
-            block_rq = false;
         }
     }
 

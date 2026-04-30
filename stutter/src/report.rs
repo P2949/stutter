@@ -30,6 +30,7 @@ struct SpikePoint {
     latency_ns: u64,
     wakeup_ns: u64,
     switch_ns: u64,
+    rq_depth: u32,
     elapsed_ms: Option<u128>,
 }
 
@@ -60,6 +61,9 @@ pub(crate) struct RunArtifacts {
     pub(crate) irq_events: Vec<IrqEventRecord>,
     pub(crate) gpu_samples: Vec<GpuSample>,
     pub(crate) frame_events: Vec<FrameEvent>,
+    pub(crate) migration_events: Vec<crate::recorder::MigrationEventRecord>,
+    pub(crate) cpu_freq_samples: Vec<crate::recorder::CpuFreqRecord>,
+    pub(crate) io_events: Vec<crate::recorder::BlockIoRecord>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -778,6 +782,9 @@ fn load_run_artifacts(session_path: &Path) -> anyhow::Result<RunArtifacts> {
         irq_events: load_artifact_vec(&run_dir.join("irq_events.json"))?,
         gpu_samples: load_artifact_vec(&run_dir.join("gpu_samples.json"))?,
         frame_events: load_artifact_vec(&run_dir.join("frame_correlation.json"))?,
+        migration_events: load_artifact_vec(&run_dir.join("migration_events.json"))?,
+        cpu_freq_samples: load_artifact_vec(&run_dir.join("cpu_freq_samples.json"))?,
+        io_events: load_artifact_vec(&run_dir.join("io_events.json"))?,
     })
 }
 
@@ -950,6 +957,7 @@ fn flatten_spike_events(session: &SessionFile, spike_events: &[SpikeEvent]) -> V
             latency_ns: spike.latency_ns,
             wakeup_ns: spike.wakeup_ns,
             switch_ns: spike.switch_ns,
+            rq_depth: spike.rq_depth,
             elapsed_ms: elapsed_ms(session.monotonic_start_ns, spike.switch_ns)
                 .or(spike.elapsed_ms),
         })
@@ -986,6 +994,7 @@ fn spike_point_from_task(
         latency_ns: spike.latency_ns,
         wakeup_ns: spike.wakeup_ns,
         switch_ns: spike.switch_ns,
+        rq_depth: spike.rq_depth,
         elapsed_ms,
     }
 }
@@ -1150,6 +1159,119 @@ fn render_correlation_sections(
                     max_frame,
                     min_elapsed,
                     max_elapsed
+                ),
+            );
+        }
+        pushln(output, "");
+    }
+
+    if !artifacts.migration_events.is_empty() {
+        pushln(output, "migration overlap");
+        pushln(output, "-----------------");
+        for (rank, cluster) in clusters.iter().take(top).enumerate() {
+            let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
+            let max_ns = cluster.max_switch_ns.saturating_add(cluster_window_ns);
+            let matches = artifacts
+                .migration_events
+                .iter()
+                .filter(|event| event.timestamp_ns >= min_ns && event.timestamp_ns <= max_ns)
+                .collect::<Vec<_>>();
+            if matches.is_empty() {
+                continue;
+            }
+            let tids = matches
+                .iter()
+                .map(|event| event.tid)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(|tid| tid.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            pushln(
+                output,
+                format!(
+                    "cluster=#{} matches={} tids={} window_ns={}..{}",
+                    rank + 1,
+                    matches.len(),
+                    tids,
+                    min_ns,
+                    max_ns
+                ),
+            );
+        }
+        pushln(output, "");
+    }
+
+    if !artifacts.cpu_freq_samples.is_empty() {
+        pushln(output, "cpu freq near clusters");
+        pushln(output, "----------------------");
+        for (rank, cluster) in clusters.iter().take(top).enumerate() {
+            let Some(elapsed) = cluster_elapsed(cluster) else {
+                continue;
+            };
+            let matches = artifacts
+                .cpu_freq_samples
+                .iter()
+                .filter(|sample| sample.elapsed_ms.abs_diff(elapsed) <= 50)
+                .collect::<Vec<_>>();
+            if matches.is_empty() {
+                continue;
+            }
+            let max_freq = matches
+                .iter()
+                .map(|sample| sample.freq_khz)
+                .max()
+                .unwrap_or(0);
+            pushln(
+                output,
+                format!(
+                    "cluster=#{} cpu_freq_samples={} max_freq_khz={}",
+                    rank + 1,
+                    matches.len(),
+                    max_freq
+                ),
+            );
+        }
+        pushln(output, "");
+    }
+
+    if !artifacts.io_events.is_empty() {
+        pushln(output, "block i/o overlap (approximate)");
+        pushln(output, "-------------------------------");
+        for (rank, cluster) in clusters.iter().take(top).enumerate() {
+            let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
+            let max_ns = cluster.max_switch_ns.saturating_add(cluster_window_ns);
+            let matches = artifacts
+                .io_events
+                .iter()
+                .filter(|event| event.timestamp_ns >= min_ns && event.timestamp_ns.saturating_sub(event.duration_ns) <= max_ns)
+                .collect::<Vec<_>>();
+            if matches.is_empty() {
+                continue;
+            }
+            let max_duration = matches
+                .iter()
+                .map(|event| event.duration_ns)
+                .max()
+                .unwrap_or(0);
+            let tids = matches
+                .iter()
+                .map(|event| event.tid)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(|tid| tid.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            pushln(
+                output,
+                format!(
+                    "cluster=#{} matches={} tids={} max_duration={} window_ns={}..{}",
+                    rank + 1,
+                    matches.len(),
+                    tids,
+                    format_latency(max_duration),
+                    min_ns,
+                    max_ns
                 ),
             );
         }

@@ -9,6 +9,8 @@ pub struct StutterScore {
     pub over_2ms: u64,
     pub over_5ms: u64,
     pub max_latency_ns: u64,
+    pub frame_max_ms: f64,
+    pub frame_p99_ms: f64,
 }
 
 pub fn score_from_interval_records(records: &[IntervalRecord]) -> StutterScore {
@@ -31,7 +33,28 @@ pub fn score_from_interval_records(records: &[IntervalRecord]) -> StutterScore {
         .saturating_mul(100)
         .saturating_add(score.over_2ms.saturating_mul(20))
         .saturating_add(score.over_1ms);
+
+    // If we have frame data, penalize high frame latency too.
+    // A 100ms frame is very bad, so we add it to the score.
+    if score.frame_max_ms > 50.0 {
+        score.total = score.total.saturating_add(100);
+    } else if score.frame_max_ms > 20.0 {
+        score.total = score.total.saturating_add(20);
+    }
+
     score
+}
+
+pub fn calculate_frame_metrics(frames: &[crate::recorder::FrameEvent]) -> (f64, f64) {
+    if frames.is_empty() {
+        return (0.0, 0.0);
+    }
+    let mut times: Vec<f64> = frames.iter().map(|f| f.frametime_ms).collect();
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let max = *times.last().unwrap_or(&0.0);
+    let p99_idx = (times.len() * 99 / 100).min(times.len() - 1);
+    let p99 = times[p99_idx];
+    (max, p99)
 }
 
 #[cfg(test)]

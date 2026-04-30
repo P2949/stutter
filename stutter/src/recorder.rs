@@ -453,7 +453,6 @@ pub struct RecordedSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    #[serde(default)]
     pub rq_depth: u32,
     #[serde(default)]
     pub major_faults: u32,
@@ -474,7 +473,6 @@ pub struct SessionSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    #[serde(default)]
     pub rq_depth: u32,
     #[serde(default)]
     pub major_faults: u32,
@@ -497,7 +495,6 @@ pub struct SpikeEvent {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    #[serde(default)]
     pub rq_depth: u32,
     #[serde(default)]
     pub major_faults: u32,
@@ -879,14 +876,14 @@ pub fn write_interval_csv(
 fn write_interval_csv_header(file: &mut fs::File) -> io::Result<()> {
     writeln!(
         file,
-        "elapsed_ms,task,active,class,comm,process_pid,process_comm,samples,stored_samples,truncated_samples,min_ns,avg_ns,p95_ns,p99_ns,max_ns,over_1ms,over_2ms,over_5ms,busiest_cpu,busiest_cpu_samples,worst_cpu,worst_cpu_max_ns,spikiest_cpu,spikiest_cpu_spikes,percentile_scope"
+        "elapsed_ms,task,active,class,comm,process_pid,process_comm,samples,stored_samples,truncated_samples,min_ns,avg_ns,p95_ns,p99_ns,max_ns,over_1ms,over_2ms,over_5ms,busiest_cpu,busiest_cpu_samples,worst_cpu,worst_cpu_max_ns,spikiest_cpu,spikiest_cpu_spikes,percentile_scope,major_faults,minor_faults,cpu_psi_some,mem_psi_some,mem_psi_full,io_psi_some,io_psi_full,drop_counters_total"
     )
 }
 
 fn write_interval_csv_row(file: &mut fs::File, record: &IntervalRecord) -> io::Result<()> {
     writeln!(
         file,
-        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
         record.elapsed_ms,
         record.task,
         record.active,
@@ -912,6 +909,14 @@ fn write_interval_csv_row(file: &mut fs::File, record: &IntervalRecord) -> io::R
         option_u32(record.spikiest_cpu),
         record.spikiest_cpu_spikes,
         csv_escape(&record.percentile_scope),
+        record.major_faults,
+        record.minor_faults,
+        record.cpu_psi_some,
+        record.mem_psi_some,
+        record.mem_psi_full,
+        record.io_psi_some,
+        record.io_psi_full,
+        record.drop_counters.total(),
     )
 }
 

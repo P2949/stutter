@@ -224,7 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 datasets.push({
                     label: label,
-                    data: [{ x: [start_ms, end_ms], y: label }],
+                    data: [{ x: [start_ms, end_ms], y: label, rq_depth: p.rq_depth }],
                     backgroundColor: color,
                     barPercentage: 0.8,
                     categoryPercentage: 0.8
@@ -240,7 +240,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     plugins: {
                         title: { display: true, text: `Cluster ${idx + 1} (${cluster.points.length} points)` },
                         legend: { display: false },
-                        tooltip: { callbacks: { label: (ctx) => `${ctx.raw.y}: ${((ctx.raw.x[1] - ctx.raw.x[0])).toFixed(2)}ms` } },
+                        tooltip: { callbacks: { label: (ctx) => `${ctx.raw.y}: ${((ctx.raw.x[1] - ctx.raw.x[0])).toFixed(2)}ms (rq_depth=${ctx.raw.rq_depth})` } },
                         zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } }
                     },
                     scales: {
