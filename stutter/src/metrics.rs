@@ -17,6 +17,8 @@ pub const LATENCY_HISTOGRAM_BUCKET_COUNT: usize = LATENCY_HISTOGRAM_BUCKETS_NS.l
 pub struct SpikeRecord {
     pub latency_ns: u64,
     pub cpu: u32,
+    #[serde(default)]
+    pub wakeup_target_cpu: u32,
     pub prio: i32,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
@@ -490,6 +492,7 @@ impl TaskStats {
             self.top_spikes.push(SpikeRecord {
                 latency_ns: event.latency_ns,
                 cpu: event.cpu,
+                wakeup_target_cpu: event.wakeup_target_cpu,
                 prio: event.prio,
                 wakeup_ns: event.wakeup_ns,
                 switch_ns: event.switch_ns,

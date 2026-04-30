@@ -27,6 +27,7 @@ struct SpikePoint {
     process_pid: Option<u32>,
     comm: String,
     cpu: u32,
+    wakeup_target_cpu: u32,
     latency_ns: u64,
     wakeup_ns: u64,
     switch_ns: u64,
@@ -736,12 +737,13 @@ pub(crate) fn render_report(
         pushln(
             &mut output,
             format!(
-                "task={} active={} class={:?} comm={} cpu={} latency={} wakeup_ns={} switch_ns={} target_pending_wakeups={}",
+                "task={} active={} class={:?} comm={} cpu={} wakeup_target_cpu={} latency={} wakeup_ns={} switch_ns={} target_pending_wakeups={}",
                 spike.task,
                 spike.active,
                 spike.class,
                 spike.comm,
                 spike.cpu,
+                spike.wakeup_target_cpu,
                 format_latency(spike.latency_ns),
                 spike.wakeup_ns,
                 spike.switch_ns,
@@ -988,6 +990,7 @@ fn flatten_spike_events(session: &SessionFile, spike_events: &[SpikeEvent]) -> V
             process_pid: spike.process_pid,
             comm: spike.comm.clone(),
             cpu: spike.cpu,
+            wakeup_target_cpu: spike.wakeup_target_cpu,
             latency_ns: spike.latency_ns,
             wakeup_ns: spike.wakeup_ns,
             switch_ns: spike.switch_ns,
@@ -1025,6 +1028,7 @@ fn spike_point_from_task(
         process_pid: spike.process_pid,
         comm: task.comm.clone(),
         cpu: spike.cpu,
+        wakeup_target_cpu: spike.wakeup_target_cpu,
         latency_ns: spike.latency_ns,
         wakeup_ns: spike.wakeup_ns,
         switch_ns: spike.switch_ns,
@@ -1392,11 +1396,12 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
 
 fn render_cluster_point(point: &SpikePoint) -> String {
     format!(
-        "{}({:?}:{} cpu={} latency={} switch_ns={} process_pid={} wakeup_ns={} target_pending_wakeups={})",
+        "{}({:?}:{} cpu={} wakeup_target_cpu={} latency={} switch_ns={} process_pid={} wakeup_ns={} target_pending_wakeups={})",
         point.task,
         point.class,
         point.comm,
         point.cpu,
+        point.wakeup_target_cpu,
         format_latency(point.latency_ns),
         point.switch_ns,
         format_process_pid(point.process_pid),

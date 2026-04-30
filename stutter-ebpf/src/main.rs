@@ -233,6 +233,18 @@ fn increment_drop_counter(reason: u32) {
     }
 }
 
+fn increment_target_pending(cpu: u32) {
+    if let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(cpu) {
+        unsafe { *depth = (*depth).saturating_add(1) };
+    }
+}
+
+fn decrement_target_pending(cpu: u32) {
+    if let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(cpu) {
+        unsafe { *depth = (*depth).saturating_sub(1) };
+    }
+}
+
 fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
     let pid: i32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
 
@@ -256,11 +268,16 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
         target_cpu,
         waker_tid,
     };
-    let already_pending = unsafe { WAKEUP_DATA.get(pid).is_some() };
+    let old_wakeup_data = unsafe { WAKEUP_DATA.get(pid).copied() };
 
     if WAKEUP_DATA.insert(pid, data, 0).is_ok() {
-        if !already_pending && let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(target_cpu) {
-            unsafe { *depth = (*depth).saturating_add(1) };
+        match old_wakeup_data {
+            None => increment_target_pending(target_cpu),
+            Some(old) if old.target_cpu != target_cpu => {
+                decrement_target_pending(old.target_cpu);
+                increment_target_pending(target_cpu);
+            }
+            Some(_) => {}
         }
     } else {
         increment_drop_counter(DROP_WAKEUP_DATA_INSERT_FAILED);
@@ -298,9 +315,7 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
 
     // Decrement the target-pending counter for the CPU where the task was
     // originally queued. This is not kernel runqueue depth.
-    if let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(target_cpu) {
-        unsafe { *depth = (*depth).saturating_sub(1) };
-    }
+    decrement_target_pending(target_cpu);
 
     let target_pending_wakeups = TARGET_PENDING_WAKEUPS.get(cpu).copied().unwrap_or(0);
 
@@ -327,6 +342,7 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
         (*event).kind = EVENT_RUNNABLE_LATENCY;
         (*event).pid = pid;
         (*event).cpu = cpu;
+        (*event).wakeup_target_cpu = target_cpu;
         (*event).prio = prio;
         (*event).waker_tid = waker_tid;
         (*event).target_pending_wakeups = target_pending_wakeups;
@@ -527,11 +543,6 @@ pub fn block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
         None => return Ok(0),
     };
     let _ = BLOCK_START.remove(key);
-
-    // If the start record was not created for a target task, ignore it.
-    if !is_target_pid(start.tid) {
-        return Ok(0);
-    }
 
     let now = unsafe { bpf_ktime_get_ns() };
     let duration_ns = now.saturating_sub(start.ts);
