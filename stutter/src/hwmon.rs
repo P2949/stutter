@@ -2,6 +2,8 @@ use std::{
     fs,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU32, AtomicU64, Ordering},
+    sync::Arc,
 };
 
 use crate::recorder::GpuSample;
@@ -12,10 +14,19 @@ pub struct HwmonReader {
     vram_used: Option<fs::File>,
     vram_total: Option<fs::File>,
     freq1_input: Option<fs::File>,
+    freq1_is_mhz: bool,
     freq2_input: Option<fs::File>,
     temp1_input: Option<fs::File>,
     power1_average: Option<fs::File>,
     buf: String,
+    nvidia_state: Option<Arc<NvidiaState>>,
+}
+
+#[derive(Debug)]
+struct NvidiaState {
+    gpu_busy_percent: AtomicU32,
+    vram_used_bytes: AtomicU64,
+    vram_total_bytes: AtomicU64,
 }
 
 impl HwmonReader {
@@ -49,13 +60,44 @@ impl HwmonReader {
         } else {
             discover_hwmon_root(Path::new("/sys/class/drm"))
                 .or_else(|| discover_hwmon_root(Path::new("/sys/class/hwmon")))
-        }?;
+        };
 
-        Some(Self::from_hwmon_root(root))
+        if let Some(root) = root {
+            Some(Self::from_hwmon_root(root))
+        } else if has_nvidia_pci_device() {
+            let mut reader = Self::empty();
+            reader.nvidia_state = Some(start_nvidia_smi_thread());
+            Some(reader)
+        } else {
+            None
+        }
+    }
+
+    fn empty() -> Self {
+        Self {
+            gpu_busy: None,
+            vram_used: None,
+            vram_total: None,
+            freq1_input: None,
+            freq1_is_mhz: false,
+            freq2_input: None,
+            temp1_input: None,
+            power1_average: None,
+            buf: String::with_capacity(32),
+            nvidia_state: None,
+        }
     }
 
     fn from_hwmon_root(root: PathBuf) -> Self {
-        Self {
+        let (freq1_input, freq1_is_mhz) = if let Ok(f) = fs::File::open(root.join("freq1_input")) {
+            (Some(f), false)
+        } else if let Ok(f) = fs::File::open(root.join("device/tile0/gt0/freq0/cur_freq_mhz")) {
+            (Some(f), true)
+        } else {
+            (None, false)
+        };
+
+        let mut reader = Self {
             gpu_busy: fs::File::open(root.join("device/gpu_busy_percent"))
                 .or_else(|_| fs::File::open(root.join("gpu_busy_percent")))
                 .ok(),
@@ -65,22 +107,57 @@ impl HwmonReader {
             vram_total: fs::File::open(root.join("device/mem_info_vram_total"))
                 .or_else(|_| fs::File::open(root.join("mem_info_vram_total")))
                 .ok(),
-            freq1_input: fs::File::open(root.join("freq1_input")).ok(),
+            freq1_input,
+            freq1_is_mhz,
             freq2_input: fs::File::open(root.join("freq2_input")).ok(),
             temp1_input: fs::File::open(root.join("temp1_input")).ok(),
             power1_average: fs::File::open(root.join("power1_average")).ok(),
             buf: String::with_capacity(32),
+            nvidia_state: None,
+        };
+
+        if reader.gpu_busy.is_none() && has_nvidia_pci_device() {
+            reader.nvidia_state = Some(start_nvidia_smi_thread());
         }
+
+        reader
     }
 
     pub fn sample(&mut self, elapsed_ms: u128) -> GpuSample {
+        let mut gpu_busy_percent = read_u32_cached(&mut self.gpu_busy, &mut self.buf);
+        let mut vram_used_bytes = read_u64_cached(&mut self.vram_used, &mut self.buf);
+        let mut vram_total_bytes = read_u64_cached(&mut self.vram_total, &mut self.buf);
+
+        if let Some(state) = &self.nvidia_state {
+            if gpu_busy_percent.is_none() {
+                let val = state.gpu_busy_percent.load(Ordering::Relaxed);
+                if val != u32::MAX { gpu_busy_percent = Some(val); }
+            }
+            if vram_used_bytes.is_none() {
+                let val = state.vram_used_bytes.load(Ordering::Relaxed);
+                if val != u64::MAX { vram_used_bytes = Some(val); }
+            }
+            if vram_total_bytes.is_none() {
+                let val = state.vram_total_bytes.load(Ordering::Relaxed);
+                if val != u64::MAX { vram_total_bytes = Some(val); }
+            }
+        }
+
+        let vram_used_percent = match (vram_used_bytes, vram_total_bytes) {
+            (Some(used), Some(total)) if total > 0 => Some(((used as f64 / total as f64) * 100.0) as u32),
+            _ => None,
+        };
+
+        let gpu_clock_mhz = read_u32_cached(&mut self.freq1_input, &mut self.buf)
+            .map(|val| if self.freq1_is_mhz { val } else { val / 1_000 });
+
         GpuSample {
             elapsed_ms,
-            gpu_busy_percent: read_u32_cached(&mut self.gpu_busy, &mut self.buf),
-            vram_used_bytes: read_u64_cached(&mut self.vram_used, &mut self.buf),
-            vram_total_bytes: read_u64_cached(&mut self.vram_total, &mut self.buf),
-            gpu_clock_mhz: read_u32_cached(&mut self.freq1_input, &mut self.buf)
-                .map(|khz| khz / 1_000),
+            gpu_busy_percent,
+            vram_used_bytes,
+            vram_total_bytes,
+            vram_used_percent,
+            gpu_clock_mhz,
             mem_clock_mhz: read_u32_cached(&mut self.freq2_input, &mut self.buf)
                 .map(|khz| khz / 1_000),
             temp_millidegrees: read_u32_cached(&mut self.temp1_input, &mut self.buf),
@@ -95,10 +172,12 @@ impl HwmonReader {
             vram_used: None,
             vram_total: None,
             freq1_input: fs::File::open(root.join("freq1_input")).ok(),
+            freq1_is_mhz: false,
             freq2_input: fs::File::open(root.join("freq2_input")).ok(),
             temp1_input: fs::File::open(root.join("temp1_input")).ok(),
             power1_average: fs::File::open(root.join("power1_average")).ok(),
             buf: String::with_capacity(32),
+            nvidia_state: None,
         }
     }
 }
@@ -163,6 +242,61 @@ fn read_u64_cached(file_opt: &mut Option<fs::File>, buf: &mut String) -> Option<
     file.seek(SeekFrom::Start(0)).ok()?;
     file.read_to_string(buf).ok()?;
     buf.trim().parse().ok()
+}
+
+fn has_nvidia_pci_device() -> bool {
+    let Ok(entries) = fs::read_dir("/sys/bus/pci/devices") else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        if let Ok(vendor) = fs::read_to_string(entry.path().join("vendor"))
+            && vendor.trim() == "0x10de"
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn start_nvidia_smi_thread() -> Arc<NvidiaState> {
+    let state = Arc::new(NvidiaState {
+        gpu_busy_percent: AtomicU32::new(u32::MAX),
+        vram_used_bytes: AtomicU64::new(u64::MAX),
+        vram_total_bytes: AtomicU64::new(u64::MAX),
+    });
+    
+    let state_clone = state.clone();
+    std::thread::spawn(move || {
+        loop {
+            let output = std::process::Command::new("nvidia-smi")
+                .args([
+                    "--query-gpu=utilization.gpu,memory.used,memory.total",
+                    "--format=csv,noheader,nounits"
+                ])
+                .output();
+                
+            if let Ok(out) = output
+                && let Ok(s) = String::from_utf8(out.stdout)
+                && let Some(line) = s.lines().next()
+            {
+                let parts: Vec<&str> = line.split(',').map(str::trim).collect();
+                if parts.len() == 3 {
+                    if let Ok(busy) = parts[0].parse::<u32>() {
+                        state_clone.gpu_busy_percent.store(busy, Ordering::Relaxed);
+                    }
+                    if let Ok(used_mb) = parts[1].parse::<u64>() {
+                        state_clone.vram_used_bytes.store(used_mb * 1024 * 1024, Ordering::Relaxed);
+                    }
+                    if let Ok(total_mb) = parts[2].parse::<u64>() {
+                        state_clone.vram_total_bytes.store(total_mb * 1024 * 1024, Ordering::Relaxed);
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    });
+
+    state
 }
 
 #[cfg(test)]

@@ -72,6 +72,9 @@ pub struct MonitorArgs {
     #[arg(long = "watch-timeout-seconds", value_name = "SECONDS")]
     watch_timeout_seconds: Option<u64>,
 
+    #[arg(long, default_value_t = 1024)]
+    max_tasks: usize,
+
     #[arg(long = "csv", value_name = "PATH")]
     csv_path: Option<PathBuf>,
 
@@ -155,6 +158,9 @@ struct ApplyProfileArgs {
     #[arg(long)]
     force: bool,
 
+    #[arg(long = "dry-run")]
+    dry_run: bool,
+
     #[arg(long)]
     watch: bool,
 
@@ -193,6 +199,7 @@ pub enum AppCommand {
         tree_pid: u32,
         profile: PathBuf,
         force: bool,
+        dry_run: bool,
         watch: bool,
         keep_applied: bool,
         refresh_ms: u64,
@@ -229,6 +236,7 @@ pub struct Config {
     pub persistent: bool,
     pub watch_poll_ms: u64,
     pub watch_timeout: Option<Duration>,
+    pub max_tasks: usize,
     pub csv_path: Option<PathBuf>,
     pub irq_latency: bool,
     pub irqs: Vec<u32>,
@@ -241,6 +249,7 @@ pub struct Config {
     pub retain_intervals: Option<usize>,
     pub recording: Option<RecordingConfig>,
     pub max_duration: Option<Duration>,
+    pub shared_hwmon: Option<std::sync::Arc<std::sync::Mutex<crate::hwmon::HwmonReader>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -316,6 +325,7 @@ where
                 tree_pid: args.tree_pid,
                 profile: args.profile,
                 force: args.force,
+                dry_run: args.dry_run,
                 watch: args.watch,
                 keep_applied: args.keep_applied,
                 refresh_ms: args.refresh_ms,
@@ -451,6 +461,7 @@ fn config_from_monitor_args(
         persistent: args.persistent,
         watch_poll_ms: args.watch_poll_ms,
         watch_timeout: args.watch_timeout_seconds.map(Duration::from_secs),
+        max_tasks: args.max_tasks,
         csv_path: args.csv_path,
         irq_latency: args.irq_latency,
         irqs: args.irqs,
@@ -463,6 +474,7 @@ fn config_from_monitor_args(
         retain_intervals: args.retain_intervals,
         recording,
         max_duration,
+        shared_hwmon: None,
     })
 }
 
@@ -597,6 +609,7 @@ mod tests {
             tree_pid,
             profile,
             force,
+            dry_run,
             watch,
             keep_applied,
             refresh_ms,
@@ -608,6 +621,7 @@ mod tests {
         assert_eq!(tree_pid, 42);
         assert_eq!(profile, PathBuf::from("/tmp/profile.toml"));
         assert!(!force);
+        assert!(!dry_run);
         assert!(!watch);
         assert!(!keep_applied);
         assert_eq!(refresh_ms, 1_000);
@@ -632,6 +646,7 @@ mod tests {
 
         let AppCommand::ApplyProfile {
             force,
+            dry_run: _,
             watch,
             keep_applied,
             refresh_ms,

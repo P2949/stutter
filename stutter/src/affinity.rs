@@ -63,6 +63,19 @@ impl CpuMask {
         Ok(mask)
     }
 
+    pub fn online_cpus() -> anyhow::Result<Self> {
+        let data = std::fs::read_to_string("/sys/devices/system/cpu/online")
+            .context("failed to read /sys/devices/system/cpu/online")?;
+        Self::parse(data.trim()).context("failed to parse online CPUs mask")
+    }
+
+    pub fn is_subset_of(&self, other: &Self) -> bool {
+        self.words.iter().enumerate().all(|(i, word)| {
+            let other_word = other.words.get(i).copied().unwrap_or(0);
+            word & !other_word == 0
+        })
+    }
+
     pub fn is_empty(&self) -> bool {
         self.words.iter().all(|word| *word == 0)
     }

@@ -482,6 +482,7 @@ pub struct GpuSample {
     pub gpu_busy_percent: Option<u32>,
     pub vram_used_bytes: Option<u64>,
     pub vram_total_bytes: Option<u64>,
+    pub vram_used_percent: Option<u32>,
     pub gpu_clock_mhz: Option<u32>,
     pub mem_clock_mhz: Option<u32>,
     pub temp_millidegrees: Option<u32>,

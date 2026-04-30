@@ -13,16 +13,18 @@ use crate::{
     process_tree::{self, TaskClass, TaskInfo},
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Profile {
     pub name: String,
-    pub classes: BTreeMap<TaskClass, ProfileClassRule>,
+    pub rules: Vec<ProfileRule>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProfileClassRule {
+#[derive(Clone, Debug)]
+pub struct ProfileRule {
     pub affinity: CpuMask,
+    pub match_class: Vec<TaskClass>,
     pub match_comm: Vec<String>,
+    pub match_comm_regex: Vec<Option<Regex>>,
 }
 
 #[derive(Default)]
@@ -64,23 +66,26 @@ pub fn apply_profile_to_tree(
     tree_pid: u32,
     profile: &Profile,
     force_restore_overwrite: bool,
+    dry_run: bool,
 ) -> anyhow::Result<Vec<AffinityRecord>> {
-    apply_profile_to_tree_with_cache(tree_pid, profile, force_restore_overwrite, None)
+    apply_profile_to_tree_with_cache(tree_pid, profile, force_restore_overwrite, dry_run, None)
 }
 
 pub fn apply_profile_to_tree_cached(
     tree_pid: u32,
     profile: &Profile,
     force_restore_overwrite: bool,
+    dry_run: bool,
     cache: &mut ProfileApplyCache,
 ) -> anyhow::Result<Vec<AffinityRecord>> {
-    apply_profile_to_tree_with_cache(tree_pid, profile, force_restore_overwrite, Some(cache))
+    apply_profile_to_tree_with_cache(tree_pid, profile, force_restore_overwrite, dry_run, Some(cache))
 }
 
 fn apply_profile_to_tree_with_cache(
     tree_pid: u32,
     profile: &Profile,
     force_restore_overwrite: bool,
+    dry_run: bool,
     mut cache: Option<&mut ProfileApplyCache>,
 ) -> anyhow::Result<Vec<AffinityRecord>> {
     let snapshot = process_tree::target_snapshot(&[], &[tree_pid]);
@@ -95,6 +100,16 @@ fn apply_profile_to_tree_with_cache(
 
     for planned in &planned {
         if !task_starttime_matches(planned) {
+            continue;
+        }
+
+        if dry_run {
+            log::info!(
+                "dry_run: would apply mask {} to TID {}",
+                planned.record.applied_mask.to_range_string(),
+                planned.record.tid
+            );
+            applied_records.push(planned.record.clone());
             continue;
         }
 
@@ -159,37 +174,40 @@ where
     let mut seen_cache_keys = BTreeSet::new();
 
     for task in tasks.values() {
-        let Some(rule) = profile.classes.get(&task.class) else {
+        let mut matched_rule = None;
+        for rule in &profile.rules {
+            if !rule.match_class.is_empty() && !rule.match_class.contains(&task.class) {
+                continue;
+            }
+
+            if !rule.match_comm.is_empty() {
+                let comms = [&task.comm, task.process_comm.as_ref()];
+                let mut comm_match = false;
+                
+                for (i, pattern) in rule.match_comm.iter().enumerate() {
+                    if let Some(re) = &rule.match_comm_regex[i] {
+                        if comms.iter().any(|c| re.is_match(c)) {
+                            comm_match = true;
+                            break;
+                        }
+                    } else if comms.iter().any(|c| c.contains(pattern)) {
+                        comm_match = true;
+                        break;
+                    }
+                }
+                
+                if !comm_match {
+                    continue;
+                }
+            }
+
+            matched_rule = Some(rule);
+            break;
+        }
+
+        let Some(rule) = matched_rule else {
             continue;
         };
-        if !rule.match_comm.is_empty()
-            && !rule.match_comm.iter().any(|pattern| {
-                let comms = [&task.comm, task.process_comm.as_ref()];
-                // Treat patterns like `/.../` as explicit regex; otherwise attempt regex if
-                // it contains common regex metacharacters, else do substring match.
-                if pattern.len() >= 2 && pattern.starts_with('/') && pattern.ends_with('/') {
-                    match Regex::new(&pattern[1..pattern.len() - 1]) {
-                        Ok(re) => comms.iter().any(|c| re.is_match(c)),
-                        Err(err) => {
-                            log::warn!("invalid profile regex '{}': {err}", pattern);
-                            false
-                        }
-                    }
-                } else if pattern.chars().any(|c| ".^$*+?()[]{}|\\".contains(c)) {
-                    match Regex::new(pattern) {
-                        Ok(re) => comms.iter().any(|c| re.is_match(c)),
-                        Err(err) => {
-                            log::warn!("invalid profile regex '{}': {err}", pattern);
-                            false
-                        }
-                    }
-                } else {
-                    comms.iter().any(|c| c.contains(pattern))
-                }
-            })
-        {
-            continue;
-        }
 
         let cache_key = ProfileApplyCacheKey::new(task, &rule.affinity);
         seen_cache_keys.insert(cache_key.clone());
@@ -265,9 +283,15 @@ fn validate_profile(profile: Profile) -> anyhow::Result<Profile> {
     if profile.name.is_empty() {
         anyhow::bail!("profile name must not be empty");
     }
-    for (class, rule) in &profile.classes {
+    
+    let online = affinity::CpuMask::online_cpus().unwrap_or_else(|_| affinity::CpuMask::parse("0-1023").unwrap());
+    
+    for (i, rule) in profile.rules.iter().enumerate() {
         if rule.affinity.is_empty() {
-            anyhow::bail!("profile class {class} is missing affinity");
+            anyhow::bail!("profile rule {} is missing affinity", i);
+        }
+        if !rule.affinity.is_subset_of(&online) {
+            anyhow::bail!("profile rule {} requests CPUs not currently online. Online: {}", i, online.to_range_string());
         }
     }
     Ok(profile)
@@ -283,33 +307,53 @@ struct ProfilesFile {
 struct ProfileToml {
     name: String,
     #[serde(default)]
-    classes: BTreeMap<String, ProfileClassToml>,
+    rules: Vec<ProfileRuleToml>,
 }
 
 #[derive(Deserialize)]
-struct ProfileClassToml {
+struct ProfileRuleToml {
     affinity: String,
+    #[serde(default)]
+    match_class: Vec<String>,
     #[serde(default)]
     match_comm: Vec<String>,
 }
 
 impl ProfileToml {
     fn try_into_profile(self) -> anyhow::Result<Profile> {
-        let mut classes = BTreeMap::new();
+        let mut rules = Vec::new();
 
-        for (class_name, rule) in self.classes {
-            classes.insert(
-                parse_task_class(&class_name)?,
-                ProfileClassRule {
-                    affinity: CpuMask::parse(&rule.affinity)?,
-                    match_comm: rule.match_comm,
-                },
-            );
+        for rule in self.rules {
+            let mut match_class = Vec::new();
+            for class_name in rule.match_class {
+                match_class.push(parse_task_class(&class_name)?);
+            }
+
+            let mut match_comm_regex = Vec::new();
+            for pattern in &rule.match_comm {
+                let re = if pattern.len() >= 2 && pattern.starts_with('/') && pattern.ends_with('/') {
+                    Some(Regex::new(&pattern[1..pattern.len() - 1])
+                        .with_context(|| format!("invalid profile regex '{}'", pattern))?)
+                } else if pattern.chars().any(|c| ".^$*+?()[]{}|\\".contains(c)) {
+                    Some(Regex::new(pattern)
+                        .with_context(|| format!("invalid profile regex '{}'", pattern))?)
+                } else {
+                    None
+                };
+                match_comm_regex.push(re);
+            }
+
+            rules.push(ProfileRule {
+                affinity: CpuMask::parse(&rule.affinity)?,
+                match_class,
+                match_comm: rule.match_comm,
+                match_comm_regex,
+            });
         }
 
         Ok(Profile {
             name: self.name,
-            classes,
+            rules,
         })
     }
 }
@@ -340,8 +384,9 @@ mod tests {
             [[profile]]
             name = "kcd # not a comment"
 
-            [profile.classes.Game]
+            [[profile.rules]]
             affinity = "0-3"
+            match_class = ["Game"]
             match_comm = ["RenderThread", "Main"]
             "#,
         )
@@ -349,8 +394,9 @@ mod tests {
 
         assert_eq!(profiles.len(), 1);
         assert_eq!(profiles[0].name, "kcd # not a comment");
-        let rule = profiles[0].classes.get(&TaskClass::Game).unwrap();
+        let rule = &profiles[0].rules[0];
         assert_eq!(rule.affinity.to_range_string(), "0-3");
+        assert_eq!(rule.match_class, vec![TaskClass::Game]);
         assert_eq!(rule.match_comm, vec!["RenderThread", "Main"]);
     }
 
@@ -371,13 +417,12 @@ mod tests {
         let tasks = BTreeMap::from([(7, task)]);
         let profile = Profile {
             name: "test".to_owned(),
-            classes: BTreeMap::from([(
-                TaskClass::Game,
-                ProfileClassRule {
-                    affinity: CpuMask::parse("0-1").unwrap(),
-                    match_comm: Vec::new(),
-                },
-            )]),
+            rules: vec![ProfileRule {
+                affinity: CpuMask::parse("0-1").unwrap(),
+                match_class: vec![TaskClass::Game],
+                match_comm: Vec::new(),
+                match_comm_regex: Vec::new(),
+            }],
         };
         let mut cache = ProfileApplyCache::default();
         let mut reads = 0;
