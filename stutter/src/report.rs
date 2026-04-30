@@ -30,7 +30,7 @@ struct SpikePoint {
     latency_ns: u64,
     wakeup_ns: u64,
     switch_ns: u64,
-    rq_depth: u32,
+    target_runnable_depth: u32,
     elapsed_ms: Option<u128>,
 }
 
@@ -394,7 +394,10 @@ pub fn render_diff_report(
         pushln(&mut output, "----------------------------");
         for key in removed_tasks.iter().take(top) {
             let (class, process_comm, comm) = key;
-            pushln(&mut output, format!("comm={} process={} class={:?}", comm, process_comm, class));
+            pushln(
+                &mut output,
+                format!("comm={} process={} class={:?}", comm, process_comm, class),
+            );
         }
         pushln(&mut output, "");
     }
@@ -583,7 +586,12 @@ pub(crate) fn render_report(
         );
         pushln(&mut output, "");
     }
-    if session.irq_event_count > 0 || session.gpu_sample_count > 0 || session.frame_event_count > 0
+    if session.irq_event_count > 0
+        || session.gpu_sample_count > 0
+        || session.frame_event_count > 0
+        || session.block_io_event_count > 0
+        || session.migration_event_count.unwrap_or(0) > 0
+        || session.cpu_freq_sample_count.unwrap_or(0) > 0
     {
         pushln(&mut output, "correlation artifacts");
         pushln(&mut output, "---------------------");
@@ -598,6 +606,27 @@ pub(crate) fn render_report(
         pushln(
             &mut output,
             format!("frame_events: {}", session.frame_event_count),
+        );
+        pushln(
+            &mut output,
+            format!(
+                "migration_events: {}",
+                session.migration_event_count.unwrap_or(0)
+            ),
+        );
+        pushln(
+            &mut output,
+            format!(
+                "cpu_freq_samples: {}",
+                session.cpu_freq_sample_count.unwrap_or(0)
+            ),
+        );
+        pushln(
+            &mut output,
+            format!(
+                "io_events: {} (dev+sector correlated)",
+                session.block_io_event_count
+            ),
         );
         pushln(&mut output, "");
     }
@@ -957,7 +986,7 @@ fn flatten_spike_events(session: &SessionFile, spike_events: &[SpikeEvent]) -> V
             latency_ns: spike.latency_ns,
             wakeup_ns: spike.wakeup_ns,
             switch_ns: spike.switch_ns,
-            rq_depth: spike.rq_depth,
+            target_runnable_depth: spike.target_runnable_depth,
             elapsed_ms: elapsed_ms(session.monotonic_start_ns, spike.switch_ns)
                 .or(spike.elapsed_ms),
         })
@@ -994,7 +1023,7 @@ fn spike_point_from_task(
         latency_ns: spike.latency_ns,
         wakeup_ns: spike.wakeup_ns,
         switch_ns: spike.switch_ns,
-        rq_depth: spike.rq_depth,
+        target_runnable_depth: spike.target_runnable_depth,
         elapsed_ms,
     }
 }
@@ -1236,7 +1265,10 @@ fn render_correlation_sections(
     }
 
     if !artifacts.io_events.is_empty() {
-        pushln(output, "block i/o overlap (approximate)");
+        pushln(
+            output,
+            "block i/o overlap (approximate, correlated by dev+sector)",
+        );
         pushln(output, "-------------------------------");
         for (rank, cluster) in clusters.iter().take(top).enumerate() {
             let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
@@ -1244,7 +1276,10 @@ fn render_correlation_sections(
             let matches = artifacts
                 .io_events
                 .iter()
-                .filter(|event| event.timestamp_ns >= min_ns && event.timestamp_ns.saturating_sub(event.duration_ns) <= max_ns)
+                .filter(|event| {
+                    event.timestamp_ns >= min_ns
+                        && event.timestamp_ns.saturating_sub(event.duration_ns) <= max_ns
+                })
                 .collect::<Vec<_>>();
             if matches.is_empty() {
                 continue;

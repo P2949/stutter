@@ -2,10 +2,7 @@
 #![no_main]
 
 use aya_ebpf::{
-    helpers::{
-        bpf_get_current_pid_tgid, bpf_get_smp_processor_id,
-        bpf_ktime_get_ns,
-    },
+    helpers::{bpf_get_current_pid_tgid, bpf_get_smp_processor_id, bpf_ktime_get_ns},
     macros::{map, tracepoint},
     maps::{Array, HashMap, LruHashMap, PerCpuArray, RingBuf},
     programs::TracePointContext,
@@ -13,7 +10,7 @@ use aya_ebpf::{
 use stutter_common::{
     BlockIoEvent, CpuFreqEvent, DROP_BLOCK_START_INSERT_FAILED, DROP_COUNTERS_MAX,
     DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
-    DROP_WAKEUP_TIMES_INSERT_FAILED, EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_EXEC, EVENT_IRQ_LATENCY,
+    DROP_WAKEUP_DATA_INSERT_FAILED, EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_EXEC, EVENT_IRQ_LATENCY,
     EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent, MigrationEvent,
     SchedulerEvent, StatWaitEvent,
 };
@@ -38,7 +35,8 @@ struct WakeupData {
 }
 
 #[map]
-static WAKEUP_DATA: HashMap<u32, WakeupData> = HashMap::<u32, WakeupData>::with_max_entries(131_072, 0);
+static WAKEUP_DATA: HashMap<u32, WakeupData> =
+    HashMap::<u32, WakeupData>::with_max_entries(131_072, 0);
 
 #[map]
 static IRQ_START_TIMES: HashMap<u64, u64> = HashMap::<u64, u64>::with_max_entries(1024, 0);
@@ -157,8 +155,9 @@ pub fn sched_stat_wait(ctx: TracePointContext) -> u32 {
 #[tracepoint]
 pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
-    
+
     let _ = WAKEUP_DATA.remove(tid);
+    let _ = PREV_FAULTS.remove(tid);
     0
 }
 
@@ -259,7 +258,7 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
     };
 
     if WAKEUP_DATA.insert(pid, data, 0).is_err() {
-        increment_drop_counter(DROP_WAKEUP_TIMES_INSERT_FAILED);
+        increment_drop_counter(DROP_WAKEUP_DATA_INSERT_FAILED);
     }
 
     if let Some(depth) = RQ_DEPTH.get_ptr_mut(target_cpu) {
@@ -301,7 +300,7 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
         unsafe { *depth = (*depth).saturating_sub(1) };
     }
 
-    let rq_depth = RQ_DEPTH.get(cpu).copied().unwrap_or(0);
+    let target_runnable_depth = RQ_DEPTH.get(cpu).copied().unwrap_or(0);
 
     let switch_ns = unsafe { bpf_ktime_get_ns() };
     let latency_ns = switch_ns.saturating_sub(wakeup_ns);
@@ -328,7 +327,7 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
         (*event).cpu = cpu;
         (*event).prio = prio;
         (*event).waker_tid = waker_tid;
-        (*event).rq_depth = rq_depth;
+        (*event).target_runnable_depth = target_runnable_depth;
         (*event).maj_flt = faults.maj as u32;
         (*event).min_flt = faults.min as u32;
         (*event).wakeup_ns = wakeup_ns;

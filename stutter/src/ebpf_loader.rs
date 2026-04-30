@@ -10,7 +10,7 @@ use aya::{
 use serde::{Deserialize, Serialize};
 use stutter_common::{
     DROP_BLOCK_START_INSERT_FAILED, DROP_IRQ_START_TIMES_INSERT_FAILED,
-    DROP_RINGBUF_RESERVE_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_TIMES_INSERT_FAILED,
+    DROP_RINGBUF_RESERVE_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED,
 };
 use tokio::io::unix::AsyncFd;
 
@@ -18,9 +18,9 @@ const DEFAULT_AVAILABLE_MEMORY_BYTES: u64 = 1 << 30;
 const AVAILABLE_MEMORY_BUDGET_DIVISOR: u64 = 64;
 const MEMLOCK_BUDGET_NUMERATOR: u64 = 3;
 const MEMLOCK_BUDGET_DENOMINATOR: u64 = 4;
-const WAKEUP_TIMES_ENTRY_ESTIMATED_BYTES: u64 = 64;
-const MIN_WAKEUP_TIMES_ENTRIES: u32 = 4_096;
-const MAX_WAKEUP_TIMES_ENTRIES: u32 = 1_048_576;
+const WAKEUP_DATA_ENTRY_ESTIMATED_BYTES: u64 = 64;
+const MIN_WAKEUP_DATA_ENTRIES: u32 = 4_096;
+const MAX_WAKEUP_DATA_ENTRIES: u32 = 1_048_576;
 const MIN_EVENTS_RINGBUF_BYTES: u32 = 64 * 1024;
 const MAX_EVENTS_RINGBUF_BYTES: u32 = 16 * 1024 * 1024;
 const EVENTS_BUDGET_NUMERATOR: u64 = 2;
@@ -37,22 +37,19 @@ pub struct LoadedEbpf {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DropCountersSnapshot {
-    pub wakeup_times_insert_failed: u64,
+    pub wakeup_data_insert_failed: u64,
     pub ringbuf_reserve_failed: u64,
     #[serde(default)]
     pub irq_start_times_insert_failed: u64,
-    #[serde(default)]
-    pub waker_map_insert_failed: u64,
     #[serde(default)]
     pub block_start_insert_failed: u64,
 }
 
 impl DropCountersSnapshot {
     pub fn total(&self) -> u64 {
-        self.wakeup_times_insert_failed
+        self.wakeup_data_insert_failed
             .saturating_add(self.ringbuf_reserve_failed)
             .saturating_add(self.irq_start_times_insert_failed)
-            .saturating_add(self.waker_map_insert_failed)
             .saturating_add(self.block_start_insert_failed)
     }
 }
@@ -60,9 +57,9 @@ impl DropCountersSnapshot {
 impl LoadedEbpf {
     pub fn snapshot_drop_counters(&self) -> DropCountersSnapshot {
         DropCountersSnapshot {
-            wakeup_times_insert_failed: drop_counter_value(
+            wakeup_data_insert_failed: drop_counter_value(
                 &self.drop_counters,
-                DROP_WAKEUP_TIMES_INSERT_FAILED,
+                DROP_WAKEUP_DATA_INSERT_FAILED,
             ),
             ringbuf_reserve_failed: drop_counter_value(
                 &self.drop_counters,
@@ -71,10 +68,6 @@ impl LoadedEbpf {
             irq_start_times_insert_failed: drop_counter_value(
                 &self.drop_counters,
                 DROP_IRQ_START_TIMES_INSERT_FAILED,
-            ),
-            waker_map_insert_failed: drop_counter_value(
-                &self.drop_counters,
-                DROP_WAKEUP_DATA_INSERT_FAILED,
             ),
             block_start_insert_failed: drop_counter_value(
                 &self.drop_counters,
@@ -90,11 +83,11 @@ pub fn load_and_attach(
     raise_memlock_limit();
     let map_sizing = dynamic_map_sizing();
     log::info!(
-        "ebpf_map_sizing locked_memory_limit={} available_memory={} events_ringbuf_bytes={} wakeup_times_entries={}",
+        "ebpf_map_sizing locked_memory_limit={} available_memory={} events_ringbuf_bytes={} wakeup_data_entries={}",
         format_optional_bytes(map_sizing.locked_memory_limit_bytes),
         format_optional_bytes(map_sizing.available_memory_bytes),
         map_sizing.events_ringbuf_bytes,
-        map_sizing.wakeup_times_entries,
+        map_sizing.wakeup_data_entries,
     );
     let tracepoints = validate_tracepoint_formats(Path::new("/sys/kernel/tracing/events"))
         .map_err(|e| crate::error::StutterError::TracepointOffsetMismatch(e.to_string()))?;
@@ -102,7 +95,7 @@ pub fn load_and_attach(
     let mut loader = EbpfLoader::new();
     loader
         .map_max_entries("EVENTS", map_sizing.events_ringbuf_bytes)
-        .map_max_entries("WAKEUP_TIMES", map_sizing.wakeup_times_entries);
+        .map_max_entries("WAKEUP_DATA", map_sizing.wakeup_data_entries);
 
     let mut ebpf = loader
         .load(aya::include_bytes_aligned!(concat!(
@@ -171,7 +164,9 @@ pub fn load_and_attach(
                 "block_rq tracepoints missing `rwbs`; block I/O correlation will continue but read/write flags are unavailable"
             );
         }
-        log::warn!("block I/O correlation uses dev+sector hashing; concurrent same-sector requests may collide");
+        log::warn!(
+            "block I/O correlation uses dev+sector hashing; concurrent same-sector requests may collide"
+        );
     }
 
     if tracepoints.sched_process_exec {
@@ -188,16 +183,23 @@ pub fn load_and_attach(
     // is blocked by policy or capabilities, log a warning and continue rather
     // than aborting the whole profiler startup.
     if let Err(e) = attach_software_perf_event(&mut ebpf, "major_fault", 4) {
-        log::warn!("failed to attach major_fault perf event; continuing without fault probes: {}", e);
+        log::warn!(
+            "failed to attach major_fault perf event; continuing without fault probes: {}",
+            e
+        );
     }
     if let Err(e) = attach_software_perf_event(&mut ebpf, "minor_fault", 3) {
-        log::warn!("failed to attach minor_fault perf event; continuing without fault probes: {}", e);
+        log::warn!(
+            "failed to attach minor_fault perf event; continuing without fault probes: {}",
+            e
+        );
     }
 
-    let mut target_pid_map = AyaHashMap::try_from(ebpf.take_map("TARGET_PIDS").ok_or_else(|| {
-        crate::error::StutterError::EbpfLoad("TARGET_PIDS map not found".to_owned())
-    })?)
-    .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    let mut target_pid_map =
+        AyaHashMap::try_from(ebpf.take_map("TARGET_PIDS").ok_or_else(|| {
+            crate::error::StutterError::EbpfLoad("TARGET_PIDS map not found".to_owned())
+        })?)
+        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
     let target_irq_map = ebpf
         .take_map("TARGET_IRQS")
@@ -325,7 +327,7 @@ fn drop_counter_value(counters: &PerCpuArray<MapData, u64>, key: u32) -> u64 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct EbpfMapSizing {
     events_ringbuf_bytes: u32,
-    wakeup_times_entries: u32,
+    wakeup_data_entries: u32,
     locked_memory_limit_bytes: Option<u64>,
     available_memory_bytes: Option<u64>,
 }
@@ -363,17 +365,17 @@ fn map_sizing_from_memory(snapshot: MemorySnapshot) -> EbpfMapSizing {
     let events_ringbuf_bytes =
         ring_buffer_size_from_budget(events_budget, min_events, max_events, page_size);
     let wakeup_budget = budget.saturating_sub(u64::from(events_ringbuf_bytes));
-    let wakeup_times_entries = wakeup_budget
-        .checked_div(WAKEUP_TIMES_ENTRY_ESTIMATED_BYTES)
+    let wakeup_data_entries = wakeup_budget
+        .checked_div(WAKEUP_DATA_ENTRY_ESTIMATED_BYTES)
         .unwrap_or(0)
         .clamp(
-            u64::from(MIN_WAKEUP_TIMES_ENTRIES),
-            u64::from(MAX_WAKEUP_TIMES_ENTRIES),
+            u64::from(MIN_WAKEUP_DATA_ENTRIES),
+            u64::from(MAX_WAKEUP_DATA_ENTRIES),
         ) as u32;
 
     EbpfMapSizing {
         events_ringbuf_bytes,
-        wakeup_times_entries,
+        wakeup_data_entries,
         locked_memory_limit_bytes: snapshot.locked_memory_limit_bytes,
         available_memory_bytes: snapshot.available_memory_bytes,
     }
@@ -528,14 +530,13 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
     let mut block_rq_has_rwbs = false;
 
     if block_rq_issue.exists() && block_rq_complete.exists() {
-        let issue_ok = validate_tracepoint_format_at(
-            &block_rq_issue,
-            &[("dev", 8), ("sector", 16)],
-        ).is_ok();
+        let issue_ok =
+            validate_tracepoint_format_at(&block_rq_issue, &[("dev", 8), ("sector", 16)]).is_ok();
         let complete_ok = validate_tracepoint_format_at(
             &block_rq_complete,
             &[("dev", 8), ("sector", 16), ("nr_sector", 24)],
-        ).is_ok();
+        )
+        .is_ok();
 
         if issue_ok && complete_ok {
             // Check for optional rwbs field at the expected offset
@@ -717,7 +718,9 @@ fn collect_cgroup_hierarchy_pids(path: &Path, pids: &mut Vec<u32>) -> anyhow::Re
 
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries.flatten() {
-            if let Ok(file_type) = entry.file_type() && file_type.is_dir() {
+            if let Ok(file_type) = entry.file_type()
+                && file_type.is_dir()
+            {
                 collect_cgroup_hierarchy_pids(&entry.path(), pids)?;
             }
         }
@@ -828,7 +831,7 @@ field:int irq; offset:8; size:4; signed:1;
         });
 
         assert_eq!(sizing.events_ringbuf_bytes, MAX_EVENTS_RINGBUF_BYTES);
-        assert_eq!(sizing.wakeup_times_entries, MAX_WAKEUP_TIMES_ENTRIES);
+        assert_eq!(sizing.wakeup_data_entries, MAX_WAKEUP_DATA_ENTRIES);
     }
 
     #[test]
@@ -840,7 +843,7 @@ field:int irq; offset:8; size:4; signed:1;
         });
 
         assert_eq!(sizing.events_ringbuf_bytes, 256 * 1024);
-        assert_eq!(sizing.wakeup_times_entries, 8_192);
+        assert_eq!(sizing.wakeup_data_entries, 8_192);
     }
 
     #[test]

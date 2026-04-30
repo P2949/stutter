@@ -25,6 +25,7 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
+use anyhow::Context;
 use aya::maps::{HashMap as AyaHashMap, MapData};
 use cli::{AppCommand, Config, parse_app_command};
 use crossterm::event::{Event, EventStream, KeyCode};
@@ -38,7 +39,6 @@ use recorder::{
     FinalizeRecordingInput, IntervalCsvWriter, IntervalRecord, IrqEventRecord, JsonArrayWriter,
     SpikeEventBuffer, TreeEvent, finalize_recording, prepare_recording,
 };
-use anyhow::Context;
 use serde::Serialize;
 use stutter_common::{
     BlockIoEvent, CpuFreqEvent, EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_EXEC, EVENT_IRQ_LATENCY,
@@ -63,6 +63,8 @@ struct RefreshTargetTasksInput<'a> {
     task_exe_inodes: &'a mut TaskExeInodesMap,
     tree_events: &'a mut Vec<TreeEvent>,
     target_pid_map: &'a mut AyaHashMap<MapData, u32, u8>,
+    prev_faults_map: Option<&'a mut AyaHashMap<MapData, u32, [u64; 2]>>,
+    prev_faults_snapshot: &'a mut BTreeMap<u32, (u64, u64)>,
     elapsed_ms: u128,
     recording_started: Option<Instant>,
     process_cache: &'a mut process_tree::ProcessCache,
@@ -166,7 +168,18 @@ async fn main() -> anyhow::Result<()> {
             epoch_seconds,
             warmup_seconds,
             keep_best,
-        } => tune_command(tree_pid, profiles, epoch_seconds, warmup_seconds, keep_best).await,
+            mangohud_log,
+        } => {
+            tune_command(
+                tree_pid,
+                profiles,
+                epoch_seconds,
+                warmup_seconds,
+                keep_best,
+                mangohud_log,
+            )
+            .await
+        }
     }
 }
 
@@ -207,6 +220,7 @@ async fn tune_command(
     epoch_seconds: u64,
     warmup_seconds: u64,
     keep_best: bool,
+    mangohud_log: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let profiles = profiles::load_profiles(&profiles_path)?;
     if profiles.is_empty() {
@@ -260,6 +274,7 @@ async fn tune_command(
             epoch_seconds,
             warmup_seconds,
             shared_hwmon.clone(),
+            mangohud_log.clone(),
         )
         .await
         {
@@ -270,10 +285,10 @@ async fn tune_command(
             }
         };
 
-        let (frame_max, frame_p99) = scorer::calculate_frame_metrics(&frame_events);
-        let mut score = scorer::score_from_interval_records(&interval_records);
-        score.frame_max_ms = frame_max;
-        score.frame_p99_ms = frame_p99;
+        let mut score =
+            scorer::score_from_interval_records_and_frames(&interval_records, &frame_events);
+        let frame_max = score.frame_max_ms;
+        let frame_p99 = score.frame_p99_ms;
 
         // Reject / penalize candidates that did not gather enough data to be
         // meaningfully comparable. These thresholds are conservative: at
@@ -357,7 +372,7 @@ async fn tune_command(
     if min_frames > 0 {
         let ratio = (max_frames as f64) / (min_frames as f64);
         if ratio > 1.5 {
-             warn!(
+            warn!(
                 "tune_candidates_unbalanced_frames min={} max={} ratio={:.2}",
                 min_frames, max_frames, ratio
             );
@@ -377,9 +392,7 @@ async fn tune_command(
     if keep_best {
         if !any_valid {
             restore_tune_on_error();
-            anyhow::bail!(
-                "no tune candidate collected enough data; not keeping any profile"
-            );
+            anyhow::bail!("no tune candidate collected enough data; not keeping any profile");
         }
 
         if let Some(profile) = profiles
@@ -418,6 +431,7 @@ async fn measure_tune_candidate(
     epoch_seconds: u64,
     warmup_seconds: u64,
     shared_hwmon: Option<std::sync::Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
+    mangohud_log: Option<PathBuf>,
 ) -> anyhow::Result<(Vec<IntervalRecord>, Vec<crate::recorder::FrameEvent>)> {
     let run_dir = tune_run_dir(profile_name);
     let config = Config {
@@ -443,7 +457,7 @@ async fn measure_tune_candidate(
         hwmon_root: None,
         hwmon_drm_card: None,
         hwmon_render_node: None,
-        mangohud_log: None,
+        mangohud_log,
         tui: false,
         retain_intervals: None,
         recording: Some(cli::RecordingConfig {
@@ -928,6 +942,8 @@ async fn run_monitor(
         task_exe_inodes: &mut task_exe_inodes,
         tree_events: &mut tree_events,
         target_pid_map: &mut loaded.target_pid_map,
+        prev_faults_map: loaded.prev_faults_map.as_mut(),
+        prev_faults_snapshot: &mut prev_faults_snapshot,
         elapsed_ms: started.elapsed().as_millis(),
         recording_started: recording.as_ref().map(|run| run.started_instant),
         process_cache: &mut process_cache,
@@ -1091,6 +1107,8 @@ async fn run_monitor(
                         task_exe_inodes: &mut task_exe_inodes,
                         tree_events: &mut tree_events,
                         target_pid_map: &mut loaded.target_pid_map,
+                        prev_faults_map: loaded.prev_faults_map.as_mut(),
+                        prev_faults_snapshot: &mut prev_faults_snapshot,
                         elapsed_ms: started.elapsed().as_millis(),
                         recording_started: recording.as_ref().map(|run| run.started_instant),
                         process_cache: &mut process_cache,
@@ -1125,6 +1143,8 @@ async fn run_monitor(
                         task_exe_inodes: &mut task_exe_inodes,
                         tree_events: &mut tree_events,
                         target_pid_map: &mut loaded.target_pid_map,
+                        prev_faults_map: loaded.prev_faults_map.as_mut(),
+                        prev_faults_snapshot: &mut prev_faults_snapshot,
                         elapsed_ms: started.elapsed().as_millis(),
                         recording_started: recording.as_ref().map(|run| run.started_instant),
                         process_cache: &mut process_cache,
@@ -1147,11 +1167,17 @@ async fn run_monitor(
                     task_exe_inodes: &mut task_exe_inodes,
                     tree_events: &mut tree_events,
                     target_pid_map: &mut loaded.target_pid_map,
+                    prev_faults_map: loaded.prev_faults_map.as_mut(),
+                    prev_faults_snapshot: &mut prev_faults_snapshot,
                     elapsed_ms: started.elapsed().as_millis(),
                     recording_started: recording.as_ref().map(|run| run.started_instant),
                     process_cache: &mut process_cache,
                 })
                 .await?;
+
+                // Belt-and-suspenders cleanup in case a refresh path exits before
+                // emitting per-task removal diffs.
+                prev_faults_snapshot.retain(|tid, _| active_targets.contains_key(tid));
             }
 
             _ = watch_tick.tick(), if matches!(watch_state, WatchProcessState::Waiting) => {
@@ -1177,6 +1203,8 @@ async fn run_monitor(
                         task_exe_inodes: &mut task_exe_inodes,
                         tree_events: &mut tree_events,
                         target_pid_map: &mut loaded.target_pid_map,
+                        prev_faults_map: loaded.prev_faults_map.as_mut(),
+                        prev_faults_snapshot: &mut prev_faults_snapshot,
                         elapsed_ms: started.elapsed().as_millis(),
                         recording_started: recording.as_ref().map(|run| run.started_instant),
                         process_cache: &mut process_cache,
@@ -1661,6 +1689,7 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
                     let record = recorder::BlockIoRecord {
                         elapsed_ms,
                         tid: event.tid,
+                        correlation_basis: "dev+sector".to_owned(),
                         dev: event.dev,
                         nr_sector: event.nr_sector,
                         sector: event.sector,
@@ -1949,6 +1978,8 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
         task_exe_inodes,
         tree_events,
         target_pid_map,
+        mut prev_faults_map,
+        prev_faults_snapshot,
         elapsed_ms,
         recording_started,
         process_cache,
@@ -1999,6 +2030,8 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
         stats_by_task,
         task_exe_inodes,
         tree_events,
+        &mut prev_faults_map,
+        prev_faults_snapshot,
         elapsed_ms,
         recording_started,
     );
@@ -2048,6 +2081,8 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
                 if let Some(started) = recording_started {
                     tree_events.push(TreeEvent::from_task(started, "removed", diff.task));
                 }
+
+                remove_prev_faults_state(tid, &mut prev_faults_map, prev_faults_snapshot);
 
                 if let Some(stats) = stats_by_task.get_mut(&tid) {
                     stats.active = false;
@@ -2124,6 +2159,8 @@ fn handle_same_tid_replacements(
     stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
     task_exe_inodes: &mut TaskExeInodesMap,
     tree_events: &mut Vec<TreeEvent>,
+    prev_faults_map: &mut Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
+    prev_faults_snapshot: &mut BTreeMap<u32, (u64, u64)>,
     elapsed_ms: u128,
     recording_started: Option<Instant>,
 ) {
@@ -2137,6 +2174,7 @@ fn handle_same_tid_replacements(
         }
 
         known_targets.insert(*tid, desired_task.clone());
+        remove_prev_faults_state(*tid, prev_faults_map, prev_faults_snapshot);
         reset_stats_for_task_change(
             stats_by_task,
             task_exe_inodes,
@@ -2159,6 +2197,20 @@ fn handle_same_tid_replacements(
             desired_task.comm,
             desired_task.class,
         );
+    }
+}
+
+fn remove_prev_faults_state(
+    tid: u32,
+    prev_faults_map: &mut Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
+    prev_faults_snapshot: &mut BTreeMap<u32, (u64, u64)>,
+) {
+    prev_faults_snapshot.remove(&tid);
+
+    if let Some(map) = prev_faults_map.as_mut()
+        && let Err(err) = map.remove(&tid)
+    {
+        debug!("prev_faults_remove_failed tid={tid} err={err}");
     }
 }
 
@@ -2344,10 +2396,11 @@ fn log_drop_counters(drop_counters: &ebpf_loader::DropCountersSnapshot) {
     }
 
     warn!(
-        "ebpf_drop_counters total={} wakeup_times_insert_failed={} ringbuf_reserve_failed={} irq_start_times_insert_failed={}",
+        "ebpf_drop_counters total={} wakeup_data_insert_failed={} ringbuf_reserve_failed={} irq_start_times_insert_failed={} block_start_insert_failed={}",
         drop_counters.total(),
-        drop_counters.wakeup_times_insert_failed,
+        drop_counters.wakeup_data_insert_failed,
         drop_counters.ringbuf_reserve_failed,
         drop_counters.irq_start_times_insert_failed,
+        drop_counters.block_start_insert_failed,
     );
 }

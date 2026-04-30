@@ -20,7 +20,7 @@ pub struct SpikeRecord {
     pub prio: i32,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    pub rq_depth: u32,
+    pub target_runnable_depth: u32,
     #[serde(default)]
     pub major_faults: u32,
     #[serde(default)]
@@ -492,7 +492,7 @@ impl TaskStats {
                 prio: event.prio,
                 wakeup_ns: event.wakeup_ns,
                 switch_ns: event.switch_ns,
-                rq_depth: event.rq_depth,
+                target_runnable_depth: event.target_runnable_depth,
                 major_faults: event.maj_flt.saturating_sub(self.major_faults as u32),
                 minor_faults: event.min_flt.saturating_sub(self.minor_faults as u32),
             });
@@ -612,10 +612,15 @@ pub fn collect_interval_summaries_labeled(
         // update both the stats and the snapshot for next interval.
         let mut maj_delta = 0u64;
         let mut min_delta = 0u64;
-        if let Some(map) = prev_faults_map && let Ok(counters) = map.get(task, 0) {
+        if let Some(map) = prev_faults_map
+            && let Ok(counters) = map.get(task, 0)
+        {
             let current_maj = counters[0];
             let current_min = counters[1];
-            let prev = prev_faults_snapshot.get(task).copied().unwrap_or((current_maj, current_min));
+            let prev = prev_faults_snapshot
+                .get(task)
+                .copied()
+                .unwrap_or((current_maj, current_min));
             maj_delta = current_maj.saturating_sub(prev.0);
             min_delta = current_min.saturating_sub(prev.1);
             prev_faults_snapshot.insert(*task, (current_maj, current_min));
