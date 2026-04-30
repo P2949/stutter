@@ -1150,6 +1150,193 @@ fn spike_event(task: u32, switch_ns: u64) -> SpikeEvent {
     }
 }
 
+#[test]
+fn report_diff_shows_regressions_and_improvements() {
+    let dir_a = temp_test_dir("diff-a");
+    let dir_b = temp_test_dir("diff-b");
+    fs::create_dir_all(&dir_a).unwrap();
+    fs::create_dir_all(&dir_b).unwrap();
+
+    let session_a_json = r#"{
+        "schema_version": 2,
+        "run_name": "run-a",
+        "duration_ms": 10000,
+        "metadata": {
+            "kernel_osrelease": null,
+            "kernel_version": null,
+            "cpu_online": null,
+            "cpu_possible": null,
+            "cpu_topology": [],
+            "scx_state": null,
+            "scx_ops": null,
+            "scx_enable_seq": null
+        },
+        "monotonic_start_ns": 0,
+        "started_at": {
+            "unix_seconds": 0,
+            "unix_nanos": 0,
+            "system_time_debug": "test"
+        },
+        "ended_at": {
+            "unix_seconds": 0,
+            "unix_nanos": 0,
+            "system_time_debug": "test"
+        },
+        "target_pids_max": 2048,
+        "stop_reason": "test",
+        "active_target_pids_count": 2,
+        "active_expanded_tasks": [],
+        "total_targets_tracked": 0,
+        "total_events_processed": 0,
+        "total_tasks_seen": 0,
+        "interval_record_count": 0,
+        "config": {
+            "tree_roots": [],
+            "manual_pids": [],
+            "include_comm": [],
+            "exclude_comm": [],
+            "hwmon": false,
+            "hwmon_device_prefix": null,
+            "hwmon_drm_card": null,
+            "hwmon_render_node": null,
+            "watch_process": null,
+            "watch_process_args": null,
+            "persistent": false,
+            "csv_path": null,
+            "tui": false,
+            "summary_period_ms": 1000,
+            "spike_threshold_ns": 5000000,
+            "verbose": false
+        },
+        "tasks": [
+            {
+                "task": 1,
+                "active": true,
+                "first_seen_ms": 0,
+                "last_seen_ms": 0,
+                "removed_ms": null,
+                "class": "Game",
+                "process_pid": 1,
+                "process_comm": "game",
+                "comm": "game-thread",
+                "latency": {
+                    "samples": 100,
+                    "stored_samples": 100,
+                    "truncated_samples": 0,
+                    "percentile_scope": "session",
+                    "histogram": [],
+                    "min_ns": 100000,
+                    "avg_ns": 500000,
+                    "p95_ns": 1000000,
+                    "p99_ns": 2000000,
+                    "max_ns": 5000000,
+                    "over_1ms": 10,
+                    "over_2ms": 5,
+                    "over_5ms": 0
+                },
+                "cpu": {
+                    "busiest_cpu_samples": 0,
+                    "worst_cpu_max_ns": 0,
+                    "spikiest_cpu_spikes": 0,
+                    "per_cpu": []
+                },
+                "top_spikes": []
+            },
+            {
+                "task": 2,
+                "active": true,
+                "first_seen_ms": 0,
+                "last_seen_ms": 0,
+                "removed_ms": null,
+                "class": "Helper",
+                "process_pid": 1,
+                "process_comm": "game",
+                "comm": "helper-thread",
+                "latency": {
+                    "samples": 100,
+                    "stored_samples": 100,
+                    "truncated_samples": 0,
+                    "percentile_scope": "session",
+                    "histogram": [],
+                    "min_ns": 100000,
+                    "avg_ns": 500000,
+                    "p95_ns": 1000000,
+                    "p99_ns": 2000000,
+                    "max_ns": 6000000,
+                    "over_1ms": 15,
+                    "over_2ms": 5,
+                    "over_5ms": 2
+                },
+                "cpu": {
+                    "busiest_cpu_samples": 0,
+                    "worst_cpu_max_ns": 0,
+                    "spikiest_cpu_spikes": 0,
+                    "per_cpu": []
+                },
+                "top_spikes": []
+            }
+        ],
+        "top_spikes": [],
+        "spike_event_count": 0,
+        "spike_events_truncated": false,
+        "drop_counters": {
+            "sched_switch": 0,
+            "sched_wakeup": 0,
+            "scx_runnable": 0,
+            "scx_consume": 0,
+            "timer_expire_entry": 0,
+            "irq_handler_entry": 0,
+            "gpu_drm_sched_job": 0,
+            "gpu_dma_fence_signaled": 0,
+            "sys_enter_read": 0,
+            "sys_enter_write": 0,
+            "wakeup_times_insert_failed": 0,
+            "target_tasks_insert_failed": 0,
+            "ringbuf_reserve_failed": 0
+        },
+        "scx_event_count": 0,
+        "irq_event_count": 0,
+        "gpu_sample_count": 0,
+        "frame_event_count": 0
+    }"#;
+
+    let session_b_json = session_a_json
+        .replace("\"run-a\"", "\"run-b\"")
+        // Game thread max 5ms -> 8ms
+        .replace("\"max_ns\": 5000000", "\"max_ns\": 8000000")
+        // Game thread over_1ms 10 -> 8
+        .replace("\"over_1ms\": 10", "\"over_1ms\": 8")
+        // Game thread p99 2ms -> 2.5ms
+        .replace("\"p99_ns\": 2000000", "\"p99_ns\": 2500000")
+        // Helper thread max 6ms -> 4ms
+        .replace("\"max_ns\": 6000000", "\"max_ns\": 4000000");
+
+    fs::write(dir_a.join("session.json"), session_a_json).unwrap();
+    fs::write(dir_b.join("session.json"), session_b_json).unwrap();
+
+    let output = crate::report::render_diff_report(&dir_a, &dir_b, 10, None).unwrap();
+    println!("DEBUG OUTPUT:\n{}", output);
+
+    assert!(output.contains("regressions"));
+    assert!(output.contains("improvements"));
+    // Game thread regressed max latency
+    assert!(output.contains("max: 5.000ms -> 8.000ms (delta=+3.000ms)"));
+    assert!(output.contains("p99_delta=+500.000us"));
+    assert!(output.contains("over_1ms_delta=-2"));
+
+    // Helper thread improved max latency
+    assert!(output.contains("max: 6.000ms -> 4.000ms (delta=-2.000ms)"));
+
+    // Now test with filter-class
+    let output_filtered =
+        crate::report::render_diff_report(&dir_a, &dir_b, 10, Some(TaskClass::Game)).unwrap();
+    assert!(output_filtered.contains("game-thread"));
+    assert!(!output_filtered.contains("helper-thread"));
+
+    fs::remove_dir_all(dir_a).ok();
+    fs::remove_dir_all(dir_b).ok();
+}
+
 fn temp_test_dir(name: &str) -> std::path::PathBuf {
     let mut dir = std::env::temp_dir();
     dir.push(format!(

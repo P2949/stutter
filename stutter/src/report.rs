@@ -113,12 +113,12 @@ pub fn print_report(
     Ok(())
 }
 
-pub fn print_diff_report(
+pub fn render_diff_report(
     path_a: &Path,
     path_b: &Path,
     top: usize,
     filter_class: Option<TaskClass>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<String> {
     let load_session = |path: &Path| -> anyhow::Result<SessionFile> {
         let session_path = if path.is_dir() {
             path.join("session.json")
@@ -292,7 +292,16 @@ pub fn print_diff_report(
         pushln(&mut output, "");
     }
 
-    print!("{output}");
+    Ok(output)
+}
+
+pub fn print_diff_report(
+    path_a: &Path,
+    path_b: &Path,
+    top: usize,
+    filter_class: Option<TaskClass>,
+) -> anyhow::Result<()> {
+    print!("{}", render_diff_report(path_a, path_b, top, filter_class)?);
     Ok(())
 }
 
