@@ -1,10 +1,3 @@
-use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{BarChart, Block, Borders, Cell, Paragraph, Row, Sparkline, Table},
-    Frame, Terminal,
-};
 use std::{
     collections::BTreeMap,
     io::{self, Stdout},
@@ -12,13 +5,20 @@ use std::{
 
 use crossterm::{
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::backend::CrosstermBackend;
+use ratatui::{
+    Frame, Terminal,
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{BarChart, Block, Borders, Cell, Paragraph, Row, Sparkline, Table},
+};
 
 use crate::{
     ebpf_loader::DropCountersSnapshot,
-    metrics::{format_latency, IntervalRecord, TaskStats},
+    metrics::{IntervalRecord, TaskStats, format_latency},
     process_tree::{TaskClass, TaskInfo},
 };
 
@@ -129,7 +129,7 @@ pub fn render_tui(
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // status bar
+            Constraint::Length(3), // status bar
             Constraint::Min(10),   // task table
             Constraint::Length(8), // bottom panels
         ])
@@ -283,12 +283,14 @@ fn render_task_table(
         Constraint::Length(10),
     ];
 
-    let header = Row::new(vec!["TID", "Comm", "Class", "Samples", "Max", "Avg", ">1ms"])
-        .style(
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .fg(Color::Cyan),
-        );
+    let header = Row::new(vec![
+        "TID", "Comm", "Class", "Samples", "Max", "Avg", ">1ms",
+    ])
+    .style(
+        Style::default()
+            .add_modifier(Modifier::BOLD)
+            .fg(Color::Cyan),
+    );
 
     let table = Table::new(rows, widths)
         .header(header)
@@ -345,11 +347,7 @@ fn render_sparkline(f: &mut Frame, interval_records: &[IntervalRecord], area: Re
 // Per-CPU heat bar
 // ---------------------------------------------------------------------------
 
-fn render_cpu_heat(
-    f: &mut Frame,
-    stats_by_task: &BTreeMap<u32, TaskStats>,
-    area: Rect,
-) {
+fn render_cpu_heat(f: &mut Frame, stats_by_task: &BTreeMap<u32, TaskStats>, area: Rect) {
     // Aggregate the session-level max latency per CPU across all tasks.
     let mut cpu_max: BTreeMap<u32, u64> = BTreeMap::new();
     for task in stats_by_task.values() {

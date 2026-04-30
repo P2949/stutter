@@ -69,6 +69,7 @@ RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
 ```
 
 The monitor periodically scans `/proc`, finds descendant processes, expands each process into `/proc/<pid>/task/<tid>`, and updates the eBPF `TARGET_PIDS` map dynamically.
+Add `--exclude-tree-pid <pid>` to subtract a process and all of its descendants from the monitored tree, for example to drop the Steam overlay from an otherwise useful game root.
 
 For launchers where the PID changes between runs, watch for the process name:
 
@@ -274,6 +275,7 @@ For programmatic consumption, inspect the example outputs in a sample run direct
 
 - `--pid <PID>`: add a manual TID/PID to monitor (can repeat).
 - `--tree-pid <PID>`: monitor an entire process tree rooted at `PID` (expands into per-task TIDs).
+- `--exclude-tree-pid <PID>`: exclude a process subtree from monitored tree roots (can repeat).
 - `--watch-process <COMM>`: poll `/proc` for a process whose name/comm matches `<COMM>` and automatically follow its tree; combine with `--persistent` to keep waiting across restarts.
 - `--persistent`: use with `--watch-process` to continue monitoring across relaunches.
 - `--summary-ms <MS>`: interval for interval summaries written to `interval.json` and printed to the TUI.

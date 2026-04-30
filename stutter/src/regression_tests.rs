@@ -135,8 +135,8 @@ fn same_tid_same_names_different_starttime_resets_stats() {
 #[test]
 fn event_comm_updates_only_unknown_existing_name() {
     let config = test_config(vec![7], vec![], None);
-    let active_targets = BTreeMap::new();
-    let known_targets = BTreeMap::new();
+    let mut active_targets = BTreeMap::new();
+    let mut known_targets = BTreeMap::new();
     let mut stats_by_task = BTreeMap::from([(7, metrics::TaskStats::new(7, "?".to_owned(), 0))]);
 
     let first_event = scheduler_event(7, "real-name");
@@ -144,8 +144,8 @@ fn event_comm_updates_only_unknown_existing_name() {
         event: &first_event,
         config: &config,
         started: Instant::now(),
-        active_targets: &active_targets,
-        known_targets: &known_targets,
+        active_targets: &mut active_targets,
+        known_targets: &mut known_targets,
         stats_by_task: &mut stats_by_task,
         monotonic_start_ns: None,
         spike_events: None,
@@ -158,8 +158,8 @@ fn event_comm_updates_only_unknown_existing_name() {
         event: &second_event,
         config: &config,
         started: Instant::now(),
-        active_targets: &active_targets,
-        known_targets: &known_targets,
+        active_targets: &mut active_targets,
+        known_targets: &mut known_targets,
         stats_by_task: &mut stats_by_task,
         monotonic_start_ns: None,
         spike_events: None,
@@ -171,11 +171,11 @@ fn event_comm_updates_only_unknown_existing_name() {
 #[test]
 fn recording_spike_events_capture_only_threshold_crossing_events() {
     let config = test_config(vec![7], vec![], None);
-    let active_targets = BTreeMap::from([(
+    let mut active_targets = BTreeMap::from([(
         7,
         task_info(7, 77, "KingdomCome.exe", "RenderThread", TaskClass::Game),
     )]);
-    let known_targets = BTreeMap::new();
+    let mut known_targets = BTreeMap::new();
     let mut stats_by_task = BTreeMap::new();
     let mut spike_events = SpikeEventBuffer::default();
 
@@ -184,8 +184,8 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
         event: &below_threshold,
         config: &config,
         started: Instant::now(),
-        active_targets: &active_targets,
-        known_targets: &known_targets,
+        active_targets: &mut active_targets,
+        known_targets: &mut known_targets,
         stats_by_task: &mut stats_by_task,
         monotonic_start_ns: Some(100),
         spike_events: Some(&mut spike_events),
@@ -197,8 +197,8 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
         event: &at_threshold,
         config: &config,
         started: Instant::now(),
-        active_targets: &active_targets,
-        known_targets: &known_targets,
+        active_targets: &mut active_targets,
+        known_targets: &mut known_targets,
         stats_by_task: &mut stats_by_task,
         monotonic_start_ns: Some(100),
         spike_events: Some(&mut spike_events),
@@ -413,6 +413,7 @@ fn target_snapshot_keeps_manual_missing_pid_when_requested() {
         &dir,
         &[42],
         &[],
+        &[],
         &process_tree::TaskFilters::default(),
         true,
         &mut cache,
@@ -464,7 +465,9 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         latency_ns: 2_000_000,
         wakeup_ns: 10,
         switch_ns: 2_000_010,
-        rq_depth: 0, major_faults: 0, minor_faults: 0,
+        rq_depth: 0,
+        major_faults: 0,
+        minor_faults: 0,
     }];
     let drop_counters = DropCountersSnapshot {
         wakeup_times_insert_failed: 2,
@@ -613,6 +616,34 @@ fn watch_process_selection_prefers_exact_then_executable_then_highest_pid() {
 }
 
 #[test]
+fn target_snapshot_respects_exclude_tree_pids() {
+    let dir = temp_test_dir("exclude-tree");
+    // Root 100 -> children 101, 102. 102 -> child 103.
+    create_fake_proc(&dir, 100, 1, "root", "root", &[100]);
+    create_fake_proc(&dir, 101, 100, "child1", "child1", &[101]);
+    create_fake_proc(&dir, 102, 100, "child2", "child2", &[102]);
+    create_fake_proc(&dir, 103, 102, "child3", "child3", &[103]);
+
+    let snapshot = process_tree::target_snapshot_filtered_at_with_options(
+        &dir,
+        &[],
+        &[100],
+        &[102],
+        &process_tree::TaskFilters::default(),
+        false,
+        &mut process_tree::ProcessCache::default(),
+        None,
+    );
+
+    assert!(snapshot.tasks.contains_key(&100));
+    assert!(snapshot.tasks.contains_key(&101));
+    assert!(!snapshot.tasks.contains_key(&102));
+    assert!(!snapshot.tasks.contains_key(&103));
+    assert_eq!(snapshot.process_roots, [100, 101].into_iter().collect());
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
 fn watch_process_selection_treats_wine_backslashes_as_path_separators() {
     let dir = temp_test_dir("watch-wine-path");
     create_fake_proc(
@@ -746,7 +777,9 @@ fn report_reads_recorded_session_and_spike_events() {
         prio: 120,
         wakeup_ns: 1_010_000_000,
         switch_ns: 1_016_000_000,
-        rq_depth: 0, major_faults: 0, minor_faults: 0,
+        rq_depth: 0,
+        major_faults: 0,
+        minor_faults: 0,
     });
     let stats_by_task = BTreeMap::from([(7, stats)]);
     let spike_events = vec![SpikeEvent {
@@ -762,7 +795,9 @@ fn report_reads_recorded_session_and_spike_events() {
         latency_ns: 6_000_000,
         wakeup_ns: 1_010_000_000,
         switch_ns: 1_016_000_000,
-        rq_depth: 0, major_faults: 0, minor_faults: 0,
+        rq_depth: 0,
+        major_faults: 0,
+        minor_faults: 0,
     }];
 
     recorder::finalize_recording(FinalizeRecordingInput {
@@ -827,7 +862,9 @@ fn report_cluster_output_caps_inline_points() {
             latency_ns: 1_000_000 + idx as u64,
             wakeup_ns: 1_000_000_000 + idx as u64 * 100_000,
             switch_ns: 1_001_000_000 + idx as u64 * 100_000,
-            rq_depth: 0, major_faults: 0, minor_faults: 0,
+            rq_depth: 0,
+            major_faults: 0,
+            minor_faults: 0,
         })
         .collect::<Vec<_>>();
 
@@ -905,7 +942,9 @@ fn report_correlates_artifacts_with_spike_clusters() {
             latency_ns: 1_000_000,
             wakeup_ns: 1_000_000 + idx as u64 * 100,
             switch_ns: 10_000_000 + idx as u64 * 100,
-            rq_depth: 0, major_faults: 0, minor_faults: 0,
+            rq_depth: 0,
+            major_faults: 0,
+            minor_faults: 0,
         })
         .collect::<Vec<_>>();
     let artifacts = crate::report::RunArtifacts {
@@ -965,7 +1004,15 @@ fn interval_csv_writer_outputs_header_and_rows() {
     latency.record(1_000_000);
     let latency = latency.snapshot().unwrap();
     let cpu = metrics::CpuStatsSet::new().snapshot();
-    let record = metrics::interval_record_from_snapshot(7, &stats, &latency, &cpu, 123, &Default::default(), None);
+    let record = metrics::interval_record_from_snapshot(
+        7,
+        &stats,
+        &latency,
+        &cpu,
+        123,
+        &Default::default(),
+        None,
+    );
 
     recorder::write_interval_csv(&path, &[record]).unwrap();
     let csv = fs::read_to_string(&path).unwrap();
@@ -1025,6 +1072,8 @@ fn test_config(
         max_duration,
         shared_hwmon: None,
         cgroupv2: None,
+        follow_exec: true,
+        exclude_tree_pids: Vec::new(),
     }
 }
 
