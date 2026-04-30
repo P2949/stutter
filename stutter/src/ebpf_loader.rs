@@ -166,6 +166,16 @@ pub fn load_and_attach(
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
         attach_tracepoint(&mut ebpf, "block_rq_complete", "block", "block_rq_complete")
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        if !tracepoints.block_rq_has_rwbs {
+            log::warn!(
+                "block_rq tracepoints missing `rwbs`; block I/O correlation will continue but read/write flags are unavailable"
+            );
+        }
+        if tracepoints.block_rq_rq_offset.is_none() {
+            log::warn!(
+                "block_rq tracepoints lack a request pointer field; correlation will fallback to dev+sector hashing (may collide)"
+            );
+        }
     }
 
     if tracepoints.sched_process_exec {
@@ -188,7 +198,7 @@ pub fn load_and_attach(
         log::warn!("failed to attach minor_fault perf event; continuing without fault probes: {}", e);
     }
 
-    let target_pid_map = AyaHashMap::try_from(ebpf.take_map("TARGET_PIDS").ok_or_else(|| {
+    let mut target_pid_map = AyaHashMap::try_from(ebpf.take_map("TARGET_PIDS").ok_or_else(|| {
         crate::error::StutterError::EbpfLoad("TARGET_PIDS map not found".to_owned())
     })?)
     .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
@@ -237,6 +247,18 @@ pub fn load_and_attach(
             cgroup_id_map
                 .insert(id, 1, 0)
                 .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        }
+
+        // Pre-populate TARGET_PIDS from the cgroup hierarchy to avoid races
+        // where a task appears in sched events before the eBPF-side cgroup
+        // membership maps are populated.
+        let mut pids = Vec::new();
+        collect_cgroup_hierarchy_pids(cgroup_path, &mut pids)
+            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+
+        for pid in pids {
+            // best-effort insert; ignore failures for individual entries
+            let _ = target_pid_map.insert(pid, 1, 0);
         }
     }
 
@@ -450,17 +472,19 @@ struct TracepointAvailability {
     irq_handler: bool,
     page_fault_user: bool,
     block_rq: bool,
+    block_rq_has_rwbs: bool,
+    block_rq_rq_offset: Option<usize>,
     sched_process_exec: bool,
 }
 
 fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointAvailability> {
     validate_tracepoint_format_at(
         &events_root.join("sched/sched_wakeup/format"),
-        &[("pid", 24), ("prio", 28)],
+        &[("pid", 24), ("prio", 28), ("target_cpu", 32)],
     )?;
     let sched_wakeup_new = validate_optional_tracepoint_format_at(
         &events_root.join("sched/sched_wakeup_new/format"),
-        &[("pid", 24), ("prio", 28)],
+        &[("pid", 24), ("prio", 28), ("target_cpu", 32)],
     )?;
     validate_tracepoint_format_at(
         &events_root.join("sched/sched_switch/format"),
@@ -503,19 +527,58 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
 
     let block_rq_issue = events_root.join("block/block_rq_issue/format");
     let block_rq_complete = events_root.join("block/block_rq_complete/format");
-    let block_rq = if block_rq_issue.exists() && block_rq_complete.exists() {
-        validate_tracepoint_format_at(
-            &block_rq_issue,
-            &[("dev", 8), ("sector", 16), ("nr_sector", 24), ("rwbs", 32)],
-        )?;
-        validate_tracepoint_format_at(
-            &block_rq_complete,
-            &[("dev", 8), ("sector", 16), ("nr_sector", 24), ("rwbs", 32)],
-        )?;
-        true
-    } else {
-        false
-    };
+    let mut block_rq = false;
+    let mut block_rq_has_rwbs = false;
+    let mut block_rq_rq_offset: Option<usize> = None;
+
+    if block_rq_issue.exists() && block_rq_complete.exists() {
+        // Parse offsets and ensure required fields exist. `rwbs` and a
+        // request pointer are optional — presence improves correlation but
+        // must not make the whole probe fatal if absent.
+        let issue_fmt = fs::read_to_string(&block_rq_issue)
+            .with_context(|| format!("failed to read {}", block_rq_issue.display()))?;
+        let complete_fmt = fs::read_to_string(&block_rq_complete)
+            .with_context(|| format!("failed to read {}", block_rq_complete.display()))?;
+
+        let issue_offsets = parse_tracepoint_offsets(&issue_fmt);
+        let complete_offsets = parse_tracepoint_offsets(&complete_fmt);
+
+        let issue_ok = issue_offsets.contains_key("dev")
+            && issue_offsets.contains_key("sector")
+            && issue_offsets.contains_key("nr_sector");
+        let complete_ok = complete_offsets.contains_key("dev")
+            && complete_offsets.contains_key("sector")
+            && complete_offsets.contains_key("nr_sector");
+
+        if issue_ok && complete_ok {
+            // Require `rwbs` in the complete tracepoint so the eBPF program's
+            // assumptions about offsets hold. If `rwbs` is missing the kernel
+            // layout differs and we must disable block I/O attachment to avoid
+            // tracepoint read errors in the eBPF program.
+            if complete_offsets.contains_key("rwbs") {
+                block_rq = true;
+                block_rq_has_rwbs = true;
+
+                // Try to find a request/rq pointer field to use as a stable key.
+                block_rq_rq_offset = issue_offsets
+                    .get("rq")
+                    .copied()
+                    .or_else(|| issue_offsets.get("request").copied())
+                    .or_else(|| complete_offsets.get("rq").copied())
+                    .or_else(|| complete_offsets.get("request").copied());
+            } else {
+                log::warn!(
+                    "block I/O tracepoint present but missing `rwbs` in block_rq_complete; disabling block I/O attachment to avoid eBPF/tracepoint mismatch"
+                );
+                block_rq = false;
+            }
+        } else {
+            log::warn!(
+                "block I/O tracepoint missing required fields; continuing without block I/O correlation"
+            );
+            block_rq = false;
+        }
+    }
 
     let sched_process_exec = events_root.join("sched/sched_process_exec/format");
     let sched_process_exec = if sched_process_exec.exists() {
@@ -533,6 +596,8 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         irq_handler,
         page_fault_user,
         block_rq,
+        block_rq_has_rwbs,
+        block_rq_rq_offset,
         sched_process_exec,
     })
 }
@@ -664,6 +729,39 @@ fn collect_cgroup_hierarchy_ids(path: &Path, ids: &mut Vec<u64>) -> anyhow::Resu
             }
         }
     }
+    Ok(())
+}
+
+fn collect_cgroup_hierarchy_pids(path: &Path, pids: &mut Vec<u32>) -> anyhow::Result<()> {
+    // collect PIDs from cgroup.procs and cgroup.threads recursively
+    let procs = path.join("cgroup.procs");
+    let threads = path.join("cgroup.threads");
+
+    let mut read_list = |file: &Path| -> anyhow::Result<()> {
+        if !file.exists() {
+            return Ok(());
+        }
+        let data = fs::read_to_string(file)
+            .with_context(|| format!("failed to read {}", file.display()))?;
+        for line in data.lines() {
+            if let Ok(pid) = line.trim().parse::<u32>() {
+                pids.push(pid);
+            }
+        }
+        Ok(())
+    };
+
+    read_list(&procs)?;
+    read_list(&threads)?;
+
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Ok(file_type) = entry.file_type() && file_type.is_dir() {
+                collect_cgroup_hierarchy_pids(&entry.path(), pids)?;
+            }
+        }
+    }
+
     Ok(())
 }
 

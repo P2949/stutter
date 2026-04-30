@@ -190,7 +190,7 @@ impl SpikeEventBuffer {
     #[cfg(test)]
     pub fn with_max_events(max_events: usize) -> Self {
         Self {
-            events: Vec::with_capacity(max_events),
+            events: Vec::new(),
             truncated: false,
             max_events,
         }

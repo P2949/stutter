@@ -177,24 +177,24 @@ pub fn render_diff_report(
     );
     pushln(&mut output, "");
 
-    let tasks_a: BTreeMap<(u32, &str), &SessionTask> = session_a
+    let tasks_a: BTreeMap<(TaskClass, &str, &str), &SessionTask> = session_a
         .tasks
         .iter()
         .filter(|t| t.latency.samples > 0)
         .filter(|t| filter_class.is_none_or(|c| t.class == c))
-        .map(|t| ((t.task, t.comm.as_str()), t))
+        .map(|t| ((t.class, t.process_comm.as_ref(), t.comm.as_str()), t))
         .collect();
-    let tasks_b: BTreeMap<(u32, &str), &SessionTask> = session_b
+    let tasks_b: BTreeMap<(TaskClass, &str, &str), &SessionTask> = session_b
         .tasks
         .iter()
         .filter(|t| t.latency.samples > 0)
         .filter(|t| filter_class.is_none_or(|c| t.class == c))
-        .map(|t| ((t.task, t.comm.as_str()), t))
+        .map(|t| ((t.class, t.process_comm.as_ref(), t.comm.as_str()), t))
         .collect();
 
     struct TaskDelta {
-        task: u32,
         comm: String,
+        process_comm: String,
         class: TaskClass,
         delta_max_ns: i64,
         delta_p99_ns: i64,
@@ -212,8 +212,8 @@ pub fn render_diff_report(
             let delta_p99 = tb.latency.p99_ns as i64 - ta.latency.p99_ns as i64;
             let delta_over = tb.latency.over_1ms as i64 - ta.latency.over_1ms as i64;
             let d = TaskDelta {
-                task: key.0,
-                comm: key.1.to_owned(),
+                comm: key.2.to_owned(),
+                process_comm: key.1.to_owned().to_string(),
                 class: ta.class,
                 delta_max_ns: delta_max,
                 delta_p99_ns: delta_p99,
@@ -246,10 +246,10 @@ pub fn render_diff_report(
         pushln(
             &mut output,
             format!(
-                "biggest regression:  {} on task={} ({}){}",
+                "biggest regression:  {} on comm={} process={}{}",
                 format_latency_signed(worst.delta_max_ns),
-                worst.task,
                 worst.comm,
+                worst.process_comm,
                 pct
             ),
         );
@@ -266,10 +266,10 @@ pub fn render_diff_report(
         pushln(
             &mut output,
             format!(
-                "biggest improvement: {} on task={} ({}){}",
+                "biggest improvement: {} on comm={} process={}{}",
                 format_latency_signed(best.delta_max_ns),
-                best.task,
                 best.comm,
+                best.process_comm,
                 pct
             ),
         );
@@ -285,10 +285,10 @@ pub fn render_diff_report(
         pushln(
             &mut output,
             format!(
-                "task={} class={:?} comm={} max: {} -> {} (delta={}) p99_delta={} over_1ms_delta={}",
-                d.task,
+                "class={:?} comm={} process={} max: {} -> {} (delta={}) p99_delta={} over_1ms_delta={}",
                 d.class,
                 d.comm,
+                d.process_comm,
                 format_latency(d.max_a),
                 format_latency(d.max_b),
                 format_latency_signed(d.delta_max_ns),
@@ -312,10 +312,10 @@ pub fn render_diff_report(
         pushln(
             &mut output,
             format!(
-                "task={} class={:?} comm={} max: {} -> {} (delta={}) p99_delta={} over_1ms_delta={}",
-                d.task,
+                "class={:?} comm={} process={} max: {} -> {} (delta={}) p99_delta={} over_1ms_delta={}",
                 d.class,
                 d.comm,
+                d.process_comm,
                 format_latency(d.max_a),
                 format_latency(d.max_b),
                 format_latency_signed(d.delta_max_ns),
@@ -343,8 +343,12 @@ pub fn render_diff_report(
     if !new_tasks.is_empty() {
         pushln(&mut output, "new tasks (only in run_b)");
         pushln(&mut output, "------------------------");
-        for (task, comm) in new_tasks.iter().take(top) {
-            pushln(&mut output, format!("task={task} comm={comm}"));
+        for key in new_tasks.iter().take(top) {
+            let (class, process_comm, comm) = key;
+            pushln(
+                &mut output,
+                format!("comm={} process={} class={:?}", comm, process_comm, class),
+            );
         }
         pushln(&mut output, "");
     }
@@ -352,8 +356,9 @@ pub fn render_diff_report(
     if !removed_tasks.is_empty() {
         pushln(&mut output, "removed tasks (only in run_a)");
         pushln(&mut output, "----------------------------");
-        for (task, comm) in removed_tasks.iter().take(top) {
-            pushln(&mut output, format!("task={task} comm={comm}"));
+        for key in removed_tasks.iter().take(top) {
+            let (class, process_comm, comm) = key;
+            pushln(&mut output, format!("comm={} process={} class={:?}", comm, process_comm, class));
         }
         pushln(&mut output, "");
     }
