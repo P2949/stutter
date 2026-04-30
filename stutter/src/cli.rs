@@ -2,7 +2,7 @@ use std::{ffi::OsString, path::PathBuf, time::Duration};
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::{TARGET_PIDS_MAX, process_tree::TaskFilters};
+use crate::{TARGET_PIDS_MAX, process_tree::{TaskClass, TaskFilters}};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -138,6 +138,12 @@ struct ReportArgs {
     #[arg(long = "cluster-ms", default_value_t = 5, value_name = "MS")]
     cluster_window_ms: u64,
 
+    #[arg(long = "diff", value_name = "PATH")]
+    diff: Option<PathBuf>,
+
+    #[arg(long = "filter-class", value_name = "CLASS")]
+    filter_class: Option<String>,
+
     path: PathBuf,
 }
 
@@ -213,6 +219,8 @@ pub enum AppCommand {
         html: Option<PathBuf>,
         top: usize,
         cluster_window_ms: u64,
+        diff: Option<PathBuf>,
+        filter_class: Option<TaskClass>,
     },
     Tune {
         tree_pid: u32,
@@ -300,12 +308,22 @@ where
             if args.cluster_window_ms == 0 {
                 anyhow::bail!("--cluster-ms must be greater than zero");
             }
+            let filter_class = if let Some(class_str) = &args.filter_class {
+                Some(
+                    TaskClass::from_str_opt(class_str)
+                        .ok_or_else(|| anyhow::anyhow!("unknown task class: {class_str}"))?,
+                )
+            } else {
+                None
+            };
             Ok(AppCommand::Report {
                 path: args.path,
                 json: args.json,
                 html: args.html,
                 top: args.top,
                 cluster_window_ms: args.cluster_window_ms,
+                diff: args.diff,
+                filter_class,
             })
         }
         Some(Command::Restore(args)) => Ok(AppCommand::Restore {

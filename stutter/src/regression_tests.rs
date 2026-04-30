@@ -778,8 +778,8 @@ fn report_reads_recorded_session_and_spike_events() {
     })
     .unwrap();
 
-    crate::report::print_report(&dir, false, 10, 5).unwrap();
-    crate::report::print_report(&dir, true, 10, 5).unwrap();
+    crate::report::print_report(&dir, false, 10, 5, None).unwrap();
+    crate::report::print_report(&dir, true, 10, 5, None).unwrap();
 
     fs::remove_dir_all(dir).ok();
 }
@@ -851,6 +851,7 @@ fn report_cluster_output_caps_inline_points() {
         &crate::report::RunArtifacts::default(),
         10,
         5,
+        None,
     );
 
     assert!(output.contains("total_spikes=10"));
@@ -923,6 +924,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
         &artifacts,
         10,
         5,
+        None,
     );
 
     assert!(output.contains("irq overlap"));
