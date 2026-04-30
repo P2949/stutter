@@ -1879,19 +1879,8 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
         process_cache,
     } = input;
 
-    let mut target_pids = config.target_pids.clone();
-    if let Some(cgroup_path) = &config.cgroupv2
-        && let Ok(content) = fs::read_to_string(cgroup_path.join("cgroup.procs"))
-    {
-        for line in content.lines() {
-            if let Ok(pid) = line.parse::<u32>() {
-                target_pids.push(pid);
-            }
-        }
-    }
-    target_pids.sort_unstable();
-    target_pids.dedup();
-
+    let target_pids = config.target_pids.clone();
+    let cgroup_path = config.cgroupv2.clone();
     let tree_pids = config.tree_pids.clone();
     let exclude_tree_pids = config.exclude_tree_pids.clone();
     let filters = config.task_filters.clone();
@@ -1902,6 +1891,7 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
     let active_targets_clone = active_targets.clone();
 
     let (snapshot, returned_cache) = task::spawn_blocking(move || {
+        let target_pids = collect_target_pids_with_cgroup(target_pids, cgroup_path.as_deref());
         let snap = process_tree::target_snapshot_with_options(
             &target_pids,
             &tree_pids,
@@ -2004,6 +1994,25 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
     );
 
     Ok(())
+}
+
+fn collect_target_pids_with_cgroup(
+    mut target_pids: Vec<u32>,
+    cgroup_path: Option<&Path>,
+) -> Vec<u32> {
+    if let Some(cgroup_path) = cgroup_path
+        && let Ok(content) = fs::read_to_string(cgroup_path.join("cgroup.procs"))
+    {
+        for line in content.lines() {
+            if let Ok(pid) = line.parse::<u32>() {
+                target_pids.push(pid);
+            }
+        }
+    }
+
+    target_pids.sort_unstable();
+    target_pids.dedup();
+    target_pids
 }
 
 fn should_replace_unknown_comm(current: &str, incoming: &str) -> bool {
