@@ -33,6 +33,8 @@ use recorder::{
     FinalizeRecordingInput, IntervalCsvWriter, IntervalRecord, IrqEventRecord, JsonArrayWriter,
     SpikeEventBuffer, TreeEvent, finalize_recording, prepare_recording,
 };
+use crossterm::event::{Event, EventStream, KeyCode};
+use futures_util::StreamExt;
 use serde::Serialize;
 use stutter_common::{EVENT_IRQ_LATENCY, EVENT_RUNNABLE_LATENCY, IrqEvent, SchedulerEvent};
 use tokio::{
@@ -748,10 +750,36 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
         format_latency(config.spike_threshold_ns),
     );
 
+    let mut tui_state = crate::tui::TuiState::default();
+    let mut terminal = if config.tui {
+        Some(crate::tui::init_terminal().map_err(|e| anyhow::anyhow!("failed to init terminal: {e}"))?)
+    } else {
+        None
+    };
+    let mut crossterm_events = EventStream::new();
+
     let stop_reason = loop {
         tokio::select! {
             _ = signal::ctrl_c() => {
                 break "ctrl_c".to_owned();
+            }
+            
+            Some(Ok(event)) = crossterm_events.next(), if config.tui => {
+                if let Event::Key(key) = event {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Char('Q') => break "quit".to_owned(),
+                        KeyCode::Char('p') | KeyCode::Char('P') => {
+                            tui_state.paused = !tui_state.paused;
+                        }
+                        KeyCode::Char('s') | KeyCode::Char('S') => {
+                            tui_state.sort_field = tui_state.sort_field.next();
+                        }
+                        KeyCode::Char('f') | KeyCode::Char('F') => {
+                            tui_state.next_filter_class();
+                        }
+                        _ => {}
+                    }
+                }
             }
 
             _ = &mut duration_future => {
@@ -759,36 +787,53 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
             }
 
             _ = summary_tick.tick() => {
-                let elapsed_ms = started.elapsed().as_millis();
-                let drop_counters_snapshot = loaded.snapshot_drop_counters();
-                let records = collect_interval_summaries(&mut stats_by_task, elapsed_ms, &drop_counters_snapshot);
-                streamed_interval_record_count += records.len();
+                if !tui_state.paused {
+                    let elapsed_ms = started.elapsed().as_millis();
+                    let drop_counters_snapshot = loaded.snapshot_drop_counters();
+                    let records = collect_interval_summaries(&mut stats_by_task, elapsed_ms, &drop_counters_snapshot);
+                    streamed_interval_record_count += records.len();
 
-                if let Some(writer) = interval_writer.as_mut() {
-                    for record in &records {
-                        writer.push(record)?;
+                    if let Some(writer) = interval_writer.as_mut() {
+                        for record in &records {
+                            writer.push(record)?;
+                        }
+                    } else if config.retain_intervals.is_some() || config.tui {
+                        // For TUI sparklines we need interval_records
+                        for record in &records {
+                            interval_records.push(record.clone());
+                        }
+                        
+                        let max_intervals = config.retain_intervals.unwrap_or(120);
+                        if interval_records.len() > max_intervals {
+                            let drop_count = interval_records.len() - max_intervals;
+                            interval_records.drain(0..drop_count);
+                            if config.retain_intervals.is_some() {
+                                intervals_dropped += drop_count;
+                            }
+                        }
                     }
-                } else if config.retain_intervals.is_some() {
-                    for record in &records {
-                        interval_records.push(record.clone());
-                    }
-                    if let Some(max_intervals) = config.retain_intervals
-                        && interval_records.len() > max_intervals
-                    {
-                        let drop_count = interval_records.len() - max_intervals;
-                        interval_records.drain(0..drop_count);
-                        intervals_dropped += drop_count;
+
+                    if let Some(writer) = csv_writer.as_mut() {
+                        for record in &records {
+                            writer.push(record)?;
+                        }
                     }
                 }
 
-                if let Some(writer) = csv_writer.as_mut() {
-                    for record in &records {
-                        writer.push(record)?;
-                    }
-                }
-
-                if config.tui {
-                    println!("{}", tui::render_status(&active_targets, &stats_by_task));
+                if let Some(term) = terminal.as_mut() {
+                    let elapsed_ms = started.elapsed().as_millis();
+                    let drop_counters_snapshot = loaded.snapshot_drop_counters();
+                    term.draw(|f| {
+                        crate::tui::render_tui(
+                            f,
+                            &tui_state,
+                            &active_targets,
+                            &stats_by_task,
+                            &interval_records,
+                            elapsed_ms,
+                            &drop_counters_snapshot,
+                        );
+                    })?;
                 }
             }
 
@@ -942,6 +987,10 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
             }
         }
     };
+
+    if let Some(term) = terminal.as_mut() {
+        let _ = crate::tui::restore_terminal(term);
+    }
 
     let drop_counters = loaded.snapshot_drop_counters();
     log_drop_counters(&drop_counters);
