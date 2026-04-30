@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -71,6 +71,7 @@ fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
         &mut tree_events,
         &mut prev_faults_map,
         &mut prev_faults_snapshot,
+        false,
         77,
         Some(Instant::now()),
     );
@@ -482,7 +483,13 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         started_instant: Instant::now(),
         monotonic_start_ns: Some(1_000),
     };
-    let config = test_config(vec![9, 1, 4], vec![], Some(Duration::from_secs(1)));
+    let mut config = test_config(vec![9, 1, 4], vec![], Some(Duration::from_secs(1)));
+    config.cgroupv2 = Some(PathBuf::from("/sys/fs/cgroup/game"));
+    config.exclude_tree_pids = vec![77];
+    config.follow_exec = false;
+    config.max_tasks = 2048;
+    config.retain_intervals = Some(8);
+    config.hwmon_root = Some(PathBuf::from("/tmp/hwmon"));
     let active_targets = BTreeMap::from([
         (9, task_info(9, 9, "task-9", "task-9", TaskClass::Helper)),
         (1, task_info(1, 1, "task-1", "task-1", TaskClass::Helper)),
@@ -565,6 +572,15 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     assert_eq!(metadata.drop_counters.total(), 5);
     assert_eq!(session.drop_counters.wakeup_data_insert_failed, 2);
     assert_eq!(session.drop_counters.ringbuf_reserve_failed, 3);
+    assert_eq!(
+        session.config.cgroupv2,
+        Some(PathBuf::from("/sys/fs/cgroup/game"))
+    );
+    assert_eq!(session.config.exclude_tree_pids, vec![77]);
+    assert!(!session.config.follow_exec);
+    assert_eq!(session.config.max_tasks, 2048);
+    assert_eq!(session.config.retain_intervals, Some(8));
+    assert_eq!(session.config.hwmon_root, Some(PathBuf::from("/tmp/hwmon")));
     assert_eq!(recorded_spike_events.len(), 1);
     assert_eq!(recorded_spike_events[0].task, 7);
     assert_eq!(
