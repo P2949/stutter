@@ -217,7 +217,6 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
     assert_eq!(spike.latency_ns, 1_000_000);
     assert_eq!(spike.wakeup_ns, 100);
     assert_eq!(spike.switch_ns, 1_000_100);
-    assert_eq!(spike.rq_depth, 0);
     assert_eq!(spike.elapsed_ms, Some(1));
 }
 
@@ -1064,6 +1063,9 @@ fn report_correlates_artifacts_with_spike_clusters() {
             elapsed_ms: 11,
             frametime_ms: 22.5,
         }],
+        migration_events: Vec::new(),
+        cpu_freq_samples: Vec::new(),
+        io_events: Vec::new(),
     };
 
     let output = crate::report::render_report(
@@ -1466,8 +1468,7 @@ fn report_diff_shows_regressions_and_improvements() {
             "sys_enter_write": 0,
             "wakeup_times_insert_failed": 0,
             "target_tasks_insert_failed": 0,
-            "ringbuf_reserve_failed": 0,
-            "waker_map_insert_failed": 0
+            "ringbuf_reserve_failed": 0
         },
         "scx_event_count": 0,
         "irq_event_count": 0,

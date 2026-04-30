@@ -38,6 +38,7 @@ use recorder::{
     FinalizeRecordingInput, IntervalCsvWriter, IntervalRecord, IrqEventRecord, JsonArrayWriter,
     SpikeEventBuffer, TreeEvent, finalize_recording, prepare_recording,
 };
+use anyhow::Context;
 use serde::Serialize;
 use stutter_common::{
     BlockIoEvent, CpuFreqEvent, EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_EXEC, EVENT_IRQ_LATENCY,
@@ -253,7 +254,7 @@ async fn tune_command(
             profile.name, measure_seconds
         );
 
-        let interval_records = match measure_tune_candidate(
+        let (interval_records, frame_events) = match measure_tune_candidate(
             tree_pid,
             &profile.name,
             epoch_seconds,
@@ -262,14 +263,17 @@ async fn tune_command(
         )
         .await
         {
-            Ok(records) => records,
+            Ok(res) => res,
             Err(err) => {
                 restore_tune_on_error();
                 return Err(err);
             }
         };
 
+        let (frame_max, frame_p99) = scorer::calculate_frame_metrics(&frame_events);
         let mut score = scorer::score_from_interval_records(&interval_records);
+        score.frame_max_ms = frame_max;
+        score.frame_p99_ms = frame_p99;
 
         // Reject / penalize candidates that did not gather enough data to be
         // meaningfully comparable. These thresholds are conservative: at
@@ -302,6 +306,9 @@ async fn tune_command(
             over_2ms: score.over_2ms,
             over_5ms: score.over_5ms,
             max_latency_ns: score.max_latency_ns,
+            frame_count: frame_events.len(),
+            frame_max_ms: frame_max,
+            frame_p99_ms: frame_p99,
             valid,
         };
 
@@ -329,18 +336,30 @@ async fn tune_command(
     let min_samples = results.iter().map(|r| r.samples).min().unwrap_or(0);
     let max_samples = results.iter().map(|r| r.samples).max().unwrap_or(0);
     if min_samples == 0 && max_samples > 0 {
-        warn!(
-            "tune_candidate_sample_count_variance min=0 max={} (some candidates gathered no samples)",
+        anyhow::bail!(
+            "tune candidates are not comparable: some candidates gathered no samples while others did (max_samples={})",
             max_samples
         );
     } else if min_samples > 0 {
         let ratio = (max_samples as f64) / (min_samples as f64);
         if ratio > 2.0 {
-            warn!(
-                "tune_candidate_sample_count_variance min={} max={} ratio={:.2}",
+            anyhow::bail!(
+                "tune candidates are not comparable: sample count varies by more than 2x across candidates (min={} max={} ratio={:.2})",
                 min_samples,
                 max_samples,
                 ratio
+            );
+        }
+    }
+
+    let min_frames = results.iter().map(|r| r.frame_count).min().unwrap_or(0);
+    let max_frames = results.iter().map(|r| r.frame_count).max().unwrap_or(0);
+    if min_frames > 0 {
+        let ratio = (max_frames as f64) / (min_frames as f64);
+        if ratio > 1.5 {
+             warn!(
+                "tune_candidates_unbalanced_frames min={} max={} ratio={:.2}",
+                min_frames, max_frames, ratio
             );
         }
     }
@@ -399,7 +418,7 @@ async fn measure_tune_candidate(
     epoch_seconds: u64,
     warmup_seconds: u64,
     shared_hwmon: Option<std::sync::Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
-) -> anyhow::Result<Vec<IntervalRecord>> {
+) -> anyhow::Result<(Vec<IntervalRecord>, Vec<crate::recorder::FrameEvent>)> {
     let run_dir = tune_run_dir(profile_name);
     let config = Config {
         target_pids: Vec::new(),
@@ -440,51 +459,24 @@ async fn measure_tune_candidate(
     run_monitor(config, shared_hwmon).await?;
 
     let interval_path = run_dir.join("interval.json");
-    // Try the expected path first; if missing, attempt to locate a nested
-    // `interval.json` under the run dir (defensive for different resolve
-    // behaviors). Log the path we end up reading for easier debugging.
-    let (used_path, data) = match fs::read_to_string(&interval_path) {
-        Ok(d) => (interval_path.clone(), d),
-        Err(_err) => {
-            let mut found: Option<std::path::PathBuf> = None;
-            if run_dir.exists() && run_dir.is_dir() {
-                for entry in fs::read_dir(&run_dir)?.flatten() {
-                    let path = entry.path();
-                    if path.is_file() && path.file_name().and_then(|s| s.to_str()) == Some("interval.json") {
-                        found = Some(path);
-                        break;
-                    }
-                    if path.is_dir() {
-                        let candidate = path.join("interval.json");
-                        if candidate.exists() {
-                            found = Some(candidate);
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if let Some(p) = found {
-                (p.clone(), fs::read_to_string(&p).map_err(|err| {
-                    anyhow::anyhow!("failed to read tune intervals {}: {err}", p.display())
-                })?)
-            } else {
-                return Err(anyhow::anyhow!(
-                    "failed to read tune intervals {}: file not found",
-                    interval_path.display()
-                ));
-            }
-        }
-    };
-    log::info!("reading tune intervals from {}", used_path.display());
-    let mut records: Vec<IntervalRecord> = serde_json::from_str(&data).map_err(|err| {
-        anyhow::anyhow!("failed to parse tune intervals {}: {err}", used_path.display())
-    })?;
+    let data = fs::read_to_string(&interval_path)
+        .with_context(|| format!("failed to read interval.json from {}", run_dir.display()))?;
+    let mut interval_records: Vec<IntervalRecord> = serde_json::from_str(&data)?;
     let warmup_ms = u128::from(warmup_seconds) * 1_000;
-    records.retain(|record| record.elapsed_ms >= warmup_ms);
+    interval_records.retain(|r| r.elapsed_ms >= warmup_ms);
+
+    let frame_path = run_dir.join("frame_correlation.json");
+    let mut frame_events: Vec<crate::recorder::FrameEvent> = if frame_path.exists() {
+        let data = fs::read_to_string(&frame_path)?;
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    frame_events.retain(|f| f.elapsed_ms >= warmup_ms);
+
     fs::remove_dir_all(&run_dir).ok();
 
-    Ok(records)
+    Ok((interval_records, frame_events))
 }
 
 fn tune_run_dir(profile_name: &str) -> PathBuf {
@@ -568,6 +560,9 @@ struct TuneCandidateSummary {
     over_2ms: u64,
     over_5ms: u64,
     max_latency_ns: u64,
+    frame_count: usize,
+    frame_max_ms: f64,
+    frame_p99_ms: f64,
     valid: bool,
 }
 
@@ -1081,7 +1076,7 @@ async fn run_monitor(
                 }
             }
 
-            _ = tree_tick.tick(), if !config.tree_pids.is_empty() => {
+            _ = tree_tick.tick(), if !config.tree_pids.is_empty() || config.cgroupv2.is_some() => {
                 if let Some(root_pid) = watch_state.running_pid()
                     && tree_root_is_stale(root_pid, &tree_root_starttimes)
                 {

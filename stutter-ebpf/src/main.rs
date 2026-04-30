@@ -12,7 +12,7 @@ use aya_ebpf::{
 };
 use stutter_common::{
     BlockIoEvent, CpuFreqEvent, DROP_BLOCK_START_INSERT_FAILED, DROP_COUNTERS_MAX,
-    DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED, DROP_WAKER_MAP_INSERT_FAILED,
+    DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
     DROP_WAKEUP_TIMES_INSERT_FAILED, EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_EXEC, EVENT_IRQ_LATENCY,
     EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent, MigrationEvent,
     SchedulerEvent, StatWaitEvent,
@@ -29,13 +29,16 @@ static TARGET_PIDS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(1024
 #[map]
 static TARGET_IRQS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(64, 0);
 
-#[map]
-// Userspace overrides this before loading the BPF object based on the current
-// memlock limit and available memory. The value here is only a safe fallback.
-static WAKEUP_TIMES: HashMap<u32, u64> = HashMap::<u32, u64>::with_max_entries(131_072, 0);
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct WakeupData {
+    ts: u64,
+    target_cpu: u32,
+    waker_tid: u32,
+}
 
 #[map]
-static WAKER_MAP: HashMap<u32, u32> = HashMap::<u32, u32>::with_max_entries(131_072, 0);
+static WAKEUP_DATA: HashMap<u32, WakeupData> = HashMap::<u32, WakeupData>::with_max_entries(131_072, 0);
 
 #[map]
 static IRQ_START_TIMES: HashMap<u64, u64> = HashMap::<u64, u64>::with_max_entries(1024, 0);
@@ -129,7 +132,7 @@ fn try_sched_process_exec(_ctx: TracePointContext) -> Result<u32, u32> {
         }
         entry.submit(0);
     } else {
-        let _ = increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
+        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
     }
 
     Ok(0)
@@ -155,8 +158,7 @@ pub fn sched_stat_wait(ctx: TracePointContext) -> u32 {
 pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
     
-    let _ = WAKEUP_TIMES.remove(&tid);
-    let _ = WAKER_MAP.remove(&tid);
+    let _ = WAKEUP_DATA.remove(tid);
     0
 }
 
@@ -169,10 +171,10 @@ pub fn page_fault_user(_ctx: TracePointContext) -> u32 {
 pub fn major_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
     if is_target_pid(tid) {
-        if let Some(counters) = PREV_FAULTS.get_ptr_mut(&tid) {
+        if let Some(counters) = PREV_FAULTS.get_ptr_mut(tid) {
             unsafe { (*counters).maj += 1 };
         } else {
-            let _ = PREV_FAULTS.insert(&tid, &FaultCounters { maj: 1, min: 0 }, 0);
+            let _ = PREV_FAULTS.insert(tid, FaultCounters { maj: 1, min: 0 }, 0);
         }
     }
     0
@@ -182,10 +184,10 @@ pub fn major_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
 pub fn minor_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
     if is_target_pid(tid) {
-        if let Some(counters) = PREV_FAULTS.get_ptr_mut(&tid) {
+        if let Some(counters) = PREV_FAULTS.get_ptr_mut(tid) {
             unsafe { (*counters).min += 1 };
         } else {
-            let _ = PREV_FAULTS.insert(&tid, &FaultCounters { maj: 0, min: 1 }, 0);
+            let _ = PREV_FAULTS.insert(tid, FaultCounters { maj: 0, min: 1 }, 0);
         }
     }
     0
@@ -211,11 +213,11 @@ fn is_target_pid(pid: u32) -> bool {
     // Only consider explicit per-TID entries populated from userspace.
     // Avoid relying on eBPF cgroup heuristics for discovery — userspace
     // periodically refreshes `TARGET_PIDS` from the cgroup tree.
-    unsafe { TARGET_PIDS.get(&pid).is_some() }
+    unsafe { TARGET_PIDS.get(pid).is_some() }
 }
 
 fn is_target_irq(irq: u32) -> bool {
-    unsafe { TARGET_IRQS.get(&irq).is_some() }
+    unsafe { TARGET_IRQS.get(irq).is_some() }
 }
 
 fn irq_key(irq: u32, cpu: u32) -> u64 {
@@ -247,20 +249,21 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
     }
 
     let now = unsafe { bpf_ktime_get_ns() };
+    let target_cpu: u32 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
+    let waker_tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
 
-    if WAKEUP_TIMES.insert(pid, now, 0).is_err() {
+    let data = WakeupData {
+        ts: now,
+        target_cpu,
+        waker_tid,
+    };
+
+    if WAKEUP_DATA.insert(pid, data, 0).is_err() {
         increment_drop_counter(DROP_WAKEUP_TIMES_INSERT_FAILED);
     }
 
-    // The tracepoint field `target_cpu` is at offset 32 (after pid/prio).
-    let target_cpu: u32 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
     if let Some(depth) = RQ_DEPTH.get_ptr_mut(target_cpu) {
         unsafe { *depth = (*depth).saturating_add(1) };
-    }
-
-    let waker_tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
-    if WAKER_MAP.insert(pid, waker_tid, 0).is_err() {
-        increment_drop_counter(DROP_WAKER_MAP_INSERT_FAILED);
     }
 
     Ok(0)
@@ -275,32 +278,27 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
 
     let pid = next_pid as u32;
 
-    let wakeup_ns = match unsafe { WAKEUP_TIMES.get(&pid) } {
-        Some(ts) => *ts,
+    let wakeup_data = match unsafe { WAKEUP_DATA.get(pid) } {
+        Some(d) => *d,
         None => return Ok(0),
     };
 
-    let _ = WAKEUP_TIMES.remove(&pid);
+    let _ = WAKEUP_DATA.remove(pid);
 
-    let waker_tid = unsafe { WAKER_MAP.get(&pid).copied().unwrap_or(0) };
-    let _ = WAKER_MAP.remove(&pid);
+    let wakeup_ns = wakeup_data.ts;
+    let waker_tid = wakeup_data.waker_tid;
+    let target_cpu = wakeup_data.target_cpu;
 
-    // We only arrived here because a wakeup timestamp for this PID exists
+    // We only arrived here because a wakeup record for this PID exists
     // (inserted by sched_wakeup). Treat that as sufficient evidence this is
-    // a target-related event to avoid races where the per-TID maps were not
-    // yet populated from cgroup membership.
+    // a target-related event.
 
-    let prev_state: i64 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
+    let _prev_state: i64 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
     let cpu = unsafe { bpf_get_smp_processor_id() };
 
-    // Do not maintain `CGROUP_TIDS` heuristics here; userspace handles
-    // membership via `TARGET_PIDS` refreshes. This keeps discovery
-    // deterministic and avoids relying on the current task's cgroup.
-
-    if prev_state != 0 {
-        if let Some(depth) = RQ_DEPTH.get_ptr_mut(cpu) {
-            unsafe { *depth = (*depth).saturating_sub(1) };
-        }
+    // Decrement the RQ_DEPTH for the CPU where the task was originally queued.
+    if let Some(depth) = RQ_DEPTH.get_ptr_mut(target_cpu) {
+        unsafe { *depth = (*depth).saturating_sub(1) };
     }
 
     let rq_depth = RQ_DEPTH.get(cpu).copied().unwrap_or(0);
@@ -310,7 +308,7 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
 
     let faults = unsafe {
         PREV_FAULTS
-            .get(&pid)
+            .get(pid)
             .copied()
             .unwrap_or(FaultCounters { maj: 0, min: 0 })
     };
@@ -465,11 +463,11 @@ fn try_irq_handler_exit(ctx: TracePointContext) -> Result<u32, u32> {
 
     let cpu = unsafe { bpf_get_smp_processor_id() };
     let key = irq_key(irq, cpu);
-    let enter_ns = match unsafe { IRQ_START_TIMES.get(&key) } {
+    let enter_ns = match unsafe { IRQ_START_TIMES.get(key) } {
         Some(ts) => *ts,
         None => return Ok(0),
     };
-    let _ = IRQ_START_TIMES.remove(&key);
+    let _ = IRQ_START_TIMES.remove(key);
 
     let exit_ns = unsafe { bpf_ktime_get_ns() };
     let duration_ns = exit_ns.saturating_sub(enter_ns);
@@ -508,7 +506,7 @@ pub fn block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
     // sector to 32 bits to avoid collisions across large sectors.
     let key = sector.wrapping_mul(11400714819323198485u64)
         ^ ((dev as u64).wrapping_mul(14029467366897019727u64));
-    if BLOCK_START.insert(&key, &IoStart { ts, tid }, 0).is_err() {
+    if BLOCK_START.insert(key, IoStart { ts, tid }, 0).is_err() {
         increment_drop_counter(DROP_BLOCK_START_INSERT_FAILED);
     }
 
@@ -523,11 +521,11 @@ pub fn block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
     let rwbs: [u8; 8] = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
     let key = sector.wrapping_mul(11400714819323198485u64)
         ^ ((dev as u64).wrapping_mul(14029467366897019727u64));
-    let start = match unsafe { BLOCK_START.get(&key) } {
+    let start = match unsafe { BLOCK_START.get(key) } {
         Some(s) => *s,
         None => return Ok(0),
     };
-    let _ = BLOCK_START.remove(&key);
+    let _ = BLOCK_START.remove(key);
 
     // If the start record was not created for a target task, ignore it.
     if !is_target_pid(start.tid) {
