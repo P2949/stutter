@@ -94,6 +94,7 @@ pub struct TaskInfo {
     pub exe_ino: Option<u64>,
     pub class: TaskClass,
     pub sched_policy: Option<u32>,
+    pub from_cgroup: bool,
 }
 
 pub fn sched_policy_name(policy: u32) -> &'static str {
@@ -304,13 +305,19 @@ pub fn task_comm_at(proc_root: &Path, pid: u32, tid: u32) -> Option<String> {
         .filter(|comm| !comm.is_empty())
 }
 
-pub fn target_snapshot(manual_pids: &[u32], tree_pids: &[u32]) -> TargetSnapshot {
-    target_snapshot_at(Path::new("/proc"), manual_pids, tree_pids)
+pub fn target_snapshot(
+    manual_pids: &[u32],
+    tree_pids: &[u32],
+    cgroup_path: Option<&Path>,
+) -> TargetSnapshot {
+    target_snapshot_at(Path::new("/proc"), manual_pids, tree_pids, cgroup_path)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn target_snapshot_with_options(
     manual_pids: &[u32],
     tree_pids: &[u32],
+    cgroup_path: Option<&Path>,
     exclude_tree_pids: &[u32],
     filters: &TaskFilters,
     keep_missing_pid: bool,
@@ -321,6 +328,7 @@ pub fn target_snapshot_with_options(
         Path::new("/proc"),
         manual_pids,
         tree_pids,
+        cgroup_path,
         exclude_tree_pids,
         filters,
         keep_missing_pid,
@@ -333,20 +341,29 @@ pub fn target_snapshot_at(
     proc_root: &Path,
     manual_pids: &[u32],
     tree_pids: &[u32],
+    cgroup_path: Option<&Path>,
 ) -> TargetSnapshot {
-    target_snapshot_filtered_at(proc_root, manual_pids, tree_pids, &TaskFilters::default())
+    target_snapshot_filtered_at(
+        proc_root,
+        manual_pids,
+        tree_pids,
+        cgroup_path,
+        &TaskFilters::default(),
+    )
 }
 
 pub fn target_snapshot_filtered_at(
     proc_root: &Path,
     manual_pids: &[u32],
     tree_pids: &[u32],
+    cgroup_path: Option<&Path>,
     filters: &TaskFilters,
 ) -> TargetSnapshot {
     target_snapshot_filtered_at_with_options(
         proc_root,
         manual_pids,
         tree_pids,
+        cgroup_path,
         &[],
         filters,
         false,
@@ -360,6 +377,7 @@ pub fn target_snapshot_filtered_at_with_options(
     proc_root: &Path,
     manual_pids: &[u32],
     tree_pids: &[u32],
+    cgroup_path: Option<&Path>,
     exclude_tree_pids: &[u32],
     filters: &TaskFilters,
     keep_missing_pid: bool,
@@ -369,6 +387,7 @@ pub fn target_snapshot_filtered_at_with_options(
     let processes = scan_processes_at(proc_root, cache);
     let mut requested_roots = BTreeSet::new();
     let mut process_roots = BTreeSet::new();
+    let mut cgroup_roots = BTreeSet::new();
     let mut unresolved_manual_pids = Vec::new();
     let mut missing_manual_pids = Vec::new();
 
@@ -378,6 +397,18 @@ pub fn target_snapshot_filtered_at_with_options(
             .entry(proc_info.ppid)
             .or_default()
             .push(proc_info.pid);
+    }
+
+    if let Some(cgroup_path) = cgroup_path {
+        collect_cgroup_pids_at(cgroup_path, &mut cgroup_roots);
+        for pid in &cgroup_roots {
+            if processes.contains_key(pid) {
+                requested_roots.insert(*pid);
+                process_roots.insert(*pid);
+            } else {
+                unresolved_manual_pids.push(*pid);
+            }
+        }
     }
 
     for pid in manual_pids {
@@ -444,6 +475,7 @@ pub fn target_snapshot_filtered_at_with_options(
             exe_ino: None,
             class: TaskClass::Unknown,
             sched_policy: None,
+            from_cgroup: false,
         };
         if filters.allows(&task) {
             tasks.insert(pid, task);
@@ -451,6 +483,10 @@ pub fn target_snapshot_filtered_at_with_options(
     }
 
     for task in tasks.values_mut() {
+        if cgroup_roots.contains(&task.tid) {
+            task.from_cgroup = true;
+        }
+
         if task.class == TaskClass::Unknown && !requested_roots.contains(&task.process_pid) {
             task.class = TaskClass::Helper;
         }
@@ -687,6 +723,7 @@ fn task_info_from_parts(
         exe_ino: proc_info.exe_ino,
         class: classify_task(comm, &proc_info.comm, &proc_info.cmdline),
         sched_policy,
+        from_cgroup: false,
     }
 }
 
@@ -1048,6 +1085,34 @@ impl TreeEntry {
     }
 }
 
+pub fn collect_cgroup_pids_at(cgroup_path: &Path, pids: &mut BTreeSet<u32>) {
+    let procs = cgroup_path.join("cgroup.procs");
+    let threads = cgroup_path.join("cgroup.threads");
+
+    let mut read_list = |file: &Path| {
+        if let Ok(content) = fs::read_to_string(file) {
+            for line in content.lines() {
+                if let Ok(pid) = line.trim().parse::<u32>() {
+                    pids.insert(pid);
+                }
+            }
+        }
+    };
+
+    read_list(&procs);
+    read_list(&threads);
+
+    if let Ok(entries) = fs::read_dir(cgroup_path) {
+        for entry in entries.flatten() {
+            if let Ok(file_type) = entry.file_type()
+                && file_type.is_dir()
+            {
+                collect_cgroup_pids_at(&entry.path(), pids);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1100,3 +1165,4 @@ mod tests {
         fs::remove_dir_all(dir).ok();
     }
 }
+

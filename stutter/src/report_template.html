@@ -23,6 +23,9 @@ th { background: #f3f4f6; font-weight: 600; }
 <section id="metadata-section">
   <h2>System Metadata</h2>
   <div id="metadata-content"></div>
+  <div id="block-io-warning" style="display:none; margin-top: 16px; padding: 12px; background: #fff7ed; border-left: 4px solid #ea580c; color: #9a3412; border-radius: 4px;">
+    <strong>Notice:</strong> Block I/O correlation is approximate (dev+sector hashing). Attribution may collide under high concurrency.
+  </div>
 </section>
 
 <section>
@@ -81,6 +84,10 @@ document.addEventListener('DOMContentLoaded', () => {
         addRow('SCX Ops', metadata.scx_ops);
         html += '</tbody></table>';
         document.getElementById('metadata-content').innerHTML = html;
+
+        if (session.block_io_event_count > 0) {
+            document.getElementById('block-io-warning').style.display = 'block';
+        }
     }
 
     // Prepare Task Data

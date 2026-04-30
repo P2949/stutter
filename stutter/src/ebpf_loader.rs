@@ -97,6 +97,10 @@ pub fn load_and_attach(
         .map_max_entries("EVENTS", map_sizing.events_ringbuf_bytes)
         .map_max_entries("WAKEUP_DATA", map_sizing.wakeup_data_entries);
 
+    if let Some(ref offset) = tracepoints.block_rq_key_offset {
+        loader.override_global("BLOCK_RQ_KEY_OFFSET", offset, true);
+    }
+
     let mut ebpf = loader
         .load(aya::include_bytes_aligned!(concat!(
             env!("OUT_DIR"),
@@ -159,14 +163,20 @@ pub fn load_and_attach(
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
         attach_tracepoint(&mut ebpf, "block_rq_complete", "block", "block_rq_complete")
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+
+        if let Some(offset) = tracepoints.block_rq_key_offset {
+            log::info!("Block I/O correlation using request pointer identity at offset {offset}");
+        } else {
+            log::warn!(
+                "Block I/O correlation is approximate: using dev+sector hashing instead of request pointers. Concurrent same-sector requests may collide and cause misattribution."
+            );
+        }
+
         if !tracepoints.block_rq_has_rwbs {
             log::warn!(
                 "block_rq tracepoints missing `rwbs`; block I/O correlation will continue but read/write flags are unavailable"
             );
         }
-        log::warn!(
-            "block I/O correlation uses dev+sector hashing; concurrent same-sector requests may collide"
-        );
     }
 
     if tracepoints.sched_process_exec {
@@ -231,12 +241,9 @@ pub fn load_and_attach(
         // Pre-populate TARGET_PIDS from the cgroup hierarchy to avoid races
         // where a task appears in sched events before the eBPF-side cgroup
         // membership maps are populated.
-        let mut pids = Vec::new();
-        collect_cgroup_hierarchy_pids(cgroup_path, &mut pids)
-            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
-
-        pids.sort_unstable();
-        pids.dedup();
+        let mut pids_set = std::collections::BTreeSet::new();
+        crate::process_tree::collect_cgroup_pids_at(cgroup_path, &mut pids_set);
+        let pids: Vec<_> = pids_set.into_iter().collect();
 
         if pids.len() > crate::TARGET_PIDS_MAX {
             return Err(crate::error::StutterError::EbpfLoad(format!(
@@ -473,6 +480,7 @@ struct TracepointAvailability {
     page_fault_user: bool,
     block_rq: bool,
     block_rq_has_rwbs: bool,
+    block_rq_key_offset: Option<u32>,
     sched_process_exec: bool,
 }
 
@@ -528,6 +536,7 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
     let block_rq_complete = events_root.join("block/block_rq_complete/format");
     let mut block_rq = false;
     let mut block_rq_has_rwbs = false;
+    let mut block_rq_key_offset = None;
 
     if block_rq_issue.exists() && block_rq_complete.exists() {
         let issue_ok =
@@ -547,6 +556,21 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
             if complete_offsets.get("rwbs") == Some(&32) {
                 block_rq = true;
                 block_rq_has_rwbs = true;
+
+                // Attempt to find a unique request pointer field in block_rq_issue
+                let issue_fmt = fs::read_to_string(&block_rq_issue)
+                    .with_context(|| format!("failed to read {}", block_rq_issue.display()))?;
+                let issue_offsets = parse_tracepoint_offsets(&issue_fmt);
+
+                for name in ["rq", "req", "request"] {
+                    if let Some(&offset) = issue_offsets.get(name) {
+                        // Sanity check: must be aligned and not overlapping common fields
+                        if offset >= 8 && offset % 8 == 0 {
+                            block_rq_key_offset = Some(offset as u32);
+                            break;
+                        }
+                    }
+                }
             } else {
                 log::warn!(
                     "block I/O tracepoint present but `rwbs` is not at offset 32 in block_rq_complete; disabling block I/O attachment to avoid eBPF/tracepoint mismatch"
@@ -576,6 +600,7 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         page_fault_user,
         block_rq,
         block_rq_has_rwbs,
+        block_rq_key_offset,
         sched_process_exec,
     })
 }
@@ -694,40 +719,6 @@ fn raise_memlock_limit() {
     }
 }
 
-fn collect_cgroup_hierarchy_pids(path: &Path, pids: &mut Vec<u32>) -> anyhow::Result<()> {
-    // collect PIDs from cgroup.procs and cgroup.threads recursively
-    let procs = path.join("cgroup.procs");
-    let threads = path.join("cgroup.threads");
-
-    let mut read_list = |file: &Path| -> anyhow::Result<()> {
-        if !file.exists() {
-            return Ok(());
-        }
-        let data = fs::read_to_string(file)
-            .with_context(|| format!("failed to read {}", file.display()))?;
-        for line in data.lines() {
-            if let Ok(pid) = line.trim().parse::<u32>() {
-                pids.push(pid);
-            }
-        }
-        Ok(())
-    };
-
-    read_list(&procs)?;
-    read_list(&threads)?;
-
-    if let Ok(entries) = fs::read_dir(path) {
-        for entry in entries.flatten() {
-            if let Ok(file_type) = entry.file_type()
-                && file_type.is_dir()
-            {
-                collect_cgroup_hierarchy_pids(&entry.path(), pids)?;
-            }
-        }
-    }
-
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {

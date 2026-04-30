@@ -223,6 +223,7 @@ pub struct TreeEvent {
     pub comm: String,
     pub process_comm: std::sync::Arc<str>,
     pub class: TaskClass,
+    pub from_cgroup: bool,
 }
 
 impl TreeEvent {
@@ -236,6 +237,7 @@ impl TreeEvent {
             comm: task.comm.clone(),
             process_comm: task.process_comm.clone(),
             class: task.class,
+            from_cgroup: task.from_cgroup,
         }
     }
 }
