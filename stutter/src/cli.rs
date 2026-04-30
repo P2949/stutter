@@ -107,6 +107,9 @@ pub struct MonitorArgs {
 
     #[arg(long = "no-record")]
     no_record: bool,
+
+    #[arg(long = "cgroupv2", value_name = "PATH")]
+    cgroupv2: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -258,6 +261,7 @@ pub struct Config {
     pub recording: Option<RecordingConfig>,
     pub max_duration: Option<Duration>,
     pub shared_hwmon: Option<std::sync::Arc<std::sync::Mutex<crate::hwmon::HwmonReader>>>,
+    pub cgroupv2: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -397,9 +401,9 @@ fn config_from_monitor_args(
         anyhow::bail!("--watch-timeout-seconds must be greater than zero");
     }
 
-    if args.target_pids.is_empty() && args.tree_pids.is_empty() && args.watch_process.is_none() {
+    if args.target_pids.is_empty() && args.tree_pids.is_empty() && args.watch_process.is_none() && args.cgroupv2.is_none() {
         anyhow::bail!(
-            "at least one --pid <PID>, --tree-pid <PID>, or --watch-process <COMM> is required"
+            "at least one --pid <PID>, --tree-pid <PID>, --watch-process <COMM>, or --cgroupv2 <PATH> is required"
         );
     }
 
@@ -493,6 +497,7 @@ fn config_from_monitor_args(
         recording,
         max_duration,
         shared_hwmon: None,
+        cgroupv2: args.cgroupv2,
     })
 }
 

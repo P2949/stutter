@@ -965,7 +965,7 @@ fn interval_csv_writer_outputs_header_and_rows() {
     latency.record(1_000_000);
     let latency = latency.snapshot().unwrap();
     let cpu = metrics::CpuStatsSet::new().snapshot();
-    let record = metrics::interval_record_from_snapshot(123, 7, &stats, &latency, &cpu, &Default::default());
+    let record = metrics::interval_record_from_snapshot(7, &stats, &latency, &cpu, 123, &Default::default(), None);
 
     recorder::write_interval_csv(&path, &[record]).unwrap();
     let csv = fs::read_to_string(&path).unwrap();
@@ -1024,6 +1024,7 @@ fn test_config(
         recording: None,
         max_duration,
         shared_hwmon: None,
+        cgroupv2: None,
     }
 }
 

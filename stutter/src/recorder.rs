@@ -1189,9 +1189,14 @@ mod tests {
             worst_cpu_max_ns: 0,
             spikiest_cpu: None,
             spikiest_cpu_spikes: 0,
-            percentile_scope: "exact".to_owned(),
+            cpu_psi_some: 0.0,
+            mem_psi_some: 0.0,
+            mem_psi_full: 0.0,
+            io_psi_some: 0.0,
+            io_psi_full: 0.0,
+            percentile_scope: "all".to_owned(),
             histogram: Vec::new(),
-            drop_counters: Default::default(),
+            drop_counters: crate::ebpf_loader::DropCountersSnapshot::default(),
         }
     }
 

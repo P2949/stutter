@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, fs, path::Path, os::unix::fs::MetadataExt};
 
 use anyhow::Context;
 use aya::{
@@ -73,7 +73,7 @@ impl LoadedEbpf {
     }
 }
 
-pub fn load_and_attach() -> Result<LoadedEbpf, crate::error::StutterError> {
+pub fn load_and_attach(config: &crate::cli::Config) -> Result<LoadedEbpf, crate::error::StutterError> {
     raise_memlock_limit();
     let tracepoints = validate_tracepoint_formats(Path::new("/sys/kernel/tracing/events"))
         .map_err(|e| crate::error::StutterError::TracepointOffsetMismatch(e.to_string()))?;
@@ -166,6 +166,17 @@ pub fn load_and_attach() -> Result<LoadedEbpf, crate::error::StutterError> {
         .map(AyaHashMap::try_from)
         .transpose()
         .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+
+    if let Some(cgroup_path) = &config.cgroupv2 {
+        let mut cgroup_id_map: AyaHashMap<_, u64, u8> = ebpf.map_mut("TARGET_CGROUP_IDS").context("TARGET_CGROUP_IDS map not found").map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?.try_into().map_err(|e: aya::maps::MapError| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        
+        let mut ids = Vec::new();
+        collect_cgroup_hierarchy_ids(cgroup_path, &mut ids).map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        
+        for id in ids {
+            cgroup_id_map.insert(id, 1, 0).map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        }
+    }
 
     Ok(LoadedEbpf {
         _ebpf: ebpf,
@@ -420,6 +431,22 @@ fn raise_memlock_limit() {
     if ret != 0 {
         eprintln!("warning: failed to raise RLIMIT_MEMLOCK");
     }
+}
+
+fn collect_cgroup_hierarchy_ids(path: &Path, ids: &mut Vec<u64>) -> anyhow::Result<()> {
+    let meta = fs::metadata(path).context("failed to get cgroup metadata")?;
+    ids.push(meta.ino());
+
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Ok(file_type) = entry.file_type()
+                && file_type.is_dir()
+            {
+                collect_cgroup_hierarchy_ids(&entry.path(), ids)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
