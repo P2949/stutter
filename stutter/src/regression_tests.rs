@@ -667,6 +667,18 @@ fn target_snapshot_reads_fresh_task_comm_with_previous_tasks() {
 }
 
 #[test]
+fn cgroup_target_pid_collection_parses_sorts_and_dedups() {
+    let dir = temp_test_dir("cgroup-target-pids");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("cgroup.procs"), "30\nnot-a-pid\n10\n20\n").unwrap();
+
+    let target_pids = super::collect_target_pids_with_cgroup(vec![20, 1], Some(&dir));
+
+    assert_eq!(target_pids, vec![1, 10, 20, 30]);
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
 fn proc_stat_starttime_handles_comm_with_parentheses() {
     let stat = "123 (name with ) paren) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 98765 0";
 
