@@ -220,6 +220,8 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- restore --dry-run
 
 `apply-profile --force` discards an existing restore file. Without `--force`, new records are merged into the existing restore file while preserving the earliest original mask for each TID.
 
+Profile `match_comm` entries use the same substring matching as `--include-comm` unless the pattern is written as a regex, either by including regex metacharacters or by wrapping it in `/.../`. For example, `Render` can match `RenderThread`, `RenderWorker`, and `PreRenderer`; use a more specific regex when you need tighter matching.
+
 ## Important interpretation notes
 
 For real stutter diagnosis, prioritize:
@@ -259,8 +261,9 @@ Unknown `.exe` processes are no longer automatically treated as critical game ta
 ## Performance guidance
 
 - Prefer `--summary-ms` / `--epoch` values that match the latency scale you care about. Shorter summary windows (100-500ms) increase sample frequency and reporter work; longer windows reduce overhead.
+- At startup, `stutter` sizes the eBPF wakeup timestamp map and event ring buffer from the effective `RLIMIT_MEMLOCK` and `/proc/meminfo` `MemAvailable`, with conservative caps to avoid hoarding memory on large systems.
 - Use `--hwmon` and `--irq-latency` only when you need those signals; sensor reads are cached but still impose blocking syscalls and should be sampled via the monitor's blocking worker.
-- If you see significant overhead, lower the monitor sampling rate, drop unneeded `--tree-pid` roots, or increase eBPF map sizes (rebuild the eBPF program with larger constants) to reduce map churn.
+- If you see significant overhead, lower the monitor sampling rate, drop unneeded `--tree-pid` roots, or narrow task filters to reduce map churn.
 
 ## Recording JSON schema (short)
 
@@ -279,7 +282,10 @@ For programmatic consumption, inspect the example outputs in a sample run direct
 - `--watch-process <COMM>`: poll `/proc` for a process whose name/comm matches `<COMM>` and automatically follow its tree; combine with `--persistent` to keep waiting across restarts.
 - `--persistent`: use with `--watch-process` to continue monitoring across relaunches.
 - `--summary-ms <MS>`: interval for interval summaries written to `interval.json` and printed to the TUI.
+- `--epoch <MS>`: explicit reset-and-report mode; prints interval stats with the `epoch` label every `<MS>` and skips the final cumulative session recap.
 - `--spike-us <US>`: spike detection threshold in microseconds (e.g., `--spike-us 1000` for 1ms).
+- `--alert-threshold-ms <MS>`: send an alert when a runnable-latency spike reaches this threshold. Uses `notify-send` by default.
+- `--alert-webhook-url <URL>`: with `--alert-threshold-ms`, POST alert JSON to a webhook instead of using `notify-send`. You can also set `STUTTER_ALERT_WEBHOOK_URL`.
 - `--include-comm <PATTERN>` / `--exclude-comm <PATTERN>`: case-insensitive substring filters against task `comm` and process `comm`; exclude wins.
 - `--irq-latency`: enable IRQ latency tracing and record `irq_events.json`; at least one explicit `--irq <IRQ>` is required. Inspect `/proc/interrupts` to find the IRQ for your GPU/device.
 - `--irq <IRQ>`: add an IRQ number to target for IRQ latency measurement (can repeat).

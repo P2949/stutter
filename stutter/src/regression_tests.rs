@@ -222,6 +222,32 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
 }
 
 #[test]
+fn alert_payload_captures_spike_task_identity() {
+    let event = scheduler_event_with_latency(7, "RenderThread", 250_000_000);
+    let mut stats = metrics::TaskStats::new(7, "RenderThread".to_owned(), 10);
+    stats.apply_task_info(&task_info(
+        7,
+        77,
+        "KingdomCome.exe",
+        "RenderThread",
+        TaskClass::Game,
+    ));
+
+    let payload = super::AlertPayload::from_task_stats(&stats, &event, 1234);
+
+    assert_eq!(payload.title, "stutter latency alert");
+    assert_eq!(payload.task, 7);
+    assert_eq!(payload.class, TaskClass::Game);
+    assert_eq!(payload.comm, "RenderThread");
+    assert_eq!(payload.process_pid, Some(77));
+    assert_eq!(payload.process_comm, "KingdomCome.exe");
+    assert_eq!(payload.latency_ns, 250_000_000);
+    assert_eq!(payload.latency_ms, 250);
+    assert_eq!(payload.elapsed_ms, 1234);
+    assert!(payload.message.contains("latency=250.000ms"));
+}
+
+#[test]
 fn spike_event_buffer_caps_and_marks_truncated() {
     let mut buffer = SpikeEventBuffer::with_max_events(2);
 
@@ -582,6 +608,61 @@ fn target_snapshot_prefetches_exe_inode_metadata() {
 
     assert!(task.exe_dev.is_some());
     assert!(task.exe_ino.is_some());
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn process_cache_invalidates_when_pid_starttime_changes() {
+    let dir = temp_test_dir("proc-cache-starttime");
+    create_fake_proc(&dir, 10, 1, "old-name", "old-name", &[10]);
+
+    let mut cache = process_tree::ProcessCache::default();
+    let first = process_tree::scan_processes_at(&dir, &mut cache);
+    assert_eq!(first.get(&10).unwrap().comm, "old-name");
+
+    fs::write(dir.join("10/status"), "Name:\tnew-name\nPPid:\t1\n").unwrap();
+    fs::write(dir.join("10/cmdline"), b"new-name").unwrap();
+    fs::write(dir.join("10/stat"), fake_stat("new-name", 999)).unwrap();
+
+    let second = process_tree::scan_processes_at(&dir, &mut cache);
+    assert_eq!(second.get(&10).unwrap().comm, "new-name");
+    assert_eq!(second.get(&10).unwrap().starttime_ticks, Some(999));
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn target_snapshot_reads_fresh_task_comm_with_previous_tasks() {
+    let dir = temp_test_dir("proc-fresh-task-comm");
+    create_fake_proc(&dir, 10, 1, "game", "game", &[10, 11]);
+
+    let mut cache = process_tree::ProcessCache::default();
+    let first = process_tree::target_snapshot_filtered_at_with_options(
+        &dir,
+        &[],
+        &[10],
+        &[],
+        &process_tree::TaskFilters::default(),
+        false,
+        &mut cache,
+        None,
+    );
+    assert_eq!(first.tasks.get(&11).unwrap().comm, "game-11");
+
+    fs::write(dir.join("10/task/11/comm"), "RenderThread\n").unwrap();
+
+    let second = process_tree::target_snapshot_filtered_at_with_options(
+        &dir,
+        &[],
+        &[10],
+        &[],
+        &process_tree::TaskFilters::default(),
+        false,
+        &mut cache,
+        Some(&first.tasks),
+    );
+    assert_eq!(second.tasks.get(&11).unwrap().comm, "RenderThread");
+
     fs::remove_dir_all(dir).ok();
 }
 
@@ -1049,7 +1130,10 @@ fn test_config(
         target_pids,
         tree_pids,
         summary_period_ms: 1_000,
+        epoch_period_ms: None,
         spike_threshold_ns: 1_000_000,
+        alert_threshold_ns: None,
+        alert_webhook_url: None,
         verbose: false,
         max_tasks: 1024,
         task_filters: process_tree::TaskFilters::default(),
@@ -1070,7 +1154,6 @@ fn test_config(
         retain_intervals: None,
         recording: None,
         max_duration,
-        shared_hwmon: None,
         cgroupv2: None,
         follow_exec: true,
         exclude_tree_pids: Vec::new(),

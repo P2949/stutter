@@ -14,7 +14,7 @@ pub struct ProcessCache {
 
 #[derive(Debug, Clone)]
 pub struct CachedProcInfo {
-    pub mtime: std::time::SystemTime,
+    pub starttime_ticks: Option<u64>,
     pub info: ProcInfo,
 }
 
@@ -167,14 +167,11 @@ pub fn scan_processes_at(proc_root: &Path, cache: &mut ProcessCache) -> BTreeMap
             continue;
         };
 
-        let metadata = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        let mtime = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
+        let starttime_ticks = process_starttime_at(proc_root, pid);
 
         if let Some(cached) = cache.entries.get(&pid)
-            && cached.mtime == mtime
+            && starttime_ticks.is_some()
+            && cached.starttime_ticks == starttime_ticks
         {
             processes.insert(pid, cached.info.clone());
             continue;
@@ -184,7 +181,7 @@ pub fn scan_processes_at(proc_root: &Path, cache: &mut ProcessCache) -> BTreeMap
             cache.entries.insert(
                 pid,
                 CachedProcInfo {
-                    mtime,
+                    starttime_ticks: info.starttime_ticks,
                     info: info.clone(),
                 },
             );
@@ -226,8 +223,7 @@ fn read_proc_info_at(proc_root: &Path, pid: u32) -> Option<ProcInfo> {
         .unwrap_or_default();
 
     let stat_path = proc_root.join(pid.to_string()).join("stat");
-    let starttime_ticks = stat_starttime_at(&stat_path);
-    let sched_policy = stat_policy_at(&stat_path);
+    let (starttime_ticks, sched_policy) = stat_starttime_and_policy_at(&stat_path);
     let (exe_dev, exe_ino) = exe_metadata_at(proc_root, pid)
         .map(|metadata| (Some(metadata.dev()), Some(metadata.ino())))
         .unwrap_or((None, None));
@@ -551,14 +547,29 @@ pub fn expand_tasks_at(
         }
 
         for tid in tids {
-            let comm = if let Some(prev) = previous_tasks.and_then(|t| t.get(&tid)) {
-                prev.comm.clone()
-            } else {
-                task_comm_at(proc_root, *pid, tid).unwrap_or_else(|| proc_info.comm.clone())
-            };
+            let (task_starttime_ticks, sched_policy) =
+                task_starttime_and_policy_at(proc_root, *pid, tid, proc_info);
+            let comm = task_comm_at(proc_root, *pid, tid)
+                .or_else(|| {
+                    previous_tasks
+                        .and_then(|tasks| tasks.get(&tid))
+                        .filter(|prev| {
+                            prev.process_pid == *pid
+                                && prev.task_starttime_ticks == task_starttime_ticks
+                        })
+                        .map(|prev| prev.comm.clone())
+                })
+                .unwrap_or_else(|| proc_info.comm.clone());
             tasks.insert(
                 tid,
-                task_info_from_proc(proc_root, tid, *pid, &comm, proc_info),
+                task_info_from_parts(
+                    tid,
+                    *pid,
+                    &comm,
+                    proc_info,
+                    task_starttime_ticks,
+                    sched_policy,
+                ),
             );
         }
     }
@@ -573,18 +584,27 @@ fn task_info_from_proc(
     comm: &str,
     proc_info: &ProcInfo,
 ) -> TaskInfo {
-    let stat_path = proc_root
-        .join(process_pid.to_string())
-        .join("task")
-        .join(tid.to_string())
-        .join("stat");
+    let (task_starttime_ticks, sched_policy) =
+        task_starttime_and_policy_at(proc_root, process_pid, tid, proc_info);
 
-    let (task_starttime_ticks, sched_policy) = if tid == process_pid {
-        (proc_info.starttime_ticks, proc_info.sched_policy)
-    } else {
-        (stat_starttime_at(&stat_path), stat_policy_at(&stat_path))
-    };
+    task_info_from_parts(
+        tid,
+        process_pid,
+        comm,
+        proc_info,
+        task_starttime_ticks,
+        sched_policy,
+    )
+}
 
+fn task_info_from_parts(
+    tid: u32,
+    process_pid: u32,
+    comm: &str,
+    proc_info: &ProcInfo,
+    task_starttime_ticks: Option<u64>,
+    sched_policy: Option<u32>,
+) -> TaskInfo {
     TaskInfo {
         tid,
         process_pid,
@@ -600,27 +620,31 @@ fn task_info_from_proc(
     }
 }
 
+fn task_starttime_and_policy_at(
+    proc_root: &Path,
+    process_pid: u32,
+    tid: u32,
+    proc_info: &ProcInfo,
+) -> (Option<u64>, Option<u32>) {
+    if tid == process_pid {
+        return (proc_info.starttime_ticks, proc_info.sched_policy);
+    }
+
+    let stat_path = proc_root
+        .join(process_pid.to_string())
+        .join("task")
+        .join(tid.to_string())
+        .join("stat");
+
+    stat_starttime_and_policy_at(&stat_path)
+}
+
 fn stat_starttime_at(path: &Path) -> Option<u64> {
-    let stat = fs::read_to_string(path).ok()?;
-    parse_proc_stat_starttime(&stat)
+    stat_starttime_and_policy_at(path).0
 }
 
 pub fn process_starttime_at(proc_root: &Path, pid: u32) -> Option<u64> {
     stat_starttime_at(&proc_root.join(pid.to_string()).join("stat"))
-}
-
-pub fn task_starttime_at(proc_root: &Path, process_pid: u32, tid: u32) -> Option<u64> {
-    let stat_path = if process_pid == tid {
-        proc_root.join(process_pid.to_string()).join("stat")
-    } else {
-        proc_root
-            .join(process_pid.to_string())
-            .join("task")
-            .join(tid.to_string())
-            .join("stat")
-    };
-
-    stat_starttime_at(&stat_path)
 }
 
 pub fn parse_proc_stat_starttime(stat: &str) -> Option<u64> {
@@ -628,9 +652,14 @@ pub fn parse_proc_stat_starttime(stat: &str) -> Option<u64> {
     after_comm.split_whitespace().nth(19)?.parse().ok()
 }
 
-fn stat_policy_at(path: &Path) -> Option<u32> {
-    let stat = fs::read_to_string(path).ok()?;
-    parse_proc_stat_policy(&stat)
+fn stat_starttime_and_policy_at(path: &Path) -> (Option<u64>, Option<u32>) {
+    let Ok(stat) = fs::read_to_string(path) else {
+        return (None, None);
+    };
+    (
+        parse_proc_stat_starttime(&stat),
+        parse_proc_stat_policy(&stat),
+    )
 }
 
 pub fn parse_proc_stat_policy(stat: &str) -> Option<u32> {

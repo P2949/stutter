@@ -45,8 +45,17 @@ pub struct MonitorArgs {
     #[arg(long = "summary-ms", default_value_t = 1_000)]
     summary_period_ms: u64,
 
+    #[arg(long = "epoch", value_name = "MS")]
+    epoch_period_ms: Option<u64>,
+
     #[arg(long = "spike-us", default_value_t = 1_000)]
     spike_threshold_us: u64,
+
+    #[arg(long = "alert-threshold-ms", value_name = "MS")]
+    alert_threshold_ms: Option<u64>,
+
+    #[arg(long = "alert-webhook-url", value_name = "URL")]
+    alert_webhook_url: Option<String>,
 
     #[arg(long, short = 'v')]
     verbose: bool,
@@ -248,7 +257,10 @@ pub struct Config {
     pub target_pids: Vec<u32>,
     pub tree_pids: Vec<u32>,
     pub summary_period_ms: u64,
+    pub epoch_period_ms: Option<u64>,
     pub spike_threshold_ns: u64,
+    pub alert_threshold_ns: Option<u64>,
+    pub alert_webhook_url: Option<String>,
     pub verbose: bool,
     pub task_filters: TaskFilters,
     pub keep_missing_pid: bool,
@@ -269,7 +281,6 @@ pub struct Config {
     pub retain_intervals: Option<usize>,
     pub recording: Option<RecordingConfig>,
     pub max_duration: Option<Duration>,
-    pub shared_hwmon: Option<std::sync::Arc<std::sync::Mutex<crate::hwmon::HwmonReader>>>,
     pub cgroupv2: Option<PathBuf>,
     pub follow_exec: bool,
     pub exclude_tree_pids: Vec<u32>,
@@ -402,9 +413,15 @@ fn config_from_monitor_args(
     if args.summary_period_ms == 0 {
         anyhow::bail!("--summary-ms must be greater than zero");
     }
+    if matches!(args.epoch_period_ms, Some(0)) {
+        anyhow::bail!("--epoch must be greater than zero");
+    }
 
     if args.spike_threshold_us == 0 {
         anyhow::bail!("--spike-us must be greater than zero");
+    }
+    if matches!(args.alert_threshold_ms, Some(0)) {
+        anyhow::bail!("--alert-threshold-ms must be greater than zero");
     }
     if args.watch_poll_ms == 0 {
         anyhow::bail!("--watch-poll-ms must be greater than zero");
@@ -442,6 +459,9 @@ fn config_from_monitor_args(
     if matches!(args.hwmon_drm_card.as_deref(), Some("")) {
         anyhow::bail!("--hwmon-drm-card must not be empty");
     }
+    if matches!(args.alert_webhook_url.as_deref(), Some("")) {
+        anyhow::bail!("--alert-webhook-url must not be empty");
+    }
     if (args.hwmon_root.is_some()
         || args.hwmon_drm_card.is_some()
         || args.hwmon_render_node.is_some())
@@ -462,6 +482,24 @@ fn config_from_monitor_args(
         .spike_threshold_us
         .checked_mul(1_000)
         .ok_or_else(|| anyhow::anyhow!("--spike-us value is too large"))?;
+    let summary_period_ms = args.epoch_period_ms.unwrap_or(args.summary_period_ms);
+    let alert_threshold_ns = args
+        .alert_threshold_ms
+        .map(|threshold_ms| {
+            threshold_ms
+                .checked_mul(1_000_000)
+                .ok_or_else(|| anyhow::anyhow!("--alert-threshold-ms value is too large"))
+        })
+        .transpose()?;
+    let alert_webhook_url = if alert_threshold_ns.is_some() {
+        args.alert_webhook_url.or_else(|| {
+            std::env::var("STUTTER_ALERT_WEBHOOK_URL")
+                .ok()
+                .filter(|url| !url.is_empty())
+        })
+    } else {
+        args.alert_webhook_url
+    };
 
     let recording = if args.no_record {
         None
@@ -479,8 +517,11 @@ fn config_from_monitor_args(
     Ok(Config {
         target_pids: args.target_pids,
         tree_pids: args.tree_pids,
-        summary_period_ms: args.summary_period_ms,
+        summary_period_ms,
+        epoch_period_ms: args.epoch_period_ms,
         spike_threshold_ns,
+        alert_threshold_ns,
+        alert_webhook_url,
         verbose: args.verbose,
         task_filters: TaskFilters {
             include_comm: args.include_comm,
@@ -504,7 +545,6 @@ fn config_from_monitor_args(
         retain_intervals: args.retain_intervals,
         recording,
         max_duration,
-        shared_hwmon: None,
         cgroupv2: args.cgroupv2,
         follow_exec: args.follow_exec,
         exclude_tree_pids: args.exclude_tree_pids,
@@ -614,6 +654,53 @@ mod tests {
 
         assert_eq!(config.tree_pids, vec![42]);
         assert_eq!(config.exclude_tree_pids, vec![7, 100]);
+    }
+
+    #[test]
+    fn parses_alert_threshold_and_webhook() {
+        let command = parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--alert-threshold-ms",
+            "250",
+            "--alert-webhook-url",
+            "https://example.invalid/stutter",
+        ])
+        .unwrap();
+
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+
+        assert_eq!(config.alert_threshold_ns, Some(250_000_000));
+        assert_eq!(
+            config.alert_webhook_url.as_deref(),
+            Some("https://example.invalid/stutter")
+        );
+    }
+
+    #[test]
+    fn parses_epoch_as_summary_period_override() {
+        let command = parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--summary-ms",
+            "100",
+            "--epoch",
+            "5000",
+        ])
+        .unwrap();
+
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+
+        assert_eq!(config.epoch_period_ms, Some(5_000));
+        assert_eq!(config.summary_period_ms, 5_000);
     }
 
     #[test]
@@ -856,6 +943,35 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("--exclude-tree-pid must be greater than zero")
+        );
+    }
+
+    #[test]
+    fn rejects_zero_alert_threshold() {
+        let err = parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--alert-threshold-ms",
+            "0",
+        ])
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--alert-threshold-ms must be greater than zero")
+        );
+    }
+
+    #[test]
+    fn rejects_zero_epoch() {
+        let err = parse_app_command_from(["stutter", "monitor", "--pid", "42", "--epoch", "0"])
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--epoch must be greater than zero")
         );
     }
 }

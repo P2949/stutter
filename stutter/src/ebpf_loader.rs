@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fs, os::unix::fs::MetadataExt, path::Path};
 
 use anyhow::Context;
 use aya::{
-    Ebpf,
+    Ebpf, EbpfLoader,
     maps::{HashMap as AyaHashMap, MapData, PerCpuArray, RingBuf},
     programs::{PerfEvent, TracePoint},
     util::online_cpus,
@@ -13,6 +13,18 @@ use stutter_common::{
     DROP_RINGBUF_RESERVE_FAILED, DROP_WAKER_MAP_INSERT_FAILED, DROP_WAKEUP_TIMES_INSERT_FAILED,
 };
 use tokio::io::unix::AsyncFd;
+
+const DEFAULT_AVAILABLE_MEMORY_BYTES: u64 = 1 << 30;
+const AVAILABLE_MEMORY_BUDGET_DIVISOR: u64 = 64;
+const MEMLOCK_BUDGET_NUMERATOR: u64 = 3;
+const MEMLOCK_BUDGET_DENOMINATOR: u64 = 4;
+const WAKEUP_TIMES_ENTRY_ESTIMATED_BYTES: u64 = 64;
+const MIN_WAKEUP_TIMES_ENTRIES: u32 = 4_096;
+const MAX_WAKEUP_TIMES_ENTRIES: u32 = 1_048_576;
+const MIN_EVENTS_RINGBUF_BYTES: u32 = 64 * 1024;
+const MAX_EVENTS_RINGBUF_BYTES: u32 = 16 * 1024 * 1024;
+const EVENTS_BUDGET_NUMERATOR: u64 = 2;
+const EVENTS_BUDGET_DENOMINATOR: u64 = 5;
 
 pub struct LoadedEbpf {
     _ebpf: Ebpf,
@@ -76,14 +88,29 @@ pub fn load_and_attach(
     config: &crate::cli::Config,
 ) -> Result<LoadedEbpf, crate::error::StutterError> {
     raise_memlock_limit();
+    let map_sizing = dynamic_map_sizing();
+    log::info!(
+        "ebpf_map_sizing locked_memory_limit={} available_memory={} events_ringbuf_bytes={} wakeup_times_entries={}",
+        format_optional_bytes(map_sizing.locked_memory_limit_bytes),
+        format_optional_bytes(map_sizing.available_memory_bytes),
+        map_sizing.events_ringbuf_bytes,
+        map_sizing.wakeup_times_entries,
+    );
+
     let tracepoints = validate_tracepoint_formats(Path::new("/sys/kernel/tracing/events"))
         .map_err(|e| crate::error::StutterError::TracepointOffsetMismatch(e.to_string()))?;
 
-    let mut ebpf = Ebpf::load(aya::include_bytes_aligned!(concat!(
-        env!("OUT_DIR"),
-        "/stutter"
-    )))
-    .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    let mut loader = EbpfLoader::new();
+    loader
+        .map_max_entries("EVENTS", map_sizing.events_ringbuf_bytes)
+        .map_max_entries("WAKEUP_TIMES", map_sizing.wakeup_times_entries);
+
+    let mut ebpf = loader
+        .load(aya::include_bytes_aligned!(concat!(
+            env!("OUT_DIR"),
+            "/stutter"
+        )))
+        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
     attach_tracepoint(&mut ebpf, "sched_wakeup", "sched", "sched_wakeup")
         .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
@@ -269,6 +296,146 @@ fn drop_counter_value(counters: &PerCpuArray<MapData, u64>, key: u32) -> u64 {
         .get(&key, 0)
         .map(|values| values.iter().copied().sum())
         .unwrap_or(0)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct EbpfMapSizing {
+    events_ringbuf_bytes: u32,
+    wakeup_times_entries: u32,
+    locked_memory_limit_bytes: Option<u64>,
+    available_memory_bytes: Option<u64>,
+}
+
+fn dynamic_map_sizing() -> EbpfMapSizing {
+    let snapshot = MemorySnapshot {
+        locked_memory_limit_bytes: locked_memory_limit_bytes(),
+        available_memory_bytes: available_memory_bytes(),
+        page_size: system_page_size(),
+    };
+    map_sizing_from_memory(snapshot)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MemorySnapshot {
+    locked_memory_limit_bytes: Option<u64>,
+    available_memory_bytes: Option<u64>,
+    page_size: u64,
+}
+
+fn map_sizing_from_memory(snapshot: MemorySnapshot) -> EbpfMapSizing {
+    let available_memory = snapshot
+        .available_memory_bytes
+        .unwrap_or(DEFAULT_AVAILABLE_MEMORY_BYTES);
+    let available_budget = available_memory / AVAILABLE_MEMORY_BUDGET_DIVISOR;
+    let memlock_budget = snapshot
+        .locked_memory_limit_bytes
+        .map(|bytes| bytes.saturating_mul(MEMLOCK_BUDGET_NUMERATOR) / MEMLOCK_BUDGET_DENOMINATOR)
+        .unwrap_or(u64::MAX);
+    let budget = available_budget.min(memlock_budget);
+    let events_budget = budget.saturating_mul(EVENTS_BUDGET_NUMERATOR) / EVENTS_BUDGET_DENOMINATOR;
+    let page_size = snapshot.page_size.max(1);
+    let min_events = u64::from(MIN_EVENTS_RINGBUF_BYTES).max(page_size);
+    let max_events = u64::from(MAX_EVENTS_RINGBUF_BYTES).max(min_events);
+    let events_ringbuf_bytes =
+        ring_buffer_size_from_budget(events_budget, min_events, max_events, page_size);
+    let wakeup_budget = budget.saturating_sub(u64::from(events_ringbuf_bytes));
+    let wakeup_times_entries = wakeup_budget
+        .checked_div(WAKEUP_TIMES_ENTRY_ESTIMATED_BYTES)
+        .unwrap_or(0)
+        .clamp(
+            u64::from(MIN_WAKEUP_TIMES_ENTRIES),
+            u64::from(MAX_WAKEUP_TIMES_ENTRIES),
+        ) as u32;
+
+    EbpfMapSizing {
+        events_ringbuf_bytes,
+        wakeup_times_entries,
+        locked_memory_limit_bytes: snapshot.locked_memory_limit_bytes,
+        available_memory_bytes: snapshot.available_memory_bytes,
+    }
+}
+
+fn ring_buffer_size_from_budget(budget: u64, min_size: u64, max_size: u64, page_size: u64) -> u32 {
+    let requested = budget.clamp(min_size, max_size);
+    let rounded = floor_power_of_two(requested).max(next_power_of_two(min_size));
+    let rounded = round_up_to_multiple(rounded, page_size).min(max_size);
+    rounded.min(u64::from(u32::MAX)) as u32
+}
+
+fn floor_power_of_two(value: u64) -> u64 {
+    if value <= 1 {
+        return 1;
+    }
+    1u64 << (u64::BITS - 1 - value.leading_zeros())
+}
+
+fn next_power_of_two(value: u64) -> u64 {
+    if value <= 1 {
+        return 1;
+    }
+    value.next_power_of_two()
+}
+
+fn round_up_to_multiple(value: u64, multiple: u64) -> u64 {
+    if multiple <= 1 {
+        return value;
+    }
+    value.div_ceil(multiple).saturating_mul(multiple)
+}
+
+fn locked_memory_limit_bytes() -> Option<u64> {
+    let mut rlim = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    let ret = unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut rlim) };
+    if ret != 0 || rlim.rlim_cur == libc::RLIM_INFINITY {
+        None
+    } else {
+        Some(rlim.rlim_cur)
+    }
+}
+
+fn available_memory_bytes() -> Option<u64> {
+    mem_available_bytes_at(Path::new("/proc/meminfo")).or_else(available_memory_bytes_from_sysconf)
+}
+
+fn mem_available_bytes_at(path: &Path) -> Option<u64> {
+    let meminfo = fs::read_to_string(path).ok()?;
+    parse_mem_available_bytes(&meminfo)
+}
+
+fn parse_mem_available_bytes(meminfo: &str) -> Option<u64> {
+    meminfo.lines().find_map(|line| {
+        let value = line.strip_prefix("MemAvailable:")?;
+        let kib = value.split_whitespace().next()?.parse::<u64>().ok()?;
+        kib.checked_mul(1024)
+    })
+}
+
+fn available_memory_bytes_from_sysconf() -> Option<u64> {
+    let pages = unsafe { libc::sysconf(libc::_SC_AVPHYS_PAGES) };
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    if pages <= 0 || page_size <= 0 {
+        return None;
+    }
+
+    (pages as u64).checked_mul(page_size as u64)
+}
+
+fn system_page_size() -> u64 {
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    if page_size > 0 {
+        page_size as u64
+    } else {
+        4096
+    }
+}
+
+fn format_optional_bytes(value: Option<u64>) -> String {
+    value
+        .map(|bytes| bytes.to_string())
+        .unwrap_or_else(|| "unknown_or_unlimited".to_owned())
 }
 
 struct TracepointAvailability {
@@ -580,6 +747,44 @@ field:int irq; offset:8; size:4; signed:1;
 
         assert!(!available);
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn parses_mem_available_from_proc_meminfo() {
+        let meminfo = "MemTotal:       32768000 kB\nMemAvailable:   12345 kB\n";
+
+        assert_eq!(parse_mem_available_bytes(meminfo), Some(12_641_280));
+    }
+
+    #[test]
+    fn dynamic_map_sizing_grows_when_memory_is_plentiful() {
+        let sizing = map_sizing_from_memory(MemorySnapshot {
+            locked_memory_limit_bytes: None,
+            available_memory_bytes: Some(128 * 1024 * 1024 * 1024),
+            page_size: 4096,
+        });
+
+        assert_eq!(sizing.events_ringbuf_bytes, MAX_EVENTS_RINGBUF_BYTES);
+        assert_eq!(sizing.wakeup_times_entries, MAX_WAKEUP_TIMES_ENTRIES);
+    }
+
+    #[test]
+    fn dynamic_map_sizing_respects_finite_memlock_budget() {
+        let sizing = map_sizing_from_memory(MemorySnapshot {
+            locked_memory_limit_bytes: Some(1024 * 1024),
+            available_memory_bytes: Some(128 * 1024 * 1024 * 1024),
+            page_size: 4096,
+        });
+
+        assert_eq!(sizing.events_ringbuf_bytes, 256 * 1024);
+        assert_eq!(sizing.wakeup_times_entries, 8_192);
+    }
+
+    #[test]
+    fn ring_buffer_size_is_power_of_two_and_page_aligned() {
+        let size = ring_buffer_size_from_budget(900 * 1024, 64 * 1024, 16 * 1024 * 1024, 4096);
+
+        assert_eq!(size, 512 * 1024);
     }
 
     fn temp_dir(name: &str) -> std::path::PathBuf {

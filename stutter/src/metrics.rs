@@ -595,7 +595,8 @@ pub fn print_latency_line(
     );
 }
 
-pub fn collect_interval_summaries(
+pub fn collect_interval_summaries_labeled(
+    label: &str,
     stats_by_task: &mut BTreeMap<u32, TaskStats>,
     elapsed_ms: u128,
     drop_counters: &crate::ebpf_loader::DropCountersSnapshot,
@@ -618,7 +619,7 @@ pub fn collect_interval_summaries(
 
         let cpu = stats.interval_cpu.snapshot_and_reset();
 
-        print_latency_line("summary", *task, &stats.comm, &latency, &cpu);
+        print_latency_line(label, *task, &stats.comm, &latency, &cpu);
         interval_records.push(interval_record_from_snapshot(
             *task,
             stats,

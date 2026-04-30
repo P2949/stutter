@@ -23,8 +23,13 @@ pub struct Profile {
 pub struct ProfileRule {
     pub affinity: CpuMask,
     pub match_class: Vec<TaskClass>,
-    pub match_comm: Vec<String>,
-    pub match_comm_regex: Vec<Option<Regex>>,
+    pub match_comm: Vec<CompiledPattern>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CompiledPattern {
+    raw: String,
+    regex: Option<Regex>,
 }
 
 #[derive(Default)]
@@ -43,8 +48,6 @@ struct ProfileApplyCacheKey {
 struct PlannedAffinityChange {
     record: AffinityRecord,
     cache_key: ProfileApplyCacheKey,
-    process_pid: u32,
-    task_starttime_ticks: Option<u64>,
 }
 
 pub fn load_first_profile(path: &Path) -> anyhow::Result<Profile> {
@@ -102,30 +105,27 @@ fn apply_profile_to_tree_with_cache(
 
     let restore_path = affinity::default_restore_path();
     let mut applied_records = Vec::new();
-    let mut force_restore_write = force_restore_overwrite;
 
-    for planned in &planned {
-        if !task_starttime_matches(planned) {
-            continue;
-        }
-
-        if dry_run {
+    if dry_run {
+        for planned in &planned {
             log::info!(
                 "dry_run: would apply mask {} to TID {}",
                 planned.record.applied_mask.to_range_string(),
                 planned.record.tid
             );
             applied_records.push(planned.record.clone());
-            continue;
         }
+        applied_records.sort_by_key(|record| record.tid);
+        return Ok(applied_records);
+    }
 
-        affinity::save_merged_restore_state(
-            &restore_path,
-            std::slice::from_ref(&planned.record),
-            force_restore_write,
-        )?;
-        force_restore_write = false;
+    let restore_records = planned
+        .iter()
+        .map(|planned| planned.record.clone())
+        .collect::<Vec<_>>();
+    affinity::save_merged_restore_state(&restore_path, &restore_records, force_restore_overwrite)?;
 
+    for planned in &planned {
         match affinity::set_affinity_raw(planned.record.tid, &planned.record.applied_mask) {
             Ok(()) => {
                 applied_records.push(planned.record.clone());
@@ -148,15 +148,6 @@ fn apply_profile_to_tree_with_cache(
     applied_records.sort_by_key(|record| record.tid);
 
     Ok(applied_records)
-}
-
-fn task_starttime_matches(planned: &PlannedAffinityChange) -> bool {
-    let Some(expected) = planned.task_starttime_ticks else {
-        return true;
-    };
-
-    process_tree::task_starttime_at(Path::new("/proc"), planned.process_pid, planned.record.tid)
-        == Some(expected)
 }
 
 fn planned_affinity_changes(
@@ -190,13 +181,8 @@ where
                 let comms = [&task.comm, task.process_comm.as_ref()];
                 let mut comm_match = false;
 
-                for (i, pattern) in rule.match_comm.iter().enumerate() {
-                    if let Some(re) = &rule.match_comm_regex[i] {
-                        if comms.iter().any(|c| re.is_match(c)) {
-                            comm_match = true;
-                            break;
-                        }
-                    } else if comms.iter().any(|c| c.contains(pattern)) {
+                for pattern in &rule.match_comm {
+                    if comms.iter().any(|comm| pattern.matches(comm)) {
                         comm_match = true;
                         break;
                     }
@@ -251,8 +237,6 @@ where
                 applied_mask: rule.affinity.clone(),
             },
             cache_key,
-            process_pid: task.process_pid,
-            task_starttime_ticks: task.task_starttime_ticks,
         });
     }
 
@@ -276,6 +260,36 @@ impl ProfileApplyCacheKey {
     }
 }
 
+impl CompiledPattern {
+    fn new(raw: String) -> anyhow::Result<Self> {
+        let regex = if raw.len() >= 2 && raw.starts_with('/') && raw.ends_with('/') {
+            Some(
+                Regex::new(&raw[1..raw.len() - 1])
+                    .with_context(|| format!("invalid profile regex '{}'", raw))?,
+            )
+        } else if raw.chars().any(|c| ".^$*+?()[]{}|\\".contains(c)) {
+            Some(Regex::new(&raw).with_context(|| format!("invalid profile regex '{}'", raw))?)
+        } else {
+            None
+        };
+
+        Ok(Self { raw, regex })
+    }
+
+    #[cfg(test)]
+    pub fn raw(&self) -> &str {
+        &self.raw
+    }
+
+    fn matches(&self, value: &str) -> bool {
+        if let Some(regex) = &self.regex {
+            regex.is_match(value)
+        } else {
+            value.contains(&self.raw)
+        }
+    }
+}
+
 fn parse_profiles(data: &str) -> anyhow::Result<Vec<Profile>> {
     let file = toml::from_str::<ProfilesFile>(data)?;
     file.profile
@@ -291,7 +305,7 @@ fn validate_profile(profile: Profile) -> anyhow::Result<Profile> {
     }
 
     let online = affinity::CpuMask::online_cpus()
-        .unwrap_or_else(|_| affinity::CpuMask::parse("0-1023").unwrap());
+        .context("failed to read online CPU mask while validating profile")?;
 
     for (i, rule) in profile.rules.iter().enumerate() {
         if rule.affinity.is_empty() {
@@ -340,30 +354,16 @@ impl ProfileToml {
                 match_class.push(parse_task_class(&class_name)?);
             }
 
-            let mut match_comm_regex = Vec::new();
-            for pattern in &rule.match_comm {
-                let re = if pattern.len() >= 2 && pattern.starts_with('/') && pattern.ends_with('/')
-                {
-                    Some(
-                        Regex::new(&pattern[1..pattern.len() - 1])
-                            .with_context(|| format!("invalid profile regex '{}'", pattern))?,
-                    )
-                } else if pattern.chars().any(|c| ".^$*+?()[]{}|\\".contains(c)) {
-                    Some(
-                        Regex::new(pattern)
-                            .with_context(|| format!("invalid profile regex '{}'", pattern))?,
-                    )
-                } else {
-                    None
-                };
-                match_comm_regex.push(re);
-            }
+            let match_comm = rule
+                .match_comm
+                .into_iter()
+                .map(CompiledPattern::new)
+                .collect::<anyhow::Result<Vec<_>>>()?;
 
             rules.push(ProfileRule {
                 affinity: CpuMask::parse(&rule.affinity)?,
                 match_class,
-                match_comm: rule.match_comm,
-                match_comm_regex,
+                match_comm,
             });
         }
 
@@ -413,7 +413,13 @@ mod tests {
         let rule = &profiles[0].rules[0];
         assert_eq!(rule.affinity.to_range_string(), "0-3");
         assert_eq!(rule.match_class, vec![TaskClass::Game]);
-        assert_eq!(rule.match_comm, vec!["RenderThread", "Main"]);
+        assert_eq!(
+            rule.match_comm
+                .iter()
+                .map(CompiledPattern::raw)
+                .collect::<Vec<_>>(),
+            vec!["RenderThread", "Main"]
+        );
     }
 
     #[test]
@@ -438,7 +444,6 @@ mod tests {
                 affinity: CpuMask::parse("0-1").unwrap(),
                 match_class: vec![TaskClass::Game],
                 match_comm: Vec::new(),
-                match_comm_regex: Vec::new(),
             }],
         };
         let mut cache = ProfileApplyCache::default();

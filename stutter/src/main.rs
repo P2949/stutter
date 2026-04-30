@@ -30,8 +30,10 @@ use cli::{AppCommand, Config, parse_app_command};
 use crossterm::event::{Event, EventStream, KeyCode};
 use futures_util::StreamExt;
 use log::{debug, info, warn};
-use metrics::{collect_interval_summaries, format_latency, print_event, print_session_summaries};
-use process_tree::{TargetDiffAction, TaskFilters, TaskInfo};
+use metrics::{
+    collect_interval_summaries_labeled, format_latency, print_event, print_session_summaries,
+};
+use process_tree::{TargetDiffAction, TaskClass, TaskFilters, TaskInfo};
 use recorder::{
     FinalizeRecordingInput, IntervalCsvWriter, IntervalRecord, IrqEventRecord, JsonArrayWriter,
     SpikeEventBuffer, TreeEvent, finalize_recording, prepare_recording,
@@ -48,6 +50,7 @@ use tokio::{
 };
 
 pub const TARGET_PIDS_MAX: usize = 1024;
+const TUNE_RUN_STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
 type TaskExeInodesMap = BTreeMap<u32, (Option<u64>, Option<u64>, Option<u64>)>;
 
@@ -100,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     match parse_app_command()? {
-        AppCommand::Monitor(config) => run_monitor(*config).await,
+        AppCommand::Monitor(config) => run_monitor(*config, None).await,
         AppCommand::Restore { dry_run } => {
             let path = affinity::default_restore_path();
             if dry_run {
@@ -354,7 +357,10 @@ async fn measure_tune_candidate(
         target_pids: Vec::new(),
         tree_pids: vec![tree_pid],
         summary_period_ms: 1_000,
+        epoch_period_ms: None,
         spike_threshold_ns: 1_000_000,
+        alert_threshold_ns: None,
+        alert_webhook_url: None,
         verbose: false,
         max_tasks: 1024,
         task_filters: TaskFilters::default(),
@@ -378,13 +384,12 @@ async fn measure_tune_candidate(
             out_dir: Some(run_dir.clone()),
         }),
         max_duration: Some(Duration::from_secs(epoch_seconds)),
-        shared_hwmon,
         cgroupv2: None,
         follow_exec: true,
         exclude_tree_pids: Vec::new(),
     };
 
-    run_monitor(config).await?;
+    run_monitor(config, shared_hwmon).await?;
 
     let interval_path = run_dir.join("interval.json");
     let data = fs::read_to_string(&interval_path).map_err(|err| {
@@ -407,16 +412,59 @@ async fn measure_tune_candidate(
 }
 
 fn tune_run_dir(profile_name: &str) -> PathBuf {
+    let temp_dir = std::env::temp_dir();
+    cleanup_stale_tune_run_dirs(&temp_dir);
+
     let sanitized = profile_name
         .chars()
         .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
         .collect::<String>();
-    std::env::temp_dir().join(format!(
+    temp_dir.join(format!(
         "stutter-tune-{}-{}-{}",
         std::process::id(),
         sanitized,
         unix_nanos_now()
     ))
+}
+
+fn cleanup_stale_tune_run_dirs(temp_dir: &Path) {
+    let Ok(entries) = fs::read_dir(temp_dir) else {
+        return;
+    };
+
+    let now = SystemTime::now();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with("stutter-tune-") {
+            continue;
+        }
+
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_dir() {
+            continue;
+        }
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        let Ok(age) = now.duration_since(modified) else {
+            continue;
+        };
+        if age <= TUNE_RUN_STALE_AFTER {
+            continue;
+        }
+
+        if let Err(err) = fs::remove_dir_all(&path) {
+            warn!(
+                "stale_tune_run_cleanup_failed path={} err={err}",
+                path.display()
+            );
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -673,7 +721,10 @@ impl WatchProcessState {
     }
 }
 
-async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
+async fn run_monitor(
+    mut config: Config,
+    shared_hwmon: Option<std::sync::Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
+) -> anyhow::Result<()> {
     if config.target_pids.is_empty()
         && config.tree_pids.is_empty()
         && config.watch_process.is_none()
@@ -772,7 +823,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     let mut scx_tracker = scx::ScxTracker::default();
     let recording_monotonic_start_ns = recording.as_ref().and_then(|run| run.monotonic_start_ns);
 
-    let hwmon_reader = if let Some(shared) = &config.shared_hwmon {
+    let hwmon_reader = if let Some(shared) = &shared_hwmon {
         Some(shared.clone())
     } else if config.hwmon {
         hwmon::HwmonReader::discover_with_options(
@@ -790,6 +841,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     }
 
     let mut process_cache = process_tree::ProcessCache::default();
+    let mut watch_process_cache = process_tree::ProcessCache::default();
 
     let started = Instant::now();
     scx_tracker.sample(0);
@@ -856,6 +908,11 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
         None
     };
     let mut crossterm_events = EventStream::new();
+    let interval_label = if config.epoch_period_ms.is_some() {
+        "epoch"
+    } else {
+        "summary"
+    };
 
     let stop_reason = loop {
         tokio::select! {
@@ -890,7 +947,8 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     let elapsed_ms = started.elapsed().as_millis();
                     let drop_counters_snapshot = loaded.snapshot_drop_counters();
                     let psi_snapshot = psi_reader.read().ok();
-                    let records = collect_interval_summaries(
+                    let records = collect_interval_summaries_labeled(
+                        interval_label,
                         &mut stats_by_task,
                         elapsed_ms,
                         &drop_counters_snapshot,
@@ -1026,7 +1084,11 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     continue;
                 };
 
-                if let Some(pid) = find_process_by_pattern_at(Path::new("/proc"), &pattern) {
+                if let Some(pid) = find_process_by_pattern_at_with_cache(
+                    Path::new("/proc"),
+                    &pattern,
+                    &mut watch_process_cache,
+                ) {
                     add_watch_tree_pid(&mut config, pid);
                     tree_root_starttimes.insert(pid, process_root_starttime(pid));
                     watch_state = WatchProcessState::Running(pid);
@@ -1096,7 +1158,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     block_io_event_writer: block_io_event_writer.as_mut(),
                     block_io_event_count: &mut streamed_block_io_event_count,
                     cpu_to_pkg: &cpu_to_pkg,
-                })?;
+                });
             }
         }
     };
@@ -1107,7 +1169,9 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
 
     let drop_counters = loaded.snapshot_drop_counters();
     log_drop_counters(&drop_counters);
-    print_session_summaries(&mut stats_by_task);
+    if config.epoch_period_ms.is_none() {
+        print_session_summaries(&mut stats_by_task);
+    }
 
     if let Some(writer) = csv_writer.as_mut() {
         writer.finish()?;
@@ -1198,7 +1262,10 @@ async fn resolve_watch_process(config: &mut Config) -> anyhow::Result<Option<u32
         return Ok(None);
     };
 
-    if let Some(pid) = find_process_by_pattern_at(Path::new("/proc"), &pattern) {
+    let mut cache = process_tree::ProcessCache::default();
+    if let Some(pid) =
+        find_process_by_pattern_at_with_cache(Path::new("/proc"), &pattern, &mut cache)
+    {
         add_watch_tree_pid(config, pid);
         return Ok(Some(pid));
     }
@@ -1222,6 +1289,7 @@ async fn wait_for_watch_process(config: &mut Config) -> anyhow::Result<Option<u3
 
     let mut tick = interval(Duration::from_millis(config.watch_poll_ms));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut cache = process_tree::ProcessCache::default();
 
     let watch_timeout = config.watch_timeout;
     let timeout_future = async move {
@@ -1245,7 +1313,11 @@ async fn wait_for_watch_process(config: &mut Config) -> anyhow::Result<Option<u3
                 );
             }
             _ = tick.tick() => {
-                if let Some(pid) = find_process_by_pattern_at(Path::new("/proc"), &pattern) {
+                if let Some(pid) = find_process_by_pattern_at_with_cache(
+                    Path::new("/proc"),
+                    &pattern,
+                    &mut cache,
+                ) {
                     add_watch_tree_pid(config, pid);
                     info!("watch_process_found pattern={} pid={}", pattern, pid);
                     return Ok(Some(pid));
@@ -1310,11 +1382,20 @@ fn remove_stale_tree_roots(
     removed
 }
 
+#[cfg(test)]
 fn find_process_by_pattern_at(proc_root: &Path, pattern: &str) -> Option<u32> {
+    let mut cache = process_tree::ProcessCache::default();
+    find_process_by_pattern_at_with_cache(proc_root, pattern, &mut cache)
+}
+
+fn find_process_by_pattern_at_with_cache(
+    proc_root: &Path,
+    pattern: &str,
+    cache: &mut process_tree::ProcessCache,
+) -> Option<u32> {
     let pattern_lower = normalize_process_match_text(pattern);
 
-    let mut cache = process_tree::ProcessCache::default();
-    process_tree::scan_processes_at(proc_root, &mut cache)
+    process_tree::scan_processes_at(proc_root, cache)
         .into_iter()
         .filter_map(|(pid, process)| {
             let score =
@@ -1362,7 +1443,7 @@ fn cmdline_executable_basename_lower(cmdline: &str) -> Option<String> {
         .map(|name| name.to_string_lossy().into_owned())
 }
 
-fn drain_bpf_events(input: DrainBpfEventsInput<'_>) -> anyhow::Result<()> {
+fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
     let DrainBpfEventsInput {
         mut guard,
         config,
@@ -1419,8 +1500,7 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) -> anyhow::Result<()> {
                 let event = unsafe { &*(item.as_ptr() as *const IrqEvent) };
                 let record = irq_event_record(recording_monotonic_start_ns, event);
                 if let Some(writer) = irq_event_writer.as_deref_mut() {
-                    writer.push(&record)?;
-                    *irq_event_count += 1;
+                    push_json_stream_event(writer, &record, irq_event_count, "irq_events");
                 }
                 log_irq_event(event);
             }
@@ -1445,14 +1525,19 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) -> anyhow::Result<()> {
                 }
 
                 if let Some(writer) = migration_event_writer.as_deref_mut() {
-                    writer.push(&recorder::MigrationEventRecord {
+                    let record = recorder::MigrationEventRecord {
                         elapsed_ms,
                         tid: event.tid,
                         from_cpu: event.from_cpu,
                         to_cpu: event.to_cpu,
                         timestamp_ns: event.timestamp_ns,
-                    })?;
-                    *migration_event_count += 1;
+                    };
+                    push_json_stream_event(
+                        writer,
+                        &record,
+                        migration_event_count,
+                        "migration_events",
+                    );
                 }
             }
             EVENT_CPU_FREQ => {
@@ -1464,13 +1549,18 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) -> anyhow::Result<()> {
                 let elapsed_ms = started.elapsed().as_millis();
 
                 if let Some(writer) = cpu_freq_sample_writer.as_deref_mut() {
-                    writer.push(&recorder::CpuFreqRecord {
+                    let record = recorder::CpuFreqRecord {
                         elapsed_ms,
                         cpu: event.cpu,
                         freq_khz: event.state, // state field contains freq in kHz
                         timestamp_ns: event.timestamp_ns,
-                    })?;
-                    *cpu_freq_sample_count += 1;
+                    };
+                    push_json_stream_event(
+                        writer,
+                        &record,
+                        cpu_freq_sample_count,
+                        "cpu_freq_samples",
+                    );
                 }
             }
             EVENT_STAT_WAIT => {
@@ -1493,7 +1583,7 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) -> anyhow::Result<()> {
                 let elapsed_ms = started.elapsed().as_millis();
 
                 if let Some(writer) = block_io_event_writer.as_deref_mut() {
-                    writer.push(&recorder::BlockIoRecord {
+                    let record = recorder::BlockIoRecord {
                         elapsed_ms,
                         tid: event.tid,
                         dev: event.dev,
@@ -1504,8 +1594,8 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) -> anyhow::Result<()> {
                         rwbs: String::from_utf8_lossy(&event.rwbs)
                             .trim_matches(char::from(0))
                             .to_owned(),
-                    })?;
-                    *block_io_event_count += 1;
+                    };
+                    push_json_stream_event(writer, &record, block_io_event_count, "io_events");
                 }
             }
             EVENT_EXEC => {
@@ -1539,7 +1629,18 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) -> anyhow::Result<()> {
     }
 
     guard.clear_ready();
-    Ok(())
+}
+
+fn push_json_stream_event<T: Serialize>(
+    writer: &mut JsonArrayWriter,
+    value: &T,
+    count: &mut usize,
+    stream_name: &str,
+) {
+    match writer.push(value) {
+        Ok(()) => *count += 1,
+        Err(err) => warn!("json_stream_write_failed stream={stream_name} err={err:#}"),
+    }
 }
 
 fn handle_event(input: HandleEventInput<'_>) {
@@ -1580,6 +1681,15 @@ fn handle_event(input: HandleEventInput<'_>) {
 
             stats.record(event, config.spike_threshold_ns, elapsed_ms);
 
+            let alert_payload = if config
+                .alert_threshold_ns
+                .is_some_and(|threshold| event.latency_ns >= threshold)
+            {
+                Some(AlertPayload::from_task_stats(stats, event, elapsed_ms))
+            } else {
+                None
+            };
+
             if event.latency_ns >= config.spike_threshold_ns
                 && let Some(spike_events) = spike_events
             {
@@ -1595,6 +1705,10 @@ fn handle_event(input: HandleEventInput<'_>) {
             } else if event.latency_ns >= config.spike_threshold_ns {
                 print_event(event, &comm, "spike");
             }
+
+            if let Some(alert_payload) = alert_payload {
+                dispatch_alert(config, alert_payload);
+            }
         }
         other => {
             let comm = metrics::comm_to_string(&event.comm);
@@ -1603,6 +1717,127 @@ fn handle_event(input: HandleEventInput<'_>) {
                 other, event.pid, event.cpu, comm
             );
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+struct AlertPayload {
+    title: String,
+    message: String,
+    task: u32,
+    active: bool,
+    class: TaskClass,
+    comm: String,
+    process_pid: Option<u32>,
+    process_comm: String,
+    latency_ns: u64,
+    latency_ms: u64,
+    cpu: u32,
+    prio: i32,
+    wakeup_ns: u64,
+    switch_ns: u64,
+    elapsed_ms: u128,
+}
+
+impl AlertPayload {
+    fn from_task_stats(
+        stats: &metrics::TaskStats,
+        event: &SchedulerEvent,
+        elapsed_ms: u128,
+    ) -> Self {
+        let latency_ms = event.latency_ns / 1_000_000;
+        let title = "stutter latency alert".to_owned();
+        let message = format!(
+            "task={} comm={} latency={} cpu={} process_pid={:?} process_comm={}",
+            event.pid,
+            stats.comm,
+            format_latency(event.latency_ns),
+            event.cpu,
+            stats.process_pid,
+            stats.process_comm
+        );
+
+        Self {
+            title,
+            message,
+            task: event.pid,
+            active: stats.active,
+            class: stats.class,
+            comm: stats.comm.clone(),
+            process_pid: stats.process_pid,
+            process_comm: stats.process_comm.to_string(),
+            latency_ns: event.latency_ns,
+            latency_ms,
+            cpu: event.cpu,
+            prio: event.prio,
+            wakeup_ns: event.wakeup_ns,
+            switch_ns: event.switch_ns,
+            elapsed_ms,
+        }
+    }
+}
+
+fn dispatch_alert(config: &Config, payload: AlertPayload) {
+    let webhook_url = config.alert_webhook_url.clone();
+    let spawn_result = std::thread::Builder::new()
+        .name("stutter-alert".to_owned())
+        .spawn(move || {
+            let result = if let Some(url) = webhook_url {
+                send_webhook_alert(&url, &payload)
+            } else {
+                send_desktop_alert(&payload)
+            };
+
+            if let Err(err) = result {
+                warn!("alert_delivery_failed err={err}");
+            }
+        });
+
+    if let Err(err) = spawn_result {
+        warn!("alert_thread_spawn_failed err={err}");
+    }
+}
+
+fn send_desktop_alert(payload: &AlertPayload) -> Result<(), String> {
+    let status = std::process::Command::new("notify-send")
+        .args([
+            "--urgency=critical",
+            payload.title.as_str(),
+            payload.message.as_str(),
+        ])
+        .status()
+        .map_err(|err| format!("failed to run notify-send: {err}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("notify-send exited with {status}"))
+    }
+}
+
+fn send_webhook_alert(url: &str, payload: &AlertPayload) -> Result<(), String> {
+    let body = serde_json::to_string(payload)
+        .map_err(|err| format!("failed to serialize alert payload: {err}"))?;
+    let status = std::process::Command::new("curl")
+        .args([
+            "-fsS",
+            "--max-time",
+            "10",
+            "-H",
+            "Content-Type: application/json",
+            "-X",
+            "POST",
+            "--data-binary",
+            body.as_str(),
+            url,
+        ])
+        .status()
+        .map_err(|err| format!("failed to run curl webhook POST: {err}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("curl webhook POST exited with {status}"))
     }
 }
 
