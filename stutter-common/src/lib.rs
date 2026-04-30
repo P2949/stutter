@@ -6,6 +6,7 @@ pub const EVENT_MIGRATION: u32 = 3;
 pub const EVENT_CPU_FREQ: u32 = 4;
 pub const EVENT_STAT_WAIT: u32 = 5;
 pub const EVENT_BLOCK_IO: u32 = 6;
+pub const EVENT_EXEC: u32 = 7;
 
 pub const DROP_WAKEUP_TIMES_INSERT_FAILED: u32 = 0;
 pub const DROP_RINGBUF_RESERVE_FAILED: u32 = 1;
@@ -101,6 +102,18 @@ pub struct BlockIoEvent {
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for BlockIoEvent {}
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ExecEvent {
+    pub kind: u32,
+    pub pid: u32,
+    pub tid: u32,
+    pub comm: [u8; 16],
+}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for ExecEvent {}
+
 // Compile-time layout assertions to ensure eBPF and userspace agree on struct sizes.
 // These will fail the build if the sizes change unexpectedly.
 const _: [(); core::mem::size_of::<SchedulerEvent>()] = [(); 72];
@@ -109,3 +122,4 @@ const _: [(); core::mem::size_of::<MigrationEvent>()] = [(); 24];
 const _: [(); core::mem::size_of::<CpuFreqEvent>()] = [(); 24];
 const _: [(); core::mem::size_of::<StatWaitEvent>()] = [(); 16];
 const _: [(); core::mem::size_of::<BlockIoEvent>()] = [(); 48];
+const _: [(); core::mem::size_of::<ExecEvent>()] = [(); 28];

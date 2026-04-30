@@ -248,7 +248,10 @@ fn exe_metadata_at(proc_root: &Path, pid: u32) -> Option<fs::Metadata> {
     fs::metadata(proc_root.join(pid.to_string()).join("exe")).ok()
 }
 
-pub fn descendants_of(root_pid: u32, children_by_parent: &BTreeMap<u32, Vec<u32>>) -> BTreeSet<u32> {
+pub fn descendants_of(
+    root_pid: u32,
+    children_by_parent: &BTreeMap<u32, Vec<u32>>,
+) -> BTreeSet<u32> {
     let mut result = BTreeSet::new();
     let mut queue = VecDeque::new();
 
@@ -312,6 +315,7 @@ pub fn target_snapshot(manual_pids: &[u32], tree_pids: &[u32]) -> TargetSnapshot
 pub fn target_snapshot_with_options(
     manual_pids: &[u32],
     tree_pids: &[u32],
+    exclude_tree_pids: &[u32],
     filters: &TaskFilters,
     keep_missing_pid: bool,
     cache: &mut ProcessCache,
@@ -321,6 +325,7 @@ pub fn target_snapshot_with_options(
         Path::new("/proc"),
         manual_pids,
         tree_pids,
+        exclude_tree_pids,
         filters,
         keep_missing_pid,
         cache,
@@ -342,13 +347,24 @@ pub fn target_snapshot_filtered_at(
     tree_pids: &[u32],
     filters: &TaskFilters,
 ) -> TargetSnapshot {
-    target_snapshot_filtered_at_with_options(proc_root, manual_pids, tree_pids, filters, false, &mut ProcessCache::default(), None)
+    target_snapshot_filtered_at_with_options(
+        proc_root,
+        manual_pids,
+        tree_pids,
+        &[],
+        filters,
+        false,
+        &mut ProcessCache::default(),
+        None,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn target_snapshot_filtered_at_with_options(
     proc_root: &Path,
     manual_pids: &[u32],
     tree_pids: &[u32],
+    exclude_tree_pids: &[u32],
     filters: &TaskFilters,
     keep_missing_pid: bool,
     cache: &mut ProcessCache,
@@ -387,6 +403,15 @@ pub fn target_snapshot_filtered_at_with_options(
             process_roots.extend(descendants_of(*root_pid, &children_by_parent));
         }
     }
+
+    let mut excluded_pids = BTreeSet::new();
+    for root_pid in exclude_tree_pids {
+        if processes.contains_key(root_pid) {
+            excluded_pids.insert(*root_pid);
+            excluded_pids.extend(descendants_of(*root_pid, &children_by_parent));
+        }
+    }
+    process_roots.retain(|pid| !excluded_pids.contains(pid));
 
     let mut tasks = expand_tasks_at(proc_root, &process_roots, &processes, previous_tasks);
 
@@ -456,6 +481,50 @@ pub fn diff_tasks_ref<'a>(
     });
 
     diffs
+}
+
+pub fn find_auto_target_pids(proc_root: &Path) -> Vec<(u32, TaskClass)> {
+    let mut candidates: BTreeMap<TaskClass, Vec<u32>> = BTreeMap::new();
+
+    if let Ok(entries) = fs::read_dir(proc_root) {
+        for entry in entries.flatten() {
+            let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+                continue;
+            };
+
+            let Some(proc_info) = read_proc_info_at(proc_root, pid) else {
+                continue;
+            };
+
+            let class = classify_task(&proc_info.comm, &proc_info.comm, &proc_info.cmdline);
+            match class {
+                TaskClass::GameScope
+                | TaskClass::SteamRuntime
+                | TaskClass::Game
+                | TaskClass::Launcher => {
+                    candidates.entry(class).or_default().push(pid);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let priorities = [
+        TaskClass::GameScope,
+        TaskClass::SteamRuntime,
+        TaskClass::Game,
+        TaskClass::Launcher,
+    ];
+
+    for class in priorities {
+        if let Some(pids) = candidates.get(&class) {
+            let mut result: Vec<_> = pids.iter().map(|pid| (*pid, class)).collect();
+            result.sort_unstable_by_key(|(pid, _)| *pid);
+            return result;
+        }
+    }
+
+    Vec::new()
 }
 
 pub fn expand_tasks_at(
@@ -877,5 +946,58 @@ impl TreeEntry {
             TreeEntry::Process { pid, .. } => *pid,
             TreeEntry::Task { tid, .. } => *tid,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    #[test]
+    fn detects_gamescope_as_auto_target() {
+        let dir = std::env::temp_dir().join(format!("stutter-auto-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let pid_dir = dir.join("123");
+        fs::create_dir_all(&pid_dir).unwrap();
+        fs::write(pid_dir.join("status"), "Name:\tgamescope\nPPid:\t1\n").unwrap();
+        fs::write(pid_dir.join("cmdline"), "gamescope\0-f\0--\0steam\0").unwrap();
+        fs::write(pid_dir.join("stat"), "123 (gamescope) S 1 123 0 0 -1 0 0 0 0 0 0 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n").unwrap();
+
+        let auto = find_auto_target_pids(&dir);
+        assert_eq!(auto.len(), 1);
+        assert_eq!(auto[0].0, 123);
+        assert_eq!(auto[0].1, TaskClass::GameScope);
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn prioritizes_gamescope_over_steam_runtime() {
+        let dir =
+            std::env::temp_dir().join(format!("stutter-auto-prio-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+
+        // Steam Runtime (priority 2)
+        let pid1 = dir.join("101");
+        fs::create_dir_all(&pid1).unwrap();
+        fs::write(pid1.join("status"), "Name:\tpressure-vessel\nPPid:\t1\n").unwrap();
+        fs::write(pid1.join("cmdline"), "pressure-vessel-wrap\0").unwrap();
+        fs::write(pid1.join("stat"), "101 (pressure-vessel) S 1 101 0 0 -1 0 0 0 0 0 0 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n").unwrap();
+
+        // GameScope (priority 1)
+        let pid2 = dir.join("102");
+        fs::create_dir_all(&pid2).unwrap();
+        fs::write(pid2.join("status"), "Name:\tgamescope\nPPid:\t1\n").unwrap();
+        fs::write(pid2.join("cmdline"), "gamescope\0").unwrap();
+        fs::write(pid2.join("stat"), "102 (gamescope) S 1 102 0 0 -1 0 0 0 0 0 0 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n").unwrap();
+
+        let auto = find_auto_target_pids(&dir);
+        assert_eq!(auto.len(), 1);
+        assert_eq!(auto[0].0, 102);
+        assert_eq!(auto[0].1, TaskClass::GameScope);
+
+        fs::remove_dir_all(dir).ok();
     }
 }

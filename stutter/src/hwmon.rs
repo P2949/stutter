@@ -2,8 +2,10 @@ use std::{
     fs,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU32, AtomicU64, Ordering},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, AtomicU64, Ordering},
+    },
 };
 
 use crate::recorder::GpuSample;
@@ -131,20 +133,28 @@ impl HwmonReader {
         if let Some(state) = &self.nvidia_state {
             if gpu_busy_percent.is_none() {
                 let val = state.gpu_busy_percent.load(Ordering::Relaxed);
-                if val != u32::MAX { gpu_busy_percent = Some(val); }
+                if val != u32::MAX {
+                    gpu_busy_percent = Some(val);
+                }
             }
             if vram_used_bytes.is_none() {
                 let val = state.vram_used_bytes.load(Ordering::Relaxed);
-                if val != u64::MAX { vram_used_bytes = Some(val); }
+                if val != u64::MAX {
+                    vram_used_bytes = Some(val);
+                }
             }
             if vram_total_bytes.is_none() {
                 let val = state.vram_total_bytes.load(Ordering::Relaxed);
-                if val != u64::MAX { vram_total_bytes = Some(val); }
+                if val != u64::MAX {
+                    vram_total_bytes = Some(val);
+                }
             }
         }
 
         let vram_used_percent = match (vram_used_bytes, vram_total_bytes) {
-            (Some(used), Some(total)) if total > 0 => Some(((used as f64 / total as f64) * 100.0) as u32),
+            (Some(used), Some(total)) if total > 0 => {
+                Some(((used as f64 / total as f64) * 100.0) as u32)
+            }
             _ => None,
         };
 
@@ -264,17 +274,17 @@ fn start_nvidia_smi_thread() -> Arc<NvidiaState> {
         vram_used_bytes: AtomicU64::new(u64::MAX),
         vram_total_bytes: AtomicU64::new(u64::MAX),
     });
-    
+
     let state_clone = state.clone();
     std::thread::spawn(move || {
         loop {
             let output = std::process::Command::new("nvidia-smi")
                 .args([
                     "--query-gpu=utilization.gpu,memory.used,memory.total",
-                    "--format=csv,noheader,nounits"
+                    "--format=csv,noheader,nounits",
                 ])
                 .output();
-                
+
             if let Ok(out) = output
                 && let Ok(s) = String::from_utf8(out.stdout)
                 && let Some(line) = s.lines().next()
@@ -285,10 +295,14 @@ fn start_nvidia_smi_thread() -> Arc<NvidiaState> {
                         state_clone.gpu_busy_percent.store(busy, Ordering::Relaxed);
                     }
                     if let Ok(used_mb) = parts[1].parse::<u64>() {
-                        state_clone.vram_used_bytes.store(used_mb * 1024 * 1024, Ordering::Relaxed);
+                        state_clone
+                            .vram_used_bytes
+                            .store(used_mb * 1024 * 1024, Ordering::Relaxed);
                     }
                     if let Ok(total_mb) = parts[2].parse::<u64>() {
-                        state_clone.vram_total_bytes.store(total_mb * 1024 * 1024, Ordering::Relaxed);
+                        state_clone
+                            .vram_total_bytes
+                            .store(total_mb * 1024 * 1024, Ordering::Relaxed);
                     }
                 }
             }

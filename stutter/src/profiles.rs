@@ -78,7 +78,13 @@ pub fn apply_profile_to_tree_cached(
     dry_run: bool,
     cache: &mut ProfileApplyCache,
 ) -> anyhow::Result<Vec<AffinityRecord>> {
-    apply_profile_to_tree_with_cache(tree_pid, profile, force_restore_overwrite, dry_run, Some(cache))
+    apply_profile_to_tree_with_cache(
+        tree_pid,
+        profile,
+        force_restore_overwrite,
+        dry_run,
+        Some(cache),
+    )
 }
 
 fn apply_profile_to_tree_with_cache(
@@ -183,7 +189,7 @@ where
             if !rule.match_comm.is_empty() {
                 let comms = [&task.comm, task.process_comm.as_ref()];
                 let mut comm_match = false;
-                
+
                 for (i, pattern) in rule.match_comm.iter().enumerate() {
                     if let Some(re) = &rule.match_comm_regex[i] {
                         if comms.iter().any(|c| re.is_match(c)) {
@@ -195,7 +201,7 @@ where
                         break;
                     }
                 }
-                
+
                 if !comm_match {
                     continue;
                 }
@@ -283,15 +289,20 @@ fn validate_profile(profile: Profile) -> anyhow::Result<Profile> {
     if profile.name.is_empty() {
         anyhow::bail!("profile name must not be empty");
     }
-    
-    let online = affinity::CpuMask::online_cpus().unwrap_or_else(|_| affinity::CpuMask::parse("0-1023").unwrap());
-    
+
+    let online = affinity::CpuMask::online_cpus()
+        .unwrap_or_else(|_| affinity::CpuMask::parse("0-1023").unwrap());
+
     for (i, rule) in profile.rules.iter().enumerate() {
         if rule.affinity.is_empty() {
             anyhow::bail!("profile rule {} is missing affinity", i);
         }
         if !rule.affinity.is_subset_of(&online) {
-            anyhow::bail!("profile rule {} requests CPUs not currently online. Online: {}", i, online.to_range_string());
+            anyhow::bail!(
+                "profile rule {} requests CPUs not currently online. Online: {}",
+                i,
+                online.to_range_string()
+            );
         }
     }
     Ok(profile)
@@ -331,12 +342,17 @@ impl ProfileToml {
 
             let mut match_comm_regex = Vec::new();
             for pattern in &rule.match_comm {
-                let re = if pattern.len() >= 2 && pattern.starts_with('/') && pattern.ends_with('/') {
-                    Some(Regex::new(&pattern[1..pattern.len() - 1])
-                        .with_context(|| format!("invalid profile regex '{}'", pattern))?)
+                let re = if pattern.len() >= 2 && pattern.starts_with('/') && pattern.ends_with('/')
+                {
+                    Some(
+                        Regex::new(&pattern[1..pattern.len() - 1])
+                            .with_context(|| format!("invalid profile regex '{}'", pattern))?,
+                    )
                 } else if pattern.chars().any(|c| ".^$*+?()[]{}|\\".contains(c)) {
-                    Some(Regex::new(pattern)
-                        .with_context(|| format!("invalid profile regex '{}'", pattern))?)
+                    Some(
+                        Regex::new(pattern)
+                            .with_context(|| format!("invalid profile regex '{}'", pattern))?,
+                    )
                 } else {
                     None
                 };

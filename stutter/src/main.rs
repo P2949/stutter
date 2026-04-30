@@ -27,6 +27,8 @@ use std::{
 
 use aya::maps::{HashMap as AyaHashMap, MapData};
 use cli::{AppCommand, Config, parse_app_command};
+use crossterm::event::{Event, EventStream, KeyCode};
+use futures_util::StreamExt;
 use log::{debug, info, warn};
 use metrics::{collect_interval_summaries, format_latency, print_event, print_session_summaries};
 use process_tree::{TargetDiffAction, TaskFilters, TaskInfo};
@@ -34,13 +36,11 @@ use recorder::{
     FinalizeRecordingInput, IntervalCsvWriter, IntervalRecord, IrqEventRecord, JsonArrayWriter,
     SpikeEventBuffer, TreeEvent, finalize_recording, prepare_recording,
 };
-use crossterm::event::{Event, EventStream, KeyCode};
-use futures_util::StreamExt;
 use serde::Serialize;
 use stutter_common::{
-    EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_IRQ_LATENCY, EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY,
-    EVENT_STAT_WAIT, BlockIoEvent, CpuFreqEvent, IrqEvent, MigrationEvent, SchedulerEvent,
-    StatWaitEvent,
+    BlockIoEvent, CpuFreqEvent, EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_EXEC, EVENT_IRQ_LATENCY,
+    EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent, MigrationEvent,
+    SchedulerEvent, StatWaitEvent,
 };
 use tokio::{
     signal, task,
@@ -68,8 +68,8 @@ struct HandleEventInput<'a> {
     event: &'a SchedulerEvent,
     config: &'a Config,
     started: Instant,
-    active_targets: &'a BTreeMap<u32, TaskInfo>,
-    known_targets: &'a BTreeMap<u32, TaskInfo>,
+    active_targets: &'a mut BTreeMap<u32, TaskInfo>,
+    known_targets: &'a mut BTreeMap<u32, TaskInfo>,
     stats_by_task: &'a mut BTreeMap<u32, metrics::TaskStats>,
     monotonic_start_ns: Option<u64>,
     spike_events: Option<&'a mut SpikeEventBuffer>,
@@ -79,8 +79,8 @@ struct DrainBpfEventsInput<'a> {
     guard: tokio::io::unix::AsyncFdReadyMutGuard<'a, aya::maps::RingBuf<aya::maps::MapData>>,
     config: &'a Config,
     started: Instant,
-    active_targets: &'a BTreeMap<u32, TaskInfo>,
-    known_targets: &'a BTreeMap<u32, TaskInfo>,
+    active_targets: &'a mut BTreeMap<u32, TaskInfo>,
+    known_targets: &'a mut BTreeMap<u32, TaskInfo>,
     stats_by_task: &'a mut BTreeMap<u32, metrics::TaskStats>,
     recording_monotonic_start_ns: Option<u64>,
     spike_events: &'a mut Option<SpikeEventBuffer>,
@@ -122,7 +122,18 @@ async fn main() -> anyhow::Result<()> {
             watch,
             keep_applied,
             refresh_ms,
-        } => apply_profile_command(tree_pid, profile, force, dry_run, watch, keep_applied, refresh_ms).await,
+        } => {
+            apply_profile_command(
+                tree_pid,
+                profile,
+                force,
+                dry_run,
+                watch,
+                keep_applied,
+                refresh_ms,
+            )
+            .await
+        }
         AppCommand::InspectTree { tree_pid } => {
             let rendered = process_tree::render_tree(tree_pid)?;
             print!("{rendered}");
@@ -223,30 +234,41 @@ async fn tune_command(
             profile.name, warmup_seconds
         );
 
-        let records =
-            match apply_profile_to_tree_blocking(tree_pid, profile.clone(), idx == 0, false).await {
-                Ok(records) => records,
-                Err(err) => {
-                    restore_tune_on_error();
-                    return Err(err);
-                }
-            };
+        let records = match apply_profile_to_tree_blocking(
+            tree_pid,
+            profile.clone(),
+            idx == 0,
+            false,
+        )
+        .await
+        {
+            Ok(records) => records,
+            Err(err) => {
+                restore_tune_on_error();
+                return Err(err);
+            }
+        };
 
         println!(
             "tune candidate={} state=CandidateMeasure measure_seconds={}",
             profile.name, measure_seconds
         );
 
-        let interval_records =
-            match measure_tune_candidate(tree_pid, &profile.name, epoch_seconds, warmup_seconds, shared_hwmon.clone())
-                .await
-            {
-                Ok(records) => records,
-                Err(err) => {
-                    restore_tune_on_error();
-                    return Err(err);
-                }
-            };
+        let interval_records = match measure_tune_candidate(
+            tree_pid,
+            &profile.name,
+            epoch_seconds,
+            warmup_seconds,
+            shared_hwmon.clone(),
+        )
+        .await
+        {
+            Ok(records) => records,
+            Err(err) => {
+                restore_tune_on_error();
+                return Err(err);
+            }
+        };
 
         let score = scorer::score_from_interval_records(&interval_records);
         let result = TuneCandidateSummary {
@@ -358,6 +380,8 @@ async fn measure_tune_candidate(
         max_duration: Some(Duration::from_secs(epoch_seconds)),
         shared_hwmon,
         cgroupv2: None,
+        follow_exec: true,
+        exclude_tree_pids: Vec::new(),
     };
 
     run_monitor(config).await?;
@@ -481,7 +505,15 @@ async fn apply_profile_command(
     let mut cache = profiles::ProfileApplyCache::default();
 
     let records = if watch {
-        match apply_profile_to_tree_cached_blocking(tree_pid, profile.clone(), force, dry_run, cache).await {
+        match apply_profile_to_tree_cached_blocking(
+            tree_pid,
+            profile.clone(),
+            force,
+            dry_run,
+            cache,
+        )
+        .await
+        {
             Ok((records, updated_cache)) => {
                 cache = updated_cache;
                 records
@@ -560,9 +592,11 @@ async fn apply_profile_to_tree_blocking(
     force: bool,
     dry_run: bool,
 ) -> anyhow::Result<Vec<affinity::AffinityRecord>> {
-    task::spawn_blocking(move || profiles::apply_profile_to_tree(tree_pid, &profile, force, dry_run))
-        .await
-        .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))?
+    task::spawn_blocking(move || {
+        profiles::apply_profile_to_tree(tree_pid, &profile, force, dry_run)
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))?
 }
 
 async fn apply_profile_to_tree_cached_blocking(
@@ -640,6 +674,26 @@ impl WatchProcessState {
 }
 
 async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
+    if config.target_pids.is_empty()
+        && config.tree_pids.is_empty()
+        && config.watch_process.is_none()
+        && config.cgroupv2.is_none()
+    {
+        let auto_targets = process_tree::find_auto_target_pids(Path::new("/proc"));
+        if auto_targets.is_empty() {
+            anyhow::bail!(
+                "no target specified and no game launcher (gamescope, pressure-vessel, etc.) detected. \
+                 Please provide --pid <PID>, --tree-pid <PID>, --watch-process <COMM>, or --cgroupv2 <PATH>"
+            );
+        }
+
+        let pids: Vec<_> = auto_targets.iter().map(|(p, _)| *p).collect();
+        let class = auto_targets[0].1;
+        info!("auto_detected_launcher class={class} pids={pids:?}");
+        println!("auto-detected game launcher: {class} (PIDs {pids:?}). monitoring tree...");
+        config.tree_pids = pids;
+    }
+
     let mut watch_state = match resolve_watch_process(&mut config).await? {
         Some(pid) => WatchProcessState::Running(pid),
         None => WatchProcessState::None,
@@ -661,7 +715,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     let mut spike_events = recording.as_ref().map(|_| SpikeEventBuffer::default());
     let irq_events: Vec<IrqEventRecord> = Vec::new();
     let gpu_samples = Vec::new();
-    
+
     let mut interval_writer = if config.retain_intervals.is_none() {
         recording
             .as_ref()
@@ -794,7 +848,10 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
 
     let mut tui_state = crate::tui::TuiState::default();
     let mut terminal = if config.tui {
-        Some(crate::tui::init_terminal().map_err(|e| anyhow::anyhow!("failed to init terminal: {e}"))?)
+        Some(
+            crate::tui::init_terminal()
+                .map_err(|e| anyhow::anyhow!("failed to init terminal: {e}"))?,
+        )
     } else {
         None
     };
@@ -805,7 +862,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
             _ = signal::ctrl_c() => {
                 break "ctrl_c".to_owned();
             }
-            
+
             Some(Ok(event)) = crossterm_events.next(), if config.tui => {
                 if let Event::Key(key) = event {
                     match key.code {
@@ -851,7 +908,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                         for record in &records {
                             interval_records.push(record.clone());
                         }
-                        
+
                         let max_intervals = config.retain_intervals.unwrap_or(120);
                         if interval_records.len() > max_intervals {
                             let drop_count = interval_records.len() - max_intervals;
@@ -1025,8 +1082,8 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     guard,
                     config: &config,
                     started,
-                    active_targets: &active_targets,
-                    known_targets: &known_targets,
+                    active_targets: &mut active_targets,
+                    known_targets: &mut known_targets,
                     stats_by_task: &mut stats_by_task,
                     recording_monotonic_start_ns,
                     spike_events: &mut spike_events,
@@ -1451,6 +1508,32 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) -> anyhow::Result<()> {
                     *block_io_event_count += 1;
                 }
             }
+            EVENT_EXEC => {
+                if !config.follow_exec {
+                    continue;
+                }
+                if item.len() < std::mem::size_of::<ExecEvent>() {
+                    warn!("short_exec_event len={}", item.len());
+                    continue;
+                }
+                let event = unsafe { &*(item.as_ptr() as *const ExecEvent) };
+                let comm = metrics::comm_to_string(&event.comm);
+
+                info!(
+                    "process_exec pid={} tid={} comm={}",
+                    event.pid, event.tid, comm
+                );
+
+                if let Some(stats) = stats_by_task.get_mut(&event.tid) {
+                    stats.comm = comm.clone();
+                    stats.class = process_tree::classify_task(&comm, &comm, "");
+                }
+
+                if let Some(info) = active_targets.get_mut(&event.tid) {
+                    info.comm = comm.clone();
+                    info.class = process_tree::classify_task(&comm, &comm, "");
+                }
+            }
             other => warn!("unknown_bpf_event kind={other} len={}", item.len()),
         }
     }
@@ -1575,10 +1658,11 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
     target_pids.dedup();
 
     let tree_pids = config.tree_pids.clone();
+    let exclude_tree_pids = config.exclude_tree_pids.clone();
     let filters = config.task_filters.clone();
     let keep_missing_pid = config.keep_missing_pid;
     let max_tasks = config.max_tasks;
-    
+
     let mut process_cache_owned = std::mem::take(process_cache);
     let active_targets_clone = active_targets.clone();
 
@@ -1586,6 +1670,7 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
         let snap = process_tree::target_snapshot_with_options(
             &target_pids,
             &tree_pids,
+            &exclude_tree_pids,
             &filters,
             keep_missing_pid,
             &mut process_cache_owned,

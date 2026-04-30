@@ -2,17 +2,20 @@
 #![no_main]
 
 use aya_ebpf::{
-    helpers::{bpf_get_current_pid_tgid, bpf_get_smp_processor_id, bpf_ktime_get_ns, bpf_get_current_cgroup_id},
+    helpers::{
+        bpf_get_current_cgroup_id, bpf_get_current_pid_tgid, bpf_get_smp_processor_id,
+        bpf_ktime_get_ns,
+    },
     macros::{map, tracepoint},
     maps::{Array, HashMap, LruHashMap, PerCpuArray, RingBuf},
     programs::TracePointContext,
 };
 use stutter_common::{
-    DROP_COUNTERS_MAX, DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
-    DROP_WAKER_MAP_INSERT_FAILED, DROP_WAKEUP_TIMES_INSERT_FAILED, EVENT_BLOCK_IO,
-    EVENT_CPU_FREQ, EVENT_IRQ_LATENCY, EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT,
-    BlockIoEvent, CpuFreqEvent, IrqEvent, MigrationEvent, SchedulerEvent, StatWaitEvent,
-    DROP_BLOCK_START_INSERT_FAILED,
+    BlockIoEvent, CpuFreqEvent, DROP_BLOCK_START_INSERT_FAILED, DROP_COUNTERS_MAX,
+    DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED, DROP_WAKER_MAP_INSERT_FAILED,
+    DROP_WAKEUP_TIMES_INSERT_FAILED, EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_EXEC, EVENT_IRQ_LATENCY,
+    EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent, MigrationEvent,
+    SchedulerEvent, StatWaitEvent,
 };
 
 #[map]
@@ -59,10 +62,12 @@ struct IoStart {
 }
 
 #[map]
-static PREV_FAULTS: HashMap<u32, FaultCounters> = HashMap::<u32, FaultCounters>::with_max_entries(131_072, 0);
+static PREV_FAULTS: HashMap<u32, FaultCounters> =
+    HashMap::<u32, FaultCounters>::with_max_entries(131_072, 0);
 
 #[map]
-static BLOCK_START: LruHashMap<u64, IoStart> = LruHashMap::<u64, IoStart>::with_max_entries(16384, 0);
+static BLOCK_START: LruHashMap<u64, IoStart> =
+    LruHashMap::<u64, IoStart>::with_max_entries(16384, 0);
 
 #[map]
 static DROP_COUNTERS: PerCpuArray<u64> = PerCpuArray::<u64>::with_max_entries(DROP_COUNTERS_MAX, 0);
@@ -97,6 +102,41 @@ pub fn sched_migrate_task(ctx: TracePointContext) -> u32 {
         Ok(ret) => ret,
         Err(ret) => ret,
     }
+}
+
+#[tracepoint]
+pub fn sched_process_exec(ctx: TracePointContext) -> u32 {
+    match try_sched_process_exec(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+fn try_sched_process_exec(_ctx: TracePointContext) -> Result<u32, u32> {
+    let pid_tgid = bpf_get_current_pid_tgid();
+    let pid = (pid_tgid >> 32) as u32;
+    let tid = (pid_tgid & 0xffff_ffff) as u32;
+
+    if !is_target_pid(pid) && !is_target_pid(tid) {
+        return Ok(0);
+    }
+
+    if let Some(mut entry) = EVENTS.reserve::<ExecEvent>(0) {
+        let p = entry.as_mut_ptr();
+        unsafe {
+            (*p).kind = EVENT_EXEC;
+            (*p).pid = pid;
+            (*p).tid = tid;
+            if let Ok(comm) = aya_ebpf::helpers::bpf_get_current_comm() {
+                (*p).comm = comm;
+            }
+        }
+        entry.submit(0);
+    } else {
+        let _ = increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
+    }
+
+    Ok(0)
 }
 
 #[tracepoint]

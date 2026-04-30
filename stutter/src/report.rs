@@ -1,10 +1,11 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, BinaryHeap},
     fs,
     path::Path,
 };
 
 use anyhow::Context;
+use serde::Serialize;
 
 use crate::{
     metrics::format_latency,
@@ -14,8 +15,6 @@ use crate::{
         SessionTask, SpikeEvent,
     },
 };
-
-use serde::Serialize;
 
 const MIN_CLUSTER_TASKS: usize = 3;
 const MAX_INLINE_CLUSTER_POINTS: usize = 8;
@@ -63,7 +62,7 @@ pub(crate) struct RunArtifacts {
     pub(crate) frame_events: Vec<FrameEvent>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 struct SpikeClusterCandidate {
     start_idx: usize,
     end_idx: usize,
@@ -71,6 +70,29 @@ struct SpikeClusterCandidate {
     min_switch_ns: u64,
     max_switch_ns: u64,
     max_latency_ns: u64,
+}
+
+impl Ord for SpikeClusterCandidate {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (
+            self.distinct_tasks,
+            self.max_latency_ns,
+            self.end_idx.saturating_sub(self.start_idx),
+            std::cmp::Reverse(self.min_switch_ns),
+        )
+            .cmp(&(
+                other.distinct_tasks,
+                other.max_latency_ns,
+                other.end_idx.saturating_sub(other.start_idx),
+                std::cmp::Reverse(other.min_switch_ns),
+            ))
+    }
+}
+
+impl PartialOrd for SpikeClusterCandidate {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 pub fn print_report(
@@ -210,6 +232,50 @@ pub fn render_diff_report(
     regressions.sort_by_key(|d| std::cmp::Reverse(d.delta_max_ns));
     improvements.sort_by_key(|d| d.delta_max_ns);
 
+    pushln(&mut output, "summary highlights");
+    pushln(&mut output, "------------------");
+    if let Some(worst) = regressions.first() {
+        let pct = if worst.max_a > 0 {
+            format!(
+                " (+{:.1}%)",
+                (worst.delta_max_ns as f64 / worst.max_a as f64) * 100.0
+            )
+        } else {
+            "".to_owned()
+        };
+        pushln(
+            &mut output,
+            format!(
+                "biggest regression:  {} on task={} ({}){}",
+                format_latency_signed(worst.delta_max_ns),
+                worst.task,
+                worst.comm,
+                pct
+            ),
+        );
+    }
+    if let Some(best) = improvements.first() {
+        let pct = if best.max_a > 0 {
+            format!(
+                " ({:.1}%)",
+                (best.delta_max_ns as f64 / best.max_a as f64) * 100.0
+            )
+        } else {
+            "".to_owned()
+        };
+        pushln(
+            &mut output,
+            format!(
+                "biggest improvement: {} on task={} ({}){}",
+                format_latency_signed(best.delta_max_ns),
+                best.task,
+                best.comm,
+                pct
+            ),
+        );
+    }
+    pushln(&mut output, "");
+
     pushln(&mut output, "regressions (worse in run_b)");
     pushln(&mut output, "---------------------------");
     if regressions.is_empty() {
@@ -339,6 +405,7 @@ pub fn write_html_report(
         &text_report,
         top,
         cluster_window_ms,
+        filter_class,
     );
     if let Some(parent) = html_path.parent() {
         fs::create_dir_all(parent)?;
@@ -354,17 +421,21 @@ fn render_html_report(
     text_report: &str,
     top: usize,
     cluster_window_ms: u64,
+    filter_class: Option<TaskClass>,
 ) -> String {
     let session_json = serde_json::to_string(session).unwrap_or_else(|_| "{}".to_owned());
-    let spike_events_json = serde_json::to_string(&spike_events).unwrap_or_else(|_| "null".to_owned());
+    let spike_events_json =
+        serde_json::to_string(&spike_events).unwrap_or_else(|_| "null".to_owned());
     let artifacts_json = serde_json::to_string(artifacts).unwrap_or_else(|_| "{}".to_owned());
-    
+
     let cluster_window_ns = cluster_window_ms.saturating_mul(1_000_000);
-    let cluster_analysis = spike_cluster_analysis(session, spike_events, cluster_window_ns, top);
-    let cluster_analysis_json = serde_json::to_string(&cluster_analysis).unwrap_or_else(|_| "{}".to_owned());
+    let cluster_analysis =
+        spike_cluster_analysis(session, spike_events, cluster_window_ns, top, filter_class);
+    let cluster_analysis_json =
+        serde_json::to_string(&cluster_analysis).unwrap_or_else(|_| "{}".to_owned());
 
     let template = include_str!("report_template.html");
-    
+
     template
         .replace("{text_report}", &html_escape(text_report))
         .replace("{session_json}", &session_json)
@@ -610,7 +681,8 @@ pub(crate) fn render_report(
     pushln(&mut output, "");
 
     let cluster_window_ns = cluster_window_ms.saturating_mul(1_000_000);
-    let cluster_analysis = spike_cluster_analysis(session, spike_events, cluster_window_ns, top);
+    let cluster_analysis =
+        spike_cluster_analysis(session, spike_events, cluster_window_ns, top, filter_class);
 
     pushln(&mut output, "spike clusters");
     pushln(&mut output, "--------------");
@@ -701,8 +773,9 @@ fn spike_cluster_analysis(
     spike_events: Option<&[SpikeEvent]>,
     cluster_window_ns: u64,
     top: usize,
+    filter_class: Option<TaskClass>,
 ) -> SpikeClusterAnalysis {
-    let (source, points) = match spike_events {
+    let (source, mut points) = match spike_events {
         Some(spike_events) => (
             SpikeClusterSource::SpikeEvents,
             flatten_spike_events(session, spike_events),
@@ -712,6 +785,11 @@ fn spike_cluster_analysis(
             flatten_top_spikes(session),
         ),
     };
+
+    if let Some(class) = filter_class {
+        points.retain(|p| p.class == class);
+    }
+
     let source_count = points.len();
 
     SpikeClusterAnalysis {
@@ -728,7 +806,7 @@ fn spike_clusters_from_points(
 ) -> Vec<SpikeCluster> {
     points.sort_by_key(|point| point.switch_ns);
 
-    let mut candidates = Vec::new();
+    let mut candidates = BinaryHeap::new();
     let mut task_counts = BTreeMap::<u32, usize>::new();
     let mut max_latency_candidates = std::collections::VecDeque::<usize>::new();
     let mut left_idx = 0;
@@ -762,28 +840,28 @@ fn spike_clusters_from_points(
                 .front()
                 .map(|idx| points[*idx].latency_ns)
                 .unwrap_or(0);
-            retain_cluster_candidate(
-                &mut candidates,
-                SpikeClusterCandidate {
-                    start_idx: left_idx,
-                    end_idx: right_idx + 1,
-                    distinct_tasks: task_counts.len(),
-                    min_switch_ns: points[left_idx].switch_ns,
-                    max_switch_ns: points[right_idx].switch_ns,
-                    max_latency_ns,
-                },
-            );
+
+            let candidate = SpikeClusterCandidate {
+                start_idx: left_idx,
+                end_idx: right_idx + 1,
+                distinct_tasks: task_counts.len(),
+                min_switch_ns: points[left_idx].switch_ns,
+                max_switch_ns: points[right_idx].switch_ns,
+                max_latency_ns,
+            };
+
+            if candidates.len() < MAX_CLUSTER_CANDIDATES {
+                candidates.push(std::cmp::Reverse(candidate));
+            } else if let Some(mut worst) = candidates.peek_mut()
+                && candidate > worst.0
+            {
+                *worst = std::cmp::Reverse(candidate);
+            }
         }
     }
 
-    candidates.sort_by_key(|candidate| {
-        (
-            std::cmp::Reverse(candidate.distinct_tasks),
-            std::cmp::Reverse(candidate.max_latency_ns),
-            std::cmp::Reverse(candidate.end_idx.saturating_sub(candidate.start_idx)),
-            candidate.min_switch_ns,
-        )
-    });
+    let mut candidates_vec: Vec<_> = candidates.into_iter().map(|r| r.0).collect();
+    candidates_vec.sort_by(|a, b| b.cmp(a));
 
     let mut selected_candidates = Vec::new();
     let max_selected = top.saturating_mul(4).min(MAX_CLUSTER_CANDIDATES);
@@ -792,7 +870,7 @@ fn spike_clusters_from_points(
     // for O(log n) overlap checking instead of O(n) per candidate.
     let mut selected_intervals: BTreeSet<(u64, u64)> = BTreeSet::new(); // (max_switch_ns, min_switch_ns)
 
-    for candidate in candidates {
+    for candidate in candidates_vec {
         // Check for overlap: we need intervals where
         //   existing.min_switch_ns <= candidate.max_switch_ns AND
         //   existing.max_switch_ns >= candidate.min_switch_ns
@@ -892,45 +970,9 @@ fn decrement_task_count(task_counts: &mut BTreeMap<u32, usize>, task: u32) {
     }
 }
 
-fn retain_cluster_candidate(
-    candidates: &mut Vec<SpikeClusterCandidate>,
-    candidate: SpikeClusterCandidate,
-) {
-    if candidates.len() < MAX_CLUSTER_CANDIDATES {
-        candidates.push(candidate);
-        return;
-    }
+// retain_cluster_candidate removed as it's replaced by BinaryHeap logic above
 
-    let Some((worst_idx, worst_candidate)) = candidates
-        .iter()
-        .enumerate()
-        .min_by(|(_, left), (_, right)| compare_cluster_candidates(left, right))
-    else {
-        return;
-    };
-
-    if compare_cluster_candidates(&candidate, worst_candidate).is_gt() {
-        candidates[worst_idx] = candidate;
-    }
-}
-
-fn compare_cluster_candidates(
-    left: &SpikeClusterCandidate,
-    right: &SpikeClusterCandidate,
-) -> std::cmp::Ordering {
-    (
-        left.distinct_tasks,
-        left.max_latency_ns,
-        left.end_idx.saturating_sub(left.start_idx),
-        std::cmp::Reverse(left.min_switch_ns),
-    )
-        .cmp(&(
-            right.distinct_tasks,
-            right.max_latency_ns,
-            right.end_idx.saturating_sub(right.start_idx),
-            std::cmp::Reverse(right.min_switch_ns),
-        ))
-}
+// compare_cluster_candidates removed as it's replaced by Ord implementation
 
 fn cluster_from_points(mut points: Vec<SpikePoint>, distinct_tasks: usize) -> SpikeCluster {
     points.sort_by_key(|point| (point.switch_ns, std::cmp::Reverse(point.latency_ns)));

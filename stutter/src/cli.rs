@@ -2,7 +2,10 @@ use std::{ffi::OsString, path::PathBuf, time::Duration};
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::{TARGET_PIDS_MAX, process_tree::{TaskClass, TaskFilters}};
+use crate::{
+    TARGET_PIDS_MAX,
+    process_tree::{TaskClass, TaskFilters},
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -35,6 +38,9 @@ pub struct MonitorArgs {
 
     #[arg(long = "tree-pid", value_name = "PID")]
     tree_pids: Vec<u32>,
+
+    #[arg(long = "exclude-tree-pid", value_name = "PID")]
+    exclude_tree_pids: Vec<u32>,
 
     #[arg(long = "summary-ms", default_value_t = 1_000)]
     summary_period_ms: u64,
@@ -110,6 +116,9 @@ pub struct MonitorArgs {
 
     #[arg(long = "cgroupv2", value_name = "PATH")]
     cgroupv2: Option<PathBuf>,
+
+    #[arg(long = "follow-exec", default_value_t = true)]
+    follow_exec: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -262,6 +271,8 @@ pub struct Config {
     pub max_duration: Option<Duration>,
     pub shared_hwmon: Option<std::sync::Arc<std::sync::Mutex<crate::hwmon::HwmonReader>>>,
     pub cgroupv2: Option<PathBuf>,
+    pub follow_exec: bool,
+    pub exclude_tree_pids: Vec<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -386,6 +397,7 @@ fn config_from_monitor_args(
 ) -> anyhow::Result<Config> {
     validate_pids("--pid", &args.target_pids)?;
     validate_pids("--tree-pid", &args.tree_pids)?;
+    validate_pids("--exclude-tree-pid", &args.exclude_tree_pids)?;
 
     if args.summary_period_ms == 0 {
         anyhow::bail!("--summary-ms must be greater than zero");
@@ -401,16 +413,12 @@ fn config_from_monitor_args(
         anyhow::bail!("--watch-timeout-seconds must be greater than zero");
     }
 
-    if args.target_pids.is_empty() && args.tree_pids.is_empty() && args.watch_process.is_none() && args.cgroupv2.is_none() {
-        anyhow::bail!(
-            "at least one --pid <PID>, --tree-pid <PID>, --watch-process <COMM>, or --cgroupv2 <PATH> is required"
-        );
-    }
-
     args.target_pids.sort_unstable();
     args.target_pids.dedup();
     args.tree_pids.sort_unstable();
     args.tree_pids.dedup();
+    args.exclude_tree_pids.sort_unstable();
+    args.exclude_tree_pids.dedup();
     args.include_comm.sort();
     args.include_comm.dedup();
     args.exclude_comm.sort();
@@ -498,6 +506,8 @@ fn config_from_monitor_args(
         max_duration,
         shared_hwmon: None,
         cgroupv2: args.cgroupv2,
+        follow_exec: args.follow_exec,
+        exclude_tree_pids: args.exclude_tree_pids,
     })
 }
 
@@ -580,6 +590,30 @@ mod tests {
 
         assert_eq!(config.task_filters.include_comm, vec!["RenderThread"]);
         assert_eq!(config.task_filters.exclude_comm, vec!["steamwebhelper"]);
+    }
+
+    #[test]
+    fn parses_exclude_tree_pids() {
+        let command = parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--tree-pid",
+            "42",
+            "--exclude-tree-pid",
+            "100",
+            "--exclude-tree-pid",
+            "100",
+            "--exclude-tree-pid",
+            "7",
+        ])
+        .unwrap();
+
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+
+        assert_eq!(config.tree_pids, vec![42]);
+        assert_eq!(config.exclude_tree_pids, vec![7, 100]);
     }
 
     #[test]
@@ -804,6 +838,24 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("--persistent requires --watch-process")
+        );
+    }
+
+    #[test]
+    fn rejects_zero_exclude_tree_pid() {
+        let err = parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--tree-pid",
+            "42",
+            "--exclude-tree-pid",
+            "0",
+        ])
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--exclude-tree-pid must be greater than zero")
         );
     }
 }

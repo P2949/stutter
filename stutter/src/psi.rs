@@ -1,6 +1,4 @@
-use std::fs;
-use std::path::PathBuf;
-use std::collections::HashMap;
+use std::{collections::HashMap, fs, path::PathBuf};
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct PsiSnapshot {
@@ -103,8 +101,9 @@ struct PsiLine {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
+
+    use super::*;
     #[test]
     fn parses_psi_files() {
         let dir = std::env::temp_dir().join(format!("stutter-psi-test-{}", std::process::id()));

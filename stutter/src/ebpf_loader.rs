@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs, path::Path, os::unix::fs::MetadataExt};
+use std::{collections::BTreeMap, fs, os::unix::fs::MetadataExt, path::Path};
 
 use anyhow::Context;
 use aya::{
@@ -9,9 +9,8 @@ use aya::{
 };
 use serde::{Deserialize, Serialize};
 use stutter_common::{
-    DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
-    DROP_WAKER_MAP_INSERT_FAILED, DROP_WAKEUP_TIMES_INSERT_FAILED,
-    DROP_BLOCK_START_INSERT_FAILED,
+    DROP_BLOCK_START_INSERT_FAILED, DROP_IRQ_START_TIMES_INSERT_FAILED,
+    DROP_RINGBUF_RESERVE_FAILED, DROP_WAKER_MAP_INSERT_FAILED, DROP_WAKEUP_TIMES_INSERT_FAILED,
 };
 use tokio::io::unix::AsyncFd;
 
@@ -73,7 +72,9 @@ impl LoadedEbpf {
     }
 }
 
-pub fn load_and_attach(config: &crate::cli::Config) -> Result<LoadedEbpf, crate::error::StutterError> {
+pub fn load_and_attach(
+    config: &crate::cli::Config,
+) -> Result<LoadedEbpf, crate::error::StutterError> {
     raise_memlock_limit();
     let tracepoints = validate_tracepoint_formats(Path::new("/sys/kernel/tracing/events"))
         .map_err(|e| crate::error::StutterError::TracepointOffsetMismatch(e.to_string()))?;
@@ -101,8 +102,13 @@ pub fn load_and_attach(config: &crate::cli::Config) -> Result<LoadedEbpf, crate:
     .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
     if tracepoints.sched_migrate_task {
-        attach_tracepoint(&mut ebpf, "sched_migrate_task", "sched", "sched_migrate_task")
-            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        attach_tracepoint(
+            &mut ebpf,
+            "sched_migrate_task",
+            "sched",
+            "sched_migrate_task",
+        )
+        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
     if tracepoints.cpu_frequency {
         attach_tracepoint(&mut ebpf, "cpu_frequency", "power", "cpu_frequency")
@@ -121,14 +127,29 @@ pub fn load_and_attach(config: &crate::cli::Config) -> Result<LoadedEbpf, crate:
     }
 
     if tracepoints.page_fault_user {
-        attach_tracepoint(&mut ebpf, "page_fault_user", "exceptions", "page_fault_user")
-            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        attach_tracepoint(
+            &mut ebpf,
+            "page_fault_user",
+            "exceptions",
+            "page_fault_user",
+        )
+        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
     if tracepoints.block_rq {
         attach_tracepoint(&mut ebpf, "block_rq_issue", "block", "block_rq_issue")
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
         attach_tracepoint(&mut ebpf, "block_rq_complete", "block", "block_rq_complete")
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    }
+
+    if tracepoints.sched_process_exec {
+        attach_tracepoint(
+            &mut ebpf,
+            "sched_process_exec",
+            "sched",
+            "sched_process_exec",
+        )
+        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
 
     attach_software_perf_event(&mut ebpf, "major_fault", 4) // PERF_COUNT_SW_PAGE_FAULTS_MAJ
@@ -168,13 +189,23 @@ pub fn load_and_attach(config: &crate::cli::Config) -> Result<LoadedEbpf, crate:
         .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
     if let Some(cgroup_path) = &config.cgroupv2 {
-        let mut cgroup_id_map: AyaHashMap<_, u64, u8> = ebpf.map_mut("TARGET_CGROUP_IDS").context("TARGET_CGROUP_IDS map not found").map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?.try_into().map_err(|e: aya::maps::MapError| crate::error::StutterError::EbpfLoad(e.to_string()))?;
-        
+        let mut cgroup_id_map: AyaHashMap<_, u64, u8> = ebpf
+            .map_mut("TARGET_CGROUP_IDS")
+            .context("TARGET_CGROUP_IDS map not found")
+            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?
+            .try_into()
+            .map_err(|e: aya::maps::MapError| {
+                crate::error::StutterError::EbpfLoad(e.to_string())
+            })?;
+
         let mut ids = Vec::new();
-        collect_cgroup_hierarchy_ids(cgroup_path, &mut ids).map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
-        
+        collect_cgroup_hierarchy_ids(cgroup_path, &mut ids)
+            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+
         for id in ids {
-            cgroup_id_map.insert(id, 1, 0).map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+            cgroup_id_map
+                .insert(id, 1, 0)
+                .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
         }
     }
 
@@ -248,6 +279,7 @@ struct TracepointAvailability {
     irq_handler: bool,
     page_fault_user: bool,
     block_rq: bool,
+    sched_process_exec: bool,
 }
 
 fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointAvailability> {
@@ -297,12 +329,26 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
     } else {
         false
     };
-    
+
     let block_rq_issue = events_root.join("block/block_rq_issue/format");
     let block_rq_complete = events_root.join("block/block_rq_complete/format");
     let block_rq = if block_rq_issue.exists() && block_rq_complete.exists() {
-        validate_tracepoint_format_at(&block_rq_issue, &[("dev", 8), ("sector", 16), ("nr_sector", 24), ("rwbs", 32)])?;
-        validate_tracepoint_format_at(&block_rq_complete, &[("dev", 8), ("sector", 16), ("nr_sector", 24)])?;
+        validate_tracepoint_format_at(
+            &block_rq_issue,
+            &[("dev", 8), ("sector", 16), ("nr_sector", 24), ("rwbs", 32)],
+        )?;
+        validate_tracepoint_format_at(
+            &block_rq_complete,
+            &[("dev", 8), ("sector", 16), ("nr_sector", 24)],
+        )?;
+        true
+    } else {
+        false
+    };
+
+    let sched_process_exec = events_root.join("sched/sched_process_exec/format");
+    let sched_process_exec = if sched_process_exec.exists() {
+        validate_tracepoint_format_at(&sched_process_exec, &[])?;
         true
     } else {
         false
@@ -316,6 +362,7 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         irq_handler,
         page_fault_user,
         block_rq,
+        sched_process_exec,
     })
 }
 
