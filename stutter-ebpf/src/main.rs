@@ -2,7 +2,7 @@
 #![no_main]
 
 use aya_ebpf::{
-    helpers::{bpf_get_current_pid_tgid, bpf_get_smp_processor_id, bpf_ktime_get_ns},
+    helpers::{bpf_get_current_pid_tgid, bpf_get_smp_processor_id, bpf_ktime_get_ns, bpf_get_current_cgroup_id},
     macros::{map, tracepoint},
     maps::{Array, HashMap, LruHashMap, PerCpuArray, RingBuf},
     programs::TracePointContext,
@@ -23,6 +23,12 @@ static TARGET_PIDS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(1024
 
 #[map]
 static TARGET_IRQS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(64, 0);
+
+#[map]
+static TARGET_CGROUP_IDS: HashMap<u64, u8> = HashMap::<u64, u8>::with_max_entries(128, 0);
+
+#[map]
+static CGROUP_TIDS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(1024, 0);
 
 #[map]
 // Keep enough wakeup timestamps for bursts across all 1024 tracked TIDs. This
@@ -126,7 +132,7 @@ pub fn page_fault_user(_ctx: TracePointContext) -> u32 {
 pub fn major_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
     if is_target_pid(tid) {
-        if let Some(counters) = unsafe { PREV_FAULTS.get_ptr_mut(&tid) } {
+        if let Some(counters) = PREV_FAULTS.get_ptr_mut(&tid) {
             unsafe { (*counters).maj += 1 };
         } else {
             let _ = PREV_FAULTS.insert(&tid, &FaultCounters { maj: 1, min: 0 }, 0);
@@ -139,7 +145,7 @@ pub fn major_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
 pub fn minor_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
     if is_target_pid(tid) {
-        if let Some(counters) = unsafe { PREV_FAULTS.get_ptr_mut(&tid) } {
+        if let Some(counters) = PREV_FAULTS.get_ptr_mut(&tid) {
             unsafe { (*counters).min += 1 };
         } else {
             let _ = PREV_FAULTS.insert(&tid, &FaultCounters { maj: 0, min: 1 }, 0);
@@ -165,7 +171,15 @@ pub fn irq_handler_exit(ctx: TracePointContext) -> u32 {
 }
 
 fn is_target_pid(pid: u32) -> bool {
-    unsafe { TARGET_PIDS.get(&pid).is_some() }
+    if unsafe { TARGET_PIDS.get(&pid).is_some() } {
+        return true;
+    }
+
+    if unsafe { CGROUP_TIDS.get(&pid).is_some() } {
+        return true;
+    }
+
+    false
 }
 
 fn is_target_irq(irq: u32) -> bool {
@@ -244,6 +258,14 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
 
     let prev_state: i64 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
     let cpu = unsafe { bpf_get_smp_processor_id() };
+
+    let current_tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
+    let current_cgroup_id = unsafe { bpf_get_current_cgroup_id() };
+    if unsafe { TARGET_CGROUP_IDS.get(&current_cgroup_id).is_some() } {
+        let _ = CGROUP_TIDS.insert(&current_tid, &1, 0);
+    } else {
+        let _ = CGROUP_TIDS.remove(&current_tid);
+    }
 
     if prev_state != 0 {
         if let Some(depth) = RQ_DEPTH.get_ptr_mut(cpu) {
@@ -445,7 +467,7 @@ fn try_irq_handler_exit(ctx: TracePointContext) -> Result<u32, u32> {
 pub fn block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
     let dev: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
     let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
-    let tid = (unsafe { bpf_get_current_pid_tgid() } & 0xffff_ffff) as u32;
+    let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
     let ts = unsafe { bpf_ktime_get_ns() };
 
     let key = (dev as u64) << 32 | (sector & 0xffff_ffff);

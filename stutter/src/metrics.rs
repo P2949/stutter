@@ -164,6 +164,16 @@ pub struct IntervalRecord {
     #[serde(default)]
     pub minor_faults: u64,
     #[serde(default)]
+    pub cpu_psi_some: f64,
+    #[serde(default)]
+    pub mem_psi_some: f64,
+    #[serde(default)]
+    pub mem_psi_full: f64,
+    #[serde(default)]
+    pub io_psi_some: f64,
+    #[serde(default)]
+    pub io_psi_full: f64,
+    #[serde(default)]
     pub percentile_scope: String,
     #[serde(default)]
     pub histogram: Vec<LatencyHistogramBucket>,
@@ -590,15 +600,16 @@ pub fn collect_interval_summaries(
     elapsed_ms: u128,
     drop_counters: &crate::ebpf_loader::DropCountersSnapshot,
     prev_faults_map: Option<&aya::maps::HashMap<aya::maps::MapData, u32, [u64; 2]>>,
+    psi_snapshot: Option<&crate::psi::PsiSnapshot>,
 ) -> Vec<IntervalRecord> {
     let mut interval_records = Vec::new();
 
     for (task, stats) in stats_by_task.iter_mut() {
-        if let Some(map) = prev_faults_map {
-            if let Ok(counters) = map.get(task, 0) {
-                stats.major_faults = counters[0];
-                stats.minor_faults = counters[1];
-            }
+        if let Some(map) = prev_faults_map
+            && let Ok(counters) = map.get(task, 0)
+        {
+            stats.major_faults = counters[0];
+            stats.minor_faults = counters[1];
         }
 
         let Some(latency) = stats.interval_latency.snapshot_and_reset() else {
@@ -609,7 +620,13 @@ pub fn collect_interval_summaries(
 
         print_latency_line("summary", *task, &stats.comm, &latency, &cpu);
         interval_records.push(interval_record_from_snapshot(
-            elapsed_ms, *task, stats, &latency, &cpu, drop_counters,
+            *task,
+            stats,
+            &latency,
+            &cpu,
+            elapsed_ms,
+            drop_counters,
+            psi_snapshot,
         ));
     }
 
@@ -661,12 +678,13 @@ pub fn print_session_summaries(stats_by_task: &mut BTreeMap<u32, TaskStats>) {
 }
 
 pub fn interval_record_from_snapshot(
-    elapsed_ms: u128,
     task: u32,
     stats: &TaskStats,
     latency: &LatencySnapshot,
     cpu: &CpuSnapshot,
+    elapsed_ms: u128,
     drop_counters: &crate::ebpf_loader::DropCountersSnapshot,
+    psi: Option<&crate::psi::PsiSnapshot>,
 ) -> IntervalRecord {
     IntervalRecord {
         elapsed_ms,
@@ -695,6 +713,11 @@ pub fn interval_record_from_snapshot(
         worst_cpu_max_ns: cpu.worst_cpu_max_ns,
         spikiest_cpu: cpu.spikiest_cpu,
         spikiest_cpu_spikes: cpu.spikiest_cpu_spikes,
+        cpu_psi_some: psi.map(|p| p.cpu_some_avg10).unwrap_or(0.0),
+        mem_psi_some: psi.map(|p| p.mem_some_avg10).unwrap_or(0.0),
+        mem_psi_full: psi.map(|p| p.mem_full_avg10).unwrap_or(0.0),
+        io_psi_some: psi.map(|p| p.io_some_avg10).unwrap_or(0.0),
+        io_psi_full: psi.map(|p| p.io_full_avg10).unwrap_or(0.0),
         percentile_scope: latency.percentile_scope.clone(),
         histogram: latency.histogram.clone(),
         drop_counters: drop_counters.clone(),

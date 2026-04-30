@@ -8,6 +8,7 @@ mod metadata;
 mod metrics;
 mod process_tree;
 mod profiles;
+mod psi;
 mod recorder;
 mod report;
 mod scorer;
@@ -356,6 +357,7 @@ async fn measure_tune_candidate(
         }),
         max_duration: Some(Duration::from_secs(epoch_seconds)),
         shared_hwmon,
+        cgroupv2: None,
     };
 
     run_monitor(config).await?;
@@ -647,7 +649,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     let mut tree_root_starttimes = capture_tree_root_starttimes(&config.tree_pids);
 
     let recording = prepare_recording(&config)?;
-    let mut loaded = ebpf_loader::load_and_attach().map_err(anyhow::Error::new)?;
+    let mut loaded = ebpf_loader::load_and_attach(&config).map_err(anyhow::Error::new)?;
     configure_target_irqs(&mut loaded, &config)?;
 
     let mut active_targets: BTreeMap<u32, TaskInfo> = BTreeMap::new();
@@ -707,6 +709,8 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
         .iter()
         .map(|c| (c.cpu, c.physical_package_id.clone().unwrap_or_default()))
         .collect();
+
+    let psi_reader = psi::PsiReader::new();
 
     // These mutable collections are intentionally confined to the main monitoring task.
     // Blocking work returns state to this task and does not mutate these collections
@@ -828,7 +832,14 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                 if !tui_state.paused {
                     let elapsed_ms = started.elapsed().as_millis();
                     let drop_counters_snapshot = loaded.snapshot_drop_counters();
-                    let records = collect_interval_summaries(&mut stats_by_task, elapsed_ms, &drop_counters_snapshot, loaded.prev_faults_map.as_ref());
+                    let psi_snapshot = psi_reader.read().ok();
+                    let records = collect_interval_summaries(
+                        &mut stats_by_task,
+                        elapsed_ms,
+                        &drop_counters_snapshot,
+                        loaded.prev_faults_map.as_ref(),
+                        psi_snapshot.as_ref(),
+                    );
                     streamed_interval_record_count += records.len();
 
                     if let Some(writer) = interval_writer.as_mut() {
@@ -1480,6 +1491,8 @@ fn handle_event(input: HandleEventInput<'_>) {
             if let Some(task_info) = task_info {
                 stats.apply_task_info(task_info);
                 stats.active = active_targets.contains_key(&event.pid);
+            } else if config.cgroupv2.is_some() {
+                stats.active = true;
             }
 
             stats.record(event, config.spike_threshold_ns, elapsed_ms);
@@ -1548,7 +1561,19 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
         process_cache,
     } = input;
 
-    let target_pids = config.target_pids.clone();
+    let mut target_pids = config.target_pids.clone();
+    if let Some(cgroup_path) = &config.cgroupv2
+        && let Ok(content) = fs::read_to_string(cgroup_path.join("cgroup.procs"))
+    {
+        for line in content.lines() {
+            if let Ok(pid) = line.parse::<u32>() {
+                target_pids.push(pid);
+            }
+        }
+    }
+    target_pids.sort_unstable();
+    target_pids.dedup();
+
     let tree_pids = config.tree_pids.clone();
     let filters = config.task_filters.clone();
     let keep_missing_pid = config.keep_missing_pid;
