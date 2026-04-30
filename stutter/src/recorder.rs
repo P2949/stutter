@@ -453,7 +453,8 @@ pub struct RecordedSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    pub target_runnable_depth: u32,
+    #[serde(alias = "target_runnable_depth")]
+    pub target_pending_wakeups: u32,
     #[serde(default)]
     pub major_faults: u32,
     #[serde(default)]
@@ -473,7 +474,8 @@ pub struct SessionSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    pub target_runnable_depth: u32,
+    #[serde(alias = "target_runnable_depth")]
+    pub target_pending_wakeups: u32,
     #[serde(default)]
     pub major_faults: u32,
     #[serde(default)]
@@ -495,7 +497,8 @@ pub struct SpikeEvent {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    pub target_runnable_depth: u32,
+    #[serde(alias = "target_runnable_depth")]
+    pub target_pending_wakeups: u32,
     #[serde(default)]
     pub major_faults: u32,
     #[serde(default)]
@@ -538,7 +541,7 @@ impl SpikeEvent {
             latency_ns: event.latency_ns,
             wakeup_ns: event.wakeup_ns,
             switch_ns: event.switch_ns,
-            target_runnable_depth: event.target_runnable_depth,
+            target_pending_wakeups: event.target_pending_wakeups,
             major_faults: event.maj_flt.saturating_sub(stats.major_faults as u32),
             minor_faults: event.min_flt.saturating_sub(stats.minor_faults as u32),
         }
@@ -743,7 +746,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
                 latency_ns: spike.latency_ns,
                 wakeup_ns: spike.wakeup_ns,
                 switch_ns: spike.switch_ns,
-                target_runnable_depth: spike.target_runnable_depth,
+                target_pending_wakeups: spike.target_pending_wakeups,
                 major_faults: spike.major_faults,
                 minor_faults: spike.minor_faults,
             });
@@ -966,7 +969,7 @@ fn recorded_spike(stats: &TaskStats, spike: &SpikeRecord) -> RecordedSpike {
         latency_ns: spike.latency_ns,
         wakeup_ns: spike.wakeup_ns,
         switch_ns: spike.switch_ns,
-        target_runnable_depth: spike.target_runnable_depth,
+        target_pending_wakeups: spike.target_pending_wakeups,
         major_faults: spike.major_faults,
         minor_faults: spike.minor_faults,
     }

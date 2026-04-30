@@ -22,7 +22,7 @@ pub struct SchedulerEvent {
     pub cpu: u32,
     pub prio: i32,
     pub waker_tid: u32,
-    pub target_runnable_depth: u32,
+    pub target_pending_wakeups: u32,
     pub maj_flt: u32,
     pub min_flt: u32,
     pub wakeup_ns: u64,

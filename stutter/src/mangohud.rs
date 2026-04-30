@@ -36,10 +36,12 @@ where
         if let Some(frametime_ms) = frametime_idx
             .and_then(|idx| columns.get(idx))
             .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite())
         {
             let elapsed_ms = elapsed_idx
                 .and_then(|idx| columns.get(idx))
                 .and_then(|value| value.parse::<f64>().ok())
+                .filter(|value| value.is_finite())
                 .map(|value| value.max(0.0) as u128)
                 .unwrap_or(0);
             events.push(FrameEvent {
@@ -105,6 +107,16 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].elapsed_ms, 10);
+        assert_eq!(events[0].frametime_ms, 16.7);
+    }
+
+    #[test]
+    fn skips_non_finite_frametimes() {
+        let data = "elapsed_ms,frametime_ms\n10,NaN\n20,inf\n30,16.7\n";
+        let events = parse_frame_events(data.lines().map(|s| Ok(s.to_owned()))).unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].elapsed_ms, 30);
         assert_eq!(events[0].frametime_ms, 16.7);
     }
 }

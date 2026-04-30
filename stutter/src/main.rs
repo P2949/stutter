@@ -22,6 +22,10 @@ use std::{
     collections::BTreeMap,
     fs, future,
     path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -52,6 +56,7 @@ use tokio::{
 
 pub const TARGET_PIDS_MAX: usize = 1024;
 const TUNE_RUN_STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
+const TUNE_PROFILE_REFRESH_MS: u64 = 1_000;
 
 type TaskExeInodesMap = BTreeMap<u32, (Option<u64>, Option<u64>, Option<u64>)>;
 
@@ -248,33 +253,19 @@ async fn tune_command(
             profile.name, warmup_seconds
         );
 
-        let records = match apply_profile_to_tree_blocking(
-            tree_pid,
-            profile.clone(),
-            idx == 0,
-            false,
-        )
-        .await
-        {
-            Ok(records) => records,
-            Err(err) => {
-                restore_tune_on_error();
-                return Err(err);
-            }
-        };
-
         println!(
             "tune candidate={} state=CandidateMeasure measure_seconds={}",
             profile.name, measure_seconds
         );
 
-        let (interval_records, frame_events) = match measure_tune_candidate(
+        let (applied_tasks, interval_records, frame_events) = match measure_tune_candidate(
             tree_pid,
-            &profile.name,
+            profile.clone(),
             epoch_seconds,
             warmup_seconds,
             shared_hwmon.clone(),
             mangohud_log.clone(),
+            idx == 0,
         )
         .await
         {
@@ -311,7 +302,7 @@ async fn tune_command(
 
         let result = TuneCandidateSummary {
             profile: profile.name.clone(),
-            applied_tasks: records.len(),
+            applied_tasks,
             warmup_seconds,
             measure_seconds,
             interval_count: interval_records.len(),
@@ -427,13 +418,15 @@ async fn tune_command(
 
 async fn measure_tune_candidate(
     tree_pid: u32,
-    profile_name: &str,
+    profile: profiles::Profile,
     epoch_seconds: u64,
     warmup_seconds: u64,
     shared_hwmon: Option<std::sync::Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
     mangohud_log: Option<PathBuf>,
-) -> anyhow::Result<(Vec<IntervalRecord>, Vec<crate::recorder::FrameEvent>)> {
-    let run_dir = tune_run_dir(profile_name);
+    force_restore_overwrite: bool,
+) -> anyhow::Result<(usize, Vec<IntervalRecord>, Vec<crate::recorder::FrameEvent>)> {
+    let profile_name = profile.name.clone();
+    let run_dir = tune_run_dir(&profile_name);
     let config = Config {
         target_pids: Vec::new(),
         tree_pids: vec![tree_pid],
@@ -470,7 +463,59 @@ async fn measure_tune_candidate(
         exclude_tree_pids: Vec::new(),
     };
 
-    run_monitor(config, shared_hwmon).await?;
+    let cache = profiles::ProfileApplyCache::default();
+    let (initial_records, cache) = apply_profile_to_tree_cached_blocking(
+        tree_pid,
+        profile.clone(),
+        force_restore_overwrite,
+        false,
+        cache,
+    )
+    .await?;
+    let initial_applied_tasks = initial_records.len();
+    let should_force_refresh = force_restore_overwrite && initial_records.is_empty();
+
+    let stop_refresh = Arc::new(AtomicBool::new(false));
+    let refreshed_applied_tasks = Arc::new(AtomicUsize::new(0));
+    let mut profile_refresh = tokio::spawn(tune_profile_refresh_loop(
+        tree_pid,
+        profile,
+        cache,
+        should_force_refresh,
+        TUNE_PROFILE_REFRESH_MS,
+        stop_refresh.clone(),
+        refreshed_applied_tasks.clone(),
+    ));
+
+    let mut profile_refresh_finished = false;
+    let monitor_result = tokio::select! {
+        result = run_monitor(config, shared_hwmon) => result,
+        refresh_result = &mut profile_refresh => {
+            profile_refresh_finished = true;
+            match refresh_result {
+                Ok(Ok(())) => Err(anyhow::anyhow!("tune profile refresh stopped before monitor epoch ended")),
+                Ok(Err(err)) => Err(err.context("tune profile refresh failed")),
+                Err(err) => Err(anyhow::anyhow!("tune profile refresh worker failed: {err}")),
+            }
+        }
+    };
+
+    stop_refresh.store(true, Ordering::Relaxed);
+    if !profile_refresh_finished {
+        match profile_refresh.await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) if monitor_result.is_ok() => return Err(err),
+            Ok(Err(err)) => warn!("tune_profile_refresh_stop_failed err={err:#}"),
+            Err(err) if monitor_result.is_ok() => {
+                return Err(anyhow::anyhow!("tune profile refresh worker failed: {err}"));
+            }
+            Err(err) => warn!("tune_profile_refresh_join_failed err={err}"),
+        }
+    };
+    let applied_tasks =
+        initial_applied_tasks.saturating_add(refreshed_applied_tasks.load(Ordering::Relaxed));
+
+    monitor_result?;
 
     let interval_path = run_dir.join("interval.json");
     let data = fs::read_to_string(&interval_path)
@@ -490,7 +535,48 @@ async fn measure_tune_candidate(
 
     fs::remove_dir_all(&run_dir).ok();
 
-    Ok((interval_records, frame_events))
+    Ok((applied_tasks, interval_records, frame_events))
+}
+
+async fn tune_profile_refresh_loop(
+    tree_pid: u32,
+    profile: profiles::Profile,
+    mut cache: profiles::ProfileApplyCache,
+    force_restore_overwrite: bool,
+    refresh_ms: u64,
+    stop_refresh: Arc<AtomicBool>,
+    applied_tasks: Arc<AtomicUsize>,
+) -> anyhow::Result<()> {
+    let mut should_force = force_restore_overwrite;
+    let refresh_interval = Duration::from_millis(refresh_ms);
+
+    loop {
+        if stop_refresh.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        let (records, updated_cache) = apply_profile_to_tree_cached_blocking(
+            tree_pid,
+            profile.clone(),
+            should_force,
+            false,
+            cache,
+        )
+        .await?;
+        cache = updated_cache;
+
+        if !records.is_empty() {
+            applied_tasks.fetch_add(records.len(), Ordering::Relaxed);
+            should_force = false;
+            info!(
+                "tune_profile_refresh_applied profile={} tasks={}",
+                profile.name,
+                records.len()
+            );
+        }
+
+        sleep(refresh_interval).await;
+    }
 }
 
 fn tune_run_dir(profile_name: &str) -> PathBuf {
