@@ -1105,6 +1105,7 @@ fn interval_csv_writer_outputs_header_and_rows() {
         123,
         &Default::default(),
         None,
+        (0, 0),
     );
 
     recorder::write_interval_csv(&path, &[record]).unwrap();

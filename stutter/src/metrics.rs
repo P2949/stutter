@@ -602,15 +602,28 @@ pub fn collect_interval_summaries_labeled(
     drop_counters: &crate::ebpf_loader::DropCountersSnapshot,
     prev_faults_map: Option<&aya::maps::HashMap<aya::maps::MapData, u32, [u64; 2]>>,
     psi_snapshot: Option<&crate::psi::PsiSnapshot>,
+    prev_faults_snapshot: &mut BTreeMap<u32, (u64, u64)>,
 ) -> Vec<IntervalRecord> {
     let mut interval_records = Vec::new();
 
     for (task, stats) in stats_by_task.iter_mut() {
-        if let Some(map) = prev_faults_map
-            && let Ok(counters) = map.get(task, 0)
-        {
-            stats.major_faults = counters[0];
-            stats.minor_faults = counters[1];
+        // Read cumulative fault counters from the eBPF map (if present),
+        // compute the interval delta relative to the previous snapshot, and
+        // update both the stats and the snapshot for next interval.
+        let mut maj_delta = 0u64;
+        let mut min_delta = 0u64;
+        if let Some(map) = prev_faults_map && let Ok(counters) = map.get(task, 0) {
+            let current_maj = counters[0];
+            let current_min = counters[1];
+            let prev = prev_faults_snapshot.get(task).copied().unwrap_or((current_maj, current_min));
+            maj_delta = current_maj.saturating_sub(prev.0);
+            min_delta = current_min.saturating_sub(prev.1);
+            prev_faults_snapshot.insert(*task, (current_maj, current_min));
+
+            // Preserve the TaskStats fields for use by spike delta calculations
+            // elsewhere (they store the last seen cumulative counts).
+            stats.major_faults = current_maj;
+            stats.minor_faults = current_min;
         }
 
         let Some(latency) = stats.interval_latency.snapshot_and_reset() else {
@@ -628,6 +641,7 @@ pub fn collect_interval_summaries_labeled(
             elapsed_ms,
             drop_counters,
             psi_snapshot,
+            (maj_delta, min_delta),
         ));
     }
 
@@ -678,6 +692,7 @@ pub fn print_session_summaries(stats_by_task: &mut BTreeMap<u32, TaskStats>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn interval_record_from_snapshot(
     task: u32,
     stats: &TaskStats,
@@ -686,6 +701,7 @@ pub fn interval_record_from_snapshot(
     elapsed_ms: u128,
     drop_counters: &crate::ebpf_loader::DropCountersSnapshot,
     psi: Option<&crate::psi::PsiSnapshot>,
+    faults_delta: (u64, u64),
 ) -> IntervalRecord {
     IntervalRecord {
         elapsed_ms,
@@ -709,8 +725,8 @@ pub fn interval_record_from_snapshot(
         busiest_cpu: cpu.busiest_cpu,
         busiest_cpu_samples: cpu.busiest_cpu_samples,
         worst_cpu: cpu.worst_cpu,
-        major_faults: stats.major_faults,
-        minor_faults: stats.minor_faults,
+        major_faults: faults_delta.0,
+        minor_faults: faults_delta.1,
         worst_cpu_max_ns: cpu.worst_cpu_max_ns,
         spikiest_cpu: cpu.spikiest_cpu,
         spikiest_cpu_spikes: cpu.spikiest_cpu_spikes,

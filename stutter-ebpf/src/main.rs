@@ -160,6 +160,7 @@ pub fn sched_stat_wait(ctx: TracePointContext) -> u32 {
 #[tracepoint]
 pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
+    
     let _ = WAKEUP_TIMES.remove(&tid);
     let _ = WAKER_MAP.remove(&tid);
     0
@@ -299,10 +300,10 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
     let waker_tid = unsafe { WAKER_MAP.get(&pid).copied().unwrap_or(0) };
     let _ = WAKER_MAP.remove(&pid);
 
-    // Check if this PID is a target before further processing
-    if !is_target_pid(pid) {
-        return Ok(0);
-    }
+    // We only arrived here because a wakeup timestamp for this PID exists
+    // (inserted by sched_wakeup). Treat that as sufficient evidence this is
+    // a target-related event to avoid races where the per-TID maps were not
+    // yet populated from cgroup membership.
 
     let prev_state: i64 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
     let cpu = unsafe { bpf_get_smp_processor_id() };
@@ -541,6 +542,11 @@ pub fn block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
         None => return Ok(0),
     };
     let _ = BLOCK_START.remove(&key);
+
+    // If the start record was not created for a target task, ignore it.
+    if !is_target_pid(start.tid) {
+        return Ok(0);
+    }
 
     let now = unsafe { bpf_ktime_get_ns() };
     let duration_ns = now.saturating_sub(start.ts);

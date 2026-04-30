@@ -174,18 +174,14 @@ fn print_restore_dry_run(path: &Path) -> anyhow::Result<()> {
     println!("restore dry-run file={}", path.display());
 
     for record in state.records {
-        match affinity::read_allowed_mask(record.tid) {
+        match affinity::read_allowed_mask_raw(record.tid) {
             Ok(current) => println!(
                 "tid={} alive=true current_mask={} restore_mask={}",
                 record.tid,
                 current.to_range_string(),
                 record.original_mask.to_range_string()
             ),
-            Err(err)
-                if err
-                    .downcast_ref::<std::io::Error>()
-                    .is_some_and(|err| err.raw_os_error() == Some(libc::ESRCH)) =>
-            {
+            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
                 println!(
                     "tid={} alive=false current_mask=- restore_mask={}",
                     record.tid,
@@ -292,6 +288,8 @@ async fn tune_command(
             score.total = u64::MAX / 4;
         }
 
+        let valid = interval_count >= TUNE_MIN_INTERVALS && sample_count >= TUNE_MIN_SAMPLES;
+
         let result = TuneCandidateSummary {
             profile: profile.name.clone(),
             applied_tasks: records.len(),
@@ -303,6 +301,7 @@ async fn tune_command(
             over_2ms: score.over_2ms,
             over_5ms: score.over_5ms,
             max_latency_ns: score.max_latency_ns,
+            valid,
         };
 
         if results
@@ -322,6 +321,8 @@ async fn tune_command(
         .map(|result| result.profile.clone())
         .unwrap_or_default();
 
+    let any_valid = results.iter().any(|r| r.valid);
+
     let summary = TuneSummary {
         schema_version: 1,
         tree_pid,
@@ -332,13 +333,20 @@ async fn tune_command(
         best_profile,
         candidates: results,
     };
+    if keep_best {
+        if !any_valid {
+            restore_tune_on_error();
+            anyhow::bail!(
+                "no tune candidate collected enough data; not keeping any profile"
+            );
+        }
 
-    if keep_best
-        && let Some(profile) = profiles
+        if let Some(profile) = profiles
             .iter()
             .find(|profile| profile.name == summary.best_profile)
-    {
-        apply_profile_to_tree_blocking(tree_pid, profile.clone(), false, false).await?;
+        {
+            apply_profile_to_tree_blocking(tree_pid, profile.clone(), false, false).await?;
+        }
     }
 
     let summary_path = default_tune_summary_path();
@@ -509,6 +517,7 @@ struct TuneCandidateSummary {
     over_2ms: u64,
     over_5ms: u64,
     max_latency_ns: u64,
+    valid: bool,
 }
 
 fn result_is_better(candidate: &TuneCandidateSummary, current_best: &TuneCandidateSummary) -> bool {
@@ -778,6 +787,7 @@ async fn run_monitor(
     let mut active_targets: BTreeMap<u32, TaskInfo> = BTreeMap::new();
     let mut known_targets: BTreeMap<u32, TaskInfo> = BTreeMap::new();
     let mut stats_by_task: BTreeMap<u32, metrics::TaskStats> = BTreeMap::new();
+    let mut prev_faults_snapshot: BTreeMap<u32, (u64, u64)> = BTreeMap::new();
     let mut task_exe_inodes: TaskExeInodesMap = BTreeMap::new();
     let mut interval_records: Vec<IntervalRecord> = Vec::new();
     let mut tree_events: Vec<TreeEvent> = Vec::new();
@@ -972,6 +982,7 @@ async fn run_monitor(
                         &drop_counters_snapshot,
                         loaded.prev_faults_map.as_ref(),
                         psi_snapshot.as_ref(),
+                        &mut prev_faults_snapshot,
                     );
                     streamed_interval_record_count += records.len();
 
