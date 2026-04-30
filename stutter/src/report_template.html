@@ -40,6 +40,10 @@ th { background: #f3f4f6; font-weight: 600; }
 
 <section>
   <h2>Task Latency Histograms</h2>
+  <div id="histogram-notice" style="margin-bottom: 16px; padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; color: #1e40af; border-radius: 4px; max-width: 1080px;">
+    <strong>Statistical Note:</strong> For tasks with more than 1,024 samples, percentiles (p95, p99) are approximate histogram estimates. 
+    Always prioritize <strong>Max Latency</strong> and <strong>Threshold Counters</strong> (over 1ms/2ms/5ms) for exact comparisons.
+  </div>
   <div id="histograms-container"></div>
 </section>
 
@@ -82,6 +86,18 @@ document.addEventListener('DOMContentLoaded', () => {
         addRow('CPU Online', metadata.cpu_online);
         addRow('SCX State', metadata.scx_state);
         addRow('SCX Ops', metadata.scx_ops);
+        if (session.drop_counters && (
+            session.drop_counters.wakeup_data_insert_failed > 0 ||
+            session.drop_counters.ringbuf_reserve_failed > 0 ||
+            session.drop_counters.irq_start_times_insert_failed > 0 ||
+            session.drop_counters.block_start_insert_failed > 0
+        )) {
+            const total = (session.drop_counters.wakeup_data_insert_failed || 0) +
+                          (session.drop_counters.ringbuf_reserve_failed || 0) +
+                          (session.drop_counters.irq_start_times_insert_failed || 0) +
+                          (session.drop_counters.block_start_insert_failed || 0);
+            addRow('eBPF Drops (Cumulative)', total);
+        }
         html += '</tbody></table>';
         document.getElementById('metadata-content').innerHTML = html;
 
@@ -247,7 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     plugins: {
                         title: { display: true, text: `Cluster ${idx + 1} (${cluster.points.length} points)` },
                         legend: { display: false },
-                        tooltip: { callbacks: { label: (ctx) => `${ctx.raw.y}: ${((ctx.raw.x[1] - ctx.raw.x[0])).toFixed(2)}ms (wakeup_target_cpu=${ctx.raw.wakeup_target_cpu}, switch_cpu=${ctx.raw.switch_cpu}, target_pending_wakeups=${ctx.raw.target_pending_wakeups}; target-only, not kernel runqueue depth)` } },
+                        tooltip: { callbacks: { label: (ctx) => `${ctx.raw.y}: ${((ctx.raw.x[1] - ctx.raw.x[0])).toFixed(2)}ms (wakeup_target_cpu=${ctx.raw.wakeup_target_cpu}, switch_cpu=${ctx.raw.switch_cpu}, target_pending_on_switch_cpu=${ctx.raw.target_pending_wakeups}; target-only, not kernel runqueue depth)` } },
                         zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } }
                     },
                     scales: {

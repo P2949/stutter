@@ -196,6 +196,9 @@ struct ApplyProfileArgs {
 
     #[arg(long = "refresh-ms", default_value_t = 1_000)]
     refresh_ms: u64,
+
+    #[arg(long)]
+    enforce: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -217,6 +220,9 @@ struct TuneArgs {
 
     #[arg(long = "mangohud-log", value_name = "PATH")]
     pub mangohud_log: Option<PathBuf>,
+
+    #[arg(long)]
+    pub enforce: bool,
 }
 
 #[derive(Debug)]
@@ -233,6 +239,7 @@ pub enum AppCommand {
         watch: bool,
         keep_applied: bool,
         refresh_ms: u64,
+        enforce: bool,
     },
     InspectTree {
         tree_pid: u32,
@@ -253,6 +260,7 @@ pub enum AppCommand {
         warmup_seconds: u64,
         keep_best: bool,
         mangohud_log: Option<PathBuf>,
+        enforce: bool,
     },
 }
 
@@ -383,6 +391,7 @@ where
                 watch: args.watch,
                 keep_applied: args.keep_applied,
                 refresh_ms: args.refresh_ms,
+                enforce: args.enforce,
             })
         }
         Some(Command::Tune(args)) => {
@@ -402,6 +411,7 @@ where
                 warmup_seconds: args.warmup_seconds,
                 keep_best: args.keep_best,
                 mangohud_log: args.mangohud_log,
+                enforce: args.enforce,
             })
         }
         None => Ok(AppCommand::Monitor(Box::new(config_from_monitor_args(
@@ -768,6 +778,7 @@ mod tests {
             watch,
             keep_applied,
             refresh_ms,
+            enforce,
         } = apply
         else {
             panic!("expected apply profile command");
@@ -780,6 +791,7 @@ mod tests {
         assert!(!watch);
         assert!(!keep_applied);
         assert_eq!(refresh_ms, 1_000);
+        assert!(!enforce);
     }
 
     #[test]
@@ -910,6 +922,7 @@ mod tests {
             warmup_seconds,
             keep_best,
             mangohud_log,
+            enforce,
         } = command
         else {
             panic!("expected tune command");
@@ -921,6 +934,7 @@ mod tests {
         assert_eq!(warmup_seconds, 10);
         assert!(keep_best);
         assert_eq!(mangohud_log, Some(PathBuf::from("/tmp/tune-mango.csv")));
+        assert!(!enforce);
     }
 
     #[test]

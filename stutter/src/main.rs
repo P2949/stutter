@@ -134,6 +134,7 @@ async fn main() -> anyhow::Result<()> {
             watch,
             keep_applied,
             refresh_ms,
+            enforce,
         } => {
             apply_profile_command(
                 tree_pid,
@@ -143,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
                 watch,
                 keep_applied,
                 refresh_ms,
+                enforce,
             )
             .await
         }
@@ -175,6 +177,7 @@ async fn main() -> anyhow::Result<()> {
             warmup_seconds,
             keep_best,
             mangohud_log,
+            enforce,
         } => {
             tune_command(
                 tree_pid,
@@ -183,6 +186,7 @@ async fn main() -> anyhow::Result<()> {
                 warmup_seconds,
                 keep_best,
                 mangohud_log,
+                enforce,
             )
             .await
         }
@@ -227,6 +231,7 @@ async fn tune_command(
     warmup_seconds: u64,
     keep_best: bool,
     mangohud_log: Option<PathBuf>,
+    enforce: bool,
 ) -> anyhow::Result<()> {
     let profiles = profiles::load_profiles(&profiles_path)?;
     if profiles.is_empty() {
@@ -271,6 +276,7 @@ async fn tune_command(
             profile: profile.clone(),
             epoch_seconds,
             warmup_seconds,
+            enforce,
             shared_hwmon: shared_hwmon.clone(),
             mangohud_log: mangohud_log.clone(),
             force_restore_overwrite: idx == 0,
@@ -416,7 +422,7 @@ async fn tune_command(
             .iter()
             .find(|profile| profile.name == summary.best_profile)
         {
-            apply_profile_to_tree_blocking(tree_pid, profile.clone(), false, false).await?;
+            apply_profile_to_tree_blocking(tree_pid, profile.clone(), false, false, enforce).await?;
         }
     }
 
@@ -447,6 +453,7 @@ struct TuneMeasureInput {
     profile: profiles::Profile,
     epoch_seconds: u64,
     warmup_seconds: u64,
+    enforce: bool,
     shared_hwmon: Option<std::sync::Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
     mangohud_log: Option<PathBuf>,
     force_restore_overwrite: bool,
@@ -467,6 +474,7 @@ async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<TuneM
         profile,
         epoch_seconds,
         warmup_seconds,
+        enforce,
         shared_hwmon,
         mangohud_log,
         force_restore_overwrite,
@@ -532,6 +540,7 @@ async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<TuneM
         TUNE_PROFILE_REFRESH_MS,
         stop_refresh.clone(),
         refreshed_applied_tasks.clone(),
+        enforce,
     ));
 
     let mut profile_refresh_finished = false;
@@ -595,6 +604,7 @@ async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<TuneM
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn tune_profile_refresh_loop(
     tree_pid: u32,
     profile: profiles::Profile,
@@ -603,6 +613,7 @@ async fn tune_profile_refresh_loop(
     refresh_ms: u64,
     stop_refresh: Arc<AtomicBool>,
     applied_tasks: Arc<AtomicUsize>,
+    enforce: bool,
 ) -> anyhow::Result<()> {
     let mut should_force = force_restore_overwrite;
     let refresh_interval = Duration::from_millis(refresh_ms);
@@ -614,10 +625,10 @@ async fn tune_profile_refresh_loop(
             return Ok(());
         }
 
-        if Instant::now() >= next_verify {
+        if enforce || Instant::now() >= next_verify {
             cache.clear();
             next_verify = Instant::now() + verify_interval;
-            debug!("tune_profile_refresh_cache_invalidated_for_full_verify");
+            debug!("tune_profile_refresh_cache_invalidated_for_full_verify enforce={enforce}");
         }
 
         let (records, updated_cache) = apply_profile_to_tree_cached_blocking(
@@ -727,6 +738,16 @@ struct TuneCandidateSummary {
     valid: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize)]
+struct TaskIdentity {
+    class: TaskClass,
+    process_comm: String,
+    comm: String,
+    process_starttime_ticks: Option<u64>,
+    exe_dev: Option<u64>,
+    exe_ino: Option<u64>,
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 struct TuneCoverageMetrics {
     unique_tracked_tasks: usize,
@@ -735,6 +756,8 @@ struct TuneCoverageMetrics {
     active_target_max: usize,
     removed_task_count: usize,
     drop_counter_total: u64,
+    #[serde(skip_serializing)]
+    scored_identities: BTreeSet<TaskIdentity>,
 }
 
 fn result_is_better(candidate: &TuneCandidateSummary, current_best: &TuneCandidateSummary) -> bool {
@@ -776,6 +799,20 @@ fn tune_coverage_metrics(
         )
     };
 
+    let scored_identities = session
+        .tasks
+        .iter()
+        .filter(|task| scorer::class_contributes_to_score(task.class))
+        .map(|task| TaskIdentity {
+            class: task.class,
+            process_comm: task.process_comm.to_string(),
+            comm: task.comm.clone(),
+            process_starttime_ticks: task.process_starttime_ticks,
+            exe_dev: task.exe_dev,
+            exe_ino: task.exe_ino,
+        })
+        .collect::<BTreeSet<_>>();
+
     TuneCoverageMetrics {
         unique_tracked_tasks,
         unique_scored_tasks,
@@ -783,6 +820,7 @@ fn tune_coverage_metrics(
         active_target_max,
         removed_task_count,
         drop_counter_total: session.drop_counters.total(),
+        scored_identities,
     }
 }
 
@@ -799,6 +837,37 @@ fn check_tune_coverage_comparability(results: &[TuneCandidateSummary]) -> anyhow
             .iter()
             .map(|result| result.coverage.unique_scored_tasks),
     )?;
+
+    // Verify task identity stability. If the set of scored tasks shifts
+    // significantly between candidates, the comparison is unsafe.
+    if let Some(first) = results.first() {
+        for other in results.iter().skip(1) {
+            let common = first
+                .coverage
+                .scored_identities
+                .intersection(&other.coverage.scored_identities)
+                .count();
+            let total = first
+                .coverage
+                .scored_identities
+                .union(&other.coverage.scored_identities)
+                .count();
+
+            let overlap_ratio = if total > 0 {
+                common as f64 / total as f64
+            } else {
+                1.0
+            };
+
+            if overlap_ratio < 0.75 {
+                anyhow::bail!(
+                    "scored task identity mismatch (overlap={:.1}%); candidates are not comparable (major thread topology shift)",
+                    overlap_ratio * 100.0
+                );
+            }
+        }
+    }
+
     check_tune_metric_ratio(
         "active target minimum",
         results
@@ -910,6 +979,7 @@ fn unix_nanos_now() -> u128 {
         .as_nanos()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn apply_profile_command(
     tree_pid: u32,
     profile_path: PathBuf,
@@ -918,6 +988,7 @@ async fn apply_profile_command(
     watch: bool,
     keep_applied: bool,
     refresh_ms: u64,
+    enforce: bool,
 ) -> anyhow::Result<()> {
     let profile = profiles::load_first_profile(&profile_path)?;
     let mut cache = profiles::ProfileApplyCache::default();
@@ -944,7 +1015,7 @@ async fn apply_profile_command(
             }
         }
     } else {
-        apply_profile_to_tree_blocking(tree_pid, profile.clone(), force, dry_run).await?
+        apply_profile_to_tree_blocking(tree_pid, profile.clone(), force, dry_run, enforce).await?
     };
 
     println!(
@@ -974,10 +1045,10 @@ async fn apply_profile_command(
                 return Ok(());
             }
             _ = tick.tick() => {
-                if Instant::now() >= next_verify {
+                if enforce || Instant::now() >= next_verify {
                     cache.clear();
                     next_verify = Instant::now() + verify_interval;
-                    debug!("profile_watch_cache_invalidated_for_full_verify");
+                    debug!("profile_watch_cache_invalidated_for_full_verify enforce={enforce}");
                 }
 
                 let result = apply_profile_to_tree_cached_blocking(
@@ -1017,8 +1088,11 @@ async fn apply_profile_to_tree_blocking(
     profile: profiles::Profile,
     force: bool,
     dry_run: bool,
+    _enforce: bool,
 ) -> anyhow::Result<Vec<affinity::AffinityRecord>> {
     task::spawn_blocking(move || {
+        // Enforce is handled by the caller clearing the cache in watch mode.
+        // Blocking one-shot always verifies.
         profiles::apply_profile_to_tree(tree_pid, &profile, force, dry_run)
     })
     .await
@@ -2696,7 +2770,7 @@ fn log_drop_counters(drop_counters: &ebpf_loader::DropCountersSnapshot) {
     }
 
     warn!(
-        "ebpf_drop_counters total={} wakeup_data_insert_failed={} ringbuf_reserve_failed={} irq_start_times_insert_failed={} block_start_insert_failed={}",
+        "ebpf_drop_counters cumulative_total={} wakeup_data_insert_failed={} ringbuf_reserve_failed={} irq_start_times_insert_failed={} block_start_insert_failed={}",
         drop_counters.total(),
         drop_counters.wakeup_data_insert_failed,
         drop_counters.ringbuf_reserve_failed,

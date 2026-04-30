@@ -559,8 +559,8 @@ pub fn print_event(event: &SchedulerEvent, comm: &str, label: &str) {
     let latency_ms = event.latency_ns as f64 / 1_000_000.0;
 
     info!(
-        "{label} runnable_latency={latency_us:.3}us ({latency_ms:.6}ms) task={} cpu={} prio={} comm={} wakeup_ns={} switch_ns={}",
-        event.pid, event.cpu, event.prio, comm, event.wakeup_ns, event.switch_ns,
+        "{label} runnable_latency={latency_us:.3}us ({latency_ms:.6}ms) task={} cpu={} wakeup_target_cpu={} prio={} comm={} wakeup_ns={} switch_ns={}",
+        event.pid, event.cpu, event.wakeup_target_cpu, event.prio, comm, event.wakeup_ns, event.switch_ns,
     );
 }
 
