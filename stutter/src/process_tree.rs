@@ -27,6 +27,7 @@ pub struct ProcInfo {
     pub starttime_ticks: Option<u64>,
     pub exe_dev: Option<u64>,
     pub exe_ino: Option<u64>,
+    pub sched_policy: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
@@ -92,6 +93,19 @@ pub struct TaskInfo {
     pub exe_dev: Option<u64>,
     pub exe_ino: Option<u64>,
     pub class: TaskClass,
+    pub sched_policy: Option<u32>,
+}
+
+pub fn sched_policy_name(policy: u32) -> &'static str {
+    match policy {
+        0 => "SCHED_NORMAL",
+        1 => "SCHED_FIFO",
+        2 => "SCHED_RR",
+        3 => "SCHED_BATCH",
+        5 => "SCHED_IDLE",
+        6 => "SCHED_DEADLINE",
+        _ => "UNKNOWN",
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,7 +225,9 @@ fn read_proc_info_at(proc_root: &Path, pid: u32) -> Option<ProcInfo> {
         })
         .unwrap_or_default();
 
-    let starttime_ticks = stat_starttime_at(&proc_root.join(pid.to_string()).join("stat"));
+    let stat_path = proc_root.join(pid.to_string()).join("stat");
+    let starttime_ticks = stat_starttime_at(&stat_path);
+    let sched_policy = stat_policy_at(&stat_path);
     let (exe_dev, exe_ino) = exe_metadata_at(proc_root, pid)
         .map(|metadata| (Some(metadata.dev()), Some(metadata.ino())))
         .unwrap_or((None, None));
@@ -224,6 +240,7 @@ fn read_proc_info_at(proc_root: &Path, pid: u32) -> Option<ProcInfo> {
         starttime_ticks,
         exe_dev,
         exe_ino,
+        sched_policy,
     })
 }
 
@@ -385,6 +402,7 @@ pub fn target_snapshot_filtered_at_with_options(
             exe_dev: None,
             exe_ino: None,
             class: TaskClass::Unknown,
+            sched_policy: None,
         };
         if filters.allows(&task) {
             tasks.insert(pid, task);
@@ -486,16 +504,16 @@ fn task_info_from_proc(
     comm: &str,
     proc_info: &ProcInfo,
 ) -> TaskInfo {
-    let task_starttime_ticks = if tid == process_pid {
-        proc_info.starttime_ticks
+    let stat_path = proc_root
+        .join(process_pid.to_string())
+        .join("task")
+        .join(tid.to_string())
+        .join("stat");
+
+    let (task_starttime_ticks, sched_policy) = if tid == process_pid {
+        (proc_info.starttime_ticks, proc_info.sched_policy)
     } else {
-        stat_starttime_at(
-            &proc_root
-                .join(process_pid.to_string())
-                .join("task")
-                .join(tid.to_string())
-                .join("stat"),
-        )
+        (stat_starttime_at(&stat_path), stat_policy_at(&stat_path))
     };
 
     TaskInfo {
@@ -509,6 +527,7 @@ fn task_info_from_proc(
         exe_dev: proc_info.exe_dev,
         exe_ino: proc_info.exe_ino,
         class: classify_task(comm, &proc_info.comm, &proc_info.cmdline),
+        sched_policy,
     }
 }
 
@@ -538,6 +557,16 @@ pub fn task_starttime_at(proc_root: &Path, process_pid: u32, tid: u32) -> Option
 pub fn parse_proc_stat_starttime(stat: &str) -> Option<u64> {
     let (_, after_comm) = stat.rsplit_once(") ")?;
     after_comm.split_whitespace().nth(19)?.parse().ok()
+}
+
+fn stat_policy_at(path: &Path) -> Option<u32> {
+    let stat = fs::read_to_string(path).ok()?;
+    parse_proc_stat_policy(&stat)
+}
+
+pub fn parse_proc_stat_policy(stat: &str) -> Option<u32> {
+    let (_, after_comm) = stat.rsplit_once(") ")?;
+    after_comm.split_whitespace().nth(38)?.parse().ok()
 }
 
 fn comm_pattern_matches(pattern: &str, task: &TaskInfo) -> bool {

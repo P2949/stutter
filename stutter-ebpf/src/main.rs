@@ -4,13 +4,15 @@
 use aya_ebpf::{
     helpers::{bpf_get_current_pid_tgid, bpf_get_smp_processor_id, bpf_ktime_get_ns},
     macros::{map, tracepoint},
-    maps::{HashMap, PerCpuArray, RingBuf},
+    maps::{Array, HashMap, LruHashMap, PerCpuArray, RingBuf},
     programs::TracePointContext,
 };
 use stutter_common::{
     DROP_COUNTERS_MAX, DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
-    DROP_WAKEUP_TIMES_INSERT_FAILED, EVENT_IRQ_LATENCY, EVENT_RUNNABLE_LATENCY, IrqEvent,
-    SchedulerEvent,
+    DROP_WAKER_MAP_INSERT_FAILED, DROP_WAKEUP_TIMES_INSERT_FAILED, EVENT_BLOCK_IO,
+    EVENT_CPU_FREQ, EVENT_IRQ_LATENCY, EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT,
+    BlockIoEvent, CpuFreqEvent, IrqEvent, MigrationEvent, SchedulerEvent, StatWaitEvent,
+    DROP_BLOCK_START_INSERT_FAILED,
 };
 
 #[map]
@@ -28,7 +30,33 @@ static TARGET_IRQS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(64, 
 static WAKEUP_TIMES: HashMap<u32, u64> = HashMap::<u32, u64>::with_max_entries(131_072, 0);
 
 #[map]
+static WAKER_MAP: HashMap<u32, u32> = HashMap::<u32, u32>::with_max_entries(131_072, 0);
+
+#[map]
 static IRQ_START_TIMES: HashMap<u64, u64> = HashMap::<u64, u64>::with_max_entries(1024, 0);
+
+#[map]
+static RQ_DEPTH: Array<u32> = Array::<u32>::with_max_entries(1024, 0);
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct FaultCounters {
+    maj: u64,
+    min: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct IoStart {
+    ts: u64,
+    tid: u32,
+}
+
+#[map]
+static PREV_FAULTS: HashMap<u32, FaultCounters> = HashMap::<u32, FaultCounters>::with_max_entries(131_072, 0);
+
+#[map]
+static BLOCK_START: LruHashMap<u64, IoStart> = LruHashMap::<u64, IoStart>::with_max_entries(16384, 0);
 
 #[map]
 static DROP_COUNTERS: PerCpuArray<u64> = PerCpuArray::<u64>::with_max_entries(DROP_COUNTERS_MAX, 0);
@@ -58,9 +86,65 @@ pub fn sched_switch(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+pub fn sched_migrate_task(ctx: TracePointContext) -> u32 {
+    match try_sched_migrate_task(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[tracepoint]
+pub fn cpu_frequency(ctx: TracePointContext) -> u32 {
+    match try_cpu_frequency(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[tracepoint]
+pub fn sched_stat_wait(ctx: TracePointContext) -> u32 {
+    match try_sched_stat_wait(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[tracepoint]
 pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
     let _ = WAKEUP_TIMES.remove(&tid);
+    let _ = WAKER_MAP.remove(&tid);
+    0
+}
+
+#[tracepoint]
+pub fn page_fault_user(_ctx: TracePointContext) -> u32 {
+    0
+}
+
+#[aya_ebpf::macros::perf_event]
+pub fn major_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
+    let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
+    if is_target_pid(tid) {
+        if let Some(counters) = unsafe { PREV_FAULTS.get_ptr_mut(&tid) } {
+            unsafe { (*counters).maj += 1 };
+        } else {
+            let _ = PREV_FAULTS.insert(&tid, &FaultCounters { maj: 1, min: 0 }, 0);
+        }
+    }
+    0
+}
+
+#[aya_ebpf::macros::perf_event]
+pub fn minor_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
+    let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
+    if is_target_pid(tid) {
+        if let Some(counters) = unsafe { PREV_FAULTS.get_ptr_mut(&tid) } {
+            unsafe { (*counters).min += 1 };
+        } else {
+            let _ = PREV_FAULTS.insert(&tid, &FaultCounters { maj: 0, min: 1 }, 0);
+        }
+    }
     0
 }
 
@@ -121,6 +205,16 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
         increment_drop_counter(DROP_WAKEUP_TIMES_INSERT_FAILED);
     }
 
+    let target_cpu: u32 = unsafe { ctx.read_at(36).map_err(|_| 1u32)? };
+    if let Some(depth) = RQ_DEPTH.get_ptr_mut(target_cpu) {
+        unsafe { *depth = (*depth).saturating_add(1) };
+    }
+
+    let waker_tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
+    if WAKER_MAP.insert(pid, waker_tid, 0).is_err() {
+        increment_drop_counter(DROP_WAKER_MAP_INSERT_FAILED);
+    }
+
     Ok(0)
 }
 
@@ -140,17 +234,37 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
 
     let _ = WAKEUP_TIMES.remove(&pid);
 
+    let waker_tid = unsafe { WAKER_MAP.get(&pid).copied().unwrap_or(0) };
+    let _ = WAKER_MAP.remove(&pid);
+
     // Check if this PID is a target before further processing
     if !is_target_pid(pid) {
         return Ok(0);
     }
 
+    let prev_state: i64 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
+    let cpu = unsafe { bpf_get_smp_processor_id() };
+
+    if prev_state != 0 {
+        if let Some(depth) = RQ_DEPTH.get_ptr_mut(cpu) {
+            unsafe { *depth = (*depth).saturating_sub(1) };
+        }
+    }
+
+    let rq_depth = RQ_DEPTH.get(cpu).copied().unwrap_or(0);
+
     let switch_ns = unsafe { bpf_ktime_get_ns() };
     let latency_ns = switch_ns.saturating_sub(wakeup_ns);
 
+    let faults = unsafe {
+        PREV_FAULTS
+            .get(&pid)
+            .copied()
+            .unwrap_or(FaultCounters { maj: 0, min: 0 })
+    };
+
     let prio: i32 = unsafe { ctx.read_at(60).map_err(|_| 1u32)? };
     let comm: [u8; 16] = unsafe { ctx.read_at(40).map_err(|_| 1u32)? };
-    let cpu = unsafe { bpf_get_smp_processor_id() };
 
     let Some(mut entry) = EVENTS.reserve::<SchedulerEvent>(0) else {
         increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
@@ -163,10 +277,102 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
         (*event).pid = pid;
         (*event).cpu = cpu;
         (*event).prio = prio;
+        (*event).waker_tid = waker_tid;
+        (*event).rq_depth = rq_depth;
+        (*event).maj_flt = faults.maj as u32;
+        (*event).min_flt = faults.min as u32;
         (*event).wakeup_ns = wakeup_ns;
         (*event).switch_ns = switch_ns;
         (*event).latency_ns = latency_ns;
         (*event).comm = comm;
+    }
+
+    entry.submit(0);
+
+    Ok(0)
+}
+
+fn try_sched_migrate_task(ctx: TracePointContext) -> Result<u32, u32> {
+    let pid: i32 = unsafe { ctx.read_at(12).map_err(|_| 1u32)? };
+    if pid <= 0 {
+        return Ok(0);
+    }
+
+    let pid = pid as u32;
+    if !is_target_pid(pid) {
+        return Ok(0);
+    }
+
+    let orig_cpu: i32 = unsafe { ctx.read_at(20).map_err(|_| 1u32)? };
+    let dest_cpu: i32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
+    let now = unsafe { bpf_ktime_get_ns() };
+
+    let Some(mut entry) = EVENTS.reserve::<MigrationEvent>(0) else {
+        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
+        return Ok(0);
+    };
+    let event = entry.as_mut_ptr();
+
+    unsafe {
+        (*event).kind = EVENT_MIGRATION;
+        (*event).tid = pid;
+        (*event).from_cpu = orig_cpu as u32;
+        (*event).to_cpu = dest_cpu as u32;
+        (*event).timestamp_ns = now;
+    }
+
+    entry.submit(0);
+
+    Ok(0)
+}
+
+fn try_cpu_frequency(ctx: TracePointContext) -> Result<u32, u32> {
+    let state: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
+    let cpu_id: u32 = unsafe { ctx.read_at(12).map_err(|_| 1u32)? };
+    let now = unsafe { bpf_ktime_get_ns() };
+
+    let Some(mut entry) = EVENTS.reserve::<CpuFreqEvent>(0) else {
+        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
+        return Ok(0);
+    };
+    let event = entry.as_mut_ptr();
+
+    unsafe {
+        (*event).kind = EVENT_CPU_FREQ;
+        (*event).cpu = cpu_id;
+        (*event).state = state;
+        (*event)._pad = 0;
+        (*event).timestamp_ns = now;
+    }
+
+    entry.submit(0);
+
+    Ok(0)
+}
+
+fn try_sched_stat_wait(ctx: TracePointContext) -> Result<u32, u32> {
+    let pid: i32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
+    if pid <= 0 {
+        return Ok(0);
+    }
+
+    let pid = pid as u32;
+    if !is_target_pid(pid) {
+        return Ok(0);
+    }
+
+    let delay: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
+
+    let Some(mut entry) = EVENTS.reserve::<StatWaitEvent>(0) else {
+        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
+        return Ok(0);
+    };
+    let event = entry.as_mut_ptr();
+
+    unsafe {
+        (*event).kind = EVENT_STAT_WAIT;
+        (*event).tid = pid;
+        (*event).delay_ns = delay;
     }
 
     entry.submit(0);
@@ -232,6 +438,60 @@ fn try_irq_handler_exit(ctx: TracePointContext) -> Result<u32, u32> {
     }
 
     entry.submit(0);
+    Ok(0)
+}
+
+#[tracepoint]
+pub fn block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
+    let dev: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
+    let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
+    let tid = (unsafe { bpf_get_current_pid_tgid() } & 0xffff_ffff) as u32;
+    let ts = unsafe { bpf_ktime_get_ns() };
+
+    let key = (dev as u64) << 32 | (sector & 0xffff_ffff);
+    if BLOCK_START.insert(&key, &IoStart { ts, tid }, 0).is_err() {
+        increment_drop_counter(DROP_BLOCK_START_INSERT_FAILED);
+    }
+
+    Ok(0)
+}
+
+#[tracepoint]
+pub fn block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
+    let dev: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
+    let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
+    let nr_sector: u32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
+    let rwbs: [u8; 8] = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
+
+    let key = (dev as u64) << 32 | (sector & 0xffff_ffff);
+    let start = match unsafe { BLOCK_START.get(&key) } {
+        Some(s) => *s,
+        None => return Ok(0),
+    };
+    let _ = BLOCK_START.remove(&key);
+
+    let now = unsafe { bpf_ktime_get_ns() };
+    let duration_ns = now.saturating_sub(start.ts);
+
+    let Some(mut entry) = EVENTS.reserve::<BlockIoEvent>(0) else {
+        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
+        return Ok(0);
+    };
+    let event = entry.as_mut_ptr();
+
+    unsafe {
+        (*event).kind = EVENT_BLOCK_IO;
+        (*event).tid = start.tid;
+        (*event).dev = dev;
+        (*event).nr_sector = nr_sector;
+        (*event).sector = sector;
+        (*event).duration_ns = duration_ns;
+        (*event).timestamp_ns = now;
+        (*event).rwbs = rwbs;
+    }
+
+    entry.submit(0);
+
     Ok(0)
 }
 

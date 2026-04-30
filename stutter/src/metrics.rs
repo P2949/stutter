@@ -20,6 +20,11 @@ pub struct SpikeRecord {
     pub prio: i32,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
+    pub rq_depth: u32,
+    #[serde(default)]
+    pub major_faults: u32,
+    #[serde(default)]
+    pub minor_faults: u32,
 }
 
 #[derive(Clone)]
@@ -44,6 +49,14 @@ pub struct TaskStats {
     pub session_latency: LatencyStats,
     pub session_cpu: CpuStatsSet,
     pub top_spikes: Vec<SpikeRecord>,
+    pub migration_count: u64,
+    pub cross_numa_migrations: u64,
+    pub waker_counts: BTreeMap<u32, u64>,
+    pub sched_policy: Option<u32>,
+    pub stat_wait_sum_ns: u128,
+    pub stat_wait_count: u64,
+    pub major_faults: u64,
+    pub minor_faults: u64,
     histogram_truncation_warned: bool,
 }
 
@@ -146,6 +159,10 @@ pub struct IntervalRecord {
     pub worst_cpu_max_ns: u64,
     pub spikiest_cpu: Option<u32>,
     pub spikiest_cpu_spikes: u64,
+    #[serde(default)]
+    pub major_faults: u64,
+    #[serde(default)]
+    pub minor_faults: u64,
     #[serde(default)]
     pub percentile_scope: String,
     #[serde(default)]
@@ -406,6 +423,14 @@ impl TaskStats {
             session_latency: LatencyStats::new(),
             session_cpu: CpuStatsSet::new(),
             top_spikes: Vec::with_capacity(16),
+            migration_count: 0,
+            cross_numa_migrations: 0,
+            waker_counts: BTreeMap::new(),
+            sched_policy: None,
+            stat_wait_sum_ns: 0,
+            stat_wait_count: 0,
+            major_faults: 0,
+            minor_faults: 0,
             histogram_truncation_warned: false,
         }
     }
@@ -418,6 +443,7 @@ impl TaskStats {
         self.task_starttime_ticks = task_info.task_starttime_ticks;
         self.exe_dev = task_info.exe_dev;
         self.exe_ino = task_info.exe_ino;
+        self.sched_policy = task_info.sched_policy;
 
         if should_replace_comm_from_task_info(&self.comm, task_info) {
             self.comm = task_info.comm.clone();
@@ -434,6 +460,10 @@ impl TaskStats {
         self.session_latency.record(event.latency_ns);
         self.session_cpu
             .record(event.cpu, event.latency_ns, spike_threshold_ns);
+
+        if event.waker_tid != 0 {
+            *self.waker_counts.entry(event.waker_tid).or_insert(0) += 1;
+        }
 
         if self.session_latency.samples_truncated > 0 && !self.histogram_truncation_warned {
             self.histogram_truncation_warned = true;
@@ -452,6 +482,9 @@ impl TaskStats {
                 prio: event.prio,
                 wakeup_ns: event.wakeup_ns,
                 switch_ns: event.switch_ns,
+                rq_depth: event.rq_depth,
+                major_faults: event.maj_flt.saturating_sub(self.major_faults as u32),
+                minor_faults: event.min_flt.saturating_sub(self.minor_faults as u32),
             });
 
             self.top_spikes
@@ -459,6 +492,9 @@ impl TaskStats {
 
             self.top_spikes.truncate(16);
         }
+
+        self.major_faults = event.maj_flt as u64;
+        self.minor_faults = event.min_flt as u64;
     }
 }
 
@@ -553,10 +589,18 @@ pub fn collect_interval_summaries(
     stats_by_task: &mut BTreeMap<u32, TaskStats>,
     elapsed_ms: u128,
     drop_counters: &crate::ebpf_loader::DropCountersSnapshot,
+    prev_faults_map: Option<&aya::maps::HashMap<aya::maps::MapData, u32, [u64; 2]>>,
 ) -> Vec<IntervalRecord> {
     let mut interval_records = Vec::new();
 
     for (task, stats) in stats_by_task.iter_mut() {
+        if let Some(map) = prev_faults_map {
+            if let Ok(counters) = map.get(task, 0) {
+                stats.major_faults = counters[0];
+                stats.minor_faults = counters[1];
+            }
+        }
+
         let Some(latency) = stats.interval_latency.snapshot_and_reset() else {
             continue;
         };
@@ -646,6 +690,8 @@ pub fn interval_record_from_snapshot(
         busiest_cpu: cpu.busiest_cpu,
         busiest_cpu_samples: cpu.busiest_cpu_samples,
         worst_cpu: cpu.worst_cpu,
+        major_faults: stats.major_faults,
+        minor_faults: stats.minor_faults,
         worst_cpu_max_ns: cpu.worst_cpu_max_ns,
         spikiest_cpu: cpu.spikiest_cpu,
         spikiest_cpu_spikes: cpu.spikiest_cpu_spikes,

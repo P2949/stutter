@@ -36,7 +36,11 @@ use recorder::{
 use crossterm::event::{Event, EventStream, KeyCode};
 use futures_util::StreamExt;
 use serde::Serialize;
-use stutter_common::{EVENT_IRQ_LATENCY, EVENT_RUNNABLE_LATENCY, IrqEvent, SchedulerEvent};
+use stutter_common::{
+    EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_IRQ_LATENCY, EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY,
+    EVENT_STAT_WAIT, BlockIoEvent, CpuFreqEvent, IrqEvent, MigrationEvent, SchedulerEvent,
+    StatWaitEvent,
+};
 use tokio::{
     signal, task,
     time::{Duration, MissedTickBehavior, interval, sleep},
@@ -81,6 +85,13 @@ struct DrainBpfEventsInput<'a> {
     spike_events: &'a mut Option<SpikeEventBuffer>,
     irq_event_writer: Option<&'a mut JsonArrayWriter>,
     irq_event_count: &'a mut usize,
+    migration_event_writer: Option<&'a mut JsonArrayWriter>,
+    migration_event_count: &'a mut usize,
+    cpu_freq_sample_writer: Option<&'a mut JsonArrayWriter>,
+    cpu_freq_sample_count: &'a mut usize,
+    block_io_event_writer: Option<&'a mut JsonArrayWriter>,
+    block_io_event_count: &'a mut usize,
+    cpu_to_pkg: &'a BTreeMap<u32, String>,
 }
 
 #[tokio::main]
@@ -662,9 +673,21 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
         .as_ref()
         .map(|run| JsonArrayWriter::create(run.run_dir.join("irq_events.json")))
         .transpose()?;
+    let mut migration_event_writer = recording
+        .as_ref()
+        .map(|run| JsonArrayWriter::create(run.run_dir.join("migration_events.json")))
+        .transpose()?;
+    let mut cpu_freq_sample_writer = recording
+        .as_ref()
+        .map(|run| JsonArrayWriter::create(run.run_dir.join("cpu_freq_samples.json")))
+        .transpose()?;
     let mut gpu_sample_writer = recording
         .as_ref()
         .map(|run| JsonArrayWriter::create(run.run_dir.join("gpu_samples.json")))
+        .transpose()?;
+    let mut block_io_event_writer = recording
+        .as_ref()
+        .map(|run| JsonArrayWriter::create(run.run_dir.join("io_events.json")))
         .transpose()?;
     let mut csv_writer = config
         .csv_path
@@ -673,7 +696,17 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
         .transpose()?;
     let mut streamed_interval_record_count = 0usize;
     let mut streamed_irq_event_count = 0usize;
+    let mut streamed_migration_event_count = 0usize;
+    let mut streamed_cpu_freq_sample_count = 0usize;
     let mut streamed_gpu_sample_count = 0usize;
+    let mut streamed_block_io_event_count = 0usize;
+
+    let metadata = metadata::collect_system_metadata();
+    let cpu_to_pkg: BTreeMap<u32, String> = metadata
+        .cpu_topology
+        .iter()
+        .map(|c| (c.cpu, c.physical_package_id.clone().unwrap_or_default()))
+        .collect();
 
     // These mutable collections are intentionally confined to the main monitoring task.
     // Blocking work returns state to this task and does not mutate these collections
@@ -795,7 +828,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                 if !tui_state.paused {
                     let elapsed_ms = started.elapsed().as_millis();
                     let drop_counters_snapshot = loaded.snapshot_drop_counters();
-                    let records = collect_interval_summaries(&mut stats_by_task, elapsed_ms, &drop_counters_snapshot);
+                    let records = collect_interval_summaries(&mut stats_by_task, elapsed_ms, &drop_counters_snapshot, loaded.prev_faults_map.as_ref());
                     streamed_interval_record_count += records.len();
 
                     if let Some(writer) = interval_writer.as_mut() {
@@ -988,6 +1021,13 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     spike_events: &mut spike_events,
                     irq_event_writer: irq_event_writer.as_mut(),
                     irq_event_count: &mut streamed_irq_event_count,
+                    migration_event_writer: migration_event_writer.as_mut(),
+                    migration_event_count: &mut streamed_migration_event_count,
+                    cpu_freq_sample_writer: cpu_freq_sample_writer.as_mut(),
+                    cpu_freq_sample_count: &mut streamed_cpu_freq_sample_count,
+                    block_io_event_writer: block_io_event_writer.as_mut(),
+                    block_io_event_count: &mut streamed_block_io_event_count,
+                    cpu_to_pkg: &cpu_to_pkg,
                 })?;
             }
         }
@@ -1016,6 +1056,9 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
             writer.finish()?;
         }
         if let Some(writer) = gpu_sample_writer.as_mut() {
+            writer.finish()?;
+        }
+        if let Some(writer) = block_io_event_writer.as_mut() {
             writer.finish()?;
         }
 
@@ -1062,10 +1105,17 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
             streamed_irq_event_count: irq_event_writer
                 .is_some()
                 .then_some(streamed_irq_event_count),
+            migration_event_count: migration_event_writer
+                .is_some()
+                .then_some(streamed_migration_event_count),
+            cpu_freq_sample_count: cpu_freq_sample_writer
+                .is_some()
+                .then_some(streamed_cpu_freq_sample_count),
             gpu_samples: &gpu_samples,
             streamed_gpu_sample_count: gpu_sample_writer
                 .is_some()
                 .then_some(streamed_gpu_sample_count),
+            block_io_event_count: streamed_block_io_event_count,
             frame_events: &frame_events,
             drop_counters,
         })?;
@@ -1256,6 +1306,13 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) -> anyhow::Result<()> {
         spike_events,
         mut irq_event_writer,
         irq_event_count,
+        mut migration_event_writer,
+        migration_event_count,
+        mut cpu_freq_sample_writer,
+        cpu_freq_sample_count,
+        mut block_io_event_writer,
+        block_io_event_count,
+        cpu_to_pkg,
     } = input;
 
     while let Some(item) = guard.get_inner_mut().next() {
@@ -1298,6 +1355,90 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) -> anyhow::Result<()> {
                     *irq_event_count += 1;
                 }
                 log_irq_event(event);
+            }
+            EVENT_MIGRATION => {
+                if item.len() < std::mem::size_of::<MigrationEvent>() {
+                    warn!("short_migration_event len={}", item.len());
+                    continue;
+                }
+                let event = unsafe { &*(item.as_ptr() as *const MigrationEvent) };
+                let elapsed_ms = started.elapsed().as_millis();
+
+                if let Some(stats) = stats_by_task.get_mut(&event.tid) {
+                    stats.migration_count += 1;
+
+                    let from_pkg = cpu_to_pkg.get(&event.from_cpu);
+                    let to_pkg = cpu_to_pkg.get(&event.to_cpu);
+                    if let (Some(f), Some(t)) = (from_pkg, to_pkg)
+                        && f != t
+                    {
+                        stats.cross_numa_migrations += 1;
+                    }
+                }
+
+                if let Some(writer) = migration_event_writer.as_deref_mut() {
+                    writer.push(&recorder::MigrationEventRecord {
+                        elapsed_ms,
+                        tid: event.tid,
+                        from_cpu: event.from_cpu,
+                        to_cpu: event.to_cpu,
+                        timestamp_ns: event.timestamp_ns,
+                    })?;
+                    *migration_event_count += 1;
+                }
+            }
+            EVENT_CPU_FREQ => {
+                if item.len() < std::mem::size_of::<CpuFreqEvent>() {
+                    warn!("short_cpu_freq_event len={}", item.len());
+                    continue;
+                }
+                let event = unsafe { &*(item.as_ptr() as *const CpuFreqEvent) };
+                let elapsed_ms = started.elapsed().as_millis();
+
+                if let Some(writer) = cpu_freq_sample_writer.as_deref_mut() {
+                    writer.push(&recorder::CpuFreqRecord {
+                        elapsed_ms,
+                        cpu: event.cpu,
+                        freq_khz: event.state, // state field contains freq in kHz
+                        timestamp_ns: event.timestamp_ns,
+                    })?;
+                    *cpu_freq_sample_count += 1;
+                }
+            }
+            EVENT_STAT_WAIT => {
+                if item.len() < std::mem::size_of::<StatWaitEvent>() {
+                    warn!("short_stat_wait_event len={}", item.len());
+                    continue;
+                }
+                let event = unsafe { &*(item.as_ptr() as *const StatWaitEvent) };
+                if let Some(stats) = stats_by_task.get_mut(&event.tid) {
+                    stats.stat_wait_sum_ns += event.delay_ns as u128;
+                    stats.stat_wait_count += 1;
+                }
+            }
+            EVENT_BLOCK_IO => {
+                if item.len() < std::mem::size_of::<BlockIoEvent>() {
+                    warn!("short_block_io_event len={}", item.len());
+                    continue;
+                }
+                let event = unsafe { &*(item.as_ptr() as *const BlockIoEvent) };
+                let elapsed_ms = started.elapsed().as_millis();
+
+                if let Some(writer) = block_io_event_writer.as_deref_mut() {
+                    writer.push(&recorder::BlockIoRecord {
+                        elapsed_ms,
+                        tid: event.tid,
+                        dev: event.dev,
+                        nr_sector: event.nr_sector,
+                        sector: event.sector,
+                        duration_ns: event.duration_ns,
+                        timestamp_ns: event.timestamp_ns,
+                        rwbs: String::from_utf8_lossy(&event.rwbs)
+                            .trim_matches(char::from(0))
+                            .to_owned(),
+                    })?;
+                    *block_io_event_count += 1;
+                }
             }
             other => warn!("unknown_bpf_event kind={other} len={}", item.len()),
         }

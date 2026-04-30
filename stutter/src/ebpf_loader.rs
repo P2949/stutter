@@ -4,12 +4,14 @@ use anyhow::Context;
 use aya::{
     Ebpf,
     maps::{HashMap as AyaHashMap, MapData, PerCpuArray, RingBuf},
-    programs::TracePoint,
+    programs::{PerfEvent, TracePoint},
+    util::online_cpus,
 };
 use serde::{Deserialize, Serialize};
 use stutter_common::{
     DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
-    DROP_WAKEUP_TIMES_INSERT_FAILED,
+    DROP_WAKER_MAP_INSERT_FAILED, DROP_WAKEUP_TIMES_INSERT_FAILED,
+    DROP_BLOCK_START_INSERT_FAILED,
 };
 use tokio::io::unix::AsyncFd;
 
@@ -18,6 +20,7 @@ pub struct LoadedEbpf {
     pub events: AsyncFd<RingBuf<MapData>>,
     pub target_pid_map: AyaHashMap<MapData, u32, u8>,
     pub target_irq_map: Option<AyaHashMap<MapData, u32, u8>>,
+    pub prev_faults_map: Option<AyaHashMap<MapData, u32, [u64; 2]>>, // (tid) -> (maj, min)
     drop_counters: PerCpuArray<MapData, u64>,
 }
 
@@ -27,6 +30,10 @@ pub struct DropCountersSnapshot {
     pub ringbuf_reserve_failed: u64,
     #[serde(default)]
     pub irq_start_times_insert_failed: u64,
+    #[serde(default)]
+    pub waker_map_insert_failed: u64,
+    #[serde(default)]
+    pub block_start_insert_failed: u64,
 }
 
 impl DropCountersSnapshot {
@@ -34,6 +41,8 @@ impl DropCountersSnapshot {
         self.wakeup_times_insert_failed
             .saturating_add(self.ringbuf_reserve_failed)
             .saturating_add(self.irq_start_times_insert_failed)
+            .saturating_add(self.waker_map_insert_failed)
+            .saturating_add(self.block_start_insert_failed)
     }
 }
 
@@ -51,6 +60,14 @@ impl LoadedEbpf {
             irq_start_times_insert_failed: drop_counter_value(
                 &self.drop_counters,
                 DROP_IRQ_START_TIMES_INSERT_FAILED,
+            ),
+            waker_map_insert_failed: drop_counter_value(
+                &self.drop_counters,
+                DROP_WAKER_MAP_INSERT_FAILED,
+            ),
+            block_start_insert_failed: drop_counter_value(
+                &self.drop_counters,
+                DROP_BLOCK_START_INSERT_FAILED,
             ),
         }
     }
@@ -82,12 +99,42 @@ pub fn load_and_attach() -> Result<LoadedEbpf, crate::error::StutterError> {
         "sched_process_exit",
     )
     .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+
+    if tracepoints.sched_migrate_task {
+        attach_tracepoint(&mut ebpf, "sched_migrate_task", "sched", "sched_migrate_task")
+            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    }
+    if tracepoints.cpu_frequency {
+        attach_tracepoint(&mut ebpf, "cpu_frequency", "power", "cpu_frequency")
+            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    }
+    if tracepoints.sched_stat_wait {
+        attach_tracepoint(&mut ebpf, "sched_stat_wait", "sched", "sched_stat_wait")
+            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    }
+
     if tracepoints.irq_handler {
         attach_tracepoint(&mut ebpf, "irq_handler_entry", "irq", "irq_handler_entry")
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
         attach_tracepoint(&mut ebpf, "irq_handler_exit", "irq", "irq_handler_exit")
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
+
+    if tracepoints.page_fault_user {
+        attach_tracepoint(&mut ebpf, "page_fault_user", "exceptions", "page_fault_user")
+            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    }
+    if tracepoints.block_rq {
+        attach_tracepoint(&mut ebpf, "block_rq_issue", "block", "block_rq_issue")
+            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        attach_tracepoint(&mut ebpf, "block_rq_complete", "block", "block_rq_complete")
+            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    }
+
+    attach_software_perf_event(&mut ebpf, "major_fault", 4) // PERF_COUNT_SW_PAGE_FAULTS_MAJ
+        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    attach_software_perf_event(&mut ebpf, "minor_fault", 3) // PERF_COUNT_SW_PAGE_FAULTS_MIN
+        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
     let target_pid_map = AyaHashMap::try_from(ebpf.take_map("TARGET_PIDS").ok_or_else(|| {
         crate::error::StutterError::EbpfLoad("TARGET_PIDS map not found".to_owned())
@@ -114,11 +161,18 @@ pub fn load_and_attach() -> Result<LoadedEbpf, crate::error::StutterError> {
     let events =
         AsyncFd::new(events).map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
+    let prev_faults_map = ebpf
+        .take_map("PREV_FAULTS")
+        .map(AyaHashMap::try_from)
+        .transpose()
+        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+
     Ok(LoadedEbpf {
         _ebpf: ebpf,
         events,
         target_pid_map,
         target_irq_map,
+        prev_faults_map,
         drop_counters,
     })
 }
@@ -136,6 +190,34 @@ fn attach_tracepoint(
 
     program.load()?;
     program.attach(category, tracepoint_name)?;
+    Ok(())
+}
+
+fn attach_software_perf_event(
+    ebpf: &mut Ebpf,
+    program_name: &str,
+    config: u64,
+) -> anyhow::Result<()> {
+    let program: &mut PerfEvent = ebpf
+        .program_mut(program_name)
+        .ok_or_else(|| anyhow::anyhow!("{program_name} program not found"))?
+        .try_into()?;
+
+    program.load()?;
+
+    for cpu in online_cpus().map_err(|e| anyhow::anyhow!("{}: {}", e.0, e.1))? {
+        let sw_event = match config {
+            3 => aya::programs::perf_event::SoftwareEvent::PageFaultsMin,
+            4 => aya::programs::perf_event::SoftwareEvent::PageFaultsMaj,
+            _ => unreachable!(),
+        };
+        program.attach(
+            aya::programs::perf_event::PerfEventConfig::Software(sw_event),
+            aya::programs::perf_event::PerfEventScope::AllProcessesOneCpu { cpu },
+            aya::programs::perf_event::SamplePolicy::Period(1),
+            true, // inherit
+        )?;
+    }
 
     Ok(())
 }
@@ -149,7 +231,12 @@ fn drop_counter_value(counters: &PerCpuArray<MapData, u64>, key: u32) -> u64 {
 
 struct TracepointAvailability {
     sched_wakeup_new: bool,
+    sched_migrate_task: bool,
+    cpu_frequency: bool,
+    sched_stat_wait: bool,
     irq_handler: bool,
+    page_fault_user: bool,
+    block_rq: bool,
 }
 
 fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointAvailability> {
@@ -165,6 +252,20 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         &events_root.join("sched/sched_switch/format"),
         &[("next_comm", 40), ("next_pid", 56), ("next_prio", 60)],
     )?;
+
+    let sched_migrate_task = validate_optional_tracepoint_format_at(
+        &events_root.join("sched/sched_migrate_task/format"),
+        &[("pid", 12), ("orig_cpu", 20), ("dest_cpu", 24)],
+    )?;
+    let cpu_frequency = validate_optional_tracepoint_format_at(
+        &events_root.join("power/cpu_frequency/format"),
+        &[("state", 8), ("cpu_id", 12)],
+    )?;
+    let sched_stat_wait = validate_optional_tracepoint_format_at(
+        &events_root.join("sched/sched_stat_wait/format"),
+        &[("pid", 8), ("delay", 16)],
+    )?;
+
     let irq_entry = events_root.join("irq/irq_handler_entry/format");
     let irq_exit = events_root.join("irq/irq_handler_exit/format");
     let irq_handler = if irq_entry.exists() && irq_exit.exists() {
@@ -177,9 +278,33 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
     if !irq_handler {
         log::warn!("IRQ tracepoint formats missing; continuing without IRQ latency probe");
     }
+
+    let page_fault_user = events_root.join("exceptions/page_fault_user/format");
+    let page_fault_user = if page_fault_user.exists() {
+        validate_tracepoint_format_at(&page_fault_user, &[])?; // No specific fields needed for now
+        true
+    } else {
+        false
+    };
+    
+    let block_rq_issue = events_root.join("block/block_rq_issue/format");
+    let block_rq_complete = events_root.join("block/block_rq_complete/format");
+    let block_rq = if block_rq_issue.exists() && block_rq_complete.exists() {
+        validate_tracepoint_format_at(&block_rq_issue, &[("dev", 8), ("sector", 16), ("nr_sector", 24), ("rwbs", 32)])?;
+        validate_tracepoint_format_at(&block_rq_complete, &[("dev", 8), ("sector", 16), ("nr_sector", 24)])?;
+        true
+    } else {
+        false
+    };
+
     Ok(TracepointAvailability {
         sched_wakeup_new,
+        sched_migrate_task,
+        cpu_frequency,
+        sched_stat_wait,
         irq_handler,
+        page_fault_user,
+        block_rq,
     })
 }
 

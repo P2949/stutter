@@ -413,6 +413,7 @@ mod tests {
             exe_dev: None,
             exe_ino: None,
             class: TaskClass::Game,
+            sched_policy: None,
         };
         let tasks = BTreeMap::from([(7, task)]);
         let profile = Profile {
