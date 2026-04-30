@@ -323,6 +323,10 @@ pub struct RecordedConfig {
     pub manual_pids: Vec<u32>,
     pub tree_roots: Vec<u32>,
     #[serde(default)]
+    pub cgroupv2: Option<PathBuf>,
+    #[serde(default)]
+    pub exclude_tree_pids: Vec<u32>,
+    #[serde(default)]
     pub include_comm: Vec<String>,
     #[serde(default)]
     pub exclude_comm: Vec<String>,
@@ -345,6 +349,8 @@ pub struct RecordedConfig {
     #[serde(default)]
     pub hwmon: bool,
     #[serde(default)]
+    pub hwmon_root: Option<PathBuf>,
+    #[serde(default)]
     pub hwmon_drm_card: Option<String>,
     #[serde(default)]
     pub hwmon_render_node: Option<PathBuf>,
@@ -355,12 +361,26 @@ pub struct RecordedConfig {
     pub summary_period_ms: u64,
     #[serde(default)]
     pub epoch_period_ms: Option<u64>,
+    #[serde(default)]
+    pub retain_intervals: Option<usize>,
+    #[serde(default = "default_recorded_max_tasks")]
+    pub max_tasks: usize,
     pub spike_threshold_ns: u64,
     #[serde(default)]
     pub alert_threshold_ns: Option<u64>,
     #[serde(default)]
     pub alert_webhook_url: Option<String>,
+    #[serde(default = "default_recorded_follow_exec")]
+    pub follow_exec: bool,
     pub verbose: bool,
+}
+
+fn default_recorded_max_tasks() -> usize {
+    TARGET_PIDS_MAX
+}
+
+fn default_recorded_follow_exec() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize)]
@@ -769,6 +789,8 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         config: RecordedConfig {
             manual_pids: config.target_pids.clone(),
             tree_roots: config.tree_pids.clone(),
+            cgroupv2: config.cgroupv2.clone(),
+            exclude_tree_pids: config.exclude_tree_pids.clone(),
             include_comm: config.task_filters.include_comm.clone(),
             exclude_comm: config.task_filters.exclude_comm.clone(),
             watch_process: config.watch_process.clone(),
@@ -780,15 +802,19 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             irq_latency: config.irq_latency,
             irqs: config.irqs.clone(),
             hwmon: config.hwmon,
+            hwmon_root: config.hwmon_root.clone(),
             hwmon_drm_card: config.hwmon_drm_card.clone(),
             hwmon_render_node: config.hwmon_render_node.clone(),
             mangohud_log: config.mangohud_log.clone(),
             tui: config.tui,
             summary_period_ms: config.summary_period_ms,
             epoch_period_ms: config.epoch_period_ms,
+            retain_intervals: config.retain_intervals,
+            max_tasks: config.max_tasks,
             spike_threshold_ns: config.spike_threshold_ns,
             alert_threshold_ns: config.alert_threshold_ns,
             alert_webhook_url: config.alert_webhook_url.clone(),
+            follow_exec: config.follow_exec,
             verbose: config.verbose,
         },
         metadata: metadata.clone(),

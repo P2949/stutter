@@ -37,6 +37,12 @@ pub struct ProfileApplyCache {
     known_correct: BTreeSet<ProfileApplyCacheKey>,
 }
 
+impl ProfileApplyCache {
+    pub fn clear(&mut self) {
+        self.known_correct.clear();
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct ProfileApplyCacheKey {
     tid: u32,
@@ -480,5 +486,15 @@ mod tests {
             .unwrap();
         assert!(second.is_empty());
         assert_eq!(reads, 1);
+
+        cache.clear();
+        let third =
+            planned_affinity_changes_with_reader(&tasks, &profile, Some(&mut cache), |_| {
+                reads += 1;
+                Ok(CpuMask::parse("0-1").unwrap())
+            })
+            .unwrap();
+        assert!(third.is_empty());
+        assert_eq!(reads, 2);
     }
 }

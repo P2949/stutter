@@ -256,9 +256,10 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
         target_cpu,
         waker_tid,
     };
+    let already_pending = unsafe { WAKEUP_DATA.get(pid).is_some() };
 
     if WAKEUP_DATA.insert(pid, data, 0).is_ok() {
-        if let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(target_cpu) {
+        if !already_pending && let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(target_cpu) {
             unsafe { *depth = (*depth).saturating_add(1) };
         }
     } else {

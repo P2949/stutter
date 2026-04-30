@@ -57,6 +57,7 @@ use tokio::{
 pub const TARGET_PIDS_MAX: usize = 1024;
 const TUNE_RUN_STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 const TUNE_PROFILE_REFRESH_MS: u64 = 1_000;
+const PROFILE_WATCH_VERIFY_MS: u64 = 10_000;
 
 type TaskExeInodesMap = BTreeMap<u32, (Option<u64>, Option<u64>, Option<u64>)>;
 
@@ -243,6 +244,7 @@ async fn tune_command(
     } else {
         "restore-after-each"
     };
+    let tune_output_dir = default_tune_output_dir();
 
     let shared_hwmon = hwmon::HwmonReader::discover_with_options(None, None, None)
         .map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)));
@@ -258,23 +260,25 @@ async fn tune_command(
             profile.name, measure_seconds
         );
 
-        let (applied_tasks, interval_records, frame_events) = match measure_tune_candidate(
-            tree_pid,
-            profile.clone(),
-            epoch_seconds,
-            warmup_seconds,
-            shared_hwmon.clone(),
-            mangohud_log.clone(),
-            idx == 0,
-        )
-        .await
-        {
-            Ok(res) => res,
-            Err(err) => {
-                restore_tune_on_error();
-                return Err(err);
-            }
-        };
+        let (applied_tasks, run_dir, interval_records, frame_events) =
+            match measure_tune_candidate(TuneMeasureInput {
+                tree_pid,
+                profile: profile.clone(),
+                epoch_seconds,
+                warmup_seconds,
+                shared_hwmon: shared_hwmon.clone(),
+                mangohud_log: mangohud_log.clone(),
+                force_restore_overwrite: idx == 0,
+                tune_output_dir: tune_output_dir.clone(),
+            })
+            .await
+            {
+                Ok(res) => res,
+                Err(err) => {
+                    restore_tune_on_error();
+                    return Err(err);
+                }
+            };
 
         let mut score =
             scorer::score_from_interval_records_and_frames(&interval_records, &frame_events);
@@ -302,6 +306,7 @@ async fn tune_command(
 
         let result = TuneCandidateSummary {
             profile: profile.name.clone(),
+            run_dir,
             applied_tasks,
             warmup_seconds,
             measure_seconds,
@@ -394,7 +399,7 @@ async fn tune_command(
         }
     }
 
-    let summary_path = default_tune_summary_path();
+    let summary_path = tune_output_dir.join("tuning_summary.json");
     if let Some(parent) = summary_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -416,7 +421,7 @@ async fn tune_command(
     Ok(())
 }
 
-async fn measure_tune_candidate(
+struct TuneMeasureInput {
     tree_pid: u32,
     profile: profiles::Profile,
     epoch_seconds: u64,
@@ -424,9 +429,29 @@ async fn measure_tune_candidate(
     shared_hwmon: Option<std::sync::Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
     mangohud_log: Option<PathBuf>,
     force_restore_overwrite: bool,
-) -> anyhow::Result<(usize, Vec<IntervalRecord>, Vec<crate::recorder::FrameEvent>)> {
+    tune_output_dir: PathBuf,
+}
+
+async fn measure_tune_candidate(
+    input: TuneMeasureInput,
+) -> anyhow::Result<(
+    usize,
+    PathBuf,
+    Vec<IntervalRecord>,
+    Vec<crate::recorder::FrameEvent>,
+)> {
+    let TuneMeasureInput {
+        tree_pid,
+        profile,
+        epoch_seconds,
+        warmup_seconds,
+        shared_hwmon,
+        mangohud_log,
+        force_restore_overwrite,
+        tune_output_dir,
+    } = input;
     let profile_name = profile.name.clone();
-    let run_dir = tune_run_dir(&profile_name);
+    let run_dir = tune_run_dir(&tune_output_dir, &profile_name);
     let config = Config {
         target_pids: Vec::new(),
         tree_pids: vec![tree_pid],
@@ -533,9 +558,7 @@ async fn measure_tune_candidate(
     };
     frame_events.retain(|f| f.elapsed_ms >= warmup_ms);
 
-    fs::remove_dir_all(&run_dir).ok();
-
-    Ok((applied_tasks, interval_records, frame_events))
+    Ok((applied_tasks, run_dir, interval_records, frame_events))
 }
 
 async fn tune_profile_refresh_loop(
@@ -549,10 +572,18 @@ async fn tune_profile_refresh_loop(
 ) -> anyhow::Result<()> {
     let mut should_force = force_restore_overwrite;
     let refresh_interval = Duration::from_millis(refresh_ms);
+    let verify_interval = Duration::from_millis(PROFILE_WATCH_VERIFY_MS);
+    let mut next_verify = Instant::now() + verify_interval;
 
     loop {
         if stop_refresh.load(Ordering::Relaxed) {
             return Ok(());
+        }
+
+        if Instant::now() >= next_verify {
+            cache.clear();
+            next_verify = Instant::now() + verify_interval;
+            debug!("tune_profile_refresh_cache_invalidated_for_full_verify");
         }
 
         let (records, updated_cache) = apply_profile_to_tree_cached_blocking(
@@ -579,24 +610,18 @@ async fn tune_profile_refresh_loop(
     }
 }
 
-fn tune_run_dir(profile_name: &str) -> PathBuf {
-    let temp_dir = std::env::temp_dir();
-    cleanup_stale_tune_run_dirs(&temp_dir);
-
+fn tune_run_dir(tune_output_dir: &Path, profile_name: &str) -> PathBuf {
     let sanitized = profile_name
         .chars()
         .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
         .collect::<String>();
-    temp_dir.join(format!(
-        "stutter-tune-{}-{}-{}",
-        std::process::id(),
-        sanitized,
-        unix_nanos_now()
-    ))
+    tune_output_dir
+        .join("candidates")
+        .join(format!("{}-{}", sanitized, unix_nanos_now()))
 }
 
-fn cleanup_stale_tune_run_dirs(temp_dir: &Path) {
-    let Ok(entries) = fs::read_dir(temp_dir) else {
+fn cleanup_stale_tune_run_dirs(state_dir: &Path) {
+    let Ok(entries) = fs::read_dir(state_dir) else {
         return;
     };
 
@@ -606,7 +631,7 @@ fn cleanup_stale_tune_run_dirs(temp_dir: &Path) {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if !name.starts_with("stutter-tune-") {
+        if !name.starts_with("tune-") {
             continue;
         }
 
@@ -650,6 +675,7 @@ struct TuneSummary {
 #[derive(Clone, Serialize)]
 struct TuneCandidateSummary {
     profile: String,
+    run_dir: PathBuf,
     applied_tasks: usize,
     warmup_seconds: u64,
     measure_seconds: u64,
@@ -694,7 +720,7 @@ fn restore_tune_after_candidate(profile_name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn default_tune_summary_path() -> PathBuf {
+fn default_tune_output_dir() -> PathBuf {
     let mut path = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
@@ -702,7 +728,8 @@ fn default_tune_summary_path() -> PathBuf {
     path.push(".local");
     path.push("state");
     path.push("stutter");
-    path.push(format!("tuning_summary_{}.json", unix_nanos_now()));
+    cleanup_stale_tune_run_dirs(&path);
+    path.push(format!("tune-{}", unix_nanos_now()));
     path
 }
 
@@ -763,6 +790,8 @@ async fn apply_profile_command(
     let mut tick = interval(Duration::from_millis(refresh_ms));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     tick.tick().await;
+    let verify_interval = Duration::from_millis(PROFILE_WATCH_VERIFY_MS);
+    let mut next_verify = Instant::now() + verify_interval;
 
     loop {
         tokio::select! {
@@ -775,6 +804,12 @@ async fn apply_profile_command(
                 return Ok(());
             }
             _ = tick.tick() => {
+                if Instant::now() >= next_verify {
+                    cache.clear();
+                    next_verify = Instant::now() + verify_interval;
+                    debug!("profile_watch_cache_invalidated_for_full_verify");
+                }
+
                 let result = apply_profile_to_tree_cached_blocking(
                     tree_pid,
                     profile.clone(),
@@ -2078,11 +2113,15 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
     let filters = config.task_filters.clone();
     let keep_missing_pid = config.keep_missing_pid;
     let max_tasks = config.max_tasks;
+    let cgroup_refresh_active = config.cgroupv2.is_some();
 
     let mut process_cache_owned = std::mem::take(process_cache);
     let active_targets_clone = active_targets.clone();
 
     let (snapshot, returned_cache) = task::spawn_blocking(move || {
+        // Cgroup targeting is kept dynamic here: every refresh tick rescans
+        // cgroup.procs and cgroup.threads recursively, then resolves those IDs
+        // through the normal TaskInfo/classification snapshot path.
         let target_pids = collect_target_pids_with_cgroup(target_pids, cgroup_path.as_deref());
         let snap = process_tree::target_snapshot_with_options(
             &target_pids,
@@ -2118,6 +2157,7 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
         tree_events,
         &mut prev_faults_map,
         prev_faults_snapshot,
+        cgroup_refresh_active,
         elapsed_ms,
         recording_started,
     );
@@ -2136,7 +2176,11 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
                 known_targets.insert(tid, diff.task.clone());
 
                 if let Some(started) = recording_started {
-                    tree_events.push(TreeEvent::from_task(started, "added", diff.task));
+                    tree_events.push(TreeEvent::from_task(
+                        started,
+                        target_event_action(cgroup_refresh_active, "added"),
+                        diff.task,
+                    ));
                 }
 
                 reactivate_or_reset_stats_inner(
@@ -2148,7 +2192,12 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
                 );
 
                 info!(
-                    "tree_target_added tid={} process_pid={} ppid={} comm={} class={}",
+                    "{} tid={} process_pid={} ppid={} comm={} class={}",
+                    if cgroup_refresh_active {
+                        "cgroup_target_added"
+                    } else {
+                        "tree_target_added"
+                    },
                     tid,
                     diff.task.process_pid,
                     diff.task.process_ppid,
@@ -2165,7 +2214,11 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
                 }
 
                 if let Some(started) = recording_started {
-                    tree_events.push(TreeEvent::from_task(started, "removed", diff.task));
+                    tree_events.push(TreeEvent::from_task(
+                        started,
+                        target_event_action(cgroup_refresh_active, "removed"),
+                        diff.task,
+                    ));
                 }
 
                 remove_prev_faults_state(tid, &mut prev_faults_map, prev_faults_snapshot);
@@ -2182,14 +2235,32 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
     *active_targets = desired_tasks;
 
     debug!(
-        "tree_refresh_complete active_tasks={} manual_roots={} tree_roots={} process_count={}",
+        "target_refresh_complete active_tasks={} manual_roots={} tree_roots={} cgroupv2={} process_count={}",
         active_targets.len(),
         config.target_pids.len(),
         config.tree_pids.len(),
+        config
+            .cgroupv2
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "-".to_owned()),
         snapshot.process_roots.len(),
     );
 
     Ok(())
+}
+
+fn target_event_action(cgroup_refresh_active: bool, action: &'static str) -> &'static str {
+    if cgroup_refresh_active {
+        match action {
+            "added" => "cgroup_added",
+            "removed" => "cgroup_removed",
+            "replaced" => "cgroup_replaced",
+            _ => action,
+        }
+    } else {
+        action
+    }
 }
 
 fn collect_target_pids_with_cgroup(
@@ -2247,6 +2318,7 @@ fn handle_same_tid_replacements(
     tree_events: &mut Vec<TreeEvent>,
     prev_faults_map: &mut Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
     prev_faults_snapshot: &mut BTreeMap<u32, (u64, u64)>,
+    cgroup_refresh_active: bool,
     elapsed_ms: u128,
     recording_started: Option<Instant>,
 ) {
@@ -2270,11 +2342,20 @@ fn handle_same_tid_replacements(
         );
 
         if let Some(started) = recording_started {
-            tree_events.push(TreeEvent::from_task(started, "replaced", desired_task));
+            tree_events.push(TreeEvent::from_task(
+                started,
+                target_event_action(cgroup_refresh_active, "replaced"),
+                desired_task,
+            ));
         }
 
         warn!(
-            "tree_target_replaced tid={} old_process_pid={} old_comm={} old_class={} new_process_pid={} new_comm={} new_class={}",
+            "{} tid={} old_process_pid={} old_comm={} old_class={} new_process_pid={} new_comm={} new_class={}",
+            if cgroup_refresh_active {
+                "cgroup_target_replaced"
+            } else {
+                "tree_target_replaced"
+            },
             tid,
             active_task.process_pid,
             active_task.comm,

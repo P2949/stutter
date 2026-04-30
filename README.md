@@ -301,7 +301,7 @@ Note: the CSV exporter is intentionally compact and omits some newer fields. `in
 - `--hwmon-render-node <PATH>`: choose the DRM render node whose device hwmon should be sampled.
 - `--mangohud-log <PATH>`: provide a MangoHud CSV to correlate frame times.
 - `--tui`: print a plain-text TUI status line periodically (non-interactive).
-- `stutter tune --tree-pid <PID> --profiles <FILE>`: apply each profile, keep refreshing it for new threads during the measurement epoch, score interval summaries, and restore after each candidate by default. Add `--keep-best` to reapply the best profile at the end.
+- `stutter tune --tree-pid <PID> --profiles <FILE>`: apply each profile, keep refreshing it for new threads during the measurement epoch, score interval summaries, and restore after each candidate by default. Candidate run directories are kept next to the tuning summary for auditability. Add `--keep-best` to reapply the best profile at the end.
 
 ## What TUI prints (example)
 
