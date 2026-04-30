@@ -217,6 +217,7 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
     assert_eq!(spike.latency_ns, 1_000_000);
     assert_eq!(spike.wakeup_ns, 100);
     assert_eq!(spike.switch_ns, 1_000_100);
+    assert_eq!(spike.rq_depth, 0);
     assert_eq!(spike.elapsed_ms, Some(1));
 }
 
@@ -463,11 +464,14 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         latency_ns: 2_000_000,
         wakeup_ns: 10,
         switch_ns: 2_000_010,
+        rq_depth: 0, major_faults: 0, minor_faults: 0,
     }];
     let drop_counters = DropCountersSnapshot {
         wakeup_times_insert_failed: 2,
         ringbuf_reserve_failed: 3,
         irq_start_times_insert_failed: 0,
+        waker_map_insert_failed: 0,
+        block_start_insert_failed: 0,
     };
 
     recorder::finalize_recording(FinalizeRecordingInput {
@@ -485,9 +489,12 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         scx_events: &[],
         irq_events: &[],
         streamed_irq_event_count: None,
+        migration_event_count: None,
+        cpu_freq_sample_count: None,
         gpu_samples: &[],
         streamed_gpu_sample_count: None,
         frame_events: &[],
+        block_io_event_count: 0,
         drop_counters,
     })
     .unwrap();
@@ -739,6 +746,7 @@ fn report_reads_recorded_session_and_spike_events() {
         prio: 120,
         wakeup_ns: 1_010_000_000,
         switch_ns: 1_016_000_000,
+        rq_depth: 0, major_faults: 0, minor_faults: 0,
     });
     let stats_by_task = BTreeMap::from([(7, stats)]);
     let spike_events = vec![SpikeEvent {
@@ -754,6 +762,7 @@ fn report_reads_recorded_session_and_spike_events() {
         latency_ns: 6_000_000,
         wakeup_ns: 1_010_000_000,
         switch_ns: 1_016_000_000,
+        rq_depth: 0, major_faults: 0, minor_faults: 0,
     }];
 
     recorder::finalize_recording(FinalizeRecordingInput {
@@ -771,9 +780,12 @@ fn report_reads_recorded_session_and_spike_events() {
         scx_events: &[],
         irq_events: &[],
         streamed_irq_event_count: None,
+        migration_event_count: None,
+        cpu_freq_sample_count: None,
         gpu_samples: &[],
         streamed_gpu_sample_count: None,
         frame_events: &[],
+        block_io_event_count: 0,
         drop_counters: DropCountersSnapshot::default(),
     })
     .unwrap();
@@ -815,6 +827,7 @@ fn report_cluster_output_caps_inline_points() {
             latency_ns: 1_000_000 + idx as u64,
             wakeup_ns: 1_000_000_000 + idx as u64 * 100_000,
             switch_ns: 1_001_000_000 + idx as u64 * 100_000,
+            rq_depth: 0, major_faults: 0, minor_faults: 0,
         })
         .collect::<Vec<_>>();
 
@@ -833,9 +846,12 @@ fn report_cluster_output_caps_inline_points() {
         scx_events: &[],
         irq_events: &[],
         streamed_irq_event_count: None,
+        migration_event_count: None,
+        cpu_freq_sample_count: None,
         gpu_samples: &[],
         streamed_gpu_sample_count: None,
         frame_events: &[],
+        block_io_event_count: 0,
         drop_counters: DropCountersSnapshot::default(),
     })
     .unwrap();
@@ -889,6 +905,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
             latency_ns: 1_000_000,
             wakeup_ns: 1_000_000 + idx as u64 * 100,
             switch_ns: 10_000_000 + idx as u64 * 100,
+            rq_depth: 0, major_faults: 0, minor_faults: 0,
         })
         .collect::<Vec<_>>();
     let artifacts = crate::report::RunArtifacts {
@@ -1065,11 +1082,14 @@ fn minimal_session_for_report() -> SessionFile {
         "spike_events_truncated": false,
         "scx_event_count": 0,
         "irq_event_count": 1,
+        "migration_event_count": 0,
+        "cpu_freq_sample_count": 0,
         "gpu_sample_count": 1,
         "frame_event_count": 1,
         "drop_counters": {
             "wakeup_times_insert_failed": 0,
-            "ringbuf_reserve_failed": 0
+            "ringbuf_reserve_failed": 0,
+            "waker_map_insert_failed": 0
         },
         "tasks": [],
         "top_spikes": []
@@ -1108,6 +1128,7 @@ fn task_info(
         exe_dev: None,
         exe_ino: None,
         class,
+        sched_policy: None,
     }
 }
 
@@ -1130,6 +1151,10 @@ fn scheduler_event_with_latency(pid: u32, comm: &str, latency_ns: u64) -> Schedu
         switch_ns: 100 + latency_ns,
         latency_ns,
         comm: comm_bytes,
+        waker_tid: 0,
+        rq_depth: 0,
+        maj_flt: 0,
+        min_flt: 0,
     }
 }
 
@@ -1147,6 +1172,9 @@ fn spike_event(task: u32, switch_ns: u64) -> SpikeEvent {
         latency_ns: 1_000_000,
         wakeup_ns: switch_ns.saturating_sub(1_000_000),
         switch_ns,
+        rq_depth: 0,
+        major_faults: 0,
+        minor_faults: 0,
     }
 }
 
@@ -1292,7 +1320,8 @@ fn report_diff_shows_regressions_and_improvements() {
             "sys_enter_write": 0,
             "wakeup_times_insert_failed": 0,
             "target_tasks_insert_failed": 0,
-            "ringbuf_reserve_failed": 0
+            "ringbuf_reserve_failed": 0,
+            "waker_map_insert_failed": 0
         },
         "scx_event_count": 0,
         "irq_event_count": 0,

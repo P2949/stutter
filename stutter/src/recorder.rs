@@ -256,9 +256,15 @@ pub struct SessionFile {
     #[serde(default)]
     pub irq_event_count: usize,
     #[serde(default)]
+    pub migration_event_count: Option<usize>,
+    #[serde(default)]
+    pub cpu_freq_sample_count: Option<usize>,
+    #[serde(default)]
     pub gpu_sample_count: usize,
     #[serde(default)]
     pub frame_event_count: usize,
+    #[serde(default)]
+    pub block_io_event_count: usize,
     #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
     pub tasks: Vec<SessionTask>,
@@ -294,6 +300,8 @@ pub struct MetadataFile {
     pub gpu_sample_count: usize,
     #[serde(default)]
     pub frame_event_count: usize,
+    #[serde(default)]
+    pub block_io_event_count: usize,
     #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
 }
@@ -367,6 +375,25 @@ pub struct SessionTask {
     pub latency: RecordedLatency,
     pub cpu: RecordedCpuSnapshot,
     pub top_spikes: Vec<RecordedSpike>,
+    #[serde(default)]
+    pub migration_count: u64,
+    #[serde(default)]
+    pub cross_numa_migrations: u64,
+    #[serde(default)]
+    pub top_wakers: Vec<WakerEntry>,
+    #[serde(default)]
+    pub sched_policy: Option<String>,
+    #[serde(default)]
+    pub stat_wait_sum_ns: Option<u64>,
+    #[serde(default)]
+    pub stat_wait_count: Option<u64>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct WakerEntry {
+    pub waker_tid: u32,
+    pub waker_comm: String,
+    pub count: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -408,6 +435,12 @@ pub struct RecordedSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
+    #[serde(default)]
+    pub rq_depth: u32,
+    #[serde(default)]
+    pub major_faults: u32,
+    #[serde(default)]
+    pub minor_faults: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -423,6 +456,12 @@ pub struct SessionSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
+    #[serde(default)]
+    pub rq_depth: u32,
+    #[serde(default)]
+    pub major_faults: u32,
+    #[serde(default)]
+    pub minor_faults: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -440,6 +479,29 @@ pub struct SpikeEvent {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
+    #[serde(default)]
+    pub rq_depth: u32,
+    #[serde(default)]
+    pub major_faults: u32,
+    #[serde(default)]
+    pub minor_faults: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct MigrationEventRecord {
+    pub elapsed_ms: u128,
+    pub tid: u32,
+    pub from_cpu: u32,
+    pub to_cpu: u32,
+    pub timestamp_ns: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct CpuFreqRecord {
+    pub elapsed_ms: u128,
+    pub cpu: u32,
+    pub freq_khz: u32,
+    pub timestamp_ns: u64,
 }
 
 impl SpikeEvent {
@@ -461,6 +523,9 @@ impl SpikeEvent {
             latency_ns: event.latency_ns,
             wakeup_ns: event.wakeup_ns,
             switch_ns: event.switch_ns,
+            rq_depth: event.rq_depth,
+            major_faults: event.maj_flt.saturating_sub(stats.major_faults as u32),
+            minor_faults: event.min_flt.saturating_sub(stats.minor_faults as u32),
         }
     }
 }
@@ -495,6 +560,18 @@ pub struct FrameEvent {
     pub frametime_ms: f64,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct BlockIoRecord {
+    pub elapsed_ms: u128,
+    pub tid: u32,
+    pub dev: u32,
+    pub nr_sector: u32,
+    pub sector: u64,
+    pub duration_ns: u64,
+    pub timestamp_ns: u64,
+    pub rwbs: String,
+}
+
 pub const SESSION_SCHEMA_VERSION: u32 = 15;
 
 pub struct FinalizeRecordingInput<'a> {
@@ -512,9 +589,12 @@ pub struct FinalizeRecordingInput<'a> {
     pub scx_events: &'a [ScxEvent],
     pub irq_events: &'a [IrqEventRecord],
     pub streamed_irq_event_count: Option<usize>,
+    pub migration_event_count: Option<usize>,
+    pub cpu_freq_sample_count: Option<usize>,
     pub gpu_samples: &'a [GpuSample],
     pub streamed_gpu_sample_count: Option<usize>,
     pub frame_events: &'a [FrameEvent],
+    pub block_io_event_count: usize,
     pub drop_counters: DropCountersSnapshot,
 }
 
@@ -599,6 +679,34 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
                 .iter()
                 .map(|spike| recorded_spike(stats, spike))
                 .collect(),
+            migration_count: stats.migration_count,
+            cross_numa_migrations: stats.cross_numa_migrations,
+            top_wakers: stats
+                .waker_counts
+                .iter()
+                .map(|(waker_tid, count)| WakerEntry {
+                    waker_tid: *waker_tid,
+                    waker_comm: stats_by_task
+                        .get(waker_tid)
+                        .map(|s| s.comm.clone())
+                        .unwrap_or_else(|| "?".to_owned()),
+                    count: *count,
+                })
+                .collect(),
+            sched_policy: stats
+                .sched_policy
+                .map(crate::process_tree::sched_policy_name)
+                .map(|s| s.to_owned()),
+            stat_wait_sum_ns: if stats.stat_wait_count > 0 {
+                Some(stats.stat_wait_sum_ns as u64)
+            } else {
+                None
+            },
+            stat_wait_count: if stats.stat_wait_count > 0 {
+                Some(stats.stat_wait_count)
+            } else {
+                None
+            },
         });
 
         for spike in &stats.top_spikes {
@@ -614,6 +722,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
                 latency_ns: spike.latency_ns,
                 wakeup_ns: spike.wakeup_ns,
                 switch_ns: spike.switch_ns,
+                rq_depth: spike.rq_depth,
+                major_faults: spike.major_faults,
+                minor_faults: spike.minor_faults,
             });
         }
     }
@@ -663,8 +774,11 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         spike_events_truncated,
         scx_event_count: scx_events.len(),
         irq_event_count,
+        migration_event_count: input.migration_event_count,
+        cpu_freq_sample_count: input.cpu_freq_sample_count,
         gpu_sample_count,
         frame_event_count: frame_events.len(),
+        block_io_event_count: input.block_io_event_count,
         drop_counters: drop_counters.clone(),
         tasks,
         top_spikes,
@@ -690,6 +804,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         irq_event_count,
         gpu_sample_count,
         frame_event_count: frame_events.len(),
+        block_io_event_count: input.block_io_event_count,
         drop_counters,
     };
 
@@ -819,6 +934,9 @@ fn recorded_spike(stats: &TaskStats, spike: &SpikeRecord) -> RecordedSpike {
         latency_ns: spike.latency_ns,
         wakeup_ns: spike.wakeup_ns,
         switch_ns: spike.switch_ns,
+        rq_depth: spike.rq_depth,
+        major_faults: spike.major_faults,
+        minor_faults: spike.minor_faults,
     }
 }
 
@@ -1059,6 +1177,8 @@ mod tests {
             avg_ns: 1,
             p95_ns: 1,
             p99_ns: 1,
+            major_faults: 0,
+            minor_faults: 0,
             max_ns: 1,
             over_1ms: 0,
             over_2ms: 0,
