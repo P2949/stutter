@@ -1,6 +1,3 @@
-[target."cfg(all())"]
-runner = "doas"
-
 [target.bpfel-unknown-none]
 linker = "bpf-linker"
 

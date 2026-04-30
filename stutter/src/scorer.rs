@@ -34,11 +34,21 @@ pub fn score_from_interval_records(records: &[IntervalRecord]) -> StutterScore {
         .saturating_add(score.over_2ms.saturating_mul(20))
         .saturating_add(score.over_1ms);
 
-    // If we have frame data, penalize high frame latency too.
-    // A 100ms frame is very bad, so we add it to the score.
-    if score.frame_max_ms > 50.0 {
+    score
+}
+
+pub fn score_from_interval_records_and_frames(
+    records: &[IntervalRecord],
+    frames: &[crate::recorder::FrameEvent],
+) -> StutterScore {
+    let mut score = score_from_interval_records(records);
+    let (frame_max, frame_p99) = calculate_frame_metrics(frames);
+    score.frame_max_ms = frame_max;
+    score.frame_p99_ms = frame_p99;
+
+    if frame_max > 50.0 {
         score.total = score.total.saturating_add(100);
-    } else if score.frame_max_ms > 20.0 {
+    } else if frame_max > 20.0 {
         score.total = score.total.saturating_add(20);
     }
 
@@ -103,5 +113,25 @@ mod tests {
         let score = score_from_interval_records(&[record]);
         assert_eq!(score.total, 143);
         assert_eq!(score.max_latency_ns, 7_000_000);
+    }
+
+    #[test]
+    fn frame_metrics_contribute_to_total_score() {
+        let frames = [
+            crate::recorder::FrameEvent {
+                elapsed_ms: 1_000,
+                frametime_ms: 16.6,
+            },
+            crate::recorder::FrameEvent {
+                elapsed_ms: 1_016,
+                frametime_ms: 55.0,
+            },
+        ];
+
+        let score = score_from_interval_records_and_frames(&[], &frames);
+
+        assert_eq!(score.total, 100);
+        assert_eq!(score.frame_max_ms, 55.0);
+        assert_eq!(score.frame_p99_ms, 55.0);
     }
 }

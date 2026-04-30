@@ -60,6 +60,8 @@ fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
 
     let mut tree_events = Vec::new();
     let mut task_exe_inodes: super::TaskExeInodesMap = BTreeMap::new();
+    let mut prev_faults_map = None;
+    let mut prev_faults_snapshot = BTreeMap::from([(42, (10, 20))]);
     super::handle_same_tid_replacements(
         &active_targets,
         &desired_tasks,
@@ -67,6 +69,8 @@ fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
         &mut stats_by_task,
         &mut task_exe_inodes,
         &mut tree_events,
+        &mut prev_faults_map,
+        &mut prev_faults_snapshot,
         77,
         Some(Instant::now()),
     );
@@ -80,6 +84,7 @@ fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
     assert_eq!(stats.comm, "new-worker");
     assert_eq!(stats.class, TaskClass::Helper);
     assert!(stats.active);
+    assert!(!prev_faults_snapshot.contains_key(&42));
 
     assert_eq!(known_targets.get(&42), Some(&new_task));
     assert_eq!(tree_events.len(), 1);
@@ -452,6 +457,20 @@ fn target_snapshot_keeps_manual_missing_pid_when_requested() {
 }
 
 #[test]
+fn target_snapshot_accepts_manual_thread_ids() {
+    let dir = temp_test_dir("proc-manual-thread-id");
+    create_fake_proc(&dir, 10, 1, "game", "game", &[10, 11, 12]);
+
+    let snapshot = process_tree::target_snapshot_at(&dir, &[11], &[]);
+
+    assert_eq!(snapshot.tasks.keys().copied().collect::<Vec<_>>(), vec![11]);
+    let task = snapshot.tasks.get(&11).unwrap();
+    assert_eq!(task.process_pid, 10);
+    assert_eq!(task.comm, "game-11");
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
 fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters() {
     let dir = temp_test_dir("recording-schema");
     fs::create_dir_all(&dir).unwrap();
@@ -490,15 +509,14 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         latency_ns: 2_000_000,
         wakeup_ns: 10,
         switch_ns: 2_000_010,
-        rq_depth: 0,
+        target_runnable_depth: 0,
         major_faults: 0,
         minor_faults: 0,
     }];
     let drop_counters = DropCountersSnapshot {
-        wakeup_times_insert_failed: 2,
+        wakeup_data_insert_failed: 2,
         ringbuf_reserve_failed: 3,
         irq_start_times_insert_failed: 0,
-        waker_map_insert_failed: 0,
         block_start_insert_failed: 0,
     };
 
@@ -545,7 +563,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     assert!(metadata.spike_events_truncated);
     assert_eq!(session.drop_counters.total(), 5);
     assert_eq!(metadata.drop_counters.total(), 5);
-    assert_eq!(session.drop_counters.wakeup_times_insert_failed, 2);
+    assert_eq!(session.drop_counters.wakeup_data_insert_failed, 2);
     assert_eq!(session.drop_counters.ringbuf_reserve_failed, 3);
     assert_eq!(recorded_spike_events.len(), 1);
     assert_eq!(recorded_spike_events[0].task, 7);
@@ -668,12 +686,15 @@ fn target_snapshot_reads_fresh_task_comm_with_previous_tasks() {
 #[test]
 fn cgroup_target_pid_collection_parses_sorts_and_dedups() {
     let dir = temp_test_dir("cgroup-target-pids");
-    fs::create_dir_all(&dir).unwrap();
+    fs::create_dir_all(dir.join("child")).unwrap();
     fs::write(dir.join("cgroup.procs"), "30\nnot-a-pid\n10\n20\n").unwrap();
+    fs::write(dir.join("cgroup.threads"), "40\n20\n").unwrap();
+    fs::write(dir.join("child/cgroup.procs"), "50\n").unwrap();
+    fs::write(dir.join("child/cgroup.threads"), "60\n").unwrap();
 
     let target_pids = super::collect_target_pids_with_cgroup(vec![20, 1], Some(&dir));
 
-    assert_eq!(target_pids, vec![1, 10, 20, 30]);
+    assert_eq!(target_pids, vec![1, 10, 20, 30, 40, 50, 60]);
     fs::remove_dir_all(dir).ok();
 }
 
@@ -869,7 +890,7 @@ fn report_reads_recorded_session_and_spike_events() {
         prio: 120,
         wakeup_ns: 1_010_000_000,
         switch_ns: 1_016_000_000,
-        rq_depth: 0,
+        target_runnable_depth: 0,
         major_faults: 0,
         minor_faults: 0,
     });
@@ -887,7 +908,7 @@ fn report_reads_recorded_session_and_spike_events() {
         latency_ns: 6_000_000,
         wakeup_ns: 1_010_000_000,
         switch_ns: 1_016_000_000,
-        rq_depth: 0,
+        target_runnable_depth: 0,
         major_faults: 0,
         minor_faults: 0,
     }];
@@ -954,7 +975,7 @@ fn report_cluster_output_caps_inline_points() {
             latency_ns: 1_000_000 + idx as u64,
             wakeup_ns: 1_000_000_000 + idx as u64 * 100_000,
             switch_ns: 1_001_000_000 + idx as u64 * 100_000,
-            rq_depth: 0,
+            target_runnable_depth: 0,
             major_faults: 0,
             minor_faults: 0,
         })
@@ -1034,7 +1055,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
             latency_ns: 1_000_000,
             wakeup_ns: 1_000_000 + idx as u64 * 100,
             switch_ns: 10_000_000 + idx as u64 * 100,
-            rq_depth: 0,
+            target_runnable_depth: 0,
             major_faults: 0,
             minor_faults: 0,
         })
@@ -1235,9 +1256,10 @@ fn minimal_session_for_report() -> SessionFile {
         "gpu_sample_count": 1,
         "frame_event_count": 1,
         "drop_counters": {
-            "wakeup_times_insert_failed": 0,
+            "wakeup_data_insert_failed": 0,
             "ringbuf_reserve_failed": 0,
-            "waker_map_insert_failed": 0
+            "irq_start_times_insert_failed": 0,
+            "block_start_insert_failed": 0
         },
         "tasks": [],
         "top_spikes": []
@@ -1300,7 +1322,7 @@ fn scheduler_event_with_latency(pid: u32, comm: &str, latency_ns: u64) -> Schedu
         latency_ns,
         comm: comm_bytes,
         waker_tid: 0,
-        rq_depth: 0,
+        target_runnable_depth: 0,
         maj_flt: 0,
         min_flt: 0,
     }
@@ -1320,7 +1342,7 @@ fn spike_event(task: u32, switch_ns: u64) -> SpikeEvent {
         latency_ns: 1_000_000,
         wakeup_ns: switch_ns.saturating_sub(1_000_000),
         switch_ns,
-        rq_depth: 0,
+        target_runnable_depth: 0,
         major_faults: 0,
         minor_faults: 0,
     }
@@ -1466,9 +1488,10 @@ fn report_diff_shows_regressions_and_improvements() {
             "gpu_dma_fence_signaled": 0,
             "sys_enter_read": 0,
             "sys_enter_write": 0,
-            "wakeup_times_insert_failed": 0,
-            "target_tasks_insert_failed": 0,
-            "ringbuf_reserve_failed": 0
+            "wakeup_data_insert_failed": 0,
+            "ringbuf_reserve_failed": 0,
+            "irq_start_times_insert_failed": 0,
+            "block_start_insert_failed": 0
         },
         "scx_event_count": 0,
         "irq_event_count": 0,

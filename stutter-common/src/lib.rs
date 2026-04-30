@@ -8,12 +8,11 @@ pub const EVENT_STAT_WAIT: u32 = 5;
 pub const EVENT_BLOCK_IO: u32 = 6;
 pub const EVENT_EXEC: u32 = 7;
 
-pub const DROP_WAKEUP_TIMES_INSERT_FAILED: u32 = 0;
+pub const DROP_WAKEUP_DATA_INSERT_FAILED: u32 = 0;
 pub const DROP_RINGBUF_RESERVE_FAILED: u32 = 1;
 pub const DROP_IRQ_START_TIMES_INSERT_FAILED: u32 = 2;
 pub const DROP_BLOCK_START_INSERT_FAILED: u32 = 3;
-pub const DROP_WAKEUP_DATA_INSERT_FAILED: u32 = 4;
-pub const DROP_COUNTERS_MAX: u32 = 5;
+pub const DROP_COUNTERS_MAX: u32 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -23,7 +22,7 @@ pub struct SchedulerEvent {
     pub cpu: u32,
     pub prio: i32,
     pub waker_tid: u32,
-    pub rq_depth: u32,
+    pub target_runnable_depth: u32,
     pub maj_flt: u32,
     pub min_flt: u32,
     pub wakeup_ns: u64,

@@ -369,6 +369,7 @@ pub fn target_snapshot_filtered_at_with_options(
     let processes = scan_processes_at(proc_root, cache);
     let mut requested_roots = BTreeSet::new();
     let mut process_roots = BTreeSet::new();
+    let mut unresolved_manual_pids = Vec::new();
     let mut missing_manual_pids = Vec::new();
 
     let mut children_by_parent: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
@@ -384,11 +385,7 @@ pub fn target_snapshot_filtered_at_with_options(
             requested_roots.insert(*pid);
             process_roots.insert(*pid);
         } else {
-            log::warn!("manual_pid_not_found pid={pid}");
-            if keep_missing_pid {
-                requested_roots.insert(*pid);
-                missing_manual_pids.push(*pid);
-            }
+            unresolved_manual_pids.push(*pid);
         }
     }
 
@@ -410,6 +407,29 @@ pub fn target_snapshot_filtered_at_with_options(
     process_roots.retain(|pid| !excluded_pids.contains(pid));
 
     let mut tasks = expand_tasks_at(proc_root, &process_roots, &processes, previous_tasks);
+
+    if !unresolved_manual_pids.is_empty() {
+        let thread_owner_by_tid = thread_owner_index_at(proc_root, &processes);
+        for tid in unresolved_manual_pids {
+            if let Some(process_pid) = thread_owner_by_tid.get(&tid).copied()
+                && !excluded_pids.contains(&process_pid)
+                && let Some(proc_info) = processes.get(&process_pid)
+            {
+                requested_roots.insert(process_pid);
+                tasks.insert(
+                    tid,
+                    task_info_from_tid_at(proc_root, tid, process_pid, proc_info, previous_tasks),
+                );
+                continue;
+            }
+
+            log::warn!("manual_pid_not_found pid={tid}");
+            if keep_missing_pid {
+                requested_roots.insert(tid);
+                missing_manual_pids.push(tid);
+            }
+        }
+    }
 
     for pid in missing_manual_pids {
         let task = TaskInfo {
@@ -573,34 +593,58 @@ pub fn expand_tasks_at(
         }
 
         for tid in tids {
-            let (task_starttime_ticks, sched_policy) =
-                task_starttime_and_policy_at(proc_root, *pid, tid, proc_info);
-            let comm = task_comm_at(proc_root, *pid, tid)
-                .or_else(|| {
-                    previous_tasks
-                        .and_then(|tasks| tasks.get(&tid))
-                        .filter(|prev| {
-                            prev.process_pid == *pid
-                                && prev.task_starttime_ticks == task_starttime_ticks
-                        })
-                        .map(|prev| prev.comm.clone())
-                })
-                .unwrap_or_else(|| proc_info.comm.clone());
             tasks.insert(
                 tid,
-                task_info_from_parts(
-                    tid,
-                    *pid,
-                    &comm,
-                    proc_info,
-                    task_starttime_ticks,
-                    sched_policy,
-                ),
+                task_info_from_tid_at(proc_root, tid, *pid, proc_info, previous_tasks),
             );
         }
     }
 
     tasks
+}
+
+fn thread_owner_index_at(
+    proc_root: &Path,
+    processes: &BTreeMap<u32, ProcInfo>,
+) -> BTreeMap<u32, u32> {
+    let mut owners = BTreeMap::new();
+    for pid in processes.keys() {
+        for tid in thread_ids_of_at(proc_root, *pid) {
+            owners.insert(tid, *pid);
+        }
+    }
+    owners
+}
+
+fn task_info_from_tid_at(
+    proc_root: &Path,
+    tid: u32,
+    process_pid: u32,
+    proc_info: &ProcInfo,
+    previous_tasks: Option<&BTreeMap<u32, TaskInfo>>,
+) -> TaskInfo {
+    let (task_starttime_ticks, sched_policy) =
+        task_starttime_and_policy_at(proc_root, process_pid, tid, proc_info);
+    let comm = task_comm_at(proc_root, process_pid, tid)
+        .or_else(|| {
+            previous_tasks
+                .and_then(|tasks| tasks.get(&tid))
+                .filter(|prev| {
+                    prev.process_pid == process_pid
+                        && prev.task_starttime_ticks == task_starttime_ticks
+                })
+                .map(|prev| prev.comm.clone())
+        })
+        .unwrap_or_else(|| proc_info.comm.clone());
+
+    task_info_from_parts(
+        tid,
+        process_pid,
+        &comm,
+        proc_info,
+        task_starttime_ticks,
+        sched_policy,
+    )
 }
 
 fn task_info_from_proc(

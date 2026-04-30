@@ -213,7 +213,10 @@ struct TuneArgs {
     warmup_seconds: u64,
 
     #[arg(long = "keep-best")]
-    keep_best: bool,
+    pub keep_best: bool,
+
+    #[arg(long = "mangohud-log", value_name = "PATH")]
+    pub mangohud_log: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -249,6 +252,7 @@ pub enum AppCommand {
         epoch_seconds: u64,
         warmup_seconds: u64,
         keep_best: bool,
+        mangohud_log: Option<PathBuf>,
     },
 }
 
@@ -313,7 +317,9 @@ where
             }
 
             if args.monitor.no_record {
-                anyhow::bail!("record --no-record is contradictory; use 'monitor' for non-recording runs");
+                anyhow::bail!(
+                    "record --no-record is contradictory; use 'monitor' for non-recording runs"
+                );
             }
 
             let max_duration = args.duration.map(Duration::from_secs);
@@ -395,6 +401,7 @@ where
                 epoch_seconds: args.epoch_seconds,
                 warmup_seconds: args.warmup_seconds,
                 keep_best: args.keep_best,
+                mangohud_log: args.mangohud_log,
             })
         }
         None => Ok(AppCommand::Monitor(Box::new(config_from_monitor_args(
@@ -891,6 +898,8 @@ mod tests {
             "--warmup-seconds",
             "10",
             "--keep-best",
+            "--mangohud-log",
+            "/tmp/tune-mango.csv",
         ])
         .unwrap();
 
@@ -900,6 +909,7 @@ mod tests {
             epoch_seconds,
             warmup_seconds,
             keep_best,
+            mangohud_log,
         } = command
         else {
             panic!("expected tune command");
@@ -910,6 +920,7 @@ mod tests {
         assert_eq!(epoch_seconds, 60);
         assert_eq!(warmup_seconds, 10);
         assert!(keep_best);
+        assert_eq!(mangohud_log, Some(PathBuf::from("/tmp/tune-mango.csv")));
     }
 
     #[test]

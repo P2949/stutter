@@ -453,7 +453,7 @@ pub struct RecordedSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    pub rq_depth: u32,
+    pub target_runnable_depth: u32,
     #[serde(default)]
     pub major_faults: u32,
     #[serde(default)]
@@ -473,7 +473,7 @@ pub struct SessionSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    pub rq_depth: u32,
+    pub target_runnable_depth: u32,
     #[serde(default)]
     pub major_faults: u32,
     #[serde(default)]
@@ -495,7 +495,7 @@ pub struct SpikeEvent {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    pub rq_depth: u32,
+    pub target_runnable_depth: u32,
     #[serde(default)]
     pub major_faults: u32,
     #[serde(default)]
@@ -538,7 +538,7 @@ impl SpikeEvent {
             latency_ns: event.latency_ns,
             wakeup_ns: event.wakeup_ns,
             switch_ns: event.switch_ns,
-            rq_depth: event.rq_depth,
+            target_runnable_depth: event.target_runnable_depth,
             major_faults: event.maj_flt.saturating_sub(stats.major_faults as u32),
             minor_faults: event.min_flt.saturating_sub(stats.minor_faults as u32),
         }
@@ -579,12 +579,18 @@ pub struct FrameEvent {
 pub struct BlockIoRecord {
     pub elapsed_ms: u128,
     pub tid: u32,
+    #[serde(default = "default_block_io_correlation_basis")]
+    pub correlation_basis: String,
     pub dev: u32,
     pub nr_sector: u32,
     pub sector: u64,
     pub duration_ns: u64,
     pub timestamp_ns: u64,
     pub rwbs: String,
+}
+
+fn default_block_io_correlation_basis() -> String {
+    "dev+sector".to_owned()
 }
 
 pub const SESSION_SCHEMA_VERSION: u32 = 15;
@@ -737,7 +743,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
                 latency_ns: spike.latency_ns,
                 wakeup_ns: spike.wakeup_ns,
                 switch_ns: spike.switch_ns,
-                rq_depth: spike.rq_depth,
+                target_runnable_depth: spike.target_runnable_depth,
                 major_faults: spike.major_faults,
                 minor_faults: spike.minor_faults,
             });
@@ -960,7 +966,7 @@ fn recorded_spike(stats: &TaskStats, spike: &SpikeRecord) -> RecordedSpike {
         latency_ns: spike.latency_ns,
         wakeup_ns: spike.wakeup_ns,
         switch_ns: spike.switch_ns,
-        rq_depth: spike.rq_depth,
+        target_runnable_depth: spike.target_runnable_depth,
         major_faults: spike.major_faults,
         minor_faults: spike.minor_faults,
     }
