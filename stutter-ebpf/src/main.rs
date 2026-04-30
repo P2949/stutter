@@ -3,7 +3,7 @@
 
 use aya_ebpf::{
     helpers::{
-        bpf_get_current_cgroup_id, bpf_get_current_pid_tgid, bpf_get_smp_processor_id,
+        bpf_get_current_pid_tgid, bpf_get_smp_processor_id,
         bpf_ktime_get_ns,
     },
     macros::{map, tracepoint},
@@ -28,12 +28,6 @@ static TARGET_PIDS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(1024
 
 #[map]
 static TARGET_IRQS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(64, 0);
-
-#[map]
-static TARGET_CGROUP_IDS: HashMap<u64, u8> = HashMap::<u64, u8>::with_max_entries(128, 0);
-
-#[map]
-static CGROUP_TIDS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(1024, 0);
 
 #[map]
 // Userspace overrides this before loading the BPF object based on the current
@@ -214,15 +208,10 @@ pub fn irq_handler_exit(ctx: TracePointContext) -> u32 {
 }
 
 fn is_target_pid(pid: u32) -> bool {
-    if unsafe { TARGET_PIDS.get(&pid).is_some() } {
-        return true;
-    }
-
-    if unsafe { CGROUP_TIDS.get(&pid).is_some() } {
-        return true;
-    }
-
-    false
+    // Only consider explicit per-TID entries populated from userspace.
+    // Avoid relying on eBPF cgroup heuristics for discovery — userspace
+    // periodically refreshes `TARGET_PIDS` from the cgroup tree.
+    unsafe { TARGET_PIDS.get(&pid).is_some() }
 }
 
 fn is_target_irq(irq: u32) -> bool {
@@ -251,14 +240,10 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
     }
 
     let pid = pid as u32;
-    // If the PID/TID maps do not claim this task, also check the current
-    // cgroup id as a heuristic so cgroup-only targets can be tracked when
-    // the per-TID set hasn't been populated yet.
+    // Only process explicit per-TID targets; userspace is responsible for
+    // keeping `TARGET_PIDS` up to date for cgroup-based targeting.
     if !is_target_pid(pid) {
-        let cur_cgroup = unsafe { bpf_get_current_cgroup_id() };
-        if unsafe { TARGET_CGROUP_IDS.get(&cur_cgroup).is_none() } {
-            return Ok(0);
-        }
+        return Ok(0);
     }
 
     let now = unsafe { bpf_ktime_get_ns() };
@@ -308,13 +293,9 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
     let prev_state: i64 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
     let cpu = unsafe { bpf_get_smp_processor_id() };
 
-    let current_tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
-    let current_cgroup_id = unsafe { bpf_get_current_cgroup_id() };
-    if unsafe { TARGET_CGROUP_IDS.get(&current_cgroup_id).is_some() } {
-        let _ = CGROUP_TIDS.insert(&current_tid, &1, 0);
-    } else {
-        let _ = CGROUP_TIDS.remove(&current_tid);
-    }
+    // Do not maintain `CGROUP_TIDS` heuristics here; userspace handles
+    // membership via `TARGET_PIDS` refreshes. This keeps discovery
+    // deterministic and avoids relying on the current task's cgroup.
 
     if prev_state != 0 {
         if let Some(depth) = RQ_DEPTH.get_ptr_mut(cpu) {
@@ -517,6 +498,11 @@ pub fn block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
     let dev: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
     let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
+    // Only track starts for target tasks so unrelated system I/O cannot
+    // evict target entries from the start LRU map.
+    if !is_target_pid(tid) {
+        return Ok(0);
+    }
     let ts = unsafe { bpf_ktime_get_ns() };
     // Use a 64-bit mixed key of (sector, dev) instead of truncating the
     // sector to 32 bits to avoid collisions across large sectors.

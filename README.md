@@ -81,7 +81,7 @@ RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
   --watch-timeout-seconds 120
 ```
 
-`--watch-process` scans `/proc` only while waiting for the process to appear or relaunch. Once a process is found, `stutter` follows that root PID and its descendants. `--persistent` requires `--watch-process`; if the watched process exits, stale TIDs are removed and the monitor waits for the next matching launch. Note that `--duration` begins after the watched process is found, not while waiting for it. Missing manual `--pid` targets are dropped with a warning by default; add `--keep-missing-pid` if you want an unknown fallback task retained.
+`--watch-process` scans `/proc` only while waiting for the process to appear or relaunch. Once a process is found, `stutter` follows that root PID and its descendants. `--persistent` requires `--watch-process`; if the watched process exits, stale TIDs are removed and the monitor waits for the next matching launch. Note that `--duration` begins after the watched process is found, not while waiting for it. Missing manual `--pid` targets are dropped with a warning by default; add `--keep-missing-pid` if you want an unknown fallback task retained. `--keep-missing-pid` is intended for manual PID workflows where the PID may appear later; it is not a substitute for tree-root based monitoring and should not be relied on to keep arbitrary tree roots.
 
 ## Inspect a tree before tracing
 
@@ -274,6 +274,8 @@ Unknown `.exe` processes are no longer automatically treated as critical game ta
 
 For programmatic consumption, inspect the example outputs in a sample run directory created under `~/.local/state/stutter/runs/`.
 
+Note: the CSV exporter is intentionally compact and omits some newer fields. `interval.json` and the other JSON artifacts are the canonical, full-fidelity outputs — they contain PSI samples, major/minor fault deltas, drop counters, and histogram/truncation details. Prefer JSON for programmatic analysis.
+
 ## CLI flags (quick reference)
 
 - `--pid <PID>`: add a manual TID/PID to monitor (can repeat).
@@ -317,6 +319,8 @@ The header includes `active_tasks` (number of monitored TIDs) and `tracked_stats
 - `spike_events.json` — detected latency spike clusters used by the HTML report and cluster summaries.
 - `irq_events.json` — IRQ enter/exit capture when `--irq-latency` is enabled.
 - `gpu_samples.json` — periodic hwmon samples when `--hwmon` is enabled.
+
+Note: when present, `cpu_frequency` tracepoint samples are emitted as system-wide telemetry and are not filtered to individual target tasks; treat them as global context rather than per-task signals.
 
 If you need machine-readable schemas, open a recorded run under `~/.local/state/stutter/runs/<run-dir>/` and inspect the files; they are stable across releases but may add fields in minor versions.
 

@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fs, os::unix::fs::MetadataExt, path::Path};
+use std::{collections::BTreeMap, fs, path::Path};
 
 use anyhow::Context;
 use aya::{
@@ -171,11 +171,7 @@ pub fn load_and_attach(
                 "block_rq tracepoints missing `rwbs`; block I/O correlation will continue but read/write flags are unavailable"
             );
         }
-        if tracepoints.block_rq_rq_offset.is_none() {
-            log::warn!(
-                "block_rq tracepoints lack a request pointer field; correlation will fallback to dev+sector hashing (may collide)"
-            );
-        }
+        log::warn!("block I/O correlation uses dev+sector hashing; concurrent same-sector requests may collide");
     }
 
     if tracepoints.sched_process_exec {
@@ -230,25 +226,6 @@ pub fn load_and_attach(
         .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
     if let Some(cgroup_path) = &config.cgroupv2 {
-        let mut cgroup_id_map: AyaHashMap<_, u64, u8> = ebpf
-            .map_mut("TARGET_CGROUP_IDS")
-            .context("TARGET_CGROUP_IDS map not found")
-            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?
-            .try_into()
-            .map_err(|e: aya::maps::MapError| {
-                crate::error::StutterError::EbpfLoad(e.to_string())
-            })?;
-
-        let mut ids = Vec::new();
-        collect_cgroup_hierarchy_ids(cgroup_path, &mut ids)
-            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
-
-        for id in ids {
-            cgroup_id_map
-                .insert(id, 1, 0)
-                .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
-        }
-
         // Pre-populate TARGET_PIDS from the cgroup hierarchy to avoid races
         // where a task appears in sched events before the eBPF-side cgroup
         // membership maps are populated.
@@ -256,9 +233,30 @@ pub fn load_and_attach(
         collect_cgroup_hierarchy_pids(cgroup_path, &mut pids)
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
-        for pid in pids {
-            // best-effort insert; ignore failures for individual entries
-            let _ = target_pid_map.insert(pid, 1, 0);
+        pids.sort_unstable();
+        pids.dedup();
+
+        let mut failed_inserts = 0usize;
+        for pid in pids.iter() {
+            if target_pid_map.insert(*pid, 1, 0).is_err() {
+                failed_inserts += 1;
+            }
+        }
+
+        if failed_inserts > 0 {
+            return Err(crate::error::StutterError::EbpfLoad(format!(
+                "cgroup target prepopulation failed: {} tasks failed to insert (target_pids_max={}); use a smaller cgroup or explicitly set --allow-partial-cgroup (if supported)",
+                failed_inserts,
+                crate::TARGET_PIDS_MAX
+            )));
+        }
+
+        if pids.len() > crate::TARGET_PIDS_MAX {
+            return Err(crate::error::StutterError::EbpfLoad(format!(
+                "cgroup target prepopulation failed: cgroup has {} tasks but target_pids_max is {}",
+                pids.len(),
+                crate::TARGET_PIDS_MAX
+            )));
         }
     }
 
@@ -473,7 +471,6 @@ struct TracepointAvailability {
     page_fault_user: bool,
     block_rq: bool,
     block_rq_has_rwbs: bool,
-    block_rq_rq_offset: Option<usize>,
     sched_process_exec: bool,
 }
 
@@ -529,7 +526,6 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
     let block_rq_complete = events_root.join("block/block_rq_complete/format");
     let mut block_rq = false;
     let mut block_rq_has_rwbs = false;
-    let mut block_rq_rq_offset: Option<usize> = None;
 
     if block_rq_issue.exists() && block_rq_complete.exists() {
         // Parse offsets and ensure required fields exist. `rwbs` and a
@@ -558,14 +554,6 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
             if complete_offsets.contains_key("rwbs") {
                 block_rq = true;
                 block_rq_has_rwbs = true;
-
-                // Try to find a request/rq pointer field to use as a stable key.
-                block_rq_rq_offset = issue_offsets
-                    .get("rq")
-                    .copied()
-                    .or_else(|| issue_offsets.get("request").copied())
-                    .or_else(|| complete_offsets.get("rq").copied())
-                    .or_else(|| complete_offsets.get("request").copied());
             } else {
                 log::warn!(
                     "block I/O tracepoint present but missing `rwbs` in block_rq_complete; disabling block I/O attachment to avoid eBPF/tracepoint mismatch"
@@ -597,7 +585,6 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         page_fault_user,
         block_rq,
         block_rq_has_rwbs,
-        block_rq_rq_offset,
         sched_process_exec,
     })
 }
@@ -714,22 +701,6 @@ fn raise_memlock_limit() {
     if ret != 0 {
         eprintln!("warning: failed to raise RLIMIT_MEMLOCK");
     }
-}
-
-fn collect_cgroup_hierarchy_ids(path: &Path, ids: &mut Vec<u64>) -> anyhow::Result<()> {
-    let meta = fs::metadata(path).context("failed to get cgroup metadata")?;
-    ids.push(meta.ino());
-
-    if let Ok(entries) = fs::read_dir(path) {
-        for entry in entries.flatten() {
-            if let Ok(file_type) = entry.file_type()
-                && file_type.is_dir()
-            {
-                collect_cgroup_hierarchy_ids(&entry.path(), ids)?;
-            }
-        }
-    }
-    Ok(())
 }
 
 fn collect_cgroup_hierarchy_pids(path: &Path, pids: &mut Vec<u32>) -> anyhow::Result<()> {

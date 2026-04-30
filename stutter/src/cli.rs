@@ -312,6 +312,10 @@ where
                 anyhow::bail!("--duration must be greater than zero");
             }
 
+            if args.monitor.no_record {
+                anyhow::bail!("record --no-record is contradictory; use 'monitor' for non-recording runs");
+            }
+
             let max_duration = args.duration.map(Duration::from_secs);
             Ok(AppCommand::Monitor(Box::new(config_from_monitor_args(
                 args.monitor,
