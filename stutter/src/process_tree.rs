@@ -7,6 +7,17 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Default)]
+pub struct ProcessCache {
+    pub entries: BTreeMap<u32, CachedProcInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CachedProcInfo {
+    pub mtime: std::time::SystemTime,
+    pub info: ProcInfo,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcInfo {
     pub pid: u32,
@@ -110,7 +121,7 @@ pub struct TargetDiffRef<'a> {
     pub task: &'a TaskInfo,
 }
 
-pub fn scan_processes_at(proc_root: &Path) -> BTreeMap<u32, ProcInfo> {
+pub fn scan_processes_at(proc_root: &Path, cache: &mut ProcessCache) -> BTreeMap<u32, ProcInfo> {
     let mut processes = BTreeMap::new();
 
     let Ok(entries) = fs::read_dir(proc_root) else {
@@ -127,10 +138,32 @@ pub fn scan_processes_at(proc_root: &Path) -> BTreeMap<u32, ProcInfo> {
             continue;
         };
 
+        let metadata = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let mtime = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
+
+        if let Some(cached) = cache.entries.get(&pid)
+            && cached.mtime == mtime
+        {
+            processes.insert(pid, cached.info.clone());
+            continue;
+        }
+
         if let Some(info) = read_proc_info_at(proc_root, pid) {
+            cache.entries.insert(
+                pid,
+                CachedProcInfo {
+                    mtime,
+                    info: info.clone(),
+                },
+            );
             processes.insert(pid, info);
         }
     }
+
+    cache.entries.retain(|pid, _| processes.contains_key(pid));
 
     processes
 }
@@ -183,16 +216,7 @@ fn exe_metadata_at(proc_root: &Path, pid: u32) -> Option<fs::Metadata> {
     fs::metadata(proc_root.join(pid.to_string()).join("exe")).ok()
 }
 
-pub fn descendants_of(root_pid: u32, processes: &BTreeMap<u32, ProcInfo>) -> BTreeSet<u32> {
-    let mut children_by_parent: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
-
-    for proc_info in processes.values() {
-        children_by_parent
-            .entry(proc_info.ppid)
-            .or_default()
-            .push(proc_info.pid);
-    }
-
+pub fn descendants_of(root_pid: u32, children_by_parent: &BTreeMap<u32, Vec<u32>>) -> BTreeSet<u32> {
     let mut result = BTreeSet::new();
     let mut queue = VecDeque::new();
 
@@ -258,6 +282,8 @@ pub fn target_snapshot_with_options(
     tree_pids: &[u32],
     filters: &TaskFilters,
     keep_missing_pid: bool,
+    cache: &mut ProcessCache,
+    previous_tasks: Option<&BTreeMap<u32, TaskInfo>>,
 ) -> TargetSnapshot {
     target_snapshot_filtered_at_with_options(
         Path::new("/proc"),
@@ -265,6 +291,8 @@ pub fn target_snapshot_with_options(
         tree_pids,
         filters,
         keep_missing_pid,
+        cache,
+        previous_tasks,
     )
 }
 
@@ -282,7 +310,7 @@ pub fn target_snapshot_filtered_at(
     tree_pids: &[u32],
     filters: &TaskFilters,
 ) -> TargetSnapshot {
-    target_snapshot_filtered_at_with_options(proc_root, manual_pids, tree_pids, filters, false)
+    target_snapshot_filtered_at_with_options(proc_root, manual_pids, tree_pids, filters, false, &mut ProcessCache::default(), None)
 }
 
 pub fn target_snapshot_filtered_at_with_options(
@@ -291,11 +319,21 @@ pub fn target_snapshot_filtered_at_with_options(
     tree_pids: &[u32],
     filters: &TaskFilters,
     keep_missing_pid: bool,
+    cache: &mut ProcessCache,
+    previous_tasks: Option<&BTreeMap<u32, TaskInfo>>,
 ) -> TargetSnapshot {
-    let processes = scan_processes_at(proc_root);
+    let processes = scan_processes_at(proc_root, cache);
     let mut requested_roots = BTreeSet::new();
     let mut process_roots = BTreeSet::new();
     let mut missing_manual_pids = Vec::new();
+
+    let mut children_by_parent: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+    for proc_info in processes.values() {
+        children_by_parent
+            .entry(proc_info.ppid)
+            .or_default()
+            .push(proc_info.pid);
+    }
 
     for pid in manual_pids {
         if processes.contains_key(pid) {
@@ -314,11 +352,11 @@ pub fn target_snapshot_filtered_at_with_options(
         requested_roots.insert(*root_pid);
         if processes.contains_key(root_pid) {
             process_roots.insert(*root_pid);
-            process_roots.extend(descendants_of(*root_pid, &processes));
+            process_roots.extend(descendants_of(*root_pid, &children_by_parent));
         }
     }
 
-    let mut tasks = expand_tasks_at(proc_root, &process_roots, &processes);
+    let mut tasks = expand_tasks_at(proc_root, &process_roots, &processes, previous_tasks);
 
     for pid in missing_manual_pids {
         let task = TaskInfo {
@@ -391,6 +429,7 @@ pub fn expand_tasks_at(
     proc_root: &Path,
     process_pids: &BTreeSet<u32>,
     processes: &BTreeMap<u32, ProcInfo>,
+    previous_tasks: Option<&BTreeMap<u32, TaskInfo>>,
 ) -> BTreeMap<u32, TaskInfo> {
     let mut tasks = BTreeMap::new();
 
@@ -410,7 +449,11 @@ pub fn expand_tasks_at(
         }
 
         for tid in tids {
-            let comm = task_comm_at(proc_root, *pid, tid).unwrap_or_else(|| proc_info.comm.clone());
+            let comm = if let Some(prev) = previous_tasks.and_then(|t| t.get(&tid)) {
+                prev.comm.clone()
+            } else {
+                task_comm_at(proc_root, *pid, tid).unwrap_or_else(|| proc_info.comm.clone())
+            };
             tasks.insert(
                 tid,
                 task_info_from_proc(proc_root, tid, *pid, &comm, proc_info),
@@ -643,7 +686,7 @@ pub fn render_tree(root_pid: u32) -> anyhow::Result<String> {
 }
 
 pub fn render_tree_at(proc_root: &Path, root_pid: u32) -> anyhow::Result<String> {
-    let processes = scan_processes_at(proc_root);
+    let processes = scan_processes_at(proc_root, &mut ProcessCache::default());
     let Some(root) = processes.get(&root_pid) else {
         anyhow::bail!("process {root_pid} not found under {}", proc_root.display());
     };

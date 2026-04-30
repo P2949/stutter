@@ -407,12 +407,15 @@ fn target_snapshot_keeps_manual_missing_pid_when_requested() {
     let dir = temp_test_dir("proc-keep-missing-manual-pid");
     fs::create_dir_all(&dir).unwrap();
 
+    let mut cache = process_tree::ProcessCache::default();
     let snapshot = process_tree::target_snapshot_filtered_at_with_options(
         &dir,
         &[42],
         &[],
         &process_tree::TaskFilters::default(),
         true,
+        &mut cache,
+        None,
     );
 
     let task = snapshot.tasks.get(&42).unwrap();
@@ -901,6 +904,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
             gpu_busy_percent: Some(91),
             vram_used_bytes: None,
             vram_total_bytes: None,
+            vram_used_percent: None,
             gpu_clock_mhz: Some(2200),
             mem_clock_mhz: Some(1000),
             temp_millidegrees: Some(61000),
@@ -981,6 +985,7 @@ fn test_config(
         summary_period_ms: 1_000,
         spike_threshold_ns: 1_000_000,
         verbose: false,
+        max_tasks: 1024,
         task_filters: process_tree::TaskFilters::default(),
         keep_missing_pid: false,
         watch_process: None,
@@ -999,6 +1004,7 @@ fn test_config(
         retain_intervals: None,
         recording: None,
         max_duration,
+        shared_hwmon: None,
     }
 }
 

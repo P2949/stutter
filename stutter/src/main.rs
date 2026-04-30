@@ -54,6 +54,7 @@ struct RefreshTargetTasksInput<'a> {
     target_pid_map: &'a mut AyaHashMap<MapData, u32, u8>,
     elapsed_ms: u128,
     recording_started: Option<Instant>,
+    process_cache: &'a mut process_tree::ProcessCache,
 }
 
 struct HandleEventInput<'a> {
@@ -103,10 +104,11 @@ async fn main() -> anyhow::Result<()> {
             tree_pid,
             profile,
             force,
+            dry_run,
             watch,
             keep_applied,
             refresh_ms,
-        } => apply_profile_command(tree_pid, profile, force, watch, keep_applied, refresh_ms).await,
+        } => apply_profile_command(tree_pid, profile, force, dry_run, watch, keep_applied, refresh_ms).await,
         AppCommand::InspectTree { tree_pid } => {
             let rendered = process_tree::render_tree(tree_pid)?;
             print!("{rendered}");
@@ -193,6 +195,9 @@ async fn tune_command(
         "restore-after-each"
     };
 
+    let shared_hwmon = hwmon::HwmonReader::discover_with_options(None, None, None)
+        .map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)));
+
     for (idx, profile) in profiles.iter().enumerate() {
         println!(
             "tune candidate={} state=CandidateWarmup warmup_seconds={}",
@@ -200,7 +205,7 @@ async fn tune_command(
         );
 
         let records =
-            match apply_profile_to_tree_blocking(tree_pid, profile.clone(), idx == 0).await {
+            match apply_profile_to_tree_blocking(tree_pid, profile.clone(), idx == 0, false).await {
                 Ok(records) => records,
                 Err(err) => {
                     restore_tune_on_error();
@@ -214,7 +219,7 @@ async fn tune_command(
         );
 
         let interval_records =
-            match measure_tune_candidate(tree_pid, &profile.name, epoch_seconds, warmup_seconds)
+            match measure_tune_candidate(tree_pid, &profile.name, epoch_seconds, warmup_seconds, shared_hwmon.clone())
                 .await
             {
                 Ok(records) => records,
@@ -271,7 +276,7 @@ async fn tune_command(
             .iter()
             .find(|profile| profile.name == summary.best_profile)
     {
-        apply_profile_to_tree_blocking(tree_pid, profile.clone(), false).await?;
+        apply_profile_to_tree_blocking(tree_pid, profile.clone(), false, false).await?;
     }
 
     let summary_path = default_tune_summary_path();
@@ -301,6 +306,7 @@ async fn measure_tune_candidate(
     profile_name: &str,
     epoch_seconds: u64,
     warmup_seconds: u64,
+    shared_hwmon: Option<std::sync::Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
 ) -> anyhow::Result<Vec<IntervalRecord>> {
     let run_dir = tune_run_dir(profile_name);
     let config = Config {
@@ -309,6 +315,7 @@ async fn measure_tune_candidate(
         summary_period_ms: 1_000,
         spike_threshold_ns: 1_000_000,
         verbose: false,
+        max_tasks: 1024,
         task_filters: TaskFilters::default(),
         keep_missing_pid: false,
         watch_process: None,
@@ -330,6 +337,7 @@ async fn measure_tune_candidate(
             out_dir: Some(run_dir.clone()),
         }),
         max_duration: Some(Duration::from_secs(epoch_seconds)),
+        shared_hwmon,
     };
 
     run_monitor(config).await?;
@@ -444,6 +452,7 @@ async fn apply_profile_command(
     tree_pid: u32,
     profile_path: PathBuf,
     force: bool,
+    dry_run: bool,
     watch: bool,
     keep_applied: bool,
     refresh_ms: u64,
@@ -452,7 +461,7 @@ async fn apply_profile_command(
     let mut cache = profiles::ProfileApplyCache::default();
 
     let records = if watch {
-        match apply_profile_to_tree_cached_blocking(tree_pid, profile.clone(), force, cache).await {
+        match apply_profile_to_tree_cached_blocking(tree_pid, profile.clone(), force, dry_run, cache).await {
             Ok((records, updated_cache)) => {
                 cache = updated_cache;
                 records
@@ -465,7 +474,7 @@ async fn apply_profile_command(
             }
         }
     } else {
-        apply_profile_to_tree_blocking(tree_pid, profile.clone(), force).await?
+        apply_profile_to_tree_blocking(tree_pid, profile.clone(), force, dry_run).await?
     };
 
     println!(
@@ -497,6 +506,7 @@ async fn apply_profile_command(
                     tree_pid,
                     profile.clone(),
                     false,
+                    dry_run,
                     cache,
                 )
                 .await;
@@ -528,8 +538,9 @@ async fn apply_profile_to_tree_blocking(
     tree_pid: u32,
     profile: profiles::Profile,
     force: bool,
+    dry_run: bool,
 ) -> anyhow::Result<Vec<affinity::AffinityRecord>> {
-    task::spawn_blocking(move || profiles::apply_profile_to_tree(tree_pid, &profile, force))
+    task::spawn_blocking(move || profiles::apply_profile_to_tree(tree_pid, &profile, force, dry_run))
         .await
         .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))?
 }
@@ -538,10 +549,11 @@ async fn apply_profile_to_tree_cached_blocking(
     tree_pid: u32,
     profile: profiles::Profile,
     force: bool,
+    dry_run: bool,
     mut cache: profiles::ProfileApplyCache,
 ) -> anyhow::Result<(Vec<affinity::AffinityRecord>, profiles::ProfileApplyCache)> {
     task::spawn_blocking(move || {
-        profiles::apply_profile_to_tree_cached(tree_pid, &profile, force, &mut cache)
+        profiles::apply_profile_to_tree_cached(tree_pid, &profile, force, dry_run, &mut cache)
             .map(|records| (records, cache))
     })
     .await
@@ -662,12 +674,15 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     let mut scx_tracker = scx::ScxTracker::default();
     let recording_monotonic_start_ns = recording.as_ref().and_then(|run| run.monotonic_start_ns);
 
-    let mut hwmon_reader = if config.hwmon {
+    let hwmon_reader = if let Some(shared) = &config.shared_hwmon {
+        Some(shared.clone())
+    } else if config.hwmon {
         hwmon::HwmonReader::discover_with_options(
             config.hwmon_root.as_deref(),
             config.hwmon_drm_card.as_deref(),
             config.hwmon_render_node.as_deref(),
         )
+        .map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)))
     } else {
         None
     };
@@ -675,6 +690,8 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     if config.hwmon && hwmon_reader.is_none() {
         warn!("hwmon_requested_but_no_gpu_hwmon_found");
     }
+
+    let mut process_cache = process_tree::ProcessCache::default();
 
     let started = Instant::now();
     scx_tracker.sample(0);
@@ -689,6 +706,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
         target_pid_map: &mut loaded.target_pid_map,
         elapsed_ms: started.elapsed().as_millis(),
         recording_started: recording.as_ref().map(|run| run.started_instant),
+        process_cache: &mut process_cache,
     })
     .await?;
 
@@ -791,6 +809,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                         target_pid_map: &mut loaded.target_pid_map,
                         elapsed_ms: started.elapsed().as_millis(),
                         recording_started: recording.as_ref().map(|run| run.started_instant),
+                        process_cache: &mut process_cache,
                     })
                     .await?;
 
@@ -824,6 +843,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                         target_pid_map: &mut loaded.target_pid_map,
                         elapsed_ms: started.elapsed().as_millis(),
                         recording_started: recording.as_ref().map(|run| run.started_instant),
+                        process_cache: &mut process_cache,
                     })
                     .await?;
 
@@ -845,6 +865,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     target_pid_map: &mut loaded.target_pid_map,
                     elapsed_ms: started.elapsed().as_millis(),
                     recording_started: recording.as_ref().map(|run| run.started_instant),
+                    process_cache: &mut process_cache,
                 })
                 .await?;
             }
@@ -870,6 +891,7 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                         target_pid_map: &mut loaded.target_pid_map,
                         elapsed_ms: started.elapsed().as_millis(),
                         recording_started: recording.as_ref().map(|run| run.started_instant),
+                        process_cache: &mut process_cache,
                     })
                     .await?;
                 }
@@ -880,21 +902,26 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
             }
 
             _ = hwmon_tick.tick(), if hwmon_reader.is_some() => {
-                if let Some(mut reader) = hwmon_reader.take() {
+                if let Some(reader_arc) = &hwmon_reader {
                     let elapsed = started.elapsed().as_millis();
+                    let reader_arc_clone = reader_arc.clone();
 
-                    let (sample, returned_reader) = task::spawn_blocking(move || {
-                        let sample = reader.sample(elapsed);
-                        (sample, reader)
+                    let sample_opt = task::spawn_blocking(move || {
+                        if let Ok(mut reader) = reader_arc_clone.lock() {
+                            Some(reader.sample(elapsed))
+                        } else {
+                            None
+                        }
                     })
                     .await
                     .map_err(|err| anyhow::anyhow!("hwmon worker failed: {err}"))?;
 
-                    if let Some(writer) = gpu_sample_writer.as_mut() {
+                    if let Some(sample) = sample_opt
+                        && let Some(writer) = gpu_sample_writer.as_mut()
+                    {
                         writer.push(&sample)?;
                         streamed_gpu_sample_count += 1;
                     }
-                    hwmon_reader = Some(returned_reader);
                 }
             }
 
@@ -1114,7 +1141,8 @@ fn remove_stale_tree_roots(
 fn find_process_by_pattern_at(proc_root: &Path, pattern: &str) -> Option<u32> {
     let pattern_lower = normalize_process_match_text(pattern);
 
-    process_tree::scan_processes_at(proc_root)
+    let mut cache = process_tree::ProcessCache::default();
+    process_tree::scan_processes_at(proc_root, &mut cache)
         .into_iter()
         .filter_map(|(pid, process)| {
             let score =
@@ -1322,31 +1350,40 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
         target_pid_map,
         elapsed_ms,
         recording_started,
+        process_cache,
     } = input;
 
     let target_pids = config.target_pids.clone();
     let tree_pids = config.tree_pids.clone();
     let filters = config.task_filters.clone();
     let keep_missing_pid = config.keep_missing_pid;
+    let max_tasks = config.max_tasks;
+    
+    let mut process_cache_owned = std::mem::take(process_cache);
+    let active_targets_clone = active_targets.clone();
 
-    let snapshot = task::spawn_blocking(move || {
-        process_tree::target_snapshot_with_options(
+    let (snapshot, returned_cache) = task::spawn_blocking(move || {
+        let snap = process_tree::target_snapshot_with_options(
             &target_pids,
             &tree_pids,
             &filters,
             keep_missing_pid,
-        )
+            &mut process_cache_owned,
+            Some(&active_targets_clone),
+        );
+        (snap, process_cache_owned)
     })
     .await
     .map_err(|err| anyhow::anyhow!("target snapshot worker failed: {err}"))?;
 
+    *process_cache = returned_cache;
     let desired_tasks = snapshot.tasks;
 
-    if desired_tasks.len() > TARGET_PIDS_MAX {
+    if desired_tasks.len() > max_tasks {
         anyhow::bail!(
-            "too many target tasks after tree/thread expansion: got {}, but TARGET_PIDS supports at most {}; try a narrower --tree-pid root or increase both userspace TARGET_PIDS_MAX and the eBPF TARGET_PIDS max_entries together",
+            "too many target tasks after tree/thread expansion: got {}, but --max-tasks is set to {}; try a narrower --tree-pid root or increase --max-tasks",
             desired_tasks.len(),
-            TARGET_PIDS_MAX
+            max_tasks
         );
     }
 
