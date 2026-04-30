@@ -87,11 +87,23 @@ pub struct MonitorArgs {
     #[arg(long = "hwmon-root", value_name = "PATH")]
     hwmon_root: Option<PathBuf>,
 
+    #[arg(long = "hwmon-drm-card", value_name = "CARD")]
+    hwmon_drm_card: Option<String>,
+
+    #[arg(long = "hwmon-render-node", value_name = "NODE")]
+    hwmon_render_node: Option<PathBuf>,
+
     #[arg(long = "mangohud-log", value_name = "PATH")]
     mangohud_log: Option<PathBuf>,
 
     #[arg(long = "tui")]
     tui: bool,
+
+    #[arg(long = "retain-intervals", value_name = "N")]
+    retain_intervals: Option<usize>,
+
+    #[arg(long = "no-record")]
+    no_record: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -166,6 +178,9 @@ struct TuneArgs {
 
     #[arg(long = "warmup-seconds", default_value_t = 30)]
     warmup_seconds: u64,
+
+    #[arg(long = "keep-best")]
+    keep_best: bool,
 }
 
 #[derive(Debug)]
@@ -197,6 +212,7 @@ pub enum AppCommand {
         profiles: PathBuf,
         epoch_seconds: u64,
         warmup_seconds: u64,
+        keep_best: bool,
     },
 }
 
@@ -218,8 +234,11 @@ pub struct Config {
     pub irqs: Vec<u32>,
     pub hwmon: bool,
     pub hwmon_root: Option<PathBuf>,
+    pub hwmon_drm_card: Option<String>,
+    pub hwmon_render_node: Option<PathBuf>,
     pub mangohud_log: Option<PathBuf>,
     pub tui: bool,
+    pub retain_intervals: Option<usize>,
     pub recording: Option<RecordingConfig>,
     pub max_duration: Option<Duration>,
 }
@@ -317,6 +336,7 @@ where
                 profiles: args.profiles,
                 epoch_seconds: args.epoch_seconds,
                 warmup_seconds: args.warmup_seconds,
+                keep_best: args.keep_best,
             })
         }
         None => Ok(AppCommand::Monitor(Box::new(config_from_monitor_args(
@@ -374,6 +394,21 @@ fn config_from_monitor_args(
     if args.persistent && args.watch_process.is_none() {
         anyhow::bail!("--persistent requires --watch-process");
     }
+    if args.irq_latency && args.irqs.is_empty() {
+        anyhow::bail!(
+            "--irq-latency requires at least one explicit --irq <N>; inspect /proc/interrupts to find the IRQ number for your GPU or device"
+        );
+    }
+    if matches!(args.hwmon_drm_card.as_deref(), Some("")) {
+        anyhow::bail!("--hwmon-drm-card must not be empty");
+    }
+    if (args.hwmon_root.is_some()
+        || args.hwmon_drm_card.is_some()
+        || args.hwmon_render_node.is_some())
+        && !args.hwmon
+    {
+        anyhow::bail!("--hwmon-root, --hwmon-drm-card, and --hwmon-render-node require --hwmon");
+    }
 
     if args.target_pids.len() > TARGET_PIDS_MAX {
         anyhow::bail!(
@@ -388,7 +423,9 @@ fn config_from_monitor_args(
         .checked_mul(1_000)
         .ok_or_else(|| anyhow::anyhow!("--spike-us value is too large"))?;
 
-    let recording = if force_recording || args.run_name.is_some() || args.out_dir.is_some() {
+    let recording = if args.no_record {
+        None
+    } else if force_recording || args.run_name.is_some() || args.out_dir.is_some() {
         Some(RecordingConfig {
             run_name: args
                 .run_name
@@ -419,8 +456,11 @@ fn config_from_monitor_args(
         irqs: args.irqs,
         hwmon: args.hwmon,
         hwmon_root: args.hwmon_root,
+        hwmon_drm_card: args.hwmon_drm_card,
+        hwmon_render_node: args.hwmon_render_node,
         mangohud_log: args.mangohud_log,
         tui: args.tui,
+        retain_intervals: args.retain_intervals,
         recording,
         max_duration,
     })
@@ -648,6 +688,10 @@ mod tests {
             "--irq",
             "137",
             "--hwmon",
+            "--hwmon-drm-card",
+            "card1",
+            "--hwmon-render-node",
+            "/dev/dri/renderD129",
             "--mangohud-log",
             "/tmp/mango.csv",
             "--tui",
@@ -661,6 +705,11 @@ mod tests {
         assert!(config.irq_latency);
         assert_eq!(config.irqs, vec![137]);
         assert!(config.hwmon);
+        assert_eq!(config.hwmon_drm_card.as_deref(), Some("card1"));
+        assert_eq!(
+            config.hwmon_render_node,
+            Some(PathBuf::from("/dev/dri/renderD129"))
+        );
         assert_eq!(config.mangohud_log, Some(PathBuf::from("/tmp/mango.csv")));
         assert!(config.tui);
     }
@@ -678,6 +727,7 @@ mod tests {
             "60",
             "--warmup-seconds",
             "10",
+            "--keep-best",
         ])
         .unwrap();
 
@@ -686,6 +736,7 @@ mod tests {
             profiles,
             epoch_seconds,
             warmup_seconds,
+            keep_best,
         } = command
         else {
             panic!("expected tune command");
@@ -695,6 +746,16 @@ mod tests {
         assert_eq!(profiles, PathBuf::from("/tmp/profiles.toml"));
         assert_eq!(epoch_seconds, 60);
         assert_eq!(warmup_seconds, 10);
+        assert!(keep_best);
+    }
+
+    #[test]
+    fn rejects_irq_latency_without_irq() {
+        let err = parse_app_command_from(["stutter", "monitor", "--pid", "42", "--irq-latency"])
+            .unwrap_err();
+
+        assert!(err.to_string().contains("--irq-latency requires"));
+        assert!(err.to_string().contains("/proc/interrupts"));
     }
 
     #[test]

@@ -5,8 +5,8 @@ use std::{
 };
 
 use anyhow::Context;
-use serde::Deserialize;
 use regex::Regex;
+use serde::Deserialize;
 
 use crate::{
     affinity::{self, AffinityRecord, CpuMask},
@@ -41,6 +41,8 @@ struct ProfileApplyCacheKey {
 struct PlannedAffinityChange {
     record: AffinityRecord,
     cache_key: ProfileApplyCacheKey,
+    process_pid: u32,
+    task_starttime_ticks: Option<u64>,
 }
 
 pub fn load_first_profile(path: &Path) -> anyhow::Result<Profile> {
@@ -89,8 +91,20 @@ fn apply_profile_to_tree_with_cache(
 
     let restore_path = affinity::default_restore_path();
     let mut applied_records = Vec::new();
+    let mut force_restore_write = force_restore_overwrite;
 
     for planned in &planned {
+        if !task_starttime_matches(planned) {
+            continue;
+        }
+
+        affinity::save_merged_restore_state(
+            &restore_path,
+            std::slice::from_ref(&planned.record),
+            force_restore_write,
+        )?;
+        force_restore_write = false;
+
         match affinity::set_affinity_raw(planned.record.tid, &planned.record.applied_mask) {
             Ok(()) => {
                 applied_records.push(planned.record.clone());
@@ -102,14 +116,6 @@ fn apply_profile_to_tree_with_cache(
                 // ESRCH during set_affinity is fine because restore_all skips dead TIDs.
             }
             Err(err) => {
-                if !applied_records.is_empty() {
-                    applied_records.sort_by_key(|record| record.tid);
-                    affinity::save_merged_restore_state(
-                        &restore_path,
-                        &applied_records,
-                        force_restore_overwrite,
-                    )?;
-                }
                 anyhow::bail!(
                     "failed to set affinity for TID {}: {err}",
                     planned.record.tid
@@ -119,15 +125,17 @@ fn apply_profile_to_tree_with_cache(
     }
 
     applied_records.sort_by_key(|record| record.tid);
-    if !applied_records.is_empty() {
-        affinity::save_merged_restore_state(
-            &restore_path,
-            &applied_records,
-            force_restore_overwrite,
-        )?;
-    }
 
     Ok(applied_records)
+}
+
+fn task_starttime_matches(planned: &PlannedAffinityChange) -> bool {
+    let Some(expected) = planned.task_starttime_ticks else {
+        return true;
+    };
+
+    process_tree::task_starttime_at(Path::new("/proc"), planned.process_pid, planned.record.tid)
+        == Some(expected)
 }
 
 fn planned_affinity_changes(
@@ -154,30 +162,32 @@ where
         let Some(rule) = profile.classes.get(&task.class) else {
             continue;
         };
-        if !rule.match_comm.is_empty() && !rule.match_comm.iter().any(|pattern| {
-            let comms = [&task.comm, task.process_comm.as_ref()];
-            // Treat patterns like `/.../` as explicit regex; otherwise attempt regex if
-            // it contains common regex metacharacters, else do substring match.
-            if pattern.len() >= 2 && pattern.starts_with('/') && pattern.ends_with('/') {
-                match Regex::new(&pattern[1..pattern.len() - 1]) {
-                    Ok(re) => comms.iter().any(|c| re.is_match(c)),
-                    Err(err) => {
-                        log::warn!("invalid profile regex '{}': {err}", pattern);
-                        false
+        if !rule.match_comm.is_empty()
+            && !rule.match_comm.iter().any(|pattern| {
+                let comms = [&task.comm, task.process_comm.as_ref()];
+                // Treat patterns like `/.../` as explicit regex; otherwise attempt regex if
+                // it contains common regex metacharacters, else do substring match.
+                if pattern.len() >= 2 && pattern.starts_with('/') && pattern.ends_with('/') {
+                    match Regex::new(&pattern[1..pattern.len() - 1]) {
+                        Ok(re) => comms.iter().any(|c| re.is_match(c)),
+                        Err(err) => {
+                            log::warn!("invalid profile regex '{}': {err}", pattern);
+                            false
+                        }
                     }
-                }
-            } else if pattern.chars().any(|c| ".^$*+?()[]{}|\\".contains(c)) {
-                match Regex::new(pattern) {
-                    Ok(re) => comms.iter().any(|c| re.is_match(c)),
-                    Err(err) => {
-                        log::warn!("invalid profile regex '{}': {err}", pattern);
-                        false
+                } else if pattern.chars().any(|c| ".^$*+?()[]{}|\\".contains(c)) {
+                    match Regex::new(pattern) {
+                        Ok(re) => comms.iter().any(|c| re.is_match(c)),
+                        Err(err) => {
+                            log::warn!("invalid profile regex '{}': {err}", pattern);
+                            false
+                        }
                     }
+                } else {
+                    comms.iter().any(|c| c.contains(pattern))
                 }
-            } else {
-                comms.iter().any(|c| c.contains(pattern))
-            }
-        }) {
+            })
+        {
             continue;
         }
 
@@ -217,6 +227,8 @@ where
                 applied_mask: rule.affinity.clone(),
             },
             cache_key,
+            process_pid: task.process_pid,
+            task_starttime_ticks: task.task_starttime_ticks,
         });
     }
 
@@ -352,6 +364,8 @@ mod tests {
             process_comm: "game".into(),
             process_starttime_ticks: Some(70),
             task_starttime_ticks: Some(70),
+            exe_dev: None,
+            exe_ino: None,
             class: TaskClass::Game,
         };
         let tasks = BTreeMap::from([(7, task)]);

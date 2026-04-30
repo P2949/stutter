@@ -5,7 +5,7 @@ use crate::{
     process_tree::{TaskClass, TaskInfo},
 };
 
-pub fn render_status(
+pub(crate) fn render_status(
     active_targets: &BTreeMap<u32, TaskInfo>,
     stats: &BTreeMap<u32, TaskStats>,
 ) -> String {

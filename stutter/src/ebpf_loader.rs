@@ -7,12 +7,14 @@ use aya::{
     programs::TracePoint,
 };
 use serde::{Deserialize, Serialize};
-use stutter_common::{DROP_RINGBUF_RESERVE_FAILED, DROP_WAKEUP_TIMES_INSERT_FAILED};
+use stutter_common::{
+    DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
+    DROP_WAKEUP_TIMES_INSERT_FAILED,
+};
 use tokio::io::unix::AsyncFd;
 
 pub struct LoadedEbpf {
-    #[allow(dead_code)]
-    ebpf: Ebpf,
+    _ebpf: Ebpf,
     pub events: AsyncFd<RingBuf<MapData>>,
     pub target_pid_map: AyaHashMap<MapData, u32, u8>,
     pub target_irq_map: Option<AyaHashMap<MapData, u32, u8>>,
@@ -23,12 +25,15 @@ pub struct LoadedEbpf {
 pub struct DropCountersSnapshot {
     pub wakeup_times_insert_failed: u64,
     pub ringbuf_reserve_failed: u64,
+    #[serde(default)]
+    pub irq_start_times_insert_failed: u64,
 }
 
 impl DropCountersSnapshot {
     pub fn total(&self) -> u64 {
         self.wakeup_times_insert_failed
             .saturating_add(self.ringbuf_reserve_failed)
+            .saturating_add(self.irq_start_times_insert_failed)
     }
 }
 
@@ -42,6 +47,10 @@ impl LoadedEbpf {
             ringbuf_reserve_failed: drop_counter_value(
                 &self.drop_counters,
                 DROP_RINGBUF_RESERVE_FAILED,
+            ),
+            irq_start_times_insert_failed: drop_counter_value(
+                &self.drop_counters,
+                DROP_IRQ_START_TIMES_INSERT_FAILED,
             ),
         }
     }
@@ -80,10 +89,9 @@ pub fn load_and_attach() -> Result<LoadedEbpf, crate::error::StutterError> {
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
 
-    let target_pid_map = AyaHashMap::try_from(
-        ebpf.take_map("TARGET_PIDS")
-            .ok_or_else(|| crate::error::StutterError::EbpfLoad("TARGET_PIDS map not found".to_owned()))?,
-    )
+    let target_pid_map = AyaHashMap::try_from(ebpf.take_map("TARGET_PIDS").ok_or_else(|| {
+        crate::error::StutterError::EbpfLoad("TARGET_PIDS map not found".to_owned())
+    })?)
     .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
     let target_irq_map = ebpf
@@ -92,22 +100,22 @@ pub fn load_and_attach() -> Result<LoadedEbpf, crate::error::StutterError> {
         .transpose()
         .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
-    let drop_counters = PerCpuArray::try_from(
-        ebpf.take_map("DROP_COUNTERS")
-            .ok_or_else(|| crate::error::StutterError::EbpfLoad("DROP_COUNTERS map not found".to_owned()))?,
-    )
+    let drop_counters = PerCpuArray::try_from(ebpf.take_map("DROP_COUNTERS").ok_or_else(|| {
+        crate::error::StutterError::EbpfLoad("DROP_COUNTERS map not found".to_owned())
+    })?)
     .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
-    let events = RingBuf::try_from(
-        ebpf.take_map("EVENTS")
-            .ok_or_else(|| crate::error::StutterError::EbpfLoad("EVENTS map not found".to_owned()))?,
-    )
-    .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    let events =
+        RingBuf::try_from(ebpf.take_map("EVENTS").ok_or_else(|| {
+            crate::error::StutterError::EbpfLoad("EVENTS map not found".to_owned())
+        })?)
+        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
-    let events = AsyncFd::new(events).map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    let events =
+        AsyncFd::new(events).map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
 
     Ok(LoadedEbpf {
-        ebpf,
+        _ebpf: ebpf,
         events,
         target_pid_map,
         target_irq_map,
@@ -157,8 +165,15 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         &events_root.join("sched/sched_switch/format"),
         &[("next_comm", 40), ("next_pid", 56), ("next_prio", 60)],
     )?;
-    let irq_handler = events_root.join("irq/irq_handler_entry/format").exists()
-        && events_root.join("irq/irq_handler_exit/format").exists();
+    let irq_entry = events_root.join("irq/irq_handler_entry/format");
+    let irq_exit = events_root.join("irq/irq_handler_exit/format");
+    let irq_handler = if irq_entry.exists() && irq_exit.exists() {
+        validate_tracepoint_format_at(&irq_entry, &[("irq", 8)])?;
+        validate_tracepoint_format_at(&irq_exit, &[("irq", 8)])?;
+        true
+    } else {
+        false
+    };
     if !irq_handler {
         log::warn!("IRQ tracepoint formats missing; continuing without IRQ latency probe");
     }
@@ -191,28 +206,13 @@ fn validate_tracepoint_format_at(
     let format = fs::read_to_string(path)
         .with_context(|| format!("failed to read tracepoint format {}", path.display()))?;
 
-    let offsets = parse_tracepoint_offsets(&format);
-
-    for (field, expected_offset) in expected_offsets {
-        let Some(actual_offset) = offsets.get(*field) else {
-            anyhow::bail!(
-                "tracepoint format {} missing field {field}; expected offset {expected_offset};\n\nThis usually means your kernel's tracepoint layout differs from the eBPF program's assumptions. Try rebuilding the eBPF program against your current kernel headers or upgrading your kernel. If that doesn't help, please open an issue providing your kernel version and the contents of {}.",
-                path.display(), path.display()
-            );
-        };
-
-        if *actual_offset != *expected_offset {
-            anyhow::bail!(
-                "tracepoint format {} field {field} offset mismatch: expected {expected_offset}, got {actual_offset};\n\nThis indicates the kernel tracepoint layout changed. Try building the eBPF program for your running kernel (ensure you have rust-src and bpf-linker available) or upgrade your kernel. If the problem persists, please open an issue and include the format file contents: {}",
-                path.display(), path.display()
-            );
-        }
-    }
-
-    Ok(())
+    validate_tracepoint_format(&format, expected_offsets).with_context(|| {
+        format!(
+            "tracepoint format {} did not match the eBPF program assumptions",
+            path.display()
+        )
+    })
 }
-
-
 
 fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, usize> {
     let mut offsets = BTreeMap::new();
@@ -247,7 +247,6 @@ fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, usize> {
     offsets
 }
 
-#[allow(dead_code)]
 fn validate_tracepoint_format(
     format: &str,
     expected_offsets: &[(&str, usize)],
@@ -351,6 +350,24 @@ field:int next_prio; offset:60; size:4; signed:1;
         let err = validate_tracepoint_format("field:int pid; offset:24;", &[("next_pid", 56)])
             .unwrap_err();
         assert!(err.to_string().contains("missing field next_pid"));
+    }
+
+    #[test]
+    fn validates_irq_tracepoint_offsets() {
+        let format = r#"
+field:unsigned short common_type; offset:0; size:2; signed:0;
+field:int irq; offset:8; size:4; signed:1;
+"#;
+
+        validate_tracepoint_format(format, &[("irq", 8)]).unwrap();
+    }
+
+    #[test]
+    fn rejects_bad_irq_tracepoint_offsets() {
+        let format = "field:int irq; offset:12; size:4; signed:1;";
+
+        let err = validate_tracepoint_format(format, &[("irq", 8)]).unwrap_err();
+        assert!(err.to_string().contains("expected 8, got 12"));
     }
 
     #[test]

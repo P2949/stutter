@@ -60,9 +60,28 @@ fn find_header(headers: &[String], candidates: &[&str]) -> Option<usize> {
 }
 
 fn split_csv_line(line: &str) -> Vec<String> {
-    line.split(',')
-        .map(|s| s.trim().to_owned())
-        .collect()
+    let mut fields = Vec::new();
+    let mut field = String::new();
+    let mut chars = line.chars().peekable();
+    let mut in_quotes = false;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if in_quotes && chars.peek() == Some(&'"') => {
+                field.push('"');
+                chars.next();
+            }
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                fields.push(field.trim().to_owned());
+                field.clear();
+            }
+            _ => field.push(ch),
+        }
+    }
+
+    fields.push(field.trim().to_owned());
+    fields
 }
 
 #[cfg(test)]
@@ -77,5 +96,15 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].elapsed_ms, 10);
         assert_eq!(events[1].frametime_ms, 33.4);
+    }
+
+    #[test]
+    fn parses_quoted_csv_fields() {
+        let data = "elapsed_ms,\"frame,time\",frametime_ms\n10,\"ignored, value\",16.7\n";
+        let events = parse_frame_events(data.lines().map(|s| Ok(s.to_owned()))).unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].elapsed_ms, 10);
+        assert_eq!(events[0].frametime_ms, 16.7);
     }
 }

@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
-    fmt, fs, io,
+    fmt, fs,
+    os::unix::fs::MetadataExt,
     path::Path,
 };
 
@@ -13,6 +14,8 @@ pub struct ProcInfo {
     pub comm: String,
     pub cmdline: String,
     pub starttime_ticks: Option<u64>,
+    pub exe_dev: Option<u64>,
+    pub exe_ino: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
@@ -60,6 +63,8 @@ pub struct TaskInfo {
     pub process_comm: std::sync::Arc<str>,
     pub process_starttime_ticks: Option<u64>,
     pub task_starttime_ticks: Option<u64>,
+    pub exe_dev: Option<u64>,
+    pub exe_ino: Option<u64>,
     pub class: TaskClass,
 }
 
@@ -97,13 +102,6 @@ impl TaskFilters {
 pub enum TargetDiffAction {
     Added,
     Removed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
-pub struct TargetDiff {
-    pub action: TargetDiffAction,
-    pub task: TaskInfo,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -166,6 +164,9 @@ fn read_proc_info_at(proc_root: &Path, pid: u32) -> Option<ProcInfo> {
         .unwrap_or_default();
 
     let starttime_ticks = stat_starttime_at(&proc_root.join(pid.to_string()).join("stat"));
+    let (exe_dev, exe_ino) = exe_metadata_at(proc_root, pid)
+        .map(|metadata| (Some(metadata.dev()), Some(metadata.ino())))
+        .unwrap_or((None, None));
 
     Some(ProcInfo {
         pid,
@@ -173,7 +174,13 @@ fn read_proc_info_at(proc_root: &Path, pid: u32) -> Option<ProcInfo> {
         comm: comm?,
         cmdline,
         starttime_ticks,
+        exe_dev,
+        exe_ino,
     })
+}
+
+fn exe_metadata_at(proc_root: &Path, pid: u32) -> Option<fs::Metadata> {
+    fs::metadata(proc_root.join(pid.to_string()).join("exe")).ok()
 }
 
 pub fn descendants_of(root_pid: u32, processes: &BTreeMap<u32, ProcInfo>) -> BTreeSet<u32> {
@@ -244,15 +251,6 @@ pub fn task_comm_at(proc_root: &Path, pid: u32, tid: u32) -> Option<String> {
 
 pub fn target_snapshot(manual_pids: &[u32], tree_pids: &[u32]) -> TargetSnapshot {
     target_snapshot_at(Path::new("/proc"), manual_pids, tree_pids)
-}
-
-#[allow(dead_code)]
-pub fn target_snapshot_with_filters(
-    manual_pids: &[u32],
-    tree_pids: &[u32],
-    filters: &TaskFilters,
-) -> TargetSnapshot {
-    target_snapshot_filtered_at(Path::new("/proc"), manual_pids, tree_pids, filters)
 }
 
 pub fn target_snapshot_with_options(
@@ -331,6 +329,8 @@ pub fn target_snapshot_filtered_at_with_options(
             process_comm: std::sync::Arc::from("?"),
             process_starttime_ticks: None,
             task_starttime_ticks: None,
+            exe_dev: None,
+            exe_ino: None,
             class: TaskClass::Unknown,
         };
         if filters.allows(&task) {
@@ -350,20 +350,6 @@ pub fn target_snapshot_filtered_at_with_options(
         process_roots,
         tasks,
     }
-}
-
-#[allow(dead_code)]
-pub fn diff_tasks(
-    old_tasks: &BTreeMap<u32, TaskInfo>,
-    new_tasks: &BTreeMap<u32, TaskInfo>,
-) -> Vec<TargetDiff> {
-    diff_tasks_ref(old_tasks, new_tasks)
-        .into_iter()
-        .map(|diff| TargetDiff {
-            action: diff.action,
-            task: diff.task.clone(),
-        })
-        .collect()
 }
 
 pub fn diff_tasks_ref<'a>(
@@ -462,6 +448,8 @@ fn task_info_from_proc(
         process_comm: std::sync::Arc::from(proc_info.comm.clone()),
         process_starttime_ticks: proc_info.starttime_ticks,
         task_starttime_ticks,
+        exe_dev: proc_info.exe_dev,
+        exe_ino: proc_info.exe_ino,
         class: classify_task(comm, &proc_info.comm, &proc_info.cmdline),
     }
 }
@@ -475,13 +463,33 @@ pub fn process_starttime_at(proc_root: &Path, pid: u32) -> Option<u64> {
     stat_starttime_at(&proc_root.join(pid.to_string()).join("stat"))
 }
 
+pub fn task_starttime_at(proc_root: &Path, process_pid: u32, tid: u32) -> Option<u64> {
+    let stat_path = if process_pid == tid {
+        proc_root.join(process_pid.to_string()).join("stat")
+    } else {
+        proc_root
+            .join(process_pid.to_string())
+            .join("task")
+            .join(tid.to_string())
+            .join("stat")
+    };
+
+    stat_starttime_at(&stat_path)
+}
+
 pub fn parse_proc_stat_starttime(stat: &str) -> Option<u64> {
     let (_, after_comm) = stat.rsplit_once(") ")?;
     after_comm.split_whitespace().nth(19)?.parse().ok()
 }
 
 fn comm_pattern_matches(pattern: &str, task: &TaskInfo) -> bool {
-    !pattern.is_empty() && (task.comm.contains(pattern) || task.process_comm.contains(pattern))
+    if pattern.is_empty() {
+        return false;
+    }
+
+    let pattern = pattern.to_ascii_lowercase();
+    task.comm.to_ascii_lowercase().contains(&pattern)
+        || task.process_comm.to_ascii_lowercase().contains(&pattern)
 }
 
 pub fn classify_task(comm: &str, process_comm: &str, cmdline: &str) -> TaskClass {
@@ -630,17 +638,14 @@ fn contains_known_non_game_exe(text: &str) -> bool {
     .any(|name| text.contains(name))
 }
 
-pub fn render_tree(root_pid: u32) -> io::Result<String> {
+pub fn render_tree(root_pid: u32) -> anyhow::Result<String> {
     render_tree_at(Path::new("/proc"), root_pid)
 }
 
-pub fn render_tree_at(proc_root: &Path, root_pid: u32) -> io::Result<String> {
+pub fn render_tree_at(proc_root: &Path, root_pid: u32) -> anyhow::Result<String> {
     let processes = scan_processes_at(proc_root);
     let Some(root) = processes.get(&root_pid) else {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("process {root_pid} not found under {}", proc_root.display()),
-        ));
+        anyhow::bail!("process {root_pid} not found under {}", proc_root.display());
     };
 
     let mut children_by_parent: BTreeMap<u32, Vec<u32>> = BTreeMap::new();

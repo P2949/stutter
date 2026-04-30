@@ -20,30 +20,29 @@ mod regression_tests;
 use std::{
     collections::BTreeMap,
     fs, future,
-    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use aya::maps::{HashMap as AyaHashMap, MapData};
-use cli::{parse_app_command, AppCommand, Config};
+use cli::{AppCommand, Config, parse_app_command};
 use log::{debug, info, warn};
-use metrics::{format_latency, print_event, print_interval_summaries, print_session_summaries};
-use process_tree::{TargetDiffAction, TaskInfo};
+use metrics::{collect_interval_summaries, format_latency, print_event, print_session_summaries};
+use process_tree::{TargetDiffAction, TaskFilters, TaskInfo};
 use recorder::{
-    finalize_recording, prepare_recording, FinalizeRecordingInput, IntervalRecord, IrqEventRecord,
-    SpikeEventBuffer, TreeEvent,
+    FinalizeRecordingInput, IntervalCsvWriter, IntervalRecord, IrqEventRecord, JsonArrayWriter,
+    SpikeEventBuffer, TreeEvent, finalize_recording, prepare_recording,
 };
 use serde::Serialize;
 use stutter_common::{EVENT_IRQ_LATENCY, EVENT_RUNNABLE_LATENCY, IrqEvent, SchedulerEvent};
 use tokio::{
     signal, task,
-    time::{interval, sleep, Duration, MissedTickBehavior},
+    time::{Duration, MissedTickBehavior, interval, sleep},
 };
 
 pub const TARGET_PIDS_MAX: usize = 1024;
 
-type TaskExeInodesMap = BTreeMap<u32, (u64, u64, Option<u64>)>;
+type TaskExeInodesMap = BTreeMap<u32, (Option<u64>, Option<u64>, Option<u64>)>;
 
 struct RefreshTargetTasksInput<'a> {
     config: &'a Config,
@@ -77,7 +76,8 @@ struct DrainBpfEventsInput<'a> {
     stats_by_task: &'a mut BTreeMap<u32, metrics::TaskStats>,
     recording_monotonic_start_ns: Option<u64>,
     spike_events: &'a mut Option<SpikeEventBuffer>,
-    irq_events: &'a mut Vec<IrqEventRecord>,
+    irq_event_writer: Option<&'a mut JsonArrayWriter>,
+    irq_event_count: &'a mut usize,
 }
 
 #[tokio::main]
@@ -129,7 +129,8 @@ async fn main() -> anyhow::Result<()> {
             profiles,
             epoch_seconds,
             warmup_seconds,
-        } => tune_command(tree_pid, profiles, epoch_seconds, warmup_seconds).await,
+            keep_best,
+        } => tune_command(tree_pid, profiles, epoch_seconds, warmup_seconds, keep_best).await,
     }
 }
 
@@ -138,18 +139,24 @@ fn print_restore_dry_run(path: &Path) -> anyhow::Result<()> {
     println!("restore dry-run file={}", path.display());
 
     for record in state.records {
-        match affinity::read_allowed_mask_raw(record.tid) {
+        match affinity::read_allowed_mask(record.tid) {
             Ok(current) => println!(
                 "tid={} alive=true current_mask={} restore_mask={}",
                 record.tid,
                 current.to_range_string(),
                 record.original_mask.to_range_string()
             ),
-            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => println!(
-                "tid={} alive=false current_mask=- restore_mask={}",
-                record.tid,
-                record.original_mask.to_range_string()
-            ),
+            Err(err)
+                if err
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|err| err.raw_os_error() == Some(libc::ESRCH)) =>
+            {
+                println!(
+                    "tid={} alive=false current_mask=- restore_mask={}",
+                    record.tid,
+                    record.original_mask.to_range_string()
+                )
+            }
             Err(err) => println!(
                 "tid={} alive=unknown current_mask_error={} restore_mask={}",
                 record.tid,
@@ -167,6 +174,7 @@ async fn tune_command(
     profiles_path: PathBuf,
     epoch_seconds: u64,
     warmup_seconds: u64,
+    keep_best: bool,
 ) -> anyhow::Result<()> {
     let profiles = profiles::load_profiles(&profiles_path)?;
     if profiles.is_empty() {
@@ -179,6 +187,11 @@ async fn tune_command(
     let measure_seconds = epoch_seconds.saturating_sub(warmup_seconds);
     let mut results = Vec::new();
     let mut best_idx = 0usize;
+    let restore_policy = if keep_best {
+        "restore-after-each-then-keep-best"
+    } else {
+        "restore-after-each"
+    };
 
     for (idx, profile) in profiles.iter().enumerate() {
         println!(
@@ -186,30 +199,38 @@ async fn tune_command(
             profile.name, warmup_seconds
         );
 
-        let records = match apply_profile_to_tree_blocking(tree_pid, profile.clone(), idx == 0).await
-        {
-            Ok(records) => records,
-            Err(err) => {
-                restore_tune_on_error();
-                return Err(err);
-            }
-        };
-
-        sleep(Duration::from_secs(warmup_seconds)).await;
+        let records =
+            match apply_profile_to_tree_blocking(tree_pid, profile.clone(), idx == 0).await {
+                Ok(records) => records,
+                Err(err) => {
+                    restore_tune_on_error();
+                    return Err(err);
+                }
+            };
 
         println!(
             "tune candidate={} state=CandidateMeasure measure_seconds={}",
             profile.name, measure_seconds
         );
 
-        sleep(Duration::from_secs(measure_seconds)).await;
+        let interval_records =
+            match measure_tune_candidate(tree_pid, &profile.name, epoch_seconds, warmup_seconds)
+                .await
+            {
+                Ok(records) => records,
+                Err(err) => {
+                    restore_tune_on_error();
+                    return Err(err);
+                }
+            };
 
-        let score = scorer::score_from_interval_records(&[]);
+        let score = scorer::score_from_interval_records(&interval_records);
         let result = TuneCandidateSummary {
             profile: profile.name.clone(),
             applied_tasks: records.len(),
             warmup_seconds,
             measure_seconds,
+            interval_count: interval_records.len(),
             score_total: score.total,
             over_1ms: score.over_1ms,
             over_2ms: score.over_2ms,
@@ -225,6 +246,8 @@ async fn tune_command(
         }
 
         results.push(result);
+
+        restore_tune_after_candidate(&profile.name)?;
     }
 
     let best_profile = results
@@ -238,9 +261,18 @@ async fn tune_command(
         profiles_path,
         epoch_seconds,
         warmup_seconds,
+        restore_policy: restore_policy.to_owned(),
         best_profile,
         candidates: results,
     };
+
+    if keep_best
+        && let Some(profile) = profiles
+            .iter()
+            .find(|profile| profile.name == summary.best_profile)
+    {
+        apply_profile_to_tree_blocking(tree_pid, profile.clone(), false).await?;
+    }
 
     let summary_path = default_tune_summary_path();
     if let Some(parent) = summary_path.parent() {
@@ -250,12 +282,89 @@ async fn tune_command(
     fs::write(&summary_path, serde_json::to_vec_pretty(&summary)?)?;
 
     println!(
-        "tune complete best_profile={} summary={} restore_with=\"stutter restore\"",
+        "tune complete best_profile={} restore_policy={} summary={}{}",
         summary.best_profile,
-        summary_path.display()
+        summary.restore_policy,
+        summary_path.display(),
+        if keep_best {
+            " restore_with=\"stutter restore\""
+        } else {
+            ""
+        }
     );
 
     Ok(())
+}
+
+async fn measure_tune_candidate(
+    tree_pid: u32,
+    profile_name: &str,
+    epoch_seconds: u64,
+    warmup_seconds: u64,
+) -> anyhow::Result<Vec<IntervalRecord>> {
+    let run_dir = tune_run_dir(profile_name);
+    let config = Config {
+        target_pids: Vec::new(),
+        tree_pids: vec![tree_pid],
+        summary_period_ms: 1_000,
+        spike_threshold_ns: 1_000_000,
+        verbose: false,
+        task_filters: TaskFilters::default(),
+        keep_missing_pid: false,
+        watch_process: None,
+        persistent: false,
+        watch_poll_ms: 2_000,
+        watch_timeout: None,
+        csv_path: None,
+        irq_latency: false,
+        irqs: Vec::new(),
+        hwmon: false,
+        hwmon_root: None,
+        hwmon_drm_card: None,
+        hwmon_render_node: None,
+        mangohud_log: None,
+        tui: false,
+        retain_intervals: None,
+        recording: Some(cli::RecordingConfig {
+            run_name: Some(format!("tune-{profile_name}")),
+            out_dir: Some(run_dir.clone()),
+        }),
+        max_duration: Some(Duration::from_secs(epoch_seconds)),
+    };
+
+    run_monitor(config).await?;
+
+    let interval_path = run_dir.join("interval.json");
+    let data = fs::read_to_string(&interval_path).map_err(|err| {
+        anyhow::anyhow!(
+            "failed to read tune intervals {}: {err}",
+            interval_path.display()
+        )
+    })?;
+    let mut records: Vec<IntervalRecord> = serde_json::from_str(&data).map_err(|err| {
+        anyhow::anyhow!(
+            "failed to parse tune intervals {}: {err}",
+            interval_path.display()
+        )
+    })?;
+    let warmup_ms = u128::from(warmup_seconds) * 1_000;
+    records.retain(|record| record.elapsed_ms >= warmup_ms);
+    fs::remove_dir_all(&run_dir).ok();
+
+    Ok(records)
+}
+
+fn tune_run_dir(profile_name: &str) -> PathBuf {
+    let sanitized = profile_name
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect::<String>();
+    std::env::temp_dir().join(format!(
+        "stutter-tune-{}-{}-{}",
+        std::process::id(),
+        sanitized,
+        unix_nanos_now()
+    ))
 }
 
 #[derive(Serialize)]
@@ -265,6 +374,7 @@ struct TuneSummary {
     profiles_path: PathBuf,
     epoch_seconds: u64,
     warmup_seconds: u64,
+    restore_policy: String,
     best_profile: String,
     candidates: Vec<TuneCandidateSummary>,
 }
@@ -275,6 +385,7 @@ struct TuneCandidateSummary {
     applied_tasks: usize,
     warmup_seconds: u64,
     measure_seconds: u64,
+    interval_count: usize,
     score_total: u64,
     over_1ms: u64,
     over_2ms: u64,
@@ -294,6 +405,20 @@ fn restore_tune_on_error() {
     {
         warn!("tune_restore_after_error_failed err={err:#}");
     }
+}
+
+fn restore_tune_after_candidate(profile_name: &str) -> anyhow::Result<()> {
+    let path = affinity::default_restore_path();
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let summary = affinity::restore_saved(&path)?;
+    info!(
+        "tune_candidate_restored profile={} restored={} skipped_dead={}",
+        profile_name, summary.restored, summary.skipped_dead
+    );
+    Ok(())
 }
 
 fn default_tune_summary_path() -> PathBuf {
@@ -333,9 +458,7 @@ async fn apply_profile_command(
                 records
             }
             Err(err) => {
-                if !keep_applied
-                    && let Err(restore_err) = restore_profile_watch_on_exit()
-                {
+                if !keep_applied && let Err(restore_err) = restore_profile_watch_on_exit() {
                     warn!("profile_watch_restore_after_error_failed err={restore_err:#}");
                 }
                 return Err(err);
@@ -454,13 +577,13 @@ fn configure_target_irqs(
         return Ok(());
     };
 
-    let irqs = if config.irqs.is_empty() {
-        vec![137]
-    } else {
-        config.irqs.clone()
-    };
+    if config.irqs.is_empty() {
+        anyhow::bail!(
+            "--irq-latency requires at least one explicit --irq <N>; inspect /proc/interrupts to find the IRQ number for your GPU or device"
+        );
+    }
 
-    for irq in irqs {
+    for irq in config.irqs.iter().copied() {
         target_irq_map.insert(irq, 1, 0)?;
         info!("irq_latency_target_added irq={irq}");
     }
@@ -504,8 +627,34 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     let mut interval_records: Vec<IntervalRecord> = Vec::new();
     let mut tree_events: Vec<TreeEvent> = Vec::new();
     let mut spike_events = recording.as_ref().map(|_| SpikeEventBuffer::default());
-    let mut irq_events: Vec<IrqEventRecord> = Vec::new();
-    let mut gpu_samples = Vec::new();
+    let irq_events: Vec<IrqEventRecord> = Vec::new();
+    let gpu_samples = Vec::new();
+    
+    let mut interval_writer = if config.retain_intervals.is_none() {
+        recording
+            .as_ref()
+            .map(|run| JsonArrayWriter::create(run.run_dir.join("interval.json")))
+            .transpose()?
+    } else {
+        None
+    };
+    let mut intervals_dropped = 0usize;
+    let mut irq_event_writer = recording
+        .as_ref()
+        .map(|run| JsonArrayWriter::create(run.run_dir.join("irq_events.json")))
+        .transpose()?;
+    let mut gpu_sample_writer = recording
+        .as_ref()
+        .map(|run| JsonArrayWriter::create(run.run_dir.join("gpu_samples.json")))
+        .transpose()?;
+    let mut csv_writer = config
+        .csv_path
+        .as_ref()
+        .map(|path| IntervalCsvWriter::create(path.clone()))
+        .transpose()?;
+    let mut streamed_interval_record_count = 0usize;
+    let mut streamed_irq_event_count = 0usize;
+    let mut streamed_gpu_sample_count = 0usize;
 
     // These mutable collections are intentionally confined to the main monitoring task.
     // Blocking work returns state to this task and does not mutate these collections
@@ -514,7 +663,11 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     let recording_monotonic_start_ns = recording.as_ref().and_then(|run| run.monotonic_start_ns);
 
     let mut hwmon_reader = if config.hwmon {
-        hwmon::HwmonReader::discover_at(config.hwmon_root.as_deref())
+        hwmon::HwmonReader::discover_with_options(
+            config.hwmon_root.as_deref(),
+            config.hwmon_drm_card.as_deref(),
+            config.hwmon_render_node.as_deref(),
+        )
     } else {
         None
     };
@@ -589,11 +742,32 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
 
             _ = summary_tick.tick() => {
                 let elapsed_ms = started.elapsed().as_millis();
-                print_interval_summaries(
-                    &mut stats_by_task,
-                    elapsed_ms,
-                    &mut interval_records,
-                );
+                let drop_counters_snapshot = loaded.snapshot_drop_counters();
+                let records = collect_interval_summaries(&mut stats_by_task, elapsed_ms, &drop_counters_snapshot);
+                streamed_interval_record_count += records.len();
+
+                if let Some(writer) = interval_writer.as_mut() {
+                    for record in &records {
+                        writer.push(record)?;
+                    }
+                } else if config.retain_intervals.is_some() {
+                    for record in &records {
+                        interval_records.push(record.clone());
+                    }
+                    if let Some(max_intervals) = config.retain_intervals
+                        && interval_records.len() > max_intervals
+                    {
+                        let drop_count = interval_records.len() - max_intervals;
+                        interval_records.drain(0..drop_count);
+                        intervals_dropped += drop_count;
+                    }
+                }
+
+                if let Some(writer) = csv_writer.as_mut() {
+                    for record in &records {
+                        writer.push(record)?;
+                    }
+                }
 
                 if config.tui {
                     println!("{}", tui::render_status(&active_targets, &stats_by_task));
@@ -716,7 +890,10 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     .await
                     .map_err(|err| anyhow::anyhow!("hwmon worker failed: {err}"))?;
 
-                    gpu_samples.push(sample);
+                    if let Some(writer) = gpu_sample_writer.as_mut() {
+                        writer.push(&sample)?;
+                        streamed_gpu_sample_count += 1;
+                    }
                     hwmon_reader = Some(returned_reader);
                 }
             }
@@ -732,8 +909,9 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
                     stats_by_task: &mut stats_by_task,
                     recording_monotonic_start_ns,
                     spike_events: &mut spike_events,
-                    irq_events: &mut irq_events,
-                });
+                    irq_event_writer: irq_event_writer.as_mut(),
+                    irq_event_count: &mut streamed_irq_event_count,
+                })?;
             }
         }
     };
@@ -742,7 +920,24 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
     log_drop_counters(&drop_counters);
     print_session_summaries(&mut stats_by_task);
 
+    if let Some(writer) = csv_writer.as_mut() {
+        writer.finish()?;
+        if let Some(path) = &config.csv_path {
+            println!("wrote interval CSV: {}", path.display());
+        }
+    }
+
     if let Some(recording) = recording {
+        if let Some(writer) = interval_writer.as_mut() {
+            writer.finish()?;
+        }
+        if let Some(writer) = irq_event_writer.as_mut() {
+            writer.finish()?;
+        }
+        if let Some(writer) = gpu_sample_writer.as_mut() {
+            writer.finish()?;
+        }
+
         let spike_events_slice = spike_events
             .as_ref()
             .map(SpikeEventBuffer::as_slice)
@@ -774,20 +969,25 @@ async fn run_monitor(mut config: Config) -> anyhow::Result<()> {
             active_targets: &active_targets,
             stats_by_task: &stats_by_task,
             interval_records: &interval_records,
+            streamed_interval_record_count: interval_writer
+                .is_some()
+                .then_some(streamed_interval_record_count),
+            intervals_dropped,
             tree_events: &tree_events,
             spike_events: spike_events_slice,
             spike_events_truncated,
             scx_events: scx_tracker.events(),
             irq_events: &irq_events,
+            streamed_irq_event_count: irq_event_writer
+                .is_some()
+                .then_some(streamed_irq_event_count),
             gpu_samples: &gpu_samples,
+            streamed_gpu_sample_count: gpu_sample_writer
+                .is_some()
+                .then_some(streamed_gpu_sample_count),
             frame_events: &frame_events,
             drop_counters,
         })?;
-    }
-
-    if let Some(csv_path) = &config.csv_path {
-        recorder::write_interval_csv(csv_path, &interval_records)?;
-        println!("wrote interval CSV: {}", csv_path.display());
     }
 
     info!("exiting stop_reason={stop_reason}");
@@ -912,7 +1112,7 @@ fn remove_stale_tree_roots(
 }
 
 fn find_process_by_pattern_at(proc_root: &Path, pattern: &str) -> Option<u32> {
-    let pattern_lower = pattern.to_ascii_lowercase();
+    let pattern_lower = normalize_process_match_text(pattern);
 
     process_tree::scan_processes_at(proc_root)
         .into_iter()
@@ -935,12 +1135,12 @@ fn process_match_score(
         return Some(4);
     }
 
-    let comm_lower = comm.to_ascii_lowercase();
+    let comm_lower = normalize_process_match_text(comm);
     if comm_lower == pattern_lower {
         return Some(3);
     }
 
-    let cmdline_lower = cmdline.to_ascii_lowercase();
+    let cmdline_lower = normalize_process_match_text(cmdline);
     let exe_basename_lower = cmdline_executable_basename_lower(cmdline);
     if exe_basename_lower.as_deref() == Some(pattern_lower) {
         return Some(2);
@@ -949,16 +1149,20 @@ fn process_match_score(
     (comm_lower.contains(pattern_lower) || cmdline_lower.contains(pattern_lower)).then_some(1)
 }
 
+fn normalize_process_match_text(value: &str) -> String {
+    value.replace('\\', "/").to_ascii_lowercase()
+}
+
 fn cmdline_executable_basename_lower(cmdline: &str) -> Option<String> {
     let executable = cmdline.split_whitespace().next()?;
-    let executable = executable.replace('\\', "/");
+    let executable = normalize_process_match_text(executable);
 
     PathBuf::from(executable)
         .file_name()
-        .map(|name| name.to_string_lossy().to_ascii_lowercase())
+        .map(|name| name.to_string_lossy().into_owned())
 }
 
-fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
+fn drain_bpf_events(input: DrainBpfEventsInput<'_>) -> anyhow::Result<()> {
     let DrainBpfEventsInput {
         mut guard,
         config,
@@ -968,7 +1172,8 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
         stats_by_task,
         recording_monotonic_start_ns,
         spike_events,
-        irq_events,
+        mut irq_event_writer,
+        irq_event_count,
     } = input;
 
     while let Some(item) = guard.get_inner_mut().next() {
@@ -985,11 +1190,10 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
                     continue;
                 }
 
-                let event =
-                    unsafe { (item.as_ptr() as *const SchedulerEvent).read_unaligned() };
+                let event = unsafe { &*(item.as_ptr() as *const SchedulerEvent) };
 
                 handle_event(HandleEventInput {
-                    event: &event,
+                    event,
                     config,
                     started,
                     active_targets,
@@ -1005,14 +1209,20 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
                     continue;
                 }
 
-                let event = unsafe { (item.as_ptr() as *const IrqEvent).read_unaligned() };
-                handle_irq_event(recording_monotonic_start_ns, &event, irq_events);
+                let event = unsafe { &*(item.as_ptr() as *const IrqEvent) };
+                let record = irq_event_record(recording_monotonic_start_ns, event);
+                if let Some(writer) = irq_event_writer.as_deref_mut() {
+                    writer.push(&record)?;
+                    *irq_event_count += 1;
+                }
+                log_irq_event(event);
             }
             other => warn!("unknown_bpf_event kind={other} len={}", item.len()),
         }
     }
 
     guard.clear_ready();
+    Ok(())
 }
 
 fn handle_event(input: HandleEventInput<'_>) {
@@ -1077,24 +1287,22 @@ fn handle_event(input: HandleEventInput<'_>) {
     }
 }
 
-fn handle_irq_event(
-    monotonic_start_ns: Option<u64>,
-    event: &IrqEvent,
-    irq_events: &mut Vec<IrqEventRecord>,
-) {
+fn irq_event_record(monotonic_start_ns: Option<u64>, event: &IrqEvent) -> IrqEventRecord {
     let elapsed_ms = monotonic_start_ns
         .and_then(|start_ns| event.exit_ns.checked_sub(start_ns))
         .map(|elapsed_ns| u128::from(elapsed_ns / 1_000_000));
 
-    irq_events.push(IrqEventRecord {
+    IrqEventRecord {
         elapsed_ms,
         irq: event.irq,
         cpu: event.cpu,
         enter_ns: event.enter_ns,
         exit_ns: event.exit_ns,
         duration_ns: event.duration_ns,
-    });
+    }
+}
 
+fn log_irq_event(event: &IrqEvent) {
     debug!(
         "irq_latency irq={} cpu={} duration={}",
         event.irq,
@@ -1315,16 +1523,6 @@ fn reactivate_or_reset_stats_inner(
     }
 }
 
-#[allow(dead_code)]
-fn reactivate_or_reset_stats(
-    stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
-    tid: u32,
-    task_info: &TaskInfo,
-    elapsed_ms: u128,
-) {
-    reactivate_or_reset_stats_inner(stats_by_task, None, tid, task_info, elapsed_ms);
-}
-
 fn same_logical_task(
     stats: &metrics::TaskStats,
     task_info: &TaskInfo,
@@ -1375,57 +1573,47 @@ fn same_logical_task(
     if let Some(inodes) = task_exe_inodes
         && let Some(&(dev, ino, previous_start)) = inodes.get(&stats.task)
     {
-        match get_proc_exe_info(task_info.process_pid) {
-            Some((current_dev, current_ino, current_start)) => {
-                if current_dev != dev || current_ino != ino {
-                    return false;
-                }
+        if let (Some(previous_dev), Some(current_dev)) = (dev, task_info.exe_dev)
+            && previous_dev != current_dev
+        {
+            return false;
+        }
 
-                let current_start = current_start
-                    .or(task_info.process_starttime_ticks)
-                    .or(task_info.task_starttime_ticks);
+        if let (Some(previous_ino), Some(current_ino)) = (ino, task_info.exe_ino)
+            && previous_ino != current_ino
+        {
+            return false;
+        }
 
-                if let (Some(previous), Some(current)) = (previous_start, current_start)
-                    && previous != current
-                {
-                    return false;
-                }
-            }
-            None => {
-                let current_start = task_info
-                    .process_starttime_ticks
-                    .or(task_info.task_starttime_ticks);
+        let current_start = task_info
+            .process_starttime_ticks
+            .or(task_info.task_starttime_ticks);
 
-                if let (Some(previous), Some(current)) = (previous_start, current_start)
-                    && previous != current
-                {
-                    return false;
-                }
-            }
+        if let (Some(previous), Some(current)) = (previous_start, current_start)
+            && previous != current
+        {
+            return false;
         }
     }
 
     true
 }
 
-fn update_task_exe_info(
-    task_exe_inodes: &mut TaskExeInodesMap,
-    tid: u32,
-    task_info: &TaskInfo,
-) {
-    if let Some(exe_info) = get_proc_exe_info(task_info.process_pid) {
-        task_exe_inodes.insert(tid, exe_info);
+fn update_task_exe_info(task_exe_inodes: &mut TaskExeInodesMap, tid: u32, task_info: &TaskInfo) {
+    if task_info.exe_dev.is_some() || task_info.exe_ino.is_some() {
+        task_exe_inodes.insert(
+            tid,
+            (
+                task_info.exe_dev,
+                task_info.exe_ino,
+                task_info
+                    .process_starttime_ticks
+                    .or(task_info.task_starttime_ticks),
+            ),
+        );
     } else {
         task_exe_inodes.remove(&tid);
     }
-}
-
-fn get_proc_exe_info(pid: u32) -> Option<(u64, u64, Option<u64>)> {
-    let path = Path::new("/proc").join(pid.to_string()).join("exe");
-    let metadata = fs::metadata(path).ok()?;
-    let start = process_tree::process_starttime_at(Path::new("/proc"), pid);
-
-    Some((metadata.dev(), metadata.ino(), start))
 }
 
 fn same_task_info(left: &TaskInfo, right: &TaskInfo) -> bool {
@@ -1456,6 +1644,9 @@ fn same_task_info(left: &TaskInfo, right: &TaskInfo) -> bool {
             .zip(right.task_starttime_ticks)
             .is_some();
 
+    // If proc stat start-times are unavailable for both snapshots, same-name
+    // siblings under the same parent are indistinguishable. Prefer continuity
+    // in that narrow case and rely on exe inode checks for reactivation paths.
     has_strong_starttime_match
         || (left.process_ppid == right.process_ppid
             && left.comm == right.comm
@@ -1470,9 +1661,10 @@ fn log_drop_counters(drop_counters: &ebpf_loader::DropCountersSnapshot) {
     }
 
     warn!(
-        "ebpf_drop_counters total={} wakeup_times_insert_failed={} ringbuf_reserve_failed={}",
+        "ebpf_drop_counters total={} wakeup_times_insert_failed={} ringbuf_reserve_failed={} irq_start_times_insert_failed={}",
         drop_counters.total(),
         drop_counters.wakeup_times_insert_failed,
         drop_counters.ringbuf_reserve_failed,
+        drop_counters.irq_start_times_insert_failed,
     );
 }

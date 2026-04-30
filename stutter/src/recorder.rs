@@ -1,14 +1,12 @@
 use std::{
     collections::BTreeMap,
-    env, fs,
+    env, fs, io,
     io::Write,
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Context;
-use crate::error::StutterError;
-use std::io;
 use serde::{Deserialize, Serialize};
 use stutter_common::SchedulerEvent;
 
@@ -16,6 +14,7 @@ use crate::{
     TARGET_PIDS_MAX,
     cli::{Config, RecordingConfig},
     ebpf_loader::DropCountersSnapshot,
+    error::StutterError,
     metadata::{SystemMetadata, collect_system_metadata},
     metrics::{
         CpuLine, CpuSnapshot, IntervalRecord as MetricsIntervalRecord, LatencyHistogramBucket,
@@ -37,6 +36,128 @@ pub struct RecordingRun {
     pub monotonic_start_ns: Option<u64>,
 }
 
+#[derive(Debug)]
+pub struct JsonArrayWriter {
+    file: fs::File,
+    wrote_any: bool,
+    finished: bool,
+    path: PathBuf,
+}
+
+pub struct IntervalCsvWriter {
+    file: fs::File,
+    path: PathBuf,
+    finished: bool,
+}
+
+impl IntervalCsvWriter {
+    pub fn create(path: PathBuf) -> anyhow::Result<Self> {
+        if path.file_name().is_none() {
+            anyhow::bail!("CSV destination has no file name: {}", path.display());
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut file = fs::File::create(&path)
+            .with_context(|| format!("failed to create interval CSV {}", path.display()))?;
+        write_interval_csv_header(&mut file)?;
+        Ok(Self {
+            file,
+            path,
+            finished: false,
+        })
+    }
+
+    pub fn push(&mut self, record: &IntervalRecord) -> anyhow::Result<()> {
+        write_interval_csv_row(&mut self.file, record)
+            .with_context(|| format!("failed to write interval CSV {}", self.path.display()))
+    }
+
+    pub fn finish(&mut self) -> anyhow::Result<()> {
+        if self.finished {
+            return Ok(());
+        }
+        self.file
+            .sync_all()
+            .with_context(|| format!("failed to sync interval CSV {}", self.path.display()))?;
+        self.finished = true;
+        Ok(())
+    }
+}
+
+impl Drop for IntervalCsvWriter {
+    fn drop(&mut self) {
+        let _ = self.finish();
+    }
+}
+
+impl JsonArrayWriter {
+    pub fn create(path: PathBuf) -> anyhow::Result<Self> {
+        if path.file_name().is_none() {
+            anyhow::bail!(
+                "JSON stream destination has no file name: {}",
+                path.display()
+            );
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut file = fs::File::create(&path)
+            .with_context(|| format!("failed to create JSON stream {}", path.display()))?;
+        file.write_all(b"[")
+            .with_context(|| format!("failed to start JSON stream {}", path.display()))?;
+
+        Ok(Self {
+            file,
+            wrote_any: false,
+            finished: false,
+            path,
+        })
+    }
+
+    pub fn push<T: Serialize>(&mut self, value: &T) -> anyhow::Result<()> {
+        if self.finished {
+            anyhow::bail!("JSON stream {} is already finalized", self.path.display());
+        }
+
+        if self.wrote_any {
+            self.file.write_all(b",\n")?;
+        } else {
+            self.file.write_all(b"\n")?;
+            self.wrote_any = true;
+        }
+
+        serde_json::to_writer(&mut self.file, value)
+            .with_context(|| format!("failed to write JSON stream {}", self.path.display()))?;
+        Ok(())
+    }
+
+    pub fn finish(&mut self) -> anyhow::Result<()> {
+        if self.finished {
+            return Ok(());
+        }
+
+        if self.wrote_any {
+            self.file.write_all(b"\n]\n")?;
+        } else {
+            self.file.write_all(b"]\n")?;
+        }
+        self.file
+            .sync_all()
+            .with_context(|| format!("failed to sync JSON stream {}", self.path.display()))?;
+        self.finished = true;
+        Ok(())
+    }
+}
+
+impl Drop for JsonArrayWriter {
+    fn drop(&mut self) {
+        let _ = self.finish();
+    }
+}
+
 pub struct SpikeEventBuffer {
     events: Vec<SpikeEvent>,
     truncated: bool,
@@ -46,7 +167,7 @@ pub struct SpikeEventBuffer {
 impl Default for SpikeEventBuffer {
     fn default() -> Self {
         Self {
-            events: Vec::new(),
+            events: Vec::with_capacity(MAX_SPIKE_EVENTS),
             truncated: false,
             max_events: MAX_SPIKE_EVENTS,
         }
@@ -57,7 +178,7 @@ impl SpikeEventBuffer {
     #[cfg(test)]
     pub fn with_max_events(max_events: usize) -> Self {
         Self {
-            events: Vec::new(),
+            events: Vec::with_capacity(max_events),
             truncated: false,
             max_events,
         }
@@ -123,6 +244,10 @@ pub struct SessionFile {
     pub active_target_pids_count: usize,
     pub active_expanded_tasks: Vec<u32>,
     #[serde(default)]
+    pub interval_record_count: usize,
+    #[serde(default)]
+    pub intervals_dropped: usize,
+    #[serde(default)]
     pub spike_event_count: usize,
     #[serde(default)]
     pub spike_events_truncated: bool,
@@ -153,6 +278,10 @@ pub struct MetadataFile {
     pub target_pids_max: usize,
     pub active_target_pids_count: usize,
     pub active_expanded_tasks: Vec<u32>,
+    #[serde(default)]
+    pub interval_record_count: usize,
+    #[serde(default)]
+    pub intervals_dropped: usize,
     #[serde(default)]
     pub spike_event_count: usize,
     #[serde(default)]
@@ -196,6 +325,10 @@ pub struct RecordedConfig {
     #[serde(default)]
     pub hwmon: bool,
     #[serde(default)]
+    pub hwmon_drm_card: Option<String>,
+    #[serde(default)]
+    pub hwmon_render_node: Option<PathBuf>,
+    #[serde(default)]
     pub mangohud_log: Option<PathBuf>,
     #[serde(default)]
     pub tui: bool,
@@ -226,6 +359,10 @@ pub struct SessionTask {
     pub process_starttime_ticks: Option<u64>,
     #[serde(default)]
     pub task_starttime_ticks: Option<u64>,
+    #[serde(default)]
+    pub exe_dev: Option<u64>,
+    #[serde(default)]
+    pub exe_ino: Option<u64>,
     pub comm: String,
     pub latency: RecordedLatency,
     pub cpu: RecordedCpuSnapshot,
@@ -357,7 +494,7 @@ pub struct FrameEvent {
     pub frametime_ms: f64,
 }
 
-pub const SESSION_SCHEMA_VERSION: u32 = 13;
+pub const SESSION_SCHEMA_VERSION: u32 = 15;
 
 pub struct FinalizeRecordingInput<'a> {
     pub recording: &'a RecordingRun,
@@ -366,12 +503,16 @@ pub struct FinalizeRecordingInput<'a> {
     pub active_targets: &'a BTreeMap<u32, TaskInfo>,
     pub stats_by_task: &'a BTreeMap<u32, TaskStats>,
     pub interval_records: &'a [IntervalRecord],
+    pub streamed_interval_record_count: Option<usize>,
+    pub intervals_dropped: usize,
     pub tree_events: &'a [TreeEvent],
     pub spike_events: &'a [SpikeEvent],
     pub spike_events_truncated: bool,
     pub scx_events: &'a [ScxEvent],
     pub irq_events: &'a [IrqEventRecord],
+    pub streamed_irq_event_count: Option<usize>,
     pub gpu_samples: &'a [GpuSample],
+    pub streamed_gpu_sample_count: Option<usize>,
     pub frame_events: &'a [FrameEvent],
     pub drop_counters: DropCountersSnapshot,
 }
@@ -404,12 +545,17 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     let active_targets = input.active_targets;
     let stats_by_task = input.stats_by_task;
     let interval_records = input.interval_records;
+    let interval_record_count = input
+        .streamed_interval_record_count
+        .unwrap_or(interval_records.len());
     let tree_events = input.tree_events;
     let spike_events = input.spike_events;
     let spike_events_truncated = input.spike_events_truncated;
     let scx_events = input.scx_events;
     let irq_events = input.irq_events;
+    let irq_event_count = input.streamed_irq_event_count.unwrap_or(irq_events.len());
     let gpu_samples = input.gpu_samples;
+    let gpu_sample_count = input.streamed_gpu_sample_count.unwrap_or(gpu_samples.len());
     let frame_events = input.frame_events;
     let drop_counters = input.drop_counters;
     let ended_at = SystemTime::now();
@@ -442,6 +588,8 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             process_comm: stats.process_comm.clone(),
             process_starttime_ticks: stats.process_starttime_ticks,
             task_starttime_ticks: stats.task_starttime_ticks,
+            exe_dev: stats.exe_dev,
+            exe_ino: stats.exe_ino,
             comm: stats.comm.clone(),
             latency: recorded_latency(latency),
             cpu: recorded_cpu(cpu),
@@ -496,6 +644,8 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             irq_latency: config.irq_latency,
             irqs: config.irqs.clone(),
             hwmon: config.hwmon,
+            hwmon_drm_card: config.hwmon_drm_card.clone(),
+            hwmon_render_node: config.hwmon_render_node.clone(),
             mangohud_log: config.mangohud_log.clone(),
             tui: config.tui,
             summary_period_ms: config.summary_period_ms,
@@ -506,11 +656,13 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         target_pids_max: TARGET_PIDS_MAX,
         active_target_pids_count: active_targets.len(),
         active_expanded_tasks: active_expanded_tasks.clone(),
+        interval_record_count,
+        intervals_dropped: input.intervals_dropped,
         spike_event_count: spike_events.len(),
         spike_events_truncated,
         scx_event_count: scx_events.len(),
-        irq_event_count: irq_events.len(),
-        gpu_sample_count: gpu_samples.len(),
+        irq_event_count,
+        gpu_sample_count,
         frame_event_count: frame_events.len(),
         drop_counters: drop_counters.clone(),
         tasks,
@@ -529,11 +681,13 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         target_pids_max: TARGET_PIDS_MAX,
         active_target_pids_count: active_targets.len(),
         active_expanded_tasks,
+        interval_record_count,
+        intervals_dropped: input.intervals_dropped,
         spike_event_count: spike_events.len(),
         spike_events_truncated,
         scx_event_count: scx_events.len(),
-        irq_event_count: irq_events.len(),
-        gpu_sample_count: gpu_samples.len(),
+        irq_event_count,
+        gpu_sample_count,
         frame_event_count: frame_events.len(),
         drop_counters,
     };
@@ -545,22 +699,22 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         anyhow::Error::new(StutterError::RecordWrite(io_err))
     };
 
-    write_json(recording.run_dir.join("session.json"), &session)
-        .map_err(map_write_err)?;
-    write_json(recording.run_dir.join("metadata.json"), &metadata_file)
-        .map_err(map_write_err)?;
-    write_json(recording.run_dir.join("interval.json"), interval_records)
-        .map_err(map_write_err)?;
-    write_json(recording.run_dir.join("tree_events.json"), tree_events)
-        .map_err(map_write_err)?;
-    write_json(recording.run_dir.join("spike_events.json"), spike_events)
-        .map_err(map_write_err)?;
-    write_json(recording.run_dir.join("scx_events.json"), scx_events)
-        .map_err(map_write_err)?;
-    write_json(recording.run_dir.join("irq_events.json"), irq_events)
-        .map_err(map_write_err)?;
-    write_json(recording.run_dir.join("gpu_samples.json"), gpu_samples)
-        .map_err(map_write_err)?;
+    write_json(recording.run_dir.join("session.json"), &session).map_err(map_write_err)?;
+    write_json(recording.run_dir.join("metadata.json"), &metadata_file).map_err(map_write_err)?;
+    if input.streamed_interval_record_count.is_none() {
+        write_json(recording.run_dir.join("interval.json"), interval_records)
+            .map_err(map_write_err)?;
+    }
+    write_json(recording.run_dir.join("tree_events.json"), tree_events).map_err(map_write_err)?;
+    write_json(recording.run_dir.join("spike_events.json"), spike_events).map_err(map_write_err)?;
+    write_json(recording.run_dir.join("scx_events.json"), scx_events).map_err(map_write_err)?;
+    if input.streamed_irq_event_count.is_none() {
+        write_json(recording.run_dir.join("irq_events.json"), irq_events).map_err(map_write_err)?;
+    }
+    if input.streamed_gpu_sample_count.is_none() {
+        write_json(recording.run_dir.join("gpu_samples.json"), gpu_samples)
+            .map_err(map_write_err)?;
+    }
     write_json(
         recording.run_dir.join("frame_correlation.json"),
         frame_events,
@@ -571,50 +725,57 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     Ok(())
 }
 
-pub fn write_interval_csv(path: &Path, interval_records: &[IntervalRecord]) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+#[cfg(test)]
+pub fn write_interval_csv(
+    path: &std::path::Path,
+    interval_records: &[IntervalRecord],
+) -> anyhow::Result<()> {
+    let mut writer = IntervalCsvWriter::create(path.to_path_buf())?;
+
+    for record in interval_records {
+        writer.push(record)?;
     }
 
-    let mut file = fs::File::create(path)?;
+    writer.finish()
+}
+
+fn write_interval_csv_header(file: &mut fs::File) -> io::Result<()> {
     writeln!(
         file,
         "elapsed_ms,task,active,class,comm,process_pid,process_comm,samples,stored_samples,truncated_samples,min_ns,avg_ns,p95_ns,p99_ns,max_ns,over_1ms,over_2ms,over_5ms,busiest_cpu,busiest_cpu_samples,worst_cpu,worst_cpu_max_ns,spikiest_cpu,spikiest_cpu_spikes,percentile_scope"
-    )?;
+    )
+}
 
-    for record in interval_records {
-        writeln!(
-            file,
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
-            record.elapsed_ms,
-            record.task,
-            record.active,
-            record.class,
-            csv_escape(&record.comm),
-            option_u32(record.process_pid),
-            csv_escape(&record.process_comm),
-            record.samples,
-            record.stored_samples,
-            record.truncated_samples,
-            record.min_ns,
-            record.avg_ns,
-            record.p95_ns,
-            record.p99_ns,
-            record.max_ns,
-            record.over_1ms,
-            record.over_2ms,
-            record.over_5ms,
-            option_u32(record.busiest_cpu),
-            record.busiest_cpu_samples,
-            option_u32(record.worst_cpu),
-            record.worst_cpu_max_ns,
-            option_u32(record.spikiest_cpu),
-            record.spikiest_cpu_spikes,
-            csv_escape(&record.percentile_scope),
-        )?;
-    }
-
-    Ok(())
+fn write_interval_csv_row(file: &mut fs::File, record: &IntervalRecord) -> io::Result<()> {
+    writeln!(
+        file,
+        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+        record.elapsed_ms,
+        record.task,
+        record.active,
+        record.class,
+        csv_escape(&record.comm),
+        option_u32(record.process_pid),
+        csv_escape(&record.process_comm),
+        record.samples,
+        record.stored_samples,
+        record.truncated_samples,
+        record.min_ns,
+        record.avg_ns,
+        record.p95_ns,
+        record.p99_ns,
+        record.max_ns,
+        record.over_1ms,
+        record.over_2ms,
+        record.over_5ms,
+        option_u32(record.busiest_cpu),
+        record.busiest_cpu_samples,
+        option_u32(record.worst_cpu),
+        record.worst_cpu_max_ns,
+        option_u32(record.spikiest_cpu),
+        record.spikiest_cpu_spikes,
+        csv_escape(&record.percentile_scope),
+    )
 }
 
 fn recorded_latency(latency: crate::metrics::LatencySnapshot) -> RecordedLatency {
@@ -773,7 +934,17 @@ fn csv_escape(value: &str) -> String {
 }
 
 fn write_json<T: ?Sized + Serialize>(path: PathBuf, value: &T) -> anyhow::Result<()> {
-    let tmp_path = path.with_file_name(format!("{}.tmp", path.file_name().unwrap_or_default().to_string_lossy()));
+    let file_name = path
+        .file_name()
+        .and_then(|name| {
+            if name.is_empty() {
+                None
+            } else {
+                Some(name.to_string_lossy())
+            }
+        })
+        .ok_or_else(|| anyhow::anyhow!("JSON destination has no file name: {}", path.display()))?;
+    let tmp_path = path.with_file_name(format!("{file_name}.tmp"));
     let mut file = fs::File::create(&tmp_path)
         .with_context(|| format!("failed to create temp JSON {}", tmp_path.display()))?;
     file.write_all(&serde_json::to_vec_pretty(value)?)
@@ -789,5 +960,130 @@ fn write_json<T: ?Sized + Serialize>(path: PathBuf, value: &T) -> anyhow::Result
             path.display()
         )
     })?;
+
+    if let Some(parent) = path.parent()
+        && let Ok(dir) = fs::File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
+
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_array_writer_outputs_valid_arrays() {
+        let dir = temp_dir("json-array-writer");
+        fs::create_dir_all(&dir).unwrap();
+        let empty_path = dir.join("empty.json");
+        {
+            let mut writer = JsonArrayWriter::create(empty_path.clone()).unwrap();
+            writer.finish().unwrap();
+        }
+        let empty: Vec<serde_json::Value> =
+            serde_json::from_str(&fs::read_to_string(&empty_path).unwrap()).unwrap();
+        assert!(empty.is_empty());
+
+        let single_path = dir.join("single.json");
+        {
+            let mut writer = JsonArrayWriter::create(single_path.clone()).unwrap();
+            writer.push(&serde_json::json!({"one": true})).unwrap();
+            writer.finish().unwrap();
+        }
+        let single: Vec<serde_json::Value> =
+            serde_json::from_str(&fs::read_to_string(&single_path).unwrap()).unwrap();
+        assert_eq!(single.len(), 1);
+
+        let path = dir.join("items.json");
+
+        {
+            let mut writer = JsonArrayWriter::create(path.clone()).unwrap();
+            writer.push(&serde_json::json!({"a": 1})).unwrap();
+            writer.push(&serde_json::json!({"b": 2})).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let values: Vec<serde_json::Value> =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(values.len(), 2);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn json_array_writer_rejects_path_without_file_name() {
+        let err = JsonArrayWriter::create(PathBuf::from("/")).unwrap_err();
+        assert!(err.to_string().contains("no file name"));
+    }
+
+    #[test]
+    fn write_json_rejects_path_without_file_name() {
+        let err = write_json(PathBuf::from("/"), &serde_json::json!({})).unwrap_err();
+        assert!(err.to_string().contains("no file name"));
+    }
+
+    #[test]
+    fn interval_csv_writer_streams_header_and_rows() {
+        let dir = temp_dir("interval-csv-writer");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("interval.csv");
+
+        {
+            let mut writer = IntervalCsvWriter::create(path.clone()).unwrap();
+            writer.push(&test_interval_record()).unwrap();
+            writer.finish().unwrap();
+        }
+
+        let csv = fs::read_to_string(&path).unwrap();
+        assert!(csv.starts_with("elapsed_ms,task,active"));
+        assert!(csv.contains("worker"));
+        fs::remove_dir_all(dir).ok();
+    }
+
+    fn test_interval_record() -> IntervalRecord {
+        IntervalRecord {
+            elapsed_ms: 1,
+            task: 2,
+            active: true,
+            class: TaskClass::Game,
+            comm: "worker".to_owned(),
+            process_pid: Some(2),
+            process_comm: "game".into(),
+            samples: 1,
+            stored_samples: 1,
+            truncated_samples: 0,
+            min_ns: 1,
+            avg_ns: 1,
+            p95_ns: 1,
+            p99_ns: 1,
+            max_ns: 1,
+            over_1ms: 0,
+            over_2ms: 0,
+            over_5ms: 0,
+            busiest_cpu: None,
+            busiest_cpu_samples: 0,
+            worst_cpu: None,
+            worst_cpu_max_ns: 0,
+            spikiest_cpu: None,
+            spikiest_cpu_spikes: 0,
+            percentile_scope: "exact".to_owned(),
+            histogram: Vec::new(),
+            drop_counters: Default::default(),
+        }
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "stutter-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        dir
+    }
 }

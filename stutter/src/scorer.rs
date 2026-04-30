@@ -67,6 +67,7 @@ mod tests {
             spikiest_cpu_spikes: 0,
             percentile_scope: "exact".to_owned(),
             histogram: Vec::new(),
+            drop_counters: Default::default(),
         };
 
         let score = score_from_interval_records(&[record]);
