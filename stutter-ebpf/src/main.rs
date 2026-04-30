@@ -19,6 +19,8 @@ use stutter_common::{
 };
 
 #[map]
+// Userspace overrides this before loading the BPF object based on the current
+// memlock limit and available memory. The value here is only a safe fallback.
 static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 
 #[map]
@@ -34,8 +36,8 @@ static TARGET_CGROUP_IDS: HashMap<u64, u8> = HashMap::<u64, u8>::with_max_entrie
 static CGROUP_TIDS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(1024, 0);
 
 #[map]
-// Keep enough wakeup timestamps for bursts across all 1024 tracked TIDs. This
-// map uses pinned kernel memory, so the size should stay intentional.
+// Userspace overrides this before loading the BPF object based on the current
+// memlock limit and available memory. The value here is only a safe fallback.
 static WAKEUP_TIMES: HashMap<u32, u64> = HashMap::<u32, u64>::with_max_entries(131_072, 0);
 
 #[map]

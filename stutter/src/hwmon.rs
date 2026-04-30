@@ -3,8 +3,8 @@ use std::{
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::{
-        Arc,
-        atomic::{AtomicU32, AtomicU64, Ordering},
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
@@ -21,14 +21,46 @@ pub struct HwmonReader {
     temp1_input: Option<fs::File>,
     power1_average: Option<fs::File>,
     buf: String,
-    nvidia_state: Option<Arc<NvidiaState>>,
+    nvidia_state: Option<NvidiaWorker>,
 }
 
 #[derive(Debug)]
 struct NvidiaState {
-    gpu_busy_percent: AtomicU32,
-    vram_used_bytes: AtomicU64,
-    vram_total_bytes: AtomicU64,
+    latest: Mutex<Option<NvidiaSample>>,
+    shutdown: AtomicBool,
+}
+
+#[derive(Debug)]
+struct NvidiaWorker {
+    state: Arc<NvidiaState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NvidiaSample {
+    gpu_busy_percent: u32,
+    vram_used_bytes: u64,
+    vram_total_bytes: u64,
+}
+
+impl NvidiaState {
+    fn new() -> Self {
+        Self {
+            latest: Mutex::new(None),
+            shutdown: AtomicBool::new(false),
+        }
+    }
+}
+
+impl NvidiaWorker {
+    fn latest(&self) -> Option<NvidiaSample> {
+        self.state.latest.lock().ok().and_then(|sample| *sample)
+    }
+}
+
+impl Drop for NvidiaWorker {
+    fn drop(&mut self) {
+        self.state.shutdown.store(true, Ordering::Relaxed);
+    }
 }
 
 impl HwmonReader {
@@ -130,24 +162,15 @@ impl HwmonReader {
         let mut vram_used_bytes = read_u64_cached(&mut self.vram_used, &mut self.buf);
         let mut vram_total_bytes = read_u64_cached(&mut self.vram_total, &mut self.buf);
 
-        if let Some(state) = &self.nvidia_state {
+        if let Some(sample) = self.nvidia_state.as_ref().and_then(NvidiaWorker::latest) {
             if gpu_busy_percent.is_none() {
-                let val = state.gpu_busy_percent.load(Ordering::Relaxed);
-                if val != u32::MAX {
-                    gpu_busy_percent = Some(val);
-                }
+                gpu_busy_percent = Some(sample.gpu_busy_percent);
             }
             if vram_used_bytes.is_none() {
-                let val = state.vram_used_bytes.load(Ordering::Relaxed);
-                if val != u64::MAX {
-                    vram_used_bytes = Some(val);
-                }
+                vram_used_bytes = Some(sample.vram_used_bytes);
             }
             if vram_total_bytes.is_none() {
-                let val = state.vram_total_bytes.load(Ordering::Relaxed);
-                if val != u64::MAX {
-                    vram_total_bytes = Some(val);
-                }
+                vram_total_bytes = Some(sample.vram_total_bytes);
             }
         }
 
@@ -255,6 +278,12 @@ fn read_u64_cached(file_opt: &mut Option<fs::File>, buf: &mut String) -> Option<
 }
 
 fn has_nvidia_pci_device() -> bool {
+    static NVIDIA_PCI_PRESENT: OnceLock<bool> = OnceLock::new();
+
+    *NVIDIA_PCI_PRESENT.get_or_init(has_nvidia_pci_device_uncached)
+}
+
+fn has_nvidia_pci_device_uncached() -> bool {
     let Ok(entries) = fs::read_dir("/sys/bus/pci/devices") else {
         return false;
     };
@@ -268,16 +297,12 @@ fn has_nvidia_pci_device() -> bool {
     false
 }
 
-fn start_nvidia_smi_thread() -> Arc<NvidiaState> {
-    let state = Arc::new(NvidiaState {
-        gpu_busy_percent: AtomicU32::new(u32::MAX),
-        vram_used_bytes: AtomicU64::new(u64::MAX),
-        vram_total_bytes: AtomicU64::new(u64::MAX),
-    });
+fn start_nvidia_smi_thread() -> NvidiaWorker {
+    let state = Arc::new(NvidiaState::new());
 
     let state_clone = state.clone();
     std::thread::spawn(move || {
-        loop {
+        while !state_clone.shutdown.load(Ordering::Relaxed) {
             let output = std::process::Command::new("nvidia-smi")
                 .args([
                     "--query-gpu=utilization.gpu,memory.used,memory.total",
@@ -287,30 +312,39 @@ fn start_nvidia_smi_thread() -> Arc<NvidiaState> {
 
             if let Ok(out) = output
                 && let Ok(s) = String::from_utf8(out.stdout)
-                && let Some(line) = s.lines().next()
+                && let Some(sample) = parse_nvidia_smi_sample(&s)
+                && let Ok(mut latest) = state_clone.latest.lock()
             {
-                let parts: Vec<&str> = line.split(',').map(str::trim).collect();
-                if parts.len() == 3 {
-                    if let Ok(busy) = parts[0].parse::<u32>() {
-                        state_clone.gpu_busy_percent.store(busy, Ordering::Relaxed);
-                    }
-                    if let Ok(used_mb) = parts[1].parse::<u64>() {
-                        state_clone
-                            .vram_used_bytes
-                            .store(used_mb * 1024 * 1024, Ordering::Relaxed);
-                    }
-                    if let Ok(total_mb) = parts[2].parse::<u64>() {
-                        state_clone
-                            .vram_total_bytes
-                            .store(total_mb * 1024 * 1024, Ordering::Relaxed);
-                    }
-                }
+                *latest = Some(sample);
             }
-            std::thread::sleep(std::time::Duration::from_millis(500));
+
+            for _ in 0..50 {
+                if state_clone.shutdown.load(Ordering::Relaxed) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
         }
     });
 
-    state
+    NvidiaWorker { state }
+}
+
+fn parse_nvidia_smi_sample(output: &str) -> Option<NvidiaSample> {
+    let line = output.lines().next()?;
+    let mut parts = line.split(',').map(str::trim);
+    let busy = parts.next()?.parse::<u32>().ok()?;
+    let used_mb = parts.next()?.parse::<u64>().ok()?;
+    let total_mb = parts.next()?.parse::<u64>().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+
+    Some(NvidiaSample {
+        gpu_busy_percent: busy,
+        vram_used_bytes: used_mb * 1024 * 1024,
+        vram_total_bytes: total_mb * 1024 * 1024,
+    })
 }
 
 #[cfg(test)]
@@ -338,6 +372,23 @@ mod tests {
         assert_eq!(sample.power_microwatts, Some(120000000));
 
         fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn nvidia_sample_is_absent_until_worker_records_data() {
+        let state = NvidiaState::new();
+
+        assert_eq!(*state.latest.lock().unwrap(), None);
+    }
+
+    #[test]
+    fn parses_nvidia_smi_csv_sample_without_sentinels() {
+        let sample = parse_nvidia_smi_sample("42, 1024, 8192\n").unwrap();
+
+        assert_eq!(sample.gpu_busy_percent, 42);
+        assert_eq!(sample.vram_used_bytes, 1024 * 1024 * 1024);
+        assert_eq!(sample.vram_total_bytes, 8192 * 1024 * 1024);
+        assert_eq!(parse_nvidia_smi_sample("not-ready\n"), None);
     }
 
     #[test]

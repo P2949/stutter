@@ -88,7 +88,12 @@ impl IntervalCsvWriter {
 
 impl Drop for IntervalCsvWriter {
     fn drop(&mut self) {
-        let _ = self.finish();
+        if let Err(err) = self.finish() {
+            log::warn!(
+                "interval_csv_finish_failed path={} err={err:#}",
+                self.path.display()
+            );
+        }
     }
 }
 
@@ -154,7 +159,12 @@ impl JsonArrayWriter {
 
 impl Drop for JsonArrayWriter {
     fn drop(&mut self) {
-        let _ = self.finish();
+        if let Err(err) = self.finish() {
+            log::warn!(
+                "json_array_finish_failed path={} err={err:#}",
+                self.path.display()
+            );
+        }
     }
 }
 
@@ -341,7 +351,13 @@ pub struct RecordedConfig {
     #[serde(default)]
     pub tui: bool,
     pub summary_period_ms: u64,
+    #[serde(default)]
+    pub epoch_period_ms: Option<u64>,
     pub spike_threshold_ns: u64,
+    #[serde(default)]
+    pub alert_threshold_ns: Option<u64>,
+    #[serde(default)]
+    pub alert_webhook_url: Option<String>,
     pub verbose: bool,
 }
 
@@ -761,7 +777,10 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             mangohud_log: config.mangohud_log.clone(),
             tui: config.tui,
             summary_period_ms: config.summary_period_ms,
+            epoch_period_ms: config.epoch_period_ms,
             spike_threshold_ns: config.spike_threshold_ns,
+            alert_threshold_ns: config.alert_threshold_ns,
+            alert_webhook_url: config.alert_webhook_url.clone(),
             verbose: config.verbose,
         },
         metadata: metadata.clone(),
