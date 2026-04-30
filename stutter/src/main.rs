@@ -296,6 +296,7 @@ async fn tune_command(
             warmup_seconds,
             measure_seconds,
             interval_count: interval_records.len(),
+            samples: sample_count,
             score_total: score.total,
             over_1ms: score.over_1ms,
             over_2ms: score.over_2ms,
@@ -322,6 +323,27 @@ async fn tune_command(
         .unwrap_or_default();
 
     let any_valid = results.iter().any(|r| r.valid);
+
+    // Check for large disparities in sample counts across candidates and
+    // warn when candidates are not meaningfully comparable.
+    let min_samples = results.iter().map(|r| r.samples).min().unwrap_or(0);
+    let max_samples = results.iter().map(|r| r.samples).max().unwrap_or(0);
+    if min_samples == 0 && max_samples > 0 {
+        warn!(
+            "tune_candidate_sample_count_variance min=0 max={} (some candidates gathered no samples)",
+            max_samples
+        );
+    } else if min_samples > 0 {
+        let ratio = (max_samples as f64) / (min_samples as f64);
+        if ratio > 2.0 {
+            warn!(
+                "tune_candidate_sample_count_variance min={} max={} ratio={:.2}",
+                min_samples,
+                max_samples,
+                ratio
+            );
+        }
+    }
 
     let summary = TuneSummary {
         schema_version: 1,
@@ -418,17 +440,45 @@ async fn measure_tune_candidate(
     run_monitor(config, shared_hwmon).await?;
 
     let interval_path = run_dir.join("interval.json");
-    let data = fs::read_to_string(&interval_path).map_err(|err| {
-        anyhow::anyhow!(
-            "failed to read tune intervals {}: {err}",
-            interval_path.display()
-        )
-    })?;
+    // Try the expected path first; if missing, attempt to locate a nested
+    // `interval.json` under the run dir (defensive for different resolve
+    // behaviors). Log the path we end up reading for easier debugging.
+    let (used_path, data) = match fs::read_to_string(&interval_path) {
+        Ok(d) => (interval_path.clone(), d),
+        Err(_err) => {
+            let mut found: Option<std::path::PathBuf> = None;
+            if run_dir.exists() && run_dir.is_dir() {
+                for entry in fs::read_dir(&run_dir)?.flatten() {
+                    let path = entry.path();
+                    if path.is_file() && path.file_name().and_then(|s| s.to_str()) == Some("interval.json") {
+                        found = Some(path);
+                        break;
+                    }
+                    if path.is_dir() {
+                        let candidate = path.join("interval.json");
+                        if candidate.exists() {
+                            found = Some(candidate);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if let Some(p) = found {
+                (p.clone(), fs::read_to_string(&p).map_err(|err| {
+                    anyhow::anyhow!("failed to read tune intervals {}: {err}", p.display())
+                })?)
+            } else {
+                return Err(anyhow::anyhow!(
+                    "failed to read tune intervals {}: file not found",
+                    interval_path.display()
+                ));
+            }
+        }
+    };
+    log::info!("reading tune intervals from {}", used_path.display());
     let mut records: Vec<IntervalRecord> = serde_json::from_str(&data).map_err(|err| {
-        anyhow::anyhow!(
-            "failed to parse tune intervals {}: {err}",
-            interval_path.display()
-        )
+        anyhow::anyhow!("failed to parse tune intervals {}: {err}", used_path.display())
     })?;
     let warmup_ms = u128::from(warmup_seconds) * 1_000;
     records.retain(|record| record.elapsed_ms >= warmup_ms);
@@ -512,6 +562,7 @@ struct TuneCandidateSummary {
     warmup_seconds: u64,
     measure_seconds: u64,
     interval_count: usize,
+    samples: u64,
     score_total: u64,
     over_1ms: u64,
     over_2ms: u64,
@@ -2029,14 +2080,36 @@ fn collect_target_pids_with_cgroup(
     mut target_pids: Vec<u32>,
     cgroup_path: Option<&Path>,
 ) -> Vec<u32> {
-    if let Some(cgroup_path) = cgroup_path
-        && let Ok(content) = fs::read_to_string(cgroup_path.join("cgroup.procs"))
-    {
-        for line in content.lines() {
-            if let Ok(pid) = line.parse::<u32>() {
-                target_pids.push(pid);
+    fn collect_recursive(path: &Path, pids: &mut Vec<u32>) {
+        let procs = path.join("cgroup.procs");
+        let threads = path.join("cgroup.threads");
+
+        let mut read_list = |file: &Path| {
+            if let Ok(content) = fs::read_to_string(file) {
+                for line in content.lines() {
+                    if let Ok(pid) = line.trim().parse::<u32>() {
+                        pids.push(pid);
+                    }
+                }
+            }
+        };
+
+        read_list(&procs);
+        read_list(&threads);
+
+        if let Ok(entries) = fs::read_dir(path) {
+            for entry in entries.flatten() {
+                if let Ok(file_type) = entry.file_type()
+                    && file_type.is_dir()
+                {
+                    collect_recursive(&entry.path(), pids);
+                }
             }
         }
+    }
+
+    if let Some(cgroup_path) = cgroup_path {
+        collect_recursive(cgroup_path, &mut target_pids);
     }
 
     target_pids.sort_unstable();

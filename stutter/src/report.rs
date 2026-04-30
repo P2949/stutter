@@ -177,20 +177,52 @@ pub fn render_diff_report(
     );
     pushln(&mut output, "");
 
-    let tasks_a: BTreeMap<(TaskClass, &str, &str), &SessionTask> = session_a
+    // Aggregate tasks by stable identity (class, process_comm, comm). Many
+    // games spawn multiple worker threads with the same `comm`; collapsing
+    // them loses information. Aggregate counts by summing counters and
+    // taking conservative maxima for latency metrics.
+    #[derive(Clone)]
+    struct Agg {
+        max_ns: u64,
+        p99_ns: u64,
+        over_1ms: u64,
+    }
+
+    let mut tasks_a: BTreeMap<(TaskClass, String, String), Agg> = BTreeMap::new();
+    for t in session_a
         .tasks
         .iter()
         .filter(|t| t.latency.samples > 0)
         .filter(|t| filter_class.is_none_or(|c| t.class == c))
-        .map(|t| ((t.class, t.process_comm.as_ref(), t.comm.as_str()), t))
-        .collect();
-    let tasks_b: BTreeMap<(TaskClass, &str, &str), &SessionTask> = session_b
+    {
+        let key = (t.class, t.process_comm.to_string(), t.comm.clone());
+        let entry = tasks_a.entry(key.clone()).or_insert(Agg {
+            max_ns: 0,
+            p99_ns: 0,
+            over_1ms: 0,
+        });
+        entry.max_ns = entry.max_ns.max(t.latency.max_ns);
+        entry.p99_ns = entry.p99_ns.max(t.latency.p99_ns);
+        entry.over_1ms = entry.over_1ms.saturating_add(t.latency.over_1ms);
+    }
+
+    let mut tasks_b: BTreeMap<(TaskClass, String, String), Agg> = BTreeMap::new();
+    for t in session_b
         .tasks
         .iter()
         .filter(|t| t.latency.samples > 0)
         .filter(|t| filter_class.is_none_or(|c| t.class == c))
-        .map(|t| ((t.class, t.process_comm.as_ref(), t.comm.as_str()), t))
-        .collect();
+    {
+        let key = (t.class, t.process_comm.to_string(), t.comm.clone());
+        let entry = tasks_b.entry(key.clone()).or_insert(Agg {
+            max_ns: 0,
+            p99_ns: 0,
+            over_1ms: 0,
+        });
+        entry.max_ns = entry.max_ns.max(t.latency.max_ns);
+        entry.p99_ns = entry.p99_ns.max(t.latency.p99_ns);
+        entry.over_1ms = entry.over_1ms.saturating_add(t.latency.over_1ms);
+    }
 
     struct TaskDelta {
         comm: String,
@@ -208,18 +240,18 @@ pub fn render_diff_report(
 
     for (key, ta) in &tasks_a {
         if let Some(tb) = tasks_b.get(key) {
-            let delta_max = tb.latency.max_ns as i64 - ta.latency.max_ns as i64;
-            let delta_p99 = tb.latency.p99_ns as i64 - ta.latency.p99_ns as i64;
-            let delta_over = tb.latency.over_1ms as i64 - ta.latency.over_1ms as i64;
+            let delta_max = tb.max_ns as i64 - ta.max_ns as i64;
+            let delta_p99 = tb.p99_ns as i64 - ta.p99_ns as i64;
+            let delta_over = tb.over_1ms as i64 - ta.over_1ms as i64;
             let d = TaskDelta {
                 comm: key.2.to_owned(),
                 process_comm: key.1.to_owned().to_string(),
-                class: ta.class,
+                class: key.0,
                 delta_max_ns: delta_max,
                 delta_p99_ns: delta_p99,
                 delta_over_1ms: delta_over,
-                max_a: ta.latency.max_ns,
-                max_b: tb.latency.max_ns,
+                max_a: ta.max_ns,
+                max_b: tb.max_ns,
             };
             if delta_max > 0 {
                 regressions.push(d);
