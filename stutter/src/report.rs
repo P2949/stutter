@@ -755,7 +755,7 @@ pub(crate) fn render_report(
         pushln(
             &mut output,
             format!(
-                "task={} active={} class={:?} comm={} cpu={} wakeup_target_cpu={} latency={} wakeup_ns={} switch_ns={} target_pending_wakeups={}",
+                "task={} active={} class={:?} comm={} cpu={} wakeup_target_cpu={} latency={} wakeup_ns={} switch_ns={} target_pending_on_switch_cpu={}",
                 spike.task,
                 spike.active,
                 spike.class,
@@ -783,7 +783,11 @@ pub(crate) fn render_report(
     );
     pushln(
         &mut output,
-        "target_pending_wakeups is a target-only wakeup counter, not kernel runqueue depth",
+        "target_pending_on_switch_cpu is the number of other target wakeups still pending on the switch CPU",
+    );
+    pushln(
+        &mut output,
+        "after this task was dequeued (not kernel runqueue depth)",
     );
     if cluster_analysis.clusters.is_empty() {
         pushln(
@@ -1414,7 +1418,7 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
 
 fn render_cluster_point(point: &SpikePoint) -> String {
     format!(
-        "{}({:?}:{} cpu={} wakeup_target_cpu={} latency={} switch_ns={} process_pid={} wakeup_ns={} target_pending_wakeups={})",
+        "{}({:?}:{} cpu={} wakeup_target_cpu={} latency={} switch_ns={} process_pid={} wakeup_ns={} target_pending_on_switch_cpu={})",
         point.task,
         point.class,
         point.comm,

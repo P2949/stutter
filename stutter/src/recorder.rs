@@ -921,7 +921,7 @@ pub fn write_interval_csv(
 fn write_interval_csv_header(file: &mut fs::File) -> io::Result<()> {
     writeln!(
         file,
-        "elapsed_ms,task,active,class,comm,process_pid,process_comm,samples,stored_samples,truncated_samples,min_ns,avg_ns,p95_ns,p99_ns,max_ns,over_1ms,over_2ms,over_5ms,busiest_cpu,busiest_cpu_samples,worst_cpu,worst_cpu_max_ns,spikiest_cpu,spikiest_cpu_spikes,percentile_scope,major_faults,minor_faults,cpu_psi_some,mem_psi_some,mem_psi_full,io_psi_some,io_psi_full,drop_counters_total"
+        "elapsed_ms,task,active,class,comm,process_pid,process_comm,samples,stored_samples,truncated_samples,min_ns,avg_ns,p95_ns,p99_ns,max_ns,over_1ms,over_2ms,over_5ms,busiest_cpu,busiest_cpu_samples,worst_cpu,worst_cpu_max_ns,spikiest_cpu,spikiest_cpu_spikes,percentile_scope,major_faults,minor_faults,cpu_psi_some,mem_psi_some,mem_psi_full,io_psi_some,io_psi_full,cumulative_drop_counters_total"
     )
 }
 
