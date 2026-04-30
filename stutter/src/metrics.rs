@@ -1,5 +1,4 @@
 use std::{collections::BTreeMap, fmt};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use log::info;
 use serde::{Deserialize, Serialize};
@@ -32,6 +31,8 @@ pub struct TaskStats {
     pub process_comm: std::sync::Arc<str>,
     pub process_starttime_ticks: Option<u64>,
     pub task_starttime_ticks: Option<u64>,
+    pub exe_dev: Option<u64>,
+    pub exe_ino: Option<u64>,
     pub active: bool,
     pub first_seen_ms: u128,
     pub last_seen_ms: u128,
@@ -43,6 +44,7 @@ pub struct TaskStats {
     pub session_latency: LatencyStats,
     pub session_cpu: CpuStatsSet,
     pub top_spikes: Vec<SpikeRecord>,
+    histogram_truncation_warned: bool,
 }
 
 #[derive(Clone, Default)]
@@ -58,8 +60,6 @@ pub struct LatencyStats {
     pub samples_truncated: u64,
     pub histogram: LatencyHistogram,
 }
-
-static HISTOGRAM_TRUNCATED_WARNED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct CpuStats {
@@ -150,6 +150,8 @@ pub struct IntervalRecord {
     pub percentile_scope: String,
     #[serde(default)]
     pub histogram: Vec<LatencyHistogramBucket>,
+    #[serde(default)]
+    pub drop_counters: crate::ebpf_loader::DropCountersSnapshot,
 }
 
 impl LatencyHistogram {
@@ -239,14 +241,6 @@ impl LatencyStats {
             self.samples_ns.push(latency_ns);
         } else {
             self.samples_truncated += 1;
-            // Log a single warning for histogram overflow to aid users diagnosing
-            // missing exact percentiles due to sample truncation.
-            if HISTOGRAM_TRUNCATED_WARNED
-                .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-                .is_ok()
-            {
-                log::warn!("latency_samples_truncated warning: storing only {} exact samples; future percentiles will use histogram approximation", MAX_EXACT_SAMPLES);
-            }
         }
     }
 
@@ -401,6 +395,8 @@ impl TaskStats {
             process_comm: std::sync::Arc::from(""),
             process_starttime_ticks: None,
             task_starttime_ticks: None,
+            exe_dev: None,
+            exe_ino: None,
             active: true,
             first_seen_ms: elapsed_ms,
             last_seen_ms: elapsed_ms,
@@ -410,6 +406,7 @@ impl TaskStats {
             session_latency: LatencyStats::new(),
             session_cpu: CpuStatsSet::new(),
             top_spikes: Vec::with_capacity(16),
+            histogram_truncation_warned: false,
         }
     }
 
@@ -419,6 +416,8 @@ impl TaskStats {
         self.process_comm = task_info.process_comm.clone();
         self.process_starttime_ticks = task_info.process_starttime_ticks;
         self.task_starttime_ticks = task_info.task_starttime_ticks;
+        self.exe_dev = task_info.exe_dev;
+        self.exe_ino = task_info.exe_ino;
 
         if should_replace_comm_from_task_info(&self.comm, task_info) {
             self.comm = task_info.comm.clone();
@@ -435,6 +434,16 @@ impl TaskStats {
         self.session_latency.record(event.latency_ns);
         self.session_cpu
             .record(event.cpu, event.latency_ns, spike_threshold_ns);
+
+        if self.session_latency.samples_truncated > 0 && !self.histogram_truncation_warned {
+            self.histogram_truncation_warned = true;
+            log::warn!(
+                "latency_samples_truncated task={} comm={} stored_samples={} percentile_scope=histogram",
+                self.task,
+                self.comm,
+                MAX_EXACT_SAMPLES
+            );
+        }
 
         if event.latency_ns >= spike_threshold_ns {
             self.top_spikes.push(SpikeRecord {
@@ -540,11 +549,13 @@ pub fn print_latency_line(
     );
 }
 
-pub fn print_interval_summaries(
+pub fn collect_interval_summaries(
     stats_by_task: &mut BTreeMap<u32, TaskStats>,
     elapsed_ms: u128,
-    interval_records: &mut Vec<IntervalRecord>,
-) {
+    drop_counters: &crate::ebpf_loader::DropCountersSnapshot,
+) -> Vec<IntervalRecord> {
+    let mut interval_records = Vec::new();
+
     for (task, stats) in stats_by_task.iter_mut() {
         let Some(latency) = stats.interval_latency.snapshot_and_reset() else {
             continue;
@@ -554,9 +565,11 @@ pub fn print_interval_summaries(
 
         print_latency_line("summary", *task, &stats.comm, &latency, &cpu);
         interval_records.push(interval_record_from_snapshot(
-            elapsed_ms, *task, stats, &latency, &cpu,
+            elapsed_ms, *task, stats, &latency, &cpu, drop_counters,
         ));
     }
+
+    interval_records
 }
 
 pub fn print_session_summaries(stats_by_task: &mut BTreeMap<u32, TaskStats>) {
@@ -609,6 +622,7 @@ pub fn interval_record_from_snapshot(
     stats: &TaskStats,
     latency: &LatencySnapshot,
     cpu: &CpuSnapshot,
+    drop_counters: &crate::ebpf_loader::DropCountersSnapshot,
 ) -> IntervalRecord {
     IntervalRecord {
         elapsed_ms,
@@ -637,6 +651,7 @@ pub fn interval_record_from_snapshot(
         spikiest_cpu_spikes: cpu.spikiest_cpu_spikes,
         percentile_scope: latency.percentile_scope.clone(),
         histogram: latency.histogram.clone(),
+        drop_counters: drop_counters.clone(),
     }
 }
 

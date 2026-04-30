@@ -138,8 +138,9 @@ RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- record \
 
 Hardware monitoring notes:
 
-- You can override the hwmon discovery path with `--hwmon-root /path/to/hwmon` when the automatic
-  detection doesn't find your GPU sensors.
+- On multi-GPU systems, prefer an explicit selector such as `--hwmon-drm-card card1`,
+  `--hwmon-render-node /dev/dri/renderD129`, or the direct `--hwmon-root /path/to/hwmon`
+  override so automatic discovery does not pick the wrong device.
 - Frequent hwmon sampling uses cached file descriptors internally; if you see warnings about
   `latency_samples_truncated`, that means stutter is storing a bounded number of exact samples
   and will fall back to histogram-based percentile estimates for p95/p99.
@@ -277,12 +278,16 @@ For programmatic consumption, inspect the example outputs in a sample run direct
 - `--persistent`: use with `--watch-process` to continue monitoring across relaunches.
 - `--summary-ms <MS>`: interval for interval summaries written to `interval.json` and printed to the TUI.
 - `--spike-us <US>`: spike detection threshold in microseconds (e.g., `--spike-us 1000` for 1ms).
-- `--irq-latency`: enable IRQ latency tracing and record `irq_events.json`.
+- `--include-comm <PATTERN>` / `--exclude-comm <PATTERN>`: case-insensitive substring filters against task `comm` and process `comm`; exclude wins.
+- `--irq-latency`: enable IRQ latency tracing and record `irq_events.json`; at least one explicit `--irq <IRQ>` is required. Inspect `/proc/interrupts` to find the IRQ for your GPU/device.
 - `--irq <IRQ>`: add an IRQ number to target for IRQ latency measurement (can repeat).
-- `--hwmon`: enable GPU hwmon sampling; combines with `--hwmon-root` to override discovery.
+- `--hwmon`: enable GPU hwmon sampling; combine with `--hwmon-drm-card`, `--hwmon-render-node`, or `--hwmon-root` to avoid ambiguous multi-GPU discovery.
 - `--hwmon-root <PATH>`: override hwmon discovery path when automatic detection fails.
+- `--hwmon-drm-card <CARD>`: choose a DRM card such as `card0` or `card1` for hwmon discovery.
+- `--hwmon-render-node <PATH>`: choose the DRM render node whose device hwmon should be sampled.
 - `--mangohud-log <PATH>`: provide a MangoHud CSV to correlate frame times.
 - `--tui`: print a plain-text TUI status line periodically (non-interactive).
+- `stutter tune --tree-pid <PID> --profiles <FILE>`: apply each profile, record a real measurement epoch, score interval summaries, and restore after each candidate by default. Add `--keep-best` to reapply the best profile at the end.
 
 ## What TUI prints (example)
 

@@ -31,7 +31,7 @@ fn reused_tid_with_different_task_resets_stats_after_removal() {
     }
 
     let new_task = task_info(42, 200, "new-game", "new-thread", TaskClass::Helper);
-    super::reactivate_or_reset_stats(&mut stats_by_task, 42, &new_task, 77);
+    super::reactivate_or_reset_stats_inner(&mut stats_by_task, None, 42, &new_task, 77);
 
     let stats = stats_by_task.get(&42).unwrap();
     assert_eq!(stats.first_seen_ms, 77);
@@ -59,7 +59,7 @@ fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
     let mut stats_by_task = BTreeMap::from([(42, stats)]);
 
     let mut tree_events = Vec::new();
-    let mut task_exe_inodes: BTreeMap<u32, (u64, u64, Option<u64>)> = BTreeMap::new();
+    let mut task_exe_inodes: super::TaskExeInodesMap = BTreeMap::new();
     super::handle_same_tid_replacements(
         &active_targets,
         &desired_tasks,
@@ -101,7 +101,7 @@ fn same_reused_tid_reactivates_without_clearing_stats() {
     }
 
     let same_task = task_info(42, 100, "game", "worker", TaskClass::Game);
-    super::reactivate_or_reset_stats(&mut stats_by_task, 42, &same_task, 77);
+    super::reactivate_or_reset_stats_inner(&mut stats_by_task, None, 42, &same_task, 77);
 
     let stats = stats_by_task.get(&42).unwrap();
     assert_eq!(stats.first_seen_ms, 10);
@@ -124,7 +124,7 @@ fn same_tid_same_names_different_starttime_resets_stats() {
 
     let mut new_task = task_info(42, 100, "game", "worker", TaskClass::Game);
     new_task.task_starttime_ticks = Some(999);
-    super::reactivate_or_reset_stats(&mut stats_by_task, 42, &new_task, 77);
+    super::reactivate_or_reset_stats_inner(&mut stats_by_task, None, 42, &new_task, 77);
 
     let stats = stats_by_task.get(&42).unwrap();
     assert_eq!(stats.first_seen_ms, 77);
@@ -327,7 +327,7 @@ fn diff_tasks_orders_removed_before_added_by_tid() {
         (3, task_info(3, 30, "new", "new-3", TaskClass::Game)),
     ]);
 
-    let diffs = process_tree::diff_tasks(&old_tasks, &new_tasks);
+    let diffs = process_tree::diff_tasks_ref(&old_tasks, &new_tasks);
 
     let actions_and_tids = diffs
         .iter()
@@ -464,6 +464,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     let drop_counters = DropCountersSnapshot {
         wakeup_times_insert_failed: 2,
         ringbuf_reserve_failed: 3,
+        irq_start_times_insert_failed: 0,
     };
 
     recorder::finalize_recording(FinalizeRecordingInput {
@@ -473,12 +474,16 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         active_targets: &active_targets,
         stats_by_task: &stats_by_task,
         interval_records: &interval_records,
+        streamed_interval_record_count: None,
+        intervals_dropped: 0,
         tree_events: &tree_events,
         spike_events: &spike_events,
         spike_events_truncated: true,
         scx_events: &[],
         irq_events: &[],
+        streamed_irq_event_count: None,
         gpu_samples: &[],
+        streamed_gpu_sample_count: None,
         frame_events: &[],
         drop_counters,
     })
@@ -528,8 +533,8 @@ fn target_snapshot_filters_include_and_exclude_comm_patterns() {
     fs::write(dir.join("10/task/12/comm"), "steamwebhelper\n").unwrap();
 
     let filters = process_tree::TaskFilters {
-        include_comm: vec!["Thread".to_owned()],
-        exclude_comm: vec!["steamwebhelper".to_owned()],
+        include_comm: vec!["thread".to_owned()],
+        exclude_comm: vec!["STEAMWEBHELPER".to_owned()],
     };
     let snapshot = process_tree::target_snapshot_filtered_at(&dir, &[], &[10], &filters);
 
@@ -551,6 +556,19 @@ fn target_snapshot_filters_include_and_exclude_comm_patterns() {
             .values()
             .any(|task| task.comm == "steamwebhelper")
     );
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn target_snapshot_prefetches_exe_inode_metadata() {
+    let dir = temp_test_dir("proc-exe-inode");
+    create_fake_proc(&dir, 10, 1, "game", "KingdomCome.exe", &[10]);
+
+    let snapshot = process_tree::target_snapshot_at(&dir, &[], &[10]);
+    let task = snapshot.tasks.get(&10).unwrap();
+
+    assert!(task.exe_dev.is_some());
+    assert!(task.exe_ino.is_some());
     fs::remove_dir_all(dir).ok();
 }
 
@@ -618,6 +636,21 @@ fn tree_root_starttime_change_is_stale() {
     assert_ne!(roots.get(&42).copied().flatten(), current);
 
     fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn same_task_info_falls_back_to_conservative_metadata_without_starttimes() {
+    let mut left = task_info(42, 100, "game", "worker", TaskClass::Game);
+    let mut right = left.clone();
+    left.process_starttime_ticks = None;
+    left.task_starttime_ticks = None;
+    right.process_starttime_ticks = None;
+    right.task_starttime_ticks = None;
+
+    assert!(super::same_task_info(&left, &right));
+
+    right.process_comm = "other-game".into();
+    assert!(!super::same_task_info(&left, &right));
 }
 
 #[test]
@@ -727,12 +760,16 @@ fn report_reads_recorded_session_and_spike_events() {
         active_targets: &active_targets,
         stats_by_task: &stats_by_task,
         interval_records: &[],
+        streamed_interval_record_count: None,
+        intervals_dropped: 0,
         tree_events: &[],
         spike_events: &spike_events,
         spike_events_truncated: false,
         scx_events: &[],
         irq_events: &[],
+        streamed_irq_event_count: None,
         gpu_samples: &[],
+        streamed_gpu_sample_count: None,
         frame_events: &[],
         drop_counters: DropCountersSnapshot::default(),
     })
@@ -785,12 +822,16 @@ fn report_cluster_output_caps_inline_points() {
         active_targets: &active_targets,
         stats_by_task: &stats_by_task,
         interval_records: &[],
+        streamed_interval_record_count: None,
+        intervals_dropped: 0,
         tree_events: &[],
         spike_events: &spike_events,
         spike_events_truncated: false,
         scx_events: &[],
         irq_events: &[],
+        streamed_irq_event_count: None,
         gpu_samples: &[],
+        streamed_gpu_sample_count: None,
         frame_events: &[],
         drop_counters: DropCountersSnapshot::default(),
     })
@@ -901,7 +942,7 @@ fn interval_csv_writer_outputs_header_and_rows() {
     latency.record(1_000_000);
     let latency = latency.snapshot().unwrap();
     let cpu = metrics::CpuStatsSet::new().snapshot();
-    let record = metrics::interval_record_from_snapshot(123, 7, &stats, &latency, &cpu);
+    let record = metrics::interval_record_from_snapshot(123, 7, &stats, &latency, &cpu, &Default::default());
 
     recorder::write_interval_csv(&path, &[record]).unwrap();
     let csv = fs::read_to_string(&path).unwrap();
@@ -951,8 +992,11 @@ fn test_config(
         irqs: Vec::new(),
         hwmon: false,
         hwmon_root: None,
+        hwmon_drm_card: None,
+        hwmon_render_node: None,
         mangohud_log: None,
         tui: false,
+        retain_intervals: None,
         recording: None,
         max_duration,
     }
@@ -1053,6 +1097,8 @@ fn task_info(
         process_comm: process_comm.into(),
         process_starttime_ticks: Some(u64::from(process_pid) * 10),
         task_starttime_ticks: Some(u64::from(tid) * 10),
+        exe_dev: None,
+        exe_ino: None,
         class,
     }
 }
@@ -1126,6 +1172,7 @@ fn create_fake_proc(
     .unwrap();
     fs::write(proc_dir.join("cmdline"), cmdline.as_bytes()).unwrap();
     fs::write(proc_dir.join("stat"), fake_stat(name, u64::from(pid) * 10)).unwrap();
+    fs::write(proc_dir.join("exe"), format!("{name}\n")).unwrap();
 
     for tid in tids {
         let task_dir = proc_dir.join("task").join(tid.to_string());

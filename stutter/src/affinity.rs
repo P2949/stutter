@@ -201,7 +201,6 @@ impl<'de> Deserialize<'de> for CpuMask {
     }
 }
 
-#[allow(dead_code)]
 pub fn read_allowed_mask(tid: u32) -> anyhow::Result<CpuMask> {
     read_allowed_mask_raw(tid).with_context(|| format!("failed to read CPU affinity for TID {tid}"))
 }

@@ -8,8 +8,9 @@ use aya_ebpf::{
     programs::TracePointContext,
 };
 use stutter_common::{
-    DROP_COUNTERS_MAX, DROP_RINGBUF_RESERVE_FAILED, DROP_WAKEUP_TIMES_INSERT_FAILED,
-    EVENT_IRQ_LATENCY, EVENT_RUNNABLE_LATENCY, IrqEvent, SchedulerEvent,
+    DROP_COUNTERS_MAX, DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
+    DROP_WAKEUP_TIMES_INSERT_FAILED, EVENT_IRQ_LATENCY, EVENT_RUNNABLE_LATENCY, IrqEvent,
+    SchedulerEvent,
 };
 
 #[map]
@@ -187,7 +188,9 @@ fn try_irq_handler_entry(ctx: TracePointContext) -> Result<u32, u32> {
     let cpu = unsafe { bpf_get_smp_processor_id() };
     let key = irq_key(irq, cpu);
     let now = unsafe { bpf_ktime_get_ns() };
-    let _ = IRQ_START_TIMES.insert(key, now, 0);
+    if IRQ_START_TIMES.insert(key, now, 0).is_err() {
+        increment_drop_counter(DROP_IRQ_START_TIMES_INSERT_FAILED);
+    }
     Ok(0)
 }
 

@@ -19,33 +19,58 @@ pub struct HwmonReader {
 }
 
 impl HwmonReader {
-    pub fn discover_at(root_override: Option<&Path>) -> Option<Self> {
-        let overridden = root_override.and_then(|p| {
-            if p.exists() {
-                Some(p.to_path_buf())
+    pub fn discover_with_options(
+        root_override: Option<&Path>,
+        drm_card: Option<&str>,
+        render_node: Option<&Path>,
+    ) -> Option<Self> {
+        let root = if let Some(root) = root_override {
+            if root.exists() {
+                Some(root.to_path_buf())
             } else {
-                log::warn!("hwmon_root_override_not_found path={}", p.display());
+                log::warn!("hwmon_root_override_not_found path={}", root.display());
                 None
             }
-        });
+        } else if let Some(card) = drm_card {
+            let root = discover_drm_hwmon_root(Path::new("/sys/class/drm"), card);
+            if root.is_none() {
+                log::warn!("hwmon_drm_card_not_found card={card}");
+            }
+            root
+        } else if let Some(node) = render_node {
+            let root = node
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| discover_drm_hwmon_root(Path::new("/sys/class/drm"), name));
+            if root.is_none() {
+                log::warn!("hwmon_render_node_not_found node={}", node.display());
+            }
+            root
+        } else {
+            discover_hwmon_root(Path::new("/sys/class/drm"))
+                .or_else(|| discover_hwmon_root(Path::new("/sys/class/hwmon")))
+        }?;
 
-        let root = overridden
-            .or_else(|| discover_hwmon_root(Path::new("/sys/class/drm")))
-            .or_else(|| discover_hwmon_root(Path::new("/sys/class/hwmon")))?;
+        Some(Self::from_hwmon_root(root))
+    }
 
-        Some(Self {
+    fn from_hwmon_root(root: PathBuf) -> Self {
+        Self {
             gpu_busy: fs::File::open(root.join("device/gpu_busy_percent"))
-                .or_else(|_| fs::File::open(root.join("gpu_busy_percent"))).ok(),
+                .or_else(|_| fs::File::open(root.join("gpu_busy_percent")))
+                .ok(),
             vram_used: fs::File::open(root.join("device/mem_info_vram_used"))
-                .or_else(|_| fs::File::open(root.join("mem_info_vram_used"))).ok(),
+                .or_else(|_| fs::File::open(root.join("mem_info_vram_used")))
+                .ok(),
             vram_total: fs::File::open(root.join("device/mem_info_vram_total"))
-                .or_else(|_| fs::File::open(root.join("mem_info_vram_total"))).ok(),
+                .or_else(|_| fs::File::open(root.join("mem_info_vram_total")))
+                .ok(),
             freq1_input: fs::File::open(root.join("freq1_input")).ok(),
             freq2_input: fs::File::open(root.join("freq2_input")).ok(),
             temp1_input: fs::File::open(root.join("temp1_input")).ok(),
             power1_average: fs::File::open(root.join("power1_average")).ok(),
             buf: String::with_capacity(32),
-        })
+        }
     }
 
     pub fn sample(&mut self, elapsed_ms: u128) -> GpuSample {
@@ -54,8 +79,10 @@ impl HwmonReader {
             gpu_busy_percent: read_u32_cached(&mut self.gpu_busy, &mut self.buf),
             vram_used_bytes: read_u64_cached(&mut self.vram_used, &mut self.buf),
             vram_total_bytes: read_u64_cached(&mut self.vram_total, &mut self.buf),
-            gpu_clock_mhz: read_u32_cached(&mut self.freq1_input, &mut self.buf).map(|khz| khz / 1_000),
-            mem_clock_mhz: read_u32_cached(&mut self.freq2_input, &mut self.buf).map(|khz| khz / 1_000),
+            gpu_clock_mhz: read_u32_cached(&mut self.freq1_input, &mut self.buf)
+                .map(|khz| khz / 1_000),
+            mem_clock_mhz: read_u32_cached(&mut self.freq2_input, &mut self.buf)
+                .map(|khz| khz / 1_000),
             temp_millidegrees: read_u32_cached(&mut self.temp1_input, &mut self.buf),
             power_microwatts: read_u64_cached(&mut self.power1_average, &mut self.buf),
         }
@@ -93,6 +120,25 @@ fn discover_hwmon_root(root: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn discover_drm_hwmon_root(drm_root: &Path, drm_name: &str) -> Option<PathBuf> {
+    if drm_name.is_empty() || drm_name.contains('/') {
+        return None;
+    }
+
+    let drm_path = drm_root.join(drm_name);
+    first_hwmon_child(&drm_path.join("device/hwmon"))
+        .or_else(|| first_hwmon_child(&drm_path.join("hwmon")))
+        .or_else(|| sensor_root(&drm_path.join("device")))
+        .or_else(|| sensor_root(&drm_path))
+}
+
+fn sensor_root(path: &Path) -> Option<PathBuf> {
+    (path.join("gpu_busy_percent").exists()
+        || path.join("temp1_input").exists()
+        || path.join("power1_average").exists())
+    .then(|| path.to_path_buf())
 }
 
 fn first_hwmon_child(path: &Path) -> Option<PathBuf> {
@@ -142,6 +188,51 @@ mod tests {
         assert_eq!(sample.mem_clock_mhz, Some(1000));
         assert_eq!(sample.temp_millidegrees, Some(61000));
         assert_eq!(sample.power_microwatts, Some(120000000));
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn discover_at_uses_fake_hwmon_root_override() {
+        let root = temp_dir("hwmon-discover");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("gpu_busy_percent"), "55\n").unwrap();
+        fs::write(root.join("temp1_input"), "47000\n").unwrap();
+
+        let mut reader = HwmonReader::discover_with_options(Some(&root), None, None).unwrap();
+        let sample = reader.sample(7);
+
+        assert_eq!(sample.elapsed_ms, 7);
+        assert_eq!(sample.gpu_busy_percent, Some(55));
+        assert_eq!(sample.temp_millidegrees, Some(47000));
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn discover_drm_hwmon_root_selects_requested_card() {
+        let root = temp_dir("drm-hwmon");
+        let card0 = root.join("card0/device/hwmon/hwmon0");
+        let card1 = root.join("card1/device/hwmon/hwmon1");
+        fs::create_dir_all(&card0).unwrap();
+        fs::create_dir_all(&card1).unwrap();
+        fs::write(card0.join("temp1_input"), "39000\n").unwrap();
+        fs::write(card1.join("temp1_input"), "61000\n").unwrap();
+
+        assert_eq!(discover_drm_hwmon_root(&root, "card1"), Some(card1));
+        assert_eq!(discover_drm_hwmon_root(&root, "card0"), Some(card0));
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn discover_drm_hwmon_root_selects_render_node_name() {
+        let root = temp_dir("render-hwmon");
+        let render = root.join("renderD129/device/hwmon/hwmon3");
+        fs::create_dir_all(&render).unwrap();
+        fs::write(render.join("power1_average"), "100\n").unwrap();
+
+        assert_eq!(discover_drm_hwmon_root(&root, "renderD129"), Some(render));
 
         fs::remove_dir_all(root).ok();
     }
