@@ -42,7 +42,7 @@ static WAKEUP_DATA: HashMap<u32, WakeupData> =
 static IRQ_START_TIMES: HashMap<u64, u64> = HashMap::<u64, u64>::with_max_entries(1024, 0);
 
 #[map]
-static RQ_DEPTH: Array<u32> = Array::<u32>::with_max_entries(1024, 0);
+static TARGET_PENDING_WAKEUPS: Array<u32> = Array::<u32>::with_max_entries(1024, 0);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -257,12 +257,12 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
         waker_tid,
     };
 
-    if WAKEUP_DATA.insert(pid, data, 0).is_err() {
+    if WAKEUP_DATA.insert(pid, data, 0).is_ok() {
+        if let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(target_cpu) {
+            unsafe { *depth = (*depth).saturating_add(1) };
+        }
+    } else {
         increment_drop_counter(DROP_WAKEUP_DATA_INSERT_FAILED);
-    }
-
-    if let Some(depth) = RQ_DEPTH.get_ptr_mut(target_cpu) {
-        unsafe { *depth = (*depth).saturating_add(1) };
     }
 
     Ok(0)
@@ -295,12 +295,13 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
     let _prev_state: i64 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
     let cpu = unsafe { bpf_get_smp_processor_id() };
 
-    // Decrement the RQ_DEPTH for the CPU where the task was originally queued.
-    if let Some(depth) = RQ_DEPTH.get_ptr_mut(target_cpu) {
+    // Decrement the target-pending counter for the CPU where the task was
+    // originally queued. This is not kernel runqueue depth.
+    if let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(target_cpu) {
         unsafe { *depth = (*depth).saturating_sub(1) };
     }
 
-    let target_runnable_depth = RQ_DEPTH.get(cpu).copied().unwrap_or(0);
+    let target_pending_wakeups = TARGET_PENDING_WAKEUPS.get(cpu).copied().unwrap_or(0);
 
     let switch_ns = unsafe { bpf_ktime_get_ns() };
     let latency_ns = switch_ns.saturating_sub(wakeup_ns);
@@ -327,7 +328,7 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
         (*event).cpu = cpu;
         (*event).prio = prio;
         (*event).waker_tid = waker_tid;
-        (*event).target_runnable_depth = target_runnable_depth;
+        (*event).target_pending_wakeups = target_pending_wakeups;
         (*event).maj_flt = faults.maj as u32;
         (*event).min_flt = faults.min as u32;
         (*event).wakeup_ns = wakeup_ns;

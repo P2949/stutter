@@ -509,7 +509,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         latency_ns: 2_000_000,
         wakeup_ns: 10,
         switch_ns: 2_000_010,
-        target_runnable_depth: 0,
+        target_pending_wakeups: 0,
         major_faults: 0,
         minor_faults: 0,
     }];
@@ -890,7 +890,7 @@ fn report_reads_recorded_session_and_spike_events() {
         prio: 120,
         wakeup_ns: 1_010_000_000,
         switch_ns: 1_016_000_000,
-        target_runnable_depth: 0,
+        target_pending_wakeups: 0,
         major_faults: 0,
         minor_faults: 0,
     });
@@ -908,7 +908,7 @@ fn report_reads_recorded_session_and_spike_events() {
         latency_ns: 6_000_000,
         wakeup_ns: 1_010_000_000,
         switch_ns: 1_016_000_000,
-        target_runnable_depth: 0,
+        target_pending_wakeups: 0,
         major_faults: 0,
         minor_faults: 0,
     }];
@@ -975,7 +975,7 @@ fn report_cluster_output_caps_inline_points() {
             latency_ns: 1_000_000 + idx as u64,
             wakeup_ns: 1_000_000_000 + idx as u64 * 100_000,
             switch_ns: 1_001_000_000 + idx as u64 * 100_000,
-            target_runnable_depth: 0,
+            target_pending_wakeups: 0,
             major_faults: 0,
             minor_faults: 0,
         })
@@ -1055,7 +1055,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
             latency_ns: 1_000_000,
             wakeup_ns: 1_000_000 + idx as u64 * 100,
             switch_ns: 10_000_000 + idx as u64 * 100,
-            target_runnable_depth: 0,
+            target_pending_wakeups: 0,
             major_faults: 0,
             minor_faults: 0,
         })
@@ -1322,7 +1322,7 @@ fn scheduler_event_with_latency(pid: u32, comm: &str, latency_ns: u64) -> Schedu
         latency_ns,
         comm: comm_bytes,
         waker_tid: 0,
-        target_runnable_depth: 0,
+        target_pending_wakeups: 0,
         maj_flt: 0,
         min_flt: 0,
     }
@@ -1342,7 +1342,7 @@ fn spike_event(task: u32, switch_ns: u64) -> SpikeEvent {
         latency_ns: 1_000_000,
         wakeup_ns: switch_ns.saturating_sub(1_000_000),
         switch_ns,
-        target_runnable_depth: 0,
+        target_pending_wakeups: 0,
         major_faults: 0,
         minor_faults: 0,
     }

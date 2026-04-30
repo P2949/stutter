@@ -19,7 +19,7 @@ pub fn score_from_interval_records(records: &[IntervalRecord]) -> StutterScore {
     for record in records.iter().filter(|record| {
         matches!(
             record.class,
-            TaskClass::Game | TaskClass::WineServer | TaskClass::GameScope | TaskClass::Compositor
+            TaskClass::Game | TaskClass::GameHelper | TaskClass::WineServer | TaskClass::GameScope
         )
     }) {
         score.over_1ms = score.over_1ms.saturating_add(record.over_1ms);
@@ -56,11 +56,15 @@ pub fn score_from_interval_records_and_frames(
 }
 
 pub fn calculate_frame_metrics(frames: &[crate::recorder::FrameEvent]) -> (f64, f64) {
-    if frames.is_empty() {
+    let mut times: Vec<f64> = frames
+        .iter()
+        .map(|f| f.frametime_ms)
+        .filter(|value| value.is_finite())
+        .collect();
+    if times.is_empty() {
         return (0.0, 0.0);
     }
-    let mut times: Vec<f64> = frames.iter().map(|f| f.frametime_ms).collect();
-    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    times.sort_by(|a, b| a.total_cmp(b));
     let max = *times.last().unwrap_or(&0.0);
     let p99_idx = (times.len() * 99 / 100).min(times.len() - 1);
     let p99 = times[p99_idx];
@@ -133,5 +137,70 @@ mod tests {
         assert_eq!(score.total, 100);
         assert_eq!(score.frame_max_ms, 55.0);
         assert_eq!(score.frame_p99_ms, 55.0);
+    }
+
+    #[test]
+    fn frame_metrics_ignore_non_finite_values() {
+        let frames = [
+            crate::recorder::FrameEvent {
+                elapsed_ms: 1_000,
+                frametime_ms: f64::NAN,
+            },
+            crate::recorder::FrameEvent {
+                elapsed_ms: 1_016,
+                frametime_ms: 24.0,
+            },
+            crate::recorder::FrameEvent {
+                elapsed_ms: 1_032,
+                frametime_ms: f64::INFINITY,
+            },
+        ];
+
+        assert_eq!(calculate_frame_metrics(&frames), (24.0, 24.0));
+    }
+
+    #[test]
+    fn score_includes_game_helpers() {
+        let mut record = IntervalRecord {
+            elapsed_ms: 0,
+            task: 1,
+            active: true,
+            class: TaskClass::GameHelper,
+            comm: "dxvk-worker".into(),
+            process_pid: Some(1),
+            process_comm: "game".into(),
+            samples: 1,
+            stored_samples: 1,
+            truncated_samples: 0,
+            min_ns: 0,
+            avg_ns: 0,
+            p95_ns: 0,
+            p99_ns: 0,
+            max_ns: 2_000_000,
+            over_1ms: 1,
+            over_2ms: 1,
+            over_5ms: 0,
+            busiest_cpu: None,
+            busiest_cpu_samples: 0,
+            worst_cpu: None,
+            worst_cpu_max_ns: 0,
+            spikiest_cpu: None,
+            spikiest_cpu_spikes: 0,
+            cpu_psi_some: 0.0,
+            mem_psi_some: 0.0,
+            mem_psi_full: 0.0,
+            io_psi_some: 0.0,
+            io_psi_full: 0.0,
+            major_faults: 0,
+            minor_faults: 0,
+            percentile_scope: "all".to_owned(),
+            histogram: Vec::new(),
+            drop_counters: crate::ebpf_loader::DropCountersSnapshot::default(),
+        };
+
+        assert_eq!(score_from_interval_records(&[record.clone()]).total, 21);
+
+        record.class = TaskClass::Compositor;
+        assert_eq!(score_from_interval_records(&[record]).total, 0);
     }
 }

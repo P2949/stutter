@@ -30,7 +30,7 @@ struct SpikePoint {
     latency_ns: u64,
     wakeup_ns: u64,
     switch_ns: u64,
-    target_runnable_depth: u32,
+    target_pending_wakeups: u32,
     elapsed_ms: Option<u128>,
 }
 
@@ -736,7 +736,7 @@ pub(crate) fn render_report(
         pushln(
             &mut output,
             format!(
-                "task={} active={} class={:?} comm={} cpu={} latency={} wakeup_ns={} switch_ns={}",
+                "task={} active={} class={:?} comm={} cpu={} latency={} wakeup_ns={} switch_ns={} target_pending_wakeups={}",
                 spike.task,
                 spike.active,
                 spike.class,
@@ -745,6 +745,7 @@ pub(crate) fn render_report(
                 format_latency(spike.latency_ns),
                 spike.wakeup_ns,
                 spike.switch_ns,
+                spike.target_pending_wakeups,
             ),
         );
     }
@@ -759,6 +760,10 @@ pub(crate) fn render_report(
     pushln(
         &mut output,
         render_cluster_source(&cluster_analysis, cluster_window_ms),
+    );
+    pushln(
+        &mut output,
+        "target_pending_wakeups is a target-only wakeup counter, not kernel runqueue depth",
     );
     if cluster_analysis.clusters.is_empty() {
         pushln(
@@ -986,7 +991,7 @@ fn flatten_spike_events(session: &SessionFile, spike_events: &[SpikeEvent]) -> V
             latency_ns: spike.latency_ns,
             wakeup_ns: spike.wakeup_ns,
             switch_ns: spike.switch_ns,
-            target_runnable_depth: spike.target_runnable_depth,
+            target_pending_wakeups: spike.target_pending_wakeups,
             elapsed_ms: elapsed_ms(session.monotonic_start_ns, spike.switch_ns)
                 .or(spike.elapsed_ms),
         })
@@ -1023,7 +1028,7 @@ fn spike_point_from_task(
         latency_ns: spike.latency_ns,
         wakeup_ns: spike.wakeup_ns,
         switch_ns: spike.switch_ns,
-        target_runnable_depth: spike.target_runnable_depth,
+        target_pending_wakeups: spike.target_pending_wakeups,
         elapsed_ms,
     }
 }
@@ -1387,7 +1392,7 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
 
 fn render_cluster_point(point: &SpikePoint) -> String {
     format!(
-        "{}({:?}:{} cpu={} latency={} switch_ns={} process_pid={} wakeup_ns={})",
+        "{}({:?}:{} cpu={} latency={} switch_ns={} process_pid={} wakeup_ns={} target_pending_wakeups={})",
         point.task,
         point.class,
         point.comm,
@@ -1395,7 +1400,8 @@ fn render_cluster_point(point: &SpikePoint) -> String {
         format_latency(point.latency_ns),
         point.switch_ns,
         format_process_pid(point.process_pid),
-        point.wakeup_ns
+        point.wakeup_ns,
+        point.target_pending_wakeups
     )
 }
 

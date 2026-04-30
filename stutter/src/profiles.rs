@@ -267,8 +267,6 @@ impl CompiledPattern {
                 Regex::new(&raw[1..raw.len() - 1])
                     .with_context(|| format!("invalid profile regex '{}'", raw))?,
             )
-        } else if raw.chars().any(|c| ".^$*+?()[]{}|\\".contains(c)) {
-            Some(Regex::new(&raw).with_context(|| format!("invalid profile regex '{}'", raw))?)
         } else {
             None
         };
@@ -420,6 +418,21 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["RenderThread", "Main"]
         );
+    }
+
+    #[test]
+    fn match_comm_treats_metacharacters_as_literals_unless_slash_delimited() {
+        let literal = CompiledPattern::new("KingdomCome.exe".to_owned()).unwrap();
+        assert!(literal.matches("KingdomCome.exe"));
+        assert!(!literal.matches("KingdomComeXexe"));
+
+        let regex = CompiledPattern::new("/KingdomCome[.]exe$/".to_owned()).unwrap();
+        assert!(regex.matches("KingdomCome.exe"));
+        assert!(!regex.matches("KingdomComeXexe"));
+
+        let literal_bracket = CompiledPattern::new("[".to_owned()).unwrap();
+        assert!(literal_bracket.matches("renderer[0]"));
+        assert!(CompiledPattern::new("/[/".to_owned()).is_err());
     }
 
     #[test]

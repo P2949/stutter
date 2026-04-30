@@ -20,7 +20,8 @@ pub struct SpikeRecord {
     pub prio: i32,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    pub target_runnable_depth: u32,
+    #[serde(alias = "target_runnable_depth")]
+    pub target_pending_wakeups: u32,
     #[serde(default)]
     pub major_faults: u32,
     #[serde(default)]
@@ -492,7 +493,7 @@ impl TaskStats {
                 prio: event.prio,
                 wakeup_ns: event.wakeup_ns,
                 switch_ns: event.switch_ns,
-                target_runnable_depth: event.target_runnable_depth,
+                target_pending_wakeups: event.target_pending_wakeups,
                 major_faults: event.maj_flt.saturating_sub(self.major_faults as u32),
                 minor_faults: event.min_flt.saturating_sub(self.minor_faults as u32),
             });

@@ -220,7 +220,7 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- restore --dry-run
 
 `apply-profile --force` discards an existing restore file. Without `--force`, new records are merged into the existing restore file while preserving the earliest original mask for each TID.
 
-Profile `match_comm` entries use the same substring matching as `--include-comm` unless the pattern is written as a regex, either by including regex metacharacters or by wrapping it in `/.../`. For example, `Render` can match `RenderThread`, `RenderWorker`, and `PreRenderer`; use a more specific regex when you need tighter matching.
+Profile `match_comm` entries use literal substring matching unless the whole pattern is wrapped in `/.../`. For example, `KingdomCome.exe` matches that literal dot, while `/KingdomCome[.]exe$/` is treated as a regex.
 
 ## Important interpretation notes
 
@@ -241,6 +241,10 @@ percentile_scope=histogram
 ```
 
 Histogram percentiles are approximate bucket upper bounds. `max` and threshold counters remain exact. Older recordings may still show `percentile_scope=capped_prefix`; for those, trust `max` and threshold counters more than p95/p99.
+
+`target_pending_wakeups` is a profiler-side counter of wakeups for monitored tasks, not Linux kernel runqueue depth. It is useful as a rough target-local pressure signal, but do not interpret it as scheduler `rq` depth.
+
+Block I/O overlap is approximate: `io_events.json` correlates request issue/complete by `dev+sector`, not exact request pointer identity, so concurrent same-sector requests can collide.
 
 ## Current task classes
 
@@ -297,7 +301,7 @@ Note: the CSV exporter is intentionally compact and omits some newer fields. `in
 - `--hwmon-render-node <PATH>`: choose the DRM render node whose device hwmon should be sampled.
 - `--mangohud-log <PATH>`: provide a MangoHud CSV to correlate frame times.
 - `--tui`: print a plain-text TUI status line periodically (non-interactive).
-- `stutter tune --tree-pid <PID> --profiles <FILE>`: apply each profile, record a real measurement epoch, score interval summaries, and restore after each candidate by default. Add `--keep-best` to reapply the best profile at the end.
+- `stutter tune --tree-pid <PID> --profiles <FILE>`: apply each profile, keep refreshing it for new threads during the measurement epoch, score interval summaries, and restore after each candidate by default. Add `--keep-best` to reapply the best profile at the end.
 
 ## What TUI prints (example)
 
