@@ -2283,19 +2283,15 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
     let filters = config.task_filters.clone();
     let keep_missing_pid = config.keep_missing_pid;
     let max_tasks = config.max_tasks;
-    let cgroup_refresh_active = config.cgroupv2.is_some();
 
     let mut process_cache_owned = std::mem::take(process_cache);
     let active_targets_clone = active_targets.clone();
 
     let (snapshot, returned_cache) = task::spawn_blocking(move || {
-        // Cgroup targeting is kept dynamic here: every refresh tick rescans
-        // cgroup.procs and cgroup.threads recursively, then resolves those IDs
-        // through the normal TaskInfo/classification snapshot path.
-        let target_pids = collect_target_pids_with_cgroup(target_pids, cgroup_path.as_deref());
         let snap = process_tree::target_snapshot_with_options(
             &target_pids,
             &tree_pids,
+            cgroup_path.as_deref(),
             &exclude_tree_pids,
             &filters,
             keep_missing_pid,
@@ -2327,7 +2323,6 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
         tree_events,
         &mut prev_faults_map,
         prev_faults_snapshot,
-        cgroup_refresh_active,
         elapsed_ms,
         recording_started,
     );
@@ -2348,7 +2343,7 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
                 if let Some(started) = recording_started {
                     tree_events.push(TreeEvent::from_task(
                         started,
-                        target_event_action(cgroup_refresh_active, "added"),
+                        target_event_action(diff.task.from_cgroup, "added"),
                         diff.task,
                     ));
                 }
@@ -2363,7 +2358,7 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
 
                 info!(
                     "{} tid={} process_pid={} ppid={} comm={} class={}",
-                    if cgroup_refresh_active {
+                    if diff.task.from_cgroup {
                         "cgroup_target_added"
                     } else {
                         "tree_target_added"
@@ -2378,12 +2373,12 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
             TargetDiffAction::Removed => {
                 let tid = diff.task.tid;
 
-                let remove_label = if cgroup_refresh_active {
+                let remove_label = if diff.task.from_cgroup {
                     "cgroup_target_removed"
                 } else {
                     "tree_target_removed"
                 };
-                let remove_failed_label = if cgroup_refresh_active {
+                let remove_failed_label = if diff.task.from_cgroup {
                     "cgroup_target_remove_failed"
                 } else {
                     "tree_target_remove_failed"
@@ -2396,7 +2391,7 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
                 if let Some(started) = recording_started {
                     tree_events.push(TreeEvent::from_task(
                         started,
-                        target_event_action(cgroup_refresh_active, "removed"),
+                        target_event_action(diff.task.from_cgroup, "removed"),
                         diff.task,
                     ));
                 }
@@ -2430,8 +2425,8 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
     Ok(())
 }
 
-fn target_event_action(cgroup_refresh_active: bool, action: &'static str) -> &'static str {
-    if cgroup_refresh_active {
+fn target_event_action(from_cgroup: bool, action: &'static str) -> &'static str {
+    if from_cgroup {
         match action {
             "added" => "cgroup_added",
             "removed" => "cgroup_removed",
@@ -2441,47 +2436,6 @@ fn target_event_action(cgroup_refresh_active: bool, action: &'static str) -> &'s
     } else {
         action
     }
-}
-
-fn collect_target_pids_with_cgroup(
-    mut target_pids: Vec<u32>,
-    cgroup_path: Option<&Path>,
-) -> Vec<u32> {
-    fn collect_recursive(path: &Path, pids: &mut Vec<u32>) {
-        let procs = path.join("cgroup.procs");
-        let threads = path.join("cgroup.threads");
-
-        let mut read_list = |file: &Path| {
-            if let Ok(content) = fs::read_to_string(file) {
-                for line in content.lines() {
-                    if let Ok(pid) = line.trim().parse::<u32>() {
-                        pids.push(pid);
-                    }
-                }
-            }
-        };
-
-        read_list(&procs);
-        read_list(&threads);
-
-        if let Ok(entries) = fs::read_dir(path) {
-            for entry in entries.flatten() {
-                if let Ok(file_type) = entry.file_type()
-                    && file_type.is_dir()
-                {
-                    collect_recursive(&entry.path(), pids);
-                }
-            }
-        }
-    }
-
-    if let Some(cgroup_path) = cgroup_path {
-        collect_recursive(cgroup_path, &mut target_pids);
-    }
-
-    target_pids.sort_unstable();
-    target_pids.dedup();
-    target_pids
 }
 
 fn should_replace_unknown_comm(current: &str, incoming: &str) -> bool {
@@ -2498,7 +2452,6 @@ fn handle_same_tid_replacements(
     tree_events: &mut Vec<TreeEvent>,
     prev_faults_map: &mut Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
     prev_faults_snapshot: &mut BTreeMap<u32, (u64, u64)>,
-    cgroup_refresh_active: bool,
     elapsed_ms: u128,
     recording_started: Option<Instant>,
 ) {
@@ -2524,14 +2477,14 @@ fn handle_same_tid_replacements(
         if let Some(started) = recording_started {
             tree_events.push(TreeEvent::from_task(
                 started,
-                target_event_action(cgroup_refresh_active, "replaced"),
+                target_event_action(desired_task.from_cgroup, "replaced"),
                 desired_task,
             ));
         }
 
         warn!(
             "{} tid={} old_process_pid={} old_comm={} old_class={} new_process_pid={} new_comm={} new_class={}",
-            if cgroup_refresh_active {
+            if desired_task.from_cgroup {
                 "cgroup_target_replaced"
             } else {
                 "tree_target_replaced"

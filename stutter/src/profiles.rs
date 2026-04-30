@@ -103,7 +103,7 @@ fn apply_profile_to_tree_with_cache(
     dry_run: bool,
     mut cache: Option<&mut ProfileApplyCache>,
 ) -> anyhow::Result<Vec<AffinityRecord>> {
-    let snapshot = process_tree::target_snapshot(&[], &[tree_pid]);
+    let snapshot = process_tree::target_snapshot(&[], &[tree_pid], None);
     let planned = planned_affinity_changes(&snapshot.tasks, profile, cache.as_deref_mut())?;
     if planned.is_empty() {
         return Ok(Vec::new());
@@ -459,6 +459,7 @@ mod tests {
             exe_ino: None,
             class: TaskClass::Game,
             sched_policy: None,
+            from_cgroup: false,
         };
         let tasks = BTreeMap::from([(7, task)]);
         let profile = Profile {

@@ -15,6 +15,9 @@ use stutter_common::{
     SchedulerEvent, StatWaitEvent,
 };
 
+#[unsafe(no_mangle)]
+static mut BLOCK_RQ_KEY_OFFSET: u32 = 0;
+
 #[map]
 // Userspace overrides this before loading the BPF object based on the current
 // memlock limit and available memory. The value here is only a safe fallback.
@@ -519,11 +522,21 @@ pub fn block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
         return Ok(0);
     }
     let ts = unsafe { bpf_ktime_get_ns() };
-    // Use a 64-bit mixed key of (sector, dev) instead of truncating the
-    // sector to 32 bits to avoid collisions across large sectors.
-    let key = sector.wrapping_mul(11400714819323198485u64)
-        ^ ((dev as u64).wrapping_mul(14029467366897019727u64));
-    if BLOCK_START.insert(key, IoStart { ts, tid }, 0).is_err() {
+    // If userspace detected a unique request pointer field (like `rq`), use it
+    // as the primary key. Otherwise fall back to a dev+sector hash.
+    let key = if unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) } != 0 {
+        unsafe {
+            ctx.read_at::<u64>(core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) as usize)
+                .unwrap_or(0)
+        }
+    } else {
+        // Use a 64-bit mixed key of (sector, dev) instead of truncating the
+        // sector to 32 bits to avoid collisions across large sectors.
+        sector.wrapping_mul(11400714819323198485u64)
+            ^ ((dev as u64).wrapping_mul(14029467366897019727u64))
+    };
+
+    if key != 0 && BLOCK_START.insert(key, IoStart { ts, tid }, 0).is_err() {
         increment_drop_counter(DROP_BLOCK_START_INSERT_FAILED);
     }
 
@@ -536,9 +549,22 @@ pub fn block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
     let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
     let nr_sector: u32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
     let rwbs: [u8; 8] = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
-    let key = sector.wrapping_mul(11400714819323198485u64)
-        ^ ((dev as u64).wrapping_mul(14029467366897019727u64));
-    let start = match unsafe { BLOCK_START.get(key) } {
+
+    let key = if unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) } != 0 {
+        unsafe {
+            ctx.read_at::<u64>(core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) as usize)
+                .unwrap_or(0)
+        }
+    } else {
+        sector.wrapping_mul(11400714819323198485u64)
+            ^ ((dev as u64).wrapping_mul(14029467366897019727u64))
+    };
+
+    let start = match if key != 0 {
+        unsafe { BLOCK_START.get(key) }
+    } else {
+        None
+    } {
         Some(s) => *s,
         None => return Ok(0),
     };

@@ -60,6 +60,7 @@ pub struct TaskStats {
     pub stat_wait_count: u64,
     pub major_faults: u64,
     pub minor_faults: u64,
+    pub from_cgroup: bool,
     histogram_truncation_warned: bool,
 }
 
@@ -444,6 +445,7 @@ impl TaskStats {
             stat_wait_count: 0,
             major_faults: 0,
             minor_faults: 0,
+            from_cgroup: false,
             histogram_truncation_warned: false,
         }
     }
@@ -457,6 +459,7 @@ impl TaskStats {
         self.exe_dev = task_info.exe_dev;
         self.exe_ino = task_info.exe_ino;
         self.sched_policy = task_info.sched_policy;
+        self.from_cgroup = task_info.from_cgroup;
 
         if should_replace_comm_from_task_info(&self.comm, task_info) {
             self.comm = task_info.comm.clone();

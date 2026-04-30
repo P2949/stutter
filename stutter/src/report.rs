@@ -630,6 +630,24 @@ pub(crate) fn render_report(
             ),
         );
         pushln(&mut output, "");
+
+        if session.block_io_event_count > 0 {
+            pushln(&mut output, "block i/o correlation warning");
+            pushln(&mut output, "----------------------------");
+            pushln(
+                &mut output,
+                "note: Block I/O correlation uses dev+sector hashing. Attribution to specific",
+            );
+            pushln(
+                &mut output,
+                "      tasks is best-effort and may collide if multiple concurrent requests",
+            );
+            pushln(
+                &mut output,
+                "      target the same device and sector. Exact attribution is not guaranteed.",
+            );
+            pushln(&mut output, "");
+        }
     }
 
     let truncated = session

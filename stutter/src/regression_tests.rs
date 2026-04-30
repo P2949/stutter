@@ -71,7 +71,6 @@ fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
         &mut tree_events,
         &mut prev_faults_map,
         &mut prev_faults_snapshot,
-        false,
         77,
         Some(Instant::now()),
     );
@@ -402,7 +401,7 @@ fn target_snapshot_adds_fallback_without_o_n_squared_duplicate_scan_behavior() {
     create_fake_proc(&dir, 10, 1, "root", "root", &[10]);
     create_fake_proc(&dir, 11, 10, "child", "child", &[]);
 
-    let snapshot = process_tree::target_snapshot_at(&dir, &[], &[10]);
+    let snapshot = process_tree::target_snapshot_at(&dir, &[], &[10], None);
 
     assert!(snapshot.process_roots.contains(&10));
     assert!(snapshot.process_roots.contains(&11));
@@ -416,7 +415,7 @@ fn target_snapshot_does_not_add_unknown_fallback_for_missing_tree_root() {
     let dir = temp_test_dir("proc-missing-tree-root");
     fs::create_dir_all(&dir).unwrap();
 
-    let snapshot = process_tree::target_snapshot_at(&dir, &[], &[42]);
+    let snapshot = process_tree::target_snapshot_at(&dir, &[], &[42], None);
 
     assert!(snapshot.tasks.is_empty());
     assert!(snapshot.process_roots.is_empty());
@@ -428,7 +427,7 @@ fn target_snapshot_drops_manual_missing_pid_by_default() {
     let dir = temp_test_dir("proc-missing-manual-pid");
     fs::create_dir_all(&dir).unwrap();
 
-    let snapshot = process_tree::target_snapshot_at(&dir, &[42], &[]);
+    let snapshot = process_tree::target_snapshot_at(&dir, &[42], &[], None);
 
     assert!(!snapshot.tasks.contains_key(&42));
     fs::remove_dir_all(dir).ok();
@@ -444,6 +443,7 @@ fn target_snapshot_keeps_manual_missing_pid_when_requested() {
         &dir,
         &[42],
         &[],
+        None,
         &[],
         &process_tree::TaskFilters::default(),
         true,
@@ -462,7 +462,7 @@ fn target_snapshot_accepts_manual_thread_ids() {
     let dir = temp_test_dir("proc-manual-thread-id");
     create_fake_proc(&dir, 10, 1, "game", "game", &[10, 11, 12]);
 
-    let snapshot = process_tree::target_snapshot_at(&dir, &[11], &[]);
+    let snapshot = process_tree::target_snapshot_at(&dir, &[11], &[], None);
 
     assert_eq!(snapshot.tasks.keys().copied().collect::<Vec<_>>(), vec![11]);
     let task = snapshot.tasks.get(&11).unwrap();
@@ -609,7 +609,7 @@ fn target_snapshot_filters_include_and_exclude_comm_patterns() {
         include_comm: vec!["thread".to_owned()],
         exclude_comm: vec!["STEAMWEBHELPER".to_owned()],
     };
-    let snapshot = process_tree::target_snapshot_filtered_at(&dir, &[], &[10], &filters);
+    let snapshot = process_tree::target_snapshot_filtered_at(&dir, &[], &[10], None, &filters);
 
     assert!(
         snapshot
@@ -637,7 +637,7 @@ fn target_snapshot_prefetches_exe_inode_metadata() {
     let dir = temp_test_dir("proc-exe-inode");
     create_fake_proc(&dir, 10, 1, "game", "KingdomCome.exe", &[10]);
 
-    let snapshot = process_tree::target_snapshot_at(&dir, &[], &[10]);
+    let snapshot = process_tree::target_snapshot_at(&dir, &[], &[10], None);
     let task = snapshot.tasks.get(&10).unwrap();
 
     assert!(task.exe_dev.is_some());
@@ -675,6 +675,7 @@ fn target_snapshot_reads_fresh_task_comm_with_previous_tasks() {
         &dir,
         &[],
         &[10],
+        None,
         &[],
         &process_tree::TaskFilters::default(),
         false,
@@ -689,6 +690,7 @@ fn target_snapshot_reads_fresh_task_comm_with_previous_tasks() {
         &dir,
         &[],
         &[10],
+        None,
         &[],
         &process_tree::TaskFilters::default(),
         false,
@@ -709,7 +711,9 @@ fn cgroup_target_pid_collection_parses_sorts_and_dedups() {
     fs::write(dir.join("child/cgroup.procs"), "50\n").unwrap();
     fs::write(dir.join("child/cgroup.threads"), "60\n").unwrap();
 
-    let target_pids = super::collect_target_pids_with_cgroup(vec![20, 1], Some(&dir));
+    let mut pids_set = std::collections::BTreeSet::from([1, 20]);
+    process_tree::collect_cgroup_pids_at(&dir, &mut pids_set);
+    let target_pids: Vec<_> = pids_set.into_iter().collect();
 
     assert_eq!(target_pids, vec![1, 10, 20, 30, 40, 50, 60]);
     fs::remove_dir_all(dir).ok();
@@ -758,6 +762,7 @@ fn target_snapshot_respects_exclude_tree_pids() {
         &dir,
         &[],
         &[100],
+        None,
         &[102],
         &process_tree::TaskFilters::default(),
         false,
@@ -1320,6 +1325,7 @@ fn task_info(
         exe_ino: None,
         class,
         sched_policy: None,
+        from_cgroup: false,
     }
 }
 
