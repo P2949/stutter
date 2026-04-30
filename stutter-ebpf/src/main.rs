@@ -250,9 +250,14 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
     }
 
     let pid = pid as u32;
-
+    // If the PID/TID maps do not claim this task, also check the current
+    // cgroup id as a heuristic so cgroup-only targets can be tracked when
+    // the per-TID set hasn't been populated yet.
     if !is_target_pid(pid) {
-        return Ok(0);
+        let cur_cgroup = unsafe { bpf_get_current_cgroup_id() };
+        if unsafe { TARGET_CGROUP_IDS.get(&cur_cgroup).is_none() } {
+            return Ok(0);
+        }
     }
 
     let now = unsafe { bpf_ktime_get_ns() };
@@ -261,7 +266,8 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
         increment_drop_counter(DROP_WAKEUP_TIMES_INSERT_FAILED);
     }
 
-    let target_cpu: u32 = unsafe { ctx.read_at(36).map_err(|_| 1u32)? };
+    // The tracepoint field `target_cpu` is at offset 32 (after pid/prio).
+    let target_cpu: u32 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
     if let Some(depth) = RQ_DEPTH.get_ptr_mut(target_cpu) {
         unsafe { *depth = (*depth).saturating_add(1) };
     }
@@ -511,8 +517,10 @@ pub fn block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
     let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
     let ts = unsafe { bpf_ktime_get_ns() };
-
-    let key = (dev as u64) << 32 | (sector & 0xffff_ffff);
+    // Use a 64-bit mixed key of (sector, dev) instead of truncating the
+    // sector to 32 bits to avoid collisions across large sectors.
+    let key = sector.wrapping_mul(11400714819323198485u64)
+        ^ ((dev as u64).wrapping_mul(14029467366897019727u64));
     if BLOCK_START.insert(&key, &IoStart { ts, tid }, 0).is_err() {
         increment_drop_counter(DROP_BLOCK_START_INSERT_FAILED);
     }
@@ -526,8 +534,8 @@ pub fn block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
     let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
     let nr_sector: u32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
     let rwbs: [u8; 8] = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
-
-    let key = (dev as u64) << 32 | (sector & 0xffff_ffff);
+    let key = sector.wrapping_mul(11400714819323198485u64)
+        ^ ((dev as u64).wrapping_mul(14029467366897019727u64));
     let start = match unsafe { BLOCK_START.get(&key) } {
         Some(s) => *s,
         None => return Ok(0),

@@ -273,7 +273,25 @@ async fn tune_command(
             }
         };
 
-        let score = scorer::score_from_interval_records(&interval_records);
+        let mut score = scorer::score_from_interval_records(&interval_records);
+
+        // Reject / penalize candidates that did not gather enough data to be
+        // meaningfully comparable. These thresholds are conservative: at
+        // minimum require a couple of intervals and a modest number of
+        // scheduler samples.
+        const TUNE_MIN_INTERVALS: usize = 2;
+        const TUNE_MIN_SAMPLES: u64 = 50;
+        let interval_count = interval_records.len();
+        let sample_count: u64 = interval_records.iter().map(|r| r.samples).sum();
+        if interval_count < TUNE_MIN_INTERVALS || sample_count < TUNE_MIN_SAMPLES {
+            warn!(
+                "tune_candidate_insufficient_data profile={} intervals={} samples={}",
+                profile.name, interval_count, sample_count
+            );
+            // Inflate the score so this candidate loses to better-measured ones.
+            score.total = u64::MAX / 4;
+        }
+
         let result = TuneCandidateSummary {
             profile: profile.name.clone(),
             applied_tasks: records.len(),

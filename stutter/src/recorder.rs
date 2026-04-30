@@ -177,7 +177,9 @@ pub struct SpikeEventBuffer {
 impl Default for SpikeEventBuffer {
     fn default() -> Self {
         Self {
-            events: Vec::with_capacity(MAX_SPIKE_EVENTS),
+            // Avoid eagerly allocating a very large buffer for spike events.
+            // Start empty and grow on demand.
+            events: Vec::new(),
             truncated: false,
             max_events: MAX_SPIKE_EVENTS,
         }
