@@ -514,8 +514,34 @@ pub fn find_auto_target_pids(proc_root: &Path) -> Vec<(u32, TaskClass)> {
 
     for class in priorities {
         if let Some(pids) = candidates.get(&class) {
+            // Special-case SteamRuntime: prefer an exact game-like cmdline under
+            // steamapps/common, otherwise prefer the newest (highest) PID to
+            // avoid selecting broad persistent runtime trees.
+            if class == TaskClass::SteamRuntime {
+                let mut game_like: Vec<(u32, TaskClass)> = Vec::new();
+                for pid in pids {
+                    if let Some(proc_info) = read_proc_info_at(proc_root, *pid)
+                        && contains_likely_game_cmdline(&proc_info.cmdline)
+                    {
+                        game_like.push((*pid, class));
+                    }
+                }
+                if !game_like.is_empty() {
+                    game_like.sort_unstable_by_key(|(pid, _)| std::cmp::Reverse(*pid));
+                    return game_like;
+                }
+
+                let mut result: Vec<_> = pids.iter().map(|pid| (*pid, class)).collect();
+                result.sort_unstable_by_key(|(pid, _)| std::cmp::Reverse(*pid));
+                // Return only the newest PID to avoid overly broad selections.
+                if let Some(first) = result.into_iter().next() {
+                    return vec![first];
+                }
+                return Vec::new();
+            }
+
             let mut result: Vec<_> = pids.iter().map(|pid| (*pid, class)).collect();
-            result.sort_unstable_by_key(|(pid, _)| *pid);
+            result.sort_unstable_by_key(|(pid, _)| std::cmp::Reverse(*pid));
             return result;
         }
     }

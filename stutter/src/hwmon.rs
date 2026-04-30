@@ -318,11 +318,17 @@ fn start_nvidia_smi_thread() -> NvidiaWorker {
                 *latest = Some(sample);
             }
 
-            for _ in 0..50 {
+            // Sleep in small increments but with a larger total interval to
+            // avoid spawning `nvidia-smi` frequently. Default total wait is
+            // 5s, checked every 100ms so the worker can shut down promptly.
+            let total_ms = 5_000u64;
+            let step_ms = 100u64;
+            let iterations = (total_ms / step_ms) as usize;
+            for _ in 0..iterations {
                 if state_clone.shutdown.load(Ordering::Relaxed) {
                     break;
                 }
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                std::thread::sleep(std::time::Duration::from_millis(step_ms));
             }
         }
     });

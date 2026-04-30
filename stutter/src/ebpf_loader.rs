@@ -96,7 +96,6 @@ pub fn load_and_attach(
         map_sizing.events_ringbuf_bytes,
         map_sizing.wakeup_times_entries,
     );
-
     let tracepoints = validate_tracepoint_formats(Path::new("/sys/kernel/tracing/events"))
         .map_err(|e| crate::error::StutterError::TracepointOffsetMismatch(e.to_string()))?;
 
@@ -179,10 +178,15 @@ pub fn load_and_attach(
         .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
 
-    attach_software_perf_event(&mut ebpf, "major_fault", 4) // PERF_COUNT_SW_PAGE_FAULTS_MAJ
-        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
-    attach_software_perf_event(&mut ebpf, "minor_fault", 3) // PERF_COUNT_SW_PAGE_FAULTS_MIN
-        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    // Fault perf events are optional correlation probes. If perf_event_open
+    // is blocked by policy or capabilities, log a warning and continue rather
+    // than aborting the whole profiler startup.
+    if let Err(e) = attach_software_perf_event(&mut ebpf, "major_fault", 4) {
+        log::warn!("failed to attach major_fault perf event; continuing without fault probes: {}", e);
+    }
+    if let Err(e) = attach_software_perf_event(&mut ebpf, "minor_fault", 3) {
+        log::warn!("failed to attach minor_fault perf event; continuing without fault probes: {}", e);
+    }
 
     let target_pid_map = AyaHashMap::try_from(ebpf.take_map("TARGET_PIDS").ok_or_else(|| {
         crate::error::StutterError::EbpfLoad("TARGET_PIDS map not found".to_owned())
@@ -506,7 +510,7 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         )?;
         validate_tracepoint_format_at(
             &block_rq_complete,
-            &[("dev", 8), ("sector", 16), ("nr_sector", 24)],
+            &[("dev", 8), ("sector", 16), ("nr_sector", 24), ("rwbs", 32)],
         )?;
         true
     } else {
