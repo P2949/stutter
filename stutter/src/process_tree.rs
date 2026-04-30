@@ -57,6 +57,21 @@ impl TaskClass {
             Self::Unknown => "Unknown",
         }
     }
+
+    pub fn from_str_opt(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "game" => Some(Self::Game),
+            "gamehelper" => Some(Self::GameHelper),
+            "launcher" => Some(Self::Launcher),
+            "wineserver" => Some(Self::WineServer),
+            "gamescope" => Some(Self::GameScope),
+            "compositor" => Some(Self::Compositor),
+            "steamruntime" => Some(Self::SteamRuntime),
+            "helper" => Some(Self::Helper),
+            "unknown" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for TaskClass {

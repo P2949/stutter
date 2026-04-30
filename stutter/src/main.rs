@@ -122,11 +122,16 @@ async fn main() -> anyhow::Result<()> {
             html,
             top,
             cluster_window_ms,
+            diff,
+            filter_class,
         } => {
-            if let Some(html_path) = html {
-                report::write_html_report(&path, &html_path, top, cluster_window_ms)?;
+            if let Some(diff_path) = diff {
+                return report::print_diff_report(&path, &diff_path, top, filter_class);
             }
-            report::print_report(&path, json, top, cluster_window_ms)
+            if let Some(html_path) = html {
+                report::write_html_report(&path, &html_path, top, cluster_window_ms, filter_class)?;
+            }
+            report::print_report(&path, json, top, cluster_window_ms, filter_class)
         }
         AppCommand::Tune {
             tree_pid,

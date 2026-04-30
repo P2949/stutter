@@ -78,6 +78,7 @@ pub fn print_report(
     json: bool,
     top: usize,
     cluster_window_ms: u64,
+    filter_class: Option<TaskClass>,
 ) -> anyhow::Result<()> {
     let session_path = if path.is_dir() {
         path.join("session.json")
@@ -104,10 +105,194 @@ pub fn print_report(
             spike_events.as_deref(),
             &artifacts,
             top,
-            cluster_window_ms
+            cluster_window_ms,
+            filter_class,
         )
     );
 
+    Ok(())
+}
+
+pub fn print_diff_report(
+    path_a: &Path,
+    path_b: &Path,
+    top: usize,
+    filter_class: Option<TaskClass>,
+) -> anyhow::Result<()> {
+    let load_session = |path: &Path| -> anyhow::Result<SessionFile> {
+        let session_path = if path.is_dir() {
+            path.join("session.json")
+        } else {
+            path.to_path_buf()
+        };
+        let data = fs::read_to_string(&session_path)
+            .with_context(|| format!("failed to read {}", session_path.display()))?;
+        serde_json::from_str(&data)
+            .with_context(|| format!("failed to parse {}", session_path.display()))
+    };
+
+    let session_a = load_session(path_a)?;
+    let session_b = load_session(path_b)?;
+
+    let mut output = String::new();
+    pushln(&mut output, "stutter diff report");
+    pushln(&mut output, "===================");
+    pushln(
+        &mut output,
+        format!(
+            "run_a: {} ({}ms)",
+            session_a.run_name.as_deref().unwrap_or("-"),
+            session_a.duration_ms,
+        ),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "run_b: {} ({}ms)",
+            session_b.run_name.as_deref().unwrap_or("-"),
+            session_b.duration_ms,
+        ),
+    );
+    pushln(&mut output, "");
+
+    let tasks_a: BTreeMap<(u32, &str), &SessionTask> = session_a
+        .tasks
+        .iter()
+        .filter(|t| t.latency.samples > 0)
+        .filter(|t| filter_class.is_none_or(|c| t.class == c))
+        .map(|t| ((t.task, t.comm.as_str()), t))
+        .collect();
+    let tasks_b: BTreeMap<(u32, &str), &SessionTask> = session_b
+        .tasks
+        .iter()
+        .filter(|t| t.latency.samples > 0)
+        .filter(|t| filter_class.is_none_or(|c| t.class == c))
+        .map(|t| ((t.task, t.comm.as_str()), t))
+        .collect();
+
+    struct TaskDelta {
+        task: u32,
+        comm: String,
+        class: TaskClass,
+        delta_max_ns: i64,
+        delta_p99_ns: i64,
+        delta_over_1ms: i64,
+        max_a: u64,
+        max_b: u64,
+    }
+
+    let mut regressions = Vec::new();
+    let mut improvements = Vec::new();
+
+    for (key, ta) in &tasks_a {
+        if let Some(tb) = tasks_b.get(key) {
+            let delta_max = tb.latency.max_ns as i64 - ta.latency.max_ns as i64;
+            let delta_p99 = tb.latency.p99_ns as i64 - ta.latency.p99_ns as i64;
+            let delta_over = tb.latency.over_1ms as i64 - ta.latency.over_1ms as i64;
+            let d = TaskDelta {
+                task: key.0,
+                comm: key.1.to_owned(),
+                class: ta.class,
+                delta_max_ns: delta_max,
+                delta_p99_ns: delta_p99,
+                delta_over_1ms: delta_over,
+                max_a: ta.latency.max_ns,
+                max_b: tb.latency.max_ns,
+            };
+            if delta_max > 0 {
+                regressions.push(d);
+            } else if delta_max < 0 {
+                improvements.push(d);
+            }
+        }
+    }
+
+    regressions.sort_by_key(|d| std::cmp::Reverse(d.delta_max_ns));
+    improvements.sort_by_key(|d| d.delta_max_ns);
+
+    pushln(&mut output, "regressions (worse in run_b)");
+    pushln(&mut output, "---------------------------");
+    if regressions.is_empty() {
+        pushln(&mut output, "none");
+    }
+    for d in regressions.iter().take(top) {
+        pushln(
+            &mut output,
+            format!(
+                "task={} class={:?} comm={} max: {} -> {} (delta={}) p99_delta={} over_1ms_delta={}",
+                d.task,
+                d.class,
+                d.comm,
+                format_latency(d.max_a),
+                format_latency(d.max_b),
+                format_latency_signed(d.delta_max_ns),
+                format_latency_signed(d.delta_p99_ns),
+                if d.delta_over_1ms >= 0 {
+                    format!("+{}", d.delta_over_1ms)
+                } else {
+                    d.delta_over_1ms.to_string()
+                },
+            ),
+        );
+    }
+    pushln(&mut output, "");
+
+    pushln(&mut output, "improvements (better in run_b)");
+    pushln(&mut output, "-----------------------------");
+    if improvements.is_empty() {
+        pushln(&mut output, "none");
+    }
+    for d in improvements.iter().take(top) {
+        pushln(
+            &mut output,
+            format!(
+                "task={} class={:?} comm={} max: {} -> {} (delta={}) p99_delta={} over_1ms_delta={}",
+                d.task,
+                d.class,
+                d.comm,
+                format_latency(d.max_a),
+                format_latency(d.max_b),
+                format_latency_signed(d.delta_max_ns),
+                format_latency_signed(d.delta_p99_ns),
+                if d.delta_over_1ms >= 0 {
+                    format!("+{}", d.delta_over_1ms)
+                } else {
+                    d.delta_over_1ms.to_string()
+                },
+            ),
+        );
+    }
+    pushln(&mut output, "");
+
+    // Tasks only in one run
+    let new_tasks: Vec<_> = tasks_b
+        .keys()
+        .filter(|k| !tasks_a.contains_key(k))
+        .collect();
+    let removed_tasks: Vec<_> = tasks_a
+        .keys()
+        .filter(|k| !tasks_b.contains_key(k))
+        .collect();
+
+    if !new_tasks.is_empty() {
+        pushln(&mut output, "new tasks (only in run_b)");
+        pushln(&mut output, "------------------------");
+        for (task, comm) in new_tasks.iter().take(top) {
+            pushln(&mut output, format!("task={task} comm={comm}"));
+        }
+        pushln(&mut output, "");
+    }
+
+    if !removed_tasks.is_empty() {
+        pushln(&mut output, "removed tasks (only in run_a)");
+        pushln(&mut output, "----------------------------");
+        for (task, comm) in removed_tasks.iter().take(top) {
+            pushln(&mut output, format!("task={task} comm={comm}"));
+        }
+        pushln(&mut output, "");
+    }
+
+    print!("{output}");
     Ok(())
 }
 
@@ -116,6 +301,7 @@ pub fn write_html_report(
     html_path: &Path,
     top: usize,
     cluster_window_ms: u64,
+    filter_class: Option<TaskClass>,
 ) -> anyhow::Result<()> {
     let session_path = if path.is_dir() {
         path.join("session.json")
@@ -135,6 +321,7 @@ pub fn write_html_report(
         &artifacts,
         top,
         cluster_window_ms,
+        filter_class,
     );
     let html = render_html_report(
         &session,
@@ -192,6 +379,7 @@ pub(crate) fn render_report(
     artifacts: &RunArtifacts,
     top: usize,
     cluster_window_ms: u64,
+    filter_class: Option<TaskClass>,
 ) -> String {
     let mut output = String::new();
 
@@ -322,17 +510,24 @@ pub(crate) fn render_report(
         .tasks
         .iter()
         .filter(|task| task.latency.samples > 0)
+        .filter(|task| filter_class.is_none_or(|c| task.class == c))
         .collect::<Vec<_>>();
 
     tasks.sort_by_key(|task| std::cmp::Reverse(task.latency.max_ns));
 
     pushln(&mut output, "top tasks by max latency");
     pushln(&mut output, "------------------------");
+    let duration_secs = session.duration_ms as f64 / 1000.0;
     for task in tasks.iter().take(top) {
+        let spike_rate = if duration_secs > 0.0 {
+            task.latency.over_1ms as f64 / duration_secs
+        } else {
+            0.0
+        };
         pushln(
             &mut output,
             format!(
-                "task={} active={} class={:?} comm={} process_pid={:?} samples={} max={} over_1ms={} over_2ms={} over_5ms={} percentile_scope={}",
+                "task={} active={} class={:?} comm={} process_pid={:?} samples={} max={} over_1ms={} over_2ms={} over_5ms={} spike_rate_per_s={:.1} percentile_scope={}",
                 task.task,
                 task.active,
                 task.class,
@@ -343,6 +538,7 @@ pub(crate) fn render_report(
                 task.latency.over_1ms,
                 task.latency.over_2ms,
                 task.latency.over_5ms,
+                spike_rate,
                 task.latency.percentile_scope,
             ),
         );
@@ -361,10 +557,15 @@ pub(crate) fn render_report(
     pushln(&mut output, "top tasks by threshold counters");
     pushln(&mut output, "-------------------------------");
     for task in tasks.iter().take(top) {
+        let spike_rate = if duration_secs > 0.0 {
+            task.latency.over_1ms as f64 / duration_secs
+        } else {
+            0.0
+        };
         pushln(
             &mut output,
             format!(
-                "task={} active={} class={:?} comm={} over_5ms={} over_2ms={} over_1ms={} max={}",
+                "task={} active={} class={:?} comm={} over_5ms={} over_2ms={} over_1ms={} spike_rate_per_s={:.1} max={}",
                 task.task,
                 task.active,
                 task.class,
@@ -372,6 +573,7 @@ pub(crate) fn render_report(
                 task.latency.over_5ms,
                 task.latency.over_2ms,
                 task.latency.over_1ms,
+                spike_rate,
                 format_latency(task.latency.max_ns),
             ),
         );
@@ -479,6 +681,12 @@ fn pushln(output: &mut String, line: impl AsRef<str>) {
     output.push('\n');
 }
 
+fn format_latency_signed(ns: i64) -> String {
+    let abs_ns = ns.unsigned_abs();
+    let sign = if ns >= 0 { "+" } else { "-" };
+    format!("{sign}{}", format_latency(abs_ns))
+}
+
 fn spike_cluster_analysis(
     session: &SessionFile,
     spike_events: Option<&[SpikeEvent]>,
@@ -569,17 +777,29 @@ fn spike_clusters_from_points(
     });
 
     let mut selected_candidates = Vec::new();
-    let max_selected = top.saturating_mul(4).min(MAX_CLUSTER_CANDIDATES); // Cap it. Using MAX_CLUSTER_CANDIDATES as upper bound if top is small.
+    let max_selected = top.saturating_mul(4).min(MAX_CLUSTER_CANDIDATES);
 
-    'candidate: for candidate in candidates {
-        for existing in &selected_candidates {
-            if cluster_candidates_overlap(existing, &candidate) {
-                continue 'candidate;
+    // Sweep-line: track selected intervals by max_switch_ns in a BTreeSet
+    // for O(log n) overlap checking instead of O(n) per candidate.
+    let mut selected_intervals: BTreeSet<(u64, u64)> = BTreeSet::new(); // (max_switch_ns, min_switch_ns)
+
+    for candidate in candidates {
+        // Check for overlap: we need intervals where
+        //   existing.min_switch_ns <= candidate.max_switch_ns AND
+        //   existing.max_switch_ns >= candidate.min_switch_ns
+        //
+        // Since intervals are stored as (max_switch_ns, min_switch_ns),
+        // we look for entries whose max_switch_ns >= candidate.min_switch_ns.
+        let overlaps = selected_intervals
+            .range((candidate.min_switch_ns, 0)..)
+            .any(|(_, min_ns)| *min_ns <= candidate.max_switch_ns);
+
+        if !overlaps {
+            selected_intervals.insert((candidate.max_switch_ns, candidate.min_switch_ns));
+            selected_candidates.push(candidate);
+            if selected_candidates.len() >= max_selected {
+                break;
             }
-        }
-        selected_candidates.push(candidate);
-        if selected_candidates.len() >= max_selected {
-            break;
         }
     }
 
@@ -721,10 +941,6 @@ fn cluster_from_points(mut points: Vec<SpikePoint>, distinct_tasks: usize) -> Sp
         max_switch_ns,
         max_latency_ns,
     }
-}
-
-fn cluster_candidates_overlap(left: &SpikeClusterCandidate, right: &SpikeClusterCandidate) -> bool {
-    left.min_switch_ns <= right.max_switch_ns && right.min_switch_ns <= left.max_switch_ns
 }
 
 fn render_cluster_source(analysis: &SpikeClusterAnalysis, cluster_window_ms: u64) -> String {
