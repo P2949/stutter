@@ -15,11 +15,13 @@ use crate::{
     },
 };
 
+use serde::Serialize;
+
 const MIN_CLUSTER_TASKS: usize = 3;
 const MAX_INLINE_CLUSTER_POINTS: usize = 8;
 const MAX_CLUSTER_CANDIDATES: usize = 4096;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 struct SpikePoint {
     task: u32,
     class: TaskClass,
@@ -32,7 +34,7 @@ struct SpikePoint {
     elapsed_ms: Option<u128>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 struct SpikeCluster {
     points: Vec<SpikePoint>,
     distinct_tasks: usize,
@@ -41,19 +43,20 @@ struct SpikeCluster {
     max_latency_ns: u64,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 enum SpikeClusterSource {
     SpikeEvents,
     TopSpikesFallback,
 }
 
+#[derive(Serialize)]
 struct SpikeClusterAnalysis {
     source: SpikeClusterSource,
     source_count: usize,
     clusters: Vec<SpikeCluster>,
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize)]
 pub(crate) struct RunArtifacts {
     pub(crate) irq_events: Vec<IrqEventRecord>,
     pub(crate) gpu_samples: Vec<GpuSample>,
@@ -139,6 +142,7 @@ pub fn write_html_report(
         &artifacts,
         &text_report,
         top,
+        cluster_window_ms,
     );
     if let Some(parent) = html_path.parent() {
         fs::create_dir_all(parent)?;
@@ -147,200 +151,31 @@ pub fn write_html_report(
         .with_context(|| format!("failed to write HTML report {}", html_path.display()))?;
     Ok(())
 }
-
 fn render_html_report(
     session: &SessionFile,
     spike_events: Option<&[SpikeEvent]>,
     artifacts: &RunArtifacts,
     text_report: &str,
     top: usize,
+    cluster_window_ms: u64,
 ) -> String {
-    let mut tasks = session
-        .tasks
-        .iter()
-        .filter(|task| task.latency.samples > 0)
-        .collect::<Vec<_>>();
-    tasks.sort_by_key(|task| std::cmp::Reverse(task.latency.max_ns));
-    tasks.truncate(top);
+    let session_json = serde_json::to_string(session).unwrap_or_else(|_| "{}".to_owned());
+    let spike_events_json = serde_json::to_string(&spike_events).unwrap_or_else(|_| "null".to_owned());
+    let artifacts_json = serde_json::to_string(artifacts).unwrap_or_else(|_| "{}".to_owned());
+    
+    let cluster_window_ns = cluster_window_ms.saturating_mul(1_000_000);
+    let cluster_analysis = spike_cluster_analysis(session, spike_events, cluster_window_ns, top);
+    let cluster_analysis_json = serde_json::to_string(&cluster_analysis).unwrap_or_else(|_| "{}".to_owned());
 
-    let labels = tasks
-        .iter()
-        .map(|task| json_string(&format!("{}:{}", task.task, task.comm)))
-        .collect::<Vec<_>>()
-        .join(",");
-    let max_values = tasks
-        .iter()
-        .map(|task| task.latency.max_ns.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-    let spike_points = spike_events
-        .map(|events| {
-            events
-                .iter()
-                .take(512)
-                .map(|event| {
-                    format!(
-                        "{{x:{},y:{},label:{}}}",
-                        event
-                            .elapsed_ms
-                            .unwrap_or(u128::from(event.switch_ns / 1_000_000)),
-                        event.latency_ns as f64 / 1_000_000.0,
-                        json_string(&format!("{}:{}", event.task, event.comm))
-                    )
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_else(|| {
-            session
-                .top_spikes
-                .iter()
-                .take(128)
-                .map(|spike| {
-                    format!(
-                        "{{x:{},y:{},label:{}}}",
-                        spike.switch_ns / 1_000_000,
-                        spike.latency_ns as f64 / 1_000_000.0,
-                        json_string(&format!("{}:{}", spike.task, spike.comm))
-                    )
-                })
-                .collect::<Vec<_>>()
-        })
-        .join(",");
-    let cpu_points = tasks
-        .iter()
-        .flat_map(|task| {
-            task.cpu.per_cpu.iter().map(move |cpu| {
-                format!(
-                    "{{task:{},cpu:{},value:{}}}",
-                    task.task,
-                    cpu.cpu,
-                    cpu.max_ns as f64 / 1_000_000.0
-                )
-            })
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    let gpu_points = artifacts
-        .gpu_samples
-        .iter()
-        .filter_map(|sample| {
-            sample
-                .gpu_busy_percent
-                .map(|busy| format!("{{x:{},y:{}}}", sample.elapsed_ms, busy))
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!(
-        r#"<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>stutter report</title>
-<style>
-body {{ font-family: system-ui, sans-serif; margin: 24px; color: #202124; }}
-canvas {{ width: 100%; max-width: 960px; height: 320px; border: 1px solid #ddd; }}
-section {{ margin-bottom: 28px; }}
-pre {{ white-space: pre-wrap; background: #f6f8fa; padding: 16px; overflow: auto; }}
-</style>
-</head>
-<body>
-<h1>stutter report</h1>
-<section><h2>Task Max Latency</h2><canvas id="latency"></canvas></section>
-<section><h2>Spike Timeline</h2><canvas id="spikes"></canvas></section>
-<section><h2>Per-CPU Heatmap</h2><canvas id="cpu"></canvas></section>
-<section><h2>GPU Busy</h2><canvas id="gpu"></canvas></section>
-<pre>{}</pre>
-<script>
-const labels = [{}];
-const values = [{}];
-const spikes = [{}];
-const cpuPoints = [{}];
-const gpuPoints = [{}];
-
-function setup(id) {{
-  const canvas = document.getElementById(id);
-  const ctx = canvas.getContext('2d');
-  canvas.width = canvas.clientWidth * devicePixelRatio;
-  canvas.height = canvas.clientHeight * devicePixelRatio;
-  ctx.scale(devicePixelRatio, devicePixelRatio);
-  return [canvas, ctx, canvas.clientWidth, canvas.clientHeight];
-}}
-
-let [canvas, ctx, w, h] = setup('latency');
-const max = Math.max(1, ...values);
-ctx.fillStyle = '#f8fbff';
-ctx.fillRect(0, 0, w, h);
-values.forEach((value, idx) => {{
-  const barW = Math.max(8, (w - 80) / Math.max(1, values.length) - 6);
-  const x = 50 + idx * (barW + 6);
-  const barH = (h - 70) * value / max;
-  ctx.fillStyle = '#2563eb';
-  ctx.fillRect(x, h - 40 - barH, barW, barH);
-  ctx.save();
-  ctx.translate(x, h - 28);
-  ctx.rotate(-Math.PI / 5);
-  ctx.fillStyle = '#333';
-  ctx.font = '11px system-ui';
-  ctx.fillText(labels[idx], 0, 0);
-  ctx.restore();
-}});
-ctx.fillStyle = '#111';
-ctx.font = '13px system-ui';
-ctx.fillText('Top task max latency (ns)', 16, 22);
-
-[canvas, ctx, w, h] = setup('spikes');
-drawScatter(ctx, w, h, spikes, 'Scheduler spikes (ms)', '#dc2626');
-
-[canvas, ctx, w, h] = setup('gpu');
-drawScatter(ctx, w, h, gpuPoints, 'GPU busy %', '#16a34a');
-
-[canvas, ctx, w, h] = setup('cpu');
-ctx.fillStyle = '#fff7ed';
-ctx.fillRect(0, 0, w, h);
-const maxCpu = Math.max(1, ...cpuPoints.map(p => p.value));
-cpuPoints.forEach((p, idx) => {{
-  const x = 40 + (idx % 32) * 24;
-  const y = 40 + Math.floor(idx / 32) * 22;
-  const alpha = Math.max(0.15, p.value / maxCpu);
-  ctx.fillStyle = `rgba(234,88,12,${{alpha}})`;
-  ctx.fillRect(x, y, 20, 18);
-}});
-ctx.fillStyle = '#111';
-ctx.font = '13px system-ui';
-ctx.fillText('Per-task CPU max latency heatmap', 16, 22);
-
-function drawScatter(ctx, w, h, points, title, color) {{
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = '#111';
-  ctx.font = '13px system-ui';
-  ctx.fillText(title, 16, 22);
-  const maxX = Math.max(1, ...points.map(p => p.x));
-  const maxY = Math.max(1, ...points.map(p => p.y));
-  ctx.fillStyle = color;
-  points.forEach(p => {{
-    const x = 40 + (w - 70) * p.x / maxX;
-    const y = h - 35 - (h - 70) * p.y / maxY;
-    ctx.beginPath();
-    ctx.arc(x, y, 3, 0, Math.PI * 2);
-    ctx.fill();
-  }});
-}}
-</script>
-</body>
-</html>"#,
-        html_escape(text_report),
-        labels,
-        max_values,
-        spike_points,
-        cpu_points,
-        gpu_points
-    )
-}
-
-fn json_string(value: &str) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_owned())
+    let template = include_str!("report_template.html");
+    
+    template
+        .replace("{text_report}", &html_escape(text_report))
+        .replace("{session_json}", &session_json)
+        .replace("{spike_events_json}", &spike_events_json)
+        .replace("{artifacts_json}", &artifacts_json)
+        .replace("{cluster_analysis_json}", &cluster_analysis_json)
+        .replace("{top}", &top.to_string())
 }
 
 fn html_escape(value: &str) -> String {

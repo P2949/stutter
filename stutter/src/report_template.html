@@ -1,0 +1,257 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>stutter report</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+<style>
+body { font-family: system-ui, sans-serif; margin: 24px; color: #202124; background: #f8f9fa; }
+.chart-container { position: relative; height: 400px; width: 100%; max-width: 1080px; margin-bottom: 28px; background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.small-chart-container { position: relative; height: 250px; width: 100%; max-width: 520px; margin-bottom: 16px; background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: inline-block; vertical-align: top; margin-right: 16px; }
+section { margin-bottom: 32px; }
+pre { white-space: pre-wrap; background: #fff; padding: 16px; overflow: auto; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+h1, h2, h3 { color: #111827; }
+table { border-collapse: collapse; width: 100%; max-width: 1080px; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; }
+th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+th { background: #f3f4f6; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>stutter report</h1>
+
+<section id="metadata-section">
+  <h2>System Metadata</h2>
+  <div id="metadata-content"></div>
+</section>
+
+<section>
+  <h2>Task Max Latency</h2>
+  <div class="chart-container"><canvas id="latency"></canvas></div>
+</section>
+
+<section>
+  <h2>Spike Timeline</h2>
+  <div class="chart-container"><canvas id="spikes"></canvas></div>
+</section>
+
+<section>
+  <h2>Task Latency Histograms</h2>
+  <div id="histograms-container"></div>
+</section>
+
+<section>
+  <h2>Spike Clusters (Gantt)</h2>
+  <div id="clusters-container"></div>
+</section>
+
+<section>
+  <h2>GPU Busy</h2>
+  <div class="chart-container"><canvas id="gpu"></canvas></div>
+</section>
+
+<section>
+  <h2>Text Report</h2>
+  <pre>{text_report}</pre>
+</section>
+
+<script id="data-session" type="application/json">{session_json}</script>
+<script id="data-spikes" type="application/json">{spike_events_json}</script>
+<script id="data-artifacts" type="application/json">{artifacts_json}</script>
+<script id="data-clusters" type="application/json">{cluster_analysis_json}</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const session = JSON.parse(document.getElementById('data-session').textContent);
+    const rawSpikeEvents = JSON.parse(document.getElementById('data-spikes').textContent);
+    const artifacts = JSON.parse(document.getElementById('data-artifacts').textContent);
+    const clusterAnalysis = JSON.parse(document.getElementById('data-clusters').textContent);
+
+    const topLimit = {top};
+
+    // 1. Metadata Table
+    const metadata = session.metadata;
+    if (metadata) {
+        let html = '<table><tbody>';
+        const addRow = (k, v) => { if (v) html += `<tr><th>${k}</th><td>${v}</td></tr>`; };
+        addRow('Kernel Version', metadata.kernel_version);
+        addRow('OS Release', metadata.kernel_osrelease);
+        addRow('CPU Online', metadata.cpu_online);
+        addRow('SCX State', metadata.scx_state);
+        addRow('SCX Ops', metadata.scx_ops);
+        html += '</tbody></table>';
+        document.getElementById('metadata-content').innerHTML = html;
+    }
+
+    // Prepare Task Data
+    let topTasks = session.tasks.filter(t => t.latency.samples > 0);
+    topTasks.sort((a, b) => b.latency.max_ns - a.latency.max_ns);
+    topTasks = topTasks.slice(0, topLimit);
+
+    const formatLabel = (task) => `${task.task}:${task.comm}`;
+
+    // 2. Task Max Latency (Bar Chart)
+    new Chart(document.getElementById('latency'), {
+        type: 'bar',
+        data: {
+            labels: topTasks.map(formatLabel),
+            datasets: [{
+                label: 'Max Latency (ms)',
+                data: topTasks.map(t => t.latency.max_ns / 1_000_000.0),
+                backgroundColor: '#2563eb'
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } } }
+        }
+    });
+
+    // 3. Spike Timeline (Scatter)
+    let spikePoints = [];
+    if (rawSpikeEvents) {
+        spikePoints = rawSpikeEvents.slice(0, 2048).map(e => ({
+            x: e.elapsed_ms || (e.switch_ns / 1000000.0),
+            y: e.latency_ns / 1000000.0,
+            taskLabel: `${e.task}:${e.comm}`
+        }));
+    } else {
+        spikePoints = session.top_spikes.slice(0, 512).map(e => ({
+            x: e.switch_ns / 1000000.0,
+            y: e.latency_ns / 1000000.0,
+            taskLabel: `${e.task}:${e.comm}`
+        }));
+    }
+
+    new Chart(document.getElementById('spikes'), {
+        type: 'scatter',
+        data: {
+            datasets: [{
+                label: 'Scheduler Spikes (ms)',
+                data: spikePoints,
+                backgroundColor: '#dc2626'
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                tooltip: { callbacks: { label: (ctx) => `${ctx.raw.taskLabel}: ${ctx.raw.y.toFixed(2)}ms at ${ctx.raw.x.toFixed(0)}ms` } },
+                zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } }
+            }
+        }
+    });
+
+    // 4. GPU Busy (Scatter/Line)
+    if (artifacts.gpu_samples && artifacts.gpu_samples.length > 0) {
+        const gpuPoints = artifacts.gpu_samples.filter(s => s.gpu_busy_percent != null).map(s => ({
+            x: s.elapsed_ms,
+            y: s.gpu_busy_percent
+        }));
+        new Chart(document.getElementById('gpu'), {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'GPU Busy %',
+                    data: gpuPoints,
+                    borderColor: '#16a34a',
+                    backgroundColor: 'rgba(22, 163, 74, 0.1)',
+                    fill: true,
+                    tension: 0.1,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: { y: { min: 0, max: 100 } },
+                plugins: { zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } } }
+            }
+        });
+    }
+
+    // 5. Histograms
+    const histContainer = document.getElementById('histograms-container');
+    topTasks.forEach((task, idx) => {
+        if (!task.latency.histogram || task.latency.histogram.length === 0) return;
+        
+        const wrapper = document.createElement('div');
+        wrapper.className = 'small-chart-container';
+        const canvas = document.createElement('canvas');
+        wrapper.appendChild(canvas);
+        histContainer.appendChild(wrapper);
+
+        const labels = task.latency.histogram.map(b => (b[0] / 1_000_000).toFixed(2) + 'ms');
+        const data = task.latency.histogram.map(b => b[1]);
+
+        new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{ label: `${formatLabel(task)} Latency Histogram`, data: data, backgroundColor: '#ea580c' }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, scales: { y: { type: 'logarithmic', min: 1 } } }
+        });
+    });
+
+    // 6. Gantt Chart for Spike Clusters
+    const clustersContainer = document.getElementById('clusters-container');
+    if (clusterAnalysis && clusterAnalysis.clusters) {
+        clusterAnalysis.clusters.slice(0, topLimit).forEach((cluster, idx) => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chart-container';
+            const canvas = document.createElement('canvas');
+            wrapper.appendChild(canvas);
+            clustersContainer.appendChild(wrapper);
+
+            const datasets = [];
+            const taskColors = ['#2563eb', '#dc2626', '#16a34a', '#ea580c', '#9333ea', '#ca8a04'];
+            let taskMap = {};
+            let taskIdx = 0;
+
+            const minSwitch = cluster.min_switch_ns;
+
+            cluster.points.forEach(p => {
+                const label = `${p.task}:${p.comm}`;
+                if (taskMap[label] === undefined) {
+                    taskMap[label] = taskIdx++;
+                }
+                const color = taskColors[taskMap[label] % taskColors.length];
+                
+                // For a Gantt style horizontal bar: we need x to be [start, end] and y to be the task label
+                // Chart.js bar chart supports data format: {x: [min, max], y: 'label'}
+                
+                const end_ms = (p.switch_ns - minSwitch) / 1000000.0;
+                const start_ms = end_ms - (p.latency_ns / 1000000.0);
+
+                datasets.push({
+                    label: label,
+                    data: [{ x: [start_ms, end_ms], y: label }],
+                    backgroundColor: color,
+                    barPercentage: 0.8,
+                    categoryPercentage: 0.8
+                });
+            });
+
+            new Chart(canvas, {
+                type: 'bar',
+                data: { datasets: datasets },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        title: { display: true, text: `Cluster ${idx + 1} (${cluster.points.length} points)` },
+                        legend: { display: false },
+                        tooltip: { callbacks: { label: (ctx) => `${ctx.raw.y}: ${((ctx.raw.x[1] - ctx.raw.x[0])).toFixed(2)}ms` } },
+                        zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } }
+                    },
+                    scales: {
+                        x: { title: { display: true, text: 'Time (ms) relative to cluster start' } },
+                        y: { stacked: true } // to group bars by task correctly if they overlap? Actually each data point has unique y label.
+                    }
+                }
+            });
+        });
+    }
+});
+</script>
+</body>
+</html>
