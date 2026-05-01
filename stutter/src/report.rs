@@ -6,8 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     metrics::format_latency,
@@ -131,9 +130,15 @@ pub fn print_report(
 
     let spike_events = load_spike_events(&session_path)?;
     let cluster_window_ns = cluster_window_ms.saturating_mul(1_000_000);
-    let cluster_analysis =
-        spike_cluster_analysis(&session, spike_events.as_deref(), cluster_window_ns, top, filter_class);
-    let artifacts = load_run_artifacts(&session_path, &cluster_analysis.clusters, cluster_window_ns)?;
+    let cluster_analysis = spike_cluster_analysis(
+        &session,
+        spike_events.as_deref(),
+        cluster_window_ns,
+        top,
+        filter_class,
+    );
+    let artifacts =
+        load_run_artifacts(&session_path, &cluster_analysis.clusters, cluster_window_ns)?;
 
     print!(
         "{}",
@@ -453,7 +458,9 @@ pub fn check_percentile_regression(
         .filter(|t| t.latency.samples > 0)
     {
         let key = (t.class, t.process_comm.to_string(), t.comm.clone());
-        let entry = tasks_baseline.entry(key.clone()).or_insert(Agg { p99_ns: 0 });
+        let entry = tasks_baseline
+            .entry(key.clone())
+            .or_insert(Agg { p99_ns: 0 });
         entry.p99_ns = entry.p99_ns.max(t.latency.p99_ns);
     }
 
@@ -464,7 +471,9 @@ pub fn check_percentile_regression(
         .filter(|t| t.latency.samples > 0)
     {
         let key = (t.class, t.process_comm.to_string(), t.comm.clone());
-        let entry = tasks_current.entry(key.clone()).or_insert(Agg { p99_ns: 0 });
+        let entry = tasks_current
+            .entry(key.clone())
+            .or_insert(Agg { p99_ns: 0 });
         entry.p99_ns = entry.p99_ns.max(t.latency.p99_ns);
     }
 
@@ -548,9 +557,15 @@ pub fn write_html_report(
 
     let spike_events = load_spike_events(&session_path)?;
     let cluster_window_ns = cluster_window_ms.saturating_mul(1_000_000);
-    let cluster_analysis =
-        spike_cluster_analysis(&session, spike_events.as_deref(), cluster_window_ns, top, filter_class);
-    let artifacts = load_run_artifacts(&session_path, &cluster_analysis.clusters, cluster_window_ns)?;
+    let cluster_analysis = spike_cluster_analysis(
+        &session,
+        spike_events.as_deref(),
+        cluster_window_ns,
+        top,
+        filter_class,
+    );
+    let artifacts =
+        load_run_artifacts(&session_path, &cluster_analysis.clusters, cluster_window_ns)?;
 
     let text_report = render_report(
         &session_path,
@@ -740,7 +755,11 @@ pub(crate) fn render_report(
                 "io_events: {} ({}{})",
                 session.block_io_event_count,
                 block_io_correlation_basis(session),
-                if block_io_correlation_basis(session) == "dev+sector" { " correlated (advisory, approximate)" } else { " correlated" },
+                if block_io_correlation_basis(session) == "dev+sector" {
+                    " correlated (advisory, approximate)"
+                } else {
+                    " correlated"
+                },
             ),
         );
         pushln(&mut output, "");
@@ -1038,9 +1057,11 @@ fn load_run_artifacts(
             .map(|c| c.max_switch_ns.saturating_add(cluster_window_ns))
             .max()
             .unwrap_or(0);
-        if let Ok(selected) = stream_json_array_select(&path, |e: &crate::recorder::MigrationEventRecord| {
-            e.timestamp_ns >= min_overall && e.timestamp_ns <= max_overall
-        }) {
+        if let Ok(selected) =
+            stream_json_array_select(&path, |e: &crate::recorder::MigrationEventRecord| {
+                e.timestamp_ns >= min_overall && e.timestamp_ns <= max_overall
+            })
+        {
             artifacts.migration_events = selected;
         }
     }
@@ -1053,9 +1074,11 @@ fn load_run_artifacts(
         if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
             let lower = min_overall.saturating_sub(50);
             let upper = max_overall.saturating_add(50);
-            if let Ok(selected) = stream_json_array_select(&path, |s: &crate::recorder::CpuFreqRecord| {
-                s.elapsed_ms >= lower && s.elapsed_ms <= upper
-            }) {
+            if let Ok(selected) =
+                stream_json_array_select(&path, |s: &crate::recorder::CpuFreqRecord| {
+                    s.elapsed_ms >= lower && s.elapsed_ms <= upper
+                })
+            {
                 artifacts.cpu_freq_samples = selected;
             }
         }
@@ -1074,10 +1097,12 @@ fn load_run_artifacts(
             .map(|c| c.max_switch_ns.saturating_add(cluster_window_ns))
             .max()
             .unwrap_or(0);
-        if let Ok(selected) = stream_json_array_select(&path, |e: &crate::recorder::BlockIoRecord| {
-            e.timestamp_ns >= min_overall
-                && e.timestamp_ns.saturating_sub(e.duration_ns) <= max_overall
-        }) {
+        if let Ok(selected) =
+            stream_json_array_select(&path, |e: &crate::recorder::BlockIoRecord| {
+                e.timestamp_ns >= min_overall
+                    && e.timestamp_ns.saturating_sub(e.duration_ns) <= max_overall
+            })
+        {
             artifacts.io_events = selected;
         }
     }
@@ -1098,7 +1123,8 @@ where
         return Ok(Vec::new());
     }
 
-    let file = fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut reader = std::io::BufReader::new(file);
 
     // Consume until we find the array start '['
@@ -1525,14 +1551,8 @@ fn render_correlation_sections(
         let path = run_dir.join("gpu_samples.json");
         if path.exists() && !clusters.is_empty() {
             // compute overall elapsed window (add 50ms tolerance)
-            let min_overall_opt = clusters
-                .iter()
-                .filter_map(cluster_elapsed)
-                .min();
-            let max_overall_opt = clusters
-                .iter()
-                .filter_map(cluster_elapsed)
-                .max();
+            let min_overall_opt = clusters.iter().filter_map(cluster_elapsed).min();
+            let max_overall_opt = clusters.iter().filter_map(cluster_elapsed).max();
             if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
                 let lower = min_overall.saturating_sub(50);
                 let upper = max_overall.saturating_add(50);
@@ -1549,8 +1569,12 @@ fn render_correlation_sections(
         pushln(output, "gpu near clusters");
         pushln(output, "-----------------");
         for (rank, cluster) in clusters.iter().take(top).enumerate() {
-            let Some(elapsed) = cluster_elapsed(cluster) else { continue; };
-            let Some(sample) = nearest_gpu_sample(elapsed, gpu_pool.as_ref().unwrap()) else { continue; };
+            let Some(elapsed) = cluster_elapsed(cluster) else {
+                continue;
+            };
+            let Some(sample) = nearest_gpu_sample(elapsed, gpu_pool.as_ref().unwrap()) else {
+                continue;
+            };
             pushln(
                 output,
                 format!(
@@ -1601,7 +1625,9 @@ fn render_correlation_sections(
         pushln(output, "frame overlap");
         pushln(output, "-------------");
         for (rank, cluster) in clusters.iter().take(top).enumerate() {
-            let Some((min_elapsed, max_elapsed)) = cluster_elapsed_range(cluster) else { continue; };
+            let Some((min_elapsed, max_elapsed)) = cluster_elapsed_range(cluster) else {
+                continue;
+            };
             let padding_ms = u128::from(cluster_window_ns / 1_000_000).max(1);
             let min_elapsed = min_elapsed.saturating_sub(padding_ms);
             let max_elapsed = max_elapsed.saturating_add(padding_ms);
@@ -1609,7 +1635,9 @@ fn render_correlation_sections(
                 .as_ref()
                 .map(|pool| {
                     pool.iter()
-                        .filter(|frame| frame.elapsed_ms >= min_elapsed && frame.elapsed_ms <= max_elapsed)
+                        .filter(|frame| {
+                            frame.elapsed_ms >= min_elapsed && frame.elapsed_ms <= max_elapsed
+                        })
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
@@ -1651,9 +1679,11 @@ fn render_correlation_sections(
                 .map(|c| c.max_switch_ns.saturating_add(cluster_window_ns))
                 .max()
                 .unwrap_or(0);
-            if let Ok(selected) = stream_json_array_select(&path, |e: &crate::recorder::MigrationEventRecord| {
-                e.timestamp_ns >= min_overall && e.timestamp_ns <= max_overall
-            }) {
+            if let Ok(selected) =
+                stream_json_array_select(&path, |e: &crate::recorder::MigrationEventRecord| {
+                    e.timestamp_ns >= min_overall && e.timestamp_ns <= max_overall
+                })
+            {
                 migration_pool = Some(selected);
             }
         }
@@ -1703,20 +1733,16 @@ fn render_correlation_sections(
     } else if let Some(run_dir) = run_dir {
         let path = run_dir.join("cpu_freq_samples.json");
         if path.exists() && !clusters.is_empty() {
-            let min_overall_opt = clusters
-                .iter()
-                .filter_map(cluster_elapsed)
-                .min();
-            let max_overall_opt = clusters
-                .iter()
-                .filter_map(cluster_elapsed)
-                .max();
+            let min_overall_opt = clusters.iter().filter_map(cluster_elapsed).min();
+            let max_overall_opt = clusters.iter().filter_map(cluster_elapsed).max();
             if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
                 let lower = min_overall.saturating_sub(50);
                 let upper = max_overall.saturating_add(50);
-                if let Ok(selected) = stream_json_array_select(&path, |s: &crate::recorder::CpuFreqRecord| {
-                    s.elapsed_ms >= lower && s.elapsed_ms <= upper
-                }) {
+                if let Ok(selected) =
+                    stream_json_array_select(&path, |s: &crate::recorder::CpuFreqRecord| {
+                        s.elapsed_ms >= lower && s.elapsed_ms <= upper
+                    })
+                {
                     cpu_freq_pool = Some(selected);
                 }
             }
@@ -1773,10 +1799,12 @@ fn render_correlation_sections(
                 .map(|c| c.max_switch_ns.saturating_add(cluster_window_ns))
                 .max()
                 .unwrap_or(0);
-            if let Ok(selected) = stream_json_array_select(&path, |e: &crate::recorder::BlockIoRecord| {
-                e.timestamp_ns >= min_overall
-                    && e.timestamp_ns.saturating_sub(e.duration_ns) <= max_overall
-            }) {
+            if let Ok(selected) =
+                stream_json_array_select(&path, |e: &crate::recorder::BlockIoRecord| {
+                    e.timestamp_ns >= min_overall
+                        && e.timestamp_ns.saturating_sub(e.duration_ns) <= max_overall
+                })
+            {
                 io_pool = Some(selected);
             }
         }
@@ -1825,13 +1853,16 @@ fn render_correlation_sections(
                     rank + 1,
                     matches.len(),
                     tids,
-                    if block_io_correlation_basis == "dev+sector" { " (approximate)" } else { "" },
+                    if block_io_correlation_basis == "dev+sector" {
+                        " (approximate)"
+                    } else {
+                        ""
+                    },
                     format_latency(max_duration),
                     min_ns,
                     max_ns
                 ),
             );
-
         }
         pushln(output, "");
     }

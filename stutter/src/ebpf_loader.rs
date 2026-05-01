@@ -577,7 +577,6 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         log::warn!("IRQ tracepoint formats missing; continuing without IRQ latency probe");
     }
 
-
     let block_rq_issue = events_root.join("block/block_rq_issue/format");
     let block_rq_complete = events_root.join("block/block_rq_complete/format");
     let mut block_rq = false;
@@ -729,13 +728,7 @@ fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, TracepointField> {
         }
 
         if let (Some(offset), Some(size)) = (offset, size) {
-            fields.insert(
-                field_name,
-                TracepointField {
-                    offset,
-                    size,
-                },
-            );
+            fields.insert(field_name, TracepointField { offset, size });
         }
     }
 
@@ -878,8 +871,7 @@ field:int next_prio; offset:60; size:4; signed:1;
 
     #[test]
     fn request_pointer_key_rejects_wrong_size() {
-        let issue_offsets =
-            parse_tracepoint_offsets("field:u32 rq; offset:40; size:4; signed:0;");
+        let issue_offsets = parse_tracepoint_offsets("field:u32 rq; offset:40; size:4; signed:0;");
         let complete_offsets =
             parse_tracepoint_offsets("field:u32 rq; offset:40; size:4; signed:0;");
 
@@ -947,9 +939,12 @@ field:int irq; offset:8; size:4; signed:1;
         let dir = temp_dir("optional-tracepoint");
         fs::create_dir_all(&dir).unwrap();
 
-        let available =
-            validate_optional_tracepoint_format_at(&dir.join("missing/format"), "missing", &[("pid", 24)])
-                .unwrap();
+        let available = validate_optional_tracepoint_format_at(
+            &dir.join("missing/format"),
+            "missing",
+            &[("pid", 24)],
+        )
+        .unwrap();
 
         assert!(!available);
         fs::remove_dir_all(dir).ok();

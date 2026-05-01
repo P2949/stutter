@@ -169,7 +169,8 @@ mod tests {
     #[test]
     fn read_frame_events_respects_newline_boundary_offset() -> anyhow::Result<()> {
         use std::io::Write;
-        let temp_dir = std::env::temp_dir().join(format!("stutter_test_mangohud_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("stutter_test_mangohud_{}", std::process::id()));
         fs::create_dir_all(&temp_dir)?;
         let path = temp_dir.join("test.csv");
 

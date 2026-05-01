@@ -296,7 +296,9 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         );
     }
 
-    warn!("tune_is_experimental: automated tuning decisions are experimental but useful; verify with repeated runs to ensure low variance.");
+    warn!(
+        "tune_is_experimental: automated tuning decisions are experimental but useful; verify with repeated runs to ensure low variance."
+    );
 
     let measure_seconds = epoch_seconds.saturating_sub(warmup_seconds);
     let mut results = Vec::new();
@@ -431,7 +433,10 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
 
     let mut grouped: BTreeMap<String, Vec<TuneCandidateSummary>> = BTreeMap::new();
     for r in &results {
-        grouped.entry(r.profile.clone()).or_default().push(r.clone());
+        grouped
+            .entry(r.profile.clone())
+            .or_default()
+            .push(r.clone());
     }
 
     let best_profile = grouped
@@ -535,7 +540,9 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         }
     );
 
-    warn!("tune_is_experimental: decisions are not final truth; repeated runs showing low variance are recommended.");
+    warn!(
+        "tune_is_experimental: decisions are not final truth; repeated runs showing low variance are recommended."
+    );
 
     Ok(())
 }
@@ -1034,10 +1041,8 @@ fn check_tune_coverage_comparability(
     // run of each profile against the first run of the next profile. We assume
     // that within a single tune command, the workload is stable enough that
     // the first runs are representative.
-    let representatives: Vec<&TuneCandidateSummary> = grouped
-        .values()
-        .filter_map(|runs| runs.first())
-        .collect();
+    let representatives: Vec<&TuneCandidateSummary> =
+        grouped.values().filter_map(|runs| runs.first()).collect();
 
     if let Some(first) = representatives.first() {
         for other in representatives.iter().skip(1) {
