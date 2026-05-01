@@ -1251,7 +1251,7 @@ fn report_uses_run_level_block_io_correlation_basis() {
         5,
         None,
     );
-    assert!(output.contains("io_events: 1 (dev+sector correlated; approximate)"));
+    assert!(output.contains("io_events: 1 (dev+sector correlated (advisory, approximate))"));
     assert!(output.contains("block i/o correlation warning"));
 
     fs::remove_dir_all(dir).ok();
@@ -1377,6 +1377,7 @@ fn test_config(
         cgroupv2: None,
         follow_exec: true,
         exclude_tree_pids: Vec::new(),
+        cpu_freq: false,
         mangohud_ignore_offset: 0,
     }
 }
