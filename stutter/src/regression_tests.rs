@@ -1241,6 +1241,19 @@ fn report_uses_run_level_block_io_correlation_basis() {
     assert!(output.contains("io_events: 1 (request-pointer correlated)"));
     assert!(!output.contains("block i/o correlation warning"));
 
+    session.block_io_correlation_basis = "dev+sector".to_owned();
+    let output = crate::report::render_report(
+        &session_path,
+        &session,
+        &cluster_analysis,
+        &crate::report::RunArtifacts::default(),
+        10,
+        5,
+        None,
+    );
+    assert!(output.contains("io_events: 1 (dev+sector correlated; approximate)"));
+    assert!(output.contains("block i/o correlation warning"));
+
     fs::remove_dir_all(dir).ok();
 }
 
