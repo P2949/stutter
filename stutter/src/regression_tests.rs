@@ -1184,6 +1184,42 @@ fn report_uses_run_level_block_io_correlation_basis() {
 }
 
 #[test]
+fn tune_counts_only_scored_post_warmup_records() {
+    let records = vec![
+        interval_record(10, TaskClass::Helper, 200, "helper"),
+        interval_record(11, TaskClass::Compositor, 100, "compositor"),
+    ];
+
+    assert_eq!(super::tune_scored_record_counts(&records), (0, 0));
+
+    let mut records = records;
+    records.push(interval_record(12, TaskClass::Game, 55, "game"));
+
+    assert_eq!(super::tune_scored_record_counts(&records), (1, 55));
+}
+
+#[test]
+fn tune_coverage_counts_duplicate_scored_thread_identities() {
+    let mut session = minimal_session_for_report();
+    session.tasks = vec![
+        session_task(10, 100, TaskClass::Game, "worker", Some(1000), Some(10)),
+        session_task(11, 100, TaskClass::Game, "worker", Some(1000), Some(11)),
+        session_task(12, 100, TaskClass::Game, "worker", Some(1000), Some(12)),
+    ];
+    let intervals = vec![
+        interval_record(10, TaskClass::Game, 10, "worker"),
+        interval_record(11, TaskClass::Game, 10, "worker"),
+        interval_record(12, TaskClass::Game, 10, "worker"),
+    ];
+
+    let coverage = super::tune_coverage_metrics(&session, &intervals);
+
+    assert_eq!(coverage.unique_scored_tasks, 3);
+    assert_eq!(coverage.scored_identity_counts.values().sum::<usize>(), 3);
+    assert_eq!(coverage.scored_identity_counts.len(), 3);
+}
+
+#[test]
 fn interval_csv_writer_outputs_header_and_rows() {
     let dir = temp_test_dir("interval-csv");
     fs::create_dir_all(&dir).unwrap();
@@ -1339,6 +1375,107 @@ fn minimal_session_for_report() -> SessionFile {
         "top_spikes": []
     }))
     .unwrap()
+}
+
+fn session_task(
+    tid: u32,
+    process_pid: u32,
+    class: TaskClass,
+    comm: &str,
+    process_starttime_ticks: Option<u64>,
+    task_starttime_ticks: Option<u64>,
+) -> recorder::SessionTask {
+    serde_json::from_value(serde_json::json!({
+        "task": tid,
+        "active": true,
+        "first_seen_ms": 0,
+        "last_seen_ms": 100,
+        "removed_ms": null,
+        "class": class,
+        "process_pid": process_pid,
+        "process_comm": "game",
+        "process_starttime_ticks": process_starttime_ticks,
+        "task_starttime_ticks": task_starttime_ticks,
+        "exe_dev": 1,
+        "exe_ino": 2,
+        "comm": comm,
+        "latency": {
+            "samples": 1,
+            "stored_samples": 1,
+            "truncated_samples": 0,
+            "percentile_scope": "histogram",
+            "histogram": [],
+            "min_ns": 1,
+            "avg_ns": 1,
+            "p95_ns": 1,
+            "p99_ns": 1,
+            "max_ns": 1,
+            "over_1ms": 0,
+            "over_2ms": 0,
+            "over_5ms": 0
+        },
+        "cpu": {
+            "busiest_cpu": null,
+            "busiest_cpu_samples": 0,
+            "worst_cpu": null,
+            "worst_cpu_max_ns": 0,
+            "spikiest_cpu": null,
+            "spikiest_cpu_spikes": 0,
+            "per_cpu": []
+        },
+        "top_spikes": [],
+        "migration_count": 0,
+        "cross_numa_migrations": 0,
+        "top_wakers": [],
+        "sched_policy": null,
+        "stat_wait_sum_ns": null,
+        "stat_wait_count": null
+    }))
+    .unwrap()
+}
+
+fn interval_record(
+    task: u32,
+    class: TaskClass,
+    samples: u64,
+    comm: &str,
+) -> metrics::IntervalRecord {
+    metrics::IntervalRecord {
+        elapsed_ms: 1_000,
+        task,
+        active: true,
+        class,
+        comm: comm.to_owned(),
+        process_pid: Some(100),
+        process_comm: "game".into(),
+        samples,
+        stored_samples: samples,
+        truncated_samples: 0,
+        min_ns: 0,
+        avg_ns: 0,
+        p95_ns: 0,
+        p99_ns: 0,
+        max_ns: 0,
+        over_1ms: 0,
+        over_2ms: 0,
+        over_5ms: 0,
+        busiest_cpu: None,
+        busiest_cpu_samples: 0,
+        worst_cpu: None,
+        worst_cpu_max_ns: 0,
+        spikiest_cpu: None,
+        spikiest_cpu_spikes: 0,
+        cpu_psi_some: 0.0,
+        mem_psi_some: 0.0,
+        mem_psi_full: 0.0,
+        io_psi_some: 0.0,
+        io_psi_full: 0.0,
+        major_faults: 0,
+        minor_faults: 0,
+        percentile_scope: "histogram".to_owned(),
+        histogram: Vec::new(),
+        drop_counters: DropCountersSnapshot::default(),
+    }
 }
 
 fn task_stats_with_info(

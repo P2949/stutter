@@ -122,8 +122,11 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 let summary = affinity::restore_saved(&path)?;
                 println!(
-                    "restored {} affinity record(s); skipped_dead={}",
-                    summary.restored, summary.skipped_dead
+                    "restored {} affinity record(s); skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
+                    summary.restored,
+                    summary.skipped_dead,
+                    summary.skipped_identity_mismatch,
+                    summary.legacy_unverified
                 );
             }
             Ok(())
@@ -200,22 +203,52 @@ fn print_restore_dry_run(path: &Path) -> anyhow::Result<()> {
     println!("restore dry-run file={}", path.display());
 
     for record in state.records {
-        match affinity::read_allowed_mask_raw(record.tid) {
-            Ok(current) => println!(
-                "tid={} alive=true current_mask={} restore_mask={}",
-                record.tid,
-                current.to_range_string(),
-                record.original_mask.to_range_string()
-            ),
-            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
+        match affinity::restore_record_status(&record) {
+            Ok(status @ affinity::RestoreRecordStatus::Verified)
+            | Ok(status @ affinity::RestoreRecordStatus::LegacyUnverified) => {
+                let identity_status = match status {
+                    affinity::RestoreRecordStatus::Verified => "verified",
+                    affinity::RestoreRecordStatus::LegacyUnverified => "legacy_unverified",
+                    affinity::RestoreRecordStatus::Dead
+                    | affinity::RestoreRecordStatus::IdentityMismatch => unreachable!(),
+                };
+                match affinity::read_allowed_mask_raw(record.tid) {
+                    Ok(current) => println!(
+                        "tid={} alive=true identity={} current_mask={} restore_mask={}",
+                        record.tid,
+                        identity_status,
+                        current.to_range_string(),
+                        record.original_mask.to_range_string()
+                    ),
+                    Err(err) if err.raw_os_error() == Some(libc::ESRCH) => println!(
+                        "tid={} alive=false identity={} current_mask=- restore_mask={}",
+                        record.tid,
+                        identity_status,
+                        record.original_mask.to_range_string()
+                    ),
+                    Err(err) => println!(
+                        "tid={} alive=unknown identity={} current_mask_error={} restore_mask={}",
+                        record.tid,
+                        identity_status,
+                        err,
+                        record.original_mask.to_range_string()
+                    ),
+                }
+            }
+            Ok(affinity::RestoreRecordStatus::Dead) => {
                 println!(
-                    "tid={} alive=false current_mask=- restore_mask={}",
+                    "tid={} alive=false identity=dead current_mask=- restore_mask={}",
                     record.tid,
                     record.original_mask.to_range_string()
                 )
             }
+            Ok(affinity::RestoreRecordStatus::IdentityMismatch) => println!(
+                "tid={} alive=unknown identity=mismatch current_mask=- restore_mask={}",
+                record.tid,
+                record.original_mask.to_range_string()
+            ),
             Err(err) => println!(
-                "tid={} alive=unknown current_mask_error={} restore_mask={}",
+                "tid={} alive=unknown identity=error current_mask_error={} restore_mask={}",
                 record.tid,
                 err,
                 record.original_mask.to_range_string()
@@ -306,11 +339,18 @@ async fn tune_command(
         const TUNE_MIN_SAMPLES: u64 = 50;
         let interval_count = interval_records.len();
         let sample_count: u64 = interval_records.iter().map(|r| r.samples).sum();
-        let mut valid = interval_count >= TUNE_MIN_INTERVALS && sample_count >= TUNE_MIN_SAMPLES;
+        let (scored_interval_count, scored_sample_count) =
+            tune_scored_record_counts(&interval_records);
+        let mut valid =
+            scored_interval_count >= TUNE_MIN_INTERVALS && scored_sample_count >= TUNE_MIN_SAMPLES;
         if !valid {
             warn!(
-                "tune_candidate_insufficient_data profile={} intervals={} samples={}",
-                profile.name, interval_count, sample_count
+                "tune_candidate_insufficient_scored_data profile={} scored_intervals={} scored_samples={} total_intervals={} total_samples={}",
+                profile.name,
+                scored_interval_count,
+                scored_sample_count,
+                interval_count,
+                sample_count
             );
             // Inflate the score so this candidate loses to better-measured ones.
             score.total = u64::MAX / 4;
@@ -339,6 +379,7 @@ async fn tune_command(
             measure_seconds,
             interval_count: interval_records.len(),
             samples: sample_count,
+            scored_samples: scored_sample_count,
             score_total: score.total,
             over_1ms: score.over_1ms,
             over_2ms: score.over_2ms,
@@ -376,18 +417,18 @@ async fn tune_command(
 
     // Check for large disparities in sample counts across candidates and
     // warn when candidates are not meaningfully comparable.
-    let min_samples = results.iter().map(|r| r.samples).min().unwrap_or(0);
-    let max_samples = results.iter().map(|r| r.samples).max().unwrap_or(0);
+    let min_samples = results.iter().map(|r| r.scored_samples).min().unwrap_or(0);
+    let max_samples = results.iter().map(|r| r.scored_samples).max().unwrap_or(0);
     if min_samples == 0 && max_samples > 0 {
         anyhow::bail!(
-            "tune candidates are not comparable: some candidates gathered no samples while others did (max_samples={})",
+            "tune candidates are not comparable: some candidates gathered no scored samples while others did (max_scored_samples={})",
             max_samples
         );
     } else if min_samples > 0 {
         let ratio = (max_samples as f64) / (min_samples as f64);
         if ratio > 2.0 {
             anyhow::bail!(
-                "tune candidates are not comparable: sample count varies by more than 2x across candidates (min={} max={} ratio={:.2})",
+                "tune candidates are not comparable: scored sample count varies by more than 2x across candidates (min={} max={} ratio={:.2})",
                 min_samples,
                 max_samples,
                 ratio
@@ -726,6 +767,7 @@ struct TuneCandidateSummary {
     measure_seconds: u64,
     interval_count: usize,
     samples: u64,
+    scored_samples: u64,
     score_total: u64,
     over_1ms: u64,
     over_2ms: u64,
@@ -744,6 +786,7 @@ struct TaskIdentity {
     process_comm: String,
     comm: String,
     process_starttime_ticks: Option<u64>,
+    task_starttime_ticks: Option<u64>,
     exe_dev: Option<u64>,
     exe_ino: Option<u64>,
 }
@@ -757,7 +800,7 @@ struct TuneCoverageMetrics {
     removed_task_count: usize,
     drop_counter_total: u64,
     #[serde(skip_serializing)]
-    scored_identities: BTreeSet<TaskIdentity>,
+    scored_identity_counts: BTreeMap<TaskIdentity, usize>,
 }
 
 fn result_is_better(candidate: &TuneCandidateSummary, current_best: &TuneCandidateSummary) -> bool {
@@ -765,18 +808,26 @@ fn result_is_better(candidate: &TuneCandidateSummary, current_best: &TuneCandida
         < (current_best.score_total, current_best.max_latency_ns)
 }
 
+fn tune_scored_record_counts(records: &[IntervalRecord]) -> (usize, u64) {
+    records
+        .iter()
+        .filter(|record| scorer::class_contributes_to_score(record.class))
+        .fold((0usize, 0u64), |(intervals, samples), record| {
+            (intervals + 1, samples.saturating_add(record.samples))
+        })
+}
+
 fn tune_coverage_metrics(
     session: &recorder::SessionFile,
     interval_records: &[IntervalRecord],
 ) -> TuneCoverageMetrics {
     let unique_tracked_tasks = session.tasks.len();
-    let unique_scored_tasks = session
-        .tasks
+    let scored_task_ids = interval_records
         .iter()
-        .filter(|task| scorer::class_contributes_to_score(task.class))
-        .map(|task| task.task)
-        .collect::<BTreeSet<_>>()
-        .len();
+        .filter(|record| scorer::class_contributes_to_score(record.class) && record.samples > 0)
+        .map(|record| record.task)
+        .collect::<BTreeSet<_>>();
+    let unique_scored_tasks = scored_task_ids.len();
     let removed_task_count = session
         .tasks
         .iter()
@@ -799,19 +850,38 @@ fn tune_coverage_metrics(
         )
     };
 
-    let scored_identities = session
+    let tasks_by_tid = session
         .tasks
         .iter()
-        .filter(|task| scorer::class_contributes_to_score(task.class))
-        .map(|task| TaskIdentity {
-            class: task.class,
-            process_comm: task.process_comm.to_string(),
-            comm: task.comm.clone(),
-            process_starttime_ticks: task.process_starttime_ticks,
-            exe_dev: task.exe_dev,
-            exe_ino: task.exe_ino,
-        })
-        .collect::<BTreeSet<_>>();
+        .map(|task| (task.task, task))
+        .collect::<BTreeMap<_, _>>();
+    let mut scored_identity_counts = BTreeMap::<TaskIdentity, usize>::new();
+    for tid in scored_task_ids {
+        let identity = if let Some(task) = tasks_by_tid.get(&tid) {
+            TaskIdentity {
+                class: task.class,
+                process_comm: task.process_comm.to_string(),
+                comm: task.comm.clone(),
+                process_starttime_ticks: task.process_starttime_ticks,
+                task_starttime_ticks: task.task_starttime_ticks,
+                exe_dev: task.exe_dev,
+                exe_ino: task.exe_ino,
+            }
+        } else if let Some(record) = interval_records.iter().find(|record| record.task == tid) {
+            TaskIdentity {
+                class: record.class,
+                process_comm: record.process_comm.to_string(),
+                comm: record.comm.clone(),
+                process_starttime_ticks: None,
+                task_starttime_ticks: None,
+                exe_dev: None,
+                exe_ino: None,
+            }
+        } else {
+            continue;
+        };
+        *scored_identity_counts.entry(identity).or_default() += 1;
+    }
 
     TuneCoverageMetrics {
         unique_tracked_tasks,
@@ -820,7 +890,7 @@ fn tune_coverage_metrics(
         active_target_max,
         removed_task_count,
         drop_counter_total: session.drop_counters.total(),
-        scored_identities,
+        scored_identity_counts,
     }
 }
 
@@ -842,16 +912,16 @@ fn check_tune_coverage_comparability(results: &[TuneCandidateSummary]) -> anyhow
     // significantly between candidates, the comparison is unsafe.
     if let Some(first) = results.first() {
         for other in results.iter().skip(1) {
-            let common = first
-                .coverage
-                .scored_identities
-                .intersection(&other.coverage.scored_identities)
-                .count();
-            let total = first
-                .coverage
-                .scored_identities
-                .union(&other.coverage.scored_identities)
-                .count();
+            let common = scored_identity_overlap(
+                &first.coverage.scored_identity_counts,
+                &other.coverage.scored_identity_counts,
+                usize::min,
+            );
+            let total = scored_identity_overlap(
+                &first.coverage.scored_identity_counts,
+                &other.coverage.scored_identity_counts,
+                usize::max,
+            );
 
             let overlap_ratio = if total > 0 {
                 common as f64 / total as f64
@@ -910,6 +980,24 @@ fn check_tune_coverage_comparability(results: &[TuneCandidateSummary]) -> anyhow
     Ok(())
 }
 
+fn scored_identity_overlap(
+    left: &BTreeMap<TaskIdentity, usize>,
+    right: &BTreeMap<TaskIdentity, usize>,
+    combine: fn(usize, usize) -> usize,
+) -> usize {
+    left.keys()
+        .chain(right.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|identity| {
+            combine(
+                left.get(identity).copied().unwrap_or(0),
+                right.get(identity).copied().unwrap_or(0),
+            )
+        })
+        .sum()
+}
+
 fn check_tune_metric_ratio(label: &str, values: impl Iterator<Item = usize>) -> anyhow::Result<()> {
     let values = values.collect::<Vec<_>>();
     let min_value = values.iter().copied().min().unwrap_or(0);
@@ -953,8 +1041,12 @@ fn restore_tune_after_candidate(profile_name: &str) -> anyhow::Result<()> {
 
     let summary = affinity::restore_saved(&path)?;
     info!(
-        "tune_candidate_restored profile={} restored={} skipped_dead={}",
-        profile_name, summary.restored, summary.skipped_dead
+        "tune_candidate_restored profile={} restored={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
+        profile_name,
+        summary.restored,
+        summary.skipped_dead,
+        summary.skipped_identity_mismatch,
+        summary.legacy_unverified
     );
     Ok(())
 }
@@ -1123,8 +1215,11 @@ fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
 
     let summary = affinity::restore_saved(&path)?;
     println!(
-        "stopped profile watch; restored {} affinity record(s); skipped_dead={}",
-        summary.restored, summary.skipped_dead
+        "stopped profile watch; restored {} affinity record(s); skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
+        summary.restored,
+        summary.skipped_dead,
+        summary.skipped_identity_mismatch,
+        summary.legacy_unverified
     );
 
     Ok(())
