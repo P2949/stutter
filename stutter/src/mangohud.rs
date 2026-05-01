@@ -14,8 +14,18 @@ pub fn read_frame_events(path: &Path, ignore_offset: u64) -> anyhow::Result<Vec<
         reader.read_line(&mut header)?;
     }
 
+    let mut skip_first_line = ignore_offset == 0;
     if ignore_offset > 0 {
-        use std::io::{Seek, SeekFrom};
+        use std::io::{Read, Seek, SeekFrom};
+        // By default, if we are at a nonzero offset, we assume we might be mid-line
+        // unless we can prove we are at a newline boundary.
+        skip_first_line = true;
+        if file.seek(SeekFrom::Start(ignore_offset - 1)).is_ok() {
+            let mut buf = [0u8; 1];
+            if file.read_exact(&mut buf).is_ok() && buf[0] == b'\n' {
+                skip_first_line = false;
+            }
+        }
         file.seek(SeekFrom::Start(ignore_offset))?;
     } else {
         use std::io::{Seek, SeekFrom};
@@ -24,14 +34,9 @@ pub fn read_frame_events(path: &Path, ignore_offset: u64) -> anyhow::Result<Vec<
 
     let reader = std::io::BufReader::new(file);
     let mut lines = reader.lines();
-    if ignore_offset == 0 {
-        // Skip the header line if we are reading from the beginning
-        let _ = lines.next();
-    } else {
-        // We sought into the file; the first line may be a partial CSV row
-        // (if MangoHud was writing the file while the offset was captured).
-        // Discard the first line after a nonzero offset to avoid parsing
-        // a truncated row.
+    if skip_first_line {
+        // Skip the first line if it's the header (ignore_offset == 0) or if
+        // we sought into the middle of a row.
         let _ = lines.next();
     }
 
@@ -159,5 +164,53 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].elapsed_ms, 0); // Normalized (30 - 30)
         assert_eq!(events[0].frametime_ms, 16.7);
+    }
+
+    #[test]
+    fn read_frame_events_respects_newline_boundary_offset() -> anyhow::Result<()> {
+        use std::io::Write;
+        let temp_dir = std::env::temp_dir().join(format!("stutter_test_mangohud_{}", std::process::id()));
+        fs::create_dir_all(&temp_dir)?;
+        let path = temp_dir.join("test.csv");
+
+        let header = "elapsed_ms,frametime_ms\n";
+        let row1 = "10,16.7\n";
+        let row2 = "20,33.4\n";
+
+        let mut f = fs::File::create(&path)?;
+        f.write_all(header.as_bytes())?;
+        let offset_after_header = header.len() as u64;
+        f.write_all(row1.as_bytes())?;
+        let offset_after_row1 = offset_after_header + row1.len() as u64;
+        f.write_all(row2.as_bytes())?;
+        drop(f);
+
+        // Case 1: ignore_offset = 0. Should skip header, read row1 and row2.
+        let events = read_frame_events(&path, 0)?;
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].frametime_ms, 16.7);
+
+        // Case 2: ignore_offset = offset_after_header.
+        // offset_after_header-1 is '\n'.
+        // Should NOT skip the first line (row1).
+        let events = read_frame_events(&path, offset_after_header)?;
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].frametime_ms, 16.7);
+
+        // Case 3: ignore_offset = offset_after_header + 2 (mid row1).
+        // Should skip partial row1, read row2.
+        let events = read_frame_events(&path, offset_after_header + 2)?;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].frametime_ms, 33.4);
+
+        // Case 4: ignore_offset = offset_after_row1.
+        // offset_after_row1-1 is '\n'.
+        // Should NOT skip row2.
+        let events = read_frame_events(&path, offset_after_row1)?;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].frametime_ms, 33.4);
+
+        fs::remove_dir_all(temp_dir).ok();
+        Ok(())
     }
 }
