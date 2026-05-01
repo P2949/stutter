@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     env, fs, io,
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -558,7 +558,7 @@ pub struct SpikeEvent {
     pub minor_faults: u32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MigrationEventRecord {
     pub elapsed_ms: u128,
     pub tid: u32,
@@ -567,7 +567,7 @@ pub struct MigrationEventRecord {
     pub timestamp_ns: u64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct CpuFreqRecord {
     pub elapsed_ms: u128,
     pub cpu: u32,
@@ -1070,7 +1070,7 @@ fn resolve_run_dir(
     base
 }
 
-fn ensure_empty_dir(path: &PathBuf) -> anyhow::Result<()> {
+fn ensure_empty_dir(path: &Path) -> anyhow::Result<()> {
     if path.exists() {
         anyhow::bail!("output directory already exists: {}", path.display());
     }

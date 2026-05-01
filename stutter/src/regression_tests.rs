@@ -1652,8 +1652,11 @@ fn report_diff_shows_regressions_and_improvements() {
                     "over_5ms": 0
                 },
                 "cpu": {
+                    "busiest_cpu": null,
                     "busiest_cpu_samples": 0,
+                    "worst_cpu": null,
                     "worst_cpu_max_ns": 0,
+                    "spikiest_cpu": null,
                     "spikiest_cpu_spikes": 0,
                     "per_cpu": []
                 },
@@ -1685,8 +1688,11 @@ fn report_diff_shows_regressions_and_improvements() {
                     "over_5ms": 2
                 },
                 "cpu": {
+                    "busiest_cpu": null,
                     "busiest_cpu_samples": 0,
+                    "worst_cpu": null,
                     "worst_cpu_max_ns": 0,
+                    "spikiest_cpu": null,
                     "spikiest_cpu_spikes": 0,
                     "per_cpu": []
                 },

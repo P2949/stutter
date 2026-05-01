@@ -236,6 +236,20 @@ where
             continue;
         }
 
+        // Ensure we only create restore records with full identity. If the
+        // process or task starttime ticks are missing then we must not record
+        // a partial identity that could later be mis-applied or left in an
+        // inconsistent state. Skip and warn instead.
+        if task.process_starttime_ticks.is_none() || task.task_starttime_ticks.is_none() {
+            log::warn!(
+                "profile_skip_incomplete_identity tid={} comm={} process_pid={}",
+                task.tid,
+                task.comm,
+                task.process_pid
+            );
+            continue;
+        }
+
         planned.push(PlannedAffinityChange {
             record: AffinityRecord {
                 tid: task.tid,
@@ -271,9 +285,9 @@ impl ProfileApplyCacheKey {
 
 impl CompiledPattern {
     fn new(raw: String) -> anyhow::Result<Self> {
-        let regex = if raw.len() >= 2 && raw.starts_with('/') && raw.ends_with('/') {
+        let regex = if let Some(inner) = raw.strip_prefix('/').and_then(|s| s.strip_suffix('/')) {
             Some(
-                Regex::new(&raw[1..raw.len() - 1])
+                Regex::new(inner)
                     .with_context(|| format!("invalid profile regex '{}'", raw))?,
             )
         } else {
