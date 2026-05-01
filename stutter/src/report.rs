@@ -1,11 +1,13 @@
 use std::{
     collections::{BTreeMap, BTreeSet, BinaryHeap},
     fs,
+    io::BufRead,
     path::Path,
 };
 
 use anyhow::Context;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::{
     metrics::format_latency,
@@ -252,8 +254,8 @@ pub fn render_diff_report(
             let delta_p99 = tb.p99_ns as i64 - ta.p99_ns as i64;
             let delta_over = tb.over_1ms as i64 - ta.over_1ms as i64;
             let d = TaskDelta {
-                comm: key.2.to_owned(),
-                process_comm: key.1.to_owned().to_string(),
+                comm: key.2.clone(),
+                process_comm: key.1.clone(),
                 class: key.0,
                 delta_max_ns: delta_max,
                 delta_p99_ns: delta_p99,
@@ -281,7 +283,7 @@ pub fn render_diff_report(
                 (worst.delta_max_ns as f64 / worst.max_a as f64) * 100.0
             )
         } else {
-            "".to_owned()
+            String::new()
         };
         pushln(
             &mut output,
@@ -301,7 +303,7 @@ pub fn render_diff_report(
                 (best.delta_max_ns as f64 / best.max_a as f64) * 100.0
             )
         } else {
-            "".to_owned()
+            String::new()
         };
         pushln(
             &mut output,
@@ -819,6 +821,7 @@ pub(crate) fn render_report(
         block_io_correlation_basis(session),
         cluster_window_ns,
         top,
+        session_path.parent(),
     );
 
     output
@@ -841,31 +844,103 @@ fn load_spike_events(session_path: &Path) -> anyhow::Result<Option<Vec<SpikeEven
 }
 
 fn load_run_artifacts(session_path: &Path) -> anyhow::Result<RunArtifacts> {
-    let Some(run_dir) = session_path.parent() else {
+    let Some(_run_dir) = session_path.parent() else {
         return Ok(RunArtifacts::default());
     };
-
-    Ok(RunArtifacts {
-        irq_events: load_artifact_vec(&run_dir.join("irq_events.json"))?,
-        gpu_samples: load_artifact_vec(&run_dir.join("gpu_samples.json"))?,
-        frame_events: load_artifact_vec(&run_dir.join("frame_correlation.json"))?,
-        migration_events: load_artifact_vec(&run_dir.join("migration_events.json"))?,
-        cpu_freq_samples: load_artifact_vec(&run_dir.join("cpu_freq_samples.json"))?,
-        io_events: load_artifact_vec(&run_dir.join("io_events.json"))?,
-    })
+    // Avoid eagerly loading potentially large artifact files into memory.
+    // They will be streamed on-demand when correlation sections need them.
+    Ok(RunArtifacts::default())
 }
 
-fn load_artifact_vec<T>(path: &Path) -> anyhow::Result<Vec<T>>
+// Stream elements from a JSON array file without materializing the whole
+// array. The function parses the array start token and then repeatedly
+// deserializes elements using `serde_json::from_reader`, skipping separators
+// (commas) until the array end is reached.
+fn stream_json_array_select<T, P>(path: &Path, mut predicate: P) -> anyhow::Result<Vec<T>>
 where
-    T: serde::de::DeserializeOwned,
+    T: DeserializeOwned,
+    P: FnMut(&T) -> bool,
 {
     if !path.exists() {
         return Ok(Vec::new());
     }
 
-    let data =
-        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
-    serde_json::from_str(&data).with_context(|| format!("failed to parse {}", path.display()))
+    let file = fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let mut reader = std::io::BufReader::new(file);
+
+    // Consume until we find the array start '['
+    loop {
+        let (consume_amount, found) = {
+            let buf = reader.fill_buf()?;
+            if buf.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut amount = buf.len();
+            let mut found = false;
+            for (i, &b) in buf.iter().enumerate() {
+                if !(b as char).is_whitespace() {
+                    if b == b'[' {
+                        amount = i + 1;
+                        found = true;
+                    } else {
+                        anyhow::bail!("expected JSON array in {}", path.display());
+                    }
+                    break;
+                }
+            }
+            (amount, found)
+        };
+        reader.consume(consume_amount);
+        if found {
+            break;
+        }
+    }
+
+    let mut matches = Vec::new();
+
+    loop {
+        // Skip whitespace and commas, detect end of array
+        let (consume_amount, is_end_array, is_comma) = {
+            let buf = reader.fill_buf()?;
+            if buf.is_empty() {
+                break;
+            }
+            let mut pos = 0;
+            while pos < buf.len() && (buf[pos] as char).is_whitespace() {
+                pos += 1;
+            }
+            if pos >= buf.len() {
+                (buf.len(), false, false)
+            } else {
+                let b = buf[pos];
+                if b == b']' {
+                    (pos + 1, true, false)
+                } else if b == b',' {
+                    (pos + 1, false, true)
+                } else {
+                    (0, false, false)
+                }
+            }
+        };
+
+        reader.consume(consume_amount);
+
+        if is_end_array {
+            break;
+        }
+        if is_comma || consume_amount > 0 {
+            continue;
+        }
+
+        // Parse next element from the reader
+        let val: T = serde_json::from_reader(&mut reader)
+            .with_context(|| format!("failed to parse element in {}", path.display()))?;
+        if predicate(&val) {
+            matches.push(val);
+        }
+    }
+
+    Ok(matches)
 }
 
 fn pushln(output: &mut String, line: impl AsRef<str>) {
@@ -1135,15 +1210,44 @@ fn render_correlation_sections(
     block_io_correlation_basis: &str,
     cluster_window_ns: u64,
     top: usize,
+    run_dir: Option<&Path>,
 ) {
+    // Try to use in-memory artifacts if present; otherwise stream from
+    // the run directory artifact files constrained to the union of cluster
+    // windows to avoid loading entire files.
+    let mut irq_pool: Option<Vec<IrqEventRecord>> = None;
     if !artifacts.irq_events.is_empty() {
+        irq_pool = Some(artifacts.irq_events.clone());
+    } else if let Some(run_dir) = run_dir {
+        let path = run_dir.join("irq_events.json");
+        if path.exists() && !clusters.is_empty() {
+            let min_overall = clusters
+                .iter()
+                .map(|c| c.min_switch_ns.saturating_sub(cluster_window_ns))
+                .min()
+                .unwrap_or(0);
+            let max_overall = clusters
+                .iter()
+                .map(|c| c.max_switch_ns.saturating_add(cluster_window_ns))
+                .max()
+                .unwrap_or(0);
+            if let Ok(selected) = stream_json_array_select(&path, |e: &IrqEventRecord| {
+                e.exit_ns >= min_overall && e.enter_ns <= max_overall
+            }) {
+                irq_pool = Some(selected);
+            }
+        }
+    }
+
+    if irq_pool.as_ref().is_some_and(|v| !v.is_empty()) {
         pushln(output, "irq overlap");
         pushln(output, "-----------");
         for (rank, cluster) in clusters.iter().take(top).enumerate() {
             let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
             let max_ns = cluster.max_switch_ns.saturating_add(cluster_window_ns);
-            let matches = artifacts
-                .irq_events
+            let matches = irq_pool
+                .as_ref()
+                .unwrap()
                 .iter()
                 .filter(|event| event.exit_ns >= min_ns && event.enter_ns <= max_ns)
                 .collect::<Vec<_>>();
@@ -1179,16 +1283,41 @@ fn render_correlation_sections(
         pushln(output, "");
     }
 
+    // GPU samples: either use in-memory samples or stream a narrow window
+    // around cluster elapsed times.
+    let mut gpu_pool: Option<Vec<GpuSample>> = None;
     if !artifacts.gpu_samples.is_empty() {
+        gpu_pool = Some(artifacts.gpu_samples.clone());
+    } else if let Some(run_dir) = run_dir {
+        let path = run_dir.join("gpu_samples.json");
+        if path.exists() && !clusters.is_empty() {
+            // compute overall elapsed window (add 50ms tolerance)
+            let min_overall_opt = clusters
+                .iter()
+                .filter_map(cluster_elapsed)
+                .min();
+            let max_overall_opt = clusters
+                .iter()
+                .filter_map(cluster_elapsed)
+                .max();
+            if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+                let lower = min_overall.saturating_sub(50);
+                let upper = max_overall.saturating_add(50);
+                if let Ok(selected) = stream_json_array_select(&path, |s: &GpuSample| {
+                    s.elapsed_ms >= lower && s.elapsed_ms <= upper
+                }) {
+                    gpu_pool = Some(selected);
+                }
+            }
+        }
+    }
+
+    if gpu_pool.as_ref().is_some_and(|v| !v.is_empty()) {
         pushln(output, "gpu near clusters");
         pushln(output, "-----------------");
         for (rank, cluster) in clusters.iter().take(top).enumerate() {
-            let Some(elapsed) = cluster_elapsed(cluster) else {
-                continue;
-            };
-            let Some(sample) = nearest_gpu_sample(elapsed, &artifacts.gpu_samples) else {
-                continue;
-            };
+            let Some(elapsed) = cluster_elapsed(cluster) else { continue; };
+            let Some(sample) = nearest_gpu_sample(elapsed, gpu_pool.as_ref().unwrap()) else { continue; };
             pushln(
                 output,
                 format!(
@@ -1206,21 +1335,51 @@ fn render_correlation_sections(
         pushln(output, "");
     }
 
+    // Frame events: stream a bounded elapsed window if needed.
+    let mut frame_pool: Option<Vec<FrameEvent>> = None;
     if !artifacts.frame_events.is_empty() {
+        frame_pool = Some(artifacts.frame_events.clone());
+    } else if let Some(run_dir) = run_dir {
+        let path = run_dir.join("frame_correlation.json");
+        if path.exists() && !clusters.is_empty() {
+            // compute overall min/max elapsed with padding
+            let padding_ms = u128::from(cluster_window_ns / 1_000_000).max(1);
+            let min_overall_opt = clusters
+                .iter()
+                .filter_map(|c| cluster_elapsed_range(c).map(|(min, _)| min))
+                .min();
+            let max_overall_opt = clusters
+                .iter()
+                .filter_map(|c| cluster_elapsed_range(c).map(|(_, max)| max))
+                .max();
+            if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+                let lower = min_overall.saturating_sub(padding_ms);
+                let upper = max_overall.saturating_add(padding_ms);
+                if let Ok(selected) = stream_json_array_select(&path, |f: &FrameEvent| {
+                    f.elapsed_ms >= lower && f.elapsed_ms <= upper
+                }) {
+                    frame_pool = Some(selected);
+                }
+            }
+        }
+    }
+
+    if frame_pool.as_ref().is_some_and(|v| !v.is_empty()) {
         pushln(output, "frame overlap");
         pushln(output, "-------------");
         for (rank, cluster) in clusters.iter().take(top).enumerate() {
-            let Some((min_elapsed, max_elapsed)) = cluster_elapsed_range(cluster) else {
-                continue;
-            };
+            let Some((min_elapsed, max_elapsed)) = cluster_elapsed_range(cluster) else { continue; };
             let padding_ms = u128::from(cluster_window_ns / 1_000_000).max(1);
             let min_elapsed = min_elapsed.saturating_sub(padding_ms);
             let max_elapsed = max_elapsed.saturating_add(padding_ms);
-            let matches = artifacts
-                .frame_events
-                .iter()
-                .filter(|frame| frame.elapsed_ms >= min_elapsed && frame.elapsed_ms <= max_elapsed)
-                .collect::<Vec<_>>();
+            let matches = frame_pool
+                .as_ref()
+                .map(|pool| {
+                    pool.iter()
+                        .filter(|frame| frame.elapsed_ms >= min_elapsed && frame.elapsed_ms <= max_elapsed)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             if matches.is_empty() {
                 continue;
             }
@@ -1243,14 +1402,39 @@ fn render_correlation_sections(
         pushln(output, "");
     }
 
+    let mut migration_pool: Option<Vec<crate::recorder::MigrationEventRecord>> = None;
     if !artifacts.migration_events.is_empty() {
+        migration_pool = Some(artifacts.migration_events.clone());
+    } else if let Some(run_dir) = run_dir {
+        let path = run_dir.join("migration_events.json");
+        if path.exists() && !clusters.is_empty() {
+            let min_overall = clusters
+                .iter()
+                .map(|c| c.min_switch_ns.saturating_sub(cluster_window_ns))
+                .min()
+                .unwrap_or(0);
+            let max_overall = clusters
+                .iter()
+                .map(|c| c.max_switch_ns.saturating_add(cluster_window_ns))
+                .max()
+                .unwrap_or(0);
+            if let Ok(selected) = stream_json_array_select(&path, |e: &crate::recorder::MigrationEventRecord| {
+                e.timestamp_ns >= min_overall && e.timestamp_ns <= max_overall
+            }) {
+                migration_pool = Some(selected);
+            }
+        }
+    }
+
+    if migration_pool.as_ref().is_some_and(|v| !v.is_empty()) {
         pushln(output, "migration overlap");
         pushln(output, "-----------------");
         for (rank, cluster) in clusters.iter().take(top).enumerate() {
             let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
             let max_ns = cluster.max_switch_ns.saturating_add(cluster_window_ns);
-            let matches = artifacts
-                .migration_events
+            let matches = migration_pool
+                .as_ref()
+                .unwrap()
                 .iter()
                 .filter(|event| event.timestamp_ns >= min_ns && event.timestamp_ns <= max_ns)
                 .collect::<Vec<_>>();
@@ -1280,15 +1464,42 @@ fn render_correlation_sections(
         pushln(output, "");
     }
 
+    let mut cpu_freq_pool: Option<Vec<crate::recorder::CpuFreqRecord>> = None;
     if !artifacts.cpu_freq_samples.is_empty() {
+        cpu_freq_pool = Some(artifacts.cpu_freq_samples.clone());
+    } else if let Some(run_dir) = run_dir {
+        let path = run_dir.join("cpu_freq_samples.json");
+        if path.exists() && !clusters.is_empty() {
+            let min_overall_opt = clusters
+                .iter()
+                .filter_map(cluster_elapsed)
+                .min();
+            let max_overall_opt = clusters
+                .iter()
+                .filter_map(cluster_elapsed)
+                .max();
+            if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+                let lower = min_overall.saturating_sub(50);
+                let upper = max_overall.saturating_add(50);
+                if let Ok(selected) = stream_json_array_select(&path, |s: &crate::recorder::CpuFreqRecord| {
+                    s.elapsed_ms >= lower && s.elapsed_ms <= upper
+                }) {
+                    cpu_freq_pool = Some(selected);
+                }
+            }
+        }
+    }
+
+    if cpu_freq_pool.as_ref().is_some_and(|v| !v.is_empty()) {
         pushln(output, "cpu freq near clusters");
         pushln(output, "----------------------");
         for (rank, cluster) in clusters.iter().take(top).enumerate() {
             let Some(elapsed) = cluster_elapsed(cluster) else {
                 continue;
             };
-            let matches = artifacts
-                .cpu_freq_samples
+            let matches = cpu_freq_pool
+                .as_ref()
+                .unwrap()
                 .iter()
                 .filter(|sample| sample.elapsed_ms.abs_diff(elapsed) <= 50)
                 .collect::<Vec<_>>();
@@ -1313,7 +1524,32 @@ fn render_correlation_sections(
         pushln(output, "");
     }
 
+    let mut io_pool: Option<Vec<crate::recorder::BlockIoRecord>> = None;
     if !artifacts.io_events.is_empty() {
+        io_pool = Some(artifacts.io_events.clone());
+    } else if let Some(run_dir) = run_dir {
+        let path = run_dir.join("io_events.json");
+        if path.exists() && !clusters.is_empty() {
+            let min_overall = clusters
+                .iter()
+                .map(|c| c.min_switch_ns.saturating_sub(cluster_window_ns))
+                .min()
+                .unwrap_or(0);
+            let max_overall = clusters
+                .iter()
+                .map(|c| c.max_switch_ns.saturating_add(cluster_window_ns))
+                .max()
+                .unwrap_or(0);
+            if let Ok(selected) = stream_json_array_select(&path, |e: &crate::recorder::BlockIoRecord| {
+                e.timestamp_ns >= min_overall
+                    && e.timestamp_ns.saturating_sub(e.duration_ns) <= max_overall
+            }) {
+                io_pool = Some(selected);
+            }
+        }
+    }
+
+    if io_pool.as_ref().is_some_and(|v| !v.is_empty()) {
         let heading = if block_io_correlation_basis == "dev+sector" {
             "block i/o overlap (approximate, correlated by dev+sector)"
         } else {
@@ -1324,8 +1560,9 @@ fn render_correlation_sections(
         for (rank, cluster) in clusters.iter().take(top).enumerate() {
             let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
             let max_ns = cluster.max_switch_ns.saturating_add(cluster_window_ns);
-            let matches = artifacts
-                .io_events
+            let matches = io_pool
+                .as_ref()
+                .unwrap()
                 .iter()
                 .filter(|event| {
                     event.timestamp_ns >= min_ns

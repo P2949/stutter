@@ -71,7 +71,9 @@ pub fn calculate_frame_metrics(frames: &[crate::recorder::FrameEvent]) -> (f64, 
     }
     times.sort_by(|a, b| a.total_cmp(b));
     let max = *times.last().unwrap_or(&0.0);
-    let p99_idx = (times.len() * 99 / 100).min(times.len() - 1);
+    let p99_idx = ((times.len() as f64 * 0.99).ceil() as usize)
+        .saturating_sub(1)
+        .min(times.len() - 1);
     let p99 = times[p99_idx];
     (max, p99)
 }

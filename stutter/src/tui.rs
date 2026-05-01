@@ -190,7 +190,7 @@ fn render_status_bar(
         ));
     } else {
         parts.push(Span::styled(
-            "No Drops │ ".to_owned(),
+            "No Drops │ ",
             Style::default().fg(Color::Green),
         ));
     }
@@ -206,7 +206,7 @@ fn render_status_bar(
 
     if state.paused {
         parts.push(Span::styled(
-            "PAUSED".to_owned(),
+            "PAUSED",
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
