@@ -279,6 +279,8 @@ pub struct SessionFile {
     pub frame_event_count: usize,
     #[serde(default)]
     pub block_io_event_count: usize,
+    #[serde(default = "default_block_io_correlation_basis")]
+    pub block_io_correlation_basis: String,
     #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
     pub tasks: Vec<SessionTask>,
@@ -316,6 +318,8 @@ pub struct MetadataFile {
     pub frame_event_count: usize,
     #[serde(default)]
     pub block_io_event_count: usize,
+    #[serde(default = "default_block_io_correlation_basis")]
+    pub block_io_correlation_basis: String,
     #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
 }
@@ -625,7 +629,7 @@ fn default_block_io_correlation_basis() -> String {
     "dev+sector".to_owned()
 }
 
-pub const SESSION_SCHEMA_VERSION: u32 = 15;
+pub const SESSION_SCHEMA_VERSION: u32 = 16;
 
 pub struct FinalizeRecordingInput<'a> {
     pub recording: &'a RecordingRun,
@@ -648,6 +652,7 @@ pub struct FinalizeRecordingInput<'a> {
     pub streamed_gpu_sample_count: Option<usize>,
     pub frame_events: &'a [FrameEvent],
     pub block_io_event_count: usize,
+    pub block_io_correlation_basis: &'a str,
     pub drop_counters: DropCountersSnapshot,
 }
 
@@ -842,6 +847,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         gpu_sample_count,
         frame_event_count: frame_events.len(),
         block_io_event_count: input.block_io_event_count,
+        block_io_correlation_basis: input.block_io_correlation_basis.to_owned(),
         drop_counters: drop_counters.clone(),
         tasks,
         top_spikes,
@@ -868,6 +874,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         gpu_sample_count,
         frame_event_count: frame_events.len(),
         block_io_event_count: input.block_io_event_count,
+        block_io_correlation_basis: input.block_io_correlation_basis.to_owned(),
         drop_counters,
     };
 

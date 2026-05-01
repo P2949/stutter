@@ -32,7 +32,23 @@ pub struct LoadedEbpf {
     pub target_pid_map: AyaHashMap<MapData, u32, u8>,
     pub target_irq_map: Option<AyaHashMap<MapData, u32, u8>>,
     pub prev_faults_map: Option<AyaHashMap<MapData, u32, [u64; 2]>>, // (tid) -> (maj, min)
+    pub block_io_correlation_basis: BlockIoCorrelationBasis,
     drop_counters: PerCpuArray<MapData, u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockIoCorrelationBasis {
+    DevSector,
+    RequestPointer,
+}
+
+impl BlockIoCorrelationBasis {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DevSector => "dev+sector",
+            Self::RequestPointer => "request-pointer",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -100,6 +116,12 @@ pub fn load_and_attach(
     if let Some(ref offset) = tracepoints.block_rq_key_offset {
         loader.override_global("BLOCK_RQ_KEY_OFFSET", offset, true);
     }
+
+    let block_io_correlation_basis = if tracepoints.block_rq_key_offset.is_some() {
+        BlockIoCorrelationBasis::RequestPointer
+    } else {
+        BlockIoCorrelationBasis::DevSector
+    };
 
     let mut ebpf = loader
         .load(aya::include_bytes_aligned!(concat!(
@@ -275,6 +297,7 @@ pub fn load_and_attach(
         target_pid_map,
         target_irq_map,
         prev_faults_map,
+        block_io_correlation_basis,
         drop_counters,
     })
 }
@@ -557,19 +580,18 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
                 block_rq = true;
                 block_rq_has_rwbs = true;
 
-                // Attempt to find a unique request pointer field in block_rq_issue
                 let issue_fmt = fs::read_to_string(&block_rq_issue)
                     .with_context(|| format!("failed to read {}", block_rq_issue.display()))?;
                 let issue_offsets = parse_tracepoint_offsets(&issue_fmt);
+                let issue_key_offset = find_request_key_offset(&issue_offsets);
+                let complete_key_offset = find_request_key_offset(&complete_offsets);
+                block_rq_key_offset =
+                    matching_request_key_offset(&issue_offsets, &complete_offsets);
 
-                for name in ["rq", "req", "request"] {
-                    if let Some(&offset) = issue_offsets.get(name) {
-                        // Sanity check: must be aligned and not overlapping common fields
-                        if offset >= 8 && offset % 8 == 0 {
-                            block_rq_key_offset = Some(offset as u32);
-                            break;
-                        }
-                    }
+                if block_rq_key_offset.is_none() && issue_key_offset != complete_key_offset {
+                    log::warn!(
+                        "request pointer key unavailable or mismatched between block_rq_issue ({issue_key_offset:?}) and block_rq_complete ({complete_key_offset:?}); falling back to dev+sector"
+                    );
                 }
             } else {
                 log::warn!(
@@ -669,6 +691,33 @@ fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, usize> {
     offsets
 }
 
+fn find_request_key_offset(offsets: &BTreeMap<String, usize>) -> Option<u32> {
+    for name in ["rq", "req", "request"] {
+        if let Some(&offset) = offsets.get(name)
+            && offset >= 8
+            && offset % 8 == 0
+        {
+            return Some(offset as u32);
+        }
+    }
+
+    None
+}
+
+fn matching_request_key_offset(
+    issue_offsets: &BTreeMap<String, usize>,
+    complete_offsets: &BTreeMap<String, usize>,
+) -> Option<u32> {
+    let issue_key_offset = find_request_key_offset(issue_offsets);
+    let complete_key_offset = find_request_key_offset(complete_offsets);
+
+    if issue_key_offset == complete_key_offset {
+        issue_key_offset
+    } else {
+        None
+    }
+}
+
 fn validate_tracepoint_format(
     format: &str,
     expected_offsets: &[(&str, usize)],
@@ -719,7 +768,6 @@ fn raise_memlock_limit() {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -738,6 +786,38 @@ field:int next_prio; offset:60; size:4; signed:1;
         assert_eq!(offsets.get("next_comm"), Some(&40));
         assert_eq!(offsets.get("next_pid"), Some(&56));
         assert_eq!(offsets.get("next_prio"), Some(&60));
+    }
+
+    #[test]
+    fn request_pointer_key_requires_matching_issue_and_complete_offsets() {
+        let issue_offsets =
+            parse_tracepoint_offsets("field:struct request *rq; offset:40; size:8; signed:0;");
+        let complete_offsets =
+            parse_tracepoint_offsets("field:struct request *rq; offset:40; size:8; signed:0;");
+
+        assert_eq!(
+            matching_request_key_offset(&issue_offsets, &complete_offsets),
+            Some(40),
+        );
+    }
+
+    #[test]
+    fn request_pointer_key_rejects_mismatched_or_missing_complete_offset() {
+        let issue_offsets =
+            parse_tracepoint_offsets("field:struct request *rq; offset:40; size:8; signed:0;");
+        let mismatched_complete_offsets =
+            parse_tracepoint_offsets("field:struct request *rq; offset:48; size:8; signed:0;");
+        let missing_complete_offsets =
+            parse_tracepoint_offsets("field:dev_t dev; offset:8; size:4; signed:0;");
+
+        assert_eq!(
+            matching_request_key_offset(&issue_offsets, &mismatched_complete_offsets),
+            None,
+        );
+        assert_eq!(
+            matching_request_key_offset(&issue_offsets, &missing_complete_offsets),
+            None,
+        );
     }
 
     #[test]

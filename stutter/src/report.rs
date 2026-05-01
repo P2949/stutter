@@ -625,13 +625,14 @@ pub(crate) fn render_report(
         pushln(
             &mut output,
             format!(
-                "io_events: {} (dev+sector correlated)",
-                session.block_io_event_count
+                "io_events: {} ({} correlated)",
+                session.block_io_event_count,
+                block_io_correlation_basis(session),
             ),
         );
         pushln(&mut output, "");
 
-        if session.block_io_event_count > 0 {
+        if session.block_io_event_count > 0 && block_io_correlation_basis(session) == "dev+sector" {
             pushln(&mut output, "block i/o correlation warning");
             pushln(&mut output, "----------------------------");
             pushln(
@@ -783,11 +784,15 @@ pub(crate) fn render_report(
     );
     pushln(
         &mut output,
-        "target_pending_on_switch_cpu is the number of other target wakeups still pending on the switch CPU",
+        "target_pending_on_switch_cpu counts other monitored wakeup records still pending on the CPU",
     );
     pushln(
         &mut output,
-        "after this task was dequeued (not kernel runqueue depth)",
+        "that actually ran the task, after this task was dequeued from its original wakeup target CPU.",
+    );
+    pushln(
+        &mut output,
+        "It is not kernel runqueue depth and may not be the queue that delayed the task after migration.",
     );
     if cluster_analysis.clusters.is_empty() {
         pushln(
@@ -808,6 +813,7 @@ pub(crate) fn render_report(
         &mut output,
         &cluster_analysis.clusters,
         artifacts,
+        block_io_correlation_basis(session),
         cluster_window_ns,
         top,
     );
@@ -862,6 +868,14 @@ where
 fn pushln(output: &mut String, line: impl AsRef<str>) {
     output.push_str(line.as_ref());
     output.push('\n');
+}
+
+fn block_io_correlation_basis(session: &SessionFile) -> &str {
+    if session.block_io_correlation_basis.is_empty() {
+        "dev+sector"
+    } else {
+        &session.block_io_correlation_basis
+    }
 }
 
 fn format_latency_signed(ns: i64) -> String {
@@ -1115,6 +1129,7 @@ fn render_correlation_sections(
     output: &mut String,
     clusters: &[SpikeCluster],
     artifacts: &RunArtifacts,
+    block_io_correlation_basis: &str,
     cluster_window_ns: u64,
     top: usize,
 ) {
@@ -1296,10 +1311,12 @@ fn render_correlation_sections(
     }
 
     if !artifacts.io_events.is_empty() {
-        pushln(
-            output,
-            "block i/o overlap (approximate, correlated by dev+sector)",
-        );
+        let heading = if block_io_correlation_basis == "dev+sector" {
+            "block i/o overlap (approximate, correlated by dev+sector)"
+        } else {
+            "block i/o overlap (correlated by request-pointer)"
+        };
+        pushln(output, heading);
         pushln(output, "-------------------------------");
         for (rank, cluster) in clusters.iter().take(top).enumerate() {
             let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);

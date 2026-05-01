@@ -1,6 +1,6 @@
 use std::{ffi::OsString, path::PathBuf, time::Duration};
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand};
 
 use crate::{
     TARGET_PIDS_MAX,
@@ -126,8 +126,16 @@ pub struct MonitorArgs {
     #[arg(long = "cgroupv2", value_name = "PATH")]
     cgroupv2: Option<PathBuf>,
 
-    #[arg(long = "follow-exec", default_value_t = true)]
+    #[arg(
+        long = "follow-exec",
+        default_value_t = true,
+        action = ArgAction::SetTrue,
+        conflicts_with = "no_follow_exec"
+    )]
     follow_exec: bool,
+
+    #[arg(long = "no-follow-exec", action = ArgAction::SetTrue)]
+    no_follow_exec: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -567,7 +575,7 @@ fn config_from_monitor_args(
         recording,
         max_duration,
         cgroupv2: args.cgroupv2,
-        follow_exec: args.follow_exec,
+        follow_exec: args.follow_exec && !args.no_follow_exec,
         exclude_tree_pids: args.exclude_tree_pids,
     })
 }
@@ -742,6 +750,24 @@ mod tests {
 
         assert_eq!(config.watch_process.as_deref(), Some("KingdomCome"));
         assert_eq!(config.csv_path, Some(PathBuf::from("/tmp/stutter.csv")));
+    }
+
+    #[test]
+    fn follow_exec_defaults_on_and_can_be_disabled() {
+        let default_command =
+            parse_app_command_from(["stutter", "monitor", "--pid", "42"]).unwrap();
+        let AppCommand::Monitor(default_config) = default_command else {
+            panic!("expected monitor command");
+        };
+        assert!(default_config.follow_exec);
+
+        let disabled_command =
+            parse_app_command_from(["stutter", "monitor", "--pid", "42", "--no-follow-exec"])
+                .unwrap();
+        let AppCommand::Monitor(disabled_config) = disabled_command else {
+            panic!("expected monitor command");
+        };
+        assert!(!disabled_config.follow_exec);
     }
 
     #[test]

@@ -549,6 +549,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         streamed_gpu_sample_count: None,
         frame_events: &[],
         block_io_event_count: 0,
+        block_io_correlation_basis: "dev+sector",
         drop_counters,
     })
     .unwrap();
@@ -661,6 +662,26 @@ fn process_cache_invalidates_when_pid_starttime_changes() {
     let second = process_tree::scan_processes_at(&dir, &mut cache);
     assert_eq!(second.get(&10).unwrap().comm, "new-name");
     assert_eq!(second.get(&10).unwrap().starttime_ticks, Some(999));
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn process_cache_can_be_invalidated_for_exec_without_starttime_change() {
+    let dir = temp_test_dir("proc-cache-exec");
+    create_fake_proc(&dir, 10, 1, "launcher", "launcher", &[10]);
+
+    let mut cache = process_tree::ProcessCache::default();
+    let first = process_tree::scan_processes_at(&dir, &mut cache);
+    assert_eq!(first.get(&10).unwrap().comm, "launcher");
+
+    fs::write(dir.join("10/status"), "Name:\tgame\nPPid:\t1\n").unwrap();
+    fs::write(dir.join("10/cmdline"), b"game.exe").unwrap();
+    cache.invalidate(10);
+
+    let second = process_tree::scan_processes_at(&dir, &mut cache);
+    assert_eq!(second.get(&10).unwrap().comm, "game");
+    assert_eq!(second.get(&10).unwrap().starttime_ticks, Some(100));
 
     fs::remove_dir_all(dir).ok();
 }
@@ -958,6 +979,7 @@ fn report_reads_recorded_session_and_spike_events() {
         streamed_gpu_sample_count: None,
         frame_events: &[],
         block_io_event_count: 0,
+        block_io_correlation_basis: "dev+sector",
         drop_counters: DropCountersSnapshot::default(),
     })
     .unwrap();
@@ -1027,6 +1049,7 @@ fn report_cluster_output_caps_inline_points() {
         streamed_gpu_sample_count: None,
         frame_events: &[],
         block_io_event_count: 0,
+        block_io_correlation_basis: "dev+sector",
         drop_counters: DropCountersSnapshot::default(),
     })
     .unwrap();
@@ -1131,6 +1154,31 @@ fn report_correlates_artifacts_with_spike_clusters() {
     assert!(output.contains("gpu_busy=91"));
     assert!(output.contains("frame overlap"));
     assert!(output.contains("max_frametime_ms=22.500"));
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn report_uses_run_level_block_io_correlation_basis() {
+    let dir = temp_test_dir("report-block-io-basis");
+    fs::create_dir_all(&dir).unwrap();
+    let session_path = dir.join("session.json");
+    let mut session = minimal_session_for_report();
+    session.block_io_event_count = 1;
+    session.block_io_correlation_basis = "request-pointer".to_owned();
+
+    let output = crate::report::render_report(
+        &session_path,
+        &session,
+        None,
+        &crate::report::RunArtifacts::default(),
+        10,
+        5,
+        None,
+    );
+
+    assert!(output.contains("io_events: 1 (request-pointer correlated)"));
+    assert!(!output.contains("block i/o correlation warning"));
 
     fs::remove_dir_all(dir).ok();
 }
