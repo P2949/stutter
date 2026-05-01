@@ -404,6 +404,18 @@ fn try_sched_migrate_task(ctx: TracePointContext) -> Result<u32, u32> {
 
     entry.submit(0);
 
+    // If this task is currently runnable (has a pending wakeup), update its
+    // target CPU and move its pending counter to the destination.
+    if let Some(data) = WAKEUP_DATA.get_ptr_mut(pid) {
+        let old_cpu = unsafe { (*data).target_cpu };
+        let new_cpu = dest_cpu as u32;
+        if old_cpu != new_cpu {
+            unsafe { (*data).target_cpu = new_cpu };
+            decrement_target_pending(old_cpu);
+            increment_target_pending(new_cpu);
+        }
+    }
+
     Ok(0)
 }
 

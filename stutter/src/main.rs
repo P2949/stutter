@@ -439,7 +439,11 @@ async fn tune_command(
 
     let min_frames = results.iter().map(|r| r.frame_count).min().unwrap_or(0);
     let max_frames = results.iter().map(|r| r.frame_count).max().unwrap_or(0);
-    if min_frames > 0 {
+    if max_frames > 0 && min_frames == 0 {
+        anyhow::bail!(
+            "tune candidates are not comparable: some candidates produced MangoHud frame events and some produced none"
+        );
+    } else if min_frames > 0 {
         let ratio = (max_frames as f64) / (min_frames as f64);
         if ratio > 1.5 {
             warn!(
@@ -814,24 +818,32 @@ fn result_is_better(candidate: &TuneCandidateSummary, current_best: &TuneCandida
     let cand_valid_rank: u8 = if candidate.valid { 0 } else { 1 };
     let best_valid_rank: u8 = if current_best.valid { 0 } else { 1 };
 
-    // Prefer valid candidates. Then prefer fewer large spikes and lower
-    // maximum latency (exact counters), falling back to the aggregate
-    // `score_total` last. This makes tuning lean on exact counters when
-    // percentiles may be coarse after `MAX_EXACT_SAMPLES`.
+    let cand_frame_p99 = (candidate.frame_p99_ms * 1000.0) as u64;
+    let best_frame_p99 = (current_best.frame_p99_ms * 1000.0) as u64;
+    let cand_frame_max = (candidate.frame_max_ms * 1000.0) as u64;
+    let best_frame_max = (current_best.frame_max_ms * 1000.0) as u64;
+
+    // Prefer valid candidates, then prefer the aggregate score (which includes
+    // frame penalties), then threshold counters, then specific frame metrics,
+    // and finally raw max latency as a tie-breaker.
     (
         cand_valid_rank,
+        candidate.score_total,
         candidate.over_5ms,
         candidate.over_2ms,
         candidate.over_1ms,
+        cand_frame_p99,
+        cand_frame_max,
         candidate.max_latency_ns,
-        candidate.score_total,
     ) < (
         best_valid_rank,
+        current_best.score_total,
         current_best.over_5ms,
         current_best.over_2ms,
         current_best.over_1ms,
+        best_frame_p99,
+        best_frame_max,
         current_best.max_latency_ns,
-        current_best.score_total,
     )
 }
 

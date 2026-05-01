@@ -794,15 +794,15 @@ pub(crate) fn render_report(
     );
     pushln(
         &mut output,
-        "target_pending_on_switch_cpu counts other monitored wakeup records still pending on the CPU",
+        "target_pending_on_switch_cpu is a rough advisory-only diagnostic: it counts other monitored",
     );
     pushln(
         &mut output,
-        "that actually ran the task, after this task was dequeued from its original wakeup target CPU.",
+        "wakeup records still pending on the CPU that actually ran the task.",
     );
     pushln(
         &mut output,
-        "It is not kernel runqueue depth and may not be the queue that delayed the task after migration.",
+        "It is not kernel runqueue depth and must not be used for scoring or tuning decisions.",
     );
     pushln(&mut output, "");
     if cluster_analysis.clusters.is_empty() {
