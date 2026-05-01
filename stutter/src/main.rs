@@ -814,8 +814,25 @@ fn result_is_better(candidate: &TuneCandidateSummary, current_best: &TuneCandida
     let cand_valid_rank: u8 = if candidate.valid { 0 } else { 1 };
     let best_valid_rank: u8 = if current_best.valid { 0 } else { 1 };
 
-    (cand_valid_rank, candidate.score_total, candidate.max_latency_ns)
-        < (best_valid_rank, current_best.score_total, current_best.max_latency_ns)
+    // Prefer valid candidates. Then prefer fewer large spikes and lower
+    // maximum latency (exact counters), falling back to the aggregate
+    // `score_total` last. This makes tuning lean on exact counters when
+    // percentiles may be coarse after `MAX_EXACT_SAMPLES`.
+    (
+        cand_valid_rank,
+        candidate.over_5ms,
+        candidate.over_2ms,
+        candidate.over_1ms,
+        candidate.max_latency_ns,
+        candidate.score_total,
+    ) < (
+        best_valid_rank,
+        current_best.over_5ms,
+        current_best.over_2ms,
+        current_best.over_1ms,
+        current_best.max_latency_ns,
+        current_best.score_total,
+    )
 }
 
 fn tune_scored_record_counts(records: &[IntervalRecord]) -> (usize, u64) {
