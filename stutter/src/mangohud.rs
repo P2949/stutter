@@ -4,29 +4,49 @@ use anyhow::Context;
 
 use crate::recorder::FrameEvent;
 
-pub fn read_frame_events(path: &Path) -> anyhow::Result<Vec<FrameEvent>> {
-    let file = fs::File::open(path)
+pub fn read_frame_events(path: &Path, ignore_offset: u64) -> anyhow::Result<Vec<FrameEvent>> {
+    let mut file = fs::File::open(path)
         .with_context(|| format!("failed to read MangoHud log {}", path.display()))?;
+
+    let mut header = String::new();
+    {
+        let mut reader = std::io::BufReader::new(&file);
+        reader.read_line(&mut header)?;
+    }
+
+    if ignore_offset > 0 {
+        use std::io::{Seek, SeekFrom};
+        file.seek(SeekFrom::Start(ignore_offset))?;
+    } else {
+        use std::io::{Seek, SeekFrom};
+        file.seek(SeekFrom::Start(0))?;
+    }
+
     let reader = std::io::BufReader::new(file);
-    parse_frame_events(reader.lines())
+    let mut lines = reader.lines();
+    if ignore_offset == 0 {
+        // Skip the header line if we are reading from the beginning
+        let _ = lines.next();
+    }
+
+    parse_frame_events(&header, lines)
 }
 
-pub fn parse_frame_events<I>(mut lines: I) -> anyhow::Result<Vec<FrameEvent>>
+pub fn parse_frame_events<I>(header: &str, lines: I) -> anyhow::Result<Vec<FrameEvent>>
 where
     I: Iterator<Item = std::io::Result<String>>,
 {
-    let Some(header) = lines.next() else {
-        return Ok(Vec::new());
-    };
-    let header = header?;
     if header.trim().is_empty() {
         return Ok(Vec::new());
     }
-    let headers = split_csv_line(&header);
+    let headers = split_csv_line(header);
     let elapsed_idx = find_header(&headers, &["elapsed_ms", "time_ms", "ms"]);
     let frametime_idx = find_header(&headers, &["frametime", "frametime_ms", "frame_time"]);
 
     let mut events = Vec::new();
+    let mut first_elapsed_ms: Option<u128> = None;
+    let mut accumulated_ms = 0.0;
+
     for line in lines {
         let line = line?;
         if line.trim().is_empty() {
@@ -38,12 +58,23 @@ where
             .and_then(|value| value.parse::<f64>().ok())
             .filter(|value| value.is_finite())
         {
-            let elapsed_ms = elapsed_idx
+            let raw_elapsed = elapsed_idx
                 .and_then(|idx| columns.get(idx))
                 .and_then(|value| value.parse::<f64>().ok())
-                .filter(|value| value.is_finite())
-                .map(|value| value.max(0.0) as u128)
-                .unwrap_or(0);
+                .filter(|value| value.is_finite());
+
+            let elapsed_ms = if let Some(raw) = raw_elapsed {
+                let val = raw.max(0.0) as u128;
+                if first_elapsed_ms.is_none() {
+                    first_elapsed_ms = Some(val);
+                }
+                val.saturating_sub(first_elapsed_ms.unwrap_or(0))
+            } else {
+                let val = accumulated_ms as u128;
+                accumulated_ms += frametime_ms;
+                val
+            };
+
             events.push(FrameEvent {
                 elapsed_ms,
                 frametime_ms,
@@ -92,31 +123,35 @@ mod tests {
 
     #[test]
     fn parses_header_based_frametime_csv() {
-        let data = "elapsed_ms,frametime_ms\n10,16.7\n20,33.4\n";
-        let events = parse_frame_events(data.lines().map(|s| Ok(s.to_owned()))).unwrap();
+        let header = "elapsed_ms,frametime_ms";
+        let data = "10,16.7\n20,33.4\n";
+        let events = parse_frame_events(header, data.lines().map(|s| Ok(s.to_owned()))).unwrap();
 
         assert_eq!(events.len(), 2);
-        assert_eq!(events[0].elapsed_ms, 10);
+        assert_eq!(events[0].elapsed_ms, 0); // Normalized
+        assert_eq!(events[1].elapsed_ms, 10); // 20 - 10
         assert_eq!(events[1].frametime_ms, 33.4);
     }
 
     #[test]
     fn parses_quoted_csv_fields() {
-        let data = "elapsed_ms,\"frame,time\",frametime_ms\n10,\"ignored, value\",16.7\n";
-        let events = parse_frame_events(data.lines().map(|s| Ok(s.to_owned()))).unwrap();
+        let header = "elapsed_ms,\"frame,time\",frametime_ms";
+        let data = "10,\"ignored, value\",16.7\n";
+        let events = parse_frame_events(header, data.lines().map(|s| Ok(s.to_owned()))).unwrap();
 
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].elapsed_ms, 10);
+        assert_eq!(events[0].elapsed_ms, 0); // Normalized
         assert_eq!(events[0].frametime_ms, 16.7);
     }
 
     #[test]
     fn skips_non_finite_frametimes() {
-        let data = "elapsed_ms,frametime_ms\n10,NaN\n20,inf\n30,16.7\n";
-        let events = parse_frame_events(data.lines().map(|s| Ok(s.to_owned()))).unwrap();
+        let header = "elapsed_ms,frametime_ms";
+        let data = "10,NaN\n20,inf\n30,16.7\n";
+        let events = parse_frame_events(header, data.lines().map(|s| Ok(s.to_owned()))).unwrap();
 
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].elapsed_ms, 30);
+        assert_eq!(events[0].elapsed_ms, 0); // Normalized (30 - 30)
         assert_eq!(events[0].frametime_ms, 16.7);
     }
 }

@@ -546,7 +546,7 @@ async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<TuneM
         hwmon_root: None,
         hwmon_drm_card: None,
         hwmon_render_node: None,
-        mangohud_log,
+        mangohud_log: mangohud_log.clone(),
         tui: false,
         retain_intervals: None,
         recording: Some(cli::RecordingConfig {
@@ -557,6 +557,13 @@ async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<TuneM
         cgroupv2: None,
         follow_exec: true,
         exclude_tree_pids: Vec::new(),
+        mangohud_ignore_offset: {
+            if let Some(path) = &mangohud_log {
+                std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+            } else {
+                0
+            }
+        },
     };
 
     let cache = profiles::ProfileApplyCache::default();
@@ -1770,7 +1777,7 @@ async fn run_monitor(
             .unwrap_or(false);
 
         let frame_events = if let Some(path) = &config.mangohud_log {
-            match mangohud::read_frame_events(path) {
+            match mangohud::read_frame_events(path, config.mangohud_ignore_offset) {
                 Ok(events) => events,
                 Err(err) => {
                     warn!(

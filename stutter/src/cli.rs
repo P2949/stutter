@@ -297,6 +297,7 @@ pub struct Config {
     pub hwmon_drm_card: Option<String>,
     pub hwmon_render_node: Option<PathBuf>,
     pub mangohud_log: Option<PathBuf>,
+    pub mangohud_ignore_offset: u64,
     pub tui: bool,
     pub retain_intervals: Option<usize>,
     pub recording: Option<RecordingConfig>,
@@ -577,6 +578,7 @@ fn config_from_monitor_args(
         cgroupv2: args.cgroupv2,
         follow_exec: args.follow_exec && !args.no_follow_exec,
         exclude_tree_pids: args.exclude_tree_pids,
+        mangohud_ignore_offset: 0,
     })
 }
 

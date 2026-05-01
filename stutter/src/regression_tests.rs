@@ -1303,6 +1303,7 @@ fn test_config(
         cgroupv2: None,
         follow_exec: true,
         exclude_tree_pids: Vec::new(),
+        mangohud_ignore_offset: 0,
     }
 }
 
