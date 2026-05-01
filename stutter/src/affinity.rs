@@ -18,6 +18,12 @@ pub struct CpuMask {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AffinityRecord {
     pub tid: u32,
+    #[serde(default)]
+    pub process_pid: Option<u32>,
+    #[serde(default)]
+    pub process_starttime_ticks: Option<u64>,
+    #[serde(default)]
+    pub task_starttime_ticks: Option<u64>,
     pub original_mask: CpuMask,
     pub applied_mask: CpuMask,
 }
@@ -28,7 +34,7 @@ pub struct RestoreState {
     pub records: Vec<AffinityRecord>,
 }
 
-pub const RESTORE_SCHEMA_VERSION: u32 = 2;
+pub const RESTORE_SCHEMA_VERSION: u32 = 3;
 
 impl CpuMask {
     pub fn parse(value: &str) -> anyhow::Result<Self> {
@@ -214,11 +220,6 @@ impl<'de> Deserialize<'de> for CpuMask {
     }
 }
 
-#[allow(dead_code)]
-pub fn read_allowed_mask(tid: u32) -> anyhow::Result<CpuMask> {
-    read_allowed_mask_raw(tid).with_context(|| format!("failed to read CPU affinity for TID {tid}"))
-}
-
 pub fn read_allowed_mask_raw(tid: u32) -> io::Result<CpuMask> {
     let mut set = unsafe { std::mem::zeroed::<libc::cpu_set_t>() };
     let result = unsafe {
@@ -257,14 +258,59 @@ pub fn set_affinity_raw(tid: u32, mask: &CpuMask) -> io::Result<()> {
 pub struct RestoreSummary {
     pub restored: usize,
     pub skipped_dead: usize,
+    pub skipped_identity_mismatch: usize,
+    pub legacy_unverified: usize,
     pub errors: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RestoreRecordStatus {
+    Verified,
+    LegacyUnverified,
+    Dead,
+    IdentityMismatch,
+}
+
 pub fn restore_all(records: &[AffinityRecord]) -> (RestoreSummary, Vec<anyhow::Error>) {
+    restore_all_at(Path::new("/proc"), records)
+}
+
+fn restore_all_at(
+    proc_root: &Path,
+    records: &[AffinityRecord],
+) -> (RestoreSummary, Vec<anyhow::Error>) {
     let mut summary = RestoreSummary::default();
     let mut errors = Vec::new();
 
     for record in records {
+        match restore_record_status_at(proc_root, record) {
+            Ok(RestoreRecordStatus::Verified) => {}
+            Ok(RestoreRecordStatus::LegacyUnverified) => {
+                summary.legacy_unverified += 1;
+                log::warn!(
+                    "restore_record_missing_identity tid={}; restoring by numeric TID only for legacy restore file",
+                    record.tid
+                );
+            }
+            Ok(RestoreRecordStatus::Dead) => {
+                summary.skipped_dead += 1;
+                continue;
+            }
+            Ok(RestoreRecordStatus::IdentityMismatch) => {
+                summary.skipped_identity_mismatch += 1;
+                log::warn!(
+                    "restore_record_identity_mismatch tid={}; skipping affinity restore to avoid TID reuse damage",
+                    record.tid
+                );
+                continue;
+            }
+            Err(err) => {
+                summary.errors += 1;
+                errors.push(err.into());
+                continue;
+            }
+        }
+
         match set_affinity_raw(record.tid, &record.original_mask) {
             Ok(()) => summary.restored += 1,
             Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
@@ -278,6 +324,82 @@ pub fn restore_all(records: &[AffinityRecord]) -> (RestoreSummary, Vec<anyhow::E
     }
 
     (summary, errors)
+}
+
+pub fn restore_record_status(record: &AffinityRecord) -> io::Result<RestoreRecordStatus> {
+    restore_record_status_at(Path::new("/proc"), record)
+}
+
+fn restore_record_status_at(
+    proc_root: &Path,
+    record: &AffinityRecord,
+) -> io::Result<RestoreRecordStatus> {
+    if !record.has_identity() {
+        return Ok(RestoreRecordStatus::LegacyUnverified);
+    }
+
+    let Some(process_pid) = record.process_pid else {
+        return Ok(RestoreRecordStatus::IdentityMismatch);
+    };
+
+    let process_stat_path = proc_root.join(process_pid.to_string()).join("stat");
+    let process_starttime = match stat_starttime_at(&process_stat_path) {
+        Ok(starttime) => starttime,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(RestoreRecordStatus::Dead),
+        Err(err) => {
+            return Err(io::Error::new(
+                err.kind(),
+                format!(
+                    "failed to read process identity for TID {} via {}: {err}",
+                    record.tid,
+                    process_stat_path.display()
+                ),
+            ));
+        }
+    };
+    if record.process_starttime_ticks.is_some()
+        && process_starttime != record.process_starttime_ticks
+    {
+        return Ok(RestoreRecordStatus::IdentityMismatch);
+    }
+
+    let task_stat_path = proc_root
+        .join(process_pid.to_string())
+        .join("task")
+        .join(record.tid.to_string())
+        .join("stat");
+    let task_starttime = match stat_starttime_at(&task_stat_path) {
+        Ok(starttime) => starttime,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(RestoreRecordStatus::Dead),
+        Err(err) => {
+            return Err(io::Error::new(
+                err.kind(),
+                format!(
+                    "failed to read task identity for TID {} via {}: {err}",
+                    record.tid,
+                    task_stat_path.display()
+                ),
+            ));
+        }
+    };
+    if record.task_starttime_ticks.is_some() && task_starttime != record.task_starttime_ticks {
+        return Ok(RestoreRecordStatus::IdentityMismatch);
+    }
+
+    Ok(RestoreRecordStatus::Verified)
+}
+
+impl AffinityRecord {
+    fn has_identity(&self) -> bool {
+        self.process_pid.is_some()
+            || self.process_starttime_ticks.is_some()
+            || self.task_starttime_ticks.is_some()
+    }
+}
+
+fn stat_starttime_at(path: &Path) -> io::Result<Option<u64>> {
+    let stat = fs::read_to_string(path)?;
+    Ok(crate::process_tree::parse_proc_stat_starttime(&stat))
 }
 
 pub fn default_restore_path() -> PathBuf {
@@ -319,12 +441,22 @@ pub fn save_merged_restore_state(
     let mut merged = BTreeMap::new();
 
     for record in existing.records {
-        merged.insert(record.tid, record);
+        merged.insert(restore_merge_key(&record), record);
     }
 
     for record in records {
+        if record.has_identity() {
+            let legacy_key = RestoreMergeKey {
+                tid: record.tid,
+                process_pid: None,
+                process_starttime_ticks: None,
+                task_starttime_ticks: None,
+            };
+            merged.remove(&legacy_key);
+        }
+
         merged
-            .entry(record.tid)
+            .entry(restore_merge_key(record))
             .and_modify(|existing| {
                 existing.applied_mask = record.applied_mask.clone();
             })
@@ -333,6 +465,23 @@ pub fn save_merged_restore_state(
 
     let records = merged.into_values().collect::<Vec<_>>();
     save_restore_state(path, &records)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+struct RestoreMergeKey {
+    tid: u32,
+    process_pid: Option<u32>,
+    process_starttime_ticks: Option<u64>,
+    task_starttime_ticks: Option<u64>,
+}
+
+fn restore_merge_key(record: &AffinityRecord) -> RestoreMergeKey {
+    RestoreMergeKey {
+        tid: record.tid,
+        process_pid: record.process_pid,
+        process_starttime_ticks: record.process_starttime_ticks,
+        task_starttime_ticks: record.task_starttime_ticks,
+    }
 }
 
 pub fn load_restore_state(path: &Path) -> anyhow::Result<RestoreState> {
@@ -417,26 +566,9 @@ mod tests {
         let dir = temp_dir("affinity-merge");
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("restore.json");
-        save_restore_state(
-            &path,
-            &[AffinityRecord {
-                tid: 7,
-                original_mask: CpuMask::parse("0-3").unwrap(),
-                applied_mask: CpuMask::parse("0-1").unwrap(),
-            }],
-        )
-        .unwrap();
+        save_restore_state(&path, &[affinity_record(7, "0-3", "0-1")]).unwrap();
 
-        save_merged_restore_state(
-            &path,
-            &[AffinityRecord {
-                tid: 7,
-                original_mask: CpuMask::parse("0-1").unwrap(),
-                applied_mask: CpuMask::parse("0").unwrap(),
-            }],
-            false,
-        )
-        .unwrap();
+        save_merged_restore_state(&path, &[affinity_record(7, "0-1", "0")], false).unwrap();
 
         let state = load_restore_state(&path).unwrap();
         assert_eq!(state.schema_version, RESTORE_SCHEMA_VERSION);
@@ -449,11 +581,7 @@ mod tests {
 
     #[test]
     fn restore_all_skips_dead_tids() {
-        let (summary, errors) = restore_all(&[AffinityRecord {
-            tid: i32::MAX as u32,
-            original_mask: CpuMask::parse("0").unwrap(),
-            applied_mask: CpuMask::parse("0").unwrap(),
-        }]);
+        let (summary, errors) = restore_all(&[affinity_record(i32::MAX as u32, "0", "0")]);
 
         assert_eq!(summary.restored, 0);
         assert_eq!(summary.skipped_dead, 1);
@@ -466,20 +594,92 @@ mod tests {
         let dir = temp_dir("affinity-restore-dead");
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("restore.json");
-        save_restore_state(
-            &path,
-            &[AffinityRecord {
-                tid: i32::MAX as u32,
-                original_mask: CpuMask::parse("0").unwrap(),
-                applied_mask: CpuMask::parse("0").unwrap(),
-            }],
-        )
-        .unwrap();
+        save_restore_state(&path, &[affinity_record(i32::MAX as u32, "0", "0")]).unwrap();
 
         let summary = restore_saved(&path).unwrap();
 
         assert_eq!(summary.skipped_dead, 1);
         assert!(!path.exists());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn restore_record_status_verifies_saved_identity() {
+        let dir = temp_dir("affinity-identity");
+        write_fake_task_stat(&dir, 10, 11, 100, 111);
+
+        let mut record = affinity_record(11, "0", "1");
+        record.process_pid = Some(10);
+        record.process_starttime_ticks = Some(100);
+        record.task_starttime_ticks = Some(111);
+        assert_eq!(
+            restore_record_status_at(&dir, &record).unwrap(),
+            RestoreRecordStatus::Verified
+        );
+
+        record.task_starttime_ticks = Some(222);
+        assert_eq!(
+            restore_record_status_at(&dir, &record).unwrap(),
+            RestoreRecordStatus::IdentityMismatch
+        );
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn merged_restore_state_keys_by_task_identity() {
+        let dir = temp_dir("affinity-merge-identity");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("restore.json");
+
+        let mut original = affinity_record(7, "0-3", "0-1");
+        original.process_pid = Some(7);
+        original.process_starttime_ticks = Some(70);
+        original.task_starttime_ticks = Some(70);
+        save_restore_state(&path, &[original]).unwrap();
+
+        let mut same_identity = affinity_record(7, "0-1", "0");
+        same_identity.process_pid = Some(7);
+        same_identity.process_starttime_ticks = Some(70);
+        same_identity.task_starttime_ticks = Some(70);
+        save_merged_restore_state(&path, &[same_identity], false).unwrap();
+
+        let state = load_restore_state(&path).unwrap();
+        assert_eq!(state.records.len(), 1);
+        assert_eq!(state.records[0].original_mask.to_range_string(), "0-3");
+        assert_eq!(state.records[0].applied_mask.to_range_string(), "0");
+
+        let mut new_identity = affinity_record(7, "1-3", "1");
+        new_identity.process_pid = Some(7);
+        new_identity.process_starttime_ticks = Some(70);
+        new_identity.task_starttime_ticks = Some(71);
+        save_merged_restore_state(&path, &[new_identity], false).unwrap();
+
+        let state = load_restore_state(&path).unwrap();
+        assert_eq!(state.records.len(), 2);
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn merged_restore_state_replaces_legacy_same_tid_record() {
+        let dir = temp_dir("affinity-merge-legacy");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("restore.json");
+
+        save_restore_state(&path, &[affinity_record(7, "0-3", "0-1")]).unwrap();
+
+        let mut identity_record = affinity_record(7, "1-3", "1");
+        identity_record.process_pid = Some(7);
+        identity_record.process_starttime_ticks = Some(70);
+        identity_record.task_starttime_ticks = Some(70);
+        save_merged_restore_state(&path, &[identity_record], false).unwrap();
+
+        let state = load_restore_state(&path).unwrap();
+        assert_eq!(state.records.len(), 1);
+        assert_eq!(state.records[0].original_mask.to_range_string(), "1-3");
+        assert_eq!(state.records[0].task_starttime_ticks, Some(70));
+
         fs::remove_dir_all(dir).ok();
     }
 
@@ -498,6 +698,44 @@ mod tests {
 
         let reread = read_allowed_mask_raw(0).unwrap();
         assert_eq!(reread, current);
+    }
+
+    fn affinity_record(tid: u32, original_mask: &str, applied_mask: &str) -> AffinityRecord {
+        AffinityRecord {
+            tid,
+            process_pid: None,
+            process_starttime_ticks: None,
+            task_starttime_ticks: None,
+            original_mask: CpuMask::parse(original_mask).unwrap(),
+            applied_mask: CpuMask::parse(applied_mask).unwrap(),
+        }
+    }
+
+    fn write_fake_task_stat(
+        proc_root: &Path,
+        process_pid: u32,
+        tid: u32,
+        process_starttime: u64,
+        task_starttime: u64,
+    ) {
+        let process_dir = proc_root.join(process_pid.to_string());
+        fs::create_dir_all(process_dir.join("task").join(tid.to_string())).unwrap();
+        fs::write(
+            process_dir.join("stat"),
+            fake_stat("process", process_starttime),
+        )
+        .unwrap();
+        fs::write(
+            process_dir.join("task").join(tid.to_string()).join("stat"),
+            fake_stat("task", task_starttime),
+        )
+        .unwrap();
+    }
+
+    fn fake_stat(comm: &str, starttime: u64) -> String {
+        let mut fields = vec!["0".to_owned(); 18];
+        fields.push(starttime.to_string());
+        format!("1 ({comm}) S {}\n", fields.join(" "))
     }
 
     fn temp_dir(name: &str) -> PathBuf {

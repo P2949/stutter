@@ -239,6 +239,9 @@ where
         planned.push(PlannedAffinityChange {
             record: AffinityRecord {
                 tid: task.tid,
+                process_pid: Some(task.process_pid),
+                process_starttime_ticks: task.process_starttime_ticks,
+                task_starttime_ticks: task.task_starttime_ticks,
                 original_mask,
                 applied_mask: rule.affinity.clone(),
             },
