@@ -116,6 +116,18 @@ pub fn load_and_attach(
     if let Some(ref offset) = tracepoints.block_rq_key_offset {
         loader.override_global("BLOCK_RQ_KEY_OFFSET", offset, true);
     }
+    if let Some(ref offset) = tracepoints.block_rq_issue_nr_sector_offset {
+        loader.override_global("BLOCK_RQ_ISSUE_NR_SECTOR_OFFSET", offset, true);
+    }
+    if let Some(ref offset) = tracepoints.block_rq_issue_rwbs_offset {
+        loader.override_global("BLOCK_RQ_ISSUE_RWBS_OFFSET", offset, true);
+    }
+    if let Some(ref offset) = tracepoints.block_rq_complete_nr_sector_offset {
+        loader.override_global("BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET", offset, true);
+    }
+    if let Some(ref offset) = tracepoints.block_rq_complete_rwbs_offset {
+        loader.override_global("BLOCK_RQ_COMPLETE_RWBS_OFFSET", offset, true);
+    }
 
     let block_io_correlation_basis = if tracepoints.block_rq_key_offset.is_some() {
         BlockIoCorrelationBasis::RequestPointer
@@ -514,6 +526,10 @@ struct TracepointAvailability {
     block_rq: bool,
     block_rq_has_rwbs: bool,
     block_rq_key_offset: Option<u32>,
+    block_rq_issue_nr_sector_offset: Option<u32>,
+    block_rq_issue_rwbs_offset: Option<u32>,
+    block_rq_complete_nr_sector_offset: Option<u32>,
+    block_rq_complete_rwbs_offset: Option<u32>,
     sched_process_exec: bool,
 }
 
@@ -567,6 +583,10 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
     let mut block_rq = false;
     let mut block_rq_has_rwbs = false;
     let mut block_rq_key_offset = None;
+    let mut block_rq_issue_nr_sector_offset = None;
+    let mut block_rq_issue_rwbs_offset = None;
+    let mut block_rq_complete_nr_sector_offset = None;
+    let mut block_rq_complete_rwbs_offset = None;
 
     if block_rq_issue.exists() && block_rq_complete.exists() {
         let issue_ok =
@@ -578,31 +598,31 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         .is_ok();
 
         if issue_ok && complete_ok {
-            // Check for optional rwbs field at the expected offset
             let complete_fmt = fs::read_to_string(&block_rq_complete)
                 .with_context(|| format!("failed to read {}", block_rq_complete.display()))?;
             let complete_offsets = parse_tracepoint_offsets(&complete_fmt);
 
-            if complete_offsets.get("rwbs").map(|f| f.offset) == Some(32) {
-                block_rq = true;
-                block_rq_has_rwbs = true;
+            let issue_fmt = fs::read_to_string(&block_rq_issue)
+                .with_context(|| format!("failed to read {}", block_rq_issue.display()))?;
+            let issue_offsets = parse_tracepoint_offsets(&issue_fmt);
 
-                let issue_fmt = fs::read_to_string(&block_rq_issue)
-                    .with_context(|| format!("failed to read {}", block_rq_issue.display()))?;
-                let issue_offsets = parse_tracepoint_offsets(&issue_fmt);
+            block_rq = true;
+            block_rq_key_offset = matching_request_key_offset(&issue_offsets, &complete_offsets);
+
+            block_rq_issue_nr_sector_offset =
+                issue_offsets.get("nr_sector").map(|f| f.offset as u32);
+            block_rq_issue_rwbs_offset = issue_offsets.get("rwbs").map(|f| f.offset as u32);
+            block_rq_complete_nr_sector_offset =
+                complete_offsets.get("nr_sector").map(|f| f.offset as u32);
+            block_rq_complete_rwbs_offset = complete_offsets.get("rwbs").map(|f| f.offset as u32);
+
+            block_rq_has_rwbs = block_rq_complete_rwbs_offset.is_some();
+
+            if block_rq_key_offset.is_none() {
                 let issue_key_offset = find_request_key_offset(&issue_offsets);
                 let complete_key_offset = find_request_key_offset(&complete_offsets);
-                block_rq_key_offset =
-                    matching_request_key_offset(&issue_offsets, &complete_offsets);
-
-                if block_rq_key_offset.is_none() && issue_key_offset != complete_key_offset {
-                    log::warn!(
-                        "request pointer key unavailable or mismatched between block_rq_issue ({issue_key_offset:?}) and block_rq_complete ({complete_key_offset:?}); falling back to dev+sector"
-                    );
-                }
-            } else {
                 log::warn!(
-                    "block I/O tracepoint present but `rwbs` is not at offset 32 in block_rq_complete; disabling block I/O attachment to avoid eBPF/tracepoint mismatch"
+                    "request pointer key unavailable or mismatched between block_rq_issue ({issue_key_offset:?}) and block_rq_complete ({complete_key_offset:?}); falling back to metadata hashing"
                 );
             }
         } else {
@@ -629,6 +649,10 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         block_rq,
         block_rq_has_rwbs,
         block_rq_key_offset,
+        block_rq_issue_nr_sector_offset,
+        block_rq_issue_rwbs_offset,
+        block_rq_complete_nr_sector_offset,
+        block_rq_complete_rwbs_offset,
         sched_process_exec,
     })
 }

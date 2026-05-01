@@ -418,6 +418,106 @@ pub fn render_diff_report(
     Ok(output)
 }
 
+pub fn check_percentile_regression(
+    path_baseline: &Path,
+    path_current: &Path,
+    max_regression_p99_ms: f64,
+) -> anyhow::Result<()> {
+    let load_session = |path: &Path| -> anyhow::Result<SessionFile> {
+        let session_path = if path.is_dir() {
+            path.join("session.json")
+        } else {
+            path.to_path_buf()
+        };
+        let file = fs::File::open(&session_path)
+            .with_context(|| format!("failed to open {}", session_path.display()))?;
+        let reader = std::io::BufReader::new(file);
+        serde_json::from_reader(reader)
+            .with_context(|| format!("failed to parse {}", session_path.display()))
+    };
+
+    let session_baseline = load_session(path_baseline)?;
+    let session_current = load_session(path_current)?;
+
+    let max_regression_ns = (max_regression_p99_ms * 1_000_000.0) as i64;
+
+    #[derive(Clone)]
+    struct Agg {
+        p99_ns: u64,
+    }
+
+    let mut tasks_baseline: BTreeMap<(TaskClass, String, String), Agg> = BTreeMap::new();
+    for t in session_baseline
+        .tasks
+        .iter()
+        .filter(|t| t.latency.samples > 0)
+    {
+        let key = (t.class, t.process_comm.to_string(), t.comm.clone());
+        let entry = tasks_baseline.entry(key.clone()).or_insert(Agg { p99_ns: 0 });
+        entry.p99_ns = entry.p99_ns.max(t.latency.p99_ns);
+    }
+
+    let mut tasks_current: BTreeMap<(TaskClass, String, String), Agg> = BTreeMap::new();
+    for t in session_current
+        .tasks
+        .iter()
+        .filter(|t| t.latency.samples > 0)
+    {
+        let key = (t.class, t.process_comm.to_string(), t.comm.clone());
+        let entry = tasks_current.entry(key.clone()).or_insert(Agg { p99_ns: 0 });
+        entry.p99_ns = entry.p99_ns.max(t.latency.p99_ns);
+    }
+
+    let mut worst_regression: Option<((TaskClass, String, String), i64)> = None;
+
+    for (key, ta) in &tasks_baseline {
+        if let Some(tb) = tasks_current.get(key) {
+            let delta_p99 = tb.p99_ns as i64 - ta.p99_ns as i64;
+            if delta_p99 > 0 {
+                if let Some((_, current_worst)) = worst_regression {
+                    if delta_p99 > current_worst {
+                        worst_regression = Some((key.clone(), delta_p99));
+                    }
+                } else {
+                    worst_regression = Some((key.clone(), delta_p99));
+                }
+            }
+        }
+    }
+
+    match &worst_regression {
+        Some((key, delta_p99)) if *delta_p99 > max_regression_ns => {
+            anyhow::bail!(
+                "percentile_regression_check_failed: p99 regressed by {} on comm={} process={} (max_allowed={})",
+                format_latency_signed(*delta_p99),
+                key.2,
+                key.1,
+                format_latency(max_regression_ns as u64)
+            );
+        }
+        _ => {}
+    }
+
+    println!(
+        "percentile_regression_check_passed: baseline={} current={} max_regression_p99_ms={}",
+        path_baseline.display(),
+        path_current.display(),
+        max_regression_p99_ms
+    );
+    if let Some((key, delta_p99)) = &worst_regression {
+        println!(
+            "worst_p99_regression: {} on comm={} process={}",
+            format_latency_signed(*delta_p99),
+            key.2,
+            key.1
+        );
+    } else {
+        println!("worst_p99_regression: none");
+    }
+
+    Ok(())
+}
+
 pub fn print_diff_report(
     path_a: &Path,
     path_b: &Path,

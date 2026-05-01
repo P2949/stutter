@@ -11,6 +11,9 @@ pub struct StutterScore {
     pub max_latency_ns: u64,
     pub frame_max_ms: f64,
     pub frame_p99_ms: f64,
+    pub frame_over_16ms: u64,
+    pub frame_over_33ms: u64,
+    pub frame_over_50ms: u64,
 }
 
 pub fn class_contributes_to_score(class: TaskClass) -> bool {
@@ -51,11 +54,23 @@ pub fn score_from_interval_records_and_frames(
     score.frame_max_ms = frame_max;
     score.frame_p99_ms = frame_p99;
 
-    if frame_max > 50.0 {
-        score.total = score.total.saturating_add(100);
-    } else if frame_max > 20.0 {
-        score.total = score.total.saturating_add(20);
+    for frame in frames {
+        if frame.frametime_ms > 16.6 {
+            score.frame_over_16ms = score.frame_over_16ms.saturating_add(1);
+        }
+        if frame.frametime_ms > 33.3 {
+            score.frame_over_33ms = score.frame_over_33ms.saturating_add(1);
+        }
+        if frame.frametime_ms > 50.0 {
+            score.frame_over_50ms = score.frame_over_50ms.saturating_add(1);
+        }
     }
+
+    score.total = score
+        .total
+        .saturating_add(score.frame_over_50ms.saturating_mul(100))
+        .saturating_add(score.frame_over_33ms.saturating_mul(20))
+        .saturating_add(score.frame_over_16ms);
 
     score
 }
@@ -141,7 +156,7 @@ mod tests {
 
         let score = score_from_interval_records_and_frames(&[], &frames);
 
-        assert_eq!(score.total, 100);
+        assert_eq!(score.total, 121);
         assert_eq!(score.frame_max_ms, 55.0);
         assert_eq!(score.frame_p99_ms, 55.0);
     }
