@@ -31,6 +31,9 @@ struct SpikePoint {
     latency_ns: u64,
     wakeup_ns: u64,
     switch_ns: u64,
+    // Diagnostic-only: see docs in `metrics::SpikeRecord`.
+    // This is included in reports and visualizations only and MUST NOT
+    // influence scoring or tuning decisions.
     target_pending_wakeups: u32,
     elapsed_ms: Option<u128>,
 }

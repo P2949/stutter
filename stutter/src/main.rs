@@ -811,8 +811,11 @@ struct TuneCoverageMetrics {
 }
 
 fn result_is_better(candidate: &TuneCandidateSummary, current_best: &TuneCandidateSummary) -> bool {
-    (candidate.score_total, candidate.max_latency_ns)
-        < (current_best.score_total, current_best.max_latency_ns)
+    let cand_valid_rank: u8 = if candidate.valid { 0 } else { 1 };
+    let best_valid_rank: u8 = if current_best.valid { 0 } else { 1 };
+
+    (cand_valid_rank, candidate.score_total, candidate.max_latency_ns)
+        < (best_valid_rank, current_best.score_total, current_best.max_latency_ns)
 }
 
 fn tune_scored_record_counts(records: &[IntervalRecord]) -> (usize, u64) {

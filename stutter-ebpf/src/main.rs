@@ -45,6 +45,11 @@ static WAKEUP_DATA: HashMap<u32, WakeupData> =
 static IRQ_START_TIMES: HashMap<u64, u64> = HashMap::<u64, u64>::with_max_entries(1024, 0);
 
 #[map]
+// Diagnostic-only per-CPU counter of *monitored* wakeups that are still
+// pending on a CPU. This records other monitored wakeup records still
+// present on the CPU that actually ran the task after dequeue/migration.
+// It is NOT the kernel runqueue depth and MUST NOT be used in scoring or
+// tuning decisions in userspace.
 static TARGET_PENDING_WAKEUPS: Array<u32> = Array::<u32>::with_max_entries(1024, 0);
 
 #[repr(C)]
@@ -242,12 +247,14 @@ fn increment_drop_counter(reason: u32) {
 
 fn increment_target_pending(cpu: u32) {
     if let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(cpu) {
+        // Diagnostic-only increment.
         unsafe { *depth = (*depth).saturating_add(1) };
     }
 }
 
 fn decrement_target_pending(cpu: u32) {
     if let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(cpu) {
+        // Diagnostic-only decrement.
         unsafe { *depth = (*depth).saturating_sub(1) };
     }
 }

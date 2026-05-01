@@ -22,6 +22,10 @@ pub struct SpikeRecord {
     pub prio: i32,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
+    // Diagnostic-only: counter of monitored wakeups that were still
+    // pending on the CPU that actually ran the task after dequeue/migration.
+    // This is NOT the kernel runqueue depth and MUST NOT be used in
+    // scoring or tuning decisions.
     #[serde(alias = "target_runnable_depth")]
     pub target_pending_wakeups: u32,
     #[serde(default)]

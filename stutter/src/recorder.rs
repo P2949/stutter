@@ -481,6 +481,8 @@ pub struct RecordedSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
+    // Diagnostic-only: see docs in `metrics::SpikeRecord`.
+    // Do not use this field in scoring or tuning decisions.
     #[serde(alias = "target_runnable_depth")]
     pub target_pending_wakeups: u32,
     #[serde(default)]
@@ -504,6 +506,8 @@ pub struct SessionSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
+    // Diagnostic-only: see docs in `metrics::SpikeRecord`.
+    // Do not use this field in scoring or tuning decisions.
     #[serde(alias = "target_runnable_depth")]
     pub target_pending_wakeups: u32,
     #[serde(default)]
@@ -529,6 +533,8 @@ pub struct SpikeEvent {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
+    // Diagnostic-only: see docs in `metrics::SpikeRecord`.
+    // Do not use this field in scoring or tuning decisions.
     #[serde(alias = "target_runnable_depth")]
     pub target_pending_wakeups: u32,
     #[serde(default)]
