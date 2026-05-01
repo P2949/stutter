@@ -173,10 +173,6 @@ pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
     0
 }
 
-#[tracepoint]
-pub fn page_fault_user(_ctx: TracePointContext) -> u32 {
-    0
-}
 
 #[aya_ebpf::macros::perf_event]
 pub fn major_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {

@@ -109,6 +109,17 @@ struct DrainBpfEventsInput<'a> {
     process_cache: &'a mut process_tree::ProcessCache,
 }
 
+struct TuneCommandInput {
+    tree_pid: u32,
+    profiles_path: PathBuf,
+    epoch_seconds: u64,
+    warmup_seconds: u64,
+    runs: u32,
+    keep_best: bool,
+    mangohud_log: Option<PathBuf>,
+    enforce: bool,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -180,19 +191,21 @@ async fn main() -> anyhow::Result<()> {
             profiles,
             epoch_seconds,
             warmup_seconds,
+            runs,
             keep_best,
             mangohud_log,
             enforce,
         } => {
-            tune_command(
+            tune_command(TuneCommandInput {
                 tree_pid,
-                profiles,
+                profiles_path: profiles,
                 epoch_seconds,
                 warmup_seconds,
+                runs,
                 keep_best,
                 mangohud_log,
                 enforce,
-            )
+            })
             .await
         }
     }
@@ -259,15 +272,17 @@ fn print_restore_dry_run(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn tune_command(
-    tree_pid: u32,
-    profiles_path: PathBuf,
-    epoch_seconds: u64,
-    warmup_seconds: u64,
-    keep_best: bool,
-    mangohud_log: Option<PathBuf>,
-    enforce: bool,
-) -> anyhow::Result<()> {
+async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
+    let TuneCommandInput {
+        tree_pid,
+        profiles_path,
+        epoch_seconds,
+        warmup_seconds,
+        runs,
+        keep_best,
+        mangohud_log,
+        enforce,
+    } = input;
     let profiles = profiles::load_profiles(&profiles_path)?;
     if profiles.is_empty() {
         anyhow::bail!(
@@ -291,119 +306,127 @@ async fn tune_command(
     let shared_hwmon = hwmon::HwmonReader::discover_with_options(None, None, None)
         .map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)));
 
-    for (idx, profile) in profiles.iter().enumerate() {
-        println!(
-            "tune candidate={} state=CandidateWarmup warmup_seconds={}",
-            profile.name, warmup_seconds
-        );
+    for iteration in 1..=runs {
+        if runs > 1 {
+            println!("tune iteration={} status=Starting", iteration);
+        }
 
-        println!(
-            "tune candidate={} state=CandidateMeasure measure_seconds={}",
-            profile.name, measure_seconds
-        );
+        for profile in profiles.iter() {
+            println!(
+                "tune iteration={} candidate={} state=CandidateWarmup warmup_seconds={}",
+                iteration, profile.name, warmup_seconds
+            );
 
-        let TuneMeasureResult {
-            applied_tasks,
-            run_dir,
-            interval_records,
-            frame_events,
-            coverage,
-        } = match measure_tune_candidate(TuneMeasureInput {
-            tree_pid,
-            profile: profile.clone(),
-            epoch_seconds,
-            warmup_seconds,
-            enforce,
-            shared_hwmon: shared_hwmon.clone(),
-            mangohud_log: mangohud_log.clone(),
-            force_restore_overwrite: idx == 0,
-            tune_output_dir: tune_output_dir.clone(),
-        })
-        .await
-        {
-            Ok(res) => res,
-            Err(err) => {
-                restore_tune_on_error();
-                return Err(err);
+            println!(
+                "tune iteration={} candidate={} state=CandidateMeasure measure_seconds={}",
+                iteration, profile.name, measure_seconds
+            );
+
+            let TuneMeasureResult {
+                applied_tasks,
+                run_dir,
+                interval_records,
+                frame_events,
+                coverage,
+            } = match measure_tune_candidate(TuneMeasureInput {
+                tree_pid,
+                profile: profile.clone(),
+                epoch_seconds,
+                warmup_seconds,
+                enforce,
+                shared_hwmon: shared_hwmon.clone(),
+                mangohud_log: mangohud_log.clone(),
+                force_restore_overwrite: results.is_empty(),
+                tune_output_dir: tune_output_dir.clone(),
+            })
+            .await
+            {
+                Ok(res) => res,
+                Err(err) => {
+                    restore_tune_on_error();
+                    return Err(err);
+                }
+            };
+
+            let mut score =
+                scorer::score_from_interval_records_and_frames(&interval_records, &frame_events);
+            let frame_max = score.frame_max_ms;
+            let frame_p99 = score.frame_p99_ms;
+
+            // Reject / penalize candidates that did not gather enough data to be
+            // meaningfully comparable. These thresholds are conservative: at
+            // minimum require a couple of intervals and a modest number of
+            // scheduler samples.
+            const TUNE_MIN_INTERVALS: usize = 2;
+            const TUNE_MIN_SAMPLES: u64 = 50;
+            let interval_count = interval_records.len();
+            let sample_count: u64 = interval_records.iter().map(|r| r.samples).sum();
+            let (scored_interval_count, scored_sample_count) =
+                tune_scored_record_counts(&interval_records);
+            let mut valid = scored_interval_count >= TUNE_MIN_INTERVALS
+                && scored_sample_count >= TUNE_MIN_SAMPLES;
+            if !valid {
+                warn!(
+                    "tune_candidate_insufficient_scored_data iteration={} profile={} scored_intervals={} scored_samples={} total_intervals={} total_samples={}",
+                    iteration,
+                    profile.name,
+                    scored_interval_count,
+                    scored_sample_count,
+                    interval_count,
+                    sample_count
+                );
+                // Inflate the score so this candidate loses to better-measured ones.
+                score.total = u64::MAX / 4;
             }
-        };
 
-        let mut score =
-            scorer::score_from_interval_records_and_frames(&interval_records, &frame_events);
-        let frame_max = score.frame_max_ms;
-        let frame_p99 = score.frame_p99_ms;
+            if coverage.unique_scored_tasks == 0 {
+                warn!(
+                    "tune_candidate_no_scored_tasks iteration={} profile={} tracked_tasks={}",
+                    iteration, profile.name, coverage.unique_tracked_tasks
+                );
+                score.total = u64::MAX / 4;
+                valid = false;
+            }
+            if coverage.drop_counter_total > 0 {
+                warn!(
+                    "tune_candidate_drop_counters_nonzero iteration={} profile={} drops={}",
+                    iteration, profile.name, coverage.drop_counter_total
+                );
+            }
 
-        // Reject / penalize candidates that did not gather enough data to be
-        // meaningfully comparable. These thresholds are conservative: at
-        // minimum require a couple of intervals and a modest number of
-        // scheduler samples.
-        const TUNE_MIN_INTERVALS: usize = 2;
-        const TUNE_MIN_SAMPLES: u64 = 50;
-        let interval_count = interval_records.len();
-        let sample_count: u64 = interval_records.iter().map(|r| r.samples).sum();
-        let (scored_interval_count, scored_sample_count) =
-            tune_scored_record_counts(&interval_records);
-        let mut valid =
-            scored_interval_count >= TUNE_MIN_INTERVALS && scored_sample_count >= TUNE_MIN_SAMPLES;
-        if !valid {
-            warn!(
-                "tune_candidate_insufficient_scored_data profile={} scored_intervals={} scored_samples={} total_intervals={} total_samples={}",
-                profile.name,
-                scored_interval_count,
-                scored_sample_count,
-                interval_count,
-                sample_count
-            );
-            // Inflate the score so this candidate loses to better-measured ones.
-            score.total = u64::MAX / 4;
+            let result = TuneCandidateSummary {
+                profile: profile.name.clone(),
+                iteration,
+                run_dir,
+                applied_tasks,
+                warmup_seconds,
+                measure_seconds,
+                interval_count: interval_records.len(),
+                samples: sample_count,
+                scored_samples: scored_sample_count,
+                score_total: score.total,
+                over_1ms: score.over_1ms,
+                over_2ms: score.over_2ms,
+                over_5ms: score.over_5ms,
+                max_latency_ns: score.max_latency_ns,
+                frame_count: frame_events.len(),
+                frame_max_ms: frame_max,
+                frame_p99_ms: frame_p99,
+                coverage,
+                valid,
+            };
+
+            if results
+                .get(best_idx)
+                .is_none_or(|current_best| result_is_better(&result, current_best))
+            {
+                best_idx = results.len();
+            }
+
+            results.push(result);
+
+            restore_tune_after_candidate(&profile.name)?;
         }
-
-        if coverage.unique_scored_tasks == 0 {
-            warn!(
-                "tune_candidate_no_scored_tasks profile={} tracked_tasks={}",
-                profile.name, coverage.unique_tracked_tasks
-            );
-            score.total = u64::MAX / 4;
-            valid = false;
-        }
-        if coverage.drop_counter_total > 0 {
-            warn!(
-                "tune_candidate_drop_counters_nonzero profile={} drops={}",
-                profile.name, coverage.drop_counter_total
-            );
-        }
-
-        let result = TuneCandidateSummary {
-            profile: profile.name.clone(),
-            run_dir,
-            applied_tasks,
-            warmup_seconds,
-            measure_seconds,
-            interval_count: interval_records.len(),
-            samples: sample_count,
-            scored_samples: scored_sample_count,
-            score_total: score.total,
-            over_1ms: score.over_1ms,
-            over_2ms: score.over_2ms,
-            over_5ms: score.over_5ms,
-            max_latency_ns: score.max_latency_ns,
-            frame_count: frame_events.len(),
-            frame_max_ms: frame_max,
-            frame_p99_ms: frame_p99,
-            coverage,
-            valid,
-        };
-
-        if results
-            .get(best_idx)
-            .is_none_or(|current_best| result_is_better(&result, current_best))
-        {
-            best_idx = results.len();
-        }
-
-        results.push(result);
-
-        restore_tune_after_candidate(&profile.name)?;
     }
 
     let best_profile = results
@@ -459,6 +482,7 @@ async fn tune_command(
         schema_version: 1,
         tree_pid,
         profiles_path,
+        runs,
         epoch_seconds,
         warmup_seconds,
         restore_policy: restore_policy.to_owned(),
@@ -767,6 +791,7 @@ struct TuneSummary {
     schema_version: u32,
     tree_pid: u32,
     profiles_path: PathBuf,
+    runs: u32,
     epoch_seconds: u64,
     warmup_seconds: u64,
     restore_policy: String,
@@ -777,6 +802,7 @@ struct TuneSummary {
 #[derive(Clone, Serialize)]
 struct TuneCandidateSummary {
     profile: String,
+    iteration: u32,
     run_dir: PathBuf,
     applied_tasks: usize,
     warmup_seconds: u64,
@@ -853,12 +879,18 @@ fn result_is_better(candidate: &TuneCandidateSummary, current_best: &TuneCandida
 }
 
 fn tune_scored_record_counts(records: &[IntervalRecord]) -> (usize, u64) {
-    records
+    let mut elapsed = BTreeSet::new();
+    let mut samples = 0u64;
+
+    for record in records
         .iter()
         .filter(|record| scorer::class_contributes_to_score(record.class))
-        .fold((0usize, 0u64), |(intervals, samples), record| {
-            (intervals + 1, samples.saturating_add(record.samples))
-        })
+    {
+        elapsed.insert(record.elapsed_ms);
+        samples = samples.saturating_add(record.samples);
+    }
+
+    (elapsed.len(), samples)
 }
 
 fn tune_coverage_metrics(

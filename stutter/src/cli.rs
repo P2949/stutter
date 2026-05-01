@@ -237,6 +237,9 @@ struct TuneArgs {
     #[arg(long = "mangohud-log", value_name = "PATH")]
     pub mangohud_log: Option<PathBuf>,
 
+    #[arg(long = "runs", short = 'n', default_value_t = 1, value_name = "N")]
+    pub runs: u32,
+
     #[arg(long)]
     pub enforce: bool,
 }
@@ -274,6 +277,7 @@ pub enum AppCommand {
         profiles: PathBuf,
         epoch_seconds: u64,
         warmup_seconds: u64,
+        runs: u32,
         keep_best: bool,
         mangohud_log: Option<PathBuf>,
         enforce: bool,
@@ -422,11 +426,15 @@ where
             if args.warmup_seconds >= args.epoch_seconds {
                 anyhow::bail!("--warmup-seconds must be less than --epoch-seconds");
             }
+            if args.runs == 0 {
+                anyhow::bail!("--runs must be greater than zero");
+            }
             Ok(AppCommand::Tune {
                 tree_pid: args.tree_pid,
                 profiles: args.profiles,
                 epoch_seconds: args.epoch_seconds,
                 warmup_seconds: args.warmup_seconds,
+                runs: args.runs,
                 keep_best: args.keep_best,
                 mangohud_log: args.mangohud_log,
                 enforce: args.enforce,
@@ -973,6 +981,7 @@ mod tests {
             profiles,
             epoch_seconds,
             warmup_seconds,
+            runs,
             keep_best,
             mangohud_log,
             enforce,
@@ -985,6 +994,7 @@ mod tests {
         assert_eq!(profiles, PathBuf::from("/tmp/profiles.toml"));
         assert_eq!(epoch_seconds, 60);
         assert_eq!(warmup_seconds, 10);
+        assert_eq!(runs, 1);
         assert!(keep_best);
         assert_eq!(mangohud_log, Some(PathBuf::from("/tmp/tune-mango.csv")));
         assert!(!enforce);

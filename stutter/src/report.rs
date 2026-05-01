@@ -1721,15 +1721,17 @@ fn render_correlation_sections(
             pushln(
                 output,
                 format!(
-                    "cluster=#{} matches={} tids={} max_duration={} window_ns={}..{}",
+                    "cluster=#{} matches={} tids={}{} max_duration={} window_ns={}..{}",
                     rank + 1,
                     matches.len(),
                     tids,
+                    if block_io_correlation_basis == "dev+sector" { " (approximate)" } else { "" },
                     format_latency(max_duration),
                     min_ns,
                     max_ns
                 ),
             );
+
         }
         pushln(output, "");
     }
