@@ -164,22 +164,13 @@ pub fn load_and_attach(
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
 
-    if tracepoints.irq_handler {
+    if tracepoints.irq_handler && config.irq_latency {
         attach_tracepoint(&mut ebpf, "irq_handler_entry", "irq", "irq_handler_entry")
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
         attach_tracepoint(&mut ebpf, "irq_handler_exit", "irq", "irq_handler_exit")
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
 
-    if tracepoints.page_fault_user {
-        attach_tracepoint(
-            &mut ebpf,
-            "page_fault_user",
-            "exceptions",
-            "page_fault_user",
-        )
-        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
-    }
     if tracepoints.block_rq {
         attach_tracepoint(&mut ebpf, "block_rq_issue", "block", "block_rq_issue")
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
@@ -520,7 +511,6 @@ struct TracepointAvailability {
     cpu_frequency: bool,
     sched_stat_wait: bool,
     irq_handler: bool,
-    page_fault_user: bool,
     block_rq: bool,
     block_rq_has_rwbs: bool,
     block_rq_key_offset: Option<u32>,
@@ -571,13 +561,6 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         log::warn!("IRQ tracepoint formats missing; continuing without IRQ latency probe");
     }
 
-    let page_fault_user = events_root.join("exceptions/page_fault_user/format");
-    let page_fault_user = if page_fault_user.exists() {
-        validate_tracepoint_format_at(&page_fault_user, &[])?; // No specific fields needed for now
-        true
-    } else {
-        false
-    };
 
     let block_rq_issue = events_root.join("block/block_rq_issue/format");
     let block_rq_complete = events_root.join("block/block_rq_complete/format");
@@ -643,7 +626,6 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         cpu_frequency,
         sched_stat_wait,
         irq_handler,
-        page_fault_user,
         block_rq,
         block_rq_has_rwbs,
         block_rq_key_offset,
