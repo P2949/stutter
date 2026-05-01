@@ -324,7 +324,6 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
     // (inserted by sched_wakeup). Treat that as sufficient evidence this is
     // a target-related event.
 
-    let _prev_state: i64 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
     let cpu = unsafe { bpf_get_smp_processor_id() };
 
     // Decrement the target-pending counter for the CPU where the task was

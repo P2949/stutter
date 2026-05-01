@@ -637,9 +637,10 @@ pub(crate) fn render_report(
         pushln(
             &mut output,
             format!(
-                "io_events: {} ({} correlated)",
+                "io_events: {} ({}{})",
                 session.block_io_event_count,
                 block_io_correlation_basis(session),
+                if block_io_correlation_basis(session) == "dev+sector" { " correlated; approximate" } else { " correlated" },
             ),
         );
         pushln(&mut output, "");
@@ -1683,7 +1684,7 @@ fn render_correlation_sections(
 
     if io_pool.as_ref().is_some_and(|v| !v.is_empty()) {
         let heading = if block_io_correlation_basis == "dev+sector" {
-            "block i/o overlap (approximate, correlated by dev+sector)"
+            "block i/o overlap (advisory, approximate; correlated by dev+sector)"
         } else {
             "block i/o overlap (correlated by request-pointer)"
         };
