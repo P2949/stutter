@@ -27,6 +27,12 @@ pub fn read_frame_events(path: &Path, ignore_offset: u64) -> anyhow::Result<Vec<
     if ignore_offset == 0 {
         // Skip the header line if we are reading from the beginning
         let _ = lines.next();
+    } else {
+        // We sought into the file; the first line may be a partial CSV row
+        // (if MangoHud was writing the file while the offset was captured).
+        // Discard the first line after a nonzero offset to avoid parsing
+        // a truncated row.
+        let _ = lines.next();
     }
 
     parse_frame_events(&header, lines)
