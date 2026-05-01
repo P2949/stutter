@@ -29,6 +29,7 @@ enum Command {
     Restore(RestoreArgs),
     ApplyProfile(ApplyProfileArgs),
     Tune(TuneArgs),
+    Check(CheckArgs),
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -218,18 +219,18 @@ struct ApplyProfileArgs {
     long_about = "Benchmark multiple profiles and select the best one. \
                   This command is experimental and its decisions should be verified with repeated runs."
 )]
-struct TuneArgs {
+pub struct TuneArgs {
     #[arg(long = "tree-pid", value_name = "PID")]
-    tree_pid: u32,
+    pub tree_pid: u32,
 
     #[arg(long = "profiles", value_name = "FILE")]
-    profiles: PathBuf,
+    pub profiles: PathBuf,
 
     #[arg(long = "epoch-seconds", default_value_t = 120)]
-    epoch_seconds: u64,
+    pub epoch_seconds: u64,
 
     #[arg(long = "warmup-seconds", default_value_t = 30)]
-    warmup_seconds: u64,
+    pub warmup_seconds: u64,
 
     #[arg(long = "keep-best")]
     pub keep_best: bool,
@@ -242,6 +243,18 @@ struct TuneArgs {
 
     #[arg(long)]
     pub enforce: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct CheckArgs {
+    #[arg(long = "baseline", value_name = "PATH")]
+    pub baseline: PathBuf,
+
+    #[arg(long = "current", value_name = "PATH")]
+    pub current: PathBuf,
+
+    #[arg(long = "max-regression-p99-ms", value_name = "MS")]
+    pub max_regression_p99_ms: f64,
 }
 
 #[derive(Debug)]
@@ -281,6 +294,11 @@ pub enum AppCommand {
         keep_best: bool,
         mangohud_log: Option<PathBuf>,
         enforce: bool,
+    },
+    Check {
+        baseline: PathBuf,
+        current: PathBuf,
+        max_regression_p99_ms: f64,
     },
 }
 
@@ -438,6 +456,16 @@ where
                 keep_best: args.keep_best,
                 mangohud_log: args.mangohud_log,
                 enforce: args.enforce,
+            })
+        }
+        Some(Command::Check(args)) => {
+            if args.max_regression_p99_ms < 0.0 {
+                anyhow::bail!("--max-regression-p99-ms must be non-negative");
+            }
+            Ok(AppCommand::Check {
+                baseline: args.baseline,
+                current: args.current,
+                max_regression_p99_ms: args.max_regression_p99_ms,
             })
         }
         None => Ok(AppCommand::Monitor(Box::new(config_from_monitor_args(
@@ -1065,5 +1093,32 @@ mod tests {
             err.to_string()
                 .contains("--epoch must be greater than zero")
         );
+    }
+    #[test]
+    fn parses_check_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "check",
+            "--baseline",
+            "run1/",
+            "--current",
+            "run2/",
+            "--max-regression-p99-ms",
+            "2.5",
+        ])
+        .unwrap();
+
+        let AppCommand::Check {
+            baseline,
+            current,
+            max_regression_p99_ms,
+        } = command
+        else {
+            panic!("expected check command");
+        };
+
+        assert_eq!(baseline, PathBuf::from("run1/"));
+        assert_eq!(current, PathBuf::from("run2/"));
+        assert_eq!(max_regression_p99_ms, 2.5);
     }
 }

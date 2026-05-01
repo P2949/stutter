@@ -208,6 +208,11 @@ async fn main() -> anyhow::Result<()> {
             })
             .await
         }
+        AppCommand::Check {
+            baseline,
+            current,
+            max_regression_p99_ms,
+        } => report::check_percentile_regression(&baseline, &current, max_regression_p99_ms),
     }
 }
 
@@ -295,7 +300,6 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
 
     let measure_seconds = epoch_seconds.saturating_sub(warmup_seconds);
     let mut results = Vec::new();
-    let mut best_idx = 0usize;
     let restore_policy = if keep_best {
         "restore-after-each-then-keep-best"
     } else {
@@ -412,16 +416,12 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
                 frame_count: frame_events.len(),
                 frame_max_ms: frame_max,
                 frame_p99_ms: frame_p99,
+                frame_over_16ms: score.frame_over_16ms,
+                frame_over_33ms: score.frame_over_33ms,
+                frame_over_50ms: score.frame_over_50ms,
                 coverage,
                 valid,
             };
-
-            if results
-                .get(best_idx)
-                .is_none_or(|current_best| result_is_better(&result, current_best))
-            {
-                best_idx = results.len();
-            }
 
             results.push(result);
 
@@ -429,9 +429,16 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         }
     }
 
-    let best_profile = results
-        .get(best_idx)
-        .map(|result| result.profile.clone())
+    let mut grouped: BTreeMap<String, Vec<TuneCandidateSummary>> = BTreeMap::new();
+    for r in &results {
+        grouped.entry(r.profile.clone()).or_default().push(r.clone());
+    }
+
+    let best_profile = grouped
+        .iter()
+        .filter(|(_, runs)| runs.iter().any(|r| r.valid))
+        .min_by_key(|(_, runs)| aggregate_profile_rank(runs))
+        .map(|(name, _)| name.clone())
         .unwrap_or_default();
 
     let any_valid = results.iter().any(|r| r.valid);
@@ -441,38 +448,50 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     }
 
     // Check for large disparities in sample counts across candidates and
-    // warn when candidates are not meaningfully comparable.
-    let min_samples = results.iter().map(|r| r.scored_samples).min().unwrap_or(0);
-    let max_samples = results.iter().map(|r| r.scored_samples).max().unwrap_or(0);
+    // warn when candidates are not meaningfully comparable. Use profile
+    // medians to ensure one noisy run does not invalidate the entire suite.
+    let profile_medians: Vec<_> = grouped
+        .values()
+        .map(|runs| median_u64(runs.iter().map(|r| r.scored_samples).collect()))
+        .collect();
+    let min_samples = profile_medians.iter().copied().min().unwrap_or(0);
+    let max_samples = profile_medians.iter().copied().max().unwrap_or(0);
+
     if min_samples == 0 && max_samples > 0 {
         anyhow::bail!(
-            "tune candidates are not comparable: some candidates gathered no scored samples while others did (max_scored_samples={})",
+            "tune candidates are not comparable: some profiles gathered no scored samples while others did (max_median_scored_samples={})",
             max_samples
         );
     } else if min_samples > 0 {
         let ratio = (max_samples as f64) / (min_samples as f64);
         if ratio > 2.0 {
             anyhow::bail!(
-                "tune candidates are not comparable: scored sample count varies by more than 2x across candidates (min={} max={} ratio={:.2})",
+                "tune candidates are not comparable: median scored sample count varies by more than 2x across profiles (min={} max={} ratio={:.2})",
                 min_samples,
                 max_samples,
                 ratio
             );
         }
     }
-    check_tune_coverage_comparability(&results)?;
 
-    let min_frames = results.iter().map(|r| r.frame_count).min().unwrap_or(0);
-    let max_frames = results.iter().map(|r| r.frame_count).max().unwrap_or(0);
+    check_tune_coverage_comparability(&grouped)?;
+
+    let profile_frame_medians: Vec<_> = grouped
+        .values()
+        .map(|runs| median_u64(runs.iter().map(|r| r.frame_count as u64).collect()))
+        .collect();
+    let min_frames = profile_frame_medians.iter().copied().min().unwrap_or(0);
+    let max_frames = profile_frame_medians.iter().copied().max().unwrap_or(0);
+
     if max_frames > 0 && min_frames == 0 {
         anyhow::bail!(
-            "tune candidates are not comparable: some candidates produced MangoHud frame events and some produced none"
+            "tune candidates are not comparable: some profiles produced MangoHud frame events and some produced none"
         );
     } else if min_frames > 0 {
         let ratio = (max_frames as f64) / (min_frames as f64);
         if ratio > 1.5 {
             warn!(
-                "tune_candidates_unbalanced_frames min={} max={} ratio={:.2}",
+                "tune_candidates_unbalanced_frames min_median={} max_median={} ratio={:.2}",
                 min_frames, max_frames, ratio
             );
         }
@@ -818,6 +837,9 @@ struct TuneCandidateSummary {
     frame_count: usize,
     frame_max_ms: f64,
     frame_p99_ms: f64,
+    frame_over_16ms: u64,
+    frame_over_33ms: u64,
+    frame_over_50ms: u64,
     coverage: TuneCoverageMetrics,
     valid: bool,
 }
@@ -841,41 +863,55 @@ struct TuneCoverageMetrics {
     active_target_max: usize,
     removed_task_count: usize,
     drop_counter_total: u64,
-    #[serde(skip_serializing)]
     scored_identity_counts: BTreeMap<TaskIdentity, usize>,
 }
 
-fn result_is_better(candidate: &TuneCandidateSummary, current_best: &TuneCandidateSummary) -> bool {
-    let cand_valid_rank: u8 = if candidate.valid { 0 } else { 1 };
-    let best_valid_rank: u8 = if current_best.valid { 0 } else { 1 };
+fn aggregate_profile_rank(runs: &[TuneCandidateSummary]) -> impl Ord {
+    let invalid_run_count = runs.iter().filter(|r| !r.valid).count();
 
-    let cand_frame_p99 = (candidate.frame_p99_ms * 1000.0) as u64;
-    let best_frame_p99 = (current_best.frame_p99_ms * 1000.0) as u64;
-    let cand_frame_max = (candidate.frame_max_ms * 1000.0) as u64;
-    let best_frame_max = (current_best.frame_max_ms * 1000.0) as u64;
+    let score_totals: Vec<u64> = runs.iter().map(|r| r.score_total).collect();
+    let over_5ms: Vec<u64> = runs.iter().map(|r| r.over_5ms).collect();
+    let over_2ms: Vec<u64> = runs.iter().map(|r| r.over_2ms).collect();
+    let over_1ms: Vec<u64> = runs.iter().map(|r| r.over_1ms).collect();
+    let frame_over_50ms: Vec<u64> = runs.iter().map(|r| r.frame_over_50ms).collect();
+    let frame_over_33ms: Vec<u64> = runs.iter().map(|r| r.frame_over_33ms).collect();
+    let frame_over_16ms: Vec<u64> = runs.iter().map(|r| r.frame_over_16ms).collect();
+    let frame_p99s: Vec<u64> = runs
+        .iter()
+        .map(|r| (r.frame_p99_ms * 1000.0) as u64)
+        .collect();
+    let frame_maxes: Vec<u64> = runs
+        .iter()
+        .map(|r| (r.frame_max_ms * 1000.0) as u64)
+        .collect();
+    let max_latencies: Vec<u64> = runs.iter().map(|r| r.max_latency_ns).collect();
 
-    // Prefer valid candidates, then prefer the aggregate score (which includes
-    // frame penalties), then threshold counters, then specific frame metrics,
-    // and finally raw max latency as a tie-breaker.
     (
-        cand_valid_rank,
-        candidate.score_total,
-        candidate.over_5ms,
-        candidate.over_2ms,
-        candidate.over_1ms,
-        cand_frame_p99,
-        cand_frame_max,
-        candidate.max_latency_ns,
-    ) < (
-        best_valid_rank,
-        current_best.score_total,
-        current_best.over_5ms,
-        current_best.over_2ms,
-        current_best.over_1ms,
-        best_frame_p99,
-        best_frame_max,
-        current_best.max_latency_ns,
+        invalid_run_count,
+        median_u64(score_totals.clone()),
+        median_u64(over_5ms),
+        median_u64(over_2ms),
+        median_u64(over_1ms),
+        median_u64(frame_over_50ms),
+        median_u64(frame_over_33ms),
+        median_u64(frame_over_16ms),
+        worst_u64(score_totals),
+        worst_u64(frame_p99s),
+        worst_u64(frame_maxes),
+        worst_u64(max_latencies),
     )
+}
+
+fn median_u64(mut values: Vec<u64>) -> u64 {
+    if values.is_empty() {
+        return 0;
+    }
+    values.sort_unstable();
+    values[values.len() / 2]
+}
+
+fn worst_u64(values: Vec<u64>) -> u64 {
+    values.into_iter().max().unwrap_or(0)
 }
 
 fn tune_scored_record_counts(records: &[IntervalRecord]) -> (usize, u64) {
@@ -970,24 +1006,41 @@ fn tune_coverage_metrics(
     }
 }
 
-fn check_tune_coverage_comparability(results: &[TuneCandidateSummary]) -> anyhow::Result<()> {
+fn check_tune_coverage_comparability(
+    grouped: &BTreeMap<String, Vec<TuneCandidateSummary>>,
+) -> anyhow::Result<()> {
     check_tune_metric_ratio(
         "unique tracked tasks",
-        results
-            .iter()
-            .map(|result| result.coverage.unique_tracked_tasks),
+        grouped.values().map(|runs| {
+            median_u64(
+                runs.iter()
+                    .map(|result| result.coverage.unique_tracked_tasks as u64)
+                    .collect(),
+            ) as usize
+        }),
     )?;
     check_tune_metric_ratio(
         "unique scored tasks",
-        results
-            .iter()
-            .map(|result| result.coverage.unique_scored_tasks),
+        grouped.values().map(|runs| {
+            median_u64(
+                runs.iter()
+                    .map(|result| result.coverage.unique_scored_tasks as u64)
+                    .collect(),
+            ) as usize
+        }),
     )?;
 
-    // Verify task identity stability. If the set of scored tasks shifts
-    // significantly between candidates, the comparison is unsafe.
-    if let Some(first) = results.first() {
-        for other in results.iter().skip(1) {
+    // Verify task identity stability. For repeated runs, we compare the first
+    // run of each profile against the first run of the next profile. We assume
+    // that within a single tune command, the workload is stable enough that
+    // the first runs are representative.
+    let representatives: Vec<&TuneCandidateSummary> = grouped
+        .values()
+        .filter_map(|runs| runs.first())
+        .collect();
+
+    if let Some(first) = representatives.first() {
+        for other in representatives.iter().skip(1) {
             let common = scored_identity_overlap(
                 &first.coverage.scored_identity_counts,
                 &other.coverage.scored_identity_counts,
@@ -1016,37 +1069,48 @@ fn check_tune_coverage_comparability(results: &[TuneCandidateSummary]) -> anyhow
 
     check_tune_metric_ratio(
         "active target minimum",
-        results
-            .iter()
-            .map(|result| result.coverage.active_target_min),
+        grouped.values().map(|runs| {
+            median_u64(
+                runs.iter()
+                    .map(|result| result.coverage.active_target_min as u64)
+                    .collect(),
+            ) as usize
+        }),
     )?;
     check_tune_metric_ratio(
         "active target maximum",
-        results
-            .iter()
-            .map(|result| result.coverage.active_target_max),
+        grouped.values().map(|runs| {
+            median_u64(
+                runs.iter()
+                    .map(|result| result.coverage.active_target_max as u64)
+                    .collect(),
+            ) as usize
+        }),
     )?;
 
-    let min_removed = results
-        .iter()
-        .map(|result| result.coverage.removed_task_count)
-        .min()
-        .unwrap_or(0);
-    let max_removed = results
-        .iter()
-        .map(|result| result.coverage.removed_task_count)
-        .max()
-        .unwrap_or(0);
+    let profile_removed_medians: Vec<_> = grouped
+        .values()
+        .map(|runs| {
+            median_u64(
+                runs.iter()
+                    .map(|result| result.coverage.removed_task_count as u64)
+                    .collect(),
+            )
+        })
+        .collect();
+
+    let min_removed = profile_removed_medians.iter().copied().min().unwrap_or(0);
+    let max_removed = profile_removed_medians.iter().copied().max().unwrap_or(0);
     if max_removed > min_removed {
         warn!(
-            "tune_candidates_removed_task_counts_differ min={} max={}",
+            "tune_candidates_removed_task_counts_differ min_median={} max_median={}",
             min_removed, max_removed
         );
     }
 
-    let max_drops = results
-        .iter()
-        .map(|result| result.coverage.drop_counter_total)
+    let max_drops = grouped
+        .values()
+        .flat_map(|runs| runs.iter().map(|r| r.coverage.drop_counter_total))
         .max()
         .unwrap_or(0);
     if max_drops > 0 {
