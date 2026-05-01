@@ -534,6 +534,7 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
     )?;
     let sched_wakeup_new = validate_optional_tracepoint_format_at(
         &events_root.join("sched/sched_wakeup_new/format"),
+        "sched_wakeup_new",
         &[("pid", 24), ("prio", 28), ("target_cpu", 32)],
     )?;
     validate_tracepoint_format_at(
@@ -543,14 +544,17 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
 
     let sched_migrate_task = validate_optional_tracepoint_format_at(
         &events_root.join("sched/sched_migrate_task/format"),
+        "sched_migrate_task",
         &[("pid", 12), ("orig_cpu", 20), ("dest_cpu", 24)],
     )?;
     let cpu_frequency = validate_optional_tracepoint_format_at(
         &events_root.join("power/cpu_frequency/format"),
+        "cpu_frequency",
         &[("state", 8), ("cpu_id", 12)],
     )?;
     let sched_stat_wait = validate_optional_tracepoint_format_at(
         &events_root.join("sched/sched_stat_wait/format"),
+        "sched_stat_wait",
         &[("pid", 8), ("delay", 16)],
     )?;
 
@@ -649,11 +653,12 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
 
 fn validate_optional_tracepoint_format_at(
     path: &Path,
+    name: &str,
     expected_offsets: &[(&str, usize)],
 ) -> anyhow::Result<bool> {
     if !path.exists() {
         log::warn!(
-            "optional tracepoint format missing: {}; continuing without sched_wakeup_new",
+            "optional tracepoint format missing: {}; continuing without {name}",
             path.display()
         );
         return Ok(false);
@@ -682,7 +687,6 @@ fn validate_tracepoint_format_at(
 struct TracepointField {
     offset: usize,
     size: usize,
-    declaration: String,
 }
 
 fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, TracepointField> {
@@ -699,9 +703,9 @@ fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, TracepointField> {
             continue;
         };
 
-        let Some(declaration) = field_part.strip_prefix("field:").map(|d| d.trim().to_owned()) else {
+        if !field_part.starts_with("field:") {
             continue;
-        };
+        }
 
         let Some(field_name) = field_name_from_part(field_part) else {
             continue;
@@ -724,7 +728,6 @@ fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, TracepointField> {
                 TracepointField {
                     offset,
                     size,
-                    declaration,
                 },
             );
         }
@@ -939,7 +942,7 @@ field:int irq; offset:8; size:4; signed:1;
         fs::create_dir_all(&dir).unwrap();
 
         let available =
-            validate_optional_tracepoint_format_at(&dir.join("missing/format"), &[("pid", 24)])
+            validate_optional_tracepoint_format_at(&dir.join("missing/format"), "missing", &[("pid", 24)])
                 .unwrap();
 
         assert!(!available);

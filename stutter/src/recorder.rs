@@ -580,6 +580,7 @@ impl SpikeEvent {
         monotonic_start_ns: Option<u64>,
         stats: &TaskStats,
         event: &SchedulerEvent,
+        fault_deltas: (u32, u32),
     ) -> Self {
         Self {
             elapsed_ms: elapsed_ms_from_monotonic(monotonic_start_ns, event.switch_ns),
@@ -596,8 +597,8 @@ impl SpikeEvent {
             wakeup_ns: event.wakeup_ns,
             switch_ns: event.switch_ns,
             target_pending_wakeups: event.target_pending_wakeups,
-            major_faults: event.maj_flt.saturating_sub(stats.major_faults as u32),
-            minor_faults: event.min_flt.saturating_sub(stats.minor_faults as u32),
+            major_faults: fault_deltas.0,
+            minor_faults: fault_deltas.1,
         }
     }
 }

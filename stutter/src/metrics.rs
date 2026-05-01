@@ -470,7 +470,12 @@ impl TaskStats {
         }
     }
 
-    pub fn record(&mut self, event: &SchedulerEvent, spike_threshold_ns: u64, elapsed_ms: u128) {
+    pub fn record(
+        &mut self,
+        event: &SchedulerEvent,
+        spike_threshold_ns: u64,
+        elapsed_ms: u128,
+    ) -> (u32, u32) {
         self.last_seen_ms = elapsed_ms;
 
         self.interval_latency.record(event.latency_ns);
@@ -495,6 +500,9 @@ impl TaskStats {
             );
         }
 
+        let major_faults = event.maj_flt.saturating_sub(self.major_faults as u32);
+        let minor_faults = event.min_flt.saturating_sub(self.minor_faults as u32);
+
         if event.latency_ns >= spike_threshold_ns {
             self.top_spikes.push(SpikeRecord {
                 latency_ns: event.latency_ns,
@@ -504,8 +512,8 @@ impl TaskStats {
                 wakeup_ns: event.wakeup_ns,
                 switch_ns: event.switch_ns,
                 target_pending_wakeups: event.target_pending_wakeups,
-                major_faults: event.maj_flt.saturating_sub(self.major_faults as u32),
-                minor_faults: event.min_flt.saturating_sub(self.minor_faults as u32),
+                major_faults,
+                minor_faults,
             });
 
             self.top_spikes
@@ -516,6 +524,8 @@ impl TaskStats {
 
         self.major_faults = event.maj_flt as u64;
         self.minor_faults = event.min_flt as u64;
+
+        (major_faults, minor_faults)
     }
 }
 
