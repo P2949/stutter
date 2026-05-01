@@ -577,7 +577,7 @@ pub(crate) fn render_report(
             &mut output,
             format!(
                 "spike_events_truncated=true retained_spike_events={} note=spike_events.json is capped; top_spikes and threshold counters remain available",
-                session.spike_event_count
+                session.spike_events_retained_count
             ),
         );
         pushln(&mut output, "");

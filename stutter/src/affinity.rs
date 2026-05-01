@@ -334,13 +334,23 @@ fn restore_record_status_at(
     proc_root: &Path,
     record: &AffinityRecord,
 ) -> io::Result<RestoreRecordStatus> {
+    // No identity at all -> legacy restore by numeric TID (back-compat).
     if !record.has_identity() {
         return Ok(RestoreRecordStatus::LegacyUnverified);
     }
 
-    let Some(process_pid) = record.process_pid else {
+    // If any identity field is present but the trio is incomplete, treat
+    // this as an identity mismatch rather than falling back to a numeric
+    // TID restore. This prevents accidental restores when schema v3
+    // records include partial identity data.
+    if record.process_pid.is_none()
+        || record.process_starttime_ticks.is_none()
+        || record.task_starttime_ticks.is_none()
+    {
         return Ok(RestoreRecordStatus::IdentityMismatch);
-    };
+    }
+
+    let process_pid = record.process_pid.unwrap();
 
     let process_stat_path = proc_root.join(process_pid.to_string()).join("stat");
     let process_starttime = match stat_starttime_at(&process_stat_path) {
@@ -357,9 +367,7 @@ fn restore_record_status_at(
             ));
         }
     };
-    if record.process_starttime_ticks.is_some()
-        && process_starttime != record.process_starttime_ticks
-    {
+    if process_starttime != record.process_starttime_ticks {
         return Ok(RestoreRecordStatus::IdentityMismatch);
     }
 
@@ -382,20 +390,11 @@ fn restore_record_status_at(
             ));
         }
     };
-    if record.task_starttime_ticks.is_some() && task_starttime != record.task_starttime_ticks {
+    if task_starttime != record.task_starttime_ticks {
         return Ok(RestoreRecordStatus::IdentityMismatch);
     }
 
-    // Only treat a record as strongly `Verified` when we have full identity
-    // information: `process_pid`, `process_starttime_ticks`, and
-    // `task_starttime_ticks`. If either start-time field is missing, fall
-    // back to `LegacyUnverified` so we don't accidentally accept weak
-    // identity data (e.g., when proc stat parsing failed during apply).
-    if record.process_starttime_ticks.is_some() && record.task_starttime_ticks.is_some() {
-        Ok(RestoreRecordStatus::Verified)
-    } else {
-        Ok(RestoreRecordStatus::LegacyUnverified)
-    }
+    Ok(RestoreRecordStatus::Verified)
 }
 
 impl AffinityRecord {

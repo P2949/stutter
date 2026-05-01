@@ -540,6 +540,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         tree_events: &tree_events,
         spike_events: &spike_events,
         spike_events_truncated: true,
+        spike_events_dropped_count: 0,
         scx_events: &[],
         irq_events: &[],
         streamed_irq_event_count: None,
@@ -564,8 +565,8 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
     assert_eq!(session.active_expanded_tasks, vec![1, 4, 9]);
     assert_eq!(metadata.active_expanded_tasks, vec![1, 4, 9]);
-    assert_eq!(session.spike_event_count, 1);
-    assert_eq!(metadata.spike_event_count, 1);
+    assert_eq!(session.spike_events_retained_count, 1);
+    assert_eq!(metadata.spike_events_retained_count, 1);
     assert_eq!(session.scx_event_count, 0);
     assert_eq!(metadata.scx_event_count, 0);
     assert!(session.spike_events_truncated);
@@ -970,6 +971,7 @@ fn report_reads_recorded_session_and_spike_events() {
         tree_events: &[],
         spike_events: &spike_events,
         spike_events_truncated: false,
+        spike_events_dropped_count: 0,
         scx_events: &[],
         irq_events: &[],
         streamed_irq_event_count: None,
@@ -1040,6 +1042,7 @@ fn report_cluster_output_caps_inline_points() {
         tree_events: &[],
         spike_events: &spike_events,
         spike_events_truncated: false,
+        spike_events_dropped_count: 0,
         scx_events: &[],
         irq_events: &[],
         streamed_irq_event_count: None,
@@ -1358,7 +1361,8 @@ fn minimal_session_for_report() -> SessionFile {
         "target_pids_max": 1024,
         "active_target_pids_count": 0,
         "active_expanded_tasks": [],
-        "spike_event_count": 3,
+        "spike_events_retained_count": 3,
+        "spike_events_dropped_count": 0,
         "spike_events_truncated": false,
         "scx_event_count": 0,
         "irq_event_count": 1,
@@ -1690,7 +1694,8 @@ fn report_diff_shows_regressions_and_improvements() {
             }
         ],
         "top_spikes": [],
-        "spike_event_count": 0,
+        "spike_events_retained_count": 0,
+        "spike_events_dropped_count": 0,
         "spike_events_truncated": false,
         "drop_counters": {
             "sched_switch": 0,
