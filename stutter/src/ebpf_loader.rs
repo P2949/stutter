@@ -596,7 +596,7 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
                 .with_context(|| format!("failed to read {}", block_rq_complete.display()))?;
             let complete_offsets = parse_tracepoint_offsets(&complete_fmt);
 
-            if complete_offsets.get("rwbs") == Some(&32) {
+            if complete_offsets.get("rwbs").map(|f| f.offset) == Some(32) {
                 block_rq = true;
                 block_rq_has_rwbs = true;
 
@@ -678,8 +678,15 @@ fn validate_tracepoint_format_at(
     })
 }
 
-fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, usize> {
-    let mut offsets = BTreeMap::new();
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TracepointField {
+    offset: usize,
+    size: usize,
+    declaration: String,
+}
+
+fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, TracepointField> {
+    let mut fields = BTreeMap::new();
 
     for line in format.lines() {
         let line = line.trim();
@@ -687,37 +694,53 @@ fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, usize> {
             continue;
         }
 
-        let mut parts = line.split(';').map(str::trim);
-        let Some(field_part) = parts.next() else {
+        let parts: Vec<_> = line.split(';').map(str::trim).collect();
+        let Some(field_part) = parts.first() else {
             continue;
         };
-        let Some(offset_part) = parts.find(|part| part.starts_with("offset:")) else {
+
+        let Some(declaration) = field_part.strip_prefix("field:").map(|d| d.trim().to_owned()) else {
             continue;
         };
 
         let Some(field_name) = field_name_from_part(field_part) else {
             continue;
         };
-        let Some(offset) = offset_part
-            .strip_prefix("offset:")
-            .and_then(|offset| offset.trim().parse::<usize>().ok())
-        else {
-            continue;
-        };
 
-        offsets.insert(field_name, offset);
+        let mut offset = None;
+        let mut size = None;
+
+        for part in parts.iter().skip(1) {
+            if let Some(val) = part.strip_prefix("offset:") {
+                offset = val.trim().parse::<usize>().ok();
+            } else if let Some(val) = part.strip_prefix("size:") {
+                size = val.trim().parse::<usize>().ok();
+            }
+        }
+
+        if let (Some(offset), Some(size)) = (offset, size) {
+            fields.insert(
+                field_name,
+                TracepointField {
+                    offset,
+                    size,
+                    declaration,
+                },
+            );
+        }
     }
 
-    offsets
+    fields
 }
 
-fn find_request_key_offset(offsets: &BTreeMap<String, usize>) -> Option<u32> {
+fn find_request_key_offset(offsets: &BTreeMap<String, TracepointField>) -> Option<u32> {
     for name in ["rq", "req", "request"] {
-        if let Some(&offset) = offsets.get(name)
-            && offset >= 8
-            && offset % 8 == 0
+        if let Some(field) = offsets.get(name)
+            && field.offset >= 8
+            && field.offset % 8 == 0
+            && field.size == 8
         {
-            return Some(offset as u32);
+            return Some(field.offset as u32);
         }
     }
 
@@ -725,8 +748,8 @@ fn find_request_key_offset(offsets: &BTreeMap<String, usize>) -> Option<u32> {
 }
 
 fn matching_request_key_offset(
-    issue_offsets: &BTreeMap<String, usize>,
-    complete_offsets: &BTreeMap<String, usize>,
+    issue_offsets: &BTreeMap<String, TracepointField>,
+    complete_offsets: &BTreeMap<String, TracepointField>,
 ) -> Option<u32> {
     let issue_key_offset = find_request_key_offset(issue_offsets);
     let complete_key_offset = find_request_key_offset(complete_offsets);
@@ -745,13 +768,14 @@ fn validate_tracepoint_format(
     let offsets = parse_tracepoint_offsets(format);
 
     for (field, expected_offset) in expected_offsets {
-        let Some(actual_offset) = offsets.get(*field) else {
+        let Some(actual_field) = offsets.get(*field) else {
             anyhow::bail!("missing field {field}");
         };
 
-        if *actual_offset != *expected_offset {
+        if actual_field.offset != *expected_offset {
             anyhow::bail!(
-                "field {field} offset mismatch: expected {expected_offset}, got {actual_offset}"
+                "field {field} offset mismatch: expected {expected_offset}, got {}",
+                actual_field.offset
             );
         }
     }
@@ -803,9 +827,12 @@ field:int next_prio; offset:60; size:4; signed:1;
 
         let offsets = parse_tracepoint_offsets(format);
 
-        assert_eq!(offsets.get("next_comm"), Some(&40));
-        assert_eq!(offsets.get("next_pid"), Some(&56));
-        assert_eq!(offsets.get("next_prio"), Some(&60));
+        assert_eq!(offsets.get("next_comm").map(|f| f.offset), Some(40));
+        assert_eq!(offsets.get("next_pid").map(|f| f.offset), Some(56));
+        assert_eq!(offsets.get("next_prio").map(|f| f.offset), Some(60));
+        assert_eq!(offsets.get("next_comm").map(|f| f.size), Some(16));
+        assert_eq!(offsets.get("next_pid").map(|f| f.size), Some(4));
+        assert_eq!(offsets.get("next_prio").map(|f| f.size), Some(4));
     }
 
     #[test]
@@ -836,6 +863,19 @@ field:int next_prio; offset:60; size:4; signed:1;
         );
         assert_eq!(
             matching_request_key_offset(&issue_offsets, &missing_complete_offsets),
+            None,
+        );
+    }
+
+    #[test]
+    fn request_pointer_key_rejects_wrong_size() {
+        let issue_offsets =
+            parse_tracepoint_offsets("field:u32 rq; offset:40; size:4; signed:0;");
+        let complete_offsets =
+            parse_tracepoint_offsets("field:u32 rq; offset:40; size:4; signed:0;");
+
+        assert_eq!(
+            matching_request_key_offset(&issue_offsets, &complete_offsets),
             None,
         );
     }
