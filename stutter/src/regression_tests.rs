@@ -226,6 +226,61 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
 }
 
 #[test]
+fn spike_event_fault_deltas_are_captured_correctly() {
+    let config = test_config(vec![7], vec![], None);
+    let mut active_targets = BTreeMap::from([(
+        7,
+        task_info(7, 77, "KingdomCome.exe", "RenderThread", TaskClass::Game),
+    )]);
+    let mut known_targets = BTreeMap::new();
+    let mut stats_by_task = BTreeMap::new();
+    let mut spike_events = SpikeEventBuffer::default();
+
+    // First event establishes baseline faults
+    let mut first_event = scheduler_event_with_latency(7, "RenderThread", 10);
+    first_event.maj_flt = 10;
+    first_event.min_flt = 20;
+
+    super::handle_event(super::HandleEventInput {
+        event: &first_event,
+        config: &config,
+        started: Instant::now(),
+        active_targets: &mut active_targets,
+        known_targets: &mut known_targets,
+        stats_by_task: &mut stats_by_task,
+        monotonic_start_ns: Some(100),
+        spike_events: Some(&mut spike_events),
+    });
+
+    // Second event is a spike with additional faults
+    let mut spike_event = scheduler_event_with_latency(7, "RenderThread", 1_000_000);
+    spike_event.maj_flt = 15; // +5 delta
+    spike_event.min_flt = 30; // +10 delta
+
+    super::handle_event(super::HandleEventInput {
+        event: &spike_event,
+        config: &config,
+        started: Instant::now(),
+        active_targets: &mut active_targets,
+        known_targets: &mut known_targets,
+        stats_by_task: &mut stats_by_task,
+        monotonic_start_ns: Some(100),
+        spike_events: Some(&mut spike_events),
+    });
+
+    assert_eq!(spike_events.as_slice().len(), 1);
+    let spike = &spike_events.as_slice()[0];
+    assert_eq!(spike.major_faults, 5);
+    assert_eq!(spike.minor_faults, 10);
+
+    // Also verify TaskStats internal top_spikes has the same deltas
+    let stats = stats_by_task.get(&7).unwrap();
+    assert_eq!(stats.top_spikes.len(), 1);
+    assert_eq!(stats.top_spikes[0].major_faults, 5);
+    assert_eq!(stats.top_spikes[0].minor_faults, 10);
+}
+
+#[test]
 fn alert_payload_captures_spike_task_identity() {
     let event = scheduler_event_with_latency(7, "RenderThread", 250_000_000);
     let mut stats = metrics::TaskStats::new(7, "RenderThread".to_owned(), 10);

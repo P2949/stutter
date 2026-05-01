@@ -2295,7 +2295,7 @@ fn handle_event(input: HandleEventInput<'_>) {
                 stats.active = true;
             }
 
-            stats.record(event, config.spike_threshold_ns, elapsed_ms);
+            let fault_deltas = stats.record(event, config.spike_threshold_ns, elapsed_ms);
 
             let alert_payload = if config
                 .alert_threshold_ns
@@ -2313,6 +2313,7 @@ fn handle_event(input: HandleEventInput<'_>) {
                     monotonic_start_ns,
                     stats,
                     event,
+                    fault_deltas,
                 ));
             }
 

@@ -459,6 +459,9 @@ fn config_from_monitor_args(
     if matches!(args.watch_timeout_seconds, Some(0)) {
         anyhow::bail!("--watch-timeout-seconds must be greater than zero");
     }
+    if args.max_tasks == 0 {
+        anyhow::bail!("--max-tasks must be greater than zero");
+    }
 
     args.target_pids.sort_unstable();
     args.target_pids.dedup();
@@ -780,6 +783,17 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("--cluster-ms must be greater than zero")
+        );
+    }
+
+    #[test]
+    fn rejects_zero_max_tasks() {
+        let err = parse_app_command_from(["stutter", "monitor", "--pid", "42", "--max-tasks", "0"])
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--max-tasks must be greater than zero")
         );
     }
 
