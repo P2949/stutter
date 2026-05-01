@@ -1061,10 +1061,11 @@ fn report_cluster_output_caps_inline_points() {
     let session: SessionFile =
         serde_json::from_str(&fs::read_to_string(&session_path).unwrap()).unwrap();
 
+    let cluster_analysis = crate::report::spike_cluster_analysis(&session, Some(&spike_events), 5_000_000, 10, None);
     let output = crate::report::render_report(
         &session_path,
         &session,
-        Some(&spike_events),
+        &cluster_analysis,
         &crate::report::RunArtifacts::default(),
         10,
         5,
@@ -1141,10 +1142,11 @@ fn report_correlates_artifacts_with_spike_clusters() {
         io_events: Vec::new(),
     };
 
+    let cluster_analysis = crate::report::spike_cluster_analysis(&session, Some(&spike_events), 5_000_000, 10, None);
     let output = crate::report::render_report(
         &session_path,
         &session,
-        Some(&spike_events),
+        &cluster_analysis,
         &artifacts,
         10,
         5,
@@ -1170,10 +1172,11 @@ fn report_uses_run_level_block_io_correlation_basis() {
     session.block_io_event_count = 1;
     session.block_io_correlation_basis = "request-pointer".to_owned();
 
+    let cluster_analysis = crate::report::spike_cluster_analysis(&session, None, 5_000_000, 10, None);
     let output = crate::report::render_report(
         &session_path,
         &session,
-        None,
+        &cluster_analysis,
         &crate::report::RunArtifacts::default(),
         10,
         5,

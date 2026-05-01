@@ -23,7 +23,7 @@ const MAX_INLINE_CLUSTER_POINTS: usize = 8;
 const MAX_CLUSTER_CANDIDATES: usize = 4096;
 
 #[derive(Clone, Serialize)]
-struct SpikePoint {
+pub(crate) struct SpikePoint {
     task: u32,
     class: TaskClass,
     process_pid: Option<u32>,
@@ -41,7 +41,7 @@ struct SpikePoint {
 }
 
 #[derive(Clone, Serialize)]
-struct SpikeCluster {
+pub(crate) struct SpikeCluster {
     points: Vec<SpikePoint>,
     distinct_tasks: usize,
     min_switch_ns: u64,
@@ -50,13 +50,13 @@ struct SpikeCluster {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-enum SpikeClusterSource {
+pub(crate) enum SpikeClusterSource {
     SpikeEvents,
     TopSpikesFallback,
 }
 
 #[derive(Serialize)]
-struct SpikeClusterAnalysis {
+pub(crate) struct SpikeClusterAnalysis {
     source: SpikeClusterSource,
     source_count: usize,
     clusters: Vec<SpikeCluster>,
@@ -118,8 +118,11 @@ pub fn print_report(
         path.to_path_buf()
     };
 
-    let data = fs::read_to_string(&session_path)?;
-    let session: SessionFile = serde_json::from_str(&data)?;
+    let file = fs::File::open(&session_path)
+        .with_context(|| format!("failed to open {}", session_path.display()))?;
+    let reader = std::io::BufReader::new(file);
+    let session: SessionFile = serde_json::from_reader(reader)
+        .with_context(|| format!("failed to parse {}", session_path.display()))?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&session)?);
@@ -127,14 +130,17 @@ pub fn print_report(
     }
 
     let spike_events = load_spike_events(&session_path)?;
-    let artifacts = load_run_artifacts(&session_path)?;
+    let cluster_window_ns = cluster_window_ms.saturating_mul(1_000_000);
+    let cluster_analysis =
+        spike_cluster_analysis(&session, spike_events.as_deref(), cluster_window_ns, top, filter_class);
+    let artifacts = load_run_artifacts(&session_path, &cluster_analysis.clusters, cluster_window_ns)?;
 
     print!(
         "{}",
         render_report(
             &session_path,
             &session,
-            spike_events.as_deref(),
+            &cluster_analysis,
             &artifacts,
             top,
             cluster_window_ms,
@@ -157,9 +163,10 @@ pub fn render_diff_report(
         } else {
             path.to_path_buf()
         };
-        let data = fs::read_to_string(&session_path)
-            .with_context(|| format!("failed to read {}", session_path.display()))?;
-        serde_json::from_str(&data)
+        let file = fs::File::open(&session_path)
+            .with_context(|| format!("failed to open {}", session_path.display()))?;
+        let reader = std::io::BufReader::new(file);
+        serde_json::from_reader(reader)
             .with_context(|| format!("failed to parse {}", session_path.display()))
     };
 
@@ -433,16 +440,22 @@ pub fn write_html_report(
     } else {
         path.to_path_buf()
     };
-    let data = fs::read_to_string(&session_path)
-        .with_context(|| format!("failed to read {}", session_path.display()))?;
-    let session: SessionFile = serde_json::from_str(&data)
+    let file = fs::File::open(&session_path)
+        .with_context(|| format!("failed to open {}", session_path.display()))?;
+    let reader = std::io::BufReader::new(file);
+    let session: SessionFile = serde_json::from_reader(reader)
         .with_context(|| format!("failed to parse {}", session_path.display()))?;
+
     let spike_events = load_spike_events(&session_path)?;
-    let artifacts = load_run_artifacts(&session_path)?;
+    let cluster_window_ns = cluster_window_ms.saturating_mul(1_000_000);
+    let cluster_analysis =
+        spike_cluster_analysis(&session, spike_events.as_deref(), cluster_window_ns, top, filter_class);
+    let artifacts = load_run_artifacts(&session_path, &cluster_analysis.clusters, cluster_window_ns)?;
+
     let text_report = render_report(
         &session_path,
         &session,
-        spike_events.as_deref(),
+        &cluster_analysis,
         &artifacts,
         top,
         cluster_window_ms,
@@ -452,10 +465,9 @@ pub fn write_html_report(
         &session,
         spike_events.as_deref(),
         &artifacts,
+        &cluster_analysis,
         &text_report,
         top,
-        cluster_window_ms,
-        filter_class,
     );
     if let Some(parent) = html_path.parent() {
         fs::create_dir_all(parent)?;
@@ -468,19 +480,14 @@ fn render_html_report(
     session: &SessionFile,
     spike_events: Option<&[SpikeEvent]>,
     artifacts: &RunArtifacts,
+    cluster_analysis: &SpikeClusterAnalysis,
     text_report: &str,
     top: usize,
-    cluster_window_ms: u64,
-    filter_class: Option<TaskClass>,
 ) -> String {
     let session_json = serde_json::to_string(session).unwrap_or_else(|_| "{}".to_owned());
     let spike_events_json =
         serde_json::to_string(&spike_events).unwrap_or_else(|_| "null".to_owned());
     let artifacts_json = serde_json::to_string(artifacts).unwrap_or_else(|_| "{}".to_owned());
-
-    let cluster_window_ns = cluster_window_ms.saturating_mul(1_000_000);
-    let cluster_analysis =
-        spike_cluster_analysis(session, spike_events, cluster_window_ns, top, filter_class);
     let cluster_analysis_json =
         serde_json::to_string(&cluster_analysis).unwrap_or_else(|_| "{}".to_owned());
 
@@ -505,7 +512,7 @@ fn html_escape(value: &str) -> String {
 pub(crate) fn render_report(
     session_path: &Path,
     session: &SessionFile,
-    spike_events: Option<&[SpikeEvent]>,
+    cluster_analysis: &SpikeClusterAnalysis,
     artifacts: &RunArtifacts,
     top: usize,
     cluster_window_ms: u64,
@@ -778,14 +785,12 @@ pub(crate) fn render_report(
     pushln(&mut output, "");
 
     let cluster_window_ns = cluster_window_ms.saturating_mul(1_000_000);
-    let cluster_analysis =
-        spike_cluster_analysis(session, spike_events, cluster_window_ns, top, filter_class);
 
     pushln(&mut output, "spike clusters");
     pushln(&mut output, "--------------");
     pushln(
         &mut output,
-        render_cluster_source(&cluster_analysis, cluster_window_ms),
+        render_cluster_source(cluster_analysis, cluster_window_ms),
     );
     pushln(
         &mut output,
@@ -799,6 +804,7 @@ pub(crate) fn render_report(
         &mut output,
         "It is not kernel runqueue depth and may not be the queue that delayed the task after migration.",
     );
+    pushln(&mut output, "");
     if cluster_analysis.clusters.is_empty() {
         pushln(
             &mut output,
@@ -807,13 +813,13 @@ pub(crate) fn render_report(
                 MIN_CLUSTER_TASKS, cluster_window_ms
             ),
         );
-        return output;
-    }
-
-    for (idx, cluster) in cluster_analysis.clusters.iter().take(top).enumerate() {
-        pushln(&mut output, render_cluster(idx + 1, cluster));
+    } else {
+        for (rank, cluster) in cluster_analysis.clusters.iter().take(top).enumerate() {
+            pushln(&mut output, render_cluster(rank + 1, cluster));
+        }
     }
     pushln(&mut output, "");
+
     render_correlation_sections(
         &mut output,
         &cluster_analysis.clusters,
@@ -836,20 +842,146 @@ fn load_spike_events(session_path: &Path) -> anyhow::Result<Option<Vec<SpikeEven
         return Ok(None);
     }
 
-    let data = fs::read_to_string(&spike_events_path)
-        .with_context(|| format!("failed to read {}", spike_events_path.display()))?;
-    let events = serde_json::from_str(&data)
+    let file = fs::File::open(&spike_events_path)
+        .with_context(|| format!("failed to open {}", spike_events_path.display()))?;
+    let reader = std::io::BufReader::new(file);
+    let events = serde_json::from_reader(reader)
         .with_context(|| format!("failed to parse {}", spike_events_path.display()))?;
     Ok(Some(events))
 }
 
-fn load_run_artifacts(session_path: &Path) -> anyhow::Result<RunArtifacts> {
-    let Some(_run_dir) = session_path.parent() else {
+fn load_run_artifacts(
+    session_path: &Path,
+    clusters: &[SpikeCluster],
+    cluster_window_ns: u64,
+) -> anyhow::Result<RunArtifacts> {
+    let Some(run_dir) = session_path.parent() else {
         return Ok(RunArtifacts::default());
     };
-    // Avoid eagerly loading potentially large artifact files into memory.
-    // They will be streamed on-demand when correlation sections need them.
-    Ok(RunArtifacts::default())
+
+    if clusters.is_empty() {
+        return Ok(RunArtifacts::default());
+    }
+
+    let mut artifacts = RunArtifacts::default();
+
+    // IRQ events
+    let path = run_dir.join("irq_events.json");
+    if path.exists() {
+        let min_overall = clusters
+            .iter()
+            .map(|c| c.min_switch_ns.saturating_sub(cluster_window_ns))
+            .min()
+            .unwrap_or(0);
+        let max_overall = clusters
+            .iter()
+            .map(|c| c.max_switch_ns.saturating_add(cluster_window_ns))
+            .max()
+            .unwrap_or(0);
+        if let Ok(selected) = stream_json_array_select(&path, |e: &IrqEventRecord| {
+            e.exit_ns >= min_overall && e.enter_ns <= max_overall
+        }) {
+            artifacts.irq_events = selected;
+        }
+    }
+
+    // GPU samples
+    let path = run_dir.join("gpu_samples.json");
+    if path.exists() {
+        let min_overall_opt = clusters.iter().filter_map(cluster_elapsed).min();
+        let max_overall_opt = clusters.iter().filter_map(cluster_elapsed).max();
+        if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+            let lower = min_overall.saturating_sub(50);
+            let upper = max_overall.saturating_add(50);
+            if let Ok(selected) = stream_json_array_select(&path, |s: &GpuSample| {
+                s.elapsed_ms >= lower && s.elapsed_ms <= upper
+            }) {
+                artifacts.gpu_samples = selected;
+            }
+        }
+    }
+
+    // Frame events
+    let path = run_dir.join("frame_correlation.json");
+    if path.exists() {
+        let padding_ms = u128::from(cluster_window_ns / 1_000_000).max(1);
+        let min_overall_opt = clusters
+            .iter()
+            .filter_map(|c| cluster_elapsed_range(c).map(|(min, _)| min))
+            .min();
+        let max_overall_opt = clusters
+            .iter()
+            .filter_map(|c| cluster_elapsed_range(c).map(|(_, max)| max))
+            .max();
+        if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+            let lower = min_overall.saturating_sub(padding_ms);
+            let upper = max_overall.saturating_add(padding_ms);
+            if let Ok(selected) = stream_json_array_select(&path, |f: &FrameEvent| {
+                f.elapsed_ms >= lower && f.elapsed_ms <= upper
+            }) {
+                artifacts.frame_events = selected;
+            }
+        }
+    }
+
+    // Migration events
+    let path = run_dir.join("migration_events.json");
+    if path.exists() {
+        let min_overall = clusters
+            .iter()
+            .map(|c| c.min_switch_ns.saturating_sub(cluster_window_ns))
+            .min()
+            .unwrap_or(0);
+        let max_overall = clusters
+            .iter()
+            .map(|c| c.max_switch_ns.saturating_add(cluster_window_ns))
+            .max()
+            .unwrap_or(0);
+        if let Ok(selected) = stream_json_array_select(&path, |e: &crate::recorder::MigrationEventRecord| {
+            e.timestamp_ns >= min_overall && e.timestamp_ns <= max_overall
+        }) {
+            artifacts.migration_events = selected;
+        }
+    }
+
+    // CPU frequency samples
+    let path = run_dir.join("cpu_freq_samples.json");
+    if path.exists() {
+        let min_overall_opt = clusters.iter().filter_map(cluster_elapsed).min();
+        let max_overall_opt = clusters.iter().filter_map(cluster_elapsed).max();
+        if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+            let lower = min_overall.saturating_sub(50);
+            let upper = max_overall.saturating_add(50);
+            if let Ok(selected) = stream_json_array_select(&path, |s: &crate::recorder::CpuFreqRecord| {
+                s.elapsed_ms >= lower && s.elapsed_ms <= upper
+            }) {
+                artifacts.cpu_freq_samples = selected;
+            }
+        }
+    }
+
+    // I/O events
+    let path = run_dir.join("io_events.json");
+    if path.exists() {
+        let min_overall = clusters
+            .iter()
+            .map(|c| c.min_switch_ns.saturating_sub(cluster_window_ns))
+            .min()
+            .unwrap_or(0);
+        let max_overall = clusters
+            .iter()
+            .map(|c| c.max_switch_ns.saturating_add(cluster_window_ns))
+            .max()
+            .unwrap_or(0);
+        if let Ok(selected) = stream_json_array_select(&path, |e: &crate::recorder::BlockIoRecord| {
+            e.timestamp_ns >= min_overall
+                && e.timestamp_ns.saturating_sub(e.duration_ns) <= max_overall
+        }) {
+            artifacts.io_events = selected;
+        }
+    }
+
+    Ok(artifacts)
 }
 
 // Stream elements from a JSON array file without materializing the whole
@@ -962,7 +1094,7 @@ fn format_latency_signed(ns: i64) -> String {
     format!("{sign}{}", format_latency(abs_ns))
 }
 
-fn spike_cluster_analysis(
+pub(crate) fn spike_cluster_analysis(
     session: &SessionFile,
     spike_events: Option<&[SpikeEvent]>,
     cluster_window_ns: u64,
