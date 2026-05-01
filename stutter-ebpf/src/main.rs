@@ -159,6 +159,10 @@ pub fn sched_stat_wait(ctx: TracePointContext) -> u32 {
 pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
 
+    if let Some(old) = unsafe { WAKEUP_DATA.get(tid).copied() } {
+        decrement_target_pending(old.target_cpu);
+    }
+
     let _ = WAKEUP_DATA.remove(tid);
     let _ = PREV_FAULTS.remove(tid);
     0

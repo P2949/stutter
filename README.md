@@ -242,9 +242,9 @@ percentile_scope=histogram
 
 Histogram percentiles are approximate bucket upper bounds. `max` and threshold counters remain exact. Older recordings may still show `percentile_scope=capped_prefix`; for those, trust `max` and threshold counters more than p95/p99.
 
-`target_pending_wakeups` is a profiler-side counter of wakeups for monitored tasks, not Linux kernel runqueue depth. It is useful as a rough target-local pressure signal, but do not interpret it as scheduler `rq` depth.
+`target_pending_wakeups` is a profiler-side counter of wakeups for monitored tasks, not Linux kernel runqueue depth. In reports, `target_pending_on_switch_cpu` means other monitored wakeup records still pending on the CPU that actually ran the task after this task was dequeued from its original wakeup target CPU. It is useful as a rough target-local pressure signal, but do not score it as the queue depth that delayed the task.
 
-Block I/O overlap is approximate: `io_events.json` correlates request issue/complete by `dev+sector`, not exact request pointer identity, so concurrent same-sector requests can collide.
+Block I/O overlap records the run-level `block_io_correlation_basis`. When request pointer offsets match between issue and completion tracepoints it uses `request-pointer`; otherwise it falls back to approximate `dev+sector` hashing, where concurrent same-sector requests can collide.
 
 ## Current task classes
 

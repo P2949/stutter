@@ -104,7 +104,9 @@ struct DrainBpfEventsInput<'a> {
     cpu_freq_sample_count: &'a mut usize,
     block_io_event_writer: Option<&'a mut JsonArrayWriter>,
     block_io_event_count: &'a mut usize,
+    block_io_correlation_basis: &'a str,
     cpu_to_pkg: &'a BTreeMap<u32, String>,
+    process_cache: &'a mut process_tree::ProcessCache,
 }
 
 #[tokio::main]
@@ -367,6 +369,10 @@ async fn tune_command(
         .unwrap_or_default();
 
     let any_valid = results.iter().any(|r| r.valid);
+    if !any_valid {
+        restore_tune_on_error();
+        anyhow::bail!("no tune candidate collected enough data; no best profile selected");
+    }
 
     // Check for large disparities in sample counts across candidates and
     // warn when candidates are not meaningfully comparable.
@@ -412,18 +418,12 @@ async fn tune_command(
         best_profile,
         candidates: results,
     };
-    if keep_best {
-        if !any_valid {
-            restore_tune_on_error();
-            anyhow::bail!("no tune candidate collected enough data; not keeping any profile");
-        }
-
-        if let Some(profile) = profiles
+    if keep_best
+        && let Some(profile) = profiles
             .iter()
             .find(|profile| profile.name == summary.best_profile)
-        {
-            apply_profile_to_tree_blocking(tree_pid, profile.clone(), false, false, enforce).await?;
-        }
+    {
+        apply_profile_to_tree_blocking(tree_pid, profile.clone(), false, false, enforce).await?;
     }
 
     let summary_path = tune_output_dir.join("tuning_summary.json");
@@ -1208,6 +1208,7 @@ async fn run_monitor(
     let recording = prepare_recording(&config)?;
     let mut loaded = ebpf_loader::load_and_attach(&config).map_err(anyhow::Error::new)?;
     configure_target_irqs(&mut loaded, &config)?;
+    let block_io_correlation_basis = loaded.block_io_correlation_basis.as_str().to_owned();
 
     let mut active_targets: BTreeMap<u32, TaskInfo> = BTreeMap::new();
     let mut known_targets: BTreeMap<u32, TaskInfo> = BTreeMap::new();
@@ -1625,7 +1626,9 @@ async fn run_monitor(
                     cpu_freq_sample_count: &mut streamed_cpu_freq_sample_count,
                     block_io_event_writer: block_io_event_writer.as_mut(),
                     block_io_event_count: &mut streamed_block_io_event_count,
+                    block_io_correlation_basis: &block_io_correlation_basis,
                     cpu_to_pkg: &cpu_to_pkg,
+                    process_cache: &mut process_cache,
                 });
             }
         }
@@ -1716,6 +1719,7 @@ async fn run_monitor(
                 .is_some()
                 .then_some(streamed_gpu_sample_count),
             block_io_event_count: streamed_block_io_event_count,
+            block_io_correlation_basis: &block_io_correlation_basis,
             frame_events: &frame_events,
             drop_counters,
         })?;
@@ -1929,7 +1933,9 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
         cpu_freq_sample_count,
         mut block_io_event_writer,
         block_io_event_count,
+        block_io_correlation_basis,
         cpu_to_pkg,
+        process_cache,
     } = input;
 
     while let Some(item) = guard.get_inner_mut().next() {
@@ -2054,7 +2060,7 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
                     let record = recorder::BlockIoRecord {
                         elapsed_ms,
                         tid: event.tid,
-                        correlation_basis: "dev+sector".to_owned(),
+                        correlation_basis: block_io_correlation_basis.to_owned(),
                         dev: event.dev,
                         nr_sector: event.nr_sector,
                         sector: event.sector,
@@ -2077,6 +2083,8 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
                 }
                 let event = unsafe { &*(item.as_ptr() as *const ExecEvent) };
                 let comm = metrics::comm_to_string(&event.comm);
+                process_cache.invalidate(event.pid);
+                process_cache.invalidate(event.tid);
 
                 info!(
                     "process_exec pid={} tid={} comm={}",

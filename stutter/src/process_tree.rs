@@ -12,6 +12,12 @@ pub struct ProcessCache {
     pub entries: BTreeMap<u32, CachedProcInfo>,
 }
 
+impl ProcessCache {
+    pub fn invalidate(&mut self, pid: u32) {
+        self.entries.remove(&pid);
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CachedProcInfo {
     pub starttime_ticks: Option<u64>,
@@ -1165,4 +1171,3 @@ mod tests {
         fs::remove_dir_all(dir).ok();
     }
 }
-
