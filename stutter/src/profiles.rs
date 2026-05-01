@@ -286,10 +286,7 @@ impl ProfileApplyCacheKey {
 impl CompiledPattern {
     fn new(raw: String) -> anyhow::Result<Self> {
         let regex = if let Some(inner) = raw.strip_prefix('/').and_then(|s| s.strip_suffix('/')) {
-            Some(
-                Regex::new(inner)
-                    .with_context(|| format!("invalid profile regex '{}'", raw))?,
-            )
+            Some(Regex::new(inner).with_context(|| format!("invalid profile regex '{}'", raw))?)
         } else {
             None
         };

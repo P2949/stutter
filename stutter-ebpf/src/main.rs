@@ -185,7 +185,6 @@ pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
     0
 }
 
-
 #[aya_ebpf::macros::perf_event]
 pub fn major_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
@@ -579,7 +578,8 @@ fn try_block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
             h ^= (nr_sector as u64).wrapping_mul(11500714819323198485u64);
         }
 
-        let rwbs_offset = unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_ISSUE_RWBS_OFFSET) };
+        let rwbs_offset =
+            unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_ISSUE_RWBS_OFFSET) };
         if rwbs_offset != 0 {
             let rwbs: u64 = unsafe { ctx.read_at(rwbs_offset as usize).unwrap_or(0) };
             h ^= rwbs.wrapping_mul(11600714819323198485u64);
