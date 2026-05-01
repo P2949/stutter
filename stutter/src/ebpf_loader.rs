@@ -261,17 +261,37 @@ pub fn load_and_attach(
 
     if let Some(cgroup_path) = &config.cgroupv2 {
         // Pre-populate TARGET_PIDS from the cgroup hierarchy to avoid races
-        // where a task appears in sched events before the eBPF-side cgroup
-        // membership maps are populated.
-        let mut pids_set = std::collections::BTreeSet::new();
-        crate::process_tree::collect_cgroup_pids_at(cgroup_path, &mut pids_set);
-        let pids: Vec<_> = pids_set.into_iter().collect();
+        // where a task appears in sched events before the eBPF-side target
+        // maps are populated. Use a filtered snapshot to ensure that we
+        // respect user-provided filters and do not exceed TARGET_PIDS_MAX
+        // due to unrelated tasks in the same cgroup.
+        let mut cache = crate::process_tree::ProcessCache::default();
+        let snapshot = crate::process_tree::target_snapshot_with_options(
+            &[], // Pre-populate only cgroup tasks here
+            &[],
+            Some(cgroup_path),
+            &config.exclude_tree_pids,
+            &config.task_filters,
+            config.keep_missing_pid,
+            &mut cache,
+            None,
+        );
+        let pids: Vec<_> = snapshot.tasks.keys().copied().collect();
 
         if pids.len() > crate::TARGET_PIDS_MAX {
             return Err(crate::error::StutterError::EbpfLoad(format!(
-                "cgroup target prepopulation failed: cgroup has {} tasks but target_pids_max is {}",
+                "cgroup target prepopulation failed: {} tasks in cgroup match filters, but target_pids_max is {}",
                 pids.len(),
                 crate::TARGET_PIDS_MAX
+            )));
+        }
+
+        // Also respect the user-defined --max-tasks limit during prepopulation.
+        if pids.len() > config.max_tasks {
+            return Err(crate::error::StutterError::EbpfLoad(format!(
+                "cgroup target prepopulation failed: {} tasks in cgroup match filters, but --max-tasks is {}",
+                pids.len(),
+                config.max_tasks
             )));
         }
 
@@ -284,7 +304,7 @@ pub fn load_and_attach(
 
         if failed_inserts > 0 {
             return Err(crate::error::StutterError::EbpfLoad(format!(
-                "cgroup target prepopulation failed: {} tasks failed to insert (target_pids_max={}); use a smaller cgroup or explicitly set --allow-partial-cgroup (if supported)",
+                "cgroup target prepopulation failed: {} tasks failed to insert (target_pids_max={}); use narrower filters or a smaller cgroup",
                 failed_inserts,
                 crate::TARGET_PIDS_MAX
             )));
