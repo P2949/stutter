@@ -155,7 +155,7 @@ pub fn load_and_attach(
         )
         .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
-    if tracepoints.cpu_frequency {
+    if tracepoints.cpu_frequency && config.cpu_freq {
         attach_tracepoint(&mut ebpf, "cpu_frequency", "power", "cpu_frequency")
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }

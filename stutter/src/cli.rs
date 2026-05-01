@@ -123,6 +123,9 @@ pub struct MonitorArgs {
     #[arg(long = "no-record")]
     no_record: bool,
 
+    #[arg(long = "cpu-freq")]
+    cpu_freq: bool,
+
     #[arg(long = "cgroupv2", value_name = "PATH")]
     cgroupv2: Option<PathBuf>,
 
@@ -210,6 +213,11 @@ struct ApplyProfileArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+#[command(
+    about = "Benchmark multiple profiles and select the best one (EXPERIMENTAL)",
+    long_about = "Benchmark multiple profiles and select the best one. \
+                  This command is experimental and its decisions should be verified with repeated runs."
+)]
 struct TuneArgs {
     #[arg(long = "tree-pid", value_name = "PID")]
     tree_pid: u32,
@@ -302,6 +310,7 @@ pub struct Config {
     pub retain_intervals: Option<usize>,
     pub recording: Option<RecordingConfig>,
     pub max_duration: Option<Duration>,
+    pub cpu_freq: bool,
     pub cgroupv2: Option<PathBuf>,
     pub follow_exec: bool,
     pub exclude_tree_pids: Vec<u32>,
@@ -547,6 +556,7 @@ fn config_from_monitor_args(
         None
     };
 
+    let cpu_freq = args.cpu_freq || recording.is_some();
     Ok(Config {
         target_pids: args.target_pids,
         tree_pids: args.tree_pids,
@@ -578,6 +588,7 @@ fn config_from_monitor_args(
         retain_intervals: args.retain_intervals,
         recording,
         max_duration,
+        cpu_freq,
         cgroupv2: args.cgroupv2,
         follow_exec: args.follow_exec && !args.no_follow_exec,
         exclude_tree_pids: args.exclude_tree_pids,

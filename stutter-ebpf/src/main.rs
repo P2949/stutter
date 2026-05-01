@@ -534,7 +534,14 @@ fn try_irq_handler_exit(ctx: TracePointContext) -> Result<u32, u32> {
 }
 
 #[tracepoint]
-pub fn block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
+pub fn block_rq_issue(ctx: TracePointContext) -> u32 {
+    match try_block_rq_issue(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+fn try_block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
     let dev: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
     let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
@@ -566,7 +573,14 @@ pub fn block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
 }
 
 #[tracepoint]
-pub fn block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
+pub fn block_rq_complete(ctx: TracePointContext) -> u32 {
+    match try_block_rq_complete(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+fn try_block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
     let dev: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
     let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
     let nr_sector: u32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };

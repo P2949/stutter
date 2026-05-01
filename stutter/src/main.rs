@@ -276,6 +276,8 @@ async fn tune_command(
         );
     }
 
+    warn!("tune_is_experimental: automated tuning decisions are experimental but useful; verify with repeated runs to ensure low variance.");
+
     let measure_seconds = epoch_seconds.saturating_sub(warmup_seconds);
     let mut results = Vec::new();
     let mut best_idx = 0usize;
@@ -490,6 +492,8 @@ async fn tune_command(
         }
     );
 
+    warn!("tune_is_experimental: decisions are not final truth; repeated runs showing low variance are recommended.");
+
     Ok(())
 }
 
@@ -561,6 +565,7 @@ async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<TuneM
         cgroupv2: None,
         follow_exec: true,
         exclude_tree_pids: Vec::new(),
+        cpu_freq: true, // tune candidate measurement always collects frequency for correlation
         mangohud_ignore_offset: {
             if let Some(path) = &mangohud_log {
                 std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)

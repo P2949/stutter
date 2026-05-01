@@ -640,7 +640,7 @@ pub(crate) fn render_report(
                 "io_events: {} ({}{})",
                 session.block_io_event_count,
                 block_io_correlation_basis(session),
-                if block_io_correlation_basis(session) == "dev+sector" { " correlated; approximate" } else { " correlated" },
+                if block_io_correlation_basis(session) == "dev+sector" { " correlated (advisory, approximate)" } else { " correlated" },
             ),
         );
         pushln(&mut output, "");
