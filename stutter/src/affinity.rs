@@ -386,7 +386,16 @@ fn restore_record_status_at(
         return Ok(RestoreRecordStatus::IdentityMismatch);
     }
 
-    Ok(RestoreRecordStatus::Verified)
+    // Only treat a record as strongly `Verified` when we have full identity
+    // information: `process_pid`, `process_starttime_ticks`, and
+    // `task_starttime_ticks`. If either start-time field is missing, fall
+    // back to `LegacyUnverified` so we don't accidentally accept weak
+    // identity data (e.g., when proc stat parsing failed during apply).
+    if record.process_starttime_ticks.is_some() && record.task_starttime_ticks.is_some() {
+        Ok(RestoreRecordStatus::Verified)
+    } else {
+        Ok(RestoreRecordStatus::LegacyUnverified)
+    }
 }
 
 impl AffinityRecord {
