@@ -172,6 +172,7 @@ pub struct SpikeEventBuffer {
     events: Vec<SpikeEvent>,
     truncated: bool,
     max_events: usize,
+    dropped_count: usize,
 }
 
 impl Default for SpikeEventBuffer {
@@ -182,6 +183,7 @@ impl Default for SpikeEventBuffer {
             events: Vec::new(),
             truncated: false,
             max_events: MAX_SPIKE_EVENTS,
+            dropped_count: 0,
         }
     }
 }
@@ -193,6 +195,7 @@ impl SpikeEventBuffer {
             events: Vec::new(),
             truncated: false,
             max_events,
+            dropped_count: 0,
         }
     }
 
@@ -201,6 +204,7 @@ impl SpikeEventBuffer {
             self.events.push(event);
         } else {
             self.truncated = true;
+            self.dropped_count = self.dropped_count.saturating_add(1);
         }
     }
 
@@ -210,6 +214,9 @@ impl SpikeEventBuffer {
 
     pub fn truncated(&self) -> bool {
         self.truncated
+    }
+    pub fn dropped_count(&self) -> usize {
+        self.dropped_count
     }
 }
 
@@ -262,7 +269,9 @@ pub struct SessionFile {
     #[serde(default)]
     pub intervals_dropped: usize,
     #[serde(default)]
-    pub spike_event_count: usize,
+    pub spike_events_retained_count: usize,
+    #[serde(default)]
+    pub spike_events_dropped_count: usize,
     #[serde(default)]
     pub spike_events_truncated: bool,
     #[serde(default)]
@@ -305,13 +314,19 @@ pub struct MetadataFile {
     #[serde(default)]
     pub intervals_dropped: usize,
     #[serde(default)]
-    pub spike_event_count: usize,
+    pub spike_events_retained_count: usize,
+    #[serde(default)]
+    pub spike_events_dropped_count: usize,
     #[serde(default)]
     pub spike_events_truncated: bool,
     #[serde(default)]
     pub scx_event_count: usize,
     #[serde(default)]
     pub irq_event_count: usize,
+    #[serde(default)]
+    pub migration_event_count: Option<usize>,
+    #[serde(default)]
+    pub cpu_freq_sample_count: Option<usize>,
     #[serde(default)]
     pub gpu_sample_count: usize,
     #[serde(default)]
@@ -649,6 +664,7 @@ pub struct FinalizeRecordingInput<'a> {
     pub tree_events: &'a [TreeEvent],
     pub spike_events: &'a [SpikeEvent],
     pub spike_events_truncated: bool,
+    pub spike_events_dropped_count: usize,
     pub scx_events: &'a [ScxEvent],
     pub irq_events: &'a [IrqEventRecord],
     pub streamed_irq_event_count: Option<usize>,
@@ -695,7 +711,6 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         .unwrap_or(interval_records.len());
     let tree_events = input.tree_events;
     let spike_events = input.spike_events;
-    let spike_events_truncated = input.spike_events_truncated;
     let scx_events = input.scx_events;
     let irq_events = input.irq_events;
     let irq_event_count = input.streamed_irq_event_count.unwrap_or(irq_events.len());
@@ -844,8 +859,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         active_expanded_tasks: active_expanded_tasks.clone(),
         interval_record_count,
         intervals_dropped: input.intervals_dropped,
-        spike_event_count: spike_events.len(),
-        spike_events_truncated,
+        spike_events_retained_count: spike_events.len(),
+        spike_events_dropped_count: input.spike_events_dropped_count,
+        spike_events_truncated: input.spike_events_truncated,
         scx_event_count: scx_events.len(),
         irq_event_count,
         migration_event_count: input.migration_event_count,
@@ -873,10 +889,13 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         active_expanded_tasks,
         interval_record_count,
         intervals_dropped: input.intervals_dropped,
-        spike_event_count: spike_events.len(),
-        spike_events_truncated,
+        spike_events_retained_count: spike_events.len(),
+        spike_events_dropped_count: input.spike_events_dropped_count,
+        spike_events_truncated: input.spike_events_truncated,
         scx_event_count: scx_events.len(),
         irq_event_count,
+        migration_event_count: input.migration_event_count,
+        cpu_freq_sample_count: input.cpu_freq_sample_count,
         gpu_sample_count,
         frame_event_count: frame_events.len(),
         block_io_event_count: input.block_io_event_count,

@@ -1795,6 +1795,10 @@ async fn run_monitor(
             .as_ref()
             .map(SpikeEventBuffer::truncated)
             .unwrap_or(false);
+        let spike_events_dropped_count = spike_events
+            .as_ref()
+            .map(SpikeEventBuffer::dropped_count)
+            .unwrap_or(0);
 
         let frame_events = if let Some(path) = &config.mangohud_log {
             match mangohud::read_frame_events(path, config.mangohud_ignore_offset) {
@@ -1825,6 +1829,7 @@ async fn run_monitor(
             tree_events: &tree_events,
             spike_events: spike_events_slice,
             spike_events_truncated,
+            spike_events_dropped_count,
             scx_events: scx_tracker.events(),
             irq_events: &irq_events,
             streamed_irq_event_count: irq_event_writer
