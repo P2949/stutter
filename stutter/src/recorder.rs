@@ -507,9 +507,9 @@ pub struct RecordedSpike {
     #[serde(alias = "target_runnable_depth")]
     pub target_pending_wakeups: u32,
     #[serde(default)]
-    pub major_faults: u32,
+    pub major_faults: u64,
     #[serde(default)]
-    pub minor_faults: u32,
+    pub minor_faults: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -532,9 +532,9 @@ pub struct SessionSpike {
     #[serde(alias = "target_runnable_depth")]
     pub target_pending_wakeups: u32,
     #[serde(default)]
-    pub major_faults: u32,
+    pub major_faults: u64,
     #[serde(default)]
-    pub minor_faults: u32,
+    pub minor_faults: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -559,9 +559,9 @@ pub struct SpikeEvent {
     #[serde(alias = "target_runnable_depth")]
     pub target_pending_wakeups: u32,
     #[serde(default)]
-    pub major_faults: u32,
+    pub major_faults: u64,
     #[serde(default)]
-    pub minor_faults: u32,
+    pub minor_faults: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -586,7 +586,7 @@ impl SpikeEvent {
         monotonic_start_ns: Option<u64>,
         stats: &TaskStats,
         event: &SchedulerEvent,
-        fault_deltas: (u32, u32),
+        fault_deltas: (u64, u64),
     ) -> Self {
         Self {
             elapsed_ms: elapsed_ms_from_monotonic(monotonic_start_ns, event.switch_ns),

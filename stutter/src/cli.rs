@@ -227,7 +227,8 @@ struct ApplyProfileArgs {
     about = "Benchmark multiple profiles and select the best one",
     long_about = "Benchmark multiple profiles and select the best one. \
                   Warning: ranking is count-based and workload-sensitive. It assumes comparable route/scene/load \
-                  across epochs and will reject profiles with major scored-sample or frame-count mismatches."
+                  across epochs and will reject profiles with major scored-sample or frame-count mismatches. \
+                  Use --runs 3 or higher for reliable results."
 )]
 pub struct TuneArgs {
     #[arg(long = "tree-pid", value_name = "PID")]
@@ -248,7 +249,7 @@ pub struct TuneArgs {
     #[arg(long = "mangohud-log", value_name = "PATH")]
     pub mangohud_log: Option<PathBuf>,
 
-    #[arg(long = "runs", short = 'n', default_value_t = 1, value_name = "N")]
+    #[arg(long = "runs", short = 'n', default_value_t = 3, value_name = "N")]
     pub runs: u32,
 
     #[arg(long)]
@@ -1038,7 +1039,7 @@ mod tests {
         assert_eq!(profiles, PathBuf::from("/tmp/profiles.toml"));
         assert_eq!(epoch_seconds, 60);
         assert_eq!(warmup_seconds, 10);
-        assert_eq!(runs, 1);
+        assert_eq!(runs, 3);
         assert!(keep_best);
         assert_eq!(mangohud_log, Some(PathBuf::from("/tmp/tune-mango.csv")));
         assert!(!enforce);

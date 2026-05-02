@@ -296,9 +296,16 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         );
     }
 
-    warn!(
-        "tune_ranking_is_workload_sensitive: ranking is count-based and assumes comparable route/scene/load across epochs; verify with repeated runs to ensure low variance."
-    );
+    if runs < 3 {
+        warn!(
+            "tune_low_run_count_warning: ranking is count-based and workload-sensitive; --runs {} may be too low for reliable results. --runs 3 or higher is recommended for stable ranking.",
+            runs
+        );
+    } else {
+        info!(
+            "tune_ranking_info: ranking is count-based and workload-sensitive; assumes comparable route/scene/load across epochs."
+        );
+    }
 
     let measure_seconds = epoch_seconds.saturating_sub(warmup_seconds);
     let mut results = Vec::new();

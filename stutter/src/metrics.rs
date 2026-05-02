@@ -29,9 +29,9 @@ pub struct SpikeRecord {
     #[serde(alias = "target_runnable_depth")]
     pub target_pending_wakeups: u32,
     #[serde(default)]
-    pub major_faults: u32,
+    pub major_faults: u64,
     #[serde(default)]
-    pub minor_faults: u32,
+    pub minor_faults: u64,
 }
 
 #[derive(Clone)]
@@ -475,7 +475,7 @@ impl TaskStats {
         event: &SchedulerEvent,
         spike_threshold_ns: u64,
         elapsed_ms: u128,
-    ) -> (u32, u32) {
+    ) -> (u64, u64) {
         self.last_seen_ms = elapsed_ms;
 
         self.interval_latency.record(event.latency_ns);
@@ -500,8 +500,8 @@ impl TaskStats {
             );
         }
 
-        let major_faults = event.maj_flt.saturating_sub(self.major_faults as u32);
-        let minor_faults = event.min_flt.saturating_sub(self.minor_faults as u32);
+        let major_faults = event.maj_flt.saturating_sub(self.major_faults);
+        let minor_faults = event.min_flt.saturating_sub(self.minor_faults);
 
         if event.latency_ns >= spike_threshold_ns {
             self.top_spikes.push(SpikeRecord {
@@ -522,8 +522,8 @@ impl TaskStats {
             self.top_spikes.truncate(16);
         }
 
-        self.major_faults = event.maj_flt as u64;
-        self.minor_faults = event.min_flt as u64;
+        self.major_faults = event.maj_flt;
+        self.minor_faults = event.min_flt;
 
         (major_faults, minor_faults)
     }
