@@ -459,8 +459,8 @@ where
             })
         }
         Some(Command::Check(args)) => {
-            if args.max_regression_p99_ms < 0.0 {
-                anyhow::bail!("--max-regression-p99-ms must be non-negative");
+            if !args.max_regression_p99_ms.is_finite() || args.max_regression_p99_ms < 0.0 {
+                anyhow::bail!("--max-regression-p99-ms must be a finite non-negative value");
             }
             Ok(AppCommand::Check {
                 baseline: args.baseline,
@@ -1120,5 +1120,27 @@ mod tests {
         assert_eq!(baseline, PathBuf::from("run1/"));
         assert_eq!(current, PathBuf::from("run2/"));
         assert_eq!(max_regression_p99_ms, 2.5);
+    }
+
+    #[test]
+    fn rejects_invalid_regression_threshold() {
+        for val in ["NaN", "inf", "-1.0"] {
+            let err = parse_app_command_from([
+                "stutter",
+                "check",
+                "--baseline",
+                "run1/",
+                "--current",
+                "run2/",
+                &format!("--max-regression-p99-ms={val}"),
+            ])
+            .unwrap_err();
+
+            assert!(
+                err.to_string()
+                    .contains("--max-regression-p99-ms must be a finite non-negative value"),
+                "expected failure for {val}, got {err}"
+            );
+        }
     }
 }

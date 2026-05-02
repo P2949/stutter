@@ -68,6 +68,12 @@ impl DropCountersSnapshot {
             .saturating_add(self.irq_start_times_insert_failed)
             .saturating_add(self.block_start_insert_failed)
     }
+
+    pub fn total_excluding_block_io(&self) -> u64 {
+        self.wakeup_data_insert_failed
+            .saturating_add(self.ringbuf_reserve_failed)
+            .saturating_add(self.irq_start_times_insert_failed)
+    }
 }
 
 impl LoadedEbpf {
@@ -608,12 +614,22 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
             block_rq = true;
             block_rq_key_offset = matching_request_key_offset(&issue_offsets, &complete_offsets);
 
-            block_rq_issue_nr_sector_offset =
-                issue_offsets.get("nr_sector").map(|f| f.offset as u32);
-            block_rq_issue_rwbs_offset = issue_offsets.get("rwbs").map(|f| f.offset as u32);
-            block_rq_complete_nr_sector_offset =
-                complete_offsets.get("nr_sector").map(|f| f.offset as u32);
-            block_rq_complete_rwbs_offset = complete_offsets.get("rwbs").map(|f| f.offset as u32);
+            let use_nr_sector = issue_offsets.contains_key("nr_sector")
+                && complete_offsets.contains_key("nr_sector");
+            let use_rwbs =
+                issue_offsets.contains_key("rwbs") && complete_offsets.contains_key("rwbs");
+
+            if use_nr_sector {
+                block_rq_issue_nr_sector_offset =
+                    issue_offsets.get("nr_sector").map(|f| f.offset as u32);
+                block_rq_complete_nr_sector_offset =
+                    complete_offsets.get("nr_sector").map(|f| f.offset as u32);
+            }
+            if use_rwbs {
+                block_rq_issue_rwbs_offset = issue_offsets.get("rwbs").map(|f| f.offset as u32);
+                block_rq_complete_rwbs_offset =
+                    complete_offsets.get("rwbs").map(|f| f.offset as u32);
+            }
 
             block_rq_has_rwbs = block_rq_complete_rwbs_offset.is_some();
 
@@ -623,6 +639,12 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
                 log::warn!(
                     "request pointer key unavailable or mismatched between block_rq_issue ({issue_key_offset:?}) and block_rq_complete ({complete_key_offset:?}); falling back to metadata hashing"
                 );
+
+                if !use_nr_sector || !use_rwbs {
+                    log::warn!(
+                        "Block I/O correlation fallback is approximate: nr_sector available on both? {use_nr_sector}, rwbs available on both? {use_rwbs}. Missing fields will be excluded from the correlation hash."
+                    );
+                }
             }
         } else {
             log::warn!(
