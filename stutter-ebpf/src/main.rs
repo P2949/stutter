@@ -366,8 +366,8 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
         (*event).prio = prio;
         (*event).waker_tid = waker_tid;
         (*event).target_pending_wakeups = target_pending_wakeups;
-        (*event).maj_flt = faults.maj as u32;
-        (*event).min_flt = faults.min as u32;
+        (*event).maj_flt = faults.maj;
+        (*event).min_flt = faults.min;
         (*event).wakeup_ns = wakeup_ns;
         (*event).switch_ns = switch_ns;
         (*event).latency_ns = latency_ns;

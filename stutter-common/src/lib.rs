@@ -24,8 +24,8 @@ pub struct SchedulerEvent {
     pub prio: i32,
     pub waker_tid: u32,
     pub target_pending_wakeups: u32,
-    pub maj_flt: u32,
-    pub min_flt: u32,
+    pub maj_flt: u64,
+    pub min_flt: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
     pub latency_ns: u64,
@@ -116,7 +116,7 @@ unsafe impl aya::Pod for ExecEvent {}
 
 // Compile-time layout assertions to ensure eBPF and userspace agree on struct sizes.
 // These will fail the build if the sizes change unexpectedly.
-const _: [(); core::mem::size_of::<SchedulerEvent>()] = [(); 80];
+const _: [(); core::mem::size_of::<SchedulerEvent>()] = [(); 88];
 const _: [(); core::mem::size_of::<IrqEvent>()] = [(); 40];
 const _: [(); core::mem::size_of::<MigrationEvent>()] = [(); 24];
 const _: [(); core::mem::size_of::<CpuFreqEvent>()] = [(); 24];

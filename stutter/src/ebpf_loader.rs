@@ -111,7 +111,7 @@ pub fn load_and_attach(
         map_sizing.events_ringbuf_bytes,
         map_sizing.wakeup_data_entries,
     );
-    let tracepoints = validate_tracepoint_formats(Path::new("/sys/kernel/tracing/events"))
+    let tracepoints = validate_tracepoint_formats(Path::new("/sys/kernel/tracing/events"), config)
         .map_err(|e| crate::error::StutterError::TracepointOffsetMismatch(e.to_string()))?;
 
     let mut loader = EbpfLoader::new();
@@ -541,7 +541,10 @@ struct TracepointAvailability {
     sched_process_exec: bool,
 }
 
-fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointAvailability> {
+fn validate_tracepoint_formats(
+    events_root: &Path,
+    config: &crate::cli::Config,
+) -> anyhow::Result<TracepointAvailability> {
     validate_tracepoint_format_at(
         &events_root.join("sched/sched_wakeup/format"),
         &[("pid", 24), ("prio", 28), ("target_cpu", 32)],
@@ -550,6 +553,7 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         &events_root.join("sched/sched_wakeup_new/format"),
         "sched_wakeup_new",
         &[("pid", 24), ("prio", 28), ("target_cpu", 32)],
+        true,
     )?;
     validate_tracepoint_format_at(
         &events_root.join("sched/sched_switch/format"),
@@ -560,16 +564,19 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
         &events_root.join("sched/sched_migrate_task/format"),
         "sched_migrate_task",
         &[("pid", 12), ("orig_cpu", 20), ("dest_cpu", 24)],
+        true,
     )?;
     let cpu_frequency = validate_optional_tracepoint_format_at(
         &events_root.join("power/cpu_frequency/format"),
         "cpu_frequency",
         &[("state", 8), ("cpu_id", 12)],
+        config.cpu_freq,
     )?;
     let sched_stat_wait = validate_optional_tracepoint_format_at(
         &events_root.join("sched/sched_stat_wait/format"),
         "sched_stat_wait",
         &[("pid", 8), ("delay", 16)],
+        config.stat_wait,
     )?;
 
     let irq_entry = events_root.join("irq/irq_handler_entry/format");
@@ -581,7 +588,7 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
     } else {
         false
     };
-    if !irq_handler {
+    if !irq_handler && config.irq_latency {
         log::warn!("IRQ tracepoint formats missing; continuing without IRQ latency probe");
     }
 
@@ -635,7 +642,7 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
 
             block_rq_has_rwbs = block_rq_complete_rwbs_offset.is_some();
 
-            if block_rq_key_offset.is_none() {
+            if block_rq_key_offset.is_none() && config.block_io {
                 let issue_key_offset = find_request_key_offset(&issue_offsets);
                 let complete_key_offset = find_request_key_offset(&complete_offsets);
                 log::warn!(
@@ -648,7 +655,7 @@ fn validate_tracepoint_formats(events_root: &Path) -> anyhow::Result<TracepointA
                     );
                 }
             }
-        } else {
+        } else if config.block_io {
             log::warn!(
                 "block I/O tracepoint missing required fields or layout mismatch; continuing without block I/O correlation"
             );
@@ -684,12 +691,15 @@ fn validate_optional_tracepoint_format_at(
     path: &Path,
     name: &str,
     expected_offsets: &[(&str, usize)],
+    warn_on_missing: bool,
 ) -> anyhow::Result<bool> {
     if !path.exists() {
-        log::warn!(
-            "optional tracepoint format missing: {}; continuing without {name}",
-            path.display()
-        );
+        if warn_on_missing {
+            log::warn!(
+                "optional tracepoint format missing: {}; continuing without {name}",
+                path.display()
+            );
+        }
         return Ok(false);
     }
 
@@ -967,6 +977,7 @@ field:int irq; offset:8; size:4; signed:1;
             &dir.join("missing/format"),
             "missing",
             &[("pid", 24)],
+            true,
         )
         .unwrap();
 
