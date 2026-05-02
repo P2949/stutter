@@ -383,6 +383,15 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
                 );
                 // Inflate the score so this candidate loses to better-measured ones.
                 score.total = u64::MAX / 4;
+                score.over_5ms = u64::MAX / 4;
+                score.over_2ms = u64::MAX / 4;
+                score.over_1ms = u64::MAX / 4;
+                score.frame_over_50ms = u64::MAX / 4;
+                score.frame_over_33ms = u64::MAX / 4;
+                score.frame_over_16ms = u64::MAX / 4;
+                score.max_latency_ns = u64::MAX / 4;
+                score.frame_p99_ms = 1_000_000.0;
+                score.frame_max_ms = 1_000_000.0;
             }
 
             if coverage.unique_scored_tasks == 0 {
@@ -391,6 +400,15 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
                     iteration, profile.name, coverage.unique_tracked_tasks
                 );
                 score.total = u64::MAX / 4;
+                score.over_5ms = u64::MAX / 4;
+                score.over_2ms = u64::MAX / 4;
+                score.over_1ms = u64::MAX / 4;
+                score.frame_over_50ms = u64::MAX / 4;
+                score.frame_over_33ms = u64::MAX / 4;
+                score.frame_over_16ms = u64::MAX / 4;
+                score.max_latency_ns = u64::MAX / 4;
+                score.frame_p99_ms = 1_000_000.0;
+                score.frame_max_ms = 1_000_000.0;
                 valid = false;
             }
             if coverage.drop_counter_total > 0 {
@@ -894,7 +912,6 @@ fn aggregate_profile_rank(runs: &[TuneCandidateSummary]) -> impl Ord {
     let max_latencies: Vec<u64> = runs.iter().map(|r| r.max_latency_ns).collect();
 
     (
-        invalid_run_count,
         median_u64(score_totals.clone()),
         median_u64(over_5ms),
         median_u64(over_2ms),
@@ -902,6 +919,7 @@ fn aggregate_profile_rank(runs: &[TuneCandidateSummary]) -> impl Ord {
         median_u64(frame_over_50ms),
         median_u64(frame_over_33ms),
         median_u64(frame_over_16ms),
+        invalid_run_count,
         worst_u64(score_totals),
         worst_u64(frame_p99s),
         worst_u64(frame_maxes),
@@ -1008,7 +1026,11 @@ fn tune_coverage_metrics(
         active_target_min,
         active_target_max,
         removed_task_count,
-        drop_counter_total: session.drop_counters.total(),
+        drop_counter_total: if session.block_io_correlation_basis == "request-pointer" {
+            session.drop_counters.total()
+        } else {
+            session.drop_counters.total_excluding_block_io()
+        },
         scored_identity_counts,
     }
 }

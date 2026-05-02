@@ -479,17 +479,24 @@ pub fn check_percentile_regression(
 
     let mut worst_regression: Option<((TaskClass, String, String), i64)> = None;
 
-    for (key, ta) in &tasks_baseline {
-        if let Some(tb) = tasks_current.get(key) {
-            let delta_p99 = tb.p99_ns as i64 - ta.p99_ns as i64;
-            if delta_p99 > 0 {
-                if let Some((_, current_worst)) = worst_regression {
-                    if delta_p99 > current_worst {
-                        worst_regression = Some((key.clone(), delta_p99));
-                    }
-                } else {
+    for (key, tb) in &tasks_current {
+        let delta_p99 = if let Some(ta) = tasks_baseline.get(key) {
+            tb.p99_ns as i64 - ta.p99_ns as i64
+        } else if crate::scorer::class_contributes_to_score(key.0) {
+            // New task in current run. If it belongs to a scored class,
+            // treat its entire p99 as a regression relative to 0.
+            tb.p99_ns as i64
+        } else {
+            0
+        };
+
+        if delta_p99 > 0 {
+            if let Some((_, current_worst)) = worst_regression {
+                if delta_p99 > current_worst {
                     worst_regression = Some((key.clone(), delta_p99));
                 }
+            } else {
+                worst_regression = Some((key.clone(), delta_p99));
             }
         }
     }
