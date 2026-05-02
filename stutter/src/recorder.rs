@@ -394,6 +394,12 @@ pub struct RecordedConfig {
     #[serde(default = "default_recorded_follow_exec")]
     pub follow_exec: bool,
     pub verbose: bool,
+    #[serde(default)]
+    pub faults: bool,
+    #[serde(default)]
+    pub block_io: bool,
+    #[serde(default)]
+    pub stat_wait: bool,
 }
 
 fn default_recorded_max_tasks() -> usize {
@@ -853,6 +859,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             alert_webhook_url: config.alert_webhook_url.clone(),
             follow_exec: config.follow_exec,
             verbose: config.verbose,
+            faults: config.faults,
+            block_io: config.block_io,
+            stat_wait: config.stat_wait,
         },
         metadata: metadata.clone(),
         target_pids_max: TARGET_PIDS_MAX,

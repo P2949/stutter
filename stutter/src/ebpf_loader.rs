@@ -177,7 +177,7 @@ pub fn load_and_attach(
         attach_tracepoint(&mut ebpf, "cpu_frequency", "power", "cpu_frequency")
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
-    if tracepoints.sched_stat_wait {
+    if tracepoints.sched_stat_wait && config.stat_wait {
         attach_tracepoint(&mut ebpf, "sched_stat_wait", "sched", "sched_stat_wait")
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
@@ -189,7 +189,7 @@ pub fn load_and_attach(
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
 
-    if tracepoints.block_rq {
+    if tracepoints.block_rq && config.block_io {
         attach_tracepoint(&mut ebpf, "block_rq_issue", "block", "block_rq_issue")
             .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
         attach_tracepoint(&mut ebpf, "block_rq_complete", "block", "block_rq_complete")
@@ -220,20 +220,22 @@ pub fn load_and_attach(
         .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
     }
 
-    // Fault perf events are optional correlation probes. If perf_event_open
-    // is blocked by policy or capabilities, log a warning and continue rather
-    // than aborting the whole profiler startup.
-    if let Err(e) = attach_software_perf_event(&mut ebpf, "major_fault", 4) {
-        log::warn!(
-            "failed to attach major_fault perf event; continuing without fault probes: {}",
-            e
-        );
-    }
-    if let Err(e) = attach_software_perf_event(&mut ebpf, "minor_fault", 3) {
-        log::warn!(
-            "failed to attach minor_fault perf event; continuing without fault probes: {}",
-            e
-        );
+    if config.faults {
+        // Fault perf events are optional correlation probes. If perf_event_open
+        // is blocked by policy or capabilities, log a warning and continue rather
+        // than aborting the whole profiler startup.
+        if let Err(e) = attach_software_perf_event(&mut ebpf, "major_fault", 4) {
+            log::warn!(
+                "failed to attach major_fault perf event; continuing without fault probes: {}",
+                e
+            );
+        }
+        if let Err(e) = attach_software_perf_event(&mut ebpf, "minor_fault", 3) {
+            log::warn!(
+                "failed to attach minor_fault perf event; continuing without fault probes: {}",
+                e
+            );
+        }
     }
 
     let mut target_pid_map =

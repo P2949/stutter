@@ -297,7 +297,7 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     }
 
     warn!(
-        "tune_is_experimental: automated tuning decisions are experimental but useful; verify with repeated runs to ensure low variance."
+        "tune_ranking_is_workload_sensitive: ranking is count-based and assumes comparable route/scene/load across epochs; verify with repeated runs to ensure low variance."
     );
 
     let measure_seconds = epoch_seconds.saturating_sub(warmup_seconds);
@@ -356,8 +356,6 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
 
             let mut score =
                 scorer::score_from_interval_records_and_frames(&interval_records, &frame_events);
-            let frame_max = score.frame_max_ms;
-            let frame_p99 = score.frame_p99_ms;
 
             // Reject / penalize candidates that did not gather enough data to be
             // meaningfully comparable. These thresholds are conservative: at
@@ -434,8 +432,8 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
                 over_5ms: score.over_5ms,
                 max_latency_ns: score.max_latency_ns,
                 frame_count: frame_events.len(),
-                frame_max_ms: frame_max,
-                frame_p99_ms: frame_p99,
+                frame_max_ms: score.frame_max_ms,
+                frame_p99_ms: score.frame_p99_ms,
                 frame_over_16ms: score.frame_over_16ms,
                 frame_over_33ms: score.frame_over_33ms,
                 frame_over_50ms: score.frame_over_50ms,
@@ -559,7 +557,7 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     );
 
     warn!(
-        "tune_is_experimental: decisions are not final truth; repeated runs showing low variance are recommended."
+        "tune_ranking_is_workload_sensitive: decisions are not final truth and depend on comparable workload; repeated runs showing low variance are recommended."
     );
 
     Ok(())
@@ -641,6 +639,9 @@ async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<TuneM
                 0
             }
         },
+        faults: false,
+        block_io: false,
+        stat_wait: false,
     };
 
     let cache = profiles::ProfileApplyCache::default();

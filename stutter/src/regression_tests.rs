@@ -1382,6 +1382,9 @@ fn test_config(
         exclude_tree_pids: Vec::new(),
         cpu_freq: false,
         mangohud_ignore_offset: 0,
+        faults: false,
+        block_io: false,
+        stat_wait: false,
     }
 }
 

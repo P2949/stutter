@@ -140,6 +140,15 @@ pub struct MonitorArgs {
 
     #[arg(long = "no-follow-exec", action = ArgAction::SetTrue)]
     no_follow_exec: bool,
+
+    #[arg(long = "faults")]
+    faults: bool,
+
+    #[arg(long = "block-io")]
+    block_io: bool,
+
+    #[arg(long = "stat-wait")]
+    stat_wait: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -215,9 +224,10 @@ struct ApplyProfileArgs {
 
 #[derive(Args, Debug, Clone)]
 #[command(
-    about = "Benchmark multiple profiles and select the best one (EXPERIMENTAL)",
+    about = "Benchmark multiple profiles and select the best one",
     long_about = "Benchmark multiple profiles and select the best one. \
-                  This command is experimental and its decisions should be verified with repeated runs."
+                  Warning: ranking is count-based and workload-sensitive. It assumes comparable route/scene/load \
+                  across epochs and will reject profiles with major scored-sample or frame-count mismatches."
 )]
 pub struct TuneArgs {
     #[arg(long = "tree-pid", value_name = "PID")]
@@ -336,6 +346,9 @@ pub struct Config {
     pub cgroupv2: Option<PathBuf>,
     pub follow_exec: bool,
     pub exclude_tree_pids: Vec<u32>,
+    pub faults: bool,
+    pub block_io: bool,
+    pub stat_wait: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -629,6 +642,9 @@ fn config_from_monitor_args(
         follow_exec: args.follow_exec && !args.no_follow_exec,
         exclude_tree_pids: args.exclude_tree_pids,
         mangohud_ignore_offset: 0,
+        faults: args.faults,
+        block_io: args.block_io,
+        stat_wait: args.stat_wait,
     })
 }
 
@@ -1142,5 +1158,27 @@ mod tests {
                 "expected failure for {val}, got {err}"
             );
         }
+    }
+
+    #[test]
+    fn parses_correlation_flags() {
+        let command = parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--faults",
+            "--block-io",
+            "--stat-wait",
+        ])
+        .unwrap();
+
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+
+        assert!(config.faults);
+        assert!(config.block_io);
+        assert!(config.stat_wait);
     }
 }
