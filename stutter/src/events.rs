@@ -3,9 +3,8 @@ use std::{collections::BTreeMap, time::Instant};
 use log::{debug, info, warn};
 use serde::Serialize;
 use stutter_common::{
-    BlockIoEvent, CpuFreqEvent, EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_EXEC, EVENT_IRQ_LATENCY,
-    EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent, MigrationEvent,
-    SchedulerEvent, StatWaitEvent,
+    BlockIoEvent, CpuFreqEvent, EVENT_RUNNABLE_LATENCY, ExecEvent, IrqEvent, MigrationEvent,
+    SchedulerEvent,
 };
 
 use crate::{
@@ -16,215 +15,131 @@ use crate::{
     tasks::{TaskTracker, should_replace_unknown_comm},
 };
 
-pub struct HandleEventInput<'a> {
-    pub event: &'a SchedulerEvent,
-    pub config: &'a Config,
-    pub started: Instant,
-    pub tasks: &'a mut TaskTracker,
-    pub monotonic_start_ns: Option<u64>,
-    pub recorder: &'a mut LiveRecorder,
-    pub alert_sender: Option<&'a std::sync::mpsc::SyncSender<AlertPayload>>,
+
+pub fn handle_irq_event(
+    event: &IrqEvent,
+    recorder: &mut LiveRecorder,
+    monotonic_start_ns: Option<u64>,
+) {
+    let record = irq_event_record(monotonic_start_ns, event);
+    if let Some(writer) = recorder.irq_event_writer.as_mut() {
+        push_json_stream_event(writer, &record, &mut recorder.irq_event_count, "irq_events");
+    }
+    log_irq_event(event);
 }
 
-pub struct DrainBpfEventsInput<'a> {
-    pub guard: tokio::io::unix::AsyncFdReadyMutGuard<'a, aya::maps::RingBuf<aya::maps::MapData>>,
-    pub config: &'a Config,
-    pub started: Instant,
-    pub tasks: &'a mut TaskTracker,
-    pub recorder: &'a mut LiveRecorder,
-    pub cpu_to_pkg: &'a BTreeMap<u32, String>,
-    pub block_io_correlation_basis: &'a str,
-    pub alert_sender: Option<&'a std::sync::mpsc::SyncSender<AlertPayload>>,
-}
+pub fn handle_migration_event(
+    event: &MigrationEvent,
+    tasks: &mut TaskTracker,
+    recorder: &mut LiveRecorder,
+    cpu_to_pkg: &BTreeMap<u32, String>,
+    started: Instant,
+) {
+    let elapsed_ms = started.elapsed().as_millis();
 
-pub fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
-    let DrainBpfEventsInput {
-        mut guard,
-        config,
-        started,
-        tasks,
-        recorder,
-        cpu_to_pkg,
-        block_io_correlation_basis,
-        alert_sender,
-    } = input;
+    if let Some(stats) = tasks.stats_by_task.get_mut(&event.tid) {
+        stats.migration_count += 1;
 
-    let recording_monotonic_start_ns = recorder.run.as_ref().and_then(|r| r.monotonic_start_ns);
-
-    while let Some(item) = guard.get_inner_mut().next() {
-        if item.len() < std::mem::size_of::<u32>() {
-            warn!("short_bpf_event len={}", item.len());
-            continue;
-        }
-
-        let kind = unsafe { (item.as_ptr() as *const u32).read_unaligned() };
-        match kind {
-            EVENT_RUNNABLE_LATENCY => {
-                let Some(event) = cast_event::<SchedulerEvent>(&item) else {
-                    warn!("short_scheduler_event len={}", item.len());
-                    continue;
-                };
-
-                handle_event(HandleEventInput {
-                    event,
-                    config,
-                    started,
-                    tasks,
-                    monotonic_start_ns: recording_monotonic_start_ns,
-                    recorder,
-                    alert_sender,
-                });
-            }
-            EVENT_IRQ_LATENCY => {
-                let Some(event) = cast_event::<IrqEvent>(&item) else {
-                    warn!("short_irq_event len={}", item.len());
-                    continue;
-                };
-
-                let record = irq_event_record(recording_monotonic_start_ns, event);
-                if let Some(writer) = recorder.irq_event_writer.as_mut() {
-                    push_json_stream_event(
-                        writer,
-                        &record,
-                        &mut recorder.irq_event_count,
-                        "irq_events",
-                    );
-                }
-                log_irq_event(event);
-            }
-            EVENT_MIGRATION => {
-                let Some(event) = cast_event::<MigrationEvent>(&item) else {
-                    warn!("short_migration_event len={}", item.len());
-                    continue;
-                };
-
-                let elapsed_ms = started.elapsed().as_millis();
-
-                if let Some(stats) = tasks.stats_by_task.get_mut(&event.tid) {
-                    stats.migration_count += 1;
-
-                    let from_pkg = cpu_to_pkg.get(&event.from_cpu);
-                    let to_pkg = cpu_to_pkg.get(&event.to_cpu);
-                    if let (Some(f), Some(t)) = (from_pkg, to_pkg)
-                        && f != t
-                    {
-                        stats.cross_numa_migrations += 1;
-                    }
-                }
-
-                if let Some(writer) = recorder.migration_event_writer.as_mut() {
-                    let record = recorder::MigrationEventRecord {
-                        elapsed_ms,
-                        tid: event.tid,
-                        from_cpu: event.from_cpu,
-                        to_cpu: event.to_cpu,
-                        timestamp_ns: event.timestamp_ns,
-                    };
-                    push_json_stream_event(
-                        writer,
-                        &record,
-                        &mut recorder.migration_event_count,
-                        "migration_events",
-                    );
-                }
-            }
-            EVENT_CPU_FREQ => {
-                let Some(event) = cast_event::<CpuFreqEvent>(&item) else {
-                    warn!("short_cpu_freq_event len={}", item.len());
-                    continue;
-                };
-
-                let elapsed_ms = started.elapsed().as_millis();
-
-                if let Some(writer) = recorder.cpu_freq_sample_writer.as_mut() {
-                    let record = recorder::CpuFreqRecord {
-                        elapsed_ms,
-                        cpu: event.cpu,
-                        freq_khz: event.state, // state field contains freq in kHz
-                        timestamp_ns: event.timestamp_ns,
-                    };
-                    push_json_stream_event(
-                        writer,
-                        &record,
-                        &mut recorder.cpu_freq_sample_count,
-                        "cpu_freq_samples",
-                    );
-                }
-            }
-            EVENT_STAT_WAIT => {
-                let Some(event) = cast_event::<StatWaitEvent>(&item) else {
-                    warn!("short_stat_wait_event len={}", item.len());
-                    continue;
-                };
-
-                if let Some(stats) = tasks.stats_by_task.get_mut(&event.tid) {
-                    stats.stat_wait_sum_ns += event.delay_ns as u128;
-                    stats.stat_wait_count += 1;
-                }
-            }
-            EVENT_BLOCK_IO => {
-                let Some(event) = cast_event::<BlockIoEvent>(&item) else {
-                    warn!("short_block_io_event len={}", item.len());
-                    continue;
-                };
-
-                let elapsed_ms = started.elapsed().as_millis();
-
-                if let Some(writer) = recorder.block_io_event_writer.as_mut() {
-                    let record = recorder::BlockIoRecord {
-                        elapsed_ms,
-                        tid: event.tid,
-                        correlation_basis: block_io_correlation_basis.to_owned(),
-                        dev: event.dev,
-                        nr_sector: event.nr_sector,
-                        sector: event.sector,
-                        duration_ns: event.duration_ns,
-                        timestamp_ns: event.timestamp_ns,
-                        rwbs: String::from_utf8_lossy(&event.rwbs)
-                            .trim_matches(char::from(0))
-                            .to_owned(),
-                    };
-                    push_json_stream_event(
-                        writer,
-                        &record,
-                        &mut recorder.block_io_event_count,
-                        "io_events",
-                    );
-                }
-            }
-            EVENT_EXEC => {
-                if !config.follow_exec {
-                    continue;
-                }
-                if item.len() < std::mem::size_of::<ExecEvent>() {
-                    warn!("short_exec_event len={}", item.len());
-                    continue;
-                }
-                let event = unsafe { &*(item.as_ptr() as *const ExecEvent) };
-                let comm = metrics::comm_to_string(&event.comm);
-                tasks.cache.invalidate(event.pid);
-                tasks.cache.invalidate(event.tid);
-
-                info!(
-                    "process_exec pid={} tid={} comm={}",
-                    event.pid, event.tid, comm
-                );
-
-                if let Some(stats) = tasks.stats_by_task.get_mut(&event.tid) {
-                    stats.comm = comm.clone();
-                    stats.class = process_tree::classify_task(&comm, &comm, "");
-                }
-
-                if let Some(info) = tasks.active_targets.get_mut(&event.tid) {
-                    info.comm = comm.clone();
-                    info.class = process_tree::classify_task(&comm, &comm, "");
-                }
-            }
-            other => warn!("unknown_bpf_event kind={other} len={}", item.len()),
+        let from_pkg = cpu_to_pkg.get(&event.from_cpu);
+        let to_pkg = cpu_to_pkg.get(&event.to_cpu);
+        if let (Some(f), Some(t)) = (from_pkg, to_pkg)
+            && f != t
+        {
+            stats.cross_numa_migrations += 1;
         }
     }
 
-    guard.clear_ready();
+    if let Some(writer) = recorder.migration_event_writer.as_mut() {
+        let record = recorder::MigrationEventRecord {
+            elapsed_ms,
+            tid: event.tid,
+            from_cpu: event.from_cpu,
+            to_cpu: event.to_cpu,
+            timestamp_ns: event.timestamp_ns,
+        };
+        push_json_stream_event(
+            writer,
+            &record,
+            &mut recorder.migration_event_count,
+            "migration_events",
+        );
+    }
+}
+
+pub fn handle_cpu_freq_event(event: &CpuFreqEvent, recorder: &mut LiveRecorder, started: Instant) {
+    let elapsed_ms = started.elapsed().as_millis();
+
+    if let Some(writer) = recorder.cpu_freq_sample_writer.as_mut() {
+        let record = recorder::CpuFreqRecord {
+            elapsed_ms,
+            cpu: event.cpu,
+            freq_khz: event.state,
+            timestamp_ns: event.timestamp_ns,
+        };
+        push_json_stream_event(
+            writer,
+            &record,
+            &mut recorder.cpu_freq_sample_count,
+            "cpu_freq_samples",
+        );
+    }
+}
+
+pub fn handle_block_io_event(
+    event: &BlockIoEvent,
+    recorder: &mut LiveRecorder,
+    block_io_correlation_basis: &str,
+    started: Instant,
+) {
+    let elapsed_ms = started.elapsed().as_millis();
+
+    if let Some(writer) = recorder.block_io_event_writer.as_mut() {
+        let record = recorder::BlockIoRecord {
+            elapsed_ms,
+            tid: event.tid,
+            correlation_basis: block_io_correlation_basis.to_owned(),
+            dev: event.dev,
+            nr_sector: event.nr_sector,
+            sector: event.sector,
+            duration_ns: event.duration_ns,
+            timestamp_ns: event.timestamp_ns,
+            rwbs: String::from_utf8_lossy(&event.rwbs)
+                .trim_matches(char::from(0))
+                .to_owned(),
+        };
+        push_json_stream_event(
+            writer,
+            &record,
+            &mut recorder.block_io_event_count,
+            "io_events",
+        );
+    }
+}
+
+pub fn handle_exec_event(item: &[u8], tasks: &mut TaskTracker) {
+    if item.len() < std::mem::size_of::<ExecEvent>() {
+        warn!("short_exec_event len={}", item.len());
+        return;
+    }
+    let event = unsafe { &*(item.as_ptr() as *const ExecEvent) };
+    let comm = metrics::comm_to_string(&event.comm);
+    tasks.cache.invalidate(event.pid);
+    tasks.cache.invalidate(event.tid);
+
+    info!(
+        "process_exec pid={} tid={} comm={}",
+        event.pid, event.tid, comm
+    );
+
+    if let Some(stats) = tasks.stats_by_task.get_mut(&event.tid) {
+        stats.comm = comm.clone();
+        stats.class = process_tree::classify_task(&comm, &comm, "");
+    }
+
+    if let Some(info) = tasks.active_targets.get_mut(&event.tid) {
+        info.comm = comm.clone();
+        info.class = process_tree::classify_task(&comm, &comm, "");
+    }
 }
 
 pub fn push_json_stream_event<T: Serialize>(
@@ -239,17 +154,15 @@ pub fn push_json_stream_event<T: Serialize>(
     }
 }
 
-pub fn handle_event(input: HandleEventInput<'_>) {
-    let HandleEventInput {
-        event,
-        config,
-        started,
-        tasks,
-        monotonic_start_ns,
-        recorder,
-        alert_sender,
-    } = input;
-
+pub fn handle_event(
+    event: &SchedulerEvent,
+    config: &Config,
+    started: Instant,
+    tasks: &mut TaskTracker,
+    monotonic_start_ns: Option<u64>,
+    recorder: &mut LiveRecorder,
+    alert_sender: Option<&std::sync::mpsc::SyncSender<AlertPayload>>,
+) {
     debug_assert_eq!(event.kind, EVENT_RUNNABLE_LATENCY);
 
     let comm = metrics::comm_to_string(&event.comm);
@@ -278,37 +191,33 @@ pub fn handle_event(input: HandleEventInput<'_>) {
 
     let fault_deltas = stats.record(event, config.spike_threshold_ns, elapsed_ms);
 
-    let alert_payload = if config
-        .alert_threshold_ns
-        .is_some_and(|threshold| event.latency_ns >= threshold)
-    {
-        Some(AlertPayload::from_task_stats(stats, event, elapsed_ms))
-    } else {
-        None
-    };
+    if event.latency_ns >= config.spike_threshold_ns {
+        if let Some(spike_events) = recorder.spike_events.as_mut() {
+            spike_events.push(recorder::SpikeEvent::from_task_stats(
+                monotonic_start_ns,
+                stats,
+                event,
+                fault_deltas,
+            ));
+        }
 
-    if event.latency_ns >= config.spike_threshold_ns
-        && let Some(spike_events) = recorder.spike_events.as_mut()
-    {
-        spike_events.push(recorder::SpikeEvent::from_task_stats(
-            monotonic_start_ns,
-            stats,
-            event,
-            fault_deltas,
-        ));
-    }
-
-    if config.verbose {
+        if config.verbose {
+            print_event(event, &comm, "sample");
+        } else {
+            print_event(event, &comm, "spike");
+        }
+    } else if config.verbose {
         print_event(event, &comm, "sample");
-    } else if event.latency_ns >= config.spike_threshold_ns {
-        print_event(event, &comm, "spike");
     }
 
-    if let Some(alert_payload) = alert_payload
+    if let Some(threshold) = config.alert_threshold_ns
+        && event.latency_ns >= threshold
         && let Some(sender) = alert_sender
-        && let Err(err) = sender.try_send(alert_payload)
     {
-        warn!("alert_send_failed err={err}");
+        let alert_payload = AlertPayload::from_task_stats(stats, event, elapsed_ms);
+        if let Err(err) = sender.try_send(alert_payload) {
+            warn!("alert_send_failed err={err}");
+        }
     }
 }
 

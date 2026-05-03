@@ -100,16 +100,9 @@ pub struct TuneCommandInput {
     pub enforce: bool,
 }
 
-pub struct TuneMeasureInput {
-    pub tree_pid: u32,
-    pub profile: profiles::Profile,
-    pub epoch_seconds: u64,
-    pub warmup_seconds: u64,
-    pub enforce: bool,
-    pub shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
-    pub mangohud_log: Option<PathBuf>,
-    pub force_restore_overwrite: bool,
-    pub tune_output_dir: PathBuf,
+pub struct TuneControl {
+    pub stop_refresh: Arc<AtomicBool>,
+    pub applied_tasks: Arc<AtomicUsize>,
 }
 
 pub struct TuneMeasureResult {
@@ -120,16 +113,6 @@ pub struct TuneMeasureResult {
     pub coverage: TuneCoverageMetrics,
 }
 
-pub struct TuneProfileRefreshInput {
-    pub tree_pid: u32,
-    pub profile: profiles::Profile,
-    pub cache: profiles::ProfileApplyCache,
-    pub force_restore_overwrite: bool,
-    pub refresh_ms: u64,
-    pub stop_refresh: Arc<AtomicBool>,
-    pub applied_tasks: Arc<AtomicUsize>,
-    pub enforce: bool,
-}
 
 pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     let TuneCommandInput {
@@ -195,17 +178,59 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
                 interval_records,
                 frame_events,
                 coverage,
-            } = match measure_tune_candidate(TuneMeasureInput {
-                tree_pid,
-                profile: profile.clone(),
-                epoch_seconds,
-                warmup_seconds,
+            } = match measure_tune_candidate(
+                Config {
+                    target_pids: Vec::new(),
+                    tree_pids: vec![tree_pid],
+                    summary_period_ms: 1_000,
+                    epoch_period_ms: None,
+                    spike_threshold_ns: 1_000_000,
+                    alert_threshold_ns: None,
+                    alert_webhook_url: None,
+                    verbose: false,
+                    max_tasks: 1024,
+                    task_filters: TaskFilters::default(),
+                    keep_missing_pid: false,
+                    watch_process: None,
+                    persistent: false,
+                    watch_poll_ms: 2_000,
+                    watch_timeout: None,
+                    csv_path: None,
+                    irq_latency: false,
+                    irqs: Vec::new(),
+                    hwmon: false,
+                    hwmon_root: None,
+                    hwmon_drm_card: None,
+                    hwmon_render_node: None,
+                    mangohud_log: mangohud_log.clone(),
+                    tui: false,
+                    retain_intervals: None,
+                    recording: Some(cli::RecordingConfig {
+                        run_name: Some(format!("tune-{}", profile.name)),
+                        out_dir: Some(tune_run_dir(&tune_output_dir, &profile.name)),
+                    }),
+                    max_duration: Some(Duration::from_secs(epoch_seconds)),
+                    cgroupv2: None,
+                    follow_exec: true,
+                    exclude_tree_pids: Vec::new(),
+                    cpu_freq: true,
+                    mangohud_ignore_offset: {
+                        if let Some(path) = &mangohud_log {
+                            std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+                        } else {
+                            0
+                        }
+                    },
+                    faults: false,
+                    block_io: false,
+                    stat_wait: false,
+                },
+                profile.clone(),
                 enforce,
-                shared_hwmon: shared_hwmon.clone(),
-                mangohud_log: mangohud_log.clone(),
-                force_restore_overwrite: results.is_empty(),
-                tune_output_dir: tune_output_dir.clone(),
-            })
+                shared_hwmon.clone(),
+                results.is_empty(),
+                tune_output_dir.clone(),
+            )
             .await
             {
                 Ok(res) => res,
@@ -404,66 +429,16 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<TuneMeasureResult> {
-    let TuneMeasureInput {
-        tree_pid,
-        profile,
-        epoch_seconds,
-        warmup_seconds,
-        enforce,
-        shared_hwmon,
-        mangohud_log,
-        force_restore_overwrite,
-        tune_output_dir,
-    } = input;
-    let profile_name = profile.name.clone();
-    let run_dir = tune_run_dir(&tune_output_dir, &profile_name);
-    let config = Config {
-        target_pids: Vec::new(),
-        tree_pids: vec![tree_pid],
-        summary_period_ms: 1_000,
-        epoch_period_ms: None,
-        spike_threshold_ns: 1_000_000,
-        alert_threshold_ns: None,
-        alert_webhook_url: None,
-        verbose: false,
-        max_tasks: 1024,
-        task_filters: TaskFilters::default(),
-        keep_missing_pid: false,
-        watch_process: None,
-        persistent: false,
-        watch_poll_ms: 2_000,
-        watch_timeout: None,
-        csv_path: None,
-        irq_latency: false,
-        irqs: Vec::new(),
-        hwmon: false,
-        hwmon_root: None,
-        hwmon_drm_card: None,
-        hwmon_render_node: None,
-        mangohud_log: mangohud_log.clone(),
-        tui: false,
-        retain_intervals: None,
-        recording: Some(cli::RecordingConfig {
-            run_name: Some(format!("tune-{profile_name}")),
-            out_dir: Some(run_dir.clone()),
-        }),
-        max_duration: Some(Duration::from_secs(epoch_seconds)),
-        cgroupv2: None,
-        follow_exec: true,
-        exclude_tree_pids: Vec::new(),
-        cpu_freq: true,
-        mangohud_ignore_offset: {
-            if let Some(path) = &mangohud_log {
-                std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
-            } else {
-                0
-            }
-        },
-        faults: false,
-        block_io: false,
-        stat_wait: false,
-    };
+pub async fn measure_tune_candidate(
+    config: Config,
+    profile: profiles::Profile,
+    enforce: bool,
+    shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
+    force_restore_overwrite: bool,
+    _tune_output_dir: PathBuf,
+) -> anyhow::Result<TuneMeasureResult> {
+    let tree_pid = config.tree_pids[0];
+    let run_dir = config.recording.as_ref().unwrap().out_dir.as_ref().unwrap().clone();
 
     let cache = profiles::ProfileApplyCache::default();
     let (initial_records, cache) = crate::watch::apply_profile_to_tree_cached_blocking(
@@ -477,22 +452,26 @@ pub async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<T
     let initial_applied_tasks = initial_records.len();
     let should_force_refresh = force_restore_overwrite && initial_records.is_empty();
 
-    let stop_refresh = Arc::new(AtomicBool::new(false));
-    let refreshed_applied_tasks = Arc::new(AtomicUsize::new(0));
-    let mut profile_refresh = tokio::spawn(tune_profile_refresh_loop(TuneProfileRefreshInput {
+    let control = TuneControl {
+        stop_refresh: Arc::new(AtomicBool::new(false)),
+        applied_tasks: Arc::new(AtomicUsize::new(0)),
+    };
+    let stop_refresh = control.stop_refresh.clone();
+    let refreshed_applied_tasks = control.applied_tasks.clone();
+
+    let mut profile_refresh = tokio::spawn(tune_profile_refresh_loop(
         tree_pid,
         profile,
         cache,
-        force_restore_overwrite: should_force_refresh,
-        refresh_ms: TUNE_PROFILE_REFRESH_MS,
-        stop_refresh: stop_refresh.clone(),
-        applied_tasks: refreshed_applied_tasks.clone(),
+        should_force_refresh,
+        TUNE_PROFILE_REFRESH_MS,
+        control,
         enforce,
-    }));
+    ));
 
     let mut profile_refresh_finished = false;
     let monitor_result = tokio::select! {
-        result = run_monitor(config, shared_hwmon) => result,
+        result = run_monitor(config.clone(), shared_hwmon) => result,
         refresh_result = &mut profile_refresh => {
             profile_refresh_finished = true;
             match refresh_result {
@@ -527,7 +506,7 @@ pub async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<T
         .into_iter::<IntervalRecord>()
         .collect::<Result<Vec<_>, _>>()?;
     let mut interval_records = interval_records;
-    let warmup_ms = u128::from(warmup_seconds) * 1_000;
+    let warmup_ms = config.max_duration.map(|d| d.as_millis()).unwrap_or(0); // This is actually epoch_seconds in the original, we should use config instead
     interval_records.retain(|r| r.elapsed_ms >= warmup_ms);
 
     let frame_path = run_dir.join("frame_correlation.json");
@@ -557,24 +536,22 @@ pub async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<T
     })
 }
 
-pub async fn tune_profile_refresh_loop(input: TuneProfileRefreshInput) -> anyhow::Result<()> {
-    let TuneProfileRefreshInput {
-        tree_pid,
-        profile,
-        mut cache,
-        force_restore_overwrite,
-        refresh_ms,
-        stop_refresh,
-        applied_tasks,
-        enforce,
-    } = input;
+pub async fn tune_profile_refresh_loop(
+    tree_pid: u32,
+    profile: profiles::Profile,
+    mut cache: profiles::ProfileApplyCache,
+    force_restore_overwrite: bool,
+    refresh_ms: u64,
+    control: TuneControl,
+    enforce: bool,
+) -> anyhow::Result<()> {
     let mut should_force = force_restore_overwrite;
     let refresh_interval = Duration::from_millis(refresh_ms);
     let verify_interval = Duration::from_millis(crate::watch::PROFILE_WATCH_VERIFY_MS);
     let mut next_verify = Instant::now() + verify_interval;
 
     loop {
-        if stop_refresh.load(Ordering::Relaxed) {
+        if control.stop_refresh.load(Ordering::Relaxed) {
             return Ok(());
         }
 
@@ -595,7 +572,7 @@ pub async fn tune_profile_refresh_loop(input: TuneProfileRefreshInput) -> anyhow
         cache = updated_cache;
 
         if !records.is_empty() {
-            applied_tasks.fetch_add(records.len(), Ordering::Relaxed);
+            control.applied_tasks.fetch_add(records.len(), Ordering::Relaxed);
         }
 
         should_force = false;

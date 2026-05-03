@@ -16,7 +16,7 @@ use tokio::{
 use crate::{
     cli::Config,
     ebpf_loader,
-    events::{AlertPayload, DrainBpfEventsInput, drain_bpf_events},
+    events::AlertPayload,
     hwmon, mangohud,
     metrics::{
         collect_interval_summaries_labeled, log_drop_counters, print_session_summaries,
@@ -28,7 +28,7 @@ use crate::{
         SpikeEventBuffer,
     },
     scx,
-    tasks::{RefreshTargetTasksInput, TaskTracker, refresh_target_tasks},
+    tasks::TaskTracker,
     watch::{
         WatchProcessState, add_watch_tree_pid, capture_tree_root_starttimes,
         find_process_by_pattern_at_with_cache, process_root_starttime, remove_stale_tree_roots,
@@ -322,31 +322,96 @@ impl MonitorSession {
                 }
 
                 ready = self.loaded.events.readable_mut() => {
-                    let guard = ready?;
-                    let MonitorSession {
-                        config,
-                        started,
-                        tasks,
-                        recorder,
-                        cpu_to_pkg,
-                        alert_sender,
-                        ..
-                    } = self;
+                    let mut guard = ready?;
+                    let recording_monotonic_start_ns = self.recorder.run.as_ref().and_then(|r| r.monotonic_start_ns);
 
-                    drain_bpf_events(DrainBpfEventsInput {
-                        guard,
-                        config,
-                        started: *started,
-                        tasks,
-                        recorder,
-                        cpu_to_pkg,
-                        block_io_correlation_basis: self.loaded.block_io_correlation_basis.as_str(),
-                        alert_sender: alert_sender.as_ref(),
-                    });
+                    while let Some(item) = guard.get_inner_mut().next() {
+                        if item.len() < std::mem::size_of::<u32>() {
+                            log::warn!("short_bpf_event len={}", item.len());
+                            continue;
+                        }
+
+                        let kind = unsafe { (item.as_ptr() as *const u32).read_unaligned() };
+                        match kind {
+                            stutter_common::EVENT_RUNNABLE_LATENCY => {
+                                if let Some(event) = crate::events::cast_event::<stutter_common::SchedulerEvent>(&item) {
+                                    crate::events::handle_event(
+                                        event,
+                                        &self.config,
+                                        self.started,
+                                        &mut self.tasks,
+                                        recording_monotonic_start_ns,
+                                        &mut self.recorder,
+                                        self.alert_sender.as_ref(),
+                                    );
+                                } else {
+                                    log::warn!("short_scheduler_event len={}", item.len());
+                                }
+                            }
+                            stutter_common::EVENT_IRQ_LATENCY => {
+                                if let Some(event) = crate::events::cast_event::<stutter_common::IrqEvent>(&item) {
+                                    crate::events::handle_irq_event(event, &mut self.recorder, recording_monotonic_start_ns);
+                                } else {
+                                    log::warn!("short_irq_event len={}", item.len());
+                                }
+                            }
+                            stutter_common::EVENT_MIGRATION => {
+                                if let Some(event) = crate::events::cast_event::<stutter_common::MigrationEvent>(&item) {
+                                    crate::events::handle_migration_event(
+                                        event,
+                                        &mut self.tasks,
+                                        &mut self.recorder,
+                                        &self.cpu_to_pkg,
+                                        self.started,
+                                    );
+                                } else {
+                                    log::warn!("short_migration_event len={}", item.len());
+                                }
+                            }
+                            stutter_common::EVENT_CPU_FREQ => {
+                                if let Some(event) = crate::events::cast_event::<stutter_common::CpuFreqEvent>(&item) {
+                                    crate::events::handle_cpu_freq_event(event, &mut self.recorder, self.started);
+                                } else {
+                                    log::warn!("short_cpu_freq_event len={}", item.len());
+                                }
+                            }
+                            stutter_common::EVENT_STAT_WAIT => {
+                                if let Some(event) = crate::events::cast_event::<stutter_common::StatWaitEvent>(&item) {
+                                    if let Some(stats) = self.tasks.stats_by_task.get_mut(&event.tid) {
+                                        stats.stat_wait_sum_ns += event.delay_ns as u128;
+                                        stats.stat_wait_count += 1;
+                                    }
+                                } else {
+                                    log::warn!("short_stat_wait_event len={}", item.len());
+                                }
+                            }
+                            stutter_common::EVENT_BLOCK_IO => {
+                                if let Some(event) = crate::events::cast_event::<stutter_common::BlockIoEvent>(&item) {
+                                    crate::events::handle_block_io_event(
+                                        event,
+                                        &mut self.recorder,
+                                        self.loaded.block_io_correlation_basis.as_str(),
+                                        self.started,
+                                    );
+                                } else {
+                                    log::warn!("short_block_io_event len={}", item.len());
+                                }
+                            }
+                            stutter_common::EVENT_EXEC => {
+                                if self.config.follow_exec {
+                                    crate::events::handle_exec_event(&item, &mut self.tasks);
+                                }
+                            }
+                            other => log::warn!("unknown_bpf_event kind={other} len={}", item.len()),
+                        }
+                    }
+
+                    guard.clear_ready();
                 }
             }
         }
     }
+
 
     pub fn handle_tui_event(&mut self, event: Event) -> Option<String> {
         if let Event::Key(key) = event {
@@ -544,15 +609,14 @@ impl MonitorSession {
     }
 
     pub async fn refresh_tasks(&mut self) -> anyhow::Result<()> {
-        refresh_target_tasks(RefreshTargetTasksInput {
-            config: &self.config,
-            tasks: &mut self.tasks,
-            tree_events: &mut self.recorder.tree_events,
-            target_pid_map: &mut self.loaded.target_pid_map,
-            prev_faults_map: self.loaded.prev_faults_map.as_mut(),
-            elapsed_ms: self.started.elapsed().as_millis(),
-            recording_started: self.recorder.run.as_ref().map(|run| run.started_instant),
-        })
+        self.tasks.refresh(
+            &self.config,
+            &mut self.recorder.tree_events,
+            &mut self.loaded.target_pid_map,
+            self.loaded.prev_faults_map.as_mut(),
+            self.started.elapsed().as_millis(),
+            self.recorder.run.as_ref().map(|run| run.started_instant),
+        )
         .await
     }
 
