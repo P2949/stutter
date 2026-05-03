@@ -62,18 +62,18 @@ fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
     let mut task_exe_inodes: super::TaskExeInodesMap = BTreeMap::new();
     let mut prev_faults_map = None;
     let mut prev_faults_snapshot = BTreeMap::from([(42, (10, 20))]);
-    super::handle_same_tid_replacements(
-        &active_targets,
-        &desired_tasks,
-        &mut known_targets,
-        &mut stats_by_task,
-        &mut task_exe_inodes,
-        &mut tree_events,
-        &mut prev_faults_map,
-        &mut prev_faults_snapshot,
-        77,
-        Some(Instant::now()),
-    );
+    super::handle_same_tid_replacements(super::HandleSameTidReplacementsInput {
+        active_targets: &active_targets,
+        desired_tasks: &desired_tasks,
+        known_targets: &mut known_targets,
+        stats_by_task: &mut stats_by_task,
+        task_exe_inodes: &mut task_exe_inodes,
+        tree_events: &mut tree_events,
+        prev_faults_map: &mut prev_faults_map,
+        prev_faults_snapshot: &mut prev_faults_snapshot,
+        elapsed_ms: 77,
+        recording_started: Some(Instant::now()),
+    });
 
     let stats = stats_by_task.get(&42).unwrap();
     assert_eq!(stats.first_seen_ms, 77);
@@ -500,17 +500,18 @@ fn target_snapshot_keeps_manual_missing_pid_when_requested() {
     fs::create_dir_all(&dir).unwrap();
 
     let mut cache = process_tree::ProcessCache::default();
-    let snapshot = process_tree::target_snapshot_filtered_at_with_options(
-        &dir,
-        &[42],
-        &[],
-        None,
-        &[],
-        &process_tree::TaskFilters::default(),
-        true,
-        &mut cache,
-        None,
-    );
+    let snapshot =
+        process_tree::target_snapshot_filtered_at_with_options(process_tree::TargetSnapshotInput {
+            proc_root: &dir,
+            manual_pids: &[42],
+            tree_pids: &[],
+            cgroup_path: None,
+            exclude_tree_pids: &[],
+            filters: &process_tree::TaskFilters::default(),
+            keep_missing_pid: true,
+            cache: &mut cache,
+            previous_tasks: None,
+        });
 
     let task = snapshot.tasks.get(&42).unwrap();
     assert_eq!(task.comm, "?");
@@ -674,7 +675,9 @@ fn target_snapshot_filters_include_and_exclude_comm_patterns() {
 
     let filters = process_tree::TaskFilters {
         include_comm: vec![process_tree::CompiledPattern::new("thread".to_owned()).unwrap()],
-        exclude_comm: vec![process_tree::CompiledPattern::new("STEAMWEBHELPER".to_owned()).unwrap()],
+        exclude_comm: vec![
+            process_tree::CompiledPattern::new("STEAMWEBHELPER".to_owned()).unwrap(),
+        ],
     };
     let snapshot = process_tree::target_snapshot_filtered_at(&dir, &[], &[10], None, &filters);
 
@@ -758,32 +761,34 @@ fn target_snapshot_reads_fresh_task_comm_with_previous_tasks() {
     create_fake_proc(&dir, 10, 1, "game", "game", &[10, 11]);
 
     let mut cache = process_tree::ProcessCache::default();
-    let first = process_tree::target_snapshot_filtered_at_with_options(
-        &dir,
-        &[],
-        &[10],
-        None,
-        &[],
-        &process_tree::TaskFilters::default(),
-        false,
-        &mut cache,
-        None,
-    );
+    let first =
+        process_tree::target_snapshot_filtered_at_with_options(process_tree::TargetSnapshotInput {
+            proc_root: &dir,
+            manual_pids: &[],
+            tree_pids: &[10],
+            cgroup_path: None,
+            exclude_tree_pids: &[],
+            filters: &process_tree::TaskFilters::default(),
+            keep_missing_pid: false,
+            cache: &mut cache,
+            previous_tasks: None,
+        });
     assert_eq!(first.tasks.get(&11).unwrap().comm, "game-11");
 
     fs::write(dir.join("10/task/11/comm"), "RenderThread\n").unwrap();
 
-    let second = process_tree::target_snapshot_filtered_at_with_options(
-        &dir,
-        &[],
-        &[10],
-        None,
-        &[],
-        &process_tree::TaskFilters::default(),
-        false,
-        &mut cache,
-        Some(&first.tasks),
-    );
+    let second =
+        process_tree::target_snapshot_filtered_at_with_options(process_tree::TargetSnapshotInput {
+            proc_root: &dir,
+            manual_pids: &[],
+            tree_pids: &[10],
+            cgroup_path: None,
+            exclude_tree_pids: &[],
+            filters: &process_tree::TaskFilters::default(),
+            keep_missing_pid: false,
+            cache: &mut cache,
+            previous_tasks: Some(&first.tasks),
+        });
     assert_eq!(second.tasks.get(&11).unwrap().comm, "RenderThread");
 
     fs::remove_dir_all(dir).ok();
@@ -845,17 +850,18 @@ fn target_snapshot_respects_exclude_tree_pids() {
     create_fake_proc(&dir, 102, 100, "child2", "child2", &[102]);
     create_fake_proc(&dir, 103, 102, "child3", "child3", &[103]);
 
-    let snapshot = process_tree::target_snapshot_filtered_at_with_options(
-        &dir,
-        &[],
-        &[100],
-        None,
-        &[102],
-        &process_tree::TaskFilters::default(),
-        false,
-        &mut process_tree::ProcessCache::default(),
-        None,
-    );
+    let snapshot =
+        process_tree::target_snapshot_filtered_at_with_options(process_tree::TargetSnapshotInput {
+            proc_root: &dir,
+            manual_pids: &[],
+            tree_pids: &[100],
+            cgroup_path: None,
+            exclude_tree_pids: &[102],
+            filters: &process_tree::TaskFilters::default(),
+            keep_missing_pid: false,
+            cache: &mut process_tree::ProcessCache::default(),
+            previous_tasks: None,
+        });
 
     assert!(snapshot.tasks.contains_key(&100));
     assert!(snapshot.tasks.contains_key(&101));
@@ -1317,16 +1323,16 @@ fn interval_csv_writer_outputs_header_and_rows() {
     latency.record(1_000_000);
     let latency = latency.snapshot().unwrap();
     let cpu = metrics::CpuStatsSet::new().snapshot();
-    let record = metrics::interval_record_from_snapshot(
-        7,
-        &stats,
-        &latency,
-        &cpu,
-        123,
-        &Default::default(),
-        None,
-        (0, 0),
-    );
+    let record = metrics::interval_record_from_snapshot(metrics::IntervalRecordFromSnapshotInput {
+        task: 7,
+        stats: &stats,
+        latency: &latency,
+        cpu: &cpu,
+        elapsed_ms: 123,
+        drop_counters: &Default::default(),
+        psi: None,
+        faults_delta: (0, 0),
+    });
 
     recorder::write_interval_csv(&path, &[record]).unwrap();
     let csv = fs::read_to_string(&path).unwrap();

@@ -278,14 +278,17 @@ pub fn load_and_attach(
         // due to unrelated tasks in the same cgroup.
         let mut cache = crate::process_tree::ProcessCache::default();
         let snapshot = crate::process_tree::target_snapshot_with_options(
-            &[], // Pre-populate only cgroup tasks here
-            &[],
-            Some(cgroup_path),
-            &config.exclude_tree_pids,
-            &config.task_filters,
-            config.keep_missing_pid,
-            &mut cache,
-            None,
+            crate::process_tree::TargetSnapshotInput {
+                proc_root: Path::new("/proc"),
+                manual_pids: &[],
+                tree_pids: &[],
+                cgroup_path: Some(cgroup_path),
+                exclude_tree_pids: &config.exclude_tree_pids,
+                filters: &config.task_filters,
+                keep_missing_pid: config.keep_missing_pid,
+                cache: &mut cache,
+                previous_tasks: None,
+            },
         );
         let pids: Vec<_> = snapshot.tasks.keys().copied().collect();
 

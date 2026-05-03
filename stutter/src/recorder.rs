@@ -822,8 +822,18 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             tree_roots: config.tree_pids.clone(),
             cgroupv2: config.cgroupv2.clone(),
             exclude_tree_pids: config.exclude_tree_pids.clone(),
-            include_comm: config.task_filters.include_comm.iter().map(|p| p.raw().to_owned()).collect(),
-            exclude_comm: config.task_filters.exclude_comm.iter().map(|p| p.raw().to_owned()).collect(),
+            include_comm: config
+                .task_filters
+                .include_comm
+                .iter()
+                .map(|p| p.raw().to_owned())
+                .collect(),
+            exclude_comm: config
+                .task_filters
+                .exclude_comm
+                .iter()
+                .map(|p| p.raw().to_owned())
+                .collect(),
             watch_process: config.watch_process.clone(),
             persistent: config.persistent,
             keep_missing_pid: config.keep_missing_pid,
@@ -1257,12 +1267,11 @@ mod tests {
             writer.push(&serde_json::json!({"one": true})).unwrap();
             writer.finish().unwrap();
         }
-        let single: Vec<serde_json::Value> = serde_json::Deserializer::from_reader(
-            fs::File::open(&single_path).unwrap(),
-        )
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
+        let single: Vec<serde_json::Value> =
+            serde_json::Deserializer::from_reader(fs::File::open(&single_path).unwrap())
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
         assert_eq!(single.len(), 1);
 
         let path = dir.join("items.json");
