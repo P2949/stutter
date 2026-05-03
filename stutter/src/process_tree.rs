@@ -122,16 +122,95 @@ pub struct TargetSnapshot {
     pub tasks: BTreeMap<u32, TaskInfo>,
 }
 
+/// Input parameters for [target_snapshot].
+///
+/// This struct uses the builder pattern to allow flexible configuration of what
+/// processes and tasks should be included in the snapshot.
 pub struct TargetSnapshotInput<'a> {
+    /// The root directory for the proc filesystem. Defaults to `/proc`.
     pub proc_root: &'a Path,
+    /// A list of specific PIDs to include.
     pub manual_pids: &'a [u32],
+    /// A list of root PIDs whose entire descendant trees should be included.
     pub tree_pids: &'a [u32],
+    /// An optional cgroup path. All tasks in this cgroup and its sub-cgroups will be included.
     pub cgroup_path: Option<&'a Path>,
+    /// A list of root PIDs whose descendant trees should be excluded, even if they would
+    /// otherwise be included via [Self::tree_pids] or [Self::cgroup_path].
     pub exclude_tree_pids: &'a [u32],
-    pub filters: &'a TaskFilters,
+    /// Optional filters to exclude tasks based on their command name.
+    pub filters: Option<&'a TaskFilters>,
+    /// If true, PIDs in [Self::manual_pids] that are not found will still be included
+    /// in the output with [TaskClass::Unknown].
     pub keep_missing_pid: bool,
-    pub cache: &'a mut ProcessCache,
+    /// An optional cache to speed up repeated scans.
+    pub cache: Option<&'a mut ProcessCache>,
+    /// An optional map of previous tasks to help preserve task information.
     pub previous_tasks: Option<&'a BTreeMap<u32, TaskInfo>>,
+}
+
+impl<'a> Default for TargetSnapshotInput<'a> {
+    fn default() -> Self {
+        Self {
+            proc_root: Path::new("/proc"),
+            manual_pids: &[],
+            tree_pids: &[],
+            cgroup_path: None,
+            exclude_tree_pids: &[],
+            filters: None,
+            keep_missing_pid: false,
+            cache: None,
+            previous_tasks: None,
+        }
+    }
+}
+
+impl<'a> TargetSnapshotInput<'a> {
+    #[allow(dead_code)]
+    pub fn proc_root(mut self, path: &'a Path) -> Self {
+        self.proc_root = path;
+        self
+    }
+
+    pub fn manual_pids(mut self, pids: &'a [u32]) -> Self {
+        self.manual_pids = pids;
+        self
+    }
+
+    pub fn tree_pids(mut self, pids: &'a [u32]) -> Self {
+        self.tree_pids = pids;
+        self
+    }
+
+    pub fn cgroup_path(mut self, path: Option<&'a Path>) -> Self {
+        self.cgroup_path = path;
+        self
+    }
+
+    pub fn exclude_tree_pids(mut self, pids: &'a [u32]) -> Self {
+        self.exclude_tree_pids = pids;
+        self
+    }
+
+    pub fn filters(mut self, filters: &'a TaskFilters) -> Self {
+        self.filters = Some(filters);
+        self
+    }
+
+    pub fn keep_missing_pid(mut self, keep: bool) -> Self {
+        self.keep_missing_pid = keep;
+        self
+    }
+
+    pub fn cache(mut self, cache: &'a mut ProcessCache) -> Self {
+        self.cache = Some(cache);
+        self
+    }
+
+    pub fn previous_tasks(mut self, tasks: Option<&'a BTreeMap<u32, TaskInfo>>) -> Self {
+        self.previous_tasks = tasks;
+        self
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -366,55 +445,10 @@ pub fn task_comm_at(proc_root: &Path, pid: u32, tid: u32) -> Option<String> {
         .filter(|comm| !comm.is_empty())
 }
 
-pub fn target_snapshot(
-    manual_pids: &[u32],
-    tree_pids: &[u32],
-    cgroup_path: Option<&Path>,
-) -> TargetSnapshot {
-    target_snapshot_at(Path::new("/proc"), manual_pids, tree_pids, cgroup_path)
-}
-
-pub fn target_snapshot_with_options(mut input: TargetSnapshotInput) -> TargetSnapshot {
-    input.proc_root = Path::new("/proc");
-    target_snapshot_filtered_at_with_options(input)
-}
-
-pub fn target_snapshot_at(
-    proc_root: &Path,
-    manual_pids: &[u32],
-    tree_pids: &[u32],
-    cgroup_path: Option<&Path>,
-) -> TargetSnapshot {
-    target_snapshot_filtered_at(
-        proc_root,
-        manual_pids,
-        tree_pids,
-        cgroup_path,
-        &TaskFilters::default(),
-    )
-}
-
-pub fn target_snapshot_filtered_at(
-    proc_root: &Path,
-    manual_pids: &[u32],
-    tree_pids: &[u32],
-    cgroup_path: Option<&Path>,
-    filters: &TaskFilters,
-) -> TargetSnapshot {
-    target_snapshot_filtered_at_with_options(TargetSnapshotInput {
-        proc_root,
-        manual_pids,
-        tree_pids,
-        cgroup_path,
-        exclude_tree_pids: &[],
-        filters,
-        keep_missing_pid: false,
-        cache: &mut ProcessCache::default(),
-        previous_tasks: None,
-    })
-}
-
-pub fn target_snapshot_filtered_at_with_options(input: TargetSnapshotInput) -> TargetSnapshot {
+/// Collect a snapshot of tasks based on the provided input criteria.
+///
+/// This function scans the process tree and filters tasks according to the [TargetSnapshotInput].
+pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
     let TargetSnapshotInput {
         proc_root,
         manual_pids,
@@ -426,6 +460,12 @@ pub fn target_snapshot_filtered_at_with_options(input: TargetSnapshotInput) -> T
         cache,
         previous_tasks,
     } = input;
+
+    let mut local_cache = ProcessCache::default();
+    let cache = cache.unwrap_or(&mut local_cache);
+    let default_filters = TaskFilters::default();
+    let filters = filters.unwrap_or(&default_filters);
+
     let processes = scan_processes_at(proc_root, cache);
     let mut requested_roots = BTreeSet::new();
     let mut process_roots = BTreeSet::new();

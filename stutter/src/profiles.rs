@@ -96,7 +96,9 @@ fn apply_profile_to_tree_with_cache(
     dry_run: bool,
     mut cache: Option<&mut ProfileApplyCache>,
 ) -> anyhow::Result<Vec<AffinityRecord>> {
-    let snapshot = process_tree::target_snapshot(&[], &[tree_pid], None);
+    let snapshot = process_tree::target_snapshot(
+        process_tree::TargetSnapshotInput::default().tree_pids(&[tree_pid]),
+    );
     let planned = planned_affinity_changes(&snapshot.tasks, profile, cache.as_deref_mut())?;
     if planned.is_empty() {
         return Ok(Vec::new());
