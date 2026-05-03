@@ -673,8 +673,8 @@ fn target_snapshot_filters_include_and_exclude_comm_patterns() {
     fs::write(dir.join("10/task/12/comm"), "steamwebhelper\n").unwrap();
 
     let filters = process_tree::TaskFilters {
-        include_comm: vec!["thread".to_owned()],
-        exclude_comm: vec!["STEAMWEBHELPER".to_owned()],
+        include_comm: vec![process_tree::CompiledPattern::new("thread".to_owned()).unwrap()],
+        exclude_comm: vec![process_tree::CompiledPattern::new("STEAMWEBHELPER".to_owned()).unwrap()],
     };
     let snapshot = process_tree::target_snapshot_filtered_at(&dir, &[], &[10], None, &filters);
 

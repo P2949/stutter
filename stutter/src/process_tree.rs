@@ -5,6 +5,8 @@ use std::{
     path::Path,
 };
 
+use regex::Regex;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default)]
@@ -123,9 +125,50 @@ pub struct TargetSnapshot {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskFilters {
-    pub include_comm: Vec<String>,
-    pub exclude_comm: Vec<String>,
+    pub include_comm: Vec<CompiledPattern>,
+    pub exclude_comm: Vec<CompiledPattern>,
 }
+
+#[derive(Clone, Debug, Default)]
+pub struct CompiledPattern {
+    pub raw: String,
+    pub regex: Option<Regex>,
+}
+
+impl CompiledPattern {
+    pub fn new(raw: String) -> anyhow::Result<Self> {
+        let regex = if let Some(inner) = raw.strip_prefix('/').and_then(|s| s.strip_suffix('/')) {
+            Some(Regex::new(inner).map_err(|e| anyhow::anyhow!("invalid regex in pattern '{}': {e}", raw))?)
+        } else {
+            None
+        };
+
+        Ok(Self { raw, regex })
+    }
+
+    pub fn raw(&self) -> &str {
+        &self.raw
+    }
+
+    pub fn matches(&self, value: &str) -> bool {
+        if let Some(regex) = &self.regex {
+            regex.is_match(value)
+        } else {
+            value
+                .to_ascii_lowercase()
+                .contains(&self.raw.to_ascii_lowercase())
+        }
+    }
+}
+
+
+impl PartialEq for CompiledPattern {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw == other.raw
+    }
+}
+
+impl Eq for CompiledPattern {}
 
 impl TaskFilters {
     fn allows(&self, task: &TaskInfo) -> bool {
@@ -779,14 +822,8 @@ pub fn parse_proc_stat_policy(stat: &str) -> Option<u32> {
     after_comm.split_whitespace().nth(38)?.parse().ok()
 }
 
-fn comm_pattern_matches(pattern: &str, task: &TaskInfo) -> bool {
-    if pattern.is_empty() {
-        return false;
-    }
-
-    let pattern = pattern.to_ascii_lowercase();
-    task.comm.to_ascii_lowercase().contains(&pattern)
-        || task.process_comm.to_ascii_lowercase().contains(&pattern)
+fn comm_pattern_matches(pattern: &CompiledPattern, task: &TaskInfo) -> bool {
+    pattern.matches(&task.comm) || pattern.matches(&task.process_comm)
 }
 
 pub fn classify_task(comm: &str, process_comm: &str, cmdline: &str) -> TaskClass {

@@ -5,12 +5,11 @@ use std::{
 };
 
 use anyhow::Context;
-use regex::Regex;
 use serde::Deserialize;
 
 use crate::{
     affinity::{self, AffinityRecord, CpuMask},
-    process_tree::{self, TaskClass, TaskInfo},
+    process_tree::{self, CompiledPattern, TaskClass, TaskInfo},
 };
 
 #[derive(Clone, Debug)]
@@ -26,11 +25,6 @@ pub struct ProfileRule {
     pub match_comm: Vec<CompiledPattern>,
 }
 
-#[derive(Clone, Debug)]
-pub struct CompiledPattern {
-    raw: String,
-    regex: Option<Regex>,
-}
 
 #[derive(Default)]
 pub struct ProfileApplyCache {
@@ -283,32 +277,6 @@ impl ProfileApplyCacheKey {
     }
 }
 
-impl CompiledPattern {
-    fn new(raw: String) -> anyhow::Result<Self> {
-        let regex = if let Some(inner) = raw.strip_prefix('/').and_then(|s| s.strip_suffix('/')) {
-            Some(Regex::new(inner).with_context(|| format!("invalid profile regex '{}'", raw))?)
-        } else {
-            None
-        };
-
-        Ok(Self { raw, regex })
-    }
-
-    #[cfg(test)]
-    pub fn raw(&self) -> &str {
-        &self.raw
-    }
-
-    fn matches(&self, value: &str) -> bool {
-        if let Some(regex) = &self.regex {
-            regex.is_match(value)
-        } else {
-            value
-                .to_ascii_lowercase()
-                .contains(&self.raw.to_ascii_lowercase())
-        }
-    }
-}
 
 fn parse_profiles(data: &str) -> anyhow::Result<Vec<Profile>> {
     let file = toml::from_str::<ProfilesFile>(data)?;
