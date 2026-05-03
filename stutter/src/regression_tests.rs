@@ -72,16 +72,14 @@ fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
         prev_faults_snapshot: BTreeMap::from([(42, (10, 20))]),
         cache: process_tree::ProcessCache::default(),
     };
-    let mut prev_faults_map = None;
 
-    tasks::handle_same_tid_replacements(tasks::HandleSameTidReplacementsInput {
-        tasks: &mut tasks,
-        desired_tasks: &desired_tasks,
-        tree_events: &mut tree_events,
-        prev_faults_map: &mut prev_faults_map,
-        elapsed_ms: 77,
-        recording_started: Some(Instant::now()),
-    });
+    tasks.handle_replacements(
+        &desired_tasks,
+        &mut tree_events,
+        &mut None,
+        77,
+        Some(Instant::now()),
+    );
 
     let stats = tasks.stats_by_task.get(&42).unwrap();
     assert_eq!(stats.first_seen_ms, 77);
@@ -155,28 +153,28 @@ fn event_comm_updates_only_unknown_existing_name() {
     tasks.stats_by_task = stats_by_task;
     let mut recorder = recorder::LiveRecorder::default();
 
-    events::handle_event(events::HandleEventInput {
-        event: &first_event,
-        config: &config,
-        started: Instant::now(),
-        tasks: &mut tasks,
-        monotonic_start_ns: None,
-        recorder: &mut recorder,
-        alert_sender: None,
-    });
+    events::handle_event(
+        &first_event,
+        &config,
+        Instant::now(),
+        &mut tasks,
+        None,
+        &mut recorder,
+        None,
+    );
 
     assert_eq!(tasks.stats_by_task.get(&7).unwrap().comm, "real-name");
 
     let second_event = scheduler_event(7, "later-name");
-    events::handle_event(events::HandleEventInput {
-        event: &second_event,
-        config: &config,
-        started: Instant::now(),
-        tasks: &mut tasks,
-        monotonic_start_ns: None,
-        recorder: &mut recorder,
-        alert_sender: None,
-    });
+    events::handle_event(
+        &second_event,
+        &config,
+        Instant::now(),
+        &mut tasks,
+        None,
+        &mut recorder,
+        None,
+    );
 
     assert_eq!(tasks.stats_by_task.get(&7).unwrap().comm, "real-name");
 }
@@ -198,27 +196,27 @@ fn spike_events_capture_only_threshold_crossing_events() {
     let mut recorder = recorder::LiveRecorder::default();
     recorder.spike_events = Some(spike_events);
 
-    events::handle_event(events::HandleEventInput {
-        event: &below_threshold,
-        config: &config,
-        started: Instant::now(),
-        tasks: &mut tasks,
-        monotonic_start_ns: Some(100),
-        recorder: &mut recorder,
-        alert_sender: None,
-    });
+    events::handle_event(
+        &below_threshold,
+        &config,
+        Instant::now(),
+        &mut tasks,
+        Some(100),
+        &mut recorder,
+        None,
+    );
     assert!(recorder.spike_events.as_ref().unwrap().as_slice().is_empty());
 
     let at_threshold = scheduler_event_with_latency(7, "RenderThread", 1_000_000);
-    events::handle_event(events::HandleEventInput {
-        event: &at_threshold,
-        config: &config,
-        started: Instant::now(),
-        tasks: &mut tasks,
-        monotonic_start_ns: Some(100),
-        recorder: &mut recorder,
-        alert_sender: None,
-    });
+    events::handle_event(
+        &at_threshold,
+        &config,
+        Instant::now(),
+        &mut tasks,
+        Some(100),
+        &mut recorder,
+        None,
+    );
 
     let spike_events_slice = recorder.spike_events.as_ref().unwrap().as_slice();
     assert_eq!(spike_events_slice.len(), 1);
@@ -258,30 +256,30 @@ fn spike_event_fault_deltas_are_captured_correctly() {
     let mut recorder = recorder::LiveRecorder::default();
     recorder.spike_events = Some(spike_events);
 
-    events::handle_event(events::HandleEventInput {
-        event: &first_event,
-        config: &config,
-        started: Instant::now(),
-        tasks: &mut tasks,
-        monotonic_start_ns: Some(100),
-        recorder: &mut recorder,
-        alert_sender: None,
-    });
+    events::handle_event(
+        &first_event,
+        &config,
+        Instant::now(),
+        &mut tasks,
+        Some(100),
+        &mut recorder,
+        None,
+    );
 
     // Second event is a spike with additional faults
     let mut spike_event = scheduler_event_with_latency(7, "RenderThread", 1_000_000);
     spike_event.maj_flt = 15; // +5 delta
     spike_event.min_flt = 30; // +10 delta
 
-    events::handle_event(events::HandleEventInput {
-        event: &spike_event,
-        config: &config,
-        started: Instant::now(),
-        tasks: &mut tasks,
-        monotonic_start_ns: Some(100),
-        recorder: &mut recorder,
-        alert_sender: None,
-    });
+    events::handle_event(
+        &spike_event,
+        &config,
+        Instant::now(),
+        &mut tasks,
+        Some(100),
+        &mut recorder,
+        None,
+    );
 
     let spike_events_slice = recorder.spike_events.as_ref().unwrap().as_slice();
     assert_eq!(spike_events_slice.len(), 1);

@@ -26,200 +26,177 @@ pub struct TaskTracker {
     pub cache: crate::process_tree::ProcessCache,
 }
 
-pub struct RefreshTargetTasksInput<'a, 'b> {
-    pub config: &'a Config,
-    pub tasks: &'a mut TaskTracker,
-    pub tree_events: &'a mut Vec<TreeEvent>,
-    pub target_pid_map: &'a mut AyaHashMap<MapData, u32, u8>,
-    pub prev_faults_map: Option<&'b mut AyaHashMap<MapData, u32, [u64; 2]>>,
-    pub elapsed_ms: u128,
-    pub recording_started: Option<Instant>,
-}
+impl TaskTracker {
+    pub async fn refresh(
+        &mut self,
+        config: &Config,
+        tree_events: &mut Vec<TreeEvent>,
+        target_pid_map: &mut AyaHashMap<MapData, u32, u8>,
+        mut prev_faults_map: Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
+        elapsed_ms: u128,
+        recording_started: Option<Instant>,
+    ) -> anyhow::Result<()> {
+        let snapshot = crate::process_tree::target_snapshot_filtered_at_with_options(
+            crate::process_tree::TargetSnapshotInput {
+                proc_root: Path::new("/proc"),
+                manual_pids: &config.target_pids,
+                tree_pids: &config.tree_pids,
+                cgroup_path: config.cgroupv2.as_deref(),
+                exclude_tree_pids: &config.exclude_tree_pids,
+                filters: &config.task_filters,
+                keep_missing_pid: config.keep_missing_pid,
+                cache: &mut self.cache,
+                previous_tasks: Some(&self.active_targets),
+            },
+        );
 
-pub struct HandleSameTidReplacementsInput<'a, 'b, 'c> {
-    pub tasks: &'b mut TaskTracker,
-    pub desired_tasks: &'a BTreeMap<u32, TaskInfo>,
-    pub tree_events: &'b mut Vec<TreeEvent>,
-    pub prev_faults_map: &'b mut Option<&'c mut AyaHashMap<MapData, u32, [u64; 2]>>,
-    pub elapsed_ms: u128,
-    pub recording_started: Option<Instant>,
-}
-
-pub async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_, '_>) -> anyhow::Result<()> {
-    let RefreshTargetTasksInput {
-        config,
-        tasks,
-        tree_events,
-        target_pid_map,
-        mut prev_faults_map,
-        elapsed_ms,
-        recording_started,
-    } = input;
-
-    let snapshot = crate::process_tree::target_snapshot_filtered_at_with_options(
-        crate::process_tree::TargetSnapshotInput {
-            proc_root: Path::new("/proc"),
-            manual_pids: &config.target_pids,
-            tree_pids: &config.tree_pids,
-            cgroup_path: config.cgroupv2.as_deref(),
-            exclude_tree_pids: &config.exclude_tree_pids,
-            filters: &config.task_filters,
-            keep_missing_pid: config.keep_missing_pid,
-            cache: &mut tasks.cache,
-            previous_tasks: Some(&tasks.active_targets),
-        },
-    );
-
-    {
-        handle_same_tid_replacements(HandleSameTidReplacementsInput {
-            tasks,
-            desired_tasks: &snapshot.tasks,
+        self.handle_replacements(
+            &snapshot.tasks,
             tree_events,
-            prev_faults_map: &mut prev_faults_map,
+            &mut prev_faults_map,
             elapsed_ms,
             recording_started,
-        });
-    }
+        );
 
-    let diffs: Vec<(TargetDiffAction, TaskInfo)> = {
-        let active_snapshot = tasks.active_targets.clone();
-        crate::process_tree::diff_tasks_ref(&active_snapshot, &snapshot.tasks)
-            .into_iter()
-            .map(|d| (d.action, d.task.clone()))
-            .collect()
-    };
+        let diffs: Vec<(TargetDiffAction, TaskInfo)> = {
+            let active_snapshot = self.active_targets.clone();
+            crate::process_tree::diff_tasks_ref(&active_snapshot, &snapshot.tasks)
+                .into_iter()
+                .map(|d| (d.action, d.task.clone()))
+                .collect()
+        };
 
-    if diffs.is_empty() {
-        return Ok(());
-    }
+        if diffs.is_empty() {
+            return Ok(());
+        }
 
-    for (action, task) in diffs {
-        let tid = task.tid;
-        match action {
-            TargetDiffAction::Added => {
-                let action_name = target_event_action(task.from_cgroup, "added");
-                info!(
-                    "target_{} tid={} pid={} comm={} class={:?}",
-                    action_name, tid, task.process_pid, task.comm, task.class
-                );
+        for (action, task) in diffs {
+            let tid = task.tid;
+            match action {
+                TargetDiffAction::Added => {
+                    let action_name = target_event_action(task.from_cgroup, "added");
+                    info!(
+                        "target_{} tid={} pid={} comm={} class={:?}",
+                        action_name, tid, task.process_pid, task.comm, task.class
+                    );
 
-                tree_events.push(TreeEvent {
-                    elapsed_ms,
-                    action: action_name.to_owned(),
-                    tid,
-                    process_pid: task.process_pid,
-                    process_ppid: task.process_ppid,
-                    comm: task.comm.clone(),
-                    process_comm: task.process_comm.clone(),
-                    class: task.class,
-                    from_cgroup: task.from_cgroup,
-                });
+                    tree_events.push(TreeEvent {
+                        elapsed_ms,
+                        action: action_name.to_owned(),
+                        tid,
+                        process_pid: task.process_pid,
+                        process_ppid: task.process_ppid,
+                        comm: task.comm.clone(),
+                        process_comm: task.process_comm.clone(),
+                        class: task.class,
+                        from_cgroup: task.from_cgroup,
+                    });
 
-                reactivate_or_reset_stats_inner(
-                    &mut tasks.stats_by_task,
-                    recording_started,
-                    tid,
-                    &task,
-                    elapsed_ms,
-                );
+                    reactivate_or_reset_stats_inner(
+                        &mut self.stats_by_task,
+                        recording_started,
+                        tid,
+                        &task,
+                        elapsed_ms,
+                    );
 
-                update_task_exe_info(&mut tasks.task_exe_inodes, tid, &task);
+                    update_task_exe_info(&mut self.task_exe_inodes, tid, &task);
 
-                target_pid_map.insert(tid, 1, 0)?;
-                tasks.active_targets.insert(tid, task);
-            }
-            TargetDiffAction::Removed => {
-                let action_name = target_event_action(task.from_cgroup, "removed");
-                info!(
-                    "target_{} tid={} pid={} comm={} class={:?}",
-                    action_name, tid, task.process_pid, task.comm, task.class
-                );
-
-                tree_events.push(TreeEvent {
-                    elapsed_ms,
-                    action: action_name.to_owned(),
-                    tid,
-                    process_pid: task.process_pid,
-                    process_ppid: task.process_ppid,
-                    comm: task.comm.clone(),
-                    process_comm: task.process_comm.clone(),
-                    class: task.class,
-                    from_cgroup: task.from_cgroup,
-                });
-
-                if let Some(stats) = tasks.stats_by_task.get_mut(&tid) {
-                    stats.active = false;
-                    stats.removed_ms = Some(elapsed_ms);
+                    target_pid_map.insert(tid, 1, 0)?;
+                    self.active_targets.insert(tid, task);
                 }
+                TargetDiffAction::Removed => {
+                    let action_name = target_event_action(task.from_cgroup, "removed");
+                    info!(
+                        "target_{} tid={} pid={} comm={} class={:?}",
+                        action_name, tid, task.process_pid, task.comm, task.class
+                    );
 
-                remove_prev_faults_state(
-                    &mut prev_faults_map,
-                    &mut tasks.prev_faults_snapshot,
+                    tree_events.push(TreeEvent {
+                        elapsed_ms,
+                        action: action_name.to_owned(),
+                        tid,
+                        process_pid: task.process_pid,
+                        process_ppid: task.process_ppid,
+                        comm: task.comm.clone(),
+                        process_comm: task.process_comm.clone(),
+                        class: task.class,
+                        from_cgroup: task.from_cgroup,
+                    });
+
+                    if let Some(stats) = self.stats_by_task.get_mut(&tid) {
+                        stats.active = false;
+                        stats.removed_ms = Some(elapsed_ms);
+                    }
+
+                    remove_prev_faults_state(
+                        &mut prev_faults_map,
+                        &mut self.prev_faults_snapshot,
+                        tid,
+                    );
+
+                    let _ = target_pid_map.remove(&tid);
+                    self.active_targets.remove(&tid);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn handle_replacements(
+        &mut self,
+        desired_tasks: &BTreeMap<u32, TaskInfo>,
+        tree_events: &mut Vec<TreeEvent>,
+        prev_faults_map: &mut Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
+        elapsed_ms: u128,
+        recording_started: Option<Instant>,
+    ) {
+        for (tid, desired) in desired_tasks {
+            if let Some(active) = self.active_targets.get(tid)
+                && !same_logical_task(active, desired)
+            {
+                info!(
+                    "target_replaced tid={} old_pid={} new_pid={} old_comm={} new_comm={} old_class={:?} new_class={:?}",
                     tid,
+                    active.process_pid,
+                    desired.process_pid,
+                    active.comm,
+                    desired.comm,
+                    active.class,
+                    desired.class
                 );
 
-                let _ = target_pid_map.remove(&tid);
-                tasks.active_targets.remove(&tid);
+                tree_events.push(TreeEvent {
+                    elapsed_ms,
+                    action: "replaced".to_owned(),
+                    tid: *tid,
+                    process_pid: desired.process_pid,
+                    process_ppid: desired.process_ppid,
+                    comm: desired.comm.clone(),
+                    process_comm: desired.process_comm.clone(),
+                    class: desired.class,
+                    from_cgroup: desired.from_cgroup,
+                });
+
+                reset_stats_for_task_change(
+                    &mut self.stats_by_task,
+                    recording_started,
+                    *tid,
+                    desired,
+                    elapsed_ms,
+                );
+
+                update_task_exe_info(&mut self.task_exe_inodes, *tid, desired);
+
+                remove_prev_faults_state(prev_faults_map, &mut self.prev_faults_snapshot, *tid);
+
+                self.known_targets.insert(*tid, desired.clone());
             }
         }
     }
-
-    Ok(())
 }
 
-pub fn handle_same_tid_replacements(input: HandleSameTidReplacementsInput<'_, '_, '_>) {
-    let HandleSameTidReplacementsInput {
-        tasks,
-        desired_tasks,
-        tree_events,
-        prev_faults_map,
-        elapsed_ms,
-        recording_started,
-    } = input;
-
-    for (tid, desired) in desired_tasks {
-        if let Some(active) = tasks.active_targets.get(tid)
-            && !same_logical_task(active, desired)
-        {
-            info!(
-                "target_replaced tid={} old_pid={} new_pid={} old_comm={} new_comm={} old_class={:?} new_class={:?}",
-                tid,
-                active.process_pid,
-                desired.process_pid,
-                active.comm,
-                desired.comm,
-                active.class,
-                desired.class
-            );
-
-            tree_events.push(TreeEvent {
-                elapsed_ms,
-                action: "replaced".to_owned(),
-                tid: *tid,
-                process_pid: desired.process_pid,
-                process_ppid: desired.process_ppid,
-                comm: desired.comm.clone(),
-                process_comm: desired.process_comm.clone(),
-                class: desired.class,
-                from_cgroup: desired.from_cgroup,
-            });
-
-            reset_stats_for_task_change(
-                &mut tasks.stats_by_task,
-                recording_started,
-                *tid,
-                desired,
-                elapsed_ms,
-            );
-
-            update_task_exe_info(&mut tasks.task_exe_inodes, *tid, desired);
-
-            remove_prev_faults_state(prev_faults_map, &mut tasks.prev_faults_snapshot, *tid);
-
-            tasks.known_targets.insert(*tid, desired.clone());
-        }
-    }
-}
 
 pub fn remove_prev_faults_state(
     prev_faults_map: &mut Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
