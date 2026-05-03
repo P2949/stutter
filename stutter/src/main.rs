@@ -361,7 +361,7 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
                 }
             };
 
-            let mut score =
+            let score =
                 scorer::score_from_interval_records_and_frames(&interval_records, &frame_events);
 
             // Reject / penalize candidates that did not gather enough data to be
@@ -386,17 +386,8 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
                     interval_count,
                     sample_count
                 );
-                // Inflate the score so this candidate loses to better-measured ones.
-                score.total = u64::MAX / 4;
-                score.over_5ms = u64::MAX / 4;
-                score.over_2ms = u64::MAX / 4;
-                score.over_1ms = u64::MAX / 4;
-                score.frame_over_50ms = u64::MAX / 4;
-                score.frame_over_33ms = u64::MAX / 4;
-                score.frame_over_16ms = u64::MAX / 4;
-                score.max_latency_ns = u64::MAX / 4;
-                score.frame_p99_ms = 1_000_000.0;
-                score.frame_max_ms = 1_000_000.0;
+                // We mark it as invalid and let the ranking logic handle it.
+                valid = false;
             }
 
             if coverage.unique_scored_tasks == 0 {
@@ -404,16 +395,6 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
                     "tune_candidate_no_scored_tasks iteration={} profile={} tracked_tasks={}",
                     iteration, profile.name, coverage.unique_tracked_tasks
                 );
-                score.total = u64::MAX / 4;
-                score.over_5ms = u64::MAX / 4;
-                score.over_2ms = u64::MAX / 4;
-                score.over_1ms = u64::MAX / 4;
-                score.frame_over_50ms = u64::MAX / 4;
-                score.frame_over_33ms = u64::MAX / 4;
-                score.frame_over_16ms = u64::MAX / 4;
-                score.max_latency_ns = u64::MAX / 4;
-                score.frame_p99_ms = 1_000_000.0;
-                score.frame_max_ms = 1_000_000.0;
                 valid = false;
             }
             if coverage.drop_counter_total > 0 {
@@ -901,25 +882,27 @@ struct TuneCoverageMetrics {
 
 fn aggregate_profile_rank(runs: &[TuneCandidateSummary]) -> impl Ord {
     let invalid_run_count = runs.iter().filter(|r| !r.valid).count();
+    let valid_runs: Vec<&TuneCandidateSummary> = runs.iter().filter(|r| r.valid).collect();
 
-    let score_totals: Vec<u64> = runs.iter().map(|r| r.score_total).collect();
-    let over_5ms: Vec<u64> = runs.iter().map(|r| r.over_5ms).collect();
-    let over_2ms: Vec<u64> = runs.iter().map(|r| r.over_2ms).collect();
-    let over_1ms: Vec<u64> = runs.iter().map(|r| r.over_1ms).collect();
-    let frame_over_50ms: Vec<u64> = runs.iter().map(|r| r.frame_over_50ms).collect();
-    let frame_over_33ms: Vec<u64> = runs.iter().map(|r| r.frame_over_33ms).collect();
-    let frame_over_16ms: Vec<u64> = runs.iter().map(|r| r.frame_over_16ms).collect();
-    let frame_p99s: Vec<u64> = runs
+    let score_totals: Vec<u64> = valid_runs.iter().map(|r| r.score_total).collect();
+    let over_5ms: Vec<u64> = valid_runs.iter().map(|r| r.over_5ms).collect();
+    let over_2ms: Vec<u64> = valid_runs.iter().map(|r| r.over_2ms).collect();
+    let over_1ms: Vec<u64> = valid_runs.iter().map(|r| r.over_1ms).collect();
+    let frame_over_50ms: Vec<u64> = valid_runs.iter().map(|r| r.frame_over_50ms).collect();
+    let frame_over_33ms: Vec<u64> = valid_runs.iter().map(|r| r.frame_over_33ms).collect();
+    let frame_over_16ms: Vec<u64> = valid_runs.iter().map(|r| r.frame_over_16ms).collect();
+    let frame_p99s: Vec<u64> = valid_runs
         .iter()
         .map(|r| (r.frame_p99_ms * 1000.0) as u64)
         .collect();
-    let frame_maxes: Vec<u64> = runs
+    let frame_maxes: Vec<u64> = valid_runs
         .iter()
         .map(|r| (r.frame_max_ms * 1000.0) as u64)
         .collect();
-    let max_latencies: Vec<u64> = runs.iter().map(|r| r.max_latency_ns).collect();
+    let max_latencies: Vec<u64> = valid_runs.iter().map(|r| r.max_latency_ns).collect();
 
     (
+        invalid_run_count,
         median_u64(score_totals.clone()),
         median_u64(over_5ms),
         median_u64(over_2ms),
@@ -927,7 +910,6 @@ fn aggregate_profile_rank(runs: &[TuneCandidateSummary]) -> impl Ord {
         median_u64(frame_over_50ms),
         median_u64(frame_over_33ms),
         median_u64(frame_over_16ms),
-        invalid_run_count,
         worst_u64(score_totals),
         worst_u64(frame_p99s),
         worst_u64(frame_maxes),
@@ -1443,565 +1425,663 @@ impl WatchProcessState {
     }
 }
 
-async fn run_monitor(
-    mut config: Config,
-    shared_hwmon: Option<std::sync::Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
-) -> anyhow::Result<()> {
-    if config.target_pids.is_empty()
-        && config.tree_pids.is_empty()
-        && config.watch_process.is_none()
-        && config.cgroupv2.is_none()
-    {
-        let auto_targets = process_tree::find_auto_target_pids(Path::new("/proc"));
-        if auto_targets.is_empty() {
-            anyhow::bail!(
-                "no target specified and no game launcher (gamescope, pressure-vessel, etc.) detected. \
-                 Please provide --pid <PID>, --tree-pid <PID>, --watch-process <COMM>, or --cgroupv2 <PATH>"
-            );
-        }
+struct MonitorSession {
+    config: Config,
+    watch_state: WatchProcessState,
+    tree_root_starttimes: BTreeMap<u32, Option<u64>>,
+    recording: Option<recorder::RecordingRun>,
+    loaded: ebpf_loader::LoadedEbpf,
+    active_targets: BTreeMap<u32, TaskInfo>,
+    known_targets: BTreeMap<u32, TaskInfo>,
+    stats_by_task: BTreeMap<u32, metrics::TaskStats>,
+    prev_faults_snapshot: BTreeMap<u32, (u64, u64)>,
+    task_exe_inodes: TaskExeInodesMap,
+    interval_records: Vec<IntervalRecord>,
+    tree_events: Vec<TreeEvent>,
+    spike_events: Option<SpikeEventBuffer>,
+    irq_events: Vec<recorder::IrqEventRecord>,
+    gpu_samples: Vec<recorder::GpuSample>,
 
-        let pids: Vec<_> = auto_targets.iter().map(|(p, _)| *p).collect();
-        let class = auto_targets[0].1;
-        info!("auto_detected_launcher class={class} pids={pids:?}");
-        println!("auto-detected game launcher: {class} (PIDs {pids:?}). monitoring tree...");
-        config.tree_pids = pids;
-    }
+    interval_writer: Option<JsonArrayWriter>,
+    irq_event_writer: Option<JsonArrayWriter>,
+    migration_event_writer: Option<JsonArrayWriter>,
+    cpu_freq_sample_writer: Option<JsonArrayWriter>,
+    gpu_sample_writer: Option<JsonArrayWriter>,
+    block_io_event_writer: Option<JsonArrayWriter>,
+    csv_writer: Option<IntervalCsvWriter>,
 
-    let mut watch_state = match resolve_watch_process(&mut config).await? {
-        Some(pid) => WatchProcessState::Running(pid),
-        None => WatchProcessState::None,
-    };
+    streamed_interval_record_count: usize,
+    streamed_irq_event_count: usize,
+    streamed_migration_event_count: usize,
+    streamed_cpu_freq_sample_count: usize,
+    streamed_gpu_sample_count: usize,
+    streamed_block_io_event_count: usize,
 
-    let had_tree_roots = !config.tree_pids.is_empty();
-    let mut tree_root_starttimes = capture_tree_root_starttimes(&config.tree_pids);
+    cpu_to_pkg: BTreeMap<u32, String>,
+    psi_reader: psi::PsiReader,
+    scx_tracker: scx::ScxTracker,
+    hwmon_reader: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
+    process_cache: process_tree::ProcessCache,
+    watch_process_cache: process_tree::ProcessCache,
 
-    let recording = prepare_recording(&config)?;
-    let mut loaded = ebpf_loader::load_and_attach(&config).map_err(anyhow::Error::new)?;
-    configure_target_irqs(&mut loaded, &config)?;
-    let block_io_correlation_basis = loaded.block_io_correlation_basis.as_str().to_owned();
+    started: Instant,
+    tui_state: crate::tui::TuiState,
+    terminal: Option<ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>>,
+    intervals_dropped: usize,
+    had_tree_roots: bool,
+    interval_label: &'static str,
+    block_io_correlation_basis: String,
+}
 
-    let mut active_targets: BTreeMap<u32, TaskInfo> = BTreeMap::new();
-    let mut known_targets: BTreeMap<u32, TaskInfo> = BTreeMap::new();
-    let mut stats_by_task: BTreeMap<u32, metrics::TaskStats> = BTreeMap::new();
-    let mut prev_faults_snapshot: BTreeMap<u32, (u64, u64)> = BTreeMap::new();
-    let mut task_exe_inodes: TaskExeInodesMap = BTreeMap::new();
-    let mut interval_records: Vec<IntervalRecord> = Vec::new();
-    let mut tree_events: Vec<TreeEvent> = Vec::new();
-    let mut spike_events = recording.as_ref().map(|_| SpikeEventBuffer::default());
-    let irq_events: Vec<IrqEventRecord> = Vec::new();
-    let gpu_samples = Vec::new();
-
-    let mut interval_writer = if config.retain_intervals.is_none() {
-        recording
-            .as_ref()
-            .map(|run| JsonArrayWriter::create(run.run_dir.join("interval.json")))
-            .transpose()?
-    } else {
-        None
-    };
-    let mut intervals_dropped = 0usize;
-    let mut irq_event_writer = recording
-        .as_ref()
-        .map(|run| JsonArrayWriter::create(run.run_dir.join("irq_events.json")))
-        .transpose()?;
-    let mut migration_event_writer = recording
-        .as_ref()
-        .map(|run| JsonArrayWriter::create(run.run_dir.join("migration_events.json")))
-        .transpose()?;
-    let mut cpu_freq_sample_writer = recording
-        .as_ref()
-        .map(|run| JsonArrayWriter::create(run.run_dir.join("cpu_freq_samples.json")))
-        .transpose()?;
-    let mut gpu_sample_writer = recording
-        .as_ref()
-        .map(|run| JsonArrayWriter::create(run.run_dir.join("gpu_samples.json")))
-        .transpose()?;
-    let mut block_io_event_writer = recording
-        .as_ref()
-        .map(|run| JsonArrayWriter::create(run.run_dir.join("io_events.json")))
-        .transpose()?;
-    let mut csv_writer = config
-        .csv_path
-        .as_ref()
-        .map(|path| IntervalCsvWriter::create(path.clone()))
-        .transpose()?;
-    let mut streamed_interval_record_count = 0usize;
-    let mut streamed_irq_event_count = 0usize;
-    let mut streamed_migration_event_count = 0usize;
-    let mut streamed_cpu_freq_sample_count = 0usize;
-    let mut streamed_gpu_sample_count = 0usize;
-    let mut streamed_block_io_event_count = 0usize;
-
-    let metadata = metadata::collect_system_metadata();
-    let cpu_to_pkg: BTreeMap<u32, String> = metadata
-        .cpu_topology
-        .iter()
-        .map(|c| (c.cpu, c.physical_package_id.clone().unwrap_or_default()))
-        .collect();
-
-    let psi_reader = psi::PsiReader::new();
-
-    // These mutable collections are intentionally confined to the main monitoring task.
-    // Blocking work returns state to this task and does not mutate these collections
-    // concurrently. Future background mutation should use Arc<Mutex<_>> or messages.
-    let mut scx_tracker = scx::ScxTracker::default();
-    let recording_monotonic_start_ns = recording.as_ref().and_then(|run| run.monotonic_start_ns);
-
-    let hwmon_reader = if let Some(shared) = &shared_hwmon {
-        Some(shared.clone())
-    } else if config.hwmon {
-        hwmon::HwmonReader::discover_with_options(
-            config.hwmon_root.as_deref(),
-            config.hwmon_drm_card.as_deref(),
-            config.hwmon_render_node.as_deref(),
-        )
-        .map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)))
-    } else {
-        None
-    };
-
-    if config.hwmon && hwmon_reader.is_none() {
-        warn!("hwmon_requested_but_no_gpu_hwmon_found");
-    }
-
-    let mut process_cache = process_tree::ProcessCache::default();
-    let mut watch_process_cache = process_tree::ProcessCache::default();
-
-    let started = Instant::now();
-    scx_tracker.sample(0);
-
-    refresh_target_tasks(RefreshTargetTasksInput {
-        config: &config,
-        active_targets: &mut active_targets,
-        known_targets: &mut known_targets,
-        stats_by_task: &mut stats_by_task,
-        task_exe_inodes: &mut task_exe_inodes,
-        tree_events: &mut tree_events,
-        target_pid_map: &mut loaded.target_pid_map,
-        prev_faults_map: loaded.prev_faults_map.as_mut(),
-        prev_faults_snapshot: &mut prev_faults_snapshot,
-        elapsed_ms: started.elapsed().as_millis(),
-        recording_started: recording.as_ref().map(|run| run.started_instant),
-        process_cache: &mut process_cache,
-    })
-    .await?;
-
-    let mut summary_tick = interval(Duration::from_millis(config.summary_period_ms));
-    summary_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    summary_tick.tick().await;
-
-    let mut tree_tick = interval(Duration::from_secs(1));
-    tree_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    tree_tick.tick().await;
-
-    let mut watch_tick = interval(Duration::from_millis(config.watch_poll_ms));
-    watch_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    watch_tick.tick().await;
-
-    let mut scx_tick = interval(Duration::from_secs(1));
-    scx_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    scx_tick.tick().await;
-
-    let mut hwmon_tick = interval(Duration::from_millis(100));
-    hwmon_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    hwmon_tick.tick().await;
-
-    let max_duration = config.max_duration;
-    let duration_future = async move {
-        if let Some(max_duration) = max_duration {
-            sleep(max_duration).await;
-        } else {
-            future::pending::<()>().await;
-        }
-    };
-    tokio::pin!(duration_future);
-
-    info!(
-        "attached target_tasks={} tree_roots={} summary_ms={} spike_threshold={}",
-        active_targets.len(),
-        config.tree_pids.len(),
-        config.summary_period_ms,
-        format_latency(config.spike_threshold_ns),
-    );
-
-    let mut tui_state = crate::tui::TuiState::default();
-    let mut terminal = if config.tui {
-        Some(
-            crate::tui::init_terminal()
-                .map_err(|e| anyhow::anyhow!("failed to init terminal: {e}"))?,
-        )
-    } else {
-        None
-    };
-    let mut crossterm_events = EventStream::new();
-    let interval_label = if config.epoch_period_ms.is_some() {
-        "epoch"
-    } else {
-        "summary"
-    };
-
-    let stop_reason = loop {
-        tokio::select! {
-            _ = signal::ctrl_c() => {
-                break "ctrl_c".to_owned();
-            }
-
-            Some(Ok(event)) = crossterm_events.next(), if config.tui => {
-                if let Event::Key(key) = event {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('Q') => break "quit".to_owned(),
-                        KeyCode::Char('p') | KeyCode::Char('P') => {
-                            tui_state.paused = !tui_state.paused;
-                        }
-                        KeyCode::Char('s') | KeyCode::Char('S') => {
-                            tui_state.sort_field = tui_state.sort_field.next();
-                        }
-                        KeyCode::Char('f') | KeyCode::Char('F') => {
-                            tui_state.next_filter_class();
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            _ = &mut duration_future => {
-                break "duration".to_owned();
-            }
-
-            _ = summary_tick.tick() => {
-                if !tui_state.paused {
-                    let elapsed_ms = started.elapsed().as_millis();
-                    let drop_counters_snapshot = loaded.snapshot_drop_counters();
-                    let psi_snapshot = psi_reader.read().ok();
-                    let records = collect_interval_summaries_labeled(
-                        interval_label,
-                        &mut stats_by_task,
-                        elapsed_ms,
-                        &drop_counters_snapshot,
-                        loaded.prev_faults_map.as_ref(),
-                        psi_snapshot.as_ref(),
-                        &mut prev_faults_snapshot,
-                    );
-                    streamed_interval_record_count += records.len();
-
-                    if let Some(writer) = interval_writer.as_mut() {
-                        for record in &records {
-                            writer.push(record)?;
-                        }
-                    } else if config.retain_intervals.is_some() || config.tui {
-                        // For TUI sparklines we need interval_records
-                        for record in &records {
-                            interval_records.push(record.clone());
-                        }
-
-                        let max_intervals = config.retain_intervals.unwrap_or(120);
-                        if interval_records.len() > max_intervals {
-                            let drop_count = interval_records.len() - max_intervals;
-                            interval_records.drain(0..drop_count);
-                            if config.retain_intervals.is_some() {
-                                intervals_dropped += drop_count;
-                            }
-                        }
-                    }
-
-                    if let Some(writer) = csv_writer.as_mut() {
-                        for record in &records {
-                            writer.push(record)?;
-                        }
-                    }
-                }
-
-                if let Some(term) = terminal.as_mut() {
-                    let elapsed_ms = started.elapsed().as_millis();
-                    let drop_counters_snapshot = loaded.snapshot_drop_counters();
-                    term.draw(|f| {
-                        crate::tui::render_tui(
-                            f,
-                            &tui_state,
-                            &active_targets,
-                            &stats_by_task,
-                            &interval_records,
-                            elapsed_ms,
-                            &drop_counters_snapshot,
-                        );
-                    })?;
-                }
-            }
-
-            _ = tree_tick.tick(), if !config.tree_pids.is_empty() || config.cgroupv2.is_some() => {
-                if let Some(root_pid) = watch_state.running_pid()
-                    && tree_root_is_stale(root_pid, &tree_root_starttimes)
-                {
-                    remove_watch_tree_pid(&mut config, root_pid);
-                    tree_root_starttimes.remove(&root_pid);
-
-                    refresh_target_tasks(RefreshTargetTasksInput {
-                        config: &config,
-                        active_targets: &mut active_targets,
-                        known_targets: &mut known_targets,
-                        stats_by_task: &mut stats_by_task,
-                        task_exe_inodes: &mut task_exe_inodes,
-                        tree_events: &mut tree_events,
-                        target_pid_map: &mut loaded.target_pid_map,
-                        prev_faults_map: loaded.prev_faults_map.as_mut(),
-                        prev_faults_snapshot: &mut prev_faults_snapshot,
-                        elapsed_ms: started.elapsed().as_millis(),
-                        recording_started: recording.as_ref().map(|run| run.started_instant),
-                        process_cache: &mut process_cache,
-                    })
-                    .await?;
-
-                    if !config.persistent {
-                        break "watched_process_exit".to_owned();
-                    }
-
-                    watch_state = WatchProcessState::Waiting;
-                    info!("watch_process_waiting_for_relaunch");
-                    continue;
-                }
-
-                let removed_roots = remove_stale_tree_roots(
-                    &mut config,
-                    &mut tree_root_starttimes,
-                    watch_state.running_pid(),
+impl MonitorSession {
+    async fn new(
+        mut config: Config,
+        shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
+    ) -> anyhow::Result<Self> {
+        if config.target_pids.is_empty()
+            && config.tree_pids.is_empty()
+            && config.watch_process.is_none()
+            && config.cgroupv2.is_none()
+        {
+            let auto_targets = process_tree::find_auto_target_pids(Path::new("/proc"));
+            if auto_targets.is_empty() {
+                anyhow::bail!(
+                    "no target specified and no game launcher (gamescope, pressure-vessel, etc.) detected. \
+                     Please provide --pid <PID>, --tree-pid <PID>, --watch-process <COMM>, or --cgroupv2 <PATH>"
                 );
-
-                if !removed_roots.is_empty() {
-                    for root in &removed_roots {
-                        info!("tree_root_removed pid={root}");
-                    }
-
-                    refresh_target_tasks(RefreshTargetTasksInput {
-                        config: &config,
-                        active_targets: &mut active_targets,
-                        known_targets: &mut known_targets,
-                        stats_by_task: &mut stats_by_task,
-                        task_exe_inodes: &mut task_exe_inodes,
-                        tree_events: &mut tree_events,
-                        target_pid_map: &mut loaded.target_pid_map,
-                        prev_faults_map: loaded.prev_faults_map.as_mut(),
-                        prev_faults_snapshot: &mut prev_faults_snapshot,
-                        elapsed_ms: started.elapsed().as_millis(),
-                        recording_started: recording.as_ref().map(|run| run.started_instant),
-                        process_cache: &mut process_cache,
-                    })
-                    .await?;
-
-                    if had_tree_roots
-                        && config.tree_pids.is_empty()
-                        && !matches!(watch_state, WatchProcessState::Waiting)
-                    {
-                        break "tree_root_exit".to_owned();
-                    }
-                }
-
-                refresh_target_tasks(RefreshTargetTasksInput {
-                    config: &config,
-                    active_targets: &mut active_targets,
-                    known_targets: &mut known_targets,
-                    stats_by_task: &mut stats_by_task,
-                    task_exe_inodes: &mut task_exe_inodes,
-                    tree_events: &mut tree_events,
-                    target_pid_map: &mut loaded.target_pid_map,
-                    prev_faults_map: loaded.prev_faults_map.as_mut(),
-                    prev_faults_snapshot: &mut prev_faults_snapshot,
-                    elapsed_ms: started.elapsed().as_millis(),
-                    recording_started: recording.as_ref().map(|run| run.started_instant),
-                    process_cache: &mut process_cache,
-                })
-                .await?;
-
-                // Belt-and-suspenders cleanup in case a refresh path exits before
-                // emitting per-task removal diffs.
-                prev_faults_snapshot.retain(|tid, _| active_targets.contains_key(tid));
             }
 
-            _ = watch_tick.tick(), if matches!(watch_state, WatchProcessState::Waiting) => {
-                let Some(pattern) = config.watch_process.clone() else {
-                    continue;
-                };
-
-                if let Some(pid) = find_process_by_pattern_at_with_cache(
-                    Path::new("/proc"),
-                    &pattern,
-                    &mut watch_process_cache,
-                ) {
-                    add_watch_tree_pid(&mut config, pid);
-                    tree_root_starttimes.insert(pid, process_root_starttime(pid));
-                    watch_state = WatchProcessState::Running(pid);
-                    info!("watch_process_relaunched pattern={} pid={}", pattern, pid);
-
-                    refresh_target_tasks(RefreshTargetTasksInput {
-                        config: &config,
-                        active_targets: &mut active_targets,
-                        known_targets: &mut known_targets,
-                        stats_by_task: &mut stats_by_task,
-                        task_exe_inodes: &mut task_exe_inodes,
-                        tree_events: &mut tree_events,
-                        target_pid_map: &mut loaded.target_pid_map,
-                        prev_faults_map: loaded.prev_faults_map.as_mut(),
-                        prev_faults_snapshot: &mut prev_faults_snapshot,
-                        elapsed_ms: started.elapsed().as_millis(),
-                        recording_started: recording.as_ref().map(|run| run.started_instant),
-                        process_cache: &mut process_cache,
-                    })
-                    .await?;
-                }
-            }
-
-            _ = scx_tick.tick() => {
-                scx_tracker.sample(started.elapsed().as_millis());
-            }
-
-            _ = hwmon_tick.tick(), if hwmon_reader.is_some() => {
-                if let Some(reader_arc) = &hwmon_reader {
-                    let elapsed = started.elapsed().as_millis();
-                    let reader_arc_clone = reader_arc.clone();
-
-                    let sample_opt = task::spawn_blocking(move || {
-                        if let Ok(mut reader) = reader_arc_clone.lock() {
-                            Some(reader.sample(elapsed))
-                        } else {
-                            None
-                        }
-                    })
-                    .await
-                    .map_err(|err| anyhow::anyhow!("hwmon worker failed: {err}"))?;
-
-                    if let Some(sample) = sample_opt
-                        && let Some(writer) = gpu_sample_writer.as_mut()
-                    {
-                        writer.push(&sample)?;
-                        streamed_gpu_sample_count += 1;
-                    }
-                }
-            }
-
-            ready = loaded.events.readable_mut() => {
-                let guard = ready?;
-                drain_bpf_events(DrainBpfEventsInput {
-                    guard,
-                    config: &config,
-                    started,
-                    active_targets: &mut active_targets,
-                    known_targets: &mut known_targets,
-                    stats_by_task: &mut stats_by_task,
-                    recording_monotonic_start_ns,
-                    spike_events: &mut spike_events,
-                    irq_event_writer: irq_event_writer.as_mut(),
-                    irq_event_count: &mut streamed_irq_event_count,
-                    migration_event_writer: migration_event_writer.as_mut(),
-                    migration_event_count: &mut streamed_migration_event_count,
-                    cpu_freq_sample_writer: cpu_freq_sample_writer.as_mut(),
-                    cpu_freq_sample_count: &mut streamed_cpu_freq_sample_count,
-                    block_io_event_writer: block_io_event_writer.as_mut(),
-                    block_io_event_count: &mut streamed_block_io_event_count,
-                    block_io_correlation_basis: &block_io_correlation_basis,
-                    cpu_to_pkg: &cpu_to_pkg,
-                    process_cache: &mut process_cache,
-                });
-            }
-        }
-    };
-
-    if let Some(term) = terminal.as_mut() {
-        let _ = crate::tui::restore_terminal(term);
-    }
-
-    let drop_counters = loaded.snapshot_drop_counters();
-    log_drop_counters(&drop_counters);
-    if config.epoch_period_ms.is_none() {
-        print_session_summaries(&mut stats_by_task);
-    }
-
-    if let Some(writer) = csv_writer.as_mut() {
-        writer.finish()?;
-        if let Some(path) = &config.csv_path {
-            println!("wrote interval CSV: {}", path.display());
-        }
-    }
-
-    if let Some(recording) = recording {
-        if let Some(writer) = interval_writer.as_mut() {
-            writer.finish()?;
-        }
-        if let Some(writer) = irq_event_writer.as_mut() {
-            writer.finish()?;
-        }
-        if let Some(writer) = gpu_sample_writer.as_mut() {
-            writer.finish()?;
-        }
-        if let Some(writer) = block_io_event_writer.as_mut() {
-            writer.finish()?;
+            let pids: Vec<_> = auto_targets.iter().map(|(p, _)| *p).collect();
+            let class = auto_targets[0].1;
+            info!("auto_detected_launcher class={class} pids={pids:?}");
+            println!("auto-detected game launcher: {class} (PIDs {pids:?}). monitoring tree...");
+            config.tree_pids = pids;
         }
 
-        let spike_events_slice = spike_events
-            .as_ref()
-            .map(SpikeEventBuffer::as_slice)
-            .unwrap_or(&[]);
-        let spike_events_truncated = spike_events
-            .as_ref()
-            .map(SpikeEventBuffer::truncated)
-            .unwrap_or(false);
-        let spike_events_dropped_count = spike_events
-            .as_ref()
-            .map(SpikeEventBuffer::dropped_count)
-            .unwrap_or(0);
-
-        let frame_events = if let Some(path) = &config.mangohud_log {
-            match mangohud::read_frame_events(path, config.mangohud_ignore_offset) {
-                Ok(events) => events,
-                Err(err) => {
-                    warn!(
-                        "mangohud_log_read_failed path={} err={err:#}",
-                        path.display()
-                    );
-                    Vec::new()
-                }
-            }
-        } else {
-            Vec::new()
+        let watch_state = match resolve_watch_process(&mut config).await? {
+            Some(pid) => WatchProcessState::Running(pid),
+            None => WatchProcessState::None,
         };
 
-        finalize_recording(FinalizeRecordingInput {
-            recording: &recording,
-            config: &config,
-            stop_reason: &stop_reason,
-            active_targets: &active_targets,
-            stats_by_task: &stats_by_task,
-            interval_records: &interval_records,
-            streamed_interval_record_count: interval_writer
-                .is_some()
-                .then_some(streamed_interval_record_count),
-            intervals_dropped,
-            tree_events: &tree_events,
-            spike_events: spike_events_slice,
-            spike_events_truncated,
-            spike_events_dropped_count,
-            scx_events: scx_tracker.events(),
-            irq_events: &irq_events,
-            streamed_irq_event_count: irq_event_writer
-                .is_some()
-                .then_some(streamed_irq_event_count),
-            migration_event_count: migration_event_writer
-                .is_some()
-                .then_some(streamed_migration_event_count),
-            cpu_freq_sample_count: cpu_freq_sample_writer
-                .is_some()
-                .then_some(streamed_cpu_freq_sample_count),
-            gpu_samples: &gpu_samples,
-            streamed_gpu_sample_count: gpu_sample_writer
-                .is_some()
-                .then_some(streamed_gpu_sample_count),
-            block_io_event_count: streamed_block_io_event_count,
-            block_io_correlation_basis: &block_io_correlation_basis,
-            frame_events: &frame_events,
-            drop_counters,
-        })?;
+        let had_tree_roots = !config.tree_pids.is_empty();
+        let tree_root_starttimes = capture_tree_root_starttimes(&config.tree_pids);
+
+        let recording = prepare_recording(&config)?;
+        let mut loaded = ebpf_loader::load_and_attach(&config).map_err(anyhow::Error::new)?;
+        configure_target_irqs(&mut loaded, &config)?;
+        let block_io_correlation_basis = loaded.block_io_correlation_basis.as_str().to_owned();
+
+        let active_targets = BTreeMap::new();
+        let known_targets = BTreeMap::new();
+        let stats_by_task = BTreeMap::new();
+        let prev_faults_snapshot = BTreeMap::new();
+        let task_exe_inodes = BTreeMap::new();
+        let tree_events = Vec::new();
+        let spike_events = recording.as_ref().map(|_| SpikeEventBuffer::default());
+        let gpu_samples = Vec::new();
+
+        let interval_writer = if config.retain_intervals.is_none() {
+            recording
+                .as_ref()
+                .map(|run| JsonArrayWriter::create(run.run_dir.join("interval.json")))
+                .transpose()?
+        } else {
+            None
+        };
+        let irq_event_writer = recording
+            .as_ref()
+            .map(|run| JsonArrayWriter::create(run.run_dir.join("irq_events.json")))
+            .transpose()?;
+        let migration_event_writer = recording
+            .as_ref()
+            .map(|run| JsonArrayWriter::create(run.run_dir.join("migration_events.json")))
+            .transpose()?;
+        let cpu_freq_sample_writer = recording
+            .as_ref()
+            .map(|run| JsonArrayWriter::create(run.run_dir.join("cpu_freq_samples.json")))
+            .transpose()?;
+        let gpu_sample_writer = recording
+            .as_ref()
+            .map(|run| JsonArrayWriter::create(run.run_dir.join("gpu_samples.json")))
+            .transpose()?;
+        let block_io_event_writer = recording
+            .as_ref()
+            .map(|run| JsonArrayWriter::create(run.run_dir.join("io_events.json")))
+            .transpose()?;
+        let csv_writer = config
+            .csv_path
+            .as_ref()
+            .map(|path| IntervalCsvWriter::create(path.clone()))
+            .transpose()?;
+
+        let metadata = metadata::collect_system_metadata();
+        let cpu_to_pkg: BTreeMap<u32, String> = metadata
+            .cpu_topology
+            .iter()
+            .map(|c| (c.cpu, c.physical_package_id.clone().unwrap_or_default()))
+            .collect();
+
+        let psi_reader = psi::PsiReader::new();
+        let mut scx_tracker = scx::ScxTracker::default();
+
+        let hwmon_reader = if let Some(shared) = shared_hwmon {
+            Some(shared)
+        } else if config.hwmon {
+            hwmon::HwmonReader::discover_with_options(
+                config.hwmon_root.as_deref(),
+                config.hwmon_drm_card.as_deref(),
+                config.hwmon_render_node.as_deref(),
+            )
+            .map(|r| Arc::new(std::sync::Mutex::new(r)))
+        } else {
+            None
+        };
+
+        if config.hwmon && hwmon_reader.is_none() {
+            warn!("hwmon_requested_but_no_gpu_hwmon_found");
+        }
+
+        let started = Instant::now();
+        scx_tracker.sample(0);
+
+        let tui_state = crate::tui::TuiState::default();
+        let terminal = if config.tui {
+            Some(
+                crate::tui::init_terminal()
+                    .map_err(|e| anyhow::anyhow!("failed to init terminal: {e}"))?,
+            )
+        } else {
+            None
+        };
+
+        let interval_label = if config.epoch_period_ms.is_some() {
+            "epoch"
+        } else {
+            "summary"
+        };
+
+        let mut session = Self {
+            config,
+            watch_state,
+            tree_root_starttimes,
+            recording,
+            loaded,
+            active_targets,
+            known_targets,
+            stats_by_task,
+            prev_faults_snapshot,
+            task_exe_inodes,
+            interval_records: Vec::new(),
+            tree_events,
+            spike_events,
+            irq_events: Vec::new(),
+            gpu_samples,
+            interval_writer,
+            irq_event_writer,
+            migration_event_writer,
+            cpu_freq_sample_writer,
+            gpu_sample_writer,
+            block_io_event_writer,
+            csv_writer,
+            streamed_interval_record_count: 0,
+            streamed_irq_event_count: 0,
+            streamed_migration_event_count: 0,
+            streamed_cpu_freq_sample_count: 0,
+            streamed_gpu_sample_count: 0,
+            streamed_block_io_event_count: 0,
+            cpu_to_pkg,
+            psi_reader,
+            scx_tracker,
+            hwmon_reader,
+            process_cache: process_tree::ProcessCache::default(),
+            watch_process_cache: process_tree::ProcessCache::default(),
+            started,
+            tui_state,
+            terminal,
+            intervals_dropped: 0,
+            had_tree_roots,
+            interval_label,
+            block_io_correlation_basis,
+        };
+
+        session.refresh_tasks().await?;
+
+        info!(
+            "attached target_tasks={} tree_roots={} summary_ms={} spike_threshold={}",
+            session.active_targets.len(),
+            session.config.tree_pids.len(),
+            session.config.summary_period_ms,
+            format_latency(session.config.spike_threshold_ns),
+        );
+
+        Ok(session)
     }
 
-    info!("exiting stop_reason={stop_reason}");
-    Ok(())
+    async fn run(&mut self) -> anyhow::Result<String> {
+        let mut summary_tick = interval(Duration::from_millis(self.config.summary_period_ms));
+        summary_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        summary_tick.tick().await;
+
+        let mut tree_tick = interval(Duration::from_secs(1));
+        tree_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        tree_tick.tick().await;
+
+        let mut watch_tick = interval(Duration::from_millis(self.config.watch_poll_ms));
+        watch_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        watch_tick.tick().await;
+
+        let mut scx_tick = interval(Duration::from_secs(1));
+        scx_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        scx_tick.tick().await;
+
+        let mut hwmon_tick = interval(Duration::from_millis(100));
+        hwmon_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        hwmon_tick.tick().await;
+
+        let max_duration = self.config.max_duration;
+        let duration_future = async move {
+            if let Some(max_duration) = max_duration {
+                sleep(max_duration).await;
+            } else {
+                future::pending::<()>().await;
+            }
+        };
+        tokio::pin!(duration_future);
+
+        let mut crossterm_events = EventStream::new();
+
+        loop {
+            tokio::select! {
+                _ = signal::ctrl_c() => {
+                    break Ok("ctrl_c".to_owned());
+                }
+
+                Some(Ok(event)) = crossterm_events.next(), if self.config.tui => {
+                    if let Some(reason) = self.handle_tui_event(event) {
+                        break Ok(reason);
+                    }
+                }
+
+                _ = &mut duration_future => {
+                    break Ok("duration".to_owned());
+                }
+
+                _ = summary_tick.tick() => {
+                    self.handle_summary_tick()?;
+                }
+
+                _ = tree_tick.tick(), if !self.config.tree_pids.is_empty() || self.config.cgroupv2.is_some() => {
+                    if let Some(reason) = self.handle_tree_tick().await? {
+                        break Ok(reason);
+                    }
+                }
+
+                _ = watch_tick.tick(), if matches!(self.watch_state, WatchProcessState::Waiting) => {
+                    self.handle_watch_tick().await?;
+                }
+
+                _ = scx_tick.tick() => {
+                    self.handle_scx_tick();
+                }
+
+                _ = hwmon_tick.tick(), if self.hwmon_reader.is_some() => {
+                    self.handle_hwmon_tick().await?;
+                }
+
+                ready = self.loaded.events.readable_mut() => {
+                    let guard = ready?;
+                    let MonitorSession {
+                        config,
+                        started,
+                        active_targets,
+                        known_targets,
+                        stats_by_task,
+                        recording,
+                        spike_events,
+                        irq_event_writer,
+                        streamed_irq_event_count,
+                        migration_event_writer,
+                        streamed_migration_event_count,
+                        cpu_freq_sample_writer,
+                        streamed_cpu_freq_sample_count,
+                        block_io_event_writer,
+                        streamed_block_io_event_count,
+                        block_io_correlation_basis,
+                        cpu_to_pkg,
+                        process_cache,
+                        ..
+                    } = self;
+
+                    drain_bpf_events(DrainBpfEventsInput {
+                        guard,
+                        config,
+                        started: *started,
+                        active_targets,
+                        known_targets,
+                        stats_by_task,
+                        recording_monotonic_start_ns: recording.as_ref().and_then(|run| run.monotonic_start_ns),
+                        spike_events,
+                        irq_event_writer: irq_event_writer.as_mut(),
+                        irq_event_count: streamed_irq_event_count,
+                        migration_event_writer: migration_event_writer.as_mut(),
+                        migration_event_count: streamed_migration_event_count,
+                        cpu_freq_sample_writer: cpu_freq_sample_writer.as_mut(),
+                        cpu_freq_sample_count: streamed_cpu_freq_sample_count,
+                        block_io_event_writer: block_io_event_writer.as_mut(),
+                        block_io_event_count: streamed_block_io_event_count,
+                        block_io_correlation_basis,
+                        cpu_to_pkg,
+                        process_cache,
+                    });
+                }
+            }
+        }
+    }
+
+    fn handle_tui_event(&mut self, event: Event) -> Option<String> {
+        if let Event::Key(key) = event {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Char('Q') => return Some("quit".to_owned()),
+                KeyCode::Char('p') | KeyCode::Char('P') => {
+                    self.tui_state.paused = !self.tui_state.paused;
+                }
+                KeyCode::Char('s') | KeyCode::Char('S') => {
+                    self.tui_state.sort_field = self.tui_state.sort_field.next();
+                }
+                KeyCode::Char('f') | KeyCode::Char('F') => {
+                    self.tui_state.next_filter_class();
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn handle_summary_tick(&mut self) -> anyhow::Result<()> {
+        if !self.tui_state.paused {
+            let elapsed_ms = self.started.elapsed().as_millis();
+            let drop_counters_snapshot = self.loaded.snapshot_drop_counters();
+            let psi_snapshot = self.psi_reader.read().ok();
+            let records = collect_interval_summaries_labeled(
+                self.interval_label,
+                &mut self.stats_by_task,
+                elapsed_ms,
+                &drop_counters_snapshot,
+                self.loaded.prev_faults_map.as_ref(),
+                psi_snapshot.as_ref(),
+                &mut self.prev_faults_snapshot,
+            );
+            self.streamed_interval_record_count += records.len();
+
+            if let Some(writer) = self.interval_writer.as_mut() {
+                for record in &records {
+                    writer.push(record)?;
+                }
+            } else if self.config.retain_intervals.is_some() || self.config.tui {
+                // For TUI sparklines we need interval_records
+                for record in &records {
+                    self.interval_records.push(record.clone());
+                }
+
+                let max_intervals = self.config.retain_intervals.unwrap_or(120);
+                if self.interval_records.len() > max_intervals {
+                    let drop_count = self.interval_records.len() - max_intervals;
+                    self.interval_records.drain(0..drop_count);
+                    if self.config.retain_intervals.is_some() {
+                        self.intervals_dropped += drop_count;
+                    }
+                }
+            }
+
+            if let Some(writer) = self.csv_writer.as_mut() {
+                for record in &records {
+                    writer.push(record)?;
+                }
+            }
+        }
+
+        if let Some(term) = self.terminal.as_mut() {
+            let elapsed_ms = self.started.elapsed().as_millis();
+            let drop_counters_snapshot = self.loaded.snapshot_drop_counters();
+            term.draw(|f| {
+                crate::tui::render_tui(
+                    f,
+                    &self.tui_state,
+                    &self.active_targets,
+                    &self.stats_by_task,
+                    &self.interval_records,
+                    elapsed_ms,
+                    &drop_counters_snapshot,
+                );
+            })?;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_tree_tick(&mut self) -> anyhow::Result<Option<String>> {
+        let mut should_exit = None;
+
+        if let Some(root_pid) = self.watch_state.running_pid()
+            && tree_root_is_stale(root_pid, &self.tree_root_starttimes)
+        {
+            remove_watch_tree_pid(&mut self.config, root_pid);
+            self.tree_root_starttimes.remove(&root_pid);
+
+            if !self.config.persistent {
+                should_exit = Some("watched_process_exit".to_owned());
+            } else {
+                self.watch_state = WatchProcessState::Waiting;
+                info!("watch_process_waiting_for_relaunch");
+            }
+        } else {
+            let removed_roots = remove_stale_tree_roots(
+                &mut self.config,
+                &mut self.tree_root_starttimes,
+                self.watch_state.running_pid(),
+            );
+
+            for root in &removed_roots {
+                info!("tree_root_removed pid={root}");
+            }
+
+            if !removed_roots.is_empty()
+                && self.had_tree_roots
+                && self.config.tree_pids.is_empty()
+                && !matches!(self.watch_state, WatchProcessState::Waiting)
+            {
+                should_exit = Some("tree_root_exit".to_owned());
+            }
+        }
+
+        self.refresh_tasks().await?;
+
+        // Belt-and-suspenders cleanup in case a refresh path exits before
+        // emitting per-task removal diffs.
+        self.prev_faults_snapshot
+            .retain(|tid, _| self.active_targets.contains_key(tid));
+
+        Ok(should_exit)
+    }
+
+    async fn handle_watch_tick(&mut self) -> anyhow::Result<()> {
+        let Some(pattern) = self.config.watch_process.clone() else {
+            return Ok(());
+        };
+
+        if let Some(pid) = find_process_by_pattern_at_with_cache(
+            Path::new("/proc"),
+            &pattern,
+            &mut self.watch_process_cache,
+        ) {
+            add_watch_tree_pid(&mut self.config, pid);
+            self.tree_root_starttimes.insert(pid, process_root_starttime(pid));
+            self.watch_state = WatchProcessState::Running(pid);
+            info!("watch_process_relaunched pattern={} pid={}", pattern, pid);
+
+            self.refresh_tasks().await?;
+        }
+
+        Ok(())
+    }
+
+    fn handle_scx_tick(&mut self) {
+        self.scx_tracker.sample(self.started.elapsed().as_millis());
+    }
+
+    async fn handle_hwmon_tick(&mut self) -> anyhow::Result<()> {
+        if let Some(reader_arc) = &self.hwmon_reader {
+            let elapsed = self.started.elapsed().as_millis();
+            let reader_arc_clone = reader_arc.clone();
+
+            let sample_opt = task::spawn_blocking(move || {
+                if let Ok(mut reader) = reader_arc_clone.lock() {
+                    Some(reader.sample(elapsed))
+                } else {
+                    None
+                }
+            })
+            .await
+            .map_err(|err| anyhow::anyhow!("hwmon worker failed: {err}"))?;
+
+            if let Some(sample) = sample_opt
+                && let Some(writer) = self.gpu_sample_writer.as_mut()
+            {
+                writer.push(&sample)?;
+                self.streamed_gpu_sample_count += 1;
+            }
+        }
+        Ok(())
+    }
+
+    async fn refresh_tasks(&mut self) -> anyhow::Result<()> {
+        refresh_target_tasks(RefreshTargetTasksInput {
+            config: &self.config,
+            active_targets: &mut self.active_targets,
+            known_targets: &mut self.known_targets,
+            stats_by_task: &mut self.stats_by_task,
+            task_exe_inodes: &mut self.task_exe_inodes,
+            tree_events: &mut self.tree_events,
+            target_pid_map: &mut self.loaded.target_pid_map,
+            prev_faults_map: self.loaded.prev_faults_map.as_mut(),
+            prev_faults_snapshot: &mut self.prev_faults_snapshot,
+            elapsed_ms: self.started.elapsed().as_millis(),
+            recording_started: self.recording.as_ref().map(|run| run.started_instant),
+            process_cache: &mut self.process_cache,
+        })
+        .await
+    }
+
+    fn finalize(mut self, stop_reason: String) -> anyhow::Result<()> {
+        if let Some(term) = self.terminal.as_mut() {
+            let _ = crate::tui::restore_terminal(term);
+        }
+
+        let drop_counters = self.loaded.snapshot_drop_counters();
+        log_drop_counters(&drop_counters);
+        if self.config.epoch_period_ms.is_none() {
+            print_session_summaries(&mut self.stats_by_task);
+        }
+
+        if let Some(writer) = self.csv_writer.as_mut() {
+            writer.finish()?;
+            if let Some(path) = &self.config.csv_path {
+                println!("wrote interval CSV: {}", path.display());
+            }
+        }
+
+        if let Some(recording) = self.recording {
+            if let Some(writer) = self.interval_writer.as_mut() {
+                writer.finish()?;
+            }
+            if let Some(writer) = self.irq_event_writer.as_mut() {
+                writer.finish()?;
+            }
+            if let Some(writer) = self.gpu_sample_writer.as_mut() {
+                writer.finish()?;
+            }
+            if let Some(writer) = self.block_io_event_writer.as_mut() {
+                writer.finish()?;
+            }
+
+            let spike_events_slice = self.spike_events
+                .as_ref()
+                .map(SpikeEventBuffer::as_slice)
+                .unwrap_or(&[]);
+            let spike_events_truncated = self.spike_events
+                .as_ref()
+                .map(SpikeEventBuffer::truncated)
+                .unwrap_or(false);
+            let spike_events_dropped_count = self.spike_events
+                .as_ref()
+                .map(SpikeEventBuffer::dropped_count)
+                .unwrap_or(0);
+
+            let frame_events = if let Some(path) = &self.config.mangohud_log {
+                match mangohud::read_frame_events(path, self.config.mangohud_ignore_offset) {
+                    Ok(events) => events,
+                    Err(err) => {
+                        warn!(
+                            "mangohud_log_read_failed path={} err={err:#}",
+                            path.display()
+                        );
+                        Vec::new()
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+
+            finalize_recording(FinalizeRecordingInput {
+                recording: &recording,
+                config: &self.config,
+                stop_reason: &stop_reason,
+                active_targets: &self.active_targets,
+                stats_by_task: &self.stats_by_task,
+                interval_records: &self.interval_records,
+                streamed_interval_record_count: self.interval_writer
+                    .is_some()
+                    .then_some(self.streamed_interval_record_count),
+                intervals_dropped: self.intervals_dropped,
+                tree_events: &self.tree_events,
+                spike_events: spike_events_slice,
+                spike_events_truncated,
+                spike_events_dropped_count,
+                scx_events: self.scx_tracker.events(),
+                irq_events: &self.irq_events,
+                streamed_irq_event_count: self.irq_event_writer
+                    .is_some()
+                    .then_some(self.streamed_irq_event_count),
+                migration_event_count: self.migration_event_writer
+                    .is_some()
+                    .then_some(self.streamed_migration_event_count),
+                cpu_freq_sample_count: self.cpu_freq_sample_writer
+                    .is_some()
+                    .then_some(self.streamed_cpu_freq_sample_count),
+                gpu_samples: &self.gpu_samples,
+                streamed_gpu_sample_count: self.gpu_sample_writer
+                    .is_some()
+                    .then_some(self.streamed_gpu_sample_count),
+                block_io_event_count: self.streamed_block_io_event_count,
+                block_io_correlation_basis: &self.block_io_correlation_basis,
+                frame_events: &frame_events,
+                drop_counters,
+            })?;
+        }
+
+        info!("exiting stop_reason={stop_reason}");
+        Ok(())
+    }
+}
+
+
+async fn run_monitor(
+    config: Config,
+    shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
+) -> anyhow::Result<()> {
+    let mut session = MonitorSession::new(config, shared_hwmon).await?;
+    let stop_reason = session.run().await?;
+    session.finalize(stop_reason)
 }
 
 async fn resolve_watch_process(config: &mut Config) -> anyhow::Result<Option<u32>> {
@@ -2190,6 +2270,27 @@ fn cmdline_executable_basename_lower(cmdline: &str) -> Option<String> {
         .map(|name| name.to_string_lossy().into_owned())
 }
 
+/// Safely cast a byte slice from the eBPF ring buffer to a Pod type.
+///
+/// This performs bounds and alignment checks before casting. eBPF ring buffers
+/// guarantee 8-byte alignment for all items, which matches the requirements of
+/// our `repr(C)` structs containing `u64` fields.
+fn cast_event<T: aya::Pod>(data: &[u8]) -> Option<&T> {
+    if data.len() < std::mem::size_of::<T>() {
+        return None;
+    }
+    let ptr = data.as_ptr();
+    if !(ptr as usize).is_multiple_of(std::mem::align_of::<T>()) {
+        // This should not happen with eBPF ring buffers as they guarantee 8-byte alignment.
+        return None;
+    }
+    // SAFETY: We have verified that:
+    // 1. The buffer is large enough to contain T.
+    // 2. The buffer is properly aligned for T.
+    // 3. T is Pod, so it is safe to initialize from arbitrary bytes.
+    Some(unsafe { &*(ptr as *const T) })
+}
+
 fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
     let DrainBpfEventsInput {
         mut guard,
@@ -2222,12 +2323,12 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
         let kind = unsafe { (item.as_ptr() as *const u32).read_unaligned() };
         match kind {
             EVENT_RUNNABLE_LATENCY => {
-                if item.len() < std::mem::size_of::<SchedulerEvent>() {
+                let Some(event) = cast_event::<SchedulerEvent>(&item) else {
+
                     warn!("short_scheduler_event len={}", item.len());
                     continue;
-                }
+                };
 
-                let event = unsafe { &*(item.as_ptr() as *const SchedulerEvent) };
 
                 handle_event(HandleEventInput {
                     event,
@@ -2241,12 +2342,12 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
                 });
             }
             EVENT_IRQ_LATENCY => {
-                if item.len() < std::mem::size_of::<IrqEvent>() {
+                let Some(event) = cast_event::<IrqEvent>(&item) else {
+
                     warn!("short_irq_event len={}", item.len());
                     continue;
-                }
+                };
 
-                let event = unsafe { &*(item.as_ptr() as *const IrqEvent) };
                 let record = irq_event_record(recording_monotonic_start_ns, event);
                 if let Some(writer) = irq_event_writer.as_deref_mut() {
                     push_json_stream_event(writer, &record, irq_event_count, "irq_events");
@@ -2254,11 +2355,12 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
                 log_irq_event(event);
             }
             EVENT_MIGRATION => {
-                if item.len() < std::mem::size_of::<MigrationEvent>() {
+                let Some(event) = cast_event::<MigrationEvent>(&item) else {
+
                     warn!("short_migration_event len={}", item.len());
                     continue;
-                }
-                let event = unsafe { &*(item.as_ptr() as *const MigrationEvent) };
+                };
+
                 let elapsed_ms = started.elapsed().as_millis();
 
                 if let Some(stats) = stats_by_task.get_mut(&event.tid) {
@@ -2290,11 +2392,12 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
                 }
             }
             EVENT_CPU_FREQ => {
-                if item.len() < std::mem::size_of::<CpuFreqEvent>() {
+                let Some(event) = cast_event::<CpuFreqEvent>(&item) else {
+
                     warn!("short_cpu_freq_event len={}", item.len());
                     continue;
-                }
-                let event = unsafe { &*(item.as_ptr() as *const CpuFreqEvent) };
+                };
+
                 let elapsed_ms = started.elapsed().as_millis();
 
                 if let Some(writer) = cpu_freq_sample_writer.as_deref_mut() {
@@ -2313,22 +2416,24 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
                 }
             }
             EVENT_STAT_WAIT => {
-                if item.len() < std::mem::size_of::<StatWaitEvent>() {
+                let Some(event) = cast_event::<StatWaitEvent>(&item) else {
+
                     warn!("short_stat_wait_event len={}", item.len());
                     continue;
-                }
-                let event = unsafe { &*(item.as_ptr() as *const StatWaitEvent) };
+                };
+
                 if let Some(stats) = stats_by_task.get_mut(&event.tid) {
                     stats.stat_wait_sum_ns += event.delay_ns as u128;
                     stats.stat_wait_count += 1;
                 }
             }
             EVENT_BLOCK_IO => {
-                if item.len() < std::mem::size_of::<BlockIoEvent>() {
+                let Some(event) = cast_event::<BlockIoEvent>(&item) else {
+
                     warn!("short_block_io_event len={}", item.len());
                     continue;
-                }
-                let event = unsafe { &*(item.as_ptr() as *const BlockIoEvent) };
+                };
+
                 let elapsed_ms = started.elapsed().as_millis();
 
                 if let Some(writer) = block_io_event_writer.as_deref_mut() {
