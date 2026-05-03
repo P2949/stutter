@@ -453,6 +453,7 @@ pub fn save_merged_restore_state(
     }
 
     for record in records {
+        let mut record = record.clone();
         if record.has_identity() {
             let legacy_key = RestoreMergeKey {
                 tid: record.tid,
@@ -460,15 +461,23 @@ pub fn save_merged_restore_state(
                 process_starttime_ticks: None,
                 task_starttime_ticks: None,
             };
-            merged.remove(&legacy_key);
+            if let Some(legacy) = merged.remove(&legacy_key)
+                && legacy.applied_mask == record.original_mask
+            {
+                record.original_mask = legacy.original_mask;
+            }
         }
 
         merged
-            .entry(restore_merge_key(record))
+            .entry(restore_merge_key(&record))
             .and_modify(|existing| {
-                existing.applied_mask = record.applied_mask.clone();
+                if record.applied_mask == existing.original_mask {
+                    existing.original_mask = record.original_mask.clone();
+                } else {
+                    existing.applied_mask = record.applied_mask.clone();
+                }
             })
-            .or_insert_with(|| record.clone());
+            .or_insert(record);
     }
 
     let records = merged.into_values().collect::<Vec<_>>();
@@ -745,7 +754,6 @@ mod tests {
         fields.push(starttime.to_string());
         format!("1 ({comm}) S {}\n", fields.join(" "))
     }
-
     fn temp_dir(name: &str) -> PathBuf {
         let mut dir = std::env::temp_dir();
         dir.push(format!(
@@ -757,5 +765,50 @@ mod tests {
                 .as_nanos()
         ));
         dir
+    }
+
+    #[test]
+    fn merged_restore_state_preserves_earliest_original_mask_even_if_merge_order_is_swapped() {
+        let dir = temp_dir("affinity-merge-swapped");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("restore.json");
+
+        // File has LATER record
+        save_restore_state(&path, &[affinity_record(7, "0-1", "0")]).unwrap();
+
+        // New has EARLIER record
+        save_merged_restore_state(&path, &[affinity_record(7, "0-3", "0-1")], false).unwrap();
+
+        let state = load_restore_state(&path).unwrap();
+        assert_eq!(state.records.len(), 1);
+        assert_eq!(state.records[0].original_mask.to_range_string(), "0-3");
+        assert_eq!(state.records[0].applied_mask.to_range_string(), "0");
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn merged_restore_state_preserves_earliest_original_mask_during_legacy_upgrade() {
+        let dir = temp_dir("affinity-legacy-upgrade");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("restore.json");
+
+        // File has legacy record (earliest)
+        save_restore_state(&path, &[affinity_record(7, "0-3", "0-1")]).unwrap();
+
+        // New has identity record (later)
+        let mut identity = affinity_record(7, "0-1", "0");
+        identity.process_pid = Some(7);
+        identity.process_starttime_ticks = Some(70);
+        identity.task_starttime_ticks = Some(70);
+
+        save_merged_restore_state(&path, &[identity], false).unwrap();
+
+        let state = load_restore_state(&path).unwrap();
+        assert_eq!(state.records.len(), 1);
+        assert_eq!(state.records[0].original_mask.to_range_string(), "0-3");
+        assert_eq!(state.records[0].applied_mask.to_range_string(), "0");
+
+        fs::remove_dir_all(dir).ok();
     }
 }
