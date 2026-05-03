@@ -4,7 +4,7 @@ use clap::{ArgAction, Args, Parser, Subcommand};
 
 use crate::{
     TARGET_PIDS_MAX,
-    process_tree::{TaskClass, TaskFilters},
+    process_tree::{CompiledPattern, TaskClass, TaskFilters},
 };
 
 #[derive(Parser, Debug)]
@@ -535,8 +535,8 @@ fn config_from_monitor_args(
     args.irqs.sort_unstable();
     args.irqs.dedup();
 
-    validate_comm_patterns("--include-comm", &args.include_comm)?;
-    validate_comm_patterns("--exclude-comm", &args.exclude_comm)?;
+    let include_comm = validate_comm_patterns("--include-comm", &args.include_comm)?;
+    let exclude_comm = validate_comm_patterns("--exclude-comm", &args.exclude_comm)?;
     if matches!(args.watch_process.as_deref(), Some("")) {
         anyhow::bail!("--watch-process must not be empty");
     }
@@ -617,8 +617,8 @@ fn config_from_monitor_args(
         alert_webhook_url,
         verbose: args.verbose,
         task_filters: TaskFilters {
-            include_comm: args.include_comm,
-            exclude_comm: args.exclude_comm,
+            include_comm,
+            exclude_comm,
         },
         keep_missing_pid: args.keep_missing_pid,
         watch_process: args.watch_process,
@@ -656,11 +656,15 @@ fn validate_pids(flag: &str, pids: &[u32]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn validate_comm_patterns(flag: &str, patterns: &[String]) -> anyhow::Result<()> {
-    if patterns.iter().any(|pattern| pattern.is_empty()) {
-        anyhow::bail!("{flag} patterns must not be empty");
+fn validate_comm_patterns(flag: &str, patterns: &[String]) -> anyhow::Result<Vec<CompiledPattern>> {
+    let mut compiled = Vec::new();
+    for pattern in patterns {
+        if pattern.is_empty() {
+            anyhow::bail!("{flag} patterns must not be empty");
+        }
+        compiled.push(CompiledPattern::new(pattern.clone())?);
     }
-    Ok(())
+    Ok(compiled)
 }
 
 #[cfg(test)]
@@ -726,8 +730,14 @@ mod tests {
             panic!("expected monitor command");
         };
 
-        assert_eq!(config.task_filters.include_comm, vec!["RenderThread"]);
-        assert_eq!(config.task_filters.exclude_comm, vec!["steamwebhelper"]);
+        assert_eq!(
+            config.task_filters.include_comm,
+            vec![CompiledPattern::new("RenderThread".to_owned()).unwrap()]
+        );
+        assert_eq!(
+            config.task_filters.exclude_comm,
+            vec![CompiledPattern::new("steamwebhelper".to_owned()).unwrap()]
+        );
     }
 
     #[test]
