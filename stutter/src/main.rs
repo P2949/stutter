@@ -316,7 +316,7 @@ async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     } else {
         "restore-after-each"
     };
-    let tune_output_dir = default_tune_output_dir();
+    let tune_output_dir = default_tune_output_dir()?;
 
     let shared_hwmon = hwmon::HwmonReader::discover_with_options(None, None, None)
         .map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)));
@@ -787,13 +787,19 @@ fn tune_run_dir(tune_output_dir: &Path, profile_name: &str) -> PathBuf {
         .join(format!("{}-{}", sanitized, unix_nanos_now()))
 }
 
-fn cleanup_stale_tune_run_dirs(state_dir: &Path) {
-    let Ok(entries) = fs::read_dir(state_dir) else {
-        return;
+fn cleanup_stale_tune_run_dirs(state_dir: &Path) -> anyhow::Result<()> {
+    let entries = match fs::read_dir(state_dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(anyhow::Error::from(e))
+                .context(format!("failed to read state dir {}", state_dir.display()));
+        }
     };
 
     let now = SystemTime::now();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry.context("failed to read directory entry")?;
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
@@ -802,29 +808,20 @@ fn cleanup_stale_tune_run_dirs(state_dir: &Path) {
             continue;
         }
 
-        let Ok(metadata) = entry.metadata() else {
-            continue;
-        };
+        let metadata = entry.metadata().context("failed to get entry metadata")?;
         if !metadata.is_dir() {
             continue;
         }
-        let Ok(modified) = metadata.modified() else {
-            continue;
-        };
-        let Ok(age) = now.duration_since(modified) else {
-            continue;
-        };
+        let modified = metadata.modified().context("failed to get modified time")?;
+        let age = now.duration_since(modified).unwrap_or(Duration::ZERO);
         if age <= TUNE_RUN_STALE_AFTER {
             continue;
         }
 
-        if let Err(err) = fs::remove_dir_all(&path) {
-            warn!(
-                "stale_tune_run_cleanup_failed path={} err={err}",
-                path.display()
-            );
-        }
+        fs::remove_dir_all(&path)
+            .with_context(|| format!("failed to remove stale tune dir {}", path.display()))?;
     }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -1216,7 +1213,7 @@ fn restore_tune_after_candidate(profile_name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn default_tune_output_dir() -> PathBuf {
+fn default_tune_output_dir() -> anyhow::Result<PathBuf> {
     let mut path = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
@@ -1224,9 +1221,9 @@ fn default_tune_output_dir() -> PathBuf {
     path.push(".local");
     path.push("state");
     path.push("stutter");
-    cleanup_stale_tune_run_dirs(&path);
+    cleanup_stale_tune_run_dirs(&path)?;
     path.push(format!("tune-{}", unix_nanos_now()));
-    path
+    Ok(path)
 }
 
 fn unix_nanos_now() -> u128 {
@@ -1881,17 +1878,37 @@ impl MonitorSession {
         if let Some(term) = self.terminal.as_mut() {
             let elapsed_ms = self.started.elapsed().as_millis();
             let drop_counters_snapshot = self.loaded.snapshot_drop_counters();
-            term.draw(|f| {
-                crate::tui::render_tui(
-                    f,
-                    &self.tui_state,
-                    &self.active_targets,
-                    &self.stats_by_task,
-                    &self.interval_records,
-                    elapsed_ms,
-                    &drop_counters_snapshot,
-                );
-            })?;
+
+            let tui_state = &self.tui_state;
+            let active_targets = &self.active_targets;
+            let stats_by_task = &self.stats_by_task;
+            let interval_records = &self.interval_records;
+
+            // TUI rendering errors and panics should be logged and dismissed,
+            // not propagated, to avoid killing the monitor.
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                term.draw(move |f| {
+                    crate::tui::render_tui(
+                        f,
+                        tui_state,
+                        active_targets,
+                        stats_by_task,
+                        interval_records,
+                        elapsed_ms,
+                        &drop_counters_snapshot,
+                    );
+                })
+            }));
+
+            match res {
+                Ok(Ok(_)) => {}
+                Ok(Err(err)) => {
+                    warn!("tui_render_failed err={err}");
+                }
+                Err(_) => {
+                    warn!("tui_render_panic");
+                }
+            }
         }
 
         Ok(())
