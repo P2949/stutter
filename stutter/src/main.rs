@@ -1,7 +1,6 @@
 mod affinity;
 mod cli;
 mod ebpf_loader;
-mod error;
 mod events;
 mod hwmon;
 mod mangohud;

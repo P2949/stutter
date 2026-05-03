@@ -103,7 +103,7 @@ impl LoadedEbpf {
 
 pub fn load_and_attach(
     config: &crate::cli::Config,
-) -> Result<LoadedEbpf, crate::error::StutterError> {
+) -> anyhow::Result<LoadedEbpf> {
     raise_memlock_limit();
     let map_sizing = dynamic_map_sizing();
     log::info!(
@@ -114,7 +114,7 @@ pub fn load_and_attach(
         map_sizing.wakeup_data_entries,
     );
     let tracepoints = validate_tracepoint_formats(Path::new("/sys/kernel/tracing/events"), config)
-        .map_err(|e| crate::error::StutterError::TracepointOffsetMismatch(e.to_string()))?;
+        .context("tracepoint offset mismatch")?;
 
     let mut loader = EbpfLoader::new();
     loader
@@ -148,23 +148,23 @@ pub fn load_and_attach(
             env!("OUT_DIR"),
             "/stutter"
         )))
-        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        .context("eBPF load failed")?;
 
     attach_tracepoint(&mut ebpf, "sched_wakeup", "sched", "sched_wakeup")
-        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        .context("eBPF load failed: attach sched_wakeup")?;
     if tracepoints.sched_wakeup_new {
         attach_tracepoint(&mut ebpf, "sched_wakeup_new", "sched", "sched_wakeup_new")
-            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+            .context("eBPF load failed: attach sched_wakeup_new")?;
     }
     attach_tracepoint(&mut ebpf, "sched_switch", "sched", "sched_switch")
-        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        .context("eBPF load failed: attach sched_switch")?;
     attach_tracepoint(
         &mut ebpf,
         "sched_process_exit",
         "sched",
         "sched_process_exit",
     )
-    .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    .context("eBPF load failed: attach sched_process_exit")?;
 
     if tracepoints.sched_migrate_task {
         attach_tracepoint(
@@ -173,29 +173,29 @@ pub fn load_and_attach(
             "sched",
             "sched_migrate_task",
         )
-        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        .context("eBPF load failed: attach sched_migrate_task")?;
     }
     if tracepoints.cpu_frequency && config.cpu_freq {
         attach_tracepoint(&mut ebpf, "cpu_frequency", "power", "cpu_frequency")
-            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+            .context("eBPF load failed: attach cpu_frequency")?;
     }
     if tracepoints.sched_stat_wait && config.stat_wait {
         attach_tracepoint(&mut ebpf, "sched_stat_wait", "sched", "sched_stat_wait")
-            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+            .context("eBPF load failed: attach sched_stat_wait")?;
     }
 
     if tracepoints.irq_handler && config.irq_latency {
         attach_tracepoint(&mut ebpf, "irq_handler_entry", "irq", "irq_handler_entry")
-            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+            .context("eBPF load failed: attach irq_handler_entry")?;
         attach_tracepoint(&mut ebpf, "irq_handler_exit", "irq", "irq_handler_exit")
-            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+            .context("eBPF load failed: attach irq_handler_exit")?;
     }
 
     if tracepoints.block_rq && config.block_io {
         attach_tracepoint(&mut ebpf, "block_rq_issue", "block", "block_rq_issue")
-            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+            .context("eBPF load failed: attach block_rq_issue")?;
         attach_tracepoint(&mut ebpf, "block_rq_complete", "block", "block_rq_complete")
-            .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+            .context("eBPF load failed: attach block_rq_complete")?;
 
         if let Some(offset) = tracepoints.block_rq_key_offset {
             log::info!("Block I/O correlation using request pointer identity at offset {offset}");
@@ -219,7 +219,7 @@ pub fn load_and_attach(
             "sched",
             "sched_process_exec",
         )
-        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        .context("eBPF load failed: attach sched_process_exec")?;
     }
 
     if config.faults {
@@ -241,36 +241,30 @@ pub fn load_and_attach(
     }
 
     let mut target_pid_map =
-        AyaHashMap::try_from(ebpf.take_map("TARGET_PIDS").ok_or_else(|| {
-            crate::error::StutterError::EbpfLoad("TARGET_PIDS map not found".to_owned())
-        })?)
-        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        AyaHashMap::try_from(ebpf.take_map("TARGET_PIDS").context("eBPF load failed: TARGET_PIDS map not found")?)
+        .context("eBPF load failed: TARGET_PIDS map init")?;
 
     let target_irq_map = ebpf
         .take_map("TARGET_IRQS")
         .map(AyaHashMap::try_from)
         .transpose()
-        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        .context("eBPF load failed: TARGET_IRQS map init")?;
 
-    let drop_counters = PerCpuArray::try_from(ebpf.take_map("DROP_COUNTERS").ok_or_else(|| {
-        crate::error::StutterError::EbpfLoad("DROP_COUNTERS map not found".to_owned())
-    })?)
-    .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+    let drop_counters = PerCpuArray::try_from(ebpf.take_map("DROP_COUNTERS").context("eBPF load failed: DROP_COUNTERS map not found")?)
+    .context("eBPF load failed: DROP_COUNTERS map init")?;
 
     let events =
-        RingBuf::try_from(ebpf.take_map("EVENTS").ok_or_else(|| {
-            crate::error::StutterError::EbpfLoad("EVENTS map not found".to_owned())
-        })?)
-        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        RingBuf::try_from(ebpf.take_map("EVENTS").context("eBPF load failed: EVENTS map not found")?)
+        .context("eBPF load failed: EVENTS map init")?;
 
     let events =
-        AsyncFd::new(events).map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        AsyncFd::new(events).context("eBPF load failed: events ringbuf async fd")?;
 
     let prev_faults_map = ebpf
         .take_map("PREV_FAULTS")
         .map(AyaHashMap::try_from)
         .transpose()
-        .map_err(|e| crate::error::StutterError::EbpfLoad(e.to_string()))?;
+        .context("eBPF load failed: PREV_FAULTS map init")?;
 
     if let Some(cgroup_path) = &config.cgroupv2 {
         // Pre-populate TARGET_PIDS from the cgroup hierarchy to avoid races
@@ -295,20 +289,20 @@ pub fn load_and_attach(
         let pids: Vec<_> = snapshot.tasks.keys().copied().collect();
 
         if pids.len() > TARGET_PIDS_MAX {
-            return Err(crate::error::StutterError::EbpfLoad(format!(
+            anyhow::bail!(
                 "cgroup target prepopulation failed: {} tasks in cgroup match filters, but target_pids_max is {}",
                 pids.len(),
                 crate::cli::TARGET_PIDS_MAX
-            )));
+            );
         }
 
         // Also respect the user-defined --max-tasks limit during prepopulation.
         if pids.len() > config.max_tasks {
-            return Err(crate::error::StutterError::EbpfLoad(format!(
+            anyhow::bail!(
                 "cgroup target prepopulation failed: {} tasks in cgroup match filters, but --max-tasks is {}",
                 pids.len(),
                 config.max_tasks
-            )));
+            );
         }
 
         let mut failed_inserts = 0usize;
@@ -319,11 +313,11 @@ pub fn load_and_attach(
         }
 
         if failed_inserts > 0 {
-            return Err(crate::error::StutterError::EbpfLoad(format!(
+            anyhow::bail!(
                 "cgroup target prepopulation failed: {} tasks failed to insert (target_pids_max={}); use narrower filters or a smaller cgroup",
                 failed_inserts,
                 crate::cli::TARGET_PIDS_MAX
-            )));
+            );
         }
     }
 

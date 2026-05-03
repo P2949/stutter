@@ -1352,7 +1352,7 @@ fn prepare_recording_refuses_to_overwrite_existing_output_dir() {
 
     let err = recorder::prepare_recording(&config).unwrap_err();
 
-    assert!(err.to_string().contains("output directory already exists"));
+    assert!(format!("{err:#}").contains("output directory already exists"));
 
     fs::remove_dir_all(dir).ok();
 }

@@ -93,7 +93,7 @@ impl MonitorSession {
         let tree_root_starttimes = capture_tree_root_starttimes(&config.tree_pids);
 
         let recording = recorder::prepare_recording(&config)?;
-        let mut loaded = ebpf_loader::load_and_attach(&config).map_err(anyhow::Error::new)?;
+        let mut loaded = ebpf_loader::load_and_attach(&config)?;
         configure_target_irqs(&mut loaded, &config)?;
         let block_io_correlation_basis = loaded.block_io_correlation_basis.as_str().to_owned();
 

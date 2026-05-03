@@ -1612,7 +1612,6 @@ dependencies = [
  "serde_json",
  "stutter-common",
  "stutter-ebpf",
- "thiserror 2.0.18",
  "tokio",
  "toml",
 ]
