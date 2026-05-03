@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    
     env, fs, io,
     io::Write,
     path::{Path, PathBuf},
@@ -11,8 +11,7 @@ use serde::{Deserialize, Serialize};
 use stutter_common::SchedulerEvent;
 
 use crate::{
-    TARGET_PIDS_MAX,
-    cli::{Config, RecordingConfig},
+    cli::{Config, RecordingConfig, TARGET_PIDS_MAX},
     ebpf_loader::DropCountersSnapshot,
     error::StutterError,
     metadata::{SystemMetadata, collect_system_metadata},
@@ -26,6 +25,55 @@ use crate::{
 
 pub type IntervalRecord = MetricsIntervalRecord;
 pub const MAX_SPIKE_EVENTS: usize = 500_000;
+
+#[derive(Default)]
+pub struct LiveRecorder {
+    pub run: Option<RecordingRun>,
+    pub interval_records: Vec<IntervalRecord>,
+    pub tree_events: Vec<TreeEvent>,
+    pub spike_events: Option<SpikeEventBuffer>,
+    pub irq_events: Vec<IrqEventRecord>,
+    pub gpu_samples: Vec<GpuSample>,
+
+    pub interval_writer: Option<JsonArrayWriter>,
+    pub irq_event_writer: Option<JsonArrayWriter>,
+    pub migration_event_writer: Option<JsonArrayWriter>,
+    pub cpu_freq_sample_writer: Option<JsonArrayWriter>,
+    pub gpu_sample_writer: Option<JsonArrayWriter>,
+    pub block_io_event_writer: Option<JsonArrayWriter>,
+    pub csv_writer: Option<IntervalCsvWriter>,
+
+    pub intervals_dropped: u64,
+    pub scx_event_count: u64,
+    pub irq_event_count: u64,
+    pub migration_event_count: u64,
+    pub cpu_freq_sample_count: u64,
+    pub gpu_sample_count: u64,
+    pub block_io_event_count: u64,
+    pub interval_record_count: u64,
+    pub spike_events_dropped_count: u64,
+}
+
+impl std::fmt::Debug for LiveRecorder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LiveRecorder")
+            .field("run", &self.run)
+            .field("interval_records", &self.interval_records)
+            .field("tree_events", &self.tree_events)
+            .field("spike_events", &self.spike_events)
+            .field("irq_events", &self.irq_events)
+            .field("gpu_samples", &self.gpu_samples)
+            .field("intervals_dropped", &self.intervals_dropped)
+            .field("scx_event_count", &self.scx_event_count)
+            .field("irq_event_count", &self.irq_event_count)
+            .field("migration_event_count", &self.migration_event_count)
+            .field("cpu_freq_sample_count", &self.cpu_freq_sample_count)
+            .field("gpu_sample_count", &self.gpu_sample_count)
+            .field("block_io_event_count", &self.block_io_event_count)
+            .field("interval_record_count", &self.interval_record_count)
+            .finish()
+    }
+}
 
 #[derive(Debug)]
 pub struct RecordingRun {
@@ -48,6 +96,15 @@ pub struct IntervalCsvWriter {
     file: fs::File,
     path: PathBuf,
     finished: bool,
+}
+
+impl std::fmt::Debug for IntervalCsvWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IntervalCsvWriter")
+            .field("path", &self.path)
+            .field("finished", &self.finished)
+            .finish()
+    }
 }
 
 impl IntervalCsvWriter {
@@ -156,59 +213,60 @@ impl Drop for JsonArrayWriter {
     }
 }
 
+#[derive(Debug)]
 pub struct SpikeEventBuffer {
     events: Vec<SpikeEvent>,
     truncated: bool,
-    max_events: usize,
-    dropped_count: usize,
-}
-
-impl Default for SpikeEventBuffer {
-    fn default() -> Self {
-        Self {
-            // Avoid eagerly allocating a very large buffer for spike events.
-            // Start empty and grow on demand.
-            events: Vec::new(),
-            truncated: false,
-            max_events: MAX_SPIKE_EVENTS,
-            dropped_count: 0,
-        }
-    }
+    max_events: u64,
 }
 
 impl SpikeEventBuffer {
-    #[cfg(test)]
-    pub fn with_max_events(max_events: usize) -> Self {
+    pub fn new(max_events: u64) -> Self {
         Self {
-            events: Vec::new(),
+            events: Vec::with_capacity(max_events as usize),
             truncated: false,
             max_events,
-            dropped_count: 0,
         }
     }
 
     pub fn push(&mut self, event: SpikeEvent) {
-        if self.events.len() < self.max_events {
+        if (self.events.len() as u64) < self.max_events {
             self.events.push(event);
         } else {
             self.truncated = true;
-            self.dropped_count = self.dropped_count.saturating_add(1);
         }
     }
+#[allow(dead_code)]
+    pub fn truncate(&mut self) {
+        self.truncated = true;
+    }
 
+    #[cfg(test)]
+    pub fn with_max_events(max_events: u64) -> Self {
+        Self {
+            events: Vec::new(),
+            truncated: false,
+            max_events,
+        }
+    }
+    #[allow(dead_code)]
     pub fn as_slice(&self) -> &[SpikeEvent] {
         &self.events
     }
 
+    #[allow(dead_code)]
     pub fn truncated(&self) -> bool {
         self.truncated
     }
-    pub fn dropped_count(&self) -> usize {
-        self.dropped_count
+}
+
+impl Default for SpikeEventBuffer {
+    fn default() -> Self {
+        Self::new(MAX_SPIKE_EVENTS as u64)
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct TreeEvent {
     pub elapsed_ms: u128,
     pub action: String,
@@ -220,7 +278,7 @@ pub struct TreeEvent {
     pub class: TaskClass,
     pub from_cgroup: bool,
 }
-
+#[allow(dead_code)]
 impl TreeEvent {
     pub fn from_task(started: Instant, action: &str, task: &TaskInfo) -> Self {
         Self {
@@ -249,33 +307,33 @@ pub struct SessionFile {
     pub stop_reason: String,
     pub config: RecordedConfig,
     pub metadata: SystemMetadata,
-    pub target_pids_max: usize,
-    pub active_target_pids_count: usize,
+    pub target_pids_max: u64,
+    pub active_target_pids_count: u64,
     pub active_expanded_tasks: Vec<u32>,
     #[serde(default)]
-    pub interval_record_count: usize,
+    pub interval_record_count: u64,
     #[serde(default)]
-    pub intervals_dropped: usize,
+    pub intervals_dropped: u64,
     #[serde(default)]
-    pub spike_events_retained_count: usize,
+    pub spike_events_retained_count: u64,
     #[serde(default)]
-    pub spike_events_dropped_count: usize,
+    pub spike_events_dropped_count: u64,
     #[serde(default)]
     pub spike_events_truncated: bool,
     #[serde(default)]
-    pub scx_event_count: usize,
+    pub scx_event_count: u64,
     #[serde(default)]
-    pub irq_event_count: usize,
+    pub irq_event_count: u64,
     #[serde(default)]
-    pub migration_event_count: Option<usize>,
+    pub migration_event_count: Option<u64>,
     #[serde(default)]
-    pub cpu_freq_sample_count: Option<usize>,
+    pub cpu_freq_sample_count: Option<u64>,
     #[serde(default)]
-    pub gpu_sample_count: usize,
+    pub gpu_sample_count: u64,
     #[serde(default)]
-    pub frame_event_count: usize,
+    pub frame_event_count: u64,
     #[serde(default)]
-    pub block_io_event_count: usize,
+    pub block_io_event_count: u64,
     #[serde(default = "default_block_io_correlation_basis")]
     pub block_io_correlation_basis: String,
     #[serde(default)]
@@ -294,33 +352,33 @@ pub struct MetadataFile {
     pub monotonic_end_ns: Option<u64>,
     pub duration_ms: u128,
     pub metadata: SystemMetadata,
-    pub target_pids_max: usize,
-    pub active_target_pids_count: usize,
+    pub target_pids_max: u64,
+    pub active_target_pids_count: u64,
     pub active_expanded_tasks: Vec<u32>,
     #[serde(default)]
-    pub interval_record_count: usize,
+    pub interval_record_count: u64,
     #[serde(default)]
-    pub intervals_dropped: usize,
+    pub intervals_dropped: u64,
     #[serde(default)]
-    pub spike_events_retained_count: usize,
+    pub spike_events_retained_count: u64,
     #[serde(default)]
-    pub spike_events_dropped_count: usize,
+    pub spike_events_dropped_count: u64,
     #[serde(default)]
     pub spike_events_truncated: bool,
     #[serde(default)]
-    pub scx_event_count: usize,
+    pub scx_event_count: u64,
     #[serde(default)]
-    pub irq_event_count: usize,
+    pub irq_event_count: u64,
     #[serde(default)]
-    pub migration_event_count: Option<usize>,
+    pub migration_event_count: Option<u64>,
     #[serde(default)]
-    pub cpu_freq_sample_count: Option<usize>,
+    pub cpu_freq_sample_count: Option<u64>,
     #[serde(default)]
-    pub gpu_sample_count: usize,
+    pub gpu_sample_count: u64,
     #[serde(default)]
-    pub frame_event_count: usize,
+    pub frame_event_count: u64,
     #[serde(default)]
-    pub block_io_event_count: usize,
+    pub block_io_event_count: u64,
     #[serde(default = "default_block_io_correlation_basis")]
     pub block_io_correlation_basis: String,
     #[serde(default)]
@@ -442,7 +500,7 @@ pub struct SessionTask {
     pub stat_wait_count: Option<u64>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct WakerEntry {
     pub waker_tid: u32,
     pub waker_comm: String,
@@ -478,7 +536,7 @@ pub struct RecordedCpuSnapshot {
     pub per_cpu: Vec<CpuLine>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct RecordedSpike {
     pub class: TaskClass,
     pub process_pid: Option<u32>,
@@ -500,7 +558,7 @@ pub struct RecordedSpike {
     pub minor_faults: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct SessionSpike {
     pub task: u32,
     pub active: bool,
@@ -525,7 +583,7 @@ pub struct SessionSpike {
     pub minor_faults: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct SpikeEvent {
     #[serde(default)]
     pub elapsed_ms: Option<u128>,
@@ -552,7 +610,7 @@ pub struct SpikeEvent {
     pub minor_faults: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct MigrationEventRecord {
     pub elapsed_ms: u128,
     pub tid: u32,
@@ -561,7 +619,7 @@ pub struct MigrationEventRecord {
     pub timestamp_ns: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct CpuFreqRecord {
     pub elapsed_ms: u128,
     pub cpu: u32,
@@ -597,7 +655,7 @@ impl SpikeEvent {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct IrqEventRecord {
     #[serde(default)]
     pub elapsed_ms: Option<u128>,
@@ -608,7 +666,7 @@ pub struct IrqEventRecord {
     pub duration_ns: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct GpuSample {
     pub elapsed_ms: u128,
     pub gpu_busy_percent: Option<u32>,
@@ -621,13 +679,13 @@ pub struct GpuSample {
     pub power_microwatts: Option<u64>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct FrameEvent {
     pub elapsed_ms: u128,
     pub frametime_ms: f64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct BlockIoRecord {
     pub elapsed_ms: u128,
     pub tid: u32,
@@ -648,29 +706,13 @@ fn default_block_io_correlation_basis() -> String {
 pub const SESSION_SCHEMA_VERSION: u32 = 16;
 
 pub struct FinalizeRecordingInput<'a> {
-    pub recording: &'a RecordingRun,
+    pub recorder: &'a LiveRecorder,
     pub config: &'a Config,
     pub stop_reason: &'a str,
-    pub active_targets: &'a BTreeMap<u32, TaskInfo>,
-    pub stats_by_task: &'a BTreeMap<u32, TaskStats>,
-    pub interval_records: &'a [IntervalRecord],
-    pub streamed_interval_record_count: Option<usize>,
-    pub intervals_dropped: usize,
-    pub tree_events: &'a [TreeEvent],
-    pub spike_events: &'a [SpikeEvent],
-    pub spike_events_truncated: bool,
-    pub spike_events_dropped_count: usize,
-    pub scx_events: &'a [ScxEvent],
-    pub irq_events: &'a [IrqEventRecord],
-    pub streamed_irq_event_count: Option<usize>,
-    pub migration_event_count: Option<usize>,
-    pub cpu_freq_sample_count: Option<usize>,
-    pub gpu_samples: &'a [GpuSample],
-    pub streamed_gpu_sample_count: Option<usize>,
+    pub tasks: &'a crate::tasks::TaskTracker,
     pub frame_events: &'a [FrameEvent],
-    pub block_io_event_count: usize,
     pub block_io_correlation_basis: &'a str,
-    pub drop_counters: DropCountersSnapshot,
+    pub drop_counters: crate::ebpf_loader::DropCountersSnapshot,
 }
 
 pub fn prepare_recording(config: &Config) -> anyhow::Result<Option<RecordingRun>> {
@@ -695,24 +737,34 @@ pub fn prepare_recording(config: &Config) -> anyhow::Result<Option<RecordingRun>
 }
 
 pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<()> {
-    let recording = input.recording;
-    let config = input.config;
-    let stop_reason = input.stop_reason;
-    let active_targets = input.active_targets;
-    let stats_by_task = input.stats_by_task;
-    let interval_records = input.interval_records;
-    let interval_record_count = input
-        .streamed_interval_record_count
-        .unwrap_or(interval_records.len());
-    let tree_events = input.tree_events;
-    let spike_events = input.spike_events;
-    let scx_events = input.scx_events;
-    let irq_events = input.irq_events;
-    let irq_event_count = input.streamed_irq_event_count.unwrap_or(irq_events.len());
-    let gpu_samples = input.gpu_samples;
-    let gpu_sample_count = input.streamed_gpu_sample_count.unwrap_or(gpu_samples.len());
-    let frame_events = input.frame_events;
-    let drop_counters = input.drop_counters;
+    let FinalizeRecordingInput {
+        recorder,
+        config,
+        stop_reason,
+        tasks: task_tracker,
+        frame_events,
+        block_io_correlation_basis,
+        drop_counters,
+    } = input;
+
+    let Some(recording) = recorder.run.as_ref() else {
+        return Ok(());
+    };
+
+    let active_targets = &task_tracker.active_targets;
+    let stats_by_task = &task_tracker.stats_by_task;
+    let interval_records = &recorder.interval_records;
+    let interval_record_count = recorder.interval_record_count;
+    let tree_events = &recorder.tree_events;
+    let spike_events = recorder
+        .spike_events
+        .as_ref()
+        .map(|s| s.events.as_slice())
+        .unwrap_or(&[]);
+    let _scx_events = Vec::<ScxEvent>::new(); // SCX events are not currently persisted in LiveRecorder for finalization
+
+    let irq_event_count = recorder.irq_event_count;
+    let gpu_sample_count = recorder.gpu_sample_count;
     let ended_at = SystemTime::now();
     let monotonic_end_ns = monotonic_now_ns();
     let duration_ms = recording.started_instant.elapsed().as_millis();
@@ -817,67 +869,28 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         monotonic_end_ns,
         duration_ms,
         stop_reason: stop_reason.to_owned(),
-        config: RecordedConfig {
-            manual_pids: config.target_pids.clone(),
-            tree_roots: config.tree_pids.clone(),
-            cgroupv2: config.cgroupv2.clone(),
-            exclude_tree_pids: config.exclude_tree_pids.clone(),
-            include_comm: config
-                .task_filters
-                .include_comm
-                .iter()
-                .map(|p| p.raw().to_owned())
-                .collect(),
-            exclude_comm: config
-                .task_filters
-                .exclude_comm
-                .iter()
-                .map(|p| p.raw().to_owned())
-                .collect(),
-            watch_process: config.watch_process.clone(),
-            persistent: config.persistent,
-            keep_missing_pid: config.keep_missing_pid,
-            watch_poll_ms: config.watch_poll_ms,
-            watch_timeout_ms: config.watch_timeout.map(|timeout| timeout.as_millis()),
-            csv_path: config.csv_path.clone(),
-            irq_latency: config.irq_latency,
-            irqs: config.irqs.clone(),
-            hwmon: config.hwmon,
-            hwmon_root: config.hwmon_root.clone(),
-            hwmon_drm_card: config.hwmon_drm_card.clone(),
-            hwmon_render_node: config.hwmon_render_node.clone(),
-            mangohud_log: config.mangohud_log.clone(),
-            tui: config.tui,
-            summary_period_ms: config.summary_period_ms,
-            epoch_period_ms: config.epoch_period_ms,
-            retain_intervals: config.retain_intervals,
-            max_tasks: config.max_tasks,
-            spike_threshold_ns: config.spike_threshold_ns,
-            alert_threshold_ns: config.alert_threshold_ns,
-            alert_webhook_url: config.alert_webhook_url.clone(),
-            follow_exec: config.follow_exec,
-            verbose: config.verbose,
-            faults: config.faults,
-            block_io: config.block_io,
-            stat_wait: config.stat_wait,
-        },
+        config: recorded_config(config),
         metadata: metadata.clone(),
-        target_pids_max: TARGET_PIDS_MAX,
-        active_target_pids_count: active_targets.len(),
+        target_pids_max: TARGET_PIDS_MAX as u64,
+        active_target_pids_count: active_targets.len() as u64,
         active_expanded_tasks: active_expanded_tasks.clone(),
         interval_record_count,
-        intervals_dropped: input.intervals_dropped,
-        spike_events_retained_count: spike_events.len(),
-        spike_events_dropped_count: input.spike_events_dropped_count,
-        spike_events_truncated: input.spike_events_truncated,
-        scx_event_count: scx_events.len(),
+        intervals_dropped: recorder.intervals_dropped,
+        spike_events_retained_count: spike_events.len() as u64,
+        spike_events_dropped_count: recorder.spike_events_dropped_count,
+        spike_events_truncated: recorder
+            .spike_events
+            .as_ref()
+            .map(|s| s.truncated)
+            .unwrap_or(false),
+        scx_event_count: recorder.scx_event_count,
         irq_event_count,
-        migration_event_count: input.migration_event_count,
-        cpu_freq_sample_count: input.cpu_freq_sample_count,
+        migration_event_count: Some(recorder.migration_event_count),
+        cpu_freq_sample_count: Some(recorder.cpu_freq_sample_count),
         gpu_sample_count,
-        frame_event_count: frame_events.len(),
-        block_io_event_count: input.block_io_event_count,
-        block_io_correlation_basis: input.block_io_correlation_basis.to_owned(),
+        frame_event_count: frame_events.len() as u64,
+        block_io_event_count: recorder.block_io_event_count,
+        block_io_correlation_basis: block_io_correlation_basis.to_owned(),
         drop_counters: drop_counters.clone(),
         tasks,
         top_spikes,
@@ -892,60 +905,116 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         monotonic_end_ns,
         duration_ms,
         metadata,
-        target_pids_max: TARGET_PIDS_MAX,
-        active_target_pids_count: active_targets.len(),
+        target_pids_max: TARGET_PIDS_MAX as u64,
+        active_target_pids_count: active_targets.len() as u64,
         active_expanded_tasks,
         interval_record_count,
-        intervals_dropped: input.intervals_dropped,
-        spike_events_retained_count: spike_events.len(),
-        spike_events_dropped_count: input.spike_events_dropped_count,
-        spike_events_truncated: input.spike_events_truncated,
-        scx_event_count: scx_events.len(),
+        intervals_dropped: recorder.intervals_dropped,
+        spike_events_retained_count: spike_events.len() as u64,
+        spike_events_dropped_count: recorder.spike_events_dropped_count,
+        spike_events_truncated: recorder
+            .spike_events
+            .as_ref()
+            .map(|s| s.truncated)
+            .unwrap_or(false),
+        scx_event_count: recorder.scx_event_count,
         irq_event_count,
-        migration_event_count: input.migration_event_count,
-        cpu_freq_sample_count: input.cpu_freq_sample_count,
+        migration_event_count: Some(recorder.migration_event_count),
+        cpu_freq_sample_count: Some(recorder.cpu_freq_sample_count),
         gpu_sample_count,
-        frame_event_count: frame_events.len(),
-        block_io_event_count: input.block_io_event_count,
-        block_io_correlation_basis: input.block_io_correlation_basis.to_owned(),
-        drop_counters,
+        frame_event_count: frame_events.len() as u64,
+        block_io_event_count: recorder.block_io_event_count,
+        block_io_correlation_basis: block_io_correlation_basis.to_owned(),
+        drop_counters: drop_counters.clone(),
     };
 
     // Map any write errors to `StutterError::RecordWrite` so callers can decide
     // whether a failed recording should be treated as fatal.
     let map_write_err = |e: anyhow::Error| -> anyhow::Error {
-        let io_err = io::Error::other(e.to_string());
+        let io_err = std::io::Error::other(e.to_string());
         anyhow::Error::new(StutterError::RecordWrite(io_err))
     };
 
     write_json(recording.run_dir.join("session.json"), &session).map_err(map_write_err)?;
     write_json(recording.run_dir.join("metadata.json"), &metadata_file).map_err(map_write_err)?;
-    if input.streamed_interval_record_count.is_none() {
+    
+    if recorder.interval_writer.is_none() {
         write_json_stream(recording.run_dir.join("interval.json"), interval_records)
             .map_err(map_write_err)?;
     }
-    write_json_stream(recording.run_dir.join("tree_events.json"), tree_events)
-        .map_err(map_write_err)?;
-    write_json_stream(recording.run_dir.join("spike_events.json"), spike_events)
-        .map_err(map_write_err)?;
-    write_json_stream(recording.run_dir.join("scx_events.json"), scx_events)
-        .map_err(map_write_err)?;
-    if input.streamed_irq_event_count.is_none() {
-        write_json_stream(recording.run_dir.join("irq_events.json"), irq_events)
+    if !tree_events.is_empty() {
+        write_json_stream(recording.run_dir.join("tree_events.json"), tree_events)
             .map_err(map_write_err)?;
     }
-    if input.streamed_gpu_sample_count.is_none() {
-        write_json_stream(recording.run_dir.join("gpu_samples.json"), gpu_samples)
+    if !spike_events.is_empty() {
+        write_json_stream(recording.run_dir.join("spike_events.json"), spike_events)
             .map_err(map_write_err)?;
     }
-    write_json_stream(
-        recording.run_dir.join("frame_correlation.json"),
-        frame_events,
-    )
-    .map_err(map_write_err)?;
+    if recorder.irq_event_writer.is_none() && !recorder.irq_events.is_empty() {
+        write_json_stream(recording.run_dir.join("irq_events.json"), &recorder.irq_events)
+            .map_err(map_write_err)?;
+    }
+    if recorder.gpu_sample_writer.is_none() && !recorder.gpu_samples.is_empty() {
+        write_json_stream(recording.run_dir.join("gpu_samples.json"), &recorder.gpu_samples)
+            .map_err(map_write_err)?;
+    }
+    if !frame_events.is_empty() {
+        write_json_stream(
+            recording.run_dir.join("frame_correlation.json"),
+            frame_events,
+        )
+        .map_err(map_write_err)?;
+    }
 
     println!("recording written to {}", recording.run_dir.display());
     Ok(())
+}
+
+fn recorded_config(config: &Config) -> RecordedConfig {
+    RecordedConfig {
+        manual_pids: config.target_pids.clone(),
+        tree_roots: config.tree_pids.clone(),
+        cgroupv2: config.cgroupv2.clone(),
+        exclude_tree_pids: config.exclude_tree_pids.clone(),
+        include_comm: config
+            .task_filters
+            .include_comm
+            .iter()
+            .map(|p| p.raw().to_owned())
+            .collect(),
+        exclude_comm: config
+            .task_filters
+            .exclude_comm
+            .iter()
+            .map(|p| p.raw().to_owned())
+            .collect(),
+        watch_process: config.watch_process.clone(),
+        persistent: config.persistent,
+        keep_missing_pid: config.keep_missing_pid,
+        watch_poll_ms: config.watch_poll_ms,
+        watch_timeout_ms: config.watch_timeout.map(|timeout| timeout.as_millis()),
+        csv_path: config.csv_path.clone(),
+        irq_latency: config.irq_latency,
+        irqs: config.irqs.clone(),
+        hwmon: config.hwmon,
+        hwmon_root: config.hwmon_root.clone(),
+        hwmon_drm_card: config.hwmon_drm_card.clone(),
+        hwmon_render_node: config.hwmon_render_node.clone(),
+        mangohud_log: config.mangohud_log.clone(),
+        tui: config.tui,
+        summary_period_ms: config.summary_period_ms,
+        epoch_period_ms: config.epoch_period_ms,
+        retain_intervals: config.retain_intervals,
+        max_tasks: config.max_tasks,
+        spike_threshold_ns: config.spike_threshold_ns,
+        alert_threshold_ns: config.alert_threshold_ns,
+        alert_webhook_url: config.alert_webhook_url.clone(),
+        follow_exec: config.follow_exec,
+        verbose: config.verbose,
+        faults: config.faults,
+        block_io: config.block_io,
+        stat_wait: config.stat_wait,
+    }
 }
 
 #[cfg(test)]
@@ -1272,7 +1341,7 @@ mod tests {
                 .into_iter()
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap();
-        assert_eq!(single.len(), 1);
+        assert_eq!(single.len() as u64, 1);
 
         let path = dir.join("items.json");
 
@@ -1288,7 +1357,7 @@ mod tests {
                 .into_iter()
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap();
-        assert_eq!(values.len(), 2);
+        assert_eq!(values.len() as u64, 2);
         fs::remove_dir_all(dir).ok();
     }
 

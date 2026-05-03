@@ -326,9 +326,7 @@ fn restore_all_at(
     (summary, errors)
 }
 
-pub fn restore_record_status(record: &AffinityRecord) -> io::Result<RestoreRecordStatus> {
-    restore_record_status_at(Path::new("/proc"), record)
-}
+// restore_record_status removed as unused
 
 fn restore_record_status_at(
     proc_root: &Path,
@@ -499,6 +497,11 @@ fn restore_merge_key(record: &AffinityRecord) -> RestoreMergeKey {
         process_starttime_ticks: record.process_starttime_ticks,
         task_starttime_ticks: record.task_starttime_ticks,
     }
+}
+
+pub fn read_restore_records(path: &Path) -> anyhow::Result<Vec<AffinityRecord>> {
+    let state = load_restore_state(path)?;
+    Ok(state.records)
 }
 
 pub fn load_restore_state(path: &Path) -> anyhow::Result<RestoreState> {

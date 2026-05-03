@@ -1,0 +1,387 @@
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+use futures_util::future;
+use log::{debug, info, warn};
+use tokio::{
+    signal,
+    time::{Instant, MissedTickBehavior, interval, sleep},
+};
+
+use crate::cli::Config;
+
+pub const PROFILE_WATCH_VERIFY_MS: u64 = 10_000;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WatchProcessState {
+    None,
+    Waiting,
+    Running(u32),
+}
+
+impl WatchProcessState {
+    pub fn running_pid(&self) -> Option<u32> {
+        match self {
+            WatchProcessState::Running(pid) => Some(*pid),
+            _ => None,
+        }
+    }
+}
+
+pub async fn resolve_watch_process(config: &mut Config) -> anyhow::Result<Option<u32>> {
+    let Some(pattern) = config.watch_process.clone() else {
+        return Ok(None);
+    };
+
+    let mut cache = crate::process_tree::ProcessCache::default();
+    if let Some(pid) =
+        find_process_by_pattern_at_with_cache(Path::new("/proc"), &pattern, &mut cache)
+    {
+        add_watch_tree_pid(config, pid);
+        return Ok(Some(pid));
+    }
+
+    wait_for_watch_process(config)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("stopped while waiting for --watch-process {pattern}"))
+        .map(Some)
+}
+
+pub async fn wait_for_watch_process(config: &mut Config) -> anyhow::Result<Option<u32>> {
+    let pattern = config
+        .watch_process
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("internal error: watch_process missing"))?;
+
+    info!(
+        "watch_process_waiting pattern={} persistent={}",
+        pattern, config.persistent
+    );
+
+    let mut tick = interval(Duration::from_millis(config.watch_poll_ms));
+    tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut cache = crate::process_tree::ProcessCache::default();
+
+    let watch_timeout = config.watch_timeout;
+    let timeout_future = async move {
+        if let Some(timeout) = watch_timeout {
+            sleep(timeout).await;
+        } else {
+            future::pending::<()>().await;
+        }
+    };
+    tokio::pin!(timeout_future);
+
+    loop {
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                return Ok(None);
+            }
+            _ = &mut timeout_future => {
+                anyhow::bail!(
+                    "timed out waiting for --watch-process {pattern} after {}ms",
+                    watch_timeout.map(|timeout| timeout.as_millis()).unwrap_or(0)
+                );
+            }
+            _ = tick.tick() => {
+                if let Some(pid) = find_process_by_pattern_at_with_cache(
+                    Path::new("/proc"),
+                    &pattern,
+                    &mut cache,
+                ) {
+                    add_watch_tree_pid(config, pid);
+                    info!("watch_process_found pattern={} pid={}", pattern, pid);
+                    return Ok(Some(pid));
+                }
+            }
+        }
+    }
+}
+
+pub fn add_watch_tree_pid(config: &mut Config, pid: u32) {
+    config.tree_pids.push(pid);
+    config.tree_pids.sort_unstable();
+    config.tree_pids.dedup();
+}
+
+pub fn remove_watch_tree_pid(config: &mut Config, pid: u32) {
+    config.tree_pids.retain(|tree_pid| *tree_pid != pid);
+}
+
+pub fn capture_tree_root_starttimes(tree_pids: &[u32]) -> BTreeMap<u32, Option<u64>> {
+    tree_pids
+        .iter()
+        .map(|pid| (*pid, process_root_starttime(*pid)))
+        .collect()
+}
+
+pub fn process_root_starttime(pid: u32) -> Option<u64> {
+    crate::process_tree::process_starttime_at(Path::new("/proc"), pid)
+}
+
+pub fn tree_root_is_stale(pid: u32, root_starttimes: &BTreeMap<u32, Option<u64>>) -> bool {
+    let current = process_root_starttime(pid);
+    let expected = root_starttimes.get(&pid).copied().flatten();
+
+    current.is_none() || expected.is_some_and(|expected| current != Some(expected))
+}
+
+pub fn remove_stale_tree_roots(
+    config: &mut Config,
+    root_starttimes: &mut BTreeMap<u32, Option<u64>>,
+    watched_pid: Option<u32>,
+) -> Vec<u32> {
+    let mut removed = Vec::new();
+
+    for pid in config.tree_pids.clone() {
+        if Some(pid) == watched_pid {
+            continue;
+        }
+
+        if tree_root_is_stale(pid, root_starttimes) {
+            removed.push(pid);
+            root_starttimes.remove(&pid);
+        }
+    }
+
+    if !removed.is_empty() {
+        config
+            .tree_pids
+            .retain(|tree_pid| !removed.contains(tree_pid));
+    }
+
+    removed
+}
+
+#[cfg(test)]
+pub fn find_process_by_pattern_at(proc_root: &Path, pattern: &str) -> Option<u32> {
+    let mut cache = crate::process_tree::ProcessCache::default();
+    find_process_by_pattern_at_with_cache(proc_root, pattern, &mut cache)
+}
+
+pub fn find_process_by_pattern_at_with_cache(
+    proc_root: &Path,
+    pattern: &str,
+    cache: &mut crate::process_tree::ProcessCache,
+) -> Option<u32> {
+    let pattern_lower = normalize_process_match_text(pattern);
+
+    crate::process_tree::scan_processes_at(proc_root, cache)
+        .into_iter()
+        .filter_map(|(pid, process)| {
+            let score =
+                process_match_score(pattern, &pattern_lower, &process.comm, &process.cmdline)?;
+            Some((score, pid))
+        })
+        .max_by_key(|(score, pid)| (*score, *pid))
+        .map(|(_, pid)| pid)
+}
+
+pub fn process_match_score(
+    pattern: &str,
+    pattern_lower: &str,
+    comm: &str,
+    cmdline: &str,
+) -> Option<u8> {
+    if comm == pattern {
+        return Some(4);
+    }
+
+    let comm_lower = normalize_process_match_text(comm);
+    if comm_lower == pattern_lower {
+        return Some(3);
+    }
+
+    let cmdline_lower = normalize_process_match_text(cmdline);
+    let exe_basename_lower = cmdline_executable_basename_lower(cmdline);
+    if exe_basename_lower.as_deref() == Some(pattern_lower) {
+        return Some(2);
+    }
+
+    (comm_lower.contains(pattern_lower) || cmdline_lower.contains(pattern_lower)).then_some(1)
+}
+
+pub fn normalize_process_match_text(value: &str) -> String {
+    value.replace('\\', "/").to_ascii_lowercase()
+}
+
+pub fn cmdline_executable_basename_lower(cmdline: &str) -> Option<String> {
+    let executable = cmdline.split_whitespace().next()?;
+    let executable = normalize_process_match_text(executable);
+
+    PathBuf::from(executable)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+}
+pub struct ApplyProfileCommandInput {
+    pub tree_pid: u32,
+    pub profile_path: PathBuf,
+    pub force: bool,
+    pub dry_run: bool,
+    pub watch: bool,
+    pub keep_applied: bool,
+    pub refresh_ms: u64,
+    pub enforce: bool,
+}
+
+pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::Result<()> {
+    let ApplyProfileCommandInput {
+        tree_pid,
+        profile_path,
+        force,
+        dry_run,
+        watch,
+        keep_applied,
+        refresh_ms,
+        enforce,
+    } = input;
+    let profile = crate::profiles::load_first_profile(&profile_path)?;
+    let mut cache = crate::profiles::ProfileApplyCache::default();
+
+    let records = if watch {
+        match apply_profile_to_tree_cached_blocking(
+            tree_pid,
+            profile.clone(),
+            force,
+            dry_run,
+            cache,
+        )
+        .await
+        {
+            Ok((records, updated_cache)) => {
+                cache = updated_cache;
+                records
+            }
+            Err(err) => {
+                if !keep_applied && let Err(restore_err) = restore_profile_watch_on_exit() {
+                    warn!("profile_watch_restore_after_error_failed err={restore_err:#}");
+                }
+                return Err(err);
+            }
+        }
+    } else {
+        apply_profile_to_tree_blocking(tree_pid, profile.clone(), force, dry_run, enforce).await?
+    };
+
+    println!(
+        "applied profile affinity to {} task(s); restore with: stutter restore",
+        records.len()
+    );
+
+    if !watch {
+        println!("apply-profile is one-shot; use --watch to keep applying to new threads");
+        return Ok(());
+    }
+
+    let mut tick = interval(Duration::from_millis(refresh_ms));
+    tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    tick.tick().await;
+    let verify_interval = Duration::from_millis(PROFILE_WATCH_VERIFY_MS);
+    let mut next_verify = Instant::now() + verify_interval;
+
+    loop {
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                if keep_applied {
+                    println!("stopped profile watch; restore with: stutter restore");
+                } else {
+                    restore_profile_watch_on_exit()?;
+                }
+                return Ok(());
+            }
+            _ = tick.tick() => {
+                if enforce || Instant::now() >= next_verify {
+                    cache.clear();
+                    next_verify = Instant::now() + verify_interval;
+                    debug!("profile_watch_cache_invalidated_for_full_verify enforce={enforce}");
+                }
+
+                let result = apply_profile_to_tree_cached_blocking(
+                    tree_pid,
+                    profile.clone(),
+                    false,
+                    dry_run,
+                    cache,
+                )
+                .await;
+
+                let records = match result {
+                    Ok((records, updated_cache)) => {
+                        cache = updated_cache;
+                        records
+                    }
+                    Err(err) => {
+                        if !keep_applied
+                            && let Err(restore_err) = restore_profile_watch_on_exit()
+                        {
+                            warn!("profile_watch_restore_after_error_failed err={restore_err:#}");
+                        }
+                        return Err(err);
+                    }
+                };
+
+                if !records.is_empty() {
+                    info!("profile_watch_applied tasks={}", records.len());
+                }
+            }
+        }
+    }
+}
+
+pub async fn apply_profile_to_tree_blocking(
+    tree_pid: u32,
+    profile: crate::profiles::Profile,
+    force: bool,
+    dry_run: bool,
+    _enforce: bool,
+) -> anyhow::Result<Vec<crate::affinity::AffinityRecord>> {
+    tokio::task::spawn_blocking(move || {
+        // Enforce is handled by the caller clearing the cache in watch mode.
+        // Blocking one-shot always verifies.
+        crate::profiles::apply_profile_to_tree(tree_pid, &profile, force, dry_run)
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))?
+}
+
+pub async fn apply_profile_to_tree_cached_blocking(
+    tree_pid: u32,
+    profile: crate::profiles::Profile,
+    force: bool,
+    dry_run: bool,
+    mut cache: crate::profiles::ProfileApplyCache,
+) -> anyhow::Result<(
+    Vec<crate::affinity::AffinityRecord>,
+    crate::profiles::ProfileApplyCache,
+)> {
+    tokio::task::spawn_blocking(move || {
+        crate::profiles::apply_profile_to_tree_cached(
+            tree_pid, &profile, force, dry_run, &mut cache,
+        )
+        .map(|records| (records, cache))
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))?
+}
+
+pub fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
+    let path = crate::affinity::default_restore_path();
+    if !path.exists() {
+        println!("stopped profile watch; no restore file was written");
+        return Ok(());
+    }
+
+    let summary = crate::affinity::restore_saved(&path)?;
+    println!(
+        "stopped profile watch; restored {} affinity record(s); skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
+        summary.restored,
+        summary.skipped_dead,
+        summary.skipped_identity_mismatch,
+        summary.legacy_unverified
+    );
+
+    Ok(())
+}

@@ -2,10 +2,9 @@ use std::{ffi::OsString, path::PathBuf, time::Duration};
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 
-use crate::{
-    TARGET_PIDS_MAX,
-    process_tree::{CompiledPattern, TaskClass, TaskFilters},
-};
+pub const TARGET_PIDS_MAX: usize = 1024;
+
+use crate::process_tree::{CompiledPattern, TaskClass, TaskFilters};
 
 #[derive(Parser, Debug)]
 #[command(
