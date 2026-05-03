@@ -154,6 +154,7 @@ fn event_comm_updates_only_unknown_existing_name() {
         stats_by_task: &mut stats_by_task,
         monotonic_start_ns: None,
         spike_events: None,
+        alert_sender: None,
     });
 
     assert_eq!(stats_by_task.get(&7).unwrap().comm, "real-name");
@@ -168,6 +169,7 @@ fn event_comm_updates_only_unknown_existing_name() {
         stats_by_task: &mut stats_by_task,
         monotonic_start_ns: None,
         spike_events: None,
+        alert_sender: None,
     });
 
     assert_eq!(stats_by_task.get(&7).unwrap().comm, "real-name");
@@ -194,6 +196,7 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
         stats_by_task: &mut stats_by_task,
         monotonic_start_ns: Some(100),
         spike_events: Some(&mut spike_events),
+        alert_sender: None,
     });
     assert!(spike_events.as_slice().is_empty());
 
@@ -207,6 +210,7 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
         stats_by_task: &mut stats_by_task,
         monotonic_start_ns: Some(100),
         spike_events: Some(&mut spike_events),
+        alert_sender: None,
     });
 
     assert_eq!(spike_events.as_slice().len(), 1);
@@ -250,6 +254,7 @@ fn spike_event_fault_deltas_are_captured_correctly() {
         stats_by_task: &mut stats_by_task,
         monotonic_start_ns: Some(100),
         spike_events: Some(&mut spike_events),
+        alert_sender: None,
     });
 
     // Second event is a spike with additional faults
@@ -266,6 +271,7 @@ fn spike_event_fault_deltas_are_captured_correctly() {
         stats_by_task: &mut stats_by_task,
         monotonic_start_ns: Some(100),
         spike_events: Some(&mut spike_events),
+        alert_sender: None,
     });
 
     assert_eq!(spike_events.as_slice().len(), 1);
@@ -614,8 +620,12 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         serde_json::from_str(&fs::read_to_string(dir.join("session.json")).unwrap()).unwrap();
     let metadata: recorder::MetadataFile =
         serde_json::from_str(&fs::read_to_string(dir.join("metadata.json")).unwrap()).unwrap();
-    let recorded_spike_events: Vec<SpikeEvent> =
-        serde_json::from_str(&fs::read_to_string(dir.join("spike_events.json")).unwrap()).unwrap();
+    let recorded_spike_events: Vec<SpikeEvent> = serde_json::Deserializer::from_reader(
+        fs::File::open(dir.join("spike_events.json")).unwrap(),
+    )
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()
+    .unwrap();
 
     assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
     assert_eq!(session.active_expanded_tasks, vec![1, 4, 9]);

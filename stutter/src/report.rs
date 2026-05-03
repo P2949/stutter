@@ -1,7 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, BinaryHeap},
     fs,
-    io::BufRead,
     path::Path,
 };
 
@@ -972,7 +971,9 @@ fn load_spike_events(session_path: &Path) -> anyhow::Result<Option<Vec<SpikeEven
     let file = fs::File::open(&spike_events_path)
         .with_context(|| format!("failed to open {}", spike_events_path.display()))?;
     let reader = std::io::BufReader::new(file);
-    let events = serde_json::from_reader(reader)
+    let events = serde_json::Deserializer::from_reader(reader)
+        .into_iter::<SpikeEvent>()
+        .collect::<Result<Vec<_>, _>>()
         .with_context(|| format!("failed to parse {}", spike_events_path.display()))?;
     Ok(Some(events))
 }
@@ -1132,75 +1133,13 @@ where
 
     let file =
         fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
-    let mut reader = std::io::BufReader::new(file);
-
-    // Consume until we find the array start '['
-    loop {
-        let (consume_amount, found) = {
-            let buf = reader.fill_buf()?;
-            if buf.is_empty() {
-                return Ok(Vec::new());
-            }
-            let mut amount = buf.len();
-            let mut found = false;
-            for (i, &b) in buf.iter().enumerate() {
-                if !(b as char).is_whitespace() {
-                    if b == b'[' {
-                        amount = i + 1;
-                        found = true;
-                    } else {
-                        anyhow::bail!("expected JSON array in {}", path.display());
-                    }
-                    break;
-                }
-            }
-            (amount, found)
-        };
-        reader.consume(consume_amount);
-        if found {
-            break;
-        }
-    }
+    let reader = std::io::BufReader::new(file);
 
     let mut matches = Vec::new();
+    let stream = serde_json::Deserializer::from_reader(reader).into_iter::<T>();
 
-    loop {
-        // Skip whitespace and commas, detect end of array
-        let (consume_amount, is_end_array, is_comma) = {
-            let buf = reader.fill_buf()?;
-            if buf.is_empty() {
-                break;
-            }
-            let mut pos = 0;
-            while pos < buf.len() && (buf[pos] as char).is_whitespace() {
-                pos += 1;
-            }
-            if pos >= buf.len() {
-                (buf.len(), false, false)
-            } else {
-                let b = buf[pos];
-                if b == b']' {
-                    (pos + 1, true, false)
-                } else if b == b',' {
-                    (pos + 1, false, true)
-                } else {
-                    (0, false, false)
-                }
-            }
-        };
-
-        reader.consume(consume_amount);
-
-        if is_end_array {
-            break;
-        }
-        if is_comma || consume_amount > 0 {
-            continue;
-        }
-
-        // Parse next element from the reader
-        let val: T = serde_json::from_reader(&mut reader)
-            .with_context(|| format!("failed to parse element in {}", path.display()))?;
+    for item in stream {
+        let val = item.with_context(|| format!("failed to parse element in {}", path.display()))?;
         if predicate(&val) {
             matches.push(val);
         }

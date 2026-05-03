@@ -177,7 +177,6 @@ pub fn scan_processes_at(proc_root: &Path, cache: &mut ProcessCache) -> BTreeMap
         let starttime_ticks = process_starttime_at(proc_root, pid);
 
         if let Some(cached) = cache.entries.get(&pid)
-            && starttime_ticks.is_some()
             && cached.starttime_ticks == starttime_ticks
         {
             processes.insert(pid, cached.info.clone());

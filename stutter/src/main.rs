@@ -85,6 +85,7 @@ struct HandleEventInput<'a> {
     stats_by_task: &'a mut BTreeMap<u32, metrics::TaskStats>,
     monotonic_start_ns: Option<u64>,
     spike_events: Option<&'a mut SpikeEventBuffer>,
+    alert_sender: Option<&'a std::sync::mpsc::SyncSender<AlertPayload>>,
 }
 
 struct DrainBpfEventsInput<'a> {
@@ -107,6 +108,7 @@ struct DrainBpfEventsInput<'a> {
     block_io_correlation_basis: &'a str,
     cpu_to_pkg: &'a BTreeMap<u32, String>,
     process_cache: &'a mut process_tree::ProcessCache,
+    alert_sender: Option<&'a std::sync::mpsc::SyncSender<AlertPayload>>,
 }
 
 struct TuneCommandInput {
@@ -688,16 +690,22 @@ async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<TuneM
     monitor_result?;
 
     let interval_path = run_dir.join("interval.json");
-    let data = fs::read_to_string(&interval_path)
+    let interval_data = fs::read_to_string(&interval_path)
         .with_context(|| format!("failed to read interval.json from {}", run_dir.display()))?;
-    let mut interval_records: Vec<IntervalRecord> = serde_json::from_str(&data)?;
+    let interval_records: Vec<IntervalRecord> = serde_json::Deserializer::from_str(&interval_data)
+        .into_iter::<IntervalRecord>()
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut interval_records = interval_records;
     let warmup_ms = u128::from(warmup_seconds) * 1_000;
     interval_records.retain(|r| r.elapsed_ms >= warmup_ms);
 
     let frame_path = run_dir.join("frame_correlation.json");
     let mut frame_events: Vec<crate::recorder::FrameEvent> = if frame_path.exists() {
-        let data = fs::read_to_string(&frame_path)?;
-        serde_json::from_str(&data).unwrap_or_default()
+        let frame_data = fs::read_to_string(&frame_path)?;
+        serde_json::Deserializer::from_str(&frame_data)
+            .into_iter::<crate::recorder::FrameEvent>()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -1471,6 +1479,7 @@ struct MonitorSession {
     had_tree_roots: bool,
     interval_label: &'static str,
     block_io_correlation_basis: String,
+    alert_sender: Option<std::sync::mpsc::SyncSender<AlertPayload>>,
 }
 
 impl MonitorSession {
@@ -1600,6 +1609,30 @@ impl MonitorSession {
             "summary"
         };
 
+        let alert_sender = if config.alert_threshold_ns.is_some() {
+            let (tx, rx) = std::sync::mpsc::sync_channel(100);
+            let webhook_url = config.alert_webhook_url.clone();
+            std::thread::Builder::new()
+                .name("stutter-alert".to_owned())
+                .spawn(move || {
+                    while let Ok(payload) = rx.recv() {
+                        let result = if let Some(url) = &webhook_url {
+                            send_webhook_alert(url, &payload)
+                        } else {
+                            send_desktop_alert(&payload)
+                        };
+
+                        if let Err(err) = result {
+                            warn!("alert_delivery_failed err={err}");
+                        }
+                    }
+                })
+                .context("failed to spawn alert worker thread")?;
+            Some(tx)
+        } else {
+            None
+        };
+
         let mut session = Self {
             config,
             watch_state,
@@ -1642,6 +1675,7 @@ impl MonitorSession {
             had_tree_roots,
             interval_label,
             block_io_correlation_basis,
+            alert_sender,
         };
 
         session.refresh_tasks().await?;
@@ -1749,6 +1783,7 @@ impl MonitorSession {
                         block_io_correlation_basis,
                         cpu_to_pkg,
                         process_cache,
+                        alert_sender,
                         ..
                     } = self;
 
@@ -1759,7 +1794,9 @@ impl MonitorSession {
                         active_targets,
                         known_targets,
                         stats_by_task,
-                        recording_monotonic_start_ns: recording.as_ref().and_then(|run| run.monotonic_start_ns),
+                        recording_monotonic_start_ns: recording
+                            .as_ref()
+                            .and_then(|run| run.monotonic_start_ns),
                         spike_events,
                         irq_event_writer: irq_event_writer.as_mut(),
                         irq_event_count: streamed_irq_event_count,
@@ -1772,6 +1809,7 @@ impl MonitorSession {
                         block_io_correlation_basis,
                         cpu_to_pkg,
                         process_cache,
+                        alert_sender: alert_sender.as_ref(),
                     });
                 }
             }
@@ -2312,6 +2350,7 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
         block_io_correlation_basis,
         cpu_to_pkg,
         process_cache,
+        alert_sender,
     } = input;
 
     while let Some(item) = guard.get_inner_mut().next() {
@@ -2339,6 +2378,7 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
                     stats_by_task,
                     monotonic_start_ns: recording_monotonic_start_ns,
                     spike_events: spike_events.as_mut(),
+                    alert_sender,
                 });
             }
             EVENT_IRQ_LATENCY => {
@@ -2510,71 +2550,66 @@ fn handle_event(input: HandleEventInput<'_>) {
         stats_by_task,
         monotonic_start_ns,
         spike_events,
+        alert_sender,
     } = input;
 
-    match event.kind {
-        EVENT_RUNNABLE_LATENCY => {
-            let comm = metrics::comm_to_string(&event.comm);
-            let elapsed_ms = started.elapsed().as_millis();
+    debug_assert_eq!(event.kind, EVENT_RUNNABLE_LATENCY);
 
-            let task_info = active_targets
-                .get(&event.pid)
-                .or_else(|| known_targets.get(&event.pid));
+    let comm = metrics::comm_to_string(&event.comm);
+    let elapsed_ms = started.elapsed().as_millis();
 
-            let stats = stats_by_task
-                .entry(event.pid)
-                .or_insert_with(|| metrics::TaskStats::new(event.pid, comm.clone(), elapsed_ms));
+    let task_info = active_targets
+        .get(&event.pid)
+        .or_else(|| known_targets.get(&event.pid));
 
-            if should_replace_unknown_comm(&stats.comm, &comm) {
-                stats.comm = comm.clone();
-            }
+    let stats = stats_by_task
+        .entry(event.pid)
+        .or_insert_with(|| metrics::TaskStats::new(event.pid, comm.clone(), elapsed_ms));
 
-            if let Some(task_info) = task_info {
-                stats.apply_task_info(task_info);
-                stats.active = active_targets.contains_key(&event.pid);
-            } else if config.cgroupv2.is_some() {
-                stats.active = true;
-            }
+    if should_replace_unknown_comm(&stats.comm, &comm) {
+        stats.comm = comm.clone();
+    }
 
-            let fault_deltas = stats.record(event, config.spike_threshold_ns, elapsed_ms);
+    if let Some(task_info) = task_info {
+        stats.apply_task_info(task_info);
+        stats.active = active_targets.contains_key(&event.pid);
+    } else if config.cgroupv2.is_some() {
+        stats.active = true;
+    }
 
-            let alert_payload = if config
-                .alert_threshold_ns
-                .is_some_and(|threshold| event.latency_ns >= threshold)
-            {
-                Some(AlertPayload::from_task_stats(stats, event, elapsed_ms))
-            } else {
-                None
-            };
+    let fault_deltas = stats.record(event, config.spike_threshold_ns, elapsed_ms);
 
-            if event.latency_ns >= config.spike_threshold_ns
-                && let Some(spike_events) = spike_events
-            {
-                spike_events.push(recorder::SpikeEvent::from_task_stats(
-                    monotonic_start_ns,
-                    stats,
-                    event,
-                    fault_deltas,
-                ));
-            }
+    let alert_payload = if config
+        .alert_threshold_ns
+        .is_some_and(|threshold| event.latency_ns >= threshold)
+    {
+        Some(AlertPayload::from_task_stats(stats, event, elapsed_ms))
+    } else {
+        None
+    };
 
-            if config.verbose {
-                print_event(event, &comm, "sample");
-            } else if event.latency_ns >= config.spike_threshold_ns {
-                print_event(event, &comm, "spike");
-            }
+    if event.latency_ns >= config.spike_threshold_ns
+        && let Some(spike_events) = spike_events
+    {
+        spike_events.push(recorder::SpikeEvent::from_task_stats(
+            monotonic_start_ns,
+            stats,
+            event,
+            fault_deltas,
+        ));
+    }
 
-            if let Some(alert_payload) = alert_payload {
-                dispatch_alert(config, alert_payload);
-            }
-        }
-        other => {
-            let comm = metrics::comm_to_string(&event.comm);
-            info!(
-                "unknown_event kind={} task={} cpu={} comm={}",
-                other, event.pid, event.cpu, comm
-            );
-        }
+    if config.verbose {
+        print_event(event, &comm, "sample");
+    } else if event.latency_ns >= config.spike_threshold_ns {
+        print_event(event, &comm, "spike");
+    }
+
+    if let Some(alert_payload) = alert_payload
+        && let Some(sender) = alert_sender
+        && let Err(err) = sender.try_send(alert_payload)
+    {
+        warn!("alert_send_failed err={err}");
     }
 }
 
@@ -2635,26 +2670,6 @@ impl AlertPayload {
     }
 }
 
-fn dispatch_alert(config: &Config, payload: AlertPayload) {
-    let webhook_url = config.alert_webhook_url.clone();
-    let spawn_result = std::thread::Builder::new()
-        .name("stutter-alert".to_owned())
-        .spawn(move || {
-            let result = if let Some(url) = webhook_url {
-                send_webhook_alert(&url, &payload)
-            } else {
-                send_desktop_alert(&payload)
-            };
-
-            if let Err(err) = result {
-                warn!("alert_delivery_failed err={err}");
-            }
-        });
-
-    if let Err(err) = spawn_result {
-        warn!("alert_thread_spawn_failed err={err}");
-    }
-}
 
 fn send_desktop_alert(payload: &AlertPayload) -> Result<(), String> {
     let status = std::process::Command::new("notify-send")

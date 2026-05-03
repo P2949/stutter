@@ -109,10 +109,8 @@ impl JsonArrayWriter {
             fs::create_dir_all(parent)?;
         }
 
-        let mut file = fs::File::create(&path)
+        let file = fs::File::create(&path)
             .with_context(|| format!("failed to create JSON stream {}", path.display()))?;
-        file.write_all(b"[")
-            .with_context(|| format!("failed to start JSON stream {}", path.display()))?;
 
         Ok(Self {
             file,
@@ -127,15 +125,10 @@ impl JsonArrayWriter {
             anyhow::bail!("JSON stream {} is already finalized", self.path.display());
         }
 
-        if self.wrote_any {
-            self.file.write_all(b",\n")?;
-        } else {
-            self.file.write_all(b"\n")?;
-            self.wrote_any = true;
-        }
-
         serde_json::to_writer(&mut self.file, value)
             .with_context(|| format!("failed to write JSON stream {}", self.path.display()))?;
+        self.file.write_all(b"\n")?;
+        self.wrote_any = true;
         Ok(())
     }
 
@@ -144,11 +137,6 @@ impl JsonArrayWriter {
             return Ok(());
         }
 
-        if self.wrote_any {
-            self.file.write_all(b"\n]\n")?;
-        } else {
-            self.file.write_all(b"]\n")?;
-        }
         self.file
             .sync_all()
             .with_context(|| format!("failed to sync JSON stream {}", self.path.display()))?;
@@ -923,20 +911,24 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     write_json(recording.run_dir.join("session.json"), &session).map_err(map_write_err)?;
     write_json(recording.run_dir.join("metadata.json"), &metadata_file).map_err(map_write_err)?;
     if input.streamed_interval_record_count.is_none() {
-        write_json(recording.run_dir.join("interval.json"), interval_records)
+        write_json_stream(recording.run_dir.join("interval.json"), interval_records)
             .map_err(map_write_err)?;
     }
-    write_json(recording.run_dir.join("tree_events.json"), tree_events).map_err(map_write_err)?;
-    write_json(recording.run_dir.join("spike_events.json"), spike_events).map_err(map_write_err)?;
-    write_json(recording.run_dir.join("scx_events.json"), scx_events).map_err(map_write_err)?;
+    write_json_stream(recording.run_dir.join("tree_events.json"), tree_events)
+        .map_err(map_write_err)?;
+    write_json_stream(recording.run_dir.join("spike_events.json"), spike_events)
+        .map_err(map_write_err)?;
+    write_json_stream(recording.run_dir.join("scx_events.json"), scx_events)
+        .map_err(map_write_err)?;
     if input.streamed_irq_event_count.is_none() {
-        write_json(recording.run_dir.join("irq_events.json"), irq_events).map_err(map_write_err)?;
+        write_json_stream(recording.run_dir.join("irq_events.json"), irq_events)
+            .map_err(map_write_err)?;
     }
     if input.streamed_gpu_sample_count.is_none() {
-        write_json(recording.run_dir.join("gpu_samples.json"), gpu_samples)
+        write_json_stream(recording.run_dir.join("gpu_samples.json"), gpu_samples)
             .map_err(map_write_err)?;
     }
-    write_json(
+    write_json_stream(
         recording.run_dir.join("frame_correlation.json"),
         frame_events,
     )
@@ -1183,16 +1175,28 @@ fn write_json<T: ?Sized + Serialize>(path: PathBuf, value: &T) -> anyhow::Result
     file.write_all(&serde_json::to_vec_pretty(value)?)
         .with_context(|| format!("failed to write temp JSON {}", tmp_path.display()))?;
     file.write_all(b"\n")
-        .with_context(|| format!("failed to finish temp JSON {}", tmp_path.display()))?;
+        .with_context(|| format!("failed to finalize temp JSON {}", tmp_path.display()))?;
     file.sync_all()
         .with_context(|| format!("failed to sync temp JSON {}", tmp_path.display()))?;
-    fs::rename(&tmp_path, &path).with_context(|| {
-        format!(
-            "failed to atomically rename {} to {}",
-            tmp_path.display(),
-            path.display()
-        )
-    })?;
+    drop(file);
+    fs::rename(&tmp_path, &path)
+        .with_context(|| format!("failed to rename temp JSON {}", tmp_path.display()))?;
+
+    if let Some(parent) = path.parent()
+        && let Ok(dir) = fs::File::open(parent)
+    {
+        let _ = dir.sync_all();
+    }
+
+    Ok(())
+}
+
+fn write_json_stream<T: Serialize>(path: PathBuf, values: &[T]) -> anyhow::Result<()> {
+    let mut writer = JsonArrayWriter::create(path.clone())?;
+    for value in values {
+        writer.push(value)?;
+    }
+    writer.finish()?;
 
     if let Some(parent) = path.parent()
         && let Ok(dir) = fs::File::open(parent)
@@ -1208,7 +1212,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn json_array_writer_outputs_valid_arrays() {
+    fn json_array_writer_outputs_valid_concatenated_json() {
         let dir = temp_dir("json-array-writer");
         fs::create_dir_all(&dir).unwrap();
         let empty_path = dir.join("empty.json");
@@ -1216,9 +1220,7 @@ mod tests {
             let mut writer = JsonArrayWriter::create(empty_path.clone()).unwrap();
             writer.finish().unwrap();
         }
-        let empty: Vec<serde_json::Value> =
-            serde_json::from_str(&fs::read_to_string(&empty_path).unwrap()).unwrap();
-        assert!(empty.is_empty());
+        assert!(fs::read_to_string(&empty_path).unwrap().is_empty());
 
         let single_path = dir.join("single.json");
         {
@@ -1226,8 +1228,12 @@ mod tests {
             writer.push(&serde_json::json!({"one": true})).unwrap();
             writer.finish().unwrap();
         }
-        let single: Vec<serde_json::Value> =
-            serde_json::from_str(&fs::read_to_string(&single_path).unwrap()).unwrap();
+        let single: Vec<serde_json::Value> = serde_json::Deserializer::from_reader(
+            fs::File::open(&single_path).unwrap(),
+        )
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
         assert_eq!(single.len(), 1);
 
         let path = dir.join("items.json");
@@ -1240,7 +1246,10 @@ mod tests {
         }
 
         let values: Vec<serde_json::Value> =
-            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            serde_json::Deserializer::from_reader(fs::File::open(&path).unwrap())
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
         assert_eq!(values.len(), 2);
         fs::remove_dir_all(dir).ok();
     }
