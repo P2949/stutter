@@ -1,8 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    path::Path,
-    time::Instant,
-};
+use std::{collections::BTreeMap, time::Instant};
 
 use aya::maps::{HashMap as AyaHashMap, MapData};
 use log::info;
@@ -36,18 +32,16 @@ impl TaskTracker {
         elapsed_ms: u128,
         recording_started: Option<Instant>,
     ) -> anyhow::Result<()> {
-        let snapshot = crate::process_tree::target_snapshot_filtered_at_with_options(
-            crate::process_tree::TargetSnapshotInput {
-                proc_root: Path::new("/proc"),
-                manual_pids: &config.target_pids,
-                tree_pids: &config.tree_pids,
-                cgroup_path: config.cgroupv2.as_deref(),
-                exclude_tree_pids: &config.exclude_tree_pids,
-                filters: &config.task_filters,
-                keep_missing_pid: config.keep_missing_pid,
-                cache: &mut self.cache,
-                previous_tasks: Some(&self.active_targets),
-            },
+        let snapshot = crate::process_tree::target_snapshot(
+            crate::process_tree::TargetSnapshotInput::default()
+                .manual_pids(&config.target_pids)
+                .tree_pids(&config.tree_pids)
+                .cgroup_path(config.cgroupv2.as_deref())
+                .exclude_tree_pids(&config.exclude_tree_pids)
+                .filters(&config.task_filters)
+                .keep_missing_pid(config.keep_missing_pid)
+                .cache(&mut self.cache)
+                .previous_tasks(Some(&self.active_targets)),
         );
 
         self.handle_replacements(
