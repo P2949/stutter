@@ -15,3 +15,5 @@ which = { workspace = true }
 [[bin]]
 name = "stutter"
 path = "src/main.rs"
+test = false
+bench = false
