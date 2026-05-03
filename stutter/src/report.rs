@@ -605,12 +605,14 @@ fn render_html_report(
     text_report: &str,
     top: usize,
 ) -> String {
-    let session_json = serde_json::to_string(session).unwrap_or_else(|_| "{}".to_owned());
+    let session_json =
+        json_escape(&serde_json::to_string(session).unwrap_or_else(|_| "{}".to_owned()));
     let spike_events_json =
-        serde_json::to_string(&spike_events).unwrap_or_else(|_| "null".to_owned());
-    let artifacts_json = serde_json::to_string(artifacts).unwrap_or_else(|_| "{}".to_owned());
+        json_escape(&serde_json::to_string(&spike_events).unwrap_or_else(|_| "null".to_owned()));
+    let artifacts_json =
+        json_escape(&serde_json::to_string(artifacts).unwrap_or_else(|_| "{}".to_owned()));
     let cluster_analysis_json =
-        serde_json::to_string(&cluster_analysis).unwrap_or_else(|_| "{}".to_owned());
+        json_escape(&serde_json::to_string(&cluster_analysis).unwrap_or_else(|_| "{}".to_owned()));
 
     let template = include_str!("report_template.html");
 
@@ -621,6 +623,12 @@ fn render_html_report(
         .replace("{artifacts_json}", &artifacts_json)
         .replace("{cluster_analysis_json}", &cluster_analysis_json)
         .replace("{top}", &top.to_string())
+}
+
+fn json_escape(s: &str) -> String {
+    s.replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026")
 }
 
 fn html_escape(value: &str) -> String {

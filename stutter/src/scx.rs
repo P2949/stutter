@@ -27,7 +27,7 @@ impl ScxTracker {
     pub fn sample(&mut self, elapsed_ms: u128) {
         self.sample_at(Path::new("/sys/kernel/sched_ext"), elapsed_ms);
     }
-
+#[allow(dead_code)]
     pub fn events(&self) -> &[ScxEvent] {
         &self.events
     }
