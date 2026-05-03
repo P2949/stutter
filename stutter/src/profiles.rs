@@ -25,7 +25,6 @@ pub struct ProfileRule {
     pub match_comm: Vec<CompiledPattern>,
 }
 
-
 #[derive(Default)]
 pub struct ProfileApplyCache {
     known_correct: BTreeSet<ProfileApplyCacheKey>,
@@ -276,7 +275,6 @@ impl ProfileApplyCacheKey {
         }
     }
 }
-
 
 fn parse_profiles(data: &str) -> anyhow::Result<Vec<Profile>> {
     let file = toml::from_str::<ProfilesFile>(data)?;

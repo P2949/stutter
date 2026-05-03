@@ -76,6 +76,41 @@ struct RefreshTargetTasksInput<'a> {
     process_cache: &'a mut process_tree::ProcessCache,
 }
 
+struct TuneProfileRefreshInput {
+    tree_pid: u32,
+    profile: profiles::Profile,
+    cache: profiles::ProfileApplyCache,
+    force_restore_overwrite: bool,
+    refresh_ms: u64,
+    stop_refresh: Arc<AtomicBool>,
+    applied_tasks: Arc<AtomicUsize>,
+    enforce: bool,
+}
+
+struct ApplyProfileCommandInput {
+    tree_pid: u32,
+    profile_path: PathBuf,
+    force: bool,
+    dry_run: bool,
+    watch: bool,
+    keep_applied: bool,
+    refresh_ms: u64,
+    enforce: bool,
+}
+
+struct HandleSameTidReplacementsInput<'a, 'b> {
+    active_targets: &'a BTreeMap<u32, TaskInfo>,
+    desired_tasks: &'a BTreeMap<u32, TaskInfo>,
+    known_targets: &'b mut BTreeMap<u32, TaskInfo>,
+    stats_by_task: &'b mut BTreeMap<u32, metrics::TaskStats>,
+    task_exe_inodes: &'b mut TaskExeInodesMap,
+    tree_events: &'b mut Vec<TreeEvent>,
+    prev_faults_map: &'b mut Option<&'a mut AyaHashMap<MapData, u32, [u64; 2]>>,
+    prev_faults_snapshot: &'b mut BTreeMap<u32, (u64, u64)>,
+    elapsed_ms: u128,
+    recording_started: Option<Instant>,
+}
+
 struct HandleEventInput<'a> {
     event: &'a SchedulerEvent,
     config: &'a Config,
@@ -154,16 +189,16 @@ async fn main() -> anyhow::Result<()> {
             refresh_ms,
             enforce,
         } => {
-            apply_profile_command(
+            apply_profile_command(ApplyProfileCommandInput {
                 tree_pid,
-                profile,
+                profile_path: profile,
                 force,
                 dry_run,
                 watch,
                 keep_applied,
                 refresh_ms,
                 enforce,
-            )
+            })
             .await
         }
         AppCommand::InspectTree { tree_pid } => {
@@ -648,16 +683,16 @@ async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<TuneM
 
     let stop_refresh = Arc::new(AtomicBool::new(false));
     let refreshed_applied_tasks = Arc::new(AtomicUsize::new(0));
-    let mut profile_refresh = tokio::spawn(tune_profile_refresh_loop(
+    let mut profile_refresh = tokio::spawn(tune_profile_refresh_loop(TuneProfileRefreshInput {
         tree_pid,
         profile,
         cache,
-        should_force_refresh,
-        TUNE_PROFILE_REFRESH_MS,
-        stop_refresh.clone(),
-        refreshed_applied_tasks.clone(),
+        force_restore_overwrite: should_force_refresh,
+        refresh_ms: TUNE_PROFILE_REFRESH_MS,
+        stop_refresh: stop_refresh.clone(),
+        applied_tasks: refreshed_applied_tasks.clone(),
         enforce,
-    ));
+    }));
 
     let mut profile_refresh_finished = false;
     let monitor_result = tokio::select! {
@@ -726,17 +761,17 @@ async fn measure_tune_candidate(input: TuneMeasureInput) -> anyhow::Result<TuneM
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn tune_profile_refresh_loop(
-    tree_pid: u32,
-    profile: profiles::Profile,
-    mut cache: profiles::ProfileApplyCache,
-    force_restore_overwrite: bool,
-    refresh_ms: u64,
-    stop_refresh: Arc<AtomicBool>,
-    applied_tasks: Arc<AtomicUsize>,
-    enforce: bool,
-) -> anyhow::Result<()> {
+async fn tune_profile_refresh_loop(input: TuneProfileRefreshInput) -> anyhow::Result<()> {
+    let TuneProfileRefreshInput {
+        tree_pid,
+        profile,
+        mut cache,
+        force_restore_overwrite,
+        refresh_ms,
+        stop_refresh,
+        applied_tasks,
+        enforce,
+    } = input;
     let mut should_force = force_restore_overwrite;
     let refresh_interval = Duration::from_millis(refresh_ms);
     let verify_interval = Duration::from_millis(PROFILE_WATCH_VERIFY_MS);
@@ -1233,17 +1268,17 @@ fn unix_nanos_now() -> u128 {
         .as_nanos()
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn apply_profile_command(
-    tree_pid: u32,
-    profile_path: PathBuf,
-    force: bool,
-    dry_run: bool,
-    watch: bool,
-    keep_applied: bool,
-    refresh_ms: u64,
-    enforce: bool,
-) -> anyhow::Result<()> {
+async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::Result<()> {
+    let ApplyProfileCommandInput {
+        tree_pid,
+        profile_path,
+        force,
+        dry_run,
+        watch,
+        keep_applied,
+        refresh_ms,
+        enforce,
+    } = input;
     let profile = profiles::load_first_profile(&profile_path)?;
     let mut cache = profiles::ProfileApplyCache::default();
 
@@ -1970,7 +2005,8 @@ impl MonitorSession {
             &mut self.watch_process_cache,
         ) {
             add_watch_tree_pid(&mut self.config, pid);
-            self.tree_root_starttimes.insert(pid, process_root_starttime(pid));
+            self.tree_root_starttimes
+                .insert(pid, process_root_starttime(pid));
             self.watch_state = WatchProcessState::Running(pid);
             info!("watch_process_relaunched pattern={} pid={}", pattern, pid);
 
@@ -2059,15 +2095,18 @@ impl MonitorSession {
                 writer.finish()?;
             }
 
-            let spike_events_slice = self.spike_events
+            let spike_events_slice = self
+                .spike_events
                 .as_ref()
                 .map(SpikeEventBuffer::as_slice)
                 .unwrap_or(&[]);
-            let spike_events_truncated = self.spike_events
+            let spike_events_truncated = self
+                .spike_events
                 .as_ref()
                 .map(SpikeEventBuffer::truncated)
                 .unwrap_or(false);
-            let spike_events_dropped_count = self.spike_events
+            let spike_events_dropped_count = self
+                .spike_events
                 .as_ref()
                 .map(SpikeEventBuffer::dropped_count)
                 .unwrap_or(0);
@@ -2094,7 +2133,8 @@ impl MonitorSession {
                 active_targets: &self.active_targets,
                 stats_by_task: &self.stats_by_task,
                 interval_records: &self.interval_records,
-                streamed_interval_record_count: self.interval_writer
+                streamed_interval_record_count: self
+                    .interval_writer
                     .is_some()
                     .then_some(self.streamed_interval_record_count),
                 intervals_dropped: self.intervals_dropped,
@@ -2104,17 +2144,21 @@ impl MonitorSession {
                 spike_events_dropped_count,
                 scx_events: self.scx_tracker.events(),
                 irq_events: &self.irq_events,
-                streamed_irq_event_count: self.irq_event_writer
+                streamed_irq_event_count: self
+                    .irq_event_writer
                     .is_some()
                     .then_some(self.streamed_irq_event_count),
-                migration_event_count: self.migration_event_writer
+                migration_event_count: self
+                    .migration_event_writer
                     .is_some()
                     .then_some(self.streamed_migration_event_count),
-                cpu_freq_sample_count: self.cpu_freq_sample_writer
+                cpu_freq_sample_count: self
+                    .cpu_freq_sample_writer
                     .is_some()
                     .then_some(self.streamed_cpu_freq_sample_count),
                 gpu_samples: &self.gpu_samples,
-                streamed_gpu_sample_count: self.gpu_sample_writer
+                streamed_gpu_sample_count: self
+                    .gpu_sample_writer
                     .is_some()
                     .then_some(self.streamed_gpu_sample_count),
                 block_io_event_count: self.streamed_block_io_event_count,
@@ -2128,7 +2172,6 @@ impl MonitorSession {
         Ok(())
     }
 }
-
 
 async fn run_monitor(
     config: Config,
@@ -2380,11 +2423,9 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
         match kind {
             EVENT_RUNNABLE_LATENCY => {
                 let Some(event) = cast_event::<SchedulerEvent>(&item) else {
-
                     warn!("short_scheduler_event len={}", item.len());
                     continue;
                 };
-
 
                 handle_event(HandleEventInput {
                     event,
@@ -2400,7 +2441,6 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
             }
             EVENT_IRQ_LATENCY => {
                 let Some(event) = cast_event::<IrqEvent>(&item) else {
-
                     warn!("short_irq_event len={}", item.len());
                     continue;
                 };
@@ -2413,7 +2453,6 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
             }
             EVENT_MIGRATION => {
                 let Some(event) = cast_event::<MigrationEvent>(&item) else {
-
                     warn!("short_migration_event len={}", item.len());
                     continue;
                 };
@@ -2450,7 +2489,6 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
             }
             EVENT_CPU_FREQ => {
                 let Some(event) = cast_event::<CpuFreqEvent>(&item) else {
-
                     warn!("short_cpu_freq_event len={}", item.len());
                     continue;
                 };
@@ -2474,7 +2512,6 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
             }
             EVENT_STAT_WAIT => {
                 let Some(event) = cast_event::<StatWaitEvent>(&item) else {
-
                     warn!("short_stat_wait_event len={}", item.len());
                     continue;
                 };
@@ -2486,7 +2523,6 @@ fn drain_bpf_events(input: DrainBpfEventsInput<'_>) {
             }
             EVENT_BLOCK_IO => {
                 let Some(event) = cast_event::<BlockIoEvent>(&item) else {
-
                     warn!("short_block_io_event len={}", item.len());
                     continue;
                 };
@@ -2687,7 +2723,6 @@ impl AlertPayload {
     }
 }
 
-
 fn send_desktop_alert(payload: &AlertPayload) -> Result<(), String> {
     let status = std::process::Command::new("notify-send")
         .args([
@@ -2783,16 +2818,17 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
     let active_targets_clone = active_targets.clone();
 
     let (snapshot, returned_cache) = task::spawn_blocking(move || {
-        let snap = process_tree::target_snapshot_with_options(
-            &target_pids,
-            &tree_pids,
-            cgroup_path.as_deref(),
-            &exclude_tree_pids,
-            &filters,
+        let snap = process_tree::target_snapshot_with_options(process_tree::TargetSnapshotInput {
+            proc_root: Path::new("/proc"),
+            manual_pids: &target_pids,
+            tree_pids: &tree_pids,
+            cgroup_path: cgroup_path.as_deref(),
+            exclude_tree_pids: &exclude_tree_pids,
+            filters: &filters,
             keep_missing_pid,
-            &mut process_cache_owned,
-            Some(&active_targets_clone),
-        );
+            cache: &mut process_cache_owned,
+            previous_tasks: Some(&active_targets_clone),
+        });
         (snap, process_cache_owned)
     })
     .await
@@ -2809,18 +2845,18 @@ async fn refresh_target_tasks(input: RefreshTargetTasksInput<'_>) -> anyhow::Res
         );
     }
 
-    handle_same_tid_replacements(
+    handle_same_tid_replacements(HandleSameTidReplacementsInput {
         active_targets,
-        &desired_tasks,
+        desired_tasks: &desired_tasks,
         known_targets,
         stats_by_task,
         task_exe_inodes,
         tree_events,
-        &mut prev_faults_map,
+        prev_faults_map: &mut prev_faults_map,
         prev_faults_snapshot,
         elapsed_ms,
         recording_started,
-    );
+    });
 
     for diff in process_tree::diff_tasks_ref(active_targets, &desired_tasks) {
         match diff.action {
@@ -2937,19 +2973,19 @@ fn should_replace_unknown_comm(current: &str, incoming: &str) -> bool {
     (current == "?" || current.is_empty()) && incoming != "?" && !incoming.is_empty()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn handle_same_tid_replacements(
-    active_targets: &BTreeMap<u32, TaskInfo>,
-    desired_tasks: &BTreeMap<u32, TaskInfo>,
-    known_targets: &mut BTreeMap<u32, TaskInfo>,
-    stats_by_task: &mut BTreeMap<u32, metrics::TaskStats>,
-    task_exe_inodes: &mut TaskExeInodesMap,
-    tree_events: &mut Vec<TreeEvent>,
-    prev_faults_map: &mut Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
-    prev_faults_snapshot: &mut BTreeMap<u32, (u64, u64)>,
-    elapsed_ms: u128,
-    recording_started: Option<Instant>,
-) {
+fn handle_same_tid_replacements(input: HandleSameTidReplacementsInput<'_, '_>) {
+    let HandleSameTidReplacementsInput {
+        active_targets,
+        desired_tasks,
+        known_targets,
+        stats_by_task,
+        task_exe_inodes,
+        tree_events,
+        prev_faults_map,
+        prev_faults_snapshot,
+        elapsed_ms,
+        recording_started,
+    } = input;
     for (tid, desired_task) in desired_tasks {
         let Some(active_task) = active_targets.get(tid) else {
             continue;

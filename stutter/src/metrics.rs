@@ -631,6 +631,10 @@ pub fn collect_interval_summaries_labeled(
     psi_snapshot: Option<&crate::psi::PsiSnapshot>,
     prev_faults_snapshot: &mut BTreeMap<u32, (u64, u64)>,
 ) -> Vec<IntervalRecord> {
+    if prev_faults_map.is_none() {
+        prev_faults_snapshot.clear();
+    }
+
     let mut interval_records = Vec::new();
 
     for (task, stats) in stats_by_task.iter_mut() {
@@ -639,18 +643,21 @@ pub fn collect_interval_summaries_labeled(
         // update both the stats and the snapshot for next interval.
         let mut maj_delta = 0u64;
         let mut min_delta = 0u64;
+        let mut counters = None;
+
         if let Some(map) = prev_faults_map
-            && let Ok(counters) = map.get(task, 0)
+            && let Ok(c) = map.get(task, 0)
         {
-            let current_maj = counters[0];
-            let current_min = counters[1];
+            let current_maj = c[0];
+            let current_min = c[1];
             let prev = prev_faults_snapshot
                 .get(task)
                 .copied()
                 .unwrap_or((current_maj, current_min));
+
             maj_delta = current_maj.saturating_sub(prev.0);
             min_delta = current_min.saturating_sub(prev.1);
-            prev_faults_snapshot.insert(*task, (current_maj, current_min));
+            counters = Some((current_maj, current_min));
 
             // Preserve the TaskStats fields for use by spike delta calculations
             // elsewhere (they store the last seen cumulative counts).
@@ -662,18 +669,29 @@ pub fn collect_interval_summaries_labeled(
             continue;
         };
 
+        if let Some((current_maj, current_min)) = counters {
+            prev_faults_snapshot.insert(*task, (current_maj, current_min));
+        } else {
+            // If we didn't get a fresh reading from the eBPF map this interval
+            // (either because the map is globally missing or this task was absent),
+            // we must clear any previous snapshot state for this task.
+            prev_faults_snapshot.remove(task);
+        }
+
         let cpu = stats.interval_cpu.snapshot_and_reset();
 
         print_latency_line(label, *task, &stats.comm, &latency, &cpu);
         interval_records.push(interval_record_from_snapshot(
-            *task,
-            stats,
-            &latency,
-            &cpu,
-            elapsed_ms,
-            drop_counters,
-            psi_snapshot,
-            (maj_delta, min_delta),
+            IntervalRecordFromSnapshotInput {
+                task: *task,
+                stats,
+                latency: &latency,
+                cpu: &cpu,
+                elapsed_ms,
+                drop_counters,
+                psi: psi_snapshot,
+                faults_delta: (maj_delta, min_delta),
+            },
         ));
     }
 
@@ -724,17 +742,28 @@ pub fn print_session_summaries(stats_by_task: &mut BTreeMap<u32, TaskStats>) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn interval_record_from_snapshot(
-    task: u32,
-    stats: &TaskStats,
-    latency: &LatencySnapshot,
-    cpu: &CpuSnapshot,
-    elapsed_ms: u128,
-    drop_counters: &crate::ebpf_loader::DropCountersSnapshot,
-    psi: Option<&crate::psi::PsiSnapshot>,
-    faults_delta: (u64, u64),
-) -> IntervalRecord {
+pub struct IntervalRecordFromSnapshotInput<'a> {
+    pub task: u32,
+    pub stats: &'a TaskStats,
+    pub latency: &'a LatencySnapshot,
+    pub cpu: &'a CpuSnapshot,
+    pub elapsed_ms: u128,
+    pub drop_counters: &'a crate::ebpf_loader::DropCountersSnapshot,
+    pub psi: Option<&'a crate::psi::PsiSnapshot>,
+    pub faults_delta: (u64, u64),
+}
+
+pub fn interval_record_from_snapshot(input: IntervalRecordFromSnapshotInput) -> IntervalRecord {
+    let IntervalRecordFromSnapshotInput {
+        task,
+        stats,
+        latency,
+        cpu,
+        elapsed_ms,
+        drop_counters,
+        psi,
+        faults_delta,
+    } = input;
     IntervalRecord {
         elapsed_ms,
         task,

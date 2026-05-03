@@ -6,7 +6,6 @@ use std::{
 };
 
 use regex::Regex;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default)]
@@ -123,6 +122,18 @@ pub struct TargetSnapshot {
     pub tasks: BTreeMap<u32, TaskInfo>,
 }
 
+pub struct TargetSnapshotInput<'a> {
+    pub proc_root: &'a Path,
+    pub manual_pids: &'a [u32],
+    pub tree_pids: &'a [u32],
+    pub cgroup_path: Option<&'a Path>,
+    pub exclude_tree_pids: &'a [u32],
+    pub filters: &'a TaskFilters,
+    pub keep_missing_pid: bool,
+    pub cache: &'a mut ProcessCache,
+    pub previous_tasks: Option<&'a BTreeMap<u32, TaskInfo>>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskFilters {
     pub include_comm: Vec<CompiledPattern>,
@@ -138,7 +149,10 @@ pub struct CompiledPattern {
 impl CompiledPattern {
     pub fn new(raw: String) -> anyhow::Result<Self> {
         let regex = if let Some(inner) = raw.strip_prefix('/').and_then(|s| s.strip_suffix('/')) {
-            Some(Regex::new(inner).map_err(|e| anyhow::anyhow!("invalid regex in pattern '{}': {e}", raw))?)
+            Some(
+                Regex::new(inner)
+                    .map_err(|e| anyhow::anyhow!("invalid regex in pattern '{}': {e}", raw))?,
+            )
         } else {
             None
         };
@@ -160,7 +174,6 @@ impl CompiledPattern {
         }
     }
 }
-
 
 impl PartialEq for CompiledPattern {
     fn eq(&self, other: &Self) -> bool {
@@ -361,28 +374,9 @@ pub fn target_snapshot(
     target_snapshot_at(Path::new("/proc"), manual_pids, tree_pids, cgroup_path)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn target_snapshot_with_options(
-    manual_pids: &[u32],
-    tree_pids: &[u32],
-    cgroup_path: Option<&Path>,
-    exclude_tree_pids: &[u32],
-    filters: &TaskFilters,
-    keep_missing_pid: bool,
-    cache: &mut ProcessCache,
-    previous_tasks: Option<&BTreeMap<u32, TaskInfo>>,
-) -> TargetSnapshot {
-    target_snapshot_filtered_at_with_options(
-        Path::new("/proc"),
-        manual_pids,
-        tree_pids,
-        cgroup_path,
-        exclude_tree_pids,
-        filters,
-        keep_missing_pid,
-        cache,
-        previous_tasks,
-    )
+pub fn target_snapshot_with_options(mut input: TargetSnapshotInput) -> TargetSnapshot {
+    input.proc_root = Path::new("/proc");
+    target_snapshot_filtered_at_with_options(input)
 }
 
 pub fn target_snapshot_at(
@@ -407,31 +401,31 @@ pub fn target_snapshot_filtered_at(
     cgroup_path: Option<&Path>,
     filters: &TaskFilters,
 ) -> TargetSnapshot {
-    target_snapshot_filtered_at_with_options(
+    target_snapshot_filtered_at_with_options(TargetSnapshotInput {
         proc_root,
         manual_pids,
         tree_pids,
         cgroup_path,
-        &[],
+        exclude_tree_pids: &[],
         filters,
-        false,
-        &mut ProcessCache::default(),
-        None,
-    )
+        keep_missing_pid: false,
+        cache: &mut ProcessCache::default(),
+        previous_tasks: None,
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn target_snapshot_filtered_at_with_options(
-    proc_root: &Path,
-    manual_pids: &[u32],
-    tree_pids: &[u32],
-    cgroup_path: Option<&Path>,
-    exclude_tree_pids: &[u32],
-    filters: &TaskFilters,
-    keep_missing_pid: bool,
-    cache: &mut ProcessCache,
-    previous_tasks: Option<&BTreeMap<u32, TaskInfo>>,
-) -> TargetSnapshot {
+pub fn target_snapshot_filtered_at_with_options(input: TargetSnapshotInput) -> TargetSnapshot {
+    let TargetSnapshotInput {
+        proc_root,
+        manual_pids,
+        tree_pids,
+        cgroup_path,
+        exclude_tree_pids,
+        filters,
+        keep_missing_pid,
+        cache,
+        previous_tasks,
+    } = input;
     let processes = scan_processes_at(proc_root, cache);
     let mut requested_roots = BTreeSet::new();
     let mut process_roots = BTreeSet::new();
