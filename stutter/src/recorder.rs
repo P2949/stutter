@@ -9,11 +9,9 @@ use std::{
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use stutter_common::SchedulerEvent;
-
 use crate::{
     cli::{Config, RecordingConfig, TARGET_PIDS_MAX},
     ebpf_loader::DropCountersSnapshot,
-    error::StutterError,
     metadata::{SystemMetadata, collect_system_metadata},
     metrics::{
         CpuLine, CpuSnapshot, IntervalRecord as MetricsIntervalRecord, LatencyHistogramBucket,
@@ -723,8 +721,7 @@ pub fn prepare_recording(config: &Config) -> anyhow::Result<Option<RecordingRun>
     let started_at = SystemTime::now();
     let run_dir = resolve_run_dir(recording, started_at, env::var_os("HOME"));
     if let Err(err) = ensure_empty_dir(&run_dir) {
-        let io_err = io::Error::other(err);
-        return Err(anyhow::Error::new(StutterError::RecordWrite(io_err)));
+        return Err(err.context("record write failed"));
     }
 
     Ok(Some(RecordingRun {
@@ -928,11 +925,10 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         drop_counters: drop_counters.clone(),
     };
 
-    // Map any write errors to `StutterError::RecordWrite` so callers can decide
+    // Map any write errors to a "record write failed" context so callers can decide
     // whether a failed recording should be treated as fatal.
     let map_write_err = |e: anyhow::Error| -> anyhow::Error {
-        let io_err = std::io::Error::other(e.to_string());
-        anyhow::Error::new(StutterError::RecordWrite(io_err))
+        e.context("record write failed")
     };
 
     write_json(recording.run_dir.join("session.json"), &session).map_err(map_write_err)?;
