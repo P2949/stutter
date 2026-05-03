@@ -14,6 +14,8 @@ use stutter_common::{
 };
 use tokio::io::unix::AsyncFd;
 
+use crate::cli::TARGET_PIDS_MAX;
+
 const DEFAULT_AVAILABLE_MEMORY_BYTES: u64 = 1 << 30;
 const AVAILABLE_MEMORY_BUDGET_DIVISOR: u64 = 64;
 const MEMLOCK_BUDGET_NUMERATOR: u64 = 3;
@@ -274,7 +276,7 @@ pub fn load_and_attach(
         // Pre-populate TARGET_PIDS from the cgroup hierarchy to avoid races
         // where a task appears in sched events before the eBPF-side target
         // maps are populated. Use a filtered snapshot to ensure that we
-        // respect user-provided filters and do not exceed TARGET_PIDS_MAX
+        // respect user-provided filters and do not exceed crate::cli::TARGET_PIDS_MAX
         // due to unrelated tasks in the same cgroup.
         let mut cache = crate::process_tree::ProcessCache::default();
         let snapshot = crate::process_tree::target_snapshot_with_options(
@@ -292,11 +294,11 @@ pub fn load_and_attach(
         );
         let pids: Vec<_> = snapshot.tasks.keys().copied().collect();
 
-        if pids.len() > crate::TARGET_PIDS_MAX {
+        if pids.len() > TARGET_PIDS_MAX {
             return Err(crate::error::StutterError::EbpfLoad(format!(
                 "cgroup target prepopulation failed: {} tasks in cgroup match filters, but target_pids_max is {}",
                 pids.len(),
-                crate::TARGET_PIDS_MAX
+                crate::cli::TARGET_PIDS_MAX
             )));
         }
 
@@ -320,7 +322,7 @@ pub fn load_and_attach(
             return Err(crate::error::StutterError::EbpfLoad(format!(
                 "cgroup target prepopulation failed: {} tasks failed to insert (target_pids_max={}); use narrower filters or a smaller cgroup",
                 failed_inserts,
-                crate::TARGET_PIDS_MAX
+                crate::cli::TARGET_PIDS_MAX
             )));
         }
     }
@@ -853,6 +855,11 @@ fn raise_memlock_limit() {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::path::PathBuf;
+
+    // tokio::time::sleep removed as unused
+
     use super::*;
 
     #[test]
@@ -1026,13 +1033,13 @@ field:int irq; offset:8; size:4; signed:1;
         assert_eq!(size, 512 * 1024);
     }
 
-    fn temp_dir(name: &str) -> std::path::PathBuf {
+    fn temp_dir(name: &str) -> PathBuf {
         let mut dir = std::env::temp_dir();
         dir.push(format!(
             "stutter-{name}-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos()
         ));

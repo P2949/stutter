@@ -13,7 +13,7 @@ pub const LATENCY_HISTOGRAM_BUCKETS_NS: [u64; 15] = [
 ];
 pub const LATENCY_HISTOGRAM_BUCKET_COUNT: usize = LATENCY_HISTOGRAM_BUCKETS_NS.len() + 1;
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
 pub struct SpikeRecord {
     pub latency_ns: u64,
     pub cpu: u32,
@@ -68,7 +68,7 @@ pub struct TaskStats {
     histogram_truncation_warned: bool,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct LatencyStats {
     pub count: u64,
     pub min_ns: u64,
@@ -82,30 +82,30 @@ pub struct LatencyStats {
     pub histogram: LatencyHistogram,
 }
 
-#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, Default, Serialize, Deserialize)]
 pub struct CpuStats {
     pub samples: u64,
     pub max_ns: u64,
     pub spikes: u64,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct CpuStatsSet {
     pub by_cpu: BTreeMap<u32, CpuStats>,
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LatencyHistogramBucket {
     pub upper_bound_ns: Option<u64>,
     pub count: u64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LatencyHistogram {
     buckets: [u64; LATENCY_HISTOGRAM_BUCKET_COUNT],
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LatencySnapshot {
     pub count: u64,
     pub stored_samples: u64,
@@ -122,7 +122,7 @@ pub struct LatencySnapshot {
     pub histogram: Vec<LatencyHistogramBucket>,
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
 pub struct CpuLine {
     pub cpu: u32,
     pub samples: u64,
@@ -130,7 +130,7 @@ pub struct CpuLine {
     pub spikes: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CpuSnapshot {
     pub busiest_cpu: Option<u32>,
     pub busiest_cpu_samples: u64,
@@ -141,7 +141,7 @@ pub struct CpuSnapshot {
     pub per_cpu: Vec<CpuLine>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IntervalRecord {
     pub elapsed_ms: u128,
     pub task: u32,
@@ -455,18 +455,41 @@ impl TaskStats {
     }
 
     pub fn apply_task_info(&mut self, task_info: &TaskInfo) {
-        self.class = task_info.class;
         self.process_pid = Some(task_info.process_pid);
         self.process_comm = task_info.process_comm.clone();
         self.process_starttime_ticks = task_info.process_starttime_ticks;
         self.task_starttime_ticks = task_info.task_starttime_ticks;
         self.exe_dev = task_info.exe_dev;
         self.exe_ino = task_info.exe_ino;
-        self.sched_policy = task_info.sched_policy;
+        self.class = task_info.class;
         self.from_cgroup = task_info.from_cgroup;
+        self.sched_policy = task_info.sched_policy;
 
         if should_replace_comm_from_task_info(&self.comm, task_info) {
             self.comm = task_info.comm.clone();
+        }
+    }
+
+    pub fn recording_started(&mut self, elapsed_ms: u128) {
+        if self.first_seen_ms == 0 {
+            self.first_seen_ms = elapsed_ms;
+        }
+    }
+
+    pub fn task_info(&self) -> TaskInfo {
+        TaskInfo {
+            tid: self.task,
+            process_pid: self.process_pid.unwrap_or(0),
+            process_ppid: 0, // ppid is not tracked in TaskStats
+            comm: self.comm.clone(),
+            process_comm: self.process_comm.clone(),
+            process_starttime_ticks: self.process_starttime_ticks,
+            task_starttime_ticks: self.task_starttime_ticks,
+            exe_dev: self.exe_dev,
+            exe_ino: self.exe_ino,
+            class: self.class,
+            sched_policy: self.sched_policy,
+            from_cgroup: self.from_cgroup,
         }
     }
 
@@ -812,4 +835,19 @@ impl fmt::Debug for TaskStats {
             .field("active", &self.active)
             .finish()
     }
+}
+pub fn log_drop_counters(drop_counters: &crate::ebpf_loader::DropCountersSnapshot) {
+    if drop_counters.total() == 0 {
+        log::debug!("ebpf_drop_counters total=0");
+        return;
+    }
+
+    log::warn!(
+        "ebpf_drop_counters cumulative_total={} wakeup_data_insert_failed={} ringbuf_reserve_failed={} irq_start_times_insert_failed={} block_start_insert_failed={}",
+        drop_counters.total(),
+        drop_counters.wakeup_data_insert_failed,
+        drop_counters.ringbuf_reserve_failed,
+        drop_counters.irq_start_times_insert_failed,
+        drop_counters.block_start_insert_failed,
+    );
 }

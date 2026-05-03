@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::useless_vec)]
 use std::{
     collections::BTreeMap,
     fs,
@@ -10,12 +12,15 @@ use stutter_common::{EVENT_RUNNABLE_LATENCY, SchedulerEvent};
 use crate::{
     cli::{Config, RecordingConfig},
     ebpf_loader::DropCountersSnapshot,
+    events::{self, AlertPayload},
     metrics,
     process_tree::{self, TargetDiffAction, TaskClass, TaskInfo},
     recorder::{
         self, FinalizeRecordingInput, FrameEvent, GpuSample, IrqEventRecord, RecordingRun,
         SESSION_SCHEMA_VERSION, SessionFile, SpikeEvent, SpikeEventBuffer,
     },
+    tasks,
+    tune,
 };
 
 #[test]
@@ -31,7 +36,7 @@ fn reused_tid_with_different_task_resets_stats_after_removal() {
     }
 
     let new_task = task_info(42, 200, "new-game", "new-thread", TaskClass::Helper);
-    super::reactivate_or_reset_stats_inner(&mut stats_by_task, None, 42, &new_task, 77);
+    tasks::reactivate_or_reset_stats_inner(&mut stats_by_task, None, 42, &new_task, 77);
 
     let stats = stats_by_task.get(&42).unwrap();
     assert_eq!(stats.first_seen_ms, 77);
@@ -52,30 +57,33 @@ fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
 
     let active_targets = BTreeMap::from([(42, old_task.clone())]);
     let desired_tasks = BTreeMap::from([(42, new_task.clone())]);
-    let mut known_targets = active_targets.clone();
+    let known_targets = active_targets.clone();
 
     let mut stats = task_stats_with_info(42, 100, "old-game", "old-worker", TaskClass::Game, 10);
     stats.session_latency.record(5_000_000);
-    let mut stats_by_task = BTreeMap::from([(42, stats)]);
+    let stats_by_task = BTreeMap::from([(42, stats)]);
 
     let mut tree_events = Vec::new();
-    let mut task_exe_inodes: super::TaskExeInodesMap = BTreeMap::new();
+    let mut tasks = tasks::TaskTracker {
+        active_targets,
+        known_targets,
+        stats_by_task,
+        task_exe_inodes: BTreeMap::new(),
+        prev_faults_snapshot: BTreeMap::from([(42, (10, 20))]),
+        cache: process_tree::ProcessCache::default(),
+    };
     let mut prev_faults_map = None;
-    let mut prev_faults_snapshot = BTreeMap::from([(42, (10, 20))]);
-    super::handle_same_tid_replacements(super::HandleSameTidReplacementsInput {
-        active_targets: &active_targets,
+
+    tasks::handle_same_tid_replacements(tasks::HandleSameTidReplacementsInput {
+        tasks: &mut tasks,
         desired_tasks: &desired_tasks,
-        known_targets: &mut known_targets,
-        stats_by_task: &mut stats_by_task,
-        task_exe_inodes: &mut task_exe_inodes,
         tree_events: &mut tree_events,
         prev_faults_map: &mut prev_faults_map,
-        prev_faults_snapshot: &mut prev_faults_snapshot,
         elapsed_ms: 77,
         recording_started: Some(Instant::now()),
     });
 
-    let stats = stats_by_task.get(&42).unwrap();
+    let stats = tasks.stats_by_task.get(&42).unwrap();
     assert_eq!(stats.first_seen_ms, 77);
     assert_eq!(stats.last_seen_ms, 77);
     assert_eq!(stats.session_latency.count, 0);
@@ -84,9 +92,9 @@ fn active_same_tid_replacement_resets_stats_even_without_remove_add_diff() {
     assert_eq!(stats.comm, "new-worker");
     assert_eq!(stats.class, TaskClass::Helper);
     assert!(stats.active);
-    assert!(!prev_faults_snapshot.contains_key(&42));
+    assert!(!tasks.prev_faults_snapshot.contains_key(&42));
 
-    assert_eq!(known_targets.get(&42), Some(&new_task));
+    assert_eq!(tasks.known_targets.get(&42), Some(&new_task));
     assert_eq!(tree_events.len(), 1);
     assert_eq!(tree_events[0].action, "replaced");
     assert_eq!(tree_events[0].tid, 42);
@@ -106,7 +114,7 @@ fn same_reused_tid_reactivates_without_clearing_stats() {
     }
 
     let same_task = task_info(42, 100, "game", "worker", TaskClass::Game);
-    super::reactivate_or_reset_stats_inner(&mut stats_by_task, None, 42, &same_task, 77);
+    tasks::reactivate_or_reset_stats_inner(&mut stats_by_task, None, 42, &same_task, 77);
 
     let stats = stats_by_task.get(&42).unwrap();
     assert_eq!(stats.first_seen_ms, 10);
@@ -129,7 +137,7 @@ fn same_tid_same_names_different_starttime_resets_stats() {
 
     let mut new_task = task_info(42, 100, "game", "worker", TaskClass::Game);
     new_task.task_starttime_ticks = Some(999);
-    super::reactivate_or_reset_stats_inner(&mut stats_by_task, None, 42, &new_task, 77);
+    tasks::reactivate_or_reset_stats_inner(&mut stats_by_task, None, 42, &new_task, 77);
 
     let stats = stats_by_task.get(&42).unwrap();
     assert_eq!(stats.first_seen_ms, 77);
@@ -140,81 +148,81 @@ fn same_tid_same_names_different_starttime_resets_stats() {
 #[test]
 fn event_comm_updates_only_unknown_existing_name() {
     let config = test_config(vec![7], vec![], None);
-    let mut active_targets = BTreeMap::new();
-    let mut known_targets = BTreeMap::new();
-    let mut stats_by_task = BTreeMap::from([(7, metrics::TaskStats::new(7, "?".to_owned(), 0))]);
+    let stats_by_task = BTreeMap::from([(7, metrics::TaskStats::new(7, "?".to_owned(), 0))]);
 
     let first_event = scheduler_event(7, "real-name");
-    super::handle_event(super::HandleEventInput {
+    let mut tasks = tasks::TaskTracker::default();
+    tasks.stats_by_task = stats_by_task;
+    let mut recorder = recorder::LiveRecorder::default();
+
+    events::handle_event(events::HandleEventInput {
         event: &first_event,
         config: &config,
         started: Instant::now(),
-        active_targets: &mut active_targets,
-        known_targets: &mut known_targets,
-        stats_by_task: &mut stats_by_task,
+        tasks: &mut tasks,
         monotonic_start_ns: None,
-        spike_events: None,
+        recorder: &mut recorder,
         alert_sender: None,
     });
 
-    assert_eq!(stats_by_task.get(&7).unwrap().comm, "real-name");
+    assert_eq!(tasks.stats_by_task.get(&7).unwrap().comm, "real-name");
 
     let second_event = scheduler_event(7, "later-name");
-    super::handle_event(super::HandleEventInput {
+    events::handle_event(events::HandleEventInput {
         event: &second_event,
         config: &config,
         started: Instant::now(),
-        active_targets: &mut active_targets,
-        known_targets: &mut known_targets,
-        stats_by_task: &mut stats_by_task,
+        tasks: &mut tasks,
         monotonic_start_ns: None,
-        spike_events: None,
+        recorder: &mut recorder,
         alert_sender: None,
     });
 
-    assert_eq!(stats_by_task.get(&7).unwrap().comm, "real-name");
+    assert_eq!(tasks.stats_by_task.get(&7).unwrap().comm, "real-name");
 }
 
 #[test]
-fn recording_spike_events_capture_only_threshold_crossing_events() {
+fn spike_events_capture_only_threshold_crossing_events() {
     let config = test_config(vec![7], vec![], None);
-    let mut active_targets = BTreeMap::from([(
+    let active_targets = BTreeMap::from([(
         7,
         task_info(7, 77, "KingdomCome.exe", "RenderThread", TaskClass::Game),
     )]);
-    let mut known_targets = BTreeMap::new();
-    let mut stats_by_task = BTreeMap::new();
-    let mut spike_events = SpikeEventBuffer::default();
+    let spike_events = SpikeEventBuffer::default();
 
     let below_threshold = scheduler_event_with_latency(7, "RenderThread", 999_999);
-    super::handle_event(super::HandleEventInput {
+    let mut tasks = tasks::TaskTracker::default();
+    let stats_by_task = BTreeMap::<u32, crate::metrics::TaskStats>::new();
+    tasks.active_targets = active_targets;
+    tasks.stats_by_task = stats_by_task;
+    let mut recorder = recorder::LiveRecorder::default();
+    recorder.spike_events = Some(spike_events);
+
+    events::handle_event(events::HandleEventInput {
         event: &below_threshold,
         config: &config,
         started: Instant::now(),
-        active_targets: &mut active_targets,
-        known_targets: &mut known_targets,
-        stats_by_task: &mut stats_by_task,
+        tasks: &mut tasks,
         monotonic_start_ns: Some(100),
-        spike_events: Some(&mut spike_events),
+        recorder: &mut recorder,
         alert_sender: None,
     });
-    assert!(spike_events.as_slice().is_empty());
+    assert!(recorder.spike_events.as_ref().unwrap().as_slice().is_empty());
 
     let at_threshold = scheduler_event_with_latency(7, "RenderThread", 1_000_000);
-    super::handle_event(super::HandleEventInput {
+    events::handle_event(events::HandleEventInput {
         event: &at_threshold,
         config: &config,
         started: Instant::now(),
-        active_targets: &mut active_targets,
-        known_targets: &mut known_targets,
-        stats_by_task: &mut stats_by_task,
+        tasks: &mut tasks,
         monotonic_start_ns: Some(100),
-        spike_events: Some(&mut spike_events),
+        recorder: &mut recorder,
         alert_sender: None,
     });
 
-    assert_eq!(spike_events.as_slice().len(), 1);
-    let spike = &spike_events.as_slice()[0];
+    let spike_events_slice = recorder.spike_events.as_ref().unwrap().as_slice();
+    assert_eq!(spike_events_slice.len(), 1);
+    let spike = &spike_events_slice[0];
     assert_eq!(spike.task, 7);
     assert!(spike.active);
     assert_eq!(spike.class, TaskClass::Game);
@@ -232,28 +240,31 @@ fn recording_spike_events_capture_only_threshold_crossing_events() {
 #[test]
 fn spike_event_fault_deltas_are_captured_correctly() {
     let config = test_config(vec![7], vec![], None);
-    let mut active_targets = BTreeMap::from([(
+    let active_targets = BTreeMap::from([(
         7,
         task_info(7, 77, "KingdomCome.exe", "RenderThread", TaskClass::Game),
     )]);
-    let mut known_targets = BTreeMap::new();
-    let mut stats_by_task = BTreeMap::new();
-    let mut spike_events = SpikeEventBuffer::default();
+    let spike_events = SpikeEventBuffer::default();
 
     // First event establishes baseline faults
     let mut first_event = scheduler_event_with_latency(7, "RenderThread", 10);
     first_event.maj_flt = 10;
     first_event.min_flt = 20;
 
-    super::handle_event(super::HandleEventInput {
+    let stats_by_task = BTreeMap::<u32, crate::metrics::TaskStats>::new();
+    let mut tasks = tasks::TaskTracker::default();
+    tasks.active_targets = active_targets;
+    tasks.stats_by_task = stats_by_task;
+    let mut recorder = recorder::LiveRecorder::default();
+    recorder.spike_events = Some(spike_events);
+
+    events::handle_event(events::HandleEventInput {
         event: &first_event,
         config: &config,
         started: Instant::now(),
-        active_targets: &mut active_targets,
-        known_targets: &mut known_targets,
-        stats_by_task: &mut stats_by_task,
+        tasks: &mut tasks,
         monotonic_start_ns: Some(100),
-        spike_events: Some(&mut spike_events),
+        recorder: &mut recorder,
         alert_sender: None,
     });
 
@@ -262,25 +273,24 @@ fn spike_event_fault_deltas_are_captured_correctly() {
     spike_event.maj_flt = 15; // +5 delta
     spike_event.min_flt = 30; // +10 delta
 
-    super::handle_event(super::HandleEventInput {
+    events::handle_event(events::HandleEventInput {
         event: &spike_event,
         config: &config,
         started: Instant::now(),
-        active_targets: &mut active_targets,
-        known_targets: &mut known_targets,
-        stats_by_task: &mut stats_by_task,
+        tasks: &mut tasks,
         monotonic_start_ns: Some(100),
-        spike_events: Some(&mut spike_events),
+        recorder: &mut recorder,
         alert_sender: None,
     });
 
-    assert_eq!(spike_events.as_slice().len(), 1);
-    let spike = &spike_events.as_slice()[0];
+    let spike_events_slice = recorder.spike_events.as_ref().unwrap().as_slice();
+    assert_eq!(spike_events_slice.len(), 1);
+    let spike = &spike_events_slice[0];
     assert_eq!(spike.major_faults, 5);
     assert_eq!(spike.minor_faults, 10);
 
     // Also verify TaskStats internal top_spikes has the same deltas
-    let stats = stats_by_task.get(&7).unwrap();
+    let stats = tasks.stats_by_task.get(&7).unwrap();
     assert_eq!(stats.top_spikes.len(), 1);
     assert_eq!(stats.top_spikes[0].major_faults, 5);
     assert_eq!(stats.top_spikes[0].minor_faults, 10);
@@ -298,7 +308,7 @@ fn alert_payload_captures_spike_task_identity() {
         TaskClass::Game,
     ));
 
-    let payload = super::AlertPayload::from_task_stats(&stats, &event, 1234);
+    let payload = AlertPayload::from_task_stats(&stats, &event, 1234);
 
     assert_eq!(payload.title, "stutter latency alert");
     assert_eq!(payload.task, 7);
@@ -563,12 +573,8 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     stats.session_latency.record(1_000);
     stats.session_latency.record(2_000_000);
     let stats_by_task = BTreeMap::from([(7, stats)]);
-    let interval_records = Vec::new();
-    let tree_events = Vec::new();
     let spike_events = vec![SpikeEvent {
-        elapsed_ms: Some(12),
         task: 7,
-        active: true,
         class: TaskClass::Helper,
         process_pid: Some(7),
         process_comm: "task-7".into(),
@@ -582,6 +588,8 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         target_pending_wakeups: 0,
         major_faults: 0,
         minor_faults: 0,
+        active: true,
+        elapsed_ms: Some(1),
     }];
     let drop_counters = DropCountersSnapshot {
         wakeup_data_insert_failed: 2,
@@ -590,28 +598,22 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         block_start_insert_failed: 0,
     };
 
+    let mut task_tracker = tasks::TaskTracker::default();
+    task_tracker.active_targets = active_targets;
+    task_tracker.stats_by_task = stats_by_task;
+
+    let mut recorder = recorder::LiveRecorder::default();
+    recorder.run = Some(recording);
+    recorder.spike_events = Some(SpikeEventBuffer::default());
+    recorder.spike_events.as_mut().unwrap().push(spike_events[0].clone());
+    recorder.spike_events.as_mut().unwrap().truncate(); // Force truncated state for testing
+
     recorder::finalize_recording(FinalizeRecordingInput {
-        recording: &recording,
+        recorder: &recorder,
         config: &config,
         stop_reason: "test",
-        active_targets: &active_targets,
-        stats_by_task: &stats_by_task,
-        interval_records: &interval_records,
-        streamed_interval_record_count: None,
-        intervals_dropped: 0,
-        tree_events: &tree_events,
-        spike_events: &spike_events,
-        spike_events_truncated: true,
-        spike_events_dropped_count: 0,
-        scx_events: &[],
-        irq_events: &[],
-        streamed_irq_event_count: None,
-        migration_event_count: None,
-        cpu_freq_sample_count: None,
-        gpu_samples: &[],
-        streamed_gpu_sample_count: None,
+        tasks: &task_tracker,
         frame_events: &[],
-        block_io_event_count: 0,
         block_io_correlation_basis: "dev+sector",
         drop_counters,
     })
@@ -621,7 +623,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         serde_json::from_str(&fs::read_to_string(dir.join("session.json")).unwrap()).unwrap();
     let metadata: recorder::MetadataFile =
         serde_json::from_str(&fs::read_to_string(dir.join("metadata.json")).unwrap()).unwrap();
-    let recorded_spike_events: Vec<SpikeEvent> = serde_json::Deserializer::from_reader(
+    let recordedspike_events: Vec<SpikeEvent> = serde_json::Deserializer::from_reader(
         fs::File::open(dir.join("spike_events.json")).unwrap(),
     )
     .into_iter()
@@ -650,8 +652,8 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     assert_eq!(session.config.max_tasks, 2048);
     assert_eq!(session.config.retain_intervals, Some(8));
     assert_eq!(session.config.hwmon_root, Some(PathBuf::from("/tmp/hwmon")));
-    assert_eq!(recorded_spike_events.len(), 1);
-    assert_eq!(recorded_spike_events[0].task, 7);
+    assert_eq!(recordedspike_events.len(), 1);
+    assert_eq!(recordedspike_events[0].task, 7);
     assert_eq!(
         session.tasks[0]
             .latency
@@ -826,7 +828,7 @@ fn watch_process_selection_prefers_exact_then_executable_then_highest_pid() {
     create_fake_proc(&dir, 30, 1, "other", "/bin/other KingdomCome", &[30]);
 
     assert_eq!(
-        super::find_process_by_pattern_at(&dir, "KingdomCome"),
+        crate::watch::find_process_by_pattern_at(&dir, "KingdomCome"),
         Some(20)
     );
 
@@ -836,7 +838,10 @@ fn watch_process_selection_prefers_exact_then_executable_then_highest_pid() {
     create_fake_proc(&dir, 10, 1, "helper", "/bin/foo target", &[10]);
     create_fake_proc(&dir, 30, 1, "helper", "/bin/bar target", &[30]);
 
-    assert_eq!(super::find_process_by_pattern_at(&dir, "target"), Some(30));
+    assert_eq!(
+        crate::watch::find_process_by_pattern_at(&dir, "target"),
+        Some(30)
+    );
 
     fs::remove_dir_all(dir).ok();
 }
@@ -885,7 +890,7 @@ fn watch_process_selection_treats_wine_backslashes_as_path_separators() {
     create_fake_proc(&dir, 20, 1, "other", "/bin/other KingdomCome.exe", &[20]);
 
     assert_eq!(
-        super::find_process_by_pattern_at(&dir, "KingdomCome.exe"),
+        crate::watch::find_process_by_pattern_at(&dir, "KingdomCome.exe"),
         Some(10)
     );
 
@@ -916,10 +921,10 @@ fn same_task_info_falls_back_to_conservative_metadata_without_starttimes() {
     right.process_starttime_ticks = None;
     right.task_starttime_ticks = None;
 
-    assert!(super::same_task_info(&left, &right));
+    assert!(crate::tasks::same_task_info(&left, &right));
 
     right.process_comm = "other-game".into();
-    assert!(!super::same_task_info(&left, &right));
+    assert!(!crate::tasks::same_task_info(&left, &right));
 }
 
 #[test]
@@ -980,7 +985,7 @@ fn recorded_time_accepts_legacy_local_field() {
 }
 
 #[test]
-fn report_reads_recorded_session_and_spike_events() {
+fn report_reads_recorded_session_andspike_events() {
     let dir = temp_test_dir("report-smoke");
     fs::create_dir_all(&dir).unwrap();
 
@@ -1030,28 +1035,24 @@ fn report_reads_recorded_session_and_spike_events() {
         minor_faults: 0,
     }];
 
+    let mut task_tracker = tasks::TaskTracker::default();
+    task_tracker.active_targets = active_targets;
+    task_tracker.stats_by_task = stats_by_task;
+
+    let mut recorder = recorder::LiveRecorder::default();
+    recorder.run = Some(recording);
+    let mut buffer = SpikeEventBuffer::default();
+    for spike in spike_events {
+        buffer.push(spike);
+    }
+    recorder.spike_events = Some(buffer);
+
     recorder::finalize_recording(FinalizeRecordingInput {
-        recording: &recording,
+        recorder: &recorder,
         config: &config,
         stop_reason: "test",
-        active_targets: &active_targets,
-        stats_by_task: &stats_by_task,
-        interval_records: &[],
-        streamed_interval_record_count: None,
-        intervals_dropped: 0,
-        tree_events: &[],
-        spike_events: &spike_events,
-        spike_events_truncated: false,
-        spike_events_dropped_count: 0,
-        scx_events: &[],
-        irq_events: &[],
-        streamed_irq_event_count: None,
-        migration_event_count: None,
-        cpu_freq_sample_count: None,
-        gpu_samples: &[],
-        streamed_gpu_sample_count: None,
+        tasks: &task_tracker,
         frame_events: &[],
-        block_io_event_count: 0,
         block_io_correlation_basis: "dev+sector",
         drop_counters: DropCountersSnapshot::default(),
     })
@@ -1101,28 +1102,24 @@ fn report_cluster_output_caps_inline_points() {
         })
         .collect::<Vec<_>>();
 
+    let mut task_tracker = tasks::TaskTracker::default();
+    task_tracker.active_targets = active_targets;
+    task_tracker.stats_by_task = stats_by_task;
+
+    let mut recorder = recorder::LiveRecorder::default();
+    recorder.run = Some(recording);
+    let mut buffer = SpikeEventBuffer::default();
+    for spike in spike_events.iter().cloned() {
+        buffer.push(spike);
+    }
+    recorder.spike_events = Some(buffer);
+
     recorder::finalize_recording(FinalizeRecordingInput {
-        recording: &recording,
+        recorder: &recorder,
         config: &config,
         stop_reason: "test",
-        active_targets: &active_targets,
-        stats_by_task: &stats_by_task,
-        interval_records: &[],
-        streamed_interval_record_count: None,
-        intervals_dropped: 0,
-        tree_events: &[],
-        spike_events: &spike_events,
-        spike_events_truncated: false,
-        spike_events_dropped_count: 0,
-        scx_events: &[],
-        irq_events: &[],
-        streamed_irq_event_count: None,
-        migration_event_count: None,
-        cpu_freq_sample_count: None,
-        gpu_samples: &[],
-        streamed_gpu_sample_count: None,
+        tasks: &task_tracker,
         frame_events: &[],
-        block_io_event_count: 0,
         block_io_correlation_basis: "dev+sector",
         drop_counters: DropCountersSnapshot::default(),
     })
@@ -1283,12 +1280,12 @@ fn tune_counts_only_scored_post_warmup_records() {
         interval_record(11, TaskClass::Compositor, 100, "compositor"),
     ];
 
-    assert_eq!(super::tune_scored_record_counts(&records), (0, 0));
+    assert_eq!(crate::tune::tune_scored_record_counts(&records), (0, 0));
 
     let mut records = records;
     records.push(interval_record(12, TaskClass::Game, 55, "game"));
 
-    assert_eq!(super::tune_scored_record_counts(&records), (1, 55));
+    assert_eq!(crate::tune::tune_scored_record_counts(&records), (1, 55));
 }
 
 #[test]
@@ -1305,7 +1302,7 @@ fn tune_coverage_counts_duplicate_scored_thread_identities() {
         interval_record(12, TaskClass::Game, 10, "worker"),
     ];
 
-    let coverage = super::tune_coverage_metrics(&session, &intervals);
+    let coverage = tune::tune_coverage_metrics(&session, &intervals);
 
     assert_eq!(coverage.unique_scored_tasks, 3);
     assert_eq!(coverage.scored_identity_counts.values().sum::<usize>(), 3);
@@ -1470,6 +1467,7 @@ fn minimal_session_for_report() -> SessionFile {
             "irq_start_times_insert_failed": 0,
             "block_start_insert_failed": 0
         },
+        "interval_record_count": 0,
         "tasks": [],
         "top_spikes": []
     }))
@@ -1701,6 +1699,7 @@ fn report_diff_shows_regressions_and_improvements() {
         "total_events_processed": 0,
         "total_tasks_seen": 0,
         "interval_record_count": 0,
+        "intervals_dropped": 0,
         "config": {
             "tree_roots": [],
             "manual_pids": [],
@@ -1815,8 +1814,12 @@ fn report_diff_shows_regressions_and_improvements() {
         },
         "scx_event_count": 0,
         "irq_event_count": 0,
+        "migration_event_count": 0,
+        "cpu_freq_sample_count": 0,
         "gpu_sample_count": 0,
-        "frame_event_count": 0
+        "frame_event_count": 0,
+        "block_io_event_count": 0,
+        "block_io_correlation_basis": "dev+sector"
     }"#;
 
     let session_b_json = session_a_json
