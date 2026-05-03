@@ -1109,20 +1109,49 @@ fn sanitize_run_name(name: &str) -> String {
 }
 
 fn monotonic_now_ns() -> Option<u64> {
+    static CLOCK_ID: std::sync::OnceLock<libc::clockid_t> = std::sync::OnceLock::new();
+    let clock_id = CLOCK_ID.get_or_init(|| {
+        if is_kernel_before_5_7() {
+            libc::CLOCK_MONOTONIC_RAW
+        } else {
+            libc::CLOCK_MONOTONIC
+        }
+    });
+
     let mut timespec = libc::timespec {
         tv_sec: 0,
         tv_nsec: 0,
     };
 
     // SAFETY: clock_gettime writes to the provided valid timespec pointer and
-    // does not retain it after the call. CLOCK_MONOTONIC intentionally matches
-    // bpf_ktime_get_ns(), so recorded elapsed times line up with eBPF timestamps.
-    let result = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut timespec) };
+    // does not retain it after the call. We select CLOCK_MONOTONIC or
+    // CLOCK_MONOTONIC_RAW based on the kernel version to match bpf_ktime_get_ns()
+    // behavior, so recorded elapsed times line up with eBPF timestamps.
+    let result = unsafe { libc::clock_gettime(*clock_id, &mut timespec) };
     if result != 0 {
         return None;
     }
 
     timespec_to_ns(timespec)
+}
+
+fn is_kernel_before_5_7() -> bool {
+    let mut uts = std::mem::MaybeUninit::<libc::utsname>::uninit();
+    // SAFETY: uts is a valid pointer to a libc::utsname struct.
+    if unsafe { libc::uname(uts.as_mut_ptr()) } != 0 {
+        return false;
+    }
+    // SAFETY: uname succeeded and initialized the struct.
+    let uts = unsafe { uts.assume_init() };
+    // SAFETY: release field is a null-terminated string.
+    let release = unsafe { std::ffi::CStr::from_ptr(uts.release.as_ptr()) };
+    let release_str = release.to_string_lossy();
+
+    let mut parts = release_str.split('.');
+    let major: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let minor: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+
+    major < 5 || (major == 5 && minor < 7)
 }
 
 fn timespec_to_ns(timespec: libc::timespec) -> Option<u64> {
