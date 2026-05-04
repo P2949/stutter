@@ -17,7 +17,7 @@ use crate::{
         CpuLine, CpuSnapshot, IntervalRecord as MetricsIntervalRecord, LatencyHistogramBucket,
         SpikeRecord, TaskStats,
     },
-    process_tree::{TaskClass, TaskInfo},
+    process_tree::TaskClass,
     scx::ScxEvent,
 };
 
@@ -249,7 +249,7 @@ impl SpikeEventBuffer {
             SpikePushResult::Dropped
         }
     }
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn truncate(&mut self) {
         self.truncated = true;
     }
@@ -262,12 +262,12 @@ impl SpikeEventBuffer {
             max_events,
         }
     }
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn as_slice(&self) -> &[SpikeEvent] {
         &self.events
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn truncated(&self) -> bool {
         self.truncated
     }
@@ -290,22 +290,6 @@ pub struct TreeEvent {
     pub process_comm: std::sync::Arc<str>,
     pub class: TaskClass,
     pub from_cgroup: bool,
-}
-#[allow(dead_code)]
-impl TreeEvent {
-    pub fn from_task(started: Instant, action: &str, task: &TaskInfo) -> Self {
-        Self {
-            elapsed_ms: started.elapsed().as_millis(),
-            action: action.to_owned(),
-            tid: task.tid,
-            process_pid: task.process_pid,
-            process_ppid: task.process_ppid,
-            comm: task.comm.clone(),
-            process_comm: task.process_comm.clone(),
-            class: task.class,
-            from_cgroup: task.from_cgroup,
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize)]
