@@ -41,6 +41,8 @@ pub struct LiveRecorder {
     pub scx_event_writer: Option<JsonArrayWriter>,
     pub csv_writer: Option<IntervalCsvWriter>,
 
+    pub scx_events: Vec<crate::scx::ScxEvent>,
+
     pub intervals_dropped: u64,
     pub scx_event_count: u64,
     pub irq_event_count: u64,
@@ -63,6 +65,7 @@ impl std::fmt::Debug for LiveRecorder {
             .field("spike_events", &self.spike_events)
             .field("irq_events", &self.irq_events)
             .field("gpu_samples", &self.gpu_samples)
+            .field("scx_events", &self.scx_events)
             .field("intervals_dropped", &self.intervals_dropped)
             .field("scx_event_count", &self.scx_event_count)
             .field("irq_event_count", &self.irq_event_count)
@@ -1026,6 +1029,13 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         write_json_stream(
             recording.run_dir.join("frame_correlation.json"),
             frame_events,
+        )
+        .map_err(map_write_err)?;
+    }
+    if recorder.scx_event_writer.is_none() && !recorder.scx_events.is_empty() {
+        write_json_stream(
+            recording.run_dir.join("scx_events.json"),
+            &recorder.scx_events,
         )
         .map_err(map_write_err)?;
     }

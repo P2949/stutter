@@ -1174,7 +1174,7 @@ fn report_cluster_output_caps_inline_points() {
             minor_faults: 0,
             scx_ops: None,
             scx_state: None,
-        scx_enable_seq: None,
+            scx_enable_seq: None,
         })
         .collect::<Vec<_>>();
 
@@ -1260,7 +1260,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
             minor_faults: 0,
             scx_ops: None,
             scx_state: None,
-        scx_enable_seq: None,
+            scx_enable_seq: None,
         })
         .collect::<Vec<_>>();
     let artifacts = crate::report::RunArtifacts {
