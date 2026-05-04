@@ -3,8 +3,8 @@ use serde::Serialize;
 use crate::{
     metrics::format_latency,
     process_tree::TaskClass,
-    recorder::{BlockIoRecord, FrameEvent, GpuSample, IntervalRecord, IrqEventRecord},
-    report::{SpikeCluster, SpikePoint},
+    recorder::{BlockIoRecord, GpuSample, IntervalRecord, IrqEventRecord},
+    report::{SpikeCluster, SpikePoint, RunArtifacts},
 };
 
 const IRQ_SIGNIFICANT_NS: u64 = 250_000; // start conservative
@@ -147,14 +147,68 @@ pub(crate) fn select_anchor(cluster: &SpikeCluster) -> ClusterAnchor {
     }
 }
 
-pub fn diagnose_cluster(
-    cluster: &SpikeCluster,
-    irq_events: &[IrqEventRecord],
-    gpu_samples: &[GpuSample],
-    _frame_events: &[FrameEvent],
-    io_events: &[BlockIoRecord],
-    interval_records: &[IntervalRecord],
-) -> Diagnosis {
+pub fn diagnose_cluster(cluster: &SpikeCluster, artifacts: &RunArtifacts, window_ns: u64) -> Diagnosis {
+    // Compute cluster time window
+    let start_ns = cluster.min_switch_ns.saturating_sub(window_ns);
+    let end_ns = cluster.max_switch_ns.saturating_add(window_ns);
+
+    // Helper: cluster elapsed and range based on spike point elapsed_ms
+    let cluster_elapsed_opt = cluster.points.iter().filter_map(|p| p.elapsed_ms).min();
+    let cluster_elapsed_range = {
+        let mut it = cluster.points.iter().filter_map(|p| p.elapsed_ms);
+        if let Some(first) = it.next() {
+            let mut min = first;
+            let mut max = first;
+            for v in it {
+                min = min.min(v);
+                max = max.max(v);
+            }
+            Some((min, max))
+        } else {
+            None
+        }
+    };
+
+    // Filter artifacts to the cluster window / elapsed range
+    let irq_events: Vec<IrqEventRecord> = artifacts
+        .irq_events
+        .iter()
+        .filter(|e| e.exit_ns >= start_ns && e.enter_ns <= end_ns)
+        .cloned()
+        .collect();
+
+    let gpu_samples: Vec<GpuSample> = if let Some(elapsed) = cluster_elapsed_opt {
+        artifacts
+            .gpu_samples
+            .iter()
+            .filter(|s| s.elapsed_ms.abs_diff(elapsed) <= 50)
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    // frame events are not currently used in diagnosis, but could be considered
+    // for future enhancements.
+
+    let io_events: Vec<BlockIoRecord> = artifacts
+        .io_events
+        .iter()
+        .filter(|e| e.timestamp_ns >= start_ns && e.timestamp_ns.saturating_sub(e.duration_ns) <= end_ns)
+        .cloned()
+        .collect();
+
+    let interval_records: Vec<IntervalRecord> = if let Some((min, max)) = cluster_elapsed_range {
+        artifacts
+            .interval_records
+            .iter()
+            .filter(|r| r.elapsed_ms >= min.saturating_sub(1000) && r.elapsed_ms <= max.saturating_add(1000))
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     let mut evidence = Vec::new();
     let mut causes = Vec::new();
 
@@ -300,7 +354,7 @@ mod tests {
             anchor_comm: None,
             anchor_kind: None,
         };
-        let d = diagnose_cluster(&cluster, &[], &[], &[], &[], &[]);
+        let d = diagnose_cluster(&cluster, &RunArtifacts::default(), 0);
         assert_eq!(d.cause, StutterCause::CompositorSchedulerDelay);
     }
 
@@ -348,7 +402,7 @@ mod tests {
             anchor_comm: None,
             anchor_kind: None,
         };
-        let d = diagnose_cluster(&cluster, &[], &[], &[], &[], &[]);
+        let d = diagnose_cluster(&cluster, &RunArtifacts::default(), 0);
         assert_eq!(d.cause, StutterCause::CompositorSchedulerDelay);
         assert!(
             d.secondary_causes
@@ -406,7 +460,8 @@ mod tests {
             duration_ns: 10_000,
         };
 
-        let d = diagnose_cluster(&cluster, &[irq], &[], &[], &[], &[]);
+        let artifacts = RunArtifacts { irq_events: vec![irq], ..Default::default() };
+        let d = diagnose_cluster(&cluster, &artifacts, 0);
         assert!(
             !d.secondary_causes
                 .contains(&StutterCause::IrqDelayCandidate)
@@ -422,7 +477,8 @@ mod tests {
             exit_ns: 1_000_000,
             duration_ns: 1_000_000,
         };
-        let d2 = diagnose_cluster(&cluster, &[irq_big], &[], &[], &[], &[]);
+        let artifacts2 = RunArtifacts { irq_events: vec![irq_big], ..Default::default() };
+        let d2 = diagnose_cluster(&cluster, &artifacts2, 0);
         assert!(
             d2.secondary_causes
                 .contains(&StutterCause::IrqDelayCandidate)

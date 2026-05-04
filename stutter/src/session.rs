@@ -842,54 +842,20 @@ impl MonitorSession {
             anchor_kind: None,
         };
 
-        // Filter other telemetry near the cluster
-        let irq_events: Vec<_> = self
-            .recent_telemetry
-            .irq_events
-            .iter()
-            .filter(|e| {
-                e.exit_ns >= min_switch_ns.saturating_sub(cluster_window_ns)
-                    && e.enter_ns <= max_switch_ns.saturating_add(cluster_window_ns)
-            })
-            .cloned()
-            .collect();
+        // Build a RunArtifacts-like snapshot from recent telemetry and let
+        // `diagnose_cluster` perform time filtering itself.
+        let artifacts = crate::report::RunArtifacts {
+            irq_events: self.recent_telemetry.irq_events.iter().cloned().collect(),
+            gpu_samples: self.recent_telemetry.gpu_samples.iter().cloned().collect(),
+            frame_events: Vec::new(),
+            migration_events: Vec::new(),
+            cpu_freq_samples: Vec::new(),
+            io_events: self.recent_telemetry.io_events.iter().cloned().collect(),
+            interval_records: self.recorder.interval_records.clone(),
+            scx_events: Vec::new(),
+        };
 
-        let gpu_samples: Vec<_> = self
-            .recent_telemetry
-            .gpu_samples
-            .iter()
-            .filter(|s| {
-                let s_ns = (s.elapsed_ms as u64).saturating_mul(1_000_000); // approximate
-                s_ns >= min_switch_ns.saturating_sub(cluster_window_ns)
-                    && s_ns <= max_switch_ns.saturating_add(cluster_window_ns)
-            })
-            .cloned()
-            .collect();
-
-        let io_events: Vec<_> = self
-            .recent_telemetry
-            .io_events
-            .iter()
-            .filter(|e| {
-                e.timestamp_ns >= min_switch_ns.saturating_sub(cluster_window_ns)
-                    && e.timestamp_ns.saturating_sub(e.duration_ns)
-                        <= max_switch_ns.saturating_add(cluster_window_ns)
-            })
-            .cloned()
-            .collect();
-
-        // PSI: we don't have fine-grained PSI here yet, just interval records.
-        // For live diagnosis, maybe we can skip PSI or use the last one.
-        let interval_records = &self.recorder.interval_records;
-
-        let diagnosis = diagnose_cluster(
-            &cluster,
-            &irq_events,
-            &gpu_samples,
-            &[],
-            &io_events,
-            interval_records,
-        );
+        let diagnosis = diagnose_cluster(&cluster, &artifacts, cluster_window_ns);
         let anchor = crate::diagnosis::select_anchor(&cluster);
         cluster.anchor_task = Some(anchor.task);
         cluster.anchor_class = Some(anchor.class);

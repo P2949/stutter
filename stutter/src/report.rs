@@ -796,6 +796,30 @@ pub(crate) fn render_report(
         &mut output,
         format!("exclude_comm: {:?}", session.config.exclude_comm),
     );
+
+    if session.event_stream_write_errors > 0 {
+        pushln(&mut output, "recording integrity warning");
+        pushln(&mut output, "---------------------------");
+        pushln(
+            &mut output,
+            format!(
+                "event_stream_write_errors={}",
+                session.event_stream_write_errors
+            ),
+        );
+        pushln(
+            &mut output,
+            format!(
+                "first_event_stream_write_error={}",
+                session
+                    .first_event_stream_write_error
+                    .as_deref()
+                    .unwrap_or("-")
+            ),
+        );
+        pushln(&mut output, "diagnosis may be incomplete");
+        pushln(&mut output, "");
+    }
     pushln(
         &mut output,
         format!(
@@ -1679,74 +1703,7 @@ fn perform_diagnosis(
     cluster_window_ns: u64,
 ) {
     for cluster in clusters {
-        let irq_events = artifacts
-            .irq_events
-            .iter()
-            .filter(|e| {
-                let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
-                let max_ns = cluster.max_switch_ns.saturating_add(cluster_window_ns);
-                e.exit_ns >= min_ns && e.enter_ns <= max_ns
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let gpu_samples = artifacts
-            .gpu_samples
-            .iter()
-            .filter(|s| {
-                cluster_elapsed(cluster).is_some_and(|elapsed| s.elapsed_ms.abs_diff(elapsed) <= 50)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let frame_events = artifacts
-            .frame_events
-            .iter()
-            .filter(|f| {
-                if let Some((min, max)) = cluster_elapsed_range(cluster) {
-                    let padding = u128::from(cluster_window_ns / 1_000_000).max(1);
-                    f.elapsed_ms >= min.saturating_sub(padding)
-                        && f.elapsed_ms <= max.saturating_add(padding)
-                } else {
-                    false
-                }
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let io_events = artifacts
-            .io_events
-            .iter()
-            .filter(|e| {
-                let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
-                let max_ns = cluster.max_switch_ns.saturating_add(cluster_window_ns);
-                e.timestamp_ns >= min_ns && e.timestamp_ns.saturating_sub(e.duration_ns) <= max_ns
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let interval_records = artifacts
-            .interval_records
-            .iter()
-            .filter(|r| {
-                if let Some((min, max)) = cluster_elapsed_range(cluster) {
-                    r.elapsed_ms >= min.saturating_sub(1000)
-                        && r.elapsed_ms <= max.saturating_add(1000)
-                } else {
-                    false
-                }
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let diagnosis = diagnose_cluster(
-            cluster,
-            &irq_events,
-            &gpu_samples,
-            &frame_events,
-            &io_events,
-            &interval_records,
-        );
+        let diagnosis = diagnose_cluster(cluster, artifacts, cluster_window_ns);
         let anchor = select_anchor(cluster);
         cluster.anchor_task = Some(anchor.task);
         cluster.anchor_class = Some(anchor.class);
@@ -2375,8 +2332,6 @@ fn perform_frame_diagnosis(
     cluster_window_ns: u64,
 ) -> Vec<FrameDiagnosis> {
     let mut diagnoses = Vec::new();
-    let padding_ms = u128::from(cluster_window_ns / 1_000_000).max(1);
-
     for frame in frame_spikes {
         let frame_monotonic_ns = if let Some(start_ns) = session.monotonic_start_ns {
             start_ns + (frame.elapsed_ms as u64 * 1_000_000)
@@ -2397,49 +2352,9 @@ fn perform_frame_diagnosis(
             .len();
         let cluster = cluster_from_points(nearby_points, distinct_tasks);
 
-        let irq_events = artifacts
-            .irq_events
-            .iter()
-            .filter(|e| {
-                e.exit_ns >= frame_monotonic_ns.saturating_sub(cluster_window_ns)
-                    && e.enter_ns <= frame_monotonic_ns.saturating_add(cluster_window_ns)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
+        // Let `diagnose_cluster` handle artifact filtering.
 
-        let gpu_samples = artifacts
-            .gpu_samples
-            .iter()
-            .filter(|s| s.elapsed_ms.abs_diff(frame.elapsed_ms) <= padding_ms)
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let io_events = artifacts
-            .io_events
-            .iter()
-            .filter(|e| {
-                e.timestamp_ns >= frame_monotonic_ns.saturating_sub(cluster_window_ns)
-                    && e.timestamp_ns.saturating_sub(e.duration_ns)
-                        <= frame_monotonic_ns.saturating_add(cluster_window_ns)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let interval_records = artifacts
-            .interval_records
-            .iter()
-            .filter(|r| r.elapsed_ms.abs_diff(frame.elapsed_ms) <= 1000)
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let diagnosis = diagnose_cluster(
-            &cluster,
-            &irq_events,
-            &gpu_samples,
-            &[],
-            &io_events,
-            &interval_records,
-        );
+        let diagnosis = diagnose_cluster(&cluster, artifacts, cluster_window_ns);
 
         diagnoses.push(FrameDiagnosis {
             frame_elapsed_ms: frame.elapsed_ms,
