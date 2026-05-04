@@ -303,6 +303,10 @@ impl AlertPayload {
     }
 }
 
+/// Sends a desktop notification using the `notify-send` command.
+///
+/// NOTE: This spawns an external process which can add system noise.
+/// TODO: Replace with a native implementation using `zbus` or `freedesktop-notifications`.
 pub async fn send_desktop_alert(payload: &AlertPayload) -> Result<(), String> {
     let mut child = tokio::process::Command::new("notify-send")
         .args([
@@ -325,6 +329,10 @@ pub async fn send_desktop_alert(payload: &AlertPayload) -> Result<(), String> {
     }
 }
 
+/// Sends a webhook alert using the `curl` command.
+///
+/// NOTE: This spawns an external process which can add system noise.
+/// TODO: Replace with a native implementation using `reqwest` or a `tiny-hyper` client.
 pub async fn send_webhook_alert(url: &str, payload: &AlertPayload) -> Result<(), String> {
     let body = serde_json::to_string(payload)
         .map_err(|err| format!("failed to serialize alert payload: {err}"))?;

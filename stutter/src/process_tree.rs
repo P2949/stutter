@@ -246,6 +246,7 @@ pub struct TaskFilters {
 #[derive(Clone, Debug, Default)]
 pub struct CompiledPattern {
     pub raw: String,
+    pub lower_raw: String,
     pub regex: Option<Regex>,
 }
 
@@ -260,7 +261,12 @@ impl CompiledPattern {
             None
         };
 
-        Ok(Self { raw, regex })
+        let lower_raw = raw.to_ascii_lowercase();
+        Ok(Self {
+            raw,
+            lower_raw,
+            regex,
+        })
     }
 
     pub fn raw(&self) -> &str {
@@ -271,9 +277,15 @@ impl CompiledPattern {
         if let Some(regex) = &self.regex {
             regex.is_match(value)
         } else {
-            value
-                .to_ascii_lowercase()
-                .contains(&self.raw.to_ascii_lowercase())
+            value.to_ascii_lowercase().contains(&self.lower_raw)
+        }
+    }
+
+    pub fn matches_with_lower(&self, value: &str, lower_value: &str) -> bool {
+        if let Some(regex) = &self.regex {
+            regex.is_match(value)
+        } else {
+            lower_value.contains(&self.lower_raw)
         }
     }
 }
@@ -288,21 +300,28 @@ impl Eq for CompiledPattern {}
 
 impl TaskFilters {
     fn allows(&self, task: &TaskInfo) -> bool {
-        if self
-            .exclude_comm
-            .iter()
-            .any(|pattern| comm_pattern_matches(pattern, task))
-        {
+        if self.exclude_comm.is_empty() && self.include_comm.is_empty() {
+            return true;
+        }
+
+        let lower_comm = task.comm.to_ascii_lowercase();
+        let lower_process_comm = task.process_comm.to_ascii_lowercase();
+
+        if self.exclude_comm.iter().any(|pattern| {
+            pattern.matches_with_lower(&task.comm, &lower_comm)
+                || pattern.matches_with_lower(&task.process_comm, &lower_process_comm)
+        }) {
             return false;
         }
 
         self.include_comm.is_empty()
-            || self
-                .include_comm
-                .iter()
-                .any(|pattern| comm_pattern_matches(pattern, task))
+            || self.include_comm.iter().any(|pattern| {
+                pattern.matches_with_lower(&task.comm, &lower_comm)
+                    || pattern.matches_with_lower(&task.process_comm, &lower_process_comm)
+            })
     }
 }
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetDiffAction {
@@ -898,9 +917,6 @@ pub fn parse_proc_stat_policy(stat: &str) -> Option<u32> {
     after_comm.split_whitespace().nth(38)?.parse().ok()
 }
 
-fn comm_pattern_matches(pattern: &CompiledPattern, task: &TaskInfo) -> bool {
-    pattern.matches(&task.comm) || pattern.matches(&task.process_comm)
-}
 
 /// Classification priority (highest to lowest):
 /// 1. GameScope: The compositor running the game.

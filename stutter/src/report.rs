@@ -12,8 +12,9 @@ use crate::{
     process_tree::TaskClass,
     recorder::{
         FrameEvent, GpuSample, IrqEventRecord, RecordedSpike, SESSION_SCHEMA_VERSION, SessionFile,
-        SessionTask, SpikeEvent,
+        SessionTask, SpikeEvent, IntervalRecord,
     },
+    diagnosis::{Diagnosis, diagnose_cluster},
 };
 
 const MIN_CLUSTER_TASKS: usize = 3;
@@ -22,29 +23,27 @@ const MAX_CLUSTER_CANDIDATES: usize = 4096;
 
 #[derive(Clone, Serialize)]
 pub(crate) struct SpikePoint {
-    task: u32,
-    class: TaskClass,
-    process_pid: Option<u32>,
-    comm: String,
-    cpu: u32,
-    wakeup_target_cpu: u32,
-    latency_ns: u64,
-    wakeup_ns: u64,
-    switch_ns: u64,
-    // Diagnostic-only: see docs in `metrics::SpikeRecord`.
-    // This is included in reports and visualizations only and MUST NOT
-    // influence scoring or tuning decisions.
-    target_pending_wakeups: u32,
-    elapsed_ms: Option<u128>,
+    pub(crate) task: u32,
+    pub(crate) class: TaskClass,
+    pub(crate) process_pid: Option<u32>,
+    pub(crate) comm: String,
+    pub(crate) cpu: u32,
+    pub(crate) wakeup_target_cpu: u32,
+    pub(crate) latency_ns: u64,
+    pub(crate) wakeup_ns: u64,
+    pub(crate) switch_ns: u64,
+    pub(crate) target_pending_wakeups: u32,
+    pub(crate) elapsed_ms: Option<u128>,
 }
 
 #[derive(Clone, Serialize)]
 pub(crate) struct SpikeCluster {
-    points: Vec<SpikePoint>,
-    distinct_tasks: usize,
-    min_switch_ns: u64,
-    max_switch_ns: u64,
-    max_latency_ns: u64,
+    pub(crate) points: Vec<SpikePoint>,
+    pub(crate) distinct_tasks: usize,
+    pub(crate) min_switch_ns: u64,
+    pub(crate) max_switch_ns: u64,
+    pub(crate) max_latency_ns: u64,
+    pub(crate) diagnosis: Option<Diagnosis>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -68,6 +67,7 @@ pub(crate) struct RunArtifacts {
     pub(crate) migration_events: Vec<crate::recorder::MigrationEventRecord>,
     pub(crate) cpu_freq_samples: Vec<crate::recorder::CpuFreqRecord>,
     pub(crate) io_events: Vec<crate::recorder::BlockIoRecord>,
+    pub(crate) interval_records: Vec<IntervalRecord>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -138,6 +138,8 @@ pub fn print_report(
     );
     let artifacts =
         load_run_artifacts(&session_path, &cluster_analysis.clusters, cluster_window_ns)?;
+    let mut cluster_analysis = cluster_analysis;
+    perform_diagnosis(&mut cluster_analysis.clusters, &artifacts, cluster_window_ns);
 
     print!(
         "{}",
@@ -572,6 +574,8 @@ pub fn write_html_report(
     );
     let artifacts =
         load_run_artifacts(&session_path, &cluster_analysis.clusters, cluster_window_ns)?;
+    let mut cluster_analysis = cluster_analysis;
+    perform_diagnosis(&mut cluster_analysis.clusters, &artifacts, cluster_window_ns);
 
     let text_report = render_report(
         &session_path,
@@ -1123,6 +1127,35 @@ fn load_run_artifacts(
         }
     }
 
+    // Interval records (for PSI diagnosis)
+    let path = run_dir.join("interval_records.json");
+    if path.exists() {
+        let min_overall_opt = clusters
+            .iter()
+            .filter_map(|c| {
+                let (min, _) = cluster_elapsed_range(c)?;
+                Some(min)
+            })
+            .min();
+        let max_overall_opt = clusters
+            .iter()
+            .filter_map(|c| {
+                let (_, max) = cluster_elapsed_range(c)?;
+                Some(max)
+            })
+            .max();
+
+        if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+            let lower = min_overall.saturating_sub(1000); // 1s buffer for PSI
+            let upper = max_overall.saturating_add(1000);
+            if let Ok(selected) = stream_json_array_select(&path, |r: &IntervalRecord| {
+                r.elapsed_ms >= lower && r.elapsed_ms <= upper
+            }) {
+                artifacts.interval_records = selected;
+            }
+        }
+    }
+
     Ok(artifacts)
 }
 
@@ -1402,6 +1435,72 @@ fn cluster_from_points(mut points: Vec<SpikePoint>, distinct_tasks: usize) -> Sp
         min_switch_ns,
         max_switch_ns,
         max_latency_ns,
+        diagnosis: None,
+    }
+}
+
+fn perform_diagnosis(
+    clusters: &mut [SpikeCluster],
+    artifacts: &RunArtifacts,
+    cluster_window_ns: u64,
+) {
+    for cluster in clusters {
+        let irq_events = artifacts.irq_events.iter()
+            .filter(|e| {
+                let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
+                let max_ns = cluster.max_switch_ns.saturating_add(cluster_window_ns);
+                e.exit_ns >= min_ns && e.enter_ns <= max_ns
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let gpu_samples = artifacts.gpu_samples.iter()
+            .filter(|s| {
+                cluster_elapsed(cluster).is_some_and(|elapsed| s.elapsed_ms.abs_diff(elapsed) <= 50)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let frame_events = artifacts.frame_events.iter()
+            .filter(|f| {
+                if let Some((min, max)) = cluster_elapsed_range(cluster) {
+                    let padding = u128::from(cluster_window_ns / 1_000_000).max(1);
+                    f.elapsed_ms >= min.saturating_sub(padding) && f.elapsed_ms <= max.saturating_add(padding)
+                } else {
+                    false
+                }
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let io_events = artifacts.io_events.iter()
+            .filter(|e| {
+                let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
+                let max_ns = cluster.max_switch_ns.saturating_add(cluster_window_ns);
+                e.timestamp_ns >= min_ns && e.timestamp_ns.saturating_sub(e.duration_ns) <= max_ns
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let interval_records = artifacts.interval_records.iter()
+            .filter(|r| {
+                if let Some((min, max)) = cluster_elapsed_range(cluster) {
+                     r.elapsed_ms >= min.saturating_sub(1000) && r.elapsed_ms <= max.saturating_add(1000)
+                } else {
+                    false
+                }
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        cluster.diagnosis = Some(diagnose_cluster(
+            cluster,
+            &irq_events,
+            &gpu_samples,
+            &frame_events,
+            &io_events,
+            &interval_records,
+        ));
     }
 }
 
@@ -1818,8 +1917,18 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
         .collect::<Vec<_>>()
         .join(" ");
 
+    let diagnosis_line = if let Some(d) = &cluster.diagnosis {
+        let evidence = d.evidence.join("; ");
+        format!(
+            "\n  diagnosis: cause={:?} confidence={:?} evidence=[{}]",
+            d.cause, d.confidence, evidence
+        )
+    } else {
+        String::new()
+    };
+
     format!(
-        "#{rank} elapsed={} span={} tasks={} spikes={} total_spikes={} shown_points={} omitted_points={} cpus={} labels={} max={} switch_ns={}..{} points={}",
+        "#{rank} elapsed={} span={} tasks={} spikes={} total_spikes={} shown_points={} omitted_points={} cpus={} labels={} max={} switch_ns={}..{} points={}{}",
         format_elapsed(elapsed),
         format_latency(span_ns),
         cluster.distinct_tasks,
@@ -1832,7 +1941,8 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
         format_latency(cluster.max_latency_ns),
         cluster.min_switch_ns,
         cluster.max_switch_ns,
-        points
+        points,
+        diagnosis_line
     )
 }
 
