@@ -32,7 +32,8 @@ use crate::{
 };
 
 pub struct MonitorSession {
-    pub config: Config,
+    pub config: Arc<Config>,
+    pub tree_pids: Vec<u32>,
     pub watch_state: WatchProcessState,
     pub tree_root_starttimes: BTreeMap<u32, Option<u64>>,
     pub recorder: LiveRecorder,
@@ -79,13 +80,14 @@ impl MonitorSession {
             config.tree_pids = pids;
         }
 
-        let watch_state = match resolve_watch_process(&mut config).await? {
+        let mut tree_pids = config.tree_pids.clone();
+        let watch_state = match resolve_watch_process(&config, &mut tree_pids).await? {
             Some(pid) => WatchProcessState::Running(pid),
             None => WatchProcessState::None,
         };
 
-        let had_tree_roots = !config.tree_pids.is_empty();
-        let tree_root_starttimes = capture_tree_root_starttimes(&config.tree_pids);
+        let had_tree_roots = !tree_pids.is_empty();
+        let tree_root_starttimes = capture_tree_root_starttimes(&tree_pids);
 
         let recording = recorder::prepare_recording(&config)?;
         let mut loaded = ebpf_loader::load_and_attach(&config)?;
@@ -217,7 +219,8 @@ impl MonitorSession {
         };
 
         Ok(Self {
-            config,
+            config: Arc::new(config),
+            tree_pids,
             watch_state,
             tree_root_starttimes,
             recorder,
@@ -513,7 +516,7 @@ impl MonitorSession {
         if let Some(root_pid) = self.watch_state.running_pid()
             && tree_root_is_stale(root_pid, &self.tree_root_starttimes)
         {
-            remove_watch_tree_pid(&mut self.config, root_pid);
+            remove_watch_tree_pid(&mut self.tree_pids, root_pid);
             self.tree_root_starttimes.remove(&root_pid);
 
             if !self.config.persistent {
@@ -524,7 +527,7 @@ impl MonitorSession {
             }
         } else {
             let removed_roots = remove_stale_tree_roots(
-                &mut self.config,
+                &mut self.tree_pids,
                 &mut self.tree_root_starttimes,
                 self.watch_state.running_pid(),
             );
@@ -535,7 +538,7 @@ impl MonitorSession {
 
             if !removed_roots.is_empty()
                 && self.had_tree_roots
-                && self.config.tree_pids.is_empty()
+                && self.tree_pids.is_empty()
                 && !matches!(self.watch_state, WatchProcessState::Waiting)
             {
                 should_exit = Some("tree_root_exit".to_owned());
@@ -563,7 +566,7 @@ impl MonitorSession {
             &pattern,
             &mut self.watch_process_cache,
         ) {
-            add_watch_tree_pid(&mut self.config, pid);
+            add_watch_tree_pid(&mut self.tree_pids, pid);
             self.tree_root_starttimes
                 .insert(pid, process_root_starttime(pid));
             self.watch_state = WatchProcessState::Running(pid);
@@ -606,14 +609,15 @@ impl MonitorSession {
 
     pub async fn refresh_tasks(&mut self) -> anyhow::Result<()> {
         self.tasks
-            .refresh(
-                &self.config,
-                &mut self.recorder.tree_events,
-                &mut self.loaded.target_pid_map,
-                self.loaded.prev_faults_map.as_mut(),
-                self.started.elapsed().as_millis(),
-                self.recorder.run.as_ref().map(|run| run.started_instant),
-            )
+            .refresh(crate::tasks::RefreshInput {
+                config: &self.config,
+                tree_pids: &self.tree_pids,
+                tree_events: &mut self.recorder.tree_events,
+                target_pid_map: &mut self.loaded.target_pid_map,
+                prev_faults_map: self.loaded.prev_faults_map.as_mut(),
+                elapsed_ms: self.started.elapsed().as_millis(),
+                recording_started: self.recorder.run.as_ref().map(|run| run.started_instant),
+            })
             .await
     }
 
@@ -673,6 +677,7 @@ impl MonitorSession {
             recorder::finalize_recording(FinalizeRecordingInput {
                 recorder: &self.recorder,
                 config: &self.config,
+                tree_pids: &self.tree_pids,
                 stop_reason: &stop_reason,
                 tasks: &self.tasks,
                 frame_events: &frame_events,
@@ -687,10 +692,10 @@ impl MonitorSession {
 }
 
 pub async fn run_monitor(
-    config: Config,
+    config: Arc<Config>,
     shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
 ) -> anyhow::Result<()> {
-    let mut session = MonitorSession::new(config, shared_hwmon).await?;
+    let mut session = MonitorSession::new((*config).clone(), shared_hwmon).await?;
     let stop_reason = session.run().await?;
     session.finalize(stop_reason)
 }

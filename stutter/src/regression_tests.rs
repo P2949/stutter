@@ -640,6 +640,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     recorder::finalize_recording(FinalizeRecordingInput {
         recorder: &recorder,
         config: &config,
+        tree_pids: &config.tree_pids,
         stop_reason: "test",
         tasks: &task_tracker,
         frame_events: &[],
@@ -1077,6 +1078,7 @@ fn report_reads_recorded_session_andspike_events() {
     recorder::finalize_recording(FinalizeRecordingInput {
         recorder: &recorder,
         config: &config,
+        tree_pids: &config.tree_pids,
         stop_reason: "test",
         tasks: &task_tracker,
         frame_events: &[],
@@ -1144,6 +1146,7 @@ fn report_cluster_output_caps_inline_points() {
     recorder::finalize_recording(FinalizeRecordingInput {
         recorder: &recorder,
         config: &config,
+        tree_pids: &config.tree_pids,
         stop_reason: "test",
         tasks: &task_tracker,
         frame_events: &[],
@@ -1443,7 +1446,7 @@ fn minimal_session_for_report() -> SessionFile {
         monotonic_end_ns: Some(20_000_000),
         duration_ms: 20,
         stop_reason: "test".to_owned(),
-        config: recorded_config(&config),
+        config: recorded_config(&config, &config.tree_pids),
         metadata: SystemMetadata::default(),
         target_pids_max: 1024,
         active_target_pids_count: 0,

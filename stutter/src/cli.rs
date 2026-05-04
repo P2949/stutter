@@ -1,4 +1,4 @@
-use std::{ffi::OsString, path::PathBuf, time::Duration};
+use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 
@@ -269,7 +269,7 @@ pub struct CheckArgs {
 
 #[derive(Debug)]
 pub enum AppCommand {
-    Monitor(Box<Config>),
+    Monitor(Arc<Config>),
     Restore {
         dry_run: bool,
     },
@@ -369,7 +369,7 @@ where
     let cli = Cli::try_parse_from(args)?;
 
     match cli.command {
-        Some(Command::Monitor(args)) => Ok(AppCommand::Monitor(Box::new(
+        Some(Command::Monitor(args)) => Ok(AppCommand::Monitor(Arc::new(
             config_from_monitor_args(args, false, None)?,
         ))),
         Some(Command::Record(args)) => {
@@ -384,7 +384,7 @@ where
             }
 
             let max_duration = args.duration.map(Duration::from_secs);
-            Ok(AppCommand::Monitor(Box::new(config_from_monitor_args(
+            Ok(AppCommand::Monitor(Arc::new(config_from_monitor_args(
                 args.monitor,
                 true,
                 max_duration,
@@ -481,7 +481,7 @@ where
                 max_regression_p99_ms: args.max_regression_p99_ms,
             })
         }
-        None => Ok(AppCommand::Monitor(Box::new(config_from_monitor_args(
+        None => Ok(AppCommand::Monitor(Arc::new(config_from_monitor_args(
             cli.legacy_monitor,
             false,
             None,
