@@ -818,10 +818,11 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
                     count: *count,
                 })
                 .collect(),
-            sched_policy: stats
-                .sched_policy
-                .map(crate::process_tree::sched_policy_name)
-                .map(|s| s.to_owned()),
+            sched_policy: stats.sched_policy.map(|p| {
+                crate::process_tree::sched_policy_name(p)
+                    .map(|s| s.to_owned())
+                    .unwrap_or_else(|| format!("UNKNOWN({})", p))
+            }),
             stat_wait_sum_ns: if stats.stat_wait_count > 0 {
                 Some(stats.stat_wait_sum_ns as u64)
             } else {

@@ -105,15 +105,15 @@ pub struct TaskInfo {
     pub from_cgroup: bool,
 }
 
-pub fn sched_policy_name(policy: u32) -> &'static str {
+pub fn sched_policy_name(policy: u32) -> Option<&'static str> {
     match policy {
-        0 => "SCHED_NORMAL",
-        1 => "SCHED_FIFO",
-        2 => "SCHED_RR",
-        3 => "SCHED_BATCH",
-        5 => "SCHED_IDLE",
-        6 => "SCHED_DEADLINE",
-        _ => "UNKNOWN",
+        0 => Some("SCHED_NORMAL"),
+        1 => Some("SCHED_FIFO"),
+        2 => Some("SCHED_RR"),
+        3 => Some("SCHED_BATCH"),
+        5 => Some("SCHED_IDLE"),
+        6 => Some("SCHED_DEADLINE"),
+        _ => None,
     }
 }
 
