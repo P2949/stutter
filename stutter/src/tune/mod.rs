@@ -18,12 +18,16 @@ use crate::{
     affinity,
     cli::{self, Config},
     hwmon,
-    process_tree::{TaskClass, TaskFilters},
+    process_tree::TaskFilters,
     profiles,
     recorder::{self, IntervalRecord},
     scorer,
     session::run_monitor,
 };
+
+pub mod comparability;
+
+pub use comparability::TuneCoverageMetrics;
 
 pub const TUNE_RUN_STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 pub const TUNE_PROFILE_REFRESH_MS: u64 = 1_000;
@@ -67,28 +71,6 @@ pub struct TuneCandidateSummary {
     pub valid: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize)]
-pub struct TaskIdentity {
-    pub class: TaskClass,
-    pub process_comm: String,
-    pub comm: String,
-    pub process_starttime_ticks: Option<u64>,
-    pub task_starttime_ticks: Option<u64>,
-    pub exe_dev: Option<u64>,
-    pub exe_ino: Option<u64>,
-}
-
-#[derive(Clone, Debug, Default, Serialize)]
-pub struct TuneCoverageMetrics {
-    pub unique_tracked_tasks: usize,
-    pub unique_scored_tasks: usize,
-    pub active_target_min: usize,
-    pub active_target_max: usize,
-    pub removed_task_count: usize,
-    pub drop_counter_total: u64,
-    pub scored_identity_counts: BTreeMap<TaskIdentity, usize>,
-}
-
 pub struct TuneCommandInput {
     pub tree_pid: u32,
     pub profiles_path: PathBuf,
@@ -124,6 +106,7 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         mangohud_log,
         enforce,
     } = input;
+
     let profiles = profiles::load_profiles(&profiles_path)?;
     if profiles.is_empty() {
         anyhow::bail!(
@@ -143,15 +126,73 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         );
     }
 
-    let measure_seconds = epoch_seconds.saturating_sub(warmup_seconds);
-    let mut results = Vec::new();
+    let tune_output_dir = default_tune_output_dir()?;
+    let results = collect_tune_results(
+        &profiles,
+        tree_pid,
+        epoch_seconds,
+        warmup_seconds,
+        runs,
+        mangohud_log,
+        enforce,
+        &tune_output_dir,
+    )
+    .await?;
+
+    let mut grouped: BTreeMap<String, Vec<TuneCandidateSummary>> = BTreeMap::new();
+    for r in &results {
+        grouped
+            .entry(r.profile.clone())
+            .or_default()
+            .push(r.clone());
+    }
+
+    let any_valid = results.iter().any(|r| r.valid);
+    if !any_valid {
+        restore_tune_on_error();
+        anyhow::bail!("no tune candidate collected enough data; no best profile selected");
+    }
+
+    comparability::check_tune_coverage_comparability(&grouped)?;
+
+    let best_profile = select_best_profile(&grouped);
+
     let restore_policy = if keep_best {
         "restore-after-each-then-keep-best"
     } else {
         "restore-after-each"
     };
-    let tune_output_dir = default_tune_output_dir()?;
 
+    let summary = TuneSummary {
+        schema_version: 1,
+        tree_pid,
+        profiles_path,
+        runs,
+        epoch_seconds,
+        warmup_seconds,
+        restore_policy: restore_policy.to_owned(),
+        best_profile,
+        candidates: results,
+    };
+
+    write_tune_summary(&summary, &tune_output_dir, keep_best, enforce).await?;
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn collect_tune_results(
+    profiles: &[profiles::Profile],
+    tree_pid: u32,
+    epoch_seconds: u64,
+    warmup_seconds: u64,
+    runs: u32,
+    mangohud_log: Option<PathBuf>,
+    enforce: bool,
+    tune_output_dir: &Path,
+) -> anyhow::Result<Vec<TuneCandidateSummary>> {
+    let measure_seconds = epoch_seconds.saturating_sub(warmup_seconds);
+    let mut results = Vec::new();
     let shared_hwmon = hwmon::HwmonReader::discover_with_options(None, None, None)
         .map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)));
 
@@ -206,7 +247,7 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
                     retain_intervals: None,
                     recording: Some(cli::RecordingConfig {
                         run_name: Some(format!("tune-{}", profile.name)),
-                        out_dir: Some(tune_run_dir(&tune_output_dir, &profile.name)),
+                        out_dir: Some(tune_run_dir(tune_output_dir, &profile.name)),
                     }),
                     max_duration: Some(Duration::from_secs(epoch_seconds)),
                     cgroupv2: None,
@@ -228,7 +269,7 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
                 enforce,
                 shared_hwmon.clone(),
                 results.is_empty(),
-                tune_output_dir.clone(),
+                tune_output_dir.to_owned(),
             )
             .await
             {
@@ -308,98 +349,39 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         }
     }
 
-    let mut grouped: BTreeMap<String, Vec<TuneCandidateSummary>> = BTreeMap::new();
-    for r in &results {
-        grouped
-            .entry(r.profile.clone())
-            .or_default()
-            .push(r.clone());
-    }
+    Ok(results)
+}
 
-    let best_profile = grouped
+fn select_best_profile(grouped: &BTreeMap<String, Vec<TuneCandidateSummary>>) -> String {
+    grouped
         .iter()
         .filter(|(_, runs)| runs.iter().any(|r| r.valid))
         .min_by_key(|(_, runs)| aggregate_profile_rank(runs))
         .map(|(name, _)| name.clone())
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
-    let any_valid = results.iter().any(|r| r.valid);
-    if !any_valid {
-        restore_tune_on_error();
-        anyhow::bail!("no tune candidate collected enough data; no best profile selected");
-    }
-
-    let profile_medians: Vec<_> = grouped
-        .values()
-        .map(|runs| median_u64(runs.iter().map(|r| r.scored_samples).collect()))
-        .collect();
-    let min_samples = profile_medians.iter().copied().min().unwrap_or(0);
-    let max_samples = profile_medians.iter().copied().max().unwrap_or(0);
-
-    if min_samples == 0 && max_samples > 0 {
-        anyhow::bail!(
-            "tune candidates are not comparable: some profiles gathered no scored samples while others did (max_median_scored_samples={})",
-            max_samples
-        );
-    } else if min_samples > 0 {
-        let ratio = (max_samples as f64) / (min_samples as f64);
-        if ratio > 2.0 {
-            anyhow::bail!(
-                "tune candidates are not comparable: median scored sample count varies by more than 2x across profiles (min={} max={} ratio={:.2})",
-                min_samples,
-                max_samples,
-                ratio
-            );
-        }
-    }
-
-    check_tune_coverage_comparability(&grouped)?;
-
-    let profile_frame_medians: Vec<_> = grouped
-        .values()
-        .map(|runs| median_u64(runs.iter().map(|r| r.frame_count as u64).collect()))
-        .collect();
-    let min_frames = profile_frame_medians.iter().copied().min().unwrap_or(0);
-    let max_frames = profile_frame_medians.iter().copied().max().unwrap_or(0);
-
-    if max_frames > 0 && min_frames == 0 {
-        anyhow::bail!(
-            "tune candidates are not comparable: some profiles produced MangoHud frame events and some produced none"
-        );
-    } else if min_frames > 0 {
-        let ratio = (max_frames as f64) / (min_frames as f64);
-        if ratio > 1.5 {
-            warn!(
-                "tune_candidates_unbalanced_frames min_median={} max_median={} ratio={:.2}",
-                min_frames, max_frames, ratio
-            );
-        }
-    }
-
-    let summary = TuneSummary {
-        schema_version: 1,
-        tree_pid,
-        profiles_path,
-        runs,
-        epoch_seconds,
-        warmup_seconds,
-        restore_policy: restore_policy.to_owned(),
-        best_profile,
-        candidates: results,
-    };
-    if keep_best
-        && let Some(profile) = profiles
+async fn write_tune_summary(
+    summary: &TuneSummary,
+    tune_output_dir: &Path,
+    keep_best: bool,
+    enforce: bool,
+) -> anyhow::Result<()> {
+    if keep_best && !summary.best_profile.is_empty() {
+        let profiles = profiles::load_profiles(&summary.profiles_path)?;
+        if let Some(profile) = profiles
             .iter()
             .find(|profile| profile.name == summary.best_profile)
-    {
-        crate::watch::apply_profile_to_tree_blocking(
-            tree_pid,
-            profile.clone(),
-            false,
-            false,
-            enforce,
-        )
-        .await?;
+        {
+            crate::watch::apply_profile_to_tree_blocking(
+                summary.tree_pid,
+                profile.clone(),
+                false,
+                false,
+                enforce,
+            )
+            .await?;
+        }
     }
 
     let summary_path = tune_output_dir.join("tuning_summary.json");
@@ -531,7 +513,7 @@ pub async fn measure_tune_candidate(
     let session_data = fs::read_to_string(&session_path)
         .with_context(|| format!("failed to read session.json from {}", run_dir.display()))?;
     let session: recorder::SessionFile = serde_json::from_str(&session_data)?;
-    let coverage = tune_coverage_metrics(&session, &interval_records);
+    let coverage = comparability::tune_coverage_metrics(&session, &interval_records);
 
     Ok(TuneMeasureResult {
         applied_tasks,
@@ -688,242 +670,6 @@ pub fn tune_scored_record_counts(records: &[IntervalRecord]) -> (usize, u64) {
     }
 
     (elapsed.len(), samples)
-}
-
-pub fn tune_coverage_metrics(
-    session: &recorder::SessionFile,
-    interval_records: &[IntervalRecord],
-) -> TuneCoverageMetrics {
-    let unique_tracked_tasks = session.tasks.len();
-    let scored_task_ids = interval_records
-        .iter()
-        .filter(|record| scorer::class_contributes_to_score(record.class) && record.samples > 0)
-        .map(|record| record.task)
-        .collect::<BTreeSet<_>>();
-    let unique_scored_tasks = scored_task_ids.len();
-    let removed_task_count = session
-        .tasks
-        .iter()
-        .filter(|task| !task.active || task.removed_ms.is_some())
-        .count();
-
-    let mut active_by_elapsed: BTreeMap<u128, usize> = BTreeMap::new();
-    for record in interval_records.iter().filter(|record| record.active) {
-        *active_by_elapsed.entry(record.elapsed_ms).or_default() += 1;
-    }
-    let (active_target_min, active_target_max) = if active_by_elapsed.is_empty() {
-        (
-            session.active_target_pids_count as usize,
-            session.active_target_pids_count as usize,
-        )
-    } else {
-        (
-            active_by_elapsed.values().copied().min().unwrap_or(0),
-            active_by_elapsed.values().copied().max().unwrap_or(0),
-        )
-    };
-
-    let tasks_by_tid = session
-        .tasks
-        .iter()
-        .map(|task| (task.task, task))
-        .collect::<BTreeMap<_, _>>();
-    let mut scored_identity_counts = BTreeMap::<TaskIdentity, usize>::new();
-    for tid in scored_task_ids {
-        let identity = if let Some(task) = tasks_by_tid.get(&tid) {
-            TaskIdentity {
-                class: task.class,
-                process_comm: task.process_comm.to_string(),
-                comm: task.comm.clone(),
-                process_starttime_ticks: task.process_starttime_ticks,
-                task_starttime_ticks: task.task_starttime_ticks,
-                exe_dev: task.exe_dev,
-                exe_ino: task.exe_ino,
-            }
-        } else if let Some(record) = interval_records.iter().find(|record| record.task == tid) {
-            TaskIdentity {
-                class: record.class,
-                process_comm: record.process_comm.to_string(),
-                comm: record.comm.clone(),
-                process_starttime_ticks: None,
-                task_starttime_ticks: None,
-                exe_dev: None,
-                exe_ino: None,
-            }
-        } else {
-            continue;
-        };
-        *scored_identity_counts.entry(identity).or_default() += 1;
-    }
-
-    TuneCoverageMetrics {
-        unique_tracked_tasks,
-        unique_scored_tasks,
-        active_target_min,
-        active_target_max,
-        removed_task_count,
-        drop_counter_total: if session.block_io_correlation_basis == "request-pointer" {
-            session.drop_counters.total()
-        } else {
-            session.drop_counters.total_excluding_block_io()
-        },
-        scored_identity_counts,
-    }
-}
-
-pub fn check_tune_coverage_comparability(
-    grouped: &BTreeMap<String, Vec<TuneCandidateSummary>>,
-) -> anyhow::Result<()> {
-    check_tune_metric_ratio(
-        "unique tracked tasks",
-        grouped.values().map(|runs| {
-            median_u64(
-                runs.iter()
-                    .map(|result| result.coverage.unique_tracked_tasks as u64)
-                    .collect(),
-            ) as usize
-        }),
-    )?;
-    check_tune_metric_ratio(
-        "unique scored tasks",
-        grouped.values().map(|runs| {
-            median_u64(
-                runs.iter()
-                    .map(|result| result.coverage.unique_scored_tasks as u64)
-                    .collect(),
-            ) as usize
-        }),
-    )?;
-
-    let representatives: Vec<&TuneCandidateSummary> =
-        grouped.values().filter_map(|runs| runs.first()).collect();
-
-    if let Some(first) = representatives.first() {
-        for other in representatives.iter().skip(1) {
-            let common = scored_identity_overlap(
-                &first.coverage.scored_identity_counts,
-                &other.coverage.scored_identity_counts,
-                usize::min,
-            );
-            let total = scored_identity_overlap(
-                &first.coverage.scored_identity_counts,
-                &other.coverage.scored_identity_counts,
-                usize::max,
-            );
-
-            let overlap_ratio = if total > 0 {
-                common as f64 / total as f64
-            } else {
-                1.0
-            };
-
-            if overlap_ratio < 0.75 {
-                anyhow::bail!(
-                    "scored task identity mismatch (overlap={:.1}%); candidates are not comparable (major thread topology shift)",
-                    overlap_ratio * 100.0
-                );
-            }
-        }
-    }
-
-    check_tune_metric_ratio(
-        "active target minimum",
-        grouped.values().map(|runs| {
-            median_u64(
-                runs.iter()
-                    .map(|result| result.coverage.active_target_min as u64)
-                    .collect(),
-            ) as usize
-        }),
-    )?;
-    check_tune_metric_ratio(
-        "active target maximum",
-        grouped.values().map(|runs| {
-            median_u64(
-                runs.iter()
-                    .map(|result| result.coverage.active_target_max as u64)
-                    .collect(),
-            ) as usize
-        }),
-    )?;
-
-    let profile_removed_medians: Vec<_> = grouped
-        .values()
-        .map(|runs| {
-            median_u64(
-                runs.iter()
-                    .map(|result| result.coverage.removed_task_count as u64)
-                    .collect(),
-            )
-        })
-        .collect();
-
-    let min_removed = profile_removed_medians.iter().copied().min().unwrap_or(0);
-    let max_removed = profile_removed_medians.iter().copied().max().unwrap_or(0);
-    if max_removed > min_removed {
-        warn!(
-            "tune_candidates_removed_task_counts_differ min_median={} max_median={}",
-            min_removed, max_removed
-        );
-    }
-
-    let max_drops = grouped
-        .values()
-        .flat_map(|runs| runs.iter().map(|r| r.coverage.drop_counter_total))
-        .max()
-        .unwrap_or(0);
-    if max_drops > 0 {
-        warn!("tune_candidates_drop_counters_nonzero max_drops={max_drops}");
-    }
-
-    Ok(())
-}
-
-pub fn scored_identity_overlap(
-    left: &BTreeMap<TaskIdentity, usize>,
-    right: &BTreeMap<TaskIdentity, usize>,
-    combine: fn(usize, usize) -> usize,
-) -> usize {
-    left.keys()
-        .chain(right.keys())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .map(|identity| {
-            combine(
-                left.get(identity).copied().unwrap_or(0),
-                right.get(identity).copied().unwrap_or(0),
-            )
-        })
-        .sum()
-}
-
-pub fn check_tune_metric_ratio(
-    label: &str,
-    values: impl Iterator<Item = usize>,
-) -> anyhow::Result<()> {
-    let values = values.collect::<Vec<_>>();
-    let min_value = values.iter().copied().min().unwrap_or(0);
-    let max_value = values.iter().copied().max().unwrap_or(0);
-    if min_value == 0 && max_value > 0 {
-        anyhow::bail!(
-            "tune candidates are not comparable: {} is zero for some candidates but nonzero for others (max={})",
-            label,
-            max_value
-        );
-    }
-    if min_value > 0 {
-        let ratio = (max_value as f64) / (min_value as f64);
-        if ratio > 2.0 {
-            anyhow::bail!(
-                "tune candidates are not comparable: {} varies by more than 2x across candidates (min={} max={} ratio={:.2})",
-                label,
-                min_value,
-                max_value,
-                ratio
-            );
-        }
-    }
-    Ok(())
 }
 
 pub fn restore_tune_on_error() {
