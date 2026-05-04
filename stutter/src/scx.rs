@@ -24,40 +24,44 @@ struct ScxSnapshot {
 }
 
 impl ScxTracker {
-    pub fn sample(&mut self, elapsed_ms: u128) {
-        self.sample_at(Path::new("/sys/kernel/sched_ext"), elapsed_ms);
+    pub fn current_ops(&self) -> Option<&str> {
+        self.last.as_ref().and_then(|s| s.ops.as_deref())
     }
-    #[cfg(test)]
+
+    pub fn current_state(&self) -> Option<&str> {
+        self.last.as_ref().and_then(|s| s.state.as_deref())
+    }
+
+    pub fn sample(&mut self, elapsed_ms: u128) -> Option<ScxEvent> {
+        self.sample_at(Path::new("/sys/kernel/sched_ext"), elapsed_ms)
+    }
+
     pub fn events(&self) -> &[ScxEvent] {
         &self.events
     }
 
-    #[cfg(test)]
-    pub fn sample_at(&mut self, root: &Path, elapsed_ms: u128) {
-        self.record_snapshot(snapshot_at(root), elapsed_ms);
+    pub fn sample_at(&mut self, root: &Path, elapsed_ms: u128) -> Option<ScxEvent> {
+        self.record_snapshot(snapshot_at(root), elapsed_ms)
     }
 
-    #[cfg(not(test))]
-    fn sample_at(&mut self, root: &Path, elapsed_ms: u128) {
-        self.record_snapshot(snapshot_at(root), elapsed_ms);
-    }
-
-    fn record_snapshot(&mut self, snapshot: ScxSnapshot, elapsed_ms: u128) {
+    fn record_snapshot(&mut self, snapshot: ScxSnapshot, elapsed_ms: u128) -> Option<ScxEvent> {
         if snapshot.is_empty() {
-            return;
+            return None;
         }
 
         if self.last.as_ref() == Some(&snapshot) {
-            return;
+            return None;
         }
 
-        self.events.push(ScxEvent {
+        let event = ScxEvent {
             elapsed_ms,
             state: snapshot.state.clone(),
             ops: snapshot.ops.clone(),
             enable_seq: snapshot.enable_seq.clone(),
-        });
+        };
+        self.events.push(event.clone());
         self.last = Some(snapshot);
+        Some(event)
     }
 }
 

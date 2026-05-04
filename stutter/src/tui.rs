@@ -17,6 +17,7 @@ use ratatui::{
 };
 
 use crate::{
+    diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
     metrics::{IntervalRecord, TaskStats, format_latency},
     process_tree::{TaskClass, TaskInfo},
@@ -117,12 +118,14 @@ pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io
 // Render entry point
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_tui(
     f: &mut Frame,
     state: &TuiState,
     active_targets: &BTreeMap<u32, TaskInfo>,
     stats_by_task: &BTreeMap<u32, TaskStats>,
     interval_records: &[IntervalRecord],
+    recent_diagnoses: &std::collections::VecDeque<LiveDiagnosisEntry>,
     elapsed_ms: u128,
     drop_counters: &DropCountersSnapshot,
 ) {
@@ -131,7 +134,8 @@ pub fn render_tui(
         .constraints([
             Constraint::Length(3), // status bar
             Constraint::Min(10),   // task table
-            Constraint::Length(8), // bottom panels
+            Constraint::Length(8), // sparkline / heat
+            Constraint::Length(8), // recent diagnoses
         ])
         .split(f.area());
 
@@ -154,6 +158,8 @@ pub fn render_tui(
 
     render_sparkline(f, interval_records, bottom[0]);
     render_cpu_heat(f, stats_by_task, bottom[1]);
+
+    render_diagnoses(f, recent_diagnoses, chunks[3]);
 }
 
 // ---------------------------------------------------------------------------
@@ -381,6 +387,56 @@ fn render_cpu_heat(f: &mut Frame, stats_by_task: &BTreeMap<u32, TaskStats>, area
         .value_style(Style::default().fg(Color::White).bg(Color::Red));
 
     f.render_widget(barchart, area);
+}
+
+// ---------------------------------------------------------------------------
+// Recent stutter diagnoses
+// ---------------------------------------------------------------------------
+
+fn render_diagnoses(
+    f: &mut Frame,
+    diagnoses: &std::collections::VecDeque<LiveDiagnosisEntry>,
+    area: Rect,
+) {
+    let mut lines = Vec::new();
+    for d in diagnoses.iter().rev() {
+        let mut parts = vec![
+            Span::styled(
+                format!("elapsed={}ms ", d.elapsed_ms),
+                Style::default().fg(Color::Gray),
+            ),
+            Span::styled(
+                format!("cause={:?} ", d.cause),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("confidence={:?} ", d.confidence),
+                Style::default().fg(match d.confidence {
+                    crate::diagnosis::Confidence::High => Color::Red,
+                    crate::diagnosis::Confidence::Medium => Color::Yellow,
+                    crate::diagnosis::Confidence::Low => Color::Gray,
+                }),
+            ),
+            Span::styled(
+                format!("anchor={} ({:?}) ", d.anchor_comm, d.anchor_class),
+                Style::default().fg(Color::Cyan),
+            ),
+        ];
+
+        if !d.evidence.is_empty() {
+            parts.push(Span::raw(format!("evidence={} ", d.evidence.join("; "))));
+        }
+
+        lines.push(Line::from(parts));
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Recent stutter diagnoses ");
+    let paragraph = Paragraph::new(lines).block(block);
+    f.render_widget(paragraph, area);
 }
 
 #[cfg(test)]

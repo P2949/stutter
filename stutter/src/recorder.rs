@@ -87,6 +87,9 @@ pub struct RecordingRun {
     pub started_at: SystemTime,
     pub started_instant: Instant,
     pub monotonic_start_ns: Option<u64>,
+    pub mangohud_start_offset: Option<u64>,
+    pub mangohud_first_frame_monotonic_ns: Option<u64>,
+    pub mangohud_first_frame_raw_elapsed_ms: Option<u128>,
 }
 
 #[derive(Debug)]
@@ -301,6 +304,12 @@ pub struct SessionFile {
     pub monotonic_start_ns: Option<u64>,
     pub monotonic_end_ns: Option<u64>,
     pub duration_ms: u128,
+    #[serde(default)]
+    pub mangohud_start_offset: Option<u64>,
+    #[serde(default)]
+    pub mangohud_first_frame_monotonic_ns: Option<u64>,
+    #[serde(default)]
+    pub mangohud_first_frame_raw_elapsed_ms: Option<u128>,
     pub stop_reason: String,
     pub config: RecordedConfig,
     pub metadata: SystemMetadata,
@@ -352,6 +361,12 @@ pub struct MetadataFile {
     pub monotonic_start_ns: Option<u64>,
     pub monotonic_end_ns: Option<u64>,
     pub duration_ms: u128,
+    #[serde(default)]
+    pub mangohud_start_offset: Option<u64>,
+    #[serde(default)]
+    pub mangohud_first_frame_monotonic_ns: Option<u64>,
+    #[serde(default)]
+    pub mangohud_first_frame_raw_elapsed_ms: Option<u128>,
     pub metadata: SystemMetadata,
     pub target_pids_max: u64,
     pub active_target_pids_count: u64,
@@ -738,6 +753,9 @@ pub fn prepare_recording(config: &Config) -> anyhow::Result<Option<RecordingRun>
         started_at,
         started_instant: Instant::now(),
         monotonic_start_ns: monotonic_now_ns(),
+        mangohud_start_offset: None,
+        mangohud_first_frame_monotonic_ns: None,
+        mangohud_first_frame_raw_elapsed_ms: None,
     }))
 }
 
@@ -874,6 +892,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         ended_at: recorded_time(ended_at),
         monotonic_start_ns: recording.monotonic_start_ns,
         monotonic_end_ns,
+        mangohud_start_offset: recording.mangohud_start_offset,
+        mangohud_first_frame_monotonic_ns: recording.mangohud_first_frame_monotonic_ns,
+        mangohud_first_frame_raw_elapsed_ms: recording.mangohud_first_frame_raw_elapsed_ms,
         duration_ms,
         stop_reason: stop_reason.to_owned(),
         config: recorded_config(config, tree_pids),
@@ -912,6 +933,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         ended_at: recorded_time(ended_at),
         monotonic_start_ns: recording.monotonic_start_ns,
         monotonic_end_ns,
+        mangohud_start_offset: recording.mangohud_start_offset,
+        mangohud_first_frame_monotonic_ns: recording.mangohud_first_frame_monotonic_ns,
+        mangohud_first_frame_raw_elapsed_ms: recording.mangohud_first_frame_raw_elapsed_ms,
         duration_ms,
         metadata,
         target_pids_max: TARGET_PIDS_MAX as u64,
@@ -1201,7 +1225,7 @@ fn sanitize_run_name(name: &str) -> String {
         .collect()
 }
 
-fn monotonic_now_ns() -> Option<u64> {
+pub(crate) fn monotonic_now_ns() -> Option<u64> {
     static CLOCK_ID: std::sync::OnceLock<libc::clockid_t> = std::sync::OnceLock::new();
     let clock_id = CLOCK_ID.get_or_init(|| {
         if is_kernel_before_5_7() {
