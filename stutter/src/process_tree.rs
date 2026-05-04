@@ -21,7 +21,8 @@ impl ProcessCache {
 
 #[derive(Debug, Clone)]
 pub struct CachedProcInfo {
-    pub starttime_ticks: Option<u64>,
+    pub ctime_sec: i64,
+    pub ctime_nsec: i64,
     pub info: ProcInfo,
 }
 
@@ -293,6 +294,7 @@ pub struct TargetDiffRef<'a> {
 }
 
 pub fn scan_processes_at(proc_root: &Path, cache: &mut ProcessCache) -> BTreeMap<u32, ProcInfo> {
+    let start = std::time::Instant::now();
     let mut processes = BTreeMap::new();
 
     let Ok(entries) = fs::read_dir(proc_root) else {
@@ -309,10 +311,16 @@ pub fn scan_processes_at(proc_root: &Path, cache: &mut ProcessCache) -> BTreeMap
             continue;
         };
 
-        let starttime_ticks = process_starttime_at(proc_root, pid);
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+
+        let ctime_sec = metadata.ctime();
+        let ctime_nsec = metadata.ctime_nsec();
 
         if let Some(cached) = cache.entries.get(&pid)
-            && cached.starttime_ticks == starttime_ticks
+            && cached.ctime_sec == ctime_sec
+            && cached.ctime_nsec == ctime_nsec
         {
             processes.insert(pid, cached.info.clone());
             continue;
@@ -322,7 +330,8 @@ pub fn scan_processes_at(proc_root: &Path, cache: &mut ProcessCache) -> BTreeMap
             cache.entries.insert(
                 pid,
                 CachedProcInfo {
-                    starttime_ticks: info.starttime_ticks,
+                    ctime_sec,
+                    ctime_nsec,
                     info: info.clone(),
                 },
             );
@@ -331,6 +340,16 @@ pub fn scan_processes_at(proc_root: &Path, cache: &mut ProcessCache) -> BTreeMap
     }
 
     cache.entries.retain(|pid, _| processes.contains_key(pid));
+
+    let elapsed = start.elapsed();
+    if elapsed.as_millis() > 50 {
+        log::warn!(
+            "scan_processes_slow elapsed={:?} count={} cache_size={}",
+            elapsed,
+            processes.len(),
+            cache.entries.len()
+        );
+    }
 
     processes
 }

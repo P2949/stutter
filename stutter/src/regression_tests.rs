@@ -768,8 +768,10 @@ fn process_cache_invalidates_when_pid_starttime_changes() {
     let first = process_tree::scan_processes_at(&dir, &mut cache);
     assert_eq!(first.get(&10).unwrap().comm, "old-name");
 
-    fs::write(dir.join("10/status"), "Name:\tnew-name\nPPid:\t1\n").unwrap();
-    fs::write(dir.join("10/cmdline"), b"new-name").unwrap();
+    fs::remove_dir_all(dir.join("10")).unwrap();
+    // Recreate the process to simulate PID reuse.
+    create_fake_proc(&dir, 10, 1, "new-name", "new-name", &[10]);
+    // Manually overwrite stat to match the test's expected starttime.
     fs::write(dir.join("10/stat"), fake_stat("new-name", 999)).unwrap();
 
     let second = process_tree::scan_processes_at(&dir, &mut cache);
