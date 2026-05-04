@@ -80,6 +80,7 @@ pub struct TuneCommandInput {
     pub keep_best: bool,
     pub mangohud_log: Option<PathBuf>,
     pub enforce: bool,
+    pub hwmon: bool,
 }
 
 pub struct TuneControl {
@@ -105,6 +106,7 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         keep_best,
         mangohud_log,
         enforce,
+        hwmon,
     } = input;
 
     let profiles = profiles::load_profiles(&profiles_path)?;
@@ -135,6 +137,7 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         runs,
         mangohud_log,
         enforce,
+        hwmon,
         &tune_output_dir,
     )
     .await?;
@@ -189,12 +192,17 @@ async fn collect_tune_results(
     runs: u32,
     mangohud_log: Option<PathBuf>,
     enforce: bool,
+    hwmon: bool,
     tune_output_dir: &Path,
 ) -> anyhow::Result<Vec<TuneCandidateSummary>> {
     let measure_seconds = epoch_seconds.saturating_sub(warmup_seconds);
     let mut results = Vec::new();
-    let shared_hwmon = hwmon::HwmonReader::discover_with_options(None, None, None)
-        .map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)));
+    let shared_hwmon = if hwmon {
+        hwmon::HwmonReader::discover_with_options(None, None, None)
+            .map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)))
+    } else {
+        None
+    };
 
     for iteration in 1..=runs {
         if runs > 1 {
@@ -238,7 +246,7 @@ async fn collect_tune_results(
                     csv_path: None,
                     irq_latency: false,
                     irqs: Vec::new(),
-                    hwmon: false,
+                    hwmon,
                     hwmon_root: None,
                     hwmon_drm_card: None,
                     hwmon_render_node: None,

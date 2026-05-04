@@ -160,17 +160,17 @@ impl MonitorSession {
         let psi_reader = psi::PsiReader::new();
         let mut scx_tracker = scx::ScxTracker::default();
 
-        let hwmon_reader = if let Some(shared) = shared_hwmon {
+        let hwmon_reader = if !config.hwmon {
+            None
+        } else if let Some(shared) = shared_hwmon {
             Some(shared)
-        } else if config.hwmon {
+        } else {
             hwmon::HwmonReader::discover_with_options(
                 config.hwmon_root.as_deref(),
                 config.hwmon_drm_card.as_deref(),
                 config.hwmon_render_node.as_deref(),
             )
             .map(|r| Arc::new(std::sync::Mutex::new(r)))
-        } else {
-            None
         };
 
         if config.hwmon && hwmon_reader.is_none() {

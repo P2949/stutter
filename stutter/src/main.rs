@@ -103,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
             keep_best,
             mangohud_log,
             enforce,
+            hwmon,
         } => {
             tune_command(TuneCommandInput {
                 tree_pid,
@@ -113,6 +114,7 @@ async fn main() -> anyhow::Result<()> {
                 keep_best,
                 mangohud_log,
                 enforce,
+                hwmon,
             })
             .await
         }

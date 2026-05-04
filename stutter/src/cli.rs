@@ -260,6 +260,9 @@ pub struct TuneArgs {
 
     #[arg(long)]
     pub enforce: bool,
+
+    #[arg(long = "hwmon")]
+    pub hwmon: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -311,6 +314,7 @@ pub enum AppCommand {
         keep_best: bool,
         mangohud_log: Option<PathBuf>,
         enforce: bool,
+        hwmon: bool,
     },
     Check {
         baseline: PathBuf,
@@ -476,6 +480,7 @@ where
                 keep_best: args.keep_best,
                 mangohud_log: args.mangohud_log,
                 enforce: args.enforce,
+                hwmon: args.hwmon,
             })
         }
         Some(Command::Check(args)) => {
@@ -1046,6 +1051,7 @@ mod tests {
             keep_best,
             mangohud_log,
             enforce,
+            hwmon,
         } = command
         else {
             panic!("expected tune command");
@@ -1059,6 +1065,7 @@ mod tests {
         assert!(keep_best);
         assert_eq!(mangohud_log, Some(PathBuf::from("/tmp/tune-mango.csv")));
         assert!(!enforce);
+        assert!(!hwmon);
     }
 
     #[test]
