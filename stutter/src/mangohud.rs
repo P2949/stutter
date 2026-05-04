@@ -69,8 +69,27 @@ where
         return Ok(Vec::new());
     }
     let headers = split_csv_line(header);
-    let elapsed_idx = find_header(&headers, &["elapsed_ms", "time_ms", "ms"]);
-    let frametime_idx = find_header(&headers, &["frametime", "frametime_ms", "frame_time"]);
+    let elapsed_idx = find_header(
+        &headers,
+        &["elapsed_ms", "time_ms", "ms", "time", "elapsed"],
+    );
+    let frametime_idx = find_header(
+        &headers,
+        &[
+            "frametime",
+            "frametime_ms",
+            "frame_time",
+            "frame_time_ms",
+            "frame time",
+            "frame time ms",
+        ],
+    );
+
+    if frametime_idx.is_none() {
+        anyhow::bail!(
+            "MangoHud CSV did not contain a recognized frametime column; headers={headers:?}"
+        );
+    }
 
     let mut events = Vec::new();
     let mut first_elapsed_ms: Option<u128> = None;
