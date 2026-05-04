@@ -8,13 +8,13 @@ use anyhow::Context;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
+    diagnosis::{Diagnosis, diagnose_cluster},
     metrics::format_latency,
     process_tree::TaskClass,
     recorder::{
-        FrameEvent, GpuSample, IrqEventRecord, RecordedSpike, SESSION_SCHEMA_VERSION, SessionFile,
-        SessionTask, SpikeEvent, IntervalRecord,
+        FrameEvent, GpuSample, IntervalRecord, IrqEventRecord, RecordedSpike,
+        SESSION_SCHEMA_VERSION, SessionFile, SessionTask, SpikeEvent,
     },
-    diagnosis::{Diagnosis, diagnose_cluster},
 };
 
 const MIN_CLUSTER_TASKS: usize = 3;
@@ -139,7 +139,11 @@ pub fn print_report(
     let artifacts =
         load_run_artifacts(&session_path, &cluster_analysis.clusters, cluster_window_ns)?;
     let mut cluster_analysis = cluster_analysis;
-    perform_diagnosis(&mut cluster_analysis.clusters, &artifacts, cluster_window_ns);
+    perform_diagnosis(
+        &mut cluster_analysis.clusters,
+        &artifacts,
+        cluster_window_ns,
+    );
 
     print!(
         "{}",
@@ -575,7 +579,11 @@ pub fn write_html_report(
     let artifacts =
         load_run_artifacts(&session_path, &cluster_analysis.clusters, cluster_window_ns)?;
     let mut cluster_analysis = cluster_analysis;
-    perform_diagnosis(&mut cluster_analysis.clusters, &artifacts, cluster_window_ns);
+    perform_diagnosis(
+        &mut cluster_analysis.clusters,
+        &artifacts,
+        cluster_window_ns,
+    );
 
     let text_report = render_report(
         &session_path,
@@ -1445,7 +1453,9 @@ fn perform_diagnosis(
     cluster_window_ns: u64,
 ) {
     for cluster in clusters {
-        let irq_events = artifacts.irq_events.iter()
+        let irq_events = artifacts
+            .irq_events
+            .iter()
             .filter(|e| {
                 let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
                 let max_ns = cluster.max_switch_ns.saturating_add(cluster_window_ns);
@@ -1454,18 +1464,23 @@ fn perform_diagnosis(
             .cloned()
             .collect::<Vec<_>>();
 
-        let gpu_samples = artifacts.gpu_samples.iter()
+        let gpu_samples = artifacts
+            .gpu_samples
+            .iter()
             .filter(|s| {
                 cluster_elapsed(cluster).is_some_and(|elapsed| s.elapsed_ms.abs_diff(elapsed) <= 50)
             })
             .cloned()
             .collect::<Vec<_>>();
 
-        let frame_events = artifacts.frame_events.iter()
+        let frame_events = artifacts
+            .frame_events
+            .iter()
             .filter(|f| {
                 if let Some((min, max)) = cluster_elapsed_range(cluster) {
                     let padding = u128::from(cluster_window_ns / 1_000_000).max(1);
-                    f.elapsed_ms >= min.saturating_sub(padding) && f.elapsed_ms <= max.saturating_add(padding)
+                    f.elapsed_ms >= min.saturating_sub(padding)
+                        && f.elapsed_ms <= max.saturating_add(padding)
                 } else {
                     false
                 }
@@ -1473,7 +1488,9 @@ fn perform_diagnosis(
             .cloned()
             .collect::<Vec<_>>();
 
-        let io_events = artifacts.io_events.iter()
+        let io_events = artifacts
+            .io_events
+            .iter()
             .filter(|e| {
                 let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
                 let max_ns = cluster.max_switch_ns.saturating_add(cluster_window_ns);
@@ -1482,10 +1499,13 @@ fn perform_diagnosis(
             .cloned()
             .collect::<Vec<_>>();
 
-        let interval_records = artifacts.interval_records.iter()
+        let interval_records = artifacts
+            .interval_records
+            .iter()
             .filter(|r| {
                 if let Some((min, max)) = cluster_elapsed_range(cluster) {
-                     r.elapsed_ms >= min.saturating_sub(1000) && r.elapsed_ms <= max.saturating_add(1000)
+                    r.elapsed_ms >= min.saturating_sub(1000)
+                        && r.elapsed_ms <= max.saturating_add(1000)
                 } else {
                     false
                 }

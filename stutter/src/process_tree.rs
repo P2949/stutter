@@ -322,7 +322,6 @@ impl TaskFilters {
     }
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetDiffAction {
     Added,
@@ -916,7 +915,6 @@ pub fn parse_proc_stat_policy(stat: &str) -> Option<u32> {
     let (_, after_comm) = stat.rsplit_once(") ")?;
     after_comm.split_whitespace().nth(38)?.parse().ok()
 }
-
 
 /// Classification priority (highest to lowest):
 /// 1. GameScope: The compositor running the game.
