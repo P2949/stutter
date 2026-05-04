@@ -706,6 +706,7 @@ pub const SESSION_SCHEMA_VERSION: u32 = 16;
 pub struct FinalizeRecordingInput<'a> {
     pub recorder: &'a LiveRecorder,
     pub config: &'a Config,
+    pub tree_pids: &'a [u32],
     pub stop_reason: &'a str,
     pub tasks: &'a crate::tasks::TaskTracker,
     pub frame_events: &'a [FrameEvent],
@@ -737,6 +738,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     let FinalizeRecordingInput {
         recorder,
         config,
+        tree_pids,
         stop_reason,
         tasks: task_tracker,
         frame_events,
@@ -866,7 +868,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         monotonic_end_ns,
         duration_ms,
         stop_reason: stop_reason.to_owned(),
-        config: recorded_config(config),
+        config: recorded_config(config, tree_pids),
         metadata: metadata.clone(),
         target_pids_max: TARGET_PIDS_MAX as u64,
         active_target_pids_count: active_targets.len() as u64,
@@ -970,10 +972,10 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     Ok(())
 }
 
-pub fn recorded_config(config: &Config) -> RecordedConfig {
+pub fn recorded_config(config: &Config, tree_pids: &[u32]) -> RecordedConfig {
     RecordedConfig {
         manual_pids: config.target_pids.clone(),
-        tree_roots: config.tree_pids.clone(),
+        tree_roots: tree_pids.to_vec(),
         cgroupv2: config.cgroupv2.clone(),
         exclude_tree_pids: config.exclude_tree_pids.clone(),
         include_comm: config

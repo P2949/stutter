@@ -219,7 +219,7 @@ async fn collect_tune_results(
                 frame_events,
                 coverage,
             } = match measure_tune_candidate(
-                Config {
+                Arc::new(Config {
                     target_pids: Vec::new(),
                     tree_pids: vec![tree_pid],
                     summary_period_ms: 1_000,
@@ -264,7 +264,7 @@ async fn collect_tune_results(
                     faults: false,
                     block_io: false,
                     stat_wait: false,
-                },
+                }),
                 profile.clone(),
                 enforce,
                 shared_hwmon.clone(),
@@ -411,7 +411,7 @@ async fn write_tune_summary(
 }
 
 pub async fn measure_tune_candidate(
-    config: Config,
+    config: Arc<Config>,
     profile: profiles::Profile,
     enforce: bool,
     shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,

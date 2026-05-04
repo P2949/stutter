@@ -31,7 +31,10 @@ impl WatchProcessState {
     }
 }
 
-pub async fn resolve_watch_process(config: &mut Config) -> anyhow::Result<Option<u32>> {
+pub async fn resolve_watch_process(
+    config: &Config,
+    tree_pids: &mut Vec<u32>,
+) -> anyhow::Result<Option<u32>> {
     let Some(pattern) = config.watch_process.clone() else {
         return Ok(None);
     };
@@ -40,17 +43,20 @@ pub async fn resolve_watch_process(config: &mut Config) -> anyhow::Result<Option
     if let Some(pid) =
         find_process_by_pattern_at_with_cache(Path::new("/proc"), &pattern, &mut cache)
     {
-        add_watch_tree_pid(config, pid);
+        add_watch_tree_pid(tree_pids, pid);
         return Ok(Some(pid));
     }
 
-    wait_for_watch_process(config)
+    wait_for_watch_process(config, tree_pids)
         .await?
         .ok_or_else(|| anyhow::anyhow!("stopped while waiting for --watch-process {pattern}"))
         .map(Some)
 }
 
-pub async fn wait_for_watch_process(config: &mut Config) -> anyhow::Result<Option<u32>> {
+pub async fn wait_for_watch_process(
+    config: &Config,
+    tree_pids: &mut Vec<u32>,
+) -> anyhow::Result<Option<u32>> {
     let pattern = config
         .watch_process
         .clone()
@@ -92,7 +98,7 @@ pub async fn wait_for_watch_process(config: &mut Config) -> anyhow::Result<Optio
                     &pattern,
                     &mut cache,
                 ) {
-                    add_watch_tree_pid(config, pid);
+                    add_watch_tree_pid(tree_pids, pid);
                     info!("watch_process_found pattern={} pid={}", pattern, pid);
                     return Ok(Some(pid));
                 }
@@ -101,14 +107,14 @@ pub async fn wait_for_watch_process(config: &mut Config) -> anyhow::Result<Optio
     }
 }
 
-pub fn add_watch_tree_pid(config: &mut Config, pid: u32) {
-    config.tree_pids.push(pid);
-    config.tree_pids.sort_unstable();
-    config.tree_pids.dedup();
+pub fn add_watch_tree_pid(tree_pids: &mut Vec<u32>, pid: u32) {
+    tree_pids.push(pid);
+    tree_pids.sort_unstable();
+    tree_pids.dedup();
 }
 
-pub fn remove_watch_tree_pid(config: &mut Config, pid: u32) {
-    config.tree_pids.retain(|tree_pid| *tree_pid != pid);
+pub fn remove_watch_tree_pid(tree_pids: &mut Vec<u32>, pid: u32) {
+    tree_pids.retain(|tree_pid| *tree_pid != pid);
 }
 
 pub fn capture_tree_root_starttimes(tree_pids: &[u32]) -> BTreeMap<u32, Option<u64>> {
@@ -130,13 +136,13 @@ pub fn tree_root_is_stale(pid: u32, root_starttimes: &BTreeMap<u32, Option<u64>>
 }
 
 pub fn remove_stale_tree_roots(
-    config: &mut Config,
+    tree_pids: &mut Vec<u32>,
     root_starttimes: &mut BTreeMap<u32, Option<u64>>,
     watched_pid: Option<u32>,
 ) -> Vec<u32> {
     let mut removed = Vec::new();
 
-    for pid in config.tree_pids.clone() {
+    for pid in tree_pids.clone() {
         if Some(pid) == watched_pid {
             continue;
         }
@@ -148,9 +154,7 @@ pub fn remove_stale_tree_roots(
     }
 
     if !removed.is_empty() {
-        config
-            .tree_pids
-            .retain(|tree_pid| !removed.contains(tree_pid));
+        tree_pids.retain(|tree_pid| !removed.contains(tree_pid));
     }
 
     removed

@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     match parse_app_command()? {
-        AppCommand::Monitor(config) => run_monitor(*config, None).await,
+        AppCommand::Monitor(config) => run_monitor(config, None).await,
         AppCommand::Restore { dry_run } => {
             let path = affinity::default_restore_path();
             if dry_run {

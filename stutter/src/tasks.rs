@@ -10,6 +10,16 @@ use crate::{
     recorder::TreeEvent,
 };
 
+pub struct RefreshInput<'a> {
+    pub config: &'a Config,
+    pub tree_pids: &'a [u32],
+    pub tree_events: &'a mut Vec<TreeEvent>,
+    pub target_pid_map: &'a mut AyaHashMap<MapData, u32, u8>,
+    pub prev_faults_map: Option<&'a mut AyaHashMap<MapData, u32, [u64; 2]>>,
+    pub elapsed_ms: u128,
+    pub recording_started: Option<Instant>,
+}
+
 pub type TaskExeInodesMap = BTreeMap<u32, (Option<u64>, Option<u64>, Option<u64>)>;
 
 #[derive(Default)]
@@ -23,19 +33,21 @@ pub struct TaskTracker {
 }
 
 impl TaskTracker {
-    pub async fn refresh(
-        &mut self,
-        config: &Config,
-        tree_events: &mut Vec<TreeEvent>,
-        target_pid_map: &mut AyaHashMap<MapData, u32, u8>,
-        mut prev_faults_map: Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
-        elapsed_ms: u128,
-        recording_started: Option<Instant>,
-    ) -> anyhow::Result<()> {
+    pub async fn refresh(&mut self, input: RefreshInput<'_>) -> anyhow::Result<()> {
+        let RefreshInput {
+            config,
+            tree_pids,
+            tree_events,
+            target_pid_map,
+            mut prev_faults_map,
+            elapsed_ms,
+            recording_started,
+        } = input;
+
         let snapshot = crate::process_tree::target_snapshot(
             crate::process_tree::TargetSnapshotInput::default()
                 .manual_pids(&config.target_pids)
-                .tree_pids(&config.tree_pids)
+                .tree_pids(tree_pids)
                 .cgroup_path(config.cgroupv2.as_deref())
                 .exclude_tree_pids(&config.exclude_tree_pids)
                 .filters(&config.task_filters)
@@ -97,7 +109,8 @@ impl TaskTracker {
                     update_task_exe_info(&mut self.task_exe_inodes, tid, &task);
 
                     target_pid_map.insert(tid, 1, 0)?;
-                    self.active_targets.insert(tid, task);
+                    self.active_targets.insert(tid, task.clone());
+                    self.known_targets.insert(tid, task);
                 }
                 TargetDiffAction::Removed => {
                     let action_name = target_event_action(task.from_cgroup, "removed");
@@ -129,7 +142,7 @@ impl TaskTracker {
                         tid,
                     );
 
-                    let _ = target_pid_map.remove(&tid);
+                    target_pid_map.remove(&tid)?;
                     self.active_targets.remove(&tid);
                 }
             }
