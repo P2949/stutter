@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, time::{Duration, Instant}};
+use std::{
+    collections::BTreeMap,
+    time::{Duration, Instant},
+};
 
 use log::{debug, info, warn};
 use serde::Serialize;
@@ -116,11 +119,10 @@ pub fn handle_block_io_event(
 }
 
 pub fn handle_exec_event(item: &[u8], tasks: &mut TaskTracker) {
-    if item.len() < std::mem::size_of::<ExecEvent>() {
+    let Some(event) = read_event_unaligned::<ExecEvent>(item) else {
         warn!("short_exec_event len={}", item.len());
         return;
-    }
-    let event = unsafe { &*(item.as_ptr() as *const ExecEvent) };
+    };
     let comm = metrics::comm_to_string(&event.comm);
     tasks.cache.invalidate(event.pid);
     tasks.cache.invalidate(event.tid);
@@ -349,9 +351,51 @@ pub fn log_irq_event(event: &IrqEvent) {
     );
 }
 
-pub fn cast_event<T: aya::Pod>(data: &[u8]) -> Option<&T> {
+pub fn read_event_unaligned<T: aya::Pod + Copy>(data: &[u8]) -> Option<T> {
     if data.len() < std::mem::size_of::<T>() {
         return None;
     }
-    unsafe { Some(&*(data.as_ptr() as *const T)) }
+
+    Some(unsafe { (data.as_ptr() as *const T).read_unaligned() })
+}
+
+#[cfg(test)]
+mod tests {
+    use stutter_common::EVENT_RUNNABLE_LATENCY;
+
+    use super::*;
+
+    #[test]
+    fn test_unaligned_event_decoding() {
+        let event = SchedulerEvent {
+            kind: EVENT_RUNNABLE_LATENCY,
+            pid: 123,
+            cpu: 1,
+            wakeup_target_cpu: 1,
+            prio: 120,
+            waker_tid: 0,
+            target_pending_wakeups: 0,
+            maj_flt: 0,
+            min_flt: 0,
+            wakeup_ns: 2000,
+            switch_ns: 3000,
+            latency_ns: 1000,
+            comm: [0; 16],
+        };
+
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                &event as *const SchedulerEvent as *const u8,
+                std::mem::size_of::<SchedulerEvent>(),
+            )
+        };
+
+        // Build a deliberately misaligned buffer
+        let mut misaligned = vec![0u8];
+        misaligned.extend_from_slice(bytes);
+
+        let decoded = read_event_unaligned::<SchedulerEvent>(&misaligned[1..]).unwrap();
+        assert_eq!(decoded.kind, EVENT_RUNNABLE_LATENCY);
+        assert_eq!(decoded.pid, 123);
+    }
 }

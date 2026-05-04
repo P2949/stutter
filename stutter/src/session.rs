@@ -330,9 +330,9 @@ impl MonitorSession {
                         let kind = unsafe { (item.as_ptr() as *const u32).read_unaligned() };
                         match kind {
                             stutter_common::EVENT_RUNNABLE_LATENCY => {
-                                if let Some(event) = crate::events::cast_event::<stutter_common::SchedulerEvent>(&item) {
+                                if let Some(event) = crate::events::read_event_unaligned::<stutter_common::SchedulerEvent>(&item) {
                                     crate::events::handle_event(
-                                        event,
+                                        &event,
                                         &self.config,
                                         self.started,
                                         &mut self.tasks,
@@ -345,16 +345,16 @@ impl MonitorSession {
                                 }
                             }
                             stutter_common::EVENT_IRQ_LATENCY => {
-                                if let Some(event) = crate::events::cast_event::<stutter_common::IrqEvent>(&item) {
-                                    crate::events::handle_irq_event(event, &mut self.recorder, recording_monotonic_start_ns);
+                                if let Some(event) = crate::events::read_event_unaligned::<stutter_common::IrqEvent>(&item) {
+                                    crate::events::handle_irq_event(&event, &mut self.recorder, recording_monotonic_start_ns);
                                 } else {
                                     log::warn!("short_irq_event len={}", item.len());
                                 }
                             }
                             stutter_common::EVENT_MIGRATION => {
-                                if let Some(event) = crate::events::cast_event::<stutter_common::MigrationEvent>(&item) {
+                                if let Some(event) = crate::events::read_event_unaligned::<stutter_common::MigrationEvent>(&item) {
                                     crate::events::handle_migration_event(
-                                        event,
+                                        &event,
                                         &mut self.tasks,
                                         &mut self.recorder,
                                         &self.cpu_to_pkg,
@@ -365,14 +365,14 @@ impl MonitorSession {
                                 }
                             }
                             stutter_common::EVENT_CPU_FREQ => {
-                                if let Some(event) = crate::events::cast_event::<stutter_common::CpuFreqEvent>(&item) {
-                                    crate::events::handle_cpu_freq_event(event, &mut self.recorder, self.started);
+                                if let Some(event) = crate::events::read_event_unaligned::<stutter_common::CpuFreqEvent>(&item) {
+                                    crate::events::handle_cpu_freq_event(&event, &mut self.recorder, self.started);
                                 } else {
                                     log::warn!("short_cpu_freq_event len={}", item.len());
                                 }
                             }
                             stutter_common::EVENT_STAT_WAIT => {
-                                if let Some(event) = crate::events::cast_event::<stutter_common::StatWaitEvent>(&item) {
+                                if let Some(event) = crate::events::read_event_unaligned::<stutter_common::StatWaitEvent>(&item) {
                                     if let Some(stats) = self.tasks.stats_by_task.get_mut(&event.tid) {
                                         stats.stat_wait_sum_ns += event.delay_ns as u128;
                                         stats.stat_wait_count += 1;
@@ -382,9 +382,9 @@ impl MonitorSession {
                                 }
                             }
                             stutter_common::EVENT_BLOCK_IO => {
-                                if let Some(event) = crate::events::cast_event::<stutter_common::BlockIoEvent>(&item) {
+                                if let Some(event) = crate::events::read_event_unaligned::<stutter_common::BlockIoEvent>(&item) {
                                     crate::events::handle_block_io_event(
-                                        event,
+                                        &event,
                                         &mut self.recorder,
                                         self.loaded.block_io_correlation_basis.as_str(),
                                         self.started,
