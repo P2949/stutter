@@ -124,6 +124,8 @@ impl MonitorSession {
             scx_event_writer: None,
             csv_writer: None,
 
+            scx_events: Vec::new(),
+
             intervals_dropped: 0,
             scx_event_count: 0,
             irq_event_count: 0,
@@ -694,17 +696,20 @@ impl MonitorSession {
     }
 
     pub fn handle_scx_tick(&mut self) {
-        if let Some(event) = self.scx_tracker.sample(self.started.elapsed().as_millis())
-            && let Some(writer) = self.recorder.scx_event_writer.as_mut()
-        {
-            crate::events::push_json_stream_event(
-                writer,
-                &event,
-                &mut self.recorder.scx_event_count,
-                &mut self.recorder.event_stream_write_errors,
-                &mut self.recorder.first_event_stream_write_error,
-                "scx_events",
-            );
+        if let Some(event) = self.scx_tracker.sample(self.started.elapsed().as_millis()) {
+            if let Some(writer) = self.recorder.scx_event_writer.as_mut() {
+                crate::events::push_json_stream_event(
+                    writer,
+                    &event,
+                    &mut self.recorder.scx_event_count,
+                    &mut self.recorder.event_stream_write_errors,
+                    &mut self.recorder.first_event_stream_write_error,
+                    "scx_events",
+                );
+            } else {
+                self.recorder.scx_events.push(event);
+                self.recorder.scx_event_count += 1;
+            }
         }
     }
 
@@ -961,6 +966,9 @@ impl MonitorSession {
                 writer.finish()?;
             }
             if let Some(writer) = self.recorder.block_io_event_writer.as_mut() {
+                writer.finish()?;
+            }
+            if let Some(writer) = self.recorder.scx_event_writer.as_mut() {
                 writer.finish()?;
             }
 
