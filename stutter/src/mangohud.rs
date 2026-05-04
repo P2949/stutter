@@ -102,9 +102,11 @@ where
                 first_elapsed_ms = raw_val;
             }
 
-            let elapsed_ms = if let (Some(raw), Some(first_raw), Some(observed_ms)) =
-                (raw_val, alignment_raw_elapsed_ms, alignment_recorder_elapsed_ms)
-            {
+            let elapsed_ms = if let (Some(raw), Some(first_raw), Some(observed_ms)) = (
+                raw_val,
+                alignment_raw_elapsed_ms,
+                alignment_recorder_elapsed_ms,
+            ) {
                 // Monotonic observed alignment
                 observed_ms + raw.saturating_sub(first_raw)
             } else if let Some(raw) = raw_val {
@@ -135,6 +137,7 @@ where
 
 pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u128, u64)> {
     use std::io::{Read, Seek, SeekFrom};
+
     use tokio::time::{Duration, sleep};
 
     loop {
@@ -223,7 +226,14 @@ mod tests {
     fn parses_header_based_frametime_csv() {
         let header = "elapsed_ms,frametime_ms";
         let data = "10,16.7\n20,33.4\n";
-        let events = parse_frame_events(header, data.lines().map(|s| Ok(s.to_owned())), None, None, None).unwrap();
+        let events = parse_frame_events(
+            header,
+            data.lines().map(|s| Ok(s.to_owned())),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].elapsed_ms, 0); // Normalized
@@ -235,7 +245,14 @@ mod tests {
     fn parses_quoted_csv_fields() {
         let header = "elapsed_ms,\"frame,time\",frametime_ms";
         let data = "10,\"ignored, value\",16.7\n";
-        let events = parse_frame_events(header, data.lines().map(|s| Ok(s.to_owned())), None, None, None).unwrap();
+        let events = parse_frame_events(
+            header,
+            data.lines().map(|s| Ok(s.to_owned())),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].elapsed_ms, 0); // Normalized
@@ -246,7 +263,14 @@ mod tests {
     fn skips_non_finite_frametimes() {
         let header = "elapsed_ms,frametime_ms";
         let data = "10,NaN\n20,inf\n30,16.7\n";
-        let events = parse_frame_events(header, data.lines().map(|s| Ok(s.to_owned())), None, None, None).unwrap();
+        let events = parse_frame_events(
+            header,
+            data.lines().map(|s| Ok(s.to_owned())),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].elapsed_ms, 0); // Normalized (30 - 30)
@@ -306,7 +330,7 @@ mod tests {
     fn test_alignment_with_monotonic_observed() {
         let header = "elapsed_ms,frametime_ms";
         let data = "1000,16.7\n1016,16.7\n1033,16.7\n";
-        
+
         let alignment_monotonic_ns = Some(1_420_000_000); // 1420ms
         let alignment_raw_elapsed_ms = Some(1000);
         let recorder_start_monotonic_ns = Some(1_000_000_000); // 1000ms
@@ -318,7 +342,8 @@ mod tests {
             alignment_monotonic_ns,
             alignment_raw_elapsed_ms,
             recorder_start_monotonic_ns,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].elapsed_ms, 420);
@@ -330,7 +355,7 @@ mod tests {
     fn test_alignment_missing_elapsed_column() {
         let header = "frametime_ms";
         let data = "16.7\n16.7\n16.7\n";
-        
+
         let alignment_monotonic_ns = Some(1_420_000_000); // 1420ms
         let recorder_start_monotonic_ns = Some(1_000_000_000); // 1000ms
         // observed_ms = 420ms
@@ -341,7 +366,8 @@ mod tests {
             alignment_monotonic_ns,
             None,
             recorder_start_monotonic_ns,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].elapsed_ms, 420);

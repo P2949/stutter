@@ -60,9 +60,28 @@ pub(crate) enum SpikeClusterSource {
 
 #[derive(Serialize)]
 pub(crate) struct SpikeClusterAnalysis {
-    source: SpikeClusterSource,
-    source_count: usize,
-    clusters: Vec<SpikeCluster>,
+    pub(crate) source: SpikeClusterSource,
+    pub(crate) source_count: usize,
+    pub(crate) clusters: Vec<SpikeCluster>,
+}
+
+#[derive(Serialize)]
+pub struct ArtifactsSummary {
+    pub irq_event_count: u64,
+    pub gpu_sample_count: u64,
+    pub frame_event_count: u64,
+    pub migration_event_count: u64,
+    pub cpu_freq_sample_count: u64,
+    pub block_io_event_count: u64,
+    pub interval_record_count: u64,
+    pub scx_event_count: u64,
+}
+
+#[derive(Serialize)]
+pub struct ReportAnalysisJson {
+    pub session: SessionFile,
+    pub cluster_analysis: SpikeClusterAnalysis,
+    pub artifacts_summary: ArtifactsSummary,
 }
 
 #[derive(Default, Serialize)]
@@ -113,6 +132,7 @@ impl PartialOrd for SpikeClusterCandidate {
 pub fn print_report(
     path: &Path,
     json: bool,
+    analysis_json: bool,
     top: usize,
     cluster_window_ms: u64,
     filter_class: Option<TaskClass>,
@@ -151,6 +171,26 @@ pub fn print_report(
         &artifacts,
         cluster_window_ns,
     );
+
+    if analysis_json {
+        let artifacts_summary = ArtifactsSummary {
+            irq_event_count: session.irq_event_count,
+            gpu_sample_count: session.gpu_sample_count,
+            frame_event_count: session.frame_event_count,
+            migration_event_count: session.migration_event_count.unwrap_or(0),
+            cpu_freq_sample_count: session.cpu_freq_sample_count.unwrap_or(0),
+            block_io_event_count: session.block_io_event_count,
+            interval_record_count: session.interval_record_count,
+            scx_event_count: session.scx_event_count,
+        };
+        let report = ReportAnalysisJson {
+            session,
+            cluster_analysis,
+            artifacts_summary,
+        };
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
 
     print!(
         "{}",
@@ -2042,7 +2082,7 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
         };
         format!(
             "\n  diagnosis: primary={:?} confidence={:?}{} evidence=[{}]",
-            d.primary_cause, d.confidence, secondary, evidence
+            d.cause, d.confidence, secondary, evidence
         )
     } else {
         String::new()

@@ -177,6 +177,9 @@ struct ReportArgs {
     #[arg(long)]
     json: bool,
 
+    #[arg(long = "analysis-json")]
+    analysis_json: bool,
+
     #[arg(long = "html", value_name = "PATH")]
     html: Option<PathBuf>,
 
@@ -299,6 +302,7 @@ pub enum AppCommand {
     Report {
         path: PathBuf,
         json: bool,
+        analysis_json: bool,
         html: Option<PathBuf>,
         top: usize,
         cluster_window_ms: u64,
@@ -426,6 +430,7 @@ where
             Ok(AppCommand::Report {
                 path: args.path,
                 json: args.json,
+                analysis_json: args.analysis_json,
                 html: args.html,
                 top: args.top,
                 cluster_window_ms: args.cluster_window_ms,

@@ -29,6 +29,10 @@ impl WatchProcessState {
             _ => None,
         }
     }
+
+    pub fn should_poll(&self) -> bool {
+        matches!(self, WatchProcessState::Waiting | WatchProcessState::None)
+    }
 }
 
 pub async fn resolve_watch_process(
@@ -388,4 +392,16 @@ pub fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_watch_process_should_poll() {
+        assert!(WatchProcessState::None.should_poll());
+        assert!(WatchProcessState::Waiting.should_poll());
+        assert!(!WatchProcessState::Running(123).should_poll());
+    }
 }

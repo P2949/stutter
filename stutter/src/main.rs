@@ -81,6 +81,7 @@ async fn main() -> anyhow::Result<()> {
         AppCommand::Report {
             path,
             json,
+            analysis_json,
             html,
             top,
             cluster_window_ms,
@@ -93,7 +94,14 @@ async fn main() -> anyhow::Result<()> {
             if let Some(html_path) = html {
                 report::write_html_report(&path, &html_path, top, cluster_window_ms, filter_class)?;
             }
-            report::print_report(&path, json, top, cluster_window_ms, filter_class)
+            report::print_report(
+                &path,
+                json,
+                analysis_json,
+                top,
+                cluster_window_ms,
+                filter_class,
+            )
         }
         AppCommand::Tune {
             tree_pid,
