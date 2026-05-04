@@ -271,6 +271,8 @@ mod tests {
             switch_ns: 0,
             target_pending_wakeups: 0,
             elapsed_ms: Some(100),
+            scx_ops: None,
+            scx_state: None,
         };
         let cluster = SpikeCluster {
             points: vec![p],
@@ -302,6 +304,8 @@ mod tests {
             switch_ns: 0,
             target_pending_wakeups: 0,
             elapsed_ms: Some(100),
+            scx_ops: None,
+            scx_state: None,
         };
         let p_game = SpikePoint {
             task: 456,
@@ -315,6 +319,8 @@ mod tests {
             switch_ns: 0,
             target_pending_wakeups: 0,
             elapsed_ms: Some(100),
+            scx_ops: None,
+            scx_state: None,
         };
         let cluster = SpikeCluster {
             points: vec![p_compositor, p_game],

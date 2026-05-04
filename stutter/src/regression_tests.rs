@@ -162,6 +162,8 @@ fn event_comm_updates_only_unknown_existing_name() {
         None,
         &mut recorder,
         None,
+        None,
+        None,
     );
 
     assert_eq!(tasks.stats_by_task.get(&7).unwrap().comm, "real-name");
@@ -174,6 +176,8 @@ fn event_comm_updates_only_unknown_existing_name() {
         &mut tasks,
         None,
         &mut recorder,
+        None,
+        None,
         None,
     );
 
@@ -205,6 +209,8 @@ fn spike_events_capture_only_threshold_crossing_events() {
         Some(100),
         &mut recorder,
         None,
+        None,
+        None,
     );
     assert!(
         recorder
@@ -223,6 +229,8 @@ fn spike_events_capture_only_threshold_crossing_events() {
         &mut tasks,
         Some(100),
         &mut recorder,
+        None,
+        None,
         None,
     );
 
@@ -272,6 +280,8 @@ fn spike_event_fault_deltas_are_captured_correctly() {
         Some(100),
         &mut recorder,
         None,
+        None,
+        None,
     );
 
     // Second event is a spike with additional faults
@@ -286,6 +296,8 @@ fn spike_event_fault_deltas_are_captured_correctly() {
         &mut tasks,
         Some(100),
         &mut recorder,
+        None,
+        None,
         None,
     );
 
@@ -618,6 +630,8 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         minor_faults: 0,
         active: true,
         elapsed_ms: Some(1),
+        scx_ops: None,
+        scx_state: None,
     }];
     let drop_counters = DropCountersSnapshot {
         wakeup_data_insert_failed: 2,
@@ -1056,6 +1070,8 @@ fn report_reads_recorded_session_andspike_events() {
         target_pending_wakeups: 0,
         major_faults: 0,
         minor_faults: 0,
+        scx_ops: None,
+        scx_state: None,
     });
     let stats_by_task = BTreeMap::from([(7, stats)]);
     let spike_events = vec![SpikeEvent {
@@ -1075,6 +1091,8 @@ fn report_reads_recorded_session_andspike_events() {
         target_pending_wakeups: 0,
         major_faults: 0,
         minor_faults: 0,
+        scx_ops: None,
+        scx_state: None,
     }];
 
     let mut task_tracker = tasks::TaskTracker::default();
@@ -1145,6 +1163,8 @@ fn report_cluster_output_caps_inline_points() {
             target_pending_wakeups: 0,
             major_faults: 0,
             minor_faults: 0,
+            scx_ops: None,
+            scx_state: None,
         })
         .collect::<Vec<_>>();
 
@@ -1227,9 +1247,12 @@ fn report_correlates_artifacts_with_spike_clusters() {
             target_pending_wakeups: 0,
             major_faults: 0,
             minor_faults: 0,
+            scx_ops: None,
+            scx_state: None,
         })
         .collect::<Vec<_>>();
     let artifacts = crate::report::RunArtifacts {
+        scx_events: Vec::new(),
         irq_events: vec![IrqEventRecord {
             elapsed_ms: Some(10),
             irq: 137,
@@ -1673,6 +1696,8 @@ fn spike_event(task: u32, switch_ns: u64) -> SpikeEvent {
         target_pending_wakeups: 0,
         major_faults: 0,
         minor_faults: 0,
+        scx_ops: None,
+        scx_state: None,
     }
 }
 
@@ -1920,4 +1945,44 @@ fn fake_stat(comm: &str, starttime: u64) -> String {
     let mut fields = vec!["0".to_owned(); 18];
     fields.push(starttime.to_string());
     format!("1 ({comm}) S {}\n", fields.join(" "))
+}
+
+#[test]
+fn scx_correlation_spike_event_serialization() {
+    let event = SpikeEvent {
+        elapsed_ms: Some(100),
+        task: 123,
+        active: true,
+        class: TaskClass::Game,
+        process_pid: Some(123),
+        process_comm: "game".into(),
+        comm: "game-main".into(),
+        cpu: 1,
+        wakeup_target_cpu: 1,
+        prio: 120,
+        latency_ns: 5_000_000,
+        wakeup_ns: 100,
+        switch_ns: 5_000_100,
+        target_pending_wakeups: 0,
+        major_faults: 0,
+        minor_faults: 0,
+        scx_ops: Some("scx_lavd".to_owned()),
+        scx_state: Some("enabled".to_owned()),
+    };
+
+    let json = serde_json::to_string(&event).unwrap();
+    assert!(json.contains("\"scx_ops\":\"scx_lavd\""));
+    assert!(json.contains("\"scx_state\":\"enabled\""));
+
+    let deserialized: SpikeEvent = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized.scx_ops.as_deref(), Some("scx_lavd"));
+    assert_eq!(deserialized.scx_state.as_deref(), Some("enabled"));
+}
+
+#[test]
+fn scx_correlation_backward_compatibility() {
+    let json = r#"{"elapsed_ms":100,"task":123,"active":true,"class":"Game","process_pid":123,"process_comm":"game","comm":"game-main","cpu":1,"wakeup_target_cpu":1,"prio":120,"latency_ns":5000000,"wakeup_ns":100,"switch_ns":5000100,"target_pending_wakeups":0,"major_faults":0,"minor_faults":0}"#;
+    let deserialized: SpikeEvent = serde_json::from_str(json).unwrap();
+    assert_eq!(deserialized.scx_ops, None);
+    assert_eq!(deserialized.scx_state, None);
 }

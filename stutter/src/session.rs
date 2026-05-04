@@ -121,6 +121,7 @@ impl MonitorSession {
             cpu_freq_sample_writer: None,
             gpu_sample_writer: None,
             block_io_event_writer: None,
+            scx_event_writer: None,
             csv_writer: None,
 
             intervals_dropped: 0,
@@ -169,6 +170,9 @@ impl MonitorSession {
             )?);
             recorder.block_io_event_writer =
                 Some(JsonArrayWriter::create(run.run_dir.join("io_events.json"))?);
+            recorder.scx_event_writer = Some(JsonArrayWriter::create(
+                run.run_dir.join("scx_events.json"),
+            )?);
         }
 
         if let Some(path) = &config.csv_path {
@@ -413,6 +417,8 @@ impl MonitorSession {
                                         recording_monotonic_start_ns,
                                         &mut self.recorder,
                                         self.alert_sender.as_ref(),
+                                        self.scx_tracker.current_ops().map(str::to_owned),
+                                        self.scx_tracker.current_state().map(str::to_owned),
                                     );
                                     if let Some(spike) = spike {
                                         pending_spikes.push(spike);
@@ -683,7 +689,18 @@ impl MonitorSession {
     }
 
     pub fn handle_scx_tick(&mut self) {
-        self.scx_tracker.sample(self.started.elapsed().as_millis());
+        if let Some(event) = self.scx_tracker.sample(self.started.elapsed().as_millis())
+            && let Some(writer) = self.recorder.scx_event_writer.as_mut()
+        {
+            crate::events::push_json_stream_event(
+                writer,
+                &event,
+                &mut self.recorder.scx_event_count,
+                &mut self.recorder.event_stream_write_errors,
+                &mut self.recorder.first_event_stream_write_error,
+                "scx_events",
+            );
+        }
     }
 
     pub async fn handle_hwmon_tick(&mut self) -> anyhow::Result<()> {
@@ -783,6 +800,8 @@ impl MonitorSession {
                 switch_ns: s.switch_ns,
                 target_pending_wakeups: s.target_pending_wakeups,
                 elapsed_ms: s.elapsed_ms,
+                scx_ops: s.scx_ops.clone(),
+                scx_state: s.scx_state.clone(),
             });
         }
 

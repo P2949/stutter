@@ -34,6 +34,8 @@ pub(crate) struct SpikePoint {
     pub(crate) switch_ns: u64,
     pub(crate) target_pending_wakeups: u32,
     pub(crate) elapsed_ms: Option<u128>,
+    pub(crate) scx_ops: Option<String>,
+    pub(crate) scx_state: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -72,6 +74,7 @@ pub(crate) struct RunArtifacts {
     pub(crate) cpu_freq_samples: Vec<crate::recorder::CpuFreqRecord>,
     pub(crate) io_events: Vec<crate::recorder::BlockIoRecord>,
     pub(crate) interval_records: Vec<IntervalRecord>,
+    pub(crate) scx_events: Vec<crate::scx::ScxEvent>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -1179,6 +1182,35 @@ fn load_run_artifacts(
         }
     }
 
+    // SCX events
+    let path = run_dir.join("scx_events.json");
+    if path.exists() {
+        let min_overall_opt = clusters
+            .iter()
+            .filter_map(|c| {
+                let (min, _) = cluster_elapsed_range(c)?;
+                Some(min)
+            })
+            .min();
+        let max_overall_opt = clusters
+            .iter()
+            .filter_map(|c| {
+                let (_, max) = cluster_elapsed_range(c)?;
+                Some(max)
+            })
+            .max();
+
+        if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+            let lower = min_overall.saturating_sub(2000);
+            let upper = max_overall.saturating_add(2000);
+            if let Ok(selected) = stream_json_array_select(&path, |e: &crate::scx::ScxEvent| {
+                e.elapsed_ms >= lower && e.elapsed_ms <= upper
+            }) {
+                artifacts.scx_events = selected;
+            }
+        }
+    }
+
     Ok(artifacts)
 }
 
@@ -1380,6 +1412,8 @@ fn flatten_spike_events(session: &SessionFile, spike_events: &[SpikeEvent]) -> V
             target_pending_wakeups: spike.target_pending_wakeups,
             elapsed_ms: elapsed_ms(session.monotonic_start_ns, spike.switch_ns)
                 .or(spike.elapsed_ms),
+            scx_ops: spike.scx_ops.clone(),
+            scx_state: spike.scx_state.clone(),
         })
         .collect()
 }
@@ -1417,6 +1451,8 @@ fn spike_point_from_task(
         switch_ns: spike.switch_ns,
         target_pending_wakeups: spike.target_pending_wakeups,
         elapsed_ms,
+        scx_ops: spike.scx_ops.clone(),
+        scx_state: spike.scx_state.clone(),
     }
 }
 
@@ -1914,6 +1950,41 @@ fn render_correlation_sections(
             );
         },
     );
+
+    // 7. SCX transitions
+    let min_overall_opt = clusters.iter().filter_map(cluster_elapsed).min();
+    let max_overall_opt = clusters.iter().filter_map(cluster_elapsed).max();
+    if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+        let lower = min_overall.saturating_sub(2000);
+        let upper = max_overall.saturating_add(2000);
+        render_correlation(
+            &mut ctx,
+            "scx transitions near clusters",
+            &artifacts.scx_events,
+            "scx_events.json",
+            |e| e.elapsed_ms >= lower && e.elapsed_ms <= upper,
+            |cluster, event| {
+                cluster_elapsed(cluster)
+                    .is_some_and(|elapsed| event.elapsed_ms.abs_diff(elapsed) <= 2000)
+            },
+            |output, rank, cluster, matches| {
+                let elapsed = cluster_elapsed(cluster).unwrap();
+                for event in matches {
+                    pushln(
+                        output,
+                        format!(
+                            "cluster=#{} SCX transition near spike: ops={} state={} at elapsed={}ms (cluster_elapsed={}ms)",
+                            rank + 1,
+                            event.ops.as_deref().unwrap_or("-"),
+                            event.state.as_deref().unwrap_or("-"),
+                            event.elapsed_ms,
+                            elapsed
+                        ),
+                    );
+                }
+            },
+        );
+    }
 }
 
 fn cluster_elapsed_range(cluster: &SpikeCluster) -> Option<(u128, u128)> {
@@ -1997,8 +2068,13 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
 }
 
 fn render_cluster_point(point: &SpikePoint) -> String {
+    let scx = if let Some(ops) = &point.scx_ops {
+        format!(" scx_ops={ops}")
+    } else {
+        String::new()
+    };
     format!(
-        "{}({:?}:{} cpu={} wakeup_target_cpu={} latency={} switch_ns={} process_pid={} wakeup_ns={} target_pending_on_switch_cpu={})",
+        "{}({:?}:{} cpu={} wakeup_target_cpu={} latency={} switch_ns={} process_pid={} wakeup_ns={} target_pending_on_switch_cpu={}{})",
         point.task,
         point.class,
         point.comm,
@@ -2008,7 +2084,8 @@ fn render_cluster_point(point: &SpikePoint) -> String {
         point.switch_ns,
         format_process_pid(point.process_pid),
         point.wakeup_ns,
-        point.target_pending_wakeups
+        point.target_pending_wakeups,
+        scx
     )
 }
 

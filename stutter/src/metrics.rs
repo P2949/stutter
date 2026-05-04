@@ -13,7 +13,7 @@ pub const LATENCY_HISTOGRAM_BUCKETS_NS: [u64; 15] = [
 ];
 pub const LATENCY_HISTOGRAM_BUCKET_COUNT: usize = LATENCY_HISTOGRAM_BUCKETS_NS.len() + 1;
 
-#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SpikeRecord {
     pub latency_ns: u64,
     pub cpu: u32,
@@ -32,6 +32,10 @@ pub struct SpikeRecord {
     pub major_faults: u64,
     #[serde(default)]
     pub minor_faults: u64,
+    #[serde(default)]
+    pub scx_ops: Option<String>,
+    #[serde(default)]
+    pub scx_state: Option<String>,
 }
 
 #[derive(Clone)]
@@ -498,6 +502,8 @@ impl TaskStats {
         event: &SchedulerEvent,
         spike_threshold_ns: u64,
         elapsed_ms: u128,
+        scx_ops: Option<String>,
+        scx_state: Option<String>,
     ) -> (u64, u64) {
         self.last_seen_ms = elapsed_ms;
 
@@ -537,6 +543,8 @@ impl TaskStats {
                 target_pending_wakeups: event.target_pending_wakeups,
                 major_faults,
                 minor_faults,
+                scx_ops,
+                scx_state,
             });
 
             self.top_spikes
@@ -878,7 +886,7 @@ mod tests {
         // 1. First event establishes baseline: 10 faults
         event.maj_flt = 10;
         event.latency_ns = 100; // Not a spike
-        stats.record(&event, 1000, 0);
+        stats.record(&event, 1000, 0, None, None);
         assert_eq!(stats.last_spike_major_faults, 10);
 
         // 2. Interval summary happens. It sees 10 faults.
@@ -911,7 +919,7 @@ mod tests {
         // 3. Next spike event with 12 faults
         event.maj_flt = 12;
         event.latency_ns = 2000; // Spike!
-        let (maj_delta, _) = stats.record(&event, 1000, 0);
+        let (maj_delta, _) = stats.record(&event, 1000, 0, None, None);
 
         // Delta should be 12 - 10 = 2.
         // If interval summary had reset the baseline to 12, delta would be 0.
