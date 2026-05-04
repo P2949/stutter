@@ -105,6 +105,29 @@ pub struct TaskInfo {
     pub from_cgroup: bool,
 }
 
+pub fn same_logical_task(left: &TaskInfo, right: &TaskInfo) -> bool {
+    if left.process_pid != right.process_pid {
+        return false;
+    }
+
+    if let (Some(lp), Some(rp), Some(lt), Some(rt)) = (
+        left.process_starttime_ticks,
+        right.process_starttime_ticks,
+        left.task_starttime_ticks,
+        right.task_starttime_ticks,
+    ) {
+        return lp == rp && lt == rt;
+    }
+
+    if let (Some(ld), Some(rd), Some(li), Some(ri)) =
+        (left.exe_dev, right.exe_dev, left.exe_ino, right.exe_ino)
+    {
+        return ld == rd && li == ri && left.comm == right.comm;
+    }
+
+    false
+}
+
 pub fn sched_policy_name(policy: u32) -> Option<&'static str> {
     match policy {
         0 => Some("SCHED_NORMAL"),

@@ -118,6 +118,8 @@ impl MonitorSession {
             block_io_event_count: 0,
             interval_record_count: 0,
             spike_events_dropped_count: 0,
+            event_stream_write_errors: 0,
+            first_event_stream_write_error: None,
         };
 
         let mut recorder = recorder;
@@ -261,7 +263,11 @@ impl MonitorSession {
         let mut hwmon_tick = interval(Duration::from_millis(1_000));
         hwmon_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        let mut tui_event_reader = crossterm::event::EventStream::new();
+        let mut tui_event_reader = if self.config.tui {
+            Some(crossterm::event::EventStream::new())
+        } else {
+            None
+        };
 
         let max_duration = self.config.max_duration;
         let max_duration_future = async move {
@@ -309,7 +315,13 @@ impl MonitorSession {
                     self.handle_hwmon_tick().await?;
                 }
 
-                maybe_event = futures_util::StreamExt::next(&mut tui_event_reader) => {
+                maybe_event = async {
+                    if let Some(reader) = &mut tui_event_reader {
+                        futures_util::StreamExt::next(reader).await
+                    } else {
+                        futures_util::future::pending().await
+                    }
+                } => {
                     if let Some(Ok(event)) = maybe_event
                         && let Some(reason) = self.handle_tui_event(event)
                     {
@@ -596,8 +608,14 @@ impl MonitorSession {
             if let Some(sample) = sample_opt
                 && let Some(writer) = self.recorder.gpu_sample_writer.as_mut()
             {
-                writer.push(&sample)?;
-                self.recorder.gpu_sample_count += 1;
+                crate::events::push_json_stream_event(
+                    writer,
+                    &sample,
+                    &mut self.recorder.gpu_sample_count,
+                    &mut self.recorder.event_stream_write_errors,
+                    &mut self.recorder.first_event_stream_write_error,
+                    "gpu_samples",
+                );
             }
         }
         Ok(())

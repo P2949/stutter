@@ -368,7 +368,7 @@ pub fn parse_app_command() -> anyhow::Result<AppCommand> {
     parse_app_command_from(std::env::args_os())
 }
 
-fn parse_app_command_from<I, T>(args: I) -> anyhow::Result<AppCommand>
+pub fn parse_app_command_from<I, T>(args: I) -> anyhow::Result<AppCommand>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,

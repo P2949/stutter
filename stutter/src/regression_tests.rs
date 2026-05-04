@@ -667,6 +667,8 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     assert_eq!(metadata.spike_events_retained_count, 1);
     assert_eq!(session.scx_event_count, 0);
     assert_eq!(metadata.scx_event_count, 0);
+    assert_eq!(session.spike_events_dropped_count, 0);
+    assert_eq!(metadata.spike_events_dropped_count, 0);
     assert!(session.spike_events_truncated);
     assert!(metadata.spike_events_truncated);
     assert_eq!(session.drop_counters.total(), 5);
@@ -948,6 +950,12 @@ fn same_task_info_falls_back_to_conservative_metadata_without_starttimes() {
     left.task_starttime_ticks = None;
     right.process_starttime_ticks = None;
     right.task_starttime_ticks = None;
+
+    // Provide exe info so it can fall back when starttimes are missing
+    left.exe_dev = Some(1);
+    left.exe_ino = Some(2);
+    right.exe_dev = Some(1);
+    right.exe_ino = Some(2);
 
     assert!(crate::tasks::same_task_info(&left, &right));
 
@@ -1461,6 +1469,8 @@ fn minimal_session_for_report() -> SessionFile {
         gpu_sample_count: 1,
         frame_event_count: 1,
         block_io_event_count: 0,
+        event_stream_write_errors: 0,
+        first_event_stream_write_error: None,
         block_io_correlation_basis: "dev+sector".to_owned(),
         drop_counters: DropCountersSnapshot::default(),
         interval_record_count: 0,

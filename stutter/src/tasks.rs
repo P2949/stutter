@@ -205,7 +205,7 @@ impl TaskTracker {
     ) {
         for (tid, desired) in desired_tasks {
             if let Some(active) = self.active_targets.get(tid)
-                && !same_logical_task(active, desired)
+                && !crate::process_tree::same_logical_task(active, desired)
             {
                 info!(
                     "target_replaced tid={} old_pid={} new_pid={} old_comm={} new_comm={} old_class={:?} new_class={:?}",
@@ -292,12 +292,6 @@ pub fn reactivate_or_reset_stats_inner(
     reset_stats_for_task_change(stats_by_task, recording_started, tid, task_info, elapsed_ms);
 }
 
-pub fn same_logical_task(left: &TaskInfo, right: &TaskInfo) -> bool {
-    left.process_pid == right.process_pid
-        && left.task_starttime_ticks == right.task_starttime_ticks
-        && left.process_starttime_ticks == right.process_starttime_ticks
-}
-
 pub fn update_task_exe_info(
     task_exe_inodes: &mut TaskExeInodesMap,
     tid: u32,
@@ -314,12 +308,10 @@ pub fn update_task_exe_info(
 }
 
 pub fn same_task_info(left: &TaskInfo, right: &TaskInfo) -> bool {
-    left.process_pid == right.process_pid
+    crate::process_tree::same_logical_task(left, right)
         && left.comm == right.comm
         && left.process_comm == right.process_comm
         && left.class == right.class
-        && left.task_starttime_ticks == right.task_starttime_ticks
-        && left.process_starttime_ticks == right.process_starttime_ticks
 }
 
 pub fn target_event_action(from_cgroup: bool, action: &'static str) -> &'static str {
@@ -421,10 +413,12 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("too many target tasks"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("too many target tasks")
+        );
         assert!(tracker.active_targets.is_empty());
         assert!(tracker.stats_by_task.is_empty());
         assert!(tree_events.is_empty());
@@ -451,5 +445,38 @@ mod tests {
             sched_policy: None,
             from_cgroup: false,
         }
+    }
+
+    #[test]
+    fn test_same_logical_task() {
+        let mut t1 = task_info(1, 100, "proc1", "task1", TaskClass::Game);
+        let mut t2 = t1.clone();
+
+        // same pid + same starttimes => same
+        assert!(crate::process_tree::same_logical_task(&t1, &t2));
+
+        // different pid => not same
+        t2.process_pid = 101;
+        assert!(!crate::process_tree::same_logical_task(&t1, &t2));
+        t2.process_pid = 100;
+
+        // same pid + all starttimes None + different exe inode => not same
+        t1.process_starttime_ticks = None;
+        t1.task_starttime_ticks = None;
+        t2.process_starttime_ticks = None;
+        t2.task_starttime_ticks = None;
+        t1.exe_dev = Some(1);
+        t1.exe_ino = Some(10);
+        t2.exe_dev = Some(1);
+        t2.exe_ino = Some(11);
+        assert!(!crate::process_tree::same_logical_task(&t1, &t2));
+
+        // same pid + missing starttimes + same exe inode + same comm => same
+        t2.exe_ino = Some(10);
+        assert!(crate::process_tree::same_logical_task(&t1, &t2));
+
+        // same pid + missing starttimes + same exe inode + different comm => not same
+        t2.comm = "task2".to_owned();
+        assert!(!crate::process_tree::same_logical_task(&t1, &t2));
     }
 }

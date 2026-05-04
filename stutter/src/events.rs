@@ -25,7 +25,14 @@ pub fn handle_irq_event(
 ) {
     let record = irq_event_record(monotonic_start_ns, event);
     if let Some(writer) = recorder.irq_event_writer.as_mut() {
-        push_json_stream_event(writer, &record, &mut recorder.irq_event_count, "irq_events");
+        push_json_stream_event(
+            writer,
+            &record,
+            &mut recorder.irq_event_count,
+            &mut recorder.event_stream_write_errors,
+            &mut recorder.first_event_stream_write_error,
+            "irq_events",
+        );
     }
     log_irq_event(event);
 }
@@ -63,6 +70,8 @@ pub fn handle_migration_event(
             writer,
             &record,
             &mut recorder.migration_event_count,
+            &mut recorder.event_stream_write_errors,
+            &mut recorder.first_event_stream_write_error,
             "migration_events",
         );
     }
@@ -82,6 +91,8 @@ pub fn handle_cpu_freq_event(event: &CpuFreqEvent, recorder: &mut LiveRecorder, 
             writer,
             &record,
             &mut recorder.cpu_freq_sample_count,
+            &mut recorder.event_stream_write_errors,
+            &mut recorder.first_event_stream_write_error,
             "cpu_freq_samples",
         );
     }
@@ -113,6 +124,8 @@ pub fn handle_block_io_event(
             writer,
             &record,
             &mut recorder.block_io_event_count,
+            &mut recorder.event_stream_write_errors,
+            &mut recorder.first_event_stream_write_error,
             "io_events",
         );
     }
@@ -147,11 +160,19 @@ pub fn push_json_stream_event<T: Serialize>(
     writer: &mut JsonArrayWriter,
     value: &T,
     count: &mut u64,
+    error_count: &mut u64,
+    first_error: &mut Option<String>,
     stream_name: &str,
 ) {
     match writer.push(value) {
         Ok(()) => *count += 1,
-        Err(err) => warn!("json_stream_write_failed stream={stream_name} err={err:#}"),
+        Err(err) => {
+            warn!("json_stream_write_failed stream={stream_name} err={err:#}");
+            *error_count += 1;
+            if first_error.is_none() {
+                *first_error = Some(format!("{stream_name}: {err:#}"));
+            }
+        }
     }
 }
 
@@ -194,12 +215,15 @@ pub fn handle_event(
 
     if event.latency_ns >= config.spike_threshold_ns {
         if let Some(spike_events) = recorder.spike_events.as_mut() {
-            spike_events.push(recorder::SpikeEvent::from_task_stats(
+            match spike_events.push(recorder::SpikeEvent::from_task_stats(
                 monotonic_start_ns,
                 stats,
                 event,
                 fault_deltas,
-            ));
+            )) {
+                recorder::SpikePushResult::Stored => {}
+                recorder::SpikePushResult::Dropped => recorder.spike_events_dropped_count += 1,
+            }
         }
 
         if config.verbose {
