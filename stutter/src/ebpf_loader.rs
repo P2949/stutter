@@ -210,7 +210,7 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         }
     }
 
-    if tracepoints.sched_process_exec {
+    if config.follow_exec && tracepoints.sched_process_exec {
         attach_tracepoint(
             &mut ebpf,
             "sched_process_exec",
