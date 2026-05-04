@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet, VecDeque},
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -14,13 +14,17 @@ use tokio::{
 
 use crate::{
     cli::Config,
+    diagnosis::{LiveDiagnosisEntry, diagnose_cluster},
     ebpf_loader,
     events::AlertPayload,
     hwmon, mangohud,
     metrics::{collect_interval_summaries_labeled, log_drop_counters, print_session_summaries},
     process_tree::{self, find_auto_target_pids},
     psi,
-    recorder::{self, FinalizeRecordingInput, JsonArrayWriter, LiveRecorder, SpikeEventBuffer},
+    recorder::{
+        self, BlockIoRecord, FinalizeRecordingInput, GpuSample, IrqEventRecord,
+        JsonArrayWriter, LiveRecorder, SpikeEvent, SpikeEventBuffer,
+    },
     scx,
     tasks::TaskTracker,
     watch::{
@@ -29,6 +33,14 @@ use crate::{
         remove_watch_tree_pid, resolve_watch_process, tree_root_is_stale,
     },
 };
+
+struct RecentTelemetry {
+    spikes: VecDeque<SpikeEvent>,
+    irq_events: VecDeque<IrqEventRecord>,
+    gpu_samples: VecDeque<GpuSample>,
+    io_events: VecDeque<BlockIoRecord>,
+    diagnoses: VecDeque<LiveDiagnosisEntry>,
+}
 
 pub struct MonitorSession {
     pub config: Arc<Config>,
@@ -52,6 +64,7 @@ pub struct MonitorSession {
     pub interval_label: &'static str,
     pub block_io_correlation_basis: String,
     pub alert_sender: Option<tokio::sync::mpsc::Sender<AlertPayload>>,
+    recent_telemetry: RecentTelemetry,
 }
 
 impl MonitorSession {
@@ -216,6 +229,14 @@ impl MonitorSession {
             None
         };
 
+        let recent_telemetry = RecentTelemetry {
+            spikes: VecDeque::new(),
+            irq_events: VecDeque::new(),
+            gpu_samples: VecDeque::new(),
+            io_events: VecDeque::new(),
+            diagnoses: VecDeque::new(),
+        };
+
         Ok(Self {
             config: Arc::new(config),
             tree_pids,
@@ -236,6 +257,7 @@ impl MonitorSession {
             interval_label,
             block_io_correlation_basis,
             alert_sender,
+            recent_telemetry,
         })
     }
 
@@ -333,6 +355,10 @@ impl MonitorSession {
                     let mut guard = ready?;
                     let recording_monotonic_start_ns = self.recorder.run.as_ref().and_then(|r| r.monotonic_start_ns);
 
+                    let mut pending_spikes = Vec::new();
+                    let mut pending_irqs = Vec::new();
+                    let mut pending_ios = Vec::new();
+
                     while let Some(item) = guard.get_inner_mut().next() {
                         if item.len() < std::mem::size_of::<u32>() {
                             log::warn!("short_bpf_event len={}", item.len());
@@ -343,7 +369,7 @@ impl MonitorSession {
                         match kind {
                             stutter_common::EVENT_RUNNABLE_LATENCY => {
                                 if let Some(event) = crate::events::read_event_unaligned::<stutter_common::SchedulerEvent>(&item) {
-                                    crate::events::handle_event(
+                                    let spike = crate::events::handle_event(
                                         &event,
                                         &self.config,
                                         self.started,
@@ -352,12 +378,17 @@ impl MonitorSession {
                                         &mut self.recorder,
                                         self.alert_sender.as_ref(),
                                     );
+                                    if let Some(spike) = spike {
+                                        pending_spikes.push(spike);
+                                    }
                                 } else {
                                     log::warn!("short_scheduler_event len={}", item.len());
                                 }
                             }
                             stutter_common::EVENT_IRQ_LATENCY => {
                                 if let Some(event) = crate::events::read_event_unaligned::<stutter_common::IrqEvent>(&item) {
+                                    let record = crate::events::irq_event_record(recording_monotonic_start_ns, &event);
+                                    pending_irqs.push(record);
                                     crate::events::handle_irq_event(&event, &mut self.recorder, recording_monotonic_start_ns);
                                 } else {
                                     log::warn!("short_irq_event len={}", item.len());
@@ -395,6 +426,22 @@ impl MonitorSession {
                             }
                             stutter_common::EVENT_BLOCK_IO => {
                                 if let Some(event) = crate::events::read_event_unaligned::<stutter_common::BlockIoEvent>(&item) {
+                                    let elapsed_ms = self.started.elapsed().as_millis();
+                                    let record = recorder::BlockIoRecord {
+                                        elapsed_ms,
+                                        tid: event.tid,
+                                        correlation_basis: self.loaded.block_io_correlation_basis.as_str().to_owned(),
+                                        dev: event.dev,
+                                        nr_sector: event.nr_sector,
+                                        sector: event.sector,
+                                        duration_ns: event.duration_ns,
+                                        timestamp_ns: event.timestamp_ns,
+                                        rwbs: String::from_utf8_lossy(&event.rwbs)
+                                            .trim_matches(char::from(0))
+                                            .to_owned(),
+                                    };
+                                    pending_ios.push(record);
+
                                     crate::events::handle_block_io_event(
                                         &event,
                                         &mut self.recorder,
@@ -415,6 +462,17 @@ impl MonitorSession {
                     }
 
                     guard.clear_ready();
+                    drop(guard);
+
+                    for irq in pending_irqs {
+                        self.recent_telemetry.irq_events.push_back(irq);
+                    }
+                    for io in pending_ios {
+                        self.recent_telemetry.io_events.push_back(io);
+                    }
+                    for spike in pending_spikes {
+                        self.handle_live_spike(spike);
+                    }
                 }
             }
         }
@@ -605,20 +663,173 @@ impl MonitorSession {
             .await
             .map_err(|err| anyhow::anyhow!("hwmon worker failed: {err}"))?;
 
-            if let Some(sample) = sample_opt
-                && let Some(writer) = self.recorder.gpu_sample_writer.as_mut()
-            {
-                crate::events::push_json_stream_event(
-                    writer,
-                    &sample,
-                    &mut self.recorder.gpu_sample_count,
-                    &mut self.recorder.event_stream_write_errors,
-                    &mut self.recorder.first_event_stream_write_error,
-                    "gpu_samples",
-                );
+            if let Some(sample) = sample_opt {
+                self.recent_telemetry.gpu_samples.push_back(sample.clone());
+
+                if let Some(writer) = self.recorder.gpu_sample_writer.as_mut() {
+                    crate::events::push_json_stream_event(
+                        writer,
+                        &sample,
+                        &mut self.recorder.gpu_sample_count,
+                        &mut self.recorder.event_stream_write_errors,
+                        &mut self.recorder.first_event_stream_write_error,
+                        "gpu_samples",
+                    );
+                }
             }
         }
         Ok(())
+    }
+
+    fn handle_live_spike(&mut self, spike: SpikeEvent) {
+        let elapsed_ms = self.started.elapsed().as_millis();
+        self.recent_telemetry.spikes.push_back(spike);
+
+        // Keep 10 seconds of history
+        let history_window_ms = 10_000;
+        while self.recent_telemetry.spikes.front().is_some_and(|s| {
+            elapsed_ms.saturating_sub(s.elapsed_ms.unwrap_or(0)) > history_window_ms
+        }) {
+            self.recent_telemetry.spikes.pop_front();
+        }
+        while self.recent_telemetry.irq_events.front().is_some_and(|e| {
+            elapsed_ms.saturating_sub(e.elapsed_ms.unwrap_or(0)) > history_window_ms
+        }) {
+            self.recent_telemetry.irq_events.pop_front();
+        }
+        while self.recent_telemetry.gpu_samples.front().is_some_and(|s| {
+            elapsed_ms.saturating_sub(s.elapsed_ms) > history_window_ms
+        }) {
+            self.recent_telemetry.gpu_samples.pop_front();
+        }
+        while self.recent_telemetry.io_events.front().is_some_and(|e| {
+            elapsed_ms.saturating_sub(e.elapsed_ms) > history_window_ms
+        }) {
+            self.recent_telemetry.io_events.pop_front();
+        }
+        while self.recent_telemetry.diagnoses.front().is_some_and(|d| {
+            elapsed_ms.saturating_sub(d.timestamp_ms) > history_window_ms
+        }) {
+            self.recent_telemetry.diagnoses.pop_front();
+        }
+
+        // Form a cluster from spikes within cluster_window_ms
+        let cluster_window_ms = 5;
+        let cluster_window_ns = cluster_window_ms * 1_000_000;
+
+        let recent_spikes: Vec<_> = self
+            .recent_telemetry
+            .spikes
+            .iter()
+            .filter(|s| {
+                elapsed_ms.saturating_sub(s.elapsed_ms.unwrap_or(0)) <= cluster_window_ms as u128
+            })
+            .cloned()
+            .collect();
+
+        if recent_spikes.is_empty() {
+            return;
+        }
+
+        let mut points = Vec::new();
+        for s in &recent_spikes {
+            points.push(crate::report::SpikePoint {
+                task: s.task,
+                class: s.class,
+                process_pid: s.process_pid,
+                comm: s.comm.clone(),
+                cpu: s.cpu,
+                wakeup_target_cpu: s.wakeup_target_cpu,
+                latency_ns: s.latency_ns,
+                wakeup_ns: s.wakeup_ns,
+                switch_ns: s.switch_ns,
+                target_pending_wakeups: s.target_pending_wakeups,
+                elapsed_ms: s.elapsed_ms,
+            });
+        }
+
+        let distinct_tasks = points
+            .iter()
+            .map(|p| p.task)
+            .collect::<HashSet<_>>()
+            .len();
+        let min_switch_ns = points.iter().map(|p| p.switch_ns).min().unwrap_or(0);
+        let max_switch_ns = points.iter().map(|p| p.switch_ns).max().unwrap_or(0);
+        let max_latency_ns = points.iter().map(|p| p.latency_ns).max().unwrap_or(0);
+
+        let cluster = crate::report::SpikeCluster {
+            points,
+            distinct_tasks,
+            min_switch_ns,
+            max_switch_ns,
+            max_latency_ns,
+            diagnosis: None,
+        };
+
+        // Filter other telemetry near the cluster
+        let irq_events: Vec<_> = self
+            .recent_telemetry
+            .irq_events
+            .iter()
+            .filter(|e| {
+                e.exit_ns >= min_switch_ns.saturating_sub(cluster_window_ns)
+                    && e.enter_ns <= max_switch_ns.saturating_add(cluster_window_ns)
+            })
+            .cloned()
+            .collect();
+
+        let gpu_samples: Vec<_> = self
+            .recent_telemetry
+            .gpu_samples
+            .iter()
+            .filter(|s| {
+                let s_ns = (s.elapsed_ms as u64).saturating_mul(1_000_000); // approximate
+                s_ns >= min_switch_ns.saturating_sub(cluster_window_ns)
+                    && s_ns <= max_switch_ns.saturating_add(cluster_window_ns)
+            })
+            .cloned()
+            .collect();
+
+        let io_events: Vec<_> = self
+            .recent_telemetry
+            .io_events
+            .iter()
+            .filter(|e| {
+                e.timestamp_ns >= min_switch_ns.saturating_sub(cluster_window_ns)
+                    && e.timestamp_ns.saturating_sub(e.duration_ns)
+                        <= max_switch_ns.saturating_add(cluster_window_ns)
+            })
+            .cloned()
+            .collect();
+
+        // PSI: we don't have fine-grained PSI here yet, just interval records.
+        // For live diagnosis, maybe we can skip PSI or use the last one.
+        let interval_records = &self.recorder.interval_records;
+
+        let diagnosis = diagnose_cluster(
+            &cluster,
+            &irq_events,
+            &gpu_samples,
+            &[],
+            &io_events,
+            interval_records,
+        );
+
+        if diagnosis.cause != crate::diagnosis::StutterCause::Unknown {
+            self.recent_telemetry.diagnoses.push_back(LiveDiagnosisEntry {
+                timestamp_ms: elapsed_ms,
+                spike: self.recent_telemetry.spikes.back().unwrap().clone(),
+                diagnosis: diagnosis.clone(),
+            });
+
+            // Log it?
+            log::info!(
+                "live_diagnosis cause={:?} confidence={:?} evidence={:?}",
+                diagnosis.cause,
+                diagnosis.confidence,
+                diagnosis.evidence
+            );
+        }
     }
 
     pub async fn refresh_tasks(&mut self) -> anyhow::Result<()> {

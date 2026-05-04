@@ -184,7 +184,7 @@ pub fn handle_event(
     monotonic_start_ns: Option<u64>,
     recorder: &mut LiveRecorder,
     alert_sender: Option<&tokio::sync::mpsc::Sender<AlertPayload>>,
-) {
+) -> Option<recorder::SpikeEvent> {
     debug_assert_eq!(event.kind, EVENT_RUNNABLE_LATENCY);
 
     let comm = metrics::comm_to_string(&event.comm);
@@ -213,14 +213,18 @@ pub fn handle_event(
 
     let fault_deltas = stats.record(event, config.spike_threshold_ns, elapsed_ms);
 
+    let mut spike_ret = None;
     if event.latency_ns >= config.spike_threshold_ns {
+        let spike_event = recorder::SpikeEvent::from_task_stats(
+            monotonic_start_ns,
+            stats,
+            event,
+            fault_deltas,
+        );
+        spike_ret = Some(spike_event.clone());
+
         if let Some(spike_events) = recorder.spike_events.as_mut() {
-            match spike_events.push(recorder::SpikeEvent::from_task_stats(
-                monotonic_start_ns,
-                stats,
-                event,
-                fault_deltas,
-            )) {
+            match spike_events.push(spike_event) {
                 recorder::SpikePushResult::Stored => {}
                 recorder::SpikePushResult::Dropped => recorder.spike_events_dropped_count += 1,
             }
@@ -244,6 +248,8 @@ pub fn handle_event(
             warn!("alert_send_failed err={err}");
         }
     }
+
+    spike_ret
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
