@@ -1247,6 +1247,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
         migration_events: Vec::new(),
         cpu_freq_samples: Vec::new(),
         io_events: Vec::new(),
+        interval_records: Vec::new(),
     };
 
     let cluster_analysis =

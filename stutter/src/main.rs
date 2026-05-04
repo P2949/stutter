@@ -1,5 +1,6 @@
 mod affinity;
 mod cli;
+mod diagnosis;
 mod ebpf_loader;
 mod events;
 mod hwmon;
