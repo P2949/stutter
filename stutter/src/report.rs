@@ -8,7 +8,7 @@ use anyhow::Context;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
-    diagnosis::{ClusterAnchorKind, Diagnosis, diagnose_cluster, select_anchor},
+    diagnosis::{ClusterAnchorKind, Diagnosis, FrameDiagnosis, diagnose_cluster, select_anchor},
     metrics::format_latency,
     process_tree::TaskClass,
     recorder::{
@@ -81,6 +81,7 @@ pub struct ArtifactsSummary {
 pub struct ReportAnalysisJson {
     pub session: SessionFile,
     pub cluster_analysis: SpikeClusterAnalysis,
+    pub frame_diagnoses: Vec<FrameDiagnosis>,
     pub artifacts_summary: ArtifactsSummary,
 }
 
@@ -155,6 +156,10 @@ pub fn print_report(
     }
 
     let spike_events = load_spike_events(&session_path)?;
+    let all_frame_events = load_all_frame_events(&session_path)?;
+    let median_frametime = calculate_median_frametime(&all_frame_events);
+    let frame_spikes = identify_frame_spikes(&all_frame_events, median_frametime);
+
     let cluster_window_ns = cluster_window_ms.saturating_mul(1_000_000);
     let cluster_analysis = spike_cluster_analysis(
         &session,
@@ -163,11 +168,31 @@ pub fn print_report(
         top,
         filter_class,
     );
-    let artifacts =
-        load_run_artifacts(&session_path, &cluster_analysis.clusters, cluster_window_ns)?;
+    let artifacts = load_run_artifacts(
+        &session,
+        &session_path,
+        &cluster_analysis.clusters,
+        &frame_spikes,
+        cluster_window_ns,
+    )?;
+
     let mut cluster_analysis = cluster_analysis;
     perform_diagnosis(
         &mut cluster_analysis.clusters,
+        &artifacts,
+        cluster_window_ns,
+    );
+
+    let all_spike_points = if let Some(evs) = &spike_events {
+        flatten_spike_events(&session, evs)
+    } else {
+        flatten_top_spikes(&session)
+    };
+
+    let frame_diagnoses = perform_frame_diagnosis(
+        &session,
+        &frame_spikes,
+        &all_spike_points,
         &artifacts,
         cluster_window_ns,
     );
@@ -186,6 +211,7 @@ pub fn print_report(
         let report = ReportAnalysisJson {
             session,
             cluster_analysis,
+            frame_diagnoses,
             artifacts_summary,
         };
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -198,6 +224,7 @@ pub fn print_report(
             &session_path,
             &session,
             &cluster_analysis,
+            &frame_diagnoses,
             &artifacts,
             top,
             cluster_window_ms,
@@ -615,6 +642,10 @@ pub fn write_html_report(
         .with_context(|| format!("failed to parse {}", session_path.display()))?;
 
     let spike_events = load_spike_events(&session_path)?;
+    let all_frame_events = load_all_frame_events(&session_path)?;
+    let median_frametime = calculate_median_frametime(&all_frame_events);
+    let frame_spikes = identify_frame_spikes(&all_frame_events, median_frametime);
+
     let cluster_window_ns = cluster_window_ms.saturating_mul(1_000_000);
     let cluster_analysis = spike_cluster_analysis(
         &session,
@@ -623,11 +654,30 @@ pub fn write_html_report(
         top,
         filter_class,
     );
-    let artifacts =
-        load_run_artifacts(&session_path, &cluster_analysis.clusters, cluster_window_ns)?;
+    let artifacts = load_run_artifacts(
+        &session,
+        &session_path,
+        &cluster_analysis.clusters,
+        &frame_spikes,
+        cluster_window_ns,
+    )?;
     let mut cluster_analysis = cluster_analysis;
     perform_diagnosis(
         &mut cluster_analysis.clusters,
+        &artifacts,
+        cluster_window_ns,
+    );
+
+    let all_spike_points = if let Some(evs) = &spike_events {
+        flatten_spike_events(&session, evs)
+    } else {
+        flatten_top_spikes(&session)
+    };
+
+    let frame_diagnoses = perform_frame_diagnosis(
+        &session,
+        &frame_spikes,
+        &all_spike_points,
         &artifacts,
         cluster_window_ns,
     );
@@ -636,6 +686,7 @@ pub fn write_html_report(
         &session_path,
         &session,
         &cluster_analysis,
+        &frame_diagnoses,
         &artifacts,
         top,
         cluster_window_ms,
@@ -646,6 +697,7 @@ pub fn write_html_report(
         spike_events.as_deref(),
         &artifacts,
         &cluster_analysis,
+        &frame_diagnoses,
         &text_report,
         top,
     );
@@ -661,6 +713,7 @@ fn render_html_report(
     spike_events: Option<&[SpikeEvent]>,
     artifacts: &RunArtifacts,
     cluster_analysis: &SpikeClusterAnalysis,
+    frame_diagnoses: &[FrameDiagnosis],
     text_report: &str,
     top: usize,
 ) -> String {
@@ -672,6 +725,8 @@ fn render_html_report(
         json_escape(&serde_json::to_string(artifacts).unwrap_or_else(|_| "{}".to_owned()));
     let cluster_analysis_json =
         json_escape(&serde_json::to_string(&cluster_analysis).unwrap_or_else(|_| "{}".to_owned()));
+    let frame_diagnoses_json =
+        json_escape(&serde_json::to_string(&frame_diagnoses).unwrap_or_else(|_| "[]".to_owned()));
 
     let template = include_str!("report_template.html");
 
@@ -681,6 +736,7 @@ fn render_html_report(
         .replace("{spike_events_json}", &spike_events_json)
         .replace("{artifacts_json}", &artifacts_json)
         .replace("{cluster_analysis_json}", &cluster_analysis_json)
+        .replace("{frame_diagnoses_json}", &frame_diagnoses_json)
         .replace("{top}", &top.to_string())
 }
 
@@ -697,10 +753,12 @@ fn html_escape(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_report(
     session_path: &Path,
     session: &SessionFile,
     cluster_analysis: &SpikeClusterAnalysis,
+    frame_diagnoses: &[FrameDiagnosis],
     artifacts: &RunArtifacts,
     top: usize,
     cluster_window_ms: u64,
@@ -1024,6 +1082,15 @@ pub(crate) fn render_report(
     }
     pushln(&mut output, "");
 
+    if !frame_diagnoses.is_empty() {
+        pushln(&mut output, "frame spike diagnoses");
+        pushln(&mut output, "---------------------");
+        for (rank, diag) in frame_diagnoses.iter().take(top).enumerate() {
+            pushln(&mut output, render_frame_diagnosis(rank + 1, diag));
+        }
+        pushln(&mut output, "");
+    }
+
     render_correlation_sections(
         &mut output,
         &cluster_analysis.clusters,
@@ -1056,16 +1123,19 @@ fn load_spike_events(session_path: &Path) -> anyhow::Result<Option<Vec<SpikeEven
     Ok(Some(events))
 }
 
+#[allow(clippy::collapsible_if)]
 fn load_run_artifacts(
+    session: &SessionFile,
     session_path: &Path,
     clusters: &[SpikeCluster],
+    frame_spikes: &[FrameEvent],
     cluster_window_ns: u64,
 ) -> anyhow::Result<RunArtifacts> {
     let Some(run_dir) = session_path.parent() else {
         return Ok(RunArtifacts::default());
     };
 
-    if clusters.is_empty() {
+    if clusters.is_empty() && frame_spikes.is_empty() {
         return Ok(RunArtifacts::default());
     }
 
@@ -1074,29 +1144,46 @@ fn load_run_artifacts(
     // IRQ events
     let path = run_dir.join("irq_events.json");
     if path.exists() {
-        let min_overall = clusters
+        let mut min_overall = clusters
             .iter()
             .map(|c| c.min_switch_ns.saturating_sub(cluster_window_ns))
             .min()
-            .unwrap_or(0);
-        let max_overall = clusters
+            .unwrap_or(u64::MAX);
+        let mut max_overall = clusters
             .iter()
             .map(|c| c.max_switch_ns.saturating_add(cluster_window_ns))
             .max()
             .unwrap_or(0);
-        if let Ok(selected) = stream_json_array_select(&path, |e: &IrqEventRecord| {
-            e.exit_ns >= min_overall && e.enter_ns <= max_overall
-        }) {
-            artifacts.irq_events = selected;
+
+        for f in frame_spikes {
+            if let Some(start_ns) = session.monotonic_start_ns {
+                let f_ns = start_ns + (f.elapsed_ms as u64 * 1_000_000);
+                min_overall = min_overall.min(f_ns.saturating_sub(cluster_window_ns));
+                max_overall = max_overall.max(f_ns.saturating_add(cluster_window_ns));
+            }
+        }
+
+        if min_overall != u64::MAX {
+            if let Ok(selected) = stream_json_array_select(&path, |e: &IrqEventRecord| {
+                e.exit_ns >= min_overall && e.enter_ns <= max_overall
+            }) {
+                artifacts.irq_events = selected;
+            }
         }
     }
 
     // GPU samples
     let path = run_dir.join("gpu_samples.json");
     if path.exists() {
-        let min_overall_opt = clusters.iter().filter_map(cluster_elapsed).min();
-        let max_overall_opt = clusters.iter().filter_map(cluster_elapsed).max();
-        if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+        let mut min_overall_ms = clusters.iter().filter_map(cluster_elapsed).min();
+        let mut max_overall_ms = clusters.iter().filter_map(cluster_elapsed).max();
+
+        for f in frame_spikes {
+            min_overall_ms = Some(min_overall_ms.map_or(f.elapsed_ms, |m| m.min(f.elapsed_ms)));
+            max_overall_ms = Some(max_overall_ms.map_or(f.elapsed_ms, |m| m.max(f.elapsed_ms)));
+        }
+
+        if let (Some(min_overall), Some(max_overall)) = (min_overall_ms, max_overall_ms) {
             let lower = min_overall.saturating_sub(50);
             let upper = max_overall.saturating_add(50);
             if let Ok(selected) = stream_json_array_select(&path, |s: &GpuSample| {
@@ -1111,15 +1198,21 @@ fn load_run_artifacts(
     let path = run_dir.join("frame_correlation.json");
     if path.exists() {
         let padding_ms = u128::from(cluster_window_ns / 1_000_000).max(1);
-        let min_overall_opt = clusters
+        let mut min_overall_ms = clusters
             .iter()
             .filter_map(|c| cluster_elapsed_range(c).map(|(min, _)| min))
             .min();
-        let max_overall_opt = clusters
+        let mut max_overall_ms = clusters
             .iter()
             .filter_map(|c| cluster_elapsed_range(c).map(|(_, max)| max))
             .max();
-        if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+
+        for f in frame_spikes {
+            min_overall_ms = Some(min_overall_ms.map_or(f.elapsed_ms, |m| m.min(f.elapsed_ms)));
+            max_overall_ms = Some(max_overall_ms.map_or(f.elapsed_ms, |m| m.max(f.elapsed_ms)));
+        }
+
+        if let (Some(min_overall), Some(max_overall)) = (min_overall_ms, max_overall_ms) {
             let lower = min_overall.saturating_sub(padding_ms);
             let upper = max_overall.saturating_add(padding_ms);
             if let Ok(selected) = stream_json_array_select(&path, |f: &FrameEvent| {
@@ -1133,31 +1226,48 @@ fn load_run_artifacts(
     // Migration events
     let path = run_dir.join("migration_events.json");
     if path.exists() {
-        let min_overall = clusters
+        let mut min_overall = clusters
             .iter()
             .map(|c| c.min_switch_ns.saturating_sub(cluster_window_ns))
             .min()
-            .unwrap_or(0);
-        let max_overall = clusters
+            .unwrap_or(u64::MAX);
+        let mut max_overall = clusters
             .iter()
             .map(|c| c.max_switch_ns.saturating_add(cluster_window_ns))
             .max()
             .unwrap_or(0);
-        if let Ok(selected) =
-            stream_json_array_select(&path, |e: &crate::recorder::MigrationEventRecord| {
-                e.timestamp_ns >= min_overall && e.timestamp_ns <= max_overall
-            })
-        {
-            artifacts.migration_events = selected;
+
+        for f in frame_spikes {
+            if let Some(start_ns) = session.monotonic_start_ns {
+                let f_ns = start_ns + (f.elapsed_ms as u64 * 1_000_000);
+                min_overall = min_overall.min(f_ns.saturating_sub(cluster_window_ns));
+                max_overall = max_overall.max(f_ns.saturating_add(cluster_window_ns));
+            }
+        }
+
+        if min_overall != u64::MAX {
+            if let Ok(selected) =
+                stream_json_array_select(&path, |e: &crate::recorder::MigrationEventRecord| {
+                    e.timestamp_ns >= min_overall && e.timestamp_ns <= max_overall
+                })
+            {
+                artifacts.migration_events = selected;
+            }
         }
     }
 
     // CPU frequency samples
     let path = run_dir.join("cpu_freq_samples.json");
     if path.exists() {
-        let min_overall_opt = clusters.iter().filter_map(cluster_elapsed).min();
-        let max_overall_opt = clusters.iter().filter_map(cluster_elapsed).max();
-        if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+        let mut min_overall_ms = clusters.iter().filter_map(cluster_elapsed).min();
+        let mut max_overall_ms = clusters.iter().filter_map(cluster_elapsed).max();
+
+        for f in frame_spikes {
+            min_overall_ms = Some(min_overall_ms.map_or(f.elapsed_ms, |m| m.min(f.elapsed_ms)));
+            max_overall_ms = Some(max_overall_ms.map_or(f.elapsed_ms, |m| m.max(f.elapsed_ms)));
+        }
+
+        if let (Some(min_overall), Some(max_overall)) = (min_overall_ms, max_overall_ms) {
             let lower = min_overall.saturating_sub(50);
             let upper = max_overall.saturating_add(50);
             if let Ok(selected) =
@@ -1173,37 +1283,48 @@ fn load_run_artifacts(
     // I/O events
     let path = run_dir.join("io_events.json");
     if path.exists() {
-        let min_overall = clusters
+        let mut min_overall = clusters
             .iter()
             .map(|c| c.min_switch_ns.saturating_sub(cluster_window_ns))
             .min()
-            .unwrap_or(0);
-        let max_overall = clusters
+            .unwrap_or(u64::MAX);
+        let mut max_overall = clusters
             .iter()
             .map(|c| c.max_switch_ns.saturating_add(cluster_window_ns))
             .max()
             .unwrap_or(0);
-        if let Ok(selected) =
-            stream_json_array_select(&path, |e: &crate::recorder::BlockIoRecord| {
-                e.timestamp_ns >= min_overall
-                    && e.timestamp_ns.saturating_sub(e.duration_ns) <= max_overall
-            })
-        {
-            artifacts.io_events = selected;
+
+        for f in frame_spikes {
+            if let Some(start_ns) = session.monotonic_start_ns {
+                let f_ns = start_ns + (f.elapsed_ms as u64 * 1_000_000);
+                min_overall = min_overall.min(f_ns.saturating_sub(cluster_window_ns));
+                max_overall = max_overall.max(f_ns.saturating_add(cluster_window_ns));
+            }
+        }
+
+        if min_overall != u64::MAX {
+            if let Ok(selected) =
+                stream_json_array_select(&path, |e: &crate::recorder::BlockIoRecord| {
+                    e.timestamp_ns >= min_overall
+                        && e.timestamp_ns.saturating_sub(e.duration_ns) <= max_overall
+                })
+            {
+                artifacts.io_events = selected;
+            }
         }
     }
 
     // Interval records (for PSI diagnosis)
     let path = run_dir.join("interval_records.json");
     if path.exists() {
-        let min_overall_opt = clusters
+        let mut min_overall_ms = clusters
             .iter()
             .filter_map(|c| {
                 let (min, _) = cluster_elapsed_range(c)?;
                 Some(min)
             })
             .min();
-        let max_overall_opt = clusters
+        let mut max_overall_ms = clusters
             .iter()
             .filter_map(|c| {
                 let (_, max) = cluster_elapsed_range(c)?;
@@ -1211,7 +1332,12 @@ fn load_run_artifacts(
             })
             .max();
 
-        if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+        for f in frame_spikes {
+            min_overall_ms = Some(min_overall_ms.map_or(f.elapsed_ms, |m| m.min(f.elapsed_ms)));
+            max_overall_ms = Some(max_overall_ms.map_or(f.elapsed_ms, |m| m.max(f.elapsed_ms)));
+        }
+
+        if let (Some(min_overall), Some(max_overall)) = (min_overall_ms, max_overall_ms) {
             let lower = min_overall.saturating_sub(1000); // 1s buffer for PSI
             let upper = max_overall.saturating_add(1000);
             if let Ok(selected) = stream_json_array_select(&path, |r: &IntervalRecord| {
@@ -1225,14 +1351,14 @@ fn load_run_artifacts(
     // SCX events
     let path = run_dir.join("scx_events.json");
     if path.exists() {
-        let min_overall_opt = clusters
+        let mut min_overall_ms = clusters
             .iter()
             .filter_map(|c| {
                 let (min, _) = cluster_elapsed_range(c)?;
                 Some(min)
             })
             .min();
-        let max_overall_opt = clusters
+        let mut max_overall_ms = clusters
             .iter()
             .filter_map(|c| {
                 let (_, max) = cluster_elapsed_range(c)?;
@@ -1240,7 +1366,12 @@ fn load_run_artifacts(
             })
             .max();
 
-        if let (Some(min_overall), Some(max_overall)) = (min_overall_opt, max_overall_opt) {
+        for f in frame_spikes {
+            min_overall_ms = Some(min_overall_ms.map_or(f.elapsed_ms, |m| m.min(f.elapsed_ms)));
+            max_overall_ms = Some(max_overall_ms.map_or(f.elapsed_ms, |m| m.max(f.elapsed_ms)));
+        }
+
+        if let (Some(min_overall), Some(max_overall)) = (min_overall_ms, max_overall_ms) {
             let lower = min_overall.saturating_sub(2000);
             let upper = max_overall.saturating_add(2000);
             if let Ok(selected) = stream_json_array_select(&path, |e: &crate::scx::ScxEvent| {
@@ -2201,4 +2332,144 @@ fn percentile_warning_note(percentile_scope: &str) -> &'static str {
             "p95/p99 may be capped because this session predates histogram percentiles; prefer max and threshold counters"
         }
     }
+}
+
+fn load_all_frame_events(session_path: &Path) -> anyhow::Result<Vec<FrameEvent>> {
+    let Some(run_dir) = session_path.parent() else {
+        return Ok(Vec::new());
+    };
+    let path = run_dir.join("frame_correlation.json");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    stream_json_array_select(&path, |_| true)
+}
+
+fn calculate_median_frametime(frames: &[FrameEvent]) -> f64 {
+    if frames.is_empty() {
+        return 0.0;
+    }
+    let mut times: Vec<_> = frames.iter().map(|f| f.frametime_ms).collect();
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mid = times.len() / 2;
+    if times.len() % 2 == 0 {
+        (times[mid - 1] + times[mid]) / 2.0
+    } else {
+        times[mid]
+    }
+}
+
+fn identify_frame_spikes(frames: &[FrameEvent], median: f64) -> Vec<FrameEvent> {
+    frames
+        .iter()
+        .filter(|f| f.frametime_ms > 1.5 * median || f.frametime_ms > 33.3 || f.frametime_ms > 50.0)
+        .cloned()
+        .collect()
+}
+
+fn perform_frame_diagnosis(
+    session: &SessionFile,
+    frame_spikes: &[FrameEvent],
+    all_spike_points: &[SpikePoint],
+    artifacts: &RunArtifacts,
+    cluster_window_ns: u64,
+) -> Vec<FrameDiagnosis> {
+    let mut diagnoses = Vec::new();
+    let padding_ms = u128::from(cluster_window_ns / 1_000_000).max(1);
+
+    for frame in frame_spikes {
+        let frame_monotonic_ns = if let Some(start_ns) = session.monotonic_start_ns {
+            start_ns + (frame.elapsed_ms as u64 * 1_000_000)
+        } else {
+            continue;
+        };
+
+        let nearby_points: Vec<_> = all_spike_points
+            .iter()
+            .filter(|p| p.switch_ns.abs_diff(frame_monotonic_ns) <= cluster_window_ns)
+            .cloned()
+            .collect();
+
+        let distinct_tasks = nearby_points
+            .iter()
+            .map(|p| p.task)
+            .collect::<BTreeSet<_>>()
+            .len();
+        let cluster = cluster_from_points(nearby_points, distinct_tasks);
+
+        let irq_events = artifacts
+            .irq_events
+            .iter()
+            .filter(|e| {
+                e.exit_ns >= frame_monotonic_ns.saturating_sub(cluster_window_ns)
+                    && e.enter_ns <= frame_monotonic_ns.saturating_add(cluster_window_ns)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let gpu_samples = artifacts
+            .gpu_samples
+            .iter()
+            .filter(|s| s.elapsed_ms.abs_diff(frame.elapsed_ms) <= padding_ms)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let io_events = artifacts
+            .io_events
+            .iter()
+            .filter(|e| {
+                e.timestamp_ns >= frame_monotonic_ns.saturating_sub(cluster_window_ns)
+                    && e.timestamp_ns.saturating_sub(e.duration_ns)
+                        <= frame_monotonic_ns.saturating_add(cluster_window_ns)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let interval_records = artifacts
+            .interval_records
+            .iter()
+            .filter(|r| r.elapsed_ms.abs_diff(frame.elapsed_ms) <= 1000)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let diagnosis = diagnose_cluster(
+            &cluster,
+            &irq_events,
+            &gpu_samples,
+            &[],
+            &io_events,
+            &interval_records,
+        );
+
+        diagnoses.push(FrameDiagnosis {
+            frame_elapsed_ms: frame.elapsed_ms,
+            frametime_ms: frame.frametime_ms,
+            diagnosis,
+        });
+    }
+
+    diagnoses
+}
+
+fn render_frame_diagnosis(rank: usize, diag: &FrameDiagnosis) -> String {
+    let mut evidence = diag.diagnosis.evidence.join(", ");
+    if !diag.diagnosis.secondary_causes.is_empty() {
+        let secondary: Vec<_> = diag
+            .diagnosis
+            .secondary_causes
+            .iter()
+            .map(|c| format!("{:?}", c))
+            .collect();
+        evidence.push_str(&format!(" (secondary: {})", secondary.join(", ")));
+    }
+
+    format!(
+        "{}. elapsed={}ms frametime={:.1}ms cause={:?} confidence={:?} evidence=\"{}\"",
+        rank,
+        diag.frame_elapsed_ms,
+        diag.frametime_ms,
+        diag.diagnosis.cause,
+        diag.diagnosis.confidence,
+        evidence
+    )
 }

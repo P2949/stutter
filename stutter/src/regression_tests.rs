@@ -164,6 +164,7 @@ fn event_comm_updates_only_unknown_existing_name() {
         None,
         None,
         None,
+        None,
     );
 
     assert_eq!(tasks.stats_by_task.get(&7).unwrap().comm, "real-name");
@@ -176,6 +177,7 @@ fn event_comm_updates_only_unknown_existing_name() {
         &mut tasks,
         None,
         &mut recorder,
+        None,
         None,
         None,
         None,
@@ -211,6 +213,7 @@ fn spike_events_capture_only_threshold_crossing_events() {
         None,
         None,
         None,
+        None,
     );
     assert!(
         recorder
@@ -229,6 +232,7 @@ fn spike_events_capture_only_threshold_crossing_events() {
         &mut tasks,
         Some(100),
         &mut recorder,
+        None,
         None,
         None,
         None,
@@ -282,6 +286,7 @@ fn spike_event_fault_deltas_are_captured_correctly() {
         None,
         None,
         None,
+        None,
     );
 
     // Second event is a spike with additional faults
@@ -296,6 +301,7 @@ fn spike_event_fault_deltas_are_captured_correctly() {
         &mut tasks,
         Some(100),
         &mut recorder,
+        None,
         None,
         None,
         None,
@@ -632,6 +638,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         elapsed_ms: Some(1),
         scx_ops: None,
         scx_state: None,
+        scx_enable_seq: None,
     }];
     let drop_counters = DropCountersSnapshot {
         wakeup_data_insert_failed: 2,
@@ -1072,6 +1079,7 @@ fn report_reads_recorded_session_andspike_events() {
         minor_faults: 0,
         scx_ops: None,
         scx_state: None,
+        scx_enable_seq: None,
     });
     let stats_by_task = BTreeMap::from([(7, stats)]);
     let spike_events = vec![SpikeEvent {
@@ -1093,6 +1101,7 @@ fn report_reads_recorded_session_andspike_events() {
         minor_faults: 0,
         scx_ops: None,
         scx_state: None,
+        scx_enable_seq: None,
     }];
 
     let mut task_tracker = tasks::TaskTracker::default();
@@ -1165,6 +1174,7 @@ fn report_cluster_output_caps_inline_points() {
             minor_faults: 0,
             scx_ops: None,
             scx_state: None,
+        scx_enable_seq: None,
         })
         .collect::<Vec<_>>();
 
@@ -1202,6 +1212,7 @@ fn report_cluster_output_caps_inline_points() {
         &session_path,
         &session,
         &cluster_analysis,
+        &[],
         &crate::report::RunArtifacts::default(),
         10,
         5,
@@ -1249,6 +1260,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
             minor_faults: 0,
             scx_ops: None,
             scx_state: None,
+        scx_enable_seq: None,
         })
         .collect::<Vec<_>>();
     let artifacts = crate::report::RunArtifacts {
@@ -1288,6 +1300,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
         &session_path,
         &session,
         &cluster_analysis,
+        &[],
         &artifacts,
         10,
         5,
@@ -1319,6 +1332,7 @@ fn report_uses_run_level_block_io_correlation_basis() {
         &session_path,
         &session,
         &cluster_analysis,
+        &[],
         &crate::report::RunArtifacts::default(),
         10,
         5,
@@ -1333,6 +1347,7 @@ fn report_uses_run_level_block_io_correlation_basis() {
         &session_path,
         &session,
         &cluster_analysis,
+        &[],
         &crate::report::RunArtifacts::default(),
         10,
         5,
@@ -1698,6 +1713,7 @@ fn spike_event(task: u32, switch_ns: u64) -> SpikeEvent {
         minor_faults: 0,
         scx_ops: None,
         scx_state: None,
+        scx_enable_seq: None,
     }
 }
 
@@ -1968,6 +1984,7 @@ fn scx_correlation_spike_event_serialization() {
         minor_faults: 0,
         scx_ops: Some("scx_lavd".to_owned()),
         scx_state: Some("enabled".to_owned()),
+        scx_enable_seq: Some("1".to_owned()),
     };
 
     let json = serde_json::to_string(&event).unwrap();
@@ -1977,6 +1994,7 @@ fn scx_correlation_spike_event_serialization() {
     let deserialized: SpikeEvent = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized.scx_ops.as_deref(), Some("scx_lavd"));
     assert_eq!(deserialized.scx_state.as_deref(), Some("enabled"));
+    assert_eq!(deserialized.scx_enable_seq.as_deref(), Some("1"));
 }
 
 #[test]
@@ -1985,4 +2003,5 @@ fn scx_correlation_backward_compatibility() {
     let deserialized: SpikeEvent = serde_json::from_str(json).unwrap();
     assert_eq!(deserialized.scx_ops, None);
     assert_eq!(deserialized.scx_state, None);
+    assert_eq!(deserialized.scx_enable_seq, None);
 }

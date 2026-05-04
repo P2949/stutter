@@ -68,6 +68,13 @@ pub struct Diagnosis {
     pub evidence: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct FrameDiagnosis {
+    pub frame_elapsed_ms: u128,
+    pub frametime_ms: f64,
+    pub diagnosis: Diagnosis,
+}
+
 #[derive(Clone, Debug)]
 pub struct LiveDiagnosisEntry {
     pub elapsed_ms: u128,
