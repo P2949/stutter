@@ -860,37 +860,81 @@ fn comm_pattern_matches(pattern: &CompiledPattern, task: &TaskInfo) -> bool {
     pattern.matches(&task.comm) || pattern.matches(&task.process_comm)
 }
 
+/// Classification priority (highest to lowest):
+/// 1. GameScope: The compositor running the game.
+/// 2. Compositor: System-level window managers and compositors.
+/// 3. WineServer: The core Wine/Proton server process.
+/// 4. SteamRuntime: Container and runtime tools (pressure-vessel, bwrap, etc).
+/// 5. Launcher: Game-specific or platform launchers (Epic, EA, Ubisoft, etc).
+/// 6. Helper: Known system or background helpers (svchost, steamwebhelper, etc).
+/// 7. Game: Likely game process based on path patterns (steamapps/common, etc).
+/// 8. GameHelper: Any other .exe process not caught by the above.
 pub fn classify_task(comm: &str, process_comm: &str, cmdline: &str) -> TaskClass {
     let comm = comm.to_ascii_lowercase();
     let process_comm = process_comm.to_ascii_lowercase();
     let cmdline = cmdline.to_ascii_lowercase();
-    let haystack = format!("{comm} {process_comm} {cmdline}");
 
-    if contains_token(&haystack, &["gamescope"]) {
-        return TaskClass::GameScope;
+    for rule in CLASSIFICATION_RULES {
+        if rule.matches(&comm, &process_comm, &cmdline) {
+            return rule.class;
+        }
     }
 
-    if contains_token(
-        &haystack,
-        &[
+    TaskClass::Unknown
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ClassificationMatchType {
+    /// Match any of the tokens in any of the fields (comm, process_comm, cmdline).
+    AnyField(&'static [&'static str]),
+    /// Match only if it looks like a game (specific path patterns).
+    LikelyGame,
+    /// Match any .exe process.
+    AnyExe,
+}
+
+struct ClassificationRule {
+    class: TaskClass,
+    match_type: ClassificationMatchType,
+}
+
+impl ClassificationRule {
+    fn matches(&self, comm: &str, process_comm: &str, cmdline: &str) -> bool {
+        match self.match_type {
+            ClassificationMatchType::AnyField(tokens) => tokens.iter().any(|&token| {
+                comm.contains(token) || process_comm.contains(token) || cmdline.contains(token)
+            }),
+            ClassificationMatchType::LikelyGame => contains_likely_game_cmdline(cmdline),
+            ClassificationMatchType::AnyExe => {
+                comm.contains(".exe") || process_comm.contains(".exe") || cmdline.contains(".exe")
+            }
+        }
+    }
+}
+
+const CLASSIFICATION_RULES: &[ClassificationRule] = &[
+    ClassificationRule {
+        class: TaskClass::GameScope,
+        match_type: ClassificationMatchType::AnyField(&["gamescope"]),
+    },
+    ClassificationRule {
+        class: TaskClass::Compositor,
+        match_type: ClassificationMatchType::AnyField(&[
             "sway",
             "kwin",
             "kwin_wayland",
             "mutter",
             "gnome-shell",
             "steamcompmgr",
-        ],
-    ) {
-        return TaskClass::Compositor;
-    }
-
-    if contains_token(&haystack, &["wineserver"]) {
-        return TaskClass::WineServer;
-    }
-
-    if contains_token(
-        &haystack,
-        &[
+        ]),
+    },
+    ClassificationRule {
+        class: TaskClass::WineServer,
+        match_type: ClassificationMatchType::AnyField(&["wineserver"]),
+    },
+    ClassificationRule {
+        class: TaskClass::SteamRuntime,
+        match_type: ClassificationMatchType::AnyField(&[
             "pressure-vessel",
             "pv-",
             "steam-runtime",
@@ -898,14 +942,11 @@ pub fn classify_task(comm: &str, process_comm: &str, cmdline: &str) -> TaskClass
             "sniper",
             "srt-bwrap",
             "xalia",
-        ],
-    ) {
-        return TaskClass::SteamRuntime;
-    }
-
-    if contains_token(
-        &haystack,
-        &[
+        ]),
+    },
+    ClassificationRule {
+        class: TaskClass::Launcher,
+        match_type: ClassificationMatchType::AnyField(&[
             "launcher",
             "launch",
             "bootstrapper",
@@ -917,14 +958,11 @@ pub fn classify_task(comm: &str, process_comm: &str, cmdline: &str) -> TaskClass
             "ubisoftconnect",
             "uplay",
             "epicgameslauncher",
-        ],
-    ) {
-        return TaskClass::Launcher;
-    }
-
-    if contains_token(
-        &haystack,
-        &[
+        ]),
+    },
+    ClassificationRule {
+        class: TaskClass::Helper,
+        match_type: ClassificationMatchType::AnyField(&[
             "reaper",
             "helper",
             "rundll32",
@@ -942,25 +980,17 @@ pub fn classify_task(comm: &str, process_comm: &str, cmdline: &str) -> TaskClass
             "steam.exe",
             "steamwebhelper.exe",
             "steamerrorreporter.exe",
-        ],
-    ) {
-        return TaskClass::Helper;
-    }
-
-    if contains_likely_game_cmdline(&cmdline) {
-        return TaskClass::Game;
-    }
-
-    if contains_any_exe(&comm) || contains_any_exe(&process_comm) || contains_any_exe(&cmdline) {
-        return TaskClass::GameHelper;
-    }
-
-    TaskClass::Unknown
-}
-
-fn contains_token(haystack: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| haystack.contains(needle))
-}
+        ]),
+    },
+    ClassificationRule {
+        class: TaskClass::Game,
+        match_type: ClassificationMatchType::LikelyGame,
+    },
+    ClassificationRule {
+        class: TaskClass::GameHelper,
+        match_type: ClassificationMatchType::AnyExe,
+    },
+];
 
 fn contains_likely_game_cmdline(cmdline: &str) -> bool {
     if !cmdline.contains(".exe") {
@@ -976,10 +1006,6 @@ fn contains_likely_game_cmdline(cmdline: &str) -> bool {
     }
 
     !contains_known_non_game_exe(cmdline)
-}
-
-fn contains_any_exe(text: &str) -> bool {
-    text.contains(".exe")
 }
 
 fn contains_known_non_game_exe(text: &str) -> bool {
