@@ -4,7 +4,7 @@ use crate::{
     metrics::format_latency,
     process_tree::TaskClass,
     recorder::{BlockIoRecord, GpuSample, IntervalRecord, IrqEventRecord},
-    report::{SpikeCluster, SpikePoint, RunArtifacts},
+    report::{RunArtifacts, SpikeCluster, SpikePoint},
 };
 
 const IRQ_SIGNIFICANT_NS: u64 = 250_000; // start conservative
@@ -147,7 +147,11 @@ pub(crate) fn select_anchor(cluster: &SpikeCluster) -> ClusterAnchor {
     }
 }
 
-pub fn diagnose_cluster(cluster: &SpikeCluster, artifacts: &RunArtifacts, window_ns: u64) -> Diagnosis {
+pub fn diagnose_cluster(
+    cluster: &SpikeCluster,
+    artifacts: &RunArtifacts,
+    window_ns: u64,
+) -> Diagnosis {
     // Compute cluster time window
     let start_ns = cluster.min_switch_ns.saturating_sub(window_ns);
     let end_ns = cluster.max_switch_ns.saturating_add(window_ns);
@@ -194,7 +198,9 @@ pub fn diagnose_cluster(cluster: &SpikeCluster, artifacts: &RunArtifacts, window
     let io_events: Vec<BlockIoRecord> = artifacts
         .io_events
         .iter()
-        .filter(|e| e.timestamp_ns >= start_ns && e.timestamp_ns.saturating_sub(e.duration_ns) <= end_ns)
+        .filter(|e| {
+            e.timestamp_ns >= start_ns && e.timestamp_ns.saturating_sub(e.duration_ns) <= end_ns
+        })
         .cloned()
         .collect();
 
@@ -202,7 +208,9 @@ pub fn diagnose_cluster(cluster: &SpikeCluster, artifacts: &RunArtifacts, window
         artifacts
             .interval_records
             .iter()
-            .filter(|r| r.elapsed_ms >= min.saturating_sub(1000) && r.elapsed_ms <= max.saturating_add(1000))
+            .filter(|r| {
+                r.elapsed_ms >= min.saturating_sub(1000) && r.elapsed_ms <= max.saturating_add(1000)
+            })
             .cloned()
             .collect()
     } else {
@@ -460,7 +468,10 @@ mod tests {
             duration_ns: 10_000,
         };
 
-        let artifacts = RunArtifacts { irq_events: vec![irq], ..Default::default() };
+        let artifacts = RunArtifacts {
+            irq_events: vec![irq],
+            ..Default::default()
+        };
         let d = diagnose_cluster(&cluster, &artifacts, 0);
         assert!(
             !d.secondary_causes
@@ -477,7 +488,10 @@ mod tests {
             exit_ns: 1_000_000,
             duration_ns: 1_000_000,
         };
-        let artifacts2 = RunArtifacts { irq_events: vec![irq_big], ..Default::default() };
+        let artifacts2 = RunArtifacts {
+            irq_events: vec![irq_big],
+            ..Default::default()
+        };
         let d2 = diagnose_cluster(&cluster, &artifacts2, 0);
         assert!(
             d2.secondary_causes
