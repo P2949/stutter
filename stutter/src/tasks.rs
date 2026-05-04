@@ -191,7 +191,6 @@ impl TaskTracker {
     }
 }
 
-
 pub fn remove_prev_faults_state(
     prev_faults_map: &mut Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
     prev_faults_snapshot: &mut BTreeMap<u32, (u64, u64)>,

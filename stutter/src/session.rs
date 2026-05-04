@@ -18,15 +18,10 @@ use crate::{
     ebpf_loader,
     events::AlertPayload,
     hwmon, mangohud,
-    metrics::{
-        collect_interval_summaries_labeled, log_drop_counters, print_session_summaries,
-    },
+    metrics::{collect_interval_summaries_labeled, log_drop_counters, print_session_summaries},
     process_tree::{self, find_auto_target_pids},
     psi,
-    recorder::{
-        self, FinalizeRecordingInput, JsonArrayWriter, LiveRecorder,
-        SpikeEventBuffer,
-    },
+    recorder::{self, FinalizeRecordingInput, JsonArrayWriter, LiveRecorder, SpikeEventBuffer},
     scx,
     tasks::TaskTracker,
     watch::{
@@ -132,16 +127,18 @@ impl MonitorSession {
                 recorder.interval_writer =
                     Some(JsonArrayWriter::create(run.run_dir.join("interval.json"))?);
             }
-            recorder.irq_event_writer =
-                Some(JsonArrayWriter::create(run.run_dir.join("irq_events.json"))?);
+            recorder.irq_event_writer = Some(JsonArrayWriter::create(
+                run.run_dir.join("irq_events.json"),
+            )?);
             recorder.migration_event_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("migration_events.json"),
             )?);
             recorder.cpu_freq_sample_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("cpu_freq_samples.json"),
             )?);
-            recorder.gpu_sample_writer =
-                Some(JsonArrayWriter::create(run.run_dir.join("gpu_samples.json"))?);
+            recorder.gpu_sample_writer = Some(JsonArrayWriter::create(
+                run.run_dir.join("gpu_samples.json"),
+            )?);
             recorder.block_io_event_writer =
                 Some(JsonArrayWriter::create(run.run_dir.join("io_events.json"))?);
         }
@@ -412,7 +409,6 @@ impl MonitorSession {
         }
     }
 
-
     pub fn handle_tui_event(&mut self, event: Event) -> Option<String> {
         if let Event::Key(key) = event {
             match key.code {
@@ -609,15 +605,16 @@ impl MonitorSession {
     }
 
     pub async fn refresh_tasks(&mut self) -> anyhow::Result<()> {
-        self.tasks.refresh(
-            &self.config,
-            &mut self.recorder.tree_events,
-            &mut self.loaded.target_pid_map,
-            self.loaded.prev_faults_map.as_mut(),
-            self.started.elapsed().as_millis(),
-            self.recorder.run.as_ref().map(|run| run.started_instant),
-        )
-        .await
+        self.tasks
+            .refresh(
+                &self.config,
+                &mut self.recorder.tree_events,
+                &mut self.loaded.target_pid_map,
+                self.loaded.prev_faults_map.as_mut(),
+                self.started.elapsed().as_millis(),
+                self.recorder.run.as_ref().map(|run| run.started_instant),
+            )
+            .await
     }
 
     pub fn finalize(mut self, stop_reason: String) -> anyhow::Result<()> {

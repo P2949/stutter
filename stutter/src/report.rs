@@ -1552,7 +1552,8 @@ fn render_correlation_sections(
             "gpu_samples.json",
             |s| s.elapsed_ms >= lower && s.elapsed_ms <= upper,
             |cluster, sample| {
-                cluster_elapsed(cluster).is_some_and(|elapsed| sample.elapsed_ms.abs_diff(elapsed) <= 50)
+                cluster_elapsed(cluster)
+                    .is_some_and(|elapsed| sample.elapsed_ms.abs_diff(elapsed) <= 50)
             },
             |output, rank, cluster, matches| {
                 let elapsed = cluster_elapsed(cluster).unwrap();
@@ -1687,7 +1688,8 @@ fn render_correlation_sections(
             "cpu_freq_samples.json",
             |s| s.elapsed_ms >= lower && s.elapsed_ms <= upper,
             |cluster, sample| {
-                cluster_elapsed(cluster).is_some_and(|elapsed| sample.elapsed_ms.abs_diff(elapsed) <= 50)
+                cluster_elapsed(cluster)
+                    .is_some_and(|elapsed| sample.elapsed_ms.abs_diff(elapsed) <= 50)
             },
             |output, rank, _, matches| {
                 let max_freq = matches.iter().map(|s| s.freq_khz).max().unwrap_or(0);
@@ -1769,7 +1771,6 @@ fn render_correlation_sections(
         },
     );
 }
-
 
 fn cluster_elapsed_range(cluster: &SpikeCluster) -> Option<(u128, u128)> {
     let mut elapsed = cluster.points.iter().filter_map(|point| point.elapsed_ms);
