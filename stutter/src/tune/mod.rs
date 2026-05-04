@@ -270,6 +270,7 @@ async fn collect_tune_results(
                 shared_hwmon.clone(),
                 results.is_empty(),
                 tune_output_dir.to_owned(),
+                warmup_seconds,
             )
             .await
             {
@@ -417,6 +418,7 @@ pub async fn measure_tune_candidate(
     shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
     force_restore_overwrite: bool,
     _tune_output_dir: PathBuf,
+    warmup_seconds: u64,
 ) -> anyhow::Result<TuneMeasureResult> {
     let tree_pid = config.tree_pids[0];
     let run_dir = config
@@ -490,12 +492,10 @@ pub async fn measure_tune_candidate(
     let interval_path = run_dir.join("interval.json");
     let interval_data = fs::read_to_string(&interval_path)
         .with_context(|| format!("failed to read interval.json from {}", run_dir.display()))?;
-    let interval_records: Vec<IntervalRecord> = serde_json::Deserializer::from_str(&interval_data)
+    let mut interval_records: Vec<IntervalRecord> = serde_json::Deserializer::from_str(&interval_data)
         .into_iter::<IntervalRecord>()
         .collect::<Result<Vec<_>, _>>()?;
-    let mut interval_records = interval_records;
-    let warmup_ms = config.max_duration.map(|d| d.as_millis()).unwrap_or(0); // This is actually epoch_seconds in the original, we should use config instead
-    interval_records.retain(|r| r.elapsed_ms >= warmup_ms);
+    retain_after_warmup(&mut interval_records, warmup_seconds, |r| r.elapsed_ms);
 
     let frame_path = run_dir.join("frame_correlation.json");
     let mut frame_events: Vec<crate::recorder::FrameEvent> = if frame_path.exists() {
@@ -507,7 +507,7 @@ pub async fn measure_tune_candidate(
     } else {
         Vec::new()
     };
-    frame_events.retain(|f| f.elapsed_ms >= warmup_ms);
+    retain_after_warmup(&mut frame_events, warmup_seconds, |f| f.elapsed_ms);
 
     let session_path = run_dir.join("session.json");
     let session_data = fs::read_to_string(&session_path)
@@ -717,4 +717,33 @@ pub fn unix_nanos_now() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos()
+}
+
+pub fn retain_after_warmup<T>(records: &mut Vec<T>, warmup_seconds: u64, elapsed: impl Fn(&T) -> u128) {
+    let warmup_ms = u128::from(warmup_seconds) * 1000;
+    records.retain(|r| elapsed(r) >= warmup_ms);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_retain_after_warmup() {
+        struct TestRecord {
+            elapsed_ms: u128,
+        }
+        let mut records = vec![
+            TestRecord { elapsed_ms: 0 },
+            TestRecord { elapsed_ms: 500 },
+            TestRecord { elapsed_ms: 1000 },
+            TestRecord { elapsed_ms: 2000 },
+        ];
+
+        retain_after_warmup(&mut records, 1, |r| r.elapsed_ms);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].elapsed_ms, 1000);
+        assert_eq!(records[1].elapsed_ms, 2000);
+    }
 }
