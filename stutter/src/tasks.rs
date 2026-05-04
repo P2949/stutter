@@ -32,29 +32,72 @@ pub struct TaskTracker {
     pub cache: crate::process_tree::ProcessCache,
 }
 
-impl TaskTracker {
-    pub async fn refresh(&mut self, input: RefreshInput<'_>) -> anyhow::Result<()> {
-        let RefreshInput {
-            config,
-            tree_pids,
-            tree_events,
-            target_pid_map,
-            mut prev_faults_map,
-            elapsed_ms,
-            recording_started,
-        } = input;
+pub trait TaskMap {
+    fn insert(&mut self, k: u32, v: u8, f: u64) -> anyhow::Result<()>;
+    fn remove(&mut self, k: &u32) -> anyhow::Result<()>;
+}
 
+impl TaskMap for AyaHashMap<MapData, u32, u8> {
+    fn insert(&mut self, k: u32, v: u8, f: u64) -> anyhow::Result<()> {
+        AyaHashMap::insert(self, k, v, f).map_err(|e| anyhow::anyhow!(e))
+    }
+    fn remove(&mut self, k: &u32) -> anyhow::Result<()> {
+        AyaHashMap::remove(self, k).map_err(|e| anyhow::anyhow!(e))
+    }
+}
+
+impl TaskTracker {
+    pub async fn refresh(&mut self, mut input: RefreshInput<'_>) -> anyhow::Result<()> {
         let snapshot = crate::process_tree::target_snapshot(
             crate::process_tree::TargetSnapshotInput::default()
-                .manual_pids(&config.target_pids)
-                .tree_pids(tree_pids)
-                .cgroup_path(config.cgroupv2.as_deref())
-                .exclude_tree_pids(&config.exclude_tree_pids)
-                .filters(&config.task_filters)
-                .keep_missing_pid(config.keep_missing_pid)
+                .manual_pids(&input.config.target_pids)
+                .tree_pids(input.tree_pids)
+                .cgroup_path(input.config.cgroupv2.as_deref())
+                .exclude_tree_pids(&input.config.exclude_tree_pids)
+                .filters(&input.config.task_filters)
+                .keep_missing_pid(input.config.keep_missing_pid)
                 .cache(&mut self.cache)
                 .previous_tasks(Some(&self.active_targets)),
         );
+
+        self.refresh_internal(
+            snapshot,
+            input.config,
+            input.tree_events,
+            input.elapsed_ms,
+            input.recording_started,
+            input.prev_faults_map.as_deref_mut(),
+            input.target_pid_map,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn refresh_internal(
+        &mut self,
+        snapshot: crate::process_tree::TargetSnapshot,
+        config: &Config,
+        tree_events: &mut Vec<TreeEvent>,
+        elapsed_ms: u128,
+        recording_started: Option<Instant>,
+        mut prev_faults_map: Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
+        target_pid_map: &mut dyn TaskMap,
+    ) -> anyhow::Result<()> {
+        if snapshot.tasks.len() > config.max_tasks {
+            anyhow::bail!(
+                "too many target tasks after expansion: got {}, but --max-tasks is {}",
+                snapshot.tasks.len(),
+                config.max_tasks
+            );
+        }
+
+        if snapshot.tasks.len() > crate::cli::TARGET_PIDS_MAX {
+            anyhow::bail!(
+                "too many target tasks after expansion: got {}, but TARGET_PIDS supports at most {}",
+                snapshot.tasks.len(),
+                crate::cli::TARGET_PIDS_MAX
+            );
+        }
 
         self.handle_replacements(
             &snapshot.tasks,
@@ -80,6 +123,8 @@ impl TaskTracker {
             let tid = task.tid;
             match action {
                 TargetDiffAction::Added => {
+                    target_pid_map.insert(tid, 1, 0)?;
+
                     let action_name = target_event_action(task.from_cgroup, "added");
                     info!(
                         "target_{} tid={} pid={} comm={} class={:?}",
@@ -108,7 +153,6 @@ impl TaskTracker {
 
                     update_task_exe_info(&mut self.task_exe_inodes, tid, &task);
 
-                    target_pid_map.insert(tid, 1, 0)?;
                     self.active_targets.insert(tid, task.clone());
                     self.known_targets.insert(tid, task);
                 }
@@ -292,4 +336,120 @@ pub fn target_event_action(from_cgroup: bool, action: &'static str) -> &'static 
 
 pub fn should_replace_unknown_comm(current: &str, incoming: &str) -> bool {
     (current == "?" || current.is_empty()) && incoming != "?" && !incoming.is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::process_tree::{TargetSnapshot, TaskClass};
+
+    #[tokio::test]
+    async fn test_refresh_exceeds_max_tasks() {
+        let mut tracker = TaskTracker::default();
+        let config = Config {
+            target_pids: Vec::new(),
+            tree_pids: Vec::new(),
+            summary_period_ms: 1000,
+            epoch_period_ms: None,
+            spike_threshold_ns: 1000000,
+            alert_threshold_ns: None,
+            alert_webhook_url: None,
+            verbose: false,
+            task_filters: crate::process_tree::TaskFilters {
+                include_comm: Vec::new(),
+                exclude_comm: Vec::new(),
+            },
+            keep_missing_pid: false,
+            watch_process: None,
+            persistent: false,
+            watch_poll_ms: 1000,
+            watch_timeout: None,
+            max_tasks: 1,
+            csv_path: None,
+            irq_latency: false,
+            irqs: Vec::new(),
+            hwmon: false,
+            hwmon_root: None,
+            hwmon_drm_card: None,
+            hwmon_render_node: None,
+            mangohud_log: None,
+            mangohud_ignore_offset: 0,
+            tui: false,
+            retain_intervals: None,
+            recording: None,
+            max_duration: None,
+            cpu_freq: false,
+            cgroupv2: None,
+            follow_exec: false,
+            exclude_tree_pids: Vec::new(),
+            faults: false,
+            block_io: false,
+            stat_wait: false,
+        };
+
+        let mut tasks = BTreeMap::new();
+        tasks.insert(1, task_info(1, 100, "proc1", "task1", TaskClass::Game));
+        tasks.insert(2, task_info(2, 100, "proc1", "task2", TaskClass::Game));
+
+        let snapshot = TargetSnapshot {
+            tasks,
+            process_roots: std::collections::BTreeSet::from([100]),
+        };
+
+        struct MockMap;
+        impl TaskMap for MockMap {
+            fn insert(&mut self, _: u32, _: u8, _: u64) -> anyhow::Result<()> {
+                Ok(())
+            }
+            fn remove(&mut self, _: &u32) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+        let mut mock_map = MockMap;
+
+        let mut tree_events = Vec::new();
+        let result = tracker
+            .refresh_internal(
+                snapshot,
+                &config,
+                &mut tree_events,
+                0,
+                None,
+                None,
+                &mut mock_map,
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("too many target tasks"));
+        assert!(tracker.active_targets.is_empty());
+        assert!(tracker.stats_by_task.is_empty());
+        assert!(tree_events.is_empty());
+    }
+
+    fn task_info(
+        tid: u32,
+        process_pid: u32,
+        process_comm: &str,
+        comm: &str,
+        class: TaskClass,
+    ) -> TaskInfo {
+        TaskInfo {
+            tid,
+            process_pid,
+            process_ppid: 1,
+            comm: comm.into(),
+            process_comm: process_comm.into(),
+            process_starttime_ticks: Some(u64::from(process_pid) * 10),
+            task_starttime_ticks: Some(u64::from(tid) * 10),
+            exe_dev: None,
+            exe_ino: None,
+            class,
+            sched_policy: None,
+            from_cgroup: false,
+        }
+    }
 }

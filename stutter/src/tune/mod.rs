@@ -247,7 +247,7 @@ async fn collect_tune_results(
                     retain_intervals: None,
                     recording: Some(cli::RecordingConfig {
                         run_name: Some(format!("tune-{}", profile.name)),
-                        out_dir: Some(tune_run_dir(tune_output_dir, &profile.name)),
+                        out_dir: Some(tune_run_dir(tune_output_dir, &profile.name, iteration)),
                     }),
                     max_duration: Some(Duration::from_secs(epoch_seconds)),
                     cgroupv2: None,
@@ -570,8 +570,23 @@ pub async fn tune_profile_refresh_loop(
     }
 }
 
-pub fn tune_run_dir(tune_output_dir: &Path, profile_name: &str) -> PathBuf {
-    tune_output_dir.join(profile_name)
+pub fn tune_run_dir(tune_output_dir: &Path, profile_name: &str, iteration: u32) -> PathBuf {
+    tune_output_dir.join(format!(
+        "iter-{iteration:03}-{}",
+        sanitize_profile_name(profile_name)
+    ))
+}
+
+fn sanitize_profile_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 pub fn cleanup_stale_tune_run_dirs(state_dir: &Path) -> anyhow::Result<()> {
@@ -745,5 +760,35 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].elapsed_ms, 1000);
         assert_eq!(records[1].elapsed_ms, 2000);
+    }
+
+    #[test]
+    fn test_tune_run_dir_iteration() {
+        let base = Path::new("/tmp/tune");
+        assert_ne!(
+            tune_run_dir(base, "kcd", 1),
+            tune_run_dir(base, "kcd", 2)
+        );
+        assert_eq!(
+            tune_run_dir(base, "kcd", 1),
+            base.join("iter-001-kcd")
+        );
+    }
+
+    #[test]
+    fn test_sanitize_profile_name() {
+        let base = Path::new("/tmp/tune");
+        assert_eq!(
+            tune_run_dir(base, "my profile/name", 1),
+            base.join("iter-001-my_profile_name")
+        );
+        assert_eq!(
+            tune_run_dir(base, "hot-path#123", 1),
+            base.join("iter-001-hot-path_123")
+        );
+        assert_eq!(
+            tune_run_dir(base, "../traversal", 1),
+            base.join("iter-001-___traversal")
+        );
     }
 }
