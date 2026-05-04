@@ -123,8 +123,15 @@ pub struct MonitorArgs {
     #[arg(long = "no-record")]
     no_record: bool,
 
-    #[arg(long = "cpu-freq")]
+    #[arg(
+        long = "cpu-freq",
+        help = "Collect CPU frequency information (enabled by default for recording runs)",
+        conflicts_with = "no_cpu_freq"
+    )]
     cpu_freq: bool,
+
+    #[arg(long = "no-cpu-freq", help = "Disable CPU frequency collection")]
+    no_cpu_freq: bool,
 
     #[arg(long = "cgroupv2", value_name = "PATH")]
     cgroupv2: Option<PathBuf>,
@@ -605,7 +612,7 @@ fn config_from_monitor_args(
         None
     };
 
-    let cpu_freq = args.cpu_freq || recording.is_some();
+    let cpu_freq = (args.cpu_freq || recording.is_some()) && !args.no_cpu_freq;
     Ok(Config {
         target_pids: args.target_pids,
         tree_pids: args.tree_pids,
@@ -1190,5 +1197,37 @@ mod tests {
         assert!(config.faults);
         assert!(config.block_io);
         assert!(config.stat_wait);
+    }
+
+    #[test]
+    fn record_enables_cpu_freq_by_default_but_can_be_disabled() {
+        let command = parse_app_command_from(["stutter", "record", "--pid", "42"]).unwrap();
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+        assert!(config.cpu_freq);
+
+        let command =
+            parse_app_command_from(["stutter", "record", "--pid", "42", "--no-cpu-freq"]).unwrap();
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+        assert!(!config.cpu_freq);
+    }
+
+    #[test]
+    fn monitor_disables_cpu_freq_by_default_but_can_be_enabled() {
+        let command = parse_app_command_from(["stutter", "monitor", "--pid", "42"]).unwrap();
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+        assert!(!config.cpu_freq);
+
+        let command =
+            parse_app_command_from(["stutter", "monitor", "--pid", "42", "--cpu-freq"]).unwrap();
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+        assert!(config.cpu_freq);
     }
 }
