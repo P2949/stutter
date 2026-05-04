@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::Instant};
+use std::{collections::BTreeMap, time::{Duration, Instant}};
 
 use log::{debug, info, warn};
 use serde::Serialize;
@@ -160,7 +160,7 @@ pub fn handle_event(
     tasks: &mut TaskTracker,
     monotonic_start_ns: Option<u64>,
     recorder: &mut LiveRecorder,
-    alert_sender: Option<&std::sync::mpsc::SyncSender<AlertPayload>>,
+    alert_sender: Option<&tokio::sync::mpsc::Sender<AlertPayload>>,
 ) {
     debug_assert_eq!(event.kind, EVENT_RUNNABLE_LATENCY);
 
@@ -277,15 +277,20 @@ impl AlertPayload {
     }
 }
 
-pub fn send_desktop_alert(payload: &AlertPayload) -> Result<(), String> {
-    let status = std::process::Command::new("notify-send")
+pub async fn send_desktop_alert(payload: &AlertPayload) -> Result<(), String> {
+    let mut child = tokio::process::Command::new("notify-send")
         .args([
             "--urgency=critical",
             payload.title.as_str(),
             payload.message.as_str(),
         ])
-        .status()
-        .map_err(|err| format!("failed to run notify-send: {err}"))?;
+        .spawn()
+        .map_err(|err| format!("failed to spawn notify-send: {err}"))?;
+
+    let status = tokio::time::timeout(Duration::from_secs(10), child.wait())
+        .await
+        .map_err(|_| "notify-send timed out after 10 seconds".to_owned())?
+        .map_err(|err| format!("failed to wait for notify-send: {err}"))?;
 
     if status.success() {
         Ok(())
@@ -294,10 +299,10 @@ pub fn send_desktop_alert(payload: &AlertPayload) -> Result<(), String> {
     }
 }
 
-pub fn send_webhook_alert(url: &str, payload: &AlertPayload) -> Result<(), String> {
+pub async fn send_webhook_alert(url: &str, payload: &AlertPayload) -> Result<(), String> {
     let body = serde_json::to_string(payload)
         .map_err(|err| format!("failed to serialize alert payload: {err}"))?;
-    let status = std::process::Command::new("curl")
+    let mut child = tokio::process::Command::new("curl")
         .args([
             "-fsS",
             "--max-time",
@@ -308,8 +313,13 @@ pub fn send_webhook_alert(url: &str, payload: &AlertPayload) -> Result<(), Strin
             &body,
             url,
         ])
-        .status()
-        .map_err(|err| format!("failed to run curl: {err}"))?;
+        .spawn()
+        .map_err(|err| format!("failed to spawn curl: {err}"))?;
+
+    let status = tokio::time::timeout(Duration::from_secs(12), child.wait())
+        .await
+        .map_err(|_| "curl timed out after 12 seconds".to_owned())?
+        .map_err(|err| format!("failed to wait for curl: {err}"))?;
 
     if status.success() {
         Ok(())

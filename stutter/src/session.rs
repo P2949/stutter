@@ -5,7 +5,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::Context;
 use crossterm::event::{Event, KeyCode};
 use log::{info, warn};
 use tokio::{
@@ -52,7 +51,7 @@ pub struct MonitorSession {
     pub had_tree_roots: bool,
     pub interval_label: &'static str,
     pub block_io_correlation_basis: String,
-    pub alert_sender: Option<std::sync::mpsc::SyncSender<AlertPayload>>,
+    pub alert_sender: Option<tokio::sync::mpsc::Sender<AlertPayload>>,
 }
 
 impl MonitorSession {
@@ -196,23 +195,20 @@ impl MonitorSession {
         };
 
         let alert_sender = if config.alert_threshold_ns.is_some() {
-            let (tx, rx) = std::sync::mpsc::sync_channel(100);
+            let (tx, mut rx) = tokio::sync::mpsc::channel(100);
             let webhook_url = config.alert_webhook_url.clone();
-            std::thread::Builder::new()
-                .name("stutter-alert".to_owned())
-                .spawn(move || {
-                    while let Ok(payload) = rx.recv() {
-                        if let Err(err) = crate::events::send_desktop_alert(&payload) {
-                            warn!("desktop_alert_failed err={err}");
-                        }
-                        if let Some(url) = &webhook_url
-                            && let Err(err) = crate::events::send_webhook_alert(url, &payload)
-                        {
-                            warn!("webhook_alert_failed url={url} err={err}");
-                        }
+            tokio::spawn(async move {
+                while let Some(payload) = rx.recv().await {
+                    if let Err(err) = crate::events::send_desktop_alert(&payload).await {
+                        warn!("desktop_alert_failed err={err}");
                     }
-                })
-                .context("failed to spawn alert thread")?;
+                    if let Some(url) = &webhook_url
+                        && let Err(err) = crate::events::send_webhook_alert(url, &payload).await
+                    {
+                        warn!("webhook_alert_failed url={url} err={err}");
+                    }
+                }
+            });
             Some(tx)
         } else {
             None
