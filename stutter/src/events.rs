@@ -187,6 +187,7 @@ pub fn handle_event(
     alert_sender: Option<&tokio::sync::mpsc::Sender<AlertPayload>>,
     scx_ops: Option<String>,
     scx_state: Option<String>,
+    scx_enable_seq: Option<String>,
 ) -> Option<recorder::SpikeEvent> {
     debug_assert_eq!(event.kind, EVENT_RUNNABLE_LATENCY);
 
@@ -220,6 +221,7 @@ pub fn handle_event(
         elapsed_ms,
         scx_ops.clone(),
         scx_state.clone(),
+        scx_enable_seq.clone(),
     );
 
     let mut spike_ret = None;
@@ -231,6 +233,7 @@ pub fn handle_event(
             fault_deltas,
             scx_ops,
             scx_state,
+            scx_enable_seq,
         );
         spike_ret = Some(spike_event.clone());
 

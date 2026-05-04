@@ -419,6 +419,7 @@ impl MonitorSession {
                                         self.alert_sender.as_ref(),
                                         self.scx_tracker.current_ops().map(str::to_owned),
                                         self.scx_tracker.current_state().map(str::to_owned),
+                                        self.scx_tracker.current_enable_seq().map(str::to_owned),
                                     );
                                     if let Some(spike) = spike {
                                         pending_spikes.push(spike);

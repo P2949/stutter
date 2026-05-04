@@ -36,6 +36,8 @@ pub struct SpikeRecord {
     pub scx_ops: Option<String>,
     #[serde(default)]
     pub scx_state: Option<String>,
+    #[serde(default)]
+    pub scx_enable_seq: Option<String>,
 }
 
 #[derive(Clone)]
@@ -504,6 +506,7 @@ impl TaskStats {
         elapsed_ms: u128,
         scx_ops: Option<String>,
         scx_state: Option<String>,
+        scx_enable_seq: Option<String>,
     ) -> (u64, u64) {
         self.last_seen_ms = elapsed_ms;
 
@@ -545,6 +548,7 @@ impl TaskStats {
                 minor_faults,
                 scx_ops,
                 scx_state,
+                scx_enable_seq,
             });
 
             self.top_spikes
@@ -886,7 +890,7 @@ mod tests {
         // 1. First event establishes baseline: 10 faults
         event.maj_flt = 10;
         event.latency_ns = 100; // Not a spike
-        stats.record(&event, 1000, 0, None, None);
+        stats.record(&event, 1000, 0, None, None, None);
         assert_eq!(stats.last_spike_major_faults, 10);
 
         // 2. Interval summary happens. It sees 10 faults.
@@ -919,7 +923,7 @@ mod tests {
         // 3. Next spike event with 12 faults
         event.maj_flt = 12;
         event.latency_ns = 2000; // Spike!
-        let (maj_delta, _) = stats.record(&event, 1000, 0, None, None);
+        let (maj_delta, _) = stats.record(&event, 1000, 0, None, None, None);
 
         // Delta should be 12 - 10 = 2.
         // If interval summary had reset the baseline to 12, delta would be 0.

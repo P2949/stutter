@@ -580,6 +580,8 @@ pub struct RecordedSpike {
     pub scx_ops: Option<String>,
     #[serde(default)]
     pub scx_state: Option<String>,
+    #[serde(default)]
+    pub scx_enable_seq: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -609,6 +611,8 @@ pub struct SessionSpike {
     pub scx_ops: Option<String>,
     #[serde(default)]
     pub scx_state: Option<String>,
+    #[serde(default)]
+    pub scx_enable_seq: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -640,6 +644,8 @@ pub struct SpikeEvent {
     pub scx_ops: Option<String>,
     #[serde(default)]
     pub scx_state: Option<String>,
+    #[serde(default)]
+    pub scx_enable_seq: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -667,6 +673,7 @@ impl SpikeEvent {
         fault_deltas: (u64, u64),
         scx_ops: Option<String>,
         scx_state: Option<String>,
+        scx_enable_seq: Option<String>,
     ) -> Self {
         Self {
             elapsed_ms: elapsed_ms_from_monotonic(monotonic_start_ns, event.switch_ns),
@@ -687,6 +694,7 @@ impl SpikeEvent {
             minor_faults: fault_deltas.1,
             scx_ops,
             scx_state,
+            scx_enable_seq,
         }
     }
 }
@@ -894,6 +902,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
                 minor_faults: spike.minor_faults,
                 scx_ops: spike.scx_ops.clone(),
                 scx_state: spike.scx_state.clone(),
+                scx_enable_seq: spike.scx_enable_seq.clone(),
             });
         }
     }
@@ -1179,6 +1188,7 @@ fn recorded_spike(stats: &TaskStats, spike: &SpikeRecord) -> RecordedSpike {
         minor_faults: spike.minor_faults,
         scx_ops: spike.scx_ops.clone(),
         scx_state: spike.scx_state.clone(),
+        scx_enable_seq: spike.scx_enable_seq.clone(),
     }
 }
 
@@ -1509,6 +1519,7 @@ mod tests {
             minor_faults: 0,
             scx_ops: None,
             scx_state: None,
+            scx_enable_seq: None,
         };
 
         assert_eq!(buf.push(event.clone()), SpikePushResult::Stored);
@@ -1537,6 +1548,7 @@ mod tests {
             minor_faults: 2,
             scx_ops: Some("scx_lavd".to_owned()),
             scx_state: Some("enabled".to_owned()),
+            scx_enable_seq: Some("1".to_owned()),
         };
 
         let json = serde_json::to_string(&event).unwrap();

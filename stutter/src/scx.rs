@@ -33,6 +33,20 @@ impl ScxTracker {
         self.last.as_ref().and_then(|s| s.state.as_deref())
     }
 
+    pub fn current_enable_seq(&self) -> Option<&str> {
+        self.last.as_ref().and_then(|s| s.enable_seq.as_deref())
+    }
+
+    #[allow(dead_code)]
+    pub fn current_event(&self) -> Option<ScxEvent> {
+        self.last.as_ref().map(|snapshot| ScxEvent {
+            elapsed_ms: 0,
+            state: snapshot.state.clone(),
+            ops: snapshot.ops.clone(),
+            enable_seq: snapshot.enable_seq.clone(),
+        })
+    }
+
     pub fn sample(&mut self, elapsed_ms: u128) -> Option<ScxEvent> {
         self.sample_at(Path::new("/sys/kernel/sched_ext"), elapsed_ms)
     }
