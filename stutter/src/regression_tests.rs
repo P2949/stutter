@@ -579,6 +579,9 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         started_at: UNIX_EPOCH,
         started_instant: Instant::now(),
         monotonic_start_ns: Some(1_000),
+        mangohud_start_offset: None,
+        mangohud_first_frame_monotonic_ns: None,
+        mangohud_first_frame_raw_elapsed_ms: None,
     };
     let mut config = test_config(vec![9, 1, 4], vec![], Some(Duration::from_secs(1)));
     config.cgroupv2 = Some(PathBuf::from("/sys/fs/cgroup/game"));
@@ -1031,6 +1034,9 @@ fn report_reads_recorded_session_andspike_events() {
         started_at: UNIX_EPOCH,
         started_instant: Instant::now(),
         monotonic_start_ns: Some(1_000_000_000),
+        mangohud_start_offset: None,
+        mangohud_first_frame_monotonic_ns: None,
+        mangohud_first_frame_raw_elapsed_ms: None,
     };
     let config = test_config(vec![7], vec![], Some(Duration::from_secs(1)));
     let active_targets = BTreeMap::from([(
@@ -1112,6 +1118,9 @@ fn report_cluster_output_caps_inline_points() {
         started_at: UNIX_EPOCH,
         started_instant: Instant::now(),
         monotonic_start_ns: Some(1_000_000_000),
+        mangohud_start_offset: None,
+        mangohud_first_frame_monotonic_ns: None,
+        mangohud_first_frame_raw_elapsed_ms: None,
     };
 
     let config = test_config(vec![7], vec![], Some(Duration::from_secs(1)));
@@ -1433,7 +1442,6 @@ fn test_config(
         follow_exec: true,
         exclude_tree_pids: Vec::new(),
         cpu_freq: false,
-        mangohud_ignore_offset: 0,
         faults: false,
         block_io: false,
         stat_wait: false,
@@ -1452,6 +1460,9 @@ fn minimal_session_for_report() -> SessionFile {
         started_at: recorded_time(UNIX_EPOCH),
         ended_at: recorded_time(UNIX_EPOCH),
         monotonic_start_ns: Some(0),
+        mangohud_start_offset: None,
+        mangohud_first_frame_monotonic_ns: None,
+        mangohud_first_frame_raw_elapsed_ms: None,
         monotonic_end_ns: Some(20_000_000),
         duration_ms: 20,
         stop_reason: "test".to_owned(),

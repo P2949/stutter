@@ -365,7 +365,6 @@ mod tests {
             hwmon_drm_card: None,
             hwmon_render_node: None,
             mangohud_log: None,
-            mangohud_ignore_offset: 0,
             tui: false,
             retain_intervals: None,
             recording: None,

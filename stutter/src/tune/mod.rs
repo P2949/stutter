@@ -262,13 +262,6 @@ async fn collect_tune_results(
                     follow_exec: true,
                     exclude_tree_pids: Vec::new(),
                     cpu_freq: true,
-                    mangohud_ignore_offset: {
-                        if let Some(path) = &mangohud_log {
-                            std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
-                        } else {
-                            0
-                        }
-                    },
                     faults: false,
                     block_io: false,
                     stat_wait: false,

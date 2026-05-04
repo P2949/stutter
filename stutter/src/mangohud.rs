@@ -2,9 +2,15 @@ use std::{fs, io::BufRead, path::Path};
 
 use anyhow::Context;
 
-use crate::recorder::FrameEvent;
+use crate::recorder::{FrameEvent, monotonic_now_ns};
 
-pub fn read_frame_events(path: &Path, ignore_offset: u64) -> anyhow::Result<Vec<FrameEvent>> {
+pub fn read_frame_events(
+    path: &Path,
+    ignore_offset: u64,
+    alignment_monotonic_ns: Option<u64>,
+    alignment_raw_elapsed_ms: Option<u128>,
+    recorder_start_monotonic_ns: Option<u64>,
+) -> anyhow::Result<Vec<FrameEvent>> {
     let mut file = fs::File::open(path)
         .with_context(|| format!("failed to read MangoHud log {}", path.display()))?;
 
@@ -40,10 +46,22 @@ pub fn read_frame_events(path: &Path, ignore_offset: u64) -> anyhow::Result<Vec<
         let _ = lines.next();
     }
 
-    parse_frame_events(&header, lines)
+    parse_frame_events(
+        &header,
+        lines,
+        alignment_monotonic_ns,
+        alignment_raw_elapsed_ms,
+        recorder_start_monotonic_ns,
+    )
 }
 
-pub fn parse_frame_events<I>(header: &str, lines: I) -> anyhow::Result<Vec<FrameEvent>>
+pub fn parse_frame_events<I>(
+    header: &str,
+    lines: I,
+    alignment_monotonic_ns: Option<u64>,
+    alignment_raw_elapsed_ms: Option<u128>,
+    recorder_start_monotonic_ns: Option<u64>,
+) -> anyhow::Result<Vec<FrameEvent>>
 where
     I: Iterator<Item = std::io::Result<String>>,
 {
@@ -57,6 +75,11 @@ where
     let mut events = Vec::new();
     let mut first_elapsed_ms: Option<u128> = None;
     let mut accumulated_ms = 0.0;
+
+    let alignment_recorder_elapsed_ms = alignment_monotonic_ns
+        .zip(recorder_start_monotonic_ns)
+        .map(|(m, r)| m.saturating_sub(r) / 1_000_000)
+        .map(|ms| ms as u128);
 
     for line in lines {
         let line = line?;
@@ -74,13 +97,27 @@ where
                 .and_then(|value| value.parse::<f64>().ok())
                 .filter(|value| value.is_finite());
 
-            let elapsed_ms = if let Some(raw) = raw_elapsed {
-                let val = raw.max(0.0) as u128;
-                if first_elapsed_ms.is_none() {
-                    first_elapsed_ms = Some(val);
-                }
-                val.saturating_sub(first_elapsed_ms.unwrap_or(0))
+            let raw_val = raw_elapsed.map(|raw| raw.max(0.0) as u128);
+            if first_elapsed_ms.is_none() {
+                first_elapsed_ms = raw_val;
+            }
+
+            let elapsed_ms = if let (Some(raw), Some(first_raw), Some(observed_ms)) =
+                (raw_val, alignment_raw_elapsed_ms, alignment_recorder_elapsed_ms)
+            {
+                // Monotonic observed alignment
+                observed_ms + raw.saturating_sub(first_raw)
+            } else if let Some(raw) = raw_val {
+                // Approximate alignment (relative to first row)
+                let first = first_elapsed_ms.unwrap_or(0);
+                raw.saturating_sub(first)
+            } else if let Some(observed_ms) = alignment_recorder_elapsed_ms {
+                // No raw elapsed column, but we have alignment from first row
+                let val = observed_ms + accumulated_ms as u128;
+                accumulated_ms += frametime_ms;
+                val
             } else {
+                // Fallback: zero-based accumulation
                 let val = accumulated_ms as u128;
                 accumulated_ms += frametime_ms;
                 val
@@ -94,6 +131,56 @@ where
     }
 
     Ok(events)
+}
+
+pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u128, u64)> {
+    use std::io::{Read, Seek, SeekFrom};
+    use tokio::time::{Duration, sleep};
+
+    loop {
+        let mut file = fs::File::open(path)?;
+        let len = file.metadata()?.len();
+        if len > start_offset {
+            file.seek(SeekFrom::Start(start_offset))?;
+            let mut reader = std::io::BufReader::new(file);
+            let mut header_buf = String::new();
+            // We need the header to find the elapsed column
+            {
+                let hfile = fs::File::open(path)?;
+                let mut hreader = std::io::BufReader::new(hfile);
+                hreader.read_line(&mut header_buf)?;
+            }
+
+            let headers = split_csv_line(&header_buf);
+            let elapsed_idx = find_header(&headers, &["elapsed_ms", "time_ms", "ms"]);
+
+            let mut line = String::new();
+            // Skip partial line if we started in the middle
+            if start_offset > 0 {
+                let mut f2 = fs::File::open(path)?;
+                f2.seek(SeekFrom::Start(start_offset - 1))?;
+                let mut b = [0u8; 1];
+                if f2.read_exact(&mut b).is_ok() && b[0] != b'\n' {
+                    reader.read_line(&mut line)?;
+                }
+            }
+
+            line.clear();
+            if reader.read_line(&mut line)? > 0 {
+                let observed_ns = monotonic_now_ns().unwrap_or(0);
+                let columns = split_csv_line(&line);
+                if let Some(raw_elapsed) = elapsed_idx
+                    .and_then(|idx| columns.get(idx))
+                    .and_then(|value| value.parse::<f64>().ok())
+                {
+                    return Ok((raw_elapsed.max(0.0) as u128, observed_ns));
+                }
+                // If no elapsed column, we still observed the row
+                return Ok((0, observed_ns));
+            }
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
 }
 
 fn find_header(headers: &[String], candidates: &[&str]) -> Option<usize> {
@@ -136,7 +223,7 @@ mod tests {
     fn parses_header_based_frametime_csv() {
         let header = "elapsed_ms,frametime_ms";
         let data = "10,16.7\n20,33.4\n";
-        let events = parse_frame_events(header, data.lines().map(|s| Ok(s.to_owned()))).unwrap();
+        let events = parse_frame_events(header, data.lines().map(|s| Ok(s.to_owned())), None, None, None).unwrap();
 
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].elapsed_ms, 0); // Normalized
@@ -148,7 +235,7 @@ mod tests {
     fn parses_quoted_csv_fields() {
         let header = "elapsed_ms,\"frame,time\",frametime_ms";
         let data = "10,\"ignored, value\",16.7\n";
-        let events = parse_frame_events(header, data.lines().map(|s| Ok(s.to_owned()))).unwrap();
+        let events = parse_frame_events(header, data.lines().map(|s| Ok(s.to_owned())), None, None, None).unwrap();
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].elapsed_ms, 0); // Normalized
@@ -159,7 +246,7 @@ mod tests {
     fn skips_non_finite_frametimes() {
         let header = "elapsed_ms,frametime_ms";
         let data = "10,NaN\n20,inf\n30,16.7\n";
-        let events = parse_frame_events(header, data.lines().map(|s| Ok(s.to_owned()))).unwrap();
+        let events = parse_frame_events(header, data.lines().map(|s| Ok(s.to_owned())), None, None, None).unwrap();
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].elapsed_ms, 0); // Normalized (30 - 30)
@@ -187,31 +274,78 @@ mod tests {
         drop(f);
 
         // Case 1: ignore_offset = 0. Should skip header, read row1 and row2.
-        let events = read_frame_events(&path, 0)?;
+        let events = read_frame_events(&path, 0, None, None, None)?;
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].frametime_ms, 16.7);
 
         // Case 2: ignore_offset = offset_after_header.
         // offset_after_header-1 is '\n'.
         // Should NOT skip the first line (row1).
-        let events = read_frame_events(&path, offset_after_header)?;
+        let events = read_frame_events(&path, offset_after_header, None, None, None)?;
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].frametime_ms, 16.7);
 
         // Case 3: ignore_offset = offset_after_header + 2 (mid row1).
         // Should skip partial row1, read row2.
-        let events = read_frame_events(&path, offset_after_header + 2)?;
+        let events = read_frame_events(&path, offset_after_header + 2, None, None, None)?;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].frametime_ms, 33.4);
 
         // Case 4: ignore_offset = offset_after_row1.
         // offset_after_row1-1 is '\n'.
         // Should NOT skip row2.
-        let events = read_frame_events(&path, offset_after_row1)?;
+        let events = read_frame_events(&path, offset_after_row1, None, None, None)?;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].frametime_ms, 33.4);
 
         fs::remove_dir_all(temp_dir).ok();
         Ok(())
+    }
+
+    #[test]
+    fn test_alignment_with_monotonic_observed() {
+        let header = "elapsed_ms,frametime_ms";
+        let data = "1000,16.7\n1016,16.7\n1033,16.7\n";
+        
+        let alignment_monotonic_ns = Some(1_420_000_000); // 1420ms
+        let alignment_raw_elapsed_ms = Some(1000);
+        let recorder_start_monotonic_ns = Some(1_000_000_000); // 1000ms
+        // observed_ms = (1420 - 1000) = 420ms
+
+        let events = parse_frame_events(
+            header,
+            data.lines().map(|s| Ok(s.to_owned())),
+            alignment_monotonic_ns,
+            alignment_raw_elapsed_ms,
+            recorder_start_monotonic_ns,
+        ).unwrap();
+
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].elapsed_ms, 420);
+        assert_eq!(events[1].elapsed_ms, 436);
+        assert_eq!(events[2].elapsed_ms, 453);
+    }
+
+    #[test]
+    fn test_alignment_missing_elapsed_column() {
+        let header = "frametime_ms";
+        let data = "16.7\n16.7\n16.7\n";
+        
+        let alignment_monotonic_ns = Some(1_420_000_000); // 1420ms
+        let recorder_start_monotonic_ns = Some(1_000_000_000); // 1000ms
+        // observed_ms = 420ms
+
+        let events = parse_frame_events(
+            header,
+            data.lines().map(|s| Ok(s.to_owned())),
+            alignment_monotonic_ns,
+            None,
+            recorder_start_monotonic_ns,
+        ).unwrap();
+
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].elapsed_ms, 420);
+        assert_eq!(events[1].elapsed_ms, 436); // 420 + 16.7
+        assert_eq!(events[2].elapsed_ms, 453); // 436 + 16.7
     }
 }

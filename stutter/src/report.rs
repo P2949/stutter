@@ -8,7 +8,7 @@ use anyhow::Context;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
-    diagnosis::{Diagnosis, diagnose_cluster},
+    diagnosis::{ClusterAnchorKind, Diagnosis, diagnose_cluster, select_anchor},
     metrics::format_latency,
     process_tree::TaskClass,
     recorder::{
@@ -44,6 +44,10 @@ pub(crate) struct SpikeCluster {
     pub(crate) max_switch_ns: u64,
     pub(crate) max_latency_ns: u64,
     pub(crate) diagnosis: Option<Diagnosis>,
+    pub(crate) anchor_task: Option<u32>,
+    pub(crate) anchor_class: Option<TaskClass>,
+    pub(crate) anchor_comm: Option<String>,
+    pub(crate) anchor_kind: Option<ClusterAnchorKind>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -761,6 +765,17 @@ pub(crate) fn render_report(
             &mut output,
             format!("frame_events: {}", session.frame_event_count),
         );
+        if session.frame_event_count > 0 {
+            let alignment = if session.mangohud_first_frame_monotonic_ns.is_some() {
+                "monotonic_observed"
+            } else {
+                "approximate_first_row"
+            };
+            pushln(
+                &mut output,
+                format!("frame_timestamp_alignment={}", alignment),
+            );
+        }
         pushln(
             &mut output,
             format!(
@@ -1444,6 +1459,10 @@ fn cluster_from_points(mut points: Vec<SpikePoint>, distinct_tasks: usize) -> Sp
         max_switch_ns,
         max_latency_ns,
         diagnosis: None,
+        anchor_task: None,
+        anchor_class: None,
+        anchor_comm: None,
+        anchor_kind: None,
     }
 }
 
@@ -1513,14 +1532,20 @@ fn perform_diagnosis(
             .cloned()
             .collect::<Vec<_>>();
 
-        cluster.diagnosis = Some(diagnose_cluster(
+        let diagnosis = diagnose_cluster(
             cluster,
             &irq_events,
             &gpu_samples,
             &frame_events,
             &io_events,
             &interval_records,
-        ));
+        );
+        let anchor = select_anchor(cluster);
+        cluster.anchor_task = Some(anchor.task);
+        cluster.anchor_class = Some(anchor.class);
+        cluster.anchor_comm = Some(anchor.comm);
+        cluster.anchor_kind = Some(anchor.kind);
+        cluster.diagnosis = Some(diagnosis);
     }
 }
 
@@ -1939,9 +1964,14 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
 
     let diagnosis_line = if let Some(d) = &cluster.diagnosis {
         let evidence = d.evidence.join("; ");
+        let secondary = if d.secondary_causes.is_empty() {
+            String::new()
+        } else {
+            format!(" secondary={:?}", d.secondary_causes)
+        };
         format!(
-            "\n  diagnosis: cause={:?} confidence={:?} evidence=[{}]",
-            d.cause, d.confidence, evidence
+            "\n  diagnosis: primary={:?} confidence={:?}{} evidence=[{}]",
+            d.primary_cause, d.confidence, secondary, evidence
         )
     } else {
         String::new()

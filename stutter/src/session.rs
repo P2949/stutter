@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
+    fs,
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -138,7 +139,18 @@ impl MonitorSession {
         let mut recorder = recorder;
         recorder.spike_events = recorder.run.as_ref().map(|_| SpikeEventBuffer::default());
 
-        if let Some(run) = recorder.run.as_ref() {
+        if let Some(run) = recorder.run.as_mut() {
+            if let Some(path) = &config.mangohud_log
+                && let Ok(meta) = fs::metadata(path)
+            {
+                run.mangohud_start_offset = Some(meta.len());
+                info!(
+                    "mangohud_alignment_init path={} start_offset={}",
+                    path.display(),
+                    meta.len()
+                );
+            }
+
             if config.retain_intervals.is_none() {
                 recorder.interval_writer =
                     Some(JsonArrayWriter::create(run.run_dir.join("interval.json"))?);
@@ -304,8 +316,32 @@ impl MonitorSession {
 
         self.refresh_tasks().await?;
 
+        let (mangohud_tx, mut mangohud_rx) = tokio::sync::oneshot::channel::<(u128, u64)>();
+        if let Some(run) = self.recorder.run.as_ref()
+            && let Some(path) = self.config.mangohud_log.clone()
+            && let Some(offset) = run.mangohud_start_offset
+        {
+            tokio::spawn(async move {
+                if let Ok(res) = mangohud::poll_alignment(&path, offset).await {
+                    let _ = mangohud_tx.send(res);
+                }
+            });
+        }
+
         loop {
             tokio::select! {
+                res = &mut mangohud_rx => {
+                    if let Ok((raw_ms, monotonic_ns)) = res
+                        && let Some(run) = self.recorder.run.as_mut()
+                    {
+                        run.mangohud_first_frame_raw_elapsed_ms = Some(raw_ms);
+                        run.mangohud_first_frame_monotonic_ns = Some(monotonic_ns);
+                        info!(
+                            "mangohud_alignment_observed raw_ms={} monotonic_ns={}",
+                            raw_ms, monotonic_ns
+                        );
+                    }
+                }
                 _ = tokio::signal::ctrl_c() => return Ok("ctrl_c".to_owned()),
                 reason = &mut max_duration_future => return Ok(reason.unwrap()),
 
@@ -548,6 +584,7 @@ impl MonitorSession {
             let active_targets = &self.tasks.active_targets;
             let stats_by_task = &self.tasks.stats_by_task;
             let interval_records = &self.recorder.interval_records;
+            let recent_diagnoses = &self.recent_telemetry.diagnoses;
 
             // TUI rendering errors and panics should be logged and dismissed,
             // not propagated, to avoid killing the monitor.
@@ -559,6 +596,7 @@ impl MonitorSession {
                         active_targets,
                         stats_by_task,
                         interval_records,
+                        recent_diagnoses,
                         elapsed_ms,
                         &drop_counters_snapshot,
                     );
@@ -708,7 +746,7 @@ impl MonitorSession {
             self.recent_telemetry.io_events.pop_front();
         }
         while self.recent_telemetry.diagnoses.front().is_some_and(|d| {
-            elapsed_ms.saturating_sub(d.timestamp_ms) > history_window_ms
+            elapsed_ms.saturating_sub(d.elapsed_ms) > history_window_ms
         }) {
             self.recent_telemetry.diagnoses.pop_front();
         }
@@ -757,13 +795,17 @@ impl MonitorSession {
         let max_switch_ns = points.iter().map(|p| p.switch_ns).max().unwrap_or(0);
         let max_latency_ns = points.iter().map(|p| p.latency_ns).max().unwrap_or(0);
 
-        let cluster = crate::report::SpikeCluster {
+        let mut cluster = crate::report::SpikeCluster {
             points,
             distinct_tasks,
             min_switch_ns,
             max_switch_ns,
             max_latency_ns,
             diagnosis: None,
+            anchor_task: None,
+            anchor_class: None,
+            anchor_comm: None,
+            anchor_kind: None,
         };
 
         // Filter other telemetry near the cluster
@@ -814,18 +856,26 @@ impl MonitorSession {
             &io_events,
             interval_records,
         );
+        let anchor = crate::diagnosis::select_anchor(&cluster);
+        cluster.anchor_task = Some(anchor.task);
+        cluster.anchor_class = Some(anchor.class);
+        cluster.anchor_comm = Some(anchor.comm.clone());
+        cluster.anchor_kind = Some(anchor.kind);
 
-        if diagnosis.cause != crate::diagnosis::StutterCause::Unknown {
+        if diagnosis.primary_cause != crate::diagnosis::StutterCause::Unknown {
             self.recent_telemetry.diagnoses.push_back(LiveDiagnosisEntry {
-                timestamp_ms: elapsed_ms,
-                spike: self.recent_telemetry.spikes.back().unwrap().clone(),
-                diagnosis: diagnosis.clone(),
+                elapsed_ms,
+                cause: diagnosis.primary_cause,
+                confidence: diagnosis.confidence,
+                anchor_class: anchor.class,
+                anchor_comm: anchor.comm.clone(),
+                evidence: diagnosis.evidence.clone(),
             });
 
             // Log it?
             log::info!(
-                "live_diagnosis cause={:?} confidence={:?} evidence={:?}",
-                diagnosis.cause,
+                "live_diagnosis primary_cause={:?} confidence={:?} evidence={:?}",
+                diagnosis.primary_cause,
                 diagnosis.confidence,
                 diagnosis.evidence
             );
@@ -885,7 +935,24 @@ impl MonitorSession {
             }
 
             let frame_events = if let Some(path) = &self.config.mangohud_log {
-                match mangohud::read_frame_events(path, self.config.mangohud_ignore_offset) {
+                let (alignment_monotonic_ns, alignment_raw_elapsed_ms, mangohud_ignore_offset) =
+                    if let Some(run) = self.recorder.run.as_ref() {
+                        (
+                            run.mangohud_first_frame_monotonic_ns,
+                            run.mangohud_first_frame_raw_elapsed_ms,
+                            run.mangohud_start_offset.unwrap_or(0),
+                        )
+                    } else {
+                        (None, None, 0)
+                    };
+
+                match mangohud::read_frame_events(
+                    path,
+                    mangohud_ignore_offset,
+                    alignment_monotonic_ns,
+                    alignment_raw_elapsed_ms,
+                    self.recorder.run.as_ref().and_then(|r| r.monotonic_start_ns),
+                ) {
                     Ok(events) => events,
                     Err(err) => {
                         warn!(
