@@ -277,18 +277,14 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         // respect user-provided filters and do not exceed crate::cli::TARGET_PIDS_MAX
         // due to unrelated tasks in the same cgroup.
         let mut cache = crate::process_tree::ProcessCache::default();
-        let snapshot =
-            crate::process_tree::target_snapshot(crate::process_tree::TargetSnapshotInput {
-                proc_root: Path::new("/proc"),
-                manual_pids: &[],
-                tree_pids: &[],
-                cgroup_path: Some(cgroup_path),
-                exclude_tree_pids: &config.exclude_tree_pids,
-                filters: Some(&config.task_filters),
-                keep_missing_pid: config.keep_missing_pid,
-                cache: Some(&mut cache),
-                previous_tasks: None,
-            });
+        let snapshot = crate::process_tree::target_snapshot(
+            crate::process_tree::TargetSnapshotInput::default()
+                .cgroup_path(Some(cgroup_path))
+                .exclude_tree_pids(&config.exclude_tree_pids)
+                .filters(&config.task_filters)
+                .keep_missing_pid(config.keep_missing_pid)
+                .cache(&mut cache),
+        );
         let pids: Vec<_> = snapshot.tasks.keys().copied().collect();
 
         if pids.len() > TARGET_PIDS_MAX {
