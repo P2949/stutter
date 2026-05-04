@@ -23,8 +23,8 @@ use crate::{
     process_tree::{self, find_auto_target_pids},
     psi,
     recorder::{
-        self, BlockIoRecord, FinalizeRecordingInput, GpuSample, IrqEventRecord,
-        JsonArrayWriter, LiveRecorder, SpikeEvent, SpikeEventBuffer,
+        self, BlockIoRecord, FinalizeRecordingInput, GpuSample, IrqEventRecord, JsonArrayWriter,
+        LiveRecorder, SpikeEvent, SpikeEventBuffer,
     },
     scx,
     tasks::TaskTracker,
@@ -671,6 +671,10 @@ impl MonitorSession {
             return Ok(());
         };
 
+        if !self.watch_state.should_poll() {
+            return Ok(());
+        }
+
         if let Some(pid) = find_process_by_pattern_at_with_cache(
             Path::new("/proc"),
             &pattern,
@@ -752,19 +756,28 @@ impl MonitorSession {
         }) {
             self.recent_telemetry.irq_events.pop_front();
         }
-        while self.recent_telemetry.gpu_samples.front().is_some_and(|s| {
-            elapsed_ms.saturating_sub(s.elapsed_ms) > history_window_ms
-        }) {
+        while self
+            .recent_telemetry
+            .gpu_samples
+            .front()
+            .is_some_and(|s| elapsed_ms.saturating_sub(s.elapsed_ms) > history_window_ms)
+        {
             self.recent_telemetry.gpu_samples.pop_front();
         }
-        while self.recent_telemetry.io_events.front().is_some_and(|e| {
-            elapsed_ms.saturating_sub(e.elapsed_ms) > history_window_ms
-        }) {
+        while self
+            .recent_telemetry
+            .io_events
+            .front()
+            .is_some_and(|e| elapsed_ms.saturating_sub(e.elapsed_ms) > history_window_ms)
+        {
             self.recent_telemetry.io_events.pop_front();
         }
-        while self.recent_telemetry.diagnoses.front().is_some_and(|d| {
-            elapsed_ms.saturating_sub(d.elapsed_ms) > history_window_ms
-        }) {
+        while self
+            .recent_telemetry
+            .diagnoses
+            .front()
+            .is_some_and(|d| elapsed_ms.saturating_sub(d.elapsed_ms) > history_window_ms)
+        {
             self.recent_telemetry.diagnoses.pop_front();
         }
 
@@ -805,11 +818,7 @@ impl MonitorSession {
             });
         }
 
-        let distinct_tasks = points
-            .iter()
-            .map(|p| p.task)
-            .collect::<HashSet<_>>()
-            .len();
+        let distinct_tasks = points.iter().map(|p| p.task).collect::<HashSet<_>>().len();
         let min_switch_ns = points.iter().map(|p| p.switch_ns).min().unwrap_or(0);
         let max_switch_ns = points.iter().map(|p| p.switch_ns).max().unwrap_or(0);
         let max_latency_ns = points.iter().map(|p| p.latency_ns).max().unwrap_or(0);
@@ -881,20 +890,21 @@ impl MonitorSession {
         cluster.anchor_comm = Some(anchor.comm.clone());
         cluster.anchor_kind = Some(anchor.kind);
 
-        if diagnosis.primary_cause != crate::diagnosis::StutterCause::Unknown {
-            self.recent_telemetry.diagnoses.push_back(LiveDiagnosisEntry {
-                elapsed_ms,
-                cause: diagnosis.primary_cause,
-                confidence: diagnosis.confidence,
-                anchor_class: anchor.class,
-                anchor_comm: anchor.comm.clone(),
-                evidence: diagnosis.evidence.clone(),
-            });
+        if diagnosis.cause != crate::diagnosis::StutterCause::Unknown {
+            self.recent_telemetry
+                .diagnoses
+                .push_back(LiveDiagnosisEntry {
+                    elapsed_ms,
+                    cause: diagnosis.cause,
+                    confidence: diagnosis.confidence,
+                    anchor_class: anchor.class,
+                    anchor_comm: anchor.comm.clone(),
+                    evidence: diagnosis.evidence.clone(),
+                });
 
-            // Log it?
             log::info!(
-                "live_diagnosis primary_cause={:?} confidence={:?} evidence={:?}",
-                diagnosis.primary_cause,
+                "live_diagnosis cause={:?} confidence={:?} evidence={:?}",
+                diagnosis.cause,
                 diagnosis.confidence,
                 diagnosis.evidence
             );
@@ -970,7 +980,10 @@ impl MonitorSession {
                     mangohud_ignore_offset,
                     alignment_monotonic_ns,
                     alignment_raw_elapsed_ms,
-                    self.recorder.run.as_ref().and_then(|r| r.monotonic_start_ns),
+                    self.recorder
+                        .run
+                        .as_ref()
+                        .and_then(|r| r.monotonic_start_ns),
                 ) {
                     Ok(events) => events,
                     Err(err) => {

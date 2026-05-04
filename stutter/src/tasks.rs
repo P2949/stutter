@@ -242,6 +242,7 @@ impl TaskTracker {
 
                 remove_prev_faults_state(prev_faults_map, &mut self.prev_faults_snapshot, *tid);
 
+                self.active_targets.insert(*tid, desired.clone());
                 self.known_targets.insert(*tid, desired.clone());
             }
         }
@@ -477,5 +478,40 @@ mod tests {
         // same pid + missing starttimes + same exe inode + different comm => not same
         t2.comm = "task2".to_owned();
         assert!(!crate::process_tree::same_logical_task(&t1, &t2));
+    }
+
+    #[test]
+    fn test_handle_replacements() {
+        let mut tracker = TaskTracker::default();
+        let tid = 7;
+
+        // 1. active_targets contains tid=7 comm="old" starttime=10
+        let mut old_task = task_info(tid, 100, "old_proc", "old", TaskClass::Game);
+        old_task.task_starttime_ticks = Some(10);
+        tracker.active_targets.insert(tid, old_task.clone());
+        tracker.known_targets.insert(tid, old_task.clone());
+        tracker
+            .stats_by_task
+            .insert(tid, metrics::TaskStats::new(tid, "old".to_string(), 0));
+
+        // 2. desired snapshot contains tid=7 comm="new" starttime=20
+        let mut new_task = task_info(tid, 101, "new_proc", "new", TaskClass::Game);
+        new_task.task_starttime_ticks = Some(20);
+        let mut desired = BTreeMap::new();
+        desired.insert(tid, new_task.clone());
+
+        // 3. call handle_replacements
+        let mut tree_events = Vec::new();
+        tracker.handle_replacements(&desired, &mut tree_events, &mut None, 100, None);
+
+        // 4. assert active_targets[7].comm == "new"
+        assert_eq!(tracker.active_targets.get(&tid).unwrap().comm, "new");
+        assert_eq!(tracker.active_targets.get(&tid).unwrap().process_pid, 101);
+
+        // 5. assert known_targets[7].comm == "new"
+        assert_eq!(tracker.known_targets.get(&tid).unwrap().comm, "new");
+
+        // 6. assert stats_by_task[7].comm == "new"
+        assert_eq!(tracker.stats_by_task.get(&tid).unwrap().comm, "new");
     }
 }
