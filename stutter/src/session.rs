@@ -35,12 +35,86 @@ use crate::{
     },
 };
 
-struct RecentTelemetry {
-    spikes: VecDeque<SpikeEvent>,
-    irq_events: VecDeque<IrqEventRecord>,
-    gpu_samples: VecDeque<GpuSample>,
-    io_events: VecDeque<BlockIoRecord>,
-    diagnoses: VecDeque<LiveDiagnosisEntry>,
+pub struct LiveTelemetry {
+    pub spikes: VecDeque<SpikeEvent>,
+    pub irq_events: VecDeque<IrqEventRecord>,
+    pub gpu_samples: VecDeque<GpuSample>,
+    pub io_events: VecDeque<BlockIoRecord>,
+    pub diagnoses: VecDeque<LiveDiagnosisEntry>,
+    pub max_age_ms: u128,
+}
+
+impl LiveTelemetry {
+    pub fn push_spike(&mut self, event: SpikeEvent) {
+        self.spikes.push_back(event);
+    }
+
+    pub fn push_irq(&mut self, event: IrqEventRecord) {
+        self.irq_events.push_back(event);
+    }
+
+    pub fn push_gpu(&mut self, sample: GpuSample) {
+        self.gpu_samples.push_back(sample);
+    }
+
+    pub fn push_io(&mut self, event: BlockIoRecord) {
+        self.io_events.push_back(event);
+    }
+
+    pub fn prune(&mut self, now_ms: u128) {
+        while self
+            .spikes
+            .front()
+            .is_some_and(|s| now_ms.saturating_sub(s.elapsed_ms.unwrap_or(0)) > self.max_age_ms)
+        {
+            self.spikes.pop_front();
+        }
+
+        while self
+            .irq_events
+            .front()
+            .is_some_and(|e| now_ms.saturating_sub(e.elapsed_ms.unwrap_or(0)) > self.max_age_ms)
+        {
+            self.irq_events.pop_front();
+        }
+
+        while self
+            .gpu_samples
+            .front()
+            .is_some_and(|s| now_ms.saturating_sub(s.elapsed_ms) > self.max_age_ms)
+        {
+            self.gpu_samples.pop_front();
+        }
+
+        while self
+            .io_events
+            .front()
+            .is_some_and(|e| now_ms.saturating_sub(e.elapsed_ms) > self.max_age_ms)
+        {
+            self.io_events.pop_front();
+        }
+
+        while self
+            .diagnoses
+            .front()
+            .is_some_and(|d| now_ms.saturating_sub(d.elapsed_ms) > self.max_age_ms)
+        {
+            self.diagnoses.pop_front();
+        }
+    }
+}
+
+impl Default for LiveTelemetry {
+    fn default() -> Self {
+        LiveTelemetry {
+            spikes: VecDeque::new(),
+            irq_events: VecDeque::new(),
+            gpu_samples: VecDeque::new(),
+            io_events: VecDeque::new(),
+            diagnoses: VecDeque::new(),
+            max_age_ms: 10_000,
+        }
+    }
 }
 
 pub struct MonitorSession {
@@ -65,7 +139,7 @@ pub struct MonitorSession {
     pub interval_label: &'static str,
     pub block_io_correlation_basis: String,
     pub alert_sender: Option<tokio::sync::mpsc::Sender<AlertPayload>>,
-    recent_telemetry: RecentTelemetry,
+    recent_telemetry: LiveTelemetry,
 }
 
 impl MonitorSession {
@@ -247,13 +321,7 @@ impl MonitorSession {
             None
         };
 
-        let recent_telemetry = RecentTelemetry {
-            spikes: VecDeque::new(),
-            irq_events: VecDeque::new(),
-            gpu_samples: VecDeque::new(),
-            io_events: VecDeque::new(),
-            diagnoses: VecDeque::new(),
-        };
+        let recent_telemetry = LiveTelemetry::default();
 
         Ok(Self {
             config: Arc::new(config),
@@ -510,10 +578,10 @@ impl MonitorSession {
                     drop(guard);
 
                     for irq in pending_irqs {
-                        self.recent_telemetry.irq_events.push_back(irq);
+                        self.recent_telemetry.push_irq(irq);
                     }
                     for io in pending_ios {
-                        self.recent_telemetry.io_events.push_back(io);
+                        self.recent_telemetry.push_io(io);
                     }
                     for spike in pending_spikes {
                         self.handle_live_spike(spike);
@@ -729,7 +797,7 @@ impl MonitorSession {
             .map_err(|err| anyhow::anyhow!("hwmon worker failed: {err}"))?;
 
             if let Some(sample) = sample_opt {
-                self.recent_telemetry.gpu_samples.push_back(sample.clone());
+                self.recent_telemetry.push_gpu(sample.clone());
 
                 if let Some(writer) = self.recorder.gpu_sample_writer.as_mut() {
                     crate::events::push_json_stream_event(
@@ -748,44 +816,9 @@ impl MonitorSession {
 
     fn handle_live_spike(&mut self, spike: SpikeEvent) {
         let elapsed_ms = self.started.elapsed().as_millis();
-        self.recent_telemetry.spikes.push_back(spike);
-
-        // Keep 10 seconds of history
-        let history_window_ms = 10_000;
-        while self.recent_telemetry.spikes.front().is_some_and(|s| {
-            elapsed_ms.saturating_sub(s.elapsed_ms.unwrap_or(0)) > history_window_ms
-        }) {
-            self.recent_telemetry.spikes.pop_front();
-        }
-        while self.recent_telemetry.irq_events.front().is_some_and(|e| {
-            elapsed_ms.saturating_sub(e.elapsed_ms.unwrap_or(0)) > history_window_ms
-        }) {
-            self.recent_telemetry.irq_events.pop_front();
-        }
-        while self
-            .recent_telemetry
-            .gpu_samples
-            .front()
-            .is_some_and(|s| elapsed_ms.saturating_sub(s.elapsed_ms) > history_window_ms)
-        {
-            self.recent_telemetry.gpu_samples.pop_front();
-        }
-        while self
-            .recent_telemetry
-            .io_events
-            .front()
-            .is_some_and(|e| elapsed_ms.saturating_sub(e.elapsed_ms) > history_window_ms)
-        {
-            self.recent_telemetry.io_events.pop_front();
-        }
-        while self
-            .recent_telemetry
-            .diagnoses
-            .front()
-            .is_some_and(|d| elapsed_ms.saturating_sub(d.elapsed_ms) > history_window_ms)
-        {
-            self.recent_telemetry.diagnoses.pop_front();
-        }
+        self.recent_telemetry.push_spike(spike);
+        // Prune old telemetry (history window controlled by LiveTelemetry::max_age_ms)
+        self.recent_telemetry.prune(elapsed_ms);
 
         // Form a cluster from spikes within cluster_window_ms
         let cluster_window_ms = 5;
