@@ -50,6 +50,8 @@ pub struct LiveRecorder {
     pub block_io_event_count: u64,
     pub interval_record_count: u64,
     pub spike_events_dropped_count: u64,
+    pub event_stream_write_errors: u64,
+    pub first_event_stream_write_error: Option<String>,
 }
 
 impl std::fmt::Debug for LiveRecorder {
@@ -69,6 +71,11 @@ impl std::fmt::Debug for LiveRecorder {
             .field("gpu_sample_count", &self.gpu_sample_count)
             .field("block_io_event_count", &self.block_io_event_count)
             .field("interval_record_count", &self.interval_record_count)
+            .field("event_stream_write_errors", &self.event_stream_write_errors)
+            .field(
+                "first_event_stream_write_error",
+                &self.first_event_stream_write_error,
+            )
             .finish()
     }
 }
@@ -211,6 +218,12 @@ impl Drop for JsonArrayWriter {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum SpikePushResult {
+    Stored,
+    Dropped,
+}
+
 #[derive(Debug)]
 pub struct SpikeEventBuffer {
     events: Vec<SpikeEvent>,
@@ -221,17 +234,19 @@ pub struct SpikeEventBuffer {
 impl SpikeEventBuffer {
     pub fn new(max_events: u64) -> Self {
         Self {
-            events: Vec::with_capacity(max_events as usize),
+            events: Vec::with_capacity(1024.min(max_events as usize)),
             truncated: false,
             max_events,
         }
     }
 
-    pub fn push(&mut self, event: SpikeEvent) {
+    pub fn push(&mut self, event: SpikeEvent) -> SpikePushResult {
         if (self.events.len() as u64) < self.max_events {
             self.events.push(event);
+            SpikePushResult::Stored
         } else {
             self.truncated = true;
+            SpikePushResult::Dropped
         }
     }
     #[allow(dead_code)]
@@ -332,6 +347,10 @@ pub struct SessionFile {
     pub frame_event_count: u64,
     #[serde(default)]
     pub block_io_event_count: u64,
+    #[serde(default)]
+    pub event_stream_write_errors: u64,
+    #[serde(default)]
+    pub first_event_stream_write_error: Option<String>,
     #[serde(default = "default_block_io_correlation_basis")]
     pub block_io_correlation_basis: String,
     #[serde(default)]
@@ -377,6 +396,10 @@ pub struct MetadataFile {
     pub frame_event_count: u64,
     #[serde(default)]
     pub block_io_event_count: u64,
+    #[serde(default)]
+    pub event_stream_write_errors: u64,
+    #[serde(default)]
+    pub first_event_stream_write_error: Option<String>,
     #[serde(default = "default_block_io_correlation_basis")]
     pub block_io_correlation_basis: String,
     #[serde(default)]
@@ -701,7 +724,7 @@ fn default_block_io_correlation_basis() -> String {
     "dev+sector".to_owned()
 }
 
-pub const SESSION_SCHEMA_VERSION: u32 = 16;
+pub const SESSION_SCHEMA_VERSION: u32 = 17;
 
 pub struct FinalizeRecordingInput<'a> {
     pub recorder: &'a LiveRecorder,
@@ -890,6 +913,8 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         gpu_sample_count,
         frame_event_count: frame_events.len() as u64,
         block_io_event_count: recorder.block_io_event_count,
+        event_stream_write_errors: recorder.event_stream_write_errors,
+        first_event_stream_write_error: recorder.first_event_stream_write_error.clone(),
         block_io_correlation_basis: block_io_correlation_basis.to_owned(),
         drop_counters: drop_counters.clone(),
         tasks,
@@ -924,6 +949,8 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         gpu_sample_count,
         frame_event_count: frame_events.len() as u64,
         block_io_event_count: recorder.block_io_event_count,
+        event_stream_write_errors: recorder.event_stream_write_errors,
+        first_event_stream_write_error: recorder.first_event_stream_write_error.clone(),
         block_io_correlation_basis: block_io_correlation_basis.to_owned(),
         drop_counters: drop_counters.clone(),
     };
@@ -1431,6 +1458,33 @@ mod tests {
             histogram: Vec::new(),
             drop_counters: crate::ebpf_loader::DropCountersSnapshot::default(),
         }
+    }
+
+    #[test]
+    fn test_spike_event_buffer_truncation() {
+        let mut buf = SpikeEventBuffer::with_max_events(1);
+        let event = SpikeEvent {
+            elapsed_ms: Some(0),
+            task: 1,
+            active: true,
+            class: TaskClass::Unknown,
+            process_pid: Some(1),
+            process_comm: "test".into(),
+            comm: "test".to_owned(),
+            cpu: 0,
+            wakeup_target_cpu: 0,
+            prio: 0,
+            latency_ns: 1000,
+            wakeup_ns: 0,
+            switch_ns: 0,
+            target_pending_wakeups: 0,
+            major_faults: 0,
+            minor_faults: 0,
+        };
+
+        assert_eq!(buf.push(event.clone()), SpikePushResult::Stored);
+        assert_eq!(buf.push(event), SpikePushResult::Dropped);
+        assert!(buf.truncated());
     }
 
     fn temp_dir(name: &str) -> PathBuf {

@@ -523,6 +523,7 @@ fn format_optional_bytes(value: Option<u64>) -> String {
         .unwrap_or_else(|| "unknown_or_unlimited".to_owned())
 }
 
+#[derive(Debug)]
 struct TracepointAvailability {
     sched_wakeup_new: bool,
     sched_migrate_task: bool,
@@ -564,22 +565,30 @@ fn validate_tracepoint_formats(
         &[("pid", 12), ("orig_cpu", 20), ("dest_cpu", 24)],
         true,
     )?;
-    let cpu_frequency = validate_optional_tracepoint_format_at(
-        &events_root.join("power/cpu_frequency/format"),
-        "cpu_frequency",
-        &[("state", 8), ("cpu_id", 12)],
-        config.cpu_freq,
-    )?;
-    let sched_stat_wait = validate_optional_tracepoint_format_at(
-        &events_root.join("sched/sched_stat_wait/format"),
-        "sched_stat_wait",
-        &[("pid", 8), ("delay", 16)],
-        config.stat_wait,
-    )?;
+    let cpu_frequency = if config.cpu_freq {
+        validate_optional_tracepoint_format_at(
+            &events_root.join("power/cpu_frequency/format"),
+            "cpu_frequency",
+            &[("state", 8), ("cpu_id", 12)],
+            true,
+        )?
+    } else {
+        false
+    };
+    let sched_stat_wait = if config.stat_wait {
+        validate_optional_tracepoint_format_at(
+            &events_root.join("sched/sched_stat_wait/format"),
+            "sched_stat_wait",
+            &[("pid", 8), ("delay", 16)],
+            true,
+        )?
+    } else {
+        false
+    };
 
     let irq_entry = events_root.join("irq/irq_handler_entry/format");
     let irq_exit = events_root.join("irq/irq_handler_exit/format");
-    let irq_handler = if irq_entry.exists() && irq_exit.exists() {
+    let irq_handler = if config.irq_latency && irq_entry.exists() && irq_exit.exists() {
         validate_tracepoint_format_at(&irq_entry, &[("irq", 8)])?;
         validate_tracepoint_format_at(&irq_exit, &[("irq", 8)])?;
         true
@@ -600,7 +609,7 @@ fn validate_tracepoint_formats(
     let mut block_rq_complete_nr_sector_offset = None;
     let mut block_rq_complete_rwbs_offset = None;
 
-    if block_rq_issue.exists() && block_rq_complete.exists() {
+    if config.block_io && block_rq_issue.exists() && block_rq_complete.exists() {
         let issue_ok =
             validate_tracepoint_format_at(&block_rq_issue, &[("dev", 8), ("sector", 16)]).is_ok();
         let complete_ok = validate_tracepoint_format_at(
@@ -661,7 +670,7 @@ fn validate_tracepoint_formats(
     }
 
     let sched_process_exec = events_root.join("sched/sched_process_exec/format");
-    let sched_process_exec = if sched_process_exec.exists() {
+    let sched_process_exec = if config.follow_exec && sched_process_exec.exists() {
         validate_tracepoint_format_at(&sched_process_exec, &[])?;
         true
     } else {
@@ -1025,6 +1034,108 @@ field:int irq; offset:8; size:4; signed:1;
         let size = ring_buffer_size_from_budget(900 * 1024, 64 * 1024, 16 * 1024 * 1024, 4096);
 
         assert_eq!(size, 512 * 1024);
+    }
+
+    #[test]
+    fn gates_optional_tracepoint_validation_by_config() {
+        let dir = temp_dir("gate-validation");
+
+        // Required tracepoints must exist for validate_tracepoint_formats to succeed
+        let sched_wakeup = dir.join("sched/sched_wakeup");
+        fs::create_dir_all(&sched_wakeup).unwrap();
+        fs::write(
+            sched_wakeup.join("format"),
+            "field:pid_t pid; offset:24; size:4; signed:1;\nfield:int prio; offset:28; size:4; signed:1;\nfield:int target_cpu; offset:32; size:4; signed:1;",
+        ).unwrap();
+
+        let sched_switch = dir.join("sched/sched_switch");
+        fs::create_dir_all(&sched_switch).unwrap();
+        fs::write(
+            sched_switch.join("format"),
+            "field:char next_comm[16]; offset:40; size:16; signed:1;\nfield:pid_t next_pid; offset:56; size:4; signed:1;\nfield:int next_prio; offset:60; size:4; signed:1;",
+        ).unwrap();
+
+        let sched_process_exit = dir.join("sched/sched_process_exit");
+        fs::create_dir_all(&sched_process_exit).unwrap();
+        fs::write(
+            sched_process_exit.join("format"),
+            "field:pid_t pid; offset:12; size:4; signed:1;",
+        )
+        .unwrap();
+
+        // Create a fake format file with WRONG offset for cpu_frequency
+        let cpu_freq_dir = dir.join("power/cpu_frequency");
+        fs::create_dir_all(&cpu_freq_dir).unwrap();
+        fs::write(
+            cpu_freq_dir.join("format"),
+            "field:int state; offset:99; size:4; signed:1;\nfield:int cpu_id; offset:103; size:4; signed:1;",
+        ).unwrap();
+
+        // Create a fake format file with WRONG offset for sched_stat_wait
+        let stat_wait_dir = dir.join("sched/sched_stat_wait");
+        fs::create_dir_all(&stat_wait_dir).unwrap();
+        fs::write(
+            stat_wait_dir.join("format"),
+            "field:pid_t pid; offset:99; size:4; signed:1;\nfield:u64 delay; offset:103; size:8; signed:0;",
+        ).unwrap();
+
+        // Create a fake format file with WRONG offset for IRQ
+        let irq_entry_dir = dir.join("irq/irq_handler_entry");
+        fs::create_dir_all(&irq_entry_dir).unwrap();
+        fs::write(
+            irq_entry_dir.join("format"),
+            "field:int irq; offset:99; size:4; signed:1;",
+        )
+        .unwrap();
+        let irq_exit_dir = dir.join("irq/irq_handler_exit");
+        fs::create_dir_all(&irq_exit_dir).unwrap();
+        fs::write(
+            irq_exit_dir.join("format"),
+            "field:int irq; offset:99; size:4; signed:1;",
+        )
+        .unwrap();
+
+        let mut config = match crate::cli::parse_app_command_from([
+            "stutter", "monitor", "--pid", "42",
+        ])
+        .unwrap()
+        {
+            crate::cli::AppCommand::Monitor(c) => (*c).clone(),
+            _ => unreachable!(),
+        };
+
+        // Validating with optional features DISABLED should SUCCEED even with wrong formats
+        config.cpu_freq = false;
+        config.stat_wait = false;
+        config.irq_latency = false;
+        config.block_io = false;
+
+        let availability = validate_tracepoint_formats(&dir, &config).unwrap();
+        assert!(!availability.cpu_frequency);
+        assert!(!availability.sched_stat_wait);
+        assert!(!availability.irq_handler);
+
+        // Validating with cpu_freq = true should FAIL
+        config.cpu_freq = true;
+        let err = validate_tracepoint_formats(&dir, &config).unwrap_err();
+        assert!(err.to_string().contains("cpu_frequency"));
+        config.cpu_freq = false;
+
+        // Validating with stat_wait = true should FAIL
+        config.stat_wait = true;
+        let err = validate_tracepoint_formats(&dir, &config).unwrap_err();
+        assert!(err.to_string().contains("sched_stat_wait"));
+        config.stat_wait = false;
+
+        // Validating with irq_latency = true should FAIL
+        config.irq_latency = true;
+        // irq_latency also requires --irq N in CLI, but validate_tracepoint_formats
+        // only cares about the irq_latency flag and existence of files.
+        let err = validate_tracepoint_formats(&dir, &config).unwrap_err();
+        assert!(err.to_string().contains("irq_handler_entry"));
+        config.irq_latency = false;
+
+        fs::remove_dir_all(dir).ok();
     }
 
     fn temp_dir(name: &str) -> PathBuf {

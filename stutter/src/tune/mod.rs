@@ -492,9 +492,10 @@ pub async fn measure_tune_candidate(
     let interval_path = run_dir.join("interval.json");
     let interval_data = fs::read_to_string(&interval_path)
         .with_context(|| format!("failed to read interval.json from {}", run_dir.display()))?;
-    let mut interval_records: Vec<IntervalRecord> = serde_json::Deserializer::from_str(&interval_data)
-        .into_iter::<IntervalRecord>()
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut interval_records: Vec<IntervalRecord> =
+        serde_json::Deserializer::from_str(&interval_data)
+            .into_iter::<IntervalRecord>()
+            .collect::<Result<Vec<_>, _>>()?;
     retain_after_warmup(&mut interval_records, warmup_seconds, |r| r.elapsed_ms);
 
     let frame_path = run_dir.join("frame_correlation.json");
@@ -734,7 +735,11 @@ pub fn unix_nanos_now() -> u128 {
         .as_nanos()
 }
 
-pub fn retain_after_warmup<T>(records: &mut Vec<T>, warmup_seconds: u64, elapsed: impl Fn(&T) -> u128) {
+pub fn retain_after_warmup<T>(
+    records: &mut Vec<T>,
+    warmup_seconds: u64,
+    elapsed: impl Fn(&T) -> u128,
+) {
     let warmup_ms = u128::from(warmup_seconds) * 1000;
     records.retain(|r| elapsed(r) >= warmup_ms);
 }
@@ -765,14 +770,8 @@ mod tests {
     #[test]
     fn test_tune_run_dir_iteration() {
         let base = Path::new("/tmp/tune");
-        assert_ne!(
-            tune_run_dir(base, "kcd", 1),
-            tune_run_dir(base, "kcd", 2)
-        );
-        assert_eq!(
-            tune_run_dir(base, "kcd", 1),
-            base.join("iter-001-kcd")
-        );
+        assert_ne!(tune_run_dir(base, "kcd", 1), tune_run_dir(base, "kcd", 2));
+        assert_eq!(tune_run_dir(base, "kcd", 1), base.join("iter-001-kcd"));
     }
 
     #[test]
