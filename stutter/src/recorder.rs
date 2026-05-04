@@ -1,5 +1,4 @@
 use std::{
-    
     env, fs, io,
     io::Write,
     path::{Path, PathBuf},
@@ -9,6 +8,7 @@ use std::{
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use stutter_common::SchedulerEvent;
+
 use crate::{
     cli::{Config, RecordingConfig, TARGET_PIDS_MAX},
     ebpf_loader::DropCountersSnapshot,
@@ -234,7 +234,7 @@ impl SpikeEventBuffer {
             self.truncated = true;
         }
     }
-#[allow(dead_code)]
+    #[allow(dead_code)]
     pub fn truncate(&mut self) {
         self.truncated = true;
     }
@@ -927,13 +927,11 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
 
     // Map any write errors to a "record write failed" context so callers can decide
     // whether a failed recording should be treated as fatal.
-    let map_write_err = |e: anyhow::Error| -> anyhow::Error {
-        e.context("record write failed")
-    };
+    let map_write_err = |e: anyhow::Error| -> anyhow::Error { e.context("record write failed") };
 
     write_json(recording.run_dir.join("session.json"), &session).map_err(map_write_err)?;
     write_json(recording.run_dir.join("metadata.json"), &metadata_file).map_err(map_write_err)?;
-    
+
     if recorder.interval_writer.is_none() {
         write_json_stream(recording.run_dir.join("interval.json"), interval_records)
             .map_err(map_write_err)?;
@@ -947,12 +945,18 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             .map_err(map_write_err)?;
     }
     if recorder.irq_event_writer.is_none() && !recorder.irq_events.is_empty() {
-        write_json_stream(recording.run_dir.join("irq_events.json"), &recorder.irq_events)
-            .map_err(map_write_err)?;
+        write_json_stream(
+            recording.run_dir.join("irq_events.json"),
+            &recorder.irq_events,
+        )
+        .map_err(map_write_err)?;
     }
     if recorder.gpu_sample_writer.is_none() && !recorder.gpu_samples.is_empty() {
-        write_json_stream(recording.run_dir.join("gpu_samples.json"), &recorder.gpu_samples)
-            .map_err(map_write_err)?;
+        write_json_stream(
+            recording.run_dir.join("gpu_samples.json"),
+            &recorder.gpu_samples,
+        )
+        .map_err(map_write_err)?;
     }
     if !frame_events.is_empty() {
         write_json_stream(

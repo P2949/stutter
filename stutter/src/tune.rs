@@ -113,7 +113,6 @@ pub struct TuneMeasureResult {
     pub coverage: TuneCoverageMetrics,
 }
 
-
 pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     let TuneCommandInput {
         tree_pid,
@@ -438,7 +437,14 @@ pub async fn measure_tune_candidate(
     _tune_output_dir: PathBuf,
 ) -> anyhow::Result<TuneMeasureResult> {
     let tree_pid = config.tree_pids[0];
-    let run_dir = config.recording.as_ref().unwrap().out_dir.as_ref().unwrap().clone();
+    let run_dir = config
+        .recording
+        .as_ref()
+        .unwrap()
+        .out_dir
+        .as_ref()
+        .unwrap()
+        .clone();
 
     let cache = profiles::ProfileApplyCache::default();
     let (initial_records, cache) = crate::watch::apply_profile_to_tree_cached_blocking(
@@ -572,7 +578,9 @@ pub async fn tune_profile_refresh_loop(
         cache = updated_cache;
 
         if !records.is_empty() {
-            control.applied_tasks.fetch_add(records.len(), Ordering::Relaxed);
+            control
+                .applied_tasks
+                .fetch_add(records.len(), Ordering::Relaxed);
         }
 
         should_force = false;

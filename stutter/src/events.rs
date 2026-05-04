@@ -15,7 +15,6 @@ use crate::{
     tasks::{TaskTracker, should_replace_unknown_comm},
 };
 
-
 pub fn handle_irq_event(
     event: &IrqEvent,
     recorder: &mut LiveRecorder,

@@ -101,9 +101,7 @@ impl LoadedEbpf {
     }
 }
 
-pub fn load_and_attach(
-    config: &crate::cli::Config,
-) -> anyhow::Result<LoadedEbpf> {
+pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf> {
     raise_memlock_limit();
     let map_sizing = dynamic_map_sizing();
     log::info!(
@@ -240,9 +238,11 @@ pub fn load_and_attach(
         }
     }
 
-    let mut target_pid_map =
-        AyaHashMap::try_from(ebpf.take_map("TARGET_PIDS").context("eBPF load failed: TARGET_PIDS map not found")?)
-        .context("eBPF load failed: TARGET_PIDS map init")?;
+    let mut target_pid_map = AyaHashMap::try_from(
+        ebpf.take_map("TARGET_PIDS")
+            .context("eBPF load failed: TARGET_PIDS map not found")?,
+    )
+    .context("eBPF load failed: TARGET_PIDS map init")?;
 
     let target_irq_map = ebpf
         .take_map("TARGET_IRQS")
@@ -250,15 +250,19 @@ pub fn load_and_attach(
         .transpose()
         .context("eBPF load failed: TARGET_IRQS map init")?;
 
-    let drop_counters = PerCpuArray::try_from(ebpf.take_map("DROP_COUNTERS").context("eBPF load failed: DROP_COUNTERS map not found")?)
+    let drop_counters = PerCpuArray::try_from(
+        ebpf.take_map("DROP_COUNTERS")
+            .context("eBPF load failed: DROP_COUNTERS map not found")?,
+    )
     .context("eBPF load failed: DROP_COUNTERS map init")?;
 
-    let events =
-        RingBuf::try_from(ebpf.take_map("EVENTS").context("eBPF load failed: EVENTS map not found")?)
-        .context("eBPF load failed: EVENTS map init")?;
+    let events = RingBuf::try_from(
+        ebpf.take_map("EVENTS")
+            .context("eBPF load failed: EVENTS map not found")?,
+    )
+    .context("eBPF load failed: EVENTS map init")?;
 
-    let events =
-        AsyncFd::new(events).context("eBPF load failed: events ringbuf async fd")?;
+    let events = AsyncFd::new(events).context("eBPF load failed: events ringbuf async fd")?;
 
     let prev_faults_map = ebpf
         .take_map("PREV_FAULTS")
@@ -273,8 +277,8 @@ pub fn load_and_attach(
         // respect user-provided filters and do not exceed crate::cli::TARGET_PIDS_MAX
         // due to unrelated tasks in the same cgroup.
         let mut cache = crate::process_tree::ProcessCache::default();
-        let snapshot = crate::process_tree::target_snapshot(
-            crate::process_tree::TargetSnapshotInput {
+        let snapshot =
+            crate::process_tree::target_snapshot(crate::process_tree::TargetSnapshotInput {
                 proc_root: Path::new("/proc"),
                 manual_pids: &[],
                 tree_pids: &[],
@@ -284,8 +288,7 @@ pub fn load_and_attach(
                 keep_missing_pid: config.keep_missing_pid,
                 cache: Some(&mut cache),
                 previous_tasks: None,
-            },
-        );
+            });
         let pids: Vec<_> = snapshot.tasks.keys().copied().collect();
 
         if pids.len() > TARGET_PIDS_MAX {
@@ -849,11 +852,12 @@ fn raise_memlock_limit() {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use std::path::PathBuf;
+    use std::{
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     // tokio::time::sleep removed as unused
-
     use super::*;
 
     #[test]
