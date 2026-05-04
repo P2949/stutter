@@ -532,17 +532,13 @@ fn target_snapshot_keeps_manual_missing_pid_when_requested() {
     fs::create_dir_all(&dir).unwrap();
 
     let mut cache = process_tree::ProcessCache::default();
-    let snapshot = process_tree::target_snapshot(process_tree::TargetSnapshotInput {
-        proc_root: &dir,
-        manual_pids: &[42],
-        tree_pids: &[],
-        cgroup_path: None,
-        exclude_tree_pids: &[],
-        filters: Some(&process_tree::TaskFilters::default()),
-        keep_missing_pid: true,
-        cache: Some(&mut cache),
-        previous_tasks: None,
-    });
+    let snapshot = process_tree::target_snapshot(
+        process_tree::TargetSnapshotInput::default()
+            .proc_root(&dir)
+            .manual_pids(&[42])
+            .keep_missing_pid(true)
+            .cache(&mut cache),
+    );
 
     let task = snapshot.tasks.get(&42).unwrap();
     assert_eq!(task.comm, "?");
@@ -807,32 +803,23 @@ fn target_snapshot_reads_fresh_task_comm_with_previous_tasks() {
     create_fake_proc(&dir, 10, 1, "game", "game", &[10, 11]);
 
     let mut cache = process_tree::ProcessCache::default();
-    let first = process_tree::target_snapshot(process_tree::TargetSnapshotInput {
-        proc_root: &dir,
-        manual_pids: &[],
-        tree_pids: &[10],
-        cgroup_path: None,
-        exclude_tree_pids: &[],
-        filters: Some(&process_tree::TaskFilters::default()),
-        keep_missing_pid: false,
-        cache: Some(&mut cache),
-        previous_tasks: None,
-    });
+    let first = process_tree::target_snapshot(
+        process_tree::TargetSnapshotInput::default()
+            .proc_root(&dir)
+            .tree_pids(&[10])
+            .cache(&mut cache),
+    );
     assert_eq!(first.tasks.get(&11).unwrap().comm, "game-11");
 
     fs::write(dir.join("10/task/11/comm"), "RenderThread\n").unwrap();
 
-    let second = process_tree::target_snapshot(process_tree::TargetSnapshotInput {
-        proc_root: &dir,
-        manual_pids: &[],
-        tree_pids: &[10],
-        cgroup_path: None,
-        exclude_tree_pids: &[],
-        filters: Some(&process_tree::TaskFilters::default()),
-        keep_missing_pid: false,
-        cache: Some(&mut cache),
-        previous_tasks: Some(&first.tasks),
-    });
+    let second = process_tree::target_snapshot(
+        process_tree::TargetSnapshotInput::default()
+            .proc_root(&dir)
+            .tree_pids(&[10])
+            .cache(&mut cache)
+            .previous_tasks(Some(&first.tasks)),
+    );
     assert_eq!(second.tasks.get(&11).unwrap().comm, "RenderThread");
 
     fs::remove_dir_all(dir).ok();
@@ -897,17 +884,12 @@ fn target_snapshot_respects_exclude_tree_pids() {
     create_fake_proc(&dir, 102, 100, "child2", "child2", &[102]);
     create_fake_proc(&dir, 103, 102, "child3", "child3", &[103]);
 
-    let snapshot = process_tree::target_snapshot(process_tree::TargetSnapshotInput {
-        proc_root: &dir,
-        manual_pids: &[],
-        tree_pids: &[100],
-        cgroup_path: None,
-        exclude_tree_pids: &[102],
-        filters: Some(&process_tree::TaskFilters::default()),
-        keep_missing_pid: false,
-        cache: None,
-        previous_tasks: None,
-    });
+    let snapshot = process_tree::target_snapshot(
+        process_tree::TargetSnapshotInput::default()
+            .proc_root(&dir)
+            .tree_pids(&[100])
+            .exclude_tree_pids(&[102]),
+    );
 
     assert!(snapshot.tasks.contains_key(&100));
     assert!(snapshot.tasks.contains_key(&101));
