@@ -18,7 +18,6 @@ use crate::{
         SpikeRecord, TaskStats,
     },
     process_tree::TaskClass,
-    scx::ScxEvent,
 };
 
 pub type IntervalRecord = MetricsIntervalRecord;
@@ -39,6 +38,7 @@ pub struct LiveRecorder {
     pub cpu_freq_sample_writer: Option<JsonArrayWriter>,
     pub gpu_sample_writer: Option<JsonArrayWriter>,
     pub block_io_event_writer: Option<JsonArrayWriter>,
+    pub scx_event_writer: Option<JsonArrayWriter>,
     pub csv_writer: Option<IntervalCsvWriter>,
 
     pub intervals_dropped: u64,
@@ -576,6 +576,10 @@ pub struct RecordedSpike {
     pub major_faults: u64,
     #[serde(default)]
     pub minor_faults: u64,
+    #[serde(default)]
+    pub scx_ops: Option<String>,
+    #[serde(default)]
+    pub scx_state: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -601,6 +605,10 @@ pub struct SessionSpike {
     pub major_faults: u64,
     #[serde(default)]
     pub minor_faults: u64,
+    #[serde(default)]
+    pub scx_ops: Option<String>,
+    #[serde(default)]
+    pub scx_state: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -628,6 +636,10 @@ pub struct SpikeEvent {
     pub major_faults: u64,
     #[serde(default)]
     pub minor_faults: u64,
+    #[serde(default)]
+    pub scx_ops: Option<String>,
+    #[serde(default)]
+    pub scx_state: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -653,6 +665,8 @@ impl SpikeEvent {
         stats: &TaskStats,
         event: &SchedulerEvent,
         fault_deltas: (u64, u64),
+        scx_ops: Option<String>,
+        scx_state: Option<String>,
     ) -> Self {
         Self {
             elapsed_ms: elapsed_ms_from_monotonic(monotonic_start_ns, event.switch_ns),
@@ -671,6 +685,8 @@ impl SpikeEvent {
             target_pending_wakeups: event.target_pending_wakeups,
             major_faults: fault_deltas.0,
             minor_faults: fault_deltas.1,
+            scx_ops,
+            scx_state,
         }
     }
 }
@@ -785,7 +801,6 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         .as_ref()
         .map(|s| s.events.as_slice())
         .unwrap_or(&[]);
-    let _scx_events = Vec::<ScxEvent>::new(); // SCX events are not currently persisted in LiveRecorder for finalization
 
     let irq_event_count = recorder.irq_event_count;
     let gpu_sample_count = recorder.gpu_sample_count;
@@ -877,6 +892,8 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
                 target_pending_wakeups: spike.target_pending_wakeups,
                 major_faults: spike.major_faults,
                 minor_faults: spike.minor_faults,
+                scx_ops: spike.scx_ops.clone(),
+                scx_state: spike.scx_state.clone(),
             });
         }
     }
@@ -1160,6 +1177,8 @@ fn recorded_spike(stats: &TaskStats, spike: &SpikeRecord) -> RecordedSpike {
         target_pending_wakeups: spike.target_pending_wakeups,
         major_faults: spike.major_faults,
         minor_faults: spike.minor_faults,
+        scx_ops: spike.scx_ops.clone(),
+        scx_state: spike.scx_state.clone(),
     }
 }
 
@@ -1488,11 +1507,53 @@ mod tests {
             target_pending_wakeups: 0,
             major_faults: 0,
             minor_faults: 0,
+            scx_ops: None,
+            scx_state: None,
         };
 
         assert_eq!(buf.push(event.clone()), SpikePushResult::Stored);
         assert_eq!(buf.push(event), SpikePushResult::Dropped);
         assert!(buf.truncated());
+    }
+
+    #[test]
+    fn test_spike_event_serialization() {
+        let event = SpikeEvent {
+            elapsed_ms: Some(100),
+            task: 123,
+            active: true,
+            class: TaskClass::Game,
+            process_pid: Some(123),
+            process_comm: "game".into(),
+            comm: "game".to_owned(),
+            cpu: 1,
+            wakeup_target_cpu: 1,
+            prio: 120,
+            latency_ns: 1_000_000,
+            wakeup_ns: 2000,
+            switch_ns: 3000,
+            target_pending_wakeups: 0,
+            major_faults: 1,
+            minor_faults: 2,
+            scx_ops: Some("scx_lavd".to_owned()),
+            scx_state: Some("enabled".to_owned()),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"scx_ops\":\"scx_lavd\""));
+        assert!(json.contains("\"scx_state\":\"enabled\""));
+
+        let decoded: SpikeEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.scx_ops.as_deref(), Some("scx_lavd"));
+        assert_eq!(decoded.scx_state.as_deref(), Some("enabled"));
+    }
+
+    #[test]
+    fn test_spike_event_deserialization_compatibility() {
+        let json = r#"{"elapsed_ms":100,"task":123,"active":true,"class":"Game","process_pid":123,"process_comm":"game","comm":"game","cpu":1,"wakeup_target_cpu":1,"prio":120,"latency_ns":1000000,"wakeup_ns":2000,"switch_ns":3000,"target_pending_wakeups":0,"major_faults":1,"minor_faults":2}"#;
+        let decoded: SpikeEvent = serde_json::from_str(json).unwrap();
+        assert!(decoded.scx_ops.is_none());
+        assert!(decoded.scx_state.is_none());
     }
 
     fn temp_dir(name: &str) -> PathBuf {

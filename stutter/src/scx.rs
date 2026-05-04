@@ -13,6 +13,7 @@ pub struct ScxEvent {
 #[derive(Clone, Debug, Default)]
 pub struct ScxTracker {
     last: Option<ScxSnapshot>,
+    #[cfg(test)]
     events: Vec<ScxEvent>,
 }
 
@@ -36,6 +37,7 @@ impl ScxTracker {
         self.sample_at(Path::new("/sys/kernel/sched_ext"), elapsed_ms)
     }
 
+    #[cfg(test)]
     pub fn events(&self) -> &[ScxEvent] {
         &self.events
     }
@@ -59,6 +61,7 @@ impl ScxTracker {
             ops: snapshot.ops.clone(),
             enable_seq: snapshot.enable_seq.clone(),
         };
+        #[cfg(test)]
         self.events.push(event.clone());
         self.last = Some(snapshot);
         Some(event)
@@ -101,10 +104,15 @@ mod tests {
         fs::write(root.join("enable_seq"), "1\n").unwrap();
 
         let mut tracker = ScxTracker::default();
-        tracker.sample_at(&root, 0);
-        tracker.sample_at(&root, 1_000);
+        let ev1 = tracker.sample_at(&root, 0);
+        assert!(ev1.is_some());
+
+        let ev2 = tracker.sample_at(&root, 1_000);
+        assert!(ev2.is_none());
+
         fs::write(root.join("root/ops"), "scx_p2dq\n").unwrap();
-        tracker.sample_at(&root, 2_000);
+        let ev3 = tracker.sample_at(&root, 2_000);
+        assert!(ev3.is_some());
 
         assert_eq!(tracker.events().len(), 2);
         assert_eq!(tracker.events()[0].ops.as_deref(), Some("scx_lavd"));

@@ -176,6 +176,7 @@ pub fn push_json_stream_event<T: Serialize>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_event(
     event: &SchedulerEvent,
     config: &Config,
@@ -184,6 +185,8 @@ pub fn handle_event(
     monotonic_start_ns: Option<u64>,
     recorder: &mut LiveRecorder,
     alert_sender: Option<&tokio::sync::mpsc::Sender<AlertPayload>>,
+    scx_ops: Option<String>,
+    scx_state: Option<String>,
 ) -> Option<recorder::SpikeEvent> {
     debug_assert_eq!(event.kind, EVENT_RUNNABLE_LATENCY);
 
@@ -211,7 +214,13 @@ pub fn handle_event(
         stats.active = true;
     }
 
-    let fault_deltas = stats.record(event, config.spike_threshold_ns, elapsed_ms);
+    let fault_deltas = stats.record(
+        event,
+        config.spike_threshold_ns,
+        elapsed_ms,
+        scx_ops.clone(),
+        scx_state.clone(),
+    );
 
     let mut spike_ret = None;
     if event.latency_ns >= config.spike_threshold_ns {
@@ -220,6 +229,8 @@ pub fn handle_event(
             stats,
             event,
             fault_deltas,
+            scx_ops,
+            scx_state,
         );
         spike_ret = Some(spike_event.clone());
 
