@@ -970,7 +970,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     Ok(())
 }
 
-fn recorded_config(config: &Config) -> RecordedConfig {
+pub fn recorded_config(config: &Config) -> RecordedConfig {
     RecordedConfig {
         manual_pids: config.target_pids.clone(),
         tree_roots: config.tree_pids.clone(),
@@ -1160,7 +1160,7 @@ fn ensure_empty_dir(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn recorded_time(time: SystemTime) -> RecordedTime {
+pub fn recorded_time(time: SystemTime) -> RecordedTime {
     let duration = time.duration_since(UNIX_EPOCH).unwrap_or_default();
 
     RecordedTime {

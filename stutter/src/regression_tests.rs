@@ -13,11 +13,13 @@ use crate::{
     cli::{Config, RecordingConfig},
     ebpf_loader::DropCountersSnapshot,
     events::{self, AlertPayload},
+    metadata::SystemMetadata,
     metrics,
     process_tree::{self, TargetDiffAction, TaskClass, TaskInfo},
     recorder::{
-        self, FinalizeRecordingInput, FrameEvent, GpuSample, IrqEventRecord, RecordingRun,
-        SESSION_SCHEMA_VERSION, SessionFile, SpikeEvent, SpikeEventBuffer,
+        self, FinalizeRecordingInput, FrameEvent, GpuSample, IrqEventRecord, RecordedCpuSnapshot,
+        RecordedLatency, RecordingRun, SESSION_SCHEMA_VERSION, SessionFile, SessionTask,
+        SpikeEvent, SpikeEventBuffer, recorded_config, recorded_time,
     },
     tasks, tune,
 };
@@ -1425,76 +1427,42 @@ fn test_config(
 }
 
 fn minimal_session_for_report() -> SessionFile {
-    serde_json::from_value(serde_json::json!({
-        "schema_version": SESSION_SCHEMA_VERSION,
-        "run_name": "report-correlation",
-        "started_at": {
-            "unix_seconds": 0,
-            "unix_nanos": 0,
-            "system_time_debug": "SystemTime { tv_sec: 0, tv_nsec: 0 }"
-        },
-        "ended_at": {
-            "unix_seconds": 0,
-            "unix_nanos": 0,
-            "system_time_debug": "SystemTime { tv_sec: 0, tv_nsec: 0 }"
-        },
-        "monotonic_start_ns": 0,
-        "monotonic_end_ns": 20_000_000,
-        "duration_ms": 20,
-        "stop_reason": "test",
-        "config": {
-            "manual_pids": [],
-            "tree_roots": [],
-            "include_comm": [],
-            "exclude_comm": [],
-            "watch_process": null,
-            "persistent": false,
-            "keep_missing_pid": false,
-            "watch_poll_ms": 2000,
-            "watch_timeout_ms": null,
-            "csv_path": null,
-            "irq_latency": true,
-            "irqs": [137],
-            "hwmon": true,
-            "mangohud_log": null,
-            "tui": false,
-            "summary_period_ms": 1000,
-            "spike_threshold_ns": 1_000_000,
-            "verbose": false
-        },
-        "metadata": {
-            "kernel_osrelease": null,
-            "kernel_version": null,
-            "cpu_online": null,
-            "cpu_possible": null,
-            "cpu_topology": [],
-            "scx_state": null,
-            "scx_ops": null,
-            "scx_enable_seq": null
-        },
-        "target_pids_max": 1024,
-        "active_target_pids_count": 0,
-        "active_expanded_tasks": [],
-        "spike_events_retained_count": 3,
-        "spike_events_dropped_count": 0,
-        "spike_events_truncated": false,
-        "scx_event_count": 0,
-        "irq_event_count": 1,
-        "migration_event_count": 0,
-        "cpu_freq_sample_count": 0,
-        "gpu_sample_count": 1,
-        "frame_event_count": 1,
-        "drop_counters": {
-            "wakeup_data_insert_failed": 0,
-            "ringbuf_reserve_failed": 0,
-            "irq_start_times_insert_failed": 0,
-            "block_start_insert_failed": 0
-        },
-        "interval_record_count": 0,
-        "tasks": [],
-        "top_spikes": []
-    }))
-    .unwrap()
+    let mut config = test_config(vec![], vec![], None);
+    config.irq_latency = true;
+    config.irqs = vec![137];
+    config.hwmon = true;
+
+    SessionFile {
+        schema_version: SESSION_SCHEMA_VERSION,
+        run_name: Some("report-correlation".to_owned()),
+        started_at: recorded_time(UNIX_EPOCH),
+        ended_at: recorded_time(UNIX_EPOCH),
+        monotonic_start_ns: Some(0),
+        monotonic_end_ns: Some(20_000_000),
+        duration_ms: 20,
+        stop_reason: "test".to_owned(),
+        config: recorded_config(&config),
+        metadata: SystemMetadata::default(),
+        target_pids_max: 1024,
+        active_target_pids_count: 0,
+        active_expanded_tasks: Vec::new(),
+        spike_events_retained_count: 3,
+        spike_events_dropped_count: 0,
+        spike_events_truncated: false,
+        scx_event_count: 0,
+        irq_event_count: 1,
+        migration_event_count: Some(0),
+        cpu_freq_sample_count: Some(0),
+        gpu_sample_count: 1,
+        frame_event_count: 1,
+        block_io_event_count: 0,
+        block_io_correlation_basis: "dev+sector".to_owned(),
+        drop_counters: DropCountersSnapshot::default(),
+        interval_record_count: 0,
+        intervals_dropped: 0,
+        tasks: Vec::new(),
+        top_spikes: Vec::new(),
+    }
 }
 
 fn session_task(
@@ -1504,54 +1472,53 @@ fn session_task(
     comm: &str,
     process_starttime_ticks: Option<u64>,
     task_starttime_ticks: Option<u64>,
-) -> recorder::SessionTask {
-    serde_json::from_value(serde_json::json!({
-        "task": tid,
-        "active": true,
-        "first_seen_ms": 0,
-        "last_seen_ms": 100,
-        "removed_ms": null,
-        "class": class,
-        "process_pid": process_pid,
-        "process_comm": "game",
-        "process_starttime_ticks": process_starttime_ticks,
-        "task_starttime_ticks": task_starttime_ticks,
-        "exe_dev": 1,
-        "exe_ino": 2,
-        "comm": comm,
-        "latency": {
-            "samples": 1,
-            "stored_samples": 1,
-            "truncated_samples": 0,
-            "percentile_scope": "histogram",
-            "histogram": [],
-            "min_ns": 1,
-            "avg_ns": 1,
-            "p95_ns": 1,
-            "p99_ns": 1,
-            "max_ns": 1,
-            "over_1ms": 0,
-            "over_2ms": 0,
-            "over_5ms": 0
+) -> SessionTask {
+    SessionTask {
+        task: tid,
+        active: true,
+        first_seen_ms: 0,
+        last_seen_ms: 100,
+        removed_ms: None,
+        class,
+        process_pid: Some(process_pid),
+        process_comm: "game".into(),
+        process_starttime_ticks,
+        task_starttime_ticks,
+        exe_dev: Some(1),
+        exe_ino: Some(2),
+        comm: comm.to_owned(),
+        latency: RecordedLatency {
+            samples: 1,
+            stored_samples: 1,
+            truncated_samples: 0,
+            percentile_scope: "histogram".to_owned(),
+            histogram: Vec::new(),
+            min_ns: 1,
+            avg_ns: 1,
+            p95_ns: 1,
+            p99_ns: 1,
+            max_ns: 1,
+            over_1ms: 0,
+            over_2ms: 0,
+            over_5ms: 0,
         },
-        "cpu": {
-            "busiest_cpu": null,
-            "busiest_cpu_samples": 0,
-            "worst_cpu": null,
-            "worst_cpu_max_ns": 0,
-            "spikiest_cpu": null,
-            "spikiest_cpu_spikes": 0,
-            "per_cpu": []
+        cpu: RecordedCpuSnapshot {
+            busiest_cpu: None,
+            busiest_cpu_samples: 0,
+            worst_cpu: None,
+            worst_cpu_max_ns: 0,
+            spikiest_cpu: None,
+            spikiest_cpu_spikes: 0,
+            per_cpu: Vec::new(),
         },
-        "top_spikes": [],
-        "migration_count": 0,
-        "cross_numa_migrations": 0,
-        "top_wakers": [],
-        "sched_policy": null,
-        "stat_wait_sum_ns": null,
-        "stat_wait_count": null
-    }))
-    .unwrap()
+        top_spikes: Vec::new(),
+        migration_count: 0,
+        cross_numa_migrations: 0,
+        top_wakers: Vec::new(),
+        sched_policy: None,
+        stat_wait_sum_ns: None,
+        stat_wait_count: None,
+    }
 }
 
 fn interval_record(
