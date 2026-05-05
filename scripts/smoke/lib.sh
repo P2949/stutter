@@ -25,8 +25,8 @@ write_basic_metadata() {
 
 run_or_skip_live() {
     # Run command and capture stdout/stderr to output.log in the current directory
-    "$@" > output.log 2>&1
-    local status=$?
+    local status=0
+    "$@" > output.log 2>&1 || status=$?
 
     if [ $status -eq 0 ]; then
         return 0

@@ -21,6 +21,8 @@ mod tune;
 mod watch;
 
 #[cfg(test)]
+mod recording_fixture_tests;
+#[cfg(test)]
 mod regression_tests;
 
 use std::path::Path;
