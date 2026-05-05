@@ -47,6 +47,30 @@ pub enum Confidence {
     High,
 }
 
+impl Confidence {
+    pub fn as_report_word(self) -> &'static str {
+        match self {
+            Confidence::High => "strong candidate",
+            Confidence::Medium => "candidate",
+            Confidence::Low => "weak candidate",
+        }
+    }
+
+    pub fn caution_text(self) -> &'static str {
+        match self {
+            Confidence::High => {
+                "evidence is strong, but this is still a profiler inference rather than proof"
+            }
+            Confidence::Medium => {
+                "evidence is mixed; treat this as a candidate cause and inspect secondary evidence"
+            }
+            Confidence::Low => {
+                "evidence is weak; do not treat this as a reliable cause without more data"
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum EvidenceKind {
@@ -103,6 +127,22 @@ pub struct Diagnosis {
     pub primary: Option<DiagnosisCandidate>,
     pub candidates: Vec<DiagnosisCandidate>,
     pub summary: String,
+}
+
+impl Diagnosis {
+    pub fn report_summary(&self) -> String {
+        match &self.primary {
+            Some(primary) => format!(
+                "{:?}: {} (confidence={:?}, score={:.2}) - {}",
+                primary.cause,
+                primary.confidence.as_report_word(),
+                primary.confidence,
+                primary.score,
+                primary.confidence.caution_text()
+            ),
+            None => "Unknown: no strong correlation found".to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -619,6 +659,34 @@ mod tests {
             .iter()
             .find(|candidate| candidate.cause == cause)
             .unwrap()
+    }
+
+    #[test]
+    fn confidence_words_are_cautious() {
+        assert_eq!(Confidence::High.as_report_word(), "strong candidate");
+        assert_eq!(Confidence::Medium.as_report_word(), "candidate");
+        assert_eq!(Confidence::Low.as_report_word(), "weak candidate");
+
+        assert!(Confidence::High.caution_text().contains("inference"));
+        assert!(Confidence::Medium.caution_text().contains("mixed"));
+        assert!(Confidence::Low.caution_text().contains("weak"));
+    }
+
+    #[test]
+    fn diagnosis_report_summary_uses_candidate_wording() {
+        let cluster = spike_cluster(vec![spike_point(
+            456,
+            TaskClass::Game,
+            "RenderThread",
+            8_000_000,
+        )]);
+
+        let d = diagnose_cluster(&cluster, &RunArtifacts::default(), 0);
+        let summary = d.report_summary();
+
+        assert!(summary.contains("GameThreadSchedulerDelay"));
+        assert!(summary.contains("candidate"));
+        assert!(summary.contains("inference"));
     }
 
     #[test]
