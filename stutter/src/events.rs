@@ -25,7 +25,7 @@ pub fn handle_irq_event(
 ) {
     let record = irq_event_record(monotonic_start_ns, event);
     if let Some(writer) = recorder.irq_event_writer.as_mut() {
-        push_json_stream_event(
+        push_ndjson_event(
             writer,
             &record,
             &mut recorder.irq_event_count,
@@ -66,7 +66,7 @@ pub fn handle_migration_event(
             to_cpu: event.to_cpu,
             timestamp_ns: event.timestamp_ns,
         };
-        push_json_stream_event(
+        push_ndjson_event(
             writer,
             &record,
             &mut recorder.migration_event_count,
@@ -87,7 +87,7 @@ pub fn handle_cpu_freq_event(event: &CpuFreqEvent, recorder: &mut LiveRecorder, 
             freq_khz: event.state,
             timestamp_ns: event.timestamp_ns,
         };
-        push_json_stream_event(
+        push_ndjson_event(
             writer,
             &record,
             &mut recorder.cpu_freq_sample_count,
@@ -120,7 +120,7 @@ pub fn handle_block_io_event(
                 .trim_matches(char::from(0))
                 .to_owned(),
         };
-        push_json_stream_event(
+        push_ndjson_event(
             writer,
             &record,
             &mut recorder.block_io_event_count,
@@ -156,7 +156,8 @@ pub fn handle_exec_event(item: &[u8], tasks: &mut TaskTracker) {
     }
 }
 
-pub fn push_json_stream_event<T: Serialize>(
+/// Pushes an event to an NDJSON stream.
+pub fn push_ndjson_event<T: Serialize>(
     writer: &mut JsonArrayWriter,
     value: &T,
     count: &mut u64,
@@ -167,7 +168,7 @@ pub fn push_json_stream_event<T: Serialize>(
     match writer.push(value) {
         Ok(()) => *count += 1,
         Err(err) => {
-            warn!("json_stream_write_failed stream={stream_name} err={err:#}");
+            warn!("ndjson_write_failed stream={stream_name} err={err:#}");
             *error_count += 1;
             if first_error.is_none() {
                 *first_error = Some(format!("{stream_name}: {err:#}"));

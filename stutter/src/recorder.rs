@@ -109,6 +109,10 @@ pub struct RecordingRun {
     pub mangohud_first_frame_raw_elapsed_ms: Option<u128>,
 }
 
+/// A writer for Newline Delimited JSON (NDJSON) streams.
+///
+/// Despite its name, this writes a stream of JSON objects separated by newlines,
+/// not a single JSON array.
 #[derive(Debug)]
 pub struct JsonArrayWriter {
     file: fs::File,
@@ -183,7 +187,7 @@ impl JsonArrayWriter {
     pub fn create(path: PathBuf) -> anyhow::Result<Self> {
         if path.file_name().is_none() {
             anyhow::bail!(
-                "JSON stream destination has no file name: {}",
+                "NDJSON stream destination has no file name: {}",
                 path.display()
             );
         }
@@ -192,7 +196,7 @@ impl JsonArrayWriter {
         }
 
         let file = fs::File::create(&path)
-            .with_context(|| format!("failed to create JSON stream {}", path.display()))?;
+            .with_context(|| format!("failed to create NDJSON stream {}", path.display()))?;
 
         Ok(Self {
             file,
@@ -204,11 +208,11 @@ impl JsonArrayWriter {
 
     pub fn push<T: Serialize>(&mut self, value: &T) -> anyhow::Result<()> {
         if self.finished {
-            anyhow::bail!("JSON stream {} is already finalized", self.path.display());
+            anyhow::bail!("NDJSON stream {} is already finalized", self.path.display());
         }
 
         serde_json::to_writer(&mut self.file, value)
-            .with_context(|| format!("failed to write JSON stream {}", self.path.display()))?;
+            .with_context(|| format!("failed to write NDJSON stream {}", self.path.display()))?;
         self.file.write_all(b"\n")?;
         self.wrote_any = true;
         Ok(())
@@ -221,7 +225,7 @@ impl JsonArrayWriter {
 
         self.file
             .sync_all()
-            .with_context(|| format!("failed to sync JSON stream {}", self.path.display()))?;
+            .with_context(|| format!("failed to sync NDJSON stream {}", self.path.display()))?;
         self.finished = true;
         Ok(())
     }
@@ -1423,8 +1427,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn json_array_writer_outputs_valid_concatenated_json() {
-        let dir = temp_dir("json-array-writer");
+    fn ndjson_writer_outputs_valid_stream() {
+        let dir = temp_dir("ndjson-writer");
         fs::create_dir_all(&dir).unwrap();
         let empty_path = dir.join("empty.json");
         {

@@ -768,7 +768,7 @@ impl MonitorSession {
     pub fn handle_scx_tick(&mut self) {
         if let Some(event) = self.scx_tracker.sample(self.started.elapsed().as_millis()) {
             if let Some(writer) = self.recorder.scx_event_writer.as_mut() {
-                crate::events::push_json_stream_event(
+                crate::events::push_ndjson_event(
                     writer,
                     &event,
                     &mut self.recorder.scx_event_count,
@@ -802,7 +802,7 @@ impl MonitorSession {
                 self.recent_telemetry.push_gpu(sample.clone());
 
                 if let Some(writer) = self.recorder.gpu_sample_writer.as_mut() {
-                    crate::events::push_json_stream_event(
+                    crate::events::push_ndjson_event(
                         writer,
                         &sample,
                         &mut self.recorder.gpu_sample_count,
