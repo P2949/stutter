@@ -332,7 +332,7 @@ fn alert_payload_captures_spike_task_identity() {
         TaskClass::Game,
     ));
 
-    let payload = AlertPayload::from_task_stats(&stats, &event, 1234);
+    let payload = AlertPayload::from_task_stats(&stats, &event, 1234, None, None, None);
 
     assert_eq!(payload.title, "stutter latency alert");
     assert_eq!(payload.task, 7);
