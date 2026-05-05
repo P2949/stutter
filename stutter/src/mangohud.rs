@@ -159,25 +159,52 @@ pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u
 
     use tokio::time::{Duration, sleep};
 
+    let mut elapsed_idx_cache: Option<Option<usize>> = None;
+
     loop {
-        let mut file = fs::File::open(path)?;
+        let mut file = match fs::File::open(path) {
+            Ok(file) => file,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                sleep(Duration::from_millis(500)).await;
+                continue;
+            }
+            Err(err) => return Err(err.into()),
+        };
+
         let len = file.metadata()?.len();
-        if len > start_offset {
-            file.seek(SeekFrom::Start(start_offset))?;
-            let mut reader = std::io::BufReader::new(file);
+
+        if elapsed_idx_cache.is_none() {
             let mut header_buf = String::new();
-            // We need the header to find the elapsed column
-            {
-                let hfile = fs::File::open(path)?;
-                let mut hreader = std::io::BufReader::new(hfile);
-                hreader.read_line(&mut header_buf)?;
+
+            let hfile = match fs::File::open(path) {
+                Ok(file) => file,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            };
+
+            let mut hreader = std::io::BufReader::new(hfile);
+            hreader.read_line(&mut header_buf)?;
+
+            if header_buf.trim().is_empty() {
+                sleep(Duration::from_millis(500)).await;
+                continue;
             }
 
             let headers = split_csv_line(&header_buf);
-            let elapsed_idx = find_header(&headers, &["elapsed_ms", "time_ms", "ms"]);
+            elapsed_idx_cache = Some(find_header(&headers, &["elapsed_ms", "time_ms", "ms"]));
+        }
+
+        let elapsed_idx = elapsed_idx_cache.flatten();
+
+        if len > start_offset {
+            file.seek(SeekFrom::Start(start_offset))?;
+            let mut reader = std::io::BufReader::new(file);
 
             let mut line = String::new();
-            // Skip partial line if we started in the middle
+
             if start_offset > 0 {
                 let mut f2 = fs::File::open(path)?;
                 f2.seek(SeekFrom::Start(start_offset - 1))?;
@@ -191,16 +218,18 @@ pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u
             if reader.read_line(&mut line)? > 0 {
                 let observed_ns = monotonic_now_ns().unwrap_or(0);
                 let columns = split_csv_line(&line);
+
                 if let Some(raw_elapsed) = elapsed_idx
                     .and_then(|idx| columns.get(idx))
                     .and_then(|value| value.parse::<f64>().ok())
                 {
                     return Ok((raw_elapsed.max(0.0) as u128, observed_ns));
                 }
-                // If no elapsed column, we still observed the row
+
                 return Ok((0, observed_ns));
             }
         }
+
         sleep(Duration::from_millis(500)).await;
     }
 }
