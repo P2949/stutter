@@ -425,14 +425,23 @@ mod tests {
         assert_eq!(process_match_score(p, pl, "MY-GAME", ""), Some(4));
 
         // Score 3: Executable basename match
-        assert_eq!(process_match_score(p, pl, "other", "/usr/bin/my-game"), Some(3));
-        assert_eq!(process_match_score(p, pl, "other", "C:\\Games\\my-game"), Some(3));
+        assert_eq!(
+            process_match_score(p, pl, "other", "/usr/bin/my-game"),
+            Some(3)
+        );
+        assert_eq!(
+            process_match_score(p, pl, "other", "C:\\Games\\my-game"),
+            Some(3)
+        );
 
         // Score 2: comm substring match
         assert_eq!(process_match_score(p, pl, "super-my-game-pro", ""), Some(2));
 
         // Score 1: cmdline substring match
-        assert_eq!(process_match_score(p, pl, "other", "--game=my-game"), Some(1));
+        assert_eq!(
+            process_match_score(p, pl, "other", "--game=my-game"),
+            Some(1)
+        );
 
         // None: No match
         assert_eq!(process_match_score(p, pl, "other", "--foo"), None);

@@ -76,9 +76,18 @@ impl std::fmt::Debug for LiveRecorder {
             .field("gpu_sample_count", &self.gpu_sample_count)
             .field("block_io_event_count", &self.block_io_event_count)
             .field("interval_record_count", &self.interval_record_count)
-            .field("spike_events_dropped_count", &self.spike_events_dropped_count)
-            .field("alert_events_dropped_count", &self.alert_events_dropped_count)
-            .field("alert_channel_closed_count", &self.alert_channel_closed_count)
+            .field(
+                "spike_events_dropped_count",
+                &self.spike_events_dropped_count,
+            )
+            .field(
+                "alert_events_dropped_count",
+                &self.alert_events_dropped_count,
+            )
+            .field(
+                "alert_channel_closed_count",
+                &self.alert_channel_closed_count,
+            )
             .field("event_stream_write_errors", &self.event_stream_write_errors)
             .field(
                 "first_event_stream_write_error",
