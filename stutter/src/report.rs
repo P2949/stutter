@@ -1285,6 +1285,11 @@ pub(crate) fn data_quality_summary(
         reasons.push("recording stream had write errors".to_owned());
     }
 
+    if !validation.missing_optional_files.is_empty() {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("optional correlation artifacts are missing".to_owned());
+    }
+
     if session.spike_events_truncated {
         level = downgrade_quality(level, DataQualityLevel::Medium);
         reasons.push("spike event stream was truncated".to_owned());
@@ -2069,16 +2074,7 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
         .join(" ");
 
     let diagnosis_line = if let Some(d) = &cluster.diagnosis {
-        let evidence = d.evidence.join("; ");
-        let secondary = if d.secondary_causes.is_empty() {
-            String::new()
-        } else {
-            format!(" secondary={:?}", d.secondary_causes)
-        };
-        format!(
-            "\n  diagnosis: primary={:?} confidence={:?}{} evidence=[{}]",
-            d.cause, d.confidence, secondary, evidence
-        )
+        format!("\n{}", render_diagnosis_lines(d, "  "))
     } else {
         String::new()
     };
@@ -2099,6 +2095,51 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
         points,
         diagnosis_line
     )
+}
+
+fn render_diagnosis_lines(diagnosis: &Diagnosis, indent: &str) -> String {
+    let mut output = String::new();
+    pushln(
+        &mut output,
+        format!("{indent}diagnosis: {}", diagnosis.report_summary()),
+    );
+    output.push_str(&render_diagnosis_detail_lines(diagnosis, indent));
+    output.trim_end().to_owned()
+}
+
+fn render_diagnosis_detail_lines(diagnosis: &Diagnosis, indent: &str) -> String {
+    let mut output = String::new();
+    if !diagnosis.secondary_causes.is_empty() {
+        pushln(
+            &mut output,
+            format!(
+                "{indent}diagnosis_secondary causes={:?}",
+                diagnosis.secondary_causes
+            ),
+        );
+    }
+
+    for candidate in diagnosis.candidates.iter().take(3) {
+        pushln(
+            &mut output,
+            format!(
+                "{indent}diagnosis_candidate cause={:?} confidence={:?} score={:.2}",
+                candidate.cause, candidate.confidence, candidate.score
+            ),
+        );
+
+        for evidence in candidate.evidence.iter().take(3) {
+            pushln(
+                &mut output,
+                format!(
+                    "{indent}  evidence kind={:?} strength={:.2} msg={}",
+                    evidence.kind, evidence.strength, evidence.message
+                ),
+            );
+        }
+    }
+
+    output.trim_end().to_owned()
 }
 
 fn render_cluster_point(point: &SpikePoint) -> String {
@@ -2270,26 +2311,19 @@ fn perform_frame_diagnosis(
 }
 
 fn render_frame_diagnosis(rank: usize, diag: &FrameDiagnosis) -> String {
-    let mut evidence = diag.diagnosis.evidence.join(", ");
-    if !diag.diagnosis.secondary_causes.is_empty() {
-        let secondary: Vec<_> = diag
-            .diagnosis
-            .secondary_causes
-            .iter()
-            .map(|c| format!("{:?}", c))
-            .collect();
-        evidence.push_str(&format!(" (secondary: {})", secondary.join(", ")));
-    }
-
-    format!(
-        "{}. elapsed={}ms frametime={:.1}ms cause={:?} confidence={:?} evidence=\"{}\"",
-        rank,
-        diag.frame_elapsed_ms,
-        diag.frametime_ms,
-        diag.diagnosis.cause,
-        diag.diagnosis.confidence,
-        evidence
-    )
+    let mut output = String::new();
+    pushln(
+        &mut output,
+        format!(
+            "{}. elapsed={}ms frametime={:.1}ms diagnosis: {}",
+            rank,
+            diag.frame_elapsed_ms,
+            diag.frametime_ms,
+            diag.diagnosis.report_summary()
+        ),
+    );
+    output.push_str(&render_diagnosis_detail_lines(&diag.diagnosis, "  "));
+    output.trim_end().to_owned()
 }
 
 fn compute_correlation_windows(
@@ -2345,6 +2379,29 @@ mod tests {
             active_target_pids_count: 1,
             block_io_correlation_basis: "request-pointer".to_owned(),
             ..Default::default()
+        }
+    }
+
+    fn spike_point_for_report_test(
+        task: u32,
+        class: TaskClass,
+        comm: &str,
+        latency_ns: u64,
+    ) -> SpikePoint {
+        SpikePoint {
+            task,
+            class,
+            process_pid: Some(task),
+            comm: comm.to_owned(),
+            cpu: 0,
+            wakeup_target_cpu: 0,
+            latency_ns,
+            wakeup_ns: 10_000_000,
+            switch_ns: 10_000_000 + latency_ns,
+            target_pending_wakeups: 0,
+            elapsed_ms: Some(100),
+            scx_ops: None,
+            scx_state: None,
         }
     }
 
@@ -2404,6 +2461,25 @@ mod tests {
     }
 
     #[test]
+    fn data_quality_warns_on_missing_optional_artifacts() {
+        let session = minimal_session_for_report_test();
+        let validation = crate::session_io::RunValidationReport {
+            missing_optional_files: vec!["frame_correlation.json".to_owned()],
+            ..Default::default()
+        };
+
+        let summary = data_quality_summary(&session, &validation);
+
+        assert_eq!(summary.level, DataQualityLevel::Medium);
+        assert!(
+            summary
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("optional correlation artifacts"))
+        );
+    }
+
+    #[test]
     fn render_report_includes_data_quality_section() {
         let session = minimal_session_for_report_test();
         let output = render_report(
@@ -2423,6 +2499,32 @@ mod tests {
 
         assert!(output.contains("data quality"));
         assert!(output.contains("level: High"));
+    }
+
+    #[test]
+    fn render_cluster_uses_cautious_diagnosis_wording() {
+        let mut cluster = cluster_from_points(
+            vec![spike_point_for_report_test(
+                456,
+                TaskClass::Game,
+                "RenderThread",
+                8_000_000,
+            )],
+            1,
+        );
+        cluster.diagnosis = Some(diagnose_cluster(
+            &cluster,
+            &session_io::RunArtifacts::default(),
+            0,
+        ));
+
+        let output = render_cluster(1, &cluster);
+
+        assert!(output.contains("diagnosis: GameThreadSchedulerDelay: strong candidate"));
+        assert!(output.contains("profiler inference"));
+        assert!(output.contains("diagnosis_candidate cause=GameThreadSchedulerDelay"));
+        assert!(output.contains("evidence kind=SchedulerDelay"));
+        assert!(!output.contains("diagnosis: primary="));
     }
 
     #[test]

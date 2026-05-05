@@ -189,6 +189,8 @@ The levels are:
 
 For machine-readable consumers, `stutter report --analysis-json <run-dir>` includes the same data-quality summary.
 
+Diagnosis output uses candidate wording intentionally. A `High` confidence diagnosis means the evidence is strong for a profiler inference, not proof of root cause. `Medium` and `Low` confidence diagnoses should be treated as leads for further testing. Text reports show the top diagnosis candidates and evidence items so the score is auditable instead of sounding final.
+
 Generate a self-contained HTML report:
 
 ```bash
