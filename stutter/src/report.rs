@@ -8,7 +8,9 @@ use anyhow::Context;
 use serde::Serialize;
 
 use crate::{
-    diagnosis::{ClusterAnchorKind, Diagnosis, FrameDiagnosis, diagnose_cluster, select_anchor},
+    diagnosis::{
+        ClusterAnchorKind, Diagnosis, FrameDiagnosis, diagnose_cluster, select_anchor_for_diagnosis,
+    },
     metrics::format_latency,
     process_tree::TaskClass,
     recorder::{
@@ -1382,7 +1384,7 @@ fn perform_diagnosis(
 ) {
     for cluster in clusters {
         let diagnosis = diagnose_cluster(cluster, artifacts, cluster_window_ns);
-        let anchor = select_anchor(cluster);
+        let anchor = select_anchor_for_diagnosis(cluster, &diagnosis);
         cluster.anchor_task = Some(anchor.task);
         cluster.anchor_class = Some(anchor.class);
         cluster.anchor_comm = Some(anchor.comm);

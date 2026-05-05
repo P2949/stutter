@@ -227,6 +227,49 @@ fn finalize_diagnosis(mut candidates: Vec<DiagnosisCandidate>) -> Diagnosis {
     }
 }
 
+pub(crate) fn select_anchor_for_diagnosis(
+    cluster: &SpikeCluster,
+    diagnosis: &Diagnosis,
+) -> ClusterAnchor {
+    if diagnosis.cause == StutterCause::GameThreadSchedulerDelay {
+        let game_anchor = cluster
+            .points
+            .iter()
+            .filter(|p| is_game_point(p) && p.latency_ns > SCHED_DELAY_SIGNIFICANT_NS)
+            .max_by_key(|p| p.latency_ns);
+
+        if let Some(p) = game_anchor {
+            return ClusterAnchor {
+                task: p.task,
+                class: p.class,
+                comm: p.comm.clone(),
+                latency_ns: p.latency_ns,
+                kind: ClusterAnchorKind::Game,
+            };
+        }
+    }
+
+    if diagnosis.cause == StutterCause::CompositorSchedulerDelay {
+        let compositor_anchor = cluster
+            .points
+            .iter()
+            .filter(|p| is_compositor_point(p) && p.latency_ns > SCHED_DELAY_SIGNIFICANT_NS)
+            .max_by_key(|p| p.latency_ns);
+
+        if let Some(p) = compositor_anchor {
+            return ClusterAnchor {
+                task: p.task,
+                class: p.class,
+                comm: p.comm.clone(),
+                latency_ns: p.latency_ns,
+                kind: ClusterAnchorKind::Compositor,
+            };
+        }
+    }
+
+    select_anchor(cluster)
+}
+
 pub(crate) fn select_anchor(cluster: &SpikeCluster) -> ClusterAnchor {
     // 1. Prefer highest-latency TaskClass::Compositor or TaskClass::GameScope point above 2ms.
     let compositor_anchor = cluster
@@ -769,5 +812,37 @@ mod tests {
         assert!(d.primary.is_some());
         assert!(!d.candidates.is_empty());
         assert!(d.summary.contains("primary="));
+    }
+
+    #[test]
+    fn cluster_anchor_follows_ranked_game_primary() {
+        // compositor 3ms + game 10ms => diagnosis primary GameThreadSchedulerDelay and anchor_kind Game
+        let cluster = spike_cluster(vec![
+            spike_point(123, TaskClass::Compositor, "sway", 3_000_000),
+            spike_point(456, TaskClass::Game, "RenderThread", 10_000_000),
+        ]);
+
+        let d = diagnose_cluster(&cluster, &RunArtifacts::default(), 0);
+        assert_eq!(d.cause, StutterCause::GameThreadSchedulerDelay);
+
+        let anchor = select_anchor_for_diagnosis(&cluster, &d);
+        assert_eq!(anchor.kind, ClusterAnchorKind::Game);
+        assert_eq!(anchor.task, 456);
+    }
+
+    #[test]
+    fn cluster_anchor_follows_compositor_primary() {
+        // compositor 6ms + game 5ms => diagnosis primary CompositorSchedulerDelay and anchor_kind Compositor
+        let cluster = spike_cluster(vec![
+            spike_point(123, TaskClass::Compositor, "sway", 6_000_000),
+            spike_point(456, TaskClass::Game, "RenderThread", 5_000_000),
+        ]);
+
+        let d = diagnose_cluster(&cluster, &RunArtifacts::default(), 0);
+        assert_eq!(d.cause, StutterCause::CompositorSchedulerDelay);
+
+        let anchor = select_anchor_for_diagnosis(&cluster, &d);
+        assert_eq!(anchor.kind, ClusterAnchorKind::Compositor);
+        assert_eq!(anchor.task, 123);
     }
 }
