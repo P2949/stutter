@@ -141,14 +141,9 @@ pub fn print_report(
         );
     }
 
-    let artifacts = session_io::load_run_artifacts(path, ArtifactLoadOptions::REPORT)?;
+    let mut artifacts = session_io::load_run_artifacts(path, ArtifactLoadOptions::REPORT)?;
     let session = artifacts.session.clone();
     let _metadata = artifacts.metadata.clone();
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&session)?);
-        return Ok(());
-    }
 
     let median_frametime = calculate_median_frametime(&artifacts.frame_events);
     let frame_spikes = identify_frame_spikes(&artifacts.frame_events, median_frametime);
@@ -167,6 +162,14 @@ pub fn print_report(
         top,
         filter_class,
     );
+
+    let windows = compute_correlation_windows(
+        &session,
+        &cluster_analysis.clusters,
+        &frame_spikes,
+        cluster_window_ns,
+    );
+    artifacts.load_correlations(windows)?;
 
     let mut cluster_analysis = cluster_analysis;
     perform_diagnosis(
@@ -188,6 +191,11 @@ pub fn print_report(
         &artifacts,
         cluster_window_ns,
     );
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&session)?);
+        return Ok(());
+    }
 
     if analysis_json {
         let artifacts_summary = ArtifactsSummary {
@@ -596,7 +604,7 @@ pub fn write_html_report(
     cluster_window_ms: u64,
     filter_class: Option<TaskClass>,
 ) -> anyhow::Result<()> {
-    let artifacts = session_io::load_run_artifacts(path, ArtifactLoadOptions::REPORT)?;
+    let mut artifacts = session_io::load_run_artifacts(path, ArtifactLoadOptions::REPORT)?;
     let session = artifacts.session.clone();
 
     let median_frametime = calculate_median_frametime(&artifacts.frame_events);
@@ -616,6 +624,15 @@ pub fn write_html_report(
         top,
         filter_class,
     );
+
+    let windows = compute_correlation_windows(
+        &session,
+        &cluster_analysis.clusters,
+        &frame_spikes,
+        cluster_window_ns,
+    );
+    artifacts.load_correlations(windows)?;
+
     let mut cluster_analysis = cluster_analysis;
     perform_diagnosis(
         &mut cluster_analysis.clusters,
@@ -2010,6 +2027,46 @@ fn render_frame_diagnosis(rank: usize, diag: &FrameDiagnosis) -> String {
         diag.diagnosis.confidence,
         evidence
     )
+}
+
+fn compute_correlation_windows(
+    session: &SessionFile,
+    clusters: &[SpikeCluster],
+    frame_spikes: &[FrameEvent],
+    cluster_window_ns: u64,
+) -> session_io::CorrelationWindows {
+    let mut windows = session_io::CorrelationWindows::default();
+    let padding_ms = u128::from(cluster_window_ns / 1_000_000).max(1);
+
+    for cluster in clusters {
+        let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
+        let max_ns = cluster.max_switch_ns.saturating_add(cluster_window_ns);
+        windows.windows_ns.push((min_ns, max_ns));
+
+        if let Some((min_e, max_e)) = cluster_elapsed_range(cluster) {
+            // Padding for SCX (2000ms), CPU freq (50ms), GPU (50ms), intervals (1000ms)
+            windows.windows_ms.push((
+                min_e.saturating_sub(2000).max(padding_ms),
+                max_e.saturating_add(2000).max(padding_ms),
+            ));
+        }
+    }
+
+    for frame in frame_spikes {
+        if let Some(start_ns) = session.monotonic_start_ns {
+            let frame_ns = start_ns + (frame.elapsed_ms as u64 * 1_000_000);
+            windows.windows_ns.push((
+                frame_ns.saturating_sub(cluster_window_ns),
+                frame_ns.saturating_add(cluster_window_ns),
+            ));
+        }
+        windows.windows_ms.push((
+            frame.elapsed_ms.saturating_sub(2000).max(padding_ms),
+            frame.elapsed_ms.saturating_add(2000).max(padding_ms),
+        ));
+    }
+
+    windows
 }
 
 #[cfg(test)]

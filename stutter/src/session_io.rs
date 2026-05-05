@@ -32,6 +32,26 @@ pub struct RunArtifacts {
     pub validation: RunValidationReport,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct CorrelationWindows {
+    pub windows_ms: Vec<(u128, u128)>,
+    pub windows_ns: Vec<(u64, u64)>,
+}
+
+impl CorrelationWindows {
+    pub fn is_in_ms(&self, ms: u128) -> bool {
+        self.windows_ms
+            .iter()
+            .any(|(min, max)| ms >= *min && ms <= *max)
+    }
+
+    pub fn is_in_ns(&self, ns: u64) -> bool {
+        self.windows_ns
+            .iter()
+            .any(|(min, max)| ns >= *min && ns <= *max)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ArtifactLoadOptions {
     pub load_intervals: bool,
@@ -48,16 +68,16 @@ pub struct ArtifactLoadOptions {
 
 impl ArtifactLoadOptions {
     pub const REPORT: Self = Self {
-        load_intervals: true,
+        load_intervals: false,
         load_spikes: true,
-        load_tree_events: true,
-        load_irq_events: true,
-        load_gpu_samples: true,
+        load_tree_events: false,
+        load_irq_events: false,
+        load_gpu_samples: false,
         load_frame_events: true,
-        load_migration_events: true,
-        load_cpu_freq_events: true,
-        load_block_io_events: true,
-        load_scx_events: true,
+        load_migration_events: false,
+        load_cpu_freq_events: false,
+        load_block_io_events: false,
+        load_scx_events: false,
     };
 
     pub const TUNE: Self = Self {
@@ -121,7 +141,10 @@ fn load_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
     serde_json::from_reader(file).with_context(|| format!("failed to parse {}", path.display()))
 }
 
-fn load_ndjson_file<T: DeserializeOwned>(path: &Path) -> Result<Vec<T>> {
+fn load_ndjson_file_filtered<T: DeserializeOwned, F: Fn(&T) -> bool>(
+    path: &Path,
+    filter: F,
+) -> Result<Vec<T>> {
     let file =
         fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let reader = std::io::BufReader::new(file);
@@ -129,9 +152,16 @@ fn load_ndjson_file<T: DeserializeOwned>(path: &Path) -> Result<Vec<T>> {
     let deserializer = serde_json::Deserializer::from_reader(reader);
     let iter = deserializer.into_iter::<T>();
     for item in iter {
-        results.push(item.with_context(|| format!("failed to parse {}", path.display()))?);
+        let val = item.with_context(|| format!("failed to parse {}", path.display()))?;
+        if filter(&val) {
+            results.push(val);
+        }
     }
     Ok(results)
+}
+
+fn load_ndjson_file<T: DeserializeOwned>(path: &Path) -> Result<Vec<T>> {
+    load_ndjson_file_filtered(path, |_| true)
 }
 
 fn session_path_for(path: &Path) -> PathBuf {
@@ -342,6 +372,99 @@ fn check_consistency(artifacts: &mut RunArtifacts) {
             artifacts.spikes.len()
         ));
     }
+}
+
+impl RunArtifacts {
+    pub fn load_correlations(&mut self, windows: CorrelationWindows) -> Result<()> {
+        let run_dir = &self.run_dir;
+        let validation = &mut self.validation;
+
+        self.intervals = load_optional_json_vec_filtered(
+            run_dir,
+            INTERVALS_FILE,
+            validation,
+            |r: &IntervalRecord| windows.is_in_ms(r.elapsed_ms),
+        )?;
+
+        self.tree_events = load_optional_json_vec(run_dir, TREE_EVENTS_FILE, validation)?;
+
+        self.irq_events = load_optional_json_vec_filtered(
+            run_dir,
+            IRQ_EVENTS_FILE,
+            validation,
+            |r: &IrqEventRecord| {
+                windows.is_in_ns(r.enter_ns)
+                    || windows.is_in_ns(r.exit_ns)
+                    || (r.enter_ns < windows.windows_ns.iter().map(|w| w.1).max().unwrap_or(0)
+                        && r.exit_ns
+                            > windows
+                                .windows_ns
+                                .iter()
+                                .map(|w| w.0)
+                                .min()
+                                .unwrap_or(u64::MAX))
+            },
+        )?;
+
+        self.gpu_samples = load_optional_json_vec_filtered(
+            run_dir,
+            GPU_SAMPLES_FILE,
+            validation,
+            |r: &GpuSample| windows.is_in_ms(r.elapsed_ms),
+        )?;
+
+        self.migration_events = load_optional_json_vec_filtered(
+            run_dir,
+            MIGRATION_EVENTS_FILE,
+            validation,
+            |r: &MigrationEventRecord| windows.is_in_ns(r.timestamp_ns),
+        )?;
+
+        self.cpu_freq_events = load_optional_json_vec_filtered(
+            run_dir,
+            CPU_FREQ_EVENTS_FILE,
+            validation,
+            |r: &CpuFreqRecord| windows.is_in_ns(r.timestamp_ns),
+        )?;
+
+        self.block_io_events = load_optional_json_vec_filtered(
+            run_dir,
+            BLOCK_IO_EVENTS_FILE,
+            validation,
+            |r: &BlockIoRecord| {
+                windows.is_in_ns(r.timestamp_ns)
+                    || windows.is_in_ns(r.timestamp_ns.saturating_sub(r.duration_ns))
+            },
+        )?;
+
+        self.scx_events = load_optional_json_vec_filtered(
+            run_dir,
+            SCX_EVENTS_FILE,
+            validation,
+            |r: &ScxEvent| windows.is_in_ms(r.elapsed_ms),
+        )?;
+
+        Ok(())
+    }
+}
+
+fn load_optional_json_vec_filtered<T: DeserializeOwned, F: Fn(&T) -> bool>(
+    run_dir: &Path,
+    file_name: &str,
+    validation: &mut RunValidationReport,
+    filter: F,
+) -> Result<Vec<T>> {
+    let path = json_path_for(run_dir, file_name);
+
+    if !path.exists() {
+        validation.missing_optional_files.push(file_name.to_owned());
+        return Ok(Vec::new());
+    }
+
+    if !validation.present_files.contains(&file_name.to_owned()) {
+        validation.present_files.push(file_name.to_owned());
+    }
+    load_ndjson_file_filtered(&path, filter)
 }
 
 pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
@@ -601,7 +724,7 @@ mod tests {
     fn load_run_artifacts_missing_optional_files_warns() {
         let dir = temp_dir("missing-optional");
         write_minimal_session(&dir);
-        let artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::REPORT).unwrap();
+        let artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::TUNE).unwrap();
         assert!(
             artifacts
                 .validation
@@ -617,7 +740,7 @@ mod tests {
         let dir = temp_dir("invalid-optional");
         write_minimal_session(&dir);
         fs::write(dir.join(INTERVALS_FILE), "invalid json").unwrap();
-        let result = load_run_artifacts(&dir, ArtifactLoadOptions::REPORT);
+        let result = load_run_artifacts(&dir, ArtifactLoadOptions::TUNE);
         assert!(result.is_err());
         std::fs::remove_dir_all(dir).ok();
     }
