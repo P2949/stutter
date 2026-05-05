@@ -61,7 +61,21 @@ impl ScxTracker {
     }
 
     fn record_snapshot(&mut self, snapshot: ScxSnapshot, elapsed_ms: u128) -> Option<ScxEvent> {
+        let was_active = self.last.as_ref().is_some_and(|s| !s.is_empty());
+
         if snapshot.is_empty() {
+            if was_active {
+                let event = ScxEvent {
+                    elapsed_ms,
+                    state: None,
+                    ops: None,
+                    enable_seq: None,
+                };
+                #[cfg(test)]
+                self.events.push(event.clone());
+                self.last = Some(snapshot);
+                return Some(event);
+            }
             return None;
         }
 
@@ -144,6 +158,39 @@ mod tests {
         tracker.sample_at(&root, 0);
 
         assert!(tracker.events().is_empty());
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn emits_event_on_active_to_inactive_transition() {
+        let root = temp_dir("scx-transition");
+        fs::create_dir_all(root.join("root")).unwrap();
+        fs::write(root.join("state"), "enabled\n").unwrap();
+        fs::write(root.join("root/ops"), "scx_lavd\n").unwrap();
+        fs::write(root.join("enable_seq"), "1\n").unwrap();
+
+        let mut tracker = ScxTracker::default();
+        let ev1 = tracker.sample_at(&root, 0);
+        assert!(ev1.is_some());
+        assert_eq!(tracker.events().len(), 1);
+
+        // Make it inactive by removing files or making them empty
+        fs::remove_dir_all(root.join("root")).unwrap();
+        fs::remove_file(root.join("state")).unwrap();
+        fs::remove_file(root.join("enable_seq")).unwrap();
+
+        let ev2 = tracker.sample_at(&root, 1_000);
+        assert!(ev2.is_some());
+        assert_eq!(tracker.events().len(), 2);
+        assert!(tracker.events()[1].state.is_none());
+        assert!(tracker.events()[1].ops.is_none());
+        assert!(tracker.events()[1].enable_seq.is_none());
+
+        // Subsequent empty snapshots should NOT emit events
+        let ev3 = tracker.sample_at(&root, 2_000);
+        assert!(ev3.is_none());
+        assert_eq!(tracker.events().len(), 2);
+
         fs::remove_dir_all(root).ok();
     }
 
