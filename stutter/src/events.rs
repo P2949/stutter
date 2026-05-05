@@ -259,7 +259,16 @@ pub fn handle_event(
     {
         let alert_payload = AlertPayload::from_task_stats(stats, event, elapsed_ms);
         if let Err(err) = sender.try_send(alert_payload) {
-            warn!("alert_send_failed err={err}");
+            match err {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    warn!("alert_channel_full_dropping_alert");
+                    recorder.alert_events_dropped_count += 1;
+                }
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
+                    warn!("alert_channel_closed");
+                    recorder.alert_channel_closed_count += 1;
+                }
+            }
         }
     }
 

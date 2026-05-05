@@ -52,6 +52,8 @@ pub struct LiveRecorder {
     pub block_io_event_count: u64,
     pub interval_record_count: u64,
     pub spike_events_dropped_count: u64,
+    pub alert_events_dropped_count: u64,
+    pub alert_channel_closed_count: u64,
     pub event_stream_write_errors: u64,
     pub first_event_stream_write_error: Option<String>,
 }
@@ -74,6 +76,9 @@ impl std::fmt::Debug for LiveRecorder {
             .field("gpu_sample_count", &self.gpu_sample_count)
             .field("block_io_event_count", &self.block_io_event_count)
             .field("interval_record_count", &self.interval_record_count)
+            .field("spike_events_dropped_count", &self.spike_events_dropped_count)
+            .field("alert_events_dropped_count", &self.alert_events_dropped_count)
+            .field("alert_channel_closed_count", &self.alert_channel_closed_count)
             .field("event_stream_write_errors", &self.event_stream_write_errors)
             .field(
                 "first_event_stream_write_error",
@@ -346,6 +351,10 @@ pub struct SessionFile {
     #[serde(default)]
     pub event_stream_write_errors: u64,
     #[serde(default)]
+    pub alert_events_dropped_count: u64,
+    #[serde(default)]
+    pub alert_channel_closed_count: u64,
+    #[serde(default)]
     pub first_event_stream_write_error: Option<String>,
     #[serde(default = "default_block_io_correlation_basis")]
     pub block_io_correlation_basis: String,
@@ -400,6 +409,10 @@ pub struct MetadataFile {
     pub block_io_event_count: u64,
     #[serde(default)]
     pub event_stream_write_errors: u64,
+    #[serde(default)]
+    pub alert_events_dropped_count: u64,
+    #[serde(default)]
+    pub alert_channel_closed_count: u64,
     #[serde(default)]
     pub first_event_stream_write_error: Option<String>,
     #[serde(default = "default_block_io_correlation_basis")]
@@ -750,7 +763,7 @@ fn default_block_io_correlation_basis() -> String {
     "dev+sector".to_owned()
 }
 
-pub const SESSION_SCHEMA_VERSION: u32 = 17;
+pub const SESSION_SCHEMA_VERSION: u32 = 18;
 
 pub struct FinalizeRecordingInput<'a> {
     pub recorder: &'a LiveRecorder,
@@ -948,6 +961,8 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         frame_event_count: frame_events.len() as u64,
         block_io_event_count: recorder.block_io_event_count,
         event_stream_write_errors: recorder.event_stream_write_errors,
+        alert_events_dropped_count: recorder.alert_events_dropped_count,
+        alert_channel_closed_count: recorder.alert_channel_closed_count,
         first_event_stream_write_error: recorder.first_event_stream_write_error.clone(),
         block_io_correlation_basis: block_io_correlation_basis.to_owned(),
         drop_counters: drop_counters.clone(),
@@ -987,6 +1002,8 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         frame_event_count: frame_events.len() as u64,
         block_io_event_count: recorder.block_io_event_count,
         event_stream_write_errors: recorder.event_stream_write_errors,
+        alert_events_dropped_count: recorder.alert_events_dropped_count,
+        alert_channel_closed_count: recorder.alert_channel_closed_count,
         first_event_stream_write_error: recorder.first_event_stream_write_error.clone(),
         block_io_correlation_basis: block_io_correlation_basis.to_owned(),
         drop_counters: drop_counters.clone(),

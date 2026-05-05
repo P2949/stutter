@@ -156,13 +156,20 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
     }
     attach_tracepoint(&mut ebpf, "sched_switch", "sched", "sched_switch")
         .context("eBPF load failed: attach sched_switch")?;
-    attach_tracepoint(
-        &mut ebpf,
-        "sched_process_exit",
-        "sched",
-        "sched_process_exit",
-    )
-    .context("eBPF load failed: attach sched_process_exit")?;
+
+    if tracepoints.sched_process_exit {
+        attach_tracepoint(
+            &mut ebpf,
+            "sched_process_exit",
+            "sched",
+            "sched_process_exit",
+        )
+        .context("eBPF load failed: attach sched_process_exit")?;
+    } else {
+        log::warn!(
+            "sched_process_exit tracepoint unavailable; stale wakeup/fault cleanup on task exit is disabled"
+        );
+    }
 
     if tracepoints.sched_migrate_task {
         attach_tracepoint(
@@ -537,6 +544,7 @@ struct TracepointAvailability {
     block_rq_issue_rwbs_offset: Option<u32>,
     block_rq_complete_nr_sector_offset: Option<u32>,
     block_rq_complete_rwbs_offset: Option<u32>,
+    sched_process_exit: bool,
     sched_process_exec: bool,
 }
 
@@ -669,6 +677,13 @@ fn validate_tracepoint_formats(
         }
     }
 
+    let sched_process_exit = validate_optional_tracepoint_format_at(
+        &events_root.join("sched/sched_process_exit/format"),
+        "sched_process_exit",
+        &[],
+        true,
+    )?;
+
     let sched_process_exec = events_root.join("sched/sched_process_exec/format");
     let sched_process_exec = if config.follow_exec && sched_process_exec.exists() {
         validate_tracepoint_format_at(&sched_process_exec, &[])?;
@@ -690,6 +705,7 @@ fn validate_tracepoint_formats(
         block_rq_issue_rwbs_offset,
         block_rq_complete_nr_sector_offset,
         block_rq_complete_rwbs_offset,
+        sched_process_exit,
         sched_process_exec,
     })
 }
@@ -1134,6 +1150,51 @@ field:int irq; offset:8; size:4; signed:1;
         let err = validate_tracepoint_formats(&dir, &config).unwrap_err();
         assert!(err.to_string().contains("irq_handler_entry"));
         config.irq_latency = false;
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn validates_sched_process_exit_availability() {
+        let dir = temp_dir("process-exit");
+
+        // Required tracepoints
+        let sched_wakeup = dir.join("sched/sched_wakeup");
+        fs::create_dir_all(&sched_wakeup).unwrap();
+        fs::write(
+            sched_wakeup.join("format"),
+            "field:pid_t pid; offset:24; size:4; signed:1;\nfield:int prio; offset:28; size:4; signed:1;\nfield:int target_cpu; offset:32; size:4; signed:1;",
+        ).unwrap();
+
+        let sched_switch = dir.join("sched/sched_switch");
+        fs::create_dir_all(&sched_switch).unwrap();
+        fs::write(
+            sched_switch.join("format"),
+            "field:char next_comm[16]; offset:40; size:16; signed:1;\nfield:pid_t next_pid; offset:56; size:4; signed:1;\nfield:int next_prio; offset:60; size:4; signed:1;",
+        ).unwrap();
+
+        let config = match crate::cli::parse_app_command_from(["stutter", "monitor", "--pid", "42"])
+            .unwrap()
+        {
+            crate::cli::AppCommand::Monitor(c) => (*c).clone(),
+            _ => unreachable!(),
+        };
+
+        // Case 1: sched/sched_process_exit/format missing
+        let availability = validate_tracepoint_formats(&dir, &config).unwrap();
+        assert!(!availability.sched_process_exit);
+
+        // Case 2: sched/sched_process_exit/format present
+        let sched_process_exit = dir.join("sched/sched_process_exit");
+        fs::create_dir_all(&sched_process_exit).unwrap();
+        fs::write(
+            sched_process_exit.join("format"),
+            "field:pid_t pid; offset:12; size:4; signed:1;",
+        )
+        .unwrap();
+
+        let availability = validate_tracepoint_formats(&dir, &config).unwrap();
+        assert!(availability.sched_process_exit);
 
         fs::remove_dir_all(dir).ok();
     }
