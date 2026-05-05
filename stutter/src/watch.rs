@@ -195,21 +195,29 @@ pub fn process_match_score(
     cmdline: &str,
 ) -> Option<u8> {
     if comm == pattern {
-        return Some(4);
+        return Some(5);
     }
 
     let comm_lower = normalize_process_match_text(comm);
     if comm_lower == pattern_lower {
-        return Some(3);
+        return Some(4);
     }
 
     let cmdline_lower = normalize_process_match_text(cmdline);
     let exe_basename_lower = cmdline_executable_basename_lower(cmdline);
     if exe_basename_lower.as_deref() == Some(pattern_lower) {
+        return Some(3);
+    }
+
+    if comm_lower.contains(pattern_lower) {
         return Some(2);
     }
 
-    (comm_lower.contains(pattern_lower) || cmdline_lower.contains(pattern_lower)).then_some(1)
+    if cmdline_lower.contains(pattern_lower) {
+        return Some(1);
+    }
+
+    None
 }
 
 pub fn normalize_process_match_text(value: &str) -> String {
@@ -403,5 +411,65 @@ mod tests {
         assert!(WatchProcessState::None.should_poll());
         assert!(WatchProcessState::Waiting.should_poll());
         assert!(!WatchProcessState::Running(123).should_poll());
+    }
+
+    #[test]
+    fn test_process_match_score() {
+        let p = "my-game";
+        let pl = "my-game";
+
+        // Score 5: Exact comm match
+        assert_eq!(process_match_score(p, pl, "my-game", ""), Some(5));
+
+        // Score 4: Case-insensitive comm match
+        assert_eq!(process_match_score(p, pl, "MY-GAME", ""), Some(4));
+
+        // Score 3: Executable basename match
+        assert_eq!(process_match_score(p, pl, "other", "/usr/bin/my-game"), Some(3));
+        assert_eq!(process_match_score(p, pl, "other", "C:\\Games\\my-game"), Some(3));
+
+        // Score 2: comm substring match
+        assert_eq!(process_match_score(p, pl, "super-my-game-pro", ""), Some(2));
+
+        // Score 1: cmdline substring match
+        assert_eq!(process_match_score(p, pl, "other", "--game=my-game"), Some(1));
+
+        // None: No match
+        assert_eq!(process_match_score(p, pl, "other", "--foo"), None);
+    }
+
+    #[test]
+    fn test_find_process_selection_priority() {
+        let dir = std::env::temp_dir().join(format!("stutter-watch-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // PID 100: comm contains pattern (Score 2)
+        let pid100 = dir.join("100");
+        std::fs::create_dir_all(&pid100).unwrap();
+        std::fs::write(pid100.join("status"), "Name:\tmy-game-helper\nPPid:\t1\n").unwrap();
+        std::fs::write(pid100.join("cmdline"), "helper\0").unwrap();
+        std::fs::write(
+            pid100.join("stat"),
+            "100 (my-game-helper) S 1 100 0 0 -1 0 0 0 0 0 0 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+        )
+        .unwrap();
+
+        // PID 200: only cmdline contains pattern (Score 1)
+        let pid200 = dir.join("200");
+        std::fs::create_dir_all(&pid200).unwrap();
+        std::fs::write(pid200.join("status"), "Name:\tother\nPPid:\t1\n").unwrap();
+        std::fs::write(pid200.join("cmdline"), "other\0--match=my-game\0").unwrap();
+        std::fs::write(
+            pid200.join("stat"),
+            "200 (other) S 1 200 0 0 -1 0 0 0 0 0 0 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+        )
+        .unwrap();
+
+        // Even though 200 has a higher PID, 100 should be selected because Score 2 > Score 1.
+        let mut cache = crate::process_tree::ProcessCache::default();
+        let selected = find_process_by_pattern_at_with_cache(&dir, "my-game", &mut cache);
+        assert_eq!(selected, Some(100));
+
+        std::fs::remove_dir_all(dir).ok();
     }
 }
