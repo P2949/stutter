@@ -1045,7 +1045,7 @@ fn recorded_time_accepts_legacy_local_field() {
 }
 
 #[test]
-fn report_reads_recorded_session_andspike_events() {
+fn report_reads_recorded_session_and_spike_events() {
     let dir = temp_test_dir("report-smoke");
     fs::create_dir_all(&dir).unwrap();
 
