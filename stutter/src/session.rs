@@ -209,6 +209,8 @@ impl MonitorSession {
             block_io_event_count: 0,
             interval_record_count: 0,
             spike_events_dropped_count: 0,
+            alert_events_dropped_count: 0,
+            alert_channel_closed_count: 0,
             event_stream_write_errors: 0,
             first_event_stream_write_error: None,
         };

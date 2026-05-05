@@ -1520,6 +1520,8 @@ fn minimal_session_for_report() -> SessionFile {
         frame_event_count: 1,
         block_io_event_count: 0,
         event_stream_write_errors: 0,
+        alert_events_dropped_count: 0,
+        alert_channel_closed_count: 0,
         first_event_stream_write_error: None,
         block_io_correlation_basis: "dev+sector".to_owned(),
         drop_counters: DropCountersSnapshot::default(),
