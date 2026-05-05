@@ -35,6 +35,10 @@ use crate::{
     },
 };
 
+const LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS: u64 = 5;
+// Keep this aligned with the report default unless live diagnosis gets
+// its own CLI/config field.
+
 pub struct LiveTelemetry {
     pub spikes: VecDeque<SpikeEvent>,
     pub irq_events: VecDeque<IrqEventRecord>,
@@ -823,7 +827,7 @@ impl MonitorSession {
         self.recent_telemetry.prune(elapsed_ms);
 
         // Form a cluster from spikes within cluster_window_ms
-        let cluster_window_ms = 5;
+        let cluster_window_ms = LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS;
         let cluster_window_ns = cluster_window_ms * 1_000_000;
 
         let recent_spikes: Vec<_> = self

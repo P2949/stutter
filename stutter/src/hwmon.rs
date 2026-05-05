@@ -83,14 +83,19 @@ impl HwmonReader {
             }
             root
         } else if let Some(node) = render_node {
-            let root = node
-                .file_name()
-                .and_then(|name| name.to_str())
-                .and_then(|name| discover_drm_hwmon_root(Path::new("/sys/class/drm"), name));
-            if root.is_none() {
-                log::warn!("hwmon_render_node_not_found node={}", node.display());
+            match node.file_name().and_then(|name| name.to_str()) {
+                Some(file_name) => {
+                    let root = discover_drm_hwmon_root(Path::new("/sys/class/drm"), file_name);
+                    if root.is_none() {
+                        log::warn!("hwmon_render_node_not_found node={}", node.display());
+                    }
+                    root
+                }
+                None => {
+                    log::warn!("hwmon_render_node_invalid path={}", node.display());
+                    None
+                }
             }
-            root
         } else {
             discover_hwmon_root(Path::new("/sys/class/drm"))
                 .or_else(|| discover_hwmon_root(Path::new("/sys/class/hwmon")))

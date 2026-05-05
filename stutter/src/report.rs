@@ -2177,11 +2177,10 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
     };
 
     format!(
-        "#{rank} elapsed={} span={} tasks={} spikes={} total_spikes={} shown_points={} omitted_points={} cpus={} labels={} max={} switch_ns={}..{} points={}{}",
+        "#{rank} elapsed={} span={} tasks={} total_spikes={} shown_points={} omitted_points={} cpus={} labels={} max={} switch_ns={}..{} points={}{}",
         format_elapsed(elapsed),
         format_latency(span_ns),
         cluster.distinct_tasks,
-        cluster.points.len(),
         cluster.points.len(),
         shown_points,
         omitted_points,

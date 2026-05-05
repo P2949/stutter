@@ -99,16 +99,16 @@ pub struct MonitorArgs {
     #[arg(long = "irq", value_name = "IRQ")]
     irqs: Vec<u32>,
 
-    #[arg(long = "hwmon")]
+    #[arg(long = "hwmon", id = "hwmon")]
     hwmon: bool,
 
-    #[arg(long = "hwmon-root", value_name = "PATH")]
+    #[arg(long = "hwmon-root", value_name = "PATH", requires = "hwmon")]
     hwmon_root: Option<PathBuf>,
 
-    #[arg(long = "hwmon-drm-card", value_name = "CARD")]
+    #[arg(long = "hwmon-drm-card", value_name = "CARD", requires = "hwmon")]
     hwmon_drm_card: Option<String>,
 
-    #[arg(long = "hwmon-render-node", value_name = "NODE")]
+    #[arg(long = "hwmon-render-node", value_name = "NODE", requires = "hwmon")]
     hwmon_render_node: Option<PathBuf>,
 
     #[arg(long = "mangohud-log", value_name = "PATH")]
@@ -264,7 +264,7 @@ pub struct TuneArgs {
     #[arg(long)]
     pub enforce: bool,
 
-    #[arg(long = "hwmon")]
+    #[arg(long = "hwmon", id = "hwmon")]
     pub hwmon: bool,
 }
 
@@ -568,13 +568,6 @@ fn config_from_monitor_args(
     }
     if matches!(args.alert_webhook_url.as_deref(), Some("")) {
         anyhow::bail!("--alert-webhook-url must not be empty");
-    }
-    if (args.hwmon_root.is_some()
-        || args.hwmon_drm_card.is_some()
-        || args.hwmon_render_node.is_some())
-        && !args.hwmon
-    {
-        anyhow::bail!("--hwmon-root, --hwmon-drm-card, and --hwmon-render-node require --hwmon");
     }
 
     if args.target_pids.len() > TARGET_PIDS_MAX {
@@ -1089,6 +1082,26 @@ mod tests {
             err.to_string()
                 .contains("--persistent requires --watch-process")
         );
+    }
+
+    #[test]
+    fn rejects_hwmon_args_without_hwmon_flag() {
+        for arg in ["--hwmon-root", "--hwmon-drm-card", "--hwmon-render-node"] {
+            let val = if arg == "--hwmon-drm-card" {
+                "card0"
+            } else {
+                "/dev/null"
+            };
+            let err = parse_app_command_from(["stutter", "monitor", "--pid", "42", arg, val])
+                .unwrap_err();
+
+            // Clap error message for missing requirements
+            assert!(
+                err.to_string()
+                    .contains("required arguments were not provided"),
+                "expected clap requirement error for {arg}, got: {err:?}"
+            );
+        }
     }
 
     #[test]

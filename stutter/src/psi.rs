@@ -72,6 +72,7 @@ impl PsiReader {
         for line in content.lines() {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() < 5 {
+                log::debug!("psi_line_too_short path={} line={:?}", rel_path, line);
                 continue;
             }
 
