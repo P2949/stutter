@@ -151,15 +151,12 @@ impl PartialOrd for SpikeClusterCandidate {
     }
 }
 
-pub fn print_report(
-    path: &Path,
-    json: bool,
-    analysis_json: bool,
-    top: usize,
-    cluster_window_ms: u64,
-    filter_class: Option<TaskClass>,
-) -> anyhow::Result<()> {
-    let validation = session_io::validate_run_dir_shallow(path)?;
+struct ReportBuildResult {
+    analysis: ReportAnalysisJson,
+    artifacts: session_io::RunArtifacts,
+}
+
+fn log_run_validation(path: &Path, validation: &session_io::RunValidationReport) {
     if !validation.is_ok() {
         for err in &validation.errors {
             log::error!("run_dir_validation_error path={} err={err}", path.display());
@@ -171,10 +168,28 @@ pub fn print_report(
             path.display()
         );
     }
+}
+
+pub fn build_report_analysis(
+    path: &Path,
+    top: usize,
+    cluster_window_ms: u64,
+    filter_class: Option<TaskClass>,
+) -> anyhow::Result<ReportAnalysisJson> {
+    Ok(build_report_analysis_with_artifacts(path, top, cluster_window_ms, filter_class)?.analysis)
+}
+
+fn build_report_analysis_with_artifacts(
+    path: &Path,
+    top: usize,
+    cluster_window_ms: u64,
+    filter_class: Option<TaskClass>,
+) -> anyhow::Result<ReportBuildResult> {
+    let validation = session_io::validate_run_dir_shallow(path)?;
+    log_run_validation(path, &validation);
 
     let mut artifacts = session_io::load_run_artifacts(path, ArtifactLoadOptions::REPORT)?;
     let session = artifacts.session.clone();
-    let _metadata = artifacts.metadata.clone();
 
     let median_frametime = calculate_median_frametime(&artifacts.frame_events);
     let frame_spikes = identify_frame_spikes(&artifacts.frame_events, median_frametime);
@@ -223,41 +238,64 @@ pub fn print_report(
         cluster_window_ns,
     );
 
-    if json {
-        println!("{}", serde_json::to_string_pretty(&session)?);
-        return Ok(());
-    }
+    let data_quality = data_quality_summary(&session, &artifacts.validation);
+    let artifacts_summary = ArtifactsSummary {
+        irq_event_count: session.irq_event_count,
+        gpu_sample_count: session.gpu_sample_count,
+        frame_event_count: session.frame_event_count,
+        migration_event_count: session.migration_event_count.unwrap_or(0),
+        cpu_freq_sample_count: session.cpu_freq_sample_count.unwrap_or(0),
+        block_io_event_count: session.block_io_event_count,
+        interval_record_count: session.interval_record_count,
+        scx_event_count: session.scx_event_count,
+    };
 
-    if analysis_json {
-        let data_quality = data_quality_summary(&session, &artifacts.validation);
-        let artifacts_summary = ArtifactsSummary {
-            irq_event_count: session.irq_event_count,
-            gpu_sample_count: session.gpu_sample_count,
-            frame_event_count: session.frame_event_count,
-            migration_event_count: session.migration_event_count.unwrap_or(0),
-            cpu_freq_sample_count: session.cpu_freq_sample_count.unwrap_or(0),
-            block_io_event_count: session.block_io_event_count,
-            interval_record_count: session.interval_record_count,
-            scx_event_count: session.scx_event_count,
-        };
-        let report = ReportAnalysisJson {
+    Ok(ReportBuildResult {
+        analysis: ReportAnalysisJson {
             session,
             cluster_analysis,
             frame_diagnoses,
             artifacts_summary,
             data_quality,
-        };
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        },
+        artifacts,
+    })
+}
+
+pub fn print_report(
+    path: &Path,
+    json: bool,
+    analysis_json: bool,
+    top: usize,
+    cluster_window_ms: u64,
+    filter_class: Option<TaskClass>,
+) -> anyhow::Result<()> {
+    if json {
+        let validation = session_io::validate_run_dir_shallow(path)?;
+        log_run_validation(path, &validation);
+        let session = session_io::load_session(path)?;
+        println!("{}", serde_json::to_string_pretty(&session)?);
         return Ok(());
     }
+
+    if analysis_json {
+        let analysis = build_report_analysis(path, top, cluster_window_ms, filter_class)?;
+        println!("{}", serde_json::to_string_pretty(&analysis)?);
+        return Ok(());
+    }
+
+    let ReportBuildResult {
+        analysis,
+        artifacts,
+    } = build_report_analysis_with_artifacts(path, top, cluster_window_ms, filter_class)?;
 
     print!(
         "{}",
         render_report(
             path,
-            &session,
-            &cluster_analysis,
-            &frame_diagnoses,
+            &analysis.session,
+            &analysis.cluster_analysis,
+            &analysis.frame_diagnoses,
             &artifacts,
             top,
             cluster_window_ms,
@@ -637,74 +675,16 @@ pub fn write_html_report(
     cluster_window_ms: u64,
     filter_class: Option<TaskClass>,
 ) -> anyhow::Result<()> {
-    let validation = session_io::validate_run_dir_shallow(path)?;
-    if !validation.is_ok() {
-        for err in &validation.errors {
-            log::error!("run_dir_validation_error path={} err={err}", path.display());
-        }
-    }
-    for warning in &validation.warnings {
-        log::warn!(
-            "run_dir_validation_warning path={} warn={warning}",
-            path.display()
-        );
-    }
-
-    let mut artifacts = session_io::load_run_artifacts(path, ArtifactLoadOptions::REPORT)?;
-    let session = artifacts.session.clone();
-
-    let median_frametime = calculate_median_frametime(&artifacts.frame_events);
-    let frame_spikes = identify_frame_spikes(&artifacts.frame_events, median_frametime);
-
-    let cluster_window_ns = cluster_window_ms.saturating_mul(1_000_000);
-    let spike_events_ref = if !artifacts.spikes.is_empty() {
-        Some(&artifacts.spikes[..])
-    } else {
-        None
-    };
-
-    let cluster_analysis = spike_cluster_analysis(
-        &session,
-        spike_events_ref,
-        cluster_window_ns,
-        top,
-        filter_class,
-    );
-
-    let windows = compute_correlation_windows(
-        &session,
-        &cluster_analysis.clusters,
-        &frame_spikes,
-        cluster_window_ns,
-    );
-    artifacts.load_correlations(windows)?;
-
-    let mut cluster_analysis = cluster_analysis;
-    perform_diagnosis(
-        &mut cluster_analysis.clusters,
-        &artifacts,
-        cluster_window_ns,
-    );
-
-    let all_spike_points = if !artifacts.spikes.is_empty() {
-        flatten_spike_events(&session, &artifacts.spikes)
-    } else {
-        flatten_top_spikes(&session)
-    };
-
-    let frame_diagnoses = perform_frame_diagnosis(
-        &session,
-        &frame_spikes,
-        &all_spike_points,
-        &artifacts,
-        cluster_window_ns,
-    );
+    let ReportBuildResult {
+        analysis,
+        artifacts,
+    } = build_report_analysis_with_artifacts(path, top, cluster_window_ms, filter_class)?;
 
     let text_report = render_report(
         path,
-        &session,
-        &cluster_analysis,
-        &frame_diagnoses,
+        &analysis.session,
+        &analysis.cluster_analysis,
+        &analysis.frame_diagnoses,
         &artifacts,
         top,
         cluster_window_ms,
@@ -716,11 +696,11 @@ pub fn write_html_report(
         Some(&artifacts.spikes[..])
     };
     let html = render_html_report(
-        &session,
+        &analysis.session,
         spike_events_opt,
         &artifacts,
-        &cluster_analysis,
-        &frame_diagnoses,
+        &analysis.cluster_analysis,
+        &analysis.frame_diagnoses,
         &text_report,
         top,
     );

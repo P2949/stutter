@@ -42,7 +42,39 @@ pub struct TuneSummary {
     pub warmup_seconds: u64,
     pub restore_policy: String,
     pub best_profile: String,
+    pub candidate_order: Vec<TuneIterationOrder>,
+    pub profile_stats: Vec<TuneProfileStats>,
+    pub ranking_confidence: RankingConfidence,
+    pub ranking_notes: Vec<String>,
     pub candidates: Vec<TuneCandidateSummary>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct TuneIterationOrder {
+    pub iteration: u32,
+    pub profiles: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct TuneProfileStats {
+    pub profile: String,
+    pub valid_runs: usize,
+    pub invalid_runs: usize,
+    pub median_score_total: u64,
+    pub iqr_score_total: u64,
+    pub worst_score_total: u64,
+    pub median_over_5ms: u64,
+    pub iqr_over_5ms: u64,
+    pub median_frame_p99_us: u64,
+    pub iqr_frame_p99_us: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub enum RankingConfidence {
+    High,
+    Medium,
+    Low,
+    Unstable,
 }
 
 #[derive(Clone, Serialize)]
@@ -128,6 +160,7 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         );
     }
 
+    let candidate_order = tune_candidate_order(&profiles, runs);
     let tune_output_dir = default_tune_output_dir()?;
     let results = collect_tune_results(
         &profiles,
@@ -151,14 +184,20 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     }
 
     let any_valid = results.iter().any(|r| r.valid);
-    if !any_valid {
-        restore_tune_on_error();
-        anyhow::bail!("no tune candidate collected enough data; no best profile selected");
+    if any_valid {
+        comparability::check_tune_coverage_comparability(&grouped)?;
     }
 
-    comparability::check_tune_coverage_comparability(&grouped)?;
-
-    let best_profile = select_best_profile(&grouped);
+    let profile_stats = profile_stats_from_grouped(&grouped);
+    let selected_best_profile = select_best_profile(&grouped);
+    let (ranking_confidence, ranking_notes) =
+        assess_ranking_confidence(&profile_stats, &grouped, &selected_best_profile, runs);
+    let best_profile = if ranking_confidence == RankingConfidence::Unstable {
+        String::new()
+    } else {
+        selected_best_profile
+    };
+    let keep_best = keep_best && ranking_confidence != RankingConfidence::Unstable;
 
     let restore_policy = if keep_best {
         "restore-after-each-then-keep-best"
@@ -175,12 +214,52 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         warmup_seconds,
         restore_policy: restore_policy.to_owned(),
         best_profile,
+        candidate_order,
+        profile_stats,
+        ranking_confidence,
+        ranking_notes,
         candidates: results,
     };
 
     write_tune_summary(&summary, &tune_output_dir, keep_best, enforce).await?;
 
+    if summary.ranking_confidence == RankingConfidence::Unstable {
+        restore_tune_on_error();
+        anyhow::bail!(
+            "tune ranking unstable; no best profile selected; inspect tuning_summary.json"
+        );
+    }
+
     Ok(())
+}
+
+pub fn candidate_order_for_iteration(profile_count: usize, iteration: u32) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..profile_count).collect();
+
+    if profile_count <= 1 {
+        return order;
+    }
+
+    let rotation = ((iteration - 1) as usize) % profile_count;
+    order.rotate_left(rotation);
+
+    if iteration.is_multiple_of(2) {
+        order.reverse();
+    }
+
+    order
+}
+
+fn tune_candidate_order(profiles: &[profiles::Profile], runs: u32) -> Vec<TuneIterationOrder> {
+    (1..=runs)
+        .map(|iteration| TuneIterationOrder {
+            iteration,
+            profiles: candidate_order_for_iteration(profiles.len(), iteration)
+                .into_iter()
+                .map(|profile_idx| profiles[profile_idx].name.clone())
+                .collect(),
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -209,7 +288,9 @@ async fn collect_tune_results(
             println!("tune iteration={} status=Starting", iteration);
         }
 
-        for profile in profiles.iter() {
+        let order = candidate_order_for_iteration(profiles.len(), iteration);
+        for profile_idx in order {
+            let profile = &profiles[profile_idx];
             println!(
                 "tune iteration={} candidate={} state=CandidateWarmup warmup_seconds={}",
                 iteration, profile.name, warmup_seconds
@@ -645,6 +726,143 @@ pub fn aggregate_profile_rank(runs: &[TuneCandidateSummary]) -> impl Ord {
     )
 }
 
+pub fn percentile_nearest_rank_u64(values: &mut [u64], percentile: f64) -> u64 {
+    if values.is_empty() {
+        return 0;
+    }
+
+    values.sort_unstable();
+    let percentile = percentile.clamp(0.0, 100.0);
+    let rank = ((percentile / 100.0) * values.len() as f64).ceil() as usize;
+    let idx = rank.saturating_sub(1).min(values.len() - 1);
+    values[idx]
+}
+
+pub fn iqr_u64(values: Vec<u64>) -> u64 {
+    if values.is_empty() {
+        return 0;
+    }
+
+    let mut q25_values = values.clone();
+    let q25 = percentile_nearest_rank_u64(&mut q25_values, 25.0);
+    let mut q75_values = values;
+    let q75 = percentile_nearest_rank_u64(&mut q75_values, 75.0);
+    q75.saturating_sub(q25)
+}
+
+pub fn profile_stats_from_grouped(
+    grouped: &BTreeMap<String, Vec<TuneCandidateSummary>>,
+) -> Vec<TuneProfileStats> {
+    grouped
+        .iter()
+        .map(|(profile, runs)| {
+            let valid_runs = runs.iter().filter(|run| run.valid).collect::<Vec<_>>();
+            let score_totals = valid_runs
+                .iter()
+                .map(|run| run.score_total)
+                .collect::<Vec<_>>();
+            let over_5ms = valid_runs
+                .iter()
+                .map(|run| run.over_5ms)
+                .collect::<Vec<_>>();
+            let frame_p99_us = valid_runs
+                .iter()
+                .map(|run| (run.frame_p99_ms * 1000.0) as u64)
+                .collect::<Vec<_>>();
+
+            TuneProfileStats {
+                profile: profile.clone(),
+                valid_runs: valid_runs.len(),
+                invalid_runs: runs.len().saturating_sub(valid_runs.len()),
+                median_score_total: median_u64(score_totals.clone()),
+                iqr_score_total: iqr_u64(score_totals.clone()),
+                worst_score_total: worst_u64(score_totals),
+                median_over_5ms: median_u64(over_5ms.clone()),
+                iqr_over_5ms: iqr_u64(over_5ms),
+                median_frame_p99_us: median_u64(frame_p99_us.clone()),
+                iqr_frame_p99_us: iqr_u64(frame_p99_us),
+            }
+        })
+        .collect()
+}
+
+pub fn assess_ranking_confidence(
+    profile_stats: &[TuneProfileStats],
+    _grouped: &BTreeMap<String, Vec<TuneCandidateSummary>>,
+    best_profile: &str,
+    runs: u32,
+) -> (RankingConfidence, Vec<String>) {
+    let mut notes = Vec::new();
+    let mut valid_stats = profile_stats
+        .iter()
+        .filter(|stat| stat.valid_runs > 0)
+        .collect::<Vec<_>>();
+    valid_stats.sort_by_key(|stat| stat.median_score_total);
+
+    if valid_stats.len() < 2 {
+        notes.push("fewer than two profiles produced valid runs".to_owned());
+        return (RankingConfidence::Unstable, notes);
+    }
+
+    let Some(best) = valid_stats
+        .iter()
+        .copied()
+        .find(|stat| stat.profile == best_profile)
+    else {
+        notes.push("best profile did not produce valid runs".to_owned());
+        return (RankingConfidence::Unstable, notes);
+    };
+
+    if runs >= 3 && best.valid_runs < 2 {
+        notes.push("best profile has fewer than two valid runs".to_owned());
+        return (RankingConfidence::Unstable, notes);
+    }
+
+    let Some(second) = valid_stats
+        .iter()
+        .copied()
+        .find(|stat| stat.profile != best.profile)
+    else {
+        notes.push("no second valid profile is available for comparison".to_owned());
+        return (RankingConfidence::Unstable, notes);
+    };
+
+    let diff = second.median_score_total.abs_diff(best.median_score_total);
+    let max_iqr = best.iqr_score_total.max(second.iqr_score_total);
+    if diff <= max_iqr && max_iqr > 0 {
+        notes.push(format!(
+            "best and second-best median scores are close relative to variance (diff={diff}, max_iqr={max_iqr})"
+        ));
+        return (RankingConfidence::Unstable, notes);
+    }
+
+    let five_percent_second = second.median_score_total / 20;
+    let close_to_second = diff <= five_percent_second;
+
+    if runs < 3 {
+        notes.push("--runs is less than 3; ranking confidence is limited".to_owned());
+    }
+    if best.invalid_runs > 0 {
+        notes.push("best profile has invalid runs".to_owned());
+    }
+    if close_to_second {
+        notes.push(format!(
+            "best median score is within 5% of second-best (diff={diff})"
+        ));
+    }
+    if best.iqr_score_total > 0 {
+        notes.push("best profile score IQR is non-zero".to_owned());
+    }
+
+    if runs < 3 || best.invalid_runs > 0 || close_to_second {
+        (RankingConfidence::Low, notes)
+    } else if best.iqr_score_total > 0 || second.iqr_score_total > 0 || !notes.is_empty() {
+        (RankingConfidence::Medium, notes)
+    } else {
+        (RankingConfidence::High, notes)
+    }
+}
+
 pub fn median_u64(mut values: Vec<u64>) -> u64 {
     if values.is_empty() {
         return 0;
@@ -731,6 +949,124 @@ pub fn retain_after_warmup<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tune_candidate(
+        profile: &str,
+        iteration: u32,
+        score_total: u64,
+        valid: bool,
+    ) -> TuneCandidateSummary {
+        TuneCandidateSummary {
+            profile: profile.to_owned(),
+            iteration,
+            run_dir: PathBuf::from(format!("/tmp/{profile}-{iteration}")),
+            applied_tasks: 1,
+            warmup_seconds: 1,
+            measure_seconds: 1,
+            interval_count: 2,
+            samples: 100,
+            scored_samples: 100,
+            score_total,
+            over_1ms: 0,
+            over_2ms: 0,
+            over_5ms: 0,
+            max_latency_ns: 0,
+            frame_count: 0,
+            frame_max_ms: 0.0,
+            frame_p99_ms: 0.0,
+            frame_over_16ms: 0,
+            frame_over_33ms: 0,
+            frame_over_50ms: 0,
+            coverage: TuneCoverageMetrics::default(),
+            valid,
+        }
+    }
+
+    fn grouped_candidates(
+        candidates: Vec<TuneCandidateSummary>,
+    ) -> BTreeMap<String, Vec<TuneCandidateSummary>> {
+        let mut grouped = BTreeMap::new();
+        for candidate in candidates {
+            grouped
+                .entry(candidate.profile.clone())
+                .or_insert_with(Vec::new)
+                .push(candidate);
+        }
+        grouped
+    }
+
+    #[test]
+    fn candidate_order_counterbalances_iterations() {
+        assert_eq!(candidate_order_for_iteration(3, 1), vec![0, 1, 2]);
+        assert_eq!(candidate_order_for_iteration(3, 2), vec![0, 2, 1]);
+        assert_eq!(candidate_order_for_iteration(3, 3), vec![2, 0, 1]);
+        assert_eq!(candidate_order_for_iteration(1, 4), vec![0]);
+    }
+
+    #[test]
+    fn percentile_nearest_rank_and_iqr_work_on_u64_values() {
+        let mut values = vec![40, 10, 30, 20];
+        assert_eq!(percentile_nearest_rank_u64(&mut values, 25.0), 10);
+        let mut values = vec![40, 10, 30, 20];
+        assert_eq!(percentile_nearest_rank_u64(&mut values, 50.0), 20);
+        let mut values = vec![40, 10, 30, 20];
+        assert_eq!(percentile_nearest_rank_u64(&mut values, 100.0), 40);
+        assert_eq!(iqr_u64(vec![10, 20, 30, 40]), 20);
+    }
+
+    #[test]
+    fn ranking_confidence_is_unstable_for_close_results() {
+        let grouped = grouped_candidates(vec![
+            tune_candidate("a", 1, 100, true),
+            tune_candidate("a", 2, 100, true),
+            tune_candidate("a", 3, 120, true),
+            tune_candidate("b", 1, 110, true),
+            tune_candidate("b", 2, 110, true),
+            tune_candidate("b", 3, 110, true),
+        ]);
+        let stats = profile_stats_from_grouped(&grouped);
+        let (confidence, notes) = assess_ranking_confidence(&stats, &grouped, "a", 3);
+
+        assert_eq!(confidence, RankingConfidence::Unstable);
+        assert!(notes.iter().any(|note| note.contains("variance")));
+    }
+
+    #[test]
+    fn ranking_confidence_distinguishes_high_medium_and_low() {
+        let high_grouped = grouped_candidates(vec![
+            tune_candidate("a", 1, 90, true),
+            tune_candidate("a", 2, 90, true),
+            tune_candidate("a", 3, 90, true),
+            tune_candidate("b", 1, 120, true),
+            tune_candidate("b", 2, 120, true),
+            tune_candidate("b", 3, 120, true),
+        ]);
+        let high_stats = profile_stats_from_grouped(&high_grouped);
+        let (confidence, _) = assess_ranking_confidence(&high_stats, &high_grouped, "a", 3);
+        assert_eq!(confidence, RankingConfidence::High);
+
+        let medium_grouped = grouped_candidates(vec![
+            tune_candidate("a", 1, 90, true),
+            tune_candidate("a", 2, 90, true),
+            tune_candidate("a", 3, 100, true),
+            tune_candidate("b", 1, 150, true),
+            tune_candidate("b", 2, 150, true),
+            tune_candidate("b", 3, 150, true),
+        ]);
+        let medium_stats = profile_stats_from_grouped(&medium_grouped);
+        let (confidence, _) = assess_ranking_confidence(&medium_stats, &medium_grouped, "a", 3);
+        assert_eq!(confidence, RankingConfidence::Medium);
+
+        let low_grouped = grouped_candidates(vec![
+            tune_candidate("a", 1, 90, true),
+            tune_candidate("a", 2, 90, true),
+            tune_candidate("b", 1, 120, true),
+            tune_candidate("b", 2, 120, true),
+        ]);
+        let low_stats = profile_stats_from_grouped(&low_grouped);
+        let (confidence, _) = assess_ranking_confidence(&low_stats, &low_grouped, "a", 2);
+        assert_eq!(confidence, RankingConfidence::Low);
+    }
 
     #[test]
     fn test_retain_after_warmup() {

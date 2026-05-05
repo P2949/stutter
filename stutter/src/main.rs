@@ -1,6 +1,7 @@
 mod affinity;
 mod cli;
 mod diagnosis;
+mod doctor;
 mod ebpf_loader;
 mod events;
 mod hwmon;
@@ -135,6 +136,7 @@ async fn main() -> anyhow::Result<()> {
             current,
             max_regression_p99_ms,
         } => report::check_percentile_regression(&baseline, &current, max_regression_p99_ms),
+        AppCommand::Doctor { input } => doctor::doctor_command(input),
     }
 }
 

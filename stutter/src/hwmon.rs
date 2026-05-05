@@ -8,6 +8,8 @@ use std::{
     },
 };
 
+use serde::Serialize;
+
 use crate::recorder::GpuSample;
 
 #[derive(Debug)]
@@ -40,6 +42,93 @@ struct NvidiaSample {
     gpu_busy_percent: u32,
     vram_used_bytes: u64,
     vram_total_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HwmonProbeReport {
+    pub selected_root: Option<PathBuf>,
+    pub nvidia_fallback_available: bool,
+    pub gpu_busy_available: bool,
+    pub vram_used_available: bool,
+    pub vram_total_available: bool,
+    pub temp_available: bool,
+    pub power_available: bool,
+    pub warnings: Vec<String>,
+}
+
+pub fn probe_hwmon_with_options(
+    root_override: Option<&Path>,
+    drm_card: Option<&str>,
+    render_node: Option<&Path>,
+) -> HwmonProbeReport {
+    let mut warnings = Vec::new();
+    let selected_root = if let Some(root) = root_override {
+        if root.exists() {
+            Some(root.to_path_buf())
+        } else {
+            warnings.push(format!("hwmon root override not found: {}", root.display()));
+            None
+        }
+    } else if let Some(card) = drm_card {
+        let root = discover_drm_hwmon_root(Path::new("/sys/class/drm"), card);
+        if root.is_none() {
+            warnings.push(format!("DRM card hwmon root not found: {card}"));
+        }
+        root
+    } else if let Some(node) = render_node {
+        let root = node
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|file_name| discover_drm_hwmon_root(Path::new("/sys/class/drm"), file_name));
+        if root.is_none() {
+            warnings.push(format!(
+                "render-node hwmon root not found: {}",
+                node.display()
+            ));
+        }
+        root
+    } else {
+        discover_hwmon_root(Path::new("/sys/class/drm"))
+            .or_else(|| discover_hwmon_root(Path::new("/sys/class/hwmon")))
+    };
+
+    let nvidia_fallback_available = has_nvidia_pci_device();
+    if selected_root.is_none() && !nvidia_fallback_available {
+        warnings.push("no GPU hwmon root discovered".to_owned());
+    }
+
+    let (
+        gpu_busy_available,
+        vram_used_available,
+        vram_total_available,
+        temp_available,
+        power_available,
+    ) = selected_root
+        .as_ref()
+        .map(|root| {
+            (
+                root.join("device/gpu_busy_percent").exists()
+                    || root.join("gpu_busy_percent").exists(),
+                root.join("device/mem_info_vram_used").exists()
+                    || root.join("mem_info_vram_used").exists(),
+                root.join("device/mem_info_vram_total").exists()
+                    || root.join("mem_info_vram_total").exists(),
+                root.join("temp1_input").exists(),
+                root.join("power1_average").exists(),
+            )
+        })
+        .unwrap_or((false, false, false, false, false));
+
+    HwmonProbeReport {
+        selected_root,
+        nvidia_fallback_available,
+        gpu_busy_available,
+        vram_used_available,
+        vram_total_available,
+        temp_available,
+        power_available,
+        warnings,
+    }
 }
 
 impl NvidiaState {
@@ -415,6 +504,25 @@ mod tests {
         assert_eq!(sample.elapsed_ms, 7);
         assert_eq!(sample.gpu_busy_percent, Some(55));
         assert_eq!(sample.temp_millidegrees, Some(47000));
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn probe_hwmon_with_options_reports_available_fake_files() {
+        let root = temp_dir("hwmon-probe");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("gpu_busy_percent"), "55\n").unwrap();
+        fs::write(root.join("temp1_input"), "47000\n").unwrap();
+        fs::write(root.join("power1_average"), "100\n").unwrap();
+
+        let report = probe_hwmon_with_options(Some(&root), None, None);
+
+        assert_eq!(report.selected_root, Some(root.clone()));
+        assert!(report.gpu_busy_available);
+        assert!(!report.vram_used_available);
+        assert!(report.temp_available);
+        assert!(report.power_available);
 
         fs::remove_dir_all(root).ok();
     }

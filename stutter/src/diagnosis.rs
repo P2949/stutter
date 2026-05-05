@@ -1,11 +1,14 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, collections::BTreeMap};
 
 use serde::Serialize;
 
 use crate::{
     metrics::format_latency,
     process_tree::TaskClass,
-    recorder::{BlockIoRecord, GpuSample, IntervalRecord, IrqEventRecord},
+    recorder::{
+        BlockIoRecord, CpuFreqRecord, GpuSample, IntervalRecord, IrqEventRecord,
+        MigrationEventRecord,
+    },
     report::{SpikeCluster, SpikePoint},
     session_io::RunArtifacts,
 };
@@ -14,6 +17,33 @@ const IRQ_SIGNIFICANT_NS: u64 = 250_000; // start conservative
 const BLOCK_IO_SIGNIFICANT_NS: u64 = 1_000_000;
 const GPU_BUSY_BOUND_PERCENT: u32 = 95;
 const SCHED_DELAY_SIGNIFICANT_NS: u64 = 2_000_000;
+
+#[derive(Clone, Copy, Debug)]
+pub struct DiagnosisConfig {
+    pub irq_significant_ns: u64,
+    pub block_io_significant_ns: u64,
+    pub gpu_busy_bound_percent: u32,
+    pub sched_delay_significant_ns: u64,
+    pub cpu_psi_some_significant: f64,
+    pub cpu_freq_drop_percent: f64,
+    pub migration_window_ms: u128,
+    pub page_fault_delta_threshold: u64,
+}
+
+impl Default for DiagnosisConfig {
+    fn default() -> Self {
+        Self {
+            irq_significant_ns: IRQ_SIGNIFICANT_NS,
+            block_io_significant_ns: BLOCK_IO_SIGNIFICANT_NS,
+            gpu_busy_bound_percent: GPU_BUSY_BOUND_PERCENT,
+            sched_delay_significant_ns: SCHED_DELAY_SIGNIFICANT_NS,
+            cpu_psi_some_significant: 50.0,
+            cpu_freq_drop_percent: 20.0,
+            migration_window_ms: 5,
+            page_fault_delta_threshold: 1,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 pub enum StutterCause {
@@ -81,6 +111,8 @@ pub enum EvidenceKind {
     CpuPressure,
     ScxState,
     CpuFrequency,
+    Migration,
+    PageFaults,
     Unknown,
 }
 
@@ -208,6 +240,38 @@ fn push_candidate(
             evidence: vec![evidence],
         });
     }
+}
+
+fn push_supporting_evidence(
+    candidates: &mut [DiagnosisCandidate],
+    cause: StutterCause,
+    mut evidence: EvidenceItem,
+) {
+    evidence.strength = clamp01(evidence.strength);
+    if let Some(candidate) = candidates
+        .iter_mut()
+        .find(|candidate| candidate.cause == cause)
+    {
+        candidate.evidence.push(evidence);
+    }
+}
+
+fn scheduler_candidate_cause(candidates: &[DiagnosisCandidate]) -> Option<StutterCause> {
+    candidates
+        .iter()
+        .filter(|candidate| {
+            matches!(
+                candidate.cause,
+                StutterCause::GameThreadSchedulerDelay | StutterCause::CompositorSchedulerDelay
+            )
+        })
+        .max_by(|a, b| {
+            a.score
+                .partial_cmp(&b.score)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| b.cause.priority().cmp(&a.cause.priority()))
+        })
+        .map(|candidate| candidate.cause)
 }
 
 fn finalize_diagnosis(mut candidates: Vec<DiagnosisCandidate>) -> Diagnosis {
@@ -366,6 +430,15 @@ pub fn diagnose_cluster(
     artifacts: &RunArtifacts,
     window_ns: u64,
 ) -> Diagnosis {
+    diagnose_cluster_with_config(cluster, artifacts, window_ns, DiagnosisConfig::default())
+}
+
+pub fn diagnose_cluster_with_config(
+    cluster: &SpikeCluster,
+    artifacts: &RunArtifacts,
+    window_ns: u64,
+    config: DiagnosisConfig,
+) -> Diagnosis {
     // Compute cluster time window
     let start_ns = cluster.min_switch_ns.saturating_sub(window_ns);
     let end_ns = cluster.max_switch_ns.saturating_add(window_ns);
@@ -418,6 +491,20 @@ pub fn diagnose_cluster(
         .cloned()
         .collect();
 
+    let cpu_freq_events: Vec<CpuFreqRecord> = artifacts
+        .cpu_freq_events
+        .iter()
+        .filter(|e| e.timestamp_ns >= start_ns && e.timestamp_ns <= end_ns)
+        .cloned()
+        .collect();
+
+    let migration_events: Vec<MigrationEventRecord> = artifacts
+        .migration_events
+        .iter()
+        .filter(|e| e.timestamp_ns >= start_ns && e.timestamp_ns <= end_ns)
+        .cloned()
+        .collect();
+
     let interval_records: Vec<IntervalRecord> = if let Some((min, max)) = cluster_elapsed_range {
         artifacts
             .intervals
@@ -438,7 +525,7 @@ pub fn diagnose_cluster(
     let compositor_point = cluster
         .points
         .iter()
-        .filter(|p| is_compositor_point(p) && p.latency_ns > SCHED_DELAY_SIGNIFICANT_NS)
+        .filter(|p| is_compositor_point(p) && p.latency_ns > config.sched_delay_significant_ns)
         .max_by_key(|p| p.latency_ns);
 
     if let Some(p) = compositor_point {
@@ -461,6 +548,7 @@ pub fn diagnose_cluster(
                 end_ns: Some(p.switch_ns),
             },
         );
+        push_scx_evidence(&mut candidates, StutterCause::CompositorSchedulerDelay, p);
     }
 
     // 2. Game thread scheduler delay
@@ -468,7 +556,7 @@ pub fn diagnose_cluster(
     let game_point = cluster
         .points
         .iter()
-        .filter(|p| is_game_point(p) && p.latency_ns > SCHED_DELAY_SIGNIFICANT_NS)
+        .filter(|p| is_game_point(p) && p.latency_ns > config.sched_delay_significant_ns)
         .max_by_key(|p| p.latency_ns);
 
     if let Some(p) = game_point {
@@ -491,12 +579,13 @@ pub fn diagnose_cluster(
                 end_ns: Some(p.switch_ns),
             },
         );
+        push_scx_evidence(&mut candidates, StutterCause::GameThreadSchedulerDelay, p);
     }
 
     // 3. IRQ overlap
     let max_irq = irq_events
         .iter()
-        .filter(|e| e.duration_ns >= IRQ_SIGNIFICANT_NS)
+        .filter(|e| e.duration_ns >= config.irq_significant_ns)
         .max_by_key(|e| e.duration_ns);
 
     if let Some(irq) = max_irq {
@@ -531,7 +620,7 @@ pub fn diagnose_cluster(
         .iter()
         .filter_map(|s| {
             s.gpu_busy_percent
-                .filter(|busy| *busy >= GPU_BUSY_BOUND_PERCENT)
+                .filter(|busy| *busy >= config.gpu_busy_bound_percent)
                 .map(|busy| (s, busy))
         })
         .max_by_key(|(_, busy)| *busy);
@@ -556,7 +645,7 @@ pub fn diagnose_cluster(
     // 5. Block I/O
     let max_io = io_events
         .iter()
-        .filter(|e| e.duration_ns >= BLOCK_IO_SIGNIFICANT_NS)
+        .filter(|e| e.duration_ns >= config.block_io_significant_ns)
         .max_by_key(|e| e.duration_ns);
 
     if let Some(io) = max_io {
@@ -583,7 +672,7 @@ pub fn diagnose_cluster(
     // 6. CPU Pressure (PSI)
     let high_psi = interval_records
         .iter()
-        .filter(|r| r.cpu_psi_some > 50.0)
+        .filter(|r| r.cpu_psi_some > config.cpu_psi_some_significant)
         .max_by(|a, b| {
             a.cpu_psi_some
                 .partial_cmp(&b.cpu_psi_some)
@@ -607,7 +696,152 @@ pub fn diagnose_cluster(
         );
     }
 
+    if let Some(cause) = scheduler_candidate_cause(&candidates) {
+        push_cpu_frequency_evidence(&mut candidates, cause, &cpu_freq_events, config);
+        push_migration_evidence(
+            &mut candidates,
+            cause,
+            &migration_events,
+            cluster_elapsed_range,
+            config,
+        );
+        push_page_fault_evidence(&mut candidates, cause, &interval_records, config);
+    }
+
     finalize_diagnosis(candidates)
+}
+
+fn push_scx_evidence(
+    candidates: &mut [DiagnosisCandidate],
+    cause: StutterCause,
+    point: &SpikePoint,
+) {
+    if point.scx_ops.is_none() && point.scx_state.is_none() {
+        return;
+    }
+
+    push_supporting_evidence(
+        candidates,
+        cause,
+        EvidenceItem {
+            kind: EvidenceKind::ScxState,
+            strength: 0.25,
+            message: format!(
+                "SCX state near spike: ops={} state={}",
+                point.scx_ops.as_deref().unwrap_or("-"),
+                point.scx_state.as_deref().unwrap_or("-")
+            ),
+            timestamp_ms: point.elapsed_ms,
+            start_ns: Some(point.wakeup_ns),
+            end_ns: Some(point.switch_ns),
+        },
+    );
+}
+
+fn push_cpu_frequency_evidence(
+    candidates: &mut [DiagnosisCandidate],
+    cause: StutterCause,
+    events: &[CpuFreqRecord],
+    config: DiagnosisConfig,
+) {
+    let mut by_cpu: BTreeMap<u32, (u32, u32)> = BTreeMap::new();
+    for event in events {
+        let entry = by_cpu
+            .entry(event.cpu)
+            .or_insert((event.freq_khz, event.freq_khz));
+        entry.0 = entry.0.min(event.freq_khz);
+        entry.1 = entry.1.max(event.freq_khz);
+    }
+
+    let Some((cpu, (min_freq, max_freq))) = by_cpu
+        .into_iter()
+        .filter(|(_, (_, max_freq))| *max_freq > 0)
+        .map(|(cpu, (min_freq, max_freq))| {
+            let drop_percent =
+                ((max_freq.saturating_sub(min_freq)) as f64 / max_freq as f64) * 100.0;
+            (cpu, (min_freq, max_freq, drop_percent))
+        })
+        .filter(|(_, (_, _, drop_percent))| *drop_percent >= config.cpu_freq_drop_percent)
+        .max_by(|a, b| a.1.2.partial_cmp(&b.1.2).unwrap_or(Ordering::Equal))
+        .map(|(cpu, (min_freq, max_freq, _))| (cpu, (min_freq, max_freq)))
+    else {
+        return;
+    };
+
+    push_supporting_evidence(
+        candidates,
+        cause,
+        EvidenceItem {
+            kind: EvidenceKind::CpuFrequency,
+            strength: 0.25,
+            message: format!(
+                "CPU frequency drop near spike: cpu={} min={}kHz max={}kHz",
+                cpu, min_freq, max_freq
+            ),
+            timestamp_ms: None,
+            start_ns: None,
+            end_ns: None,
+        },
+    );
+}
+
+fn push_migration_evidence(
+    candidates: &mut [DiagnosisCandidate],
+    cause: StutterCause,
+    events: &[MigrationEventRecord],
+    cluster_elapsed_range: Option<(u128, u128)>,
+    config: DiagnosisConfig,
+) {
+    let Some(event) = events.iter().find(|event| {
+        cluster_elapsed_range.is_none_or(|(min, max)| {
+            event.elapsed_ms >= min.saturating_sub(config.migration_window_ms)
+                && event.elapsed_ms <= max.saturating_add(config.migration_window_ms)
+        })
+    }) else {
+        return;
+    };
+
+    push_supporting_evidence(
+        candidates,
+        cause,
+        EvidenceItem {
+            kind: EvidenceKind::Migration,
+            strength: 0.20,
+            message: format!(
+                "task migration event near spike: tid={} cpu {}->{}",
+                event.tid, event.from_cpu, event.to_cpu
+            ),
+            timestamp_ms: Some(event.elapsed_ms),
+            start_ns: Some(event.timestamp_ns),
+            end_ns: Some(event.timestamp_ns),
+        },
+    );
+}
+
+fn push_page_fault_evidence(
+    candidates: &mut [DiagnosisCandidate],
+    cause: StutterCause,
+    intervals: &[IntervalRecord],
+    config: DiagnosisConfig,
+) {
+    let Some(record) = intervals.iter().find(|record| {
+        record.major_faults.saturating_add(record.minor_faults) >= config.page_fault_delta_threshold
+    }) else {
+        return;
+    };
+
+    push_supporting_evidence(
+        candidates,
+        cause,
+        EvidenceItem {
+            kind: EvidenceKind::PageFaults,
+            strength: 0.20,
+            message: "page fault activity near spike; treat as supporting evidence only".to_owned(),
+            timestamp_ms: Some(record.elapsed_ms),
+            start_ns: None,
+            end_ns: None,
+        },
+    );
 }
 
 #[cfg(test)]
@@ -687,6 +921,24 @@ mod tests {
         assert!(summary.contains("GameThreadSchedulerDelay"));
         assert!(summary.contains("candidate"));
         assert!(summary.contains("inference"));
+    }
+
+    #[test]
+    fn scx_secondary_evidence_keeps_scheduler_primary() {
+        let mut point = spike_point(456, TaskClass::Game, "RenderThread", 8_000_000);
+        point.scx_ops = Some("scx_lavd".to_owned());
+        point.scx_state = Some("enabled".to_owned());
+        let cluster = spike_cluster(vec![point]);
+
+        let d = diagnose_cluster(&cluster, &RunArtifacts::default(), 0);
+
+        assert_eq!(d.cause, StutterCause::GameThreadSchedulerDelay);
+        let game = candidate(&d, StutterCause::GameThreadSchedulerDelay);
+        assert!(
+            game.evidence
+                .iter()
+                .any(|evidence| evidence.kind == EvidenceKind::ScxState)
+        );
     }
 
     #[test]

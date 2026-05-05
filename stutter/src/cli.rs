@@ -29,6 +29,7 @@ enum Command {
     ApplyProfile(ApplyProfileArgs),
     Tune(TuneArgs),
     Check(CheckArgs),
+    Doctor(DoctorArgs),
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -280,6 +281,39 @@ pub struct CheckArgs {
     pub max_regression_p99_ms: f64,
 }
 
+#[derive(Args, Debug, Clone)]
+struct DoctorArgs {
+    #[arg(long)]
+    json: bool,
+
+    #[arg(long = "hwmon", id = "hwmon")]
+    hwmon: bool,
+
+    #[arg(long = "hwmon-root", value_name = "PATH", requires = "hwmon")]
+    hwmon_root: Option<PathBuf>,
+
+    #[arg(long = "hwmon-drm-card", value_name = "CARD", requires = "hwmon")]
+    hwmon_drm_card: Option<String>,
+
+    #[arg(long = "hwmon-render-node", value_name = "NODE", requires = "hwmon")]
+    hwmon_render_node: Option<PathBuf>,
+
+    #[arg(long = "irq-latency")]
+    irq_latency: bool,
+
+    #[arg(long = "irq", value_name = "IRQ")]
+    irqs: Vec<u32>,
+
+    #[arg(long = "block-io")]
+    block_io: bool,
+
+    #[arg(long = "faults")]
+    faults: bool,
+
+    #[arg(long = "mangohud-log", value_name = "PATH")]
+    mangohud_log: Option<PathBuf>,
+}
+
 #[derive(Debug)]
 pub enum AppCommand {
     Monitor(Arc<Config>),
@@ -324,6 +358,9 @@ pub enum AppCommand {
         baseline: PathBuf,
         current: PathBuf,
         max_regression_p99_ms: f64,
+    },
+    Doctor {
+        input: crate::doctor::DoctorInput,
     },
 }
 
@@ -497,6 +534,20 @@ where
                 max_regression_p99_ms: args.max_regression_p99_ms,
             })
         }
+        Some(Command::Doctor(args)) => Ok(AppCommand::Doctor {
+            input: crate::doctor::DoctorInput {
+                json: args.json,
+                hwmon: args.hwmon,
+                hwmon_root: args.hwmon_root,
+                hwmon_drm_card: args.hwmon_drm_card,
+                hwmon_render_node: args.hwmon_render_node,
+                irq_latency: args.irq_latency,
+                irqs: args.irqs,
+                block_io: args.block_io,
+                faults: args.faults,
+                mangohud_log: args.mangohud_log,
+            },
+        }),
         None => Ok(AppCommand::Monitor(Arc::new(config_from_monitor_args(
             cli.legacy_monitor,
             false,
@@ -1062,6 +1113,52 @@ mod tests {
         assert_eq!(mangohud_log, Some(PathBuf::from("/tmp/tune-mango.csv")));
         assert!(!enforce);
         assert!(!hwmon);
+    }
+
+    #[test]
+    fn parses_doctor_command() {
+        let command = parse_app_command_from(["stutter", "doctor"]).unwrap();
+
+        let AppCommand::Doctor { input } = command else {
+            panic!("expected doctor command");
+        };
+
+        assert!(!input.json);
+        assert!(!input.hwmon);
+        assert!(!input.irq_latency);
+    }
+
+    #[test]
+    fn parses_doctor_json_hwmon_root() {
+        let command = parse_app_command_from([
+            "stutter",
+            "doctor",
+            "--json",
+            "--hwmon",
+            "--hwmon-root",
+            "/tmp/fake",
+        ])
+        .unwrap();
+
+        let AppCommand::Doctor { input } = command else {
+            panic!("expected doctor command");
+        };
+
+        assert!(input.json);
+        assert!(input.hwmon);
+        assert_eq!(input.hwmon_root, Some(PathBuf::from("/tmp/fake")));
+    }
+
+    #[test]
+    fn parses_doctor_irq_latency_without_irq() {
+        let command = parse_app_command_from(["stutter", "doctor", "--irq-latency"]).unwrap();
+
+        let AppCommand::Doctor { input } = command else {
+            panic!("expected doctor command");
+        };
+
+        assert!(input.irq_latency);
+        assert!(input.irqs.is_empty());
     }
 
     #[test]

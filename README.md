@@ -148,10 +148,19 @@ Hardware monitoring notes:
 
 TUI notes:
 
-- The `--tui` flag currently renders a plain-text status summary (non-interactive).
-  It prints aggregated counts and a simple bar graph per task class. If you need an
-  interactive terminal UI with live histograms, please open an issue or contribute
-  to the `tui.rs` module.
+- `--tui` opens an interactive ratatui alternate-screen UI.
+- Controls:
+  - `q`: quit
+  - `p`: pause/resume interval collection/render updates
+  - `s`: cycle sort field
+  - `f`: cycle task-class filter
+- The UI shows:
+  - active/known task counts
+  - eBPF drop-counter status
+  - sortable task latency table
+  - global max-latency sparkline
+  - per-CPU max-latency heat bars
+  - recent live diagnosis candidates
 
 ## Generate a report
 
@@ -198,6 +207,23 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- report \
   --html report.html \
   ~/.local/state/stutter/runs/<run-dir>
 ```
+
+## Doctor / preflight
+
+Run `stutter doctor` before recording to check whether tracing is likely to work and which optional telemetry may be missing or degraded. The doctor command does not attach eBPF programs or perf probes by default, so it is a preflight check rather than a guarantee that a future recording will succeed.
+
+Useful optional checks:
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo run -- doctor
+RUSTUP_TOOLCHAIN=nightly cargo run -- doctor --json
+RUSTUP_TOOLCHAIN=nightly cargo run -- doctor --hwmon --hwmon-drm-card card1
+RUSTUP_TOOLCHAIN=nightly cargo run -- doctor --block-io
+RUSTUP_TOOLCHAIN=nightly cargo run -- doctor --irq-latency --irq 137
+RUSTUP_TOOLCHAIN=nightly cargo run -- doctor --faults
+```
+
+Use `--hwmon`, `--block-io`, `--irq-latency`, `--faults`, and `--mangohud-log <PATH>` to inspect the optional probes you plan to use.
 
 ## Apply and restore affinity profiles
 
@@ -312,20 +338,14 @@ Note: the CSV exporter is intentionally compact and omits some newer fields. `in
 - `--hwmon-drm-card <CARD>`: choose a DRM card such as `card0` or `card1` for hwmon discovery.
 - `--hwmon-render-node <PATH>`: choose the DRM render node whose device hwmon should be sampled.
 - `--mangohud-log <PATH>`: provide a MangoHud CSV to correlate frame times.
-- `--tui`: print a plain-text TUI status line periodically (non-interactive).
+- `--tui`: open an interactive ratatui alternate-screen UI.
 - `stutter tune --tree-pid <PID> --profiles <FILE>`: apply each profile, keep refreshing it for new threads during the measurement epoch, score interval summaries, and restore after each candidate by default. Candidate run directories are kept next to the tuning summary for auditability. Add `--keep-best` to reapply the best profile at the end.
 
-## What TUI prints (example)
+Tune counterbalances profile order across iterations to reduce order bias. `tuning_summary.json` includes the candidate order, per-profile median/IQR stats, and a ranking-confidence field. If the ranking is unstable, no best profile is selected and `--keep-best` will not apply a profile.
 
-The current `--tui` mode prints a compact status block like:
+## What TUI shows
 
-```
-stutter live active_tasks=3 tracked_stats=4 tui_mode=plain_text
-class=Game        samples=123     max=12.345ms ################################
-class=Helper      samples=42      max=2.100ms  ########
-```
-
-The header includes `active_tasks` (number of monitored TIDs) and `tracked_stats` (per-task stats stored). Each `class=...` line shows aggregated `samples` and the observed `max` latency with a small ASCII bar.
+The `--tui` mode uses ratatui and crossterm alternate-screen rendering. It shows active and known task counts, eBPF drop-counter status, a sortable per-task latency table, a global max-latency sparkline, per-CPU max-latency heat bars, and recent live diagnosis candidates. Press `q` to quit, `p` to pause or resume interval collection and render updates, `s` to cycle sort fields, and `f` to cycle the task-class filter.
 
 ## Generated JSON files (overview)
 

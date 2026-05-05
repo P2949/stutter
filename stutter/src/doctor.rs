@@ -1,0 +1,507 @@
+use std::{
+    collections::BTreeMap,
+    fs,
+    io::Read,
+    path::{Path, PathBuf},
+};
+
+use serde::Serialize;
+
+use crate::{ebpf_loader, hwmon};
+
+#[derive(Debug, Clone)]
+pub struct DoctorInput {
+    pub json: bool,
+    pub hwmon: bool,
+    pub hwmon_root: Option<PathBuf>,
+    pub hwmon_drm_card: Option<String>,
+    pub hwmon_render_node: Option<PathBuf>,
+    pub irq_latency: bool,
+    pub irqs: Vec<u32>,
+    pub block_io: bool,
+    pub faults: bool,
+    pub mangohud_log: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub enum DoctorStatus {
+    Pass,
+    Warn,
+    Fail,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DoctorReport {
+    pub overall: DoctorStatus,
+    pub checks: Vec<DoctorCheck>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DoctorCheck {
+    pub name: String,
+    pub status: DoctorStatus,
+    pub message: String,
+    pub details: BTreeMap<String, String>,
+}
+
+pub fn doctor_command(input: DoctorInput) -> anyhow::Result<()> {
+    let report = build_doctor_report(&input);
+
+    if input.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_doctor_report(&report);
+    }
+
+    Ok(())
+}
+
+pub fn build_doctor_report(input: &DoctorInput) -> DoctorReport {
+    let mut checks = vec![
+        ebpf_build_check(),
+        ebpf_map_sizing_check(),
+        tracepoint_check(input),
+    ];
+
+    if input.faults {
+        checks.push(fault_probe_preflight_check());
+    }
+    if input.hwmon {
+        checks.push(hwmon_check(input));
+    }
+    if input.irq_latency {
+        checks.push(irq_selection_check(&input.irqs));
+    }
+    if let Some(path) = &input.mangohud_log {
+        checks.push(check_mangohud_log_path(path));
+    }
+
+    DoctorReport {
+        overall: aggregate_status(&checks),
+        checks,
+    }
+}
+
+pub fn aggregate_status(checks: &[DoctorCheck]) -> DoctorStatus {
+    if checks
+        .iter()
+        .any(|check| matches!(check.status, DoctorStatus::Fail))
+    {
+        DoctorStatus::Fail
+    } else if checks
+        .iter()
+        .any(|check| matches!(check.status, DoctorStatus::Warn))
+    {
+        DoctorStatus::Warn
+    } else {
+        DoctorStatus::Pass
+    }
+}
+
+fn print_doctor_report(report: &DoctorReport) {
+    println!("stutter doctor");
+    println!("==============");
+    println!();
+    println!("overall: {:?}", report.overall);
+    println!();
+
+    for check in &report.checks {
+        println!("[{:?}] {}", check.status, check.name);
+        println!("  {}", check.message);
+        for (key, value) in &check.details {
+            println!("  {key}={value}");
+        }
+        println!();
+    }
+}
+
+fn ebpf_build_check() -> DoctorCheck {
+    DoctorCheck {
+        name: "ebpf_build".to_owned(),
+        status: DoctorStatus::Pass,
+        message: "binary started; eBPF object was embedded at build time".to_owned(),
+        details: BTreeMap::new(),
+    }
+}
+
+fn ebpf_map_sizing_check() -> DoctorCheck {
+    let sizing = ebpf_loader::ebpf_map_sizing_report();
+    let mut details = BTreeMap::new();
+    details.insert(
+        "locked_memory_limit_bytes".to_owned(),
+        format_optional_u64(sizing.locked_memory_limit_bytes),
+    );
+    details.insert(
+        "available_memory_bytes".to_owned(),
+        format_optional_u64(sizing.available_memory_bytes),
+    );
+    details.insert(
+        "events_ringbuf_bytes".to_owned(),
+        sizing.events_ringbuf_bytes.to_string(),
+    );
+    details.insert(
+        "wakeup_data_entries".to_owned(),
+        sizing.wakeup_data_entries.to_string(),
+    );
+
+    let status = if sizing.events_ringbuf_bytes <= 64 * 1024 || sizing.wakeup_data_entries <= 4096 {
+        DoctorStatus::Warn
+    } else {
+        DoctorStatus::Pass
+    };
+
+    DoctorCheck {
+        name: "ebpf_map_sizing".to_owned(),
+        status,
+        message: if matches!(status, DoctorStatus::Pass) {
+            "dynamic eBPF map sizing looks adequate".to_owned()
+        } else {
+            "dynamic eBPF map sizing is at the conservative minimum".to_owned()
+        },
+        details,
+    }
+}
+
+fn tracepoint_check(input: &DoctorInput) -> DoctorCheck {
+    let report = ebpf_loader::tracepoint_preflight(
+        Path::new("/sys/kernel/tracing/events"),
+        true,
+        false,
+        input.irq_latency,
+        input.block_io,
+        true,
+    );
+
+    let mut details = BTreeMap::new();
+    details.insert("sched_wakeup".to_owned(), report.sched_wakeup);
+    details.insert("sched_switch".to_owned(), report.sched_switch);
+    details.insert("sched_wakeup_new".to_owned(), report.sched_wakeup_new);
+    details.insert("sched_migrate_task".to_owned(), report.sched_migrate_task);
+    details.insert("cpu_frequency".to_owned(), report.cpu_frequency);
+    details.insert("sched_stat_wait".to_owned(), report.sched_stat_wait);
+    details.insert("irq_handler".to_owned(), report.irq_handler);
+    details.insert("block_rq".to_owned(), report.block_rq);
+    details.insert(
+        "block_io_correlation_basis".to_owned(),
+        report.block_io_correlation_basis,
+    );
+    for (idx, warning) in report.warnings.iter().enumerate() {
+        details.insert(format!("warning_{idx}"), warning.clone());
+    }
+    for (idx, error) in report.errors.iter().enumerate() {
+        details.insert(format!("error_{idx}"), error.clone());
+    }
+
+    let status = if !report.errors.is_empty() {
+        DoctorStatus::Fail
+    } else if !report.warnings.is_empty() {
+        DoctorStatus::Warn
+    } else {
+        DoctorStatus::Pass
+    };
+
+    DoctorCheck {
+        name: "tracepoint_formats".to_owned(),
+        status,
+        message: match status {
+            DoctorStatus::Pass => "required tracepoint formats look compatible".to_owned(),
+            DoctorStatus::Warn => {
+                "required tracepoints look usable, but optional probes may be degraded".to_owned()
+            }
+            DoctorStatus::Fail => {
+                "required scheduler tracepoint formats are missing or incompatible".to_owned()
+            }
+        },
+        details,
+    }
+}
+
+fn fault_probe_preflight_check() -> DoctorCheck {
+    let mut details = BTreeMap::new();
+    match fs::read_to_string("/proc/sys/kernel/perf_event_paranoid") {
+        Ok(value) => {
+            let trimmed = value.trim().to_owned();
+            details.insert("perf_event_paranoid".to_owned(), trimmed.clone());
+            let parsed = trimmed.parse::<i32>().ok();
+            let status = if parsed.is_some_and(|value| value > 2) {
+                DoctorStatus::Warn
+            } else {
+                DoctorStatus::Pass
+            };
+            DoctorCheck {
+                name: "fault_probe_preflight".to_owned(),
+                status,
+                message: if matches!(status, DoctorStatus::Pass) {
+                    "perf fault probes are not obviously blocked by perf_event_paranoid".to_owned()
+                } else {
+                    "perf_event_paranoid may restrict unprivileged fault probes".to_owned()
+                },
+                details,
+            }
+        }
+        Err(err) => {
+            details.insert("error".to_owned(), err.to_string());
+            DoctorCheck {
+                name: "fault_probe_preflight".to_owned(),
+                status: DoctorStatus::Warn,
+                message: "could not read perf_event_paranoid; fault probe support is uncertain"
+                    .to_owned(),
+                details,
+            }
+        }
+    }
+}
+
+fn hwmon_check(input: &DoctorInput) -> DoctorCheck {
+    let report = hwmon::probe_hwmon_with_options(
+        input.hwmon_root.as_deref(),
+        input.hwmon_drm_card.as_deref(),
+        input.hwmon_render_node.as_deref(),
+    );
+    let mut details = BTreeMap::new();
+    details.insert(
+        "selected_root".to_owned(),
+        report
+            .selected_root
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "-".to_owned()),
+    );
+    details.insert(
+        "gpu_busy_percent".to_owned(),
+        yes_no(report.gpu_busy_available),
+    );
+    details.insert("vram_used".to_owned(), yes_no(report.vram_used_available));
+    details.insert("vram_total".to_owned(), yes_no(report.vram_total_available));
+    details.insert("temp".to_owned(), yes_no(report.temp_available));
+    details.insert("power".to_owned(), yes_no(report.power_available));
+    details.insert(
+        "nvidia_smi_fallback".to_owned(),
+        yes_no(report.nvidia_fallback_available),
+    );
+    for (idx, warning) in report.warnings.iter().enumerate() {
+        details.insert(format!("warning_{idx}"), warning.clone());
+    }
+
+    let status = if report.warnings.is_empty()
+        && (report.gpu_busy_available || report.nvidia_fallback_available)
+    {
+        DoctorStatus::Pass
+    } else {
+        DoctorStatus::Warn
+    };
+
+    DoctorCheck {
+        name: "hwmon".to_owned(),
+        status,
+        message: if matches!(status, DoctorStatus::Pass) {
+            "GPU hwmon telemetry appears available".to_owned()
+        } else {
+            "GPU hwmon telemetry may be missing or partial".to_owned()
+        },
+        details,
+    }
+}
+
+fn irq_selection_check(irqs: &[u32]) -> DoctorCheck {
+    let mut details = BTreeMap::new();
+    if !irqs.is_empty() {
+        details.insert(
+            "irqs".to_owned(),
+            irqs.iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        return DoctorCheck {
+            name: "irq_latency".to_owned(),
+            status: DoctorStatus::Pass,
+            message: "IRQ latency requested with explicit IRQ targets".to_owned(),
+            details,
+        };
+    }
+
+    let mut message =
+        "no --irq supplied; inspect /proc/interrupts or use suggested GPU IRQ lines".to_owned();
+    if let Ok(text) = fs::read_to_string("/proc/interrupts") {
+        let suggestions = suggested_gpu_irq_lines_from_text(&text);
+        for (idx, line) in suggestions.iter().take(8).enumerate() {
+            details.insert(format!("suggested_irq_line_{idx}"), line.clone());
+        }
+        if suggestions.is_empty() {
+            details.insert("suggestions".to_owned(), "none".to_owned());
+        }
+    } else {
+        message.push_str("; /proc/interrupts was unreadable");
+    }
+
+    DoctorCheck {
+        name: "irq_latency".to_owned(),
+        status: DoctorStatus::Warn,
+        message,
+        details,
+    }
+}
+
+pub fn suggested_gpu_irq_lines_from_text(text: &str) -> Vec<String> {
+    const TERMS: &[&str] = &["amdgpu", "radeon", "nvidia", "i915", "xe", "drm", "gpu"];
+    text.lines()
+        .map(str::trim)
+        .filter(|line| {
+            let lower = line.to_ascii_lowercase();
+            TERMS.iter().any(|term| lower.contains(term))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+pub fn check_mangohud_log_path(path: &Path) -> DoctorCheck {
+    let mut details = BTreeMap::new();
+    details.insert("path".to_owned(), path.display().to_string());
+
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(err) => {
+            details.insert("error".to_owned(), err.to_string());
+            return DoctorCheck {
+                name: "mangohud_log".to_owned(),
+                status: DoctorStatus::Warn,
+                message: "MangoHud log is missing or unreadable".to_owned(),
+                details,
+            };
+        }
+    };
+
+    let mut buf = String::new();
+    if let Err(err) = file.by_ref().take(8192).read_to_string(&mut buf) {
+        details.insert("error".to_owned(), err.to_string());
+        return DoctorCheck {
+            name: "mangohud_log".to_owned(),
+            status: DoctorStatus::Warn,
+            message: "MangoHud log could not be read".to_owned(),
+            details,
+        };
+    }
+
+    if buf.trim().is_empty() {
+        return DoctorCheck {
+            name: "mangohud_log".to_owned(),
+            status: DoctorStatus::Warn,
+            message: "MangoHud log is empty".to_owned(),
+            details,
+        };
+    }
+
+    let looks_csv = buf.lines().any(|line| {
+        let parts = line.split(',').map(str::trim).collect::<Vec<_>>();
+        parts.len() >= 2 && parts.iter().take(2).all(|part| !part.is_empty())
+    });
+
+    DoctorCheck {
+        name: "mangohud_log".to_owned(),
+        status: if looks_csv {
+            DoctorStatus::Pass
+        } else {
+            DoctorStatus::Warn
+        },
+        message: if looks_csv {
+            "MangoHud log looks like comma-separated telemetry".to_owned()
+        } else {
+            "MangoHud log does not look like CSV telemetry".to_owned()
+        },
+        details,
+    }
+}
+
+fn format_optional_u64(value: Option<u64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unlimited_or_unknown".to_owned())
+}
+
+fn yes_no(value: bool) -> String {
+    if value {
+        "yes".to_owned()
+    } else {
+        "no".to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check(status: DoctorStatus) -> DoctorCheck {
+        DoctorCheck {
+            name: "test".to_owned(),
+            status,
+            message: String::new(),
+            details: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn aggregate_status_prefers_fail_then_warn() {
+        assert_eq!(
+            aggregate_status(&[check(DoctorStatus::Pass), check(DoctorStatus::Fail)]),
+            DoctorStatus::Fail
+        );
+        assert_eq!(
+            aggregate_status(&[check(DoctorStatus::Pass), check(DoctorStatus::Warn)]),
+            DoctorStatus::Warn
+        );
+        assert_eq!(
+            aggregate_status(&[check(DoctorStatus::Pass)]),
+            DoctorStatus::Pass
+        );
+    }
+
+    #[test]
+    fn suggested_gpu_irq_lines_match_known_driver_terms() {
+        let text = "\
+  45: 1 0 IO-APIC 45-fasteoi amdgpu
+  46: 1 0 IO-APIC 46-fasteoi eth0
+  47: 1 0 IO-APIC 47-fasteoi NVIDIA
+";
+
+        let lines = suggested_gpu_irq_lines_from_text(text);
+
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("amdgpu"));
+        assert!(lines[1].contains("NVIDIA"));
+    }
+
+    #[test]
+    fn mangohud_log_checks_missing_empty_and_basic_csv() {
+        let dir = temp_dir("doctor-mangohud");
+        fs::create_dir_all(&dir).unwrap();
+
+        let missing = check_mangohud_log_path(&dir.join("missing.csv"));
+        assert_eq!(missing.status, DoctorStatus::Warn);
+
+        let empty_path = dir.join("empty.csv");
+        fs::write(&empty_path, "").unwrap();
+        let empty = check_mangohud_log_path(&empty_path);
+        assert_eq!(empty.status, DoctorStatus::Warn);
+
+        let csv_path = dir.join("mangohud.csv");
+        fs::write(&csv_path, "elapsed_ms,frametime_ms\n1,16.6\n").unwrap();
+        let csv = check_mangohud_log_path(&csv_path);
+        assert_eq!(csv.status, DoctorStatus::Pass);
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "stutter-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        dir
+    }
+}
