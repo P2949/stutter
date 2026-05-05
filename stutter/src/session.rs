@@ -883,15 +883,12 @@ impl MonitorSession {
 
         // Build a RunArtifacts-like snapshot from recent telemetry and let
         // `diagnose_cluster` perform time filtering itself.
-        let artifacts = crate::report::RunArtifacts {
+        let artifacts = crate::session_io::RunArtifacts {
             irq_events: self.recent_telemetry.irq_events.iter().cloned().collect(),
             gpu_samples: self.recent_telemetry.gpu_samples.iter().cloned().collect(),
-            frame_events: Vec::new(),
-            migration_events: Vec::new(),
-            cpu_freq_samples: Vec::new(),
-            io_events: self.recent_telemetry.io_events.iter().cloned().collect(),
-            interval_records: self.recorder.interval_records.clone(),
-            scx_events: Vec::new(),
+            block_io_events: self.recent_telemetry.io_events.iter().cloned().collect(),
+            intervals: self.recorder.interval_records.clone(),
+            ..Default::default()
         };
 
         let diagnosis = diagnose_cluster(&cluster, &artifacts, cluster_window_ns);

@@ -21,6 +21,7 @@ use crate::{
 };
 
 pub type IntervalRecord = MetricsIntervalRecord;
+pub use crate::scx::ScxEvent;
 pub const MAX_SPIKE_EVENTS: usize = 500_000;
 
 #[derive(Default)]
@@ -303,7 +304,7 @@ impl Default for SpikeEventBuffer {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct TreeEvent {
     pub elapsed_ms: u128,
     pub action: String,
@@ -316,7 +317,7 @@ pub struct TreeEvent {
     pub from_cgroup: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct SessionFile {
     pub schema_version: u32,
     pub run_name: Option<String>,
@@ -377,7 +378,7 @@ pub struct SessionFile {
     pub top_spikes: Vec<SessionSpike>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct MetadataFile {
     pub schema_version: u32,
     pub run_name: Option<String>,
@@ -434,7 +435,7 @@ pub struct MetadataFile {
     pub drop_counters: DropCountersSnapshot,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct RecordedConfig {
     pub manual_pids: Vec<u32>,
     pub tree_roots: Vec<u32>,
@@ -505,7 +506,7 @@ fn default_recorded_follow_exec() -> bool {
     true
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct RecordedTime {
     pub unix_seconds: u64,
     pub unix_nanos: u32,
@@ -513,7 +514,7 @@ pub struct RecordedTime {
     pub system_time_debug: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct SessionTask {
     pub task: u32,
     pub active: bool,
@@ -549,14 +550,14 @@ pub struct SessionTask {
     pub stat_wait_count: Option<u64>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct WakerEntry {
     pub waker_tid: u32,
     pub waker_comm: String,
     pub count: u64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct RecordedLatency {
     pub samples: u64,
     pub stored_samples: u64,
@@ -574,7 +575,7 @@ pub struct RecordedLatency {
     pub over_5ms: u64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct RecordedCpuSnapshot {
     pub busiest_cpu: Option<u32>,
     pub busiest_cpu_samples: u64,
@@ -585,7 +586,7 @@ pub struct RecordedCpuSnapshot {
     pub per_cpu: Vec<CpuLine>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct RecordedSpike {
     pub class: TaskClass,
     pub process_pid: Option<u32>,
@@ -613,7 +614,7 @@ pub struct RecordedSpike {
     pub scx_enable_seq: Option<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct SessionSpike {
     pub task: u32,
     pub active: bool,
@@ -644,7 +645,7 @@ pub struct SessionSpike {
     pub scx_enable_seq: Option<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct SpikeEvent {
     #[serde(default)]
     pub elapsed_ms: Option<u128>,
@@ -677,7 +678,7 @@ pub struct SpikeEvent {
     pub scx_enable_seq: Option<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct MigrationEventRecord {
     pub elapsed_ms: u128,
     pub tid: u32,
@@ -686,7 +687,7 @@ pub struct MigrationEventRecord {
     pub timestamp_ns: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct CpuFreqRecord {
     pub elapsed_ms: u128,
     pub cpu: u32,
@@ -728,7 +729,7 @@ impl SpikeEvent {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct IrqEventRecord {
     #[serde(default)]
     pub elapsed_ms: Option<u128>,
@@ -739,7 +740,7 @@ pub struct IrqEventRecord {
     pub duration_ns: u64,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct GpuSample {
     pub elapsed_ms: u128,
     pub gpu_busy_percent: Option<u32>,
@@ -752,13 +753,13 @@ pub struct GpuSample {
     pub power_microwatts: Option<u64>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct FrameEvent {
     pub elapsed_ms: u128,
     pub frametime_ms: f64,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct BlockIoRecord {
     pub elapsed_ms: u128,
     pub tid: u32,

@@ -9,7 +9,6 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::Context;
 use log::{debug, info, warn};
 use serde::Serialize;
 use tokio::time::sleep;
@@ -20,9 +19,10 @@ use crate::{
     hwmon,
     process_tree::TaskFilters,
     profiles,
-    recorder::{self, IntervalRecord},
+    recorder::IntervalRecord,
     scorer,
     session::run_monitor,
+    session_io,
 };
 
 pub mod comparability;
@@ -490,21 +490,15 @@ pub async fn measure_tune_candidate(
 
     monitor_result?;
 
-    let interval_path = run_dir.join("interval.json");
-    let mut interval_records: Vec<IntervalRecord> = read_ndjson_vec(&interval_path)?;
+    let artifacts =
+        session_io::load_run_artifacts(&run_dir, session_io::ArtifactLoadOptions::TUNE)?;
+    let mut interval_records = artifacts.intervals;
     retain_after_warmup(&mut interval_records, warmup_seconds, |r| r.elapsed_ms);
 
-    let frame_path = run_dir.join("frame_correlation.json");
-    let mut frame_events: Vec<crate::recorder::FrameEvent> = if frame_path.exists() {
-        read_ndjson_vec(&frame_path)?
-    } else {
-        Vec::new()
-    };
+    let mut frame_events = artifacts.frame_events;
     retain_after_warmup(&mut frame_events, warmup_seconds, |f| f.elapsed_ms);
 
-    let session_path = run_dir.join("session.json");
-    let session: recorder::SessionFile = read_json_file(&session_path)?;
-    let coverage = comparability::tune_coverage_metrics(&session, &interval_records);
+    let coverage = comparability::tune_coverage_metrics(&artifacts.session, &interval_records);
 
     Ok(TuneMeasureResult {
         applied_tasks,
@@ -723,26 +717,6 @@ pub fn unix_nanos_now() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos()
-}
-
-fn read_ndjson_vec<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result<Vec<T>> {
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
-    let reader = std::io::BufReader::new(file);
-
-    serde_json::Deserializer::from_reader(reader)
-        .into_iter::<T>()
-        .collect::<Result<Vec<_>, _>>()
-        .with_context(|| format!("failed to parse NDJSON stream {}", path.display()))
-}
-
-fn read_json_file<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
-    let reader = std::io::BufReader::new(file);
-
-    serde_json::from_reader(reader)
-        .with_context(|| format!("failed to parse JSON file {}", path.display()))
 }
 
 pub fn retain_after_warmup<T>(

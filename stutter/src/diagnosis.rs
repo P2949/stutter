@@ -4,7 +4,8 @@ use crate::{
     metrics::format_latency,
     process_tree::TaskClass,
     recorder::{BlockIoRecord, GpuSample, IntervalRecord, IrqEventRecord},
-    report::{RunArtifacts, SpikeCluster, SpikePoint},
+    report::{SpikeCluster, SpikePoint},
+    session_io::RunArtifacts,
 };
 
 const IRQ_SIGNIFICANT_NS: u64 = 250_000; // start conservative
@@ -196,7 +197,7 @@ pub fn diagnose_cluster(
     // for future enhancements.
 
     let io_events: Vec<BlockIoRecord> = artifacts
-        .io_events
+        .block_io_events
         .iter()
         .filter(|e| {
             e.timestamp_ns >= start_ns && e.timestamp_ns.saturating_sub(e.duration_ns) <= end_ns
@@ -206,7 +207,7 @@ pub fn diagnose_cluster(
 
     let interval_records: Vec<IntervalRecord> = if let Some((min, max)) = cluster_elapsed_range {
         artifacts
-            .interval_records
+            .intervals
             .iter()
             .filter(|r| {
                 r.elapsed_ms >= min.saturating_sub(1000) && r.elapsed_ms <= max.saturating_add(1000)

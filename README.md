@@ -278,7 +278,7 @@ Unknown `.exe` processes are no longer automatically treated as critical game ta
 
 For programmatic consumption, inspect the example outputs in a sample run directory created under `~/.local/state/stutter/runs/`.
 
-Note: the CSV exporter is intentionally compact and omits some newer fields. `interval.json` and the other JSON artifacts are the canonical, full-fidelity outputs — they contain PSI samples, major/minor fault deltas, drop counters, and histogram/truncation details. Prefer JSON for programmatic analysis.
+Note: the CSV exporter is intentionally compact and omits some newer fields. `interval.json` and the other JSON artifacts are the canonical, full-fidelity outputs — they contain PSI samples, major/minor fault deltas, drop counters, and histogram/truncation details. Prefer JSON for programmatic analysis. Recorded run directories are loaded through a shared `session_io` path; missing optional artifact files are gracefully tolerated for older recordings.
 
 ## CLI flags (quick reference)
 

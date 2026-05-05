@@ -15,6 +15,7 @@ mod report;
 mod scorer;
 mod scx;
 mod session;
+mod session_io;
 mod tasks;
 mod tui;
 mod tune;
