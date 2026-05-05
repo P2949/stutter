@@ -477,8 +477,8 @@ mod tests {
         dir
     }
 
-    fn write_minimal_session(dir: &Path) {
-        let session = SessionFile {
+    fn minimal_session() -> SessionFile {
+        SessionFile {
             schema_version: crate::recorder::SESSION_SCHEMA_VERSION,
             run_name: None,
             started_at: RecordedTime {
@@ -556,12 +556,19 @@ mod tests {
             drop_counters: DropCountersSnapshot::default(),
             tasks: vec![],
             top_spikes: vec![],
-        };
+        }
+    }
+
+    fn write_session(dir: &Path, session: &SessionFile) {
         fs::write(
             dir.join(SESSION_FILE),
-            serde_json::to_string(&session).unwrap(),
+            serde_json::to_string(session).unwrap(),
         )
         .unwrap();
+    }
+
+    fn write_minimal_session(dir: &Path) {
+        write_session(dir, &minimal_session());
     }
 
     #[test]
@@ -678,10 +685,38 @@ mod tests {
         let result = load_run_artifacts(&session_path, ArtifactLoadOptions::REPORT);
         assert!(result.is_ok());
         let artifacts = result.unwrap();
-        // Since we passed session.json directly, metadata should be found in parent dir
-        // Wait, load_metadata(&run_dir) will find it if it's there.
-        // But write_minimal_session only writes session.json.
         assert!(artifacts.metadata.is_none());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn test_validate_run_dir_accepts_direct_session_json_path() {
+        let dir = temp_dir("validate-direct-session");
+        write_minimal_session(&dir);
+        let session_path = dir.join("session.json");
+        let report = validate_run_dir(&session_path).unwrap();
+        assert!(report.is_ok());
+        assert!(report.present_files.contains(&SESSION_FILE.to_owned()));
+        assert!(
+            report
+                .missing_optional_files
+                .contains(&METADATA_FILE.to_owned())
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn test_tune_load_does_not_warn_about_unloaded_spike_events() {
+        let dir = temp_dir("tune-no-spike-warn");
+        let mut session = minimal_session();
+        session.spike_events_retained_count = 10;
+        write_session(&dir, &session);
+
+        let artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::TUNE).unwrap();
+        // Should not have "spike count mismatch" warning because spikes weren't loaded
+        for warning in &artifacts.validation.warnings {
+            assert!(!warning.contains("spike count mismatch"));
+        }
         std::fs::remove_dir_all(dir).ok();
     }
 }
