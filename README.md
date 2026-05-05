@@ -179,6 +179,16 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- report \
 
 Reports use `spike_events.json` for spike cluster detection when it is present. Older runs without that file still report clusters from retained per-task `top_spikes`.
 
+Reports include a `data quality` section. This is a run-level trust summary derived from schema validation, optional artifact presence, spike-event truncation, eBPF drop counters, event-stream write errors, percentile scope, block-I/O correlation basis, and MangoHud timestamp alignment.
+
+The levels are:
+
+- `High`: no known data-quality problems.
+- `Medium`: the run is usable, but some evidence is approximate, missing, truncated, or degraded.
+- `Low`: validation errors, incompatible schema, or recording write errors make the report unreliable.
+
+For machine-readable consumers, `stutter report --analysis-json <run-dir>` includes the same data-quality summary.
+
 Generate a self-contained HTML report:
 
 ```bash

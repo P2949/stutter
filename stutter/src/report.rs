@@ -79,12 +79,41 @@ pub struct ArtifactsSummary {
     pub scx_event_count: u64,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct DataQualitySummary {
+    pub level: DataQualityLevel,
+    pub reasons: Vec<String>,
+    pub missing_optional_files: Vec<String>,
+    pub validation_errors: Vec<String>,
+    pub validation_warnings: Vec<String>,
+    pub schema_version: u32,
+    pub expected_schema_version: u32,
+    pub event_stream_write_errors: u64,
+    pub spike_events_truncated: bool,
+    pub spike_events_retained_count: u64,
+    pub spike_events_dropped_count: u64,
+    pub interval_record_count: u64,
+    pub active_target_pids_count: u64,
+    pub drop_counters_nonzero: bool,
+    pub percentile_scope_counts: BTreeMap<String, u64>,
+    pub block_io_correlation_basis: String,
+    pub frame_timestamp_alignment: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+pub enum DataQualityLevel {
+    High,
+    Medium,
+    Low,
+}
+
 #[derive(Serialize)]
 pub struct ReportAnalysisJson {
     pub session: SessionFile,
     pub cluster_analysis: SpikeClusterAnalysis,
     pub frame_diagnoses: Vec<FrameDiagnosis>,
     pub artifacts_summary: ArtifactsSummary,
+    pub data_quality: DataQualitySummary,
 }
 
 // Old RunArtifacts removed in favor of session_io::RunArtifacts
@@ -200,6 +229,7 @@ pub fn print_report(
     }
 
     if analysis_json {
+        let data_quality = data_quality_summary(&session, &artifacts.validation);
         let artifacts_summary = ArtifactsSummary {
             irq_event_count: session.irq_event_count,
             gpu_sample_count: session.gpu_sample_count,
@@ -215,6 +245,7 @@ pub fn print_report(
             cluster_analysis,
             frame_diagnoses,
             artifacts_summary,
+            data_quality,
         };
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
@@ -757,6 +788,7 @@ pub(crate) fn render_report(
     filter_class: Option<TaskClass>,
 ) -> String {
     let mut output = String::new();
+    let data_quality = data_quality_summary(session, &artifacts.validation);
 
     pushln(&mut output, "stutter report");
     pushln(&mut output, "==============");
@@ -839,6 +871,100 @@ pub(crate) fn render_report(
         &mut output,
         format!("active_tasks_at_end: {}", session.active_target_pids_count),
     );
+    pushln(&mut output, "");
+
+    pushln(&mut output, "data quality");
+    pushln(&mut output, "------------");
+    pushln(&mut output, format!("level: {:?}", data_quality.level));
+    pushln(
+        &mut output,
+        format!(
+            "schema: {} expected={}",
+            data_quality.schema_version, data_quality.expected_schema_version
+        ),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "event_stream_write_errors: {}",
+            data_quality.event_stream_write_errors
+        ),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "spike_events: retained={} dropped={} truncated={}",
+            data_quality.spike_events_retained_count,
+            data_quality.spike_events_dropped_count,
+            data_quality.spike_events_truncated
+        ),
+    );
+    pushln(
+        &mut output,
+        format!("interval_records: {}", data_quality.interval_record_count),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "active_target_pids: {}",
+            data_quality.active_target_pids_count
+        ),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "drop_counters_nonzero: {}",
+            data_quality.drop_counters_nonzero
+        ),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "percentile_scope_counts: {:?}",
+            data_quality.percentile_scope_counts
+        ),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "block_io_correlation_basis: {}",
+            data_quality.block_io_correlation_basis
+        ),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "frame_timestamp_alignment: {}",
+            data_quality.frame_timestamp_alignment
+        ),
+    );
+
+    for reason in &data_quality.reasons {
+        pushln(&mut output, format!("reason: {reason}"));
+    }
+
+    if !data_quality.missing_optional_files.is_empty() {
+        pushln(
+            &mut output,
+            format!(
+                "missing_optional_files: {:?}",
+                data_quality.missing_optional_files
+            ),
+        );
+    }
+
+    if !data_quality.validation_warnings.is_empty() {
+        for warning in &data_quality.validation_warnings {
+            pushln(&mut output, format!("validation_warning: {warning}"));
+        }
+    }
+
+    if !data_quality.validation_errors.is_empty() {
+        for error in &data_quality.validation_errors {
+            pushln(&mut output, format!("validation_error: {error}"));
+        }
+    }
+
     pushln(&mut output, "");
 
     if session.spike_events_truncated {
@@ -1129,6 +1255,128 @@ fn block_io_correlation_basis(session: &SessionFile) -> &str {
         "dev+sector"
     } else {
         &session.block_io_correlation_basis
+    }
+}
+
+pub(crate) fn data_quality_summary(
+    session: &SessionFile,
+    validation: &crate::session_io::RunValidationReport,
+) -> DataQualitySummary {
+    let mut reasons = Vec::new();
+    let mut level = DataQualityLevel::High;
+
+    if !validation.errors.is_empty() {
+        level = DataQualityLevel::Low;
+        reasons.push("run directory has validation errors".to_owned());
+    }
+
+    if session.schema_version != SESSION_SCHEMA_VERSION {
+        if session.schema_version > SESSION_SCHEMA_VERSION {
+            level = DataQualityLevel::Low;
+            reasons.push("session schema is newer than this stutter binary".to_owned());
+        } else {
+            level = downgrade_quality(level, DataQualityLevel::Medium);
+            reasons.push("session schema is older than this stutter binary".to_owned());
+        }
+    }
+
+    if session.event_stream_write_errors > 0 {
+        level = DataQualityLevel::Low;
+        reasons.push("recording stream had write errors".to_owned());
+    }
+
+    if session.spike_events_truncated {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("spike event stream was truncated".to_owned());
+    }
+
+    if session.spike_events_dropped_count > 0 {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("spike events were dropped".to_owned());
+    }
+
+    if session.interval_record_count == 0 {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("no interval records are available".to_owned());
+    }
+
+    if session.active_target_pids_count == 0 {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("no active target tasks were present at end of run".to_owned());
+    }
+
+    let drop_counters_nonzero = session.drop_counters.total() > 0;
+
+    if drop_counters_nonzero {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("eBPF drop counters are non-zero".to_owned());
+    }
+
+    let mut percentile_scope_counts = BTreeMap::new();
+    for task in &session.tasks {
+        *percentile_scope_counts
+            .entry(task.latency.percentile_scope.clone())
+            .or_insert(0) += 1;
+    }
+
+    if percentile_scope_counts.contains_key("histogram") {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("some percentile values are histogram-estimated".to_owned());
+    }
+
+    if percentile_scope_counts.contains_key("capped_prefix") {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("some percentile values are based on capped prefix samples".to_owned());
+    }
+
+    let block_io_correlation_basis = block_io_correlation_basis(session).to_owned();
+    if session.block_io_event_count > 0 && block_io_correlation_basis == "dev+sector" {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("block I/O correlation is approximate dev+sector matching".to_owned());
+    }
+
+    let frame_timestamp_alignment = if session.frame_event_count == 0 {
+        "none".to_owned()
+    } else if session.mangohud_first_frame_monotonic_ns.is_some() {
+        "monotonic_observed".to_owned()
+    } else {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("MangoHud frame timestamp alignment is approximate".to_owned());
+        "approximate_first_row".to_owned()
+    };
+
+    if reasons.is_empty() {
+        reasons.push("no data-quality problems detected".to_owned());
+    }
+
+    DataQualitySummary {
+        level,
+        reasons,
+        missing_optional_files: validation.missing_optional_files.clone(),
+        validation_errors: validation.errors.clone(),
+        validation_warnings: validation.warnings.clone(),
+        schema_version: session.schema_version,
+        expected_schema_version: SESSION_SCHEMA_VERSION,
+        event_stream_write_errors: session.event_stream_write_errors,
+        spike_events_truncated: session.spike_events_truncated,
+        spike_events_retained_count: session.spike_events_retained_count,
+        spike_events_dropped_count: session.spike_events_dropped_count,
+        interval_record_count: session.interval_record_count,
+        active_target_pids_count: session.active_target_pids_count,
+        drop_counters_nonzero,
+        percentile_scope_counts,
+        block_io_correlation_basis,
+        frame_timestamp_alignment,
+    }
+}
+
+fn downgrade_quality(current: DataQualityLevel, candidate: DataQualityLevel) -> DataQualityLevel {
+    use DataQualityLevel::{High, Low, Medium};
+
+    match (current, candidate) {
+        (Low, _) | (_, Low) => Low,
+        (Medium, _) | (_, Medium) => Medium,
+        (High, High) => High,
     }
 }
 
@@ -2087,6 +2335,95 @@ fn compute_correlation_windows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn minimal_session_for_report_test() -> SessionFile {
+        SessionFile {
+            schema_version: SESSION_SCHEMA_VERSION,
+            duration_ms: 1000,
+            stop_reason: "test".to_owned(),
+            interval_record_count: 1,
+            active_target_pids_count: 1,
+            block_io_correlation_basis: "request-pointer".to_owned(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn data_quality_is_high_for_clean_minimal_session() {
+        let session = minimal_session_for_report_test();
+        let validation = crate::session_io::RunValidationReport::default();
+
+        let summary = data_quality_summary(&session, &validation);
+
+        assert_eq!(summary.level, DataQualityLevel::High);
+        assert!(
+            summary
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("no data-quality problems"))
+        );
+    }
+
+    #[test]
+    fn data_quality_is_low_for_validation_errors() {
+        let session = minimal_session_for_report_test();
+        let validation = crate::session_io::RunValidationReport {
+            errors: vec!["bad session".to_owned()],
+            ..Default::default()
+        };
+
+        let summary = data_quality_summary(&session, &validation);
+
+        assert_eq!(summary.level, DataQualityLevel::Low);
+        assert!(
+            summary
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("validation errors"))
+        );
+    }
+
+    #[test]
+    fn data_quality_warns_on_truncated_spikes() {
+        let mut session = minimal_session_for_report_test();
+        session.spike_events_truncated = true;
+        session.spike_events_retained_count = 500_000;
+        session.spike_events_dropped_count = 1;
+
+        let validation = crate::session_io::RunValidationReport::default();
+
+        let summary = data_quality_summary(&session, &validation);
+
+        assert_eq!(summary.level, DataQualityLevel::Medium);
+        assert!(
+            summary
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("spike event stream was truncated"))
+        );
+    }
+
+    #[test]
+    fn render_report_includes_data_quality_section() {
+        let session = minimal_session_for_report_test();
+        let output = render_report(
+            Path::new("session.json"),
+            &session,
+            &SpikeClusterAnalysis {
+                source: SpikeClusterSource::TopSpikesFallback,
+                source_count: 0,
+                clusters: vec![],
+            },
+            &[],
+            &session_io::RunArtifacts::default(),
+            10,
+            500,
+            None,
+        );
+
+        assert!(output.contains("data quality"));
+        assert!(output.contains("level: High"));
+    }
 
     #[test]
     fn test_identify_frame_spikes() {
