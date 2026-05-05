@@ -196,7 +196,7 @@ pub fn load_metadata(path: &Path) -> Result<Option<MetadataFile>> {
 pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<RunArtifacts> {
     let run_dir = run_dir_for(path);
     let session = load_session(path)?;
-    let metadata = load_metadata(path)?;
+    let metadata = load_metadata(&run_dir)?;
 
     let mut validation = RunValidationReport {
         run_dir: run_dir.clone(),
@@ -333,7 +333,9 @@ fn check_consistency(artifacts: &mut RunArtifacts) {
     }
 
     // Spike count consistency
-    if artifacts.spikes.len() as u64 != session.spike_events_retained_count {
+    if validation.present_files.contains(&SPIKES_FILE.to_owned())
+        && artifacts.spikes.len() as u64 != session.spike_events_retained_count
+    {
         validation.warnings.push(format!(
             "spike count mismatch: session reported {}, found {} in artifact",
             session.spike_events_retained_count,
@@ -347,11 +349,11 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
     let run_dir = run_dir_for(path);
 
     let mut report = RunValidationReport {
-        run_dir,
+        run_dir: run_dir.clone(),
         ..Default::default()
     };
 
-    let metadata_path = metadata_path_for(path);
+    let metadata_path = run_dir.join(METADATA_FILE);
     if metadata_path.exists() {
         match load_json_file::<MetadataFile>(&metadata_path) {
             Ok(metadata) => {
@@ -665,6 +667,21 @@ mod tests {
         let artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::VALIDATE_ONLY).unwrap();
         assert!(artifacts.intervals.is_empty());
         assert!(artifacts.spikes.is_empty());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn test_load_run_artifacts_accepts_direct_session_json_path() {
+        let dir = temp_dir("direct-session-path");
+        write_minimal_session(&dir);
+        let session_path = dir.join("session.json");
+        let result = load_run_artifacts(&session_path, ArtifactLoadOptions::REPORT);
+        assert!(result.is_ok());
+        let artifacts = result.unwrap();
+        // Since we passed session.json directly, metadata should be found in parent dir
+        // Wait, load_metadata(&run_dir) will find it if it's there.
+        // But write_minimal_session only writes session.json.
+        assert!(artifacts.metadata.is_none());
         std::fs::remove_dir_all(dir).ok();
     }
 }
