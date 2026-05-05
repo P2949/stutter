@@ -398,6 +398,24 @@ struct EbpfMapSizing {
     available_memory_bytes: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct EbpfMapSizingReport {
+    pub locked_memory_limit_bytes: Option<u64>,
+    pub available_memory_bytes: Option<u64>,
+    pub events_ringbuf_bytes: u32,
+    pub wakeup_data_entries: u32,
+}
+
+pub fn ebpf_map_sizing_report() -> EbpfMapSizingReport {
+    let sizing = dynamic_map_sizing();
+    EbpfMapSizingReport {
+        locked_memory_limit_bytes: sizing.locked_memory_limit_bytes,
+        available_memory_bytes: sizing.available_memory_bytes,
+        events_ringbuf_bytes: sizing.events_ringbuf_bytes,
+        wakeup_data_entries: sizing.wakeup_data_entries,
+    }
+}
+
 fn dynamic_map_sizing() -> EbpfMapSizing {
     let snapshot = MemorySnapshot {
         locked_memory_limit_bytes: locked_memory_limit_bytes(),
@@ -546,6 +564,206 @@ struct TracepointAvailability {
     block_rq_complete_rwbs_offset: Option<u32>,
     sched_process_exit: bool,
     sched_process_exec: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TracepointPreflightReport {
+    pub sched_wakeup: String,
+    pub sched_switch: String,
+    pub sched_wakeup_new: String,
+    pub sched_migrate_task: String,
+    pub cpu_frequency: String,
+    pub sched_stat_wait: String,
+    pub irq_handler: String,
+    pub block_rq: String,
+    pub block_io_correlation_basis: String,
+    pub warnings: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+pub fn tracepoint_preflight(
+    events_root: &Path,
+    wants_cpu_freq: bool,
+    wants_stat_wait: bool,
+    wants_irq_latency: bool,
+    wants_block_io: bool,
+    wants_follow_exec: bool,
+) -> TracepointPreflightReport {
+    let mut warnings = Vec::new();
+    let mut errors = Vec::new();
+
+    let sched_wakeup = required_tracepoint_status(
+        &events_root.join("sched/sched_wakeup/format"),
+        &[("pid", 24), ("prio", 28), ("target_cpu", 32)],
+        "sched_wakeup",
+        &mut errors,
+    );
+    let sched_switch = required_tracepoint_status(
+        &events_root.join("sched/sched_switch/format"),
+        &[("next_comm", 40), ("next_pid", 56), ("next_prio", 60)],
+        "sched_switch",
+        &mut errors,
+    );
+    let sched_wakeup_new = optional_tracepoint_status(
+        &events_root.join("sched/sched_wakeup_new/format"),
+        &[("pid", 24), ("prio", 28), ("target_cpu", 32)],
+        "sched_wakeup_new",
+        true,
+        &mut warnings,
+    );
+    let sched_migrate_task = optional_tracepoint_status(
+        &events_root.join("sched/sched_migrate_task/format"),
+        &[("pid", 12), ("orig_cpu", 20), ("dest_cpu", 24)],
+        "sched_migrate_task",
+        true,
+        &mut warnings,
+    );
+    let cpu_frequency = optional_tracepoint_status(
+        &events_root.join("power/cpu_frequency/format"),
+        &[("state", 8), ("cpu_id", 12)],
+        "cpu_frequency",
+        wants_cpu_freq,
+        &mut warnings,
+    );
+    let sched_stat_wait = optional_tracepoint_status(
+        &events_root.join("sched/sched_stat_wait/format"),
+        &[("pid", 8), ("delay", 16)],
+        "sched_stat_wait",
+        wants_stat_wait,
+        &mut warnings,
+    );
+
+    let irq_entry = events_root.join("irq/irq_handler_entry/format");
+    let irq_exit = events_root.join("irq/irq_handler_exit/format");
+    let irq_handler = if !wants_irq_latency {
+        "not_requested".to_owned()
+    } else if irq_entry.exists() && irq_exit.exists() {
+        let entry_ok = validate_tracepoint_format_at(&irq_entry, &[("irq", 8)]).is_ok();
+        let exit_ok = validate_tracepoint_format_at(&irq_exit, &[("irq", 8)]).is_ok();
+        if entry_ok && exit_ok {
+            "ok".to_owned()
+        } else {
+            warnings.push("IRQ tracepoint formats are present but layouts differ".to_owned());
+            "mismatch".to_owned()
+        }
+    } else {
+        warnings.push("IRQ tracepoint formats are missing".to_owned());
+        "missing".to_owned()
+    };
+
+    let (block_rq, block_io_correlation_basis) =
+        block_tracepoint_preflight(events_root, wants_block_io, &mut warnings);
+
+    if wants_follow_exec {
+        let exec_path = events_root.join("sched/sched_process_exec/format");
+        if !exec_path.exists() {
+            warnings.push(
+                "sched_process_exec tracepoint missing; follow-exec cleanup may be degraded"
+                    .to_owned(),
+            );
+        }
+    }
+
+    TracepointPreflightReport {
+        sched_wakeup,
+        sched_switch,
+        sched_wakeup_new,
+        sched_migrate_task,
+        cpu_frequency,
+        sched_stat_wait,
+        irq_handler,
+        block_rq,
+        block_io_correlation_basis,
+        warnings,
+        errors,
+    }
+}
+
+fn required_tracepoint_status(
+    path: &Path,
+    expected_offsets: &[(&str, usize)],
+    name: &str,
+    errors: &mut Vec<String>,
+) -> String {
+    match validate_tracepoint_format_at(path, expected_offsets) {
+        Ok(()) => "ok".to_owned(),
+        Err(err) => {
+            errors.push(format!(
+                "{name} tracepoint unavailable or incompatible: {err:#}"
+            ));
+            if path.exists() {
+                "mismatch".to_owned()
+            } else {
+                "missing".to_owned()
+            }
+        }
+    }
+}
+
+fn optional_tracepoint_status(
+    path: &Path,
+    expected_offsets: &[(&str, usize)],
+    name: &str,
+    wanted: bool,
+    warnings: &mut Vec<String>,
+) -> String {
+    if !path.exists() {
+        if wanted {
+            warnings.push(format!("{name} tracepoint format is missing"));
+        }
+        return "missing".to_owned();
+    }
+
+    match validate_tracepoint_format_at(path, expected_offsets) {
+        Ok(()) => "ok".to_owned(),
+        Err(err) => {
+            if wanted {
+                warnings.push(format!("{name} tracepoint layout differs: {err:#}"));
+            }
+            "mismatch".to_owned()
+        }
+    }
+}
+
+fn block_tracepoint_preflight(
+    events_root: &Path,
+    wants_block_io: bool,
+    warnings: &mut Vec<String>,
+) -> (String, String) {
+    if !wants_block_io {
+        return ("not_requested".to_owned(), "not_requested".to_owned());
+    }
+
+    let issue = events_root.join("block/block_rq_issue/format");
+    let complete = events_root.join("block/block_rq_complete/format");
+    if !issue.exists() || !complete.exists() {
+        warnings.push("block I/O tracepoint formats are missing".to_owned());
+        return ("missing".to_owned(), "unavailable".to_owned());
+    }
+
+    let issue_ok = validate_tracepoint_format_at(&issue, &[("dev", 8), ("sector", 16)]).is_ok();
+    let complete_ok =
+        validate_tracepoint_format_at(&complete, &[("dev", 8), ("sector", 16)]).is_ok();
+    if !issue_ok || !complete_ok {
+        warnings.push("block I/O tracepoint layouts differ from expected fields".to_owned());
+        return ("mismatch".to_owned(), "unavailable".to_owned());
+    }
+
+    let issue_fmt = fs::read_to_string(&issue).unwrap_or_default();
+    let complete_fmt = fs::read_to_string(&complete).unwrap_or_default();
+    let issue_offsets = parse_tracepoint_offsets(&issue_fmt);
+    let complete_offsets = parse_tracepoint_offsets(&complete_fmt);
+    let basis = if matching_request_key_offset(&issue_offsets, &complete_offsets).is_some() {
+        "request-pointer"
+    } else {
+        warnings.push(
+            "block I/O request-pointer key unavailable; dev+sector correlation is approximate"
+                .to_owned(),
+        );
+        "dev+sector"
+    };
+
+    ("ok".to_owned(), basis.to_owned())
 }
 
 fn validate_tracepoint_formats(
