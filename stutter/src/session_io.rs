@@ -46,7 +46,6 @@ pub struct ArtifactLoadOptions {
     pub load_scx_events: bool,
 }
 
-#[allow(dead_code)]
 impl ArtifactLoadOptions {
     pub const REPORT: Self = Self {
         load_intervals: true,
@@ -98,7 +97,6 @@ pub struct RunValidationReport {
 }
 
 impl RunValidationReport {
-    #[allow(dead_code)]
     pub fn is_ok(&self) -> bool {
         self.errors.is_empty()
     }
@@ -344,8 +342,8 @@ fn check_consistency(artifacts: &mut RunArtifacts) {
     }
 }
 
-#[allow(dead_code)]
 pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
+    let _options = ArtifactLoadOptions::VALIDATE_ONLY;
     let run_dir = run_dir_for(path);
 
     let mut report = RunValidationReport {
@@ -421,18 +419,18 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
         let path = report.run_dir.join(file_name);
         if path.exists() {
             let res = match type_name {
-                "IntervalRecord" => load_json_file::<Vec<IntervalRecord>>(&path).map(|_| ()),
-                "SpikeEvent" => load_json_file::<Vec<SpikeEvent>>(&path).map(|_| ()),
-                "TreeEvent" => load_json_file::<Vec<TreeEvent>>(&path).map(|_| ()),
-                "IrqEventRecord" => load_json_file::<Vec<IrqEventRecord>>(&path).map(|_| ()),
-                "GpuSample" => load_json_file::<Vec<GpuSample>>(&path).map(|_| ()),
-                "FrameEvent" => load_json_file::<Vec<FrameEvent>>(&path).map(|_| ()),
+                "IntervalRecord" => load_ndjson_file::<IntervalRecord>(&path).map(|_| ()),
+                "SpikeEvent" => load_ndjson_file::<SpikeEvent>(&path).map(|_| ()),
+                "TreeEvent" => load_ndjson_file::<TreeEvent>(&path).map(|_| ()),
+                "IrqEventRecord" => load_ndjson_file::<IrqEventRecord>(&path).map(|_| ()),
+                "GpuSample" => load_ndjson_file::<GpuSample>(&path).map(|_| ()),
+                "FrameEvent" => load_ndjson_file::<FrameEvent>(&path).map(|_| ()),
                 "MigrationEventRecord" => {
-                    load_json_file::<Vec<MigrationEventRecord>>(&path).map(|_| ())
+                    load_ndjson_file::<MigrationEventRecord>(&path).map(|_| ())
                 }
-                "CpuFreqRecord" => load_json_file::<Vec<CpuFreqRecord>>(&path).map(|_| ()),
-                "BlockIoRecord" => load_json_file::<Vec<BlockIoRecord>>(&path).map(|_| ()),
-                "ScxEvent" => load_json_file::<Vec<ScxEvent>>(&path).map(|_| ()),
+                "CpuFreqRecord" => load_ndjson_file::<CpuFreqRecord>(&path).map(|_| ()),
+                "BlockIoRecord" => load_ndjson_file::<BlockIoRecord>(&path).map(|_| ()),
+                "ScxEvent" => load_ndjson_file::<ScxEvent>(&path).map(|_| ()),
                 _ => unreachable!(),
             };
 
@@ -635,6 +633,38 @@ mod tests {
                 .missing_optional_files
                 .contains(&INTERVALS_FILE.to_owned())
         );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn test_validate_run_dir_ndjson() {
+        let dir = temp_dir("validate-ndjson");
+        write_minimal_session(&dir);
+
+        let interval_path = dir.join(INTERVALS_FILE);
+        let record = IntervalRecord {
+            elapsed_ms: 100,
+            samples: 1,
+            ..Default::default()
+        };
+        let line1 = serde_json::to_string(&record).unwrap();
+        let line2 = serde_json::to_string(&record).unwrap();
+        fs::write(&interval_path, format!("{}\n{}\n", line1, line2)).unwrap();
+
+        let report = validate_run_dir(&dir).unwrap();
+        assert!(report.is_ok());
+        assert!(report.present_files.contains(&INTERVALS_FILE.to_owned()));
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn test_artifact_load_options_validate_only() {
+        let dir = temp_dir("validate-only");
+        write_minimal_session(&dir);
+        let artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::VALIDATE_ONLY).unwrap();
+        assert!(artifacts.intervals.is_empty());
+        assert!(artifacts.spikes.is_empty());
         std::fs::remove_dir_all(dir).ok();
     }
 }
