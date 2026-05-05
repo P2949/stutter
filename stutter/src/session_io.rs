@@ -93,6 +93,7 @@ impl ArtifactLoadOptions {
         load_scx_events: false,
     };
 
+    #[allow(dead_code)]
     pub const VALIDATE_ONLY: Self = Self {
         load_intervals: false,
         load_spikes: false,
@@ -160,6 +161,19 @@ fn load_ndjson_file_filtered<T: DeserializeOwned, F: Fn(&T) -> bool>(
     Ok(results)
 }
 
+#[allow(dead_code)]
+fn validate_ndjson_file<T: DeserializeOwned>(path: &Path) -> Result<()> {
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let reader = std::io::BufReader::new(file);
+    let deserializer = serde_json::Deserializer::from_reader(reader);
+    let iter = deserializer.into_iter::<T>();
+    for item in iter {
+        item.with_context(|| format!("failed to parse {}", path.display()))?;
+    }
+    Ok(())
+}
+
 fn load_ndjson_file<T: DeserializeOwned>(path: &Path) -> Result<Vec<T>> {
     load_ndjson_file_filtered(path, |_| true)
 }
@@ -202,11 +216,18 @@ fn load_optional_json_vec<T: DeserializeOwned>(
     let path = json_path_for(run_dir, file_name);
 
     if !path.exists() {
-        validation.missing_optional_files.push(file_name.to_owned());
+        if !validation
+            .missing_optional_files
+            .contains(&file_name.to_owned())
+        {
+            validation.missing_optional_files.push(file_name.to_owned());
+        }
         return Ok(Vec::new());
     }
 
-    validation.present_files.push(file_name.to_owned());
+    if !validation.present_files.contains(&file_name.to_owned()) {
+        validation.present_files.push(file_name.to_owned());
+    }
     load_ndjson_file(&path)
 }
 
@@ -376,6 +397,10 @@ fn check_consistency(artifacts: &mut RunArtifacts) {
 
 impl RunArtifacts {
     pub fn load_correlations(&mut self, windows: CorrelationWindows) -> Result<()> {
+        if windows.windows_ms.is_empty() && windows.windows_ns.is_empty() {
+            return Ok(());
+        }
+
         let run_dir = &self.run_dir;
         let validation = &mut self.validation;
 
@@ -393,16 +418,10 @@ impl RunArtifacts {
             IRQ_EVENTS_FILE,
             validation,
             |r: &IrqEventRecord| {
-                windows.is_in_ns(r.enter_ns)
-                    || windows.is_in_ns(r.exit_ns)
-                    || (r.enter_ns < windows.windows_ns.iter().map(|w| w.1).max().unwrap_or(0)
-                        && r.exit_ns
-                            > windows
-                                .windows_ns
-                                .iter()
-                                .map(|w| w.0)
-                                .min()
-                                .unwrap_or(u64::MAX))
+                windows
+                    .windows_ns
+                    .iter()
+                    .any(|(start, end)| r.exit_ns >= *start && r.enter_ns <= *end)
             },
         )?;
 
@@ -432,8 +451,13 @@ impl RunArtifacts {
             BLOCK_IO_EVENTS_FILE,
             validation,
             |r: &BlockIoRecord| {
-                windows.is_in_ns(r.timestamp_ns)
-                    || windows.is_in_ns(r.timestamp_ns.saturating_sub(r.duration_ns))
+                let start_ns = r.timestamp_ns.saturating_sub(r.duration_ns);
+                let end_ns = r.timestamp_ns;
+
+                windows
+                    .windows_ns
+                    .iter()
+                    .any(|(start, end)| end_ns >= *start && start_ns <= *end)
             },
         )?;
 
@@ -457,7 +481,12 @@ fn load_optional_json_vec_filtered<T: DeserializeOwned, F: Fn(&T) -> bool>(
     let path = json_path_for(run_dir, file_name);
 
     if !path.exists() {
-        validation.missing_optional_files.push(file_name.to_owned());
+        if !validation
+            .missing_optional_files
+            .contains(&file_name.to_owned())
+        {
+            validation.missing_optional_files.push(file_name.to_owned());
+        }
         return Ok(Vec::new());
     }
 
@@ -467,6 +496,7 @@ fn load_optional_json_vec_filtered<T: DeserializeOwned, F: Fn(&T) -> bool>(
     load_ndjson_file_filtered(&path, filter)
 }
 
+#[allow(dead_code)]
 pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
     let _options = ArtifactLoadOptions::VALIDATE_ONLY;
     let run_dir = run_dir_for(path);
@@ -544,18 +574,16 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
         let path = report.run_dir.join(file_name);
         if path.exists() {
             let res = match type_name {
-                "IntervalRecord" => load_ndjson_file::<IntervalRecord>(&path).map(|_| ()),
-                "SpikeEvent" => load_ndjson_file::<SpikeEvent>(&path).map(|_| ()),
-                "TreeEvent" => load_ndjson_file::<TreeEvent>(&path).map(|_| ()),
-                "IrqEventRecord" => load_ndjson_file::<IrqEventRecord>(&path).map(|_| ()),
-                "GpuSample" => load_ndjson_file::<GpuSample>(&path).map(|_| ()),
-                "FrameEvent" => load_ndjson_file::<FrameEvent>(&path).map(|_| ()),
-                "MigrationEventRecord" => {
-                    load_ndjson_file::<MigrationEventRecord>(&path).map(|_| ())
-                }
-                "CpuFreqRecord" => load_ndjson_file::<CpuFreqRecord>(&path).map(|_| ()),
-                "BlockIoRecord" => load_ndjson_file::<BlockIoRecord>(&path).map(|_| ()),
-                "ScxEvent" => load_ndjson_file::<ScxEvent>(&path).map(|_| ()),
+                "IntervalRecord" => validate_ndjson_file::<IntervalRecord>(&path),
+                "SpikeEvent" => validate_ndjson_file::<SpikeEvent>(&path),
+                "TreeEvent" => validate_ndjson_file::<TreeEvent>(&path),
+                "IrqEventRecord" => validate_ndjson_file::<IrqEventRecord>(&path),
+                "GpuSample" => validate_ndjson_file::<GpuSample>(&path),
+                "FrameEvent" => validate_ndjson_file::<FrameEvent>(&path),
+                "MigrationEventRecord" => validate_ndjson_file::<MigrationEventRecord>(&path),
+                "CpuFreqRecord" => validate_ndjson_file::<CpuFreqRecord>(&path),
+                "BlockIoRecord" => validate_ndjson_file::<BlockIoRecord>(&path),
+                "ScxEvent" => validate_ndjson_file::<ScxEvent>(&path),
                 _ => unreachable!(),
             };
 
@@ -570,6 +598,68 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
         } else {
             report.missing_optional_files.push(file_name.to_owned());
         }
+    }
+
+    Ok(report)
+}
+
+pub fn validate_run_dir_shallow(path: &Path) -> Result<RunValidationReport> {
+    let run_dir = run_dir_for(path);
+
+    let mut report = RunValidationReport {
+        run_dir: run_dir.clone(),
+        ..Default::default()
+    };
+
+    let metadata_path = run_dir.join(METADATA_FILE);
+    if metadata_path.exists() {
+        match load_json_file::<MetadataFile>(&metadata_path) {
+            Ok(metadata) => {
+                report.present_files.push(METADATA_FILE.to_owned());
+                if metadata.schema_version < SESSION_SCHEMA_VERSION {
+                    report.warnings.push(format!(
+                        "metadata schema version {} is older than current {}",
+                        metadata.schema_version, SESSION_SCHEMA_VERSION
+                    ));
+                } else if metadata.schema_version > SESSION_SCHEMA_VERSION {
+                    report.errors.push(format!(
+                        "metadata schema version {} is newer than current {}",
+                        metadata.schema_version, SESSION_SCHEMA_VERSION
+                    ));
+                }
+            }
+            Err(e) => {
+                report
+                    .errors
+                    .push(format!("{METADATA_FILE} invalid: {e:#}"));
+            }
+        }
+    } else {
+        report.missing_optional_files.push(METADATA_FILE.to_owned());
+    }
+
+    let session_path = session_path_for(path);
+    if !session_path.exists() {
+        report.errors.push(format!(
+            "missing mandatory {SESSION_FILE} (searched {})",
+            session_path.display()
+        ));
+        return Ok(report);
+    }
+
+    let session = load_session(path)?;
+    report.present_files.push(SESSION_FILE.to_owned());
+
+    if session.schema_version < SESSION_SCHEMA_VERSION {
+        report.warnings.push(format!(
+            "session schema version {} is older than current {}",
+            session.schema_version, SESSION_SCHEMA_VERSION
+        ));
+    } else if session.schema_version > SESSION_SCHEMA_VERSION {
+        report.errors.push(format!(
+            "session schema version {} is newer than current {}",
+            session.schema_version, SESSION_SCHEMA_VERSION
+        ));
     }
 
     Ok(report)
@@ -841,5 +931,89 @@ mod tests {
             assert!(!warning.contains("spike count mismatch"));
         }
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn load_correlations_empty_windows_does_not_load_existing_heavy_artifacts() {
+        let dir = temp_dir("empty-windows");
+        write_minimal_session(&dir);
+        // Mock some data in IRQ events file
+        let irq_path = dir.join(IRQ_EVENTS_FILE);
+        fs::write(irq_path, "{\"irq\":1}\n").unwrap();
+
+        let mut artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::REPORT).unwrap();
+        assert!(artifacts.irq_events.is_empty());
+
+        let empty_windows = CorrelationWindows::default();
+        artifacts.load_correlations(empty_windows).unwrap();
+        assert!(artifacts.irq_events.is_empty());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn irq_filter_does_not_include_events_between_separate_windows() {
+        let windows = CorrelationWindows {
+            windows_ns: vec![(100, 200), (400, 500)],
+            ..Default::default()
+        };
+
+        let in_1 = IrqEventRecord {
+            enter_ns: 120,
+            exit_ns: 150,
+            ..Default::default()
+        };
+        let in_2 = IrqEventRecord {
+            enter_ns: 420,
+            exit_ns: 450,
+            ..Default::default()
+        };
+        let between = IrqEventRecord {
+            enter_ns: 250,
+            exit_ns: 350,
+            ..Default::default()
+        };
+        let spans_gap = IrqEventRecord {
+            enter_ns: 150,
+            exit_ns: 450,
+            ..Default::default()
+        };
+
+        let filter = |r: &IrqEventRecord| {
+            windows
+                .windows_ns
+                .iter()
+                .any(|(start, end)| r.exit_ns >= *start && r.enter_ns <= *end)
+        };
+
+        assert!(filter(&in_1));
+        assert!(filter(&in_2));
+        assert!(!filter(&between));
+        assert!(filter(&spans_gap));
+    }
+
+    #[test]
+    fn block_io_filter_keeps_event_spanning_window() {
+        let windows = CorrelationWindows {
+            windows_ns: vec![(1000, 2000)],
+            ..Default::default()
+        };
+
+        // Event from 500 to 2500 (duration 2000, ends at 2500)
+        let spans = BlockIoRecord {
+            timestamp_ns: 2500,
+            duration_ns: 2000,
+            ..Default::default()
+        };
+
+        let filter = |r: &BlockIoRecord| {
+            let start_ns = r.timestamp_ns.saturating_sub(r.duration_ns);
+            let end_ns = r.timestamp_ns;
+            windows
+                .windows_ns
+                .iter()
+                .any(|(start, end)| end_ns >= *start && start_ns <= *end)
+        };
+
+        assert!(filter(&spans));
     }
 }

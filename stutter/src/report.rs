@@ -128,7 +128,7 @@ pub fn print_report(
     cluster_window_ms: u64,
     filter_class: Option<TaskClass>,
 ) -> anyhow::Result<()> {
-    let validation = session_io::validate_run_dir(path)?;
+    let validation = session_io::validate_run_dir_shallow(path)?;
     if !validation.is_ok() {
         for err in &validation.errors {
             log::error!("run_dir_validation_error path={} err={err}", path.display());
@@ -604,6 +604,19 @@ pub fn write_html_report(
     cluster_window_ms: u64,
     filter_class: Option<TaskClass>,
 ) -> anyhow::Result<()> {
+    let validation = session_io::validate_run_dir_shallow(path)?;
+    if !validation.is_ok() {
+        for err in &validation.errors {
+            log::error!("run_dir_validation_error path={} err={err}", path.display());
+        }
+    }
+    for warning in &validation.warnings {
+        log::warn!(
+            "run_dir_validation_warning path={} warn={warning}",
+            path.display()
+        );
+    }
+
     let mut artifacts = session_io::load_run_artifacts(path, ArtifactLoadOptions::REPORT)?;
     let session = artifacts.session.clone();
 
