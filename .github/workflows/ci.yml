@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: nightly
+
+jobs:
+  build:
+    name: fmt build clippy test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly with rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src, rustfmt, clippy
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install bpf-linker
+        run: cargo install bpf-linker --locked
+
+      - name: Run non-root smoke build gate
+        run: scripts/smoke/build.sh
+
+  live-smoke:
+    name: live smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly with rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src, rustfmt, clippy
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install bpf-linker
+        run: cargo install bpf-linker --locked
+
+      - name: Build first
+        run: scripts/smoke/build.sh
+
+      - name: Run sleep tree churn smoke
+        run: sudo -E env RUSTUP_TOOLCHAIN=nightly RUST_LOG=info scripts/smoke/sleep_tree_churn.sh
+
+      - name: Run minimal recording smoke
+        run: sudo -E env RUSTUP_TOOLCHAIN=nightly RUST_LOG=info scripts/smoke/record_minimal.sh
