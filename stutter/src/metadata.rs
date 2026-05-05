@@ -2,7 +2,7 @@ use std::fs;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default, Debug)]
 pub struct SystemMetadata {
     pub kernel_osrelease: Option<String>,
     pub kernel_version: Option<String>,
@@ -14,7 +14,7 @@ pub struct SystemMetadata {
     pub scx_enable_seq: Option<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default, Debug)]
 pub struct CpuTopology {
     pub cpu: u32,
     pub thread_siblings_list: Option<String>,

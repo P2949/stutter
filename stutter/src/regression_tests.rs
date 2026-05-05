@@ -673,16 +673,12 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     })
     .unwrap();
 
-    let session: SessionFile =
-        serde_json::from_str(&fs::read_to_string(dir.join("session.json")).unwrap()).unwrap();
-    let metadata: recorder::MetadataFile =
-        serde_json::from_str(&fs::read_to_string(dir.join("metadata.json")).unwrap()).unwrap();
-    let recordedspike_events: Vec<SpikeEvent> = serde_json::Deserializer::from_reader(
-        fs::File::open(dir.join("spike_events.json")).unwrap(),
-    )
-    .into_iter()
-    .collect::<Result<Vec<_>, _>>()
-    .unwrap();
+    let artifacts =
+        crate::session_io::load_run_artifacts(&dir, crate::session_io::ArtifactLoadOptions::REPORT)
+            .unwrap();
+    let session = artifacts.session;
+    let metadata = artifacts.metadata.unwrap();
+    let recordedspike_events = artifacts.spikes;
 
     assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
     assert_eq!(session.active_expanded_tasks, vec![1, 4, 9]);
@@ -1202,18 +1198,16 @@ fn report_cluster_output_caps_inline_points() {
     })
     .unwrap();
 
-    let session_path = dir.join("session.json");
-    let session: SessionFile =
-        serde_json::from_str(&fs::read_to_string(&session_path).unwrap()).unwrap();
+    let session = crate::session_io::load_session(&dir).unwrap();
 
     let cluster_analysis =
         crate::report::spike_cluster_analysis(&session, Some(&spike_events), 5_000_000, 10, None);
     let output = crate::report::render_report(
-        &session_path,
+        &dir,
         &session,
         &cluster_analysis,
         &[],
-        &crate::report::RunArtifacts::default(),
+        &crate::session_io::RunArtifacts::default(),
         10,
         5,
         None,
@@ -1263,7 +1257,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
             scx_enable_seq: None,
         })
         .collect::<Vec<_>>();
-    let artifacts = crate::report::RunArtifacts {
+    let artifacts = crate::session_io::RunArtifacts {
         scx_events: Vec::new(),
         irq_events: vec![IrqEventRecord {
             elapsed_ms: Some(10),
@@ -1289,9 +1283,10 @@ fn report_correlates_artifacts_with_spike_clusters() {
             frametime_ms: 22.5,
         }],
         migration_events: Vec::new(),
-        cpu_freq_samples: Vec::new(),
-        io_events: Vec::new(),
-        interval_records: Vec::new(),
+        cpu_freq_events: Vec::new(),
+        block_io_events: Vec::new(),
+        intervals: Vec::new(),
+        ..Default::default()
     };
 
     let cluster_analysis =
@@ -1333,7 +1328,7 @@ fn report_uses_run_level_block_io_correlation_basis() {
         &session,
         &cluster_analysis,
         &[],
-        &crate::report::RunArtifacts::default(),
+        &crate::session_io::RunArtifacts::default(),
         10,
         5,
         None,
@@ -1348,7 +1343,7 @@ fn report_uses_run_level_block_io_correlation_basis() {
         &session,
         &cluster_analysis,
         &[],
-        &crate::report::RunArtifacts::default(),
+        &crate::session_io::RunArtifacts::default(),
         10,
         5,
         None,

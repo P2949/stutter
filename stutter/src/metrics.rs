@@ -13,7 +13,7 @@ pub const LATENCY_HISTOGRAM_BUCKETS_NS: [u64; 15] = [
 ];
 pub const LATENCY_HISTOGRAM_BUCKET_COUNT: usize = LATENCY_HISTOGRAM_BUCKETS_NS.len() + 1;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct SpikeRecord {
     pub latency_ns: u64,
     pub cpu: u32,
@@ -100,7 +100,7 @@ pub struct CpuStatsSet {
     pub by_cpu: BTreeMap<u32, CpuStats>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct LatencyHistogramBucket {
     pub upper_bound_ns: Option<u64>,
     pub count: u64,
@@ -111,7 +111,7 @@ pub struct LatencyHistogram {
     buckets: [u64; LATENCY_HISTOGRAM_BUCKET_COUNT],
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct LatencySnapshot {
     pub count: u64,
     pub stored_samples: u64,
@@ -128,7 +128,7 @@ pub struct LatencySnapshot {
     pub histogram: Vec<LatencyHistogramBucket>,
 }
 
-#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy, Serialize, Deserialize, Default)]
 pub struct CpuLine {
     pub cpu: u32,
     pub samples: u64,
@@ -136,7 +136,7 @@ pub struct CpuLine {
     pub spikes: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct CpuSnapshot {
     pub busiest_cpu: Option<u32>,
     pub busiest_cpu_samples: u64,
@@ -147,7 +147,7 @@ pub struct CpuSnapshot {
     pub per_cpu: Vec<CpuLine>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct IntervalRecord {
     pub elapsed_ms: u128,
     pub task: u32,

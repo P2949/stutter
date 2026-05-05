@@ -8,7 +8,8 @@ use crate::{
         MetadataFile, RecordedConfig, RecordedCpuSnapshot, RecordedLatency, RecordedTime,
         SESSION_SCHEMA_VERSION, SessionFile, SessionTask,
     },
-    report::{self, RunArtifacts, SpikeClusterAnalysis, SpikeClusterSource},
+    report::{self, SpikeClusterAnalysis, SpikeClusterSource},
+    session_io::RunArtifacts,
 };
 
 pub fn write_minimal_recording_fixture(dir: &Path) {
