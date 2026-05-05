@@ -2317,9 +2317,15 @@ fn calculate_median_frametime(frames: &[FrameEvent]) -> f64 {
 }
 
 fn identify_frame_spikes(frames: &[FrameEvent], median: f64) -> Vec<FrameEvent> {
+    let threshold = if median.is_finite() && median > 0.0 {
+        (1.5 * median).min(33.3)
+    } else {
+        33.3
+    };
+
     frames
         .iter()
-        .filter(|f| f.frametime_ms > 1.5 * median || f.frametime_ms > 33.3 || f.frametime_ms > 50.0)
+        .filter(|f| f.frametime_ms.is_finite() && f.frametime_ms > threshold)
         .cloned()
         .collect()
 }
@@ -2387,4 +2393,53 @@ fn render_frame_diagnosis(rank: usize, diag: &FrameDiagnosis) -> String {
         diag.diagnosis.confidence,
         evidence
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_identify_frame_spikes() {
+        let frames = vec![
+            FrameEvent {
+                elapsed_ms: 0,
+                frametime_ms: 16.0,
+            },
+            FrameEvent {
+                elapsed_ms: 0,
+                frametime_ms: 24.1,
+            },
+            FrameEvent {
+                elapsed_ms: 0,
+                frametime_ms: 30.0,
+            },
+            FrameEvent {
+                elapsed_ms: 0,
+                frametime_ms: f64::NAN,
+            },
+        ];
+
+        // median 16.0 => threshold 24.0 (1.5 * 16 = 24.0, which is < 33.3)
+        let spikes = identify_frame_spikes(&frames, 16.0);
+        assert_eq!(spikes.len(), 2);
+        assert_eq!(spikes[0].frametime_ms, 24.1);
+        assert_eq!(spikes[1].frametime_ms, 30.0);
+
+        // median 30.0 => threshold 33.3 (1.5 * 30 = 45.0, but capped at 33.3)
+        let spikes = identify_frame_spikes(&frames, 30.0);
+        assert!(spikes.is_empty());
+
+        // median 0.0 => threshold 33.3
+        let spikes = identify_frame_spikes(&frames, 0.0);
+        assert!(spikes.is_empty());
+
+        let frames_with_long = vec![FrameEvent {
+            elapsed_ms: 0,
+            frametime_ms: 33.4,
+        }];
+        let spikes = identify_frame_spikes(&frames_with_long, 0.0);
+        assert_eq!(spikes.len(), 1);
+        assert_eq!(spikes[0].frametime_ms, 33.4);
+    }
 }
