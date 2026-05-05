@@ -231,9 +231,9 @@ pub fn handle_event(
             stats,
             event,
             fault_deltas,
-            scx_ops,
-            scx_state,
-            scx_enable_seq,
+            scx_ops.clone(),
+            scx_state.clone(),
+            scx_enable_seq.clone(),
         );
         spike_ret = Some(spike_event.clone());
 
@@ -257,7 +257,14 @@ pub fn handle_event(
         && event.latency_ns >= threshold
         && let Some(sender) = alert_sender
     {
-        let alert_payload = AlertPayload::from_task_stats(stats, event, elapsed_ms);
+        let alert_payload = AlertPayload::from_task_stats(
+            stats,
+            event,
+            elapsed_ms,
+            scx_ops.clone(),
+            scx_state.clone(),
+            scx_enable_seq.clone(),
+        );
         if let Err(err) = sender.try_send(alert_payload) {
             match err {
                 tokio::sync::mpsc::error::TrySendError::Full(_) => {
@@ -292,6 +299,15 @@ pub struct AlertPayload {
     pub wakeup_ns: u64,
     pub switch_ns: u64,
     pub elapsed_ms: u128,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scx_ops: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scx_state: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scx_enable_seq: Option<String>,
 }
 
 impl AlertPayload {
@@ -299,6 +315,9 @@ impl AlertPayload {
         stats: &metrics::TaskStats,
         event: &SchedulerEvent,
         elapsed_ms: u128,
+        scx_ops: Option<String>,
+        scx_state: Option<String>,
+        scx_enable_seq: Option<String>,
     ) -> Self {
         let latency_ms = event.latency_ns / 1_000_000;
         let title = "stutter latency alert".to_owned();
@@ -328,6 +347,9 @@ impl AlertPayload {
             wakeup_ns: event.wakeup_ns,
             switch_ns: event.switch_ns,
             elapsed_ms,
+            scx_ops,
+            scx_state,
+            scx_enable_seq,
         }
     }
 }
