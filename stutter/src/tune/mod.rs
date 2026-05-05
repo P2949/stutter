@@ -726,8 +726,8 @@ pub fn unix_nanos_now() -> u128 {
 }
 
 fn read_ndjson_vec<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result<Vec<T>> {
-    let file = fs::File::open(path)
-        .with_context(|| format!("failed to open {}", path.display()))?;
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let reader = std::io::BufReader::new(file);
 
     serde_json::Deserializer::from_reader(reader)
@@ -737,8 +737,8 @@ fn read_ndjson_vec<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Resul
 }
 
 fn read_json_file<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
-    let file = fs::File::open(path)
-        .with_context(|| format!("failed to open {}", path.display()))?;
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let reader = std::io::BufReader::new(file);
 
     serde_json::from_reader(reader)

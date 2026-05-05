@@ -8,9 +8,21 @@ use std::{
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ProcessCache {
     pub entries: BTreeMap<u32, CachedProcInfo>,
+    pub generation: u64,
+    pub max_cached_generations: u64,
+}
+
+impl Default for ProcessCache {
+    fn default() -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            generation: 0,
+            max_cached_generations: 5,
+        }
+    }
 }
 
 impl ProcessCache {
@@ -23,6 +35,7 @@ impl ProcessCache {
 pub struct CachedProcInfo {
     pub ctime_sec: i64,
     pub ctime_nsec: i64,
+    pub scan_generation: u64,
     pub info: ProcInfo,
 }
 
@@ -338,6 +351,9 @@ pub fn scan_processes_at(proc_root: &Path, cache: &mut ProcessCache) -> BTreeMap
     let start = std::time::Instant::now();
     let mut processes = BTreeMap::new();
 
+    cache.generation = cache.generation.saturating_add(1);
+    let generation = cache.generation;
+
     let Ok(entries) = fs::read_dir(proc_root) else {
         return processes;
     };
@@ -359,12 +375,17 @@ pub fn scan_processes_at(proc_root: &Path, cache: &mut ProcessCache) -> BTreeMap
         let ctime_sec = metadata.ctime();
         let ctime_nsec = metadata.ctime_nsec();
 
-        if let Some(cached) = cache.entries.get(&pid)
-            && cached.ctime_sec == ctime_sec
-            && cached.ctime_nsec == ctime_nsec
-        {
-            processes.insert(pid, cached.info.clone());
-            continue;
+        if let Some(cached) = cache.entries.get(&pid) {
+            let cache_fresh_enough =
+                generation.saturating_sub(cached.scan_generation) <= cache.max_cached_generations;
+
+            if cache_fresh_enough
+                && cached.ctime_sec == ctime_sec
+                && cached.ctime_nsec == ctime_nsec
+            {
+                processes.insert(pid, cached.info.clone());
+                continue;
+            }
         }
 
         if let Some(info) = read_proc_info_at(proc_root, pid) {
@@ -373,6 +394,7 @@ pub fn scan_processes_at(proc_root: &Path, cache: &mut ProcessCache) -> BTreeMap
                 CachedProcInfo {
                     ctime_sec,
                     ctime_nsec,
+                    scan_generation: generation,
                     info: info.clone(),
                 },
             );
@@ -1319,6 +1341,46 @@ mod tests {
         assert_eq!(auto.len(), 1);
         assert_eq!(auto[0].0, 102);
         assert_eq!(auto[0].1, TaskClass::GameScope);
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn process_cache_ttl_refresh() {
+        let dir = std::env::temp_dir().join(format!("stutter-ttl-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let pid_dir = dir.join("100");
+        fs::create_dir_all(&pid_dir).unwrap();
+        fs::write(pid_dir.join("status"), "Name:\ttest\nPPid:\t1\n").unwrap();
+        fs::write(pid_dir.join("cmdline"), "test\0").unwrap();
+        fs::write(
+            pid_dir.join("stat"),
+            "100 (test) S 1 100 0 0 -1 0 0 0 0 0 0 0 0 20 0 1 0 1000 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+        )
+        .unwrap();
+
+        let mut cache = ProcessCache {
+            max_cached_generations: 1,
+            ..Default::default()
+        };
+
+        // scan 1: inserts at generation 1
+        let p1 = scan_processes_at(&dir, &mut cache);
+        assert_eq!(p1.len(), 1);
+        assert_eq!(cache.generation, 1);
+        assert_eq!(cache.entries.get(&100).unwrap().scan_generation, 1);
+
+        // scan 2: delta is 1, cache is still reused (generation 2, cached 1, 2-1=1 <= 1)
+        let p2 = scan_processes_at(&dir, &mut cache);
+        assert_eq!(p2.len(), 1);
+        assert_eq!(cache.generation, 2);
+        assert_eq!(cache.entries.get(&100).unwrap().scan_generation, 1);
+
+        // scan 3: delta is 2, cache is refreshed (generation 3, cached 1, 3-1=2 > 1)
+        let p3 = scan_processes_at(&dir, &mut cache);
+        assert_eq!(p3.len(), 1);
+        assert_eq!(cache.generation, 3);
+        assert_eq!(cache.entries.get(&100).unwrap().scan_generation, 3);
 
         fs::remove_dir_all(dir).ok();
     }
