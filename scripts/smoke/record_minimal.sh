@@ -26,6 +26,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+export RUST_LOG="${RUST_LOG:-info}"
+
 # Ensure stutter is built
 STUTTER_BIN="$(pwd)/target/debug/stutter"
 if [ ! -f "$STUTTER_BIN" ]; then
@@ -55,30 +57,49 @@ fi
 
 if [ $STATUS -ne 0 ]; then
     echo "FAIL: stutter record exited with status $STATUS"
+    echo "--- output.log ---"
+    cat "${OUT_BASE}/output.log"
     exit $STATUS
 fi
 
 # Verification of JSON artifacts
-echo "Verifying recording artifacts in $RECORD_DIR..."
+echo "Verifying recording artifacts..."
+
+# Locate actual recording directory:
+# a. first check $RECORD_DIR/session.json
+# b. otherwise search one level under $RECORD_DIR for the newest directory containing session.json
+ACTUAL_DIR=""
+if [ -f "${RECORD_DIR}/session.json" ]; then
+    ACTUAL_DIR="${RECORD_DIR}"
+else
+    # find one level deeper for the newest directory with session.json
+    ACTUAL_DIR=$(find "${RECORD_DIR}" -maxdepth 2 -name session.json -printf "%T@ %h\n" | sort -rn | head -n1 | cut -d' ' -f2- || true)
+fi
+
+if [ -z "${ACTUAL_DIR}" ] || [ ! -d "${ACTUAL_DIR}" ]; then
+    echo "FAIL: Could not locate recording directory containing session.json under ${RECORD_DIR}"
+    ls -R "${RECORD_DIR}" || true
+    exit 1
+fi
+
+echo "Validating artifacts in: ${ACTUAL_DIR}"
 
 # metadata.json and session.json are REQUIRED
 for req in metadata.json session.json; do
-    if [ ! -f "${RECORD_DIR}/${req}" ]; then
+    if [ ! -f "${ACTUAL_DIR}/${req}" ]; then
         echo "FAIL: Required artifact ${req} is missing!"
         exit 1
     fi
     echo "Validating ${req}..."
-    python3 -c "import json; json.load(open('${RECORD_DIR}/${req}'))"
+    python3 -c "import json; json.load(open('${ACTUAL_DIR}/${req}'))"
 done
 
-# interval.json and tree_events.json are OPTIONAL (validate if present)
-# They are NDJSON formatted.
-for opt in interval.json tree_events.json; do
-    if [ -f "${RECORD_DIR}/${opt}" ]; then
+# Optional NDJSON files (validate only if present)
+for opt in interval.json tree_events.json scx_events.json irq_events.json gpu_samples.json frame_events.json block_io_events.json; do
+    if [ -f "${ACTUAL_DIR}/${opt}" ]; then
         echo "Validating ${opt} (NDJSON)..."
-        python3 -c "import json; [json.loads(line) for line in open('${RECORD_DIR}/${opt}')]"
-    else
-        echo "Note: Optional artifact ${opt} is absent."
+        # NDJSON validation: each line must be valid JSON
+        python3 -c "import json; [json.loads(line) for line in open('${ACTUAL_DIR}/${opt}') if line.strip()]"
     fi
 done
 

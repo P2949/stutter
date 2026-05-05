@@ -33,6 +33,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+export RUST_LOG="${RUST_LOG:-info}"
+
 # Verify stutter binary existence
 STUTTER_BIN="$(pwd)/target/debug/stutter"
 if [ ! -f "$STUTTER_BIN" ]; then
@@ -53,10 +55,16 @@ STATUS=0
 run_or_skip_live timeout 7s "${CMD[@]}" || STATUS=$?
 popd > /dev/null
 
-# Check for skip condition (exit code 77 from run_or_skip_live)
 if [ $STATUS -eq 77 ]; then
     echo "SKIP: live eBPF smoke requires root/capabilities"
     exit 0
+elif [ $STATUS -eq 124 ]; then
+    echo "timeout expected (status 124); continuing to validation..."
+elif [ $STATUS -ne 0 ]; then
+    echo "FAIL: stutter monitor failed with status $STATUS"
+    echo "--- output.log ---"
+    cat "${OUT_DIR}/output.log"
+    exit $STATUS
 fi
 
 # Validate output markers

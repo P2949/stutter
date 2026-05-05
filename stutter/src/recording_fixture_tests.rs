@@ -293,7 +293,8 @@ fn recording_schema_round_trip_keeps_core_fields() {
 
     write_minimal_recording_fixture(&temp);
 
-    // Load the session using the same logic as report.rs
+    // This test performs a schema serde round-trip check only.
+    // There is currently no standalone public loading helper in report.rs to use for full coverage.
     let session_path = temp.join("session.json");
     let file = fs::File::open(&session_path).unwrap();
     let reader = std::io::BufReader::new(file);
