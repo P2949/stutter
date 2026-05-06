@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, collections::BTreeMap};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     metrics::format_latency,
@@ -70,7 +70,7 @@ impl StutterCause {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Confidence {
     Low,
     Medium,

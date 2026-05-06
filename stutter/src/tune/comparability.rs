@@ -1,12 +1,27 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use log::warn;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::TuneCandidateSummary;
 use crate::{process_tree::TaskClass, recorder, scorer};
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TuneComparabilityWarning {
+    pub profile: Option<String>,
+    pub kind: String,
+    pub message: String,
+    pub severity: TuneComparabilitySeverity,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TuneComparabilitySeverity {
+    Info,
+    Warning,
+    Reject,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct TaskIdentity {
     pub class: TaskClass,
     pub process_comm: String,
@@ -17,7 +32,7 @@ pub struct TaskIdentity {
     pub exe_ino: Option<u64>,
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TuneCoverageMetrics {
     pub unique_tracked_tasks: usize,
     pub unique_scored_tasks: usize,
@@ -137,6 +152,156 @@ pub fn check_tune_coverage_comparability(
     check_tune_frame_comparability(grouped)?;
 
     Ok(())
+}
+
+pub fn tune_comparability_warnings(
+    grouped: &BTreeMap<String, Vec<TuneCandidateSummary>>,
+) -> Vec<TuneComparabilityWarning> {
+    let mut warnings = Vec::new();
+
+    push_median_ratio_warning(
+        &mut warnings,
+        "scored-sample-count-mismatch",
+        "median scored sample count differs by more than 20% between profiles",
+        grouped.iter().map(|(profile, runs)| {
+            (
+                profile,
+                super::median_u64(runs.iter().map(|run| run.scored_samples).collect()),
+            )
+        }),
+        TuneComparabilitySeverity::Warning,
+    );
+    push_median_ratio_warning(
+        &mut warnings,
+        "frame-count-mismatch",
+        "median frame count differs by more than 20% between profiles",
+        grouped.iter().map(|(profile, runs)| {
+            (
+                profile,
+                super::median_u64(runs.iter().map(|run| run.frame_count as u64).collect()),
+            )
+        }),
+        TuneComparabilitySeverity::Warning,
+    );
+
+    let frame_medians = grouped
+        .iter()
+        .map(|(profile, runs)| {
+            (
+                profile.as_str(),
+                super::median_u64(runs.iter().map(|run| run.frame_count as u64).collect()),
+            )
+        })
+        .collect::<Vec<_>>();
+    if frame_medians.iter().any(|(_, count)| *count == 0)
+        && frame_medians.iter().any(|(_, count)| *count > 0)
+    {
+        for (profile, _) in frame_medians.iter().filter(|(_, count)| *count == 0) {
+            warnings.push(TuneComparabilityWarning {
+                profile: Some((*profile).to_owned()),
+                kind: "missing-frame-data".to_owned(),
+                message: "profile has zero median frame count while another profile has frames"
+                    .to_owned(),
+                severity: TuneComparabilitySeverity::Reject,
+            });
+        }
+    }
+
+    for (profile, runs) in grouped {
+        let max_drops = runs
+            .iter()
+            .map(|run| run.coverage.drop_counter_total)
+            .max()
+            .unwrap_or(0);
+        if max_drops > 0 {
+            warnings.push(TuneComparabilityWarning {
+                profile: Some(profile.clone()),
+                kind: "drop-counters-nonzero".to_owned(),
+                message: format!("candidate had non-zero drop counters (max={max_drops})"),
+                severity: TuneComparabilitySeverity::Warning,
+            });
+        }
+
+        if runs.iter().any(|run| run.applied_tasks == 0) {
+            warnings.push(TuneComparabilityWarning {
+                profile: Some(profile.clone()),
+                kind: "applied-task-count-zero".to_owned(),
+                message: "candidate applied profile to zero tasks".to_owned(),
+                severity: TuneComparabilitySeverity::Warning,
+            });
+        }
+    }
+
+    let valid_counts = grouped
+        .iter()
+        .map(|(profile, runs)| {
+            (
+                profile.as_str(),
+                runs.iter().filter(|run| run.valid).count() as u64,
+            )
+        })
+        .collect::<Vec<_>>();
+    let min_valid = valid_counts
+        .iter()
+        .map(|(_, count)| *count)
+        .min()
+        .unwrap_or(0);
+    let max_valid = valid_counts
+        .iter()
+        .map(|(_, count)| *count)
+        .max()
+        .unwrap_or(0);
+    if min_valid != max_valid {
+        for (profile, count) in valid_counts {
+            warnings.push(TuneComparabilityWarning {
+                profile: Some(profile.to_owned()),
+                kind: "valid-run-count-mismatch".to_owned(),
+                message: format!(
+                    "valid run count differs between profiles (profile_valid_runs={count}, min={min_valid}, max={max_valid})"
+                ),
+                severity: TuneComparabilitySeverity::Warning,
+            });
+        }
+    }
+
+    warnings
+}
+
+fn push_median_ratio_warning<'a>(
+    warnings: &mut Vec<TuneComparabilityWarning>,
+    kind: &str,
+    message: &str,
+    values: impl Iterator<Item = (&'a String, u64)>,
+    severity: TuneComparabilitySeverity,
+) {
+    let values = values.collect::<Vec<_>>();
+    let min = values.iter().map(|(_, value)| *value).min().unwrap_or(0);
+    let max = values.iter().map(|(_, value)| *value).max().unwrap_or(0);
+
+    if min == 0 && max > 0 {
+        for (profile, value) in values {
+            warnings.push(TuneComparabilityWarning {
+                profile: Some(profile.clone()),
+                kind: kind.to_owned(),
+                message: format!("{message} (profile_median={value}, min={min}, max={max})"),
+                severity: TuneComparabilitySeverity::Reject,
+            });
+        }
+    } else if min > 0 {
+        let ratio = max as f64 / min as f64;
+        if ratio > 1.20 {
+            for (profile, value) in values {
+                warnings.push(TuneComparabilityWarning {
+                    profile: Some(profile.clone()),
+                    kind: kind.to_owned(),
+                    message: format!(
+                        "{message} (profile_median={value}, min={min}, max={max}, ratio={ratio:.2})"
+                    ),
+                    severity: severity.clone(),
+                });
+            }
+        }
+    }
 }
 
 pub fn check_tune_sample_comparability(
@@ -356,6 +521,56 @@ mod tests {
         }
     }
 
+    fn warning_candidate(
+        name: &str,
+        scored_samples: u64,
+        frame_count: usize,
+        drop_counter_total: u64,
+        applied_tasks: usize,
+        valid: bool,
+    ) -> TuneCandidateSummary {
+        TuneCandidateSummary {
+            profile: name.to_string(),
+            iteration: 1,
+            run_dir: PathBuf::from("."),
+            applied_tasks,
+            warmup_seconds: 0,
+            measure_seconds: 0,
+            interval_count: 2,
+            samples: scored_samples,
+            scored_samples,
+            score_total: 0,
+            over_1ms: 0,
+            over_2ms: 0,
+            over_5ms: 0,
+            max_latency_ns: 0,
+            frame_count,
+            frame_max_ms: 0.0,
+            frame_p99_ms: 0.0,
+            frame_over_16ms: 0,
+            frame_over_33ms: 0,
+            frame_over_50ms: 0,
+            coverage: TuneCoverageMetrics {
+                drop_counter_total,
+                ..Default::default()
+            },
+            valid,
+        }
+    }
+
+    fn grouped_for_warnings(
+        candidates: Vec<TuneCandidateSummary>,
+    ) -> BTreeMap<String, Vec<TuneCandidateSummary>> {
+        let mut grouped = BTreeMap::new();
+        for candidate in candidates {
+            grouped
+                .entry(candidate.profile.clone())
+                .or_insert_with(Vec::new)
+                .push(candidate);
+        }
+        grouped
+    }
+
     #[test]
     fn test_check_tune_metric_ratio() {
         let values = vec![10, 15, 20];
@@ -468,6 +683,73 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("identity mismatch")
+        );
+    }
+
+    #[test]
+    fn frame_count_mismatch_produces_warning() {
+        let grouped = grouped_for_warnings(vec![
+            warning_candidate("a", 100, 100, 0, 1, true),
+            warning_candidate("b", 100, 130, 0, 1, true),
+        ]);
+
+        let warnings = tune_comparability_warnings(&grouped);
+
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.kind == "frame-count-mismatch"
+                    && warning.severity == TuneComparabilitySeverity::Warning)
+        );
+    }
+
+    #[test]
+    fn scored_sample_mismatch_produces_warning() {
+        let grouped = grouped_for_warnings(vec![
+            warning_candidate("a", 100, 0, 0, 1, true),
+            warning_candidate("b", 130, 0, 0, 1, true),
+        ]);
+
+        let warnings = tune_comparability_warnings(&grouped);
+
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.kind == "scored-sample-count-mismatch"
+                    && warning.severity == TuneComparabilitySeverity::Warning)
+        );
+    }
+
+    #[test]
+    fn drop_counter_produces_warning() {
+        let grouped = grouped_for_warnings(vec![
+            warning_candidate("a", 100, 0, 3, 1, true),
+            warning_candidate("b", 100, 0, 0, 1, true),
+        ]);
+
+        let warnings = tune_comparability_warnings(&grouped);
+
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.kind == "drop-counters-nonzero"
+                    && warning.profile.as_deref() == Some("a"))
+        );
+    }
+
+    #[test]
+    fn reject_level_existing_behavior_is_preserved() {
+        let grouped = grouped_for_warnings(vec![
+            warning_candidate("a", 0, 0, 0, 1, true),
+            warning_candidate("b", 100, 0, 0, 1, true),
+        ]);
+
+        assert!(check_tune_sample_comparability(&grouped).is_err());
+        assert!(
+            tune_comparability_warnings(&grouped)
+                .iter()
+                .any(|warning| warning.kind == "scored-sample-count-mismatch"
+                    && warning.severity == TuneComparabilitySeverity::Reject)
         );
     }
 }

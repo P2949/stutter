@@ -1,4 +1,7 @@
+mod actions;
+mod advisor;
 mod affinity;
+mod audit;
 mod cli;
 mod diagnosis;
 mod doctor;
@@ -11,6 +14,7 @@ mod metrics;
 mod process_tree;
 mod profiles;
 mod psi;
+mod recommend;
 mod recorder;
 mod report;
 mod scorer;
@@ -39,12 +43,49 @@ async fn main() -> anyhow::Result<()> {
 
     match parse_app_command()? {
         AppCommand::Monitor(config) => run_monitor(config, None).await,
+        AppCommand::Bench {
+            config,
+            role,
+            run_name,
+        } => {
+            run_monitor(config, None).await?;
+            if role == "baseline" {
+                println!(
+                    "bench complete role=baseline run_name={} next=\"run tune, then stutter recommend --baseline <run-dir> --tune <tune-dir>\"",
+                    run_name
+                );
+            } else {
+                println!(
+                    "bench complete role=current run_name={} next=\"use stutter report --diff <baseline-run-dir> <current-run-dir>\"",
+                    run_name
+                );
+            }
+            Ok(())
+        }
         AppCommand::Restore { dry_run } => {
             let path = affinity::default_restore_path();
             if dry_run {
                 print_restore_dry_run(&path)?;
             } else {
                 let summary = affinity::restore_saved(&path)?;
+                audit::audit_or_warn(&audit::AuditEvent {
+                    schema_version: 1,
+                    unix_nanos: audit::unix_nanos_now(),
+                    command: "restore".to_owned(),
+                    action_id: Some("cpu-affinity-restore".to_owned()),
+                    safety_class: Some(actions::SafetyClass::ReversibleLowRisk),
+                    dry_run: false,
+                    success: true,
+                    affected_tasks: summary.restored,
+                    restore_path: Some(path.clone()),
+                    message: format!(
+                        "restored={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
+                        summary.restored,
+                        summary.skipped_dead,
+                        summary.skipped_identity_mismatch,
+                        summary.legacy_unverified
+                    ),
+                });
                 println!(
                     "restored {} affinity record(s); skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
                     summary.restored,
@@ -114,6 +155,8 @@ async fn main() -> anyhow::Result<()> {
             warmup_seconds,
             runs,
             keep_best,
+            baseline_profile,
+            out_dir,
             mangohud_log,
             enforce,
             hwmon,
@@ -125,17 +168,53 @@ async fn main() -> anyhow::Result<()> {
                 warmup_seconds,
                 runs,
                 keep_best,
+                baseline_profile,
+                out_dir,
                 mangohud_log,
                 enforce,
                 hwmon,
             })
             .await
         }
+        AppCommand::Recommend {
+            baseline,
+            tune,
+            json,
+            markdown,
+        } => recommend::recommend_command(recommend::RecommendCommandInput {
+            baseline,
+            tune,
+            json,
+            markdown,
+        }),
         AppCommand::Check {
             baseline,
             current,
             max_regression_p99_ms,
         } => report::check_percentile_regression(&baseline, &current, max_regression_p99_ms),
+        AppCommand::Audit { path, tail, json } => {
+            audit::audit_command(audit::AuditCommandInput { path, tail, json })
+        }
+        AppCommand::Advisor {
+            run,
+            profiles,
+            json,
+            watch_runs,
+            runs_dir,
+            poll_seconds,
+            once,
+        } => {
+            advisor::advisor_command(advisor::AdvisorCommandInput {
+                run,
+                profiles,
+                json,
+                watch_runs,
+                runs_dir,
+                poll_seconds,
+                once,
+            })
+            .await
+        }
         AppCommand::Doctor { input } => doctor::doctor_command(input),
     }
 }

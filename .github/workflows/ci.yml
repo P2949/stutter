@@ -37,6 +37,12 @@ jobs:
       - name: Run non-root smoke build gate
         run: scripts/smoke/build.sh
 
+      - name: Run offline recommendation smoke
+        run: scripts/smoke/offline_recommendation.sh
+
+      - name: Run offline advisor smoke
+        run: scripts/smoke/advisor_offline.sh
+
   live-smoke:
     name: live smoke tests
     runs-on: ubuntu-latest

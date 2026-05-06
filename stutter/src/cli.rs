@@ -23,12 +23,16 @@ struct Cli {
 enum Command {
     Monitor(MonitorArgs),
     Record(RecordArgs),
+    Bench(BenchArgs),
     InspectTree(InspectTreeArgs),
     Report(ReportArgs),
     Restore(RestoreArgs),
     ApplyProfile(ApplyProfileArgs),
     Tune(TuneArgs),
+    Recommend(RecommendArgs),
     Check(CheckArgs),
+    Audit(AuditArgs),
+    Advisor(AdvisorArgs),
     Doctor(DoctorArgs),
 }
 
@@ -168,6 +172,25 @@ struct RecordArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+pub struct BenchArgs {
+    #[command(flatten)]
+    pub monitor: MonitorArgs,
+
+    #[arg(long, value_name = "SECONDS")]
+    pub duration: u64,
+
+    #[arg(long = "scenario", value_name = "NAME")]
+    pub scenario: String,
+
+    #[arg(
+        long = "role",
+        value_name = "baseline|current",
+        default_value = "baseline"
+    )]
+    pub role: String,
+}
+
+#[derive(Args, Debug, Clone)]
 struct InspectTreeArgs {
     #[arg(long = "tree-pid", value_name = "PID")]
     tree_pid: u32,
@@ -256,6 +279,12 @@ pub struct TuneArgs {
     #[arg(long = "keep-best")]
     pub keep_best: bool,
 
+    #[arg(long = "baseline-profile", value_name = "NAME")]
+    pub baseline_profile: Option<String>,
+
+    #[arg(long = "out-dir", value_name = "PATH")]
+    pub out_dir: Option<PathBuf>,
+
     #[arg(long = "mangohud-log", value_name = "PATH")]
     pub mangohud_log: Option<PathBuf>,
 
@@ -279,6 +308,57 @@ pub struct CheckArgs {
 
     #[arg(long = "max-regression-p99-ms", value_name = "MS")]
     pub max_regression_p99_ms: f64,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RecommendArgs {
+    #[arg(long = "baseline", value_name = "PATH")]
+    pub baseline: PathBuf,
+
+    #[arg(long = "tune", value_name = "PATH")]
+    pub tune: PathBuf,
+
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "markdown", value_name = "PATH")]
+    pub markdown: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AuditArgs {
+    #[arg(long = "path", value_name = "PATH")]
+    pub path: Option<PathBuf>,
+
+    #[arg(long = "tail", default_value_t = 20)]
+    pub tail: usize,
+
+    #[arg(long = "json")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AdvisorArgs {
+    #[arg(long = "run", value_name = "PATH")]
+    pub run: Option<PathBuf>,
+
+    #[arg(long = "profiles", value_name = "PATH")]
+    pub profiles: Option<PathBuf>,
+
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "watch-runs")]
+    pub watch_runs: bool,
+
+    #[arg(long = "runs-dir", value_name = "PATH")]
+    pub runs_dir: Option<PathBuf>,
+
+    #[arg(long = "poll-seconds", default_value_t = 10)]
+    pub poll_seconds: u64,
+
+    #[arg(long = "once")]
+    pub once: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -317,6 +397,11 @@ struct DoctorArgs {
 #[derive(Debug)]
 pub enum AppCommand {
     Monitor(Arc<Config>),
+    Bench {
+        config: Arc<Config>,
+        role: String,
+        run_name: String,
+    },
     Restore {
         dry_run: bool,
     },
@@ -350,14 +435,36 @@ pub enum AppCommand {
         warmup_seconds: u64,
         runs: u32,
         keep_best: bool,
+        baseline_profile: Option<String>,
+        out_dir: Option<PathBuf>,
         mangohud_log: Option<PathBuf>,
         enforce: bool,
         hwmon: bool,
+    },
+    Recommend {
+        baseline: PathBuf,
+        tune: PathBuf,
+        json: bool,
+        markdown: Option<PathBuf>,
     },
     Check {
         baseline: PathBuf,
         current: PathBuf,
         max_regression_p99_ms: f64,
+    },
+    Audit {
+        path: Option<PathBuf>,
+        tail: usize,
+        json: bool,
+    },
+    Advisor {
+        run: Option<PathBuf>,
+        profiles: Option<PathBuf>,
+        json: bool,
+        watch_runs: bool,
+        runs_dir: Option<PathBuf>,
+        poll_seconds: u64,
+        once: bool,
     },
     Doctor {
         input: crate::doctor::DoctorInput,
@@ -441,6 +548,32 @@ where
                 max_duration,
             )?)))
         }
+        Some(Command::Bench(mut args)) => {
+            if args.duration == 0 {
+                anyhow::bail!("--duration must be greater than zero");
+            }
+            if args.scenario.trim().is_empty() {
+                anyhow::bail!("--scenario must not be empty");
+            }
+            if !matches!(args.role.as_str(), "baseline" | "current") {
+                anyhow::bail!("--role must be baseline or current");
+            }
+            if args.monitor.no_record {
+                anyhow::bail!("bench --no-record is contradictory");
+            }
+
+            let run_name = format!("bench-{}-{}", args.role, args.scenario);
+            args.monitor.run_name = Some(run_name.clone());
+            Ok(AppCommand::Bench {
+                config: Arc::new(config_from_monitor_args(
+                    args.monitor,
+                    true,
+                    Some(Duration::from_secs(args.duration)),
+                )?),
+                role: args.role,
+                run_name,
+            })
+        }
         Some(Command::InspectTree(args)) => {
             if args.tree_pid == 0 {
                 anyhow::bail!("--tree-pid must be greater than zero");
@@ -519,11 +652,19 @@ where
                 warmup_seconds: args.warmup_seconds,
                 runs: args.runs,
                 keep_best: args.keep_best,
+                baseline_profile: args.baseline_profile,
+                out_dir: args.out_dir,
                 mangohud_log: args.mangohud_log,
                 enforce: args.enforce,
                 hwmon: args.hwmon,
             })
         }
+        Some(Command::Recommend(args)) => Ok(AppCommand::Recommend {
+            baseline: args.baseline,
+            tune: args.tune,
+            json: args.json,
+            markdown: args.markdown,
+        }),
         Some(Command::Check(args)) => {
             if !args.max_regression_p99_ms.is_finite() || args.max_regression_p99_ms < 0.0 {
                 anyhow::bail!("--max-regression-p99-ms must be a finite non-negative value");
@@ -532,6 +673,31 @@ where
                 baseline: args.baseline,
                 current: args.current,
                 max_regression_p99_ms: args.max_regression_p99_ms,
+            })
+        }
+        Some(Command::Audit(args)) => Ok(AppCommand::Audit {
+            path: args.path,
+            tail: args.tail,
+            json: args.json,
+        }),
+        Some(Command::Advisor(args)) => {
+            if args.watch_runs && args.run.is_some() {
+                anyhow::bail!("--watch-runs conflicts with --run");
+            }
+            if !args.watch_runs && args.run.is_none() {
+                anyhow::bail!("advisor requires --run unless --watch-runs is set");
+            }
+            if args.poll_seconds == 0 {
+                anyhow::bail!("--poll-seconds must be greater than zero");
+            }
+            Ok(AppCommand::Advisor {
+                run: args.run,
+                profiles: args.profiles,
+                json: args.json,
+                watch_runs: args.watch_runs,
+                runs_dir: args.runs_dir,
+                poll_seconds: args.poll_seconds,
+                once: args.once,
             })
         }
         Some(Command::Doctor(args)) => Ok(AppCommand::Doctor {
@@ -1096,6 +1262,8 @@ mod tests {
             warmup_seconds,
             runs,
             keep_best,
+            baseline_profile,
+            out_dir,
             mangohud_log,
             enforce,
             hwmon,
@@ -1110,9 +1278,112 @@ mod tests {
         assert_eq!(warmup_seconds, 10);
         assert_eq!(runs, 3);
         assert!(keep_best);
+        assert_eq!(baseline_profile, None);
+        assert_eq!(out_dir, None);
         assert_eq!(mangohud_log, Some(PathBuf::from("/tmp/tune-mango.csv")));
         assert!(!enforce);
         assert!(!hwmon);
+    }
+
+    #[test]
+    fn parses_bench_baseline() {
+        let command = parse_app_command_from([
+            "stutter",
+            "bench",
+            "--watch-process",
+            "Game.exe",
+            "--persistent",
+            "--duration",
+            "180",
+            "--scenario",
+            "route-a",
+            "--role",
+            "baseline",
+        ])
+        .unwrap();
+
+        let AppCommand::Bench {
+            config,
+            role,
+            run_name,
+        } = command
+        else {
+            panic!("expected bench command");
+        };
+
+        assert_eq!(role, "baseline");
+        assert_eq!(run_name, "bench-baseline-route-a");
+        assert_eq!(config.max_duration, Some(Duration::from_secs(180)));
+        assert_eq!(
+            config.recording.as_ref().unwrap().run_name.as_deref(),
+            Some("bench-baseline-route-a")
+        );
+        assert_eq!(config.watch_process.as_deref(), Some("Game.exe"));
+        assert!(config.persistent);
+    }
+
+    #[test]
+    fn rejects_zero_bench_duration() {
+        let err = parse_app_command_from([
+            "stutter",
+            "bench",
+            "--duration",
+            "0",
+            "--scenario",
+            "route-a",
+        ])
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--duration must be greater than zero")
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_bench_role() {
+        let err = parse_app_command_from([
+            "stutter",
+            "bench",
+            "--duration",
+            "1",
+            "--scenario",
+            "route-a",
+            "--role",
+            "candidate",
+        ])
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--role must be baseline or current")
+        );
+    }
+
+    #[test]
+    fn bench_preserves_monitor_flags() {
+        let command = parse_app_command_from([
+            "stutter",
+            "bench",
+            "--watch-process",
+            "Game.exe",
+            "--hwmon",
+            "--mangohud-log",
+            "/tmp/mango.csv",
+            "--duration",
+            "10",
+            "--scenario",
+            "route-a",
+        ])
+        .unwrap();
+
+        let AppCommand::Bench { config, .. } = command else {
+            panic!("expected bench command");
+        };
+
+        assert_eq!(config.watch_process.as_deref(), Some("Game.exe"));
+        assert!(config.hwmon);
+        assert_eq!(config.mangohud_log, Some(PathBuf::from("/tmp/mango.csv")));
     }
 
     #[test]
@@ -1126,6 +1397,103 @@ mod tests {
         assert!(!input.json);
         assert!(!input.hwmon);
         assert!(!input.irq_latency);
+    }
+
+    #[test]
+    fn parses_audit_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "audit",
+            "--tail",
+            "50",
+            "--json",
+            "--path",
+            "/tmp/actions.jsonl",
+        ])
+        .unwrap();
+
+        let AppCommand::Audit { path, tail, json } = command else {
+            panic!("expected audit command");
+        };
+
+        assert_eq!(path, Some(PathBuf::from("/tmp/actions.jsonl")));
+        assert_eq!(tail, 50);
+        assert!(json);
+    }
+
+    #[test]
+    fn parses_advisor_run_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "advisor",
+            "--run",
+            "/tmp/run",
+            "--profiles",
+            "profiles.toml",
+            "--json",
+        ])
+        .unwrap();
+
+        let AppCommand::Advisor {
+            run,
+            profiles,
+            json,
+            watch_runs,
+            ..
+        } = command
+        else {
+            panic!("expected advisor command");
+        };
+
+        assert_eq!(run, Some(PathBuf::from("/tmp/run")));
+        assert_eq!(profiles, Some(PathBuf::from("profiles.toml")));
+        assert!(json);
+        assert!(!watch_runs);
+    }
+
+    #[test]
+    fn parses_advisor_watch_once_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "advisor",
+            "--watch-runs",
+            "--runs-dir",
+            "/tmp/runs",
+            "--poll-seconds",
+            "1",
+            "--once",
+        ])
+        .unwrap();
+
+        let AppCommand::Advisor {
+            run,
+            watch_runs,
+            runs_dir,
+            poll_seconds,
+            once,
+            ..
+        } = command
+        else {
+            panic!("expected advisor command");
+        };
+
+        assert_eq!(run, None);
+        assert!(watch_runs);
+        assert_eq!(runs_dir, Some(PathBuf::from("/tmp/runs")));
+        assert_eq!(poll_seconds, 1);
+        assert!(once);
+    }
+
+    #[test]
+    fn rejects_advisor_watch_runs_with_run() {
+        let err =
+            parse_app_command_from(["stutter", "advisor", "--watch-runs", "--run", "/tmp/run"])
+                .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--watch-runs conflicts with --run")
+        );
     }
 
     #[test]

@@ -286,6 +286,22 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         "applied profile affinity to {} task(s); restore with: stutter restore",
         records.len()
     );
+    crate::audit::audit_or_warn(&crate::audit::AuditEvent {
+        schema_version: 1,
+        unix_nanos: crate::audit::unix_nanos_now(),
+        command: if watch {
+            "apply-profile --watch".to_owned()
+        } else {
+            "apply-profile".to_owned()
+        },
+        action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
+        safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+        dry_run,
+        success: true,
+        affected_tasks: records.len(),
+        restore_path: Some(crate::affinity::default_restore_path()),
+        message: "initial CPU affinity profile application completed".to_owned(),
+    });
 
     if !watch {
         println!("apply-profile is one-shot; use --watch to keep applying to new threads");
@@ -357,7 +373,12 @@ pub async fn apply_profile_to_tree_blocking(
     tokio::task::spawn_blocking(move || {
         // Enforce is handled by the caller clearing the cache in watch mode.
         // Blocking one-shot always verifies.
-        crate::profiles::apply_profile_to_tree(tree_pid, &profile, force, dry_run)
+        let action = crate::actions::cpu_affinity::CpuAffinityProfileAction {
+            tree_pid,
+            profile,
+            force_restore_overwrite: force,
+        };
+        action.apply_records(dry_run)
     })
     .await
     .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))?
@@ -391,6 +412,24 @@ pub fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
     }
 
     let summary = crate::affinity::restore_saved(&path)?;
+    crate::audit::audit_or_warn(&crate::audit::AuditEvent {
+        schema_version: 1,
+        unix_nanos: crate::audit::unix_nanos_now(),
+        command: "apply-profile --watch restore".to_owned(),
+        action_id: Some("cpu-affinity-restore".to_owned()),
+        safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+        dry_run: false,
+        success: true,
+        affected_tasks: summary.restored,
+        restore_path: Some(path.clone()),
+        message: format!(
+            "watch restore completed restored={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
+            summary.restored,
+            summary.skipped_dead,
+            summary.skipped_identity_mismatch,
+            summary.legacy_unverified
+        ),
+    });
     println!(
         "stopped profile watch; restored {} affinity record(s); skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
         summary.restored,
