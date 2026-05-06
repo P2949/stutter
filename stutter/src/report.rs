@@ -622,7 +622,7 @@ pub fn check_regression(
     if !output.passed {
         if let Some(first) = output.violations.first() {
             anyhow::bail!(
-                "percentile_regression_check_failed: {:?} regressed by {} on comm={} process={} (max_allowed={})",
+                "regression_check_failed metric={:?} regressed_by={} comm={} process={} max_allowed={}",
                 first.metric,
                 format_latency_signed(first.delta_ns),
                 first.comm,

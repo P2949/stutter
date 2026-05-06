@@ -226,19 +226,41 @@ struct InspectTreeArgs {
 
 #[derive(Args, Debug, Clone)]
 struct ReportArgs {
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Output raw session JSON",
+        conflicts_with_all = ["analysis_json", "json_summary", "html"]
+    )]
     json: bool,
 
-    #[arg(long = "analysis-json")]
+    #[arg(
+        long = "analysis-json",
+        help = "Output full analysis JSON (clusters, diagnoses, artifacts)",
+        conflicts_with_all = ["json", "json_summary", "html", "batch"]
+    )]
     analysis_json: bool,
 
-    #[arg(long = "json-summary")]
+    #[arg(
+        long = "json-summary",
+        help = "Output compact summary JSON",
+        conflicts_with_all = ["json", "analysis_json", "html"]
+    )]
     json_summary: bool,
 
-    #[arg(long = "html", value_name = "PATH")]
+    #[arg(
+        long = "html",
+        value_name = "PATH",
+        help = "Generate HTML report",
+        conflicts_with_all = ["json", "analysis_json", "json_summary", "batch"]
+    )]
     html: Option<PathBuf>,
 
-    #[arg(long = "batch", value_name = "DIR")]
+    #[arg(
+        long = "batch",
+        value_name = "DIR",
+        help = "Run report on all sessions in DIR; outputs text summary or JSON summary if --json or --json-summary is set",
+        conflicts_with_all = ["analysis_json", "html"]
+    )]
     batch: Option<PathBuf>,
 
     #[arg(long, default_value_t = 10, value_name = "N")]
@@ -247,12 +269,17 @@ struct ReportArgs {
     #[arg(long = "cluster-ms", default_value_t = 5, value_name = "MS")]
     cluster_window_ms: u64,
 
-    #[arg(long = "diff", value_name = "PATH")]
+    #[arg(
+        long = "diff",
+        value_name = "PATH",
+        help = "Compare session(s) against baseline session at PATH"
+    )]
     diff: Option<PathBuf>,
 
     #[arg(long = "filter-class", value_name = "CLASS")]
     filter_class: Option<String>,
 
+    #[arg(help = "Path to session directory or session.json", conflicts_with = "batch")]
     path: Option<PathBuf>,
 }
 
@@ -677,17 +704,8 @@ where
             if args.cluster_window_ms == 0 {
                 anyhow::bail!("--cluster-ms must be greater than zero");
             }
-            if args.batch.is_some() && args.path.is_some() {
-                anyhow::bail!("report --batch does not accept a positional PATH");
-            }
             if args.batch.is_none() && args.path.is_none() {
                 anyhow::bail!("report requires PATH unless --batch is set");
-            }
-            if args.batch.is_some() && args.html.is_some() {
-                anyhow::bail!("report --batch conflicts with --html");
-            }
-            if args.batch.is_some() && args.analysis_json {
-                anyhow::bail!("report --batch conflicts with --analysis-json");
             }
             let filter_class = if let Some(class_str) = &args.filter_class {
                 Some(
@@ -1070,7 +1088,6 @@ mod tests {
         let command = parse_app_command_from([
             "stutter",
             "report",
-            "--json-summary",
             "--html",
             "/tmp/report.html",
             "--cluster-ms",
@@ -1095,6 +1112,18 @@ mod tests {
         assert_eq!(html, Some(PathBuf::from("/tmp/report.html")));
         assert_eq!(cluster_window_ms, 5);
     }
+    #[test]
+    fn report_flag_conflicts() {
+        // html vs batch
+        assert!(parse_app_command_from(["stutter", "report", "--html", "r.html", "--batch", "dir"]).is_err());
+        // json vs json-summary
+        assert!(parse_app_command_from(["stutter", "report", "--json", "--json-summary", "run"]).is_err());
+        // analysis-json vs batch
+        assert!(parse_app_command_from(["stutter", "report", "--analysis-json", "--batch", "dir"]).is_err());
+        // path vs batch
+        assert!(parse_app_command_from(["stutter", "report", "--batch", "dir", "run"]).is_err());
+    }
+
 
     #[test]
     fn parses_summary_command() {
