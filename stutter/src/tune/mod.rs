@@ -379,6 +379,8 @@ async fn collect_tune_results(
                     cpu_perf_cache_refs: false,
                     block_io: false,
                     stat_wait: false,
+                    json_stream: false,
+                    metrics_port: None,
                 }),
                 profile.clone(),
                 enforce,

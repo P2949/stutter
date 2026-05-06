@@ -144,6 +144,9 @@ pub struct MonitorSession {
     pub block_io_correlation_basis: String,
     pub alert_sender: Option<tokio::sync::mpsc::Sender<AlertPayload>>,
     pub cpu_perf_sampler: Option<crate::perf_counters::CpuPerfSampler>,
+    pub prometheus_state: Option<Arc<crate::prometheus::PrometheusState>>,
+    #[allow(dead_code)]
+    pub prometheus_task: Option<tokio::task::JoinHandle<()>>,
     recent_telemetry: LiveTelemetry,
 }
 
@@ -168,7 +171,11 @@ impl MonitorSession {
             let pids: Vec<_> = auto_targets.iter().map(|(p, _)| *p).collect();
             let class = auto_targets[0].1;
             info!("auto_detected_launcher class={class} pids={pids:?}");
-            println!("auto-detected game launcher: {class} (PIDs {pids:?}). monitoring tree...");
+            if !config.json_stream {
+                println!(
+                    "auto-detected game launcher: {class} (PIDs {pids:?}). monitoring tree..."
+                );
+            }
             config.tree_pids = pids;
         }
 
@@ -212,15 +219,35 @@ impl MonitorSession {
             cpu_freq_sample_count: 0,
             gpu_sample_count: 0,
             block_io_event_count: 0,
+            spike_event_count: 0,
             interval_record_count: 0,
             spike_events_dropped_count: 0,
             alert_events_dropped_count: 0,
             alert_channel_closed_count: 0,
             event_stream_write_errors: 0,
             first_event_stream_write_error: None,
+            spike_event_writer: None,
+            stdout_spike_stream: None,
+            stdout_spike_stream_errors: 0,
+            prometheus_state: None,
         };
 
         let mut recorder = recorder;
+        if config.json_stream {
+            recorder.stdout_spike_stream = Some(recorder::StdoutJsonStream::new());
+        }
+
+        let (prometheus_state, prometheus_task) = if let Some(port) = config.metrics_port {
+            let state = Arc::new(crate::prometheus::PrometheusState::new_started_now());
+            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+            let task = crate::prometheus::spawn_metrics_server(addr, state.clone()).await?;
+            info!("prometheus metrics listening on http://127.0.0.1:{port}/metrics");
+            (Some(state), Some(task))
+        } else {
+            (None, None)
+        };
+
+        recorder.prometheus_state = prometheus_state.clone();
         recorder.spike_events = recorder.run.as_ref().map(|_| SpikeEventBuffer::default());
 
         if let Some(run) = recorder.run.as_mut() {
@@ -255,6 +282,9 @@ impl MonitorSession {
                 Some(JsonArrayWriter::create(run.run_dir.join("io_events.json"))?);
             recorder.scx_event_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("scx_events.json"),
+            )?);
+            recorder.spike_event_writer = Some(JsonArrayWriter::create(
+                run.run_dir.join("spike_events.json"),
             )?);
         }
 
@@ -362,6 +392,8 @@ impl MonitorSession {
             block_io_correlation_basis,
             alert_sender,
             cpu_perf_sampler,
+            prometheus_state,
+            prometheus_task,
             recent_telemetry,
         })
     }
@@ -679,6 +711,14 @@ impl MonitorSession {
                     writer.push(record)?;
                 }
             }
+
+            if let Some(state) = self.prometheus_state.as_ref() {
+                let max_p99 = records.iter().map(|r| r.p99_ns).max().unwrap_or(0);
+                state.set_latest_p99_ns(max_p99);
+                state.set_active_targets(self.tasks.active_targets.len() as u64);
+                state.set_event_stream_write_errors(self.recorder.event_stream_write_errors);
+                state.set_ebpf_ringbuf_drops(drop_counters_snapshot.total());
+            }
         }
 
         if let Some(term) = self.terminal.as_mut() {
@@ -968,13 +1008,15 @@ impl MonitorSession {
 
         let drop_counters = self.loaded.snapshot_drop_counters();
         log_drop_counters(&drop_counters);
-        if self.config.epoch_period_ms.is_none() {
+        if self.config.epoch_period_ms.is_none() && !self.config.json_stream {
             print_session_summaries(&mut self.tasks.stats_by_task);
         }
 
         if let Some(writer) = self.recorder.csv_writer.as_mut() {
             writer.finish()?;
-            if let Some(path) = &self.config.csv_path {
+            if let Some(path) = &self.config.csv_path
+                && !self.config.json_stream
+            {
                 println!("wrote interval CSV: {}", path.display());
             }
         }

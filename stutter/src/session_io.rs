@@ -269,11 +269,39 @@ pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<R
         Vec::new()
     };
 
-    let spikes = if options.load_spikes {
+    let mut spikes = if options.load_spikes {
         load_optional_json_vec(&run_dir, SPIKES_FILE, &mut validation)?
     } else {
         Vec::new()
     };
+
+    if options.load_spikes && spikes.is_empty() && !session.top_spikes.is_empty() {
+        spikes = session
+            .top_spikes
+            .iter()
+            .map(|s| SpikeEvent {
+                elapsed_ms: None,
+                task: s.task,
+                active: s.active,
+                class: s.class,
+                process_pid: s.process_pid,
+                process_comm: s.process_comm.clone(),
+                comm: s.comm.clone(),
+                cpu: s.cpu,
+                wakeup_target_cpu: s.wakeup_target_cpu,
+                prio: s.prio,
+                latency_ns: s.latency_ns,
+                wakeup_ns: s.wakeup_ns,
+                switch_ns: s.switch_ns,
+                target_pending_wakeups: s.target_pending_wakeups,
+                major_faults: s.major_faults,
+                minor_faults: s.minor_faults,
+                scx_ops: s.scx_ops.clone(),
+                scx_state: s.scx_state.clone(),
+                scx_enable_seq: s.scx_enable_seq.clone(),
+            })
+            .collect();
+    }
 
     let tree_events = if options.load_tree_events {
         load_optional_json_vec(&run_dir, TREE_EVENTS_FILE, &mut validation)?

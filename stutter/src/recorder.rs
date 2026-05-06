@@ -2,6 +2,7 @@ use std::{
     env, fs, io,
     io::Write,
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -18,6 +19,7 @@ use crate::{
         LatencyHistogramBucket, SpikeRecord, TaskStats,
     },
     process_tree::TaskClass,
+    prometheus::PrometheusState,
 };
 
 pub type IntervalRecord = MetricsIntervalRecord;
@@ -40,6 +42,7 @@ pub struct LiveRecorder {
     pub gpu_sample_writer: Option<JsonArrayWriter>,
     pub block_io_event_writer: Option<JsonArrayWriter>,
     pub scx_event_writer: Option<JsonArrayWriter>,
+    pub spike_event_writer: Option<JsonArrayWriter>,
     pub csv_writer: Option<IntervalCsvWriter>,
 
     pub scx_events: Vec<crate::scx::ScxEvent>,
@@ -51,12 +54,17 @@ pub struct LiveRecorder {
     pub cpu_freq_sample_count: u64,
     pub gpu_sample_count: u64,
     pub block_io_event_count: u64,
+    pub spike_event_count: u64,
     pub interval_record_count: u64,
     pub spike_events_dropped_count: u64,
     pub alert_events_dropped_count: u64,
     pub alert_channel_closed_count: u64,
     pub event_stream_write_errors: u64,
     pub first_event_stream_write_error: Option<String>,
+
+    pub stdout_spike_stream: Option<StdoutJsonStream>,
+    pub stdout_spike_stream_errors: u64,
+    pub prometheus_state: Option<Arc<PrometheusState>>,
 }
 
 impl std::fmt::Debug for LiveRecorder {
@@ -76,6 +84,7 @@ impl std::fmt::Debug for LiveRecorder {
             .field("cpu_freq_sample_count", &self.cpu_freq_sample_count)
             .field("gpu_sample_count", &self.gpu_sample_count)
             .field("block_io_event_count", &self.block_io_event_count)
+            .field("spike_event_count", &self.spike_event_count)
             .field("interval_record_count", &self.interval_record_count)
             .field(
                 "spike_events_dropped_count",
@@ -94,6 +103,11 @@ impl std::fmt::Debug for LiveRecorder {
                 "first_event_stream_write_error",
                 &self.first_event_stream_write_error,
             )
+            .field(
+                "stdout_spike_stream_errors",
+                &self.stdout_spike_stream_errors,
+            )
+            .field("prometheus_state", &self.prometheus_state.is_some())
             .finish()
     }
 }
@@ -218,7 +232,6 @@ impl JsonArrayWriter {
         self.wrote_any = true;
         Ok(())
     }
-
     pub fn finish(&mut self) -> anyhow::Result<()> {
         if self.finished {
             return Ok(());
@@ -230,6 +243,45 @@ impl JsonArrayWriter {
         self.finished = true;
         Ok(())
     }
+}
+
+pub struct StdoutJsonStream {
+    stdout: std::io::Stdout,
+}
+
+impl StdoutJsonStream {
+    pub fn new() -> Self {
+        Self {
+            stdout: std::io::stdout(),
+        }
+    }
+
+    pub fn push<T: serde::Serialize>(&mut self, value: &T) -> anyhow::Result<()> {
+        write_ndjson_value(&mut self.stdout, value)
+    }
+}
+
+impl Default for StdoutJsonStream {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for StdoutJsonStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StdoutJsonStream").finish()
+    }
+}
+
+pub fn write_ndjson_value<W, T>(writer: &mut W, value: &T) -> anyhow::Result<()>
+where
+    W: std::io::Write,
+    T: serde::Serialize,
+{
+    serde_json::to_writer(&mut *writer, value)?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    Ok(())
 }
 
 impl Drop for JsonArrayWriter {
@@ -1010,13 +1062,21 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         active_expanded_tasks: active_expanded_tasks.clone(),
         interval_record_count,
         intervals_dropped: recorder.intervals_dropped,
-        spike_events_retained_count: spike_events.len() as u64,
+        spike_events_retained_count: if recorder.spike_event_writer.is_some() {
+            recorder.spike_event_count
+        } else {
+            spike_events.len() as u64
+        },
         spike_events_dropped_count: recorder.spike_events_dropped_count,
-        spike_events_truncated: recorder
-            .spike_events
-            .as_ref()
-            .map(|s| s.truncated)
-            .unwrap_or(false),
+        spike_events_truncated: if recorder.spike_event_writer.is_some() {
+            false
+        } else {
+            recorder
+                .spike_events
+                .as_ref()
+                .map(|s| s.truncated)
+                .unwrap_or(false)
+        },
         scx_event_count: recorder.scx_event_count,
         irq_event_count,
         migration_event_count: Some(recorder.migration_event_count),
@@ -1070,13 +1130,21 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         active_expanded_tasks,
         interval_record_count,
         intervals_dropped: recorder.intervals_dropped,
-        spike_events_retained_count: spike_events.len() as u64,
+        spike_events_retained_count: if recorder.spike_event_writer.is_some() {
+            recorder.spike_event_count
+        } else {
+            spike_events.len() as u64
+        },
         spike_events_dropped_count: recorder.spike_events_dropped_count,
-        spike_events_truncated: recorder
-            .spike_events
-            .as_ref()
-            .map(|s| s.truncated)
-            .unwrap_or(false),
+        spike_events_truncated: if recorder.spike_event_writer.is_some() {
+            false
+        } else {
+            recorder
+                .spike_events
+                .as_ref()
+                .map(|s| s.truncated)
+                .unwrap_or(false)
+        },
         scx_event_count: recorder.scx_event_count,
         irq_event_count,
         migration_event_count: Some(recorder.migration_event_count),
@@ -1126,7 +1194,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         write_json_stream(recording.run_dir.join("tree_events.json"), tree_events)
             .map_err(map_write_err)?;
     }
-    if !spike_events.is_empty() {
+    if recorder.spike_event_writer.is_none() && !spike_events.is_empty() {
         write_json_stream(recording.run_dir.join("spike_events.json"), spike_events)
             .map_err(map_write_err)?;
     }
@@ -1159,7 +1227,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         .map_err(map_write_err)?;
     }
 
-    println!("recording written to {}", recording.run_dir.display());
+    if !input.config.json_stream {
+        println!("recording written to {}", recording.run_dir.display());
+    }
     Ok(())
 }
 
@@ -1730,6 +1800,43 @@ mod tests {
         let decoded: SpikeEvent = serde_json::from_str(json).unwrap();
         assert!(decoded.scx_ops.is_none());
         assert!(decoded.scx_state.is_none());
+    }
+
+    #[test]
+    fn test_write_ndjson_value() {
+        let event = SpikeEvent {
+            elapsed_ms: Some(100),
+            task: 123,
+            active: true,
+            class: TaskClass::Game,
+            process_pid: Some(123),
+            process_comm: "game".into(),
+            comm: "game".to_owned(),
+            cpu: 1,
+            wakeup_target_cpu: 1,
+            prio: 120,
+            latency_ns: 1_000_000,
+            wakeup_ns: 2000,
+            switch_ns: 3000,
+            target_pending_wakeups: 0,
+            major_faults: 1,
+            minor_faults: 2,
+            ..Default::default()
+        };
+
+        let mut buf = Vec::new();
+        write_ndjson_value(&mut buf, &event).unwrap();
+        write_ndjson_value(&mut buf, &event).unwrap();
+
+        let output = String::from_utf8(buf).unwrap();
+        let lines: Vec<_> = output.lines().collect();
+        assert_eq!(lines.len(), 2);
+
+        for line in lines {
+            let decoded: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert!(decoded.is_object());
+            assert_eq!(decoded["task"], 123);
+        }
     }
 
     fn temp_dir(name: &str) -> PathBuf {

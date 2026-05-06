@@ -381,6 +381,8 @@ mod tests {
             cpu_perf_cache_refs: false,
             block_io: false,
             stat_wait: false,
+            json_stream: false,
+            metrics_port: None,
         };
 
         let mut tasks = BTreeMap::new();

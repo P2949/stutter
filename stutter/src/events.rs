@@ -225,6 +225,11 @@ pub fn handle_event(
         scx_enable_seq.clone(),
     );
 
+    if let Some(state) = recorder.prometheus_state.as_ref() {
+        state.inc_samples(1);
+        state.observe_latency_ns(event.latency_ns);
+    }
+
     let mut spike_ret = None;
     if event.latency_ns >= config.spike_threshold_ns {
         let spike_event = recorder::SpikeEvent::from_task_stats(
@@ -238,19 +243,41 @@ pub fn handle_event(
         );
         spike_ret = Some(spike_event.clone());
 
-        if let Some(spike_events) = recorder.spike_events.as_mut() {
-            match spike_events.push(spike_event) {
+        if let Some(state) = recorder.prometheus_state.as_ref() {
+            state.inc_spikes(1);
+        }
+
+        if let Some(writer) = recorder.spike_event_writer.as_mut() {
+            push_ndjson_event(
+                writer,
+                &spike_event,
+                &mut recorder.spike_event_count,
+                &mut recorder.event_stream_write_errors,
+                &mut recorder.first_event_stream_write_error,
+                "spike_events",
+            );
+        } else if let Some(spike_events) = recorder.spike_events.as_mut() {
+            match spike_events.push(spike_event.clone()) {
                 recorder::SpikePushResult::Stored => {}
                 recorder::SpikePushResult::Dropped => recorder.spike_events_dropped_count += 1,
             }
         }
 
-        if config.verbose {
-            print_event(event, &comm, "sample");
-        } else {
-            print_event(event, &comm, "spike");
+        if let Some(stream) = recorder.stdout_spike_stream.as_mut()
+            && let Err(err) = stream.push(&spike_event)
+        {
+            warn!("json_stream_write_failed err={err:#}");
+            recorder.stdout_spike_stream_errors += 1;
         }
-    } else if config.verbose {
+
+        if !config.json_stream {
+            if config.verbose {
+                print_event(event, &comm, "sample");
+            } else {
+                print_event(event, &comm, "spike");
+            }
+        }
+    } else if config.verbose && !config.json_stream {
         print_event(event, &comm, "sample");
     }
 
