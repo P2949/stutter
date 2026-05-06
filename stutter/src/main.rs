@@ -33,6 +33,8 @@ mod watch;
 mod recording_fixture_tests;
 #[cfg(test)]
 mod regression_tests;
+#[cfg(test)]
+mod runnable_depth_tests;
 
 use std::path::Path;
 

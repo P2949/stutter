@@ -554,6 +554,7 @@ pub fn diagnose_cluster_with_config(
             },
         );
         push_scx_evidence(&mut candidates, StutterCause::CompositorSchedulerDelay, p);
+        push_runnable_depth_evidence(&mut candidates, StutterCause::CompositorSchedulerDelay, p);
     }
 
     // 2. Game thread scheduler delay
@@ -585,6 +586,7 @@ pub fn diagnose_cluster_with_config(
             },
         );
         push_scx_evidence(&mut candidates, StutterCause::GameThreadSchedulerDelay, p);
+        push_runnable_depth_evidence(&mut candidates, StutterCause::GameThreadSchedulerDelay, p);
     }
 
     // 3. IRQ overlap
@@ -715,6 +717,48 @@ pub fn diagnose_cluster_with_config(
     }
 
     finalize_diagnosis(candidates)
+}
+
+fn push_runnable_depth_evidence(
+    candidates: &mut [DiagnosisCandidate],
+    cause: StutterCause,
+    point: &SpikePoint,
+) {
+    if point.observed_runnable_depth >= 4 {
+        push_supporting_evidence(
+            candidates,
+            cause,
+            EvidenceItem {
+                kind: EvidenceKind::SchedulerDelay,
+                strength: 0.40,
+                message: format!(
+                    "high global runnable depth ({} tasks) suggests CPU contention",
+                    point.observed_runnable_depth
+                ),
+                timestamp_ms: point.elapsed_ms,
+                start_ns: Some(point.wakeup_ns),
+                end_ns: Some(point.switch_ns),
+            },
+        );
+    }
+
+    if point.target_pending_wakeups >= 4 {
+        push_supporting_evidence(
+            candidates,
+            cause,
+            EvidenceItem {
+                kind: EvidenceKind::SchedulerDelay,
+                strength: 0.20,
+                message: format!(
+                    "monitored wakeup backlog ({} tasks) (diagnostic-only)",
+                    point.target_pending_wakeups
+                ),
+                timestamp_ms: point.elapsed_ms,
+                start_ns: Some(point.wakeup_ns),
+                end_ns: Some(point.switch_ns),
+            },
+        );
+    }
 }
 
 fn push_scx_evidence(
@@ -980,9 +1024,12 @@ mod tests {
             wakeup_ns: 0,
             switch_ns: 0,
             target_pending_wakeups: 0,
+            observed_runnable_depth: 0,
             elapsed_ms: Some(100),
             scx_ops: None,
             scx_state: None,
+            cause_tags: Vec::new(),
+            primary_cause: None,
         }
     }
 

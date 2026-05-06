@@ -23,8 +23,8 @@ use crate::{
     process_tree::{self, find_auto_target_pids},
     psi,
     recorder::{
-        self, BlockIoRecord, FinalizeRecordingInput, GpuSample, IrqEventRecord, JsonArrayWriter,
-        LiveRecorder, SpikeEvent, SpikeEventBuffer,
+        self, BlockIoRecord, FinalizeRecordingInput, FrameEvent, GpuSample, IrqEventRecord,
+        JsonArrayWriter, LiveRecorder, SpikeEvent, SpikeEventBuffer,
     },
     scx,
     tasks::TaskTracker,
@@ -44,6 +44,7 @@ pub struct LiveTelemetry {
     pub irq_events: VecDeque<IrqEventRecord>,
     pub gpu_samples: VecDeque<GpuSample>,
     pub io_events: VecDeque<BlockIoRecord>,
+    pub frame_events: VecDeque<FrameEvent>,
     pub diagnoses: VecDeque<LiveDiagnosisEntry>,
     pub max_age_ms: u128,
 }
@@ -63,6 +64,10 @@ impl LiveTelemetry {
 
     pub fn push_io(&mut self, event: BlockIoRecord) {
         self.io_events.push_back(event);
+    }
+
+    pub fn push_frame(&mut self, event: FrameEvent) {
+        self.frame_events.push_back(event);
     }
 
     pub fn prune(&mut self, now_ms: u128) {
@@ -99,6 +104,14 @@ impl LiveTelemetry {
         }
 
         while self
+            .frame_events
+            .front()
+            .is_some_and(|e| now_ms.saturating_sub(e.elapsed_ms) > self.max_age_ms)
+        {
+            self.frame_events.pop_front();
+        }
+
+        while self
             .diagnoses
             .front()
             .is_some_and(|d| now_ms.saturating_sub(d.elapsed_ms) > self.max_age_ms)
@@ -115,6 +128,7 @@ impl Default for LiveTelemetry {
             irq_events: VecDeque::new(),
             gpu_samples: VecDeque::new(),
             io_events: VecDeque::new(),
+            frame_events: VecDeque::new(),
             diagnoses: VecDeque::new(),
             max_age_ms: 10_000,
         }
@@ -208,6 +222,7 @@ impl MonitorSession {
             gpu_sample_writer: None,
             block_io_event_writer: None,
             scx_event_writer: None,
+            frame_event_writer: None,
             csv_writer: None,
 
             scx_events: Vec::new(),
@@ -219,6 +234,8 @@ impl MonitorSession {
             cpu_freq_sample_count: 0,
             gpu_sample_count: 0,
             block_io_event_count: 0,
+            frame_event_count: 0,
+            frame_events_dropped: 0,
             spike_event_count: 0,
             interval_record_count: 0,
             spike_events_dropped_count: 0,
@@ -285,6 +302,9 @@ impl MonitorSession {
             )?);
             recorder.spike_event_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("spike_events.json"),
+            )?);
+            recorder.frame_event_writer = Some(JsonArrayWriter::create(
+                run.run_dir.join("frame_events.json"),
             )?);
         }
 
@@ -442,15 +462,26 @@ impl MonitorSession {
         self.refresh_tasks().await?;
 
         let (mangohud_tx, mut mangohud_rx) = tokio::sync::oneshot::channel::<(u128, u64)>();
+        let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel(1024);
+
         if let Some(run) = self.recorder.run.as_ref()
             && let Some(path) = self.config.mangohud_log.clone()
             && let Some(offset) = run.mangohud_start_offset
         {
+            let path_clone = path.clone();
             tokio::spawn(async move {
-                if let Ok(res) = mangohud::poll_alignment(&path, offset).await {
+                if let Ok(res) = mangohud::poll_alignment(&path_clone, offset).await {
                     let _ = mangohud_tx.send(res);
                 }
             });
+
+            if self.config.mangohud_log_live {
+                tokio::spawn(async move {
+                    if let Err(err) = mangohud::tail_frames(path, offset, frame_tx).await {
+                        log::warn!("mangohud_tail_failed err={err:#}");
+                    }
+                });
+            }
         }
 
         loop {
@@ -466,6 +497,19 @@ impl MonitorSession {
                             raw_ms, monotonic_ns
                         );
                     }
+                }
+                Some(frame) = frame_rx.recv() => {
+                    if let Some(writer) = self.recorder.frame_event_writer.as_mut() {
+                         crate::events::push_ndjson_event(
+                            writer,
+                            &frame,
+                            &mut self.recorder.frame_event_count,
+                            &mut self.recorder.event_stream_write_errors,
+                            &mut self.recorder.first_event_stream_write_error,
+                            "frame_events",
+                        );
+                    }
+                    self.recent_telemetry.push_frame(frame);
                 }
                 _ = tokio::signal::ctrl_c() => return Ok("ctrl_c".to_owned()),
                 reason = &mut max_duration_future => return Ok(reason.unwrap()),
@@ -919,9 +963,12 @@ impl MonitorSession {
                 wakeup_ns: s.wakeup_ns,
                 switch_ns: s.switch_ns,
                 target_pending_wakeups: s.target_pending_wakeups,
+                observed_runnable_depth: s.observed_runnable_depth,
                 elapsed_ms: s.elapsed_ms,
                 scx_ops: s.scx_ops.clone(),
                 scx_state: s.scx_state.clone(),
+                cause_tags: s.cause_tags.clone(),
+                primary_cause: s.primary_cause.clone(),
             });
         }
 
@@ -1044,7 +1091,9 @@ impl MonitorSession {
                 writer.finish()?;
             }
 
-            let frame_events = if let Some(path) = &self.config.mangohud_log {
+            let frame_events = if !self.config.mangohud_log_live
+                && let Some(path) = &self.config.mangohud_log
+            {
                 let (alignment_monotonic_ns, alignment_raw_elapsed_ms, mangohud_ignore_offset) =
                     if let Some(run) = self.recorder.run.as_ref() {
                         (

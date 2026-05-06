@@ -14,7 +14,8 @@ use crate::{
     metrics::format_latency,
     process_tree::TaskClass,
     recorder::{
-        FrameEvent, RecordedSpike, SESSION_SCHEMA_VERSION, SessionFile, SessionTask, SpikeEvent,
+        FrameEvent, GpuSample, RecordedSpike, SESSION_SCHEMA_VERSION, SessionFile, SessionTask,
+        SpikeEvent,
     },
     session_io::{self, ArtifactLoadOptions},
     summary::{self, RunDiffSummary, TaskDeltaSummary, format_latency_signed},
@@ -24,7 +25,16 @@ const MIN_CLUSTER_TASKS: usize = 3;
 const MAX_INLINE_CLUSTER_POINTS: usize = 8;
 const MAX_CLUSTER_CANDIDATES: usize = 4096;
 
-#[derive(Clone, Serialize)]
+#[derive(Debug, Clone, Serialize)]
+pub struct SpikeDensityBucket {
+    pub start_ms: u128,
+    pub end_ms: u128,
+    pub count: u64,
+    pub max_latency_ms: f64,
+    pub p99_latency_ms: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct SpikePoint {
     pub(crate) task: u32,
     pub(crate) class: TaskClass,
@@ -36,12 +46,15 @@ pub(crate) struct SpikePoint {
     pub(crate) wakeup_ns: u64,
     pub(crate) switch_ns: u64,
     pub(crate) target_pending_wakeups: u32,
+    pub(crate) observed_runnable_depth: u32,
     pub(crate) elapsed_ms: Option<u128>,
     pub(crate) scx_ops: Option<String>,
     pub(crate) scx_state: Option<String>,
+    pub(crate) cause_tags: Vec<String>,
+    pub(crate) primary_cause: Option<String>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct SpikeCluster {
     pub(crate) points: Vec<SpikePoint>,
     pub(crate) distinct_tasks: usize,
@@ -56,20 +69,22 @@ pub(crate) struct SpikeCluster {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-pub(crate) enum SpikeClusterSource {
+pub enum SpikeClusterSource {
     SpikeEvents,
     TopSpikesFallback,
 }
 
-#[derive(Serialize)]
-pub(crate) struct SpikeClusterAnalysis {
+#[derive(Debug, Clone, Serialize)]
+pub struct SpikeClusterAnalysis {
     pub(crate) source: SpikeClusterSource,
     pub(crate) source_count: usize,
     pub(crate) clusters: Vec<SpikeCluster>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ArtifactsSummary {
+    pub spike_count: u64,
+    pub frame_count: u64,
     pub irq_event_count: u64,
     pub gpu_sample_count: u64,
     pub frame_event_count: u64,
@@ -112,13 +127,55 @@ pub enum DataQualityLevel {
     Low,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ReportAnalysisJson {
     pub session: SessionFile,
     pub cluster_analysis: SpikeClusterAnalysis,
     pub frame_diagnoses: Vec<FrameDiagnosis>,
     pub artifacts_summary: ArtifactsSummary,
     pub data_quality: DataQualitySummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TaskHtmlRow {
+    pub task: u32,
+    pub active: bool,
+    pub class: TaskClass,
+    pub process_pid: Option<u32>,
+    pub process_comm: String,
+    pub comm: String,
+    pub samples: u64,
+    pub spike_count: u64,
+    pub max_latency_ms: f64,
+    pub p99_latency_ms: f64,
+    pub avg_latency_ms: f64,
+    pub over_1ms: u64,
+    pub over_2ms: u64,
+    pub over_5ms: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct HtmlChartArtifacts {
+    pub gpu_samples: Vec<GpuSample>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HtmlReportModel {
+    pub session: SessionFile,
+    pub data_quality: DataQualitySummary,
+    pub cluster_analysis: SpikeClusterAnalysis,
+    pub frame_diagnoses: Vec<FrameDiagnosis>,
+    pub artifacts_summary: ArtifactsSummary,
+    pub top_tasks_by_max: Vec<TaskHtmlRow>,
+    pub top_tasks_by_p99: Vec<TaskHtmlRow>,
+    pub spike_density: Vec<SpikeDensityBucket>,
+
+    pub top_limit: usize,
+    pub spike_events: Option<Vec<SpikeEvent>>,
+    pub chart_artifacts: HtmlChartArtifacts,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legacy_text_report: Option<String>,
 }
 
 // Old RunArtifacts removed in favor of session_io::RunArtifacts
@@ -159,6 +216,23 @@ impl PartialOrd for SpikeClusterCandidate {
 struct ReportBuildResult {
     analysis: ReportAnalysisJson,
     artifacts: session_io::RunArtifacts,
+}
+
+fn artifacts_summary_from_session(session: &SessionFile) -> ArtifactsSummary {
+    ArtifactsSummary {
+        spike_count: session
+            .spike_events_retained_count
+            .max(session.top_spikes.len() as u64),
+        frame_count: session.frame_event_count,
+        irq_event_count: session.irq_event_count,
+        gpu_sample_count: session.gpu_sample_count,
+        frame_event_count: session.frame_event_count,
+        migration_event_count: session.migration_event_count.unwrap_or(0),
+        cpu_freq_sample_count: session.cpu_freq_sample_count.unwrap_or(0),
+        block_io_event_count: session.block_io_event_count,
+        interval_record_count: session.interval_record_count,
+        scx_event_count: session.scx_event_count,
+    }
 }
 
 fn log_run_validation(path: &Path, validation: &session_io::RunValidationReport) {
@@ -244,16 +318,7 @@ fn build_report_analysis_with_artifacts(
     );
 
     let data_quality = data_quality_summary(&session, &artifacts.validation);
-    let artifacts_summary = ArtifactsSummary {
-        irq_event_count: session.irq_event_count,
-        gpu_sample_count: session.gpu_sample_count,
-        frame_event_count: session.frame_event_count,
-        migration_event_count: session.migration_event_count.unwrap_or(0),
-        cpu_freq_sample_count: session.cpu_freq_sample_count.unwrap_or(0),
-        block_io_event_count: session.block_io_event_count,
-        interval_record_count: session.interval_record_count,
-        scx_event_count: session.scx_event_count,
-    };
+    let artifacts_summary = artifacts_summary_from_session(&session);
 
     Ok(ReportBuildResult {
         analysis: ReportAnalysisJson {
@@ -801,6 +866,105 @@ pub fn print_batch_report(
     Ok(())
 }
 
+pub fn build_html_report_model(
+    session: &SessionFile,
+    artifacts: &session_io::RunArtifacts,
+    analysis: &ReportAnalysisJson,
+    top: usize,
+    filter_class: Option<TaskClass>,
+    legacy_text_report: Option<String>,
+) -> anyhow::Result<HtmlReportModel> {
+    let spike_events = if artifacts.spikes.is_empty() {
+        None
+    } else {
+        Some(artifacts.spikes.clone())
+    };
+
+    let duration_ms = session.duration_ms.max(1);
+    let bucket_ms = (duration_ms / 500).clamp(1, 1000);
+    let spike_density = spike_events
+        .as_deref()
+        .map(|spikes| build_spike_density(spikes, bucket_ms))
+        .unwrap_or_default();
+
+    Ok(HtmlReportModel {
+        session: session.clone(),
+        data_quality: analysis.data_quality.clone(),
+        cluster_analysis: analysis.cluster_analysis.clone(),
+        frame_diagnoses: analysis.frame_diagnoses.clone(),
+        artifacts_summary: analysis.artifacts_summary.clone(),
+        top_tasks_by_max: top_task_rows_by_max_latency(session, top, filter_class),
+        top_tasks_by_p99: top_task_rows_by_p99_latency(session, top, filter_class),
+        spike_density,
+        top_limit: top,
+        spike_events,
+        chart_artifacts: HtmlChartArtifacts {
+            gpu_samples: artifacts.gpu_samples.clone(),
+        },
+        legacy_text_report,
+    })
+}
+
+fn top_task_rows_by_max_latency(
+    session: &SessionFile,
+    top: usize,
+    filter_class: Option<TaskClass>,
+) -> Vec<TaskHtmlRow> {
+    let mut tasks = filtered_latency_tasks(session, filter_class);
+    tasks.sort_by_key(|task| std::cmp::Reverse(task.latency.max_ns));
+    tasks.into_iter().take(top).map(task_html_row).collect()
+}
+
+fn top_task_rows_by_p99_latency(
+    session: &SessionFile,
+    top: usize,
+    filter_class: Option<TaskClass>,
+) -> Vec<TaskHtmlRow> {
+    let mut tasks = filtered_latency_tasks(session, filter_class);
+    tasks.sort_by_key(|task| {
+        (
+            std::cmp::Reverse(task.latency.p99_ns),
+            std::cmp::Reverse(task.latency.max_ns),
+        )
+    });
+    tasks.into_iter().take(top).map(task_html_row).collect()
+}
+
+fn filtered_latency_tasks(
+    session: &SessionFile,
+    filter_class: Option<TaskClass>,
+) -> Vec<&SessionTask> {
+    session
+        .tasks
+        .iter()
+        .filter(|task| task.latency.samples > 0)
+        .filter(|task| filter_class.is_none_or(|class| task.class == class))
+        .collect()
+}
+
+fn task_html_row(task: &SessionTask) -> TaskHtmlRow {
+    TaskHtmlRow {
+        task: task.task,
+        active: task.active,
+        class: task.class,
+        process_pid: task.process_pid,
+        process_comm: task.process_comm.to_string(),
+        comm: task.comm.clone(),
+        samples: task.latency.samples,
+        spike_count: task.latency.over_1ms,
+        max_latency_ms: ns_to_ms(task.latency.max_ns),
+        p99_latency_ms: ns_to_ms(task.latency.p99_ns),
+        avg_latency_ms: ns_to_ms(task.latency.avg_ns),
+        over_1ms: task.latency.over_1ms,
+        over_2ms: task.latency.over_2ms,
+        over_5ms: task.latency.over_5ms,
+    }
+}
+
+fn ns_to_ms(ns: u64) -> f64 {
+    ns as f64 / 1_000_000.0
+}
+
 pub fn write_html_report(
     path: &Path,
     html_path: &Path,
@@ -823,20 +987,15 @@ pub fn write_html_report(
         cluster_window_ms,
         filter_class,
     );
-    let spike_events_opt = if artifacts.spikes.is_empty() {
-        None
-    } else {
-        Some(&artifacts.spikes[..])
-    };
-    let html = render_html_report(
+    let model = build_html_report_model(
         &analysis.session,
-        spike_events_opt,
         &artifacts,
-        &analysis.cluster_analysis,
-        &analysis.frame_diagnoses,
-        &text_report,
+        &analysis,
         top,
-    );
+        filter_class,
+        Some(text_report),
+    )?;
+    let html = render_html_report(&model)?;
     if let Some(parent) = html_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -844,49 +1003,116 @@ pub fn write_html_report(
         .with_context(|| format!("failed to write HTML report {}", html_path.display()))?;
     Ok(())
 }
-fn render_html_report(
-    session: &SessionFile,
-    spike_events: Option<&[SpikeEvent]>,
-    artifacts: &session_io::RunArtifacts,
-    cluster_analysis: &SpikeClusterAnalysis,
-    frame_diagnoses: &[FrameDiagnosis],
-    text_report: &str,
-    top: usize,
-) -> String {
-    let session_json =
-        json_escape(&serde_json::to_string(session).unwrap_or_else(|_| "{}".to_owned()));
-    let spike_events_json =
-        json_escape(&serde_json::to_string(&spike_events).unwrap_or_else(|_| "null".to_owned()));
-    let artifacts_json =
-        json_escape(&serde_json::to_string(artifacts).unwrap_or_else(|_| "{}".to_owned()));
-    let cluster_analysis_json =
-        json_escape(&serde_json::to_string(&cluster_analysis).unwrap_or_else(|_| "{}".to_owned()));
-    let frame_diagnoses_json =
-        json_escape(&serde_json::to_string(&frame_diagnoses).unwrap_or_else(|_| "[]".to_owned()));
+
+pub fn render_html_report(model: &HtmlReportModel) -> anyhow::Result<String> {
+    let model_json = escape_json_for_script_tag(
+        &serde_json::to_string(model).context("failed to serialize HTML report model")?,
+    );
+    let session_json = escape_json_for_script_tag(
+        &serde_json::to_string(&model.session).context("failed to serialize HTML session data")?,
+    );
+    let spike_events_json = escape_json_for_script_tag(
+        &serde_json::to_string(&model.spike_events)
+            .context("failed to serialize HTML spike event data")?,
+    );
+    let spike_density_json = escape_json_for_script_tag(
+        &serde_json::to_string(&model.spike_density)
+            .context("failed to serialize HTML spike density data")?,
+    );
+    let artifacts_json = escape_json_for_script_tag(
+        &serde_json::to_string(&model.chart_artifacts)
+            .context("failed to serialize HTML chart artifact data")?,
+    );
+    let cluster_analysis_json = escape_json_for_script_tag(
+        &serde_json::to_string(&model.cluster_analysis)
+            .context("failed to serialize HTML cluster data")?,
+    );
 
     let template = include_str!("report_template.html");
 
-    template
-        .replace("{text_report}", &html_escape(text_report))
+    Ok(template
+        .replace("{html_report_model_json}", &model_json)
         .replace("{session_json}", &session_json)
         .replace("{spike_events_json}", &spike_events_json)
+        .replace("{spike_density_json}", &spike_density_json)
         .replace("{artifacts_json}", &artifacts_json)
         .replace("{cluster_analysis_json}", &cluster_analysis_json)
-        .replace("{frame_diagnoses_json}", &frame_diagnoses_json)
-        .replace("{top}", &top.to_string())
+        .replace("{top}", &model.top_limit.to_string()))
 }
 
-fn json_escape(s: &str) -> String {
+pub fn build_spike_density(spikes: &[SpikeEvent], bucket_ms: u128) -> Vec<SpikeDensityBucket> {
+    if spikes.is_empty() {
+        return Vec::new();
+    }
+
+    let bucket_ms = bucket_ms.max(1);
+
+    #[derive(Default)]
+    struct BucketAccum {
+        start_ms: u128,
+        end_ms: u128,
+        count: u64,
+        max_latency_ms: f64,
+        latencies_ms: Vec<f64>,
+    }
+
+    let mut buckets: BTreeMap<u128, BucketAccum> = BTreeMap::new();
+
+    for spike in spikes {
+        let elapsed_ms = spike.elapsed_ms.unwrap_or(0);
+        let latency_ms = spike.latency_ns as f64 / 1_000_000.0;
+
+        let bucket_idx = elapsed_ms / bucket_ms;
+        let start_ms = bucket_idx * bucket_ms;
+        let end_ms = start_ms + bucket_ms;
+
+        let bucket = buckets.entry(bucket_idx).or_insert_with(|| BucketAccum {
+            start_ms,
+            end_ms,
+            count: 0,
+            max_latency_ms: 0.0,
+            latencies_ms: Vec::new(),
+        });
+
+        bucket.count += 1;
+        if latency_ms.is_finite() {
+            bucket.max_latency_ms = bucket.max_latency_ms.max(latency_ms);
+            bucket.latencies_ms.push(latency_ms);
+        }
+    }
+
+    buckets
+        .into_values()
+        .map(|mut bucket| {
+            let p99_latency_ms = percentile_f64(&mut bucket.latencies_ms, 0.99);
+            SpikeDensityBucket {
+                start_ms: bucket.start_ms,
+                end_ms: bucket.end_ms,
+                count: bucket.count,
+                max_latency_ms: bucket.max_latency_ms,
+                p99_latency_ms,
+            }
+        })
+        .collect()
+}
+
+fn percentile_f64(values: &mut [f64], percentile: f64) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    values.sort_by(|a, b| a.total_cmp(b));
+
+    let len = values.len();
+    let rank = ((len as f64 - 1.0) * percentile).round() as usize;
+    values[rank.min(len - 1)]
+}
+
+fn escape_json_for_script_tag(s: &str) -> String {
     s.replace('<', "\\u003c")
         .replace('>', "\\u003e")
         .replace('&', "\\u0026")
-}
-
-fn html_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+        .replace("</", "<\\/")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1296,7 +1522,7 @@ pub(crate) fn render_report(
         pushln(
             &mut output,
             format!(
-                "task={} active={} class={:?} comm={} cpu={} wakeup_target_cpu={} latency={} wakeup_ns={} switch_ns={} target_pending_on_switch_cpu={}",
+                "task={} active={} class={:?} comm={} cpu={} wakeup_target_cpu={} latency={} wakeup_ns={} switch_ns={} observed_runnable_depth={} target_pending_wakeups={}(diagnostic)",
                 spike.task,
                 spike.active,
                 spike.class,
@@ -1306,6 +1532,7 @@ pub(crate) fn render_report(
                 format_latency(spike.latency_ns),
                 spike.wakeup_ns,
                 spike.switch_ns,
+                spike.observed_runnable_depth,
                 spike.target_pending_wakeups,
             ),
         );
@@ -1322,11 +1549,11 @@ pub(crate) fn render_report(
     );
     pushln(
         &mut output,
-        "target_pending_on_switch_cpu is a rough advisory-only diagnostic: it counts other monitored",
+        "observed_runnable_depth is an approximation of runnable pressure on the CPU reconstructed",
     );
     pushln(
         &mut output,
-        "wakeup records still pending on the CPU that actually ran the task.",
+        "from sched tracepoints. target_pending_wakeups is diagnostic-only monitored-target backlog.",
     );
     pushln(
         &mut output,
@@ -1691,10 +1918,13 @@ fn flatten_spike_events(session: &SessionFile, spike_events: &[SpikeEvent]) -> V
             wakeup_ns: spike.wakeup_ns,
             switch_ns: spike.switch_ns,
             target_pending_wakeups: spike.target_pending_wakeups,
+            observed_runnable_depth: spike.observed_runnable_depth,
             elapsed_ms: elapsed_ms(session.monotonic_start_ns, spike.switch_ns)
                 .or(spike.elapsed_ms),
             scx_ops: spike.scx_ops.clone(),
             scx_state: spike.scx_state.clone(),
+            cause_tags: spike.cause_tags.clone(),
+            primary_cause: spike.primary_cause.clone(),
         })
         .collect()
 }
@@ -1731,9 +1961,12 @@ fn spike_point_from_task(
         wakeup_ns: spike.wakeup_ns,
         switch_ns: spike.switch_ns,
         target_pending_wakeups: spike.target_pending_wakeups,
+        observed_runnable_depth: spike.observed_runnable_depth,
         elapsed_ms,
         scx_ops: spike.scx_ops.clone(),
         scx_state: spike.scx_state.clone(),
+        cause_tags: spike.cause_tags.clone(),
+        primary_cause: spike.primary_cause.clone(),
     }
 }
 
@@ -2328,7 +2561,7 @@ fn render_cluster_point(point: &SpikePoint) -> String {
         String::new()
     };
     format!(
-        "{}({:?}:{} cpu={} wakeup_target_cpu={} latency={} switch_ns={} process_pid={} wakeup_ns={} target_pending_on_switch_cpu={}{})",
+        "{}({:?}:{} cpu={} wakeup_target_cpu={} latency={} switch_ns={} process_pid={} wakeup_ns={} observed_runnable_depth={} target_pending_wakeups={}(diag){}{}{})",
         point.task,
         point.class,
         point.comm,
@@ -2338,8 +2571,19 @@ fn render_cluster_point(point: &SpikePoint) -> String {
         point.switch_ns,
         format_process_pid(point.process_pid),
         point.wakeup_ns,
+        point.observed_runnable_depth,
         point.target_pending_wakeups,
-        scx
+        scx,
+        if let Some(p) = &point.primary_cause {
+            format!(" primary_cause={}", p)
+        } else {
+            String::new()
+        },
+        if !point.cause_tags.is_empty() {
+            format!(" tags={}", point.cause_tags.join(","))
+        } else {
+            String::new()
+        }
     )
 }
 
@@ -2578,9 +2822,12 @@ mod tests {
             wakeup_ns: 10_000_000,
             switch_ns: 10_000_000 + latency_ns,
             target_pending_wakeups: 0,
+            observed_runnable_depth: 0,
             elapsed_ms: Some(100),
             scx_ops: None,
             scx_state: None,
+            cause_tags: Vec::new(),
+            primary_cause: None,
         }
     }
 
@@ -2707,6 +2954,73 @@ mod tests {
         assert!(output.contains("level: High"));
     }
 
+    fn test_html_report_model() -> HtmlReportModel {
+        let mut session = minimal_session_for_report_test();
+        session.tasks.push(SessionTask {
+            task: 42,
+            active: true,
+            class: TaskClass::Game,
+            process_pid: Some(42),
+            process_comm: "test-game".into(),
+            comm: "test-game".to_owned(),
+            latency: crate::recorder::RecordedLatency {
+                samples: 100,
+                stored_samples: 100,
+                percentile_scope: "exact".to_owned(),
+                avg_ns: 750_000,
+                p99_ns: 2_000_000,
+                max_ns: 5_000_000,
+                over_1ms: 7,
+                over_2ms: 3,
+                over_5ms: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let validation = crate::session_io::RunValidationReport::default();
+        let analysis = ReportAnalysisJson {
+            session: session.clone(),
+            cluster_analysis: SpikeClusterAnalysis {
+                source: SpikeClusterSource::TopSpikesFallback,
+                source_count: 0,
+                clusters: vec![],
+            },
+            frame_diagnoses: vec![],
+            artifacts_summary: artifacts_summary_from_session(&session),
+            data_quality: data_quality_summary(&session, &validation),
+        };
+
+        build_html_report_model(
+            &session,
+            &session_io::RunArtifacts::default(),
+            &analysis,
+            10,
+            None,
+            Some("stutter report\n==============".to_owned()),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn render_html_report_uses_structured_sections() {
+        let model = test_html_report_model();
+
+        let html = render_html_report(&model).unwrap();
+
+        assert!(html.contains(r#"id="summary-section""#));
+        assert!(html.contains(r#"id="data-quality-section""#));
+        assert!(html.contains(r#"id="top-tasks-section""#));
+        assert!(html.contains(r#"id="spike-charts-section""#));
+        assert!(html.contains(r#"id="cluster-analysis-section""#));
+        assert!(html.contains(r#"id="frame-diagnoses-section""#));
+        assert!(html.contains(r#"id="artifacts-section""#));
+        assert!(html.contains(r#"id="data-report-model""#));
+        assert!(html.contains("test-game"));
+        assert!(html.contains("<summary>Legacy text report</summary>"));
+        assert!(!html.contains("<pre>stutter report"));
+    }
+
     #[test]
     fn render_cluster_uses_cautious_diagnosis_wording() {
         let mut cluster = cluster_from_points(
@@ -2775,5 +3089,48 @@ mod tests {
         let spikes = identify_frame_spikes(&frames_with_long, 0.0);
         assert_eq!(spikes.len(), 1);
         assert_eq!(spikes[0].frametime_ms, 33.4);
+    }
+
+    #[test]
+    fn build_spike_density_counts_and_max_latency_by_bucket() {
+        let spikes = vec![
+            SpikeEvent {
+                elapsed_ms: Some(0),
+                latency_ns: 1_000_000,
+                ..Default::default()
+            }, // 1 ms latency, bucket 0
+            SpikeEvent {
+                elapsed_ms: Some(10),
+                latency_ns: 5_000_000,
+                ..Default::default()
+            }, // 5 ms latency, bucket 0
+            SpikeEvent {
+                elapsed_ms: Some(99),
+                latency_ns: 2_000_000,
+                ..Default::default()
+            }, // 2 ms latency, bucket 0
+            SpikeEvent {
+                elapsed_ms: Some(100),
+                latency_ns: 7_000_000,
+                ..Default::default()
+            }, // 7 ms latency, bucket 1
+        ];
+
+        let buckets = build_spike_density(&spikes, 100);
+
+        assert_eq!(buckets.len(), 2);
+
+        assert_eq!(buckets[0].start_ms, 0);
+        assert_eq!(buckets[0].end_ms, 100);
+        assert_eq!(buckets[0].count, 3);
+        assert_eq!(buckets[0].max_latency_ms, 5.0);
+        // p99 of [1, 5, 2] -> sorted [1, 2, 5]. len=3. rank = (3-1)*0.99 = 1.98 -> round to 2. values[2] = 5.
+        assert_eq!(buckets[0].p99_latency_ms, 5.0);
+
+        assert_eq!(buckets[1].start_ms, 100);
+        assert_eq!(buckets[1].end_ms, 200);
+        assert_eq!(buckets[1].count, 1);
+        assert_eq!(buckets[1].max_latency_ms, 7.0);
+        assert_eq!(buckets[1].p99_latency_ms, 7.0);
     }
 }

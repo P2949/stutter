@@ -29,6 +29,7 @@ tokio = { workspace = true, features = [
     "sync",
     "process",
     "io-util",
+    "fs",
 ] }
 regex = { workspace = true }
 ratatui = "0.30.0"

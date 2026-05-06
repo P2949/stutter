@@ -372,6 +372,7 @@ mod tests {
             max_duration: None,
             cpu_freq: false,
             cgroupv2: None,
+            native_cgroup_filter: false,
             follow_exec: false,
             exclude_tree_pids: Vec::new(),
             faults: false,
@@ -382,6 +383,7 @@ mod tests {
             block_io: false,
             stat_wait: false,
             json_stream: false,
+            mangohud_log_live: false,
             metrics_port: None,
         };
 

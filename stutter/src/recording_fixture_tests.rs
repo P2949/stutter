@@ -44,6 +44,7 @@ pub fn write_minimal_recording_fixture(dir: &Path) {
         hwmon_drm_card: None,
         hwmon_render_node: None,
         mangohud_log: None,
+        mangohud_log_live: false,
         tui: false,
         summary_period_ms: 1000,
         epoch_period_ms: None,
@@ -416,11 +417,14 @@ fn spike_event(
         wakeup_ns: switch_ns.saturating_sub(latency_ns),
         switch_ns,
         target_pending_wakeups: 0,
+        observed_runnable_depth: 0,
         major_faults: 0,
         minor_faults: 0,
         scx_ops: None,
         scx_state: None,
         scx_enable_seq: None,
+        cause_tags: Vec::new(),
+        primary_cause: None,
     }
 }
 
@@ -921,6 +925,7 @@ fn mk_dummy_config() -> RecordedConfig {
         hwmon_drm_card: None,
         hwmon_render_node: None,
         mangohud_log: None,
+        mangohud_log_live: false,
         tui: false,
         summary_period_ms: 1000,
         epoch_period_ms: None,

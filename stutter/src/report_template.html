@@ -9,78 +9,406 @@
 body { font-family: system-ui, sans-serif; margin: 24px; color: #202124; background: #f8f9fa; }
 .chart-container { position: relative; height: 400px; width: 100%; max-width: 1080px; margin-bottom: 28px; background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 .small-chart-container { position: relative; height: 250px; width: 100%; max-width: 520px; margin-bottom: 16px; background: #fff; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: inline-block; vertical-align: top; margin-right: 16px; }
+.summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; max-width: 1080px; }
+.summary-card { background: #fff; border-radius: 8px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.summary-card-label { color: #6b7280; font-size: 0.82rem; font-weight: 600; text-transform: uppercase; }
+.summary-card-value { color: #111827; font-size: 1.35rem; font-weight: 700; margin-top: 4px; overflow-wrap: anywhere; }
+.notice { margin-bottom: 16px; padding: 12px; border-radius: 4px; max-width: 1080px; }
+.notice-info { background: #eff6ff; border-left: 4px solid #3b82f6; color: #1e40af; }
+.notice-warn { background: #fff7ed; border-left: 4px solid #ea580c; color: #9a3412; }
+.muted { color: #6b7280; font-size: 0.875rem; }
 section { margin-bottom: 32px; }
 pre { white-space: pre-wrap; background: #fff; padding: 16px; overflow: auto; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 h1, h2, h3 { color: #111827; }
-table { border-collapse: collapse; width: 100%; max-width: 1080px; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; }
-th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+table { border-collapse: collapse; width: 100%; max-width: 1080px; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; margin-bottom: 16px; }
+th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
 th { background: #f3f4f6; font-weight: 600; }
+details { max-width: 1080px; }
+summary { cursor: pointer; font-weight: 600; color: #111827; }
 </style>
 </head>
 <body>
 <h1>stutter report</h1>
 
+<section id="summary-section">
+  <h2>Summary</h2>
+  <div class="summary-cards" id="summary-cards"></div>
+</section>
+
+<section id="data-quality-section">
+  <h2>Data Quality</h2>
+  <div id="data-quality-warnings"></div>
+</section>
+
 <section id="metadata-section">
   <h2>System Metadata</h2>
   <div id="metadata-content"></div>
-  <div id="block-io-warning" style="display:none; margin-top: 16px; padding: 12px; background: #fff7ed; border-left: 4px solid #ea580c; color: #9a3412; border-radius: 4px;">
+  <div id="block-io-warning" class="notice notice-warn" style="display:none; margin-top: 16px;">
     <strong>Notice:</strong> Block I/O correlation is advisory and approximate (dev+sector hashing). Attribution may collide under high concurrency.
   </div>
 </section>
 
-<section>
-  <h2>Task Max Latency</h2>
+<section id="top-tasks-section">
+  <h2>Top Tasks</h2>
+  <h3>By Max Latency</h3>
+  <div id="top-tasks-by-max"></div>
+  <h3>By P99 Latency</h3>
+  <div id="top-tasks-by-p99"></div>
+</section>
+
+<section id="spike-charts-section">
+  <h2>Spike Charts</h2>
+
+  <h3>Task Max Latency</h3>
   <div class="chart-container"><canvas id="latency"></canvas></div>
-</section>
 
-<section>
-  <h2>Spike Timeline</h2>
+  <h3>Spike Timeline</h3>
+  <p id="spike-sampled-notice" class="muted"></p>
   <div class="chart-container"><canvas id="spikes"></canvas></div>
+
+  <section id="spike-density-section">
+    <h3>Spike Density</h3>
+    <p class="muted">
+      Time-bucketed spike density across the whole session. Useful when there are too many spikes for a readable scatter plot.
+    </p>
+    <div class="chart-container">
+      <canvas id="spike-density"></canvas>
+    </div>
+  </section>
+
+  <section id="histograms-section">
+    <h3>Task Latency Histograms</h3>
+    <div id="histogram-notice" class="notice notice-info">
+      <strong>Statistical Note:</strong> For tasks with more than 1,024 samples, percentiles (p95, p99) are approximate histogram estimates.
+      Always prioritize <strong>Max Latency</strong> and <strong>Threshold Counters</strong> (over 1ms/2ms/5ms) for exact comparisons.
+    </div>
+    <div id="histograms-container"></div>
+  </section>
+
+  <section id="gpu-section">
+    <h3>GPU Busy</h3>
+    <div class="chart-container"><canvas id="gpu"></canvas></div>
+  </section>
 </section>
 
-<section>
-  <h2>Task Latency Histograms</h2>
-  <div id="histogram-notice" style="margin-bottom: 16px; padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; color: #1e40af; border-radius: 4px; max-width: 1080px;">
-    <strong>Statistical Note:</strong> For tasks with more than 1,024 samples, percentiles (p95, p99) are approximate histogram estimates. 
-    Always prioritize <strong>Max Latency</strong> and <strong>Threshold Counters</strong> (over 1ms/2ms/5ms) for exact comparisons.
-  </div>
-  <div id="histograms-container"></div>
-</section>
-
-<section>
-  <h2>Spike Clusters (Gantt)</h2>
+<section id="cluster-analysis-section">
+  <h2>Spike Clusters</h2>
+  <div id="cluster-analysis-table"></div>
+  <h3>Cluster Gantt</h3>
   <div id="clusters-container"></div>
 </section>
 
-<section>
-  <h2>GPU Busy</h2>
-  <div class="chart-container"><canvas id="gpu"></canvas></div>
+<section id="frame-diagnoses-section">
+  <h2>Frame Diagnoses</h2>
+  <div id="frame-diagnoses-table"></div>
 </section>
 
-<section>
-  <h2>Text Report</h2>
-  <pre>{text_report}</pre>
+<section id="artifacts-section">
+  <h2>Artifacts</h2>
+  <div id="artifacts-summary"></div>
 </section>
 
+<section id="legacy-text-report-section">
+  <details>
+    <summary>Legacy text report</summary>
+    <pre id="legacy-text-report"></pre>
+  </details>
+</section>
+
+<script id="data-report-model" type="application/json">{html_report_model_json}</script>
 <script id="data-session" type="application/json">{session_json}</script>
 <script id="data-spikes" type="application/json">{spike_events_json}</script>
+<script id="data-spike-density" type="application/json">{spike_density_json}</script>
 <script id="data-artifacts" type="application/json">{artifacts_json}</script>
 <script id="data-clusters" type="application/json">{cluster_analysis_json}</script>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    const session = JSON.parse(document.getElementById('data-session').textContent);
-    const rawSpikeEvents = JSON.parse(document.getElementById('data-spikes').textContent);
-    const artifacts = JSON.parse(document.getElementById('data-artifacts').textContent);
-    const clusterAnalysis = JSON.parse(document.getElementById('data-clusters').textContent);
+    function parseJsonScript(id, fallback) {
+        const el = document.getElementById(id);
+        if (!el) return fallback;
+        try {
+            return JSON.parse(el.textContent || 'null') ?? fallback;
+        } catch (_) {
+            return fallback;
+        }
+    }
 
-    const topLimit = {top};
+    function escapeHtml(value) {
+        return String(value)
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
+    }
+
+    function formatMs(value) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) {
+            return '—';
+        }
+
+        return `${Number(value).toFixed(3)} ms`;
+    }
+
+    function nsToMs(value) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) {
+            return null;
+        }
+
+        return Number(value) / 1000000.0;
+    }
+
+    function formatEvidence(value) {
+        if (Array.isArray(value)) {
+            return value.join(', ');
+        }
+
+        if (value && typeof value === 'object') {
+            return Object.entries(value)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(', ');
+        }
+
+        return value == null ? '—' : String(value);
+    }
+
+    function formatKey(key) {
+        return String(key)
+            .replaceAll('_', ' ')
+            .replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function renderSummaryCards(model) {
+        const container = document.getElementById('summary-cards');
+        if (!container) return;
+
+        const artifacts = model.artifacts_summary || {};
+        const session = model.session || {};
+
+        const cards = [
+            ['Duration', formatMs(session.duration_ms)],
+            ['Spikes', artifacts.spike_count ?? session.spike_events_retained_count ?? 0],
+            ['Frames', artifacts.frame_count ?? artifacts.frame_event_count ?? 0],
+            ['IRQ events', artifacts.irq_event_count ?? 0],
+            ['Migrations', artifacts.migration_event_count ?? 0],
+        ];
+
+        container.innerHTML = cards.map(([label, value]) => `
+            <div class="summary-card">
+              <div class="summary-card-label">${escapeHtml(label)}</div>
+              <div class="summary-card-value">${escapeHtml(value)}</div>
+            </div>
+        `).join('');
+    }
+
+    function renderDataQuality(model) {
+        const container = document.getElementById('data-quality-warnings');
+        if (!container) return;
+
+        const dq = model.data_quality || {};
+        const warnings = dq.warnings || dq.messages || dq.reasons || [];
+        const level = dq.level ? `<p><strong>Level:</strong> ${escapeHtml(dq.level)}</p>` : '';
+
+        if (!Array.isArray(warnings) || warnings.length === 0) {
+            container.innerHTML = `${level}<p>No data quality warnings.</p>`;
+            return;
+        }
+
+        container.innerHTML = `
+            ${level}
+            <ul>
+              ${warnings.map(w => `<li>${escapeHtml(String(w))}</li>`).join('')}
+            </ul>
+        `;
+    }
+
+    function renderTaskTable(containerId, rows) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        if (!Array.isArray(rows) || rows.length === 0) {
+            container.innerHTML = '<p>No task data available.</p>';
+            return;
+        }
+
+        container.innerHTML = `
+            <table>
+              <thead>
+                <tr>
+                  <th>Task</th>
+                  <th>Command</th>
+                  <th>Class</th>
+                  <th>Spikes</th>
+                  <th>Max latency</th>
+                  <th>P99 latency</th>
+                  <th>Avg latency</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map(row => `
+                  <tr>
+                    <td>${escapeHtml(row.task ?? row.pid ?? row.tid ?? '—')}</td>
+                    <td>${escapeHtml(row.comm ?? '—')}</td>
+                    <td>${escapeHtml(row.class ?? '—')}</td>
+                    <td>${escapeHtml(row.spike_count ?? row.over_1ms ?? 0)}</td>
+                    <td>${escapeHtml(formatMs(row.max_latency_ms))}</td>
+                    <td>${escapeHtml(formatMs(row.p99_latency_ms))}</td>
+                    <td>${escapeHtml(formatMs(row.avg_latency_ms))}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+        `;
+    }
+
+    function renderClusterAnalysis(model) {
+        const container = document.getElementById('cluster-analysis-table');
+        if (!container) return;
+
+        const analysis = model.cluster_analysis || {};
+        const clusters = Array.isArray(analysis) ? analysis : (analysis.clusters || []);
+
+        if (!Array.isArray(clusters) || clusters.length === 0) {
+            container.innerHTML = '<p>No spike clusters detected.</p>';
+            return;
+        }
+
+        container.innerHTML = `
+            <table>
+              <thead>
+                <tr>
+                  <th>Start</th>
+                  <th>End</th>
+                  <th>Spikes</th>
+                  <th>Primary cause</th>
+                  <th>Summary</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${clusters.map(cluster => {
+                    const diagnosis = cluster.diagnosis || {};
+                    const primary = diagnosis.primary || {};
+                    const cause = primary.cause || diagnosis.cause || cluster.primary_cause || cluster.anchor_kind || '—';
+                    const summary = diagnosis.summary || cluster.summary || cluster.anchor_comm || '—';
+                    return `
+                      <tr>
+                        <td>${escapeHtml(formatMs(nsToMs(cluster.min_switch_ns)))}</td>
+                        <td>${escapeHtml(formatMs(nsToMs(cluster.max_switch_ns)))}</td>
+                        <td>${escapeHtml(cluster.count ?? cluster.spike_count ?? (cluster.points || []).length ?? '—')}</td>
+                        <td>${escapeHtml(cause)}</td>
+                        <td>${escapeHtml(summary)}</td>
+                      </tr>
+                    `;
+                }).join('')}
+              </tbody>
+            </table>
+        `;
+    }
+
+    function renderFrameDiagnoses(model) {
+        const container = document.getElementById('frame-diagnoses-table');
+        if (!container) return;
+
+        const rows = model.frame_diagnoses || [];
+
+        if (!Array.isArray(rows) || rows.length === 0) {
+            container.innerHTML = '<p>No frame diagnoses available.</p>';
+            return;
+        }
+
+        container.innerHTML = `
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Frame time</th>
+                  <th>Diagnosis</th>
+                  <th>Evidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map(row => {
+                    const diagnosis = row.diagnosis || {};
+                    const primary = diagnosis.primary || {};
+                    const cause = primary.cause || diagnosis.cause || row.primary_cause || '—';
+                    const evidence = diagnosis.evidence || primary.evidence || diagnosis.summary || row.evidence || row.cause_tags || [];
+                    return `
+                      <tr>
+                        <td>${escapeHtml(formatMs(row.frame_elapsed_ms ?? row.elapsed_ms ?? row.time_ms))}</td>
+                        <td>${escapeHtml(formatMs(row.frametime_ms ?? row.frame_time_ms))}</td>
+                        <td>${escapeHtml(cause)}</td>
+                        <td>${escapeHtml(formatEvidence(evidence))}</td>
+                      </tr>
+                    `;
+                }).join('')}
+              </tbody>
+            </table>
+        `;
+    }
+
+    function renderArtifacts(model) {
+        const container = document.getElementById('artifacts-summary');
+        if (!container) return;
+
+        const artifacts = model.artifacts_summary || {};
+        const rows = Object.entries(artifacts);
+
+        if (rows.length === 0) {
+            container.innerHTML = '<p>No artifact summary available.</p>';
+            return;
+        }
+
+        container.innerHTML = `
+            <table>
+              <tbody>
+                ${rows.map(([key, value]) => `
+                  <tr>
+                    <th>${escapeHtml(formatKey(key))}</th>
+                    <td>${escapeHtml(String(value))}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+        `;
+    }
+
+    function renderLegacyTextReport(model) {
+        const section = document.getElementById('legacy-text-report-section');
+        const pre = document.getElementById('legacy-text-report');
+
+        if (!section || !pre) return;
+
+        if (!model.legacy_text_report) {
+            section.style.display = 'none';
+            return;
+        }
+
+        pre.textContent = model.legacy_text_report;
+    }
+
+    const reportModel = parseJsonScript('data-report-model', {});
+    const session = reportModel.session || parseJsonScript('data-session', {});
+    const rawSpikeEvents = reportModel.spike_events ?? parseJsonScript('data-spikes', null);
+    const spikeDensity = reportModel.spike_density || parseJsonScript('data-spike-density', []);
+    const artifacts = reportModel.chart_artifacts || parseJsonScript('data-artifacts', {});
+    const clusterAnalysis = reportModel.cluster_analysis || parseJsonScript('data-clusters', {});
+    const topLimit = Number(reportModel.top_limit || {top} || 10);
+
+    renderSummaryCards(reportModel);
+    renderDataQuality(reportModel);
+    renderTaskTable('top-tasks-by-max', reportModel.top_tasks_by_max || []);
+    renderTaskTable('top-tasks-by-p99', reportModel.top_tasks_by_p99 || []);
+    renderClusterAnalysis(reportModel);
+    renderFrameDiagnoses(reportModel);
+    renderArtifacts(reportModel);
+    renderLegacyTextReport(reportModel);
 
     // 1. Metadata Table
     const metadata = session.metadata;
     if (metadata) {
         let html = '<table><tbody>';
-        const addRow = (k, v) => { if (v) html += `<tr><th>${k}</th><td>${v}</td></tr>`; };
+        const addRow = (k, v) => { if (v !== null && v !== undefined && v !== '') html += `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`; };
         addRow('Kernel Version', metadata.kernel_version);
         addRow('OS Release', metadata.kernel_osrelease);
         addRow('CPU Online', metadata.cpu_online);
@@ -110,39 +438,67 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    if (typeof Chart === 'undefined') {
+        return;
+    }
+
     // Prepare Task Data
-    let topTasks = session.tasks.filter(t => t.latency.samples > 0);
-    topTasks.sort((a, b) => b.latency.max_ns - a.latency.max_ns);
+    let topTasks = Array.isArray(session.tasks)
+        ? session.tasks.filter(t => t.latency && t.latency.samples > 0)
+        : [];
+    topTasks.sort((a, b) => (b.latency.max_ns || 0) - (a.latency.max_ns || 0));
     topTasks = topTasks.slice(0, topLimit);
 
     const formatLabel = (task) => `${task.task}:${task.comm}`;
 
     // 2. Task Max Latency (Bar Chart)
-    new Chart(document.getElementById('latency'), {
-        type: 'bar',
-        data: {
-            labels: topTasks.map(formatLabel),
-            datasets: [{
-                label: 'Max Latency (ms)',
-                data: topTasks.map(t => t.latency.max_ns / 1_000_000.0),
-                backgroundColor: '#2563eb'
-            }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } } }
-        }
-    });
+    const latencyCanvas = document.getElementById('latency');
+    if (latencyCanvas) {
+        new Chart(latencyCanvas, {
+            type: 'bar',
+            data: {
+                labels: topTasks.map(formatLabel),
+                datasets: [{
+                    label: 'Max Latency (ms)',
+                    data: topTasks.map(t => (t.latency.max_ns || 0) / 1_000_000.0),
+                    backgroundColor: '#2563eb'
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } } }
+            }
+        });
+    }
 
     // 3. Spike Timeline (Scatter)
+    const MAX_SCATTER_POINTS = 2048;
     let spikePoints = [];
-    if (rawSpikeEvents) {
-        spikePoints = rawSpikeEvents.slice(0, 2048).map(e => ({
+    let isSampled = false;
+
+    function sampleSpikePoints(events, limit) {
+        if (!events || events.length === 0) return [];
+        if (events.length <= limit) return events;
+
+        const step = Math.ceil(events.length / limit);
+        return events.filter((_, idx) => idx % step === 0);
+    }
+
+    if (Array.isArray(rawSpikeEvents)) {
+        const sampledEvents = sampleSpikePoints(rawSpikeEvents, MAX_SCATTER_POINTS);
+        isSampled = rawSpikeEvents.length > MAX_SCATTER_POINTS;
+
+        if (isSampled) {
+            const notice = document.getElementById('spike-sampled-notice');
+            if (notice) notice.textContent = `Scatter plot shows ${sampledEvents.length} sampled points from ${rawSpikeEvents.length} spikes. Use Spike Density for the full-session distribution.`;
+        }
+
+        spikePoints = sampledEvents.map(e => ({
             x: e.elapsed_ms || (e.switch_ns / 1000000.0),
             y: e.latency_ns / 1000000.0,
             taskLabel: `${e.task}:${e.comm}`
         }));
-    } else {
+    } else if (Array.isArray(session.top_spikes)) {
         spikePoints = session.top_spikes.slice(0, 512).map(e => ({
             x: e.switch_ns / 1000000.0,
             y: e.latency_ns / 1000000.0,
@@ -150,25 +506,79 @@ document.addEventListener('DOMContentLoaded', () => {
         }));
     }
 
-    new Chart(document.getElementById('spikes'), {
-        type: 'scatter',
-        data: {
-            datasets: [{
-                label: 'Scheduler Spikes (ms)',
-                data: spikePoints,
-                backgroundColor: '#dc2626'
-            }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: {
-                tooltip: { callbacks: { label: (ctx) => `${ctx.raw.taskLabel}: ${ctx.raw.y.toFixed(2)}ms at ${ctx.raw.x.toFixed(0)}ms` } },
-                zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } }
+    const spikesCanvas = document.getElementById('spikes');
+    if (spikesCanvas) {
+        new Chart(spikesCanvas, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'Scheduler Spikes (ms)',
+                    data: spikePoints,
+                    backgroundColor: '#dc2626'
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    tooltip: { callbacks: { label: (ctx) => `${ctx.raw.taskLabel}: ${ctx.raw.y.toFixed(2)}ms at ${ctx.raw.x.toFixed(0)}ms` } },
+                    zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } }
+                }
             }
-        }
-    });
+        });
+    }
 
-    // 4. GPU Busy (Scatter/Line)
+    // 4. Spike Density (Bar Chart)
+    if (spikeDensity && spikeDensity.length > 0) {
+        new Chart(document.getElementById('spike-density'), {
+            type: 'bar',
+            data: {
+                labels: spikeDensity.map(bucket => bucket.start_ms),
+                datasets: [{
+                    label: 'Spikes per bucket',
+                    data: spikeDensity.map(bucket => bucket.count),
+                    backgroundColor: '#6366f1'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Time since session start (ms)' }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Spike count' }
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            title: function(items) {
+                                const index = items[0].dataIndex;
+                                const bucket = spikeDensity[index];
+                                return `${bucket.start_ms}–${bucket.end_ms} ms`;
+                            },
+                            label: function(item) {
+                                const bucket = spikeDensity[item.dataIndex];
+                                return [
+                                    `count: ${bucket.count}`,
+                                    `max latency: ${Number(bucket.max_latency_ms).toFixed(3)} ms`,
+                                    `p99 latency: ${Number(bucket.p99_latency_ms).toFixed(3)} ms`
+                                ];
+                            }
+                        }
+                    },
+                    zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } }
+                }
+            }
+        });
+    } else {
+        const densitySection = document.getElementById('spike-density-section');
+        if (densitySection) densitySection.style.display = 'none';
+    }
+
+    // 5. GPU Busy (Scatter/Line)
     if (artifacts.gpu_samples && artifacts.gpu_samples.length > 0) {
         const gpuPoints = artifacts.gpu_samples.filter(s => s.gpu_busy_percent != null).map(s => ({
             x: s.elapsed_ms,
@@ -193,13 +603,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 plugins: { zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } } }
             }
         });
+    } else {
+        const gpuSection = document.getElementById('gpu-section');
+        if (gpuSection) gpuSection.style.display = 'none';
     }
 
-    // 5. Histograms
+    // 6. Histograms
     const histContainer = document.getElementById('histograms-container');
-    topTasks.forEach((task, idx) => {
-        if (!task.latency.histogram || task.latency.histogram.length === 0) return;
-        
+    topTasks.forEach((task) => {
+        if (!task.latency.histogram || task.latency.histogram.length === 0 || !histContainer) return;
+
         const wrapper = document.createElement('div');
         wrapper.className = 'small-chart-container';
         const canvas = document.createElement('canvas');
@@ -219,9 +632,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // 6. Gantt Chart for Spike Clusters
+    // 7. Gantt Chart for Spike Clusters
     const clustersContainer = document.getElementById('clusters-container');
-    if (clusterAnalysis && clusterAnalysis.clusters) {
+    if (clusterAnalysis && clusterAnalysis.clusters && clustersContainer) {
         clusterAnalysis.clusters.slice(0, topLimit).forEach((cluster, idx) => {
             const wrapper = document.createElement('div');
             wrapper.className = 'chart-container';
@@ -242,16 +655,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     taskMap[label] = taskIdx++;
                 }
                 const color = taskColors[taskMap[label] % taskColors.length];
-                
-                // For a Gantt style horizontal bar: we need x to be [start, end] and y to be the task label
-                // Chart.js bar chart supports data format: {x: [min, max], y: 'label'}
-                
+
                 const end_ms = (p.switch_ns - minSwitch) / 1000000.0;
                 const start_ms = end_ms - (p.latency_ns / 1000000.0);
 
                 datasets.push({
                     label: label,
-                    data: [{ x: [start_ms, end_ms], y: label, wakeup_target_cpu: p.wakeup_target_cpu, switch_cpu: p.cpu, target_pending_wakeups: p.target_pending_wakeups }],
+                    data: [{ x: [start_ms, end_ms], y: label, wakeup_target_cpu: p.wakeup_target_cpu, switch_cpu: p.cpu, observed_runnable_depth: p.observed_runnable_depth, target_pending_wakeups: p.target_pending_wakeups, primary_cause: p.primary_cause, cause_tags: p.cause_tags }],
                     backgroundColor: color,
                     barPercentage: 0.8,
                     categoryPercentage: 0.8
@@ -267,12 +677,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     plugins: {
                         title: { display: true, text: `Cluster ${idx + 1} (${cluster.points.length} points)` },
                         legend: { display: false },
-                        tooltip: { callbacks: { label: (ctx) => `${ctx.raw.y}: ${((ctx.raw.x[1] - ctx.raw.x[0])).toFixed(2)}ms (wakeup_target_cpu=${ctx.raw.wakeup_target_cpu}, switch_cpu=${ctx.raw.switch_cpu}, target_pending_on_switch_cpu=${ctx.raw.target_pending_wakeups}; other monitored wakeups on switch CPU, not kernel runqueue depth)` } },
+                        tooltip: { callbacks: { label: (ctx) => {
+                            let label = `${ctx.raw.y}: ${((ctx.raw.x[1] - ctx.raw.x[0])).toFixed(2)}ms (wakeup_target_cpu=${ctx.raw.wakeup_target_cpu}, switch_cpu=${ctx.raw.switch_cpu}, observed_runnable_depth=${ctx.raw.observed_runnable_depth}, target_pending_wakeups=${ctx.raw.target_pending_wakeups}(diag)`;
+                            if (ctx.raw.primary_cause) label += `, primary_cause=${ctx.raw.primary_cause}`;
+                            if (ctx.raw.cause_tags && ctx.raw.cause_tags.length > 0) label += `, tags=${ctx.raw.cause_tags.join(',')}`;
+                            label += ')';
+                            return label;
+                        } } },
                         zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } }
                     },
                     scales: {
                         x: { title: { display: true, text: 'Time (ms) relative to cluster start' } },
-                        y: { stacked: true } // to group bars by task correctly if they overlap? Actually each data point has unique y label.
+                        y: { stacked: true }
                     }
                 }
             });

@@ -121,6 +121,9 @@ pub struct MonitorArgs {
     #[arg(long = "mangohud-log", value_name = "PATH")]
     mangohud_log: Option<PathBuf>,
 
+    #[arg(long = "mangohud-log-live", requires = "mangohud_log")]
+    pub mangohud_log_live: bool,
+
     #[arg(long = "tui")]
     tui: bool,
 
@@ -142,6 +145,9 @@ pub struct MonitorArgs {
 
     #[arg(long = "cgroupv2", value_name = "PATH")]
     cgroupv2: Option<PathBuf>,
+
+    #[arg(long = "native-cgroup-filter", requires = "cgroupv2")]
+    native_cgroup_filter: bool,
 
     #[arg(
         long = "follow-exec",
@@ -619,12 +625,17 @@ pub struct Config {
     pub hwmon_drm_card: Option<String>,
     pub hwmon_render_node: Option<PathBuf>,
     pub mangohud_log: Option<PathBuf>,
+    pub mangohud_log_live: bool,
+
     pub tui: bool,
     pub retain_intervals: Option<usize>,
     pub recording: Option<RecordingConfig>,
     pub max_duration: Option<Duration>,
     pub cpu_freq: bool,
     pub cgroupv2: Option<PathBuf>,
+    // Experimental: native cgroup filtering applies to current-task probes only.
+    // Scheduler wakee filtering still uses TARGET_PIDS.
+    pub native_cgroup_filter: bool,
     pub follow_exec: bool,
     pub exclude_tree_pids: Vec<u32>,
     pub faults: bool,
@@ -1050,12 +1061,15 @@ fn config_from_monitor_args(
         hwmon_drm_card: args.hwmon_drm_card,
         hwmon_render_node: args.hwmon_render_node,
         mangohud_log: args.mangohud_log,
+        mangohud_log_live: args.mangohud_log_live,
+
         tui: args.tui,
         retain_intervals: args.retain_intervals,
         recording,
         max_duration,
         cpu_freq,
         cgroupv2: args.cgroupv2,
+        native_cgroup_filter: args.native_cgroup_filter,
         follow_exec: args.follow_exec && !args.no_follow_exec,
         exclude_tree_pids: args.exclude_tree_pids,
         faults: args.faults,
@@ -1348,6 +1362,58 @@ mod tests {
             panic!("expected monitor command");
         };
         assert!(!disabled_config.follow_exec);
+    }
+
+    #[test]
+    fn native_cgroup_filter_requires_cgroupv2() {
+        let result = parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--native-cgroup-filter",
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn native_cgroup_filter_sets_config() {
+        let command = parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--cgroupv2",
+            "/sys/fs/cgroup/test.slice",
+            "--native-cgroup-filter",
+        ])
+        .unwrap();
+
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+
+        assert_eq!(
+            config.cgroupv2.as_deref(),
+            Some(std::path::Path::new("/sys/fs/cgroup/test.slice"))
+        );
+        assert!(config.native_cgroup_filter);
+    }
+
+    #[test]
+    fn native_cgroup_filter_defaults_false() {
+        let command = parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--cgroupv2",
+            "/sys/fs/cgroup/test.slice",
+        ])
+        .unwrap();
+
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+
+        assert!(!config.native_cgroup_filter);
     }
 
     #[test]
