@@ -28,6 +28,8 @@ pub struct DiagnosisConfig {
     pub cpu_freq_drop_percent: f64,
     pub migration_window_ms: u128,
     pub page_fault_delta_threshold: u64,
+    pub low_ipc_threshold: f64,
+    pub high_cache_mpki_threshold: f64,
 }
 
 impl Default for DiagnosisConfig {
@@ -41,6 +43,8 @@ impl Default for DiagnosisConfig {
             cpu_freq_drop_percent: 20.0,
             migration_window_ms: 5,
             page_fault_delta_threshold: 1,
+            low_ipc_threshold: 0.75,
+            high_cache_mpki_threshold: 30.0,
         }
     }
 }
@@ -113,6 +117,7 @@ pub enum EvidenceKind {
     CpuFrequency,
     Migration,
     PageFaults,
+    CpuPerf,
     Unknown,
 }
 
@@ -706,6 +711,7 @@ pub fn diagnose_cluster_with_config(
             config,
         );
         push_page_fault_evidence(&mut candidates, cause, &interval_records, config);
+        push_cpu_perf_evidence(&mut candidates, cause, &interval_records, cluster, config);
     }
 
     finalize_diagnosis(candidates)
@@ -844,6 +850,119 @@ fn push_page_fault_evidence(
     );
 }
 
+fn push_cpu_perf_evidence(
+    candidates: &mut [DiagnosisCandidate],
+    cause: StutterCause,
+    intervals: &[IntervalRecord],
+    cluster: &SpikeCluster,
+    config: DiagnosisConfig,
+) {
+    let anchor = select_anchor(cluster);
+    let anchor_process_pid = cluster
+        .points
+        .iter()
+        .find(|point| point.task == anchor.task)
+        .and_then(|point| point.process_pid);
+
+    let mut matching = intervals
+        .iter()
+        .filter(|record| record.cpu_perf.is_some() && record.task == anchor.task)
+        .collect::<Vec<_>>();
+
+    if matching.is_empty()
+        && let Some(process_pid) = anchor_process_pid
+    {
+        matching = intervals
+            .iter()
+            .filter(|record| record.cpu_perf.is_some() && record.process_pid == Some(process_pid))
+            .collect();
+    }
+
+    if matching.is_empty() && is_cpu_perf_class(anchor.class) {
+        matching = intervals
+            .iter()
+            .filter(|record| record.cpu_perf.is_some() && record.class == anchor.class)
+            .collect();
+    }
+
+    let Some(record) = matching.into_iter().max_by(|a, b| {
+        cpu_perf_evidence_score(a, config)
+            .partial_cmp(&cpu_perf_evidence_score(b, config))
+            .unwrap_or(Ordering::Equal)
+    }) else {
+        return;
+    };
+
+    let score = cpu_perf_evidence_score(record, config);
+    if score <= 0.0 {
+        return;
+    }
+
+    let Some(perf) = &record.cpu_perf else {
+        return;
+    };
+
+    push_supporting_evidence(
+        candidates,
+        cause,
+        EvidenceItem {
+            kind: EvidenceKind::CpuPerf,
+            strength: 0.25,
+            message: format!(
+                "CPU perf near spike: task={} ipc={} cache_mpki={} cache_miss_rate={}",
+                record.task,
+                format_optional_float(perf.ipc, 2),
+                format_optional_float(perf.cache_mpki, 1),
+                format_optional_percent(perf.cache_miss_rate),
+            ),
+            timestamp_ms: Some(record.elapsed_ms),
+            start_ns: None,
+            end_ns: None,
+        },
+    );
+}
+
+fn cpu_perf_evidence_score(record: &IntervalRecord, config: DiagnosisConfig) -> f64 {
+    let Some(perf) = &record.cpu_perf else {
+        return 0.0;
+    };
+
+    let low_ipc_score = perf
+        .ipc
+        .filter(|ipc| *ipc < config.low_ipc_threshold)
+        .map(|ipc| 10_000.0 + config.low_ipc_threshold - ipc)
+        .unwrap_or(0.0);
+    if low_ipc_score > 0.0 {
+        return low_ipc_score;
+    }
+
+    perf.cache_mpki
+        .filter(|mpki| *mpki > config.high_cache_mpki_threshold)
+        .map(|mpki| mpki - config.high_cache_mpki_threshold)
+        .unwrap_or(0.0)
+}
+
+fn is_cpu_perf_class(class: TaskClass) -> bool {
+    matches!(
+        class,
+        TaskClass::Game | TaskClass::GameHelper | TaskClass::WineServer | TaskClass::GameScope
+    )
+}
+
+fn format_optional_float(value: Option<f64>, decimals: usize) -> String {
+    let Some(value) = value.filter(|value| value.is_finite()) else {
+        return "-".to_owned();
+    };
+    format!("{value:.decimals$}")
+}
+
+fn format_optional_percent(value: Option<f64>) -> String {
+    value
+        .filter(|value| value.is_finite())
+        .map(|value| format!("{:.1}%", value * 100.0))
+        .unwrap_or_else(|| "-".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -938,6 +1057,48 @@ mod tests {
             game.evidence
                 .iter()
                 .any(|evidence| evidence.kind == EvidenceKind::ScxState)
+        );
+    }
+
+    #[test]
+    fn cpu_perf_is_supporting_scheduler_evidence() {
+        let cluster = spike_cluster(vec![spike_point(
+            456,
+            TaskClass::Game,
+            "RenderThread",
+            8_000_000,
+        )]);
+        let artifacts = RunArtifacts {
+            intervals: vec![IntervalRecord {
+                elapsed_ms: 100,
+                task: 456,
+                active: true,
+                class: TaskClass::Game,
+                comm: "RenderThread".to_owned(),
+                process_pid: Some(456),
+                process_comm: "game".into(),
+                samples: 1,
+                stored_samples: 1,
+                cpu_perf: Some(crate::metrics::CpuPerfRecord {
+                    ipc: Some(0.50),
+                    cache_mpki: Some(45.0),
+                    cache_miss_rate: Some(0.10),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let d = diagnose_cluster(&cluster, &artifacts, 0);
+
+        assert_eq!(d.cause, StutterCause::GameThreadSchedulerDelay);
+        let game = candidate(&d, StutterCause::GameThreadSchedulerDelay);
+        assert!(
+            game.evidence
+                .iter()
+                .any(|evidence| evidence.kind == EvidenceKind::CpuPerf
+                    && evidence.message.contains("ipc=0.50"))
         );
     }
 

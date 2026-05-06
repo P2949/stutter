@@ -55,6 +55,10 @@ pub fn write_minimal_recording_fixture(dir: &Path) {
         follow_exec: true,
         verbose: false,
         faults: false,
+        cpu_perf: false,
+        cpu_perf_kernel: false,
+        cpu_perf_max_tasks: 128,
+        cpu_perf_cache_refs: false,
         block_io: false,
         stat_wait: false,
     };
@@ -104,6 +108,7 @@ pub fn write_minimal_recording_fixture(dir: &Path) {
         sched_policy: None,
         stat_wait_sum_ns: None,
         stat_wait_count: None,
+        cpu_perf: None,
     };
 
     let session = SessionFile {
@@ -141,6 +146,11 @@ pub fn write_minimal_recording_fixture(dir: &Path) {
         first_event_stream_write_error: None,
         block_io_correlation_basis: "dev+sector".to_owned(),
         drop_counters: DropCountersSnapshot::default(),
+        cpu_perf_sample_count: 0,
+        cpu_perf_open_errors: 0,
+        cpu_perf_read_errors: 0,
+        cpu_perf_skipped_tasks: 0,
+        cpu_perf_last_error: None,
         tasks: vec![task],
         top_spikes: vec![],
     };
@@ -178,6 +188,11 @@ pub fn write_minimal_recording_fixture(dir: &Path) {
         first_event_stream_write_error: None,
         block_io_correlation_basis: "dev+sector".to_owned(),
         drop_counters: DropCountersSnapshot::default(),
+        cpu_perf_sample_count: 0,
+        cpu_perf_open_errors: 0,
+        cpu_perf_read_errors: 0,
+        cpu_perf_skipped_tasks: 0,
+        cpu_perf_last_error: None,
     };
 
     fs::create_dir_all(dir).unwrap();
@@ -267,6 +282,7 @@ fn task_for_fixture(task: u32, class: TaskClass, comm: &str) -> SessionTask {
         sched_policy: None,
         stat_wait_sum_ns: None,
         stat_wait_count: None,
+        cpu_perf: None,
     }
 }
 
@@ -306,6 +322,11 @@ fn base_session(run_name: &str) -> SessionFile {
         first_event_stream_write_error: None,
         block_io_correlation_basis: "dev+sector".to_owned(),
         drop_counters: DropCountersSnapshot::default(),
+        cpu_perf_sample_count: 0,
+        cpu_perf_open_errors: 0,
+        cpu_perf_read_errors: 0,
+        cpu_perf_skipped_tasks: 0,
+        cpu_perf_last_error: None,
         tasks: vec![task_for_fixture(100, TaskClass::Unknown, "worker")],
         top_spikes: vec![],
     }
@@ -345,6 +366,11 @@ fn base_metadata_from_session(session: &SessionFile) -> MetadataFile {
         first_event_stream_write_error: session.first_event_stream_write_error.clone(),
         block_io_correlation_basis: session.block_io_correlation_basis.clone(),
         drop_counters: session.drop_counters.clone(),
+        cpu_perf_sample_count: session.cpu_perf_sample_count,
+        cpu_perf_open_errors: session.cpu_perf_open_errors,
+        cpu_perf_read_errors: session.cpu_perf_read_errors,
+        cpu_perf_skipped_tasks: session.cpu_perf_skipped_tasks,
+        cpu_perf_last_error: session.cpu_perf_last_error.clone(),
     }
 }
 
@@ -842,6 +868,11 @@ fn report_check_detects_regression_from_new_scored_task() {
         first_event_stream_write_error: None,
         block_io_correlation_basis: "dev+sector".to_owned(),
         drop_counters: DropCountersSnapshot::default(),
+        cpu_perf_sample_count: 0,
+        cpu_perf_open_errors: 0,
+        cpu_perf_read_errors: 0,
+        cpu_perf_skipped_tasks: 0,
+        cpu_perf_last_error: None,
         tasks: vec![],
         top_spikes: vec![],
     };
@@ -901,6 +932,10 @@ fn mk_dummy_config() -> RecordedConfig {
         follow_exec: true,
         verbose: false,
         faults: false,
+        cpu_perf: false,
+        cpu_perf_kernel: false,
+        cpu_perf_max_tasks: 128,
+        cpu_perf_cache_refs: false,
         block_io: false,
         stat_wait: false,
     }

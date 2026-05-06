@@ -98,6 +98,10 @@ pub struct DataQualitySummary {
     pub percentile_scope_counts: BTreeMap<String, u64>,
     pub block_io_correlation_basis: String,
     pub frame_timestamp_alignment: String,
+    pub cpu_perf_requested: bool,
+    pub cpu_perf_open_errors: u64,
+    pub cpu_perf_read_errors: u64,
+    pub cpu_perf_skipped_tasks: u64,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -918,6 +922,16 @@ pub(crate) fn render_report(
             data_quality.frame_timestamp_alignment
         ),
     );
+    pushln(
+        &mut output,
+        format!(
+            "cpu_perf: requested={} open_errors={} read_errors={} skipped_tasks={}",
+            data_quality.cpu_perf_requested,
+            data_quality.cpu_perf_open_errors,
+            data_quality.cpu_perf_read_errors,
+            data_quality.cpu_perf_skipped_tasks
+        ),
+    );
 
     for reason in &data_quality.reasons {
         pushln(&mut output, format!("reason: {reason}"));
@@ -1093,7 +1107,7 @@ pub(crate) fn render_report(
         pushln(
             &mut output,
             format!(
-                "task={} active={} class={:?} comm={} process_pid={:?} samples={} max={} over_1ms={} over_2ms={} over_5ms={} spike_rate_per_s={:.1} percentile_scope={}",
+                "task={} active={} class={:?} comm={} process_pid={:?} samples={} max={} over_1ms={} over_2ms={} over_5ms={} spike_rate_per_s={:.1} percentile_scope={}{}",
                 task.task,
                 task.active,
                 task.class,
@@ -1106,6 +1120,7 @@ pub(crate) fn render_report(
                 task.latency.over_5ms,
                 spike_rate,
                 task.latency.percentile_scope,
+                format_task_cpu_perf(task),
             ),
         );
     }
@@ -1330,6 +1345,37 @@ pub(crate) fn data_quality_summary(
         "approximate_first_row".to_owned()
     };
 
+    let cpu_perf_requested = session.config.cpu_perf;
+    let task_cpu_perf_count = session
+        .tasks
+        .iter()
+        .filter(|task| task.cpu_perf.is_some())
+        .count();
+    if cpu_perf_requested && task_cpu_perf_count == 0 {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("CPU perf was requested but no counters were recorded".to_owned());
+    }
+    if session.cpu_perf_open_errors > 0 || session.cpu_perf_read_errors > 0 {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("CPU perf counters had open/read errors".to_owned());
+    }
+    if session.cpu_perf_skipped_tasks > 0 {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push(format!(
+            "CPU perf skipped {} active tasks due to cpu_perf_max_tasks limit",
+            session.cpu_perf_skipped_tasks
+        ));
+    }
+    if session
+        .tasks
+        .iter()
+        .filter_map(|task| task.cpu_perf.as_ref())
+        .any(|perf| perf.multiplexed)
+    {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("CPU perf counters were multiplexed; values are scaled estimates".to_owned());
+    }
+
     if reasons.is_empty() {
         reasons.push("no data-quality problems detected".to_owned());
     }
@@ -1352,6 +1398,10 @@ pub(crate) fn data_quality_summary(
         percentile_scope_counts,
         block_io_correlation_basis,
         frame_timestamp_alignment,
+        cpu_perf_requested,
+        cpu_perf_open_errors: session.cpu_perf_open_errors,
+        cpu_perf_read_errors: session.cpu_perf_read_errors,
+        cpu_perf_skipped_tasks: session.cpu_perf_skipped_tasks,
     }
 }
 
@@ -1562,6 +1612,32 @@ fn spike_point_from_task(
         scx_ops: spike.scx_ops.clone(),
         scx_state: spike.scx_state.clone(),
     }
+}
+
+fn format_task_cpu_perf(task: &SessionTask) -> String {
+    let Some(perf) = &task.cpu_perf else {
+        return String::new();
+    };
+
+    let mut parts = Vec::new();
+    if let Some(ipc) = perf.ipc {
+        parts.push(format!("ipc={ipc:.2}"));
+    }
+    if let Some(cache_mpki) = perf.cache_mpki {
+        parts.push(format!("cache_mpki={cache_mpki:.1}"));
+    }
+    if let Some(cache_miss_rate) = perf.cache_miss_rate {
+        parts.push(format!("cache_miss_rate={:.1}%", cache_miss_rate * 100.0));
+    }
+    if let Some(cycles) = perf.cycles {
+        parts.push(format!("cycles={cycles}"));
+    }
+    if let Some(instructions) = perf.instructions {
+        parts.push(format!("instructions={instructions}"));
+    }
+    parts.push(format!("multiplexed={}", perf.multiplexed));
+
+    format!(" cpu_perf: {}", parts.join(" "))
 }
 
 fn elapsed_ms(monotonic_start_ns: Option<u64>, switch_ns: u64) -> Option<u128> {
@@ -2108,7 +2184,7 @@ fn render_diagnosis_detail_lines(diagnosis: &Diagnosis, indent: &str) -> String 
             ),
         );
 
-        for evidence in candidate.evidence.iter().take(3) {
+        for evidence in candidate.evidence.iter().take(6) {
             pushln(
                 &mut output,
                 format!(
@@ -2456,6 +2532,33 @@ mod tests {
                 .reasons
                 .iter()
                 .any(|reason| reason.contains("optional correlation artifacts"))
+        );
+    }
+
+    #[test]
+    fn data_quality_warns_on_cpu_perf_errors() {
+        let mut session = minimal_session_for_report_test();
+        session.config.cpu_perf = true;
+        session.cpu_perf_open_errors = 1;
+        session.cpu_perf_skipped_tasks = 2;
+        let validation = crate::session_io::RunValidationReport::default();
+
+        let summary = data_quality_summary(&session, &validation);
+
+        assert_eq!(summary.level, DataQualityLevel::Medium);
+        assert!(summary.cpu_perf_requested);
+        assert_eq!(summary.cpu_perf_open_errors, 1);
+        assert!(
+            summary
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("CPU perf counters had open/read errors"))
+        );
+        assert!(
+            summary
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("CPU perf skipped 2 active tasks"))
         );
     }
 

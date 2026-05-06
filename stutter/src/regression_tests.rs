@@ -670,6 +670,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         frame_events: &[],
         block_io_correlation_basis: "dev+sector",
         drop_counters,
+        cpu_perf_status: None,
     })
     .unwrap();
 
@@ -1121,6 +1122,7 @@ fn report_reads_recorded_session_and_spike_events() {
         frame_events: &[],
         block_io_correlation_basis: "dev+sector",
         drop_counters: DropCountersSnapshot::default(),
+        cpu_perf_status: None,
     })
     .unwrap();
 
@@ -1195,6 +1197,7 @@ fn report_cluster_output_caps_inline_points() {
         frame_events: &[],
         block_io_correlation_basis: "dev+sector",
         drop_counters: DropCountersSnapshot::default(),
+        cpu_perf_status: None,
     })
     .unwrap();
 
@@ -1410,7 +1413,7 @@ fn interval_csv_writer_outputs_header_and_rows() {
     let cpu = metrics::CpuStatsSet::new().snapshot();
     let record = metrics::interval_record_from_snapshot(metrics::IntervalRecordFromSnapshotInput {
         task: 7,
-        stats: &stats,
+        stats: &mut stats,
         latency: &latency,
         cpu: &cpu,
         elapsed_ms: 123,
@@ -1483,6 +1486,10 @@ fn test_config(
         exclude_tree_pids: Vec::new(),
         cpu_freq: false,
         faults: false,
+        cpu_perf: false,
+        cpu_perf_kernel: false,
+        cpu_perf_max_tasks: 128,
+        cpu_perf_cache_refs: false,
         block_io: false,
         stat_wait: false,
     }
@@ -1529,6 +1536,11 @@ fn minimal_session_for_report() -> SessionFile {
         drop_counters: DropCountersSnapshot::default(),
         interval_record_count: 0,
         intervals_dropped: 0,
+        cpu_perf_sample_count: 0,
+        cpu_perf_open_errors: 0,
+        cpu_perf_read_errors: 0,
+        cpu_perf_skipped_tasks: 0,
+        cpu_perf_last_error: None,
         tasks: Vec::new(),
         top_spikes: Vec::new(),
     }
@@ -1587,6 +1599,7 @@ fn session_task(
         sched_policy: None,
         stat_wait_sum_ns: None,
         stat_wait_count: None,
+        cpu_perf: None,
     }
 }
 
@@ -1631,6 +1644,7 @@ fn interval_record(
         percentile_scope: "histogram".to_owned(),
         histogram: Vec::new(),
         drop_counters: DropCountersSnapshot::default(),
+        cpu_perf: None,
     }
 }
 

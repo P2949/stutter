@@ -58,9 +58,11 @@ pub struct TaskStats {
 
     pub interval_latency: LatencyStats,
     pub interval_cpu: CpuStatsSet,
+    pub interval_cpu_perf: Option<CpuPerfAccumulator>,
 
     pub session_latency: LatencyStats,
     pub session_cpu: CpuStatsSet,
+    pub session_cpu_perf: Option<CpuPerfAccumulator>,
     pub top_spikes: Vec<SpikeRecord>,
     pub migration_count: u64,
     pub cross_numa_migrations: u64,
@@ -98,6 +100,37 @@ pub struct CpuStats {
 #[derive(Clone, Debug, Default)]
 pub struct CpuStatsSet {
     pub by_cpu: BTreeMap<u32, CpuStats>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct CpuPerfRecord {
+    pub cycles: Option<u64>,
+    pub instructions: Option<u64>,
+    pub cache_references: Option<u64>,
+    pub cache_misses: Option<u64>,
+    pub ipc: Option<f64>,
+    pub cache_miss_rate: Option<f64>,
+    pub cache_mpki: Option<f64>,
+    pub time_enabled_ns: Option<u64>,
+    pub time_running_ns: Option<u64>,
+    pub multiplexed: bool,
+    pub scaled: bool,
+    pub unavailable_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CpuPerfAccumulator {
+    pub cycles: u128,
+    pub instructions: u128,
+    pub cache_references: u128,
+    pub cache_misses: u128,
+    pub time_enabled_ns: u128,
+    pub time_running_ns: u128,
+    pub samples: u64,
+    pub multiplexed_samples: u64,
+    pub scaled_samples: u64,
+    pub unavailable_samples: u64,
+    pub last_unavailable_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -193,6 +226,8 @@ pub struct IntervalRecord {
     pub histogram: Vec<LatencyHistogramBucket>,
     #[serde(default)]
     pub drop_counters: crate::ebpf_loader::DropCountersSnapshot,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_perf: Option<CpuPerfRecord>,
 }
 
 impl LatencyHistogram {
@@ -424,6 +459,81 @@ impl CpuStatsSet {
     }
 }
 
+impl CpuPerfAccumulator {
+    pub fn record(&mut self, delta: &crate::perf_counters::CpuPerfDelta) {
+        self.samples = self.samples.saturating_add(1);
+
+        if let Some(cycles) = delta.cycles {
+            self.cycles = self.cycles.saturating_add(cycles as u128);
+        }
+        if let Some(instructions) = delta.instructions {
+            self.instructions = self.instructions.saturating_add(instructions as u128);
+        }
+        if let Some(cache_references) = delta.cache_references {
+            self.cache_references = self
+                .cache_references
+                .saturating_add(cache_references as u128);
+        }
+        if let Some(cache_misses) = delta.cache_misses {
+            self.cache_misses = self.cache_misses.saturating_add(cache_misses as u128);
+        }
+        if let Some(time_enabled_ns) = delta.time_enabled_ns {
+            self.time_enabled_ns = self.time_enabled_ns.saturating_add(time_enabled_ns as u128);
+        }
+        if let Some(time_running_ns) = delta.time_running_ns {
+            self.time_running_ns = self.time_running_ns.saturating_add(time_running_ns as u128);
+        }
+
+        if delta.multiplexed {
+            self.multiplexed_samples = self.multiplexed_samples.saturating_add(1);
+        }
+        if delta.scaled {
+            self.scaled_samples = self.scaled_samples.saturating_add(1);
+        }
+        if let Some(reason) = &delta.unavailable_reason {
+            self.unavailable_samples = self.unavailable_samples.saturating_add(1);
+            self.last_unavailable_reason = Some(reason.clone());
+        }
+    }
+
+    pub fn snapshot(&self) -> Option<CpuPerfRecord> {
+        if self.samples == 0 {
+            return None;
+        }
+
+        let cycles = optional_u128_to_u64(self.cycles);
+        let instructions = optional_u128_to_u64(self.instructions);
+        let cache_references = optional_u128_to_u64(self.cache_references);
+        let cache_misses = optional_u128_to_u64(self.cache_misses);
+
+        Some(CpuPerfRecord {
+            cycles,
+            instructions,
+            cache_references,
+            cache_misses,
+            ipc: ratio_u128(self.instructions, self.cycles),
+            cache_miss_rate: ratio_u128(self.cache_misses, self.cache_references),
+            cache_mpki: if self.instructions > 0 {
+                Some(self.cache_misses as f64 * 1000.0 / self.instructions as f64)
+                    .filter(|v| v.is_finite())
+            } else {
+                None
+            },
+            time_enabled_ns: optional_u128_to_u64(self.time_enabled_ns),
+            time_running_ns: optional_u128_to_u64(self.time_running_ns),
+            multiplexed: self.multiplexed_samples > 0,
+            scaled: self.scaled_samples > 0,
+            unavailable_reason: self.last_unavailable_reason.clone(),
+        })
+    }
+
+    pub fn snapshot_and_reset(&mut self) -> Option<CpuPerfRecord> {
+        let snapshot = self.snapshot()?;
+        *self = Self::default();
+        Some(snapshot)
+    }
+}
+
 impl TaskStats {
     pub fn new(task: u32, comm: String, elapsed_ms: u128) -> Self {
         let class = crate::process_tree::classify_task(&comm, &comm, "");
@@ -444,8 +554,10 @@ impl TaskStats {
             removed_ms: None,
             interval_latency: LatencyStats::new(),
             interval_cpu: CpuStatsSet::new(),
+            interval_cpu_perf: None,
             session_latency: LatencyStats::new(),
             session_cpu: CpuStatsSet::new(),
+            session_cpu_perf: None,
             top_spikes: Vec::with_capacity(16),
             migration_count: 0,
             cross_numa_migrations: 0,
@@ -562,6 +674,30 @@ impl TaskStats {
 
         (major_faults, minor_faults)
     }
+
+    pub fn record_cpu_perf(&mut self, delta: &crate::perf_counters::CpuPerfDelta) {
+        self.interval_cpu_perf
+            .get_or_insert_with(CpuPerfAccumulator::default)
+            .record(delta);
+        self.session_cpu_perf
+            .get_or_insert_with(CpuPerfAccumulator::default)
+            .record(delta);
+    }
+}
+
+fn optional_u128_to_u64(value: u128) -> Option<u64> {
+    if value == 0 {
+        None
+    } else {
+        Some(value.min(u64::MAX as u128) as u64)
+    }
+}
+
+fn ratio_u128(numerator: u128, denominator: u128) -> Option<f64> {
+    if denominator == 0 {
+        return None;
+    }
+    Some(numerator as f64 / denominator as f64).filter(|v| v.is_finite())
 }
 
 fn should_replace_comm_from_task_info(current: &str, task_info: &TaskInfo) -> bool {
@@ -701,6 +837,9 @@ pub fn collect_interval_summaries_labeled(
         }
 
         let Some(latency) = stats.interval_latency.snapshot_and_reset() else {
+            if let Some(perf) = stats.interval_cpu_perf.as_mut() {
+                let _ = perf.snapshot_and_reset();
+            }
             continue;
         };
 
@@ -779,7 +918,7 @@ pub fn print_session_summaries(stats_by_task: &mut BTreeMap<u32, TaskStats>) {
 
 pub struct IntervalRecordFromSnapshotInput<'a> {
     pub task: u32,
-    pub stats: &'a TaskStats,
+    pub stats: &'a mut TaskStats,
     pub latency: &'a LatencySnapshot,
     pub cpu: &'a CpuSnapshot,
     pub elapsed_ms: u128,
@@ -834,6 +973,10 @@ pub fn interval_record_from_snapshot(input: IntervalRecordFromSnapshotInput) -> 
         percentile_scope: latency.percentile_scope.clone(),
         histogram: latency.histogram.clone(),
         drop_counters: drop_counters.clone(),
+        cpu_perf: stats
+            .interval_cpu_perf
+            .as_mut()
+            .and_then(|perf| perf.snapshot_and_reset()),
     }
 }
 
@@ -930,5 +1073,80 @@ mod tests {
         assert_eq!(maj_delta, 2);
         assert_eq!(stats.last_spike_major_faults, 12);
         assert_eq!(stats.top_spikes[0].major_faults, 2);
+    }
+
+    #[test]
+    fn cpu_perf_records_interval_once_and_session_cumulative() {
+        let mut stats = TaskStats::new(123, "test".to_string(), 0);
+        let delta = crate::perf_counters::CpuPerfDelta {
+            cycles: Some(100),
+            instructions: Some(200),
+            cache_misses: Some(10),
+            time_enabled_ns: Some(1_000),
+            time_running_ns: Some(1_000),
+            ..Default::default()
+        };
+        stats.record_cpu_perf(&delta);
+
+        let event = SchedulerEvent {
+            kind: stutter_common::EVENT_RUNNABLE_LATENCY,
+            pid: 123,
+            cpu: 0,
+            wakeup_target_cpu: 0,
+            prio: 120,
+            wakeup_ns: 100,
+            switch_ns: 200,
+            latency_ns: 1_000,
+            comm: [0; 16],
+            waker_tid: 0,
+            target_pending_wakeups: 0,
+            maj_flt: 0,
+            min_flt: 0,
+        };
+        stats.record(&event, 1_000_000, 0, None, None, None);
+
+        let mut stats_by_task = BTreeMap::from([(123, stats)]);
+        let mut prev_faults_snapshot = BTreeMap::new();
+        let records = collect_interval_summaries_labeled(
+            "summary",
+            &mut stats_by_task,
+            1_000,
+            &Default::default(),
+            None,
+            None,
+            &mut prev_faults_snapshot,
+        );
+
+        assert_eq!(records.len(), 1);
+        let perf = records[0].cpu_perf.as_ref().unwrap();
+        assert_eq!(perf.cycles, Some(100));
+        assert_eq!(perf.instructions, Some(200));
+        assert_eq!(perf.ipc, Some(2.0));
+        assert_eq!(perf.cache_mpki, Some(50.0));
+
+        let stats = stats_by_task.get_mut(&123).unwrap();
+        stats.record(&event, 1_000_000, 2_000, None, None, None);
+        let records = collect_interval_summaries_labeled(
+            "summary",
+            &mut stats_by_task,
+            2_000,
+            &Default::default(),
+            None,
+            None,
+            &mut prev_faults_snapshot,
+        );
+
+        assert_eq!(records.len(), 1);
+        assert!(records[0].cpu_perf.is_none());
+
+        let session_perf = stats_by_task
+            .get(&123)
+            .unwrap()
+            .session_cpu_perf
+            .as_ref()
+            .and_then(|perf| perf.snapshot())
+            .unwrap();
+        assert_eq!(session_perf.cycles, Some(100));
+        assert_eq!(session_perf.instructions, Some(200));
     }
 }
