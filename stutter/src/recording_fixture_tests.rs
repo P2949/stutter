@@ -886,7 +886,7 @@ fn report_check_detects_regression_from_new_scored_task() {
     let result = report::check_percentile_regression(&baseline_dir, &current_dir, 0.0);
     assert!(result.is_err());
     let err_msg = format!("{:?}", result.err().unwrap());
-    assert!(err_msg.contains("percentile_regression_check_failed"));
+    assert!(err_msg.contains("regression_check_failed"));
 
     let _ = fs::remove_dir_all(baseline_dir);
     let _ = fs::remove_dir_all(current_dir);

@@ -47,18 +47,20 @@ pub struct TargetCountsSummary {
     pub active_expanded_tasks: usize,
 }
 
+/// Artifact counts as reported in the session file.
+/// Note: these are NOT verified against the actual artifacts on disk unless deep validation is requested.
 #[derive(Clone, Debug, Serialize)]
 pub struct ArtifactCountsSummary {
-    pub interval_records: u64,
-    pub spike_events: u64,
-    pub irq_events: u64,
-    pub gpu_samples: u64,
-    pub frame_events: u64,
-    pub migration_events: u64,
-    pub cpu_freq_samples: u64,
-    pub block_io_events: u64,
-    pub scx_events: u64,
-    pub cpu_perf_samples: u64,
+    pub reported_interval_records: u64,
+    pub reported_spike_events: u64,
+    pub reported_irq_events: u64,
+    pub reported_gpu_samples: u64,
+    pub reported_frame_events: u64,
+    pub reported_migration_events: u64,
+    pub reported_cpu_freq_samples: u64,
+    pub reported_block_io_events: u64,
+    pub reported_scx_events: u64,
+    pub reported_cpu_perf_samples: u64,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -245,16 +247,16 @@ pub fn compact_run_summary_from_session(
             active_expanded_tasks: session.active_expanded_tasks.len(),
         },
         artifact_counts: ArtifactCountsSummary {
-            interval_records: session.interval_record_count,
-            spike_events: session.spike_events_retained_count,
-            irq_events: session.irq_event_count,
-            gpu_samples: session.gpu_sample_count,
-            frame_events: session.frame_event_count,
-            migration_events: session.migration_event_count.unwrap_or(0),
-            cpu_freq_samples: session.cpu_freq_sample_count.unwrap_or(0),
-            block_io_events: session.block_io_event_count,
-            scx_events: session.scx_event_count,
-            cpu_perf_samples: session.cpu_perf_sample_count,
+            reported_interval_records: session.interval_record_count,
+            reported_spike_events: session.spike_events_retained_count,
+            reported_irq_events: session.irq_event_count,
+            reported_gpu_samples: session.gpu_sample_count,
+            reported_frame_events: session.frame_event_count,
+            reported_migration_events: session.migration_event_count.unwrap_or(0),
+            reported_cpu_freq_samples: session.cpu_freq_sample_count.unwrap_or(0),
+            reported_block_io_events: session.block_io_event_count,
+            reported_scx_events: session.scx_event_count,
+            reported_cpu_perf_samples: session.cpu_perf_sample_count,
         },
         data_quality_level: quality.level,
         data_quality_reasons: quality.reasons,
@@ -460,16 +462,16 @@ pub fn render_compact_run_summary(summary: &CompactRunSummary) -> String {
     pushln(
         &mut output,
         format!(
-            "artifacts: intervals={} spikes={} irq={} gpu={} frames={} migrations={} cpu_freq={} block_io={} scx={}",
-            summary.artifact_counts.interval_records,
-            summary.artifact_counts.spike_events,
-            summary.artifact_counts.irq_events,
-            summary.artifact_counts.gpu_samples,
-            summary.artifact_counts.frame_events,
-            summary.artifact_counts.migration_events,
-            summary.artifact_counts.cpu_freq_samples,
-            summary.artifact_counts.block_io_events,
-            summary.artifact_counts.scx_events
+            "artifacts (reported): intervals={} spikes={} irq={} gpu={} frames={} migrations={} cpu_freq={} block_io={} scx={}",
+            summary.artifact_counts.reported_interval_records,
+            summary.artifact_counts.reported_spike_events,
+            summary.artifact_counts.reported_irq_events,
+            summary.artifact_counts.reported_gpu_samples,
+            summary.artifact_counts.reported_frame_events,
+            summary.artifact_counts.reported_migration_events,
+            summary.artifact_counts.reported_cpu_freq_samples,
+            summary.artifact_counts.reported_block_io_events,
+            summary.artifact_counts.reported_scx_events
         ),
     );
     pushln(
