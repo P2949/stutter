@@ -11,6 +11,7 @@ mod hwmon;
 mod mangohud;
 mod metadata;
 mod metrics;
+mod perf_counters;
 mod process_tree;
 mod profiles;
 mod psi;

@@ -143,6 +143,7 @@ pub struct MonitorSession {
     pub interval_label: &'static str,
     pub block_io_correlation_basis: String,
     pub alert_sender: Option<tokio::sync::mpsc::Sender<AlertPayload>>,
+    pub cpu_perf_sampler: Option<crate::perf_counters::CpuPerfSampler>,
     recent_telemetry: LiveTelemetry,
 }
 
@@ -328,6 +329,17 @@ impl MonitorSession {
         };
 
         let recent_telemetry = LiveTelemetry::default();
+        let cpu_perf_sampler = if config.cpu_perf {
+            Some(crate::perf_counters::CpuPerfSampler::new(
+                crate::perf_counters::CpuPerfConfig {
+                    include_kernel: config.cpu_perf_kernel,
+                    max_tasks: config.cpu_perf_max_tasks,
+                    collect_cache_refs: config.cpu_perf_cache_refs,
+                },
+            ))
+        } else {
+            None
+        };
 
         Ok(Self {
             config: Arc::new(config),
@@ -349,6 +361,7 @@ impl MonitorSession {
             interval_label,
             block_io_correlation_basis,
             alert_sender,
+            cpu_perf_sampler,
             recent_telemetry,
         })
     }
@@ -619,6 +632,15 @@ impl MonitorSession {
     pub fn handle_summary_tick(&mut self) -> anyhow::Result<()> {
         if !self.tui_state.paused {
             let elapsed_ms = self.started.elapsed().as_millis();
+            if let Some(sampler) = self.cpu_perf_sampler.as_mut() {
+                let deltas = sampler.sample_interval();
+                for (tid, delta) in deltas {
+                    if let Some(stats) = self.tasks.stats_by_task.get_mut(&tid) {
+                        stats.record_cpu_perf(&delta);
+                    }
+                }
+            }
+
             let drop_counters_snapshot = self.loaded.snapshot_drop_counters();
             let psi_snapshot = self.psi_reader.read().ok();
             let records = collect_interval_summaries_labeled(
@@ -930,7 +952,13 @@ impl MonitorSession {
                 elapsed_ms: self.started.elapsed().as_millis(),
                 recording_started: self.recorder.run.as_ref().map(|run| run.started_instant),
             })
-            .await
+            .await?;
+
+        if let Some(sampler) = self.cpu_perf_sampler.as_mut() {
+            sampler.sync_targets(&self.tasks.active_targets, &self.tasks.stats_by_task);
+        }
+
+        Ok(())
     }
 
     pub fn finalize(mut self, stop_reason: String) -> anyhow::Result<()> {
@@ -1018,6 +1046,16 @@ impl MonitorSession {
                 frame_events: &frame_events,
                 block_io_correlation_basis: &self.block_io_correlation_basis,
                 drop_counters,
+                cpu_perf_status: self.cpu_perf_sampler.as_ref().map(|sampler| {
+                    recorder::CpuPerfStatus {
+                        sample_count: sampler.total_samples(),
+                        active_counter_tasks: sampler.active_counter_tasks() as u64,
+                        skipped_counter_tasks: sampler.skipped_counter_tasks() as u64,
+                        open_errors: sampler.total_open_errors(),
+                        read_errors: sampler.total_read_errors(),
+                        last_error: sampler.last_error().map(str::to_owned),
+                    }
+                }),
             })?;
         }
 

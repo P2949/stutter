@@ -14,8 +14,8 @@ use crate::{
     ebpf_loader::DropCountersSnapshot,
     metadata::{SystemMetadata, collect_system_metadata},
     metrics::{
-        CpuLine, CpuSnapshot, IntervalRecord as MetricsIntervalRecord, LatencyHistogramBucket,
-        SpikeRecord, TaskStats,
+        CpuLine, CpuPerfRecord, CpuSnapshot, IntervalRecord as MetricsIntervalRecord,
+        LatencyHistogramBucket, SpikeRecord, TaskStats,
     },
     process_tree::TaskClass,
 };
@@ -374,6 +374,16 @@ pub struct SessionFile {
     pub block_io_correlation_basis: String,
     #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
+    #[serde(default)]
+    pub cpu_perf_sample_count: u64,
+    #[serde(default)]
+    pub cpu_perf_open_errors: u64,
+    #[serde(default)]
+    pub cpu_perf_read_errors: u64,
+    #[serde(default)]
+    pub cpu_perf_skipped_tasks: u64,
+    #[serde(default)]
+    pub cpu_perf_last_error: Option<String>,
     pub tasks: Vec<SessionTask>,
     pub top_spikes: Vec<SessionSpike>,
 }
@@ -433,6 +443,16 @@ pub struct MetadataFile {
     pub block_io_correlation_basis: String,
     #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
+    #[serde(default)]
+    pub cpu_perf_sample_count: u64,
+    #[serde(default)]
+    pub cpu_perf_open_errors: u64,
+    #[serde(default)]
+    pub cpu_perf_read_errors: u64,
+    #[serde(default)]
+    pub cpu_perf_skipped_tasks: u64,
+    #[serde(default)]
+    pub cpu_perf_last_error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -493,6 +513,14 @@ pub struct RecordedConfig {
     #[serde(default)]
     pub faults: bool,
     #[serde(default)]
+    pub cpu_perf: bool,
+    #[serde(default)]
+    pub cpu_perf_kernel: bool,
+    #[serde(default = "default_recorded_cpu_perf_max_tasks")]
+    pub cpu_perf_max_tasks: usize,
+    #[serde(default)]
+    pub cpu_perf_cache_refs: bool,
+    #[serde(default)]
     pub block_io: bool,
     #[serde(default)]
     pub stat_wait: bool,
@@ -504,6 +532,10 @@ fn default_recorded_max_tasks() -> usize {
 
 fn default_recorded_follow_exec() -> bool {
     true
+}
+
+fn default_recorded_cpu_perf_max_tasks() -> usize {
+    128
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -548,6 +580,8 @@ pub struct SessionTask {
     pub stat_wait_sum_ns: Option<u64>,
     #[serde(default)]
     pub stat_wait_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_perf: Option<CpuPerfRecord>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -777,7 +811,17 @@ fn default_block_io_correlation_basis() -> String {
     "dev+sector".to_owned()
 }
 
-pub const SESSION_SCHEMA_VERSION: u32 = 18;
+pub const SESSION_SCHEMA_VERSION: u32 = 19;
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CpuPerfStatus {
+    pub sample_count: u64,
+    pub active_counter_tasks: u64,
+    pub skipped_counter_tasks: u64,
+    pub open_errors: u64,
+    pub read_errors: u64,
+    pub last_error: Option<String>,
+}
 
 pub struct FinalizeRecordingInput<'a> {
     pub recorder: &'a LiveRecorder,
@@ -788,6 +832,7 @@ pub struct FinalizeRecordingInput<'a> {
     pub frame_events: &'a [FrameEvent],
     pub block_io_correlation_basis: &'a str,
     pub drop_counters: crate::ebpf_loader::DropCountersSnapshot,
+    pub cpu_perf_status: Option<CpuPerfStatus>,
 }
 
 pub fn prepare_recording(config: &Config) -> anyhow::Result<Option<RecordingRun>> {
@@ -823,6 +868,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         frame_events,
         block_io_correlation_basis,
         drop_counters,
+        cpu_perf_status,
     } = input;
 
     let Some(recording) = recorder.run.as_ref() else {
@@ -911,6 +957,10 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             } else {
                 None
             },
+            cpu_perf: stats
+                .session_cpu_perf
+                .as_ref()
+                .and_then(|perf| perf.snapshot()),
         });
 
         for spike in &stats.top_spikes {
@@ -980,6 +1030,25 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         first_event_stream_write_error: recorder.first_event_stream_write_error.clone(),
         block_io_correlation_basis: block_io_correlation_basis.to_owned(),
         drop_counters: drop_counters.clone(),
+        cpu_perf_sample_count: cpu_perf_status
+            .as_ref()
+            .map(|status| status.sample_count)
+            .unwrap_or(0),
+        cpu_perf_open_errors: cpu_perf_status
+            .as_ref()
+            .map(|status| status.open_errors)
+            .unwrap_or(0),
+        cpu_perf_read_errors: cpu_perf_status
+            .as_ref()
+            .map(|status| status.read_errors)
+            .unwrap_or(0),
+        cpu_perf_skipped_tasks: cpu_perf_status
+            .as_ref()
+            .map(|status| status.skipped_counter_tasks)
+            .unwrap_or(0),
+        cpu_perf_last_error: cpu_perf_status
+            .as_ref()
+            .and_then(|status| status.last_error.clone()),
         tasks,
         top_spikes,
     };
@@ -1021,6 +1090,25 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         first_event_stream_write_error: recorder.first_event_stream_write_error.clone(),
         block_io_correlation_basis: block_io_correlation_basis.to_owned(),
         drop_counters: drop_counters.clone(),
+        cpu_perf_sample_count: cpu_perf_status
+            .as_ref()
+            .map(|status| status.sample_count)
+            .unwrap_or(0),
+        cpu_perf_open_errors: cpu_perf_status
+            .as_ref()
+            .map(|status| status.open_errors)
+            .unwrap_or(0),
+        cpu_perf_read_errors: cpu_perf_status
+            .as_ref()
+            .map(|status| status.read_errors)
+            .unwrap_or(0),
+        cpu_perf_skipped_tasks: cpu_perf_status
+            .as_ref()
+            .map(|status| status.skipped_counter_tasks)
+            .unwrap_or(0),
+        cpu_perf_last_error: cpu_perf_status
+            .as_ref()
+            .and_then(|status| status.last_error.clone()),
     };
 
     // Map any write errors to a "record write failed" context so callers can decide
@@ -1117,6 +1205,10 @@ pub fn recorded_config(config: &Config, tree_pids: &[u32]) -> RecordedConfig {
         follow_exec: config.follow_exec,
         verbose: config.verbose,
         faults: config.faults,
+        cpu_perf: config.cpu_perf,
+        cpu_perf_kernel: config.cpu_perf_kernel,
+        cpu_perf_max_tasks: config.cpu_perf_max_tasks,
+        cpu_perf_cache_refs: config.cpu_perf_cache_refs,
         block_io: config.block_io,
         stat_wait: config.stat_wait,
     }
@@ -1139,14 +1231,15 @@ pub fn write_interval_csv(
 fn write_interval_csv_header(file: &mut fs::File) -> io::Result<()> {
     writeln!(
         file,
-        "elapsed_ms,task,active,class,comm,process_pid,process_comm,samples,stored_samples,truncated_samples,min_ns,avg_ns,p95_ns,p99_ns,max_ns,over_1ms,over_2ms,over_5ms,busiest_cpu,busiest_cpu_samples,worst_cpu,worst_cpu_max_ns,spikiest_cpu,spikiest_cpu_spikes,percentile_scope,major_faults,minor_faults,cpu_psi_some,mem_psi_some,mem_psi_full,io_psi_some,io_psi_full,cumulative_drop_counters_total"
+        "elapsed_ms,task,active,class,comm,process_pid,process_comm,samples,stored_samples,truncated_samples,min_ns,avg_ns,p95_ns,p99_ns,max_ns,over_1ms,over_2ms,over_5ms,busiest_cpu,busiest_cpu_samples,worst_cpu,worst_cpu_max_ns,spikiest_cpu,spikiest_cpu_spikes,percentile_scope,major_faults,minor_faults,cpu_psi_some,mem_psi_some,mem_psi_full,io_psi_some,io_psi_full,cumulative_drop_counters_total,cpu_cycles,cpu_instructions,cpu_ipc,cache_references,cache_misses,cache_miss_rate,cache_mpki,cpu_perf_multiplexed,cpu_perf_scaled,cpu_perf_unavailable_reason"
     )
 }
 
 fn write_interval_csv_row(file: &mut fs::File, record: &IntervalRecord) -> io::Result<()> {
+    let cpu_perf = record.cpu_perf.as_ref();
     writeln!(
         file,
-        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
         record.elapsed_ms,
         record.task,
         record.active,
@@ -1180,6 +1273,20 @@ fn write_interval_csv_row(file: &mut fs::File, record: &IntervalRecord) -> io::R
         record.io_psi_some,
         record.io_psi_full,
         record.drop_counters.total(),
+        option_u64(cpu_perf.and_then(|perf| perf.cycles)),
+        option_u64(cpu_perf.and_then(|perf| perf.instructions)),
+        option_f64(cpu_perf.and_then(|perf| perf.ipc)),
+        option_u64(cpu_perf.and_then(|perf| perf.cache_references)),
+        option_u64(cpu_perf.and_then(|perf| perf.cache_misses)),
+        option_f64(cpu_perf.and_then(|perf| perf.cache_miss_rate)),
+        option_f64(cpu_perf.and_then(|perf| perf.cache_mpki)),
+        option_bool(cpu_perf.map(|perf| perf.multiplexed)),
+        option_bool(cpu_perf.map(|perf| perf.scaled)),
+        csv_escape(
+            cpu_perf
+                .and_then(|perf| perf.unavailable_reason.as_deref())
+                .unwrap_or("")
+        ),
     )
 }
 
@@ -1366,6 +1473,21 @@ fn option_u32(value: Option<u32>) -> String {
     value.map(|value| value.to_string()).unwrap_or_default()
 }
 
+fn option_u64(value: Option<u64>) -> String {
+    value.map(|value| value.to_string()).unwrap_or_default()
+}
+
+fn option_f64(value: Option<f64>) -> String {
+    value
+        .filter(|value| value.is_finite())
+        .map(|value| format!("{value:.6}"))
+        .unwrap_or_default()
+}
+
+fn option_bool(value: Option<bool>) -> String {
+    value.map(|value| value.to_string()).unwrap_or_default()
+}
+
 fn csv_escape(value: &str) -> String {
     if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
         format!("\"{}\"", value.replace('"', "\"\""))
@@ -1535,6 +1657,7 @@ mod tests {
             percentile_scope: "all".to_owned(),
             histogram: Vec::new(),
             drop_counters: crate::ebpf_loader::DropCountersSnapshot::default(),
+            cpu_perf: None,
         }
     }
 

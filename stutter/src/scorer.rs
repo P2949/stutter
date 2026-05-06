@@ -134,6 +134,7 @@ mod tests {
             percentile_scope: "all".to_owned(),
             histogram: Vec::new(),
             drop_counters: crate::ebpf_loader::DropCountersSnapshot::default(),
+            cpu_perf: None,
         };
 
         let score = score_from_interval_records(&[record]);
@@ -218,6 +219,7 @@ mod tests {
             percentile_scope: "all".to_owned(),
             histogram: Vec::new(),
             drop_counters: crate::ebpf_loader::DropCountersSnapshot::default(),
+            cpu_perf: None,
         };
 
         assert_eq!(score_from_interval_records(&[record.clone()]).total, 21);

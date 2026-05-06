@@ -742,6 +742,10 @@ mod tests {
                 follow_exec: true,
                 verbose: false,
                 faults: false,
+                cpu_perf: false,
+                cpu_perf_kernel: false,
+                cpu_perf_max_tasks: 128,
+                cpu_perf_cache_refs: false,
                 block_io: false,
                 stat_wait: false,
             },
@@ -767,6 +771,11 @@ mod tests {
             first_event_stream_write_error: None,
             block_io_correlation_basis: "dev+sector".into(),
             drop_counters: DropCountersSnapshot::default(),
+            cpu_perf_sample_count: 0,
+            cpu_perf_open_errors: 0,
+            cpu_perf_read_errors: 0,
+            cpu_perf_skipped_tasks: 0,
+            cpu_perf_last_error: None,
             tasks: vec![],
             top_spikes: vec![],
         }
@@ -877,6 +886,28 @@ mod tests {
         assert!(report.is_ok());
         assert!(report.present_files.contains(&INTERVALS_FILE.to_owned()));
 
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn old_interval_without_cpu_perf_deserializes() {
+        let dir = temp_dir("old-interval-no-cpu-perf");
+        write_minimal_session(&dir);
+        let record = IntervalRecord {
+            elapsed_ms: 100,
+            task: 1,
+            active: true,
+            samples: 1,
+            ..Default::default()
+        };
+        let line = serde_json::to_string(&record).unwrap();
+        assert!(!line.contains("cpu_perf"));
+        fs::write(dir.join(INTERVALS_FILE), format!("{line}\n")).unwrap();
+
+        let artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::TUNE).unwrap();
+
+        assert_eq!(artifacts.intervals.len(), 1);
+        assert!(artifacts.intervals[0].cpu_perf.is_none());
         std::fs::remove_dir_all(dir).ok();
     }
 

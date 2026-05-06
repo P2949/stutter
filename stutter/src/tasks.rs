@@ -375,6 +375,10 @@ mod tests {
             follow_exec: false,
             exclude_tree_pids: Vec::new(),
             faults: false,
+            cpu_perf: false,
+            cpu_perf_kernel: false,
+            cpu_perf_max_tasks: 128,
+            cpu_perf_cache_refs: false,
             block_io: false,
             stat_wait: false,
         };

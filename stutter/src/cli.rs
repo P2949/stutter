@@ -156,6 +156,32 @@ pub struct MonitorArgs {
     #[arg(long = "faults")]
     faults: bool,
 
+    #[arg(
+        long = "cpu-perf",
+        help = "Collect per-task CPU hardware counters for IPC/cache-miss diagnostics"
+    )]
+    cpu_perf: bool,
+
+    #[arg(
+        long = "cpu-perf-kernel",
+        help = "Include kernel/hypervisor time in CPU perf counters; default is user-space only"
+    )]
+    cpu_perf_kernel: bool,
+
+    #[arg(
+        long = "cpu-perf-max-tasks",
+        default_value_t = 128,
+        value_name = "N",
+        help = "Maximum active target tasks to attach CPU perf counters to"
+    )]
+    cpu_perf_max_tasks: usize,
+
+    #[arg(
+        long = "cpu-perf-cache-refs",
+        help = "Also collect cache references so cache miss rate can be computed; otherwise only cache MPKI is computed"
+    )]
+    cpu_perf_cache_refs: bool,
+
     #[arg(long = "block-io")]
     block_io: bool,
 
@@ -391,6 +417,9 @@ struct DoctorArgs {
     #[arg(long = "faults")]
     faults: bool,
 
+    #[arg(long = "cpu-perf")]
+    cpu_perf: bool,
+
     #[arg(long = "mangohud-log", value_name = "PATH")]
     mangohud_log: Option<PathBuf>,
 }
@@ -515,6 +544,10 @@ pub struct Config {
     pub follow_exec: bool,
     pub exclude_tree_pids: Vec<u32>,
     pub faults: bool,
+    pub cpu_perf: bool,
+    pub cpu_perf_kernel: bool,
+    pub cpu_perf_max_tasks: usize,
+    pub cpu_perf_cache_refs: bool,
     pub block_io: bool,
     pub stat_wait: bool,
 }
@@ -721,6 +754,7 @@ where
                 irqs: args.irqs,
                 block_io: args.block_io,
                 faults: args.faults,
+                cpu_perf: args.cpu_perf,
                 mangohud_log: args.mangohud_log,
             },
         }),
@@ -765,6 +799,9 @@ fn config_from_monitor_args(
     }
     if args.max_tasks == 0 {
         anyhow::bail!("--max-tasks must be greater than zero");
+    }
+    if args.cpu_perf_max_tasks == 0 {
+        anyhow::bail!("--cpu-perf-max-tasks must be greater than zero");
     }
 
     args.target_pids.sort_unstable();
@@ -881,6 +918,10 @@ fn config_from_monitor_args(
         follow_exec: args.follow_exec && !args.no_follow_exec,
         exclude_tree_pids: args.exclude_tree_pids,
         faults: args.faults,
+        cpu_perf: args.cpu_perf,
+        cpu_perf_kernel: args.cpu_perf_kernel,
+        cpu_perf_max_tasks: args.cpu_perf_max_tasks,
+        cpu_perf_cache_refs: args.cpu_perf_cache_refs,
         block_io: args.block_io,
         stat_wait: args.stat_wait,
     })
@@ -1105,6 +1146,69 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("--max-tasks must be greater than zero")
+        );
+    }
+
+    #[test]
+    fn parses_cpu_perf_monitor_flags() {
+        let command = parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--cpu-perf",
+            "--cpu-perf-kernel",
+            "--cpu-perf-max-tasks",
+            "16",
+        ])
+        .unwrap();
+
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+
+        assert!(config.cpu_perf);
+        assert!(config.cpu_perf_kernel);
+        assert_eq!(config.cpu_perf_max_tasks, 16);
+        assert!(!config.cpu_perf_cache_refs);
+    }
+
+    #[test]
+    fn parses_cpu_perf_cache_refs_for_recording() {
+        let command = parse_app_command_from([
+            "stutter",
+            "record",
+            "--pid",
+            "42",
+            "--cpu-perf",
+            "--cpu-perf-cache-refs",
+        ])
+        .unwrap();
+
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+
+        assert!(config.cpu_perf);
+        assert!(config.cpu_perf_cache_refs);
+        assert!(config.recording.is_some());
+    }
+
+    #[test]
+    fn rejects_zero_cpu_perf_max_tasks() {
+        let err = parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--cpu-perf-max-tasks",
+            "0",
+        ])
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("--cpu-perf-max-tasks must be greater than zero")
         );
     }
 
