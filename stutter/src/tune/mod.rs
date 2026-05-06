@@ -486,14 +486,35 @@ async fn write_tune_summary(
             .iter()
             .find(|profile| profile.name == summary.best_profile)
         {
-            let records = crate::watch::apply_profile_to_tree_blocking(
+            let records = match crate::watch::apply_profile_to_tree_blocking(
                 summary.tree_pid,
                 profile.clone(),
                 false,
                 false,
                 enforce,
             )
-            .await?;
+            .await
+            {
+                Ok(records) => records,
+                Err(err) => {
+                    crate::audit::audit_or_warn(&crate::audit::AuditEvent {
+                        schema_version: 1,
+                        unix_nanos: crate::audit::unix_nanos_now(),
+                        command: "tune --keep-best".to_owned(),
+                        action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
+                        safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+                        dry_run: false,
+                        success: false,
+                        affected_tasks: 0,
+                        restore_path: Some(crate::affinity::default_restore_path()),
+                        message: format!(
+                            "failed to apply best tune profile '{}': {err:#}",
+                            profile.name
+                        ),
+                    });
+                    return Err(err);
+                }
+            };
             crate::audit::audit_or_warn(&crate::audit::AuditEvent {
                 schema_version: 1,
                 unix_nanos: crate::audit::unix_nanos_now(),
@@ -567,14 +588,35 @@ pub async fn measure_tune_candidate(
         .clone();
 
     let cache = profiles::ProfileApplyCache::default();
-    let (initial_records, cache) = crate::watch::apply_profile_to_tree_cached_blocking(
+    let (initial_records, cache) = match crate::watch::apply_profile_to_tree_cached_blocking(
         tree_pid,
         profile.clone(),
         force_restore_overwrite,
         false,
         cache,
     )
-    .await?;
+    .await
+    {
+        Ok(res) => res,
+        Err(err) => {
+            crate::audit::audit_or_warn(&crate::audit::AuditEvent {
+                schema_version: 1,
+                unix_nanos: crate::audit::unix_nanos_now(),
+                command: "tune candidate".to_owned(),
+                action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
+                safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+                dry_run: false,
+                success: false,
+                affected_tasks: 0,
+                restore_path: Some(affinity::default_restore_path()),
+                message: format!(
+                    "failed to apply tune candidate profile '{}': {err:#}",
+                    profile.name
+                ),
+            });
+            return Err(err);
+        }
+    };
     let initial_applied_tasks = initial_records.len();
     crate::audit::audit_or_warn(&crate::audit::AuditEvent {
         schema_version: 1,

@@ -257,30 +257,44 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
     let profile = crate::profiles::load_first_profile(&profile_path)?;
     let mut cache = crate::profiles::ProfileApplyCache::default();
 
-    let records = if watch {
-        match apply_profile_to_tree_cached_blocking(
+    if !watch {
+        let action = crate::actions::cpu_affinity::CpuAffinityProfileAction {
             tree_pid,
-            profile.clone(),
-            force,
-            dry_run,
-            cache,
-        )
+            profile,
+            force_restore_overwrite: force,
+        };
+        let result = tokio::task::spawn_blocking(move || {
+            crate::actions::runner::run_audited_action("apply-profile", &action, dry_run)
+        })
         .await
-        {
-            Ok((records, updated_cache)) => {
-                cache = updated_cache;
-                records
+        .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))??;
+
+        println!(
+            "applied profile affinity to {} task(s); restore with: stutter restore",
+            result.state.affected_tasks
+        );
+        println!("apply-profile is one-shot; use --watch to keep applying to new threads");
+        return Ok(());
+    }
+
+    let (records, updated_cache) = match apply_profile_to_tree_cached_blocking(
+        tree_pid,
+        profile.clone(),
+        force,
+        dry_run,
+        cache,
+    )
+    .await
+    {
+        Ok(res) => res,
+        Err(err) => {
+            if !keep_applied && let Err(restore_err) = restore_profile_watch_on_exit() {
+                warn!("profile_watch_restore_after_error_failed err={restore_err:#}");
             }
-            Err(err) => {
-                if !keep_applied && let Err(restore_err) = restore_profile_watch_on_exit() {
-                    warn!("profile_watch_restore_after_error_failed err={restore_err:#}");
-                }
-                return Err(err);
-            }
+            return Err(err);
         }
-    } else {
-        apply_profile_to_tree_blocking(tree_pid, profile.clone(), force, dry_run, enforce).await?
     };
+    cache = updated_cache;
 
     println!(
         "applied profile affinity to {} task(s); restore with: stutter restore",
@@ -289,11 +303,7 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
     crate::audit::audit_or_warn(&crate::audit::AuditEvent {
         schema_version: 1,
         unix_nanos: crate::audit::unix_nanos_now(),
-        command: if watch {
-            "apply-profile --watch".to_owned()
-        } else {
-            "apply-profile".to_owned()
-        },
+        command: "apply-profile --watch".to_owned(),
         action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
         safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
         dry_run,
@@ -302,11 +312,6 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         restore_path: Some(crate::affinity::default_restore_path()),
         message: "initial CPU affinity profile application completed".to_owned(),
     });
-
-    if !watch {
-        println!("apply-profile is one-shot; use --watch to keep applying to new threads");
-        return Ok(());
-    }
 
     let mut tick = interval(Duration::from_millis(refresh_ms));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -411,32 +416,50 @@ pub fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let summary = crate::affinity::restore_saved(&path)?;
-    crate::audit::audit_or_warn(&crate::audit::AuditEvent {
-        schema_version: 1,
-        unix_nanos: crate::audit::unix_nanos_now(),
-        command: "apply-profile --watch restore".to_owned(),
-        action_id: Some("cpu-affinity-restore".to_owned()),
-        safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
-        dry_run: false,
-        success: true,
-        affected_tasks: summary.restored,
-        restore_path: Some(path.clone()),
-        message: format!(
-            "watch restore completed restored={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
-            summary.restored,
-            summary.skipped_dead,
-            summary.skipped_identity_mismatch,
-            summary.legacy_unverified
-        ),
-    });
-    println!(
-        "stopped profile watch; restored {} affinity record(s); skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
-        summary.restored,
-        summary.skipped_dead,
-        summary.skipped_identity_mismatch,
-        summary.legacy_unverified
-    );
+    match crate::affinity::restore_saved(&path) {
+        Ok(summary) => {
+            crate::audit::audit_or_warn(&crate::audit::AuditEvent {
+                schema_version: 1,
+                unix_nanos: crate::audit::unix_nanos_now(),
+                command: "apply-profile --watch restore".to_owned(),
+                action_id: Some("cpu-affinity-restore".to_owned()),
+                safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+                dry_run: false,
+                success: true,
+                affected_tasks: summary.restored,
+                restore_path: Some(path.clone()),
+                message: format!(
+                    "watch restore completed restored={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
+                    summary.restored,
+                    summary.skipped_dead,
+                    summary.skipped_identity_mismatch,
+                    summary.legacy_unverified
+                ),
+            });
+            println!(
+                "stopped profile watch; restored {} affinity record(s); skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
+                summary.restored,
+                summary.skipped_dead,
+                summary.skipped_identity_mismatch,
+                summary.legacy_unverified
+            );
+        }
+        Err(err) => {
+            crate::audit::audit_or_warn(&crate::audit::AuditEvent {
+                schema_version: 1,
+                unix_nanos: crate::audit::unix_nanos_now(),
+                command: "apply-profile --watch restore".to_owned(),
+                action_id: Some("cpu-affinity-restore".to_owned()),
+                safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+                dry_run: false,
+                success: false,
+                affected_tasks: 0,
+                restore_path: Some(path.clone()),
+                message: format!("restore failed: {err:#}"),
+            });
+            return Err(err);
+        }
+    }
 
     Ok(())
 }

@@ -65,6 +65,8 @@ This installs `stutter` under `~/.local/bin` by default. It does not install set
 5. Apply only if the recommendation is stable enough to trust.
 6. Restore if needed.
 
+Check your CPU topology (e.g. `lscpu -e`) before editing profiles to use explicit masks. See [docs/SAFETY.md](docs/SAFETY.md) for more details.
+
 Example:
 
 ```bash

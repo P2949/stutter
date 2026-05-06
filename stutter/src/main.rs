@@ -67,32 +67,50 @@ async fn main() -> anyhow::Result<()> {
             if dry_run {
                 print_restore_dry_run(&path)?;
             } else {
-                let summary = affinity::restore_saved(&path)?;
-                audit::audit_or_warn(&audit::AuditEvent {
-                    schema_version: 1,
-                    unix_nanos: audit::unix_nanos_now(),
-                    command: "restore".to_owned(),
-                    action_id: Some("cpu-affinity-restore".to_owned()),
-                    safety_class: Some(actions::SafetyClass::ReversibleLowRisk),
-                    dry_run: false,
-                    success: true,
-                    affected_tasks: summary.restored,
-                    restore_path: Some(path.clone()),
-                    message: format!(
-                        "restored={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
-                        summary.restored,
-                        summary.skipped_dead,
-                        summary.skipped_identity_mismatch,
-                        summary.legacy_unverified
-                    ),
-                });
-                println!(
-                    "restored {} affinity record(s); skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
-                    summary.restored,
-                    summary.skipped_dead,
-                    summary.skipped_identity_mismatch,
-                    summary.legacy_unverified
-                );
+                match affinity::restore_saved(&path) {
+                    Ok(summary) => {
+                        audit::audit_or_warn(&audit::AuditEvent {
+                            schema_version: 1,
+                            unix_nanos: audit::unix_nanos_now(),
+                            command: "restore".to_owned(),
+                            action_id: Some("cpu-affinity-restore".to_owned()),
+                            safety_class: Some(actions::SafetyClass::ReversibleLowRisk),
+                            dry_run: false,
+                            success: true,
+                            affected_tasks: summary.restored,
+                            restore_path: Some(path.clone()),
+                            message: format!(
+                                "restored={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
+                                summary.restored,
+                                summary.skipped_dead,
+                                summary.skipped_identity_mismatch,
+                                summary.legacy_unverified
+                            ),
+                        });
+                        println!(
+                            "restored {} affinity record(s); skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
+                            summary.restored,
+                            summary.skipped_dead,
+                            summary.skipped_identity_mismatch,
+                            summary.legacy_unverified
+                        );
+                    }
+                    Err(err) => {
+                        audit::audit_or_warn(&audit::AuditEvent {
+                            schema_version: 1,
+                            unix_nanos: audit::unix_nanos_now(),
+                            command: "restore".to_owned(),
+                            action_id: Some("cpu-affinity-restore".to_owned()),
+                            safety_class: Some(actions::SafetyClass::ReversibleLowRisk),
+                            dry_run: false,
+                            success: false,
+                            affected_tasks: 0,
+                            restore_path: Some(path.clone()),
+                            message: format!("restore failed: {err:#}"),
+                        });
+                        return Err(err);
+                    }
+                }
             }
             Ok(())
         }
@@ -216,6 +234,14 @@ async fn main() -> anyhow::Result<()> {
             .await
         }
         AppCommand::Doctor { input } => doctor::doctor_command(input),
+        AppCommand::ProfileTemplate { topology } => {
+            if topology {
+                print!("{}", profiles::generate_topology_template());
+                Ok(())
+            } else {
+                anyhow::bail!("profile-template requires --topology");
+            }
+        }
     }
 }
 

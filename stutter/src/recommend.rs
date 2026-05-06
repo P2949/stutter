@@ -36,6 +36,15 @@ pub struct BaselineTuneRecommendation {
     pub best_median_score_total: Option<u64>,
     pub score_delta_abs: Option<i64>,
     pub score_delta_percent: Option<f64>,
+
+    pub baseline_over_5ms: u64,
+    pub best_median_over_5ms: Option<u64>,
+    pub over_5ms_delta_abs: Option<i64>,
+
+    pub baseline_frame_p99_ms: Option<f64>,
+    pub best_median_frame_p99_ms: Option<f64>,
+    pub frame_p99_delta_ms: Option<f64>,
+
     pub warnings: Vec<String>,
     pub next_steps: Vec<String>,
 }
@@ -111,6 +120,23 @@ pub fn build_baseline_tune_recommendation(
         (baseline_score.total > 0).then_some(delta as f64 / baseline_score.total as f64 * 100.0)
     });
 
+    let baseline_over_5ms = baseline_score.over_5ms;
+    let best_median_over_5ms = best_stat.map(|stat| stat.median_over_5ms);
+    let over_5ms_delta_abs =
+        best_median_over_5ms.map(|best| baseline_over_5ms as i64 - best as i64);
+
+    let baseline_frame_p99_ms =
+        (baseline_score.frame_p99_ms > 0.0).then_some(baseline_score.frame_p99_ms);
+
+    let best_median_frame_p99_ms = best_stat.and_then(|stat| {
+        (stat.median_frame_p99_us > 0).then_some(stat.median_frame_p99_us as f64 / 1000.0)
+    });
+
+    let frame_p99_delta_ms = match (baseline_frame_p99_ms, best_median_frame_p99_ms) {
+        (Some(base), Some(best)) => Some(best - base),
+        _ => None,
+    };
+
     if baseline.intervals.is_empty() {
         warnings.push("baseline intervals are missing".to_owned());
     }
@@ -134,19 +160,25 @@ pub fn build_baseline_tune_recommendation(
                 "best profile '{best_profile}' has invalid candidate runs"
             ));
         }
-        if baseline_score.frame_p99_ms > 0.0
-            && let Some(best) = best_stat
-        {
-            let best_p99_ms = best.median_frame_p99_us as f64 / 1000.0;
-            warnings.push(format!(
-                "frame p99 delta best-vs-baseline: {:.3}ms",
-                best_p99_ms - baseline_score.frame_p99_ms
-            ));
-        }
     }
 
     let baseline_quality_blocks_recommendation =
         baseline.intervals.is_empty() || baseline_scored_samples < 50;
+
+    const LOW_BASELINE_SCORE_TOTAL: u64 = 100;
+
+    let baseline_score_blocks_recommendation = if baseline_score.total == 0 {
+        warnings.push("baseline score is zero; score improvement cannot be measured".to_owned());
+        true
+    } else if baseline_score.total < LOW_BASELINE_SCORE_TOTAL {
+        warnings.push(format!(
+            "baseline score is very low ({}); recommendation requires retest",
+            baseline_score.total
+        ));
+        true
+    } else {
+        false
+    };
 
     let verdict = if summary.ranking_confidence == RankingConfidence::Unstable {
         TuneRecommendationVerdict::NoRecommendation
@@ -158,7 +190,10 @@ pub fn build_baseline_tune_recommendation(
         let improvement = baseline_score.total.saturating_sub(best);
         if best > worse_threshold {
             TuneRecommendationVerdict::NoRecommendation
-        } else if baseline_quality_blocks_recommendation || improvement < improvement_threshold {
+        } else if baseline_quality_blocks_recommendation
+            || baseline_score_blocks_recommendation
+            || improvement < improvement_threshold
+        {
             TuneRecommendationVerdict::NeedsRetest
         } else if matches!(
             summary.ranking_confidence,
@@ -220,7 +255,7 @@ pub fn build_baseline_tune_recommendation(
     }
 
     Ok(BaselineTuneRecommendation {
-        schema_version: 1,
+        schema_version: 2,
         baseline_run: baseline.run_dir,
         tune_dir: tune_dir.to_path_buf(),
         best_profile,
@@ -231,6 +266,12 @@ pub fn build_baseline_tune_recommendation(
         best_median_score_total,
         score_delta_abs,
         score_delta_percent,
+        baseline_over_5ms,
+        best_median_over_5ms,
+        over_5ms_delta_abs,
+        baseline_frame_p99_ms,
+        best_median_frame_p99_ms,
+        frame_p99_delta_ms,
         warnings,
         next_steps,
     })
@@ -281,6 +322,58 @@ pub fn render_baseline_tune_recommendation_markdown(rec: &BaselineTuneRecommenda
             ),
         );
     }
+    pushln(&mut out, "");
+    pushln(&mut out, "## Latency details");
+    pushln(&mut out, "");
+    pushln(
+        &mut out,
+        format!("- Baseline over 5ms: {}", rec.baseline_over_5ms),
+    );
+    pushln(
+        &mut out,
+        format!(
+            "- Best median over 5ms: {}",
+            rec.best_median_over_5ms
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "n/a".to_owned())
+        ),
+    );
+    pushln(
+        &mut out,
+        format!(
+            "- Over 5ms delta: {}",
+            rec.over_5ms_delta_abs
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "n/a".to_owned())
+        ),
+    );
+    pushln(
+        &mut out,
+        format!(
+            "- Baseline frame p99: {}",
+            rec.baseline_frame_p99_ms
+                .map(|v| format!("{v:.3}ms"))
+                .unwrap_or_else(|| "n/a".to_owned())
+        ),
+    );
+    pushln(
+        &mut out,
+        format!(
+            "- Best median frame p99: {}",
+            rec.best_median_frame_p99_ms
+                .map(|v| format!("{v:.3}ms"))
+                .unwrap_or_else(|| "n/a".to_owned())
+        ),
+    );
+    pushln(
+        &mut out,
+        format!(
+            "- Frame p99 delta: {}",
+            rec.frame_p99_delta_ms
+                .map(|v| format!("{v:+.3}ms"))
+                .unwrap_or_else(|| "n/a".to_owned())
+        ),
+    );
     pushln(&mut out, "");
     pushln(&mut out, "## Warnings");
     pushln(&mut out, "");
@@ -548,9 +641,144 @@ mod tests {
         let rec = build_baseline_tune_recommendation(&baseline, &tune).unwrap();
         let json = serde_json::to_value(&rec).unwrap();
 
-        assert_eq!(json["schema_version"], 1);
+        assert_eq!(json["schema_version"], 2);
         assert_eq!(json["best_profile"], "best");
         assert_eq!(json["baseline_score_total"], 200);
+        assert_eq!(json["baseline_over_5ms"], 2);
+        assert!(json["best_median_over_5ms"].is_number());
+        assert!(json["over_5ms_delta_abs"].is_number());
+        fs::remove_dir_all(baseline).ok();
+        fs::remove_dir_all(tune).ok();
+    }
+
+    #[test]
+    fn zero_baseline_score_never_recommends() {
+        let baseline = temp_dir("zero-baseline-score");
+        write_baseline(&baseline, 0, 100); // score 0
+        let tune = temp_dir("zero-tune-score");
+        write_tune(&tune, RankingConfidence::High, 0); // score 0
+
+        let rec = build_baseline_tune_recommendation(&baseline, &tune).unwrap();
+
+        assert_eq!(rec.verdict, TuneRecommendationVerdict::NeedsRetest);
+        assert!(
+            rec.warnings
+                .iter()
+                .any(|w| w.contains("baseline score is zero"))
+        );
+        fs::remove_dir_all(baseline).ok();
+        fs::remove_dir_all(tune).ok();
+    }
+
+    #[test]
+    fn very_low_baseline_score_needs_retest() {
+        let baseline = temp_dir("low-baseline-score");
+        // Score will be 50 * 100 = 5000ns? No, interval(over_5ms, samples) returns score_over_5ms * 100 in stat()?
+        // Wait, scorer::score_from_interval_records_and_frames calculates score.
+        // Let's look at interval():
+        // over_5ms is passed as a field.
+        // stat() uses score / 100 for median_over_5ms.
+        // baseline_score.total is calculated from intervals.
+        // scorer::score_from_interval_records_and_frames(intervals, frames)
+        // total = intervals.iter().map(|r| r.over_5ms as u64 * 100 + r.over_1ms as u64 * 10).sum()
+        // If I pass 0 to write_baseline, total is 0.
+        // If I pass 1, total is 100.
+        // LOW_BASELINE_SCORE_TOTAL is 100.
+
+        write_baseline(&baseline, 0, 100);
+        // Change it to exactly 50 total score.
+        fs::write(
+            baseline.join("interval.json"),
+            format!(
+                "{}\n",
+                serde_json::to_string(&IntervalRecord {
+                    elapsed_ms: 1000,
+                    task: 1,
+                    active: true,
+                    class: TaskClass::Game,
+                    comm: "game".to_owned(),
+                    samples: 100,
+                    stored_samples: 100,
+                    over_1ms: 50, // 50 score
+                    ..Default::default()
+                })
+                .unwrap()
+            ),
+        )
+        .unwrap();
+
+        let tune = temp_dir("low-tune-score");
+        write_tune(&tune, RankingConfidence::High, 10); // score 10
+
+        let rec = build_baseline_tune_recommendation(&baseline, &tune).unwrap();
+
+        assert_eq!(rec.baseline_score_total, 50);
+        assert_eq!(rec.verdict, TuneRecommendationVerdict::NeedsRetest);
+        assert!(
+            rec.warnings
+                .iter()
+                .any(|w| w.contains("baseline score is very low (50)"))
+        );
+        fs::remove_dir_all(baseline).ok();
+        fs::remove_dir_all(tune).ok();
+    }
+
+    #[test]
+    fn frame_p99_metrics_are_captured_structured() {
+        let baseline = temp_dir("frame-baseline");
+        fs::write(
+            baseline.join("session.json"),
+            serde_json::to_vec_pretty(&minimal_session(1)).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            baseline.join("frame_correlation.json"),
+            r#"{"elapsed_ms":100,"frametime_ms":16.0}
+{"elapsed_ms":200,"frametime_ms":17.0}
+"#,
+        )
+        .unwrap();
+
+        let tune = temp_dir("frame-tune");
+        let summary = TuneSummary {
+            schema_version: 1,
+            tree_pid: 42,
+            profiles_path: PathBuf::from("profiles.toml"),
+            runs: 3,
+            epoch_seconds: 60,
+            warmup_seconds: 10,
+            restore_policy: "restore-after-each".to_owned(),
+            best_profile: "best".to_owned(),
+            candidate_order: vec![],
+            profile_stats: vec![TuneProfileStats {
+                profile: "best".to_owned(),
+                valid_runs: 3,
+                invalid_runs: 0,
+                median_score_total: 100,
+                iqr_score_total: 0,
+                worst_score_total: 100,
+                median_over_5ms: 1,
+                iqr_over_5ms: 0,
+                median_frame_p99_us: 15000, // 15ms
+                iqr_frame_p99_us: 0,
+            }],
+            ranking_confidence: RankingConfidence::High,
+            ranking_notes: Vec::new(),
+            comparability_warnings: Vec::new(),
+            candidates: vec![candidate("best", 100)],
+        };
+        fs::write(
+            tune.join("tuning_summary.json"),
+            serde_json::to_vec_pretty(&summary).unwrap(),
+        )
+        .unwrap();
+
+        let rec = build_baseline_tune_recommendation(&baseline, &tune).unwrap();
+
+        assert_eq!(rec.baseline_frame_p99_ms, Some(17.0));
+        assert_eq!(rec.best_median_frame_p99_ms, Some(15.0));
+        assert_eq!(rec.frame_p99_delta_ms, Some(-2.0));
+
         fs::remove_dir_all(baseline).ok();
         fs::remove_dir_all(tune).ok();
     }

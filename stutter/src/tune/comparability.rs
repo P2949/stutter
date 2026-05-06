@@ -32,6 +32,12 @@ pub struct TaskIdentity {
     pub exe_ino: Option<u64>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScoredIdentityCount {
+    pub identity: TaskIdentity,
+    pub count: usize,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TuneCoverageMetrics {
     pub unique_tracked_tasks: usize,
@@ -40,7 +46,27 @@ pub struct TuneCoverageMetrics {
     pub active_target_max: usize,
     pub removed_task_count: usize,
     pub drop_counter_total: u64,
-    pub scored_identity_counts: BTreeMap<TaskIdentity, usize>,
+
+    #[serde(default)]
+    pub scored_identity_counts: Vec<ScoredIdentityCount>,
+}
+
+pub fn scored_identity_counts_to_map(
+    counts: &[ScoredIdentityCount],
+) -> BTreeMap<TaskIdentity, usize> {
+    let mut map = BTreeMap::new();
+    for item in counts {
+        *map.entry(item.identity.clone()).or_default() += item.count;
+    }
+    map
+}
+
+pub fn scored_identity_map_to_counts(
+    map: BTreeMap<TaskIdentity, usize>,
+) -> Vec<ScoredIdentityCount> {
+    map.into_iter()
+        .map(|(identity, count)| ScoredIdentityCount { identity, count })
+        .collect()
 }
 
 pub fn check_tune_coverage_comparability(
@@ -71,17 +97,11 @@ pub fn check_tune_coverage_comparability(
         grouped.values().filter_map(|runs| runs.first()).collect();
 
     if let Some(first) = representatives.first() {
+        let first_map = scored_identity_counts_to_map(&first.coverage.scored_identity_counts);
         for other in representatives.iter().skip(1) {
-            let common = scored_identity_overlap(
-                &first.coverage.scored_identity_counts,
-                &other.coverage.scored_identity_counts,
-                usize::min,
-            );
-            let total = scored_identity_overlap(
-                &first.coverage.scored_identity_counts,
-                &other.coverage.scored_identity_counts,
-                usize::max,
-            );
+            let other_map = scored_identity_counts_to_map(&other.coverage.scored_identity_counts);
+            let common = scored_identity_overlap(&first_map, &other_map, usize::min);
+            let total = scored_identity_overlap(&first_map, &other_map, usize::max);
 
             let overlap_ratio = if total > 0 {
                 common as f64 / total as f64
@@ -483,7 +503,7 @@ pub fn tune_coverage_metrics(
         } else {
             session.drop_counters.total_excluding_block_io()
         },
-        scored_identity_counts,
+        scored_identity_counts: scored_identity_map_to_counts(scored_identity_counts),
     }
 }
 
@@ -656,7 +676,7 @@ mod tests {
                     unique_scored_tasks: 10,
                     active_target_min: 10,
                     active_target_max: 10,
-                    scored_identity_counts: counts1,
+                    scored_identity_counts: scored_identity_map_to_counts(counts1),
                     ..Default::default()
                 },
             )],
@@ -670,7 +690,7 @@ mod tests {
                     unique_scored_tasks: 10,
                     active_target_min: 10,
                     active_target_max: 10,
-                    scored_identity_counts: counts2,
+                    scored_identity_counts: scored_identity_map_to_counts(counts2),
                     ..Default::default()
                 },
             )],
@@ -751,5 +771,34 @@ mod tests {
                 .any(|warning| warning.kind == "scored-sample-count-mismatch"
                     && warning.severity == TuneComparabilitySeverity::Reject)
         );
+    }
+
+    #[test]
+    fn tune_coverage_metrics_with_non_empty_identity_counts_serializes_to_json() {
+        let identity = TaskIdentity {
+            class: TaskClass::Game,
+            process_comm: "game".to_string(),
+            comm: "render".to_string(),
+            process_starttime_ticks: Some(100),
+            task_starttime_ticks: Some(101),
+            exe_dev: Some(1),
+            exe_ino: Some(2),
+        };
+        let metrics = TuneCoverageMetrics {
+            unique_tracked_tasks: 1,
+            unique_scored_tasks: 1,
+            active_target_min: 1,
+            active_target_max: 1,
+            scored_identity_counts: vec![ScoredIdentityCount { identity, count: 1 }],
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string_pretty(&metrics).unwrap();
+        assert!(json.contains("scored_identity_counts"));
+        assert!(json.contains("\"identity\""));
+        assert!(json.contains("\"count\""));
+
+        let roundtrip: TuneCoverageMetrics = serde_json::from_str(&json).unwrap();
+        assert_eq!(roundtrip.scored_identity_counts.len(), 1);
     }
 }

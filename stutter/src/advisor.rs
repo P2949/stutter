@@ -149,14 +149,6 @@ pub(crate) fn build_advisor_report_from_evidence(
                 .to_owned(),
         });
         warnings.push("CPU affinity may not help a GPU-bound candidate.".to_owned());
-        return AdvisorReport {
-            schema_version: 1,
-            run: run.to_path_buf(),
-            data_quality,
-            verdict: AdvisorVerdict::InvestigateNonCpuBottleneck,
-            recommendations,
-            warnings,
-        };
     }
 
     if has_irq_candidate {
@@ -172,14 +164,6 @@ pub(crate) fn build_advisor_report_from_evidence(
             safety_note: "Observe only; do not change IRQ affinity yet.".to_owned(),
         });
         warnings.push("Advisor does not suggest changing IRQ affinity yet.".to_owned());
-        return AdvisorReport {
-            schema_version: 1,
-            run: run.to_path_buf(),
-            data_quality,
-            verdict: AdvisorVerdict::InvestigateNonCpuBottleneck,
-            recommendations,
-            warnings,
-        };
     }
 
     if has_block_io_candidate {
@@ -194,14 +178,6 @@ pub(crate) fn build_advisor_report_from_evidence(
             },
             safety_note: "Observe only; do not tune CPU affinity first for a block I/O candidate.".to_owned(),
         });
-        return AdvisorReport {
-            schema_version: 1,
-            run: run.to_path_buf(),
-            data_quality,
-            verdict: AdvisorVerdict::InvestigateNonCpuBottleneck,
-            recommendations,
-            warnings,
-        };
     }
 
     if has_scheduler {
@@ -226,31 +202,34 @@ pub(crate) fn build_advisor_report_from_evidence(
                     .to_owned(),
             );
         }
-        return AdvisorReport {
-            schema_version: 1,
-            run: run.to_path_buf(),
-            data_quality,
-            verdict: AdvisorVerdict::TryProfileTuning,
-            recommendations,
-            warnings,
-        };
     }
 
-    recommendations.push(AdvisorRecommendation {
-        title: "Collect more comparable data".to_owned(),
-        rationale: "No strong candidate stood out; this is not proof that no bottleneck exists."
-            .to_owned(),
-        confidence: Confidence::Low,
-        suggested_commands: vec![
-            "stutter bench --duration 180 --scenario <name> --role baseline".to_owned(),
-        ],
-        safety_note: "Observe only; do not auto-apply tuning from this run.".to_owned(),
-    });
+    let verdict = if has_gpu || has_irq_candidate || has_block_io_candidate {
+        AdvisorVerdict::InvestigateNonCpuBottleneck
+    } else if has_scheduler {
+        AdvisorVerdict::TryProfileTuning
+    } else {
+        if recommendations.is_empty() {
+            recommendations.push(AdvisorRecommendation {
+                title: "Collect more comparable data".to_owned(),
+                rationale:
+                    "No strong candidate stood out; this is not proof that no bottleneck exists."
+                        .to_owned(),
+                confidence: Confidence::Low,
+                suggested_commands: vec![
+                    "stutter bench --duration 180 --scenario <name> --role baseline".to_owned(),
+                ],
+                safety_note: "Observe only; do not auto-apply tuning from this run.".to_owned(),
+            });
+        }
+        AdvisorVerdict::CollectMoreData
+    };
+
     AdvisorReport {
         schema_version: 1,
         run: run.to_path_buf(),
         data_quality,
-        verdict: AdvisorVerdict::CollectMoreData,
+        verdict,
         recommendations,
         warnings,
     }
@@ -563,5 +542,30 @@ mod tests {
 
         assert!(runs.is_empty());
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn gpu_and_scheduler_both_produce_recommendations() {
+        let report = report_for(
+            &[
+                StutterCause::GpuBoundCandidate,
+                StutterCause::GameThreadSchedulerDelay,
+            ],
+            DataQualityLevel::High,
+        );
+
+        assert_eq!(report.verdict, AdvisorVerdict::InvestigateNonCpuBottleneck);
+        assert!(
+            report
+                .recommendations
+                .iter()
+                .any(|r| r.title.contains("non-CPU"))
+        );
+        assert!(
+            report
+                .recommendations
+                .iter()
+                .any(|r| r.title.contains("profile tuning"))
+        );
     }
 }

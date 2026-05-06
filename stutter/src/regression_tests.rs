@@ -1386,7 +1386,14 @@ fn tune_coverage_counts_duplicate_scored_thread_identities() {
     let coverage = tune::comparability::tune_coverage_metrics(&session, &intervals);
 
     assert_eq!(coverage.unique_scored_tasks, 3);
-    assert_eq!(coverage.scored_identity_counts.values().sum::<usize>(), 3);
+    assert_eq!(
+        coverage
+            .scored_identity_counts
+            .iter()
+            .map(|c| c.count)
+            .sum::<usize>(),
+        3
+    );
     assert_eq!(coverage.scored_identity_counts.len(), 3);
 }
 

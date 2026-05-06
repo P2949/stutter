@@ -124,7 +124,20 @@ cat >"$tune/tuning_summary.json" <<'JSON'
         "active_target_max": 1,
         "removed_task_count": 0,
         "drop_counter_total": 0,
-        "scored_identity_counts": {}
+        "scored_identity_counts": [
+          {
+            "identity": {
+              "class": "Game",
+              "process_comm": "Game.exe",
+              "comm": "Game.exe",
+              "process_starttime_ticks": null,
+              "task_starttime_ticks": null,
+              "exe_dev": null,
+              "exe_ino": null
+            },
+            "count": 1
+          }
+        ]
       },
       "valid": true
     }
