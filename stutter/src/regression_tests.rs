@@ -632,6 +632,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         wakeup_ns: 10,
         switch_ns: 2_000_010,
         target_pending_wakeups: 0,
+        observed_runnable_depth: 0,
         major_faults: 0,
         minor_faults: 0,
         active: true,
@@ -639,6 +640,8 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         scx_ops: None,
         scx_state: None,
         scx_enable_seq: None,
+        cause_tags: Vec::new(),
+        primary_cause: None,
     }];
     let drop_counters = DropCountersSnapshot {
         wakeup_data_insert_failed: 2,
@@ -1072,11 +1075,14 @@ fn report_reads_recorded_session_and_spike_events() {
         wakeup_ns: 1_010_000_000,
         switch_ns: 1_016_000_000,
         target_pending_wakeups: 0,
+        observed_runnable_depth: 0,
         major_faults: 0,
         minor_faults: 0,
         scx_ops: None,
         scx_state: None,
         scx_enable_seq: None,
+        cause_tags: Vec::new(),
+        primary_cause: None,
     });
     let stats_by_task = BTreeMap::from([(7, stats)]);
     let spike_events = vec![SpikeEvent {
@@ -1094,11 +1100,14 @@ fn report_reads_recorded_session_and_spike_events() {
         wakeup_ns: 1_010_000_000,
         switch_ns: 1_016_000_000,
         target_pending_wakeups: 0,
+        observed_runnable_depth: 0,
         major_faults: 0,
         minor_faults: 0,
         scx_ops: None,
         scx_state: None,
         scx_enable_seq: None,
+        cause_tags: Vec::new(),
+        primary_cause: None,
     }];
 
     let mut task_tracker = tasks::TaskTracker::default();
@@ -1154,7 +1163,7 @@ fn report_cluster_output_caps_inline_points() {
 
     let spike_events = (0..10)
         .map(|idx| SpikeEvent {
-            elapsed_ms: Some(idx),
+            elapsed_ms: Some(idx as u128),
             task: 100 + idx as u32,
             active: true,
             class: TaskClass::Helper,
@@ -1168,11 +1177,14 @@ fn report_cluster_output_caps_inline_points() {
             wakeup_ns: 1_000_000_000 + idx as u64 * 100_000,
             switch_ns: 1_001_000_000 + idx as u64 * 100_000,
             target_pending_wakeups: 0,
+            observed_runnable_depth: 0,
             major_faults: 0,
             minor_faults: 0,
             scx_ops: None,
             scx_state: None,
             scx_enable_seq: None,
+            cause_tags: Vec::new(),
+            primary_cause: None,
         })
         .collect::<Vec<_>>();
 
@@ -1235,7 +1247,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
     let session = minimal_session_for_report();
     let spike_events = (0..3)
         .map(|idx| SpikeEvent {
-            elapsed_ms: Some(10 + idx),
+            elapsed_ms: Some(10 + idx as u128),
             task: 10 + idx as u32,
             active: true,
             class: TaskClass::Game,
@@ -1253,11 +1265,14 @@ fn report_correlates_artifacts_with_spike_clusters() {
             wakeup_ns: 1_000_000 + idx as u64 * 100,
             switch_ns: 10_000_000 + idx as u64 * 100,
             target_pending_wakeups: 0,
+            observed_runnable_depth: 0,
             major_faults: 0,
             minor_faults: 0,
             scx_ops: None,
             scx_state: None,
             scx_enable_seq: None,
+            cause_tags: Vec::new(),
+            primary_cause: None,
         })
         .collect::<Vec<_>>();
     let artifacts = crate::session_io::RunArtifacts {
@@ -1482,6 +1497,7 @@ fn test_config(
         recording: None,
         max_duration,
         cgroupv2: None,
+        native_cgroup_filter: false,
         follow_exec: true,
         exclude_tree_pids: Vec::new(),
         cpu_freq: false,
@@ -1493,6 +1509,7 @@ fn test_config(
         block_io: false,
         stat_wait: false,
         json_stream: false,
+        mangohud_log_live: false,
         metrics_port: None,
     }
 }
@@ -1708,6 +1725,7 @@ fn scheduler_event_with_latency(pid: u32, comm: &str, latency_ns: u64) -> Schedu
         comm: comm_bytes,
         waker_tid: 0,
         target_pending_wakeups: 0,
+        observed_runnable_depth: 0,
         maj_flt: 0,
         min_flt: 0,
     }
@@ -1718,10 +1736,10 @@ fn spike_event(task: u32, switch_ns: u64) -> SpikeEvent {
         elapsed_ms: Some(u128::from(switch_ns / 1_000_000)),
         task,
         active: true,
-        class: TaskClass::Helper,
+        class: TaskClass::Game,
         process_pid: Some(task),
-        process_comm: format!("proc-{}", task).into(),
-        comm: format!("worker-{}", task),
+        process_comm: "game".into(),
+        comm: "game".to_owned(),
         cpu: 0,
         wakeup_target_cpu: 0,
         prio: 120,
@@ -1729,11 +1747,14 @@ fn spike_event(task: u32, switch_ns: u64) -> SpikeEvent {
         wakeup_ns: switch_ns.saturating_sub(1_000_000),
         switch_ns,
         target_pending_wakeups: 0,
+        observed_runnable_depth: 0,
         major_faults: 0,
         minor_faults: 0,
         scx_ops: None,
         scx_state: None,
         scx_enable_seq: None,
+        cause_tags: Vec::new(),
+        primary_cause: None,
     }
 }
 
@@ -1992,19 +2013,22 @@ fn scx_correlation_spike_event_serialization() {
         class: TaskClass::Game,
         process_pid: Some(123),
         process_comm: "game".into(),
-        comm: "game-main".into(),
+        comm: "game".to_owned(),
         cpu: 1,
         wakeup_target_cpu: 1,
         prio: 120,
-        latency_ns: 5_000_000,
-        wakeup_ns: 100,
-        switch_ns: 5_000_100,
+        latency_ns: 1_000_000,
+        wakeup_ns: 2000,
+        switch_ns: 3000,
         target_pending_wakeups: 0,
-        major_faults: 0,
-        minor_faults: 0,
+        observed_runnable_depth: 0,
+        major_faults: 1,
+        minor_faults: 2,
         scx_ops: Some("scx_lavd".to_owned()),
         scx_state: Some("enabled".to_owned()),
         scx_enable_seq: Some("1".to_owned()),
+        cause_tags: Vec::new(),
+        primary_cause: None,
     };
 
     let json = serde_json::to_string(&event).unwrap();

@@ -154,6 +154,123 @@ where
     Ok(events)
 }
 
+#[derive(Default)]
+pub struct MangoHudLiveParser {
+    frametime_idx: Option<usize>,
+    elapsed_idx: Option<usize>,
+    header_seen: bool,
+}
+
+impl MangoHudLiveParser {
+    pub fn parse_line(&mut self, line: &str) -> Option<FrameEvent> {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            return None;
+        }
+
+        if !self.header_seen {
+            let headers = split_csv_line(line);
+            self.elapsed_idx = find_header(
+                &headers,
+                &["elapsed_ms", "time_ms", "ms", "time", "elapsed"],
+            );
+            self.frametime_idx = find_header(
+                &headers,
+                &[
+                    "frametime",
+                    "frametime_ms",
+                    "frame_time",
+                    "frame_time_ms",
+                    "frame time",
+                    "frame time ms",
+                ],
+            );
+            self.header_seen = true;
+            return None;
+        }
+
+        let columns = split_csv_line(line);
+        let frametime_ms = self
+            .frametime_idx
+            .and_then(|idx| columns.get(idx))
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite())?;
+
+        let raw_elapsed = self
+            .elapsed_idx
+            .and_then(|idx| columns.get(idx))
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite());
+
+        let elapsed_ms = raw_elapsed.map(|raw| raw.max(0.0) as u128).unwrap_or(0);
+
+        Some(FrameEvent {
+            elapsed_ms,
+            frametime_ms,
+        })
+    }
+}
+
+pub async fn tail_frames(
+    path: std::path::PathBuf,
+    start_offset: u64,
+    tx: tokio::sync::mpsc::Sender<FrameEvent>,
+) -> anyhow::Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
+
+    let mut file = tokio::fs::File::open(&path).await.with_context(|| {
+        format!(
+            "failed to open MangoHud log for tailing: {}",
+            path.display()
+        )
+    })?;
+    file.seek(SeekFrom::Start(start_offset)).await?;
+
+    let mut read_buf = vec![0_u8; 8192];
+    let mut pending = String::new();
+    let mut parser = MangoHudLiveParser::default();
+
+    loop {
+        let n = match file.read(&mut read_buf).await {
+            Ok(0) => {
+                tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+                continue;
+            }
+            Ok(n) => n,
+            Err(err) => {
+                log::warn!(
+                    "mangohud_tail_read_failed path={} err={err:#}",
+                    path.display()
+                );
+                return Err(err.into());
+            }
+        };
+
+        let chunk = String::from_utf8_lossy(&read_buf[..n]);
+        pending.push_str(&chunk);
+
+        while let Some(newline_pos) = pending.find('\n') {
+            let mut line = pending[..newline_pos].to_string();
+
+            if line.ends_with('\r') {
+                line.pop();
+            }
+
+            pending.drain(..=newline_pos);
+
+            if let Some(frame) = parser.parse_line(&line)
+                && tx.try_send(frame).is_err()
+            {
+                // Channel full or receiver gone.
+                // If receiver is gone, exiting is okay.
+                if tx.is_closed() {
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
 pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u128, u64)> {
     use std::io::{Read, Seek, SeekFrom};
 

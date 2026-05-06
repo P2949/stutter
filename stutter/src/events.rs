@@ -232,14 +232,31 @@ pub fn handle_event(
 
     let mut spike_ret = None;
     if event.latency_ns >= config.spike_threshold_ns {
+        let cause_tags = immediate_cause_tags(event, stats, fault_deltas);
+        let primary_cause = primary_from_tags(&cause_tags);
+
+        // Update the internal top spikes record so it persists into the session summary too
+        if let Some(spike) = stats
+            .top_spikes
+            .iter_mut()
+            .find(|s| s.switch_ns == event.switch_ns && s.cpu == event.cpu)
+        {
+            spike.cause_tags = cause_tags.clone();
+            spike.primary_cause = primary_cause.clone();
+        }
+
         let spike_event = recorder::SpikeEvent::from_task_stats(
             monotonic_start_ns,
             stats,
             event,
             fault_deltas,
-            scx_ops.clone(),
-            scx_state.clone(),
-            scx_enable_seq.clone(),
+            recorder::SpikeDiagnosticContext {
+                scx_ops: scx_ops.clone(),
+                scx_state: scx_state.clone(),
+                scx_enable_seq: scx_enable_seq.clone(),
+                cause_tags,
+                primary_cause,
+            },
         );
         spike_ret = Some(spike_event.clone());
 
@@ -470,6 +487,52 @@ pub fn read_event_unaligned<T: aya::Pod + Copy>(data: &[u8]) -> Option<T> {
     Some(unsafe { (data.as_ptr() as *const T).read_unaligned() })
 }
 
+pub(crate) fn immediate_cause_tags(
+    event: &SchedulerEvent,
+    _stats: &metrics::TaskStats,
+    fault_deltas: (u64, u64),
+) -> Vec<String> {
+    let mut tags = Vec::new();
+
+    if event.observed_runnable_depth >= 4 {
+        tags.push("runqueue_contention".to_string());
+    }
+
+    if event.target_pending_wakeups > 2 {
+        tags.push("monitored_wakeup_backlog".to_string());
+    }
+
+    if fault_deltas.0 > 0 {
+        tags.push("major_page_fault".to_string());
+    } else if fault_deltas.1 > 0 {
+        tags.push("minor_page_fault".to_string());
+    }
+
+    if event.wakeup_target_cpu != event.cpu {
+        tags.push("migration_or_cpu_mismatch".to_string());
+    }
+
+    tags
+}
+
+pub(crate) fn primary_from_tags(tags: &[String]) -> Option<String> {
+    let priority = [
+        "major_page_fault",
+        "runqueue_contention",
+        "cpu_frequency",
+        "irq_interference",
+        "gpu_frame_pressure",
+        "block_io",
+        "migration_or_cpu_mismatch",
+        "monitored_wakeup_backlog",
+    ];
+
+    priority
+        .iter()
+        .find(|candidate| tags.iter().any(|tag| tag == **candidate))
+        .map(|cause| cause.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use stutter_common::EVENT_RUNNABLE_LATENCY;
@@ -486,6 +549,7 @@ mod tests {
             prio: 120,
             waker_tid: 0,
             target_pending_wakeups: 0,
+            observed_runnable_depth: 0,
             maj_flt: 0,
             min_flt: 0,
             wakeup_ns: 2000,
@@ -508,5 +572,74 @@ mod tests {
         let decoded = read_event_unaligned::<SchedulerEvent>(&misaligned[1..]).unwrap();
         assert_eq!(decoded.kind, EVENT_RUNNABLE_LATENCY);
         assert_eq!(decoded.pid, 123);
+    }
+
+    #[test]
+    fn test_immediate_cause_tags() {
+        let mut event = SchedulerEvent {
+            kind: EVENT_RUNNABLE_LATENCY,
+            pid: 123,
+            cpu: 1,
+            wakeup_target_cpu: 1,
+            prio: 120,
+            waker_tid: 0,
+            target_pending_wakeups: 0,
+            observed_runnable_depth: 0,
+            maj_flt: 0,
+            min_flt: 0,
+            wakeup_ns: 0,
+            switch_ns: 0,
+            latency_ns: 1000,
+            comm: [0; 16],
+        };
+        let stats = metrics::TaskStats::new(123, "test".to_string(), 0);
+
+        // No tags
+        let tags = immediate_cause_tags(&event, &stats, (0, 0));
+        assert!(tags.is_empty());
+
+        // Major fault
+        let tags = immediate_cause_tags(&event, &stats, (1, 0));
+        assert!(tags.contains(&"major_page_fault".to_string()));
+
+        // Minor fault
+        let tags = immediate_cause_tags(&event, &stats, (0, 1));
+        assert!(tags.contains(&"minor_page_fault".to_string()));
+
+        // Wakeup backlog
+        event.target_pending_wakeups = 5;
+        let tags = immediate_cause_tags(&event, &stats, (0, 0));
+        assert!(tags.contains(&"monitored_wakeup_backlog".to_string()));
+
+        // Migration
+        event.target_pending_wakeups = 0;
+        event.wakeup_target_cpu = 2;
+        let tags = immediate_cause_tags(&event, &stats, (0, 0));
+        assert!(tags.contains(&"migration_or_cpu_mismatch".to_string()));
+    }
+
+    #[test]
+    fn test_primary_from_tags() {
+        let tags = vec![
+            "migration_or_cpu_mismatch".to_string(),
+            "major_page_fault".to_string(),
+        ];
+        // major_page_fault has higher priority
+        assert_eq!(
+            primary_from_tags(&tags),
+            Some("major_page_fault".to_string())
+        );
+
+        let tags = vec![
+            "monitored_wakeup_backlog".to_string(),
+            "migration_or_cpu_mismatch".to_string(),
+        ];
+        // migration_or_cpu_mismatch has higher priority
+        assert_eq!(
+            primary_from_tags(&tags),
+            Some("migration_or_cpu_mismatch".to_string())
+        );
+
+        assert_eq!(primary_from_tags(&[]), None);
     }
 }

@@ -43,6 +43,7 @@ pub struct LiveRecorder {
     pub block_io_event_writer: Option<JsonArrayWriter>,
     pub scx_event_writer: Option<JsonArrayWriter>,
     pub spike_event_writer: Option<JsonArrayWriter>,
+    pub frame_event_writer: Option<JsonArrayWriter>,
     pub csv_writer: Option<IntervalCsvWriter>,
 
     pub scx_events: Vec<crate::scx::ScxEvent>,
@@ -54,8 +55,11 @@ pub struct LiveRecorder {
     pub cpu_freq_sample_count: u64,
     pub gpu_sample_count: u64,
     pub block_io_event_count: u64,
-    pub spike_event_count: u64,
     pub interval_record_count: u64,
+    pub frame_event_count: u64,
+    #[allow(dead_code)]
+    pub frame_events_dropped: u64,
+    pub spike_event_count: u64,
     pub spike_events_dropped_count: u64,
     pub alert_events_dropped_count: u64,
     pub alert_channel_closed_count: u64,
@@ -546,6 +550,8 @@ pub struct RecordedConfig {
     #[serde(default)]
     pub mangohud_log: Option<PathBuf>,
     #[serde(default)]
+    pub mangohud_log_live: bool,
+    #[serde(default)]
     pub tui: bool,
     pub summary_period_ms: u64,
     #[serde(default)]
@@ -684,10 +690,14 @@ pub struct RecordedSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    // Diagnostic-only: see docs in `metrics::SpikeRecord`.
-    // Do not use this field in scoring or tuning decisions.
+    // Diagnostic-only count of monitored pending wakeups for this target/task.
+    // This is not CPU runqueue depth and must not be used as true CPU contention.
     #[serde(alias = "target_runnable_depth")]
     pub target_pending_wakeups: u32,
+    /// Approximate per-CPU runnable depth reconstructed from sched wakeup/switch
+    /// tracepoints. This is not literal rq->nr_running.
+    #[serde(default)]
+    pub observed_runnable_depth: u32,
     #[serde(default)]
     pub major_faults: u64,
     #[serde(default)]
@@ -698,6 +708,12 @@ pub struct RecordedSpike {
     pub scx_state: Option<String>,
     #[serde(default)]
     pub scx_enable_seq: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cause_tags: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_cause: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -715,10 +731,14 @@ pub struct SessionSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    // Diagnostic-only: see docs in `metrics::SpikeRecord`.
-    // Do not use this field in scoring or tuning decisions.
+    // Diagnostic-only count of monitored pending wakeups for this target/task.
+    // This is not CPU runqueue depth and must not be used as true CPU contention.
     #[serde(alias = "target_runnable_depth")]
     pub target_pending_wakeups: u32,
+    /// Approximate per-CPU runnable depth reconstructed from sched wakeup/switch
+    /// tracepoints. This is not literal rq->nr_running.
+    #[serde(default)]
+    pub observed_runnable_depth: u32,
     #[serde(default)]
     pub major_faults: u64,
     #[serde(default)]
@@ -729,6 +749,12 @@ pub struct SessionSpike {
     pub scx_state: Option<String>,
     #[serde(default)]
     pub scx_enable_seq: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cause_tags: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_cause: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -748,10 +774,14 @@ pub struct SpikeEvent {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    // Diagnostic-only: see docs in `metrics::SpikeRecord`.
-    // Do not use this field in scoring or tuning decisions.
+    // Diagnostic-only count of monitored pending wakeups for this target/task.
+    // This is not CPU runqueue depth and must not be used as true CPU contention.
     #[serde(alias = "target_runnable_depth")]
     pub target_pending_wakeups: u32,
+    /// Approximate per-CPU runnable depth reconstructed from sched wakeup/switch
+    /// tracepoints. This is not literal rq->nr_running.
+    #[serde(default)]
+    pub observed_runnable_depth: u32,
     #[serde(default)]
     pub major_faults: u64,
     #[serde(default)]
@@ -762,6 +792,12 @@ pub struct SpikeEvent {
     pub scx_state: Option<String>,
     #[serde(default)]
     pub scx_enable_seq: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cause_tags: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_cause: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -781,15 +817,21 @@ pub struct CpuFreqRecord {
     pub timestamp_ns: u64,
 }
 
+pub struct SpikeDiagnosticContext {
+    pub scx_ops: Option<String>,
+    pub scx_state: Option<String>,
+    pub scx_enable_seq: Option<String>,
+    pub cause_tags: Vec<String>,
+    pub primary_cause: Option<String>,
+}
+
 impl SpikeEvent {
     pub fn from_task_stats(
         monotonic_start_ns: Option<u64>,
         stats: &TaskStats,
         event: &SchedulerEvent,
         fault_deltas: (u64, u64),
-        scx_ops: Option<String>,
-        scx_state: Option<String>,
-        scx_enable_seq: Option<String>,
+        diag: SpikeDiagnosticContext,
     ) -> Self {
         Self {
             elapsed_ms: elapsed_ms_from_monotonic(monotonic_start_ns, event.switch_ns),
@@ -806,11 +848,14 @@ impl SpikeEvent {
             wakeup_ns: event.wakeup_ns,
             switch_ns: event.switch_ns,
             target_pending_wakeups: event.target_pending_wakeups,
+            observed_runnable_depth: event.observed_runnable_depth,
             major_faults: fault_deltas.0,
             minor_faults: fault_deltas.1,
-            scx_ops,
-            scx_state,
-            scx_enable_seq,
+            scx_ops: diag.scx_ops,
+            scx_state: diag.scx_state,
+            scx_enable_seq: diag.scx_enable_seq,
+            cause_tags: diag.cause_tags,
+            primary_cause: diag.primary_cause,
         }
     }
 }
@@ -863,7 +908,7 @@ fn default_block_io_correlation_basis() -> String {
     "dev+sector".to_owned()
 }
 
-pub const SESSION_SCHEMA_VERSION: u32 = 19;
+pub const SESSION_SCHEMA_VERSION: u32 = 20;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CpuPerfStatus {
@@ -1030,11 +1075,14 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
                 wakeup_ns: spike.wakeup_ns,
                 switch_ns: spike.switch_ns,
                 target_pending_wakeups: spike.target_pending_wakeups,
+                observed_runnable_depth: spike.observed_runnable_depth,
                 major_faults: spike.major_faults,
                 minor_faults: spike.minor_faults,
                 scx_ops: spike.scx_ops.clone(),
                 scx_state: spike.scx_state.clone(),
                 scx_enable_seq: spike.scx_enable_seq.clone(),
+                cause_tags: spike.cause_tags.clone(),
+                primary_cause: spike.primary_cause.clone(),
             });
         }
     }
@@ -1082,7 +1130,11 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         migration_event_count: Some(recorder.migration_event_count),
         cpu_freq_sample_count: Some(recorder.cpu_freq_sample_count),
         gpu_sample_count,
-        frame_event_count: frame_events.len() as u64,
+        frame_event_count: if recorder.frame_event_writer.is_some() {
+            recorder.frame_event_count
+        } else {
+            frame_events.len() as u64
+        },
         block_io_event_count: recorder.block_io_event_count,
         event_stream_write_errors: recorder.event_stream_write_errors,
         alert_events_dropped_count: recorder.alert_events_dropped_count,
@@ -1150,7 +1202,11 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         migration_event_count: Some(recorder.migration_event_count),
         cpu_freq_sample_count: Some(recorder.cpu_freq_sample_count),
         gpu_sample_count,
-        frame_event_count: frame_events.len() as u64,
+        frame_event_count: if recorder.frame_event_writer.is_some() {
+            recorder.frame_event_count
+        } else {
+            frame_events.len() as u64
+        },
         block_io_event_count: recorder.block_io_event_count,
         event_stream_write_errors: recorder.event_stream_write_errors,
         alert_events_dropped_count: recorder.alert_events_dropped_count,
@@ -1212,12 +1268,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         )
         .map_err(map_write_err)?;
     }
-    if !frame_events.is_empty() {
-        write_json_stream(
-            recording.run_dir.join("frame_correlation.json"),
-            frame_events,
-        )
-        .map_err(map_write_err)?;
+    if recorder.frame_event_writer.is_none() && !frame_events.is_empty() {
+        write_json_stream(recording.run_dir.join("frame_events.json"), frame_events)
+            .map_err(map_write_err)?;
     }
     if recorder.scx_event_writer.is_none() && !recorder.scx_events.is_empty() {
         write_json_stream(
@@ -1264,6 +1317,7 @@ pub fn recorded_config(config: &Config, tree_pids: &[u32]) -> RecordedConfig {
         hwmon_drm_card: config.hwmon_drm_card.clone(),
         hwmon_render_node: config.hwmon_render_node.clone(),
         mangohud_log: config.mangohud_log.clone(),
+        mangohud_log_live: config.mangohud_log_live,
         tui: config.tui,
         summary_period_ms: config.summary_period_ms,
         epoch_period_ms: config.epoch_period_ms,
@@ -1402,11 +1456,14 @@ fn recorded_spike(stats: &TaskStats, spike: &SpikeRecord) -> RecordedSpike {
         wakeup_ns: spike.wakeup_ns,
         switch_ns: spike.switch_ns,
         target_pending_wakeups: spike.target_pending_wakeups,
+        observed_runnable_depth: spike.observed_runnable_depth,
         major_faults: spike.major_faults,
         minor_faults: spike.minor_faults,
         scx_ops: spike.scx_ops.clone(),
         scx_state: spike.scx_state.clone(),
         scx_enable_seq: spike.scx_enable_seq.clone(),
+        cause_tags: spike.cause_tags.clone(),
+        primary_cause: spike.primary_cause.clone(),
     }
 }
 
@@ -1749,11 +1806,14 @@ mod tests {
             wakeup_ns: 0,
             switch_ns: 0,
             target_pending_wakeups: 0,
+            observed_runnable_depth: 0,
             major_faults: 0,
             minor_faults: 0,
             scx_ops: None,
             scx_state: None,
             scx_enable_seq: None,
+            cause_tags: Vec::new(),
+            primary_cause: None,
         };
 
         assert_eq!(buf.push(event.clone()), SpikePushResult::Stored);
@@ -1778,11 +1838,14 @@ mod tests {
             wakeup_ns: 2000,
             switch_ns: 3000,
             target_pending_wakeups: 0,
+            observed_runnable_depth: 0,
             major_faults: 1,
             minor_faults: 2,
             scx_ops: Some("scx_lavd".to_owned()),
             scx_state: Some("enabled".to_owned()),
             scx_enable_seq: Some("1".to_owned()),
+            cause_tags: vec!["cpu_pressure".to_string()],
+            primary_cause: Some("cpu_pressure".to_string()),
         };
 
         let json = serde_json::to_string(&event).unwrap();

@@ -33,6 +33,9 @@ pub struct LoadedEbpf {
     pub events: AsyncFd<RingBuf<MapData>>,
     pub target_pid_map: AyaHashMap<MapData, u32, u8>,
     pub target_irq_map: Option<AyaHashMap<MapData, u32, u8>>,
+    // Stored to keep the optional native cgroup map FD alive for the session.
+    #[allow(dead_code)]
+    pub target_cgroup_map: Option<AyaHashMap<MapData, u64, u8>>,
     pub prev_faults_map: Option<AyaHashMap<MapData, u32, [u64; 2]>>, // (tid) -> (maj, min)
     pub block_io_correlation_basis: BlockIoCorrelationBasis,
     drop_counters: PerCpuArray<MapData, u64>,
@@ -99,6 +102,22 @@ impl LoadedEbpf {
             ),
         }
     }
+}
+
+#[cfg(unix)]
+pub fn resolve_cgroup_id_best_effort(path: &Path) -> anyhow::Result<u64> {
+    use std::os::unix::fs::MetadataExt;
+
+    // Experimental best-effort cgroup id resolver. bpf_get_current_cgroup_id()
+    // returns a kernel cgroup id; for cgroup v2 the directory inode is commonly
+    // usable, but this is not a full replacement for PID expansion.
+    let metadata = fs::metadata(path)?;
+    Ok(metadata.ino())
+}
+
+#[cfg(not(unix))]
+pub fn resolve_cgroup_id_best_effort(_path: &Path) -> anyhow::Result<u64> {
+    anyhow::bail!("native cgroup filtering is only supported on Unix/Linux");
 }
 
 pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf> {
@@ -277,12 +296,45 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         .transpose()
         .context("eBPF load failed: PREV_FAULTS map init")?;
 
+    let target_cgroup_map = if config.native_cgroup_filter {
+        let cgroup_path = config
+            .cgroupv2
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("native cgroup filtering requires --cgroupv2 PATH"))?;
+        let cgroup_id = resolve_cgroup_id_best_effort(cgroup_path).with_context(|| {
+            format!(
+                "failed to resolve native cgroup id for {}",
+                cgroup_path.display()
+            )
+        })?;
+
+        let mut map = AyaHashMap::<_, u64, u8>::try_from(
+            ebpf.take_map("TARGET_CGROUP_IDS")
+                .context("eBPF load failed: TARGET_CGROUP_IDS map not found")?,
+        )
+        .context("eBPF load failed: TARGET_CGROUP_IDS map init")?;
+        map.insert(cgroup_id, 1, 0)
+            .context("failed to insert TARGET_CGROUP_IDS entry")?;
+        log::info!(
+            "native_cgroup_filter enabled cgroup_path={} cgroup_id={}",
+            cgroup_path.display(),
+            cgroup_id
+        );
+        Some(map)
+    } else {
+        None
+    };
+
     if let Some(cgroup_path) = &config.cgroupv2 {
         // Pre-populate TARGET_PIDS from the cgroup hierarchy to avoid races
         // where a task appears in sched events before the eBPF-side target
-        // maps are populated. Use a filtered snapshot to ensure that we
-        // respect user-provided filters and do not exceed crate::cli::TARGET_PIDS_MAX
-        // due to unrelated tasks in the same cgroup.
+        // maps are populated. Native cgroup filtering only applies to
+        // current-task probes; scheduler wakeup target filtering still needs
+        // TARGET_PIDS because bpf_get_current_cgroup_id() reports the
+        // waker/current task, not the wakee pid in sched_wakeup. Use a filtered
+        // snapshot to ensure that we respect user-provided filters and do not
+        // exceed crate::cli::TARGET_PIDS_MAX due to unrelated tasks in the same
+        // cgroup.
         let mut cache = crate::process_tree::ProcessCache::default();
         let snapshot = crate::process_tree::target_snapshot(
             crate::process_tree::TargetSnapshotInput::default()
@@ -332,6 +384,7 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         events,
         target_pid_map,
         target_irq_map,
+        target_cgroup_map,
         prev_faults_map,
         block_io_correlation_basis,
         drop_counters,

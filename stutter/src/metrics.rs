@@ -22,12 +22,14 @@ pub struct SpikeRecord {
     pub prio: i32,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    // Diagnostic-only: counter of monitored wakeups that were still
-    // pending on the CPU that actually ran the task after dequeue/migration.
-    // This is NOT the kernel runqueue depth and MUST NOT be used in
-    // scoring or tuning decisions.
+    /// Diagnostic-only count of monitored pending wakeups for this target/task.
+    /// This is not CPU runqueue depth and must not be used as true CPU contention.
     #[serde(alias = "target_runnable_depth")]
     pub target_pending_wakeups: u32,
+    /// Approximate per-CPU runnable depth reconstructed from sched wakeup/switch
+    /// tracepoints. This is not literal rq->nr_running.
+    #[serde(default)]
+    pub observed_runnable_depth: u32,
     #[serde(default)]
     pub major_faults: u64,
     #[serde(default)]
@@ -38,6 +40,12 @@ pub struct SpikeRecord {
     pub scx_state: Option<String>,
     #[serde(default)]
     pub scx_enable_seq: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cause_tags: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_cause: Option<String>,
 }
 
 #[derive(Clone)]
@@ -656,11 +664,14 @@ impl TaskStats {
                 wakeup_ns: event.wakeup_ns,
                 switch_ns: event.switch_ns,
                 target_pending_wakeups: event.target_pending_wakeups,
+                observed_runnable_depth: event.observed_runnable_depth,
                 major_faults,
                 minor_faults,
                 scx_ops,
                 scx_state,
                 scx_enable_seq,
+                cause_tags: Vec::new(),
+                primary_cause: None,
             });
 
             self.top_spikes
@@ -1020,14 +1031,15 @@ mod tests {
             cpu: 0,
             wakeup_target_cpu: 0,
             prio: 120,
+            waker_tid: 0,
+            target_pending_wakeups: 0,
+            observed_runnable_depth: 0,
+            maj_flt: 0,
+            min_flt: 0,
             wakeup_ns: 100,
             switch_ns: 200,
             latency_ns: 100,
             comm: [0; 16],
-            waker_tid: 0,
-            target_pending_wakeups: 0,
-            maj_flt: 0,
-            min_flt: 0,
         };
 
         // 1. First event establishes baseline: 10 faults
@@ -1094,14 +1106,15 @@ mod tests {
             cpu: 0,
             wakeup_target_cpu: 0,
             prio: 120,
-            wakeup_ns: 100,
-            switch_ns: 200,
-            latency_ns: 1_000,
-            comm: [0; 16],
             waker_tid: 0,
             target_pending_wakeups: 0,
+            observed_runnable_depth: 0,
             maj_flt: 0,
             min_flt: 0,
+            wakeup_ns: 1000,
+            switch_ns: 2000,
+            latency_ns: 1_000,
+            comm: [0; 16],
         };
         stats.record(&event, 1_000_000, 0, None, None, None);
 

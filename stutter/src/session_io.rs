@@ -131,6 +131,7 @@ const TREE_EVENTS_FILE: &str = "tree_events.json";
 const IRQ_EVENTS_FILE: &str = "irq_events.json";
 const GPU_SAMPLES_FILE: &str = "gpu_samples.json";
 const FRAME_EVENTS_FILE: &str = "frame_correlation.json";
+const FRAME_EVENTS_STREAM_FILE: &str = "frame_events.json";
 const MIGRATION_EVENTS_FILE: &str = "migration_events.json";
 const CPU_FREQ_EVENTS_FILE: &str = "cpu_freq_samples.json";
 const BLOCK_IO_EVENTS_FILE: &str = "io_events.json";
@@ -294,11 +295,14 @@ pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<R
                 wakeup_ns: s.wakeup_ns,
                 switch_ns: s.switch_ns,
                 target_pending_wakeups: s.target_pending_wakeups,
+                observed_runnable_depth: s.observed_runnable_depth,
                 major_faults: s.major_faults,
                 minor_faults: s.minor_faults,
                 scx_ops: s.scx_ops.clone(),
                 scx_state: s.scx_state.clone(),
                 scx_enable_seq: s.scx_enable_seq.clone(),
+                cause_tags: s.cause_tags.clone(),
+                primary_cause: s.primary_cause.clone(),
             })
             .collect();
     }
@@ -322,7 +326,25 @@ pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<R
     };
 
     let frame_events = if options.load_frame_events {
-        load_optional_json_vec(&run_dir, FRAME_EVENTS_FILE, &mut validation)?
+        let mut events = load_optional_json_vec(&run_dir, FRAME_EVENTS_FILE, &mut validation)?;
+        if events.is_empty() {
+            let stream_path = json_path_for(&run_dir, FRAME_EVENTS_STREAM_FILE);
+            if stream_path.exists() {
+                events = load_ndjson_file(&stream_path)?;
+                if !validation
+                    .present_files
+                    .contains(&FRAME_EVENTS_STREAM_FILE.to_owned())
+                {
+                    validation
+                        .present_files
+                        .push(FRAME_EVENTS_STREAM_FILE.to_owned());
+                }
+                validation
+                    .missing_optional_files
+                    .retain(|f| f != FRAME_EVENTS_FILE);
+            }
+        }
+        events
     } else {
         Vec::new()
     };
@@ -599,7 +621,17 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
     ];
 
     for (file_name, type_name) in optional_artifacts {
-        let path = report.run_dir.join(file_name);
+        let mut path = report.run_dir.join(file_name);
+        let mut actual_file_name = file_name.to_owned();
+
+        if file_name == FRAME_EVENTS_FILE && !path.exists() {
+            let stream_path = report.run_dir.join(FRAME_EVENTS_STREAM_FILE);
+            if stream_path.exists() {
+                path = stream_path;
+                actual_file_name = FRAME_EVENTS_STREAM_FILE.to_owned();
+            }
+        }
+
         if path.exists() {
             let res = match type_name {
                 "IntervalRecord" => validate_ndjson_file::<IntervalRecord>(&path),
@@ -617,10 +649,12 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
 
             match res {
                 Ok(_) => {
-                    report.present_files.push(file_name.to_owned());
+                    report.present_files.push(actual_file_name);
                 }
                 Err(e) => {
-                    report.errors.push(format!("{file_name} invalid: {e:#}"));
+                    report
+                        .errors
+                        .push(format!("{actual_file_name} invalid: {e:#}"));
                 }
             }
         } else {
@@ -759,6 +793,7 @@ mod tests {
                 hwmon_drm_card: None,
                 hwmon_render_node: None,
                 mangohud_log: None,
+                mangohud_log_live: false,
                 tui: false,
                 summary_period_ms: 1000,
                 epoch_period_ms: None,

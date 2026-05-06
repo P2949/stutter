@@ -2,7 +2,10 @@
 #![no_main]
 
 use aya_ebpf::{
-    helpers::{bpf_get_current_pid_tgid, bpf_get_smp_processor_id, bpf_ktime_get_ns},
+    helpers::{
+        bpf_get_current_cgroup_id, bpf_get_current_pid_tgid, bpf_get_smp_processor_id,
+        bpf_ktime_get_ns,
+    },
     macros::{map, tracepoint},
     maps::{Array, HashMap, LruHashMap, PerCpuArray, RingBuf},
     programs::TracePointContext,
@@ -39,6 +42,9 @@ static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 static TARGET_PIDS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(1024, 0);
 
 #[map]
+static TARGET_CGROUP_IDS: HashMap<u64, u8> = HashMap::<u64, u8>::with_max_entries(64, 0);
+
+#[map]
 static TARGET_IRQS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(64, 0);
 
 #[repr(C)]
@@ -57,12 +63,19 @@ static WAKEUP_DATA: HashMap<u32, WakeupData> =
 static IRQ_START_TIMES: HashMap<u64, u64> = HashMap::<u64, u64>::with_max_entries(1024, 0);
 
 #[map]
-// Diagnostic-only per-CPU counter of *monitored* wakeups that are still
-// pending on a CPU. This records other monitored wakeup records still
-// present on the CPU that actually ran the task after dequeue/migration.
-// It is NOT the kernel runqueue depth and MUST NOT be used in scoring or
-// tuning decisions in userspace.
+// Diagnostic-only count of monitored pending wakeups for this target/task.
+// This is not CPU runqueue depth and must not be used as true CPU contention.
 static TARGET_PENDING_WAKEUPS: Array<u32> = Array::<u32>::with_max_entries(1024, 0);
+
+#[map]
+// Approximate per-CPU runnable depth reconstructed from sched wakeup/switch
+// tracepoints. This is not literal rq->nr_running.
+static CPU_RUNNABLE_DEPTH: Array<u32> = Array::<u32>::with_max_entries(1024, 0);
+
+#[map]
+// Per-pid mapping to the CPU where it was last counted as runnable.
+// Used to move counts during migration and avoid double-counting.
+static RUNNABLE_TASK_CPU: LruHashMap<u32, u32> = LruHashMap::<u32, u32>::with_max_entries(65536, 0);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -134,7 +147,7 @@ fn try_sched_process_exec(_ctx: TracePointContext) -> Result<u32, u32> {
     let pid = (pid_tgid >> 32) as u32;
     let tid = (pid_tgid & 0xffff_ffff) as u32;
 
-    if !is_target_pid(pid) && !is_target_pid(tid) {
+    if !is_target_pid(pid) && !is_target_pid_or_current_cgroup(tid) {
         return Ok(0);
     }
 
@@ -176,6 +189,8 @@ pub fn sched_stat_wait(ctx: TracePointContext) -> u32 {
 pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
 
+    remove_runnable_task_if_present(tid);
+
     if let Some(old) = unsafe { WAKEUP_DATA.get(tid).copied() } {
         decrement_target_pending(old.target_cpu);
     }
@@ -188,7 +203,7 @@ pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
 #[aya_ebpf::macros::perf_event]
 pub fn major_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
-    if is_target_pid(tid) {
+    if is_target_pid_or_current_cgroup(tid) {
         if let Some(counters) = PREV_FAULTS.get_ptr_mut(tid) {
             unsafe { (*counters).maj += 1 };
         } else {
@@ -201,7 +216,7 @@ pub fn major_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
 #[aya_ebpf::macros::perf_event]
 pub fn minor_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
-    if is_target_pid(tid) {
+    if is_target_pid_or_current_cgroup(tid) {
         if let Some(counters) = PREV_FAULTS.get_ptr_mut(tid) {
             unsafe { (*counters).min += 1 };
         } else {
@@ -227,11 +242,25 @@ pub fn irq_handler_exit(ctx: TracePointContext) -> u32 {
     }
 }
 
+#[inline(always)]
+fn is_target_current_cgroup() -> bool {
+    // Experimental current-task filter. This must not be used for wakee pid
+    // fields from scheduler tracepoints.
+    let cgroup_id = unsafe { bpf_get_current_cgroup_id() };
+    unsafe { TARGET_CGROUP_IDS.get(cgroup_id).is_some() }
+}
+
+#[inline(always)]
 fn is_target_pid(pid: u32) -> bool {
     // Only consider explicit per-TID entries populated from userspace.
     // Avoid relying on eBPF cgroup heuristics for discovery — userspace
     // periodically refreshes `TARGET_PIDS` from the cgroup tree.
     unsafe { TARGET_PIDS.get(pid).is_some() }
+}
+
+#[inline(always)]
+fn is_target_pid_or_current_cgroup(pid: u32) -> bool {
+    is_target_pid(pid) || is_target_current_cgroup()
 }
 
 fn is_target_irq(irq: u32) -> bool {
@@ -252,6 +281,90 @@ fn increment_drop_counter(reason: u32) {
     }
 }
 
+#[inline(always)]
+fn valid_cpu(cpu: u32) -> bool {
+    cpu < 1024
+}
+
+#[inline(always)]
+fn read_cpu_runnable_depth(cpu: u32) -> u32 {
+    if !valid_cpu(cpu) {
+        return 0;
+    }
+    CPU_RUNNABLE_DEPTH.get(cpu).copied().unwrap_or(0)
+}
+
+#[inline(always)]
+fn increment_cpu_runnable_depth(cpu: u32) {
+    if !valid_cpu(cpu) {
+        return;
+    }
+    if let Some(depth) = CPU_RUNNABLE_DEPTH.get_ptr_mut(cpu) {
+        unsafe { *depth = (*depth).saturating_add(1) };
+    }
+}
+
+#[inline(always)]
+fn decrement_cpu_runnable_depth(cpu: u32) {
+    if !valid_cpu(cpu) {
+        return;
+    }
+    if let Some(depth) = CPU_RUNNABLE_DEPTH.get_ptr_mut(cpu) {
+        unsafe { *depth = (*depth).saturating_sub(1) };
+    }
+}
+
+#[inline(always)]
+fn mark_task_runnable(pid: u32, target_cpu: u32) {
+    if pid == 0 || !valid_cpu(target_cpu) {
+        return;
+    }
+
+    match unsafe { RUNNABLE_TASK_CPU.get(pid).copied() } {
+        Some(old_cpu) if old_cpu == target_cpu => {
+            // Already counted on the same CPU.
+        }
+        Some(old_cpu) => {
+            // Migrated while runnable.
+            decrement_cpu_runnable_depth(old_cpu);
+            increment_cpu_runnable_depth(target_cpu);
+            let _ = RUNNABLE_TASK_CPU.insert(pid, target_cpu, 0);
+        }
+        None => {
+            increment_cpu_runnable_depth(target_cpu);
+            let _ = RUNNABLE_TASK_CPU.insert(pid, target_cpu, 0);
+        }
+    }
+}
+
+#[inline(always)]
+fn mark_task_running(pid: u32, current_cpu: u32) {
+    if pid == 0 {
+        return;
+    }
+
+    if let Some(stored_cpu) = unsafe { RUNNABLE_TASK_CPU.get(pid).copied() } {
+        let cpu_to_decrement = if valid_cpu(stored_cpu) {
+            stored_cpu
+        } else {
+            current_cpu
+        };
+        decrement_cpu_runnable_depth(cpu_to_decrement);
+        let _ = RUNNABLE_TASK_CPU.remove(pid);
+    }
+}
+
+#[inline(always)]
+fn remove_runnable_task_if_present(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    if let Some(cpu) = unsafe { RUNNABLE_TASK_CPU.get(pid).copied() } {
+        decrement_cpu_runnable_depth(cpu);
+        let _ = RUNNABLE_TASK_CPU.remove(pid);
+    }
+}
+
 fn increment_target_pending(cpu: u32) {
     if let Some(depth) = TARGET_PENDING_WAKEUPS.get_ptr_mut(cpu) {
         // Diagnostic-only increment.
@@ -268,20 +381,23 @@ fn decrement_target_pending(cpu: u32) {
 
 fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
     let pid: i32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
+    let target_cpu: u32 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
 
     if pid <= 0 {
         return Ok(0);
     }
 
     let pid = pid as u32;
-    // Only process explicit per-TID targets; userspace is responsible for
-    // keeping `TARGET_PIDS` up to date for cgroup-based targeting.
+
+    // New: update global runnable tracking for every task first.
+    mark_task_runnable(pid, target_cpu);
+
+    // Keep PID filtering here. current_cgroup is the waker, not the wakee.
     if !is_target_pid(pid) {
         return Ok(0);
     }
 
     let now = unsafe { bpf_ktime_get_ns() };
-    let target_cpu: u32 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
     let waker_tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
 
     let data = WakeupData {
@@ -331,7 +447,15 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
     // (inserted by sched_wakeup). Treat that as sufficient evidence this is
     // a target-related event.
 
-    let cpu = unsafe { bpf_get_smp_processor_id() };
+    let cpu = unsafe { bpf_get_smp_processor_id() } as u32;
+
+    // Every sched_switch means next_pid is now running, so it is no longer
+    // counted as runnable in our approximation.
+    mark_task_running(pid, cpu);
+
+    // Read depth after removing next_pid. This represents remaining runnable
+    // tasks on the CPU.
+    let observed_runnable_depth = read_cpu_runnable_depth(cpu);
 
     // Decrement the target-pending counter for the CPU where the task was
     // originally queued. This is not kernel runqueue depth.
@@ -366,6 +490,7 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
         (*event).prio = prio;
         (*event).waker_tid = waker_tid;
         (*event).target_pending_wakeups = target_pending_wakeups;
+        (*event).observed_runnable_depth = observed_runnable_depth;
         (*event).maj_flt = faults.maj;
         (*event).min_flt = faults.min;
         (*event).wakeup_ns = wakeup_ns;
@@ -394,8 +519,19 @@ fn try_sched_migrate_task(ctx: TracePointContext) -> Result<u32, u32> {
     let dest_cpu: i32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
     let now = unsafe { bpf_ktime_get_ns() };
 
-    // If this task is currently runnable (has a pending wakeup), update its
-    // target CPU and move its pending counter to the destination.
+    // Goal: Move global runnable count if this task migrates.
+    match unsafe { RUNNABLE_TASK_CPU.get(pid).copied() } {
+        Some(old_cpu) if old_cpu != dest_cpu as u32 => {
+            let new_cpu = dest_cpu as u32;
+            decrement_cpu_runnable_depth(old_cpu);
+            increment_cpu_runnable_depth(new_cpu);
+            let _ = RUNNABLE_TASK_CPU.insert(pid, new_cpu, 0);
+        }
+        _ => {}
+    }
+
+    // If this task is currently a monitored target with a pending wakeup,
+    // update its target CPU and move its diagnostic-only pending counter.
     if let Some(data) = WAKEUP_DATA.get_ptr_mut(pid) {
         let old_cpu = unsafe { (*data).target_cpu };
         let new_cpu = dest_cpu as u32;
@@ -554,7 +690,7 @@ fn try_block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
     // Only track starts for target tasks so unrelated system I/O cannot
     // evict target entries from the start LRU map.
-    if !is_target_pid(tid) {
+    if !is_target_pid_or_current_cgroup(tid) {
         return Ok(0);
     }
     let ts = unsafe { bpf_ktime_get_ns() };
