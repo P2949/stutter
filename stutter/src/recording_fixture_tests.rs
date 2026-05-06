@@ -487,7 +487,7 @@ fn report_rejects_missing_required_artifacts() {
     fs::create_dir_all(&temp).unwrap();
 
     // Call the report loading helper. It should fail because the directory is empty.
-    let result = report::print_report(&temp, false, false, 10, 500, None);
+    let result = report::print_report(&temp, false, false, false, 10, 500, None);
 
     assert!(result.is_err());
     let err_msg = format!("{:?}", result.err().unwrap()).to_lowercase();

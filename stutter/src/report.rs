@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, BinaryHeap},
     fs,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use anyhow::Context;
@@ -17,6 +17,7 @@ use crate::{
         FrameEvent, RecordedSpike, SESSION_SCHEMA_VERSION, SessionFile, SessionTask, SpikeEvent,
     },
     session_io::{self, ArtifactLoadOptions},
+    summary::{self, RunDiffSummary, TaskDeltaSummary, format_latency_signed},
 };
 
 const MIN_CLUSTER_TASKS: usize = 3;
@@ -270,6 +271,7 @@ pub fn print_report(
     path: &Path,
     json: bool,
     analysis_json: bool,
+    json_summary: bool,
     top: usize,
     cluster_window_ms: u64,
     filter_class: Option<TaskClass>,
@@ -279,6 +281,12 @@ pub fn print_report(
         log_run_validation(path, &validation);
         let session = session_io::load_session(path)?;
         println!("{}", serde_json::to_string_pretty(&session)?);
+        return Ok(());
+    }
+
+    if json_summary {
+        let summary = summary::build_compact_run_summary(path, top, filter_class)?;
+        println!("{}", serde_json::to_string_pretty(&summary)?);
         return Ok(());
     }
 
@@ -316,9 +324,11 @@ pub fn render_diff_report(
     top: usize,
     filter_class: Option<TaskClass>,
 ) -> anyhow::Result<String> {
-    let session_a = crate::session_io::load_session(path_a)?;
-    let session_b = crate::session_io::load_session(path_b)?;
+    let diff = summary::build_run_diff_summary(path_a, path_b, filter_class)?;
+    Ok(render_run_diff_summary(&diff, top))
+}
 
+fn render_run_diff_summary(diff: &RunDiffSummary, top: usize) -> String {
     let mut output = String::new();
     pushln(&mut output, "stutter diff report");
     pushln(&mut output, "===================");
@@ -326,114 +336,27 @@ pub fn render_diff_report(
         &mut output,
         format!(
             "run_a: {} ({}ms)",
-            session_a.run_name.as_deref().unwrap_or("-"),
-            session_a.duration_ms,
+            diff.baseline_run_name.as_deref().unwrap_or("-"),
+            diff.baseline_duration_ms,
         ),
     );
     pushln(
         &mut output,
         format!(
             "run_b: {} ({}ms)",
-            session_b.run_name.as_deref().unwrap_or("-"),
-            session_b.duration_ms,
+            diff.current_run_name.as_deref().unwrap_or("-"),
+            diff.current_duration_ms,
         ),
     );
     pushln(&mut output, "");
 
-    // Aggregate tasks by stable identity (class, process_comm, comm). Many
-    // games spawn multiple worker threads with the same `comm`; collapsing
-    // them loses information. Aggregate counts by summing counters and
-    // taking conservative maxima for latency metrics.
-    #[derive(Clone)]
-    struct Agg {
-        max_ns: u64,
-        p99_ns: u64,
-        over_1ms: u64,
-    }
-
-    let mut tasks_a: BTreeMap<(TaskClass, String, String), Agg> = BTreeMap::new();
-    for t in session_a
-        .tasks
-        .iter()
-        .filter(|t| t.latency.samples > 0)
-        .filter(|t| filter_class.is_none_or(|c| t.class == c))
-    {
-        let key = (t.class, t.process_comm.to_string(), t.comm.clone());
-        let entry = tasks_a.entry(key.clone()).or_insert(Agg {
-            max_ns: 0,
-            p99_ns: 0,
-            over_1ms: 0,
-        });
-        entry.max_ns = entry.max_ns.max(t.latency.max_ns);
-        entry.p99_ns = entry.p99_ns.max(t.latency.p99_ns);
-        entry.over_1ms = entry.over_1ms.saturating_add(t.latency.over_1ms);
-    }
-
-    let mut tasks_b: BTreeMap<(TaskClass, String, String), Agg> = BTreeMap::new();
-    for t in session_b
-        .tasks
-        .iter()
-        .filter(|t| t.latency.samples > 0)
-        .filter(|t| filter_class.is_none_or(|c| t.class == c))
-    {
-        let key = (t.class, t.process_comm.to_string(), t.comm.clone());
-        let entry = tasks_b.entry(key.clone()).or_insert(Agg {
-            max_ns: 0,
-            p99_ns: 0,
-            over_1ms: 0,
-        });
-        entry.max_ns = entry.max_ns.max(t.latency.max_ns);
-        entry.p99_ns = entry.p99_ns.max(t.latency.p99_ns);
-        entry.over_1ms = entry.over_1ms.saturating_add(t.latency.over_1ms);
-    }
-
-    struct TaskDelta {
-        comm: String,
-        process_comm: String,
-        class: TaskClass,
-        delta_max_ns: i64,
-        delta_p99_ns: i64,
-        delta_over_1ms: i64,
-        max_a: u64,
-        max_b: u64,
-    }
-
-    let mut regressions = Vec::new();
-    let mut improvements = Vec::new();
-
-    for (key, ta) in &tasks_a {
-        if let Some(tb) = tasks_b.get(key) {
-            let delta_max = tb.max_ns as i64 - ta.max_ns as i64;
-            let delta_p99 = tb.p99_ns as i64 - ta.p99_ns as i64;
-            let delta_over = tb.over_1ms as i64 - ta.over_1ms as i64;
-            let d = TaskDelta {
-                comm: key.2.clone(),
-                process_comm: key.1.clone(),
-                class: key.0,
-                delta_max_ns: delta_max,
-                delta_p99_ns: delta_p99,
-                delta_over_1ms: delta_over,
-                max_a: ta.max_ns,
-                max_b: tb.max_ns,
-            };
-            if delta_max > 0 {
-                regressions.push(d);
-            } else if delta_max < 0 {
-                improvements.push(d);
-            }
-        }
-    }
-
-    regressions.sort_by_key(|d| std::cmp::Reverse(d.delta_max_ns));
-    improvements.sort_by_key(|d| d.delta_max_ns);
-
     pushln(&mut output, "summary highlights");
     pushln(&mut output, "------------------");
-    if let Some(worst) = regressions.first() {
-        let pct = if worst.max_a > 0 {
+    if let Some(worst) = &diff.worst_max_regression {
+        let pct = if worst.baseline_max_ns > 0 {
             format!(
                 " (+{:.1}%)",
-                (worst.delta_max_ns as f64 / worst.max_a as f64) * 100.0
+                (worst.delta_max_ns as f64 / worst.baseline_max_ns as f64) * 100.0
             )
         } else {
             String::new()
@@ -443,17 +366,17 @@ pub fn render_diff_report(
             format!(
                 "biggest regression:  {} on comm={} process={}{}",
                 format_latency_signed(worst.delta_max_ns),
-                worst.comm,
-                worst.process_comm,
+                worst.identity.comm,
+                worst.identity.process_comm,
                 pct
             ),
         );
     }
-    if let Some(best) = improvements.first() {
-        let pct = if best.max_a > 0 {
+    if let Some(best) = diff.improvements.first() {
+        let pct = if best.baseline_max_ns > 0 {
             format!(
                 " ({:.1}%)",
-                (best.delta_max_ns as f64 / best.max_a as f64) * 100.0
+                (best.delta_max_ns as f64 / best.baseline_max_ns as f64) * 100.0
             )
         } else {
             String::new()
@@ -463,8 +386,8 @@ pub fn render_diff_report(
             format!(
                 "biggest improvement: {} on comm={} process={}{}",
                 format_latency_signed(best.delta_max_ns),
-                best.comm,
-                best.process_comm,
+                best.identity.comm,
+                best.identity.process_comm,
                 pct
             ),
         );
@@ -473,19 +396,19 @@ pub fn render_diff_report(
 
     pushln(&mut output, "regressions (worse in run_b)");
     pushln(&mut output, "---------------------------");
-    if regressions.is_empty() {
+    if diff.regressions.is_empty() {
         pushln(&mut output, "none");
     }
-    for d in regressions.iter().take(top) {
+    for d in diff.regressions.iter().take(top) {
         pushln(
             &mut output,
             format!(
                 "class={:?} comm={} process={} max: {} -> {} (delta={}) p99_delta={} over_1ms_delta={}",
-                d.class,
-                d.comm,
-                d.process_comm,
-                format_latency(d.max_a),
-                format_latency(d.max_b),
+                d.identity.class,
+                d.identity.comm,
+                d.identity.process_comm,
+                format_latency(d.baseline_max_ns),
+                format_latency(d.current_max_ns),
                 format_latency_signed(d.delta_max_ns),
                 format_latency_signed(d.delta_p99_ns),
                 if d.delta_over_1ms >= 0 {
@@ -500,19 +423,19 @@ pub fn render_diff_report(
 
     pushln(&mut output, "improvements (better in run_b)");
     pushln(&mut output, "-----------------------------");
-    if improvements.is_empty() {
+    if diff.improvements.is_empty() {
         pushln(&mut output, "none");
     }
-    for d in improvements.iter().take(top) {
+    for d in diff.improvements.iter().take(top) {
         pushln(
             &mut output,
             format!(
                 "class={:?} comm={} process={} max: {} -> {} (delta={}) p99_delta={} over_1ms_delta={}",
-                d.class,
-                d.comm,
-                d.process_comm,
-                format_latency(d.max_a),
-                format_latency(d.max_b),
+                d.identity.class,
+                d.identity.comm,
+                d.identity.process_comm,
+                format_latency(d.baseline_max_ns),
+                format_latency(d.current_max_ns),
                 format_latency_signed(d.delta_max_ns),
                 format_latency_signed(d.delta_p99_ns),
                 if d.delta_over_1ms >= 0 {
@@ -525,141 +448,331 @@ pub fn render_diff_report(
     }
     pushln(&mut output, "");
 
-    // Tasks only in one run
-    let new_tasks: Vec<_> = tasks_b
-        .keys()
-        .filter(|k| !tasks_a.contains_key(k))
-        .collect();
-    let removed_tasks: Vec<_> = tasks_a
-        .keys()
-        .filter(|k| !tasks_b.contains_key(k))
-        .collect();
-
-    if !new_tasks.is_empty() {
+    if !diff.new_tasks.is_empty() {
         pushln(&mut output, "new tasks (only in run_b)");
         pushln(&mut output, "------------------------");
-        for key in new_tasks.iter().take(top) {
-            let (class, process_comm, comm) = key;
+        for task in diff.new_tasks.iter().take(top) {
             pushln(
                 &mut output,
-                format!("comm={} process={} class={:?}", comm, process_comm, class),
+                format!(
+                    "comm={} process={} class={:?}",
+                    task.identity.comm, task.identity.process_comm, task.identity.class
+                ),
             );
         }
         pushln(&mut output, "");
     }
 
-    if !removed_tasks.is_empty() {
+    if !diff.removed_tasks.is_empty() {
         pushln(&mut output, "removed tasks (only in run_a)");
         pushln(&mut output, "----------------------------");
-        for key in removed_tasks.iter().take(top) {
-            let (class, process_comm, comm) = key;
+        for task in diff.removed_tasks.iter().take(top) {
             pushln(
                 &mut output,
-                format!("comm={} process={} class={:?}", comm, process_comm, class),
+                format!(
+                    "comm={} process={} class={:?}",
+                    task.identity.comm, task.identity.process_comm, task.identity.class
+                ),
             );
         }
         pushln(&mut output, "");
     }
 
-    Ok(output)
+    output
 }
 
+#[allow(dead_code)]
 pub fn check_percentile_regression(
     path_baseline: &Path,
     path_current: &Path,
     max_regression_p99_ms: f64,
 ) -> anyhow::Result<()> {
-    let session_baseline = crate::session_io::load_session(path_baseline)?;
-    let session_current = crate::session_io::load_session(path_current)?;
+    check_regression(
+        path_baseline,
+        path_current,
+        Some(max_regression_p99_ms),
+        None,
+        false,
+        10,
+        None,
+    )
+}
 
-    let max_regression_ns = (max_regression_p99_ms * 1_000_000.0) as i64;
+#[derive(Clone, Debug, Serialize)]
+pub struct RegressionCheckSummary {
+    pub passed: bool,
+    pub baseline_path: PathBuf,
+    pub current_path: PathBuf,
+    pub max_regression_p99_ms: Option<f64>,
+    pub max_max_regression_ms: Option<f64>,
+    pub violations: Vec<RegressionViolation>,
+    pub diff: RunDiffSummary,
+}
 
-    #[derive(Clone)]
-    struct Agg {
-        p99_ns: u64,
-    }
+#[derive(Clone, Debug, Serialize)]
+pub struct RegressionViolation {
+    pub metric: RegressionMetric,
+    pub comm: String,
+    pub process_comm: String,
+    pub class: TaskClass,
+    pub delta_ns: i64,
+    pub threshold_ns: i64,
+    pub new_task: bool,
+}
 
-    let mut tasks_baseline: BTreeMap<(TaskClass, String, String), Agg> = BTreeMap::new();
-    for t in session_baseline
-        .tasks
-        .iter()
-        .filter(|t| t.latency.samples > 0)
-    {
-        let key = (t.class, t.process_comm.to_string(), t.comm.clone());
-        let entry = tasks_baseline
-            .entry(key.clone())
-            .or_insert(Agg { p99_ns: 0 });
-        entry.p99_ns = entry.p99_ns.max(t.latency.p99_ns);
-    }
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegressionMetric {
+    P99,
+    Max,
+}
 
-    let mut tasks_current: BTreeMap<(TaskClass, String, String), Agg> = BTreeMap::new();
-    for t in session_current
-        .tasks
-        .iter()
-        .filter(|t| t.latency.samples > 0)
-    {
-        let key = (t.class, t.process_comm.to_string(), t.comm.clone());
-        let entry = tasks_current
-            .entry(key.clone())
-            .or_insert(Agg { p99_ns: 0 });
-        entry.p99_ns = entry.p99_ns.max(t.latency.p99_ns);
-    }
+pub fn check_regression(
+    path_baseline: &Path,
+    path_current: &Path,
+    max_regression_p99_ms: Option<f64>,
+    max_max_regression_ms: Option<f64>,
+    json: bool,
+    top: usize,
+    filter_class: Option<TaskClass>,
+) -> anyhow::Result<()> {
+    let diff = summary::build_run_diff_summary(path_baseline, path_current, filter_class)?;
+    let mut violations = Vec::new();
 
-    let mut worst_regression: Option<((TaskClass, String, String), i64)> = None;
-
-    for (key, tb) in &tasks_current {
-        let delta_p99 = if let Some(ta) = tasks_baseline.get(key) {
-            tb.p99_ns as i64 - ta.p99_ns as i64
-        } else if crate::scorer::class_contributes_to_score(key.0) {
-            // New task in current run. If it belongs to a scored class,
-            // treat its entire p99 as a regression relative to 0.
-            tb.p99_ns as i64
-        } else {
-            0
-        };
-
-        if delta_p99 > 0 {
-            if let Some((_, current_worst)) = worst_regression {
-                if delta_p99 > current_worst {
-                    worst_regression = Some((key.clone(), delta_p99));
-                }
-            } else {
-                worst_regression = Some((key.clone(), delta_p99));
-            }
+    if let Some(threshold_ms) = max_regression_p99_ms {
+        let threshold_ns = ms_to_ns_i64(threshold_ms);
+        for delta in diff
+            .regressions
+            .iter()
+            .filter(|delta| delta.delta_p99_ns > threshold_ns)
+        {
+            violations.push(violation_from_delta(
+                RegressionMetric::P99,
+                delta,
+                delta.delta_p99_ns,
+                threshold_ns,
+            ));
+        }
+        for task in diff
+            .new_scored_tasks
+            .iter()
+            .filter(|task| task.p99_ns as i64 > threshold_ns)
+        {
+            violations.push(RegressionViolation {
+                metric: RegressionMetric::P99,
+                comm: task.identity.comm.clone(),
+                process_comm: task.identity.process_comm.clone(),
+                class: task.identity.class,
+                delta_ns: task.p99_ns as i64,
+                threshold_ns,
+                new_task: true,
+            });
         }
     }
 
-    match &worst_regression {
-        Some((key, delta_p99)) if *delta_p99 > max_regression_ns => {
+    if let Some(threshold_ms) = max_max_regression_ms {
+        let threshold_ns = ms_to_ns_i64(threshold_ms);
+        for delta in diff
+            .regressions
+            .iter()
+            .filter(|delta| delta.delta_max_ns > threshold_ns)
+        {
+            violations.push(violation_from_delta(
+                RegressionMetric::Max,
+                delta,
+                delta.delta_max_ns,
+                threshold_ns,
+            ));
+        }
+        for task in diff
+            .new_scored_tasks
+            .iter()
+            .filter(|task| task.max_ns as i64 > threshold_ns)
+        {
+            violations.push(RegressionViolation {
+                metric: RegressionMetric::Max,
+                comm: task.identity.comm.clone(),
+                process_comm: task.identity.process_comm.clone(),
+                class: task.identity.class,
+                delta_ns: task.max_ns as i64,
+                threshold_ns,
+                new_task: true,
+            });
+        }
+    }
+
+    violations.sort_by_key(|violation| std::cmp::Reverse(violation.delta_ns));
+    let passed = violations.is_empty();
+    let output = RegressionCheckSummary {
+        passed,
+        baseline_path: path_baseline.to_path_buf(),
+        current_path: path_current.to_path_buf(),
+        max_regression_p99_ms,
+        max_max_regression_ms,
+        violations,
+        diff: diff.limited(top),
+    };
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        print!("{}", render_check_summary(&output, top));
+    }
+
+    if !output.passed {
+        if let Some(first) = output.violations.first() {
             anyhow::bail!(
-                "percentile_regression_check_failed: p99 regressed by {} on comm={} process={} (max_allowed={})",
-                format_latency_signed(*delta_p99),
-                key.2,
-                key.1,
-                format_latency(max_regression_ns as u64)
+                "percentile_regression_check_failed: {:?} regressed by {} on comm={} process={} (max_allowed={})",
+                first.metric,
+                format_latency_signed(first.delta_ns),
+                first.comm,
+                first.process_comm,
+                format_latency(first.threshold_ns as u64)
             );
         }
-        _ => {}
-    }
-
-    println!(
-        "percentile_regression_check_passed: baseline={} current={} max_regression_p99_ms={}",
-        path_baseline.display(),
-        path_current.display(),
-        max_regression_p99_ms
-    );
-    if let Some((key, delta_p99)) = &worst_regression {
-        println!(
-            "worst_p99_regression: {} on comm={} process={}",
-            format_latency_signed(*delta_p99),
-            key.2,
-            key.1
-        );
-    } else {
-        println!("worst_p99_regression: none");
+        anyhow::bail!("regression_check_failed");
     }
 
     Ok(())
+}
+
+fn violation_from_delta(
+    metric: RegressionMetric,
+    delta: &TaskDeltaSummary,
+    delta_ns: i64,
+    threshold_ns: i64,
+) -> RegressionViolation {
+    RegressionViolation {
+        metric,
+        comm: delta.identity.comm.clone(),
+        process_comm: delta.identity.process_comm.clone(),
+        class: delta.identity.class,
+        delta_ns,
+        threshold_ns,
+        new_task: false,
+    }
+}
+
+fn render_check_summary(summary: &RegressionCheckSummary, top: usize) -> String {
+    let mut output = String::new();
+    pushln(&mut output, "stutter check");
+    pushln(&mut output, "=============");
+    pushln(
+        &mut output,
+        format!("baseline: {}", summary.baseline_path.display()),
+    );
+    pushln(
+        &mut output,
+        format!("current: {}", summary.current_path.display()),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "result: {}",
+            if summary.passed { "passed" } else { "failed" }
+        ),
+    );
+    if let Some(threshold) = summary.max_regression_p99_ms {
+        pushln(&mut output, format!("max_regression_p99_ms: {threshold}"));
+    }
+    if let Some(threshold) = summary.max_max_regression_ms {
+        pushln(&mut output, format!("max_max_regression_ms: {threshold}"));
+    }
+
+    if let Some(worst) = &summary.diff.worst_p99_regression {
+        pushln(
+            &mut output,
+            format!(
+                "worst_p99_regression: {} on comm={} process={}",
+                format_latency_signed(worst.delta_p99_ns),
+                worst.identity.comm,
+                worst.identity.process_comm
+            ),
+        );
+    } else {
+        pushln(&mut output, "worst_p99_regression: none");
+    }
+
+    if let Some(worst) = &summary.diff.worst_max_regression {
+        pushln(
+            &mut output,
+            format!(
+                "worst_max_regression: {} on comm={} process={}",
+                format_latency_signed(worst.delta_max_ns),
+                worst.identity.comm,
+                worst.identity.process_comm
+            ),
+        );
+    } else {
+        pushln(&mut output, "worst_max_regression: none");
+    }
+
+    if !summary.violations.is_empty() {
+        pushln(&mut output, "");
+        pushln(&mut output, "violations");
+        pushln(&mut output, "----------");
+        for violation in summary.violations.iter().take(top) {
+            pushln(
+                &mut output,
+                format!(
+                    "metric={:?} class={:?} comm={} process={} delta={} threshold={} new_task={}",
+                    violation.metric,
+                    violation.class,
+                    violation.comm,
+                    violation.process_comm,
+                    format_latency_signed(violation.delta_ns),
+                    format_latency(violation.threshold_ns as u64),
+                    violation.new_task
+                ),
+            );
+        }
+    }
+
+    if !summary.diff.regressions.is_empty() {
+        pushln(&mut output, "");
+        pushln(&mut output, "top regressions");
+        pushln(&mut output, "---------------");
+        for delta in summary.diff.regressions.iter().take(top) {
+            pushln(
+                &mut output,
+                format!(
+                    "class={:?} comm={} process={} p99_delta={} max_delta={} over_1ms_delta={}",
+                    delta.identity.class,
+                    delta.identity.comm,
+                    delta.identity.process_comm,
+                    format_latency_signed(delta.delta_p99_ns),
+                    format_latency_signed(delta.delta_max_ns),
+                    delta.delta_over_1ms
+                ),
+            );
+        }
+    }
+
+    if !summary.diff.improvements.is_empty() {
+        pushln(&mut output, "");
+        pushln(&mut output, "top improvements");
+        pushln(&mut output, "----------------");
+        for delta in summary.diff.improvements.iter().take(top) {
+            pushln(
+                &mut output,
+                format!(
+                    "class={:?} comm={} process={} p99_delta={} max_delta={} over_1ms_delta={}",
+                    delta.identity.class,
+                    delta.identity.comm,
+                    delta.identity.process_comm,
+                    format_latency_signed(delta.delta_p99_ns),
+                    format_latency_signed(delta.delta_max_ns),
+                    delta.delta_over_1ms
+                ),
+            );
+        }
+    }
+
+    output
+}
+
+fn ms_to_ns_i64(value: f64) -> i64 {
+    (value * 1_000_000.0).ceil() as i64
 }
 
 pub fn print_diff_report(
@@ -669,6 +782,22 @@ pub fn print_diff_report(
     filter_class: Option<TaskClass>,
 ) -> anyhow::Result<()> {
     print!("{}", render_diff_report(path_a, path_b, top, filter_class)?);
+    Ok(())
+}
+
+pub fn print_batch_report(
+    batch_dir: &Path,
+    baseline_path: Option<&Path>,
+    json_summary: bool,
+    top: usize,
+    filter_class: Option<TaskClass>,
+) -> anyhow::Result<()> {
+    let summary = summary::build_batch_run_summary(batch_dir, baseline_path, top, filter_class)?;
+    if json_summary {
+        println!("{}", serde_json::to_string_pretty(&summary)?);
+    } else {
+        print!("{}", summary::render_batch_run_summary(&summary, top));
+    }
     Ok(())
 }
 
@@ -1413,12 +1542,6 @@ fn downgrade_quality(current: DataQualityLevel, candidate: DataQualityLevel) -> 
         (Medium, _) | (_, Medium) => Medium,
         (High, High) => High,
     }
-}
-
-fn format_latency_signed(ns: i64) -> String {
-    let abs_ns = ns.unsigned_abs();
-    let sign = if ns >= 0 { "+" } else { "-" };
-    format!("{sign}{}", format_latency(abs_ns))
 }
 
 pub(crate) fn spike_cluster_analysis(

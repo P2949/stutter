@@ -1126,8 +1126,8 @@ fn report_reads_recorded_session_and_spike_events() {
     })
     .unwrap();
 
-    crate::report::print_report(&dir, false, false, 10, 5, None).unwrap();
-    crate::report::print_report(&dir, true, false, 10, 5, None).unwrap();
+    crate::report::print_report(&dir, false, false, false, 10, 5, None).unwrap();
+    crate::report::print_report(&dir, true, false, false, 10, 5, None).unwrap();
 
     fs::remove_dir_all(dir).ok();
 }
