@@ -22,6 +22,7 @@ mod scorer;
 mod scx;
 mod session;
 mod session_io;
+mod summary;
 mod tasks;
 mod tui;
 mod tune;
@@ -142,18 +143,38 @@ async fn main() -> anyhow::Result<()> {
             print!("{rendered}");
             Ok(())
         }
+        AppCommand::Summary {
+            path,
+            json,
+            top,
+            filter_class,
+        } => summary::summary_command(&path, json, top, filter_class),
         AppCommand::Report {
             path,
             json,
             analysis_json,
+            json_summary,
             html,
             top,
             cluster_window_ms,
+            batch,
             diff,
             filter_class,
         } => {
+            if let Some(batch_dir) = batch {
+                return report::print_batch_report(
+                    &batch_dir,
+                    diff.as_deref(),
+                    json_summary || json,
+                    top,
+                    filter_class,
+                );
+            }
+            let Some(path) = path else {
+                anyhow::bail!("report requires PATH unless --batch is set");
+            };
             if let Some(diff_path) = diff {
-                return report::print_diff_report(&path, &diff_path, top, filter_class);
+                return report::print_diff_report(&diff_path, &path, top, filter_class);
             }
             if let Some(html_path) = html {
                 report::write_html_report(&path, &html_path, top, cluster_window_ms, filter_class)?;
@@ -162,6 +183,7 @@ async fn main() -> anyhow::Result<()> {
                 &path,
                 json,
                 analysis_json,
+                json_summary,
                 top,
                 cluster_window_ms,
                 filter_class,
@@ -210,7 +232,19 @@ async fn main() -> anyhow::Result<()> {
             baseline,
             current,
             max_regression_p99_ms,
-        } => report::check_percentile_regression(&baseline, &current, max_regression_p99_ms),
+            max_max_regression_ms,
+            json,
+            top,
+            filter_class,
+        } => report::check_regression(
+            &baseline,
+            &current,
+            max_regression_p99_ms,
+            max_max_regression_ms,
+            json,
+            top,
+            filter_class,
+        ),
         AppCommand::Audit { path, tail, json } => {
             audit::audit_command(audit::AuditCommandInput { path, tail, json })
         }

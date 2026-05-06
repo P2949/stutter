@@ -26,6 +26,7 @@ enum Command {
     Bench(BenchArgs),
     InspectTree(InspectTreeArgs),
     Report(ReportArgs),
+    Summary(SummaryArgs),
     Restore(RestoreArgs),
     ApplyProfile(ApplyProfileArgs),
     Tune(TuneArgs),
@@ -231,8 +232,14 @@ struct ReportArgs {
     #[arg(long = "analysis-json")]
     analysis_json: bool,
 
+    #[arg(long = "json-summary")]
+    json_summary: bool,
+
     #[arg(long = "html", value_name = "PATH")]
     html: Option<PathBuf>,
+
+    #[arg(long = "batch", value_name = "DIR")]
+    batch: Option<PathBuf>,
 
     #[arg(long, default_value_t = 10, value_name = "N")]
     top: usize,
@@ -242,6 +249,20 @@ struct ReportArgs {
 
     #[arg(long = "diff", value_name = "PATH")]
     diff: Option<PathBuf>,
+
+    #[arg(long = "filter-class", value_name = "CLASS")]
+    filter_class: Option<String>,
+
+    path: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, Clone)]
+struct SummaryArgs {
+    #[arg(long)]
+    json: bool,
+
+    #[arg(long, default_value_t = 10, value_name = "N")]
+    top: usize,
 
     #[arg(long = "filter-class", value_name = "CLASS")]
     filter_class: Option<String>,
@@ -334,7 +355,19 @@ pub struct CheckArgs {
     pub current: PathBuf,
 
     #[arg(long = "max-regression-p99-ms", value_name = "MS")]
-    pub max_regression_p99_ms: f64,
+    pub max_regression_p99_ms: Option<f64>,
+
+    #[arg(long = "max-max-regression-ms", value_name = "MS")]
+    pub max_max_regression_ms: Option<f64>,
+
+    #[arg(long)]
+    pub json: bool,
+
+    #[arg(long, default_value_t = 10, value_name = "N")]
+    pub top: usize,
+
+    #[arg(long = "filter-class", value_name = "CLASS")]
+    pub filter_class: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -455,13 +488,21 @@ pub enum AppCommand {
         tree_pid: u32,
     },
     Report {
-        path: PathBuf,
+        path: Option<PathBuf>,
         json: bool,
         analysis_json: bool,
+        json_summary: bool,
         html: Option<PathBuf>,
         top: usize,
         cluster_window_ms: u64,
+        batch: Option<PathBuf>,
         diff: Option<PathBuf>,
+        filter_class: Option<TaskClass>,
+    },
+    Summary {
+        path: PathBuf,
+        json: bool,
+        top: usize,
         filter_class: Option<TaskClass>,
     },
     Tune {
@@ -486,7 +527,11 @@ pub enum AppCommand {
     Check {
         baseline: PathBuf,
         current: PathBuf,
-        max_regression_p99_ms: f64,
+        max_regression_p99_ms: Option<f64>,
+        max_max_regression_ms: Option<f64>,
+        json: bool,
+        top: usize,
+        filter_class: Option<TaskClass>,
     },
     Audit {
         path: Option<PathBuf>,
@@ -632,6 +677,18 @@ where
             if args.cluster_window_ms == 0 {
                 anyhow::bail!("--cluster-ms must be greater than zero");
             }
+            if args.batch.is_some() && args.path.is_some() {
+                anyhow::bail!("report --batch does not accept a positional PATH");
+            }
+            if args.batch.is_none() && args.path.is_none() {
+                anyhow::bail!("report requires PATH unless --batch is set");
+            }
+            if args.batch.is_some() && args.html.is_some() {
+                anyhow::bail!("report --batch conflicts with --html");
+            }
+            if args.batch.is_some() && args.analysis_json {
+                anyhow::bail!("report --batch conflicts with --analysis-json");
+            }
             let filter_class = if let Some(class_str) = &args.filter_class {
                 Some(
                     TaskClass::from_str_opt(class_str)
@@ -644,10 +701,31 @@ where
                 path: args.path,
                 json: args.json,
                 analysis_json: args.analysis_json,
+                json_summary: args.json_summary,
                 html: args.html,
                 top: args.top,
                 cluster_window_ms: args.cluster_window_ms,
+                batch: args.batch,
                 diff: args.diff,
+                filter_class,
+            })
+        }
+        Some(Command::Summary(args)) => {
+            if args.top == 0 {
+                anyhow::bail!("--top must be greater than zero");
+            }
+            let filter_class = if let Some(class_str) = &args.filter_class {
+                Some(
+                    TaskClass::from_str_opt(class_str)
+                        .ok_or_else(|| anyhow::anyhow!("unknown task class: {class_str}"))?,
+                )
+            } else {
+                None
+            };
+            Ok(AppCommand::Summary {
+                path: args.path,
+                json: args.json,
+                top: args.top,
                 filter_class,
             })
         }
@@ -709,13 +787,40 @@ where
             markdown: args.markdown,
         }),
         Some(Command::Check(args)) => {
-            if !args.max_regression_p99_ms.is_finite() || args.max_regression_p99_ms < 0.0 {
+            if args.max_regression_p99_ms.is_none() && args.max_max_regression_ms.is_none() {
+                anyhow::bail!(
+                    "check requires at least one threshold: --max-regression-p99-ms or --max-max-regression-ms"
+                );
+            }
+            if let Some(value) = args.max_regression_p99_ms
+                && (!value.is_finite() || value < 0.0)
+            {
                 anyhow::bail!("--max-regression-p99-ms must be a finite non-negative value");
             }
+            if let Some(value) = args.max_max_regression_ms
+                && (!value.is_finite() || value < 0.0)
+            {
+                anyhow::bail!("--max-max-regression-ms must be a finite non-negative value");
+            }
+            if args.top == 0 {
+                anyhow::bail!("--top must be greater than zero");
+            }
+            let filter_class = if let Some(class_str) = &args.filter_class {
+                Some(
+                    TaskClass::from_str_opt(class_str)
+                        .ok_or_else(|| anyhow::anyhow!("unknown task class: {class_str}"))?,
+                )
+            } else {
+                None
+            };
             Ok(AppCommand::Check {
                 baseline: args.baseline,
                 current: args.current,
                 max_regression_p99_ms: args.max_regression_p99_ms,
+                max_max_regression_ms: args.max_max_regression_ms,
+                json: args.json,
+                top: args.top,
+                filter_class,
             })
         }
         Some(Command::Audit(args)) => Ok(AppCommand::Audit {
@@ -965,6 +1070,7 @@ mod tests {
         let command = parse_app_command_from([
             "stutter",
             "report",
+            "--json-summary",
             "--html",
             "/tmp/report.html",
             "--cluster-ms",
@@ -988,6 +1094,66 @@ mod tests {
         assert_eq!(top, 25);
         assert_eq!(html, Some(PathBuf::from("/tmp/report.html")));
         assert_eq!(cluster_window_ms, 5);
+    }
+
+    #[test]
+    fn parses_summary_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "summary",
+            "--json",
+            "--top",
+            "3",
+            "--filter-class",
+            "Game",
+            "/tmp/run",
+        ])
+        .unwrap();
+
+        let AppCommand::Summary {
+            path,
+            json,
+            top,
+            filter_class,
+        } = command
+        else {
+            panic!("expected summary command");
+        };
+
+        assert_eq!(path, PathBuf::from("/tmp/run"));
+        assert!(json);
+        assert_eq!(top, 3);
+        assert_eq!(filter_class, Some(TaskClass::Game));
+    }
+
+    #[test]
+    fn parses_report_batch_json_summary() {
+        let command = parse_app_command_from([
+            "stutter",
+            "report",
+            "--batch",
+            "/tmp/runs",
+            "--json-summary",
+            "--top",
+            "4",
+        ])
+        .unwrap();
+
+        let AppCommand::Report {
+            batch,
+            json_summary,
+            top,
+            path,
+            ..
+        } = command
+        else {
+            panic!("expected report command");
+        };
+
+        assert_eq!(batch, Some(PathBuf::from("/tmp/runs")));
+        assert!(json_summary);
+        assert_eq!(top, 4);
+        assert_eq!(path, None);
     }
 
     #[test]
@@ -1209,6 +1375,67 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("--cpu-perf-max-tasks must be greater than zero")
+        );
+    }
+
+    #[test]
+    fn parses_extended_check_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "check",
+            "--baseline",
+            "/tmp/base",
+            "--current",
+            "/tmp/current",
+            "--max-regression-p99-ms",
+            "0.5",
+            "--max-max-regression-ms",
+            "2.0",
+            "--json",
+            "--top",
+            "5",
+            "--filter-class",
+            "Game",
+        ])
+        .unwrap();
+
+        let AppCommand::Check {
+            baseline,
+            current,
+            max_regression_p99_ms,
+            max_max_regression_ms,
+            json,
+            top,
+            filter_class,
+        } = command
+        else {
+            panic!("expected check command");
+        };
+
+        assert_eq!(baseline, PathBuf::from("/tmp/base"));
+        assert_eq!(current, PathBuf::from("/tmp/current"));
+        assert_eq!(max_regression_p99_ms, Some(0.5));
+        assert_eq!(max_max_regression_ms, Some(2.0));
+        assert!(json);
+        assert_eq!(top, 5);
+        assert_eq!(filter_class, Some(TaskClass::Game));
+    }
+
+    #[test]
+    fn rejects_check_without_thresholds() {
+        let err = parse_app_command_from([
+            "stutter",
+            "check",
+            "--baseline",
+            "/tmp/base",
+            "--current",
+            "/tmp/current",
+        ])
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("check requires at least one threshold")
         );
     }
 
@@ -1750,6 +1977,10 @@ mod tests {
             baseline,
             current,
             max_regression_p99_ms,
+            max_max_regression_ms,
+            json,
+            top,
+            filter_class,
         } = command
         else {
             panic!("expected check command");
@@ -1757,7 +1988,11 @@ mod tests {
 
         assert_eq!(baseline, PathBuf::from("run1/"));
         assert_eq!(current, PathBuf::from("run2/"));
-        assert_eq!(max_regression_p99_ms, 2.5);
+        assert_eq!(max_regression_p99_ms, Some(2.5));
+        assert_eq!(max_max_regression_ms, None);
+        assert!(!json);
+        assert_eq!(top, 10);
+        assert_eq!(filter_class, None);
     }
 
     #[test]
