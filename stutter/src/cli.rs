@@ -34,6 +34,7 @@ enum Command {
     Audit(AuditArgs),
     Advisor(AdvisorArgs),
     Doctor(DoctorArgs),
+    ProfileTemplate(ProfileTemplateArgs),
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -394,6 +395,12 @@ struct DoctorArgs {
     mangohud_log: Option<PathBuf>,
 }
 
+#[derive(Args, Debug, Clone)]
+pub struct ProfileTemplateArgs {
+    #[arg(long = "topology")]
+    pub topology: bool,
+}
+
 #[derive(Debug)]
 pub enum AppCommand {
     Monitor(Arc<Config>),
@@ -468,6 +475,9 @@ pub enum AppCommand {
     },
     Doctor {
         input: crate::doctor::DoctorInput,
+    },
+    ProfileTemplate {
+        topology: bool,
     },
 }
 
@@ -713,6 +723,9 @@ where
                 faults: args.faults,
                 mangohud_log: args.mangohud_log,
             },
+        }),
+        Some(Command::ProfileTemplate(args)) => Ok(AppCommand::ProfileTemplate {
+            topology: args.topology,
         }),
         None => Ok(AppCommand::Monitor(Arc::new(config_from_monitor_args(
             cli.legacy_monitor,

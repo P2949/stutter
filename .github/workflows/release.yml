@@ -1,0 +1,52 @@
+name: Release artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: nightly
+
+jobs:
+  linux-x86_64:
+    name: linux x86_64 release build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly with rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install bpf-linker
+        run: cargo install bpf-linker --locked
+
+      - name: Build release binary
+        run: cargo build -p stutter --release
+
+      - name: Package artifact
+        run: |
+          mkdir -p dist
+          cp target/release/stutter dist/stutter
+          cp README.md dist/
+          cp docs/INSTALL.md dist/
+          cp docs/SAFETY.md dist/
+          tar -C dist -czf stutter-linux-x86_64.tar.gz .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stutter-linux-x86_64
+          path: stutter-linux-x86_64.tar.gz

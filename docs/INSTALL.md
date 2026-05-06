@@ -88,6 +88,15 @@ systemctl --user disable --now stutter-advisor.service
 `advisor`, `recommend`, `report`, `audit`, and offline file inspection commands do not require root.
 Commands that attach eBPF programs or trace live scheduler state generally require elevated privileges.
 
+## CPU Topology
+
+When using affinity profiles, it is important to check your CPU topology to ensure masks align with your cores and hyperthreads. Use `lscpu` or `/sys` to inspect your layout before applying explicit masks:
+
+```bash
+lscpu -e=CPU,CORE,SOCKET,NODE,ONLINE,MAXMHZ
+cat /sys/devices/system/cpu/online
+```
+
 ## Packaging Status
 
 There is no distro package yet. The local scripts are intentionally small and conservative so you can inspect exactly what they do.

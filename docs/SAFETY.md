@@ -61,6 +61,21 @@ Before wider tunables are added, they should have:
 - rollback path
 - durable audit event
 
+## Checking CPU Topology
+
+Before editing affinity profiles with explicit masks, check your CPU layout to avoid splitting hyperthreads across different classes or using unstable E-cores for critical tasks:
+
+```bash
+lscpu -e=CPU,CORE,SOCKET,NODE,ONLINE,MAXMHZ
+cat /sys/devices/system/cpu/online
+```
+
+Example 8-core/16-thread mapping logic:
+- `0-3`: First 4 threads (often Core 0 and 1 with hyperthreading)
+- `4-15`: Remaining 12 threads (Cores 2 through 7)
+
+Do not blindly copy masks from other machines; a mask that works on an 8-core CPU may be invalid or suboptimal on a 6-core or hybrid CPU.
+
 ## Rollback Expectations
 
 CPU-affinity changes are reversible when the target tasks still exist and the restore file is intact. Some tasks may exit before restore; `stutter restore` reports skipped/dead tasks instead of treating them as a reason to panic.

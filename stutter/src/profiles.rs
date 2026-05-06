@@ -385,6 +385,24 @@ fn parse_task_class(value: &str) -> anyhow::Result<TaskClass> {
     }
 }
 
+pub fn generate_topology_template() -> String {
+    let mut out = String::new();
+    out.push_str("[[profile]]\n");
+    out.push_str("name = \"baseline-online\"\n\n");
+    out.push_str("[[profile.rules]]\n");
+    out.push_str("affinity = \"online\"\n");
+    out.push_str("match_class = [\"Game\", \"GameHelper\", \"WineServer\", \"GameScope\", \"Compositor\", \"Launcher\", \"SteamRuntime\", \"Helper\", \"Unknown\"]\n\n");
+    out.push_str("[[profile]]\n");
+    out.push_str("name = \"game-main-suggested\"\n\n");
+    out.push_str("[[profile.rules]]\n");
+    out.push_str("affinity = \"<edit-me>\"\n");
+    out.push_str("match_class = [\"Game\", \"GameHelper\", \"WineServer\"]\n\n");
+    out.push_str("[[profile.rules]]\n");
+    out.push_str("affinity = \"<edit-me>\"\n");
+    out.push_str("match_class = [\"GameScope\", \"Compositor\"]\n");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

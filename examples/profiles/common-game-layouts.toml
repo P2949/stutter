@@ -1,6 +1,25 @@
 # Example stutter profile set.
 # Edit CPU masks for the target machine.
 # These examples are experiments, not guaranteed improvements.
+#
+# Example masks after checking your topology:
+#
+# 4C/8T:
+#   compositor/helper: "0-1"
+#   game/main:         "2-7"
+#
+# 6C/12T:
+#   compositor/helper: "0-1"
+#   game/main:         "2-11"
+#
+# 8C/16T:
+#   compositor/helper: "0-3"
+#   game/main:         "4-15"
+#
+# Hybrid CPU:
+#   prefer explicit masks only after checking /sys/devices/system/cpu/cpu*/topology
+#   keep compositor/helper on stable low-load CPUs
+#   do not blindly copy masks across machines
 
 [[profile]]
 name = "baseline-online"

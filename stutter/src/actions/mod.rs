@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod cpu_affinity;
+pub mod runner;
 
 use serde::{Deserialize, Serialize};
 
