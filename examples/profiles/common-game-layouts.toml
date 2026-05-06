@@ -1,0 +1,36 @@
+# Example stutter profile set.
+# Edit CPU masks for the target machine.
+# These examples are experiments, not guaranteed improvements.
+
+[[profile]]
+name = "baseline-online"
+
+[[profile.rules]]
+affinity = "online"
+match_class = ["Game", "GameHelper", "WineServer", "GameScope", "Compositor", "Launcher", "SteamRuntime", "Helper", "Unknown"]
+
+[[profile]]
+name = "game-on-middle-compositor-low"
+
+[[profile.rules]]
+# Replace "online" with a low-core mask such as "0-1" after checking your CPU layout.
+affinity = "online"
+match_class = ["GameScope", "Compositor"]
+
+[[profile.rules]]
+# Replace "online" with a game-core mask such as "2-5" after checking your CPU layout.
+affinity = "online"
+match_class = ["Game", "GameHelper", "WineServer"]
+
+[[profile]]
+name = "game-render-isolated"
+
+[[profile.rules]]
+# Replace "online" with a render-thread mask such as "2-5" after checking your CPU layout.
+affinity = "online"
+match_comm = ["RenderThread", "Main"]
+
+[[profile.rules]]
+# Replace "online" with a compositor/helper mask such as "0-1" after checking your CPU layout.
+affinity = "online"
+match_class = ["GameScope", "Compositor", "Launcher", "SteamRuntime"]

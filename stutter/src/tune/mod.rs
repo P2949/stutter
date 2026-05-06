@@ -10,7 +10,7 @@ use std::{
 };
 
 use log::{debug, info, warn};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 
 use crate::{
@@ -26,13 +26,14 @@ use crate::{
 };
 
 pub mod comparability;
+pub mod recommendation;
 
 pub use comparability::TuneCoverageMetrics;
 
 pub const TUNE_RUN_STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 pub const TUNE_PROFILE_REFRESH_MS: u64 = 1_000;
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct TuneSummary {
     pub schema_version: u32,
     pub tree_pid: u32,
@@ -46,16 +47,18 @@ pub struct TuneSummary {
     pub profile_stats: Vec<TuneProfileStats>,
     pub ranking_confidence: RankingConfidence,
     pub ranking_notes: Vec<String>,
+    #[serde(default)]
+    pub comparability_warnings: Vec<comparability::TuneComparabilityWarning>,
     pub candidates: Vec<TuneCandidateSummary>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TuneIterationOrder {
     pub iteration: u32,
     pub profiles: Vec<String>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TuneProfileStats {
     pub profile: String,
     pub valid_runs: usize,
@@ -69,7 +72,7 @@ pub struct TuneProfileStats {
     pub iqr_frame_p99_us: u64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RankingConfidence {
     High,
     Medium,
@@ -77,7 +80,7 @@ pub enum RankingConfidence {
     Unstable,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TuneCandidateSummary {
     pub profile: String,
     pub iteration: u32,
@@ -110,6 +113,8 @@ pub struct TuneCommandInput {
     pub warmup_seconds: u64,
     pub runs: u32,
     pub keep_best: bool,
+    pub baseline_profile: Option<String>,
+    pub out_dir: Option<PathBuf>,
     pub mangohud_log: Option<PathBuf>,
     pub enforce: bool,
     pub hwmon: bool,
@@ -136,6 +141,8 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         warmup_seconds,
         runs,
         keep_best,
+        baseline_profile,
+        out_dir,
         mangohud_log,
         enforce,
         hwmon,
@@ -148,6 +155,20 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
             profiles_path.display()
         );
     }
+    if let Some(baseline_profile) = &baseline_profile
+        && !profiles
+            .iter()
+            .any(|profile| profile.name == *baseline_profile)
+    {
+        anyhow::bail!("--baseline-profile {baseline_profile} was not found in profiles file");
+    }
+    let tune_output_dir = match out_dir {
+        Some(path) => {
+            ensure_tune_output_dir_available(&path)?;
+            path
+        }
+        None => default_tune_output_dir()?,
+    };
 
     if runs < 3 {
         warn!(
@@ -161,7 +182,6 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     }
 
     let candidate_order = tune_candidate_order(&profiles, runs);
-    let tune_output_dir = default_tune_output_dir()?;
     let results = collect_tune_results(
         &profiles,
         tree_pid,
@@ -187,6 +207,7 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     if any_valid {
         comparability::check_tune_coverage_comparability(&grouped)?;
     }
+    let comparability_warnings = comparability::tune_comparability_warnings(&grouped);
 
     let profile_stats = profile_stats_from_grouped(&grouped);
     let selected_best_profile = select_best_profile(&grouped);
@@ -218,10 +239,18 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         profile_stats,
         ranking_confidence,
         ranking_notes,
+        comparability_warnings,
         candidates: results,
     };
 
-    write_tune_summary(&summary, &tune_output_dir, keep_best, enforce).await?;
+    write_tune_summary(
+        &summary,
+        &tune_output_dir,
+        keep_best,
+        enforce,
+        baseline_profile.as_deref(),
+    )
+    .await?;
 
     if summary.ranking_confidence == RankingConfidence::Unstable {
         restore_tune_on_error();
@@ -449,6 +478,7 @@ async fn write_tune_summary(
     tune_output_dir: &Path,
     keep_best: bool,
     enforce: bool,
+    baseline_profile: Option<&str>,
 ) -> anyhow::Result<()> {
     if keep_best && !summary.best_profile.is_empty() {
         let profiles = profiles::load_profiles(&summary.profiles_path)?;
@@ -456,7 +486,7 @@ async fn write_tune_summary(
             .iter()
             .find(|profile| profile.name == summary.best_profile)
         {
-            crate::watch::apply_profile_to_tree_blocking(
+            let records = crate::watch::apply_profile_to_tree_blocking(
                 summary.tree_pid,
                 profile.clone(),
                 false,
@@ -464,6 +494,18 @@ async fn write_tune_summary(
                 enforce,
             )
             .await?;
+            crate::audit::audit_or_warn(&crate::audit::AuditEvent {
+                schema_version: 1,
+                unix_nanos: crate::audit::unix_nanos_now(),
+                command: "tune --keep-best".to_owned(),
+                action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
+                safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+                dry_run: false,
+                success: true,
+                affected_tasks: records.len(),
+                restore_path: Some(crate::affinity::default_restore_path()),
+                message: "kept best tune profile applied".to_owned(),
+            });
         }
     }
 
@@ -473,6 +515,17 @@ async fn write_tune_summary(
     }
 
     fs::write(&summary_path, serde_json::to_vec_pretty(&summary)?)?;
+    let recommendation = recommendation::build_tune_recommendation(summary, baseline_profile);
+    let recommendation_json_path = tune_output_dir.join("tuning_recommendation.json");
+    fs::write(
+        &recommendation_json_path,
+        serde_json::to_vec_pretty(&recommendation)?,
+    )?;
+    let recommendation_markdown_path = tune_output_dir.join("tuning_recommendation.md");
+    fs::write(
+        &recommendation_markdown_path,
+        recommendation::render_tune_recommendation_markdown(&recommendation),
+    )?;
 
     println!(
         "tune complete best_profile={} restore_policy={} summary={}{}",
@@ -485,6 +538,7 @@ async fn write_tune_summary(
             ""
         }
     );
+    println!("recommendation={}", recommendation_markdown_path.display());
 
     warn!(
         "tune_ranking_is_workload_sensitive: decisions are not final truth and depend on comparable workload; repeated runs showing low variance are recommended."
@@ -522,6 +576,18 @@ pub async fn measure_tune_candidate(
     )
     .await?;
     let initial_applied_tasks = initial_records.len();
+    crate::audit::audit_or_warn(&crate::audit::AuditEvent {
+        schema_version: 1,
+        unix_nanos: crate::audit::unix_nanos_now(),
+        command: "tune candidate".to_owned(),
+        action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
+        safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+        dry_run: false,
+        success: true,
+        affected_tasks: initial_applied_tasks,
+        restore_path: Some(affinity::default_restore_path()),
+        message: format!("applied tune candidate profile '{}'", profile.name),
+    });
     let should_force_refresh = force_restore_overwrite && initial_records.is_empty();
 
     let control = TuneControl {
@@ -928,6 +994,22 @@ pub fn default_tune_output_dir() -> anyhow::Result<PathBuf> {
     cleanup_stale_tune_run_dirs(&path)?;
     path.push(format!("tune-{}", unix_nanos_now()));
     Ok(path)
+}
+
+pub fn ensure_tune_output_dir_available(path: &Path) -> anyhow::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    if !path.is_dir() {
+        anyhow::bail!("--out-dir {} exists but is not a directory", path.display());
+    }
+    if fs::read_dir(path)?.next().is_some() {
+        anyhow::bail!(
+            "--out-dir {} already exists and is not empty",
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 pub fn unix_nanos_now() -> u128 {

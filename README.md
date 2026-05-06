@@ -44,6 +44,50 @@ RUSTUP_TOOLCHAIN=nightly cargo build
 RUSTUP_TOOLCHAIN=nightly cargo clippy --all-targets -- -D warnings
 ```
 
+## Install
+
+For a local technical-user install:
+
+```bash
+scripts/install-local.sh
+```
+
+This installs `stutter` under `~/.local/bin` by default. It does not install setuid bits or Linux capabilities. See [docs/INSTALL.md](docs/INSTALL.md) for uninstall and user-service notes.
+
+## Recommended workflow
+
+`stutter` recommendations are experiments, not proof of root cause.
+
+1. Run `doctor`.
+2. Record a baseline with `bench`.
+3. Tune a small, explicit profile set.
+4. Compare baseline and tune output with `recommend`.
+5. Apply only if the recommendation is stable enough to trust.
+6. Restore if needed.
+
+Example:
+
+```bash
+stutter doctor
+
+stutter bench \
+  --watch-process Game.exe \
+  --persistent \
+  --duration 180 \
+  --scenario kcd \
+  --role baseline
+
+stutter tune \
+  --tree-pid <PID> \
+  --profiles examples/profiles/common-game-layouts.toml \
+  --runs 5 \
+  --baseline-profile baseline-online
+
+stutter recommend \
+  --baseline <baseline-run-dir> \
+  --tune <tune-dir>
+```
+
 ## Monitor manual PIDs
 
 ```bash
@@ -146,6 +190,21 @@ Hardware monitoring notes:
   `latency_samples_truncated`, that means stutter is storing a bounded number of exact samples
   and will fall back to histogram-based percentile estimates for p95/p99.
 
+## Bench a repeatable route
+
+`bench` is a guided recording wrapper for baseline/current comparisons. It uses stricter naming and records by default.
+
+```bash
+RUST_LOG=info stutter bench \
+  --watch-process Game.exe \
+  --persistent \
+  --duration 180 \
+  --scenario test-route \
+  --role baseline
+```
+
+Use `--role current` when recording a later comparison run against an existing baseline.
+
 TUI notes:
 
 - `--tui` opens an interactive ratatui alternate-screen UI.
@@ -208,6 +267,54 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- report \
   ~/.local/state/stutter/runs/<run-dir>
 ```
 
+## Tune and recommend profiles
+
+Tune benchmarks a TOML affinity profile set and writes both machine-readable and human-readable recommendation artifacts:
+
+```text
+tuning_summary.json
+tuning_recommendation.json
+tuning_recommendation.md
+```
+
+Example:
+
+```bash
+stutter tune \
+  --tree-pid <PID> \
+  --profiles examples/profiles/common-game-layouts.toml \
+  --runs 5 \
+  --baseline-profile baseline-online
+```
+
+Use `recommend` to compare a separately recorded baseline run against a tuning output directory:
+
+```bash
+stutter recommend \
+  --baseline ~/.local/state/stutter/runs/<baseline-run-dir> \
+  --tune ~/.local/state/stutter/tune-<timestamp>
+```
+
+If ranking confidence is `Unstable`, `tune --keep-best` will not apply anything. Treat `Low` confidence as a prompt to retest under a comparable workload.
+
+## Offline advisor
+
+`advisor` reads an existing run and suggests next experiments without changing system state:
+
+```bash
+stutter advisor --run ~/.local/state/stutter/runs/<run-dir>
+stutter advisor --run ~/.local/state/stutter/runs/<run-dir> --json
+```
+
+It can also watch completed run directories and emit reports as they appear:
+
+```bash
+stutter advisor --watch-runs --once
+stutter advisor --watch-runs
+```
+
+Advisor output is deliberately cautious: it reports candidates and suggested experiments, not confirmed root causes, and it does not auto-apply any tuning.
+
 ## Doctor / preflight
 
 Run `stutter doctor` before recording to check whether tracing is likely to work and which optional telemetry may be missing or degraded. The doctor command does not attach eBPF programs or perf probes by default, so it is a preflight check rather than a guarantee that a future recording will succeed.
@@ -254,6 +361,14 @@ Audit a pending restore file without applying it:
 
 ```bash
 RUSTUP_TOOLCHAIN=nightly cargo run -- restore --dry-run
+```
+
+Inspect recent action audit events:
+
+```bash
+stutter audit
+stutter audit --tail 50
+stutter audit --json
 ```
 
 `apply-profile --force` discards an existing restore file. Without `--force`, new records are merged into the existing restore file while preserving the earliest original mask for each TID.
@@ -339,7 +454,11 @@ Note: the CSV exporter is intentionally compact and omits some newer fields. `in
 - `--hwmon-render-node <PATH>`: choose the DRM render node whose device hwmon should be sampled.
 - `--mangohud-log <PATH>`: provide a MangoHud CSV to correlate frame times.
 - `--tui`: open an interactive ratatui alternate-screen UI.
+- `stutter bench --duration <SECONDS> --scenario <NAME>`: record a named baseline/current route with safer defaults.
 - `stutter tune --tree-pid <PID> --profiles <FILE>`: apply each profile, keep refreshing it for new threads during the measurement epoch, score interval summaries, and restore after each candidate by default. Candidate run directories are kept next to the tuning summary for auditability. Add `--keep-best` to reapply the best profile at the end.
+- `stutter recommend --baseline <RUN> --tune <DIR>`: compare a baseline recording against a tune output directory.
+- `stutter advisor --run <RUN>`: read an existing run and suggest conservative next experiments without applying changes.
+- `stutter audit`: show recent action audit events from `~/.local/state/stutter/audit/actions.jsonl`.
 
 Tune counterbalances profile order across iterations to reduce order bias. `tuning_summary.json` includes the candidate order, per-profile median/IQR stats, and a ranking-confidence field. If the ranking is unstable, no best profile is selected and `--keep-best` will not apply a profile.
 

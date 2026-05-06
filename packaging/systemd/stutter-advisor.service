@@ -1,0 +1,10 @@
+[Unit]
+Description=stutter advisor watch mode
+
+[Service]
+ExecStart=%h/.local/bin/stutter advisor --watch-runs
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

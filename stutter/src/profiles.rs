@@ -349,7 +349,7 @@ impl ProfileToml {
                 .collect::<anyhow::Result<Vec<_>>>()?;
 
             rules.push(ProfileRule {
-                affinity: CpuMask::parse(&rule.affinity)?,
+                affinity: parse_affinity_value(&rule.affinity)?,
                 match_class,
                 match_comm,
             });
@@ -359,6 +359,14 @@ impl ProfileToml {
             name: self.name,
             rules,
         })
+    }
+}
+
+fn parse_affinity_value(value: &str) -> anyhow::Result<CpuMask> {
+    if value.trim() == "online" {
+        CpuMask::online_cpus()
+    } else {
+        CpuMask::parse(value)
     }
 }
 
@@ -407,6 +415,58 @@ mod tests {
                 .map(CompiledPattern::raw)
                 .collect::<Vec<_>>(),
             vec!["RenderThread", "Main"]
+        );
+    }
+
+    #[test]
+    fn profile_parser_accepts_online_affinity() {
+        let profiles = parse_profiles(
+            r#"
+            [[profile]]
+            name = "baseline-online"
+
+            [[profile.rules]]
+            affinity = "online"
+            match_class = ["Game"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(profiles.len(), 1);
+        assert!(!profiles[0].rules[0].affinity.is_empty());
+    }
+
+    #[test]
+    fn invalid_symbolic_affinity_fails_clearly() {
+        let err = parse_profiles(
+            r#"
+            [[profile]]
+            name = "bad"
+
+            [[profile.rules]]
+            affinity = "all"
+            match_class = ["Game"]
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("invalid CPU id"));
+    }
+
+    #[test]
+    fn examples_profile_file_parses() {
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let path = manifest_dir
+            .parent()
+            .unwrap()
+            .join("examples/profiles/common-game-layouts.toml");
+        let profiles = load_profiles(&path).unwrap();
+
+        assert!(!profiles.is_empty());
+        assert!(
+            profiles
+                .iter()
+                .any(|profile| profile.name == "baseline-online")
         );
     }
 

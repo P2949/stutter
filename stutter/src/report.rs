@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Context;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     diagnosis::{
@@ -100,7 +100,7 @@ pub struct DataQualitySummary {
     pub frame_timestamp_alignment: String,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DataQualityLevel {
     High,
     Medium,
