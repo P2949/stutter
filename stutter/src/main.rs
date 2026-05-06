@@ -14,6 +14,7 @@ mod metrics;
 mod perf_counters;
 mod process_tree;
 mod profiles;
+mod prometheus;
 mod psi;
 mod recommend;
 mod recorder;

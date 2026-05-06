@@ -188,6 +188,15 @@ pub struct MonitorArgs {
 
     #[arg(long = "stat-wait")]
     stat_wait: bool,
+
+    #[arg(
+        long = "json-stream",
+        help = "Emit scheduler spike events to stdout as newline-delimited JSON"
+    )]
+    pub json_stream: bool,
+
+    #[arg(long = "metrics-port", value_name = "PORT")]
+    pub metrics_port: Option<u16>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -279,7 +288,10 @@ struct ReportArgs {
     #[arg(long = "filter-class", value_name = "CLASS")]
     filter_class: Option<String>,
 
-    #[arg(help = "Path to session directory or session.json", conflicts_with = "batch")]
+    #[arg(
+        help = "Path to session directory or session.json",
+        conflicts_with = "batch"
+    )]
     path: Option<PathBuf>,
 }
 
@@ -622,6 +634,8 @@ pub struct Config {
     pub cpu_perf_cache_refs: bool,
     pub block_io: bool,
     pub stat_wait: bool,
+    pub json_stream: bool,
+    pub metrics_port: Option<u16>,
 }
 
 #[derive(Debug, Clone)]
@@ -1005,6 +1019,10 @@ fn config_from_monitor_args(
     };
 
     let cpu_freq = (args.cpu_freq || recording.is_some()) && !args.no_cpu_freq;
+    if matches!(args.metrics_port, Some(0)) {
+        anyhow::bail!("--metrics-port must be greater than zero");
+    }
+
     Ok(Config {
         target_pids: args.target_pids,
         tree_pids: args.tree_pids,
@@ -1047,6 +1065,8 @@ fn config_from_monitor_args(
         cpu_perf_cache_refs: args.cpu_perf_cache_refs,
         block_io: args.block_io,
         stat_wait: args.stat_wait,
+        json_stream: args.json_stream,
+        metrics_port: args.metrics_port,
     })
 }
 
@@ -1115,15 +1135,23 @@ mod tests {
     #[test]
     fn report_flag_conflicts() {
         // html vs batch
-        assert!(parse_app_command_from(["stutter", "report", "--html", "r.html", "--batch", "dir"]).is_err());
+        assert!(
+            parse_app_command_from(["stutter", "report", "--html", "r.html", "--batch", "dir"])
+                .is_err()
+        );
         // json vs json-summary
-        assert!(parse_app_command_from(["stutter", "report", "--json", "--json-summary", "run"]).is_err());
+        assert!(
+            parse_app_command_from(["stutter", "report", "--json", "--json-summary", "run"])
+                .is_err()
+        );
         // analysis-json vs batch
-        assert!(parse_app_command_from(["stutter", "report", "--analysis-json", "--batch", "dir"]).is_err());
+        assert!(
+            parse_app_command_from(["stutter", "report", "--analysis-json", "--batch", "dir"])
+                .is_err()
+        );
         // path vs batch
         assert!(parse_app_command_from(["stutter", "report", "--batch", "dir", "run"]).is_err());
     }
-
 
     #[test]
     fn parses_summary_command() {
@@ -2098,5 +2126,21 @@ mod tests {
             panic!("expected monitor command");
         };
         assert!(config.cpu_freq);
+    }
+
+    #[test]
+    fn monitor_json_stream_flag_sets_config() {
+        let command =
+            parse_app_command_from(["stutter", "monitor", "--pid", "42", "--json-stream"]).unwrap();
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+        assert!(config.json_stream);
+
+        let command = parse_app_command_from(["stutter", "monitor", "--pid", "42"]).unwrap();
+        let AppCommand::Monitor(config) = command else {
+            panic!("expected monitor command");
+        };
+        assert!(!config.json_stream);
     }
 }
