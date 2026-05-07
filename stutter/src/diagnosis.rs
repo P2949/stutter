@@ -166,7 +166,7 @@ impl DiagnosisConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum StutterCause {
     CompositorSchedulerDelay,
     GameThreadSchedulerDelay,
@@ -231,7 +231,7 @@ fn confidence_threshold_value(confidence: Confidence) -> f64 {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum EvidenceKind {
     SchedulerDelay,
@@ -317,7 +317,7 @@ pub struct FrameDiagnosis {
     pub diagnosis: Diagnosis,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LiveDiagnosisEntry {
     pub elapsed_ms: u64,
     pub cause: StutterCause,
