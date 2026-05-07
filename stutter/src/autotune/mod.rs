@@ -1,7 +1,3 @@
-#![allow(dead_code)]
-
-use std::path::PathBuf;
-
 pub mod controller;
 pub mod decision;
 pub mod observation;
@@ -9,6 +5,20 @@ pub mod quality;
 pub mod replay;
 pub mod state;
 
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
+
+use serde::Serialize;
+use tokio::sync::{mpsc, oneshot};
+
+use crate::{cli::Config, session_events::MonitorEvent};
+
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AutotuneCommandInput {
     pub config: Option<PathBuf>,
@@ -24,30 +34,185 @@ pub struct AutotuneCommandInput {
     pub mangohud_log: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AutotuneDecisionLogEntry {
+    pub unix_nanos: u128,
+    pub mode: String,
+    pub event_kind: String,
+    pub decision: String,
+    pub reason: String,
+    pub interval_records: usize,
+}
+
+#[derive(Debug, Default)]
+struct ObservePolicyStub {
+    mode: String,
+    decision_log: Option<PathBuf>,
+    interval_events: usize,
+    interval_records: usize,
+}
+
+impl ObservePolicyStub {
+    fn new(mode: String, decision_log: Option<PathBuf>) -> Self {
+        Self {
+            mode,
+            decision_log,
+            interval_events: 0,
+            interval_records: 0,
+        }
+    }
+
+    fn on_event(&mut self, event: MonitorEvent) -> anyhow::Result<()> {
+        match event {
+            MonitorEvent::Interval { records, .. } => {
+                self.interval_events += 1;
+                self.interval_records += records.len();
+                self.write_decision(
+                    "interval",
+                    "noop",
+                    "observe/suggest mode does not apply actions",
+                    records.len(),
+                )?;
+            }
+            MonitorEvent::DataQualityWarning { message } => {
+                self.write_decision("data_quality_warning", "noop", &message, 0)?;
+            }
+            MonitorEvent::Finished { reason } => {
+                self.write_decision("finished", "noop", &reason, 0)?;
+            }
+            other => {
+                self.write_decision(other.kind(), "noop", "event observed; no action applied", 0)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn write_decision(
+        &self,
+        event_kind: &str,
+        decision: &str,
+        reason: &str,
+        interval_records: usize,
+    ) -> anyhow::Result<()> {
+        let Some(path) = &self.decision_log else {
+            return Ok(());
+        };
+
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)?;
+        }
+
+        let entry = AutotuneDecisionLogEntry {
+            unix_nanos: crate::audit::unix_nanos_now(),
+            mode: self.mode.clone(),
+            event_kind: event_kind.to_owned(),
+            decision: decision.to_owned(),
+            reason: reason.to_owned(),
+            interval_records,
+        };
+
+        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+        serde_json::to_writer(&mut file, &entry)?;
+        file.write_all(b"\n")?;
+        Ok(())
+    }
+}
+
 pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()> {
     match input.mode.as_str() {
-        "observe" | "suggest" => {
-            println!(
-                "autotune mode={} parsed; live autotune controller is not implemented yet; no actions applied",
-                input.mode
-            );
-            println!(
-                "autotune config={:?} watch_process={:?} tree_pid={:?} profiles={:?} decision_log={:?} duration_seconds={:?} summary_ms={} preset={} hwmon={} mangohud_log={:?}",
-                input.config,
-                input.watch_process,
-                input.tree_pid,
-                input.profiles,
-                input.decision_log,
-                input.duration_seconds,
-                input.summary_ms,
-                input.preset,
-                input.hwmon,
-                input.mangohud_log
-            );
-            Ok(())
-        }
+        "observe" | "suggest" => {}
         _ => {
             anyhow::bail!("apply mode is not implemented yet; use --mode observe or --mode suggest")
         }
+    }
+
+    let monitor_config = crate::cli::autotune_monitor_config(&input)?;
+    let (event_tx, mut event_rx) = mpsc::channel::<MonitorEvent>(256);
+    let (stop_tx, stop_rx) = oneshot::channel::<()>();
+    let duration = input.duration_seconds.map(Duration::from_secs);
+    let mut policy = ObservePolicyStub::new(input.mode.clone(), input.decision_log.clone());
+
+    let monitor_task = tokio::spawn(async move {
+        crate::session::run_monitor(monitor_config, None, Some(event_tx), Some(stop_rx)).await
+    });
+
+    let timeout_task = duration.map(|duration| {
+        tokio::spawn(async move {
+            tokio::time::sleep(duration).await;
+            let _ = stop_tx.send(());
+        })
+    });
+
+    while let Some(event) = event_rx.recv().await {
+        policy.on_event(event)?;
+    }
+
+    if let Some(timeout_task) = timeout_task {
+        let _ = timeout_task.await;
+    }
+
+    let monitor_result = monitor_task.await?;
+    monitor_result?;
+
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub fn make_monitor_config_for_tests(config: Arc<Config>) -> Arc<Config> {
+    config
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn observe_policy_writes_decision_jsonl() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "stutter-autotune-decision-test-{}-{}.jsonl",
+            std::process::id(),
+            crate::audit::unix_nanos_now()
+        ));
+
+        let mut policy = ObservePolicyStub::new("observe".to_owned(), Some(path.clone()));
+        policy
+            .on_event(MonitorEvent::DataQualityWarning {
+                message: "test warning".to_owned(),
+            })
+            .unwrap();
+
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"mode\":\"observe\""));
+        assert!(text.contains("\"event_kind\":\"data_quality_warning\""));
+        assert!(text.contains("\"decision\":\"noop\""));
+        assert!(text.contains("test warning"));
+
+        fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn apply_mode_is_rejected_before_monitor_starts() {
+        let input = AutotuneCommandInput {
+            config: None,
+            watch_process: None,
+            tree_pid: None,
+            profiles: None,
+            mode: "apply-low-risk".to_owned(),
+            decision_log: None,
+            duration_seconds: Some(1),
+            summary_ms: 1000,
+            preset: "diagnosis".to_owned(),
+            hwmon: false,
+            mangohud_log: None,
+        };
+
+        let err = autotune_command(input).await.unwrap_err().to_string();
+        assert_eq!(
+            err,
+            "apply mode is not implemented yet; use --mode observe or --mode suggest"
+        );
     }
 }
