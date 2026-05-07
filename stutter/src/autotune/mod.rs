@@ -151,6 +151,22 @@ impl ObservePolicyStub {
 }
 
 pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()> {
+    if input.mode == "suggest"
+        && let (Some(profiles_path), Some(tree_pid)) = (input.profiles.as_deref(), input.tree_pid)
+    {
+        let loaded_profiles = profiles::load_autotune_profiles(profiles_path)?;
+        let candidates =
+            candidate::generate_profile_candidates(&loaded_profiles.profiles, tree_pid, None);
+        let dry_run_records = candidate::dry_run_candidates(&candidates);
+        let suggestions = candidate::suggestions_from_dry_run_records(
+            &dry_run_records,
+            tree_pid,
+            Some(profiles_path),
+            "scheduler pressure detected on Game/WineServer classes",
+        );
+        candidate::print_candidate_suggestions(&suggestions);
+    }
+
     let loaded_profiles = match input.profiles.as_deref() {
         Some(path) => Some(profiles::load_autotune_profiles(path)?),
         None => None,
