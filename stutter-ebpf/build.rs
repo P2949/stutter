@@ -18,6 +18,30 @@ fn main() {
         return;
     }
 
-    let bpf_linker = which("bpf-linker").unwrap();
-    println!("cargo:rerun-if-changed={}", bpf_linker.to_str().unwrap());
+    let bpf_linker = match which("bpf-linker") {
+        Ok(path) => path,
+        Err(err) => {
+            eprintln!(
+                "error: failed to find `bpf-linker` while building stutter-ebpf for bpfel-unknown-none: {err}"
+            );
+            eprintln!(
+                "hint: build stutter as your normal user with bpf-linker on PATH, then run the built stutter binary with doas/sudo."
+            );
+            eprintln!(
+                "hint: avoid `doas cargo run` unless root has rustup, cargo, and bpf-linker configured."
+            );
+            eprintln!("hint: install with `cargo install bpf-linker` or preserve PATH explicitly.");
+            std::process::exit(1);
+        }
+    };
+
+    let Some(path) = bpf_linker.to_str() else {
+        eprintln!(
+            "error: path to bpf-linker is not valid UTF-8: {}",
+            bpf_linker.display()
+        );
+        std::process::exit(1);
+    };
+
+    println!("cargo:rerun-if-changed={path}");
 }

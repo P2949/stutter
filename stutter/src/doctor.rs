@@ -60,6 +60,7 @@ pub fn doctor_command(input: DoctorInput) -> anyhow::Result<()> {
 pub fn build_doctor_report(input: &DoctorInput) -> DoctorReport {
     let mut checks = vec![
         ebpf_build_check(),
+        ebpf_runtime_permission_check(),
         ebpf_map_sizing_check(),
         tracepoint_check(input),
     ];
@@ -125,6 +126,96 @@ fn ebpf_build_check() -> DoctorCheck {
         status: DoctorStatus::Pass,
         message: "binary started; eBPF object was embedded at build time".to_owned(),
         details: BTreeMap::new(),
+    }
+}
+
+fn ebpf_runtime_permission_check() -> DoctorCheck {
+    let euid = unsafe { libc::geteuid() };
+    let rlimit = current_memlock_limit();
+    let unprivileged_bpf_disabled =
+        read_trimmed(Path::new("/proc/sys/kernel/unprivileged_bpf_disabled"));
+
+    ebpf_runtime_permission_check_from_parts(euid, rlimit, unprivileged_bpf_disabled)
+}
+
+fn ebpf_runtime_permission_check_from_parts(
+    euid: libc::uid_t,
+    memlock: Option<(u64, u64)>,
+    unprivileged_bpf_disabled: Result<Option<String>, String>,
+) -> DoctorCheck {
+    let mut details = BTreeMap::new();
+    details.insert("effective_uid".to_owned(), euid.to_string());
+    details.insert("is_root".to_owned(), yes_no(euid == 0));
+
+    match memlock {
+        Some((soft, hard)) => {
+            details.insert("rlimit_memlock_soft_bytes".to_owned(), soft.to_string());
+            details.insert("rlimit_memlock_hard_bytes".to_owned(), hard.to_string());
+        }
+        None => {
+            details.insert("rlimit_memlock_soft_bytes".to_owned(), "unknown".to_owned());
+            details.insert("rlimit_memlock_hard_bytes".to_owned(), "unknown".to_owned());
+        }
+    }
+
+    match unprivileged_bpf_disabled {
+        Ok(Some(val)) => {
+            details.insert("unprivileged_bpf_disabled".to_owned(), val);
+        }
+        Ok(None) => {
+            details.insert("unprivileged_bpf_disabled".to_owned(), "missing".to_owned());
+        }
+        Err(err) => {
+            details.insert("unprivileged_bpf_disabled_error".to_owned(), err);
+        }
+    }
+
+    let (status, message) = if euid == 0 {
+        (
+            DoctorStatus::Pass,
+            "process is running as root; eBPF recording should have the required runtime privileges"
+                .to_owned(),
+        )
+    } else {
+        (
+            DoctorStatus::Warn,
+            "recording likely requires root or CAP_BPF/CAP_PERFMON/CAP_SYS_RESOURCE; build as your normal user, then run the built stutter binary with doas/sudo"
+                .to_owned(),
+        )
+    };
+
+    DoctorCheck {
+        name: "ebpf_runtime_permissions".to_owned(),
+        status,
+        message,
+        details,
+    }
+}
+
+fn current_memlock_limit() -> Option<(u64, u64)> {
+    let mut limit = std::mem::MaybeUninit::<libc::rlimit>::uninit();
+    let rc = unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, limit.as_mut_ptr()) };
+    if rc != 0 {
+        return None;
+    }
+    let limit = unsafe { limit.assume_init() };
+
+    #[cfg(target_env = "musl")]
+    type RlimT = libc::rlim_t;
+    #[cfg(not(target_env = "musl"))]
+    type RlimT = u64;
+
+    let soft = limit.rlim_cur as RlimT;
+    let hard = limit.rlim_max as RlimT;
+
+    Some((soft as u64, hard as u64))
+}
+
+fn read_trimmed(path: &Path) -> Result<Option<String>, String> {
+    match fs::read_to_string(path) {
+        Ok(value) => Ok(Some(value.trim().to_owned())),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err.to_string()),
     }
 }
 
@@ -609,6 +700,64 @@ mod tests {
         assert_eq!(check.status, DoctorStatus::Fail);
         assert!(check.message.contains("permission"));
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn ebpf_runtime_permission_check_passes_for_root() {
+        let check = ebpf_runtime_permission_check_from_parts(
+            0,
+            Some((4096, 8192)),
+            Ok(Some("2".to_owned())),
+        );
+        assert_eq!(check.name, "ebpf_runtime_permissions");
+        assert_eq!(check.status, DoctorStatus::Pass);
+        assert_eq!(check.details["effective_uid"], "0");
+        assert_eq!(check.details["is_root"], "yes");
+    }
+
+    #[test]
+    fn ebpf_runtime_permission_check_warns_for_non_root() {
+        let check = ebpf_runtime_permission_check_from_parts(
+            1000,
+            Some((4096, 8192)),
+            Ok(Some("2".to_owned())),
+        );
+        assert_eq!(check.status, DoctorStatus::Warn);
+        assert!(check.message.contains("recording likely requires root"));
+        assert!(check.message.contains("doas") || check.message.contains("sudo"));
+        assert_eq!(check.details["effective_uid"], "1000");
+        assert_eq!(check.details["is_root"], "no");
+    }
+
+    #[test]
+    fn doctor_report_includes_runtime_permission_check() {
+        let input = DoctorInput {
+            json: false,
+            hwmon: false,
+            hwmon_root: None,
+            hwmon_drm_card: None,
+            hwmon_render_node: None,
+            irq_latency: false,
+            irqs: Vec::new(),
+            block_io: false,
+            faults: false,
+            cpu_perf: false,
+            mangohud_log: None,
+        };
+
+        let report = build_doctor_report(&input);
+        assert!(
+            report
+                .checks
+                .iter()
+                .any(|c| c.name == "ebpf_runtime_permissions")
+        );
+    }
+
+    #[test]
+    fn ebpf_runtime_permission_check_handles_missing_unprivileged_bpf_file() {
+        let check = ebpf_runtime_permission_check_from_parts(1000, Some((4096, 8192)), Ok(None));
+        assert_eq!(check.details["unprivileged_bpf_disabled"], "missing");
     }
 
     fn temp_dir(name: &str) -> PathBuf {
