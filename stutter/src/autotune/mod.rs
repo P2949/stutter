@@ -1,3 +1,4 @@
+pub mod decision;
 pub mod observation;
 pub mod quality;
 pub mod replay;
