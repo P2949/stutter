@@ -83,18 +83,16 @@ pub fn run_audited_action_with_audit_path<A: TuningAction>(
 
             let state = match action.verify() {
                 Ok(state) => state,
-                Err(verify_err) => {
-                    match action.rollback(&rollback) {
-                        Ok(()) => {
-                            anyhow::bail!("verify failed; rollback completed: {verify_err:#}");
-                        }
-                        Err(rollback_err) => {
-                            anyhow::bail!(
-                                "verify failed; emergency rollback failed: verify error: {verify_err:#}; rollback error: {rollback_err:#}"
-                            );
-                        }
+                Err(verify_err) => match action.rollback(&rollback) {
+                    Ok(()) => {
+                        anyhow::bail!("verify failed; rollback completed: {verify_err:#}");
                     }
-                }
+                    Err(rollback_err) => {
+                        anyhow::bail!(
+                            "verify failed; emergency rollback failed: verify error: {verify_err:#}; rollback error: {rollback_err:#}"
+                        );
+                    }
+                },
             };
 
             audit_event.affected_tasks = state.affected_tasks;
