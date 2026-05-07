@@ -2,61 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::state::SituationKind;
+use super::{quality::OnlineDataQuality, state::SituationKind};
 use crate::{diagnosis::LiveDiagnosisEntry, scorer::StutterScore};
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct OnlineDataQuality {
-    pub usable: bool,
-    pub min_scored_samples_met: bool,
-    pub min_scored_intervals_met: bool,
-    pub drop_counters_ok: bool,
-    pub target_identity_stable: bool,
-    pub target_present: bool,
-    pub warnings: Vec<String>,
-}
-
-impl Default for OnlineDataQuality {
-    fn default() -> Self {
-        Self {
-            usable: false,
-            min_scored_samples_met: false,
-            min_scored_intervals_met: false,
-            drop_counters_ok: true,
-            target_identity_stable: true,
-            target_present: false,
-            warnings: Vec::new(),
-        }
-    }
-}
-
-impl OnlineDataQuality {
-    pub fn good() -> Self {
-        Self {
-            usable: true,
-            min_scored_samples_met: true,
-            min_scored_intervals_met: true,
-            drop_counters_ok: true,
-            target_identity_stable: true,
-            target_present: true,
-            warnings: Vec::new(),
-        }
-    }
-
-    pub fn blocks_action(&self) -> bool {
-        !self.usable
-            || !self.min_scored_samples_met
-            || !self.min_scored_intervals_met
-            || !self.drop_counters_ok
-            || !self.target_identity_stable
-            || !self.target_present
-    }
-
-    pub fn with_warning(mut self, warning: impl Into<String>) -> Self {
-        self.warnings.push(warning.into());
-        self
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AutotuneObservation {
@@ -121,10 +68,10 @@ mod tests {
     }
 
     #[test]
-    fn good_data_quality_does_not_block_action() {
-        let quality = OnlineDataQuality::good();
+    fn high_data_quality_does_not_block_action() {
+        let quality = OnlineDataQuality::High;
 
-        assert!(quality.usable);
+        assert!(quality.is_high());
         assert!(!quality.blocks_action());
     }
 }
