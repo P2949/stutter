@@ -1099,6 +1099,25 @@ fn validate_autotune_mode(mode: &str) -> anyhow::Result<()> {
     }
 }
 
+pub fn autotune_monitor_config(
+    input: &crate::autotune::AutotuneCommandInput,
+) -> anyhow::Result<Arc<Config>> {
+    let monitor = MonitorArgs {
+        watch_process: input.watch_process.clone(),
+        tree_pids: input.tree_pid.map_or(Vec::new(), |pid| vec![pid]),
+        summary_period_ms: Some(input.summary_ms),
+        preset: Some(input.preset.clone()),
+        hwmon: input.hwmon,
+        no_hwmon: !input.hwmon,
+        mangohud_log: input.mangohud_log.clone(),
+        no_record: input.decision_log.is_none(),
+        run_name: Some("autotune-observe".to_owned()),
+        ..Default::default()
+    };
+
+    Ok(Arc::new(config_from_monitor_args(monitor, false, None)?))
+}
+
 pub fn parse_app_command() -> anyhow::Result<AppCommand> {
     parse_app_command_from(std::env::args_os())
 }
