@@ -7,8 +7,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum SafetyClass {
+    #[default]
     ObserveOnly,
     ReversibleLowRisk,
     ReversibleMediumRisk,

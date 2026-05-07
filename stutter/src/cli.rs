@@ -1092,10 +1092,10 @@ pub struct RecordingConfig {
 
 fn validate_autotune_mode(mode: &str) -> anyhow::Result<()> {
     match mode {
-        "observe" | "suggest" => Ok(()),
-        _ => {
-            anyhow::bail!("apply mode is not implemented yet; use --mode observe or --mode suggest")
-        }
+        "observe" | "suggest" | "apply-low-risk" => Ok(()),
+        _ => anyhow::bail!(
+            "apply mode is not implemented yet; use --mode observe, --mode suggest, or --mode apply-low-risk"
+        ),
     }
 }
 

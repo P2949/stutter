@@ -278,7 +278,6 @@ impl<'a> Default for TargetSnapshotInput<'a> {
 }
 
 impl<'a> TargetSnapshotInput<'a> {
-    #[cfg(test)]
     pub fn proc_root(mut self, path: &'a Path) -> Self {
         self.proc_root = path;
         self

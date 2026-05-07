@@ -1,3 +1,4 @@
+pub mod apply_low_risk;
 pub mod candidate;
 pub mod controller;
 pub mod decision;
@@ -185,7 +186,9 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
     match input.mode.as_str() {
         "observe" | "suggest" => {}
         _ => {
-            anyhow::bail!("apply mode is not implemented yet; use --mode observe or --mode suggest")
+            anyhow::bail!(
+                "apply mode is not implemented yet; use --mode observe, --mode suggest, or --mode apply-low-risk"
+            )
         }
     }
 
@@ -277,7 +280,7 @@ mod tests {
         let err = autotune_command(input).await.unwrap_err().to_string();
         assert_eq!(
             err,
-            "apply mode is not implemented yet; use --mode observe or --mode suggest"
+            "apply mode is not implemented yet; use --mode observe, --mode suggest, or --mode apply-low-risk"
         );
     }
 }
