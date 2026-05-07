@@ -34,6 +34,7 @@ mod scenario;
 mod scorer;
 mod scx;
 mod session;
+mod session_events;
 mod session_io;
 mod summary;
 mod tasks;
