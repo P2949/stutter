@@ -25,6 +25,13 @@ th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e5e7eb;
 th { background: #f3f4f6; font-weight: 600; }
 details { max-width: 1080px; }
 summary { cursor: pointer; font-weight: 600; color: #111827; }
+.wake-graph-table { margin-top: 4px; font-size: 0.85rem; box-shadow: none !important; border: 1px solid #e5e7eb; width: auto !important; min-width: 400px; }
+.wake-graph-table th { background: #f9fafb; padding: 6px 12px; }
+.wake-graph-table td { padding: 4px 12px; border-bottom: 1px solid #f3f4f6; }
+.wake-graph-table tr:last-child td { border-bottom: none; }
+.wake-graph-table .count-cell { text-align: right; font-weight: 500; }
+.wake-graph-table .latency-cell { text-align: right; color: #4b5563; }
+.wake-graph-badge { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.8rem; }
 </style>
 </head>
 <body>
@@ -291,13 +298,43 @@ document.addEventListener('DOMContentLoaded', () => {
                     const primary = diagnosis.primary || {};
                     const cause = primary.cause || diagnosis.cause || cluster.primary_cause || cluster.anchor_kind || '—';
                     const summary = diagnosis.summary || cluster.summary || cluster.anchor_comm || '—';
+
+                    let wakeHtml = '';
+                    if (cluster.wake_graph && cluster.wake_graph.length > 0) {
+                        wakeHtml = `
+                            <details style="margin-top: 8px;">
+                                <summary>Wake relationships (${cluster.wake_graph.length})</summary>
+                                <table class="wake-graph-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Waker</th>
+                                            <th>Wakee</th>
+                                            <th style="text-align: right;">Count</th>
+                                            <th style="text-align: right;">Max latency</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${cluster.wake_graph.map(edge => `
+                                            <tr>
+                                                <td><span class="wake-graph-badge">${escapeHtml(edge.waker_comm)}</span> <span class="muted">[${edge.waker_tid}]</span></td>
+                                                <td><span class="wake-graph-badge">${escapeHtml(edge.wakee_comm)}</span> <span class="muted">[${edge.wakee_tid}]</span></td>
+                                                <td class="count-cell">${edge.count}</td>
+                                                <td class="latency-cell">${formatMs(nsToMs(edge.max_latency_ns))}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </details>
+                        `;
+                    }
+
                     return `
                       <tr>
                         <td>${escapeHtml(formatMs(nsToMs(cluster.min_switch_ns)))}</td>
                         <td>${escapeHtml(formatMs(nsToMs(cluster.max_switch_ns)))}</td>
                         <td>${escapeHtml(cluster.count ?? cluster.spike_count ?? (cluster.points || []).length ?? '—')}</td>
                         <td>${escapeHtml(cause)}</td>
-                        <td>${escapeHtml(summary)}</td>
+                        <td>${escapeHtml(summary)}${wakeHtml}</td>
                       </tr>
                     `;
                 }).join('')}
@@ -484,6 +521,22 @@ document.addEventListener('DOMContentLoaded', () => {
         return events.filter((_, idx) => idx % step === 0);
     }
 
+    function classifySwitchPrevState(prevState) {
+        const state = Number(prevState);
+        if (state === 0) {
+            return 'preempted_or_runnable';
+        }
+        const TASK_INTERRUPTIBLE = 1;
+        const TASK_UNINTERRUPTIBLE = 2;
+        if ((state & TASK_INTERRUPTIBLE) !== 0) {
+            return 'voluntary_sleep_interruptible';
+        }
+        if ((state & TASK_UNINTERRUPTIBLE) !== 0) {
+            return 'voluntary_sleep_uninterruptible';
+        }
+        return 'other_sleep';
+    }
+
     if (Array.isArray(rawSpikeEvents)) {
         const sampledEvents = sampleSpikePoints(rawSpikeEvents, MAX_SCATTER_POINTS);
         isSampled = rawSpikeEvents.length > MAX_SCATTER_POINTS;
@@ -496,12 +549,18 @@ document.addEventListener('DOMContentLoaded', () => {
         spikePoints = sampledEvents.map(e => ({
             x: e.elapsed_ms || (e.switch_ns / 1000000.0),
             y: e.latency_ns / 1000000.0,
+            switch_prev_pid: e.switch_prev_pid || 0,
+            switch_prev_state: e.switch_prev_state || 0,
+            switch_prev_state_label: classifySwitchPrevState(e.switch_prev_state || 0),
             taskLabel: `${e.task}:${e.comm}`
         }));
     } else if (Array.isArray(session.top_spikes)) {
         spikePoints = session.top_spikes.slice(0, 512).map(e => ({
             x: e.switch_ns / 1000000.0,
             y: e.latency_ns / 1000000.0,
+            switch_prev_pid: e.switch_prev_pid || 0,
+            switch_prev_state: e.switch_prev_state || 0,
+            switch_prev_state_label: classifySwitchPrevState(e.switch_prev_state || 0),
             taskLabel: `${e.task}:${e.comm}`
         }));
     }
@@ -520,7 +579,19 @@ document.addEventListener('DOMContentLoaded', () => {
             options: {
                 responsive: true, maintainAspectRatio: false,
                 plugins: {
-                    tooltip: { callbacks: { label: (ctx) => `${ctx.raw.taskLabel}: ${ctx.raw.y.toFixed(2)}ms at ${ctx.raw.x.toFixed(0)}ms` } },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => {
+                                const p = ctx.raw;
+                                let lines = [
+                                    `${p.taskLabel}: ${p.y.toFixed(2)}ms at ${p.x.toFixed(0)}ms`,
+                                    `switch_prev_pid: ${p.switch_prev_pid}`,
+                                    `switch_prev_state: ${p.switch_prev_state} (${p.switch_prev_state_label})`
+                                ];
+                                return lines;
+                            }
+                        }
+                    },
                     zoom: { zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }, pan: { enabled: true, mode: 'x' } }
                 }
             }
@@ -661,7 +732,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 datasets.push({
                     label: label,
-                    data: [{ x: [start_ms, end_ms], y: label, wakeup_target_cpu: p.wakeup_target_cpu, switch_cpu: p.cpu, observed_runnable_depth: p.observed_runnable_depth, target_pending_wakeups: p.target_pending_wakeups, primary_cause: p.primary_cause, cause_tags: p.cause_tags }],
+                    data: [{
+                        x: [start_ms, end_ms],
+                        y: label,
+                        wakeup_target_cpu: p.wakeup_target_cpu,
+                        switch_cpu: p.cpu,
+                        observed_runnable_depth: p.observed_runnable_depth,
+                        target_pending_wakeups: p.target_pending_wakeups,
+                        primary_cause: p.primary_cause,
+                        cause_tags: p.cause_tags,
+                        switch_prev_pid: p.switch_prev_pid,
+                        switch_prev_state: p.switch_prev_state
+                    }],
                     backgroundColor: color,
                     barPercentage: 0.8,
                     categoryPercentage: 0.8
@@ -678,9 +760,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         title: { display: true, text: `Cluster ${idx + 1} (${cluster.points.length} points)` },
                         legend: { display: false },
                         tooltip: { callbacks: { label: (ctx) => {
-                            let label = `${ctx.raw.y}: ${((ctx.raw.x[1] - ctx.raw.x[0])).toFixed(2)}ms (wakeup_target_cpu=${ctx.raw.wakeup_target_cpu}, switch_cpu=${ctx.raw.switch_cpu}, observed_runnable_depth=${ctx.raw.observed_runnable_depth}, target_pending_wakeups=${ctx.raw.target_pending_wakeups}(diag)`;
-                            if (ctx.raw.primary_cause) label += `, primary_cause=${ctx.raw.primary_cause}`;
-                            if (ctx.raw.cause_tags && ctx.raw.cause_tags.length > 0) label += `, tags=${ctx.raw.cause_tags.join(',')}`;
+                            const p = ctx.raw;
+                            let label = `${p.y}: ${((p.x[1] - p.x[0])).toFixed(2)}ms (wakeup_target_cpu=${p.wakeup_target_cpu}, switch_cpu=${p.switch_cpu}, observed_runnable_depth=${p.observed_runnable_depth}, target_pending_wakeups=${p.target_pending_wakeups}(diag)`;
+                            if (p.primary_cause) label += `, primary_cause=${p.primary_cause}`;
+                            if (p.cause_tags && p.cause_tags.length > 0) label += `, tags=${p.cause_tags.join(',')}`;
+
+                            const prevState = p.switch_prev_state ?? 0;
+                            const prevLabel = classifySwitchPrevState(prevState);
+                            label += `, switch_prev_pid=${p.switch_prev_pid ?? 0}, switch_prev_state=${prevState}(${prevLabel})`;
+
                             label += ')';
                             return label;
                         } } },

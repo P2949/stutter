@@ -1,23 +1,31 @@
 mod actions;
 mod advisor;
 mod affinity;
+mod agent;
 mod audit;
 mod cli;
+mod config_file;
+
 mod diagnosis;
 mod doctor;
 mod ebpf_loader;
 mod events;
+mod flamegraph;
 mod hwmon;
+mod irq_inspect;
 mod mangohud;
 mod metadata;
 mod metrics;
+mod otel;
 mod perf_counters;
+mod presets;
 mod process_tree;
 mod profiles;
 mod prometheus;
 mod psi;
 mod recommend;
 mod recorder;
+mod remote;
 mod report;
 mod scorer;
 mod scx;
@@ -47,13 +55,21 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     match parse_app_command()? {
-        AppCommand::Monitor(config) => run_monitor(config, None).await,
+        AppCommand::Monitor(config) => {
+            if let Some(remote) = config.remote.as_deref() {
+                let request = remote::request_from_monitor_config(&config)?;
+                remote::run_remote_monitor(remote, request).await?;
+                Ok(())
+            } else {
+                run_monitor(config, None, None).await.map(|_| ())
+            }
+        }
         AppCommand::Bench {
             config,
             role,
             run_name,
         } => {
-            run_monitor(config, None).await?;
+            run_monitor(config, None, None).await?;
             if role == "baseline" {
                 println!(
                     "bench complete role=baseline run_name={} next=\"run tune, then stutter recommend --baseline <run-dir> --tune <tune-dir>\"",
@@ -163,6 +179,7 @@ async fn main() -> anyhow::Result<()> {
             batch,
             diff,
             filter_class,
+            flamegraph: flamegraph_path,
         } => {
             if let Some(batch_dir) = batch {
                 return report::print_batch_report(
@@ -190,6 +207,7 @@ async fn main() -> anyhow::Result<()> {
                 top,
                 cluster_window_ms,
                 filter_class,
+                flamegraph_path,
             )
         }
         AppCommand::Tune {
@@ -280,6 +298,10 @@ async fn main() -> anyhow::Result<()> {
                 anyhow::bail!("profile-template requires --topology");
             }
         }
+        AppCommand::InspectIrqs { json, filter, top } => {
+            irq_inspect::run_inspect_irqs(json, &filter, top)
+        }
+        AppCommand::Agent { bind, runs_dir } => agent::run_agent(bind, runs_dir).await,
     }
 }
 

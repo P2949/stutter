@@ -353,7 +353,7 @@ async fn collect_tune_results(
                     persistent: false,
                     watch_poll_ms: 2_000,
                     watch_timeout: None,
-                    csv_path: None,
+                    csv_stream: None,
                     irq_latency: false,
                     irqs: Vec::new(),
                     hwmon,
@@ -383,6 +383,11 @@ async fn collect_tune_results(
                     json_stream: false,
                     mangohud_log_live: false,
                     metrics_port: None,
+                    ringbuf_size_kb: None,
+                    wakeup_map_factor: None,
+                    otlp_endpoint: None,
+                    otel_service_name: "stutter".to_owned(),
+                    remote: None,
                 }),
                 profile.clone(),
                 enforce,
@@ -659,7 +664,7 @@ pub async fn measure_tune_candidate(
 
     let mut profile_refresh_finished = false;
     let monitor_result = tokio::select! {
-        result = run_monitor(config.clone(), shared_hwmon) => result,
+        result = run_monitor(config.clone(), shared_hwmon, None) => result,
         refresh_result = &mut profile_refresh => {
             profile_refresh_finished = true;
             match refresh_result {

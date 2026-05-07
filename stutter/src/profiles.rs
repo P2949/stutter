@@ -12,6 +12,13 @@ use crate::{
     process_tree::{self, CompiledPattern, TaskClass, TaskInfo},
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileCpuWarning {
+    pub rule_index: usize,
+    pub requested: String,
+    pub online: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct Profile {
     pub name: String,
@@ -99,6 +106,11 @@ fn apply_profile_to_tree_with_cache(
     let snapshot = process_tree::target_snapshot(
         process_tree::TargetSnapshotInput::default().tree_pids(&[tree_pid]),
     );
+
+    if let Err(err) = warn_profile_offline_cpus(profile) {
+        log::warn!("profile_online_cpu_check_failed err={err:#}");
+    }
+
     let planned = planned_affinity_changes(&snapshot.tasks, profile, cache.as_deref_mut())?;
     if planned.is_empty() {
         return Ok(Vec::new());
@@ -265,6 +277,41 @@ where
     }
 
     Ok(planned)
+}
+
+pub fn profile_offline_cpu_warnings(profile: &Profile, online: &CpuMask) -> Vec<ProfileCpuWarning> {
+    profile
+        .rules
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, rule)| {
+            if rule.affinity.is_subset_of(online) {
+                None
+            } else {
+                Some(ProfileCpuWarning {
+                    rule_index: idx,
+                    requested: rule.affinity.to_range_string(),
+                    online: online.to_range_string(),
+                })
+            }
+        })
+        .collect()
+}
+
+fn warn_profile_offline_cpus(profile: &Profile) -> anyhow::Result<()> {
+    let online =
+        CpuMask::online_cpus().context("failed to read online CPU mask before applying profile")?;
+
+    for warning in profile_offline_cpu_warnings(profile, &online) {
+        log::warn!(
+            "profile_rule_offline_cpus rule={} requested={} online={}",
+            warning.rule_index,
+            warning.requested,
+            warning.online
+        );
+    }
+
+    Ok(())
 }
 
 impl ProfileApplyCacheKey {
@@ -561,5 +608,69 @@ mod tests {
             .unwrap();
         assert!(third.is_empty());
         assert_eq!(reads, 2);
+    }
+
+    #[test]
+    fn profile_offline_cpu_warnings_detects_rule_with_offline_cpus() {
+        let profile = Profile {
+            name: "test".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: CpuMask::parse("0-3").unwrap(),
+                match_class: vec![TaskClass::Game],
+                match_comm: Vec::new(),
+            }],
+        };
+        let online = CpuMask::parse("0-1").unwrap();
+
+        let warnings = profile_offline_cpu_warnings(&profile, &online);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].rule_index, 0);
+        assert_eq!(warnings[0].requested, "0-3");
+        assert_eq!(warnings[0].online, "0-1");
+    }
+
+    #[test]
+    fn profile_offline_cpu_warnings_empty_when_subset() {
+        let profile = Profile {
+            name: "test".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: CpuMask::parse("0-1").unwrap(),
+                match_class: vec![TaskClass::Game],
+                match_comm: Vec::new(),
+            }],
+        };
+        let online = CpuMask::parse("0-3").unwrap();
+
+        let warnings = profile_offline_cpu_warnings(&profile, &online);
+
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn profile_offline_cpu_warnings_multiple_rules_report_correct_indexes() {
+        let profile = Profile {
+            name: "test".to_owned(),
+            rules: vec![
+                ProfileRule {
+                    affinity: CpuMask::parse("0-1").unwrap(),
+                    match_class: vec![TaskClass::Game],
+                    match_comm: Vec::new(),
+                },
+                ProfileRule {
+                    affinity: CpuMask::parse("2-3").unwrap(),
+                    match_class: vec![TaskClass::GameHelper],
+                    match_comm: Vec::new(),
+                },
+            ],
+        };
+        let online = CpuMask::parse("0-1").unwrap();
+
+        let warnings = profile_offline_cpu_warnings(&profile, &online);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].rule_index, 1);
+        assert_eq!(warnings[0].requested, "2-3");
+        assert_eq!(warnings[0].online, "0-1");
     }
 }

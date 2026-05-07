@@ -1,6 +1,7 @@
 use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::{ArgAction, Args, Parser, Subcommand};
+use serde::{Deserialize, Serialize};
 
 pub const TARGET_PIDS_MAX: usize = 1024;
 
@@ -36,9 +37,12 @@ enum Command {
     Advisor(AdvisorArgs),
     Doctor(DoctorArgs),
     ProfileTemplate(ProfileTemplateArgs),
+    #[command(name = "inspect-irqs")]
+    InspectIrqs(InspectIrqsArgs),
+    Agent(AgentArgs),
 }
 
-#[derive(Args, Debug, Clone, Default)]
+#[derive(Args, Debug, Clone)]
 pub struct MonitorArgs {
     #[arg(long = "pid", short = 'p', value_name = "PID")]
     target_pids: Vec<u32>,
@@ -49,14 +53,14 @@ pub struct MonitorArgs {
     #[arg(long = "exclude-tree-pid", value_name = "PID")]
     exclude_tree_pids: Vec<u32>,
 
-    #[arg(long = "summary-ms", default_value_t = 1_000)]
-    summary_period_ms: u64,
+    #[arg(long = "summary-ms", value_name = "MS")]
+    summary_period_ms: Option<u64>,
 
     #[arg(long = "epoch", value_name = "MS")]
     epoch_period_ms: Option<u64>,
 
-    #[arg(long = "spike-us", default_value_t = 1_000)]
-    spike_threshold_us: u64,
+    #[arg(long = "spike-us", value_name = "US")]
+    spike_threshold_us: Option<u64>,
 
     #[arg(long = "alert-threshold-ms", value_name = "MS")]
     alert_threshold_ms: Option<u64>,
@@ -94,11 +98,18 @@ pub struct MonitorArgs {
     #[arg(long = "watch-timeout-seconds", value_name = "SECONDS")]
     watch_timeout_seconds: Option<u64>,
 
-    #[arg(long, default_value_t = 1024)]
-    max_tasks: usize,
+    #[arg(long, value_name = "N")]
+    max_tasks: Option<usize>,
 
     #[arg(long = "csv", value_name = "PATH")]
     csv_path: Option<PathBuf>,
+
+    #[arg(
+        long = "stream-csv",
+        value_name = "PATH_OR_-",
+        conflicts_with = "csv_path"
+    )]
+    stream_csv: Option<String>,
 
     #[arg(long = "irq-latency")]
     irq_latency: bool,
@@ -106,8 +117,11 @@ pub struct MonitorArgs {
     #[arg(long = "irq", value_name = "IRQ")]
     irqs: Vec<u32>,
 
-    #[arg(long = "hwmon", id = "hwmon")]
+    #[arg(long = "hwmon", id = "hwmon", conflicts_with = "no_hwmon")]
     hwmon: bool,
+
+    #[arg(long = "no-hwmon", help = "Disable GPU hwmon telemetry")]
+    no_hwmon: bool,
 
     #[arg(long = "hwmon-root", value_name = "PATH", requires = "hwmon")]
     hwmon_root: Option<PathBuf>,
@@ -160,8 +174,11 @@ pub struct MonitorArgs {
     #[arg(long = "no-follow-exec", action = ArgAction::SetTrue)]
     no_follow_exec: bool,
 
-    #[arg(long = "faults")]
+    #[arg(long = "faults", conflicts_with = "no_faults")]
     faults: bool,
+
+    #[arg(long = "no-faults", help = "Disable page fault collection")]
+    no_faults: bool,
 
     #[arg(
         long = "cpu-perf",
@@ -189,11 +206,17 @@ pub struct MonitorArgs {
     )]
     cpu_perf_cache_refs: bool,
 
-    #[arg(long = "block-io")]
+    #[arg(long = "block-io", conflicts_with = "no_block_io")]
     block_io: bool,
 
-    #[arg(long = "stat-wait")]
+    #[arg(long = "no-block-io", help = "Disable block I/O collection")]
+    no_block_io: bool,
+
+    #[arg(long = "stat-wait", conflicts_with = "no_stat_wait")]
     stat_wait: bool,
+
+    #[arg(long = "no-stat-wait", help = "Disable stat-wait collection")]
+    no_stat_wait: bool,
 
     #[arg(
         long = "json-stream",
@@ -203,6 +226,104 @@ pub struct MonitorArgs {
 
     #[arg(long = "metrics-port", value_name = "PORT")]
     pub metrics_port: Option<u16>,
+
+    #[arg(
+        long = "preset",
+        value_name = "NAME",
+        help = "Apply named monitor defaults: gaming, recording, diagnosis, lightweight"
+    )]
+    pub preset: Option<String>,
+
+    #[arg(long = "ringbuf-size-kb", value_name = "KB")]
+    pub ringbuf_size_kb: Option<u32>,
+
+    #[arg(long = "wakeup-map-factor", value_name = "N")]
+    pub wakeup_map_factor: Option<u32>,
+
+    #[arg(long = "otlp-endpoint", value_name = "URL")]
+    pub otlp_endpoint: Option<String>,
+
+    #[arg(long = "otel-service-name", default_value = "stutter")]
+    pub otel_service_name: String,
+
+    #[arg(long = "remote", value_name = "URL")]
+    pub remote: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AgentArgs {
+    #[arg(long = "bind", default_value = "127.0.0.1:9899")]
+    pub bind: std::net::SocketAddr,
+
+    #[arg(long = "port", value_name = "PORT")]
+    pub port: Option<u16>,
+
+    #[arg(long = "runs-dir", value_name = "PATH")]
+    pub runs_dir: Option<std::path::PathBuf>,
+}
+
+impl Default for MonitorArgs {
+    fn default() -> Self {
+        Self {
+            target_pids: Vec::new(),
+            tree_pids: Vec::new(),
+            exclude_tree_pids: Vec::new(),
+            summary_period_ms: None,
+            epoch_period_ms: None,
+            spike_threshold_us: None,
+            alert_threshold_ms: None,
+            alert_webhook_url: None,
+            verbose: false,
+            run_name: None,
+            out_dir: None,
+            include_comm: Vec::new(),
+            exclude_comm: Vec::new(),
+            keep_missing_pid: false,
+            watch_process: None,
+            persistent: false,
+            watch_poll_ms: 2000,
+            watch_timeout_seconds: None,
+            max_tasks: None,
+            csv_path: None,
+            stream_csv: None,
+            irq_latency: false,
+            irqs: Vec::new(),
+            hwmon: false,
+            no_hwmon: false,
+            hwmon_root: None,
+            hwmon_drm_card: None,
+            hwmon_render_node: None,
+            mangohud_log: None,
+            mangohud_log_live: false,
+            tui: false,
+            retain_intervals: None,
+            no_record: false,
+            cpu_freq: false,
+            no_cpu_freq: false,
+            cgroupv2: None,
+            native_cgroup_filter: false,
+            follow_exec: true,
+            no_follow_exec: false,
+            faults: false,
+            no_faults: false,
+            cpu_perf: false,
+            cpu_perf_kernel: false,
+            cpu_perf_max_tasks: 128,
+            cpu_perf_cache_refs: false,
+            block_io: false,
+            no_block_io: false,
+            stat_wait: false,
+            no_stat_wait: false,
+            json_stream: false,
+            metrics_port: None,
+            preset: None,
+            ringbuf_size_kb: None,
+            wakeup_map_factor: None,
+            otlp_endpoint: None,
+            otel_service_name: "stutter".to_owned(),
+            remote: None,
+        }
+    }
 }
 
 #[derive(Args, Debug, Clone)]
@@ -247,6 +368,14 @@ struct ReportArgs {
         conflicts_with_all = ["analysis_json", "json_summary", "html"]
     )]
     json: bool,
+
+    #[arg(
+        long = "flamegraph",
+        alias = "latency-flamegraph",
+        value_name = "SVG",
+        help = "Write a latency attribution flamegraph SVG"
+    )]
+    pub flamegraph: Option<PathBuf>,
 
     #[arg(
         long = "analysis-json",
@@ -508,6 +637,18 @@ pub struct ProfileTemplateArgs {
     pub topology: bool,
 }
 
+#[derive(Args, Debug, Clone)]
+pub struct InspectIrqsArgs {
+    #[arg(long)]
+    pub json: bool,
+
+    #[arg(long = "filter", value_name = "TEXT")]
+    pub filter: Vec<String>,
+
+    #[arg(long = "top", default_value_t = 30)]
+    pub top: usize,
+}
+
 #[derive(Debug)]
 pub enum AppCommand {
     Monitor(Arc<Config>),
@@ -543,6 +684,7 @@ pub enum AppCommand {
         batch: Option<PathBuf>,
         diff: Option<PathBuf>,
         filter_class: Option<TaskClass>,
+        flamegraph: Option<PathBuf>,
     },
     Summary {
         path: PathBuf,
@@ -598,6 +740,21 @@ pub enum AppCommand {
     ProfileTemplate {
         topology: bool,
     },
+    InspectIrqs {
+        json: bool,
+        filter: Vec<String>,
+        top: usize,
+    },
+    Agent {
+        bind: std::net::SocketAddr,
+        runs_dir: Option<std::path::PathBuf>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CsvStreamTarget {
+    File(PathBuf),
+    Stdout,
 }
 
 #[derive(Debug, Clone)]
@@ -617,7 +774,7 @@ pub struct Config {
     pub watch_poll_ms: u64,
     pub watch_timeout: Option<Duration>,
     pub max_tasks: usize,
-    pub csv_path: Option<PathBuf>,
+    pub csv_stream: Option<CsvStreamTarget>,
     pub irq_latency: bool,
     pub irqs: Vec<u32>,
     pub hwmon: bool,
@@ -626,6 +783,9 @@ pub struct Config {
     pub hwmon_render_node: Option<PathBuf>,
     pub mangohud_log: Option<PathBuf>,
     pub mangohud_log_live: bool,
+    pub otlp_endpoint: Option<String>,
+    pub otel_service_name: String,
+    pub remote: Option<String>,
 
     pub tui: bool,
     pub retain_intervals: Option<usize>,
@@ -647,6 +807,14 @@ pub struct Config {
     pub stat_wait: bool,
     pub json_stream: bool,
     pub metrics_port: Option<u16>,
+    pub ringbuf_size_kb: Option<u32>,
+    pub wakeup_map_factor: Option<u32>,
+}
+
+impl Config {
+    pub fn csv_streams_to_stdout(&self) -> bool {
+        matches!(self.csv_stream, Some(CsvStreamTarget::Stdout))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -751,6 +919,7 @@ where
                 batch: args.batch,
                 diff: args.diff,
                 filter_class,
+                flamegraph: args.flamegraph,
             })
         }
         Some(Command::Summary(args)) => {
@@ -909,31 +1078,193 @@ where
         Some(Command::ProfileTemplate(args)) => Ok(AppCommand::ProfileTemplate {
             topology: args.topology,
         }),
+        Some(Command::InspectIrqs(args)) => {
+            if args.top == 0 {
+                anyhow::bail!("--top must be greater than zero");
+            }
+            Ok(AppCommand::InspectIrqs {
+                json: args.json,
+                filter: args.filter.clone(),
+                top: args.top,
+            })
+        }
         None => Ok(AppCommand::Monitor(Arc::new(config_from_monitor_args(
             cli.legacy_monitor,
             false,
             None,
         )?))),
+        Some(Command::Agent(args)) => {
+            let bind = if let Some(port) = args.port {
+                std::net::SocketAddr::from(([127, 0, 0, 1], port))
+            } else {
+                args.bind
+            };
+            Ok(AppCommand::Agent {
+                bind,
+                runs_dir: args.runs_dir,
+            })
+        }
     }
 }
 
-fn config_from_monitor_args(
-    mut args: MonitorArgs,
+fn merge_bool(
+    builtin: bool,
+    file_value: Option<bool>,
+    preset_value: Option<bool>,
+    cli_positive: bool,
+    cli_negative: bool,
+) -> bool {
+    if cli_negative {
+        false
+    } else if cli_positive {
+        true
+    } else if let Some(value) = preset_value {
+        value
+    } else if let Some(value) = file_value {
+        value
+    } else {
+        builtin
+    }
+}
+
+pub fn config_from_monitor_args(
+    args: MonitorArgs,
     force_recording: bool,
     max_duration: Option<Duration>,
 ) -> anyhow::Result<Config> {
+    let file_config = crate::config_file::load_user_config()?.unwrap_or_default();
+    config_from_monitor_args_with_file(args, file_config, force_recording, max_duration)
+}
+
+fn config_from_monitor_args_with_file(
+    mut args: MonitorArgs,
+    file_config: crate::config_file::UserConfigFile,
+    force_recording: bool,
+    max_duration: Option<Duration>,
+) -> anyhow::Result<Config> {
+    let preset = match args.preset.as_deref() {
+        Some(name) => Some(name.parse::<crate::presets::Preset>()?),
+        None => None,
+    };
+
+    let preset_defaults = preset.map(|preset| preset.defaults()).unwrap_or_default();
+
+    let summary_period_ms = args
+        .summary_period_ms
+        .or(file_config.summary_ms)
+        .unwrap_or(1_000);
+    let spike_threshold_us = args
+        .spike_threshold_us
+        .or(file_config.spike_us)
+        .unwrap_or(1_000);
+    let max_tasks = args.max_tasks.or(file_config.max_tasks).unwrap_or(1024);
+
+    if !args.include_comm.is_empty() {
+        // use CLI
+    } else if let Some(config_include) = file_config.include_comm {
+        args.include_comm = config_include;
+    }
+
+    if !args.exclude_comm.is_empty() {
+        // use CLI
+    } else if let Some(config_exclude) = file_config.exclude_comm {
+        args.exclude_comm = config_exclude;
+    }
+
+    let hwmon = merge_bool(
+        false,
+        file_config.hwmon,
+        preset_defaults.hwmon,
+        args.hwmon,
+        args.no_hwmon,
+    );
+
+    let cpu_freq_config = merge_bool(
+        false,
+        file_config.cpu_freq.or(file_config.no_cpu_freq.map(|n| !n)),
+        preset_defaults.cpu_freq,
+        args.cpu_freq,
+        args.no_cpu_freq,
+    );
+
+    let faults = merge_bool(
+        false,
+        None,
+        preset_defaults.faults,
+        args.faults,
+        args.no_faults,
+    );
+
+    let stat_wait = merge_bool(
+        false,
+        None,
+        preset_defaults.stat_wait,
+        args.stat_wait,
+        args.no_stat_wait,
+    );
+
+    let block_io = merge_bool(
+        false,
+        None,
+        preset_defaults.block_io,
+        args.block_io,
+        args.no_block_io,
+    );
+
+    // Re-evaluating irq_latency based on prompt: "Do not auto-enable all IRQ monitoring... Presets do not modify IRQ latency. Document that users should pass --irq-latency --irq N explicitly."
+    // But "lightweight" should disable it.
+    // Let's use merge_bool but with builtin = false.
+    let irq_latency = merge_bool(
+        false,
+        None,
+        preset_defaults.irq_latency,
+        args.irq_latency,
+        false, // No no-irq-latency flag yet
+    );
+
+    let retain_intervals = args.retain_intervals.or(file_config.retain_intervals);
+
     validate_pids("--pid", &args.target_pids)?;
     validate_pids("--tree-pid", &args.tree_pids)?;
     validate_pids("--exclude-tree-pid", &args.exclude_tree_pids)?;
 
-    if args.summary_period_ms == 0 {
+    #[allow(clippy::collapsible_if)]
+    if let Some(kb) = args.ringbuf_size_kb {
+        if !(64..=16 * 1024).contains(&kb) {
+            anyhow::bail!("--ringbuf-size-kb must be between 64 and 16384");
+        }
+    }
+
+    #[allow(clippy::collapsible_if)]
+    if let Some(factor) = args.wakeup_map_factor {
+        if factor == 0 || factor > 64 {
+            anyhow::bail!("--wakeup-map-factor must be between 1 and 64");
+        }
+    }
+
+    if args.otlp_endpoint.is_some() && !cfg!(feature = "otel") {
+        anyhow::bail!("OpenTelemetry support was not compiled in. Rebuild with --features otel.");
+    }
+
+    if args.otel_service_name.trim().is_empty() {
+        anyhow::bail!("--otel-service-name must not be empty");
+    }
+
+    #[allow(clippy::collapsible_if)]
+    if let Some(endpoint) = &args.otlp_endpoint {
+        if endpoint.trim().is_empty() {
+            anyhow::bail!("--otlp-endpoint must not be empty");
+        }
+    }
+
+    if summary_period_ms == 0 {
         anyhow::bail!("--summary-ms must be greater than zero");
     }
     if matches!(args.epoch_period_ms, Some(0)) {
         anyhow::bail!("--epoch must be greater than zero");
     }
 
-    if args.spike_threshold_us == 0 {
+    if spike_threshold_us == 0 {
         anyhow::bail!("--spike-us must be greater than zero");
     }
     if matches!(args.alert_threshold_ms, Some(0)) {
@@ -945,7 +1276,7 @@ fn config_from_monitor_args(
     if matches!(args.watch_timeout_seconds, Some(0)) {
         anyhow::bail!("--watch-timeout-seconds must be greater than zero");
     }
-    if args.max_tasks == 0 {
+    if max_tasks == 0 {
         anyhow::bail!("--max-tasks must be greater than zero");
     }
     if args.cpu_perf_max_tasks == 0 {
@@ -993,11 +1324,10 @@ fn config_from_monitor_args(
         );
     }
 
-    let spike_threshold_ns = args
-        .spike_threshold_us
+    let spike_threshold_ns = spike_threshold_us
         .checked_mul(1_000)
         .ok_or_else(|| anyhow::anyhow!("--spike-us value is too large"))?;
-    let summary_period_ms = args.epoch_period_ms.unwrap_or(args.summary_period_ms);
+    let summary_period_ms = args.epoch_period_ms.unwrap_or(summary_period_ms);
     let alert_threshold_ns = args
         .alert_threshold_ms
         .map(|threshold_ms| {
@@ -1029,7 +1359,7 @@ fn config_from_monitor_args(
         None
     };
 
-    let cpu_freq = (args.cpu_freq || recording.is_some()) && !args.no_cpu_freq;
+    let cpu_freq = (cpu_freq_config || recording.is_some()) && !args.no_cpu_freq;
     if matches!(args.metrics_port, Some(0)) {
         anyhow::bail!("--metrics-port must be greater than zero");
     }
@@ -1052,11 +1382,30 @@ fn config_from_monitor_args(
         persistent: args.persistent,
         watch_poll_ms: args.watch_poll_ms,
         watch_timeout: args.watch_timeout_seconds.map(Duration::from_secs),
-        max_tasks: args.max_tasks,
-        csv_path: args.csv_path,
-        irq_latency: args.irq_latency,
+        max_tasks,
+        csv_stream: {
+            let csv_stream = match (&args.csv_path, &args.stream_csv) {
+                (Some(path), None) => Some(CsvStreamTarget::File(path.clone())),
+                (None, Some(value)) if value == "-" => Some(CsvStreamTarget::Stdout),
+                (None, Some(value)) if value.trim().is_empty() => {
+                    anyhow::bail!("--stream-csv path must not be empty");
+                }
+                (None, Some(value)) => Some(CsvStreamTarget::File(PathBuf::from(value))),
+                (None, None) => None,
+                (Some(_), Some(_)) => {
+                    anyhow::bail!("--stream-csv conflicts with --csv");
+                }
+            };
+            if matches!(csv_stream, Some(CsvStreamTarget::Stdout)) && args.json_stream {
+                anyhow::bail!(
+                    "--stream-csv - cannot be used with --json-stream because both write to stdout"
+                );
+            }
+            csv_stream
+        },
+        irq_latency,
         irqs: args.irqs,
-        hwmon: args.hwmon,
+        hwmon,
         hwmon_root: args.hwmon_root,
         hwmon_drm_card: args.hwmon_drm_card,
         hwmon_render_node: args.hwmon_render_node,
@@ -1064,7 +1413,7 @@ fn config_from_monitor_args(
         mangohud_log_live: args.mangohud_log_live,
 
         tui: args.tui,
-        retain_intervals: args.retain_intervals,
+        retain_intervals,
         recording,
         max_duration,
         cpu_freq,
@@ -1072,15 +1421,20 @@ fn config_from_monitor_args(
         native_cgroup_filter: args.native_cgroup_filter,
         follow_exec: args.follow_exec && !args.no_follow_exec,
         exclude_tree_pids: args.exclude_tree_pids,
-        faults: args.faults,
+        faults,
         cpu_perf: args.cpu_perf,
         cpu_perf_kernel: args.cpu_perf_kernel,
         cpu_perf_max_tasks: args.cpu_perf_max_tasks,
         cpu_perf_cache_refs: args.cpu_perf_cache_refs,
-        block_io: args.block_io,
-        stat_wait: args.stat_wait,
+        block_io,
+        stat_wait,
         json_stream: args.json_stream,
         metrics_port: args.metrics_port,
+        ringbuf_size_kb: args.ringbuf_size_kb,
+        wakeup_map_factor: args.wakeup_map_factor,
+        otlp_endpoint: args.otlp_endpoint,
+        otel_service_name: args.otel_service_name,
+        remote: args.remote,
     })
 }
 
@@ -1343,7 +1697,10 @@ mod tests {
         };
 
         assert_eq!(config.watch_process.as_deref(), Some("KingdomCome"));
-        assert_eq!(config.csv_path, Some(PathBuf::from("/tmp/stutter.csv")));
+        assert_eq!(
+            config.csv_stream,
+            Some(CsvStreamTarget::File(PathBuf::from("/tmp/stutter.csv")))
+        );
     }
 
     #[test]
@@ -2208,5 +2565,180 @@ mod tests {
             panic!("expected monitor command");
         };
         assert!(!config.json_stream);
+    }
+
+    #[test]
+    fn config_file_sets_summary_when_cli_omitted() {
+        let args = MonitorArgs {
+            watch_poll_ms: 2000,
+            cpu_perf_max_tasks: 128,
+            ..MonitorArgs::default()
+        };
+        let file_config = crate::config_file::UserConfigFile {
+            summary_ms: Some(500),
+            ..Default::default()
+        };
+        let config = config_from_monitor_args_with_file(args, file_config, false, None).unwrap();
+        assert_eq!(config.summary_period_ms, 500);
+    }
+
+    #[test]
+    fn cli_overrides_config() {
+        let mut args = MonitorArgs {
+            watch_poll_ms: 2000,
+            cpu_perf_max_tasks: 128,
+            ..MonitorArgs::default()
+        };
+        args.summary_period_ms = Some(200);
+        let file_config = crate::config_file::UserConfigFile {
+            summary_ms: Some(500),
+            ..Default::default()
+        };
+        let config = config_from_monitor_args_with_file(args, file_config, false, None).unwrap();
+        assert_eq!(config.summary_period_ms, 200);
+    }
+
+    #[test]
+    fn include_comm_from_config_used_when_cli_omitted() {
+        let args = MonitorArgs {
+            watch_poll_ms: 2000,
+            cpu_perf_max_tasks: 128,
+            ..MonitorArgs::default()
+        };
+        let file_config = crate::config_file::UserConfigFile {
+            include_comm: Some(vec!["Game".to_owned(), "Render".to_owned()]),
+            ..Default::default()
+        };
+        let config = config_from_monitor_args_with_file(args, file_config, false, None).unwrap();
+        assert_eq!(config.task_filters.include_comm.len(), 2);
+        // They get sorted in config_from_monitor_args
+        assert_eq!(config.task_filters.include_comm[0].raw, "Game");
+        assert_eq!(config.task_filters.include_comm[1].raw, "Render");
+    }
+
+    #[test]
+    fn cli_include_comm_overrides_config_list() {
+        let mut args = MonitorArgs {
+            watch_poll_ms: 2000,
+            cpu_perf_max_tasks: 128,
+            ..MonitorArgs::default()
+        };
+        args.include_comm = vec!["RenderThread".to_owned()];
+        let file_config = crate::config_file::UserConfigFile {
+            include_comm: Some(vec!["Game".to_owned()]),
+            ..Default::default()
+        };
+        let config = config_from_monitor_args_with_file(args, file_config, false, None).unwrap();
+        assert_eq!(config.task_filters.include_comm.len(), 1);
+        assert_eq!(config.task_filters.include_comm[0].raw, "RenderThread");
+    }
+
+    #[test]
+    fn diagnosis_preset_enables_expected_fields() {
+        let mut args = MonitorArgs {
+            watch_poll_ms: 2000,
+            cpu_perf_max_tasks: 128,
+            preset: Some("diagnosis".to_owned()),
+            ..MonitorArgs::default()
+        };
+        args.target_pids = vec![1234];
+        let config =
+            config_from_monitor_args_with_file(args, Default::default(), false, None).unwrap();
+
+        assert!(config.hwmon);
+        assert!(config.cpu_freq);
+        assert!(config.faults);
+        assert!(config.stat_wait);
+        assert!(config.block_io);
+        assert!(!config.irq_latency);
+    }
+
+    #[test]
+    fn explicit_no_cpu_freq_wins() {
+        let mut args = MonitorArgs {
+            watch_poll_ms: 2000,
+            cpu_perf_max_tasks: 128,
+            preset: Some("diagnosis".to_owned()),
+            no_cpu_freq: true,
+            ..MonitorArgs::default()
+        };
+        args.target_pids = vec![1234];
+        let config =
+            config_from_monitor_args_with_file(args, Default::default(), false, None).unwrap();
+        assert!(!config.cpu_freq);
+    }
+
+    #[test]
+    fn lightweight_disables_optional_collectors() {
+        let mut args = MonitorArgs {
+            watch_poll_ms: 2000,
+            cpu_perf_max_tasks: 128,
+            preset: Some("lightweight".to_owned()),
+            ..MonitorArgs::default()
+        };
+        args.target_pids = vec![1234];
+        let config =
+            config_from_monitor_args_with_file(args, Default::default(), false, None).unwrap();
+
+        assert!(!config.hwmon);
+        assert!(!config.cpu_freq);
+        assert!(!config.faults);
+        assert!(!config.stat_wait);
+        assert!(!config.block_io);
+    }
+
+    #[test]
+    fn explicit_positive_flag_overrides_lightweight() {
+        let mut args = MonitorArgs {
+            watch_poll_ms: 2000,
+            cpu_perf_max_tasks: 128,
+            preset: Some("lightweight".to_owned()),
+            faults: true,
+            ..MonitorArgs::default()
+        };
+        args.target_pids = vec![1234];
+        let config =
+            config_from_monitor_args_with_file(args, Default::default(), false, None).unwrap();
+        assert!(config.faults);
+    }
+
+    #[test]
+    fn stream_csv_path_sets_file_target() {
+        let args = MonitorArgs {
+            target_pids: vec![1234],
+            stream_csv: Some("out.csv".to_owned()),
+            ..Default::default()
+        };
+        let config = config_from_monitor_args(args, false, None).unwrap();
+
+        assert!(matches!(
+            config.csv_stream,
+            Some(CsvStreamTarget::File(ref path)) if path == std::path::Path::new("out.csv")
+        ));
+    }
+
+    #[test]
+    fn stream_csv_dash_sets_stdout_target() {
+        let args = MonitorArgs {
+            target_pids: vec![1234],
+            stream_csv: Some("-".to_owned()),
+            ..Default::default()
+        };
+        let config = config_from_monitor_args(args, false, None).unwrap();
+
+        assert!(matches!(config.csv_stream, Some(CsvStreamTarget::Stdout)));
+    }
+
+    #[test]
+    fn stream_csv_stdout_conflicts_with_json_stream() {
+        let args = MonitorArgs {
+            target_pids: vec![1234],
+            stream_csv: Some("-".to_owned()),
+            json_stream: true,
+            ..Default::default()
+        };
+        let err = config_from_monitor_args(args, false, None).unwrap_err();
+
+        assert!(err.to_string().contains("stdout"));
     }
 }

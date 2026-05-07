@@ -294,15 +294,7 @@ pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<R
                 latency_ns: s.latency_ns,
                 wakeup_ns: s.wakeup_ns,
                 switch_ns: s.switch_ns,
-                target_pending_wakeups: s.target_pending_wakeups,
-                observed_runnable_depth: s.observed_runnable_depth,
-                major_faults: s.major_faults,
-                minor_faults: s.minor_faults,
-                scx_ops: s.scx_ops.clone(),
-                scx_state: s.scx_state.clone(),
-                scx_enable_seq: s.scx_enable_seq.clone(),
-                cause_tags: s.cause_tags.clone(),
-                primary_cause: s.primary_cause.clone(),
+                ..Default::default()
             })
             .collect();
     }
@@ -785,7 +777,7 @@ mod tests {
                 keep_missing_pid: false,
                 watch_poll_ms: 1000,
                 watch_timeout_ms: None,
-                csv_path: None,
+                csv_stream: None,
                 irq_latency: false,
                 irqs: vec![],
                 hwmon: false,
@@ -811,6 +803,8 @@ mod tests {
                 cpu_perf_cache_refs: false,
                 block_io: false,
                 stat_wait: false,
+                otlp_endpoint: None,
+                otel_service_name: "stutter".to_owned(),
             },
             metadata: SystemMetadata::default(),
             target_pids_max: 1024,

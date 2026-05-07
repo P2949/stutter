@@ -631,17 +631,12 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         latency_ns: 2_000_000,
         wakeup_ns: 10,
         switch_ns: 2_000_010,
-        target_pending_wakeups: 0,
-        observed_runnable_depth: 0,
-        major_faults: 0,
-        minor_faults: 0,
+        switch_prev_pid: 12345,
+        switch_prev_state: 2, // TASK_UNINTERRUPTIBLE
+        switch_prev_state_label: "voluntary_sleep_uninterruptible".to_owned(),
         active: true,
         elapsed_ms: Some(1),
-        scx_ops: None,
-        scx_state: None,
-        scx_enable_seq: None,
-        cause_tags: Vec::new(),
-        primary_cause: None,
+        ..Default::default()
     }];
     let drop_counters = DropCountersSnapshot {
         wakeup_data_insert_failed: 2,
@@ -710,6 +705,12 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     assert_eq!(session.config.hwmon_root, Some(PathBuf::from("/tmp/hwmon")));
     assert_eq!(recordedspike_events.len(), 1);
     assert_eq!(recordedspike_events[0].task, 7);
+    assert_eq!(recordedspike_events[0].switch_prev_pid, 12345);
+    assert_eq!(recordedspike_events[0].switch_prev_state, 2);
+    assert_eq!(
+        recordedspike_events[0].switch_prev_state_label,
+        "voluntary_sleep_uninterruptible"
+    );
     assert_eq!(
         session.tasks[0]
             .latency
@@ -792,7 +793,9 @@ fn process_cache_invalidates_when_pid_starttime_changes() {
     create_fake_proc(&dir, 10, 1, "old-name", "old-name", &[10]);
 
     let mut cache = process_tree::ProcessCache::default();
-    let first = process_tree::scan_processes_at(&dir, &mut cache);
+    let budget = process_tree::ScanBudget::default_proc_scan();
+    let mut budget_report = process_tree::ScanBudgetReport::default();
+    let first = process_tree::scan_processes_at(&dir, &mut cache, &budget, &mut budget_report);
     assert_eq!(first.get(&10).unwrap().comm, "old-name");
 
     fs::remove_dir_all(dir.join("10")).unwrap();
@@ -801,7 +804,8 @@ fn process_cache_invalidates_when_pid_starttime_changes() {
     // Manually overwrite stat to match the test's expected starttime.
     fs::write(dir.join("10/stat"), fake_stat("new-name", 999)).unwrap();
 
-    let second = process_tree::scan_processes_at(&dir, &mut cache);
+    let mut budget_report = process_tree::ScanBudgetReport::default();
+    let second = process_tree::scan_processes_at(&dir, &mut cache, &budget, &mut budget_report);
     assert_eq!(second.get(&10).unwrap().comm, "new-name");
     assert_eq!(second.get(&10).unwrap().starttime_ticks, Some(999));
 
@@ -814,14 +818,17 @@ fn process_cache_can_be_invalidated_for_exec_without_starttime_change() {
     create_fake_proc(&dir, 10, 1, "launcher", "launcher", &[10]);
 
     let mut cache = process_tree::ProcessCache::default();
-    let first = process_tree::scan_processes_at(&dir, &mut cache);
+    let budget = process_tree::ScanBudget::default_proc_scan();
+    let mut budget_report = process_tree::ScanBudgetReport::default();
+    let first = process_tree::scan_processes_at(&dir, &mut cache, &budget, &mut budget_report);
     assert_eq!(first.get(&10).unwrap().comm, "launcher");
 
     fs::write(dir.join("10/status"), "Name:\tgame\nPPid:\t1\n").unwrap();
     fs::write(dir.join("10/cmdline"), b"game.exe").unwrap();
     cache.invalidate(10);
 
-    let second = process_tree::scan_processes_at(&dir, &mut cache);
+    let mut budget_report = process_tree::ScanBudgetReport::default();
+    let second = process_tree::scan_processes_at(&dir, &mut cache, &budget, &mut budget_report);
     assert_eq!(second.get(&10).unwrap().comm, "game");
     assert_eq!(second.get(&10).unwrap().starttime_ticks, Some(100));
 
@@ -1074,15 +1081,10 @@ fn report_reads_recorded_session_and_spike_events() {
         prio: 120,
         wakeup_ns: 1_010_000_000,
         switch_ns: 1_016_000_000,
-        target_pending_wakeups: 0,
-        observed_runnable_depth: 0,
-        major_faults: 0,
-        minor_faults: 0,
-        scx_ops: None,
-        scx_state: None,
-        scx_enable_seq: None,
-        cause_tags: Vec::new(),
-        primary_cause: None,
+        switch_prev_pid: 0,
+        switch_prev_state: 0,
+        switch_prev_state_label: "".to_owned(),
+        ..metrics::SpikeRecord::default()
     });
     let stats_by_task = BTreeMap::from([(7, stats)]);
     let spike_events = vec![SpikeEvent {
@@ -1099,15 +1101,7 @@ fn report_reads_recorded_session_and_spike_events() {
         latency_ns: 6_000_000,
         wakeup_ns: 1_010_000_000,
         switch_ns: 1_016_000_000,
-        target_pending_wakeups: 0,
-        observed_runnable_depth: 0,
-        major_faults: 0,
-        minor_faults: 0,
-        scx_ops: None,
-        scx_state: None,
-        scx_enable_seq: None,
-        cause_tags: Vec::new(),
-        primary_cause: None,
+        ..Default::default()
     }];
 
     let mut task_tracker = tasks::TaskTracker::default();
@@ -1135,8 +1129,8 @@ fn report_reads_recorded_session_and_spike_events() {
     })
     .unwrap();
 
-    crate::report::print_report(&dir, false, false, false, 10, 5, None).unwrap();
-    crate::report::print_report(&dir, true, false, false, 10, 5, None).unwrap();
+    crate::report::print_report(&dir, false, false, false, 10, 5, None, None).unwrap();
+    crate::report::print_report(&dir, true, false, false, 10, 5, None, None).unwrap();
 
     fs::remove_dir_all(dir).ok();
 }
@@ -1176,15 +1170,7 @@ fn report_cluster_output_caps_inline_points() {
             latency_ns: 1_000_000 + idx as u64,
             wakeup_ns: 1_000_000_000 + idx as u64 * 100_000,
             switch_ns: 1_001_000_000 + idx as u64 * 100_000,
-            target_pending_wakeups: 0,
-            observed_runnable_depth: 0,
-            major_faults: 0,
-            minor_faults: 0,
-            scx_ops: None,
-            scx_state: None,
-            scx_enable_seq: None,
-            cause_tags: Vec::new(),
-            primary_cause: None,
+            ..Default::default()
         })
         .collect::<Vec<_>>();
 
@@ -1264,15 +1250,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
             latency_ns: 1_000_000,
             wakeup_ns: 1_000_000 + idx as u64 * 100,
             switch_ns: 10_000_000 + idx as u64 * 100,
-            target_pending_wakeups: 0,
-            observed_runnable_depth: 0,
-            major_faults: 0,
-            minor_faults: 0,
-            scx_ops: None,
-            scx_state: None,
-            scx_enable_seq: None,
-            cause_tags: Vec::new(),
-            primary_cause: None,
+            ..Default::default()
         })
         .collect::<Vec<_>>();
     let artifacts = crate::session_io::RunArtifacts {
@@ -1484,7 +1462,7 @@ fn test_config(
         persistent: false,
         watch_poll_ms: 2_000,
         watch_timeout: None,
-        csv_path: None,
+        csv_stream: None,
         irq_latency: false,
         irqs: Vec::new(),
         hwmon: false,
@@ -1511,6 +1489,11 @@ fn test_config(
         json_stream: false,
         mangohud_log_live: false,
         metrics_port: None,
+        ringbuf_size_kb: None,
+        wakeup_map_factor: None,
+        otlp_endpoint: None,
+        otel_service_name: "stutter".to_owned(),
+        remote: None,
     }
 }
 
@@ -1728,6 +1711,8 @@ fn scheduler_event_with_latency(pid: u32, comm: &str, latency_ns: u64) -> Schedu
         observed_runnable_depth: 0,
         maj_flt: 0,
         min_flt: 0,
+        switch_prev_pid: 0,
+        switch_prev_state: 0,
     }
 }
 
@@ -1740,21 +1725,10 @@ fn spike_event(task: u32, switch_ns: u64) -> SpikeEvent {
         process_pid: Some(task),
         process_comm: "game".into(),
         comm: "game".to_owned(),
-        cpu: 0,
-        wakeup_target_cpu: 0,
-        prio: 120,
         latency_ns: 1_000_000,
         wakeup_ns: switch_ns.saturating_sub(1_000_000),
         switch_ns,
-        target_pending_wakeups: 0,
-        observed_runnable_depth: 0,
-        major_faults: 0,
-        minor_faults: 0,
-        scx_ops: None,
-        scx_state: None,
-        scx_enable_seq: None,
-        cause_tags: Vec::new(),
-        primary_cause: None,
+        ..Default::default()
     }
 }
 
@@ -1811,7 +1785,7 @@ fn report_diff_shows_regressions_and_improvements() {
             "watch_process": null,
             "watch_process_args": null,
             "persistent": false,
-            "csv_path": null,
+            "csv_stream": null,
             "tui": false,
             "summary_period_ms": 1000,
             "spike_threshold_ns": 5000000,
@@ -2020,15 +1994,12 @@ fn scx_correlation_spike_event_serialization() {
         latency_ns: 1_000_000,
         wakeup_ns: 2000,
         switch_ns: 3000,
-        target_pending_wakeups: 0,
-        observed_runnable_depth: 0,
         major_faults: 1,
         minor_faults: 2,
         scx_ops: Some("scx_lavd".to_owned()),
         scx_state: Some("enabled".to_owned()),
         scx_enable_seq: Some("1".to_owned()),
-        cause_tags: Vec::new(),
-        primary_cause: None,
+        ..Default::default()
     };
 
     let json = serde_json::to_string(&event).unwrap();

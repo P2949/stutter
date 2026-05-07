@@ -34,7 +34,7 @@ pub struct SpikeDensityBucket {
     pub p99_latency_ms: f64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub(crate) struct SpikePoint {
     pub(crate) task: u32,
     pub(crate) class: TaskClass,
@@ -47,14 +47,19 @@ pub(crate) struct SpikePoint {
     pub(crate) switch_ns: u64,
     pub(crate) target_pending_wakeups: u32,
     pub(crate) observed_runnable_depth: u32,
+    pub(crate) switch_prev_pid: u32,
+    pub(crate) switch_prev_state: i64,
+    pub(crate) switch_prev_state_label: String,
     pub(crate) elapsed_ms: Option<u128>,
     pub(crate) scx_ops: Option<String>,
     pub(crate) scx_state: Option<String>,
+    pub(crate) waker_tid: u32,
+    pub(crate) waker_comm: String,
     pub(crate) cause_tags: Vec<String>,
     pub(crate) primary_cause: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub(crate) struct SpikeCluster {
     pub(crate) points: Vec<SpikePoint>,
     pub(crate) distinct_tasks: usize,
@@ -66,6 +71,17 @@ pub(crate) struct SpikeCluster {
     pub(crate) anchor_class: Option<TaskClass>,
     pub(crate) anchor_comm: Option<String>,
     pub(crate) anchor_kind: Option<ClusterAnchorKind>,
+    pub(crate) wake_graph: Vec<WakeGraphEdge>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct WakeGraphEdge {
+    pub(crate) waker_tid: u32,
+    pub(crate) waker_comm: String,
+    pub(crate) wakee_tid: u32,
+    pub(crate) wakee_comm: String,
+    pub(crate) count: u64,
+    pub(crate) max_latency_ns: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -332,6 +348,7 @@ fn build_report_analysis_with_artifacts(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn print_report(
     path: &Path,
     json: bool,
@@ -340,6 +357,7 @@ pub fn print_report(
     top: usize,
     cluster_window_ms: u64,
     filter_class: Option<TaskClass>,
+    flamegraph: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     if json {
         let validation = session_io::validate_run_dir_shallow(path)?;
@@ -365,6 +383,10 @@ pub fn print_report(
         analysis,
         artifacts,
     } = build_report_analysis_with_artifacts(path, top, cluster_window_ms, filter_class)?;
+
+    if let Some(flamegraph_path) = flamegraph {
+        crate::flamegraph::write_latency_flamegraph_svg(&artifacts.spikes, &flamegraph_path)?;
+    }
 
     print!(
         "{}",
@@ -1115,6 +1137,24 @@ fn escape_json_for_script_tag(s: &str) -> String {
         .replace("</", "<\\/")
 }
 
+// sched_switch.prev_state values are Linux task-state bits and can vary across
+// kernels. These labels are conservative. prev_state describes the task switched
+// out, not the task switched in.
+pub fn classify_switch_prev_state(prev_state: i64) -> &'static str {
+    const TASK_INTERRUPTIBLE: i64 = 1;
+    const TASK_UNINTERRUPTIBLE: i64 = 2;
+
+    if prev_state == 0 {
+        "preempted_or_runnable"
+    } else if prev_state & TASK_INTERRUPTIBLE != 0 {
+        "voluntary_sleep_interruptible"
+    } else if prev_state & TASK_UNINTERRUPTIBLE != 0 {
+        "voluntary_sleep_uninterruptible"
+    } else {
+        "other_sleep"
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_report(
     session_path: &Path,
@@ -1197,13 +1237,12 @@ pub(crate) fn render_report(
     pushln(
         &mut output,
         format!(
-            "csv_path: {}",
-            session
-                .config
-                .csv_path
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "-".to_owned())
+            "csv_stream: {}",
+            match &session.config.csv_stream {
+                Some(crate::cli::CsvStreamTarget::File(path)) => path.display().to_string(),
+                Some(crate::cli::CsvStreamTarget::Stdout) => "stdout".to_owned(),
+                None => "-".to_owned(),
+            }
         ),
     );
     pushln(
@@ -1522,7 +1561,7 @@ pub(crate) fn render_report(
         pushln(
             &mut output,
             format!(
-                "task={} active={} class={:?} comm={} cpu={} wakeup_target_cpu={} latency={} wakeup_ns={} switch_ns={} observed_runnable_depth={} target_pending_wakeups={}(diagnostic)",
+                "task={} active={} class={:?} comm={} cpu={} wakeup_target_cpu={} latency={} wakeup_ns={} switch_ns={} observed_runnable_depth={} target_pending_wakeups={}(diagnostic) switch_prev_pid={} switch_prev_state={} switch_prev_state_label={}",
                 spike.task,
                 spike.active,
                 spike.class,
@@ -1534,6 +1573,9 @@ pub(crate) fn render_report(
                 spike.switch_ns,
                 spike.observed_runnable_depth,
                 spike.target_pending_wakeups,
+                spike.switch_prev_pid,
+                spike.switch_prev_state,
+                classify_switch_prev_state(spike.switch_prev_state),
             ),
         );
     }
@@ -1919,10 +1961,15 @@ fn flatten_spike_events(session: &SessionFile, spike_events: &[SpikeEvent]) -> V
             switch_ns: spike.switch_ns,
             target_pending_wakeups: spike.target_pending_wakeups,
             observed_runnable_depth: spike.observed_runnable_depth,
+            switch_prev_pid: spike.switch_prev_pid,
+            switch_prev_state: spike.switch_prev_state,
+            switch_prev_state_label: classify_switch_prev_state(spike.switch_prev_state).to_owned(),
             elapsed_ms: elapsed_ms(session.monotonic_start_ns, spike.switch_ns)
                 .or(spike.elapsed_ms),
             scx_ops: spike.scx_ops.clone(),
             scx_state: spike.scx_state.clone(),
+            waker_tid: spike.waker_tid,
+            waker_comm: spike.waker_comm.clone(),
             cause_tags: spike.cause_tags.clone(),
             primary_cause: spike.primary_cause.clone(),
         })
@@ -1957,6 +2004,9 @@ fn spike_point_from_task(
         comm: task.comm.clone(),
         cpu: spike.cpu,
         wakeup_target_cpu: spike.wakeup_target_cpu,
+        switch_prev_pid: spike.switch_prev_pid,
+        switch_prev_state: spike.switch_prev_state,
+        switch_prev_state_label: classify_switch_prev_state(spike.switch_prev_state).to_owned(),
         latency_ns: spike.latency_ns,
         wakeup_ns: spike.wakeup_ns,
         switch_ns: spike.switch_ns,
@@ -1965,6 +2015,8 @@ fn spike_point_from_task(
         elapsed_ms,
         scx_ops: spike.scx_ops.clone(),
         scx_state: spike.scx_state.clone(),
+        waker_tid: spike.waker_tid,
+        waker_comm: spike.waker_comm.clone(),
         cause_tags: spike.cause_tags.clone(),
         primary_cause: spike.primary_cause.clone(),
     }
@@ -2028,6 +2080,8 @@ fn cluster_from_points(mut points: Vec<SpikePoint>, distinct_tasks: usize) -> Sp
         .max()
         .unwrap_or(0);
 
+    let wake_graph = build_wake_graph(&points);
+
     SpikeCluster {
         points,
         distinct_tasks,
@@ -2039,7 +2093,52 @@ fn cluster_from_points(mut points: Vec<SpikePoint>, distinct_tasks: usize) -> Sp
         anchor_class: None,
         anchor_comm: None,
         anchor_kind: None,
+        wake_graph,
     }
+}
+
+fn build_wake_graph(points: &[SpikePoint]) -> Vec<WakeGraphEdge> {
+    let mut edges = BTreeMap::<(u32, String, u32, String), (u64, u64)>::new();
+
+    for point in points {
+        if point.waker_tid != 0 {
+            let key = (
+                point.waker_tid,
+                point.waker_comm.clone(),
+                point.task,
+                point.comm.clone(),
+            );
+            let entry = edges.entry(key).or_insert((0, 0));
+            entry.0 += 1;
+            entry.1 = entry.1.max(point.latency_ns);
+        }
+    }
+
+    let mut result: Vec<_> = edges
+        .into_iter()
+        .map(
+            |((waker_tid, waker_comm, wakee_tid, wakee_comm), (count, max_latency_ns))| {
+                WakeGraphEdge {
+                    waker_tid,
+                    waker_comm,
+                    wakee_tid,
+                    wakee_comm,
+                    count,
+                    max_latency_ns,
+                }
+            },
+        )
+        .collect();
+
+    // Sort by count desc, then max_latency_ns desc
+    result.sort_by(|a, b| {
+        b.count
+            .cmp(&a.count)
+            .then_with(|| b.max_latency_ns.cmp(&a.max_latency_ns))
+    });
+
+    result.truncate(16);
+    result
 }
 
 fn perform_diagnosis(
@@ -2491,8 +2590,27 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
         String::new()
     };
 
+    let wake_block = if cluster.wake_graph.is_empty() {
+        String::new()
+    } else {
+        let mut wake_lines = Vec::new();
+        wake_lines.push("\n  wake relationships:".to_owned());
+        for edge in &cluster.wake_graph {
+            wake_lines.push(format!(
+                "    {} [{}] woke {} [{}] (count={}, max_lat={})",
+                edge.waker_comm,
+                edge.waker_tid,
+                edge.wakee_comm,
+                edge.wakee_tid,
+                edge.count,
+                format_latency(edge.max_latency_ns)
+            ));
+        }
+        wake_lines.join("\n")
+    };
+
     format!(
-        "#{rank} elapsed={} span={} tasks={} total_spikes={} shown_points={} omitted_points={} cpus={} labels={} max={} switch_ns={}..{} points={}{}",
+        "#{rank} elapsed={} span={} tasks={} total_spikes={} shown_points={} omitted_points={} cpus={} labels={} max={} switch_ns={}..{} points={}{}{}",
         format_elapsed(elapsed),
         format_latency(span_ns),
         cluster.distinct_tasks,
@@ -2505,7 +2623,8 @@ fn render_cluster(rank: usize, cluster: &SpikeCluster) -> String {
         cluster.min_switch_ns,
         cluster.max_switch_ns,
         points,
-        diagnosis_line
+        diagnosis_line,
+        wake_block
     )
 }
 
@@ -2560,8 +2679,9 @@ fn render_cluster_point(point: &SpikePoint) -> String {
     } else {
         String::new()
     };
+    let prev_label = classify_switch_prev_state(point.switch_prev_state);
     format!(
-        "{}({:?}:{} cpu={} wakeup_target_cpu={} latency={} switch_ns={} process_pid={} wakeup_ns={} observed_runnable_depth={} target_pending_wakeups={}(diag){}{}{})",
+        "{}({:?}:{} cpu={} wakeup_target_cpu={} latency={} switch_ns={} process_pid={} wakeup_ns={} observed_runnable_depth={} target_pending_wakeups={}(diag) switch_prev_pid={} switch_prev_state={} switch_prev_state_label={}{}{}{})",
         point.task,
         point.class,
         point.comm,
@@ -2573,6 +2693,9 @@ fn render_cluster_point(point: &SpikePoint) -> String {
         point.wakeup_ns,
         point.observed_runnable_depth,
         point.target_pending_wakeups,
+        point.switch_prev_pid,
+        point.switch_prev_state,
+        prev_label,
         scx,
         if let Some(p) = &point.primary_cause {
             format!(" primary_cause={}", p)
@@ -2793,6 +2916,102 @@ fn compute_correlation_windows(
 mod tests {
     use super::*;
 
+    #[test]
+    fn classify_switch_prev_state_zero_is_preempted_or_runnable() {
+        assert_eq!(classify_switch_prev_state(0), "preempted_or_runnable");
+    }
+
+    #[test]
+    fn classify_switch_prev_state_interruptible() {
+        assert_eq!(
+            classify_switch_prev_state(1),
+            "voluntary_sleep_interruptible"
+        );
+    }
+
+    #[test]
+    fn classify_switch_prev_state_uninterruptible() {
+        assert_eq!(
+            classify_switch_prev_state(2),
+            "voluntary_sleep_uninterruptible"
+        );
+    }
+
+    #[test]
+    fn classify_switch_prev_state_other_sleep() {
+        assert_eq!(classify_switch_prev_state(8), "other_sleep");
+    }
+
+    #[test]
+    fn classify_switch_prev_state_interruptible_wins_when_multiple_bits_set() {
+        assert_eq!(
+            classify_switch_prev_state(3),
+            "voluntary_sleep_interruptible"
+        );
+    }
+
+    #[test]
+    fn test_build_wake_graph_grouping_and_sorting() {
+        let points = vec![
+            SpikePoint {
+                task: 101,
+                comm: "wakee1".to_owned(),
+                waker_tid: 201,
+                waker_comm: "waker1".to_owned(),
+                latency_ns: 1000,
+                ..Default::default()
+            },
+            SpikePoint {
+                task: 101,
+                comm: "wakee1".to_owned(),
+                waker_tid: 201,
+                waker_comm: "waker1".to_owned(),
+                latency_ns: 2000,
+                ..Default::default()
+            },
+            SpikePoint {
+                task: 102,
+                comm: "wakee2".to_owned(),
+                waker_tid: 201,
+                waker_comm: "waker1".to_owned(),
+                latency_ns: 500,
+                ..Default::default()
+            },
+            SpikePoint {
+                task: 101,
+                comm: "wakee1".to_owned(),
+                waker_tid: 202,
+                waker_comm: "waker2".to_owned(),
+                latency_ns: 5000,
+                ..Default::default()
+            },
+        ];
+
+        let graph = build_wake_graph(&points);
+
+        // Should have 3 edges:
+        // 1. (201, waker1) -> (101, wakee1) count=2 max_lat=2000
+        // 2. (202, waker2) -> (101, wakee1) count=1 max_lat=5000
+        // 3. (201, waker1) -> (102, wakee2) count=1 max_lat=500
+
+        // Sorted by count desc, then max_lat desc
+        assert_eq!(graph.len(), 3);
+
+        assert_eq!(graph[0].waker_tid, 201);
+        assert_eq!(graph[0].wakee_tid, 101);
+        assert_eq!(graph[0].count, 2);
+        assert_eq!(graph[0].max_latency_ns, 2000);
+
+        assert_eq!(graph[1].waker_tid, 202);
+        assert_eq!(graph[1].count, 1);
+        assert_eq!(graph[1].max_latency_ns, 5000);
+
+        assert_eq!(graph[2].waker_tid, 201);
+        assert_eq!(graph[2].wakee_tid, 102);
+        assert_eq!(graph[2].count, 1);
+        assert_eq!(graph[2].max_latency_ns, 500);
+    }
+
     fn minimal_session_for_report_test() -> SessionFile {
         SessionFile {
             schema_version: SESSION_SCHEMA_VERSION,
@@ -2816,18 +3035,11 @@ mod tests {
             class,
             process_pid: Some(task),
             comm: comm.to_owned(),
-            cpu: 0,
-            wakeup_target_cpu: 0,
             latency_ns,
             wakeup_ns: 10_000_000,
             switch_ns: 10_000_000 + latency_ns,
-            target_pending_wakeups: 0,
-            observed_runnable_depth: 0,
             elapsed_ms: Some(100),
-            scx_ops: None,
-            scx_state: None,
-            cause_tags: Vec::new(),
-            primary_cause: None,
+            ..Default::default()
         }
     }
 
