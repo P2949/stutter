@@ -187,6 +187,41 @@ stutter recommend \
   --tune <tune-dir>
 ```
 
+### Privileged runtime workflow
+
+Loading eBPF programs usually requires root or suitable capabilities. Prefer building as your normal user and running the already-built binary with privileges:
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo build
+
+doas target/debug/stutter record \
+  --pid "$(pgrep -n sway)" \
+  --duration 10 \
+  --run-name smoke-sway
+```
+
+Avoid `doas cargo run` unless root has the same Rust, cargo, rustup, and `bpf-linker` setup as your normal user. `doas cargo run` can rebuild the eBPF crate under root with a different PATH and fail even though the normal user build succeeds.
+
+Root-owned recordings are written under root’s state directory by default, so report them with privileges:
+
+```bash
+doas target/debug/stutter report /root/.local/state/stutter/runs/<run>
+```
+
+Or pass an explicit output directory that is readable by your user:
+
+```bash
+mkdir -p "$HOME/.local/state/stutter/runs"
+
+doas target/debug/stutter record \
+  --pid "$(pgrep -n sway)" \
+  --duration 10 \
+  --run-name smoke-sway \
+  --out-dir "$HOME/.local/state/stutter/runs/smoke-sway"
+```
+
+Note: depending on `doas`/`sudo` configuration, `$HOME` may refer to root’s home. Use an absolute path when in doubt.
+
 ## Monitor manual PIDs
 
 ```bash
@@ -453,6 +488,8 @@ Advisor output is deliberately cautious: it reports candidates and suggested exp
 ## Doctor / preflight
 
 Run `stutter doctor` before recording to check whether tracing is likely to work and which optional telemetry may be missing or degraded. The doctor command does not attach eBPF programs or perf probes by default, so it is a preflight check rather than a guarantee that a future recording will succeed.
+
+`doctor` reports whether the current process appears to have eBPF runtime privileges. A non-root `doctor` warning can be normal if you plan to run the built binary with `doas`/`sudo`.
 
 Useful optional checks:
 
