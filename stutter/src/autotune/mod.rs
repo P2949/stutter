@@ -3,6 +3,7 @@ pub mod decision;
 pub mod decision_log;
 pub mod human_output;
 pub mod observation;
+pub mod profiles;
 pub mod quality;
 pub mod replay;
 pub mod state;
@@ -149,6 +150,20 @@ impl ObservePolicyStub {
 }
 
 pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()> {
+    let loaded_profiles = match input.profiles.as_deref() {
+        Some(path) => Some(profiles::load_autotune_profiles(path)?),
+        None => None,
+    };
+
+    if let Some(loaded_profiles) = &loaded_profiles {
+        println!(
+            "autotune profiles={} count={} candidates={}",
+            loaded_profiles.path.display(),
+            loaded_profiles.len(),
+            loaded_profiles.profile_names().join(",")
+        );
+    }
+
     match input.mode.as_str() {
         "observe" | "suggest" => {}
         _ => {
