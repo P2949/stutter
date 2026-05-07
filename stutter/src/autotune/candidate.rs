@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, path::Path};
 
 use crate::{
     actions::{ActionWarning, SafetyClass, TuningAction, cpu_affinity::CpuAffinityProfileAction},
@@ -117,6 +117,115 @@ pub struct CandidateDryRunRecord {
     pub safety_class: SafetyClass,
     pub eligible: bool,
     pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CandidateSuggestion {
+    pub candidate: String,
+    pub action: String,
+    pub affected_tasks: usize,
+    pub safety: SafetyClass,
+    pub reason: String,
+    pub apply_command: String,
+}
+
+pub fn suggestion_from_dry_run_record(
+    record: &CandidateDryRunRecord,
+    tree_pid: u32,
+    profile_path: Option<&Path>,
+    reason: impl Into<String>,
+) -> Option<CandidateSuggestion> {
+    if !record.eligible {
+        return None;
+    }
+
+    let profile_arg = profile_path
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "<generated-or-existing-profile>".to_owned());
+
+    Some(CandidateSuggestion {
+        candidate: record.candidate_name.clone(),
+        action: "cpu-affinity-profile".to_owned(),
+        affected_tasks: record.affected_tasks,
+        safety: record.safety_class.clone(),
+        reason: reason.into(),
+        apply_command: format!(
+            "stutter apply-profile --tree-pid {} --profile {}",
+            tree_pid, profile_arg
+        ),
+    })
+}
+
+pub fn suggestions_from_dry_run_records(
+    records: &[CandidateDryRunRecord],
+    tree_pid: u32,
+    profile_path: Option<&Path>,
+    reason: &str,
+) -> Vec<CandidateSuggestion> {
+    records
+        .iter()
+        .filter_map(|record| {
+            suggestion_from_dry_run_record(record, tree_pid, profile_path, reason.to_owned())
+        })
+        .collect()
+}
+
+pub fn render_candidate_suggestion(suggestion: &CandidateSuggestion) -> String {
+    format!(
+        "autotune suggestion:\n  candidate={}\n  action={}\n  affected_tasks={}\n  safety={:?}\n  reason=\"{}\"\n  apply_command=\"{}\"",
+        shell_safe_value(&suggestion.candidate),
+        shell_safe_value(&suggestion.action),
+        suggestion.affected_tasks,
+        suggestion.safety,
+        escape_quoted_value(&suggestion.reason),
+        escape_quoted_value(&suggestion.apply_command)
+    )
+}
+
+pub fn render_candidate_suggestions(suggestions: &[CandidateSuggestion]) -> String {
+    suggestions
+        .iter()
+        .map(render_candidate_suggestion)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn print_candidate_suggestions(suggestions: &[CandidateSuggestion]) {
+    for suggestion in suggestions {
+        println!("{}", render_candidate_suggestion(suggestion));
+    }
+}
+
+fn shell_safe_value(value: &str) -> String {
+    if value.is_empty() {
+        return "-".to_owned();
+    }
+
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | ':' | '/' | '@'))
+    {
+        value.to_owned()
+    } else {
+        format!("\"{}\"", escape_quoted_value(value))
+    }
+}
+
+fn escape_quoted_value(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            other => escaped.push(other),
+        }
+    }
+
+    escaped
 }
 
 pub fn dry_run_candidates(candidates: &[CandidateAction]) -> Vec<CandidateDryRunRecord> {
@@ -449,6 +558,100 @@ mod tests {
         assert_eq!(plan.optimization_candidates.len(), 1);
         assert_eq!(plan.optimization_candidates[0].profile_name(), "candidate");
         assert!(plan.recovery_fallback.is_some());
+    }
+
+    #[test]
+    fn suggestion_from_dry_run_record_renders_requested_shape() {
+        let record = CandidateDryRunRecord {
+            candidate_name: "game-main-suggested".to_owned(),
+            affected_tasks: 31,
+            warnings: Vec::new(),
+            safety_class: SafetyClass::ReversibleLowRisk,
+            eligible: true,
+            reason: None,
+        };
+
+        let suggestion = suggestion_from_dry_run_record(
+            &record,
+            1234,
+            None,
+            "scheduler pressure detected on Game/WineServer classes",
+        )
+        .unwrap();
+
+        let rendered = render_candidate_suggestion(&suggestion);
+
+        assert_eq!(
+            rendered,
+            "autotune suggestion:\n  candidate=game-main-suggested\n  action=cpu-affinity-profile\n  affected_tasks=31\n  safety=ReversibleLowRisk\n  reason=\"scheduler pressure detected on Game/WineServer classes\"\n  apply_command=\"stutter apply-profile --tree-pid 1234 --profile <generated-or-existing-profile>\""
+        );
+    }
+
+    #[test]
+    fn suggestion_from_dry_run_record_uses_existing_profile_path_when_available() {
+        let record = CandidateDryRunRecord {
+            candidate_name: "game-main-suggested".to_owned(),
+            affected_tasks: 31,
+            warnings: Vec::new(),
+            safety_class: SafetyClass::ReversibleLowRisk,
+            eligible: true,
+            reason: None,
+        };
+
+        let suggestion = suggestion_from_dry_run_record(
+            &record,
+            1234,
+            Some(Path::new("/tmp/profiles.toml")),
+            "scheduler pressure detected on Game/WineServer classes",
+        )
+        .unwrap();
+
+        assert_eq!(
+            suggestion.apply_command,
+            "stutter apply-profile --tree-pid 1234 --profile /tmp/profiles.toml"
+        );
+    }
+
+    #[test]
+    fn suggestion_from_dry_run_record_skips_ineligible_candidate() {
+        let record = CandidateDryRunRecord {
+            candidate_name: "bad-candidate".to_owned(),
+            affected_tasks: 0,
+            warnings: Vec::new(),
+            safety_class: SafetyClass::ReversibleLowRisk,
+            eligible: false,
+            reason: Some("dry-run matched zero affected tasks".to_owned()),
+        };
+
+        let suggestion = suggestion_from_dry_run_record(
+            &record,
+            1234,
+            None,
+            "scheduler pressure detected on Game/WineServer classes",
+        );
+
+        assert!(suggestion.is_none());
+    }
+
+    #[test]
+    fn render_candidate_suggestion_escapes_reason_and_apply_command() {
+        let suggestion = CandidateSuggestion {
+            candidate: "candidate with space".to_owned(),
+            action: "cpu-affinity-profile".to_owned(),
+            affected_tasks: 31,
+            safety: SafetyClass::ReversibleLowRisk,
+            reason: "scheduler \"pressure\"\nnext".to_owned(),
+            apply_command:
+                "stutter apply-profile --tree-pid 1234 --profile /tmp/profile \"quoted\".toml"
+                    .to_owned(),
+        };
+
+        let rendered = render_candidate_suggestion(&suggestion);
+
+        assert_eq!(
+            rendered,
+            "autotune suggestion:\n  candidate=\"candidate with space\"\n  action=cpu-affinity-profile\n  affected_tasks=31\n  safety=ReversibleLowRisk\n  reason=\"scheduler \\\"pressure\\\"\\nnext\"\n  apply_command=\"stutter apply-profile --tree-pid 1234 --profile /tmp/profile \\\"quoted\\\".toml\""
+        );
     }
 
     #[test]
