@@ -433,20 +433,22 @@ mod tests {
 
     fn minimal_session(interval_count: u64) -> SessionFile {
         SessionFile {
-            schema_version: crate::recorder::SESSION_SCHEMA_VERSION,
-            run_name: Some("baseline".to_owned()),
-            started_at: RecordedTime::default(),
-            ended_at: RecordedTime::default(),
-            duration_ms: 1000,
+            core: crate::recorder::SessionMetadataCore {
+                schema_version: crate::recorder::SESSION_SCHEMA_VERSION,
+                run_name: Some("baseline".to_owned()),
+                started_at: RecordedTime::default(),
+                ended_at: RecordedTime::default(),
+                duration_ms: 1000,
+                interval_record_count: interval_count,
+                active_target_pids_count: 1,
+                ..Default::default()
+            },
             stop_reason: "test".to_owned(),
             config: RecordedConfig {
                 summary_period_ms: 1000,
                 spike_threshold_ns: 1_000_000,
                 ..Default::default()
             },
-            target_pids_max: crate::cli::TARGET_PIDS_MAX as u64,
-            interval_record_count: interval_count,
-            active_target_pids_count: 1,
             ..Default::default()
         }
     }

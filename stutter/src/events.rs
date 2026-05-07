@@ -14,27 +14,17 @@ use crate::{
     cli::Config,
     metrics::{self, format_latency, print_event},
     process_tree::{self, TaskClass},
-    recorder::{self, IrqEventRecord, JsonArrayWriter, LiveRecorder},
+    recorder::{self, IrqEventRecord, JsonArrayWriter, LiveRecorder, RecordingCounters},
     tasks::{TaskTracker, should_replace_unknown_comm},
 };
 
-pub fn handle_irq_event(
-    event: &IrqEvent,
-    recorder: &mut LiveRecorder,
-    monotonic_start_ns: Option<u64>,
-) {
-    let record = irq_event_record(monotonic_start_ns, event);
-    if let Some(writer) = recorder.irq_event_writer.as_mut() {
-        push_ndjson_event(
-            writer,
-            &record,
-            &mut recorder.irq_event_count,
-            &mut recorder.event_stream_write_errors,
-            &mut recorder.first_event_stream_write_error,
-            "irq_events",
-        );
+pub fn handle_irq_record(record: &IrqEventRecord, recorder: &mut LiveRecorder) {
+    if let Some(writer) = recorder.streams.irq_event_writer.as_mut() {
+        push_ndjson_event(writer, record, &mut recorder.counters, "irq_events", |c| {
+            c.irq_event_count += 1
+        });
     }
-    log_irq_event(event);
+    log_irq_record(record);
 }
 
 pub fn handle_migration_event(
@@ -44,7 +34,7 @@ pub fn handle_migration_event(
     cpu_to_pkg: &BTreeMap<u32, String>,
     started: Instant,
 ) {
-    let elapsed_ms = started.elapsed().as_millis();
+    let elapsed_ms = started.elapsed().as_millis() as u64;
 
     if let Some(stats) = tasks.stats_by_task.get_mut(&event.tid) {
         stats.migration_count += 1;
@@ -58,7 +48,7 @@ pub fn handle_migration_event(
         }
     }
 
-    if let Some(writer) = recorder.migration_event_writer.as_mut() {
+    if let Some(writer) = recorder.streams.migration_event_writer.as_mut() {
         let record = recorder::MigrationEventRecord {
             elapsed_ms,
             tid: event.tid,
@@ -69,18 +59,17 @@ pub fn handle_migration_event(
         push_ndjson_event(
             writer,
             &record,
-            &mut recorder.migration_event_count,
-            &mut recorder.event_stream_write_errors,
-            &mut recorder.first_event_stream_write_error,
+            &mut recorder.counters,
             "migration_events",
+            |c| c.migration_event_count += 1,
         );
     }
 }
 
 pub fn handle_cpu_freq_event(event: &CpuFreqEvent, recorder: &mut LiveRecorder, started: Instant) {
-    let elapsed_ms = started.elapsed().as_millis();
+    let elapsed_ms = started.elapsed().as_millis() as u64;
 
-    if let Some(writer) = recorder.cpu_freq_sample_writer.as_mut() {
+    if let Some(writer) = recorder.streams.cpu_freq_sample_writer.as_mut() {
         let record = recorder::CpuFreqRecord {
             elapsed_ms,
             cpu: event.cpu,
@@ -90,44 +79,40 @@ pub fn handle_cpu_freq_event(event: &CpuFreqEvent, recorder: &mut LiveRecorder, 
         push_ndjson_event(
             writer,
             &record,
-            &mut recorder.cpu_freq_sample_count,
-            &mut recorder.event_stream_write_errors,
-            &mut recorder.first_event_stream_write_error,
+            &mut recorder.counters,
             "cpu_freq_samples",
+            |c| c.cpu_freq_sample_count += 1,
         );
     }
 }
 
-pub fn handle_block_io_event(
+pub fn block_io_event_record(
     event: &BlockIoEvent,
-    recorder: &mut LiveRecorder,
-    block_io_correlation_basis: &str,
+    block_io_correlation_basis: &'static str,
     started: Instant,
-) {
-    let elapsed_ms = started.elapsed().as_millis();
+) -> recorder::BlockIoRecord {
+    let elapsed_ms = started.elapsed().as_millis() as u64;
 
-    if let Some(writer) = recorder.block_io_event_writer.as_mut() {
-        let record = recorder::BlockIoRecord {
-            elapsed_ms,
-            tid: event.tid,
-            correlation_basis: block_io_correlation_basis.to_owned(),
-            dev: event.dev,
-            nr_sector: event.nr_sector,
-            sector: event.sector,
-            duration_ns: event.duration_ns,
-            timestamp_ns: event.timestamp_ns,
-            rwbs: String::from_utf8_lossy(&event.rwbs)
-                .trim_matches(char::from(0))
-                .to_owned(),
-        };
-        push_ndjson_event(
-            writer,
-            &record,
-            &mut recorder.block_io_event_count,
-            &mut recorder.event_stream_write_errors,
-            &mut recorder.first_event_stream_write_error,
-            "io_events",
-        );
+    recorder::BlockIoRecord {
+        elapsed_ms,
+        tid: event.tid,
+        correlation_basis: std::borrow::Cow::Borrowed(block_io_correlation_basis),
+        dev: event.dev,
+        nr_sector: event.nr_sector,
+        sector: event.sector,
+        duration_ns: event.duration_ns,
+        timestamp_ns: event.timestamp_ns,
+        rwbs: String::from_utf8_lossy(&event.rwbs)
+            .trim_matches(char::from(0))
+            .to_owned(),
+    }
+}
+
+pub fn handle_block_io_record(record: &recorder::BlockIoRecord, recorder: &mut LiveRecorder) {
+    if let Some(writer) = recorder.streams.block_io_event_writer.as_mut() {
+        push_ndjson_event(writer, record, &mut recorder.counters, "io_events", |c| {
+            c.block_io_event_count += 1
+        });
     }
 }
 
@@ -157,22 +142,20 @@ pub fn handle_exec_event(item: &[u8], tasks: &mut TaskTracker) {
 }
 
 /// Pushes an event to an NDJSON stream.
-pub fn push_ndjson_event<T: Serialize>(
+pub fn push_ndjson_event<T: Serialize, F>(
     writer: &mut JsonArrayWriter,
     value: &T,
-    count: &mut u64,
-    error_count: &mut u64,
-    first_error: &mut Option<String>,
+    counters: &mut RecordingCounters,
     stream_name: &str,
-) {
+    mut success_fn: F,
+) where
+    F: FnMut(&mut RecordingCounters),
+{
     match writer.push(value) {
-        Ok(()) => *count += 1,
+        Ok(()) => success_fn(counters),
         Err(err) => {
             warn!("ndjson_write_failed stream={stream_name} err={err:#}");
-            *error_count += 1;
-            if first_error.is_none() {
-                *first_error = Some(format!("{stream_name}: {err:#}"));
-            }
+            counters.record_stream_write_error(stream_name, err);
         }
     }
 }
@@ -186,19 +169,19 @@ pub fn handle_event(
     monotonic_start_ns: Option<u64>,
     recorder: &mut LiveRecorder,
     alert_sender: Option<&tokio::sync::mpsc::Sender<AlertPayload>>,
-    scx_ops: Option<String>,
-    scx_state: Option<String>,
-    scx_enable_seq: Option<String>,
+    scx_ops: Option<&str>,
+    scx_state: Option<&str>,
+    scx_enable_seq: Option<&str>,
 ) -> Option<recorder::SpikeEvent> {
     debug_assert_eq!(event.kind, EVENT_RUNNABLE_LATENCY);
 
     let comm = metrics::comm_to_string(&event.comm);
-    let elapsed_ms = started.elapsed().as_millis();
+    let elapsed_ms = started.elapsed().as_millis() as u64;
 
     let task_info = tasks
         .active_targets
-        .get(&event.pid)
-        .or_else(|| tasks.known_targets.get(&event.pid));
+        .get(&event.tid)
+        .or_else(|| tasks.known_targets.get(&event.tid));
 
     let waker_comm = tasks
         .stats_by_task
@@ -215,8 +198,8 @@ pub fn handle_event(
 
     let stats = tasks
         .stats_by_task
-        .entry(event.pid)
-        .or_insert_with(|| metrics::TaskStats::new(event.pid, comm.clone(), elapsed_ms));
+        .entry(event.tid)
+        .or_insert_with(|| metrics::TaskStats::new(event.tid, comm.clone(), elapsed_ms));
 
     if should_replace_unknown_comm(&stats.comm, &comm) {
         stats.comm = comm.clone();
@@ -224,39 +207,53 @@ pub fn handle_event(
 
     if let Some(task_info) = task_info {
         stats.apply_task_info(task_info);
-        stats.active = tasks.active_targets.contains_key(&event.pid);
+        stats.active = tasks.active_targets.contains_key(&event.tid);
     } else if config.cgroupv2.is_some() {
         stats.active = true;
     }
+
+    let precomputed_fault_deltas = (
+        event.maj_flt.saturating_sub(stats.last_spike_major_faults),
+        event.min_flt.saturating_sub(stats.last_spike_minor_faults),
+    );
+
+    let spike_cause_tags_and_primary = if event.latency_ns >= config.spike_threshold_ns {
+        let cause_tags = immediate_cause_tags(event, stats, precomputed_fault_deltas);
+        let primary_cause = primary_from_tags(&cause_tags);
+        Some((cause_tags, primary_cause))
+    } else {
+        None
+    };
+
+    let record_diagnostics =
+        spike_cause_tags_and_primary
+            .as_ref()
+            .map(
+                |(cause_tags, primary_cause)| metrics::SpikeRecordDiagnostics {
+                    scx_ops: scx_ops.map(str::to_owned),
+                    scx_state: scx_state.map(str::to_owned),
+                    scx_enable_seq: scx_enable_seq.map(str::to_owned),
+                    cause_tags: cause_tags.clone(),
+                    primary_cause: primary_cause.clone(),
+                },
+            );
 
     let fault_deltas = stats.record(
         event,
         config.spike_threshold_ns,
         elapsed_ms,
-        scx_ops.clone(),
-        scx_state.clone(),
-        scx_enable_seq.clone(),
+        record_diagnostics,
     );
 
-    if let Some(state) = recorder.prometheus_state.as_ref() {
+    if let Some(state) = recorder.exporters.prometheus_state.as_ref() {
         state.inc_samples(1);
         state.observe_latency_ns(event.latency_ns);
     }
 
     let mut spike_ret = None;
     if event.latency_ns >= config.spike_threshold_ns {
-        let cause_tags = immediate_cause_tags(event, stats, fault_deltas);
-        let primary_cause = primary_from_tags(&cause_tags);
-
-        // Update the internal top spikes record so it persists into the session summary too
-        if let Some(spike) = stats
-            .top_spikes
-            .iter_mut()
-            .find(|s| s.switch_ns == event.switch_ns && s.cpu == event.cpu)
-        {
-            spike.cause_tags = cause_tags.clone();
-            spike.primary_cause = primary_cause.clone();
-        }
+        let (cause_tags, primary_cause) = spike_cause_tags_and_primary
+            .expect("spike cause tags must be computed for spike events");
 
         let spike_event = recorder::SpikeEvent::from_task_stats(
             monotonic_start_ns,
@@ -264,49 +261,44 @@ pub fn handle_event(
             event,
             fault_deltas,
             recorder::SpikeDiagnosticContext {
-                scx_ops: scx_ops.clone(),
-                scx_state: scx_state.clone(),
-                scx_enable_seq: scx_enable_seq.clone(),
+                scx_ops: scx_ops.map(str::to_owned),
+                scx_state: scx_state.map(str::to_owned),
+                scx_enable_seq: scx_enable_seq.map(str::to_owned),
                 cause_tags,
                 primary_cause,
                 waker_tid: event.waker_tid,
                 waker_comm,
             },
         );
-        spike_ret = Some(spike_event.clone());
 
-        if let Some(state) = recorder.prometheus_state.as_ref() {
+        if let Some(state) = recorder.exporters.prometheus_state.as_ref() {
             state.inc_spikes(1);
         }
 
-        if let Some(writer) = recorder.spike_event_writer.as_mut() {
+        if let Some(writer) = recorder.streams.spike_event_writer.as_mut() {
             push_ndjson_event(
                 writer,
                 &spike_event,
-                &mut recorder.spike_event_count,
-                &mut recorder.event_stream_write_errors,
-                &mut recorder.first_event_stream_write_error,
+                &mut recorder.counters,
                 "spike_events",
+                |c| c.spike_event_count += 1,
             );
-        } else if let Some(spike_events) = recorder.spike_events.as_mut() {
-            match spike_events.push(spike_event.clone()) {
-                recorder::SpikePushResult::Stored => {}
-                recorder::SpikePushResult::Dropped => recorder.spike_events_dropped_count += 1,
-            }
+        } else {
+            recorder.push_spike_event_to_buffer(spike_event.clone());
         }
 
-        if let Some(stream) = recorder.stdout_spike_stream.as_mut()
+        if let Some(stream) = recorder.streams.stdout_spike_stream.as_mut()
             && let Err(err) = stream.push(&spike_event)
         {
             warn!("json_stream_write_failed err={err:#}");
-            recorder.stdout_spike_stream_errors += 1;
+            recorder.counters.stdout_spike_stream_errors += 1;
         }
 
-        if let Some(tx) = recorder.otel_spike_tx.as_ref() {
+        if let Some(tx) = recorder.exporters.otel_spike_tx.as_ref() {
             let item = crate::otel::OtelSpike::from(&spike_event);
             #[allow(clippy::collapsible_if)]
             if let Err(_err) = tx.try_send(item) {
-                if let Some(dropped) = recorder.otel_spans_dropped.as_ref() {
+                if let Some(dropped) = recorder.exporters.otel_spans_dropped.as_ref() {
                     dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
             }
@@ -319,6 +311,8 @@ pub fn handle_event(
                 print_event(event, &comm, "spike");
             }
         }
+
+        spike_ret = Some(spike_event);
     } else if config.verbose && !config.json_stream {
         print_event(event, &comm, "sample");
     }
@@ -331,19 +325,19 @@ pub fn handle_event(
             stats,
             event,
             elapsed_ms,
-            scx_ops.clone(),
-            scx_state.clone(),
-            scx_enable_seq.clone(),
+            scx_ops,
+            scx_state,
+            scx_enable_seq,
         );
         if let Err(err) = sender.try_send(alert_payload) {
             match err {
                 tokio::sync::mpsc::error::TrySendError::Full(_) => {
                     warn!("alert_channel_full_dropping_alert");
-                    recorder.alert_events_dropped_count += 1;
+                    recorder.counters.alert_events_dropped_count += 1;
                 }
                 tokio::sync::mpsc::error::TrySendError::Closed(_) => {
                     warn!("alert_channel_closed");
-                    recorder.alert_channel_closed_count += 1;
+                    recorder.counters.alert_channel_closed_count += 1;
                 }
             }
         }
@@ -368,7 +362,7 @@ pub struct AlertPayload {
     pub prio: i32,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
-    pub elapsed_ms: u128,
+    pub elapsed_ms: u64,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scx_ops: Option<String>,
@@ -384,16 +378,16 @@ impl AlertPayload {
     pub fn from_task_stats(
         stats: &metrics::TaskStats,
         event: &SchedulerEvent,
-        elapsed_ms: u128,
-        scx_ops: Option<String>,
-        scx_state: Option<String>,
-        scx_enable_seq: Option<String>,
+        elapsed_ms: u64,
+        scx_ops: Option<&str>,
+        scx_state: Option<&str>,
+        scx_enable_seq: Option<&str>,
     ) -> Self {
         let latency_ms = event.latency_ns / 1_000_000;
         let title = "stutter latency alert".to_owned();
         let message = format!(
             "task={} comm={} latency={} cpu={} process_pid={:?} process_comm={}",
-            event.pid,
+            event.tid,
             stats.comm,
             format_latency(event.latency_ns),
             event.cpu,
@@ -404,7 +398,7 @@ impl AlertPayload {
         Self {
             title,
             message,
-            task: event.pid,
+            task: event.tid,
             active: stats.active,
             class: stats.class,
             comm: stats.comm.clone(),
@@ -417,17 +411,18 @@ impl AlertPayload {
             wakeup_ns: event.wakeup_ns,
             switch_ns: event.switch_ns,
             elapsed_ms,
-            scx_ops,
-            scx_state,
-            scx_enable_seq,
+            scx_ops: scx_ops.map(str::to_owned),
+            scx_state: scx_state.map(str::to_owned),
+            scx_enable_seq: scx_enable_seq.map(str::to_owned),
         }
     }
 }
 
-/// Sends a desktop notification using the `notify-send` command.
+/// Sends a desktop notification using `notify-send`.
 ///
-/// NOTE: This spawns an external process which can add system noise.
-/// TODO: Replace with a native implementation using `zbus` or `freedesktop-notifications`.
+/// This remains a best-effort local desktop integration. It intentionally
+/// uses an external command and may add system noise, so alert failures are
+/// logged by the caller and do not stop monitoring.
 pub async fn send_desktop_alert(payload: &AlertPayload) -> Result<(), String> {
     let mut child = tokio::process::Command::new("notify-send")
         .args([
@@ -450,43 +445,59 @@ pub async fn send_desktop_alert(payload: &AlertPayload) -> Result<(), String> {
     }
 }
 
-/// Sends a webhook alert using the `curl` command.
-///
-/// NOTE: This spawns an external process which can add system noise.
-/// TODO: Replace with a native implementation using `reqwest` or a `tiny-hyper` client.
-pub async fn send_webhook_alert(url: &str, payload: &AlertPayload) -> Result<(), String> {
-    let body = serde_json::to_string(payload)
-        .map_err(|err| format!("failed to serialize alert payload: {err}"))?;
-    let mut child = tokio::process::Command::new("curl")
-        .args([
-            "-fsS",
-            "--max-time",
-            "10",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            &body,
-            url,
-        ])
-        .spawn()
-        .map_err(|err| format!("failed to spawn curl: {err}"))?;
+fn validate_webhook_url(url: &str) -> Result<url::Url, String> {
+    let parsed = url::Url::parse(url).map_err(|err| format!("invalid webhook URL: {err}"))?;
 
-    let status = tokio::time::timeout(Duration::from_secs(12), child.wait())
+    match parsed.scheme() {
+        "http" | "https" => Ok(parsed),
+        other => Err(format!(
+            "unsupported webhook URL scheme `{other}`; only http and https are allowed"
+        )),
+    }
+}
+
+pub async fn send_webhook_alert_with_client(
+    client: &reqwest::Client,
+    url: &str,
+    payload: &AlertPayload,
+) -> Result<(), String> {
+    let parsed_url = validate_webhook_url(url)?;
+    let response = client
+        .post(parsed_url)
+        .json(payload)
+        .send()
         .await
-        .map_err(|_| "curl timed out after 12 seconds".to_owned())?
-        .map_err(|err| format!("failed to wait for curl: {err}"))?;
+        .map_err(|err| format!("failed to send webhook alert: {err}"))?;
 
-    if status.success() {
+    let status = response.status();
+    if status.is_success() {
         Ok(())
     } else {
-        Err(format!("curl exited with {status}"))
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "<failed to read response body>".to_owned());
+
+        Err(format!(
+            "webhook alert failed with HTTP status {status}: {body}"
+        ))
     }
+}
+
+#[allow(dead_code)]
+pub async fn send_webhook_alert(url: &str, payload: &AlertPayload) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|err| format!("failed to build webhook HTTP client: {err}"))?;
+
+    send_webhook_alert_with_client(&client, url, payload).await
 }
 
 pub fn irq_event_record(monotonic_start_ns: Option<u64>, event: &IrqEvent) -> IrqEventRecord {
     IrqEventRecord {
         elapsed_ms: monotonic_start_ns
-            .map(|start| (event.enter_ns.saturating_sub(start)) as u128 / 1_000_000),
+            .map(|start| event.enter_ns.saturating_sub(start) / 1_000_000),
         cpu: event.cpu,
         irq: event.irq,
         enter_ns: event.enter_ns,
@@ -495,6 +506,16 @@ pub fn irq_event_record(monotonic_start_ns: Option<u64>, event: &IrqEvent) -> Ir
     }
 }
 
+pub fn log_irq_record(record: &IrqEventRecord) {
+    debug!(
+        "irq_event cpu={} irq={} latency={}",
+        record.cpu,
+        record.irq,
+        format_latency(record.duration_ns)
+    );
+}
+
+#[allow(dead_code)]
 pub fn log_irq_event(event: &IrqEvent) {
     debug!(
         "irq_event cpu={} irq={} latency={}",
@@ -512,12 +533,49 @@ pub fn read_event_unaligned<T: aya::Pod + Copy>(data: &[u8]) -> Option<T> {
     Some(unsafe { (data.as_ptr() as *const T).read_unaligned() })
 }
 
+const IMMEDIATE_CAUSE_TAG_PRIORITY: &[&str] = &[
+    "major_page_fault",
+    "minor_page_fault",
+    "runqueue_contention",
+    "migration_or_cpu_mismatch",
+    "monitored_wakeup_backlog",
+];
+
+const RESERVED_CROSS_SIGNAL_TAG_PRIORITY: &[&str] = &[
+    // Reserved for future/cross-signal diagnosis. These tags are not emitted by
+    // immediate_cause_tags() today, but primary_from_tags() accepts them so
+    // higher-level diagnosis code can use the same primary-cause selection path.
+    "cpu_frequency",
+    "irq_interference",
+    "gpu_frame_pressure",
+    "block_io",
+];
+
+const PRIMARY_CAUSE_PRIORITY: &[&str] = &[
+    "major_page_fault",
+    "minor_page_fault",
+    "runqueue_contention",
+    // Reserved for future/cross-signal diagnosis. These tags are not emitted by
+    // immediate_cause_tags() today, but primary_from_tags() intentionally accepts
+    // them so report/diagnosis code can share one priority rule.
+    "cpu_frequency",
+    "irq_interference",
+    "gpu_frame_pressure",
+    "block_io",
+    "migration_or_cpu_mismatch",
+    "monitored_wakeup_backlog",
+];
+
+// Generates only immediate per-scheduler-event tags from fields available on
+// SchedulerEvent/TaskStats. Cross-signal tags such as block_io, irq_interference,
+// gpu_frame_pressure, and cpu_frequency are intentionally not emitted here; they
+// belong to higher-level correlation/diagnosis code.
 pub(crate) fn immediate_cause_tags(
     event: &SchedulerEvent,
     _stats: &metrics::TaskStats,
     fault_deltas: (u64, u64),
 ) -> Vec<String> {
-    let mut tags = Vec::new();
+    let mut tags = Vec::with_capacity(IMMEDIATE_CAUSE_TAG_PRIORITY.len());
 
     if event.observed_runnable_depth >= 4 {
         tags.push("runqueue_contention".to_string());
@@ -529,7 +587,8 @@ pub(crate) fn immediate_cause_tags(
 
     if fault_deltas.0 > 0 {
         tags.push("major_page_fault".to_string());
-    } else if fault_deltas.1 > 0 {
+    }
+    if fault_deltas.1 > 0 {
         tags.push("minor_page_fault".to_string());
     }
 
@@ -541,18 +600,18 @@ pub(crate) fn immediate_cause_tags(
 }
 
 pub(crate) fn primary_from_tags(tags: &[String]) -> Option<String> {
-    let priority = [
-        "major_page_fault",
-        "runqueue_contention",
-        "cpu_frequency",
-        "irq_interference",
-        "gpu_frame_pressure",
-        "block_io",
-        "migration_or_cpu_mismatch",
-        "monitored_wakeup_backlog",
-    ];
+    debug_assert!(
+        IMMEDIATE_CAUSE_TAG_PRIORITY
+            .iter()
+            .all(|candidate| PRIMARY_CAUSE_PRIORITY.contains(candidate))
+    );
+    debug_assert!(
+        RESERVED_CROSS_SIGNAL_TAG_PRIORITY
+            .iter()
+            .all(|candidate| PRIMARY_CAUSE_PRIORITY.contains(candidate))
+    );
 
-    priority
+    PRIMARY_CAUSE_PRIORITY
         .iter()
         .find(|candidate| tags.iter().any(|tag| tag == **candidate))
         .map(|cause| cause.to_string())
@@ -560,15 +619,73 @@ pub(crate) fn primary_from_tags(tags: &[String]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use stutter_common::EVENT_RUNNABLE_LATENCY;
+    use stutter_common::{EVENT_BLOCK_IO, EVENT_IRQ_LATENCY, EVENT_RUNNABLE_LATENCY, IrqEvent};
 
     use super::*;
+
+    #[test]
+    fn validate_webhook_url_allows_http_and_https() {
+        assert!(validate_webhook_url("http://example.com/hook").is_ok());
+        assert!(validate_webhook_url("https://example.com/hook").is_ok());
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_non_http_schemes() {
+        let err = validate_webhook_url("file:///tmp/hook").unwrap_err();
+        assert!(err.contains("only http and https are allowed"));
+
+        let err = validate_webhook_url("ftp://example.com/hook").unwrap_err();
+        assert!(err.contains("only http and https are allowed"));
+    }
+
+    #[test]
+    fn validate_webhook_url_rejects_relative_urls() {
+        assert!(validate_webhook_url("example.com/hook").is_err());
+        assert!(validate_webhook_url("/local/path").is_err());
+    }
+
+    #[test]
+    fn irq_event_record_preserves_event_fields() {
+        let event = IrqEvent {
+            kind: EVENT_IRQ_LATENCY,
+            irq: 44,
+            cpu: 3,
+            enter_ns: 1_000_000,
+            exit_ns: 1_250_000,
+            duration_ns: 250_000,
+        };
+
+        let record = irq_event_record(Some(500_000), &event);
+
+        assert_eq!(record.elapsed_ms, Some(0));
+        assert_eq!(record.cpu, 3);
+        assert_eq!(record.irq, 44);
+        assert_eq!(record.enter_ns, 1_000_000);
+        assert_eq!(record.exit_ns, 1_250_000);
+        assert_eq!(record.duration_ns, 250_000);
+    }
+
+    #[test]
+    fn irq_event_record_without_monotonic_start_has_no_elapsed_ms() {
+        let event = IrqEvent {
+            kind: EVENT_IRQ_LATENCY,
+            irq: 44,
+            cpu: 3,
+            enter_ns: 1_000_000,
+            exit_ns: 1_250_000,
+            duration_ns: 250_000,
+        };
+
+        let record = irq_event_record(None, &event);
+
+        assert_eq!(record.elapsed_ms, None);
+    }
 
     #[test]
     fn test_unaligned_event_decoding() {
         let event = SchedulerEvent {
             kind: EVENT_RUNNABLE_LATENCY,
-            pid: 123,
+            tid: 123,
             cpu: 1,
             wakeup_target_cpu: 1,
             prio: 120,
@@ -598,14 +715,14 @@ mod tests {
 
         let decoded = read_event_unaligned::<SchedulerEvent>(&misaligned[1..]).unwrap();
         assert_eq!(decoded.kind, EVENT_RUNNABLE_LATENCY);
-        assert_eq!(decoded.pid, 123);
+        assert_eq!(decoded.tid, 123);
     }
 
     #[test]
     fn test_immediate_cause_tags() {
         let mut event = SchedulerEvent {
             kind: EVENT_RUNNABLE_LATENCY,
-            pid: 123,
+            tid: 123,
             cpu: 1,
             wakeup_target_cpu: 1,
             prio: 120,
@@ -645,6 +762,11 @@ mod tests {
         event.wakeup_target_cpu = 2;
         let tags = immediate_cause_tags(&event, &stats, (0, 0));
         assert!(tags.contains(&"migration_or_cpu_mismatch".to_string()));
+
+        // Both major and minor faults
+        let tags = immediate_cause_tags(&event, &stats, (1, 1));
+        assert!(tags.contains(&"major_page_fault".to_string()));
+        assert!(tags.contains(&"minor_page_fault".to_string()));
     }
 
     #[test]
@@ -670,5 +792,124 @@ mod tests {
         );
 
         assert_eq!(primary_from_tags(&[]), None);
+    }
+
+    #[test]
+    fn test_primary_from_tags_priority() {
+        let tags = vec![
+            "minor_page_fault".to_string(),
+            "major_page_fault".to_string(),
+        ];
+        // major_page_fault has higher priority
+        assert_eq!(
+            primary_from_tags(&tags),
+            Some("major_page_fault".to_string())
+        );
+
+        let tags = vec!["minor_page_fault".to_string()];
+        assert_eq!(
+            primary_from_tags(&tags),
+            Some("minor_page_fault".to_string())
+        );
+    }
+
+    #[test]
+    fn primary_from_tags_accepts_reserved_cross_signal_tags() {
+        let tags = vec!["block_io".to_string()];
+
+        assert_eq!(primary_from_tags(&tags), Some("block_io".to_string()));
+    }
+
+    #[test]
+    fn primary_from_tags_keeps_major_fault_above_reserved_cross_signal_tags() {
+        let tags = vec!["block_io".to_string(), "major_page_fault".to_string()];
+
+        assert_eq!(
+            primary_from_tags(&tags),
+            Some("major_page_fault".to_string())
+        );
+    }
+
+    #[test]
+    fn spike_record_is_created_with_cause_tags_without_late_patch() {
+        let event = SchedulerEvent {
+            kind: EVENT_RUNNABLE_LATENCY,
+            tid: 123,
+            cpu: 1,
+            wakeup_target_cpu: 1,
+            prio: 120,
+            waker_tid: 0,
+            target_pending_wakeups: 0,
+            observed_runnable_depth: 4,
+            maj_flt: 0,
+            min_flt: 0,
+            wakeup_ns: 10,
+            switch_ns: 20,
+            latency_ns: 2_000_000,
+            comm: [0; 16],
+            switch_prev_pid: 0,
+            switch_prev_state: 0,
+        };
+
+        let mut stats = metrics::TaskStats::new(123, "test".to_string(), 0);
+
+        let fault_deltas = (
+            event.maj_flt.saturating_sub(stats.last_spike_major_faults),
+            event.min_flt.saturating_sub(stats.last_spike_minor_faults),
+        );
+        let cause_tags = immediate_cause_tags(&event, &stats, fault_deltas);
+        let primary_cause = primary_from_tags(&cause_tags);
+
+        stats.record(
+            &event,
+            1_000_000,
+            0,
+            Some(metrics::SpikeRecordDiagnostics {
+                scx_ops: Some("ops".to_string()),
+                scx_state: Some("enabled".to_string()),
+                scx_enable_seq: Some("42".to_string()),
+                cause_tags: cause_tags.clone(),
+                primary_cause: primary_cause.clone(),
+            }),
+        );
+
+        assert_eq!(stats.top_spikes.len(), 1);
+        let spike = &stats.top_spikes[0];
+
+        assert_eq!(spike.cause_tags, cause_tags);
+        assert_eq!(spike.primary_cause, primary_cause);
+        assert_eq!(spike.scx_ops.as_deref(), Some("ops"));
+        assert_eq!(spike.scx_state.as_deref(), Some("enabled"));
+        assert_eq!(spike.scx_enable_seq.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn block_io_event_record_preserves_event_fields() {
+        let event = BlockIoEvent {
+            kind: EVENT_BLOCK_IO,
+            tid: 42,
+            dev: 123,
+            nr_sector: 8,
+            sector: 999,
+            duration_ns: 55_000,
+            timestamp_ns: 777,
+            rwbs: *b"R\0\0\0\0\0\0\0",
+        };
+
+        let started = std::time::Instant::now();
+        let record = block_io_event_record(&event, "dev+sector", started);
+
+        assert_eq!(record.tid, 42);
+        assert_eq!(record.correlation_basis.as_ref(), "dev+sector");
+        assert_eq!(record.dev, 123);
+        assert_eq!(record.nr_sector, 8);
+        assert_eq!(record.sector, 999);
+        assert_eq!(record.duration_ns, 55_000);
+        assert_eq!(record.timestamp_ns, 777);
+        assert_eq!(record.rwbs, "R");
+        assert!(matches!(
+            record.correlation_basis,
+            std::borrow::Cow::Borrowed("dev+sector")
+        ));
     }
 }

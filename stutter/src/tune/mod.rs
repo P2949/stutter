@@ -1077,9 +1077,9 @@ pub fn unix_nanos_now() -> u128 {
 pub fn retain_after_warmup<T>(
     records: &mut Vec<T>,
     warmup_seconds: u64,
-    elapsed: impl Fn(&T) -> u128,
+    elapsed: impl Fn(&T) -> u64,
 ) {
-    let warmup_ms = u128::from(warmup_seconds) * 1000;
+    let warmup_ms = warmup_seconds * 1000;
     records.retain(|r| elapsed(r) >= warmup_ms);
 }
 
@@ -1208,7 +1208,7 @@ mod tests {
     #[test]
     fn test_retain_after_warmup() {
         struct TestRecord {
-            elapsed_ms: u128,
+            elapsed_ms: u64,
         }
         let mut records = vec![
             TestRecord { elapsed_ms: 0 },

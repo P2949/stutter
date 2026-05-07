@@ -201,7 +201,7 @@ fn spike_events_capture_only_threshold_crossing_events() {
     tasks.active_targets = active_targets;
     tasks.stats_by_task = stats_by_task;
     let mut recorder = recorder::LiveRecorder::default();
-    recorder.spike_events = Some(spike_events);
+    recorder.buffers.spike_events = Some(spike_events);
 
     events::handle_event(
         &below_threshold,
@@ -217,6 +217,7 @@ fn spike_events_capture_only_threshold_crossing_events() {
     );
     assert!(
         recorder
+            .buffers
             .spike_events
             .as_ref()
             .unwrap()
@@ -238,7 +239,7 @@ fn spike_events_capture_only_threshold_crossing_events() {
         None,
     );
 
-    let spike_events_slice = recorder.spike_events.as_ref().unwrap().as_slice();
+    let spike_events_slice = recorder.buffers.spike_events.as_ref().unwrap().as_slice();
     assert_eq!(spike_events_slice.len(), 1);
     let spike = &spike_events_slice[0];
     assert_eq!(spike.task, 7);
@@ -274,7 +275,7 @@ fn spike_event_fault_deltas_are_captured_correctly() {
     tasks.active_targets = active_targets;
     tasks.stats_by_task = stats_by_task;
     let mut recorder = recorder::LiveRecorder::default();
-    recorder.spike_events = Some(spike_events);
+    recorder.buffers.spike_events = Some(spike_events);
 
     events::handle_event(
         &first_event,
@@ -307,7 +308,7 @@ fn spike_event_fault_deltas_are_captured_correctly() {
         None,
     );
 
-    let spike_events_slice = recorder.spike_events.as_ref().unwrap().as_slice();
+    let spike_events_slice = recorder.buffers.spike_events.as_ref().unwrap().as_slice();
     assert_eq!(spike_events_slice.len(), 1);
     let spike = &spike_events_slice[0];
     assert_eq!(spike.major_faults, 5);
@@ -651,13 +652,14 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
 
     let mut recorder = recorder::LiveRecorder::default();
     recorder.run = Some(recording);
-    recorder.spike_events = Some(SpikeEventBuffer::default());
+    recorder.buffers.spike_events = Some(SpikeEventBuffer::default());
     recorder
+        .buffers
         .spike_events
         .as_mut()
         .unwrap()
         .push(spike_events[0].clone());
-    recorder.spike_events.as_mut().unwrap().truncate(); // Force truncated state for testing
+    recorder.buffers.spike_events.as_mut().unwrap().truncate(); // Force truncated state for testing
 
     recorder::finalize_recording(FinalizeRecordingInput {
         recorder: &recorder,
@@ -679,21 +681,21 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     let metadata = artifacts.metadata.unwrap();
     let recordedspike_events = artifacts.spikes;
 
-    assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
-    assert_eq!(session.active_expanded_tasks, vec![1, 4, 9]);
-    assert_eq!(metadata.active_expanded_tasks, vec![1, 4, 9]);
-    assert_eq!(session.spike_events_retained_count, 1);
-    assert_eq!(metadata.spike_events_retained_count, 1);
-    assert_eq!(session.scx_event_count, 0);
-    assert_eq!(metadata.scx_event_count, 0);
-    assert_eq!(session.spike_events_dropped_count, 0);
-    assert_eq!(metadata.spike_events_dropped_count, 0);
-    assert!(session.spike_events_truncated);
-    assert!(metadata.spike_events_truncated);
-    assert_eq!(session.drop_counters.total(), 5);
-    assert_eq!(metadata.drop_counters.total(), 5);
-    assert_eq!(session.drop_counters.wakeup_data_insert_failed, 2);
-    assert_eq!(session.drop_counters.ringbuf_reserve_failed, 3);
+    assert_eq!(session.core.schema_version, SESSION_SCHEMA_VERSION);
+    assert_eq!(session.core.active_expanded_tasks, vec![1, 4, 9]);
+    assert_eq!(metadata.core.active_expanded_tasks, vec![1, 4, 9]);
+    assert_eq!(session.core.spike_events_retained_count, 1);
+    assert_eq!(metadata.core.spike_events_retained_count, 1);
+    assert_eq!(session.core.scx_event_count, 0);
+    assert_eq!(metadata.core.scx_event_count, 0);
+    assert_eq!(session.core.spike_events_dropped_count, 0);
+    assert_eq!(metadata.core.spike_events_dropped_count, 0);
+    assert!(session.core.spike_events_truncated);
+    assert!(metadata.core.spike_events_truncated);
+    assert_eq!(session.core.drop_counters.total(), 5);
+    assert_eq!(metadata.core.drop_counters.total(), 5);
+    assert_eq!(session.core.drop_counters.wakeup_data_insert_failed, 2);
+    assert_eq!(session.core.drop_counters.ringbuf_reserve_failed, 3);
     assert_eq!(
         session.config.cgroupv2,
         Some(PathBuf::from("/sys/fs/cgroup/game"))
@@ -1114,7 +1116,7 @@ fn report_reads_recorded_session_and_spike_events() {
     for spike in spike_events {
         buffer.push(spike);
     }
-    recorder.spike_events = Some(buffer);
+    recorder.buffers.spike_events = Some(buffer);
 
     recorder::finalize_recording(FinalizeRecordingInput {
         recorder: &recorder,
@@ -1157,7 +1159,7 @@ fn report_cluster_output_caps_inline_points() {
 
     let spike_events = (0..10)
         .map(|idx| SpikeEvent {
-            elapsed_ms: Some(idx as u128),
+            elapsed_ms: Some(idx as u64),
             task: 100 + idx as u32,
             active: true,
             class: TaskClass::Helper,
@@ -1184,7 +1186,7 @@ fn report_cluster_output_caps_inline_points() {
     for spike in spike_events.iter().cloned() {
         buffer.push(spike);
     }
-    recorder.spike_events = Some(buffer);
+    recorder.buffers.spike_events = Some(buffer);
 
     recorder::finalize_recording(FinalizeRecordingInput {
         recorder: &recorder,
@@ -1233,7 +1235,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
     let session = minimal_session_for_report();
     let spike_events = (0..3)
         .map(|idx| SpikeEvent {
-            elapsed_ms: Some(10 + idx as u128),
+            elapsed_ms: Some(10 + idx as u64),
             task: 10 + idx as u32,
             active: true,
             class: TaskClass::Game,
@@ -1314,8 +1316,8 @@ fn report_uses_run_level_block_io_correlation_basis() {
     fs::create_dir_all(&dir).unwrap();
     let session_path = dir.join("session.json");
     let mut session = minimal_session_for_report();
-    session.block_io_event_count = 1;
-    session.block_io_correlation_basis = "request-pointer".to_owned();
+    session.core.block_io_event_count = 1;
+    session.core.block_io_correlation_basis = "request-pointer".to_owned();
 
     let cluster_analysis =
         crate::report::spike_cluster_analysis(&session, None, 5_000_000, 10, None);
@@ -1333,7 +1335,7 @@ fn report_uses_run_level_block_io_correlation_basis() {
     assert!(output.contains("io_events: 1 (request-pointer correlated)"));
     assert!(!output.contains("block i/o correlation warning"));
 
-    session.block_io_correlation_basis = "dev+sector".to_owned();
+    session.core.block_io_correlation_basis = "dev+sector".to_owned();
     let output = crate::report::render_report(
         &session_path,
         &session,
@@ -1504,45 +1506,47 @@ fn minimal_session_for_report() -> SessionFile {
     config.hwmon = true;
 
     SessionFile {
-        schema_version: SESSION_SCHEMA_VERSION,
-        run_name: Some("report-correlation".to_owned()),
-        started_at: recorded_time(UNIX_EPOCH),
-        ended_at: recorded_time(UNIX_EPOCH),
-        monotonic_start_ns: Some(0),
-        mangohud_start_offset: None,
-        mangohud_first_frame_monotonic_ns: None,
-        mangohud_first_frame_raw_elapsed_ms: None,
-        monotonic_end_ns: Some(20_000_000),
-        duration_ms: 20,
+        core: crate::recorder::SessionMetadataCore {
+            schema_version: SESSION_SCHEMA_VERSION,
+            run_name: Some("report-correlation".to_owned()),
+            started_at: recorded_time(UNIX_EPOCH),
+            ended_at: recorded_time(UNIX_EPOCH),
+            monotonic_start_ns: Some(0),
+            mangohud_start_offset: None,
+            mangohud_first_frame_monotonic_ns: None,
+            mangohud_first_frame_raw_elapsed_ms: None,
+            monotonic_end_ns: Some(20_000_000),
+            duration_ms: 20,
+            metadata: SystemMetadata::default(),
+            target_pids_max: 1024,
+            active_target_pids_count: 0,
+            active_expanded_tasks: Vec::new(),
+            spike_events_retained_count: 3,
+            spike_events_dropped_count: 0,
+            spike_events_truncated: false,
+            scx_event_count: 0,
+            irq_event_count: 1,
+            migration_event_count: Some(0),
+            cpu_freq_sample_count: Some(0),
+            gpu_sample_count: 1,
+            frame_event_count: 1,
+            block_io_event_count: 0,
+            event_stream_write_errors: 0,
+            alert_events_dropped_count: 0,
+            alert_channel_closed_count: 0,
+            first_event_stream_write_error: None,
+            block_io_correlation_basis: "dev+sector".to_owned(),
+            drop_counters: DropCountersSnapshot::default(),
+            interval_record_count: 0,
+            intervals_dropped: 0,
+            cpu_perf_sample_count: 0,
+            cpu_perf_open_errors: 0,
+            cpu_perf_read_errors: 0,
+            cpu_perf_skipped_tasks: 0,
+            cpu_perf_last_error: None,
+        },
         stop_reason: "test".to_owned(),
         config: recorded_config(&config, &config.tree_pids),
-        metadata: SystemMetadata::default(),
-        target_pids_max: 1024,
-        active_target_pids_count: 0,
-        active_expanded_tasks: Vec::new(),
-        spike_events_retained_count: 3,
-        spike_events_dropped_count: 0,
-        spike_events_truncated: false,
-        scx_event_count: 0,
-        irq_event_count: 1,
-        migration_event_count: Some(0),
-        cpu_freq_sample_count: Some(0),
-        gpu_sample_count: 1,
-        frame_event_count: 1,
-        block_io_event_count: 0,
-        event_stream_write_errors: 0,
-        alert_events_dropped_count: 0,
-        alert_channel_closed_count: 0,
-        first_event_stream_write_error: None,
-        block_io_correlation_basis: "dev+sector".to_owned(),
-        drop_counters: DropCountersSnapshot::default(),
-        interval_record_count: 0,
-        intervals_dropped: 0,
-        cpu_perf_sample_count: 0,
-        cpu_perf_open_errors: 0,
-        cpu_perf_read_errors: 0,
-        cpu_perf_skipped_tasks: 0,
-        cpu_perf_last_error: None,
         tasks: Vec::new(),
         top_spikes: Vec::new(),
     }
@@ -1600,6 +1604,7 @@ fn session_task(
         top_wakers: Vec::new(),
         sched_policy: None,
         stat_wait_sum_ns: None,
+        stat_wait_sum_ns_saturated: false,
         stat_wait_count: None,
         cpu_perf: None,
     }
@@ -1656,7 +1661,7 @@ fn task_stats_with_info(
     process_comm: &str,
     comm: &str,
     class: TaskClass,
-    first_seen_ms: u128,
+    first_seen_ms: u64,
 ) -> metrics::TaskStats {
     let mut stats = metrics::TaskStats::new(tid, comm.to_owned(), first_seen_ms);
     stats.apply_task_info(&task_info(tid, process_pid, process_comm, comm, class));
@@ -1698,7 +1703,7 @@ fn scheduler_event_with_latency(pid: u32, comm: &str, latency_ns: u64) -> Schedu
 
     SchedulerEvent {
         kind: EVENT_RUNNABLE_LATENCY,
-        pid,
+        tid: pid,
         cpu: 0,
         wakeup_target_cpu: 0,
         prio: 120,
@@ -1718,7 +1723,7 @@ fn scheduler_event_with_latency(pid: u32, comm: &str, latency_ns: u64) -> Schedu
 
 fn spike_event(task: u32, switch_ns: u64) -> SpikeEvent {
     SpikeEvent {
-        elapsed_ms: Some(u128::from(switch_ns / 1_000_000)),
+        elapsed_ms: Some(switch_ns / 1_000_000),
         task,
         active: true,
         class: TaskClass::Game,
@@ -2028,28 +2033,26 @@ fn spike_event_stream_writes_ndjson() {
     let spike_path = dir.join("spike_events.json");
 
     let mut recorder = recorder::LiveRecorder::default();
-    recorder.spike_event_writer =
+    recorder.streams.spike_event_writer =
         Some(recorder::JsonArrayWriter::create(spike_path.clone()).unwrap());
 
     let spike1 = spike_event(1, 1000);
     let spike2 = spike_event(2, 2000);
 
     events::push_ndjson_event(
-        recorder.spike_event_writer.as_mut().unwrap(),
+        recorder.streams.spike_event_writer.as_mut().unwrap(),
         &spike1,
-        &mut recorder.spike_event_count,
-        &mut recorder.event_stream_write_errors,
-        &mut recorder.first_event_stream_write_error,
-        "spike_events",
+        &mut recorder.counters,
+        "buffers.spike_events",
+        |c| c.spike_event_count += 1,
     );
 
     events::push_ndjson_event(
-        recorder.spike_event_writer.as_mut().unwrap(),
+        recorder.streams.spike_event_writer.as_mut().unwrap(),
         &spike2,
-        &mut recorder.spike_event_count,
-        &mut recorder.event_stream_write_errors,
-        &mut recorder.first_event_stream_write_error,
-        "spike_events",
+        &mut recorder.counters,
+        "buffers.spike_events",
+        |c| c.spike_event_count += 1,
     );
 
     // Drop the recorder to finish the writer
@@ -2078,8 +2081,8 @@ fn load_run_artifacts_loads_streamed_spikes() {
     let spike2 = spike_event(2, 2000);
 
     let mut session = SessionFile::default();
-    session.schema_version = SESSION_SCHEMA_VERSION;
-    session.spike_events_retained_count = 2;
+    session.core.schema_version = SESSION_SCHEMA_VERSION;
+    session.core.spike_events_retained_count = 2;
     fs::write(
         dir.join("session.json"),
         serde_json::to_string(&session).unwrap(),
@@ -2115,9 +2118,9 @@ fn load_run_artifacts_falls_back_to_top_spikes() {
     };
 
     let mut session = SessionFile::default();
-    session.schema_version = SESSION_SCHEMA_VERSION;
+    session.core.schema_version = SESSION_SCHEMA_VERSION;
     session.top_spikes = vec![spike1.clone()];
-    session.spike_events_retained_count = 1;
+    session.core.spike_events_retained_count = 1;
     fs::write(
         dir.join("session.json"),
         serde_json::to_string(&session).unwrap(),
@@ -2135,4 +2138,87 @@ fn load_run_artifacts_falls_back_to_top_spikes() {
     assert_eq!(artifacts.spikes[0].latency_ns, spike1.latency_ns);
 
     fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn stat_wait_sum_saturation_helper_keeps_normal_values() {
+    let (value, saturated) = crate::recorder::saturating_u128_to_u64(123_456u128);
+    assert_eq!(value, 123_456);
+    assert!(!saturated);
+}
+
+#[test]
+fn stat_wait_sum_saturation_helper_caps_large_values() {
+    let too_large = u64::MAX as u128 + 1;
+    let (value, saturated) = crate::recorder::saturating_u128_to_u64(too_large);
+    assert_eq!(value, u64::MAX);
+    assert!(saturated);
+}
+
+#[test]
+fn stat_wait_sum_saturation_helper_allows_u64_max() {
+    let (value, saturated) = crate::recorder::saturating_u128_to_u64(u64::MAX as u128);
+    assert_eq!(value, u64::MAX);
+    assert!(!saturated);
+}
+
+#[test]
+fn old_json_defaults_saturation_flag_to_false() {
+    let mut task = SessionTask::default();
+    task.stat_wait_sum_ns_saturated = true; // Set to true to ensure serialization includes it
+    let json = serde_json::to_string(&task).unwrap();
+    // Remove the field from JSON to simulate old version
+    let old_json = json.replace("\"stat_wait_sum_ns_saturated\":true,", "");
+    let old_json = old_json.replace("\"stat_wait_sum_ns_saturated\":true", "");
+
+    let deserialized: SessionTask = serde_json::from_str(&old_json).unwrap();
+    assert!(!deserialized.stat_wait_sum_ns_saturated);
+}
+
+#[test]
+fn session_file_serializes_metadata_core_flat() {
+    let mut session = crate::recorder::SessionFile::default();
+    session.core.schema_version = 123;
+    session.core.run_name = Some("flat-test".to_string());
+    session.stop_reason = "test".to_string();
+
+    let value = serde_json::to_value(&session).unwrap();
+
+    assert_eq!(value["schema_version"], 123);
+    assert_eq!(value["run_name"], "flat-test");
+    assert_eq!(value["stop_reason"], "test");
+    assert!(
+        value.get("core").is_none(),
+        "core must be flattened, not nested"
+    );
+}
+
+#[test]
+fn metadata_file_serializes_metadata_core_flat() {
+    let mut metadata = crate::recorder::MetadataFile::default();
+    metadata.core.schema_version = 123;
+    metadata.core.run_name = Some("flat-test".to_string());
+
+    let value = serde_json::to_value(&metadata).unwrap();
+
+    assert_eq!(value["schema_version"], 123);
+    assert_eq!(value["run_name"], "flat-test");
+    assert!(
+        value.get("core").is_none(),
+        "core must be flattened, not nested"
+    );
+}
+
+#[test]
+fn metadata_file_deserializes_flat_json_into_core() {
+    let mut metadata = crate::recorder::MetadataFile::default();
+    metadata.core.schema_version = 123;
+    metadata.core.run_name = Some("flat-test".to_string());
+
+    let json = serde_json::to_value(&metadata).unwrap();
+
+    let deserialized: crate::recorder::MetadataFile = serde_json::from_value(json).unwrap();
+
+    assert_eq!(deserialized.core.schema_version, 123);
+    assert_eq!(deserialized.core.run_name.as_deref(), Some("flat-test"));
 }

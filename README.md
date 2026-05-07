@@ -224,6 +224,8 @@ Note: depending on `doas`/`sudo` configuration, `$HOME` may refer to root’s ho
 
 ## Monitor manual PIDs
 
+For privileged live tracing, use the build-then-run workflow from the privileged runtime section rather than `doas cargo run`.
+
 ```bash
 RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
   --pid "$(pgrep -n sway)" \
@@ -306,6 +308,8 @@ Suggestions:
 Only numeric IRQ IDs can be passed to `--irq`. Non-numeric interrupt rows such as `NMI` or `LOC` may appear in the table but are not suggested as `--irq` values.
 
 ## Record a run
+
+For real eBPF recording, prefer the privileged runtime workflow above: build once as your normal user, then run the already-built `target/debug/stutter` binary with `doas`/`sudo`. The `cargo run` examples below are mainly development shorthand and should not be combined with `doas` unless root has the same Rust and `bpf-linker` setup.
 
 ```bash
 RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- record \

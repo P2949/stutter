@@ -34,12 +34,12 @@ pub struct RunArtifacts {
 
 #[derive(Debug, Clone, Default)]
 pub struct CorrelationWindows {
-    pub windows_ms: Vec<(u128, u128)>,
+    pub windows_ms: Vec<(u64, u64)>,
     pub windows_ns: Vec<(u64, u64)>,
 }
 
 impl CorrelationWindows {
-    pub fn is_in_ms(&self, ms: u128) -> bool {
+    pub fn is_in_ms(&self, ms: u64) -> bool {
         self.windows_ms
             .iter()
             .any(|(min, max)| ms >= *min && ms <= *max)
@@ -392,46 +392,46 @@ fn check_consistency(artifacts: &mut RunArtifacts) {
     let validation = &mut artifacts.validation;
 
     // Schema validation
-    if session.schema_version < SESSION_SCHEMA_VERSION {
+    if session.core.schema_version < SESSION_SCHEMA_VERSION {
         validation.warnings.push(format!(
             "session schema version {} is older than current {}",
-            session.schema_version, SESSION_SCHEMA_VERSION
+            session.core.schema_version, SESSION_SCHEMA_VERSION
         ));
-    } else if session.schema_version > SESSION_SCHEMA_VERSION {
+    } else if session.core.schema_version > SESSION_SCHEMA_VERSION {
         validation.errors.push(format!(
             "session schema version {} is newer than current {}",
-            session.schema_version, SESSION_SCHEMA_VERSION
+            session.core.schema_version, SESSION_SCHEMA_VERSION
         ));
     }
 
     if let Some(metadata) = &artifacts.metadata {
-        if metadata.schema_version < SESSION_SCHEMA_VERSION {
+        if metadata.core.schema_version < SESSION_SCHEMA_VERSION {
             validation.warnings.push(format!(
                 "metadata schema version {} is older than current {}",
-                metadata.schema_version, SESSION_SCHEMA_VERSION
+                metadata.core.schema_version, SESSION_SCHEMA_VERSION
             ));
-        } else if metadata.schema_version > SESSION_SCHEMA_VERSION {
+        } else if metadata.core.schema_version > SESSION_SCHEMA_VERSION {
             validation.errors.push(format!(
                 "metadata schema version {} is newer than current {}",
-                metadata.schema_version, SESSION_SCHEMA_VERSION
+                metadata.core.schema_version, SESSION_SCHEMA_VERSION
             ));
         }
 
-        if metadata.spike_events_retained_count != session.spike_events_retained_count {
+        if metadata.core.spike_events_retained_count != session.core.spike_events_retained_count {
             validation.warnings.push(format!(
                 "spike count mismatch: session reported {}, metadata reported {}",
-                session.spike_events_retained_count, metadata.spike_events_retained_count
+                session.core.spike_events_retained_count, metadata.core.spike_events_retained_count
             ));
         }
     }
 
     // Spike count consistency
     if validation.present_files.contains(&SPIKES_FILE.to_owned())
-        && artifacts.spikes.len() as u64 != session.spike_events_retained_count
+        && artifacts.spikes.len() as u64 != session.core.spike_events_retained_count
     {
         validation.warnings.push(format!(
             "spike count mismatch: session reported {}, found {} in artifact",
-            session.spike_events_retained_count,
+            session.core.spike_events_retained_count,
             artifacts.spikes.len()
         ));
     }
@@ -553,15 +553,15 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
         match load_json_file::<MetadataFile>(&metadata_path) {
             Ok(metadata) => {
                 report.present_files.push(METADATA_FILE.to_owned());
-                if metadata.schema_version < SESSION_SCHEMA_VERSION {
+                if metadata.core.schema_version < SESSION_SCHEMA_VERSION {
                     report.warnings.push(format!(
                         "metadata schema version {} is older than current {}",
-                        metadata.schema_version, SESSION_SCHEMA_VERSION
+                        metadata.core.schema_version, SESSION_SCHEMA_VERSION
                     ));
-                } else if metadata.schema_version > SESSION_SCHEMA_VERSION {
+                } else if metadata.core.schema_version > SESSION_SCHEMA_VERSION {
                     report.errors.push(format!(
                         "metadata schema version {} is newer than current {}",
-                        metadata.schema_version, SESSION_SCHEMA_VERSION
+                        metadata.core.schema_version, SESSION_SCHEMA_VERSION
                     ));
                 }
             }
@@ -587,15 +587,15 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
     let session = load_session(path)?;
     report.present_files.push(SESSION_FILE.to_owned());
 
-    if session.schema_version < SESSION_SCHEMA_VERSION {
+    if session.core.schema_version < SESSION_SCHEMA_VERSION {
         report.warnings.push(format!(
             "session schema version {} is older than current {}",
-            session.schema_version, SESSION_SCHEMA_VERSION
+            session.core.schema_version, SESSION_SCHEMA_VERSION
         ));
-    } else if session.schema_version > SESSION_SCHEMA_VERSION {
+    } else if session.core.schema_version > SESSION_SCHEMA_VERSION {
         report.errors.push(format!(
             "session schema version {} is newer than current {}",
-            session.schema_version, SESSION_SCHEMA_VERSION
+            session.core.schema_version, SESSION_SCHEMA_VERSION
         ));
     }
 
@@ -670,15 +670,15 @@ pub fn validate_run_dir_shallow(path: &Path) -> Result<RunValidationReport> {
         match load_json_file::<MetadataFile>(&metadata_path) {
             Ok(metadata) => {
                 report.present_files.push(METADATA_FILE.to_owned());
-                if metadata.schema_version < SESSION_SCHEMA_VERSION {
+                if metadata.core.schema_version < SESSION_SCHEMA_VERSION {
                     report.warnings.push(format!(
                         "metadata schema version {} is older than current {}",
-                        metadata.schema_version, SESSION_SCHEMA_VERSION
+                        metadata.core.schema_version, SESSION_SCHEMA_VERSION
                     ));
-                } else if metadata.schema_version > SESSION_SCHEMA_VERSION {
+                } else if metadata.core.schema_version > SESSION_SCHEMA_VERSION {
                     report.errors.push(format!(
                         "metadata schema version {} is newer than current {}",
-                        metadata.schema_version, SESSION_SCHEMA_VERSION
+                        metadata.core.schema_version, SESSION_SCHEMA_VERSION
                     ));
                 }
             }
@@ -704,15 +704,15 @@ pub fn validate_run_dir_shallow(path: &Path) -> Result<RunValidationReport> {
     let session = load_session(path)?;
     report.present_files.push(SESSION_FILE.to_owned());
 
-    if session.schema_version < SESSION_SCHEMA_VERSION {
+    if session.core.schema_version < SESSION_SCHEMA_VERSION {
         report.warnings.push(format!(
             "session schema version {} is older than current {}",
-            session.schema_version, SESSION_SCHEMA_VERSION
+            session.core.schema_version, SESSION_SCHEMA_VERSION
         ));
-    } else if session.schema_version > SESSION_SCHEMA_VERSION {
+    } else if session.core.schema_version > SESSION_SCHEMA_VERSION {
         report.errors.push(format!(
             "session schema version {} is newer than current {}",
-            session.schema_version, SESSION_SCHEMA_VERSION
+            session.core.schema_version, SESSION_SCHEMA_VERSION
         ));
     }
 
@@ -746,24 +746,45 @@ mod tests {
 
     fn minimal_session() -> SessionFile {
         SessionFile {
-            schema_version: crate::recorder::SESSION_SCHEMA_VERSION,
-            run_name: None,
-            started_at: RecordedTime {
-                unix_seconds: 0,
-                unix_nanos: 0,
-                system_time_debug: "".into(),
+            core: crate::recorder::SessionMetadataCore {
+                schema_version: SESSION_SCHEMA_VERSION,
+                run_name: Some("test".into()),
+                started_at: RecordedTime::default(),
+                ended_at: RecordedTime::default(),
+                monotonic_start_ns: Some(0),
+                monotonic_end_ns: Some(1_000_000_000),
+                duration_ms: 1000,
+                mangohud_start_offset: None,
+                mangohud_first_frame_monotonic_ns: None,
+                mangohud_first_frame_raw_elapsed_ms: None,
+                metadata: SystemMetadata::default(),
+                target_pids_max: 1024,
+                active_target_pids_count: 0,
+                active_expanded_tasks: vec![],
+                interval_record_count: 0,
+                intervals_dropped: 0,
+                spike_events_retained_count: 0,
+                spike_events_dropped_count: 0,
+                spike_events_truncated: false,
+                scx_event_count: 0,
+                irq_event_count: 0,
+                migration_event_count: None,
+                cpu_freq_sample_count: None,
+                gpu_sample_count: 0,
+                frame_event_count: 0,
+                block_io_event_count: 0,
+                event_stream_write_errors: 0,
+                alert_events_dropped_count: 0,
+                alert_channel_closed_count: 0,
+                first_event_stream_write_error: None,
+                block_io_correlation_basis: "dev+sector".into(),
+                drop_counters: DropCountersSnapshot::default(),
+                cpu_perf_sample_count: 0,
+                cpu_perf_open_errors: 0,
+                cpu_perf_read_errors: 0,
+                cpu_perf_skipped_tasks: 0,
+                cpu_perf_last_error: None,
             },
-            ended_at: RecordedTime {
-                unix_seconds: 1,
-                unix_nanos: 0,
-                system_time_debug: "".into(),
-            },
-            monotonic_start_ns: None,
-            monotonic_end_ns: None,
-            duration_ms: 1000,
-            mangohud_start_offset: None,
-            mangohud_first_frame_monotonic_ns: None,
-            mangohud_first_frame_raw_elapsed_ms: None,
             stop_reason: "test".into(),
             config: RecordedConfig {
                 manual_pids: vec![],
@@ -775,7 +796,7 @@ mod tests {
                 watch_process: None,
                 persistent: false,
                 keep_missing_pid: false,
-                watch_poll_ms: 1000,
+                watch_poll_ms: 100,
                 watch_timeout_ms: None,
                 csv_stream: None,
                 irq_latency: false,
@@ -791,7 +812,7 @@ mod tests {
                 epoch_period_ms: None,
                 retain_intervals: None,
                 max_tasks: 1024,
-                spike_threshold_ns: 1000000,
+                spike_threshold_ns: 1_000_000,
                 alert_threshold_ns: None,
                 alert_webhook_url: None,
                 follow_exec: true,
@@ -806,33 +827,6 @@ mod tests {
                 otlp_endpoint: None,
                 otel_service_name: "stutter".to_owned(),
             },
-            metadata: SystemMetadata::default(),
-            target_pids_max: 1024,
-            active_target_pids_count: 0,
-            active_expanded_tasks: vec![],
-            interval_record_count: 0,
-            intervals_dropped: 0,
-            spike_events_retained_count: 0,
-            spike_events_dropped_count: 0,
-            spike_events_truncated: false,
-            scx_event_count: 0,
-            irq_event_count: 0,
-            migration_event_count: None,
-            cpu_freq_sample_count: None,
-            gpu_sample_count: 0,
-            frame_event_count: 0,
-            block_io_event_count: 0,
-            event_stream_write_errors: 0,
-            alert_events_dropped_count: 0,
-            alert_channel_closed_count: 0,
-            first_event_stream_write_error: None,
-            block_io_correlation_basis: "dev+sector".into(),
-            drop_counters: DropCountersSnapshot::default(),
-            cpu_perf_sample_count: 0,
-            cpu_perf_open_errors: 0,
-            cpu_perf_read_errors: 0,
-            cpu_perf_skipped_tasks: 0,
-            cpu_perf_last_error: None,
             tasks: vec![],
             top_spikes: vec![],
         }
@@ -1010,7 +1004,7 @@ mod tests {
     fn test_tune_load_does_not_warn_about_unloaded_spike_events() {
         let dir = temp_dir("tune-no-spike-warn");
         let mut session = minimal_session();
-        session.spike_events_retained_count = 10;
+        session.core.spike_events_retained_count = 10;
         write_session(&dir, &session);
 
         let artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::TUNE).unwrap();

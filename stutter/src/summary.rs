@@ -22,7 +22,7 @@ pub struct CompactRunSummary {
     pub schema_version: u32,
     pub expected_schema_version: u32,
     pub run_name: Option<String>,
-    pub duration_ms: u128,
+    pub duration_ms: u64,
     pub stop_reason: String,
     pub target_counts: TargetCountsSummary,
     pub artifact_counts: ArtifactCountsSummary,
@@ -37,6 +37,8 @@ pub struct CompactRunSummary {
     pub spike_events_dropped_count: u64,
     pub spike_events_truncated: bool,
     pub intervals_dropped: u64,
+    pub event_stream_write_errors: u64,
+    pub first_event_stream_write_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -128,8 +130,8 @@ pub struct RunDiffSummary {
     pub current_path: PathBuf,
     pub baseline_run_name: Option<String>,
     pub current_run_name: Option<String>,
-    pub baseline_duration_ms: u128,
-    pub current_duration_ms: u128,
+    pub baseline_duration_ms: u64,
+    pub current_duration_ms: u64,
     pub filter_class: Option<TaskClass>,
     pub compared_tasks: usize,
     pub worst_p99_regression: Option<TaskDeltaSummary>,
@@ -235,28 +237,28 @@ pub fn compact_run_summary_from_session(
 
     CompactRunSummary {
         path: path.to_path_buf(),
-        schema_version: session.schema_version,
+        schema_version: session.core.schema_version,
         expected_schema_version: SESSION_SCHEMA_VERSION,
-        run_name: session.run_name.clone(),
-        duration_ms: session.duration_ms,
+        run_name: session.core.run_name.clone(),
+        duration_ms: session.core.duration_ms,
         stop_reason: session.stop_reason.clone(),
         target_counts: TargetCountsSummary {
             manual_pids: session.config.manual_pids.len(),
             tree_roots: session.config.tree_roots.len(),
-            active_target_pids: session.active_target_pids_count,
-            active_expanded_tasks: session.active_expanded_tasks.len(),
+            active_target_pids: session.core.active_target_pids_count,
+            active_expanded_tasks: session.core.active_expanded_tasks.len(),
         },
         artifact_counts: ArtifactCountsSummary {
-            reported_interval_records: session.interval_record_count,
-            reported_spike_events: session.spike_events_retained_count,
-            reported_irq_events: session.irq_event_count,
-            reported_gpu_samples: session.gpu_sample_count,
-            reported_frame_events: session.frame_event_count,
-            reported_migration_events: session.migration_event_count.unwrap_or(0),
-            reported_cpu_freq_samples: session.cpu_freq_sample_count.unwrap_or(0),
-            reported_block_io_events: session.block_io_event_count,
-            reported_scx_events: session.scx_event_count,
-            reported_cpu_perf_samples: session.cpu_perf_sample_count,
+            reported_interval_records: session.core.interval_record_count,
+            reported_spike_events: session.core.spike_events_retained_count,
+            reported_irq_events: session.core.irq_event_count,
+            reported_gpu_samples: session.core.gpu_sample_count,
+            reported_frame_events: session.core.frame_event_count,
+            reported_migration_events: session.core.migration_event_count.unwrap_or(0),
+            reported_cpu_freq_samples: session.core.cpu_freq_sample_count.unwrap_or(0),
+            reported_block_io_events: session.core.block_io_event_count,
+            reported_scx_events: session.core.scx_event_count,
+            reported_cpu_perf_samples: session.core.cpu_perf_sample_count,
         },
         data_quality_level: quality.level,
         data_quality_reasons: quality.reasons,
@@ -265,10 +267,12 @@ pub fn compact_run_summary_from_session(
         top_tasks_by_max_latency: by_max.into_iter().take(top).collect(),
         top_tasks_by_p99: by_p99.into_iter().take(top).collect(),
         threshold_totals,
-        spike_events_retained_count: session.spike_events_retained_count,
-        spike_events_dropped_count: session.spike_events_dropped_count,
-        spike_events_truncated: session.spike_events_truncated,
-        intervals_dropped: session.intervals_dropped,
+        spike_events_retained_count: session.core.spike_events_retained_count,
+        spike_events_dropped_count: session.core.spike_events_dropped_count,
+        spike_events_truncated: session.core.spike_events_truncated,
+        intervals_dropped: session.core.intervals_dropped,
+        event_stream_write_errors: session.core.event_stream_write_errors,
+        first_event_stream_write_error: session.core.first_event_stream_write_error.clone(),
     }
 }
 
@@ -351,10 +355,10 @@ pub fn run_diff_summary_from_sessions(
     RunDiffSummary {
         baseline_path: baseline_path.to_path_buf(),
         current_path: current_path.to_path_buf(),
-        baseline_run_name: baseline.run_name.clone(),
-        current_run_name: current.run_name.clone(),
-        baseline_duration_ms: baseline.duration_ms,
-        current_duration_ms: current.duration_ms,
+        baseline_run_name: baseline.core.run_name.clone(),
+        current_run_name: current.core.run_name.clone(),
+        baseline_duration_ms: baseline.core.duration_ms,
+        current_duration_ms: current.core.duration_ms,
         filter_class,
         compared_tasks,
         worst_p99_regression,
@@ -445,6 +449,14 @@ pub fn render_compact_run_summary(summary: &CompactRunSummary) -> String {
     );
     pushln(&mut output, format!("duration_ms: {}", summary.duration_ms));
     pushln(&mut output, format!("stop_reason: {}", summary.stop_reason));
+
+    if let Some(warning) = crate::report::event_stream_warning(
+        summary.event_stream_write_errors,
+        summary.first_event_stream_write_error.as_deref(),
+    ) {
+        pushln(&mut output, warning);
+    }
+
     pushln(
         &mut output,
         format!("data_quality: {:?}", summary.data_quality_level),
@@ -803,15 +815,19 @@ mod tests {
 
     fn test_session(tasks: Vec<SessionTask>) -> SessionFile {
         SessionFile {
-            schema_version: SESSION_SCHEMA_VERSION,
-            run_name: Some("test-run".to_owned()),
-            duration_ms: 1000,
+            core: crate::recorder::SessionMetadataCore {
+                schema_version: SESSION_SCHEMA_VERSION,
+                run_name: Some("test-run".to_owned()),
+                started_at: crate::recorder::RecordedTime::default(),
+                ended_at: crate::recorder::RecordedTime::default(),
+                duration_ms: 1000,
+                interval_record_count: 7,
+                ..Default::default()
+            },
             stop_reason: "test".to_owned(),
-            interval_record_count: 7,
-            active_target_pids_count: 2,
-            active_expanded_tasks: vec![1, 2],
+            config: crate::recorder::RecordedConfig::default(),
             tasks,
-            ..Default::default()
+            top_spikes: Vec::new(),
         }
     }
 

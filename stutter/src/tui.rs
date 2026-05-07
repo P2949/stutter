@@ -52,6 +52,7 @@ impl SortField {
     }
 }
 
+#[derive(Clone)]
 pub struct TuiState {
     pub sort_field: SortField,
     pub filter_class: Option<TaskClass>,
@@ -323,7 +324,7 @@ fn render_sparkline(f: &mut Frame, interval_records: &[IntervalRecord], area: Re
     // Each interval can contain multiple IntervalRecords (one per task).
     // Group by `elapsed_ms` and take the max `max_ns` across all tasks
     // within each interval tick.
-    let mut by_tick: BTreeMap<u128, u64> = BTreeMap::new();
+    let mut by_tick: BTreeMap<u64, u64> = BTreeMap::new();
     for r in interval_records {
         let entry = by_tick.entry(r.elapsed_ms).or_insert(0);
         *entry = (*entry).max(r.max_ns);

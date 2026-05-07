@@ -18,7 +18,14 @@ pub const DROP_COUNTERS_MAX: u32 = 4;
 #[derive(Clone, Copy)]
 pub struct SchedulerEvent {
     pub kind: u32,
-    pub pid: u32,
+
+    /// Linux task/thread id from scheduler tracepoints.
+    ///
+    /// This is the sched wakee/switch-in task id (sched_switch.next_pid),
+    /// not necessarily the process TGID. Userspace should treat this as
+    /// a task/TID identity, not a process-level PID.
+    pub tid: u32,
+
     pub cpu: u32,
     pub wakeup_target_cpu: u32,
     pub prio: i32,
@@ -48,6 +55,21 @@ pub struct SchedulerEvent {
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for SchedulerEvent {}
+
+#[cfg(feature = "user")]
+impl SchedulerEvent {
+    /// Returns the Linux task/thread id (same as `tid`).
+    #[inline]
+    pub fn task(&self) -> u32 {
+        self.tid
+    }
+
+    /// Returns the Linux task/thread id (same as `tid`).
+    #[inline]
+    pub fn process_thread_id(&self) -> u32 {
+        self.tid
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]

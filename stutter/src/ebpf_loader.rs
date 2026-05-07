@@ -251,13 +251,15 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         // Fault perf events are optional correlation probes. If perf_event_open
         // is blocked by policy or capabilities, log a warning and continue rather
         // than aborting the whole profiler startup.
-        if let Err(e) = attach_software_perf_event(&mut ebpf, "major_fault", 4) {
+        if let Err(e) = attach_software_perf_event(&mut ebpf, "major_fault", FaultPerfProbe::Major)
+        {
             log::warn!(
                 "failed to attach major_fault perf event; continuing without fault probes: {}",
                 e
             );
         }
-        if let Err(e) = attach_software_perf_event(&mut ebpf, "minor_fault", 3) {
+        if let Err(e) = attach_software_perf_event(&mut ebpf, "minor_fault", FaultPerfProbe::Minor)
+        {
             log::warn!(
                 "failed to attach minor_fault perf event; continuing without fault probes: {}",
                 e
@@ -408,10 +410,25 @@ fn attach_tracepoint(
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FaultPerfProbe {
+    Minor,
+    Major,
+}
+
+impl FaultPerfProbe {
+    fn software_event(self) -> aya::programs::perf_event::SoftwareEvent {
+        match self {
+            Self::Minor => aya::programs::perf_event::SoftwareEvent::PageFaultsMin,
+            Self::Major => aya::programs::perf_event::SoftwareEvent::PageFaultsMaj,
+        }
+    }
+}
+
 fn attach_software_perf_event(
     ebpf: &mut Ebpf,
     program_name: &str,
-    config: u64,
+    probe: FaultPerfProbe,
 ) -> anyhow::Result<()> {
     let program: &mut PerfEvent = ebpf
         .program_mut(program_name)
@@ -421,11 +438,7 @@ fn attach_software_perf_event(
     program.load()?;
 
     for cpu in online_cpus().map_err(|e| anyhow::anyhow!("{}: {}", e.0, e.1))? {
-        let sw_event = match config {
-            3 => aya::programs::perf_event::SoftwareEvent::PageFaultsMin,
-            4 => aya::programs::perf_event::SoftwareEvent::PageFaultsMaj,
-            _ => unreachable!(),
-        };
+        let sw_event = probe.software_event();
         program.attach(
             aya::programs::perf_event::PerfEventConfig::Software(sw_event),
             aya::programs::perf_event::PerfEventScope::AllProcessesOneCpu { cpu },
@@ -722,9 +735,13 @@ pub fn tracepoint_preflight(
     let irq_handler = if !wants_irq_latency {
         "not_requested".to_owned()
     } else if irq_entry.exists() && irq_exit.exists() {
-        let entry_ok = validate_tracepoint_format_at(&irq_entry, &[("irq", 8)]).is_ok();
-        let exit_ok = validate_tracepoint_format_at(&irq_exit, &[("irq", 8)]).is_ok()
-            && require_tracepoint_field(&irq_exit, "ret").is_ok();
+        let entry_ok =
+            validate_tracepoint_format_at_named(&irq_entry, "irq_handler_entry", &[("irq", 8)])
+                .is_ok();
+        let exit_ok =
+            validate_tracepoint_format_at_named(&irq_exit, "irq_handler_exit", &[("irq", 8)])
+                .is_ok()
+                && require_tracepoint_field(&irq_exit, "ret").is_ok();
         if entry_ok && exit_ok {
             "ok".to_owned()
         } else {
@@ -770,7 +787,7 @@ fn required_tracepoint_status(
     name: &str,
     errors: &mut Vec<String>,
 ) -> String {
-    match validate_tracepoint_format_at(path, expected_offsets) {
+    match validate_tracepoint_format_at_named(path, name, expected_offsets) {
         Ok(()) => "ok".to_owned(),
         Err(err) => {
             errors.push(format!(
@@ -799,7 +816,7 @@ fn optional_tracepoint_status(
         return "missing".to_owned();
     }
 
-    match validate_tracepoint_format_at(path, expected_offsets) {
+    match validate_tracepoint_format_at_named(path, name, expected_offsets) {
         Ok(()) => "ok".to_owned(),
         Err(err) => {
             if wanted {
@@ -826,9 +843,18 @@ fn block_tracepoint_preflight(
         return ("missing".to_owned(), "unavailable".to_owned());
     }
 
-    let issue_ok = validate_tracepoint_format_at(&issue, &[("dev", 8), ("sector", 16)]).is_ok();
-    let complete_ok =
-        validate_tracepoint_format_at(&complete, &[("dev", 8), ("sector", 16)]).is_ok();
+    let issue_ok = validate_tracepoint_format_at_named(
+        &issue,
+        "block_rq_issue",
+        &[("dev", 8), ("sector", 16)],
+    )
+    .is_ok();
+    let complete_ok = validate_tracepoint_format_at_named(
+        &complete,
+        "block_rq_complete",
+        &[("dev", 8), ("sector", 16)],
+    )
+    .is_ok();
     if !issue_ok || !complete_ok {
         warnings.push("block I/O tracepoint layouts differ from expected fields".to_owned());
         return ("mismatch".to_owned(), "unavailable".to_owned());
@@ -865,8 +891,9 @@ fn validate_tracepoint_formats(
         &[("pid", 24), ("prio", 28), ("target_cpu", 32)],
         true,
     )?;
-    validate_tracepoint_format_at(
+    validate_tracepoint_format_at_named(
         &events_root.join("sched/sched_switch/format"),
+        "sched_switch",
         &[
             ("prev_pid", 24),
             ("prev_state", 32),
@@ -906,8 +933,8 @@ fn validate_tracepoint_formats(
     let irq_entry = events_root.join("irq/irq_handler_entry/format");
     let irq_exit = events_root.join("irq/irq_handler_exit/format");
     let irq_handler = if config.irq_latency && irq_entry.exists() && irq_exit.exists() {
-        validate_tracepoint_format_at(&irq_entry, &[("irq", 8)])?;
-        validate_tracepoint_format_at(&irq_exit, &[("irq", 8)])?;
+        validate_tracepoint_format_at_named(&irq_entry, "irq_handler_entry", &[("irq", 8)])?;
+        validate_tracepoint_format_at_named(&irq_exit, "irq_handler_exit", &[("irq", 8)])?;
 
         // Validation-only for now. The eBPF program does not currently read
         // irq_handler_exit.ret, but the field must exist for kernels where IRQ exit
@@ -933,10 +960,15 @@ fn validate_tracepoint_formats(
     let mut block_rq_complete_rwbs_offset = None;
 
     if config.block_io && block_rq_issue.exists() && block_rq_complete.exists() {
-        let issue_ok =
-            validate_tracepoint_format_at(&block_rq_issue, &[("dev", 8), ("sector", 16)]).is_ok();
-        let complete_ok = validate_tracepoint_format_at(
+        let issue_ok = validate_tracepoint_format_at_named(
+            &block_rq_issue,
+            "block_rq_issue",
+            &[("dev", 8), ("sector", 16)],
+        )
+        .is_ok();
+        let complete_ok = validate_tracepoint_format_at_named(
             &block_rq_complete,
+            "block_rq_complete",
             &[("dev", 8), ("sector", 16), ("nr_sector", 24)],
         )
         .is_ok();
@@ -1001,7 +1033,7 @@ fn validate_tracepoint_formats(
 
     let sched_process_exec = events_root.join("sched/sched_process_exec/format");
     let sched_process_exec = if config.follow_exec && sched_process_exec.exists() {
-        validate_tracepoint_format_at(&sched_process_exec, &[])?;
+        validate_tracepoint_format_at_named(&sched_process_exec, "sched_process_exec", &[])?;
         true
     } else {
         false
@@ -1041,7 +1073,7 @@ fn validate_optional_tracepoint_format_at(
         return Ok(false);
     }
 
-    validate_tracepoint_format_at(path, expected_offsets)?;
+    validate_tracepoint_format_at_named(path, name, expected_offsets)?;
     Ok(true)
 }
 
@@ -1049,15 +1081,31 @@ fn validate_tracepoint_format_at(
     path: &Path,
     expected_offsets: &[(&str, usize)],
 ) -> anyhow::Result<()> {
+    let tracepoint_name = path
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .unwrap_or("tracepoint");
+
+    validate_tracepoint_format_at_named(path, tracepoint_name, expected_offsets)
+}
+
+fn validate_tracepoint_format_at_named(
+    path: &Path,
+    tracepoint_name: &str,
+    expected_offsets: &[(&str, usize)],
+) -> anyhow::Result<()> {
     let format = fs::read_to_string(path)
         .with_context(|| format!("failed to read tracepoint format {}", path.display()))?;
 
-    validate_tracepoint_format(&format, expected_offsets).with_context(|| {
-        format!(
-            "tracepoint format {} did not match the eBPF program assumptions",
-            path.display()
-        )
-    })
+    validate_tracepoint_format_named(tracepoint_name, &format, expected_offsets).with_context(
+        || {
+            format!(
+                "{tracepoint_name} tracepoint format {} did not match the eBPF program assumptions",
+                path.display(),
+            )
+        },
+    )
 }
 
 fn require_tracepoint_field(format_path: &Path, field_name: &str) -> anyhow::Result<u32> {
@@ -1083,49 +1131,71 @@ fn parse_tracepoint_field_offset(format: &str, field_name: &str) -> anyhow::Resu
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TracepointField {
+    name: String,
     offset: usize,
-    size: usize,
+    size: Option<usize>,
+    signed: Option<i32>,
+    declaration: String,
 }
 
 fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, TracepointField> {
+    parse_tracepoint_fields(format)
+}
+
+fn parse_tracepoint_fields(format: &str) -> BTreeMap<String, TracepointField> {
     let mut fields = BTreeMap::new();
 
     for line in format.lines() {
-        let line = line.trim();
-        if !line.starts_with("field:") {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("field:") {
             continue;
         }
 
-        let parts: Vec<_> = line.split(';').map(str::trim).collect();
-        let Some(field_part) = parts.first() else {
-            continue;
-        };
+        let name = parse_tracepoint_field_name(trimmed);
+        let offset = parse_tracepoint_field_usize_property(trimmed, "offset:");
+        let size = parse_tracepoint_field_usize_property(trimmed, "size:");
+        let signed = parse_tracepoint_field_i32_property(trimmed, "signed:");
 
-        if !field_part.starts_with("field:") {
-            continue;
-        }
-
-        let Some(field_name) = field_name_from_part(field_part) else {
-            continue;
-        };
-
-        let mut offset = None;
-        let mut size = None;
-
-        for part in parts.iter().skip(1) {
-            if let Some(val) = part.strip_prefix("offset:") {
-                offset = val.trim().parse::<usize>().ok();
-            } else if let Some(val) = part.strip_prefix("size:") {
-                size = val.trim().parse::<usize>().ok();
-            }
-        }
-
-        if let (Some(offset), Some(size)) = (offset, size) {
-            fields.insert(field_name, TracepointField { offset, size });
+        if let (Some(name), Some(offset)) = (name, offset) {
+            fields.insert(
+                name.clone(),
+                TracepointField {
+                    name,
+                    offset,
+                    size,
+                    signed,
+                    declaration: trimmed.to_owned(),
+                },
+            );
         }
     }
 
     fields
+}
+
+fn parse_tracepoint_field_name(line: &str) -> Option<String> {
+    let field_part = line.strip_prefix("field:")?.split(';').next()?.trim();
+    let raw_name = field_part.split_whitespace().last()?;
+    let raw_name = raw_name.trim_start_matches('*');
+    let name = raw_name.split('[').next()?.trim();
+
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_owned())
+    }
+}
+
+fn parse_tracepoint_field_usize_property(line: &str, key: &str) -> Option<usize> {
+    line.split(';')
+        .find_map(|part| part.trim().strip_prefix(key))
+        .and_then(|value| value.trim().parse::<usize>().ok())
+}
+
+fn parse_tracepoint_field_i32_property(line: &str, key: &str) -> Option<i32> {
+    line.split(';')
+        .find_map(|part| part.trim().strip_prefix(key))
+        .and_then(|value| value.trim().parse::<i32>().ok())
 }
 
 fn find_request_key_offset(offsets: &BTreeMap<String, TracepointField>) -> Option<u32> {
@@ -1133,7 +1203,7 @@ fn find_request_key_offset(offsets: &BTreeMap<String, TracepointField>) -> Optio
         if let Some(field) = offsets.get(name)
             && field.offset >= 8
             && field.offset % 8 == 0
-            && field.size == 8
+            && field.size == Some(8)
         {
             return Some(field.offset as u32);
         }
@@ -1156,43 +1226,87 @@ fn matching_request_key_offset(
     }
 }
 
+#[cfg(test)]
 fn validate_tracepoint_format(
     format: &str,
     expected_offsets: &[(&str, usize)],
 ) -> anyhow::Result<()> {
-    let offsets = parse_tracepoint_offsets(format);
+    validate_tracepoint_format_named("tracepoint", format, expected_offsets)
+}
 
-    for (field, expected_offset) in expected_offsets {
-        let Some(actual_field) = offsets.get(*field) else {
-            anyhow::bail!("missing field {field}");
+fn validate_tracepoint_format_named(
+    tracepoint_name: &str,
+    format: &str,
+    expected_offsets: &[(&str, usize)],
+) -> anyhow::Result<()> {
+    let fields = parse_tracepoint_fields(format);
+
+    for &(field_name, expected_offset) in expected_offsets {
+        let Some(field) = fields.get(field_name) else {
+            return Err(tracepoint_missing_field_error(
+                tracepoint_name,
+                field_name,
+                &fields,
+            ));
         };
 
-        if actual_field.offset != *expected_offset {
-            anyhow::bail!(
-                "field {field} offset mismatch: expected {expected_offset}, got {}",
-                actual_field.offset
-            );
+        if field.offset != expected_offset {
+            return Err(tracepoint_offset_mismatch_error(
+                tracepoint_name,
+                field_name,
+                expected_offset,
+                field,
+            ));
         }
     }
 
     Ok(())
 }
 
-fn field_name_from_part(field_part: &str) -> Option<String> {
-    let declaration = field_part.strip_prefix("field:")?.trim();
-    let token = declaration.split_whitespace().last()?;
-    let token = token.trim_start_matches('*');
+fn tracepoint_offset_mismatch_error(
+    tracepoint_name: &str,
+    field_name: &str,
+    expected: usize,
+    field: &TracepointField,
+) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{} tracepoint layout mismatch for field `{}`: expected offset {}, got {}. Parsed declaration: `{}`{}",
+        tracepoint_name,
+        field_name,
+        expected,
+        field.offset,
+        field.declaration,
+        tracepoint_layout_hint(tracepoint_name, field_name),
+    )
+}
 
-    let field_name = match token.split_once('[') {
-        Some((name, _)) => name,
-        None => token,
-    };
+fn tracepoint_missing_field_error(
+    tracepoint_name: &str,
+    field_name: &str,
+    fields: &BTreeMap<String, TracepointField>,
+) -> anyhow::Error {
+    let available = fields.keys().cloned().collect::<Vec<_>>().join(", ");
 
-    if field_name.is_empty() {
-        return None;
+    anyhow::anyhow!(
+        "{} tracepoint missing expected field `{}`. Available parsed fields: [{}].{}",
+        tracepoint_name,
+        field_name,
+        available,
+        tracepoint_layout_hint(tracepoint_name, field_name),
+    )
+}
+
+fn tracepoint_layout_hint(tracepoint_name: &str, field_name: &str) -> &'static str {
+    if tracepoint_name == "sched_switch"
+        && matches!(
+            field_name,
+            "prev_state" | "next_comm" | "next_pid" | "next_prio"
+        )
+    {
+        " Hint: `sched_switch` layout differs from stutter's eBPF read offsets. A common cause is a different `prev_state` field type/size, which shifts later fields such as `next_comm`, `next_pid`, and `next_prio`. stutter rejects this layout to avoid reading the wrong tracepoint bytes."
+    } else {
+        " Hint: the running kernel tracepoint format does not match stutter's compiled eBPF read offsets. stutter rejects this layout to avoid mis-decoding tracepoint data."
     }
-
-    Some(field_name.to_owned())
 }
 
 fn raise_memlock_limit() {
@@ -1278,9 +1392,26 @@ field:int next_prio; offset:60; size:4; signed:1;
         assert_eq!(offsets.get("next_comm").map(|f| f.offset), Some(40));
         assert_eq!(offsets.get("next_pid").map(|f| f.offset), Some(56));
         assert_eq!(offsets.get("next_prio").map(|f| f.offset), Some(60));
-        assert_eq!(offsets.get("next_comm").map(|f| f.size), Some(16));
-        assert_eq!(offsets.get("next_pid").map(|f| f.size), Some(4));
-        assert_eq!(offsets.get("next_prio").map(|f| f.size), Some(4));
+        assert_eq!(offsets.get("next_comm").and_then(|f| f.size), Some(16));
+        assert_eq!(offsets.get("next_pid").and_then(|f| f.size), Some(4));
+        assert_eq!(offsets.get("next_prio").and_then(|f| f.size), Some(4));
+    }
+
+    #[test]
+    fn parse_tracepoint_fields_preserves_original_declaration() {
+        let format = "    field:char next_comm[16]; offset:40; size:16; signed:1;\n";
+
+        let fields = parse_tracepoint_fields(format);
+        let field = fields.get("next_comm").unwrap();
+
+        assert_eq!(field.name, "next_comm");
+        assert_eq!(field.offset, 40);
+        assert_eq!(field.size, Some(16));
+        assert_eq!(field.signed, Some(1));
+        assert_eq!(
+            field.declaration,
+            "field:char next_comm[16]; offset:40; size:16; signed:1;",
+        );
     }
 
     #[test]
@@ -1343,27 +1474,45 @@ field:int next_prio; offset:60; size:4; signed:1;
     }
 
     #[test]
-    fn rejects_mismatched_tracepoint_offsets() {
+    fn tracepoint_mismatch_error_includes_declaration_and_sched_switch_hint() {
         let format = r#"
     field:char prev_comm[16]; offset:8; size:16; signed:1;
     field:pid_t prev_pid; offset:24; size:4; signed:1;
     field:int prev_prio; offset:28; size:4; signed:1;
-    field:long prev_state; offset:32; size:8; signed:1;
-    field:char next_comm[16]; offset:40; size:16; signed:1;
-    field:pid_t next_pid; offset:56; size:4; signed:1;
-    field:int next_prio; offset:60; size:4; signed:1;
-    #";
+    field:int prev_state; offset:32; size:4; signed:1;
+    field:char next_comm[16]; offset:36; size:16; signed:1;
+    field:pid_t next_pid; offset:52; size:4; signed:1;
+    field:int next_prio; offset:56; size:4; signed:1;
+"#;
 
-        let err = validate_tracepoint_format(format, &[("next_pid", 56)]).unwrap_err();
-        assert!(err.to_string().contains("next_pid"));
-        assert!(err.to_string().contains("expected 56, got 52"));
+        let err = validate_tracepoint_format_named("sched_switch", format, &[("next_pid", 56)])
+            .unwrap_err();
+        let text = err.to_string();
+
+        assert!(text.contains("sched_switch"));
+        assert!(text.contains("next_pid"));
+        assert!(text.contains("expected offset 56"));
+        assert!(text.contains("got 52"));
+        assert!(text.contains("field:pid_t next_pid; offset:52; size:4; signed:1;"));
+        assert!(text.contains("prev_state"));
+        assert!(text.contains("rejects this layout"));
     }
 
     #[test]
-    fn rejects_missing_tracepoint_fields() {
-        let err = validate_tracepoint_format("field:int pid; offset:24;", &[("next_pid", 56)])
+    fn tracepoint_missing_field_error_lists_available_fields() {
+        let format = r#"
+field:pid_t prev_pid; offset:24; size:4; signed:1;
+field:long prev_state; offset:32; size:8; signed:1;
+"#;
+
+        let err = validate_tracepoint_format_named("sched_switch", format, &[("next_pid", 56)])
             .unwrap_err();
-        assert!(err.to_string().contains("missing field next_pid"));
+        let text = err.to_string();
+
+        assert!(text.contains("missing expected field"));
+        assert!(text.contains("next_pid"));
+        assert!(text.contains("prev_pid"));
+        assert!(text.contains("prev_state"));
     }
 
     #[test]
@@ -1381,7 +1530,7 @@ field:int irq; offset:8; size:4; signed:1;
         let format = "field:int irq; offset:12; size:4; signed:1;";
 
         let err = validate_tracepoint_format(format, &[("irq", 8)]).unwrap_err();
-        assert!(err.to_string().contains("expected 8, got 12"));
+        assert!(err.to_string().contains("expected offset 8, got 12"));
     }
 
     const IRQ_HANDLER_EXIT_FORMAT_WITH_RET: &str = r#"

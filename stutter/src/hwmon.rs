@@ -251,7 +251,7 @@ impl HwmonReader {
         reader
     }
 
-    pub fn sample(&mut self, elapsed_ms: u128) -> GpuSample {
+    pub fn sample(&mut self, elapsed_ms: u64) -> GpuSample {
         let mut gpu_busy_percent = read_u32_cached(&mut self.gpu_busy, &mut self.buf);
         let mut vram_used_bytes = read_u64_cached(&mut self.vram_used, &mut self.buf);
         let mut vram_total_bytes = read_u64_cached(&mut self.vram_total, &mut self.buf);
