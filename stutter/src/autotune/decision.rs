@@ -2,12 +2,7 @@
 
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
-
-pub use super::candidate::CandidateAction;
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ExperimentId(pub String);
+pub use super::{candidate::CandidateAction, experiment::ExperimentId};
 
 #[derive(Clone, Debug)]
 pub enum AutotuneDecision {
