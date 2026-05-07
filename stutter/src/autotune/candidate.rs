@@ -2,7 +2,10 @@
 
 use std::collections::BTreeSet;
 
-use crate::profiles::Profile;
+use crate::{
+    actions::{ActionWarning, SafetyClass, TuningAction, cpu_affinity::CpuAffinityProfileAction},
+    profiles::Profile,
+};
 
 #[derive(Clone, Debug)]
 pub enum CandidateAction {
@@ -104,6 +107,67 @@ pub struct RejectedCandidateProfile {
 pub struct CandidateProfileStatus {
     pub matched_tasks: usize,
     pub dry_run_tasks: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct CandidateDryRunRecord {
+    pub candidate_name: String,
+    pub affected_tasks: usize,
+    pub warnings: Vec<ActionWarning>,
+    pub safety_class: SafetyClass,
+    pub eligible: bool,
+    pub reason: Option<String>,
+}
+
+pub fn dry_run_candidates(candidates: &[CandidateAction]) -> Vec<CandidateDryRunRecord> {
+    candidates.iter().map(dry_run_candidate).collect()
+}
+
+pub fn dry_run_candidate(candidate: &CandidateAction) -> CandidateDryRunRecord {
+    match candidate {
+        CandidateAction::CpuAffinityProfile {
+            profile_name,
+            profile,
+            tree_pid,
+        } => {
+            let action = CpuAffinityProfileAction {
+                tree_pid: *tree_pid,
+                profile: profile.clone(),
+                force_restore_overwrite: false,
+            };
+            let safety_class = action.safety_class();
+
+            match action.dry_run() {
+                Ok(state) => {
+                    let affected_tasks = state.affected_tasks;
+                    CandidateDryRunRecord {
+                        candidate_name: profile_name.clone(),
+                        affected_tasks,
+                        warnings: state.warnings,
+                        safety_class,
+                        eligible: affected_tasks > 0,
+                        reason: if affected_tasks == 0 {
+                            Some("dry-run matched zero affected tasks".to_owned())
+                        } else {
+                            None
+                        },
+                    }
+                }
+                Err(err) => CandidateDryRunRecord {
+                    candidate_name: profile_name.clone(),
+                    affected_tasks: 0,
+                    warnings: Vec::new(),
+                    safety_class,
+                    eligible: false,
+                    reason: Some(format!("dry-run failed: {err:#}")),
+                },
+            }
+        }
+        #[cfg(test)]
+        CandidateAction::Fake { .. } => {
+            panic!("dry-run not implemented for Fake candidate");
+        }
+    }
 }
 
 pub fn generate_profile_candidates(
@@ -385,6 +449,46 @@ mod tests {
         assert_eq!(plan.optimization_candidates.len(), 1);
         assert_eq!(plan.optimization_candidates[0].profile_name(), "candidate");
         assert!(plan.recovery_fallback.is_some());
+    }
+
+    #[test]
+    fn dry_run_candidate_records_failure_as_ineligible() {
+        let candidate = CandidateAction::cpu_affinity_profile(profile("bad-tree"), 0);
+
+        let record = dry_run_candidate(&candidate);
+
+        assert_eq!(record.candidate_name, "bad-tree");
+        assert_eq!(record.affected_tasks, 0);
+        assert_eq!(record.safety_class, SafetyClass::ReversibleLowRisk);
+        assert!(!record.eligible);
+        assert!(
+            record
+                .reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("dry-run failed")
+        );
+        assert!(
+            record
+                .reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("tree pid must be greater than zero")
+        );
+    }
+
+    #[test]
+    fn dry_run_candidates_preserves_candidate_order() {
+        let candidates = vec![
+            CandidateAction::cpu_affinity_profile(profile("first"), 0),
+            CandidateAction::cpu_affinity_profile(profile("second"), 0),
+        ];
+
+        let records = dry_run_candidates(&candidates);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].candidate_name, "first");
+        assert_eq!(records[1].candidate_name, "second");
     }
 
     #[test]
