@@ -59,6 +59,39 @@ pub struct RunsResponse {
     pub runs: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionResponse {
+    pub name: String,
+    pub version: String,
+    pub schema_version: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilitiesResponse {
+    pub version: String,
+    pub auth_required: bool,
+    pub max_duration_seconds: u64,
+    pub max_targets: usize,
+    pub max_concurrent_recordings: usize,
+    pub supported_routes: Vec<String>,
+    pub supported_artifacts: Vec<String>,
+    pub features: AgentFeatureFlags,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentFeatureFlags {
+    pub record_start_stop: bool,
+    pub list_runs: bool,
+    pub download_session: bool,
+    pub download_artifacts: bool,
+    pub hwmon_request: bool,
+    pub cpu_freq_request: bool,
+    pub faults_request: bool,
+    pub stat_wait_request: bool,
+    pub block_io_request: bool,
+    pub irq_latency_request: bool,
+}
+
 pub fn request_from_monitor_config(config: &Config) -> anyhow::Result<RemoteMonitorRequest> {
     Ok(RemoteMonitorRequest {
         target_pids: config.target_pids.clone(),
@@ -101,8 +134,7 @@ pub async fn run_remote_monitor(
     let start_url = format!("{base}/record/start");
     log::info!("sending remote start request to {start_url}");
 
-    let start: StartRecordResponse = client
-        .post(&start_url)
+    let start: StartRecordResponse = apply_auth(client.post(&start_url))
         .json(&request)
         .send()
         .await?
@@ -120,7 +152,9 @@ pub async fn run_remote_monitor(
                 log::error!("failed to wait for ctrl-c: {e}");
             }
             log::info!("ctrl-c detected, sending remote stop request");
-            let _ = client.post(format!("{base}/record/stop")).send().await;
+            let _ = apply_auth(client.post(format!("{base}/record/stop")))
+                .send()
+                .await;
         }
     });
 
@@ -138,8 +172,7 @@ pub async fn run_remote_monitor(
         return Ok(());
     }
 
-    let stop: StopRecordResponse = client
-        .post(format!("{base}/record/stop"))
+    let stop: StopRecordResponse = apply_auth(client.post(format!("{base}/record/stop")))
         .send()
         .await?
         .error_for_status()?
@@ -149,6 +182,21 @@ pub async fn run_remote_monitor(
     println!("remote recording stopped: run_id={:?}", stop.run_id);
 
     Ok(())
+}
+
+fn maybe_bearer_token_from_env() -> Option<String> {
+    std::env::var("STUTTER_AGENT_TOKEN")
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+}
+
+fn apply_auth(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    if let Some(token) = maybe_bearer_token_from_env() {
+        request.bearer_auth(token)
+    } else {
+        request
+    }
 }
 
 #[cfg(test)]

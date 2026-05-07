@@ -208,6 +208,10 @@ Important fields:
 - `over_2ms`
 - `over_5ms`
 - `cpu_psi_some`
+- `mem_psi_some`
+- `mem_psi_full`
+- `io_psi_some`
+- `io_psi_full`
 - `major_faults`
 - `minor_faults`
 - `cpu_perf`
@@ -397,12 +401,34 @@ interface. It includes:
 - `session`
 - `cluster_analysis`
 - `frame_diagnoses`
+- `pressure_timeline`
 - `artifacts_summary`
 - `data_quality`
 
 External automation should prefer this over parsing raw report text. Text
 reports and HTML reports are user-facing and less stable. Raw artifacts are
 lower-level debugging and forensics inputs.
+
+### `pressure_timeline`
+
+`pressure_timeline` is derived from `interval.json`. It is not a raw artifact
+file. Reports populate it from the bounded interval records loaded around spike
+clusters and frame-spike correlation windows. If interval data is unavailable or
+no relevant windows are loaded, the summary is empty and reports still succeed.
+
+Fields:
+
+- `sample_count`: number of interval records considered.
+- `max_cpu_some`: maximum `cpu_psi_some` value in the considered intervals.
+- `max_mem_some`: maximum `mem_psi_some` value, or `null` when no memory PSI
+  fields are available.
+- `max_mem_full`: maximum `mem_psi_full` value, or `null` when unavailable.
+- `max_io_some`: maximum `io_psi_some` value, or `null` when unavailable.
+- `max_io_full`: maximum `io_psi_full` value, or `null` when unavailable.
+- `windows[]`: interval records sorted by `elapsed_ms`, with CPU, memory, and
+  I/O pressure values.
+- `windows[].near_spike`: true when the interval lies within the configured
+  cluster window around a scheduler spike cluster.
 
 ## Validation Command
 

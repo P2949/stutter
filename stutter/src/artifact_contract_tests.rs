@@ -66,6 +66,7 @@ fn analysis_json_has_stable_top_level_contract() {
             "session",
             "cluster_analysis",
             "frame_diagnoses",
+            "pressure_timeline",
             "artifacts_summary",
             "data_quality",
         ],

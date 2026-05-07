@@ -45,6 +45,8 @@ enum Command {
     Completions(CompletionsArgs),
     #[command(name = "man")]
     Man(ManArgs),
+    Probes(ProbesArgs),
+    Scenario(ScenarioArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -57,6 +59,12 @@ pub struct ManArgs {
 pub struct CompletionsArgs {
     #[arg(value_enum)]
     pub shell: clap_complete::Shell,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ProbesArgs {
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -277,6 +285,48 @@ pub struct AgentArgs {
 
     #[arg(long = "runs-dir", value_name = "PATH")]
     pub runs_dir: Option<std::path::PathBuf>,
+
+    #[arg(
+        long = "allow-unsafe-bind",
+        help = "Allow binding the agent to a non-loopback address. Dangerous unless the network is trusted."
+    )]
+    pub allow_unsafe_bind: bool,
+
+    #[arg(
+        long = "bearer-token-env",
+        value_name = "ENV",
+        default_value = "STUTTER_AGENT_TOKEN",
+        help = "Environment variable containing bearer token for agent HTTP API"
+    )]
+    pub bearer_token_env: String,
+
+    #[arg(
+        long = "bearer-token-file",
+        value_name = "PATH",
+        help = "Read bearer token for agent HTTP API from this file"
+    )]
+    pub bearer_token_file: Option<PathBuf>,
+
+    #[arg(
+        long = "max-duration-seconds",
+        default_value_t = crate::agent::DEFAULT_AGENT_MAX_DURATION_SECONDS,
+        value_name = "SECONDS"
+    )]
+    pub max_duration_seconds: u64,
+
+    #[arg(
+        long = "max-targets",
+        default_value_t = crate::agent::DEFAULT_AGENT_MAX_TARGETS,
+        value_name = "N"
+    )]
+    pub max_targets: usize,
+
+    #[arg(
+        long = "max-concurrent-recordings",
+        default_value_t = crate::agent::DEFAULT_AGENT_MAX_CONCURRENT_RECORDINGS,
+        value_name = "N"
+    )]
+    pub max_concurrent_recordings: usize,
 }
 
 impl Default for MonitorArgs {
@@ -677,6 +727,85 @@ pub struct InspectIrqsArgs {
     #[arg(long = "top", default_value_t = 30)]
     pub top: usize,
 }
+#[derive(Args, Debug, Clone)]
+pub struct ScenarioArgs {
+    #[command(subcommand)]
+    pub command: ScenarioCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ScenarioCommand {
+    Create(ScenarioCreateArgs),
+    Run(ScenarioRunArgs),
+    Compare(ScenarioCompareArgs),
+    Path(ScenarioPathArgs),
+    List,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ScenarioCreateArgs {
+    pub name: String,
+
+    #[arg(long = "force")]
+    pub force: bool,
+
+    #[arg(long = "watch-process", value_name = "COMM")]
+    pub watch_process: Option<String>,
+
+    #[arg(long = "duration", default_value_t = 180)]
+    pub duration: u64,
+
+    #[arg(long = "preset", default_value = "diagnosis")]
+    pub preset: String,
+
+    #[arg(long = "mangohud-log", value_name = "PATH")]
+    pub mangohud_log: Option<PathBuf>,
+
+    #[arg(long = "notes")]
+    pub notes: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ScenarioRunArgs {
+    pub name: String,
+
+    #[arg(long = "role", value_name = "baseline|current")]
+    pub role: String,
+
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+
+    #[arg(long = "out-dir", value_name = "PATH")]
+    pub out_dir: Option<PathBuf>,
+
+    #[arg(long = "mangohud-log", value_name = "PATH")]
+    pub mangohud_log_override: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ScenarioCompareArgs {
+    pub name: String,
+
+    #[arg(long = "baseline", value_name = "RUN_DIR")]
+    pub baseline: Option<PathBuf>,
+
+    #[arg(long = "current", value_name = "RUN_DIR")]
+    pub current: Option<PathBuf>,
+
+    #[arg(long, default_value_t = 10)]
+    pub top: usize,
+
+    #[arg(long = "json-summary")]
+    pub json_summary: bool,
+
+    #[arg(long = "validate")]
+    pub validate: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ScenarioPathArgs {
+    pub name: String,
+}
 
 #[derive(Debug)]
 pub enum AppCommand {
@@ -759,6 +888,37 @@ pub enum AppCommand {
         tail: usize,
         json: bool,
     },
+    Probes {
+        json: bool,
+    },
+    ScenarioCreate {
+        name: String,
+        force: bool,
+        watch_process: Option<String>,
+        duration: u64,
+        preset: String,
+        mangohud_log: Option<PathBuf>,
+        notes: Option<String>,
+    },
+    ScenarioRun {
+        name: String,
+        role: String,
+        dry_run: bool,
+        out_dir: Option<PathBuf>,
+        mangohud_log_override: Option<PathBuf>,
+    },
+    ScenarioCompare {
+        name: String,
+        baseline: Option<PathBuf>,
+        current: Option<PathBuf>,
+        top: usize,
+        json_summary: bool,
+        validate: bool,
+    },
+    ScenarioPath {
+        name: String,
+    },
+    ScenarioList,
     Advisor {
         run: Option<PathBuf>,
         profiles: Option<PathBuf>,
@@ -782,6 +942,12 @@ pub enum AppCommand {
     Agent {
         bind: std::net::SocketAddr,
         runs_dir: Option<std::path::PathBuf>,
+        allow_unsafe_bind: bool,
+        bearer_token_env: String,
+        bearer_token_file: Option<std::path::PathBuf>,
+        max_duration_seconds: u64,
+        max_targets: usize,
+        max_concurrent_recordings: usize,
     },
     Completions {
         shell: clap_complete::Shell,
@@ -1139,6 +1305,19 @@ where
             None,
         )?))),
         Some(Command::Agent(args)) => {
+            if args.max_duration_seconds == 0 {
+                anyhow::bail!("--max-duration-seconds must be greater than zero");
+            }
+            if args.max_targets == 0 {
+                anyhow::bail!("--max-targets must be greater than zero");
+            }
+            if args.max_concurrent_recordings == 0 {
+                anyhow::bail!("--max-concurrent-recordings must be greater than zero");
+            }
+            if args.max_concurrent_recordings > 1 {
+                anyhow::bail!("agent currently supports at most 1 concurrent recording");
+            }
+
             let bind = if let Some(port) = args.port {
                 std::net::SocketAddr::from(([127, 0, 0, 1], port))
             } else {
@@ -1147,12 +1326,76 @@ where
             Ok(AppCommand::Agent {
                 bind,
                 runs_dir: args.runs_dir,
+                allow_unsafe_bind: args.allow_unsafe_bind,
+                bearer_token_env: args.bearer_token_env,
+                bearer_token_file: args.bearer_token_file,
+                max_duration_seconds: args.max_duration_seconds,
+                max_targets: args.max_targets,
+                max_concurrent_recordings: args.max_concurrent_recordings,
             })
         }
         Some(Command::Completions(args)) => Ok(AppCommand::Completions { shell: args.shell }),
         Some(Command::Man(args)) => Ok(AppCommand::Man {
             output: args.output,
         }),
+        Some(Command::Probes(args)) => Ok(AppCommand::Probes { json: args.json }),
+        Some(Command::Scenario(args)) => match args.command {
+            ScenarioCommand::Create(args) => {
+                if args.name.trim().is_empty() {
+                    anyhow::bail!("scenario name must not be empty");
+                }
+                if args.duration == 0 {
+                    anyhow::bail!("scenario duration must be greater than zero");
+                }
+                Ok(AppCommand::ScenarioCreate {
+                    name: args.name,
+                    force: args.force,
+                    watch_process: args.watch_process,
+                    duration: args.duration,
+                    preset: args.preset,
+                    mangohud_log: args.mangohud_log,
+                    notes: args.notes,
+                })
+            }
+            ScenarioCommand::Run(args) => {
+                if args.name.trim().is_empty() {
+                    anyhow::bail!("scenario name must not be empty");
+                }
+                if !matches!(args.role.as_str(), "baseline" | "current") {
+                    anyhow::bail!("--role must be baseline or current");
+                }
+                Ok(AppCommand::ScenarioRun {
+                    name: args.name,
+                    role: args.role,
+                    dry_run: args.dry_run,
+                    out_dir: args.out_dir,
+                    mangohud_log_override: args.mangohud_log_override,
+                })
+            }
+            ScenarioCommand::Compare(args) => {
+                if args.name.trim().is_empty() {
+                    anyhow::bail!("scenario name must not be empty");
+                }
+                if args.top == 0 {
+                    anyhow::bail!("--top must be greater than zero");
+                }
+                Ok(AppCommand::ScenarioCompare {
+                    name: args.name,
+                    baseline: args.baseline,
+                    current: args.current,
+                    top: args.top,
+                    json_summary: args.json_summary,
+                    validate: args.validate,
+                })
+            }
+            ScenarioCommand::Path(args) => {
+                if args.name.trim().is_empty() {
+                    anyhow::bail!("scenario name must not be empty");
+                }
+                Ok(AppCommand::ScenarioPath { name: args.name })
+            }
+            ScenarioCommand::List => Ok(AppCommand::ScenarioList),
+        },
     }
 }
 
@@ -2359,6 +2602,28 @@ mod tests {
     }
 
     #[test]
+    fn probes_command_parses() {
+        let command = parse_app_command_from(["stutter", "probes"]).unwrap();
+
+        let AppCommand::Probes { json } = command else {
+            panic!("expected probes command");
+        };
+
+        assert!(!json);
+    }
+
+    #[test]
+    fn probes_json_parses() {
+        let command = parse_app_command_from(["stutter", "probes", "--json"]).unwrap();
+
+        let AppCommand::Probes { json } = command else {
+            panic!("expected probes command");
+        };
+
+        assert!(json);
+    }
+
+    #[test]
     fn parses_audit_command() {
         let command = parse_app_command_from([
             "stutter",
@@ -2873,7 +3138,176 @@ mod tests {
             ..Default::default()
         };
         let err = config_from_monitor_args(args, false, None).unwrap_err();
-
         assert!(err.to_string().contains("stdout"));
+    }
+
+    #[test]
+    fn agent_accepts_allow_unsafe_bind() {
+        let command = parse_app_command_from(["stutter", "agent", "--allow-unsafe-bind"]).unwrap();
+        let AppCommand::Agent {
+            allow_unsafe_bind, ..
+        } = command
+        else {
+            panic!("expected agent command");
+        };
+        assert!(allow_unsafe_bind);
+    }
+
+    #[test]
+    fn agent_accepts_bearer_token_file() {
+        let command =
+            parse_app_command_from(["stutter", "agent", "--bearer-token-file", "/tmp/token"])
+                .unwrap();
+        let AppCommand::Agent {
+            bearer_token_file, ..
+        } = command
+        else {
+            panic!("expected agent command");
+        };
+        assert_eq!(bearer_token_file, Some(PathBuf::from("/tmp/token")));
+    }
+
+    #[test]
+    fn agent_accepts_bearer_token_env() {
+        let command =
+            parse_app_command_from(["stutter", "agent", "--bearer-token-env", "MY_TOKEN"]).unwrap();
+        let AppCommand::Agent {
+            bearer_token_env, ..
+        } = command
+        else {
+            panic!("expected agent command");
+        };
+        assert_eq!(bearer_token_env, "MY_TOKEN");
+    }
+
+    #[test]
+    fn agent_rejects_zero_limits() {
+        assert!(
+            parse_app_command_from(["stutter", "agent", "--max-duration-seconds", "0"]).is_err()
+        );
+        assert!(parse_app_command_from(["stutter", "agent", "--max-targets", "0"]).is_err());
+        assert!(
+            parse_app_command_from(["stutter", "agent", "--max-concurrent-recordings", "0"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn agent_rejects_max_concurrent_recordings_above_one() {
+        let err = parse_app_command_from(["stutter", "agent", "--max-concurrent-recordings", "2"])
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("agent currently supports at most 1 concurrent recording")
+        );
+    }
+
+    #[test]
+    fn scenario_create_parses() {
+        let command = parse_app_command_from([
+            "stutter",
+            "scenario",
+            "create",
+            "kcd-route",
+            "--duration",
+            "60",
+            "--watch-process",
+            "KingdomCome.exe",
+        ])
+        .unwrap();
+
+        let AppCommand::ScenarioCreate {
+            name,
+            duration,
+            watch_process,
+            ..
+        } = command
+        else {
+            panic!("expected ScenarioCreate command");
+        };
+
+        assert_eq!(name, "kcd-route");
+        assert_eq!(duration, 60);
+        assert_eq!(watch_process, Some("KingdomCome.exe".to_owned()));
+    }
+
+    #[test]
+    fn scenario_create_rejects_zero_duration() {
+        assert!(
+            parse_app_command_from(["stutter", "scenario", "create", "test", "--duration", "0"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn scenario_run_parses_baseline() {
+        let command = parse_app_command_from([
+            "stutter",
+            "scenario",
+            "run",
+            "kcd-route",
+            "--role",
+            "baseline",
+        ])
+        .unwrap();
+        let AppCommand::ScenarioRun { name, role, .. } = command else {
+            panic!("expected ScenarioRun command");
+        };
+        assert_eq!(name, "kcd-route");
+        assert_eq!(role, "baseline");
+    }
+
+    #[test]
+    fn scenario_run_parses_current() {
+        let command = parse_app_command_from([
+            "stutter",
+            "scenario",
+            "run",
+            "kcd-route",
+            "--role",
+            "current",
+        ])
+        .unwrap();
+        let AppCommand::ScenarioRun { role, .. } = command else {
+            panic!("expected ScenarioRun command");
+        };
+        assert_eq!(role, "current");
+    }
+
+    #[test]
+    fn scenario_run_rejects_bad_role() {
+        assert!(
+            parse_app_command_from(["stutter", "scenario", "run", "test", "--role", "other"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn scenario_compare_parses() {
+        let command =
+            parse_app_command_from(["stutter", "scenario", "compare", "kcd-route", "--top", "5"])
+                .unwrap();
+        let AppCommand::ScenarioCompare { name, top, .. } = command else {
+            panic!("expected ScenarioCompare command");
+        };
+        assert_eq!(name, "kcd-route");
+        assert_eq!(top, 5);
+    }
+
+    #[test]
+    fn scenario_compare_rejects_top_zero() {
+        assert!(
+            parse_app_command_from(["stutter", "scenario", "compare", "test", "--top", "0"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn scenario_path_parses() {
+        let command = parse_app_command_from(["stutter", "scenario", "path", "kcd-route"]).unwrap();
+        let AppCommand::ScenarioPath { name } = command else {
+            panic!("expected ScenarioPath command");
+        };
+        assert_eq!(name, "kcd-route");
     }
 }

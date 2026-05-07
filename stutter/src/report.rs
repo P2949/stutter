@@ -14,8 +14,8 @@ use crate::{
     metrics::format_latency,
     process_tree::TaskClass,
     recorder::{
-        FrameEvent, GpuSample, RecordedSpike, SESSION_SCHEMA_VERSION, SessionFile, SessionTask,
-        SpikeEvent,
+        FrameEvent, GpuSample, IntervalRecord, RecordedSpike, SESSION_SCHEMA_VERSION, SessionFile,
+        SessionTask, SpikeEvent,
     },
     session_io::{self, ArtifactLoadOptions},
     summary::{self, RunDiffSummary, TaskDeltaSummary, format_latency_signed},
@@ -166,8 +166,31 @@ pub struct ReportAnalysisJson {
     pub session: SessionFile,
     pub cluster_analysis: SpikeClusterAnalysis,
     pub frame_diagnoses: Vec<FrameDiagnosis>,
+    pub pressure_timeline: PressureTimelineSummary,
     pub artifacts_summary: ArtifactsSummary,
     pub data_quality: DataQualitySummary,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct PressureTimelineSummary {
+    pub sample_count: usize,
+    pub max_cpu_some: f64,
+    pub max_mem_some: Option<f64>,
+    pub max_mem_full: Option<f64>,
+    pub max_io_some: Option<f64>,
+    pub max_io_full: Option<f64>,
+    pub windows: Vec<PressureWindow>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PressureWindow {
+    pub elapsed_ms: u64,
+    pub cpu_some: f64,
+    pub mem_some: Option<f64>,
+    pub mem_full: Option<f64>,
+    pub io_some: Option<f64>,
+    pub io_full: Option<f64>,
+    pub near_spike: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -354,12 +377,18 @@ fn build_report_analysis_with_artifacts(
 
     let data_quality = data_quality_summary(&session, &artifacts.validation);
     let artifacts_summary = artifacts_summary_from_session(&session);
+    let pressure_timeline = build_pressure_timeline(
+        &artifacts.intervals,
+        &cluster_analysis.clusters,
+        cluster_window_ms,
+    );
 
     Ok(ReportBuildResult {
         analysis: ReportAnalysisJson {
             session,
             cluster_analysis,
             frame_diagnoses,
+            pressure_timeline,
             artifacts_summary,
             data_quality,
         },
@@ -1367,6 +1396,16 @@ pub(crate) fn render_report(
 
     pushln(&mut output, "");
 
+    let pressure_timeline = build_pressure_timeline(
+        &artifacts.intervals,
+        &cluster_analysis.clusters,
+        cluster_window_ms,
+    );
+    if pressure_timeline_has_pressure(&pressure_timeline) {
+        output.push_str(&render_pressure_timeline_summary(&pressure_timeline));
+        pushln(&mut output, "");
+    }
+
     if session.core.spike_events_truncated {
         pushln(&mut output, "spike event warning");
         pushln(&mut output, "-------------------");
@@ -1657,6 +1696,52 @@ fn pushln(output: &mut String, line: impl AsRef<str>) {
     output.push('\n');
 }
 
+fn pressure_timeline_has_pressure(summary: &PressureTimelineSummary) -> bool {
+    summary.sample_count > 0
+        && (summary.max_cpu_some > 0.0
+            || summary.max_mem_some.unwrap_or(0.0) > 0.0
+            || summary.max_mem_full.unwrap_or(0.0) > 0.0
+            || summary.max_io_some.unwrap_or(0.0) > 0.0
+            || summary.max_io_full.unwrap_or(0.0) > 0.0)
+}
+
+fn render_pressure_timeline_summary(summary: &PressureTimelineSummary) -> String {
+    let mut output = String::new();
+    let windows_near_spikes = summary
+        .windows
+        .iter()
+        .filter(|window| window.near_spike)
+        .count();
+
+    pushln(&mut output, "pressure timeline");
+    pushln(&mut output, "-----------------");
+    pushln(
+        &mut output,
+        format!(
+            "samples={} windows_near_spikes={} max_cpu_some={:.2}",
+            summary.sample_count, windows_near_spikes, summary.max_cpu_some
+        ),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "max_mem_some={} max_mem_full={} max_io_some={} max_io_full={}",
+            format_pressure_option(summary.max_mem_some),
+            format_pressure_option(summary.max_mem_full),
+            format_pressure_option(summary.max_io_some),
+            format_pressure_option(summary.max_io_full),
+        ),
+    );
+
+    output
+}
+
+fn format_pressure_option(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{value:.2}"))
+        .unwrap_or_else(|| "-".to_owned())
+}
+
 fn block_io_correlation_basis(session: &SessionFile) -> &str {
     if session.core.block_io_correlation_basis.is_empty() {
         "dev+sector"
@@ -1815,6 +1900,69 @@ pub(crate) fn data_quality_summary(
         cpu_perf_read_errors: session.core.cpu_perf_read_errors,
         cpu_perf_skipped_tasks: session.core.cpu_perf_skipped_tasks,
     }
+}
+
+pub(crate) fn build_pressure_timeline(
+    intervals: &[IntervalRecord],
+    clusters: &[SpikeCluster],
+    cluster_window_ms: u64,
+) -> PressureTimelineSummary {
+    if intervals.is_empty() {
+        return PressureTimelineSummary::default();
+    }
+
+    let mut windows = intervals
+        .iter()
+        .map(|interval| PressureWindow {
+            elapsed_ms: interval.elapsed_ms,
+            cpu_some: interval.cpu_psi_some,
+            mem_some: Some(interval.mem_psi_some),
+            mem_full: Some(interval.mem_psi_full),
+            io_some: Some(interval.io_psi_some),
+            io_full: Some(interval.io_psi_full),
+            near_spike: pressure_window_near_spike(
+                interval.elapsed_ms,
+                clusters,
+                cluster_window_ms,
+            ),
+        })
+        .collect::<Vec<_>>();
+    windows.sort_by_key(|window| window.elapsed_ms);
+
+    PressureTimelineSummary {
+        sample_count: windows.len(),
+        max_cpu_some: max_pressure_value(intervals.iter().map(|interval| interval.cpu_psi_some)),
+        max_mem_some: Some(max_pressure_value(
+            intervals.iter().map(|interval| interval.mem_psi_some),
+        )),
+        max_mem_full: Some(max_pressure_value(
+            intervals.iter().map(|interval| interval.mem_psi_full),
+        )),
+        max_io_some: Some(max_pressure_value(
+            intervals.iter().map(|interval| interval.io_psi_some),
+        )),
+        max_io_full: Some(max_pressure_value(
+            intervals.iter().map(|interval| interval.io_psi_full),
+        )),
+        windows,
+    }
+}
+
+fn pressure_window_near_spike(
+    elapsed_ms: u64,
+    clusters: &[SpikeCluster],
+    cluster_window_ms: u64,
+) -> bool {
+    clusters.iter().any(|cluster| {
+        cluster_elapsed_range(cluster).is_some_and(|(min_ms, max_ms)| {
+            elapsed_ms >= min_ms.saturating_sub(cluster_window_ms)
+                && elapsed_ms <= max_ms.saturating_add(cluster_window_ms)
+        })
+    })
+}
+
+fn max_pressure_value(values: impl Iterator<Item = f64>) -> f64 {
+    values.fold(0.0_f64, f64::max)
 }
 
 fn downgrade_quality(current: DataQualityLevel, candidate: DataQualityLevel) -> DataQualityLevel {
@@ -3090,6 +3238,48 @@ mod tests {
         }
     }
 
+    fn pressure_interval(
+        elapsed_ms: u64,
+        cpu_some: f64,
+        mem_some: f64,
+        mem_full: f64,
+        io_some: f64,
+        io_full: f64,
+    ) -> IntervalRecord {
+        IntervalRecord {
+            elapsed_ms,
+            task: 42,
+            active: true,
+            class: TaskClass::Unknown,
+            comm: "worker".to_owned(),
+            process_pid: Some(42),
+            process_comm: "worker".into(),
+            cpu_psi_some: cpu_some,
+            mem_psi_some: mem_some,
+            mem_psi_full: mem_full,
+            io_psi_some: io_some,
+            io_psi_full: io_full,
+            percentile_scope: "exact".to_owned(),
+            ..Default::default()
+        }
+    }
+
+    fn pressure_cluster() -> SpikeCluster {
+        cluster_from_points(
+            vec![
+                SpikePoint {
+                    elapsed_ms: Some(100),
+                    ..spike_point_for_report_test(1, TaskClass::Unknown, "worker-a", 2_000_000)
+                },
+                SpikePoint {
+                    elapsed_ms: Some(110),
+                    ..spike_point_for_report_test(2, TaskClass::Unknown, "worker-b", 2_000_000)
+                },
+            ],
+            2,
+        )
+    }
+
     #[test]
     fn data_quality_is_high_for_clean_minimal_session() {
         let session = minimal_session_for_report_test();
@@ -3213,6 +3403,135 @@ mod tests {
         assert!(output.contains("level: High"));
     }
 
+    #[test]
+    fn pressure_timeline_empty_without_intervals() {
+        let summary = build_pressure_timeline(&[], &[pressure_cluster()], 5);
+
+        assert_eq!(summary.sample_count, 0);
+        assert_eq!(summary.max_cpu_some, 0.0);
+        assert_eq!(summary.max_mem_some, None);
+        assert!(summary.windows.is_empty());
+    }
+
+    #[test]
+    fn pressure_timeline_marks_near_spike() {
+        let intervals = vec![
+            pressure_interval(96, 10.0, 0.0, 0.0, 0.0, 0.0),
+            pressure_interval(120, 20.0, 0.0, 0.0, 0.0, 0.0),
+        ];
+
+        let summary = build_pressure_timeline(&intervals, &[pressure_cluster()], 5);
+
+        assert!(summary.windows[0].near_spike);
+        assert!(!summary.windows[1].near_spike);
+    }
+
+    #[test]
+    fn pressure_timeline_sorts_windows() {
+        let intervals = vec![
+            pressure_interval(300, 1.0, 0.0, 0.0, 0.0, 0.0),
+            pressure_interval(100, 2.0, 0.0, 0.0, 0.0, 0.0),
+        ];
+
+        let summary = build_pressure_timeline(&intervals, &[], 5);
+
+        assert_eq!(
+            summary
+                .windows
+                .iter()
+                .map(|window| window.elapsed_ms)
+                .collect::<Vec<_>>(),
+            vec![100, 300]
+        );
+    }
+
+    #[test]
+    fn pressure_timeline_max_cpu_some() {
+        let intervals = vec![
+            pressure_interval(100, 1.0, 0.0, 0.0, 0.0, 0.0),
+            pressure_interval(200, 42.0, 0.0, 0.0, 0.0, 0.0),
+            pressure_interval(300, 3.0, 0.0, 0.0, 0.0, 0.0),
+        ];
+
+        let summary = build_pressure_timeline(&intervals, &[], 5);
+
+        assert_eq!(summary.max_cpu_some, 42.0);
+    }
+
+    #[test]
+    fn pressure_timeline_includes_memory_io_fields() {
+        let intervals = vec![pressure_interval(100, 1.0, 2.0, 3.0, 4.0, 5.0)];
+
+        let summary = build_pressure_timeline(&intervals, &[], 5);
+        let window = &summary.windows[0];
+
+        assert_eq!(summary.max_mem_some, Some(2.0));
+        assert_eq!(summary.max_mem_full, Some(3.0));
+        assert_eq!(summary.max_io_some, Some(4.0));
+        assert_eq!(summary.max_io_full, Some(5.0));
+        assert_eq!(window.mem_some, Some(2.0));
+        assert_eq!(window.mem_full, Some(3.0));
+        assert_eq!(window.io_some, Some(4.0));
+        assert_eq!(window.io_full, Some(5.0));
+    }
+
+    #[test]
+    fn render_report_includes_pressure_timeline_when_pressure_present() {
+        let session = minimal_session_for_report_test();
+        let cluster_analysis = SpikeClusterAnalysis {
+            source: SpikeClusterSource::TopSpikesFallback,
+            source_count: 2,
+            clusters: vec![pressure_cluster()],
+        };
+        let artifacts = session_io::RunArtifacts {
+            intervals: vec![pressure_interval(100, 40.0, 2.0, 0.0, 0.0, 0.0)],
+            ..Default::default()
+        };
+
+        let output = render_report(
+            Path::new("session.json"),
+            &session,
+            &cluster_analysis,
+            &[],
+            &artifacts,
+            10,
+            5,
+            None,
+        );
+
+        assert!(output.contains("pressure timeline"));
+        assert!(output.contains("samples=1"));
+        assert!(output.contains("windows_near_spikes=1"));
+        assert!(output.contains("max_cpu_some=40.00"));
+    }
+
+    #[test]
+    fn analysis_json_contains_pressure_timeline() {
+        let session = minimal_session_for_report_test();
+        let validation = crate::session_io::RunValidationReport::default();
+        let analysis = ReportAnalysisJson {
+            session: session.clone(),
+            cluster_analysis: SpikeClusterAnalysis {
+                source: SpikeClusterSource::TopSpikesFallback,
+                source_count: 0,
+                clusters: vec![],
+            },
+            frame_diagnoses: vec![],
+            pressure_timeline: build_pressure_timeline(
+                &[pressure_interval(100, 10.0, 0.0, 0.0, 0.0, 0.0)],
+                &[],
+                5,
+            ),
+            artifacts_summary: artifacts_summary_from_session(&session),
+            data_quality: data_quality_summary(&session, &validation),
+        };
+
+        let value = serde_json::to_value(&analysis).unwrap();
+
+        assert!(value.get("pressure_timeline").is_some());
+        assert_eq!(value["pressure_timeline"]["sample_count"].as_u64(), Some(1));
+    }
+
     fn test_html_report_model() -> HtmlReportModel {
         let mut session = minimal_session_for_report_test();
         session.tasks.push(SessionTask {
@@ -3246,6 +3565,7 @@ mod tests {
                 clusters: vec![],
             },
             frame_diagnoses: vec![],
+            pressure_timeline: PressureTimelineSummary::default(),
             artifacts_summary: artifacts_summary_from_session(&session),
             data_quality: data_quality_summary(&session, &validation),
         };

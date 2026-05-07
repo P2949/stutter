@@ -377,7 +377,50 @@ RUST_LOG=info stutter bench \
   --role baseline
 ```
 
-Use `--role current` when recording a later comparison run against an existing baseline.
+## Scenario workflow
+
+Scenario files store route metadata and recording options. This reduces typing mistakes between baseline/current runs and makes benchmarks more comparable.
+
+1. Create a scenario:
+   ```bash
+   stutter scenario create kcd-route
+   ```
+2. Edit the generated TOML file:
+   ```bash
+   $EDITOR ~/.config/stutter/scenarios/kcd-route.toml
+   ```
+3. Run the baseline and current benchmarks:
+   ```bash
+   stutter scenario run kcd-route --role baseline
+   stutter scenario run kcd-route --role current
+   ```
+4. Compare the runs:
+   ```bash
+   stutter scenario compare kcd-route
+   ```
+
+Example TOML:
+
+```toml
+name = "kcd-route"
+watch_process = "KingdomCome.exe"
+duration = 180
+preset = "diagnosis"
+mangohud_log = "/path/to/MangoHud.csv"
+expected_classes = ["Game", "GameScope", "Compositor"]
+notes = "Ride from town gate to forest path"
+
+persistent = true
+summary_ms = 1000
+spike_us = 1000
+```
+
+Use `--dry-run` to inspect effective settings before recording:
+```bash
+stutter scenario run kcd-route --role baseline --dry-run
+```
+
+Scenario outputs go under `~/.local/state/stutter/scenarios/<name>/`. `scenario compare` uses the latest baseline and current runs by default, but you can override them with `--baseline` and `--current` flags.
 
 TUI notes:
 
@@ -631,6 +674,12 @@ The formal artifact contract is documented in `docs/ARTIFACT_SCHEMA.md`, with ve
 
 Note: the CSV exporter is intentionally compact and omits some newer fields. `interval.json` and the other JSON artifacts are full-fidelity raw outputs: they contain PSI samples, major/minor fault deltas, drop counters, and histogram/truncation details. Prefer `report --analysis-json` for stable programmatic analysis unless you specifically need raw streams. Recorded run directories are loaded through a shared `session_io` path; missing optional artifact files are gracefully tolerated for older recordings.
 
+## Probe admission policy
+
+New probes must answer a specific diagnostic question and include schema docs, fixture/replay tests, data-quality behavior, validation behavior, and cautious diagnosis/report integration before they are accepted. See `docs/PROBE_ADMISSION.md` for the full checklist.
+
+Use `stutter probes` or `stutter probes --json` to list implemented, view-only, and planned telemetry. The pressure timeline overlay in `report --analysis-json` is derived from existing interval PSI data; it does not add a new live probe.
+
 ## CLI flags (quick reference)
 
 - `--pid <PID>`: add a manual TID/PID to monitor (can repeat).
@@ -677,7 +726,7 @@ Note: when present, `cpu_frequency` tracepoint samples are emitted as system-wid
 
 If you need machine-readable schemas, open a recorded run under `~/.local/state/stutter/runs/<run-dir>/` and inspect the files; they are stable across releases but may add fields in minor versions.
 
-### Remote agent mode experimental
+### Remote agent mode (experimental)
 
 Run the collector as a privileged local agent:
 
@@ -691,9 +740,11 @@ Control it from a client:
 stutter monitor --remote http://127.0.0.1:9899 --pid 1234 --duration 10
 ```
 
-The first implementation exposes a local HTTP JSON API:
+The agent provides a local HTTP JSON API:
 
 * `GET /health`
+* `GET /version`
+* `GET /capabilities`
 * `POST /record/start`
 * `POST /record/stop`
 * `GET /record/status`
@@ -701,7 +752,20 @@ The first implementation exposes a local HTTP JSON API:
 * `GET /runs/<id>/session.json`
 * `GET /runs/<id>/artifact/<name>`
 
-The agent binds to localhost by default. Binding to a non-local address is not authenticated in the first version and should only be used on trusted networks.
+**Security & Hardening:**
+
+* **Loopback only:** The agent binds to loopback (`127.0.0.1`) by default.
+* **Unsafe bind:** Binding to a non-loopback address requires the `--allow-unsafe-bind` flag.
+* **Authentication:** Bearer token authentication can be enabled by setting the `STUTTER_AGENT_TOKEN` environment variable or using `--bearer-token-file`.
+* **Client Auth:** The local `stutter monitor --remote` client will automatically send the token if `STUTTER_AGENT_TOKEN` is set in its environment.
+* **Request Limits:** The agent enforces default limits on recording duration and target count, which can be configured via `--max-duration-seconds` and `--max-targets`.
+* **Artifact Whitelist:** Artifact downloads are restricted to a known allowlist of stutter-generated files.
+
+> [!WARNING]
+> Do not expose the stutter agent to untrusted networks. It is a privileged control plane that can remotely start eBPF profiling sessions.
+
+**Discovery:**
+Use `GET /version` to see schema compatibility and `GET /capabilities` to see configured limits and available routes.
 
 ## TID reuse detection (what we do)
 
