@@ -28,6 +28,7 @@ enum Command {
     InspectTree(InspectTreeArgs),
     Report(ReportArgs),
     Summary(SummaryArgs),
+    Validate(ValidateArgs),
     Restore(RestoreArgs),
     ApplyProfile(ApplyProfileArgs),
     Tune(TuneArgs),
@@ -461,6 +462,18 @@ struct SummaryArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+pub struct ValidateArgs {
+    #[arg(help = "Path to run directory or session.json")]
+    pub path: PathBuf,
+
+    #[arg(long)]
+    pub json: bool,
+
+    #[arg(long, help = "Treat warnings and medium-quality data as failures")]
+    pub strict: bool,
+}
+
+#[derive(Args, Debug, Clone)]
 struct RestoreArgs {
     #[arg(long = "dry-run")]
     dry_run: bool,
@@ -707,6 +720,11 @@ pub enum AppCommand {
         json: bool,
         top: usize,
         filter_class: Option<TaskClass>,
+    },
+    Validate {
+        path: PathBuf,
+        json: bool,
+        strict: bool,
     },
     Tune {
         tree_pid: u32,
@@ -963,6 +981,11 @@ where
                 filter_class,
             })
         }
+        Some(Command::Validate(args)) => Ok(AppCommand::Validate {
+            path: args.path,
+            json: args.json,
+            strict: args.strict,
+        }),
         Some(Command::Restore(args)) => Ok(AppCommand::Restore {
             dry_run: args.dry_run,
         }),
@@ -1615,6 +1638,52 @@ mod tests {
         assert!(json);
         assert_eq!(top, 3);
         assert_eq!(filter_class, Some(TaskClass::Game));
+    }
+
+    #[test]
+    fn validate_requires_path() {
+        assert!(parse_app_command_from(["stutter", "validate"]).is_err());
+    }
+
+    #[test]
+    fn validate_accepts_path() {
+        let command = parse_app_command_from(["stutter", "validate", "/tmp/run"]).unwrap();
+
+        let AppCommand::Validate { path, json, strict } = command else {
+            panic!("expected validate command");
+        };
+
+        assert_eq!(path, PathBuf::from("/tmp/run"));
+        assert!(!json);
+        assert!(!strict);
+    }
+
+    #[test]
+    fn validate_accepts_json() {
+        let command =
+            parse_app_command_from(["stutter", "validate", "--json", "/tmp/run"]).unwrap();
+
+        let AppCommand::Validate { path, json, strict } = command else {
+            panic!("expected validate command");
+        };
+
+        assert_eq!(path, PathBuf::from("/tmp/run"));
+        assert!(json);
+        assert!(!strict);
+    }
+
+    #[test]
+    fn validate_accepts_strict() {
+        let command =
+            parse_app_command_from(["stutter", "validate", "--strict", "/tmp/run"]).unwrap();
+
+        let AppCommand::Validate { path, json, strict } = command else {
+            panic!("expected validate command");
+        };
+
+        assert_eq!(path, PathBuf::from("/tmp/run"));
+        assert!(!json);
+        assert!(strict);
     }
 
     #[test]

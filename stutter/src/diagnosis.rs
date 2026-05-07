@@ -30,6 +30,11 @@ pub struct DiagnosisConfig {
     pub page_fault_delta_threshold: u64,
     pub low_ipc_threshold: f64,
     pub high_cache_mpki_threshold: f64,
+    pub min_primary_score: f32,
+    pub min_primary_confidence: Confidence,
+    pub min_primary_evidence_items: usize,
+    pub min_scheduler_latency_for_primary_ns: u64,
+    pub min_non_scheduler_score_for_primary: f32,
 }
 
 impl Default for DiagnosisConfig {
@@ -45,7 +50,119 @@ impl Default for DiagnosisConfig {
             page_fault_delta_threshold: 1,
             low_ipc_threshold: 0.75,
             high_cache_mpki_threshold: 30.0,
+            min_primary_score: 0.40,
+            min_primary_confidence: Confidence::Medium,
+            min_primary_evidence_items: 1,
+            min_scheduler_latency_for_primary_ns: SCHED_DELAY_SIGNIFICANT_NS,
+            min_non_scheduler_score_for_primary: 0.40,
         }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct DiagnosisThresholdDoc {
+    pub key: &'static str,
+    pub value: f64,
+    pub unit: &'static str,
+    pub description: &'static str,
+}
+
+impl DiagnosisConfig {
+    #[allow(dead_code)]
+    pub fn threshold_table(&self) -> Vec<DiagnosisThresholdDoc> {
+        vec![
+            DiagnosisThresholdDoc {
+                key: "irq_significant_ns",
+                value: self.irq_significant_ns as f64,
+                unit: "ns",
+                description: "Minimum IRQ handler duration considered meaningful overlap evidence.",
+            },
+            DiagnosisThresholdDoc {
+                key: "block_io_significant_ns",
+                value: self.block_io_significant_ns as f64,
+                unit: "ns",
+                description: "Minimum block I/O request duration considered meaningful overlap evidence.",
+            },
+            DiagnosisThresholdDoc {
+                key: "gpu_busy_bound_percent",
+                value: self.gpu_busy_bound_percent as f64,
+                unit: "%",
+                description: "GPU busy percentage considered bounded enough to create a GPU candidate.",
+            },
+            DiagnosisThresholdDoc {
+                key: "sched_delay_significant_ns",
+                value: self.sched_delay_significant_ns as f64,
+                unit: "ns",
+                description: "Minimum game or compositor scheduler delay considered candidate evidence.",
+            },
+            DiagnosisThresholdDoc {
+                key: "cpu_psi_some_significant",
+                value: self.cpu_psi_some_significant,
+                unit: "%",
+                description: "CPU PSI some percentage considered meaningful CPU pressure evidence.",
+            },
+            DiagnosisThresholdDoc {
+                key: "cpu_freq_drop_percent",
+                value: self.cpu_freq_drop_percent,
+                unit: "%",
+                description: "CPU frequency drop required before frequency data becomes supporting evidence.",
+            },
+            DiagnosisThresholdDoc {
+                key: "migration_window_ms",
+                value: self.migration_window_ms as f64,
+                unit: "ms",
+                description: "Elapsed-time window around a cluster for migration supporting evidence.",
+            },
+            DiagnosisThresholdDoc {
+                key: "page_fault_delta_threshold",
+                value: self.page_fault_delta_threshold as f64,
+                unit: "faults",
+                description: "Minimum page fault delta before fault data becomes supporting evidence.",
+            },
+            DiagnosisThresholdDoc {
+                key: "low_ipc_threshold",
+                value: self.low_ipc_threshold,
+                unit: "ipc",
+                description: "IPC level below which CPU perf data becomes supporting evidence.",
+            },
+            DiagnosisThresholdDoc {
+                key: "high_cache_mpki_threshold",
+                value: self.high_cache_mpki_threshold,
+                unit: "MPKI",
+                description: "Cache misses per thousand instructions above which CPU perf data becomes supporting evidence.",
+            },
+            DiagnosisThresholdDoc {
+                key: "min_primary_score",
+                value: self.min_primary_score as f64,
+                unit: "score",
+                description: "Minimum normalized candidate score required before a candidate can be primary.",
+            },
+            DiagnosisThresholdDoc {
+                key: "min_primary_confidence",
+                value: confidence_threshold_value(self.min_primary_confidence),
+                unit: "band",
+                description: "Minimum confidence band required before a candidate can be primary.",
+            },
+            DiagnosisThresholdDoc {
+                key: "min_primary_evidence_items",
+                value: self.min_primary_evidence_items as f64,
+                unit: "items",
+                description: "Minimum number of evidence items required before a candidate can be primary.",
+            },
+            DiagnosisThresholdDoc {
+                key: "min_scheduler_latency_for_primary_ns",
+                value: self.min_scheduler_latency_for_primary_ns as f64,
+                unit: "ns",
+                description: "Minimum scheduler latency required before a scheduler candidate can be primary.",
+            },
+            DiagnosisThresholdDoc {
+                key: "min_non_scheduler_score_for_primary",
+                value: self.min_non_scheduler_score_for_primary as f64,
+                unit: "score",
+                description: "Minimum normalized score required before a non-scheduler candidate can be primary.",
+            },
+        ]
     }
 }
 
@@ -105,6 +222,15 @@ impl Confidence {
     }
 }
 
+#[allow(dead_code)]
+fn confidence_threshold_value(confidence: Confidence) -> f64 {
+    match confidence {
+        Confidence::Low => 1.0,
+        Confidence::Medium => 2.0,
+        Confidence::High => 3.0,
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum EvidenceKind {
@@ -161,6 +287,8 @@ pub struct Diagnosis {
     pub confidence: Confidence,
     pub secondary_causes: Vec<StutterCause>,
     pub evidence: Vec<String>,
+    #[serde(default)]
+    pub missing_evidence: Vec<String>,
     pub primary: Option<DiagnosisCandidate>,
     pub candidates: Vec<DiagnosisCandidate>,
     pub summary: String,
@@ -279,35 +407,240 @@ fn scheduler_candidate_cause(candidates: &[DiagnosisCandidate]) -> Option<Stutte
         .map(|candidate| candidate.cause)
 }
 
-fn finalize_diagnosis(mut candidates: Vec<DiagnosisCandidate>) -> Diagnosis {
-    if candidates.is_empty() {
-        return Diagnosis {
-            cause: StutterCause::Unknown,
-            confidence: Confidence::Low,
-            secondary_causes: Vec::new(),
-            evidence: vec!["no strong correlation found".to_owned()],
-            primary: None,
-            candidates: Vec::new(),
-            summary: "no strong correlation found".to_owned(),
-        };
+#[derive(Default, Clone, Debug)]
+struct DiagnosisContextSummary {
+    saw_scheduler_delay: bool,
+    saw_significant_irq: bool,
+    saw_high_gpu: bool,
+    saw_significant_block_io: bool,
+    saw_high_cpu_psi: bool,
+}
+
+fn scheduler_delay_score(latency_ns: u64, config: DiagnosisConfig) -> f32 {
+    if latency_ns < config.sched_delay_significant_ns {
+        return 0.0;
     }
 
-    for candidate in &mut candidates {
+    let latency_ms = latency_ns as f32 / 1_000_000.0;
+    let score = if latency_ms < 4.0 {
+        0.40 + ((latency_ms - 2.0).max(0.0) / 2.0) * 0.15
+    } else if latency_ms < 8.0 {
+        0.55 + ((latency_ms - 4.0) / 4.0) * 0.20
+    } else if latency_ms < 16.0 {
+        0.75 + ((latency_ms - 8.0) / 8.0) * 0.25
+    } else {
+        1.0
+    };
+    score.clamp(0.40, 1.0)
+}
+
+fn is_scheduler_cause(cause: StutterCause) -> bool {
+    matches!(
+        cause,
+        StutterCause::GameThreadSchedulerDelay | StutterCause::CompositorSchedulerDelay
+    )
+}
+
+fn scheduler_latency_for_candidate(candidate: &DiagnosisCandidate) -> u64 {
+    candidate
+        .evidence
+        .iter()
+        .filter(|evidence| evidence.kind == EvidenceKind::SchedulerDelay)
+        .filter_map(|evidence| Some(evidence.end_ns?.saturating_sub(evidence.start_ns?)))
+        .max()
+        .unwrap_or(0)
+}
+
+fn primary_rejection_reasons(
+    candidate: &DiagnosisCandidate,
+    config: DiagnosisConfig,
+) -> Vec<String> {
+    let mut reasons = Vec::new();
+
+    if candidate.score < config.min_primary_score {
+        reasons.push(format!(
+            "candidate score below minimum primary score: {:.2} < {:.2}",
+            candidate.score, config.min_primary_score
+        ));
+    }
+
+    if candidate.confidence < config.min_primary_confidence {
+        reasons.push(format!(
+            "candidate confidence below minimum primary confidence: {:?} < {:?}",
+            candidate.confidence, config.min_primary_confidence
+        ));
+    }
+
+    if candidate.evidence.len() < config.min_primary_evidence_items {
+        reasons.push(format!(
+            "candidate has too few evidence items: {} < {}",
+            candidate.evidence.len(),
+            config.min_primary_evidence_items
+        ));
+    }
+
+    if is_scheduler_cause(candidate.cause) {
+        let scheduler_latency_ns = scheduler_latency_for_candidate(candidate);
+        if scheduler_latency_ns < config.min_scheduler_latency_for_primary_ns {
+            reasons.push(format!(
+                "scheduler delay below primary threshold: {}ns < {}ns",
+                scheduler_latency_ns, config.min_scheduler_latency_for_primary_ns
+            ));
+        }
+    } else if config.min_non_scheduler_score_for_primary > config.min_primary_score
+        && candidate.score < config.min_non_scheduler_score_for_primary
+    {
+        reasons.push(format!(
+            "non-scheduler candidate score below minimum primary score: {:.2} < {:.2}",
+            candidate.score, config.min_non_scheduler_score_for_primary
+        ));
+    }
+
+    reasons
+}
+
+fn candidate_is_sufficient_primary(
+    candidate: &DiagnosisCandidate,
+    config: DiagnosisConfig,
+) -> Result<(), String> {
+    let reasons = primary_rejection_reasons(candidate, config);
+    if let Some(reason) = reasons.into_iter().next() {
+        Err(reason)
+    } else {
+        Ok(())
+    }
+}
+
+fn push_unique_missing(missing: &mut Vec<String>, message: impl Into<String>) {
+    let message = message.into();
+    if !missing.iter().any(|existing| existing == &message) {
+        missing.push(message);
+    }
+}
+
+fn missing_evidence_for_context(
+    candidates: &[DiagnosisCandidate],
+    rejected_primary: Option<&DiagnosisCandidate>,
+    config: DiagnosisConfig,
+    context: &DiagnosisContextSummary,
+) -> Vec<String> {
+    let mut missing = Vec::new();
+
+    if candidates.is_empty() {
+        push_unique_missing(
+            &mut missing,
+            "no candidate reached the minimum evidence threshold",
+        );
+    }
+
+    if let Some(candidate) = rejected_primary {
+        for reason in primary_rejection_reasons(candidate, config) {
+            push_unique_missing(&mut missing, reason);
+        }
+    }
+
+    if !context.saw_scheduler_delay {
+        push_unique_missing(&mut missing, "scheduler delay below primary threshold");
+    }
+    if !context.saw_significant_irq {
+        push_unique_missing(
+            &mut missing,
+            "no IRQ event above significant-duration threshold",
+        );
+    }
+    if !context.saw_high_gpu {
+        push_unique_missing(&mut missing, "no GPU sample at or above busy threshold");
+    }
+    if !context.saw_significant_block_io {
+        push_unique_missing(
+            &mut missing,
+            "no block I/O event above significant-duration threshold",
+        );
+    }
+    if !context.saw_high_cpu_psi {
+        push_unique_missing(&mut missing, "no CPU PSI sample above pressure threshold");
+    }
+
+    missing
+}
+
+fn normalize_and_sort_candidates(candidates: &mut [DiagnosisCandidate]) {
+    for candidate in candidates {
         candidate.score = clamp01(candidate.score);
         candidate.confidence = confidence_from_score(candidate.score);
         for evidence in &mut candidate.evidence {
             evidence.strength = clamp01(evidence.strength);
         }
     }
+}
 
+fn sort_candidates(candidates: &mut [DiagnosisCandidate]) {
     candidates.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
             .unwrap_or(Ordering::Equal)
             .then_with(|| a.cause.priority().cmp(&b.cause.priority()))
     });
+}
+
+fn unknown_diagnosis_with_candidates(
+    candidates: Vec<DiagnosisCandidate>,
+    missing_evidence: Vec<String>,
+    summary: String,
+) -> Diagnosis {
+    let secondary_causes = candidates.iter().map(|c| c.cause).collect::<Vec<_>>();
+    let evidence = candidates
+        .iter()
+        .flat_map(|c| c.evidence.iter().map(|e| e.message.clone()))
+        .collect::<Vec<_>>();
+
+    Diagnosis {
+        cause: StutterCause::Unknown,
+        confidence: Confidence::Low,
+        secondary_causes,
+        evidence,
+        missing_evidence,
+        primary: None,
+        candidates,
+        summary,
+    }
+}
+
+fn finalize_diagnosis(
+    mut candidates: Vec<DiagnosisCandidate>,
+    config: DiagnosisConfig,
+    context: DiagnosisContextSummary,
+) -> Diagnosis {
+    if candidates.is_empty() {
+        let missing_evidence = missing_evidence_for_context(&[], None, config, &context);
+        return Diagnosis {
+            cause: StutterCause::Unknown,
+            confidence: Confidence::Low,
+            secondary_causes: Vec::new(),
+            evidence: vec!["no strong correlation found".to_owned()],
+            missing_evidence,
+            primary: None,
+            candidates: Vec::new(),
+            summary: "insufficient evidence: no candidate reached diagnosis thresholds".to_owned(),
+        };
+    }
+
+    normalize_and_sort_candidates(&mut candidates);
+    sort_candidates(&mut candidates);
 
     let primary = candidates[0].clone();
+    if candidate_is_sufficient_primary(&primary, config).is_err() {
+        let missing_evidence =
+            missing_evidence_for_context(&candidates, Some(&primary), config, &context);
+        return unknown_diagnosis_with_candidates(
+            candidates,
+            missing_evidence,
+            format!(
+                "insufficient evidence: best_candidate={:?} confidence={:?} score={:.2}",
+                primary.cause, primary.confidence, primary.score
+            ),
+        );
+    }
 
     let secondary_causes = candidates
         .iter()
@@ -320,6 +653,7 @@ fn finalize_diagnosis(mut candidates: Vec<DiagnosisCandidate>) -> Diagnosis {
         .flat_map(|c| c.evidence.iter().map(|e| e.message.clone()))
         .collect::<Vec<_>>();
 
+    let missing_evidence = missing_evidence_for_context(&candidates, None, config, &context);
     let summary = format!(
         "primary={:?} confidence={:?} score={:.2}",
         primary.cause, primary.confidence, primary.score
@@ -330,6 +664,7 @@ fn finalize_diagnosis(mut candidates: Vec<DiagnosisCandidate>) -> Diagnosis {
         confidence: primary.confidence,
         secondary_causes,
         evidence,
+        missing_evidence,
         primary: Some(primary),
         candidates,
         summary,
@@ -524,6 +859,7 @@ pub fn diagnose_cluster_with_config(
     };
 
     let mut candidates = Vec::new();
+    let mut context = DiagnosisContextSummary::default();
 
     // 1. Compositor scheduler delay
     // compositor/gamescope >2ms near frame spike => CompositorSchedulerDelay
@@ -534,7 +870,8 @@ pub fn diagnose_cluster_with_config(
         .max_by_key(|p| p.latency_ns);
 
     if let Some(p) = compositor_point {
-        let score = (p.latency_ns as f32 / 8_000_000.0).max(0.75);
+        context.saw_scheduler_delay = true;
+        let score = scheduler_delay_score(p.latency_ns, config);
         let message = format!(
             "compositor thread '{}' delayed by {}",
             p.comm,
@@ -566,7 +903,8 @@ pub fn diagnose_cluster_with_config(
         .max_by_key(|p| p.latency_ns);
 
     if let Some(p) = game_point {
-        let score = (p.latency_ns as f32 / 8_000_000.0).max(0.75);
+        context.saw_scheduler_delay = true;
+        let score = scheduler_delay_score(p.latency_ns, config);
         let message = format!(
             "game thread '{}' delayed by {}",
             p.comm,
@@ -596,6 +934,7 @@ pub fn diagnose_cluster_with_config(
         .max_by_key(|e| e.duration_ns);
 
     if let Some(irq) = max_irq {
+        context.saw_significant_irq = true;
         let mut score = irq.duration_ns as f32 / 2_000_000.0;
         if cluster.max_latency_ns > 0
             && (irq.duration_ns as f32 / cluster.max_latency_ns as f32) < 0.10
@@ -632,6 +971,7 @@ pub fn diagnose_cluster_with_config(
         })
         .max_by_key(|(_, busy)| *busy);
     if let Some((sample, busy_percent)) = high_gpu {
+        context.saw_high_gpu = true;
         let score = (busy_percent.saturating_sub(90)) as f32 / 10.0;
         let message = format!("GPU busy at {}%", busy_percent);
         push_candidate(
@@ -656,6 +996,7 @@ pub fn diagnose_cluster_with_config(
         .max_by_key(|e| e.duration_ns);
 
     if let Some(io) = max_io {
+        context.saw_significant_block_io = true;
         let score = (io.duration_ns as f32 / 8_000_000.0).max(0.40);
         let message = format!(
             "block I/O active (max duration {})",
@@ -686,6 +1027,7 @@ pub fn diagnose_cluster_with_config(
                 .unwrap_or(Ordering::Equal)
         });
     if let Some(r) = high_psi {
+        context.saw_high_cpu_psi = true;
         let score = (r.cpu_psi_some as f32 / 100.0).max(0.40);
         let message = format!("high CPU PSI detected ({:.1}%)", r.cpu_psi_some);
         push_candidate(
@@ -716,7 +1058,7 @@ pub fn diagnose_cluster_with_config(
         push_cpu_perf_evidence(&mut candidates, cause, &interval_records, cluster, config);
     }
 
-    finalize_diagnosis(candidates)
+    finalize_diagnosis(candidates, config, context)
 }
 
 fn push_runnable_depth_evidence(
@@ -1009,23 +1351,32 @@ fn format_optional_percent(value: Option<f64>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
     use crate::{process_tree::TaskClass, report::SpikePoint};
 
     fn spike_point(task: u32, class: TaskClass, comm: &str, latency_ns: u64) -> SpikePoint {
+        let switch_ns = 100_000_000 + u64::from(task);
         SpikePoint {
             task,
             class,
             process_pid: Some(task),
             comm: comm.to_owned(),
             latency_ns,
+            wakeup_ns: switch_ns.saturating_sub(latency_ns),
+            switch_ns,
             elapsed_ms: Some(100),
             ..Default::default()
         }
     }
 
     fn spike_cluster(points: Vec<SpikePoint>) -> SpikeCluster {
-        let distinct_tasks = points.len();
+        let distinct_tasks = points
+            .iter()
+            .map(|point| point.task)
+            .collect::<BTreeSet<_>>()
+            .len();
         let min_switch_ns = points.iter().map(|p| p.switch_ns).min().unwrap_or(0);
         let max_switch_ns = points.iter().map(|p| p.switch_ns).max().unwrap_or(0);
         let max_latency_ns = points.iter().map(|p| p.latency_ns).max().unwrap_or(0);
@@ -1040,12 +1391,84 @@ mod tests {
         }
     }
 
+    fn irq_event(duration_ns: u64) -> IrqEventRecord {
+        IrqEventRecord {
+            elapsed_ms: Some(100),
+            irq: 137,
+            cpu: 0,
+            enter_ns: 100_000_000,
+            exit_ns: 100_000_000 + duration_ns,
+            duration_ns,
+        }
+    }
+
+    fn block_io_event(duration_ns: u64) -> BlockIoRecord {
+        BlockIoRecord {
+            elapsed_ms: 100,
+            tid: 100,
+            dev: 1,
+            nr_sector: 8,
+            sector: 2048,
+            duration_ns,
+            timestamp_ns: 100_500_000,
+            rwbs: "R".to_owned(),
+            ..Default::default()
+        }
+    }
+
+    fn cpu_psi_interval(cpu_psi_some: f64) -> IntervalRecord {
+        IntervalRecord {
+            elapsed_ms: 100,
+            task: 100,
+            active: true,
+            class: TaskClass::Unknown,
+            comm: "worker-a".to_owned(),
+            process_pid: Some(100),
+            process_comm: "worker-a".into(),
+            samples: 1,
+            stored_samples: 1,
+            cpu_psi_some,
+            ..Default::default()
+        }
+    }
+
     fn candidate(diagnosis: &Diagnosis, cause: StutterCause) -> &DiagnosisCandidate {
         diagnosis
             .candidates
             .iter()
             .find(|candidate| candidate.cause == cause)
             .unwrap()
+    }
+
+    fn candidate_index(diagnosis: &Diagnosis, cause: StutterCause) -> Option<usize> {
+        diagnosis
+            .candidates
+            .iter()
+            .position(|candidate| candidate.cause == cause)
+    }
+
+    fn assert_no_candidate(diagnosis: &Diagnosis, cause: StutterCause) {
+        assert!(
+            !diagnosis
+                .candidates
+                .iter()
+                .any(|candidate| candidate.cause == cause),
+            "unexpected candidate {:?}: {:#?}",
+            cause,
+            diagnosis
+        );
+    }
+
+    fn assert_missing_contains(diagnosis: &Diagnosis, needle: &str) {
+        assert!(
+            diagnosis
+                .missing_evidence
+                .iter()
+                .any(|message| message.contains(needle)),
+            "missing_evidence did not contain {:?}: {:?}",
+            needle,
+            diagnosis.missing_evidence
+        );
     }
 
     #[test]
@@ -1057,6 +1480,353 @@ mod tests {
         assert!(Confidence::High.caution_text().contains("inference"));
         assert!(Confidence::Medium.caution_text().contains("mixed"));
         assert!(Confidence::Low.caution_text().contains("weak"));
+    }
+
+    #[test]
+    fn diagnosis_threshold_table_covers_all_config_fields() {
+        let table = DiagnosisConfig::default().threshold_table();
+        let keys = table.iter().map(|entry| entry.key).collect::<BTreeSet<_>>();
+        let expected = [
+            "irq_significant_ns",
+            "block_io_significant_ns",
+            "gpu_busy_bound_percent",
+            "sched_delay_significant_ns",
+            "cpu_psi_some_significant",
+            "cpu_freq_drop_percent",
+            "migration_window_ms",
+            "page_fault_delta_threshold",
+            "low_ipc_threshold",
+            "high_cache_mpki_threshold",
+            "min_primary_score",
+            "min_primary_confidence",
+            "min_primary_evidence_items",
+            "min_scheduler_latency_for_primary_ns",
+            "min_non_scheduler_score_for_primary",
+        ];
+
+        assert_eq!(
+            table.len(),
+            keys.len(),
+            "duplicate threshold keys: {table:?}"
+        );
+        for key in expected {
+            assert!(keys.contains(key), "missing threshold key {key}");
+        }
+        assert_eq!(table.len(), expected.len());
+        for entry in table {
+            assert!(entry.value > 0.0, "non-positive threshold value: {entry:?}");
+            assert!(
+                !entry.description.trim().is_empty(),
+                "missing threshold description: {entry:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn weak_scheduler_delay_is_not_forced_high_confidence() {
+        let cluster = spike_cluster(vec![spike_point(
+            456,
+            TaskClass::Game,
+            "RenderThread",
+            2_100_000,
+        )]);
+
+        let d = diagnose_cluster(&cluster, &RunArtifacts::default(), 0);
+
+        assert_eq!(d.cause, StutterCause::GameThreadSchedulerDelay);
+        assert_ne!(d.confidence, Confidence::High);
+        assert_eq!(
+            candidate(&d, StutterCause::GameThreadSchedulerDelay).confidence,
+            Confidence::Medium
+        );
+    }
+
+    #[test]
+    fn strict_primary_confidence_leaves_weak_scheduler_unknown() {
+        let cluster = spike_cluster(vec![spike_point(
+            456,
+            TaskClass::Game,
+            "RenderThread",
+            2_100_000,
+        )]);
+        let config = DiagnosisConfig {
+            min_primary_confidence: Confidence::High,
+            ..DiagnosisConfig::default()
+        };
+
+        let d = diagnose_cluster_with_config(&cluster, &RunArtifacts::default(), 0, config);
+
+        assert_eq!(d.cause, StutterCause::Unknown);
+        assert!(d.primary.is_none());
+        assert!(candidate_index(&d, StutterCause::GameThreadSchedulerDelay).is_some());
+        assert_missing_contains(&d, "confidence below");
+    }
+
+    #[test]
+    fn strong_scheduler_delay_still_reaches_high_confidence() {
+        let cluster = spike_cluster(vec![spike_point(
+            456,
+            TaskClass::Game,
+            "RenderThread",
+            8_000_000,
+        )]);
+
+        let d = diagnose_cluster(&cluster, &RunArtifacts::default(), 0);
+
+        assert_eq!(d.cause, StutterCause::GameThreadSchedulerDelay);
+        assert_eq!(d.confidence, Confidence::High);
+    }
+
+    #[test]
+    fn insufficient_evidence_returns_unknown_but_keeps_candidates() {
+        let cluster = spike_cluster(vec![spike_point(
+            123,
+            TaskClass::Unknown,
+            "worker",
+            3_000_000,
+        )]);
+        let artifacts = RunArtifacts {
+            irq_events: vec![irq_event(300_000)],
+            ..Default::default()
+        };
+
+        let d = diagnose_cluster(&cluster, &artifacts, 0);
+
+        assert_eq!(d.cause, StutterCause::Unknown);
+        assert!(d.primary.is_none());
+        assert!(candidate_index(&d, StutterCause::IrqDelayCandidate).is_some());
+        assert!(
+            d.secondary_causes
+                .contains(&StutterCause::IrqDelayCandidate)
+        );
+        assert!(!d.evidence.is_empty());
+        assert!(d.summary.starts_with("insufficient evidence"));
+        assert_missing_contains(&d, "score below");
+        assert_missing_contains(&d, "confidence below");
+    }
+
+    #[test]
+    fn missing_evidence_is_serialized() {
+        let cluster = spike_cluster(vec![spike_point(
+            123,
+            TaskClass::Unknown,
+            "worker",
+            3_000_000,
+        )]);
+        let artifacts = RunArtifacts {
+            irq_events: vec![irq_event(300_000)],
+            ..Default::default()
+        };
+        let d = diagnose_cluster(&cluster, &artifacts, 0);
+
+        let json = serde_json::to_value(&d).unwrap();
+        let missing = json
+            .get("missing_evidence")
+            .and_then(|value| value.as_array())
+            .expect("missing_evidence should serialize as an array");
+
+        assert!(
+            missing
+                .iter()
+                .filter_map(|value| value.as_str())
+                .any(|message| message.contains("score below")),
+            "serialized missing_evidence={missing:?}"
+        );
+    }
+
+    #[test]
+    fn weak_irq_overlap_does_not_create_irq_candidate() {
+        let config = DiagnosisConfig::default();
+        let cluster = spike_cluster(vec![spike_point(
+            123,
+            TaskClass::Unknown,
+            "worker",
+            3_000_000,
+        )]);
+        let artifacts = RunArtifacts {
+            irq_events: vec![irq_event(config.irq_significant_ns - 1)],
+            ..Default::default()
+        };
+
+        let d = diagnose_cluster_with_config(&cluster, &artifacts, 0, config);
+
+        assert_no_candidate(&d, StutterCause::IrqDelayCandidate);
+        assert_eq!(d.cause, StutterCause::Unknown);
+        assert!(d.primary.is_none());
+        assert_missing_contains(&d, "no IRQ event");
+    }
+
+    #[test]
+    fn weak_gpu_sample_does_not_create_gpu_candidate() {
+        let config = DiagnosisConfig::default();
+        let cluster = spike_cluster(vec![spike_point(
+            123,
+            TaskClass::Unknown,
+            "worker",
+            3_000_000,
+        )]);
+        let artifacts = RunArtifacts {
+            gpu_samples: vec![GpuSample {
+                elapsed_ms: 100,
+                gpu_busy_percent: Some(config.gpu_busy_bound_percent - 1),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let d = diagnose_cluster_with_config(&cluster, &artifacts, 0, config);
+
+        assert_no_candidate(&d, StutterCause::GpuBoundCandidate);
+        assert_eq!(d.cause, StutterCause::Unknown);
+        assert!(d.primary.is_none());
+        assert_missing_contains(&d, "GPU");
+    }
+
+    #[test]
+    fn weak_block_io_does_not_create_block_candidate() {
+        let config = DiagnosisConfig::default();
+        let cluster = spike_cluster(vec![spike_point(
+            123,
+            TaskClass::Unknown,
+            "worker",
+            3_000_000,
+        )]);
+        let artifacts = RunArtifacts {
+            block_io_events: vec![block_io_event(config.block_io_significant_ns - 1)],
+            ..Default::default()
+        };
+
+        let d = diagnose_cluster_with_config(&cluster, &artifacts, 0, config);
+
+        assert_no_candidate(&d, StutterCause::BlockIoCandidate);
+        assert_eq!(d.cause, StutterCause::Unknown);
+        assert!(d.primary.is_none());
+        assert_missing_contains(&d, "no block I/O");
+    }
+
+    #[test]
+    fn weak_cpu_psi_does_not_create_cpu_pressure_candidate() {
+        let config = DiagnosisConfig::default();
+        let cluster = spike_cluster(vec![spike_point(
+            123,
+            TaskClass::Unknown,
+            "worker",
+            3_000_000,
+        )]);
+        let artifacts = RunArtifacts {
+            intervals: vec![cpu_psi_interval(config.cpu_psi_some_significant - 1.0)],
+            ..Default::default()
+        };
+
+        let d = diagnose_cluster_with_config(&cluster, &artifacts, 0, config);
+
+        assert_no_candidate(&d, StutterCause::CpuPressureCandidate);
+        assert_eq!(d.cause, StutterCause::Unknown);
+        assert!(d.primary.is_none());
+        assert_missing_contains(&d, "no CPU PSI");
+    }
+
+    #[test]
+    fn below_threshold_scheduler_delay_does_not_create_scheduler_candidate() {
+        let config = DiagnosisConfig::default();
+        let cluster = spike_cluster(vec![spike_point(
+            456,
+            TaskClass::Game,
+            "RenderThread",
+            config.sched_delay_significant_ns - 1,
+        )]);
+
+        let d = diagnose_cluster_with_config(&cluster, &RunArtifacts::default(), 0, config);
+
+        assert_no_candidate(&d, StutterCause::GameThreadSchedulerDelay);
+        assert_eq!(d.cause, StutterCause::Unknown);
+        assert!(d.primary.is_none());
+        assert_missing_contains(&d, "scheduler delay below");
+    }
+
+    #[test]
+    fn strong_scheduler_beats_weak_irq() {
+        let cluster = spike_cluster(vec![spike_point(
+            456,
+            TaskClass::Game,
+            "RenderThread",
+            10_000_000,
+        )]);
+        let artifacts = RunArtifacts {
+            irq_events: vec![irq_event(300_000)],
+            ..Default::default()
+        };
+
+        let d = diagnose_cluster(&cluster, &artifacts, 0);
+
+        assert_eq!(d.cause, StutterCause::GameThreadSchedulerDelay);
+        assert!(candidate_index(&d, StutterCause::IrqDelayCandidate).is_some());
+        assert!(
+            candidate_index(&d, StutterCause::GameThreadSchedulerDelay).unwrap()
+                < candidate_index(&d, StutterCause::IrqDelayCandidate).unwrap()
+        );
+    }
+
+    #[test]
+    fn strong_irq_beats_unknown_worker_noise() {
+        let cluster = spike_cluster(vec![
+            spike_point(100, TaskClass::Unknown, "worker-a", 3_000_000),
+            spike_point(101, TaskClass::Unknown, "worker-b", 2_500_000),
+            spike_point(102, TaskClass::Unknown, "worker-c", 2_000_000),
+        ]);
+        let artifacts = RunArtifacts {
+            irq_events: vec![irq_event(4_000_000)],
+            ..Default::default()
+        };
+
+        let d = diagnose_cluster(&cluster, &artifacts, 0);
+
+        assert_eq!(d.cause, StutterCause::IrqDelayCandidate);
+        assert_eq!(d.candidates[0].cause, StutterCause::IrqDelayCandidate);
+    }
+
+    #[test]
+    fn block_io_orders_before_cpu_pressure_when_score_is_higher() {
+        let cluster = spike_cluster(vec![
+            spike_point(100, TaskClass::Unknown, "worker-a", 3_000_000),
+            spike_point(101, TaskClass::Unknown, "worker-b", 2_500_000),
+            spike_point(102, TaskClass::Unknown, "worker-c", 2_000_000),
+        ]);
+        let artifacts = RunArtifacts {
+            block_io_events: vec![block_io_event(8_000_000)],
+            intervals: vec![cpu_psi_interval(80.0)],
+            ..Default::default()
+        };
+
+        let d = diagnose_cluster(&cluster, &artifacts, 0);
+
+        assert_eq!(d.cause, StutterCause::BlockIoCandidate);
+        assert_eq!(d.candidates[0].cause, StutterCause::BlockIoCandidate);
+        assert!(candidate_index(&d, StutterCause::CpuPressureCandidate).is_some());
+    }
+
+    #[test]
+    fn gpu_bound_beats_below_threshold_scheduler_delay() {
+        let config = DiagnosisConfig::default();
+        let cluster = spike_cluster(vec![spike_point(
+            456,
+            TaskClass::Game,
+            "RenderThread",
+            config.sched_delay_significant_ns - 1,
+        )]);
+        let artifacts = RunArtifacts {
+            gpu_samples: vec![GpuSample {
+                elapsed_ms: 100,
+                gpu_busy_percent: Some(99),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let d = diagnose_cluster_with_config(&cluster, &artifacts, 0, config);
+
+        assert_eq!(d.cause, StutterCause::GpuBoundCandidate);
+        assert_no_candidate(&d, StutterCause::GameThreadSchedulerDelay);
     }
 
     #[test]
@@ -1203,14 +1973,7 @@ mod tests {
         )]);
 
         // 10us IRQ should be ignored (threshold 250us)
-        let irq = IrqEventRecord {
-            elapsed_ms: None,
-            irq: 137,
-            cpu: 0,
-            enter_ns: 0,
-            exit_ns: 10_000,
-            duration_ns: 10_000,
-        };
+        let irq = irq_event(10_000);
 
         let artifacts = RunArtifacts {
             irq_events: vec![irq],
@@ -1224,14 +1987,7 @@ mod tests {
         assert_ne!(d.cause, StutterCause::IrqDelayCandidate);
 
         // 1ms IRQ should be caught
-        let irq_big = IrqEventRecord {
-            elapsed_ms: None,
-            irq: 137,
-            cpu: 0,
-            enter_ns: 0,
-            exit_ns: 1_000_000,
-            duration_ns: 1_000_000,
-        };
+        let irq_big = irq_event(1_000_000);
         let artifacts2 = RunArtifacts {
             irq_events: vec![irq_big],
             ..Default::default()
@@ -1252,14 +2008,7 @@ mod tests {
             "RenderThread",
             8_000_000,
         )]);
-        let irq = IrqEventRecord {
-            elapsed_ms: None,
-            irq: 137,
-            cpu: 0,
-            enter_ns: 0,
-            exit_ns: 300_000,
-            duration_ns: 300_000,
-        };
+        let irq = irq_event(300_000);
         let artifacts = RunArtifacts {
             irq_events: vec![irq],
             ..Default::default()
@@ -1286,14 +2035,7 @@ mod tests {
             "other",
             3_000_000,
         )]);
-        let irq = IrqEventRecord {
-            elapsed_ms: None,
-            irq: 137,
-            cpu: 0,
-            enter_ns: 0,
-            exit_ns: 4_000_000,
-            duration_ns: 4_000_000,
-        };
+        let irq = irq_event(4_000_000);
         let artifacts = RunArtifacts {
             irq_events: vec![irq],
             ..Default::default()

@@ -2684,6 +2684,13 @@ fn render_diagnosis_detail_lines(diagnosis: &Diagnosis, indent: &str) -> String 
         }
     }
 
+    for missing in diagnosis.missing_evidence.iter().take(6) {
+        pushln(
+            &mut output,
+            format!("{indent}diagnosis_missing_evidence msg={missing}"),
+        );
+    }
+
     output.trim_end().to_owned()
 }
 
