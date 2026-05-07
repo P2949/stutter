@@ -3,6 +3,8 @@
 pub mod cpu_affinity;
 pub mod runner;
 
+use std::{path::PathBuf, time::Duration};
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -11,6 +13,15 @@ pub enum SafetyClass {
     ReversibleLowRisk,
     ReversibleMediumRisk,
     HighRisk,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ActionScope {
+    Task { tid: u32 },
+    ProcessTree { root_pid: u32 },
+    Cgroup { path: PathBuf },
+    Device { id: String },
+    SystemWide,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -31,13 +42,18 @@ pub struct ActionState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RollbackToken {
     pub kind: String,
-    pub restore_path: Option<std::path::PathBuf>,
+    pub restore_path: Option<PathBuf>,
     pub affected_tasks: usize,
 }
 
 pub trait TuningAction {
     fn id(&self) -> ActionId;
     fn describe(&self) -> String;
+    fn action_kind(&self) -> &'static str;
+    fn scope(&self) -> ActionScope;
+    fn cooldown_hint(&self) -> Duration;
+    fn requires_privilege(&self) -> bool;
+    fn reversible(&self) -> bool;
     fn safety_class(&self) -> SafetyClass;
     fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>>;
     fn dry_run(&self) -> anyhow::Result<ActionState>;
