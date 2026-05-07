@@ -3,6 +3,7 @@ pub mod candidate;
 pub mod controller;
 pub mod decision;
 pub mod decision_log;
+pub mod experiment;
 pub mod human_output;
 pub mod observation;
 pub mod profiles;
