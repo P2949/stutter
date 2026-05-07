@@ -1,3 +1,4 @@
+pub mod controller;
 pub mod decision;
 pub mod observation;
 pub mod quality;
