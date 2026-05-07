@@ -1,7 +1,7 @@
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use crate::actions::{
-    ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
+    ActionId, ActionScope, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
 };
 
 pub struct CpuAffinityProfileAction {
@@ -57,6 +57,28 @@ impl TuningAction for CpuAffinityProfileAction {
             "apply CPU affinity profile '{}' to process tree {}",
             self.profile.name, self.tree_pid
         )
+    }
+
+    fn action_kind(&self) -> &'static str {
+        "cpu_affinity_profile"
+    }
+
+    fn scope(&self) -> ActionScope {
+        ActionScope::ProcessTree {
+            root_pid: self.tree_pid,
+        }
+    }
+
+    fn cooldown_hint(&self) -> Duration {
+        Duration::from_secs(60)
+    }
+
+    fn requires_privilege(&self) -> bool {
+        false
+    }
+
+    fn reversible(&self) -> bool {
+        true
     }
 
     fn safety_class(&self) -> SafetyClass {
@@ -125,12 +147,12 @@ impl TuningAction for CpuAffinityProfileAction {
 mod tests {
     use std::{
         fs,
-        time::{SystemTime, UNIX_EPOCH},
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     use super::*;
     use crate::{
-        actions::TuningAction,
+        actions::{ActionScope, TuningAction},
         affinity::CpuMask,
         process_tree::TaskClass,
         profiles::{Profile, ProfileRule},
@@ -172,6 +194,22 @@ mod tests {
     #[test]
     fn safety_class_is_reversible_low_risk() {
         assert_eq!(action().safety_class(), SafetyClass::ReversibleLowRisk);
+    }
+
+    #[test]
+    fn metadata_describes_cpu_affinity_profile_action() {
+        let action = action();
+
+        assert_eq!(action.action_kind(), "cpu_affinity_profile");
+        assert_eq!(
+            action.scope(),
+            ActionScope::ProcessTree {
+                root_pid: u32::MAX
+            }
+        );
+        assert_eq!(action.cooldown_hint(), Duration::from_secs(60));
+        assert!(!action.requires_privilege());
+        assert!(action.reversible());
     }
 
     #[test]

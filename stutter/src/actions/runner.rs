@@ -89,11 +89,11 @@ pub fn run_audited_action_with_audit_path<A: TuningAction>(
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf};
+    use std::{fs, path::PathBuf, time::Duration};
 
     use super::*;
     use crate::actions::{
-        ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
+        ActionId, ActionScope, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
     };
 
     struct TestAction {
@@ -108,6 +108,21 @@ mod tests {
         }
         fn describe(&self) -> String {
             "test action".to_owned()
+        }
+        fn action_kind(&self) -> &'static str {
+            "test_action"
+        }
+        fn scope(&self) -> ActionScope {
+            ActionScope::Task { tid: 1234 }
+        }
+        fn cooldown_hint(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+        fn requires_privilege(&self) -> bool {
+            false
+        }
+        fn reversible(&self) -> bool {
+            true
         }
         fn safety_class(&self) -> SafetyClass {
             SafetyClass::ReversibleLowRisk
