@@ -57,6 +57,9 @@ pub struct LiveRecorder {
     pub block_io_event_count: u64,
     pub interval_record_count: u64,
     pub frame_event_count: u64,
+    pub process_scan_budget_exceeded_count: u64,
+    pub thread_scan_limited_count: u64,
+
     #[allow(dead_code)]
     pub frame_events_dropped: u64,
     pub spike_event_count: u64,
@@ -69,6 +72,8 @@ pub struct LiveRecorder {
     pub stdout_spike_stream: Option<StdoutJsonStream>,
     pub stdout_spike_stream_errors: u64,
     pub prometheus_state: Option<Arc<PrometheusState>>,
+    pub otel_spike_tx: Option<tokio::sync::mpsc::Sender<crate::otel::OtelSpike>>,
+    pub otel_spans_dropped: Option<Arc<std::sync::atomic::AtomicU64>>,
 }
 
 impl std::fmt::Debug for LiveRecorder {
@@ -140,23 +145,28 @@ pub struct JsonArrayWriter {
     path: PathBuf,
 }
 
+pub enum CsvOutput {
+    File(io::BufWriter<fs::File>),
+    Stdout(io::BufWriter<io::Stdout>),
+}
+
 pub struct IntervalCsvWriter {
-    file: fs::File,
-    path: PathBuf,
+    output: CsvOutput,
+    path_label: String,
     finished: bool,
 }
 
 impl std::fmt::Debug for IntervalCsvWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IntervalCsvWriter")
-            .field("path", &self.path)
+            .field("path", &self.path_label)
             .field("finished", &self.finished)
             .finish()
     }
 }
 
 impl IntervalCsvWriter {
-    pub fn create(path: PathBuf) -> anyhow::Result<Self> {
+    pub fn create_file(path: PathBuf) -> anyhow::Result<Self> {
         if path.file_name().is_none() {
             anyhow::bail!("CSV destination has no file name: {}", path.display());
         }
@@ -168,24 +178,43 @@ impl IntervalCsvWriter {
             .with_context(|| format!("failed to create interval CSV {}", path.display()))?;
         write_interval_csv_header(&mut file)?;
         Ok(Self {
-            file,
-            path,
+            output: CsvOutput::File(io::BufWriter::new(file)),
+            path_label: path.display().to_string(),
             finished: false,
         })
     }
 
+    pub fn stdout() -> Self {
+        let mut stdout = io::stdout();
+        let _ = write_interval_csv_header(&mut stdout);
+        Self {
+            output: CsvOutput::Stdout(io::BufWriter::new(stdout)),
+            path_label: "stdout".to_owned(),
+            finished: false,
+        }
+    }
+
     pub fn push(&mut self, record: &IntervalRecord) -> anyhow::Result<()> {
-        write_interval_csv_row(&mut self.file, record)
-            .with_context(|| format!("failed to write interval CSV {}", self.path.display()))
+        match &mut self.output {
+            CsvOutput::File(writer) => write_interval_csv_row(writer, record),
+            CsvOutput::Stdout(writer) => write_interval_csv_row(writer, record),
+        }
+        .with_context(|| format!("failed to write interval CSV {}", self.path_label))
     }
 
     pub fn finish(&mut self) -> anyhow::Result<()> {
         if self.finished {
             return Ok(());
         }
-        self.file
-            .sync_all()
-            .with_context(|| format!("failed to sync interval CSV {}", self.path.display()))?;
+        match &mut self.output {
+            CsvOutput::File(writer) => {
+                writer.flush()?;
+                writer.get_ref().sync_all()?;
+            }
+            CsvOutput::Stdout(writer) => {
+                writer.flush()?;
+            }
+        }
         self.finished = true;
         Ok(())
     }
@@ -196,7 +225,7 @@ impl Drop for IntervalCsvWriter {
         if let Err(err) = self.finish() {
             log::warn!(
                 "interval_csv_finish_failed path={} err={err:#}",
-                self.path.display()
+                self.path_label
             );
         }
     }
@@ -534,7 +563,7 @@ pub struct RecordedConfig {
     #[serde(default)]
     pub watch_timeout_ms: Option<u128>,
     #[serde(default)]
-    pub csv_path: Option<PathBuf>,
+    pub csv_stream: Option<crate::cli::CsvStreamTarget>,
     #[serde(default)]
     pub irq_latency: bool,
     #[serde(default)]
@@ -582,6 +611,10 @@ pub struct RecordedConfig {
     pub block_io: bool,
     #[serde(default)]
     pub stat_wait: bool,
+    #[serde(default)]
+    pub otlp_endpoint: Option<String>,
+    #[serde(default)]
+    pub otel_service_name: String,
 }
 
 fn default_recorded_max_tasks() -> usize {
@@ -690,6 +723,12 @@ pub struct RecordedSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
+    #[serde(default)]
+    pub switch_prev_pid: u32,
+    #[serde(default)]
+    pub switch_prev_state: i64,
+    #[serde(default)]
+    pub switch_prev_state_label: String,
     // Diagnostic-only count of monitored pending wakeups for this target/task.
     // This is not CPU runqueue depth and must not be used as true CPU contention.
     #[serde(alias = "target_runnable_depth")]
@@ -708,6 +747,11 @@ pub struct RecordedSpike {
     pub scx_state: Option<String>,
     #[serde(default)]
     pub scx_enable_seq: Option<String>,
+
+    #[serde(default)]
+    pub waker_tid: u32,
+    #[serde(default)]
+    pub waker_comm: String,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cause_tags: Vec<String>,
@@ -731,6 +775,12 @@ pub struct SessionSpike {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
+    #[serde(default)]
+    pub switch_prev_pid: u32,
+    #[serde(default)]
+    pub switch_prev_state: i64,
+    #[serde(default)]
+    pub switch_prev_state_label: String,
     // Diagnostic-only count of monitored pending wakeups for this target/task.
     // This is not CPU runqueue depth and must not be used as true CPU contention.
     #[serde(alias = "target_runnable_depth")]
@@ -749,6 +799,11 @@ pub struct SessionSpike {
     pub scx_state: Option<String>,
     #[serde(default)]
     pub scx_enable_seq: Option<String>,
+
+    #[serde(default)]
+    pub waker_tid: u32,
+    #[serde(default)]
+    pub waker_comm: String,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cause_tags: Vec<String>,
@@ -774,6 +829,12 @@ pub struct SpikeEvent {
     pub latency_ns: u64,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
+    #[serde(default)]
+    pub switch_prev_pid: u32,
+    #[serde(default)]
+    pub switch_prev_state: i64,
+    #[serde(default)]
+    pub switch_prev_state_label: String,
     // Diagnostic-only count of monitored pending wakeups for this target/task.
     // This is not CPU runqueue depth and must not be used as true CPU contention.
     #[serde(alias = "target_runnable_depth")]
@@ -792,6 +853,11 @@ pub struct SpikeEvent {
     pub scx_state: Option<String>,
     #[serde(default)]
     pub scx_enable_seq: Option<String>,
+
+    #[serde(default)]
+    pub waker_tid: u32,
+    #[serde(default)]
+    pub waker_comm: String,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cause_tags: Vec<String>,
@@ -823,6 +889,8 @@ pub struct SpikeDiagnosticContext {
     pub scx_enable_seq: Option<String>,
     pub cause_tags: Vec<String>,
     pub primary_cause: Option<String>,
+    pub waker_tid: u32,
+    pub waker_comm: String,
 }
 
 impl SpikeEvent {
@@ -847,6 +915,14 @@ impl SpikeEvent {
             latency_ns: event.latency_ns,
             wakeup_ns: event.wakeup_ns,
             switch_ns: event.switch_ns,
+            switch_prev_pid: event.switch_prev_pid,
+            switch_prev_state: event.switch_prev_state,
+            switch_prev_state_label: crate::report::classify_switch_prev_state(
+                event.switch_prev_state,
+            )
+            .to_owned(),
+            waker_tid: diag.waker_tid,
+            waker_comm: diag.waker_comm,
             target_pending_wakeups: event.target_pending_wakeups,
             observed_runnable_depth: event.observed_runnable_depth,
             major_faults: fault_deltas.0,
@@ -953,6 +1029,59 @@ pub fn prepare_recording(config: &Config) -> anyhow::Result<Option<RecordingRun>
         mangohud_first_frame_monotonic_ns: None,
         mangohud_first_frame_raw_elapsed_ms: None,
     }))
+}
+
+pub fn recording_warnings(recorder: &LiveRecorder) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    if recorder.intervals_dropped > 0 {
+        warnings.push(format!(
+            "warning: {} interval record(s) were dropped due to --retain-intervals; reports may not include full interval history",
+            recorder.intervals_dropped
+        ));
+    }
+
+    if recorder.spike_events_dropped_count > 0 {
+        warnings.push(format!(
+            "warning: {} spike event record(s) were dropped because the in-memory spike buffer was full; reports may not include every spike",
+            recorder.spike_events_dropped_count
+        ));
+    }
+
+    if recorder.event_stream_write_errors > 0 {
+        let first_err_suffix =
+            if let Some(first_error) = recorder.first_event_stream_write_error.as_deref() {
+                format!("; first error: {}", first_error)
+            } else {
+                "".to_owned()
+            };
+        warnings.push(format!(
+            "warning: {} event stream write error(s) occurred while recording{}; one or more NDJSON artifact files may be incomplete",
+            recorder.event_stream_write_errors, first_err_suffix
+        ));
+    }
+
+    if recorder.process_scan_budget_exceeded_count > 0 {
+        warnings.push(format!(
+            "warning: process tree scan budget exceeded {} times; reports may be incomplete due to skipping task discovery",
+            recorder.process_scan_budget_exceeded_count
+        ));
+    }
+
+    if recorder.thread_scan_limited_count > 0 {
+        warnings.push(format!(
+            "warning: thread scan limit exceeded {} times; reports may be incomplete due to skipping thread discovery within massive processes",
+            recorder.thread_scan_limited_count
+        ));
+    }
+
+    warnings
+}
+
+pub fn print_recording_warnings(recorder: &LiveRecorder) {
+    for warning in recording_warnings(recorder) {
+        eprintln!("{warning}");
+    }
 }
 
 pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<()> {
@@ -1074,15 +1203,10 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
                 latency_ns: spike.latency_ns,
                 wakeup_ns: spike.wakeup_ns,
                 switch_ns: spike.switch_ns,
-                target_pending_wakeups: spike.target_pending_wakeups,
-                observed_runnable_depth: spike.observed_runnable_depth,
-                major_faults: spike.major_faults,
-                minor_faults: spike.minor_faults,
-                scx_ops: spike.scx_ops.clone(),
-                scx_state: spike.scx_state.clone(),
-                scx_enable_seq: spike.scx_enable_seq.clone(),
-                cause_tags: spike.cause_tags.clone(),
-                primary_cause: spike.primary_cause.clone(),
+                switch_prev_pid: spike.switch_prev_pid,
+                switch_prev_state: spike.switch_prev_state,
+                switch_prev_state_label: spike.switch_prev_state_label.clone(),
+                ..Default::default()
             });
         }
     }
@@ -1309,7 +1433,7 @@ pub fn recorded_config(config: &Config, tree_pids: &[u32]) -> RecordedConfig {
         keep_missing_pid: config.keep_missing_pid,
         watch_poll_ms: config.watch_poll_ms,
         watch_timeout_ms: config.watch_timeout.map(|timeout| timeout.as_millis()),
-        csv_path: config.csv_path.clone(),
+        csv_stream: config.csv_stream.clone(),
         irq_latency: config.irq_latency,
         irqs: config.irqs.clone(),
         hwmon: config.hwmon,
@@ -1335,6 +1459,8 @@ pub fn recorded_config(config: &Config, tree_pids: &[u32]) -> RecordedConfig {
         cpu_perf_cache_refs: config.cpu_perf_cache_refs,
         block_io: config.block_io,
         stat_wait: config.stat_wait,
+        otlp_endpoint: config.otlp_endpoint.clone(),
+        otel_service_name: config.otel_service_name.clone(),
     }
 }
 
@@ -1343,7 +1469,7 @@ pub fn write_interval_csv(
     path: &std::path::Path,
     interval_records: &[IntervalRecord],
 ) -> anyhow::Result<()> {
-    let mut writer = IntervalCsvWriter::create(path.to_path_buf())?;
+    let mut writer = IntervalCsvWriter::create_file(path.to_path_buf())?;
 
     for record in interval_records {
         writer.push(record)?;
@@ -1352,14 +1478,14 @@ pub fn write_interval_csv(
     writer.finish()
 }
 
-fn write_interval_csv_header(file: &mut fs::File) -> io::Result<()> {
+fn write_interval_csv_header(file: &mut dyn io::Write) -> io::Result<()> {
     writeln!(
         file,
         "elapsed_ms,task,active,class,comm,process_pid,process_comm,samples,stored_samples,truncated_samples,min_ns,avg_ns,p95_ns,p99_ns,max_ns,over_1ms,over_2ms,over_5ms,busiest_cpu,busiest_cpu_samples,worst_cpu,worst_cpu_max_ns,spikiest_cpu,spikiest_cpu_spikes,percentile_scope,major_faults,minor_faults,cpu_psi_some,mem_psi_some,mem_psi_full,io_psi_some,io_psi_full,cumulative_drop_counters_total,cpu_cycles,cpu_instructions,cpu_ipc,cache_references,cache_misses,cache_miss_rate,cache_mpki,cpu_perf_multiplexed,cpu_perf_scaled,cpu_perf_unavailable_reason"
     )
 }
 
-fn write_interval_csv_row(file: &mut fs::File, record: &IntervalRecord) -> io::Result<()> {
+fn write_interval_csv_row(file: &mut dyn io::Write, record: &IntervalRecord) -> io::Result<()> {
     let cpu_perf = record.cpu_perf.as_ref();
     writeln!(
         file,
@@ -1451,10 +1577,15 @@ fn recorded_spike(stats: &TaskStats, spike: &SpikeRecord) -> RecordedSpike {
         process_comm: stats.process_comm.clone(),
         cpu: spike.cpu,
         wakeup_target_cpu: spike.wakeup_target_cpu,
+        switch_prev_pid: spike.switch_prev_pid,
+        switch_prev_state: spike.switch_prev_state,
+        switch_prev_state_label: spike.switch_prev_state_label.clone(),
         prio: spike.prio,
         latency_ns: spike.latency_ns,
         wakeup_ns: spike.wakeup_ns,
         switch_ns: spike.switch_ns,
+        waker_tid: 0, // Not currently persisted in SpikeRecord
+        waker_comm: String::new(),
         target_pending_wakeups: spike.target_pending_wakeups,
         observed_runnable_depth: spike.observed_runnable_depth,
         major_faults: spike.major_faults,
@@ -1731,13 +1862,61 @@ mod tests {
     }
 
     #[test]
+    fn spike_event_defaults_switch_prev_fields_for_old_json() {
+        // Populate a few required fields so serialization yields a full object.
+        let s = SpikeEvent {
+            task: 1,
+            class: crate::process_tree::TaskClass::Game,
+            comm: "test".to_owned(),
+            process_comm: "test".into(),
+            ..Default::default()
+        };
+
+        let mut val = serde_json::to_value(&s).unwrap();
+        if let serde_json::Value::Object(ref mut map) = val {
+            map.remove("switch_prev_pid");
+            map.remove("switch_prev_state");
+            map.remove("switch_prev_state_label");
+        } else {
+            panic!("expected object");
+        }
+
+        let json = serde_json::to_string(&val).unwrap();
+        let decoded: SpikeEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.switch_prev_pid, 0);
+        assert_eq!(decoded.switch_prev_state, 0);
+        assert_eq!(decoded.switch_prev_state_label, "");
+    }
+
+    #[test]
+    fn spike_point_preserves_switch_prev_context() {
+        let stats = crate::metrics::TaskStats::new(42, "t".to_owned(), 0);
+        let spike = crate::metrics::SpikeRecord {
+            latency_ns: 100,
+            cpu: 1,
+            wakeup_target_cpu: 0,
+            prio: 0,
+            wakeup_ns: 10,
+            switch_ns: 110,
+            switch_prev_pid: 99,
+            switch_prev_state: 1,
+            switch_prev_state_label: "voluntary_sleep_interruptible".to_owned(),
+            ..crate::metrics::SpikeRecord::default()
+        };
+
+        let rec = recorded_spike(&stats, &spike);
+        assert_eq!(rec.switch_prev_pid, 99);
+        assert_eq!(rec.switch_prev_state, 1);
+    }
+
+    #[test]
     fn interval_csv_writer_streams_header_and_rows() {
         let dir = temp_dir("interval-csv-writer");
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("interval.csv");
 
         {
-            let mut writer = IntervalCsvWriter::create(path.clone()).unwrap();
+            let mut writer = IntervalCsvWriter::create_file(path.clone()).unwrap();
             writer.push(&test_interval_record()).unwrap();
             writer.finish().unwrap();
         }
@@ -1799,21 +1978,8 @@ mod tests {
             process_pid: Some(1),
             process_comm: "test".into(),
             comm: "test".to_owned(),
-            cpu: 0,
-            wakeup_target_cpu: 0,
-            prio: 0,
             latency_ns: 1000,
-            wakeup_ns: 0,
-            switch_ns: 0,
-            target_pending_wakeups: 0,
-            observed_runnable_depth: 0,
-            major_faults: 0,
-            minor_faults: 0,
-            scx_ops: None,
-            scx_state: None,
-            scx_enable_seq: None,
-            cause_tags: Vec::new(),
-            primary_cause: None,
+            ..Default::default()
         };
 
         assert_eq!(buf.push(event.clone()), SpikePushResult::Stored);
@@ -1837,8 +2003,6 @@ mod tests {
             latency_ns: 1_000_000,
             wakeup_ns: 2000,
             switch_ns: 3000,
-            target_pending_wakeups: 0,
-            observed_runnable_depth: 0,
             major_faults: 1,
             minor_faults: 2,
             scx_ops: Some("scx_lavd".to_owned()),
@@ -1846,6 +2010,7 @@ mod tests {
             scx_enable_seq: Some("1".to_owned()),
             cause_tags: vec!["cpu_pressure".to_string()],
             primary_cause: Some("cpu_pressure".to_string()),
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&event).unwrap();
@@ -1900,6 +2065,70 @@ mod tests {
             assert!(decoded.is_object());
             assert_eq!(decoded["task"], 123);
         }
+    }
+
+    #[test]
+    fn recording_warnings_include_intervals_dropped() {
+        let recorder = LiveRecorder {
+            intervals_dropped: 3,
+            ..Default::default()
+        };
+
+        let warnings = recording_warnings(&recorder);
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("3 interval record(s) were dropped"));
+        assert!(warnings[0].contains("--retain-intervals"));
+    }
+
+    #[test]
+    fn recording_warnings_include_spike_events_dropped() {
+        let recorder = LiveRecorder {
+            spike_events_dropped_count: 2,
+            ..Default::default()
+        };
+
+        let warnings = recording_warnings(&recorder);
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("2 spike event record(s)"));
+    }
+
+    #[test]
+    fn recording_warnings_include_event_stream_write_errors() {
+        let recorder = LiveRecorder {
+            event_stream_write_errors: 4,
+            ..Default::default()
+        };
+
+        let warnings = recording_warnings(&recorder);
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("4 event stream write error(s)"));
+        assert!(warnings[0].contains("incomplete"));
+    }
+
+    #[test]
+    fn recording_warnings_include_all_recording_problems() {
+        let recorder = LiveRecorder {
+            intervals_dropped: 1,
+            spike_events_dropped_count: 2,
+            event_stream_write_errors: 3,
+            ..Default::default()
+        };
+
+        let warnings = recording_warnings(&recorder);
+
+        assert_eq!(warnings.len(), 3);
+    }
+
+    #[test]
+    fn recording_warnings_empty_for_clean_recorder() {
+        let recorder = LiveRecorder::default();
+
+        let warnings = recording_warnings(&recorder);
+
+        assert!(warnings.is_empty());
     }
 
     fn temp_dir(name: &str) -> PathBuf {

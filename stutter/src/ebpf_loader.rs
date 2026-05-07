@@ -122,7 +122,7 @@ pub fn resolve_cgroup_id_best_effort(_path: &Path) -> anyhow::Result<u64> {
 
 pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf> {
     raise_memlock_limit();
-    let map_sizing = dynamic_map_sizing();
+    let map_sizing = map_sizing_for_config(config);
     log::info!(
         "ebpf_map_sizing locked_memory_limit={} available_memory={} events_ringbuf_bytes={} wakeup_data_entries={}",
         format_optional_bytes(map_sizing.locked_memory_limit_bytes),
@@ -444,7 +444,7 @@ fn drop_counter_value(counters: &PerCpuArray<MapData, u64>, key: u32) -> u64 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct EbpfMapSizing {
+pub(crate) struct EbpfMapSizing {
     events_ringbuf_bytes: u32,
     wakeup_data_entries: u32,
     locked_memory_limit_bytes: Option<u64>,
@@ -457,6 +457,30 @@ pub struct EbpfMapSizingReport {
     pub available_memory_bytes: Option<u64>,
     pub events_ringbuf_bytes: u32,
     pub wakeup_data_entries: u32,
+}
+
+pub(crate) fn map_sizing_for_config(config: &crate::cli::Config) -> EbpfMapSizing {
+    let mut sizing = dynamic_map_sizing();
+
+    if let Some(kb) = config.ringbuf_size_kb {
+        let bytes = u64::from(kb).saturating_mul(1024);
+        let page_size = system_page_size();
+        // RingBuf requires power-of-two and page-alignment
+        let rounded =
+            next_power_of_two(bytes).max(next_power_of_two(u64::from(MIN_EVENTS_RINGBUF_BYTES)));
+        let rounded =
+            round_up_to_multiple(rounded, page_size).min(u64::from(MAX_EVENTS_RINGBUF_BYTES));
+        sizing.events_ringbuf_bytes = rounded as u32;
+    }
+
+    if let Some(factor) = config.wakeup_map_factor {
+        sizing.wakeup_data_entries = u32::try_from(config.max_tasks)
+            .unwrap_or(u32::MAX)
+            .saturating_mul(factor)
+            .clamp(MIN_WAKEUP_DATA_ENTRIES, MAX_WAKEUP_DATA_ENTRIES);
+    }
+
+    sizing
 }
 
 pub fn ebpf_map_sizing_report() -> EbpfMapSizingReport {
@@ -653,7 +677,13 @@ pub fn tracepoint_preflight(
     );
     let sched_switch = required_tracepoint_status(
         &events_root.join("sched/sched_switch/format"),
-        &[("next_comm", 40), ("next_pid", 56), ("next_prio", 60)],
+        &[
+            ("prev_pid", 24),
+            ("prev_state", 32),
+            ("next_comm", 40),
+            ("next_pid", 56),
+            ("next_prio", 60),
+        ],
         "sched_switch",
         &mut errors,
     );
@@ -692,7 +722,8 @@ pub fn tracepoint_preflight(
         "not_requested".to_owned()
     } else if irq_entry.exists() && irq_exit.exists() {
         let entry_ok = validate_tracepoint_format_at(&irq_entry, &[("irq", 8)]).is_ok();
-        let exit_ok = validate_tracepoint_format_at(&irq_exit, &[("irq", 8)]).is_ok();
+        let exit_ok = validate_tracepoint_format_at(&irq_exit, &[("irq", 8)]).is_ok()
+            && require_tracepoint_field(&irq_exit, "ret").is_ok();
         if entry_ok && exit_ok {
             "ok".to_owned()
         } else {
@@ -835,7 +866,13 @@ fn validate_tracepoint_formats(
     )?;
     validate_tracepoint_format_at(
         &events_root.join("sched/sched_switch/format"),
-        &[("next_comm", 40), ("next_pid", 56), ("next_prio", 60)],
+        &[
+            ("prev_pid", 24),
+            ("prev_state", 32),
+            ("next_comm", 40),
+            ("next_pid", 56),
+            ("next_prio", 60),
+        ],
     )?;
 
     let sched_migrate_task = validate_optional_tracepoint_format_at(
@@ -870,6 +907,12 @@ fn validate_tracepoint_formats(
     let irq_handler = if config.irq_latency && irq_entry.exists() && irq_exit.exists() {
         validate_tracepoint_format_at(&irq_entry, &[("irq", 8)])?;
         validate_tracepoint_format_at(&irq_exit, &[("irq", 8)])?;
+
+        // Validation-only for now. The eBPF program does not currently read
+        // irq_handler_exit.ret, but the field must exist for kernels where IRQ exit
+        // semantics are expected by the IRQ tracing path.
+        let _ret_offset = require_tracepoint_field(&irq_exit, "ret")?;
+
         true
     } else {
         false
@@ -1016,6 +1059,27 @@ fn validate_tracepoint_format_at(
     })
 }
 
+fn require_tracepoint_field(format_path: &Path, field_name: &str) -> anyhow::Result<u32> {
+    let contents = fs::read_to_string(format_path)
+        .with_context(|| format!("failed to read tracepoint format {}", format_path.display()))?;
+
+    parse_tracepoint_field_offset(&contents, field_name).with_context(|| {
+        format!(
+            "tracepoint format {} is missing required field {:?}",
+            format_path.display(),
+            field_name
+        )
+    })
+}
+
+fn parse_tracepoint_field_offset(format: &str, field_name: &str) -> anyhow::Result<u32> {
+    let offsets = parse_tracepoint_offsets(format);
+    offsets
+        .get(field_name)
+        .map(|f| f.offset as u32)
+        .ok_or_else(|| anyhow::anyhow!("missing tracepoint field {:?}", field_name))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TracepointField {
     offset: usize,
@@ -1156,6 +1220,10 @@ mod tests {
     fn parses_tracepoint_field_offsets() {
         let format = r#"
 field:unsigned short common_type; offset:0; size:2; signed:0;
+field:char prev_comm[16]; offset:8; size:16; signed:1;
+field:pid_t prev_pid; offset:24; size:4; signed:1;
+field:int prev_prio; offset:28; size:4; signed:1;
+field:long prev_state; offset:32; size:8; signed:1;
 field:char next_comm[16]; offset:40; size:16; signed:1;
 field:pid_t next_pid; offset:56; size:4; signed:1;
 field:int next_prio; offset:60; size:4; signed:1;
@@ -1233,10 +1301,14 @@ field:int next_prio; offset:60; size:4; signed:1;
     #[test]
     fn rejects_mismatched_tracepoint_offsets() {
         let format = r#"
-field:char next_comm[16]; offset:40; size:16; signed:1;
-field:pid_t next_pid; offset:52; size:4; signed:1;
-field:int next_prio; offset:60; size:4; signed:1;
-"#;
+    field:char prev_comm[16]; offset:8; size:16; signed:1;
+    field:pid_t prev_pid; offset:24; size:4; signed:1;
+    field:int prev_prio; offset:28; size:4; signed:1;
+    field:long prev_state; offset:32; size:8; signed:1;
+    field:char next_comm[16]; offset:40; size:16; signed:1;
+    field:pid_t next_pid; offset:56; size:4; signed:1;
+    field:int next_prio; offset:60; size:4; signed:1;
+    #";
 
         let err = validate_tracepoint_format(format, &[("next_pid", 56)]).unwrap_err();
         assert!(err.to_string().contains("next_pid"));
@@ -1266,6 +1338,61 @@ field:int irq; offset:8; size:4; signed:1;
 
         let err = validate_tracepoint_format(format, &[("irq", 8)]).unwrap_err();
         assert!(err.to_string().contains("expected 8, got 12"));
+    }
+
+    const IRQ_HANDLER_EXIT_FORMAT_WITH_RET: &str = r#"
+name: irq_handler_exit
+ID: 1234
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int irq;	offset:8;	size:4;	signed:1;
+	field:int ret;	offset:12;	size:4;	signed:1;
+
+print fmt: "irq=%d ret=%d", REC->irq, REC->ret
+"#;
+
+    const IRQ_HANDLER_EXIT_FORMAT_MISSING_RET: &str = r#"
+name: irq_handler_exit
+ID: 1234
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+	field:int irq;	offset:8;	size:4;	signed:1;
+"#;
+
+    #[test]
+    fn parse_tracepoint_field_offset_finds_irq_and_ret() {
+        assert_eq!(
+            parse_tracepoint_field_offset(IRQ_HANDLER_EXIT_FORMAT_WITH_RET, "irq").unwrap(),
+            8
+        );
+
+        assert_eq!(
+            parse_tracepoint_field_offset(IRQ_HANDLER_EXIT_FORMAT_WITH_RET, "ret").unwrap(),
+            12
+        );
+    }
+
+    #[test]
+    fn parse_tracepoint_field_offset_errors_when_ret_missing() {
+        let err =
+            parse_tracepoint_field_offset(IRQ_HANDLER_EXIT_FORMAT_MISSING_RET, "ret").unwrap_err();
+
+        assert!(err.to_string().contains("ret"));
+    }
+
+    #[test]
+    fn parse_tracepoint_field_offset_matches_exact_field_name() {
+        let format = r#"
+	field:int return_code;	offset:8;	size:4;	signed:1;
+	field:int ret;	offset:12;	size:4;	signed:1;
+"#;
+
+        assert_eq!(parse_tracepoint_field_offset(format, "ret").unwrap(), 12);
     }
 
     #[test]
@@ -1339,7 +1466,7 @@ field:int irq; offset:8; size:4; signed:1;
         fs::create_dir_all(&sched_switch).unwrap();
         fs::write(
             sched_switch.join("format"),
-            "field:char next_comm[16]; offset:40; size:16; signed:1;\nfield:pid_t next_pid; offset:56; size:4; signed:1;\nfield:int next_prio; offset:60; size:4; signed:1;",
+            "field:char prev_comm[16]; offset:8; size:16; signed:1;\nfield:pid_t prev_pid; offset:24; size:4; signed:1;\nfield:int prev_prio; offset:28; size:4; signed:1;\nfield:long prev_state; offset:32; size:8; signed:1;\nfield:char next_comm[16]; offset:40; size:16; signed:1;\nfield:pid_t next_pid; offset:56; size:4; signed:1;\nfield:int next_prio; offset:60; size:4; signed:1;",
         ).unwrap();
 
         let sched_process_exit = dir.join("sched/sched_process_exit");
@@ -1441,7 +1568,7 @@ field:int irq; offset:8; size:4; signed:1;
         fs::create_dir_all(&sched_switch).unwrap();
         fs::write(
             sched_switch.join("format"),
-            "field:char next_comm[16]; offset:40; size:16; signed:1;\nfield:pid_t next_pid; offset:56; size:4; signed:1;\nfield:int next_prio; offset:60; size:4; signed:1;",
+            "field:char prev_comm[16]; offset:8; size:16; signed:1;\nfield:pid_t prev_pid; offset:24; size:4; signed:1;\nfield:int prev_prio; offset:28; size:4; signed:1;\nfield:long prev_state; offset:32; size:8; signed:1;\nfield:char next_comm[16]; offset:40; size:16; signed:1;\nfield:pid_t next_pid; offset:56; size:4; signed:1;\nfield:int next_prio; offset:60; size:4; signed:1;",
         ).unwrap();
 
         let config = match crate::cli::parse_app_command_from(["stutter", "monitor", "--pid", "42"])
@@ -1468,6 +1595,134 @@ field:int irq; offset:8; size:4; signed:1;
         assert!(availability.sched_process_exit);
 
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn ringbuf_override_applies_and_rounds() {
+        let config = match crate::cli::parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--ringbuf-size-kb",
+            "1000",
+        ])
+        .unwrap()
+        {
+            crate::cli::AppCommand::Monitor(c) => (*c).clone(),
+            _ => unreachable!(),
+        };
+
+        let sizing = map_sizing_for_config(&config);
+        // 1000 KB = 1024000 bytes.
+        // next_power_of_two(1024000) = 1048576 (1 MiB)
+        assert_eq!(sizing.events_ringbuf_bytes, 1024 * 1024);
+    }
+
+    #[test]
+    fn wakeup_map_factor_applies_and_clamps() {
+        let config = match crate::cli::parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--wakeup-map-factor",
+            "4",
+            "--max-tasks",
+            "1000",
+        ])
+        .unwrap()
+        {
+            crate::cli::AppCommand::Monitor(c) => (*c).clone(),
+            _ => unreachable!(),
+        };
+
+        let sizing = map_sizing_for_config(&config);
+        // 1000 * 4 = 4000.
+        // MIN_WAKEUP_DATA_ENTRIES = 4096.
+        assert_eq!(sizing.wakeup_data_entries, 4096);
+
+        let config2 = match crate::cli::parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--wakeup-map-factor",
+            "10",
+            "--max-tasks",
+            "2000",
+        ])
+        .unwrap()
+        {
+            crate::cli::AppCommand::Monitor(c) => (*c).clone(),
+            _ => unreachable!(),
+        };
+        let sizing2 = map_sizing_for_config(&config2);
+        // 2000 * 10 = 20000.
+        assert_eq!(sizing2.wakeup_data_entries, 20000);
+    }
+
+    #[test]
+    fn rejects_invalid_map_tuning_values() {
+        // ringbuf too small
+        let err = crate::cli::parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--ringbuf-size-kb",
+            "63",
+        ])
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--ringbuf-size-kb must be between 64 and 16384")
+        );
+
+        // ringbuf too large
+        let err = crate::cli::parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--ringbuf-size-kb",
+            "16385",
+        ])
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--ringbuf-size-kb must be between 64 and 16384")
+        );
+
+        // wakeup factor zero
+        let err = crate::cli::parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--wakeup-map-factor",
+            "0",
+        ])
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--wakeup-map-factor must be between 1 and 64")
+        );
+
+        // wakeup factor too large
+        let err = crate::cli::parse_app_command_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "42",
+            "--wakeup-map-factor",
+            "65",
+        ])
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--wakeup-map-factor must be between 1 and 64")
+        );
     }
 
     fn temp_dir(name: &str) -> PathBuf {

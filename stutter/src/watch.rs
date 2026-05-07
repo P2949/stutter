@@ -177,7 +177,10 @@ pub fn find_process_by_pattern_at_with_cache(
 ) -> Option<u32> {
     let pattern_lower = normalize_process_match_text(pattern);
 
-    crate::process_tree::scan_processes_at(proc_root, cache)
+    let budget = crate::process_tree::ScanBudget::default_proc_scan();
+    let mut budget_report = crate::process_tree::ScanBudgetReport::default();
+
+    crate::process_tree::scan_processes_at(proc_root, cache, &budget, &mut budget_report)
         .into_iter()
         .filter_map(|(pid, process)| {
             let score =

@@ -3,7 +3,7 @@ use std::{
     fs,
     path::Path,
     sync::Arc,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use crossterm::event::{Event, KeyCode};
@@ -14,7 +14,7 @@ use tokio::{
 };
 
 use crate::{
-    cli::Config,
+    cli::{Config, CsvStreamTarget},
     diagnosis::{LiveDiagnosisEntry, diagnose_cluster},
     ebpf_loader,
     events::AlertPayload,
@@ -135,6 +135,22 @@ impl Default for LiveTelemetry {
     }
 }
 
+fn needs_tree_tick_from_parts(
+    had_tree_roots: bool,
+    watch_process_active: bool,
+    cgroupv2_active: bool,
+) -> bool {
+    had_tree_roots || watch_process_active || cgroupv2_active
+}
+
+fn needs_tree_tick(config: &Config, had_tree_roots: bool) -> bool {
+    needs_tree_tick_from_parts(
+        had_tree_roots,
+        config.watch_process.is_some(),
+        config.cgroupv2.is_some(),
+    )
+}
+
 pub struct MonitorSession {
     pub config: Arc<Config>,
     pub tree_pids: Vec<u32>,
@@ -161,6 +177,8 @@ pub struct MonitorSession {
     pub prometheus_state: Option<Arc<crate::prometheus::PrometheusState>>,
     #[allow(dead_code)]
     pub prometheus_task: Option<tokio::task::JoinHandle<()>>,
+    #[allow(dead_code)]
+    pub otel_exporter: Option<crate::otel::OtelExporterHandle>,
     recent_telemetry: LiveTelemetry,
 }
 
@@ -185,7 +203,8 @@ impl MonitorSession {
             let pids: Vec<_> = auto_targets.iter().map(|(p, _)| *p).collect();
             let class = auto_targets[0].1;
             info!("auto_detected_launcher class={class} pids={pids:?}");
-            if !config.json_stream {
+            let stdout_is_machine_stream = config.json_stream || config.csv_streams_to_stdout();
+            if !stdout_is_machine_stream {
                 println!(
                     "auto-detected game launcher: {class} (PIDs {pids:?}). monitoring tree..."
                 );
@@ -235,6 +254,8 @@ impl MonitorSession {
             gpu_sample_count: 0,
             block_io_event_count: 0,
             frame_event_count: 0,
+            process_scan_budget_exceeded_count: 0,
+            thread_scan_limited_count: 0,
             frame_events_dropped: 0,
             spike_event_count: 0,
             interval_record_count: 0,
@@ -247,6 +268,8 @@ impl MonitorSession {
             stdout_spike_stream: None,
             stdout_spike_stream_errors: 0,
             prometheus_state: None,
+            otel_spike_tx: None,
+            otel_spans_dropped: None,
         };
 
         let mut recorder = recorder;
@@ -308,8 +331,13 @@ impl MonitorSession {
             )?);
         }
 
-        if let Some(path) = &config.csv_path {
-            recorder.csv_writer = Some(recorder::IntervalCsvWriter::create(path.clone())?);
+        if let Some(csv_stream) = &config.csv_stream {
+            recorder.csv_writer = Some(match csv_stream {
+                CsvStreamTarget::File(path) => {
+                    recorder::IntervalCsvWriter::create_file(path.clone())?
+                }
+                CsvStreamTarget::Stdout => recorder::IntervalCsvWriter::stdout(),
+            });
         }
 
         let metadata = crate::metadata::collect_system_metadata();
@@ -391,6 +419,38 @@ impl MonitorSession {
             None
         };
 
+        let mut otel_exporter = None;
+        if let Some(endpoint) = config.otlp_endpoint.as_ref() {
+            let started_at = recorder
+                .run
+                .as_ref()
+                .map(|r| r.started_at)
+                .unwrap_or_else(SystemTime::now);
+            let monotonic_start_ns = recorder
+                .run
+                .as_ref()
+                .and_then(|r| r.monotonic_start_ns)
+                .unwrap_or_else(|| recorder::monotonic_now_ns().unwrap_or(0));
+
+            let otel_config = crate::otel::OtelConfig {
+                endpoint: endpoint.clone(),
+                service_name: config.otel_service_name.clone(),
+                started_at,
+                monotonic_start_ns,
+            };
+
+            match crate::otel::spawn_exporter(otel_config) {
+                Ok(handle) => {
+                    recorder.otel_spike_tx = Some(handle.tx.clone());
+                    recorder.otel_spans_dropped = Some(handle.dropped.clone());
+                    otel_exporter = Some(handle);
+                }
+                Err(err) => {
+                    warn!("failed to start OTel exporter: {err:#}");
+                }
+            }
+        }
+
         Ok(Self {
             config: Arc::new(config),
             tree_pids,
@@ -414,11 +474,15 @@ impl MonitorSession {
             cpu_perf_sampler,
             prometheus_state,
             prometheus_task,
+            otel_exporter,
             recent_telemetry,
         })
     }
 
-    pub async fn run(&mut self) -> anyhow::Result<String> {
+    pub async fn run(
+        &mut self,
+        mut stop_rx: Option<tokio::sync::oneshot::Receiver<()>>,
+    ) -> anyhow::Result<String> {
         let mut summary_tick = interval(Duration::from_millis(self.config.summary_period_ms));
         summary_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -430,8 +494,13 @@ impl MonitorSession {
         let mut epoch_tick = interval(epoch_tick_duration);
         epoch_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        let mut tree_tick = interval(Duration::from_millis(2_000));
-        tree_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut tree_tick = if needs_tree_tick(&self.config, self.had_tree_roots) {
+            let mut tick = interval(Duration::from_millis(2_000));
+            tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+            Some(tick)
+        } else {
+            None
+        };
 
         let mut watch_tick = interval(Duration::from_millis(self.config.watch_poll_ms));
         watch_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -511,8 +580,22 @@ impl MonitorSession {
                     }
                     self.recent_telemetry.push_frame(frame);
                 }
-                _ = tokio::signal::ctrl_c() => return Ok("ctrl_c".to_owned()),
-                reason = &mut max_duration_future => return Ok(reason.unwrap()),
+                _ = tokio::signal::ctrl_c() => {
+                    return Ok("ctrl_c".to_owned());
+                }
+                reason = &mut max_duration_future => {
+                    return Ok(reason.unwrap());
+                }
+                _ = async {
+                    if let Some(rx) = &mut stop_rx {
+                        let _ = rx.await;
+                        Some(())
+                    } else {
+                        futures_util::future::pending().await
+                    }
+                } => {
+                    return Ok("remote_stop".to_owned());
+                }
 
                 _ = summary_tick.tick() => {
                     self.handle_summary_tick()?;
@@ -524,7 +607,13 @@ impl MonitorSession {
                     }
                 }
 
-                _ = tree_tick.tick() => {
+                _ = async {
+                    if let Some(tick) = tree_tick.as_mut() {
+                        tick.tick().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
                     if let Some(reason) = self.handle_tree_tick().await? {
                         return Ok(reason);
                     }
@@ -964,11 +1053,14 @@ impl MonitorSession {
                 switch_ns: s.switch_ns,
                 target_pending_wakeups: s.target_pending_wakeups,
                 observed_runnable_depth: s.observed_runnable_depth,
+                switch_prev_pid: s.switch_prev_pid,
+                switch_prev_state: s.switch_prev_state,
                 elapsed_ms: s.elapsed_ms,
                 scx_ops: s.scx_ops.clone(),
                 scx_state: s.scx_state.clone(),
                 cause_tags: s.cause_tags.clone(),
                 primary_cause: s.primary_cause.clone(),
+                ..Default::default()
             });
         }
 
@@ -983,11 +1075,7 @@ impl MonitorSession {
             min_switch_ns,
             max_switch_ns,
             max_latency_ns,
-            diagnosis: None,
-            anchor_task: None,
-            anchor_class: None,
-            anchor_comm: None,
-            anchor_kind: None,
+            ..Default::default()
         };
 
         // Build a RunArtifacts-like snapshot from recent telemetry and let
@@ -1029,7 +1117,8 @@ impl MonitorSession {
     }
 
     pub async fn refresh_tasks(&mut self) -> anyhow::Result<()> {
-        self.tasks
+        let budget_report = self
+            .tasks
             .refresh(crate::tasks::RefreshInput {
                 config: &self.config,
                 tree_pids: &self.tree_pids,
@@ -1041,6 +1130,12 @@ impl MonitorSession {
             })
             .await?;
 
+        if budget_report.scan_timed_out {
+            self.recorder.process_scan_budget_exceeded_count += 1;
+        }
+
+        self.recorder.thread_scan_limited_count += budget_report.processes_thread_limited as u64;
+
         if let Some(sampler) = self.cpu_perf_sampler.as_mut() {
             sampler.sync_targets(&self.tasks.active_targets, &self.tasks.stats_by_task);
         }
@@ -1048,20 +1143,31 @@ impl MonitorSession {
         Ok(())
     }
 
-    pub fn finalize(mut self, stop_reason: String) -> anyhow::Result<()> {
+    pub fn finalize(mut self, stop_reason: String) -> anyhow::Result<String> {
         if let Some(term) = self.terminal.as_mut() {
             let _ = crate::tui::restore_terminal(term);
         }
 
         let drop_counters = self.loaded.snapshot_drop_counters();
         log_drop_counters(&drop_counters);
-        if self.config.epoch_period_ms.is_none() && !self.config.json_stream {
+
+        if let Some(dropped) = self.recorder.otel_spans_dropped.as_ref() {
+            let count = dropped.load(std::sync::atomic::Ordering::Relaxed);
+            let stdout_is_machine_stream =
+                self.config.json_stream || self.config.csv_streams_to_stdout();
+            if count > 0 && !stdout_is_machine_stream {
+                println!("OpenTelemetry export: dropped {count} spans due to channel pressure");
+            }
+        }
+        let stdout_is_machine_stream =
+            self.config.json_stream || self.config.csv_streams_to_stdout();
+        if self.config.epoch_period_ms.is_none() && !stdout_is_machine_stream {
             print_session_summaries(&mut self.tasks.stats_by_task);
         }
 
         if let Some(writer) = self.recorder.csv_writer.as_mut() {
             writer.finish()?;
-            if let Some(path) = &self.config.csv_path
+            if let Some(CsvStreamTarget::File(path)) = &self.config.csv_stream
                 && !self.config.json_stream
             {
                 println!("wrote interval CSV: {}", path.display());
@@ -1148,19 +1254,22 @@ impl MonitorSession {
                     }
                 }),
             })?;
+
+            recorder::print_recording_warnings(&self.recorder);
         }
 
         info!("exiting stop_reason={stop_reason}");
-        Ok(())
+        Ok(stop_reason)
     }
 }
 
 pub async fn run_monitor(
     config: Arc<Config>,
     shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
-) -> anyhow::Result<()> {
+    stop_rx: Option<tokio::sync::oneshot::Receiver<()>>,
+) -> anyhow::Result<String> {
     let mut session = MonitorSession::new((*config).clone(), shared_hwmon).await?;
-    let stop_reason = session.run().await?;
+    let stop_reason = session.run(stop_rx).await?;
     session.finalize(stop_reason)
 }
 
@@ -1189,4 +1298,29 @@ pub fn configure_target_irqs(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tree_tick_not_needed_for_direct_pid_only() {
+        assert!(!needs_tree_tick_from_parts(false, false, false));
+    }
+
+    #[test]
+    fn tree_tick_needed_for_tree_roots() {
+        assert!(needs_tree_tick_from_parts(true, false, false));
+    }
+
+    #[test]
+    fn tree_tick_needed_for_watch_process_even_without_current_root() {
+        assert!(needs_tree_tick_from_parts(false, true, false));
+    }
+
+    #[test]
+    fn tree_tick_needed_for_cgroupv2() {
+        assert!(needs_tree_tick_from_parts(false, false, true));
+    }
 }

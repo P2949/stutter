@@ -1018,18 +1018,9 @@ mod tests {
             class,
             process_pid: Some(task),
             comm: comm.to_owned(),
-            cpu: 0,
-            wakeup_target_cpu: 0,
             latency_ns,
-            wakeup_ns: 0,
-            switch_ns: 0,
-            target_pending_wakeups: 0,
-            observed_runnable_depth: 0,
             elapsed_ms: Some(100),
-            scx_ops: None,
-            scx_state: None,
-            cause_tags: Vec::new(),
-            primary_cause: None,
+            ..Default::default()
         }
     }
 
@@ -1045,11 +1036,7 @@ mod tests {
             min_switch_ns,
             max_switch_ns,
             max_latency_ns,
-            diagnosis: None,
-            anchor_task: None,
-            anchor_class: None,
-            anchor_comm: None,
-            anchor_kind: None,
+            ..Default::default()
         }
     }
 

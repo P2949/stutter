@@ -32,7 +32,7 @@ pub struct TaskTracker {
     pub cache: crate::process_tree::ProcessCache,
 }
 
-pub trait TaskMap {
+pub trait TaskMap: Send {
     fn insert(&mut self, k: u32, v: u8, f: u64) -> anyhow::Result<()>;
     fn remove(&mut self, k: &u32) -> anyhow::Result<()>;
 }
@@ -47,7 +47,10 @@ impl TaskMap for AyaHashMap<MapData, u32, u8> {
 }
 
 impl TaskTracker {
-    pub async fn refresh(&mut self, mut input: RefreshInput<'_>) -> anyhow::Result<()> {
+    pub async fn refresh(
+        &mut self,
+        mut input: RefreshInput<'_>,
+    ) -> anyhow::Result<crate::process_tree::ScanBudgetReport> {
         let snapshot = crate::process_tree::target_snapshot(
             crate::process_tree::TargetSnapshotInput::default()
                 .manual_pids(&input.config.target_pids)
@@ -60,6 +63,8 @@ impl TaskTracker {
                 .previous_tasks(Some(&self.active_targets)),
         );
 
+        let budget_report = snapshot.budget_report.clone();
+
         self.refresh_internal(
             snapshot,
             input.config,
@@ -69,7 +74,9 @@ impl TaskTracker {
             input.prev_faults_map.as_deref_mut(),
             input.target_pid_map,
         )
-        .await
+        .await?;
+
+        Ok(budget_report)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -358,7 +365,7 @@ mod tests {
             watch_poll_ms: 1000,
             watch_timeout: None,
             max_tasks: 1,
-            csv_path: None,
+            csv_stream: None,
             irq_latency: false,
             irqs: Vec::new(),
             hwmon: false,
@@ -385,6 +392,11 @@ mod tests {
             json_stream: false,
             mangohud_log_live: false,
             metrics_port: None,
+            ringbuf_size_kb: None,
+            wakeup_map_factor: None,
+            otlp_endpoint: None,
+            otel_service_name: "stutter".to_owned(),
+            remote: None,
         };
 
         let mut tasks = BTreeMap::new();
@@ -394,6 +406,7 @@ mod tests {
         let snapshot = TargetSnapshot {
             tasks,
             process_roots: std::collections::BTreeSet::from([100]),
+            budget_report: crate::process_tree::ScanBudgetReport::default(),
         };
 
         struct MockMap;

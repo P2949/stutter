@@ -3,7 +3,65 @@ use std::{
     fmt, fs,
     os::unix::fs::MetadataExt,
     path::Path,
+    time::{Duration, Instant},
 };
+
+pub const DEFAULT_MAX_PROC_SCAN_MS: u64 = 50;
+pub const DEFAULT_MAX_THREADS_PER_PROCESS: usize = 4096;
+
+#[derive(Debug, Clone)]
+pub struct ScanBudget {
+    started_at: Instant,
+    max_duration: Duration,
+    max_proc_entries: Option<usize>,
+    max_threads_per_process: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScanBudgetReport {
+    pub scan_timed_out: bool,
+    pub proc_entries_seen: usize,
+    pub proc_entries_skipped: usize,
+    pub thread_entries_seen: usize,
+    pub thread_entries_skipped: usize,
+    pub processes_thread_limited: usize,
+}
+
+impl ScanBudget {
+    pub fn new(max_duration: Duration, max_threads_per_process: usize) -> Self {
+        Self {
+            started_at: Instant::now(),
+            max_duration,
+            max_proc_entries: None,
+            max_threads_per_process,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_max_proc_entries(mut self, max_proc_entries: usize) -> Self {
+        self.max_proc_entries = Some(max_proc_entries);
+        self
+    }
+
+    pub fn default_proc_scan() -> Self {
+        Self::new(
+            Duration::from_millis(DEFAULT_MAX_PROC_SCAN_MS),
+            DEFAULT_MAX_THREADS_PER_PROCESS,
+        )
+    }
+
+    pub fn expired(&self) -> bool {
+        self.started_at.elapsed() > self.max_duration
+    }
+
+    pub fn max_proc_entries(&self) -> Option<usize> {
+        self.max_proc_entries
+    }
+
+    pub fn max_threads_per_process(&self) -> usize {
+        self.max_threads_per_process
+    }
+}
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -28,6 +86,10 @@ impl Default for ProcessCache {
 impl ProcessCache {
     pub fn invalidate(&mut self, pid: u32) {
         self.entries.remove(&pid);
+    }
+
+    pub fn comm_for_tid(&self, tid: u32) -> Option<String> {
+        self.entries.get(&tid).map(|e| e.info.comm.clone())
     }
 }
 
@@ -157,6 +219,7 @@ pub fn sched_policy_name(policy: u32) -> Option<&'static str> {
 pub struct TargetSnapshot {
     pub process_roots: BTreeSet<u32>,
     pub tasks: BTreeMap<u32, TaskInfo>,
+    pub budget_report: ScanBudgetReport,
 }
 
 /// Input parameters for [target_snapshot].
@@ -184,6 +247,10 @@ pub struct TargetSnapshotInput<'a> {
     pub cache: Option<&'a mut ProcessCache>,
     /// An optional map of previous tasks to help preserve task information.
     pub previous_tasks: Option<&'a BTreeMap<u32, TaskInfo>>,
+    /// Maximum duration allowed for scanning processes.
+    pub max_scan_duration: Option<Duration>,
+    /// Maximum number of threads to scan per process.
+    pub max_threads_per_process: Option<usize>,
 }
 
 impl<'a> Default for TargetSnapshotInput<'a> {
@@ -198,6 +265,8 @@ impl<'a> Default for TargetSnapshotInput<'a> {
             keep_missing_pid: false,
             cache: None,
             previous_tasks: None,
+            max_scan_duration: None,
+            max_threads_per_process: None,
         }
     }
 }
@@ -347,7 +416,12 @@ pub struct TargetDiffRef<'a> {
     pub task: &'a TaskInfo,
 }
 
-pub fn scan_processes_at(proc_root: &Path, cache: &mut ProcessCache) -> BTreeMap<u32, ProcInfo> {
+pub fn scan_processes_at(
+    proc_root: &Path,
+    cache: &mut ProcessCache,
+    budget: &ScanBudget,
+    budget_report: &mut ScanBudgetReport,
+) -> BTreeMap<u32, ProcInfo> {
     let start = std::time::Instant::now();
     let mut processes = BTreeMap::new();
 
@@ -359,6 +433,27 @@ pub fn scan_processes_at(proc_root: &Path, cache: &mut ProcessCache) -> BTreeMap
     };
 
     for entry in entries.flatten() {
+        if budget.expired() {
+            budget_report.scan_timed_out = true;
+            log::warn!(
+                "process_scan_budget_exceeded elapsed_ms={} max_ms={} proc_entries_seen={}",
+                budget.started_at.elapsed().as_millis(),
+                budget.max_duration.as_millis(),
+                budget_report.proc_entries_seen
+            );
+            break;
+        }
+
+        budget_report.proc_entries_seen += 1;
+
+        #[allow(clippy::collapsible_if)]
+        if let Some(max_proc_entries) = budget.max_proc_entries() {
+            if budget_report.proc_entries_seen > max_proc_entries {
+                budget_report.proc_entries_skipped += 1;
+                break;
+            }
+        }
+
         let file_name = entry.file_name();
         let Some(name) = file_name.to_str() else {
             continue;
@@ -490,7 +585,12 @@ pub fn descendants_of(
     result
 }
 
-pub fn thread_ids_of_at(proc_root: &Path, pid: u32) -> BTreeSet<u32> {
+pub fn thread_ids_of_at_limited(
+    proc_root: &Path,
+    pid: u32,
+    max_threads: usize,
+    report: &mut ScanBudgetReport,
+) -> BTreeSet<u32> {
     let mut tids = BTreeSet::new();
     let task_path = proc_root.join(pid.to_string()).join("task");
 
@@ -499,6 +599,13 @@ pub fn thread_ids_of_at(proc_root: &Path, pid: u32) -> BTreeSet<u32> {
     };
 
     for entry in entries.flatten() {
+        report.thread_entries_seen += 1;
+
+        if tids.len() >= max_threads {
+            report.thread_entries_skipped += 1;
+            break;
+        }
+
         let file_name = entry.file_name();
         let Some(name) = file_name.to_str() else {
             continue;
@@ -511,7 +618,16 @@ pub fn thread_ids_of_at(proc_root: &Path, pid: u32) -> BTreeSet<u32> {
         tids.insert(tid);
     }
 
+    if report.thread_entries_skipped > 0 {
+        report.processes_thread_limited += 1;
+    }
+
     tids
+}
+
+pub fn thread_ids_of_at(proc_root: &Path, pid: u32) -> BTreeSet<u32> {
+    let mut report = ScanBudgetReport::default();
+    thread_ids_of_at_limited(proc_root, pid, usize::MAX, &mut report)
 }
 
 pub fn task_comm_at(proc_root: &Path, pid: u32, tid: u32) -> Option<String> {
@@ -541,14 +657,23 @@ pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
         keep_missing_pid,
         cache,
         previous_tasks,
+        max_scan_duration,
+        max_threads_per_process,
     } = input;
+
+    let max_scan_duration =
+        max_scan_duration.unwrap_or(Duration::from_millis(DEFAULT_MAX_PROC_SCAN_MS));
+    let max_threads_per_process =
+        max_threads_per_process.unwrap_or(DEFAULT_MAX_THREADS_PER_PROCESS);
+    let budget = ScanBudget::new(max_scan_duration, max_threads_per_process);
+    let mut budget_report = ScanBudgetReport::default();
 
     let mut local_cache = ProcessCache::default();
     let cache = cache.unwrap_or(&mut local_cache);
     let default_filters = TaskFilters::default();
     let filters = filters.unwrap_or(&default_filters);
 
-    let processes = scan_processes_at(proc_root, cache);
+    let processes = scan_processes_at(proc_root, cache, &budget, &mut budget_report);
     let mut requested_roots = BTreeSet::new();
     let mut process_roots = BTreeSet::new();
     let mut cgroup_roots = BTreeSet::new();
@@ -601,10 +726,18 @@ pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
     }
     process_roots.retain(|pid| !excluded_pids.contains(pid));
 
-    let mut tasks = expand_tasks_at(proc_root, &process_roots, &processes, previous_tasks);
+    let mut tasks = expand_tasks_at(
+        proc_root,
+        &process_roots,
+        &processes,
+        previous_tasks,
+        &budget,
+        &mut budget_report,
+    );
 
     if !unresolved_manual_pids.is_empty() {
-        let thread_owner_by_tid = thread_owner_index_at(proc_root, &processes);
+        let thread_owner_by_tid =
+            thread_owner_index_at(proc_root, &processes, &budget, &mut budget_report);
         for tid in unresolved_manual_pids {
             if let Some(process_pid) = thread_owner_by_tid.get(&tid).copied()
                 && !excluded_pids.contains(&process_pid)
@@ -661,6 +794,7 @@ pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
     TargetSnapshot {
         process_roots,
         tasks,
+        budget_report,
     }
 }
 
@@ -774,6 +908,8 @@ pub fn expand_tasks_at(
     process_pids: &BTreeSet<u32>,
     processes: &BTreeMap<u32, ProcInfo>,
     previous_tasks: Option<&BTreeMap<u32, TaskInfo>>,
+    budget: &ScanBudget,
+    budget_report: &mut ScanBudgetReport,
 ) -> BTreeMap<u32, TaskInfo> {
     let mut tasks = BTreeMap::new();
 
@@ -782,7 +918,12 @@ pub fn expand_tasks_at(
             continue;
         };
 
-        let tids = thread_ids_of_at(proc_root, *pid);
+        let tids = thread_ids_of_at_limited(
+            proc_root,
+            *pid,
+            budget.max_threads_per_process(),
+            budget_report,
+        );
 
         if tids.is_empty() {
             tasks.insert(
@@ -806,10 +947,18 @@ pub fn expand_tasks_at(
 fn thread_owner_index_at(
     proc_root: &Path,
     processes: &BTreeMap<u32, ProcInfo>,
+    budget: &ScanBudget,
+    budget_report: &mut ScanBudgetReport,
 ) -> BTreeMap<u32, u32> {
     let mut owners = BTreeMap::new();
     for pid in processes.keys() {
-        for tid in thread_ids_of_at(proc_root, *pid) {
+        let tids = thread_ids_of_at_limited(
+            proc_root,
+            *pid,
+            budget.max_threads_per_process(),
+            budget_report,
+        );
+        for tid in tids {
             owners.insert(tid, *pid);
         }
     }
@@ -1115,7 +1264,14 @@ pub fn render_tree(root_pid: u32) -> anyhow::Result<String> {
 }
 
 pub fn render_tree_at(proc_root: &Path, root_pid: u32) -> anyhow::Result<String> {
-    let processes = scan_processes_at(proc_root, &mut ProcessCache::default());
+    let budget = ScanBudget::default_proc_scan();
+    let mut budget_report = ScanBudgetReport::default();
+    let processes = scan_processes_at(
+        proc_root,
+        &mut ProcessCache::default(),
+        &budget,
+        &mut budget_report,
+    );
     let Some(root) = processes.get(&root_pid) else {
         anyhow::bail!("process {root_pid} not found under {}", proc_root.display());
     };
@@ -1365,23 +1521,54 @@ mod tests {
         };
 
         // scan 1: inserts at generation 1
-        let p1 = scan_processes_at(&dir, &mut cache);
+        let budget = ScanBudget::default_proc_scan();
+        let mut budget_report1 = ScanBudgetReport::default();
+        let p1 = scan_processes_at(&dir, &mut cache, &budget, &mut budget_report1);
         assert_eq!(p1.len(), 1);
         assert_eq!(cache.generation, 1);
         assert_eq!(cache.entries.get(&100).unwrap().scan_generation, 1);
 
         // scan 2: delta is 1, cache is still reused (generation 2, cached 1, 2-1=1 <= 1)
-        let p2 = scan_processes_at(&dir, &mut cache);
+        let mut budget_report2 = ScanBudgetReport::default();
+        let p2 = scan_processes_at(&dir, &mut cache, &budget, &mut budget_report2);
         assert_eq!(p2.len(), 1);
         assert_eq!(cache.generation, 2);
         assert_eq!(cache.entries.get(&100).unwrap().scan_generation, 1);
 
         // scan 3: delta is 2, cache is refreshed (generation 3, cached 1, 3-1=2 > 1)
-        let p3 = scan_processes_at(&dir, &mut cache);
+        let mut budget_report3 = ScanBudgetReport::default();
+        let p3 = scan_processes_at(&dir, &mut cache, &budget, &mut budget_report3);
         assert_eq!(p3.len(), 1);
         assert_eq!(cache.generation, 3);
         assert_eq!(cache.entries.get(&100).unwrap().scan_generation, 3);
 
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn test_thread_ids_of_at_limited() {
+        let dir =
+            std::env::temp_dir().join(format!("stutter-test-thread-limit-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+
+        let pid_dir = dir.join("100");
+        fs::create_dir_all(&pid_dir).unwrap();
+
+        let task_dir = pid_dir.join("task");
+        fs::create_dir_all(&task_dir).unwrap();
+
+        for tid in 100..110 {
+            fs::create_dir_all(task_dir.join(tid.to_string())).unwrap();
+        }
+
+        let mut report = ScanBudgetReport::default();
+        let tids = thread_ids_of_at_limited(&dir, 100, 5, &mut report);
+
+        assert_eq!(tids.len(), 5);
+        assert_eq!(report.thread_entries_seen, 6);
+        assert_eq!(report.thread_entries_skipped, 1);
+        assert_eq!(report.processes_thread_limited, 1);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

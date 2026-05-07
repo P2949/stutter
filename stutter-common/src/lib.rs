@@ -35,6 +35,14 @@ pub struct SchedulerEvent {
     pub switch_ns: u64,
     pub latency_ns: u64,
     pub comm: [u8; 16],
+    /// PID of the task switched out immediately before this scheduler event.
+    /// This is sched_switch.prev_pid, not necessarily the task that experienced
+    /// wakeup latency.
+    pub switch_prev_pid: u32,
+
+    /// Raw sched_switch.prev_state for switch_prev_pid.
+    /// This describes the task switched out, not the task switched in.
+    pub switch_prev_state: i64,
 }
 
 #[cfg(feature = "user")]
@@ -121,7 +129,7 @@ unsafe impl aya::Pod for ExecEvent {}
 
 // Compile-time layout assertions to ensure eBPF and userspace agree on struct sizes.
 // These will fail the build if the sizes change unexpectedly.
-const _: [(); core::mem::size_of::<SchedulerEvent>()] = [(); 88];
+const _: [(); core::mem::size_of::<SchedulerEvent>()] = [(); 104];
 const _: [(); core::mem::size_of::<IrqEvent>()] = [(); 40];
 const _: [(); core::mem::size_of::<MigrationEvent>()] = [(); 24];
 const _: [(); core::mem::size_of::<CpuFreqEvent>()] = [(); 24];

@@ -432,6 +432,17 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
 
     let pid = next_pid as u32;
 
+    // Read the previous task context from the tracepoint: prev_pid and prev_state.
+    // Offsets validated in userspace preflight assume prev_pid at 24 and prev_state at 32.
+    let prev_pid_raw: i32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
+    let prev_state: i64 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
+
+    let switch_prev_pid = if prev_pid_raw > 0 {
+        prev_pid_raw as u32
+    } else {
+        0
+    };
+
     let wakeup_data = match unsafe { WAKEUP_DATA.get(pid) } {
         Some(d) => *d,
         None => return Ok(0),
@@ -497,6 +508,8 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
         (*event).switch_ns = switch_ns;
         (*event).latency_ns = latency_ns;
         (*event).comm = comm;
+        (*event).switch_prev_pid = switch_prev_pid;
+        (*event).switch_prev_state = prev_state;
     }
 
     entry.submit(0);

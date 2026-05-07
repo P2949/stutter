@@ -36,7 +36,7 @@ pub fn write_minimal_recording_fixture(dir: &Path) {
         keep_missing_pid: false,
         watch_poll_ms: 100,
         watch_timeout_ms: None,
-        csv_path: None,
+        csv_stream: None,
         irq_latency: false,
         irqs: vec![],
         hwmon: false,
@@ -62,6 +62,8 @@ pub fn write_minimal_recording_fixture(dir: &Path) {
         cpu_perf_cache_refs: false,
         block_io: false,
         stat_wait: false,
+        otlp_endpoint: None,
+        otel_service_name: "stutter".to_owned(),
     };
 
     let task = SessionTask {
@@ -416,15 +418,7 @@ fn spike_event(
         latency_ns,
         wakeup_ns: switch_ns.saturating_sub(latency_ns),
         switch_ns,
-        target_pending_wakeups: 0,
-        observed_runnable_depth: 0,
-        major_faults: 0,
-        minor_faults: 0,
-        scx_ops: None,
-        scx_state: None,
-        scx_enable_seq: None,
-        cause_tags: Vec::new(),
-        primary_cause: None,
+        ..Default::default()
     }
 }
 
@@ -491,7 +485,7 @@ fn report_rejects_missing_required_artifacts() {
     fs::create_dir_all(&temp).unwrap();
 
     // Call the report loading helper. It should fail because the directory is empty.
-    let result = report::print_report(&temp, false, false, false, 10, 500, None);
+    let result = report::print_report(&temp, false, false, false, 10, 500, None, None);
 
     assert!(result.is_err());
     let err_msg = format!("{:?}", result.err().unwrap()).to_lowercase();
@@ -917,7 +911,7 @@ fn mk_dummy_config() -> RecordedConfig {
         keep_missing_pid: false,
         watch_poll_ms: 100,
         watch_timeout_ms: None,
-        csv_path: None,
+        csv_stream: None,
         irq_latency: false,
         irqs: vec![],
         hwmon: false,
@@ -943,5 +937,7 @@ fn mk_dummy_config() -> RecordedConfig {
         cpu_perf_cache_refs: false,
         block_io: false,
         stat_wait: false,
+        otlp_endpoint: None,
+        otel_service_name: "stutter".to_owned(),
     }
 }

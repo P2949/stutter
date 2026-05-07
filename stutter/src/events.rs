@@ -200,6 +200,19 @@ pub fn handle_event(
         .get(&event.pid)
         .or_else(|| tasks.known_targets.get(&event.pid));
 
+    let waker_comm = tasks
+        .stats_by_task
+        .get(&event.waker_tid)
+        .map(|stats| stats.comm.clone())
+        .or_else(|| {
+            tasks
+                .active_targets
+                .get(&event.waker_tid)
+                .map(|target| target.comm.clone())
+        })
+        .or_else(|| tasks.cache.comm_for_tid(event.waker_tid))
+        .unwrap_or_default();
+
     let stats = tasks
         .stats_by_task
         .entry(event.pid)
@@ -256,6 +269,8 @@ pub fn handle_event(
                 scx_enable_seq: scx_enable_seq.clone(),
                 cause_tags,
                 primary_cause,
+                waker_tid: event.waker_tid,
+                waker_comm,
             },
         );
         spike_ret = Some(spike_event.clone());
@@ -285,6 +300,16 @@ pub fn handle_event(
         {
             warn!("json_stream_write_failed err={err:#}");
             recorder.stdout_spike_stream_errors += 1;
+        }
+
+        if let Some(tx) = recorder.otel_spike_tx.as_ref() {
+            let item = crate::otel::OtelSpike::from(&spike_event);
+            #[allow(clippy::collapsible_if)]
+            if let Err(_err) = tx.try_send(item) {
+                if let Some(dropped) = recorder.otel_spans_dropped.as_ref() {
+                    dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
         }
 
         if !config.json_stream {
@@ -556,6 +581,8 @@ mod tests {
             switch_ns: 3000,
             latency_ns: 1000,
             comm: [0; 16],
+            switch_prev_pid: 0,
+            switch_prev_state: 0,
         };
 
         let bytes = unsafe {
@@ -591,6 +618,8 @@ mod tests {
             switch_ns: 0,
             latency_ns: 1000,
             comm: [0; 16],
+            switch_prev_pid: 0,
+            switch_prev_state: 0,
         };
         let stats = metrics::TaskStats::new(123, "test".to_string(), 0);
 

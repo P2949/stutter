@@ -54,6 +54,103 @@ scripts/install-local.sh
 
 This installs `stutter` under `~/.local/bin` by default. It does not install setuid bits or Linux capabilities. See [docs/INSTALL.md](docs/INSTALL.md) for uninstall and user-service notes.
 
+### User config file
+
+`stutter monitor` can read default options from:
+
+```text
+~/.config/stutter/config.toml
+```
+
+Override the path with:
+
+```bash
+STUTTER_CONFIG=/path/to/config.toml stutter monitor ...
+```
+
+Example:
+
+```toml
+summary_ms = 500
+spike_us = 1000
+hwmon = true
+cpu_freq = true
+include_comm = ["Game", "/Render.*/"]
+exclude_comm = ["steamwebhelper"]
+max_tasks = 256
+retain_intervals = 120
+```
+
+Precedence is:
+
+```text
+built-in defaults < config file < CLI arguments
+```
+
+Target selection stays CLI-only; the config file does not set target PIDs or cgroups.
+
+### Monitor presets
+
+`stutter monitor` supports named presets for common collection settings:
+
+```bash
+stutter monitor --preset gaming --watch-process gamescope
+stutter monitor --preset diagnosis --pid 1234
+stutter monitor --preset lightweight --watch-process game
+```
+
+Available presets:
+
+* `gaming`: enables hardware monitoring, CPU frequency, faults, and stat-wait collection.
+* `recording`: enables a broader recording-oriented set including block I/O.
+* `diagnosis`: enables heavier diagnostic collection. IRQ latency still requires explicit `--irq-latency --irq N`.
+* `lightweight`: disables optional heavier collectors.
+
+Presets do not choose targets. You still need to pass a target such as `--pid`, `--watch-process`, or `--cgroupv2`.
+
+Precedence:
+
+```text
+built-in defaults < config file < preset < explicit CLI flags
+```
+
+Example:
+
+```bash
+stutter monitor --preset diagnosis --no-cpu-freq --pid 1234
+```
+
+Here `--no-cpu-freq` overrides the preset.
+
+### Advanced eBPF map sizing
+
+Most users should keep the automatic map sizing defaults. If a recording shows ring-buffer drops or wakeup-map pressure, advanced users can override selected map sizes:
+
+```bash
+stutter monitor --pid 1234 --ringbuf-size-kb 8192
+stutter monitor --pid 1234 --wakeup-map-factor 4
+```
+
+* `--ringbuf-size-kb KB`: increases the event ring buffer. Larger values can reduce drops during bursts, but use more locked kernel memory.
+* `--wakeup-map-factor N`: sizes the wakeup tracking map as roughly `max_tasks * N`, clamped to built-in safety limits. Larger values can reduce wakeup insert failures, but use more memory.
+
+Valid ranges:
+
+* `--ringbuf-size-kb`: `64..=16384`
+* `--wakeup-map-factor`: `1..=64`
+
+These flags are escape hatches. The automatic defaults are usually correct.
+
+### Latency flamegraph SVG
+
+`stutter report` can export a flamegraph-style SVG for spike latency attribution:
+
+```bash
+stutter report --flamegraph latency.svg run/
+```
+
+This is not a CPU stack flamegraph. Stutter does not collect stack traces for this view. The SVG is built from pseudo-stacks (task/thread/CPU) weighted by total spike latency. Use it to see which task/thread/CPU combinations account for the most observed scheduler latency.
+
 ## Recommended workflow
 
 `stutter` recommendations are experiments, not proof of root cause.
@@ -149,6 +246,30 @@ root 128848 gamescope [GameScope]
          └─ ...
 ```
 
+## Inspect IRQs
+
+Use `inspect-irqs` to discover useful numeric IRQ IDs from `/proc/interrupts`:
+
+```bash
+stutter inspect-irqs
+stutter inspect-irqs --filter amdgpu
+stutter inspect-irqs --filter xhci --top 10
+stutter inspect-irqs --json
+```
+
+Example output:
+
+```text
+IRQ        total        kind       name
+146        12345678     PCI-MSI    524288-edge amdgpu
+147        123456       PCI-MSI    524289-edge xhci_hcd
+
+Suggestions:
+  Use: stutter monitor --irq-latency --irq 146
+```
+
+Only numeric IRQ IDs can be passed to `--irq`. Non-numeric interrupt rows such as `NMI` or `LOC` may appear in the table but are not suggested as `--irq` values.
+
 ## Record a run
 
 ```bash
@@ -191,6 +312,18 @@ Hardware monitoring notes:
 - Frequent hwmon sampling uses cached file descriptors internally; if you see warnings about
   `latency_samples_truncated`, that means stutter is storing a bounded number of exact samples
   and will fall back to histogram-based percentile estimates for p95/p99.
+
+## Interval CSV Streaming
+
+Stream per-interval summaries to a file or stdout:
+
+```bash
+# Stream to a file
+stutter monitor --stream-csv output.csv
+
+# Stream to stdout (suppresses human-readable output)
+stutter monitor --stream-csv -
+```
 
 ## Bench a repeatable route
 
@@ -448,7 +581,7 @@ Note: the CSV exporter is intentionally compact and omits some newer fields. `in
 - `--alert-threshold-ms <MS>`: send an alert when a runnable-latency spike reaches this threshold. Uses `notify-send` by default.
 - `--alert-webhook-url <URL>`: with `--alert-threshold-ms`, POST alert JSON to a webhook instead of using `notify-send`. You can also set `STUTTER_ALERT_WEBHOOK_URL`.
 - `--include-comm <PATTERN>` / `--exclude-comm <PATTERN>`: case-insensitive substring filters against task `comm` and process `comm`; exclude wins.
-- `--irq-latency`: enable IRQ latency tracing and record `irq_events.json`; at least one explicit `--irq <IRQ>` is required. Inspect `/proc/interrupts` to find the IRQ for your GPU/device.
+- `--irq-latency`: enable IRQ latency tracing and record `irq_events.json`; at least one explicit `--irq <IRQ>` is required. Use `stutter inspect-irqs` to find the IRQ numbers for your devices.
 - `--irq <IRQ>`: add an IRQ number to target for IRQ latency measurement (can repeat).
 - `--hwmon`: enable GPU hwmon sampling; combine with `--hwmon-drm-card`, `--hwmon-render-node`, or `--hwmon-root` to avoid ambiguous multi-GPU discovery.
 - `--hwmon-root <PATH>`: override hwmon discovery path when automatic detection fails.
@@ -480,6 +613,32 @@ The `--tui` mode uses ratatui and crossterm alternate-screen rendering. It shows
 Note: when present, `cpu_frequency` tracepoint samples are emitted as system-wide telemetry and are not filtered to individual target tasks; treat them as global context rather than per-task signals.
 
 If you need machine-readable schemas, open a recorded run under `~/.local/state/stutter/runs/<run-dir>/` and inspect the files; they are stable across releases but may add fields in minor versions.
+
+### Remote agent mode experimental
+
+Run the collector as a privileged local agent:
+
+```bash
+sudo stutter agent --port 9899
+```
+
+Control it from a client:
+
+```bash
+stutter monitor --remote http://127.0.0.1:9899 --pid 1234 --duration 10
+```
+
+The first implementation exposes a local HTTP JSON API:
+
+* `GET /health`
+* `POST /record/start`
+* `POST /record/stop`
+* `GET /record/status`
+* `GET /runs`
+* `GET /runs/<id>/session.json`
+* `GET /runs/<id>/artifact/<name>`
+
+The agent binds to localhost by default. Binding to a non-local address is not authenticated in the first version and should only be used on trusted networks.
 
 ## TID reuse detection (what we do)
 

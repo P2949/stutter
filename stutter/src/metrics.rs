@@ -22,6 +22,12 @@ pub struct SpikeRecord {
     pub prio: i32,
     pub wakeup_ns: u64,
     pub switch_ns: u64,
+    #[serde(default)]
+    pub switch_prev_pid: u32,
+    #[serde(default)]
+    pub switch_prev_state: i64,
+    #[serde(default)]
+    pub switch_prev_state_label: String,
     /// Diagnostic-only count of monitored pending wakeups for this target/task.
     /// This is not CPU runqueue depth and must not be used as true CPU contention.
     #[serde(alias = "target_runnable_depth")]
@@ -663,6 +669,12 @@ impl TaskStats {
                 prio: event.prio,
                 wakeup_ns: event.wakeup_ns,
                 switch_ns: event.switch_ns,
+                switch_prev_pid: event.switch_prev_pid,
+                switch_prev_state: event.switch_prev_state,
+                switch_prev_state_label: crate::report::classify_switch_prev_state(
+                    event.switch_prev_state,
+                )
+                .to_owned(),
                 target_pending_wakeups: event.target_pending_wakeups,
                 observed_runnable_depth: event.observed_runnable_depth,
                 major_faults,
@@ -1040,6 +1052,8 @@ mod tests {
             switch_ns: 200,
             latency_ns: 100,
             comm: [0; 16],
+            switch_prev_pid: 0,
+            switch_prev_state: 0,
         };
 
         // 1. First event establishes baseline: 10 faults
@@ -1115,6 +1129,8 @@ mod tests {
             switch_ns: 2000,
             latency_ns: 1_000,
             comm: [0; 16],
+            switch_prev_pid: 0,
+            switch_prev_state: 0,
         };
         stats.record(&event, 1_000_000, 0, None, None, None);
 
