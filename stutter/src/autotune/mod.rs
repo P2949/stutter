@@ -1,6 +1,7 @@
 pub mod controller;
 pub mod decision;
 pub mod decision_log;
+pub mod human_output;
 pub mod observation;
 pub mod quality;
 pub mod replay;
@@ -17,7 +18,14 @@ use std::{
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{cli::Config, session_events::MonitorEvent};
+use crate::{
+    autotune::human_output::{
+        HumanAutotuneMode, HumanControllerPhase, HumanDecisionKind, HumanDecisionWindow,
+        HumanSituationKind, print_human_decision_window,
+    },
+    cli::Config,
+    session_events::MonitorEvent,
+};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -48,15 +56,17 @@ pub struct AutotuneDecisionLogEntry {
 #[derive(Debug, Default)]
 struct ObservePolicyStub {
     mode: String,
+    watch_process: Option<String>,
     decision_log: Option<PathBuf>,
     interval_events: usize,
     interval_records: usize,
 }
 
 impl ObservePolicyStub {
-    fn new(mode: String, decision_log: Option<PathBuf>) -> Self {
+    fn new(mode: String, watch_process: Option<String>, decision_log: Option<PathBuf>) -> Self {
         Self {
             mode,
+            watch_process,
             decision_log,
             interval_events: 0,
             interval_records: 0,
@@ -91,32 +101,49 @@ impl ObservePolicyStub {
     fn write_decision(
         &self,
         event_kind: &str,
-        decision: &str,
+        decision_str: &str,
         reason: &str,
         interval_records: usize,
     ) -> anyhow::Result<()> {
-        let Some(path) = &self.decision_log else {
-            return Ok(());
-        };
-
-        if let Some(parent) = path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            fs::create_dir_all(parent)?;
-        }
-
         let entry = AutotuneDecisionLogEntry {
             unix_nanos: crate::audit::unix_nanos_now(),
             mode: self.mode.clone(),
             event_kind: event_kind.to_owned(),
-            decision: decision.to_owned(),
+            decision: decision_str.to_owned(),
             reason: reason.to_owned(),
             interval_records,
         };
 
-        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-        serde_json::to_writer(&mut file, &entry)?;
-        file.write_all(b"\n")?;
+        if let Some(path) = &self.decision_log {
+            if let Some(parent) = path.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                fs::create_dir_all(parent)?;
+            }
+
+            let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+            serde_json::to_writer(&mut file, &entry)?;
+            file.write_all(b"\n")?;
+        }
+
+        let window = HumanDecisionWindow {
+            phase: HumanControllerPhase::Observing,
+            mode: match self.mode.as_str() {
+                "observe" => HumanAutotuneMode::Observe,
+                "suggest" => HumanAutotuneMode::Suggest,
+                _ => HumanAutotuneMode::Observe,
+            },
+            target: self.watch_process.clone().unwrap_or_else(|| "-".to_owned()),
+            score_total: 0,
+            situation: HumanSituationKind::Unknown,
+            decision: match decision_str {
+                "noop" => HumanDecisionKind::Noop,
+                _ => HumanDecisionKind::Noop,
+            },
+            reason: reason.to_owned(),
+        };
+        print_human_decision_window(&window);
+
         Ok(())
     }
 }
@@ -133,7 +160,11 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
     let (event_tx, mut event_rx) = mpsc::channel::<MonitorEvent>(256);
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
     let duration = input.duration_seconds.map(Duration::from_secs);
-    let mut policy = ObservePolicyStub::new(input.mode.clone(), input.decision_log.clone());
+    let mut policy = ObservePolicyStub::new(
+        input.mode.clone(),
+        input.watch_process.clone(),
+        input.decision_log.clone(),
+    );
 
     let monitor_task = tokio::spawn(async move {
         crate::session::run_monitor(monitor_config, None, Some(event_tx), Some(stop_rx)).await
@@ -178,7 +209,7 @@ mod tests {
             crate::audit::unix_nanos_now()
         ));
 
-        let mut policy = ObservePolicyStub::new("observe".to_owned(), Some(path.clone()));
+        let mut policy = ObservePolicyStub::new("observe".to_owned(), None, Some(path.clone()));
         policy
             .on_event(MonitorEvent::DataQualityWarning {
                 message: "test warning".to_owned(),
