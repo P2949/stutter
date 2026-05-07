@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     fs,
     path::Path,
     sync::Arc,
@@ -480,6 +480,28 @@ impl MonitorSession {
         }
     }
 
+    async fn refresh_tasks_and_emit_snapshot(&mut self) -> anyhow::Result<()> {
+        let elapsed_ms = self.started.elapsed().as_millis() as u64;
+        let previous_active_targets: BTreeSet<u32> =
+            self.tasks.active_targets.keys().copied().collect();
+
+        self.refresh_tasks().await?;
+
+        let removed_targets = previous_active_targets
+            .into_iter()
+            .filter(|tid| !self.tasks.active_targets.contains_key(tid))
+            .collect::<Vec<_>>();
+
+        self.emit(MonitorEvent::TargetSnapshot {
+            elapsed_ms,
+            active_targets: self.tasks.active_targets.clone(),
+            removed_targets,
+        })
+        .await;
+
+        Ok(())
+    }
+
     pub async fn run(
         &mut self,
         mut stop_rx: Option<tokio::sync::oneshot::Receiver<()>>,
@@ -529,7 +551,7 @@ impl MonitorSession {
         };
         tokio::pin!(max_duration_future);
 
-        self.refresh_tasks().await?;
+        self.refresh_tasks_and_emit_snapshot().await?;
 
         let (mangohud_tx, mut mangohud_rx) = tokio::sync::oneshot::channel::<(u64, u64)>();
         let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel(1024);
@@ -956,7 +978,7 @@ impl MonitorSession {
             }
         }
 
-        self.refresh_tasks().await?;
+        self.refresh_tasks_and_emit_snapshot().await?;
 
         // Belt-and-suspenders cleanup in case a refresh path exits before
         // emitting per-task removal diffs.
@@ -987,7 +1009,7 @@ impl MonitorSession {
             self.watch_state = WatchProcessState::Running(pid);
             info!("watch_process_relaunched pattern={} pid={}", pattern, pid);
 
-            self.refresh_tasks().await?;
+            self.refresh_tasks_and_emit_snapshot().await?;
         }
 
         Ok(())
