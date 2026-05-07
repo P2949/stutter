@@ -71,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
                 remote::run_remote_monitor(remote, request).await?;
                 Ok(())
             } else {
-                run_monitor(config, None, None).await.map(|_| ())
+                run_monitor(config, None, None, None).await.map(|_| ())
             }
         }
         AppCommand::Bench {
@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
             role,
             run_name,
         } => {
-            run_monitor(config, None, None).await?;
+            run_monitor(config, None, None, None).await?;
             if role == "baseline" {
                 println!(
                     "bench complete role=baseline run_name={} next=\"run tune, then stutter recommend --baseline <run-dir> --tune <tune-dir>\"",
@@ -396,7 +396,7 @@ async fn main() -> anyhow::Result<()> {
             let record = prepared.record.clone();
             let config = Arc::new(prepared.config);
 
-            match run_monitor(config, None, None).await {
+            match run_monitor(config, None, None, None).await {
                 Ok(_) => {
                     scenario::append_run_record(&record)?;
                     println!("scenario run complete: {}", record.run_dir.display());

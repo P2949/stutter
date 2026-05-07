@@ -27,6 +27,7 @@ use crate::{
         JsonArrayWriter, LiveRecorder, SpikeEvent, SpikeEventBuffer,
     },
     scx,
+    session_events::MonitorEvent,
     tasks::TaskTracker,
     watch::{
         WatchProcessState, add_watch_tree_pid, capture_tree_root_starttimes,
@@ -180,6 +181,8 @@ pub struct MonitorSession {
     pub interval_label: &'static str,
     pub block_io_correlation_basis: String,
     pub alert_sender: Option<tokio::sync::mpsc::Sender<AlertPayload>>,
+    #[allow(dead_code)]
+    pub event_tx: Option<tokio::sync::mpsc::Sender<MonitorEvent>>,
     pub cpu_perf_sampler: Option<crate::perf_counters::CpuPerfSampler>,
     pub prometheus_state: Option<Arc<crate::prometheus::PrometheusState>>,
     #[allow(dead_code)]
@@ -193,6 +196,7 @@ impl MonitorSession {
     pub async fn new(
         mut config: Config,
         shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
+        event_tx: Option<tokio::sync::mpsc::Sender<MonitorEvent>>,
     ) -> anyhow::Result<Self> {
         if config.target_pids.is_empty()
             && config.tree_pids.is_empty()
@@ -454,6 +458,7 @@ impl MonitorSession {
             interval_label,
             block_io_correlation_basis,
             alert_sender,
+            event_tx,
             cpu_perf_sampler,
             prometheus_state,
             prometheus_task,
@@ -1268,11 +1273,13 @@ impl MonitorSession {
 }
 
 pub async fn run_monitor(
-    config: Arc<Config>,
+    config: impl Into<Arc<Config>>,
     shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
+    event_tx: Option<tokio::sync::mpsc::Sender<MonitorEvent>>,
     stop_rx: Option<tokio::sync::oneshot::Receiver<()>>,
 ) -> anyhow::Result<String> {
-    let mut session = MonitorSession::new((*config).clone(), shared_hwmon).await?;
+    let config = config.into();
+    let mut session = MonitorSession::new((*config).clone(), shared_hwmon, event_tx).await?;
     let stop_reason = session.run(stop_rx).await?;
     session.finalize(stop_reason)
 }
