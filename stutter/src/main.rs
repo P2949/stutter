@@ -2,6 +2,8 @@ mod actions;
 mod advisor;
 mod affinity;
 mod agent;
+#[cfg(test)]
+mod artifact_contract_tests;
 mod audit;
 mod cli;
 mod config_file;
@@ -35,6 +37,7 @@ mod summary;
 mod tasks;
 mod tui;
 mod tune;
+mod validate;
 mod watch;
 
 #[cfg(test)]
@@ -43,6 +46,10 @@ mod recording_fixture_tests;
 mod regression_tests;
 #[cfg(test)]
 mod runnable_depth_tests;
+#[cfg(test)]
+mod test_fixture_builder;
+#[cfg(test)]
+mod validation_corpus_tests;
 
 use std::path::Path;
 
@@ -168,6 +175,9 @@ async fn main() -> anyhow::Result<()> {
             top,
             filter_class,
         } => summary::summary_command(&path, json, top, filter_class),
+        AppCommand::Validate { path, json, strict } => {
+            validate::validate_command(validate::ValidateCommandInput { path, json, strict })
+        }
         AppCommand::Report {
             path,
             json,

@@ -429,7 +429,7 @@ The levels are:
 - `Medium`: the run is usable, but some evidence is approximate, missing, truncated, or degraded.
 - `Low`: validation errors, incompatible schema, or recording write errors make the report unreliable.
 
-For machine-readable consumers, `stutter report --analysis-json <run-dir>` includes the same data-quality summary.
+For machine-readable consumers, `stutter report --analysis-json <run-dir>` is the stable machine-readable interface and includes the same data-quality summary. `stutter validate <run-dir>` validates artifact compatibility and data quality before automation consumes a run.
 
 Diagnosis output uses candidate wording intentionally. A `High` confidence diagnosis means the evidence is strong for a profiler inference, not proof of root cause. `Medium` and `Low` confidence diagnoses should be treated as leads for further testing. Text reports show the top diagnosis candidates and evidence items so the score is auditable instead of sounding final.
 
@@ -627,7 +627,9 @@ Unknown `.exe` processes are no longer automatically treated as critical game ta
 
 For programmatic consumption, inspect the example outputs in a sample run directory created under `~/.local/state/stutter/runs/`.
 
-Note: the CSV exporter is intentionally compact and omits some newer fields. `interval.json` and the other JSON artifacts are the canonical, full-fidelity outputs — they contain PSI samples, major/minor fault deltas, drop counters, and histogram/truncation details. Prefer JSON for programmatic analysis. Recorded run directories are loaded through a shared `session_io` path; missing optional artifact files are gracefully tolerated for older recordings.
+The formal artifact contract is documented in `docs/ARTIFACT_SCHEMA.md`, with versioned sanitized examples under `docs/examples/artifacts/`.
+
+Note: the CSV exporter is intentionally compact and omits some newer fields. `interval.json` and the other JSON artifacts are full-fidelity raw outputs: they contain PSI samples, major/minor fault deltas, drop counters, and histogram/truncation details. Prefer `report --analysis-json` for stable programmatic analysis unless you specifically need raw streams. Recorded run directories are loaded through a shared `session_io` path; missing optional artifact files are gracefully tolerated for older recordings.
 
 ## CLI flags (quick reference)
 

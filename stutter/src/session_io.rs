@@ -123,19 +123,19 @@ impl RunValidationReport {
     }
 }
 
-const SESSION_FILE: &str = "session.json";
-const METADATA_FILE: &str = "metadata.json";
-const INTERVALS_FILE: &str = "interval.json";
-const SPIKES_FILE: &str = "spike_events.json";
-const TREE_EVENTS_FILE: &str = "tree_events.json";
-const IRQ_EVENTS_FILE: &str = "irq_events.json";
-const GPU_SAMPLES_FILE: &str = "gpu_samples.json";
-const FRAME_EVENTS_FILE: &str = "frame_correlation.json";
-const FRAME_EVENTS_STREAM_FILE: &str = "frame_events.json";
-const MIGRATION_EVENTS_FILE: &str = "migration_events.json";
-const CPU_FREQ_EVENTS_FILE: &str = "cpu_freq_samples.json";
-const BLOCK_IO_EVENTS_FILE: &str = "io_events.json";
-const SCX_EVENTS_FILE: &str = "scx_events.json";
+pub(crate) const SESSION_FILE: &str = "session.json";
+pub(crate) const METADATA_FILE: &str = "metadata.json";
+pub(crate) const INTERVALS_FILE: &str = "interval.json";
+pub(crate) const SPIKES_FILE: &str = "spike_events.json";
+pub(crate) const TREE_EVENTS_FILE: &str = "tree_events.json";
+pub(crate) const IRQ_EVENTS_FILE: &str = "irq_events.json";
+pub(crate) const GPU_SAMPLES_FILE: &str = "gpu_samples.json";
+pub(crate) const FRAME_EVENTS_FILE: &str = "frame_correlation.json";
+pub(crate) const FRAME_EVENTS_STREAM_FILE: &str = "frame_events.json";
+pub(crate) const MIGRATION_EVENTS_FILE: &str = "migration_events.json";
+pub(crate) const CPU_FREQ_EVENTS_FILE: &str = "cpu_freq_samples.json";
+pub(crate) const BLOCK_IO_EVENTS_FILE: &str = "io_events.json";
+pub(crate) const SCX_EVENTS_FILE: &str = "scx_events.json";
 
 fn load_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let file =
@@ -613,17 +613,7 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
     ];
 
     for (file_name, type_name) in optional_artifacts {
-        let mut path = report.run_dir.join(file_name);
-        let mut actual_file_name = file_name.to_owned();
-
-        if file_name == FRAME_EVENTS_FILE && !path.exists() {
-            let stream_path = report.run_dir.join(FRAME_EVENTS_STREAM_FILE);
-            if stream_path.exists() {
-                path = stream_path;
-                actual_file_name = FRAME_EVENTS_STREAM_FILE.to_owned();
-            }
-        }
-
+        let path = report.run_dir.join(file_name);
         if path.exists() {
             let res = match type_name {
                 "IntervalRecord" => validate_ndjson_file::<IntervalRecord>(&path),
@@ -641,16 +631,50 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
 
             match res {
                 Ok(_) => {
-                    report.present_files.push(actual_file_name);
+                    report.present_files.push(file_name.to_owned());
                 }
                 Err(e) => {
-                    report
-                        .errors
-                        .push(format!("{actual_file_name} invalid: {e:#}"));
+                    report.errors.push(format!("{file_name} invalid: {e:#}"));
                 }
             }
         } else {
-            report.missing_optional_files.push(file_name.to_owned());
+            let frame_stream_path = report.run_dir.join(FRAME_EVENTS_STREAM_FILE);
+            if file_name == FRAME_EVENTS_FILE && frame_stream_path.exists() {
+                match validate_ndjson_file::<FrameEvent>(&frame_stream_path) {
+                    Ok(_) => {
+                        report
+                            .present_files
+                            .push(FRAME_EVENTS_STREAM_FILE.to_owned());
+                    }
+                    Err(e) => {
+                        report
+                            .errors
+                            .push(format!("{FRAME_EVENTS_STREAM_FILE} invalid: {e:#}"));
+                    }
+                }
+            } else {
+                report.missing_optional_files.push(file_name.to_owned());
+            }
+        }
+    }
+
+    let frame_stream_path = report.run_dir.join(FRAME_EVENTS_STREAM_FILE);
+    if frame_stream_path.exists()
+        && !report
+            .present_files
+            .contains(&FRAME_EVENTS_STREAM_FILE.to_owned())
+    {
+        match validate_ndjson_file::<FrameEvent>(&frame_stream_path) {
+            Ok(_) => {
+                report
+                    .present_files
+                    .push(FRAME_EVENTS_STREAM_FILE.to_owned());
+            }
+            Err(e) => {
+                report
+                    .errors
+                    .push(format!("{FRAME_EVENTS_STREAM_FILE} invalid: {e:#}"));
+            }
         }
     }
 

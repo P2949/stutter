@@ -1,0 +1,65 @@
+{
+  "schema_version": 20,
+  "run_name": "block_io_stall",
+  "started_at": {
+    "unix_seconds": 1625097600,
+    "unix_nanos": 0,
+    "system_time_debug": "2021-07-01T00:00:00Z"
+  },
+  "ended_at": {
+    "unix_seconds": 1625097600,
+    "unix_nanos": 0,
+    "system_time_debug": "2021-07-01T00:00:00Z"
+  },
+  "monotonic_start_ns": 0,
+  "monotonic_end_ns": 1000000000,
+  "duration_ms": 1000,
+  "mangohud_start_offset": null,
+  "mangohud_first_frame_monotonic_ns": null,
+  "mangohud_first_frame_raw_elapsed_ms": null,
+  "metadata": {
+    "kernel_osrelease": null,
+    "kernel_version": null,
+    "cpu_online": null,
+    "cpu_possible": null,
+    "cpu_topology": [],
+    "scx_state": null,
+    "scx_ops": null,
+    "scx_enable_seq": null
+  },
+  "target_pids_max": 1024,
+  "active_target_pids_count": 3,
+  "active_expanded_tasks": [
+    100,
+    101,
+    102
+  ],
+  "interval_record_count": 1,
+  "intervals_dropped": 0,
+  "spike_events_retained_count": 3,
+  "spike_events_dropped_count": 0,
+  "spike_events_truncated": false,
+  "scx_event_count": 0,
+  "irq_event_count": 0,
+  "migration_event_count": 0,
+  "cpu_freq_sample_count": 0,
+  "gpu_sample_count": 0,
+  "frame_event_count": 0,
+  "block_io_event_count": 1,
+  "event_stream_write_errors": 0,
+  "alert_events_dropped_count": 0,
+  "alert_channel_closed_count": 0,
+  "first_event_stream_write_error": null,
+  "block_io_correlation_basis": "request-pointer",
+  "drop_counters": {
+    "wakeup_data_insert_failed": 0,
+    "ringbuf_reserve_failed": 0,
+    "irq_start_times_insert_failed": 0,
+    "block_start_insert_failed": 0
+  },
+  "cpu_perf_sample_count": 0,
+  "cpu_perf_open_errors": 0,
+  "cpu_perf_read_errors": 0,
+  "cpu_perf_skipped_tasks": 0,
+  "cpu_perf_last_error": null
+}
