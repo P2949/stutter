@@ -21,6 +21,7 @@ mod metrics;
 mod otel;
 mod perf_counters;
 mod presets;
+mod probe_catalog;
 mod process_tree;
 mod profiles;
 mod prometheus;
@@ -29,6 +30,7 @@ mod recommend;
 mod recorder;
 mod remote;
 mod report;
+mod scenario;
 mod scorer;
 mod scx;
 mod session;
@@ -51,7 +53,7 @@ mod test_fixture_builder;
 #[cfg(test)]
 mod validation_corpus_tests;
 
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use cli::{AppCommand, parse_app_command};
 use session::run_monitor;
@@ -300,6 +302,7 @@ async fn main() -> anyhow::Result<()> {
             .await
         }
         AppCommand::Doctor { input } => doctor::doctor_command(input),
+        AppCommand::Probes { json } => probe_catalog::probes_command(json),
         AppCommand::ProfileTemplate { topology } => {
             if topology {
                 print!("{}", profiles::generate_topology_template());
@@ -311,7 +314,31 @@ async fn main() -> anyhow::Result<()> {
         AppCommand::InspectIrqs { json, filter, top } => {
             irq_inspect::run_inspect_irqs(json, &filter, top)
         }
-        AppCommand::Agent { bind, runs_dir } => agent::run_agent(bind, runs_dir).await,
+        AppCommand::Agent {
+            bind,
+            runs_dir,
+            allow_unsafe_bind,
+            bearer_token_env,
+            bearer_token_file,
+            max_duration_seconds,
+            max_targets,
+            max_concurrent_recordings,
+        } => {
+            let runs_dir = runs_dir.unwrap_or_else(agent::default_runs_dir);
+            let bearer_token =
+                agent::load_bearer_token(&bearer_token_env, bearer_token_file.as_deref())?;
+
+            agent::run_agent(agent::AgentConfig {
+                bind,
+                runs_dir,
+                allow_unsafe_bind,
+                bearer_token,
+                max_duration_seconds,
+                max_targets,
+                max_concurrent_recordings,
+            })
+            .await
+        }
         AppCommand::Completions { shell } => {
             let mut cmd = cli::command();
             clap_complete::generate(shell, &mut cmd, "stutter", &mut std::io::stdout());
@@ -321,6 +348,86 @@ async fn main() -> anyhow::Result<()> {
             render_man_page(output.as_deref())?;
             Ok(())
         }
+        AppCommand::ScenarioCreate {
+            name,
+            force,
+            watch_process,
+            duration,
+            preset,
+            mangohud_log,
+            notes,
+        } => {
+            let path = scenario::create_scenario(scenario::ScenarioCreateInput {
+                name: name.clone(),
+                force,
+                watch_process,
+                duration,
+                preset,
+                mangohud_log,
+                notes,
+            })?;
+            println!("created scenario {} at {}", name, path.display());
+            println!("edit notes/expected_classes before running if needed");
+            Ok(())
+        }
+        AppCommand::ScenarioRun {
+            name,
+            role,
+            dry_run,
+            out_dir,
+            mangohud_log_override,
+        } => {
+            let role = scenario::ScenarioRole::parse(&role)?;
+            let prepared = scenario::prepare_scenario_run(scenario::ScenarioRunInput {
+                name,
+                role,
+                dry_run,
+                out_dir,
+                mangohud_log_override,
+            })?;
+
+            if prepared.dry_run {
+                print!("{}", prepared.dry_run_text);
+                return Ok(());
+            }
+
+            println!("{}", prepared.start_text);
+            let record = prepared.record.clone();
+            let config = Arc::new(prepared.config);
+
+            match run_monitor(config, None, None).await {
+                Ok(_) => {
+                    scenario::append_run_record(&record)?;
+                    println!("scenario run complete: {}", record.run_dir.display());
+                    Ok(())
+                }
+                Err(err) => {
+                    // Optional: audit_scenario_run_failure
+                    Err(err)
+                }
+            }
+        }
+        AppCommand::ScenarioCompare {
+            name,
+            baseline,
+            current,
+            top,
+            json_summary,
+            validate,
+        } => scenario::compare_scenario(scenario::ScenarioCompareInput {
+            name,
+            baseline,
+            current,
+            top,
+            json_summary,
+            validate,
+        }),
+        AppCommand::ScenarioPath { name } => {
+            let path = scenario::scenario_path(&name)?;
+            println!("{}", path.display());
+            Ok(())
+        }
+        AppCommand::ScenarioList => scenario::list_scenarios(),
     }
 }
 
