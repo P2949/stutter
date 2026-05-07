@@ -302,7 +302,37 @@ async fn main() -> anyhow::Result<()> {
             irq_inspect::run_inspect_irqs(json, &filter, top)
         }
         AppCommand::Agent { bind, runs_dir } => agent::run_agent(bind, runs_dir).await,
+        AppCommand::Completions { shell } => {
+            let mut cmd = cli::command();
+            clap_complete::generate(shell, &mut cmd, "stutter", &mut std::io::stdout());
+            Ok(())
+        }
+        AppCommand::Man { output } => {
+            render_man_page(output.as_deref())?;
+            Ok(())
+        }
     }
+}
+
+fn render_man_page(output: Option<&std::path::Path>) -> anyhow::Result<()> {
+    use anyhow::Context;
+
+    let cmd = cli::command();
+    let man = clap_mangen::Man::new(cmd);
+
+    if let Some(path) = output {
+        let mut file = std::fs::File::create(path)
+            .with_context(|| format!("failed to create man page {}", path.display()))?;
+        man.render(&mut file)
+            .with_context(|| format!("failed to render man page to {}", path.display()))?;
+    } else {
+        let stdout = std::io::stdout();
+        let mut handle = stdout.lock();
+        man.render(&mut handle)
+            .with_context(|| "failed to render man page to stdout")?;
+    }
+
+    Ok(())
 }
 
 fn print_restore_dry_run(path: &Path) -> anyhow::Result<()> {

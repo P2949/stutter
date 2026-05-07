@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     env, fs, io,
     io::Write,
     path::{Path, PathBuf},
@@ -1363,25 +1364,50 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     // whether a failed recording should be treated as fatal.
     let map_write_err = |e: anyhow::Error| -> anyhow::Error { e.context("record write failed") };
 
-    write_json(recording.run_dir.join("session.json"), &session).map_err(map_write_err)?;
-    write_json(recording.run_dir.join("metadata.json"), &metadata_file).map_err(map_write_err)?;
+    let mut sync_tracker = SyncTracker::default();
+
+    write_json(
+        recording.run_dir.join("session.json"),
+        &session,
+        &mut sync_tracker,
+    )
+    .map_err(map_write_err)?;
+    write_json(
+        recording.run_dir.join("metadata.json"),
+        &metadata_file,
+        &mut sync_tracker,
+    )
+    .map_err(map_write_err)?;
 
     if recorder.interval_writer.is_none() {
-        write_json_stream(recording.run_dir.join("interval.json"), interval_records)
-            .map_err(map_write_err)?;
+        write_json_stream(
+            recording.run_dir.join("interval.json"),
+            interval_records,
+            &mut sync_tracker,
+        )
+        .map_err(map_write_err)?;
     }
     if !tree_events.is_empty() {
-        write_json_stream(recording.run_dir.join("tree_events.json"), tree_events)
-            .map_err(map_write_err)?;
+        write_json_stream(
+            recording.run_dir.join("tree_events.json"),
+            tree_events,
+            &mut sync_tracker,
+        )
+        .map_err(map_write_err)?;
     }
     if recorder.spike_event_writer.is_none() && !spike_events.is_empty() {
-        write_json_stream(recording.run_dir.join("spike_events.json"), spike_events)
-            .map_err(map_write_err)?;
+        write_json_stream(
+            recording.run_dir.join("spike_events.json"),
+            spike_events,
+            &mut sync_tracker,
+        )
+        .map_err(map_write_err)?;
     }
     if recorder.irq_event_writer.is_none() && !recorder.irq_events.is_empty() {
         write_json_stream(
             recording.run_dir.join("irq_events.json"),
             &recorder.irq_events,
+            &mut sync_tracker,
         )
         .map_err(map_write_err)?;
     }
@@ -1389,17 +1415,23 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         write_json_stream(
             recording.run_dir.join("gpu_samples.json"),
             &recorder.gpu_samples,
+            &mut sync_tracker,
         )
         .map_err(map_write_err)?;
     }
     if recorder.frame_event_writer.is_none() && !frame_events.is_empty() {
-        write_json_stream(recording.run_dir.join("frame_events.json"), frame_events)
-            .map_err(map_write_err)?;
+        write_json_stream(
+            recording.run_dir.join("frame_events.json"),
+            frame_events,
+            &mut sync_tracker,
+        )
+        .map_err(map_write_err)?;
     }
     if recorder.scx_event_writer.is_none() && !recorder.scx_events.is_empty() {
         write_json_stream(
             recording.run_dir.join("scx_events.json"),
             &recorder.scx_events,
+            &mut sync_tracker,
         )
         .map_err(map_write_err)?;
     }
@@ -1754,7 +1786,52 @@ fn csv_escape(value: &str) -> String {
     }
 }
 
-fn write_json<T: ?Sized + Serialize>(path: PathBuf, value: &T) -> anyhow::Result<()> {
+#[derive(Debug, Default)]
+pub struct SyncTracker {
+    synced_dirs: BTreeSet<PathBuf>,
+}
+
+impl SyncTracker {
+    pub fn sync_parent_once(&mut self, path: &Path) -> anyhow::Result<()> {
+        let Some(parent) = path.parent() else {
+            return Ok(());
+        };
+
+        let parent = parent.to_path_buf();
+
+        if self.synced_dirs.insert(parent.clone()) {
+            let dir = fs::File::open(&parent).with_context(|| {
+                format!(
+                    "failed to open parent directory {} for sync",
+                    parent.display()
+                )
+            })?;
+
+            dir.sync_all()
+                .with_context(|| format!("failed to sync parent directory {}", parent.display()))?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn synced_dir_count_for_test(&self) -> usize {
+        self.synced_dirs.len()
+    }
+
+    #[cfg(test)]
+    fn mark_parent_for_test(&mut self, path: &Path) {
+        if let Some(parent) = path.parent() {
+            self.synced_dirs.insert(parent.to_path_buf());
+        }
+    }
+}
+
+fn write_json<T: ?Sized + Serialize>(
+    path: PathBuf,
+    value: &T,
+    sync_tracker: &mut SyncTracker,
+) -> anyhow::Result<()> {
     let file_name = path
         .file_name()
         .and_then(|name| {
@@ -1778,27 +1855,23 @@ fn write_json<T: ?Sized + Serialize>(path: PathBuf, value: &T) -> anyhow::Result
     fs::rename(&tmp_path, &path)
         .with_context(|| format!("failed to rename temp JSON {}", tmp_path.display()))?;
 
-    if let Some(parent) = path.parent()
-        && let Ok(dir) = fs::File::open(parent)
-    {
-        let _ = dir.sync_all();
-    }
+    sync_tracker.sync_parent_once(&path)?;
 
     Ok(())
 }
 
-fn write_json_stream<T: Serialize>(path: PathBuf, values: &[T]) -> anyhow::Result<()> {
+fn write_json_stream<T: Serialize>(
+    path: PathBuf,
+    values: &[T],
+    sync_tracker: &mut SyncTracker,
+) -> anyhow::Result<()> {
     let mut writer = JsonArrayWriter::create(path.clone())?;
     for value in values {
         writer.push(value)?;
     }
     writer.finish()?;
 
-    if let Some(parent) = path.parent()
-        && let Ok(dir) = fs::File::open(parent)
-    {
-        let _ = dir.sync_all();
-    }
+    sync_tracker.sync_parent_once(&path)?;
 
     Ok(())
 }
@@ -1857,7 +1930,12 @@ mod tests {
 
     #[test]
     fn write_json_rejects_path_without_file_name() {
-        let err = write_json(PathBuf::from("/"), &serde_json::json!({})).unwrap_err();
+        let err = write_json(
+            PathBuf::from("/"),
+            &serde_json::json!({}),
+            &mut SyncTracker::default(),
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("no file name"));
     }
 
@@ -2142,5 +2220,43 @@ mod tests {
                 .as_nanos()
         ));
         dir
+    }
+
+    #[test]
+    fn sync_tracker_tracks_parent_once_for_same_directory() {
+        let mut tracker = SyncTracker::default();
+
+        tracker.mark_parent_for_test(Path::new("run-a/session.json"));
+        tracker.mark_parent_for_test(Path::new("run-a/metadata.json"));
+
+        assert_eq!(tracker.synced_dir_count_for_test(), 1);
+    }
+
+    #[test]
+    fn sync_tracker_tracks_distinct_parent_directories() {
+        let mut tracker = SyncTracker::default();
+
+        tracker.mark_parent_for_test(Path::new("run-a/session.json"));
+        tracker.mark_parent_for_test(Path::new("run-b/session.json"));
+
+        assert_eq!(tracker.synced_dir_count_for_test(), 2);
+    }
+
+    #[test]
+    fn sync_parent_once_does_not_error_for_existing_parent() {
+        let dir = temp_dir("sync-tracker");
+        fs::create_dir_all(&dir).unwrap();
+
+        let path = dir.join("session.json");
+        fs::write(&path, "{}\n").unwrap();
+
+        let mut tracker = SyncTracker::default();
+        tracker.sync_parent_once(&path).unwrap();
+        tracker
+            .sync_parent_once(&dir.join("metadata.json"))
+            .unwrap();
+
+        assert_eq!(tracker.synced_dir_count_for_test(), 1);
+        fs::remove_dir_all(dir).ok();
     }
 }

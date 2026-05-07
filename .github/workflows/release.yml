@@ -36,6 +36,20 @@ jobs:
       - name: Build release binary
         run: cargo build -p stutter --release
 
+      - name: Locate eBPF object
+        id: ebpf-object
+        run: |
+          # The eBPF object is built into OUT_DIR during the normal cargo build.
+          # Locate it so we can upload it as a separate release artifact.
+          OBJECT_PATH=$(find target/release/build -path '*/stutter-*/out/stutter' -type f | head -1)
+          if [ -z "$OBJECT_PATH" ]; then
+            echo "WARNING: eBPF object not found in build output"
+          else
+            echo "path=$OBJECT_PATH" >> "$GITHUB_OUTPUT"
+            cp "$OBJECT_PATH" stutter.bpf.o
+            echo "Found eBPF object: $OBJECT_PATH"
+          fi
+
       - name: Package artifact
         run: |
           mkdir -p dist
@@ -45,8 +59,15 @@ jobs:
           cp docs/SAFETY.md dist/
           tar -C dist -czf stutter-linux-x86_64.tar.gz .
 
-      - name: Upload artifact
+      - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: stutter-linux-x86_64
           path: stutter-linux-x86_64.tar.gz
+
+      - name: Upload eBPF object artifact
+        if: steps.ebpf-object.outputs.path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: stutter-bpf-object
+          path: stutter.bpf.o

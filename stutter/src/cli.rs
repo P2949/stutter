@@ -1,6 +1,6 @@
 use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
-use clap::{ArgAction, Args, Parser, Subcommand};
+use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
 pub const TARGET_PIDS_MAX: usize = 1024;
@@ -40,6 +40,22 @@ enum Command {
     #[command(name = "inspect-irqs")]
     InspectIrqs(InspectIrqsArgs),
     Agent(AgentArgs),
+    #[command(name = "completions")]
+    Completions(CompletionsArgs),
+    #[command(name = "man")]
+    Man(ManArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ManArgs {
+    #[arg(long = "output", short = 'o', value_name = "PATH")]
+    pub output: Option<std::path::PathBuf>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct CompletionsArgs {
+    #[arg(value_enum)]
+    pub shell: clap_complete::Shell,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -749,6 +765,12 @@ pub enum AppCommand {
         bind: std::net::SocketAddr,
         runs_dir: Option<std::path::PathBuf>,
     },
+    Completions {
+        shell: clap_complete::Shell,
+    },
+    Man {
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1104,7 +1126,15 @@ where
                 runs_dir: args.runs_dir,
             })
         }
+        Some(Command::Completions(args)) => Ok(AppCommand::Completions { shell: args.shell }),
+        Some(Command::Man(args)) => Ok(AppCommand::Man {
+            output: args.output,
+        }),
     }
+}
+
+pub fn command() -> clap::Command {
+    Cli::command()
 }
 
 fn merge_bool(
@@ -1469,6 +1499,42 @@ mod tests {
             err.to_string()
                 .contains("--duration must be greater than zero")
         );
+    }
+
+    #[test]
+    fn completions_cli_parses_bash() {
+        let cli = Cli::try_parse_from(["stutter", "completions", "bash"]).unwrap();
+
+        match cli.command {
+            Some(Command::Completions(args)) => {
+                assert_eq!(args.shell, clap_complete::Shell::Bash);
+            }
+            other => panic!("expected completions command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn man_cli_parses_output_path() {
+        let cli = Cli::try_parse_from(["stutter", "man", "--output", "stutter.1"]).unwrap();
+
+        match cli.command {
+            Some(Command::Man(args)) => {
+                assert_eq!(args.output, Some(PathBuf::from("stutter.1")));
+            }
+            other => panic!("expected man command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn man_page_renders_troff_header() {
+        let cmd = super::command();
+        let man = clap_mangen::Man::new(cmd);
+
+        let mut out = Vec::new();
+        man.render(&mut out).unwrap();
+
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains(".TH"));
     }
 
     #[test]

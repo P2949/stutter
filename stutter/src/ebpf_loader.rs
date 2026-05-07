@@ -1,4 +1,9 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    borrow::Cow,
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 use aya::{
@@ -160,12 +165,8 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         BlockIoCorrelationBasis::DevSector
     };
 
-    let mut ebpf = loader
-        .load(aya::include_bytes_aligned!(concat!(
-            env!("OUT_DIR"),
-            "/stutter"
-        )))
-        .context("eBPF load failed")?;
+    let object = ebpf_object_bytes()?;
+    let mut ebpf = loader.load(object.as_ref()).context("eBPF load failed")?;
 
     attach_tracepoint(&mut ebpf, "sched_wakeup", "sched", "sched_wakeup")
         .context("eBPF load failed: attach sched_wakeup")?;
@@ -1206,6 +1207,49 @@ fn raise_memlock_limit() {
     }
 }
 
+/// Read an eBPF object from an external file path.
+///
+/// Returns an error if the file cannot be read or is empty.
+pub(crate) fn read_prebuilt_bpf_object(path: &Path) -> anyhow::Result<Vec<u8>> {
+    let bytes = fs::read(path)
+        .with_context(|| format!("failed to read prebuilt BPF object {}", path.display()))?;
+
+    if bytes.is_empty() {
+        anyhow::bail!("prebuilt BPF object {} is empty", path.display());
+    }
+
+    Ok(bytes)
+}
+
+/// Resolve the eBPF object bytes to load.
+///
+/// If `STUTTER_BPF_OBJECT` is set, reads that file at runtime. This allows
+/// developers to test alternate objects without rebuilding userspace, and
+/// packagers to ship a separate object file.
+///
+/// If the env var is not set, uses the object embedded at build time via
+/// `aya::include_bytes_aligned!`.
+///
+/// If `STUTTER_BPF_OBJECT` is set but the file is unreadable or empty, this
+/// function returns an error — it does **not** silently fall back to the
+/// embedded object.
+fn ebpf_object_bytes() -> anyhow::Result<Cow<'static, [u8]>> {
+    if let Ok(path_str) = std::env::var("STUTTER_BPF_OBJECT") {
+        let path = PathBuf::from(path_str);
+        log::info!("using_prebuilt_bpf_object path={}", path.display());
+
+        let bytes = read_prebuilt_bpf_object(&path)
+            .with_context(|| format!("STUTTER_BPF_OBJECT={}", path.display()))?;
+
+        Ok(Cow::Owned(bytes))
+    } else {
+        Ok(Cow::Borrowed(aya::include_bytes_aligned!(concat!(
+            env!("OUT_DIR"),
+            "/stutter"
+        ))))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -1736,5 +1780,42 @@ format:
                 .as_nanos()
         ));
         dir
+    }
+
+    #[test]
+    fn read_prebuilt_bpf_object_reads_non_empty_file() {
+        let dir = temp_dir("prebuilt-bpf");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("stutter.bpf.o");
+
+        fs::write(&path, b"fake-bpf-object").unwrap();
+
+        let bytes = read_prebuilt_bpf_object(&path).unwrap();
+        assert_eq!(bytes, b"fake-bpf-object");
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn read_prebuilt_bpf_object_rejects_empty_file() {
+        let dir = temp_dir("prebuilt-bpf-empty");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("stutter.bpf.o");
+
+        fs::write(&path, b"").unwrap();
+
+        let err = read_prebuilt_bpf_object(&path).unwrap_err();
+        assert!(err.to_string().contains("empty"));
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn read_prebuilt_bpf_object_rejects_missing_file() {
+        let dir = temp_dir("prebuilt-bpf-missing");
+        let path = dir.join("nonexistent.bpf.o");
+
+        let err = read_prebuilt_bpf_object(&path).unwrap_err();
+        assert!(err.to_string().contains("failed to read"));
     }
 }

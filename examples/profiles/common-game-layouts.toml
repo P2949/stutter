@@ -45,9 +45,15 @@ match_class = ["Game", "GameHelper", "WineServer"]
 name = "game-render-isolated"
 
 [[profile.rules]]
+# Profile rules are first-match-wins. Put specific rules before broad fallback rules.
 # Replace "online" with a render-thread mask such as "2-5" after checking your CPU layout.
 affinity = "online"
 match_comm = ["RenderThread", "Main"]
+
+[[profile.rules]]
+# Broad Game fallback catching any game threads not matched above.
+affinity = "online"
+match_class = ["Game", "GameHelper", "WineServer"]
 
 [[profile.rules]]
 # Replace "online" with a compositor/helper mask such as "0-1" after checking your CPU layout.
