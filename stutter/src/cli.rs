@@ -40,6 +40,7 @@ enum Command {
     ProfileTemplate(ProfileTemplateArgs),
     #[command(name = "inspect-irqs")]
     InspectIrqs(InspectIrqsArgs),
+    Autotune(AutotuneArgs),
     Agent(AgentArgs),
     #[command(name = "completions")]
     Completions(CompletionsArgs),
@@ -47,7 +48,6 @@ enum Command {
     Man(ManArgs),
     Probes(ProbesArgs),
     Scenario(ScenarioArgs),
-    Autotune(AutotuneArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -279,7 +279,40 @@ pub struct MonitorArgs {
 #[derive(Args, Debug, Clone)]
 pub struct AutotuneArgs {
     #[command(subcommand)]
-    pub command: AutotuneCommand,
+    pub command: Option<AutotuneCommand>,
+
+    #[arg(long = "config", value_name = "PATH")]
+    pub config: Option<PathBuf>,
+
+    #[arg(long = "watch-process", value_name = "COMM")]
+    pub watch_process: Option<String>,
+
+    #[arg(long = "tree-pid", value_name = "PID")]
+    pub tree_pid: Option<u32>,
+
+    #[arg(long = "profiles", value_name = "FILE")]
+    pub profiles: Option<PathBuf>,
+
+    #[arg(long = "mode", default_value = "observe")]
+    pub mode: String,
+
+    #[arg(long = "decision-log", value_name = "PATH")]
+    pub decision_log: Option<PathBuf>,
+
+    #[arg(long = "duration-seconds")]
+    pub duration_seconds: Option<u64>,
+
+    #[arg(long = "summary-ms", default_value_t = 1000)]
+    pub summary_ms: u64,
+
+    #[arg(long = "preset", default_value = "diagnosis")]
+    pub preset: String,
+
+    #[arg(long = "hwmon")]
+    pub hwmon: bool,
+
+    #[arg(long = "mangohud-log")]
+    pub mangohud_log: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -904,6 +937,19 @@ pub enum AppCommand {
         top: usize,
         filter_class: Option<TaskClass>,
     },
+    Autotune {
+        config: Option<PathBuf>,
+        watch_process: Option<String>,
+        tree_pid: Option<u32>,
+        profiles: Option<PathBuf>,
+        mode: String,
+        decision_log: Option<PathBuf>,
+        duration_seconds: Option<u64>,
+        summary_ms: u64,
+        preset: String,
+        hwmon: bool,
+        mangohud_log: Option<PathBuf>,
+    },
     Audit {
         path: Option<PathBuf>,
         tail: usize,
@@ -1052,6 +1098,15 @@ impl Config {
 pub struct RecordingConfig {
     pub run_name: Option<String>,
     pub out_dir: Option<PathBuf>,
+}
+
+fn validate_autotune_mode(mode: &str) -> anyhow::Result<()> {
+    match mode {
+        "observe" | "suggest" => Ok(()),
+        _ => {
+            anyhow::bail!("apply mode is not implemented yet; use --mode observe or --mode suggest")
+        }
+    }
 }
 
 pub fn parse_app_command() -> anyhow::Result<AppCommand> {
@@ -1271,6 +1326,31 @@ where
                 filter_class,
             })
         }
+        Some(Command::Autotune(args)) => {
+            if let Some(cmd) = args.command {
+                match cmd {
+                    AutotuneCommand::Replay(replay) => Ok(AppCommand::AutotuneReplay {
+                        run: replay.run,
+                        config: replay.config,
+                    }),
+                }
+            } else {
+                validate_autotune_mode(&args.mode)?;
+                Ok(AppCommand::Autotune {
+                    config: args.config,
+                    watch_process: args.watch_process,
+                    tree_pid: args.tree_pid,
+                    profiles: args.profiles,
+                    mode: args.mode,
+                    decision_log: args.decision_log,
+                    duration_seconds: args.duration_seconds,
+                    summary_ms: args.summary_ms,
+                    preset: args.preset,
+                    hwmon: args.hwmon,
+                    mangohud_log: args.mangohud_log,
+                })
+            }
+        }
         Some(Command::Audit(args)) => Ok(AppCommand::Audit {
             path: args.path,
             tail: args.tail,
@@ -1420,12 +1500,6 @@ where
                 Ok(AppCommand::ScenarioPath { name: args.name })
             }
             ScenarioCommand::List => Ok(AppCommand::ScenarioList),
-        },
-        Some(Command::Autotune(args)) => match args.command {
-            AutotuneCommand::Replay(replay) => Ok(AppCommand::AutotuneReplay {
-                run: replay.run,
-                config: replay.config,
-            }),
         },
     }
 }
