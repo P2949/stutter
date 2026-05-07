@@ -1571,4 +1571,82 @@ mod tests {
 
         let _ = fs::remove_dir_all(&dir);
     }
+
+    fn write_fake_process(
+        proc_root: &Path,
+        pid: u32,
+        comm: &str,
+        cmdline: &str,
+    ) -> std::io::Result<()> {
+        let dir = proc_root.join(pid.to_string());
+        fs::create_dir_all(&dir)?;
+
+        fs::write(
+            dir.join("status"),
+            format!("Name:\t{comm}\nPid:\t{pid}\nPPid:\t1\nThreads:\t1\n"),
+        )?;
+
+        fs::write(dir.join("cmdline"), format!("{cmdline}\0"))?;
+
+        fs::write(
+            dir.join("stat"),
+            format!(
+                "{pid} ({comm}) S 1 {pid} {pid} 0 -1 4194304 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+            ),
+        )?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn process_cache_evicts_pid_missing_from_next_scan() {
+        let temp = tempfile::tempdir().unwrap();
+        let proc_root = temp.path();
+
+        write_fake_process(proc_root, 100, "old", "old-cmd").unwrap();
+
+        let mut cache = ProcessCache::default();
+        let budget = ScanBudget::default_proc_scan();
+        let mut budget_report = ScanBudgetReport::default();
+
+        let first = scan_processes_at(proc_root, &mut cache, &budget, &mut budget_report);
+        assert!(first.contains_key(&100));
+        assert!(cache.entries.contains_key(&100));
+
+        fs::remove_dir_all(proc_root.join("100")).unwrap();
+
+        let mut budget_report2 = ScanBudgetReport::default();
+        let second = scan_processes_at(proc_root, &mut cache, &budget, &mut budget_report2);
+        assert!(!second.contains_key(&100));
+        assert!(!cache.entries.contains_key(&100));
+    }
+
+    #[test]
+    fn process_cache_replaced_when_pid_recreated_with_new_comm() {
+        let temp = tempfile::tempdir().unwrap();
+        let proc_root = temp.path();
+
+        write_fake_process(proc_root, 100, "old", "old-cmd").unwrap();
+
+        let mut cache = ProcessCache::default();
+        let budget = ScanBudget::default_proc_scan();
+
+        let mut budget_report1 = ScanBudgetReport::default();
+        let first = scan_processes_at(proc_root, &mut cache, &budget, &mut budget_report1);
+        assert_eq!(first.get(&100).unwrap().comm, "old");
+        assert_eq!(cache.entries.get(&100).unwrap().info.comm, "old");
+
+        fs::remove_dir_all(proc_root.join("100")).unwrap();
+
+        let mut budget_report2 = ScanBudgetReport::default();
+        let _ = scan_processes_at(proc_root, &mut cache, &budget, &mut budget_report2);
+        assert!(!cache.entries.contains_key(&100));
+
+        write_fake_process(proc_root, 100, "new", "new-cmd").unwrap();
+
+        let mut budget_report3 = ScanBudgetReport::default();
+        let third = scan_processes_at(proc_root, &mut cache, &budget, &mut budget_report3);
+        assert_eq!(third.get(&100).unwrap().comm, "new");
+        assert_eq!(cache.entries.get(&100).unwrap().info.comm, "new");
+    }
 }

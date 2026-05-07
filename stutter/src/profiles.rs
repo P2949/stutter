@@ -19,6 +19,12 @@ pub struct ProfileCpuWarning {
     pub online: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileRuleOverlapWarning {
+    pub earlier_rule: usize,
+    pub later_rule: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct Profile {
     pub name: String,
@@ -279,6 +285,41 @@ where
     Ok(planned)
 }
 
+fn class_dimension_may_overlap(a: &[TaskClass], b: &[TaskClass]) -> bool {
+    a.is_empty() || b.is_empty() || a.iter().any(|left| b.contains(left))
+}
+
+fn comm_dimension_may_overlap(a: &[CompiledPattern], b: &[CompiledPattern]) -> bool {
+    a.is_empty()
+        || b.is_empty()
+        || a.iter()
+            .any(|left| b.iter().any(|right| left.raw() == right.raw()))
+}
+
+fn rule_may_overlap(earlier: &ProfileRule, later: &ProfileRule) -> bool {
+    let class_overlap = class_dimension_may_overlap(&earlier.match_class, &later.match_class);
+    let comm_overlap = comm_dimension_may_overlap(&earlier.match_comm, &later.match_comm);
+
+    class_overlap && comm_overlap
+}
+
+pub fn profile_rule_overlap_warnings(rules: &[ProfileRule]) -> Vec<ProfileRuleOverlapWarning> {
+    let mut warnings = Vec::new();
+
+    for earlier_rule in 0..rules.len() {
+        for later_rule in (earlier_rule + 1)..rules.len() {
+            if rule_may_overlap(&rules[earlier_rule], &rules[later_rule]) {
+                warnings.push(ProfileRuleOverlapWarning {
+                    earlier_rule,
+                    later_rule,
+                });
+            }
+        }
+    }
+
+    warnings
+}
+
 pub fn profile_offline_cpu_warnings(profile: &Profile, online: &CpuMask) -> Vec<ProfileCpuWarning> {
     profile
         .rules
@@ -354,6 +395,16 @@ fn validate_profile(profile: Profile) -> anyhow::Result<Profile> {
             );
         }
     }
+
+    for warning in profile_rule_overlap_warnings(&profile.rules) {
+        log::warn!(
+            "profile_rule_overlap profile={} earlier_rule={} later_rule={} message=\"rules are first-match-wins; later rule may be shadowed\"",
+            profile.name,
+            warning.earlier_rule,
+            warning.later_rule
+        );
+    }
+
     Ok(profile)
 }
 
@@ -672,5 +723,106 @@ mod tests {
         assert_eq!(warnings[0].rule_index, 1);
         assert_eq!(warnings[0].requested, "2-3");
         assert_eq!(warnings[0].online, "0-1");
+    }
+
+    #[test]
+    fn profile_rule_overlap_warnings_broad_game_before_specific_render_thread_warns() {
+        let profile = parse_profiles(
+            r#"
+            [[profile]]
+            name = "test"
+
+            [[profile.rules]]
+            match_class = ["Game"]
+            affinity = "0-7"
+
+            [[profile.rules]]
+            match_comm = ["RenderThread"]
+            affinity = "2-5"
+            "#,
+        )
+        .unwrap()
+        .pop()
+        .unwrap();
+
+        let warnings = profile_rule_overlap_warnings(&profile.rules);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].earlier_rule, 0);
+        assert_eq!(warnings[0].later_rule, 1);
+    }
+
+    #[test]
+    fn profile_rule_overlap_warnings_disjoint_classes_do_not_warn() {
+        let profile = parse_profiles(
+            r#"
+            [[profile]]
+            name = "test"
+
+            [[profile.rules]]
+            match_class = ["Game"]
+            affinity = "0-7"
+
+            [[profile.rules]]
+            match_class = ["Compositor"]
+            affinity = "8-11"
+            "#,
+        )
+        .unwrap()
+        .pop()
+        .unwrap();
+
+        let warnings = profile_rule_overlap_warnings(&profile.rules);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn profile_rule_overlap_warnings_catch_all_before_anything_warns() {
+        let profile = parse_profiles(
+            r#"
+            [[profile]]
+            name = "test"
+
+            [[profile.rules]]
+            affinity = "0-7"
+
+            [[profile.rules]]
+            match_class = ["Game"]
+            affinity = "2-5"
+            "#,
+        )
+        .unwrap()
+        .pop()
+        .unwrap();
+
+        let warnings = profile_rule_overlap_warnings(&profile.rules);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].earlier_rule, 0);
+        assert_eq!(warnings[0].later_rule, 1);
+    }
+
+    #[test]
+    fn profile_rule_overlap_warnings_exact_same_comm_warns() {
+        let profile = parse_profiles(
+            r#"
+            [[profile]]
+            name = "test"
+
+            [[profile.rules]]
+            match_comm = ["RenderThread"]
+            affinity = "0-3"
+
+            [[profile.rules]]
+            match_comm = ["RenderThread"]
+            affinity = "4-7"
+            "#,
+        )
+        .unwrap()
+        .pop()
+        .unwrap();
+
+        let warnings = profile_rule_overlap_warnings(&profile.rules);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].earlier_rule, 0);
+        assert_eq!(warnings[0].later_rule, 1);
     }
 }

@@ -235,6 +235,11 @@ pub fn cmdline_executable_basename_lower(cmdline: &str) -> Option<String> {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
 }
+
+pub fn force_for_watch_apply(initial: bool, user_force: bool) -> bool {
+    initial && user_force
+}
+
 pub struct ApplyProfileCommandInput {
     pub tree_pid: u32,
     pub profile_path: PathBuf,
@@ -283,7 +288,7 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
     let (records, updated_cache) = match apply_profile_to_tree_cached_blocking(
         tree_pid,
         profile.clone(),
-        force,
+        force_for_watch_apply(true, force),
         dry_run,
         cache,
     )
@@ -342,7 +347,7 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
                 let result = apply_profile_to_tree_cached_blocking(
                     tree_pid,
                     profile.clone(),
-                    false,
+                    force_for_watch_apply(false, force),
                     dry_run,
                     cache,
                 )
@@ -470,6 +475,14 @@ pub fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn force_for_watch_apply_only_uses_user_force_on_initial_apply() {
+        assert!(force_for_watch_apply(true, true));
+        assert!(!force_for_watch_apply(false, true));
+        assert!(!force_for_watch_apply(true, false));
+        assert!(!force_for_watch_apply(false, false));
+    }
 
     #[test]
     fn test_watch_process_should_poll() {

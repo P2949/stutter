@@ -4,6 +4,38 @@ use anyhow::{Context as _, anyhow};
 use aya_build::Toolchain;
 
 fn main() -> anyhow::Result<()> {
+    println!("cargo:rerun-if-env-changed=STUTTER_USE_PREBUILT_BPF");
+    println!("cargo:rerun-if-env-changed=STUTTER_BPF_OBJECT");
+
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    let out_object = out_dir.join("stutter");
+
+    if env::var_os("STUTTER_USE_PREBUILT_BPF").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        let object = env::var_os("STUTTER_BPF_OBJECT").ok_or_else(|| {
+            anyhow!("STUTTER_USE_PREBUILT_BPF=1 requires STUTTER_BPF_OBJECT to be set")
+        })?;
+
+        let object = PathBuf::from(object);
+
+        if !object.exists() {
+            return Err(anyhow!(
+                "STUTTER_BPF_OBJECT {} does not exist",
+                object.display()
+            ));
+        }
+
+        std::fs::copy(&object, &out_object).with_context(|| {
+            format!(
+                "failed to copy prebuilt BPF object {} to {}",
+                object.display(),
+                out_object.display()
+            )
+        })?;
+
+        return Ok(());
+    }
+
+    // Default path: build eBPF locally.
     ensure_cargo_bin_on_path();
 
     let cargo_metadata::Metadata { packages, .. } = cargo_metadata::MetadataCommand::new()

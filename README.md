@@ -510,6 +510,26 @@ stutter audit --json
 
 Profile `match_comm` entries use literal substring matching unless the whole pattern is wrapped in `/.../`. For example, `KingdomCome.exe` matches that literal dot, while `/KingdomCome[.]exe$/` is treated as a regex.
 
+### Profile rule order
+
+Profile rules are evaluated in file order. The first matching rule wins. Put specific rules before broad class rules.
+
+For example, place a specific `RenderThread` rule before a broad `Game` fallback:
+
+```toml
+# Specific RenderThread first
+[[profile.rules]]
+match_comm = ["RenderThread"]
+affinity = "2-5"
+
+# Broad Game fallback second
+[[profile.rules]]
+match_class = ["Game"]
+affinity = "0-7"
+```
+
+If a broad rule appears first, later specific rules may never apply.
+
 ## Important interpretation notes
 
 For real stutter diagnosis, prioritize:
