@@ -280,6 +280,38 @@ async fn main() -> anyhow::Result<()> {
             top,
             filter_class,
         ),
+        AppCommand::Autotune {
+            config,
+            watch_process,
+            tree_pid,
+            profiles,
+            mode,
+            decision_log,
+            duration_seconds,
+            summary_ms,
+            preset,
+            hwmon,
+            mangohud_log,
+        } => {
+            println!(
+                "autotune mode={} parsed; live autotune is not implemented yet; no actions applied",
+                mode
+            );
+            println!(
+                "autotune config={:?} watch_process={:?} tree_pid={:?} profiles={:?} decision_log={:?} duration_seconds={:?} summary_ms={} preset={} hwmon={} mangohud_log={:?}",
+                config,
+                watch_process,
+                tree_pid,
+                profiles,
+                decision_log,
+                duration_seconds,
+                summary_ms,
+                preset,
+                hwmon,
+                mangohud_log
+            );
+            Ok(())
+        }
         AppCommand::Audit { path, tail, json } => {
             audit::audit_command(audit::AuditCommandInput { path, tail, json })
         }
