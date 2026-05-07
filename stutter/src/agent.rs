@@ -349,10 +349,9 @@ async fn start_record_handler(
     let (stop_tx, stop_rx) = oneshot::channel();
     let config_arc = Arc::new(config);
 
-    let join =
-        tokio::spawn(
-            async move { crate::session::run_monitor(config_arc, None, Some(stop_rx)).await },
-        );
+    let join = tokio::spawn(async move {
+        crate::session::run_monitor(config_arc, None, None, Some(stop_rx)).await
+    });
 
     *active = Some(RunHandle {
         id: run_id.clone(),
