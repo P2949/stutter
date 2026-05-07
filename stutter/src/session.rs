@@ -71,26 +71,22 @@ impl LiveTelemetry {
     }
 
     pub fn prune(&mut self, now_ms: u128) {
-        while self
-            .spikes
-            .front()
-            .is_some_and(|s| now_ms.saturating_sub(s.elapsed_ms.unwrap_or(0)) > self.max_age_ms)
-        {
+        while self.spikes.front().is_some_and(|s| {
+            now_ms.saturating_sub(s.elapsed_ms.unwrap_or(0).into()) > self.max_age_ms
+        }) {
             self.spikes.pop_front();
         }
 
-        while self
-            .irq_events
-            .front()
-            .is_some_and(|e| now_ms.saturating_sub(e.elapsed_ms.unwrap_or(0)) > self.max_age_ms)
-        {
+        while self.irq_events.front().is_some_and(|e| {
+            now_ms.saturating_sub(e.elapsed_ms.unwrap_or(0).into()) > self.max_age_ms
+        }) {
             self.irq_events.pop_front();
         }
 
         while self
             .gpu_samples
             .front()
-            .is_some_and(|s| now_ms.saturating_sub(s.elapsed_ms) > self.max_age_ms)
+            .is_some_and(|s| now_ms.saturating_sub(s.elapsed_ms.into()) > self.max_age_ms)
         {
             self.gpu_samples.pop_front();
         }
@@ -98,7 +94,7 @@ impl LiveTelemetry {
         while self
             .io_events
             .front()
-            .is_some_and(|e| now_ms.saturating_sub(e.elapsed_ms) > self.max_age_ms)
+            .is_some_and(|e| now_ms.saturating_sub(e.elapsed_ms.into()) > self.max_age_ms)
         {
             self.io_events.pop_front();
         }
@@ -106,7 +102,7 @@ impl LiveTelemetry {
         while self
             .frame_events
             .front()
-            .is_some_and(|e| now_ms.saturating_sub(e.elapsed_ms) > self.max_age_ms)
+            .is_some_and(|e| now_ms.saturating_sub(e.elapsed_ms.into()) > self.max_age_ms)
         {
             self.frame_events.pop_front();
         }
@@ -114,7 +110,7 @@ impl LiveTelemetry {
         while self
             .diagnoses
             .front()
-            .is_some_and(|d| now_ms.saturating_sub(d.elapsed_ms) > self.max_age_ms)
+            .is_some_and(|d| now_ms.saturating_sub(d.elapsed_ms.into()) > self.max_age_ms)
         {
             self.diagnoses.pop_front();
         }
@@ -149,6 +145,17 @@ fn needs_tree_tick(config: &Config, had_tree_roots: bool) -> bool {
         config.watch_process.is_some(),
         config.cgroupv2.is_some(),
     )
+}
+
+#[derive(Clone)]
+pub(crate) struct TuiRenderSnapshot {
+    pub(crate) elapsed_ms: u64,
+    pub(crate) drop_counters: crate::ebpf_loader::DropCountersSnapshot,
+    pub(crate) tui_state: crate::tui::TuiState,
+    pub(crate) active_targets: std::collections::BTreeMap<u32, crate::process_tree::TaskInfo>,
+    pub(crate) stats_by_task: std::collections::BTreeMap<u32, crate::metrics::TaskStats>,
+    pub(crate) interval_records: Vec<crate::recorder::IntervalRecord>,
+    pub(crate) recent_diagnoses: std::collections::VecDeque<crate::diagnosis::LiveDiagnosisEntry>,
 }
 
 pub struct MonitorSession {
@@ -226,55 +233,12 @@ impl MonitorSession {
         configure_target_irqs(&mut loaded, &config)?;
         let block_io_correlation_basis = loaded.block_io_correlation_basis.as_str().to_owned();
 
-        let recorder = LiveRecorder {
+        let mut recorder = LiveRecorder {
             run: recording,
-            interval_records: Vec::new(),
-            tree_events: Vec::new(),
-            spike_events: None, // Will set below
-            irq_events: Vec::new(),
-            gpu_samples: Vec::new(),
-
-            interval_writer: None, // Will set below
-            irq_event_writer: None,
-            migration_event_writer: None,
-            cpu_freq_sample_writer: None,
-            gpu_sample_writer: None,
-            block_io_event_writer: None,
-            scx_event_writer: None,
-            frame_event_writer: None,
-            csv_writer: None,
-
-            scx_events: Vec::new(),
-
-            intervals_dropped: 0,
-            scx_event_count: 0,
-            irq_event_count: 0,
-            migration_event_count: 0,
-            cpu_freq_sample_count: 0,
-            gpu_sample_count: 0,
-            block_io_event_count: 0,
-            frame_event_count: 0,
-            process_scan_budget_exceeded_count: 0,
-            thread_scan_limited_count: 0,
-            frame_events_dropped: 0,
-            spike_event_count: 0,
-            interval_record_count: 0,
-            spike_events_dropped_count: 0,
-            alert_events_dropped_count: 0,
-            alert_channel_closed_count: 0,
-            event_stream_write_errors: 0,
-            first_event_stream_write_error: None,
-            spike_event_writer: None,
-            stdout_spike_stream: None,
-            stdout_spike_stream_errors: 0,
-            prometheus_state: None,
-            otel_spike_tx: None,
-            otel_spans_dropped: None,
+            ..Default::default()
         };
-
-        let mut recorder = recorder;
         if config.json_stream {
-            recorder.stdout_spike_stream = Some(recorder::StdoutJsonStream::new());
+            recorder.enable_stdout_spike_stream();
         }
 
         let (prometheus_state, prometheus_task) = if let Some(port) = config.metrics_port {
@@ -287,8 +251,8 @@ impl MonitorSession {
             (None, None)
         };
 
-        recorder.prometheus_state = prometheus_state.clone();
-        recorder.spike_events = recorder.run.as_ref().map(|_| SpikeEventBuffer::default());
+        recorder.exporters.prometheus_state = prometheus_state.clone();
+        recorder.buffers.spike_events = recorder.run.as_ref().map(|_| SpikeEventBuffer::default());
 
         if let Some(run) = recorder.run.as_mut() {
             if let Some(path) = &config.mangohud_log
@@ -303,36 +267,36 @@ impl MonitorSession {
             }
 
             if config.retain_intervals.is_none() {
-                recorder.interval_writer =
+                recorder.streams.interval_writer =
                     Some(JsonArrayWriter::create(run.run_dir.join("interval.json"))?);
             }
-            recorder.irq_event_writer = Some(JsonArrayWriter::create(
+            recorder.streams.irq_event_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("irq_events.json"),
             )?);
-            recorder.migration_event_writer = Some(JsonArrayWriter::create(
+            recorder.streams.migration_event_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("migration_events.json"),
             )?);
-            recorder.cpu_freq_sample_writer = Some(JsonArrayWriter::create(
+            recorder.streams.cpu_freq_sample_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("cpu_freq_samples.json"),
             )?);
-            recorder.gpu_sample_writer = Some(JsonArrayWriter::create(
+            recorder.streams.gpu_sample_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("gpu_samples.json"),
             )?);
-            recorder.block_io_event_writer =
+            recorder.streams.block_io_event_writer =
                 Some(JsonArrayWriter::create(run.run_dir.join("io_events.json"))?);
-            recorder.scx_event_writer = Some(JsonArrayWriter::create(
+            recorder.streams.scx_event_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("scx_events.json"),
             )?);
-            recorder.spike_event_writer = Some(JsonArrayWriter::create(
+            recorder.streams.spike_event_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("spike_events.json"),
             )?);
-            recorder.frame_event_writer = Some(JsonArrayWriter::create(
+            recorder.streams.frame_event_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("frame_events.json"),
             )?);
         }
 
         if let Some(csv_stream) = &config.csv_stream {
-            recorder.csv_writer = Some(match csv_stream {
+            recorder.streams.csv_writer = Some(match csv_stream {
                 CsvStreamTarget::File(path) => {
                     recorder::IntervalCsvWriter::create_file(path.clone())?
                 }
@@ -389,15 +353,34 @@ impl MonitorSession {
         let alert_sender = if config.alert_threshold_ns.is_some() {
             let (tx, mut rx) = tokio::sync::mpsc::channel(100);
             let webhook_url = config.alert_webhook_url.clone();
+            let webhook_client = webhook_url.as_ref().map(|_| {
+                reqwest::Client::builder()
+                    .timeout(Duration::from_secs(10))
+                    .build()
+            });
             tokio::spawn(async move {
                 while let Some(payload) = rx.recv().await {
                     if let Err(err) = crate::events::send_desktop_alert(&payload).await {
                         warn!("desktop_alert_failed err={err}");
                     }
-                    if let Some(url) = &webhook_url
-                        && let Err(err) = crate::events::send_webhook_alert(url, &payload).await
-                    {
-                        warn!("webhook_alert_failed url={url} err={err}");
+                    if let Some(url) = &webhook_url {
+                        match &webhook_client {
+                            Some(Ok(client)) => {
+                                if let Err(err) = crate::events::send_webhook_alert_with_client(
+                                    client, url, &payload,
+                                )
+                                .await
+                                {
+                                    warn!("webhook_alert_failed url={url} err={err}");
+                                }
+                            }
+                            Some(Err(err)) => {
+                                warn!(
+                                    "webhook_alert_failed url={url} err=failed to build HTTP client: {err}"
+                                );
+                            }
+                            None => {}
+                        }
                     }
                 }
             });
@@ -441,8 +424,8 @@ impl MonitorSession {
 
             match crate::otel::spawn_exporter(otel_config) {
                 Ok(handle) => {
-                    recorder.otel_spike_tx = Some(handle.tx.clone());
-                    recorder.otel_spans_dropped = Some(handle.dropped.clone());
+                    recorder.exporters.otel_spike_tx = Some(handle.tx.clone());
+                    recorder.exporters.otel_spans_dropped = Some(handle.dropped.clone());
                     otel_exporter = Some(handle);
                 }
                 Err(err) => {
@@ -530,7 +513,7 @@ impl MonitorSession {
 
         self.refresh_tasks().await?;
 
-        let (mangohud_tx, mut mangohud_rx) = tokio::sync::oneshot::channel::<(u128, u64)>();
+        let (mangohud_tx, mut mangohud_rx) = tokio::sync::oneshot::channel::<(u64, u64)>();
         let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel(1024);
 
         if let Some(run) = self.recorder.run.as_ref()
@@ -568,14 +551,13 @@ impl MonitorSession {
                     }
                 }
                 Some(frame) = frame_rx.recv() => {
-                    if let Some(writer) = self.recorder.frame_event_writer.as_mut() {
+                    if let Some(writer) = self.recorder.streams.frame_event_writer.as_mut() {
                          crate::events::push_ndjson_event(
                             writer,
                             &frame,
-                            &mut self.recorder.frame_event_count,
-                            &mut self.recorder.event_stream_write_errors,
-                            &mut self.recorder.first_event_stream_write_error,
+                            &mut self.recorder.counters,
                             "frame_events",
+                            |c| c.frame_event_count += 1,
                         );
                     }
                     self.recent_telemetry.push_frame(frame);
@@ -645,134 +627,149 @@ impl MonitorSession {
                     }
                 }
 
-                ready = self.loaded.events.readable_mut() => {
-                    let mut guard = ready?;
-                    let recording_monotonic_start_ns = self.recorder.run.as_ref().and_then(|r| r.monotonic_start_ns);
-
-                    let mut pending_spikes = Vec::new();
-                    let mut pending_irqs = Vec::new();
-                    let mut pending_ios = Vec::new();
-
-                    while let Some(item) = guard.get_inner_mut().next() {
-                        if item.len() < std::mem::size_of::<u32>() {
-                            log::warn!("short_bpf_event len={}", item.len());
-                            continue;
-                        }
-
-                        let kind = unsafe { (item.as_ptr() as *const u32).read_unaligned() };
-                        match kind {
-                            stutter_common::EVENT_RUNNABLE_LATENCY => {
-                                if let Some(event) = crate::events::read_event_unaligned::<stutter_common::SchedulerEvent>(&item) {
-                                    let spike = crate::events::handle_event(
-                                        &event,
-                                        &self.config,
-                                        self.started,
-                                        &mut self.tasks,
-                                        recording_monotonic_start_ns,
-                                        &mut self.recorder,
-                                        self.alert_sender.as_ref(),
-                                        self.scx_tracker.current_ops().map(str::to_owned),
-                                        self.scx_tracker.current_state().map(str::to_owned),
-                                        self.scx_tracker.current_enable_seq().map(str::to_owned),
-                                    );
-                                    if let Some(spike) = spike {
-                                        pending_spikes.push(spike);
-                                    }
-                                } else {
-                                    log::warn!("short_scheduler_event len={}", item.len());
-                                }
-                            }
-                            stutter_common::EVENT_IRQ_LATENCY => {
-                                if let Some(event) = crate::events::read_event_unaligned::<stutter_common::IrqEvent>(&item) {
-                                    let record = crate::events::irq_event_record(recording_monotonic_start_ns, &event);
-                                    pending_irqs.push(record);
-                                    crate::events::handle_irq_event(&event, &mut self.recorder, recording_monotonic_start_ns);
-                                } else {
-                                    log::warn!("short_irq_event len={}", item.len());
-                                }
-                            }
-                            stutter_common::EVENT_MIGRATION => {
-                                if let Some(event) = crate::events::read_event_unaligned::<stutter_common::MigrationEvent>(&item) {
-                                    crate::events::handle_migration_event(
-                                        &event,
-                                        &mut self.tasks,
-                                        &mut self.recorder,
-                                        &self.cpu_to_pkg,
-                                        self.started,
-                                    );
-                                } else {
-                                    log::warn!("short_migration_event len={}", item.len());
-                                }
-                            }
-                            stutter_common::EVENT_CPU_FREQ => {
-                                if let Some(event) = crate::events::read_event_unaligned::<stutter_common::CpuFreqEvent>(&item) {
-                                    crate::events::handle_cpu_freq_event(&event, &mut self.recorder, self.started);
-                                } else {
-                                    log::warn!("short_cpu_freq_event len={}", item.len());
-                                }
-                            }
-                            stutter_common::EVENT_STAT_WAIT => {
-                                if let Some(event) = crate::events::read_event_unaligned::<stutter_common::StatWaitEvent>(&item) {
-                                    if let Some(stats) = self.tasks.stats_by_task.get_mut(&event.tid) {
-                                        stats.stat_wait_sum_ns += event.delay_ns as u128;
-                                        stats.stat_wait_count += 1;
-                                    }
-                                } else {
-                                    log::warn!("short_stat_wait_event len={}", item.len());
-                                }
-                            }
-                            stutter_common::EVENT_BLOCK_IO => {
-                                if let Some(event) = crate::events::read_event_unaligned::<stutter_common::BlockIoEvent>(&item) {
-                                    let elapsed_ms = self.started.elapsed().as_millis();
-                                    let record = recorder::BlockIoRecord {
-                                        elapsed_ms,
-                                        tid: event.tid,
-                                        correlation_basis: self.loaded.block_io_correlation_basis.as_str().to_owned(),
-                                        dev: event.dev,
-                                        nr_sector: event.nr_sector,
-                                        sector: event.sector,
-                                        duration_ns: event.duration_ns,
-                                        timestamp_ns: event.timestamp_ns,
-                                        rwbs: String::from_utf8_lossy(&event.rwbs)
-                                            .trim_matches(char::from(0))
-                                            .to_owned(),
-                                    };
-                                    pending_ios.push(record);
-
-                                    crate::events::handle_block_io_event(
-                                        &event,
-                                        &mut self.recorder,
-                                        self.loaded.block_io_correlation_basis.as_str(),
-                                        self.started,
-                                    );
-                                } else {
-                                    log::warn!("short_block_io_event len={}", item.len());
-                                }
-                            }
-                            stutter_common::EVENT_EXEC => {
-                                if self.config.follow_exec {
-                                    crate::events::handle_exec_event(&item, &mut self.tasks);
-                                }
-                            }
-                            other => log::warn!("unknown_bpf_event kind={other} len={}", item.len()),
-                        }
-                    }
-
-                    guard.clear_ready();
-                    drop(guard);
-
-                    for irq in pending_irqs {
-                        self.recent_telemetry.push_irq(irq);
-                    }
-                    for io in pending_ios {
-                        self.recent_telemetry.push_io(io);
-                    }
-                    for spike in pending_spikes {
-                        self.handle_live_spike(spike);
-                    }
+                res = self.drain_bpf_events() => {
+                    res?;
                 }
             }
         }
+    }
+
+    async fn drain_bpf_events(&mut self) -> anyhow::Result<()> {
+        let mut guard = self.loaded.events.readable_mut().await?;
+        let recording_monotonic_start_ns = self
+            .recorder
+            .run
+            .as_ref()
+            .and_then(|r| r.monotonic_start_ns);
+
+        let mut pending_spikes = Vec::new();
+        let mut pending_irqs = Vec::new();
+        let mut pending_ios = Vec::new();
+
+        let current_scx = scx_snapshot(&self.scx_tracker);
+
+        while let Some(item) = guard.get_inner_mut().next() {
+            if item.len() < std::mem::size_of::<u32>() {
+                log::warn!("short_bpf_event len={}", item.len());
+                continue;
+            }
+
+            let kind = unsafe { (item.as_ptr() as *const u32).read_unaligned() };
+            match kind {
+                stutter_common::EVENT_RUNNABLE_LATENCY => {
+                    if let Some(event) =
+                        crate::events::read_event_unaligned::<stutter_common::SchedulerEvent>(&item)
+                    {
+                        let spike = crate::events::handle_event(
+                            &event,
+                            &self.config,
+                            self.started,
+                            &mut self.tasks,
+                            recording_monotonic_start_ns,
+                            &mut self.recorder,
+                            self.alert_sender.as_ref(),
+                            current_scx.ops.as_deref(),
+                            current_scx.state.as_deref(),
+                            current_scx.enable_seq.as_deref(),
+                        );
+                        if let Some(spike) = spike {
+                            pending_spikes.push(spike);
+                        }
+                    } else {
+                        log::warn!("short_scheduler_event len={}", item.len());
+                    }
+                }
+                stutter_common::EVENT_IRQ_LATENCY => {
+                    if let Some(event) =
+                        crate::events::read_event_unaligned::<stutter_common::IrqEvent>(&item)
+                    {
+                        let record =
+                            crate::events::irq_event_record(recording_monotonic_start_ns, &event);
+                        crate::events::handle_irq_record(&record, &mut self.recorder);
+                        pending_irqs.push(record);
+                    } else {
+                        log::warn!("short_irq_event len={}", item.len());
+                    }
+                }
+                stutter_common::EVENT_MIGRATION => {
+                    if let Some(event) =
+                        crate::events::read_event_unaligned::<stutter_common::MigrationEvent>(&item)
+                    {
+                        crate::events::handle_migration_event(
+                            &event,
+                            &mut self.tasks,
+                            &mut self.recorder,
+                            &self.cpu_to_pkg,
+                            self.started,
+                        );
+                    } else {
+                        log::warn!("short_migration_event len={}", item.len());
+                    }
+                }
+                stutter_common::EVENT_CPU_FREQ => {
+                    if let Some(event) =
+                        crate::events::read_event_unaligned::<stutter_common::CpuFreqEvent>(&item)
+                    {
+                        crate::events::handle_cpu_freq_event(
+                            &event,
+                            &mut self.recorder,
+                            self.started,
+                        );
+                    } else {
+                        log::warn!("short_cpu_freq_event len={}", item.len());
+                    }
+                }
+                stutter_common::EVENT_STAT_WAIT => {
+                    if let Some(event) =
+                        crate::events::read_event_unaligned::<stutter_common::StatWaitEvent>(&item)
+                    {
+                        if let Some(stats) = self.tasks.stats_by_task.get_mut(&event.tid) {
+                            stats.stat_wait_sum_ns += event.delay_ns as u128;
+                            stats.stat_wait_count += 1;
+                        }
+                    } else {
+                        log::warn!("short_stat_wait_event len={}", item.len());
+                    }
+                }
+                stutter_common::EVENT_BLOCK_IO => {
+                    if let Some(event) =
+                        crate::events::read_event_unaligned::<stutter_common::BlockIoEvent>(&item)
+                    {
+                        let record = crate::events::block_io_event_record(
+                            &event,
+                            self.loaded.block_io_correlation_basis.as_str(),
+                            self.started,
+                        );
+
+                        crate::events::handle_block_io_record(&record, &mut self.recorder);
+                        pending_ios.push(record);
+                    } else {
+                        log::warn!("short_block_io_event len={}", item.len());
+                    }
+                }
+                stutter_common::EVENT_EXEC => {
+                    if self.config.follow_exec {
+                        crate::events::handle_exec_event(&item, &mut self.tasks);
+                    }
+                }
+                other => log::warn!("unknown_bpf_event kind={other} len={}", item.len()),
+            }
+        }
+
+        guard.clear_ready();
+        drop(guard);
+
+        for irq in pending_irqs {
+            self.recent_telemetry.push_irq(irq);
+        }
+        for io in pending_ios {
+            self.recent_telemetry.push_io(io);
+        }
+        for spike in pending_spikes {
+            self.handle_live_spike(spike);
+        }
+
+        Ok(())
     }
 
     pub fn handle_tui_event(&mut self, event: Event) -> Option<String> {
@@ -796,7 +793,7 @@ impl MonitorSession {
 
     pub fn handle_summary_tick(&mut self) -> anyhow::Result<()> {
         if !self.tui_state.paused {
-            let elapsed_ms = self.started.elapsed().as_millis();
+            let elapsed_ms = self.started.elapsed().as_millis() as u64;
             if let Some(sampler) = self.cpu_perf_sampler.as_mut() {
                 let deltas = sampler.sample_interval();
                 for (tid, delta) in deltas {
@@ -817,29 +814,29 @@ impl MonitorSession {
                 psi_snapshot.as_ref(),
                 &mut self.tasks.prev_faults_snapshot,
             );
-            self.recorder.interval_record_count += records.len() as u64;
+            self.recorder.counters.interval_record_count += records.len() as u64;
 
-            if let Some(writer) = self.recorder.interval_writer.as_mut() {
+            if let Some(writer) = self.recorder.streams.interval_writer.as_mut() {
                 for record in &records {
                     writer.push(record)?;
                 }
             } else if self.config.retain_intervals.is_some() || self.config.tui {
                 // For TUI sparklines we need interval_records
                 for record in &records {
-                    self.recorder.interval_records.push(record.clone());
+                    self.recorder.buffers.interval_records.push(record.clone());
                 }
 
                 let max_intervals = self.config.retain_intervals.unwrap_or(120);
-                if self.recorder.interval_records.len() > max_intervals {
-                    let drop_count = self.recorder.interval_records.len() - max_intervals;
-                    self.recorder.interval_records.drain(0..drop_count);
+                if self.recorder.buffers.interval_records.len() > max_intervals {
+                    let drop_count = self.recorder.buffers.interval_records.len() - max_intervals;
+                    self.recorder.buffers.interval_records.drain(0..drop_count);
                     if self.config.retain_intervals.is_some() {
-                        self.recorder.intervals_dropped += drop_count as u64;
+                        self.recorder.counters.intervals_dropped += drop_count as u64;
                     }
                 }
             }
 
-            if let Some(writer) = self.recorder.csv_writer.as_mut() {
+            if let Some(writer) = self.recorder.streams.csv_writer.as_mut() {
                 for record in &records {
                     writer.push(record)?;
                 }
@@ -849,40 +846,47 @@ impl MonitorSession {
                 let max_p99 = records.iter().map(|r| r.p99_ns).max().unwrap_or(0);
                 state.set_latest_p99_ns(max_p99);
                 state.set_active_targets(self.tasks.active_targets.len() as u64);
-                state.set_event_stream_write_errors(self.recorder.event_stream_write_errors);
+                state.set_event_stream_write_errors(
+                    self.recorder.counters.event_stream_write_errors,
+                );
                 state.set_ebpf_ringbuf_drops(drop_counters_snapshot.total());
             }
         }
 
         if let Some(term) = self.terminal.as_mut() {
-            let elapsed_ms = self.started.elapsed().as_millis();
+            let elapsed_ms = self.started.elapsed().as_millis() as u64;
             let drop_counters_snapshot = self.loaded.snapshot_drop_counters();
 
-            let tui_state = &self.tui_state;
-            let active_targets = &self.tasks.active_targets;
-            let stats_by_task = &self.tasks.stats_by_task;
-            let interval_records = &self.recorder.interval_records;
-            let recent_diagnoses = &self.recent_telemetry.diagnoses;
+            let snapshot = TuiRenderSnapshot {
+                elapsed_ms,
+                drop_counters: drop_counters_snapshot,
+                tui_state: self.tui_state.clone(),
+                active_targets: self.tasks.active_targets.clone(),
+                stats_by_task: self.tasks.stats_by_task.clone(),
+                interval_records: self.recorder.buffers.interval_records.clone(),
+                recent_diagnoses: self.recent_telemetry.diagnoses.clone(),
+            };
 
             // TUI rendering errors and panics should be logged and dismissed,
             // not propagated, to avoid killing the monitor.
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                let _ = term.draw(move |f| {
+                term.draw(move |f| {
                     crate::tui::render_tui(
                         f,
-                        tui_state,
-                        active_targets,
-                        stats_by_task,
-                        interval_records,
-                        recent_diagnoses,
-                        elapsed_ms,
-                        &drop_counters_snapshot,
+                        &snapshot.tui_state,
+                        &snapshot.active_targets,
+                        &snapshot.stats_by_task,
+                        &snapshot.interval_records,
+                        &snapshot.recent_diagnoses,
+                        snapshot.elapsed_ms.into(),
+                        &snapshot.drop_counters,
                     );
-                });
+                })
             }));
 
             match res {
-                Ok(_) => {}
+                Ok(Ok(_)) => {}
+                Ok(Err(err)) => warn!("tui_render_failed err={err:#}"),
                 Err(_) => {
                     warn!("tui_render_panic");
                 }
@@ -965,26 +969,28 @@ impl MonitorSession {
     }
 
     pub fn handle_scx_tick(&mut self) {
-        if let Some(event) = self.scx_tracker.sample(self.started.elapsed().as_millis()) {
-            if let Some(writer) = self.recorder.scx_event_writer.as_mut() {
+        if let Some(event) = self
+            .scx_tracker
+            .sample(self.started.elapsed().as_millis() as u64)
+        {
+            if let Some(writer) = self.recorder.streams.scx_event_writer.as_mut() {
                 crate::events::push_ndjson_event(
                     writer,
                     &event,
-                    &mut self.recorder.scx_event_count,
-                    &mut self.recorder.event_stream_write_errors,
-                    &mut self.recorder.first_event_stream_write_error,
+                    &mut self.recorder.counters,
                     "scx_events",
+                    |c| c.scx_event_count += 1,
                 );
             } else {
-                self.recorder.scx_events.push(event);
-                self.recorder.scx_event_count += 1;
+                self.recorder.buffers.scx_events.push(event);
+                self.recorder.counters.scx_event_count += 1;
             }
         }
     }
 
     pub async fn handle_hwmon_tick(&mut self) -> anyhow::Result<()> {
         if let Some(reader_arc) = &self.hwmon_reader {
-            let elapsed = self.started.elapsed().as_millis();
+            let elapsed = self.started.elapsed().as_millis() as u64;
             let reader_arc_clone = reader_arc.clone();
 
             let sample_opt = task::spawn_blocking(move || {
@@ -1000,14 +1006,13 @@ impl MonitorSession {
             if let Some(sample) = sample_opt {
                 self.recent_telemetry.push_gpu(sample.clone());
 
-                if let Some(writer) = self.recorder.gpu_sample_writer.as_mut() {
+                if let Some(writer) = self.recorder.streams.gpu_sample_writer.as_mut() {
                     crate::events::push_ndjson_event(
                         writer,
                         &sample,
-                        &mut self.recorder.gpu_sample_count,
-                        &mut self.recorder.event_stream_write_errors,
-                        &mut self.recorder.first_event_stream_write_error,
+                        &mut self.recorder.counters,
                         "gpu_samples",
+                        |c| c.gpu_sample_count += 1,
                     );
                 }
             }
@@ -1016,10 +1021,10 @@ impl MonitorSession {
     }
 
     fn handle_live_spike(&mut self, spike: SpikeEvent) {
-        let elapsed_ms = self.started.elapsed().as_millis();
+        let elapsed_ms = self.started.elapsed().as_millis() as u64;
         self.recent_telemetry.push_spike(spike);
         // Prune old telemetry (history window controlled by LiveTelemetry::max_age_ms)
-        self.recent_telemetry.prune(elapsed_ms);
+        self.recent_telemetry.prune(elapsed_ms.into());
 
         // Form a cluster from spikes within cluster_window_ms
         let cluster_window_ms = LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS;
@@ -1029,9 +1034,7 @@ impl MonitorSession {
             .recent_telemetry
             .spikes
             .iter()
-            .filter(|s| {
-                elapsed_ms.saturating_sub(s.elapsed_ms.unwrap_or(0)) <= cluster_window_ms as u128
-            })
+            .filter(|s| elapsed_ms.saturating_sub(s.elapsed_ms.unwrap_or(0)) <= cluster_window_ms)
             .cloned()
             .collect();
 
@@ -1084,7 +1087,7 @@ impl MonitorSession {
             irq_events: self.recent_telemetry.irq_events.iter().cloned().collect(),
             gpu_samples: self.recent_telemetry.gpu_samples.iter().cloned().collect(),
             block_io_events: self.recent_telemetry.io_events.iter().cloned().collect(),
-            intervals: self.recorder.interval_records.clone(),
+            intervals: self.recorder.buffers.interval_records.clone(),
             ..Default::default()
         };
 
@@ -1122,19 +1125,20 @@ impl MonitorSession {
             .refresh(crate::tasks::RefreshInput {
                 config: &self.config,
                 tree_pids: &self.tree_pids,
-                tree_events: &mut self.recorder.tree_events,
+                tree_events: &mut self.recorder.buffers.tree_events,
                 target_pid_map: &mut self.loaded.target_pid_map,
                 prev_faults_map: self.loaded.prev_faults_map.as_mut(),
-                elapsed_ms: self.started.elapsed().as_millis(),
+                elapsed_ms: self.started.elapsed().as_millis() as u64,
                 recording_started: self.recorder.run.as_ref().map(|run| run.started_instant),
             })
             .await?;
 
         if budget_report.scan_timed_out {
-            self.recorder.process_scan_budget_exceeded_count += 1;
+            self.recorder.counters.process_scan_budget_exceeded_count += 1;
         }
 
-        self.recorder.thread_scan_limited_count += budget_report.processes_thread_limited as u64;
+        self.recorder.counters.thread_scan_limited_count +=
+            budget_report.processes_thread_limited as u64;
 
         if let Some(sampler) = self.cpu_perf_sampler.as_mut() {
             sampler.sync_targets(&self.tasks.active_targets, &self.tasks.stats_by_task);
@@ -1151,7 +1155,7 @@ impl MonitorSession {
         let drop_counters = self.loaded.snapshot_drop_counters();
         log_drop_counters(&drop_counters);
 
-        if let Some(dropped) = self.recorder.otel_spans_dropped.as_ref() {
+        if let Some(dropped) = self.recorder.exporters.otel_spans_dropped.as_ref() {
             let count = dropped.load(std::sync::atomic::Ordering::Relaxed);
             let stdout_is_machine_stream =
                 self.config.json_stream || self.config.csv_streams_to_stdout();
@@ -1165,7 +1169,7 @@ impl MonitorSession {
             print_session_summaries(&mut self.tasks.stats_by_task);
         }
 
-        if let Some(writer) = self.recorder.csv_writer.as_mut() {
+        if let Some(writer) = self.recorder.streams.csv_writer.as_mut() {
             writer.finish()?;
             if let Some(CsvStreamTarget::File(path)) = &self.config.csv_stream
                 && !self.config.json_stream
@@ -1175,25 +1179,25 @@ impl MonitorSession {
         }
 
         if self.recorder.run.is_some() {
-            if let Some(writer) = self.recorder.interval_writer.as_mut() {
+            if let Some(writer) = self.recorder.streams.interval_writer.as_mut() {
                 writer.finish()?;
             }
-            if let Some(writer) = self.recorder.irq_event_writer.as_mut() {
+            if let Some(writer) = self.recorder.streams.irq_event_writer.as_mut() {
                 writer.finish()?;
             }
-            if let Some(writer) = self.recorder.migration_event_writer.as_mut() {
+            if let Some(writer) = self.recorder.streams.migration_event_writer.as_mut() {
                 writer.finish()?;
             }
-            if let Some(writer) = self.recorder.cpu_freq_sample_writer.as_mut() {
+            if let Some(writer) = self.recorder.streams.cpu_freq_sample_writer.as_mut() {
                 writer.finish()?;
             }
-            if let Some(writer) = self.recorder.gpu_sample_writer.as_mut() {
+            if let Some(writer) = self.recorder.streams.gpu_sample_writer.as_mut() {
                 writer.finish()?;
             }
-            if let Some(writer) = self.recorder.block_io_event_writer.as_mut() {
+            if let Some(writer) = self.recorder.streams.block_io_event_writer.as_mut() {
                 writer.finish()?;
             }
-            if let Some(writer) = self.recorder.scx_event_writer.as_mut() {
+            if let Some(writer) = self.recorder.streams.scx_event_writer.as_mut() {
                 writer.finish()?;
             }
 
@@ -1322,5 +1326,20 @@ mod tests {
     #[test]
     fn tree_tick_needed_for_cgroupv2() {
         assert!(needs_tree_tick_from_parts(false, false, true));
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct ScxSnapshot {
+    ops: Option<String>,
+    state: Option<String>,
+    enable_seq: Option<String>,
+}
+
+fn scx_snapshot(tracker: &crate::scx::ScxTracker) -> ScxSnapshot {
+    ScxSnapshot {
+        ops: tracker.current_ops().map(str::to_owned),
+        state: tracker.current_state().map(str::to_owned),
+        enable_seq: tracker.current_enable_seq().map(str::to_owned),
     }
 }

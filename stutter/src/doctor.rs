@@ -149,8 +149,14 @@ fn ebpf_runtime_permission_check_from_parts(
 
     match memlock {
         Some((soft, hard)) => {
-            details.insert("rlimit_memlock_soft_bytes".to_owned(), soft.to_string());
-            details.insert("rlimit_memlock_hard_bytes".to_owned(), hard.to_string());
+            details.insert(
+                "rlimit_memlock_soft_bytes".to_owned(),
+                format_rlimit_bytes(soft),
+            );
+            details.insert(
+                "rlimit_memlock_hard_bytes".to_owned(),
+                format_rlimit_bytes(hard),
+            );
         }
         None => {
             details.insert("rlimit_memlock_soft_bytes".to_owned(), "unknown".to_owned());
@@ -199,16 +205,15 @@ fn current_memlock_limit() -> Option<(u64, u64)> {
         return None;
     }
     let limit = unsafe { limit.assume_init() };
+    Some((limit.rlim_cur, limit.rlim_max))
+}
 
-    #[cfg(target_env = "musl")]
-    type RlimT = libc::rlim_t;
-    #[cfg(not(target_env = "musl"))]
-    type RlimT = u64;
-
-    let soft = limit.rlim_cur as RlimT;
-    let hard = limit.rlim_max as RlimT;
-
-    Some((soft as u64, hard as u64))
+fn format_rlimit_bytes(value: u64) -> String {
+    if value == libc::RLIM_INFINITY {
+        "unlimited".to_owned()
+    } else {
+        value.to_string()
+    }
 }
 
 fn read_trimmed(path: &Path) -> Result<Option<String>, String> {
@@ -758,6 +763,12 @@ mod tests {
     fn ebpf_runtime_permission_check_handles_missing_unprivileged_bpf_file() {
         let check = ebpf_runtime_permission_check_from_parts(1000, Some((4096, 8192)), Ok(None));
         assert_eq!(check.details["unprivileged_bpf_disabled"], "missing");
+    }
+
+    #[test]
+    fn format_rlimit_bytes_marks_infinity_as_unlimited() {
+        assert_eq!(format_rlimit_bytes(libc::RLIM_INFINITY), "unlimited");
+        assert_eq!(format_rlimit_bytes(4096), "4096");
     }
 
     fn temp_dir(name: &str) -> PathBuf {

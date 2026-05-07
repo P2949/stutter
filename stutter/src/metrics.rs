@@ -55,6 +55,15 @@ pub struct SpikeRecord {
     pub primary_cause: Option<String>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct SpikeRecordDiagnostics {
+    pub scx_ops: Option<String>,
+    pub scx_state: Option<String>,
+    pub scx_enable_seq: Option<String>,
+    pub cause_tags: Vec<String>,
+    pub primary_cause: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct TaskStats {
     pub task: u32,
@@ -67,9 +76,9 @@ pub struct TaskStats {
     pub exe_dev: Option<u64>,
     pub exe_ino: Option<u64>,
     pub active: bool,
-    pub first_seen_ms: u128,
-    pub last_seen_ms: u128,
-    pub removed_ms: Option<u128>,
+    pub first_seen_ms: u64,
+    pub last_seen_ms: u64,
+    pub removed_ms: Option<u64>,
 
     pub interval_latency: LatencyStats,
     pub interval_cpu: CpuStatsSet,
@@ -197,7 +206,7 @@ pub struct CpuSnapshot {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct IntervalRecord {
-    pub elapsed_ms: u128,
+    pub elapsed_ms: u64,
     pub task: u32,
     pub active: bool,
     pub class: TaskClass,
@@ -550,7 +559,7 @@ impl CpuPerfAccumulator {
 }
 
 impl TaskStats {
-    pub fn new(task: u32, comm: String, elapsed_ms: u128) -> Self {
+    pub fn new(task: u32, comm: String, elapsed_ms: u64) -> Self {
         let class = crate::process_tree::classify_task(&comm, &comm, "");
 
         Self {
@@ -603,7 +612,7 @@ impl TaskStats {
         }
     }
 
-    pub fn recording_started(&mut self, elapsed_ms: u128) {
+    pub fn recording_started(&mut self, elapsed_ms: u64) {
         if self.first_seen_ms == 0 {
             self.first_seen_ms = elapsed_ms;
         }
@@ -630,10 +639,8 @@ impl TaskStats {
         &mut self,
         event: &SchedulerEvent,
         spike_threshold_ns: u64,
-        elapsed_ms: u128,
-        scx_ops: Option<String>,
-        scx_state: Option<String>,
-        scx_enable_seq: Option<String>,
+        elapsed_ms: u64,
+        diagnostics: Option<SpikeRecordDiagnostics>,
     ) -> (u64, u64) {
         self.last_seen_ms = elapsed_ms;
 
@@ -663,6 +670,8 @@ impl TaskStats {
         let minor_faults = event.min_flt.saturating_sub(self.last_spike_minor_faults);
 
         if event.latency_ns >= spike_threshold_ns {
+            let diagnostics = diagnostics.unwrap_or_default();
+
             self.top_spikes.push(SpikeRecord {
                 latency_ns: event.latency_ns,
                 cpu: event.cpu,
@@ -680,11 +689,11 @@ impl TaskStats {
                 observed_runnable_depth: event.observed_runnable_depth,
                 major_faults,
                 minor_faults,
-                scx_ops,
-                scx_state,
-                scx_enable_seq,
-                cause_tags: Vec::new(),
-                primary_cause: None,
+                scx_ops: diagnostics.scx_ops,
+                scx_state: diagnostics.scx_state,
+                scx_enable_seq: diagnostics.scx_enable_seq,
+                cause_tags: diagnostics.cause_tags,
+                primary_cause: diagnostics.primary_cause,
             });
 
             self.top_spikes
@@ -769,7 +778,7 @@ pub fn print_event(event: &SchedulerEvent, comm: &str, label: &str) {
 
     info!(
         "{label} runnable_latency={latency_us:.3}us ({latency_ms:.6}ms) task={} cpu={} wakeup_target_cpu={} prio={} comm={} wakeup_ns={} switch_ns={}",
-        event.pid,
+        event.tid,
         event.cpu,
         event.wakeup_target_cpu,
         event.prio,
@@ -820,7 +829,7 @@ pub fn print_latency_line(
 pub fn collect_interval_summaries_labeled(
     label: &str,
     stats_by_task: &mut BTreeMap<u32, TaskStats>,
-    elapsed_ms: u128,
+    elapsed_ms: u64,
     drop_counters: &crate::ebpf_loader::DropCountersSnapshot,
     prev_faults_map: Option<&aya::maps::HashMap<aya::maps::MapData, u32, [u64; 2]>>,
     psi_snapshot: Option<&crate::psi::PsiSnapshot>,
@@ -945,7 +954,7 @@ pub struct IntervalRecordFromSnapshotInput<'a> {
     pub stats: &'a mut TaskStats,
     pub latency: &'a LatencySnapshot,
     pub cpu: &'a CpuSnapshot,
-    pub elapsed_ms: u128,
+    pub elapsed_ms: u64,
     pub drop_counters: &'a crate::ebpf_loader::DropCountersSnapshot,
     pub psi: Option<&'a crate::psi::PsiSnapshot>,
     pub faults_delta: (u64, u64),
@@ -1040,7 +1049,7 @@ mod tests {
         let mut stats = TaskStats::new(123, "test".to_string(), 0);
         let mut event = SchedulerEvent {
             kind: stutter_common::EVENT_RUNNABLE_LATENCY,
-            pid: 123,
+            tid: 123,
             cpu: 0,
             wakeup_target_cpu: 0,
             prio: 120,
@@ -1060,7 +1069,7 @@ mod tests {
         // 1. First event establishes baseline: 10 faults
         event.maj_flt = 10;
         event.latency_ns = 100; // Not a spike
-        stats.record(&event, 1000, 0, None, None, None);
+        stats.record(&event, 1000, 0, None);
         assert_eq!(stats.last_spike_major_faults, 10);
 
         // 2. Interval summary happens. It sees 10 faults.
@@ -1093,7 +1102,7 @@ mod tests {
         // 3. Next spike event with 12 faults
         event.maj_flt = 12;
         event.latency_ns = 2000; // Spike!
-        let (maj_delta, _) = stats.record(&event, 1000, 0, None, None, None);
+        let (maj_delta, _) = stats.record(&event, 1000, 0, None);
 
         // Delta should be 12 - 10 = 2.
         // If interval summary had reset the baseline to 12, delta would be 0.
@@ -1117,7 +1126,7 @@ mod tests {
 
         let event = SchedulerEvent {
             kind: stutter_common::EVENT_RUNNABLE_LATENCY,
-            pid: 123,
+            tid: 123,
             cpu: 0,
             wakeup_target_cpu: 0,
             prio: 120,
@@ -1133,7 +1142,7 @@ mod tests {
             switch_prev_pid: 0,
             switch_prev_state: 0,
         };
-        stats.record(&event, 1_000_000, 0, None, None, None);
+        stats.record(&event, 1_000_000, 0, None);
 
         let mut stats_by_task = BTreeMap::from([(123, stats)]);
         let mut prev_faults_snapshot = BTreeMap::new();
@@ -1155,7 +1164,7 @@ mod tests {
         assert_eq!(perf.cache_mpki, Some(50.0));
 
         let stats = stats_by_task.get_mut(&123).unwrap();
-        stats.record(&event, 1_000_000, 2_000, None, None, None);
+        stats.record(&event, 1_000_000, 2_000, None);
         let records = collect_interval_summaries_labeled(
             "summary",
             &mut stats_by_task,

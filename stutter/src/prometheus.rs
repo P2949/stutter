@@ -8,7 +8,7 @@ use tokio::{
     net::TcpListener,
 };
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct PrometheusState {
     pub start_unix_seconds: AtomicU64,
     pub total_spikes: AtomicU64,

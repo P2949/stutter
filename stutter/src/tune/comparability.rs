@@ -443,14 +443,14 @@ pub fn tune_coverage_metrics(
         .filter(|task| !task.active || task.removed_ms.is_some())
         .count();
 
-    let mut active_by_elapsed: BTreeMap<u128, usize> = BTreeMap::new();
+    let mut active_by_elapsed: BTreeMap<u64, usize> = BTreeMap::new();
     for record in interval_records.iter().filter(|record| record.active) {
         *active_by_elapsed.entry(record.elapsed_ms).or_default() += 1;
     }
     let (active_target_min, active_target_max) = if active_by_elapsed.is_empty() {
         (
-            session.active_target_pids_count as usize,
-            session.active_target_pids_count as usize,
+            session.core.active_target_pids_count as usize,
+            session.core.active_target_pids_count as usize,
         )
     } else {
         (
@@ -498,10 +498,10 @@ pub fn tune_coverage_metrics(
         active_target_min,
         active_target_max,
         removed_task_count,
-        drop_counter_total: if session.block_io_correlation_basis == "request-pointer" {
-            session.drop_counters.total()
+        drop_counter_total: if session.core.block_io_correlation_basis == "request-pointer" {
+            session.core.drop_counters.total()
         } else {
-            session.drop_counters.total_excluding_block_io()
+            session.core.drop_counters.total_excluding_block_io()
         },
         scored_identity_counts: scored_identity_map_to_counts(scored_identity_counts),
     }

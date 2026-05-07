@@ -26,7 +26,7 @@ pub struct DiagnosisConfig {
     pub sched_delay_significant_ns: u64,
     pub cpu_psi_some_significant: f64,
     pub cpu_freq_drop_percent: f64,
-    pub migration_window_ms: u128,
+    pub migration_window_ms: u64,
     pub page_fault_delta_threshold: u64,
     pub low_ipc_threshold: f64,
     pub high_cache_mpki_threshold: f64,
@@ -126,7 +126,7 @@ pub struct EvidenceItem {
     pub kind: EvidenceKind,
     pub strength: f32,
     pub message: String,
-    pub timestamp_ms: Option<u128>,
+    pub timestamp_ms: Option<u64>,
     pub start_ns: Option<u64>,
     pub end_ns: Option<u64>,
 }
@@ -184,14 +184,14 @@ impl Diagnosis {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FrameDiagnosis {
-    pub frame_elapsed_ms: u128,
+    pub frame_elapsed_ms: u64,
     pub frametime_ms: f64,
     pub diagnosis: Diagnosis,
 }
 
 #[derive(Clone, Debug)]
 pub struct LiveDiagnosisEntry {
-    pub elapsed_ms: u128,
+    pub elapsed_ms: u64,
     pub cause: StutterCause,
     pub confidence: Confidence,
     pub anchor_class: TaskClass,
@@ -839,7 +839,7 @@ fn push_migration_evidence(
     candidates: &mut [DiagnosisCandidate],
     cause: StutterCause,
     events: &[MigrationEventRecord],
-    cluster_elapsed_range: Option<(u128, u128)>,
+    cluster_elapsed_range: Option<(u64, u64)>,
     config: DiagnosisConfig,
 ) {
     let Some(event) = events.iter().find(|event| {

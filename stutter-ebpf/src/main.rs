@@ -503,7 +503,7 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
 
     unsafe {
         (*event).kind = EVENT_RUNNABLE_LATENCY;
-        (*event).pid = pid;
+        (*event).tid = pid;
         (*event).cpu = cpu;
         (*event).wakeup_target_cpu = target_cpu;
         (*event).prio = prio;

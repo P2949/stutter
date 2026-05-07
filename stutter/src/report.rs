@@ -21,14 +21,32 @@ use crate::{
     summary::{self, RunDiffSummary, TaskDeltaSummary, format_latency_signed},
 };
 
+pub(crate) fn event_stream_warning(
+    event_stream_write_errors: u64,
+    first_event_stream_write_error: Option<&str>,
+) -> Option<String> {
+    if event_stream_write_errors == 0 {
+        return None;
+    }
+
+    let first = first_event_stream_write_error
+        .filter(|s| !s.is_empty())
+        .unwrap_or("first error was not recorded");
+
+    Some(format!(
+        "WARNING: recording event streams had {event_stream_write_errors} write error(s); \
+         event artifact files may be incomplete. First error: {first}"
+    ))
+}
+
 const MIN_CLUSTER_TASKS: usize = 3;
 const MAX_INLINE_CLUSTER_POINTS: usize = 8;
 const MAX_CLUSTER_CANDIDATES: usize = 4096;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SpikeDensityBucket {
-    pub start_ms: u128,
-    pub end_ms: u128,
+    pub start_ms: u64,
+    pub end_ms: u64,
     pub count: u64,
     pub max_latency_ms: f64,
     pub p99_latency_ms: f64,
@@ -50,7 +68,7 @@ pub(crate) struct SpikePoint {
     pub(crate) switch_prev_pid: u32,
     pub(crate) switch_prev_state: i64,
     pub(crate) switch_prev_state_label: String,
-    pub(crate) elapsed_ms: Option<u128>,
+    pub(crate) elapsed_ms: Option<u64>,
     pub(crate) scx_ops: Option<String>,
     pub(crate) scx_state: Option<String>,
     pub(crate) waker_tid: u32,
@@ -237,17 +255,18 @@ struct ReportBuildResult {
 fn artifacts_summary_from_session(session: &SessionFile) -> ArtifactsSummary {
     ArtifactsSummary {
         spike_count: session
+            .core
             .spike_events_retained_count
             .max(session.top_spikes.len() as u64),
-        frame_count: session.frame_event_count,
-        irq_event_count: session.irq_event_count,
-        gpu_sample_count: session.gpu_sample_count,
-        frame_event_count: session.frame_event_count,
-        migration_event_count: session.migration_event_count.unwrap_or(0),
-        cpu_freq_sample_count: session.cpu_freq_sample_count.unwrap_or(0),
-        block_io_event_count: session.block_io_event_count,
-        interval_record_count: session.interval_record_count,
-        scx_event_count: session.scx_event_count,
+        frame_count: session.core.frame_event_count,
+        irq_event_count: session.core.irq_event_count,
+        gpu_sample_count: session.core.gpu_sample_count,
+        frame_event_count: session.core.frame_event_count,
+        migration_event_count: session.core.migration_event_count.unwrap_or(0),
+        cpu_freq_sample_count: session.core.cpu_freq_sample_count.unwrap_or(0),
+        block_io_event_count: session.core.block_io_event_count,
+        interval_record_count: session.core.interval_record_count,
+        scx_event_count: session.core.scx_event_count,
     }
 }
 
@@ -902,7 +921,7 @@ pub fn build_html_report_model(
         Some(artifacts.spikes.clone())
     };
 
-    let duration_ms = session.duration_ms.max(1);
+    let duration_ms = session.core.duration_ms.max(1);
     let bucket_ms = (duration_ms / 500).clamp(1, 1000);
     let spike_density = spike_events
         .as_deref()
@@ -1062,7 +1081,7 @@ pub fn render_html_report(model: &HtmlReportModel) -> anyhow::Result<String> {
         .replace("{top}", &model.top_limit.to_string()))
 }
 
-pub fn build_spike_density(spikes: &[SpikeEvent], bucket_ms: u128) -> Vec<SpikeDensityBucket> {
+pub fn build_spike_density(spikes: &[SpikeEvent], bucket_ms: u64) -> Vec<SpikeDensityBucket> {
     if spikes.is_empty() {
         return Vec::new();
     }
@@ -1071,14 +1090,14 @@ pub fn build_spike_density(spikes: &[SpikeEvent], bucket_ms: u128) -> Vec<SpikeD
 
     #[derive(Default)]
     struct BucketAccum {
-        start_ms: u128,
-        end_ms: u128,
+        start_ms: u64,
+        end_ms: u64,
         count: u64,
         max_latency_ms: f64,
         latencies_ms: Vec<f64>,
     }
 
-    let mut buckets: BTreeMap<u128, BucketAccum> = BTreeMap::new();
+    let mut buckets: BTreeMap<u64, BucketAccum> = BTreeMap::new();
 
     for spike in spikes {
         let elapsed_ms = spike.elapsed_ms.unwrap_or(0);
@@ -1172,16 +1191,22 @@ pub(crate) fn render_report(
     pushln(&mut output, "stutter report");
     pushln(&mut output, "==============");
     pushln(&mut output, format!("file: {}", session_path.display()));
-    pushln(&mut output, format!("schema: {}", session.schema_version));
+    pushln(
+        &mut output,
+        format!("schema: {}", session.core.schema_version),
+    );
     pushln(
         &mut output,
         format!("expected_schema: {}", SESSION_SCHEMA_VERSION),
     );
     pushln(
         &mut output,
-        format!("run: {}", session.run_name.as_deref().unwrap_or("-")),
+        format!("run: {}", session.core.run_name.as_deref().unwrap_or("-")),
     );
-    pushln(&mut output, format!("duration_ms: {}", session.duration_ms));
+    pushln(
+        &mut output,
+        format!("duration_ms: {}", session.core.duration_ms),
+    );
     pushln(&mut output, format!("stop_reason: {}", session.stop_reason));
     pushln(
         &mut output,
@@ -1200,27 +1225,11 @@ pub(crate) fn render_report(
         format!("exclude_comm: {:?}", session.config.exclude_comm),
     );
 
-    if session.event_stream_write_errors > 0 {
-        pushln(&mut output, "recording integrity warning");
-        pushln(&mut output, "---------------------------");
-        pushln(
-            &mut output,
-            format!(
-                "event_stream_write_errors={}",
-                session.event_stream_write_errors
-            ),
-        );
-        pushln(
-            &mut output,
-            format!(
-                "first_event_stream_write_error={}",
-                session
-                    .first_event_stream_write_error
-                    .as_deref()
-                    .unwrap_or("-")
-            ),
-        );
-        pushln(&mut output, "diagnosis may be incomplete");
+    if let Some(warning) = event_stream_warning(
+        session.core.event_stream_write_errors,
+        session.core.first_event_stream_write_error.as_deref(),
+    ) {
+        pushln(&mut output, warning);
         pushln(&mut output, "");
     }
     pushln(
@@ -1247,7 +1256,10 @@ pub(crate) fn render_report(
     );
     pushln(
         &mut output,
-        format!("active_tasks_at_end: {}", session.active_target_pids_count),
+        format!(
+            "active_tasks_at_end: {}",
+            session.core.active_target_pids_count
+        ),
     );
     pushln(&mut output, "");
 
@@ -1355,49 +1367,49 @@ pub(crate) fn render_report(
 
     pushln(&mut output, "");
 
-    if session.spike_events_truncated {
+    if session.core.spike_events_truncated {
         pushln(&mut output, "spike event warning");
         pushln(&mut output, "-------------------");
         pushln(
             &mut output,
             format!(
                 "spike_events_truncated=true retained_spike_events={} note=spike_events.json is capped; top_spikes and threshold counters remain available",
-                session.spike_events_retained_count
+                session.core.spike_events_retained_count
             ),
         );
         pushln(&mut output, "");
     }
 
-    if session.scx_event_count > 0 {
+    if session.core.scx_event_count > 0 {
         pushln(
             &mut output,
-            format!("scx_events: {}", session.scx_event_count),
+            format!("scx_events: {}", session.core.scx_event_count),
         );
         pushln(&mut output, "");
     }
-    if session.irq_event_count > 0
-        || session.gpu_sample_count > 0
-        || session.frame_event_count > 0
-        || session.block_io_event_count > 0
-        || session.migration_event_count.unwrap_or(0) > 0
-        || session.cpu_freq_sample_count.unwrap_or(0) > 0
+    if session.core.irq_event_count > 0
+        || session.core.gpu_sample_count > 0
+        || session.core.frame_event_count > 0
+        || session.core.block_io_event_count > 0
+        || session.core.migration_event_count.unwrap_or(0) > 0
+        || session.core.cpu_freq_sample_count.unwrap_or(0) > 0
     {
         pushln(&mut output, "correlation artifacts");
         pushln(&mut output, "---------------------");
         pushln(
             &mut output,
-            format!("irq_events: {}", session.irq_event_count),
+            format!("irq_events: {}", session.core.irq_event_count),
         );
         pushln(
             &mut output,
-            format!("gpu_samples: {}", session.gpu_sample_count),
+            format!("gpu_samples: {}", session.core.gpu_sample_count),
         );
         pushln(
             &mut output,
-            format!("frame_events: {}", session.frame_event_count),
+            format!("frame_events: {}", session.core.frame_event_count),
         );
-        if session.frame_event_count > 0 {
-            let alignment = if session.mangohud_first_frame_monotonic_ns.is_some() {
+        if session.core.frame_event_count > 0 {
+            let alignment = if session.core.mangohud_first_frame_monotonic_ns.is_some() {
                 "monotonic_observed"
             } else {
                 "approximate_first_row"
@@ -1411,21 +1423,21 @@ pub(crate) fn render_report(
             &mut output,
             format!(
                 "migration_events: {}",
-                session.migration_event_count.unwrap_or(0)
+                session.core.migration_event_count.unwrap_or(0)
             ),
         );
         pushln(
             &mut output,
             format!(
                 "cpu_freq_samples: {}",
-                session.cpu_freq_sample_count.unwrap_or(0)
+                session.core.cpu_freq_sample_count.unwrap_or(0)
             ),
         );
         pushln(
             &mut output,
             format!(
                 "io_events: {} ({}{})",
-                session.block_io_event_count,
+                session.core.block_io_event_count,
                 block_io_correlation_basis(session),
                 if block_io_correlation_basis(session) == "dev+sector" {
                     " correlated (advisory, approximate)"
@@ -1436,7 +1448,9 @@ pub(crate) fn render_report(
         );
         pushln(&mut output, "");
 
-        if session.block_io_event_count > 0 && block_io_correlation_basis(session) == "dev+sector" {
+        if session.core.block_io_event_count > 0
+            && block_io_correlation_basis(session) == "dev+sector"
+        {
             pushln(&mut output, "block i/o correlation warning");
             pushln(&mut output, "----------------------------");
             pushln(
@@ -1491,7 +1505,7 @@ pub(crate) fn render_report(
 
     pushln(&mut output, "top tasks by max latency");
     pushln(&mut output, "------------------------");
-    let duration_secs = session.duration_ms as f64 / 1000.0;
+    let duration_secs = session.core.duration_ms as f64 / 1000.0;
     for task in tasks.iter().take(top) {
         let spike_rate = if duration_secs > 0.0 {
             task.latency.over_1ms as f64 / duration_secs
@@ -1644,10 +1658,10 @@ fn pushln(output: &mut String, line: impl AsRef<str>) {
 }
 
 fn block_io_correlation_basis(session: &SessionFile) -> &str {
-    if session.block_io_correlation_basis.is_empty() {
+    if session.core.block_io_correlation_basis.is_empty() {
         "dev+sector"
     } else {
-        &session.block_io_correlation_basis
+        &session.core.block_io_correlation_basis
     }
 }
 
@@ -1663,8 +1677,8 @@ pub(crate) fn data_quality_summary(
         reasons.push("run directory has validation errors".to_owned());
     }
 
-    if session.schema_version != SESSION_SCHEMA_VERSION {
-        if session.schema_version > SESSION_SCHEMA_VERSION {
+    if session.core.schema_version != SESSION_SCHEMA_VERSION {
+        if session.core.schema_version > SESSION_SCHEMA_VERSION {
             level = DataQualityLevel::Low;
             reasons.push("session schema is newer than this stutter binary".to_owned());
         } else {
@@ -1673,7 +1687,7 @@ pub(crate) fn data_quality_summary(
         }
     }
 
-    if session.event_stream_write_errors > 0 {
+    if session.core.event_stream_write_errors > 0 {
         level = DataQualityLevel::Low;
         reasons.push("recording stream had write errors".to_owned());
     }
@@ -1683,27 +1697,27 @@ pub(crate) fn data_quality_summary(
         reasons.push("optional correlation artifacts are missing".to_owned());
     }
 
-    if session.spike_events_truncated {
+    if session.core.spike_events_truncated {
         level = downgrade_quality(level, DataQualityLevel::Medium);
         reasons.push("spike event stream was truncated".to_owned());
     }
 
-    if session.spike_events_dropped_count > 0 {
+    if session.core.spike_events_dropped_count > 0 {
         level = downgrade_quality(level, DataQualityLevel::Medium);
         reasons.push("spike events were dropped".to_owned());
     }
 
-    if session.interval_record_count == 0 {
+    if session.core.interval_record_count == 0 {
         level = downgrade_quality(level, DataQualityLevel::Medium);
         reasons.push("no interval records are available".to_owned());
     }
 
-    if session.active_target_pids_count == 0 {
+    if session.core.active_target_pids_count == 0 {
         level = downgrade_quality(level, DataQualityLevel::Medium);
         reasons.push("no active target tasks were present at end of run".to_owned());
     }
 
-    let drop_counters_nonzero = session.drop_counters.total() > 0;
+    let drop_counters_nonzero = session.core.drop_counters.total() > 0;
 
     if drop_counters_nonzero {
         level = downgrade_quality(level, DataQualityLevel::Medium);
@@ -1728,14 +1742,14 @@ pub(crate) fn data_quality_summary(
     }
 
     let block_io_correlation_basis = block_io_correlation_basis(session).to_owned();
-    if session.block_io_event_count > 0 && block_io_correlation_basis == "dev+sector" {
+    if session.core.block_io_event_count > 0 && block_io_correlation_basis == "dev+sector" {
         level = downgrade_quality(level, DataQualityLevel::Medium);
         reasons.push("block I/O correlation is approximate dev+sector matching".to_owned());
     }
 
-    let frame_timestamp_alignment = if session.frame_event_count == 0 {
+    let frame_timestamp_alignment = if session.core.frame_event_count == 0 {
         "none".to_owned()
-    } else if session.mangohud_first_frame_monotonic_ns.is_some() {
+    } else if session.core.mangohud_first_frame_monotonic_ns.is_some() {
         "monotonic_observed".to_owned()
     } else {
         level = downgrade_quality(level, DataQualityLevel::Medium);
@@ -1753,15 +1767,15 @@ pub(crate) fn data_quality_summary(
         level = downgrade_quality(level, DataQualityLevel::Medium);
         reasons.push("CPU perf was requested but no counters were recorded".to_owned());
     }
-    if session.cpu_perf_open_errors > 0 || session.cpu_perf_read_errors > 0 {
+    if session.core.cpu_perf_open_errors > 0 || session.core.cpu_perf_read_errors > 0 {
         level = downgrade_quality(level, DataQualityLevel::Medium);
         reasons.push("CPU perf counters had open/read errors".to_owned());
     }
-    if session.cpu_perf_skipped_tasks > 0 {
+    if session.core.cpu_perf_skipped_tasks > 0 {
         level = downgrade_quality(level, DataQualityLevel::Medium);
         reasons.push(format!(
             "CPU perf skipped {} active tasks due to cpu_perf_max_tasks limit",
-            session.cpu_perf_skipped_tasks
+            session.core.cpu_perf_skipped_tasks
         ));
     }
     if session
@@ -1784,22 +1798,22 @@ pub(crate) fn data_quality_summary(
         missing_optional_files: validation.missing_optional_files.clone(),
         validation_errors: validation.errors.clone(),
         validation_warnings: validation.warnings.clone(),
-        schema_version: session.schema_version,
+        schema_version: session.core.schema_version,
         expected_schema_version: SESSION_SCHEMA_VERSION,
-        event_stream_write_errors: session.event_stream_write_errors,
-        spike_events_truncated: session.spike_events_truncated,
-        spike_events_retained_count: session.spike_events_retained_count,
-        spike_events_dropped_count: session.spike_events_dropped_count,
-        interval_record_count: session.interval_record_count,
-        active_target_pids_count: session.active_target_pids_count,
+        event_stream_write_errors: session.core.event_stream_write_errors,
+        spike_events_truncated: session.core.spike_events_truncated,
+        spike_events_retained_count: session.core.spike_events_retained_count,
+        spike_events_dropped_count: session.core.spike_events_dropped_count,
+        interval_record_count: session.core.interval_record_count,
+        active_target_pids_count: session.core.active_target_pids_count,
         drop_counters_nonzero,
         percentile_scope_counts,
         block_io_correlation_basis,
         frame_timestamp_alignment,
         cpu_perf_requested,
-        cpu_perf_open_errors: session.cpu_perf_open_errors,
-        cpu_perf_read_errors: session.cpu_perf_read_errors,
-        cpu_perf_skipped_tasks: session.cpu_perf_skipped_tasks,
+        cpu_perf_open_errors: session.core.cpu_perf_open_errors,
+        cpu_perf_read_errors: session.core.cpu_perf_read_errors,
+        cpu_perf_skipped_tasks: session.core.cpu_perf_skipped_tasks,
     }
 }
 
@@ -1964,7 +1978,7 @@ fn flatten_spike_events(session: &SessionFile, spike_events: &[SpikeEvent]) -> V
             switch_prev_pid: spike.switch_prev_pid,
             switch_prev_state: spike.switch_prev_state,
             switch_prev_state_label: classify_switch_prev_state(spike.switch_prev_state).to_owned(),
-            elapsed_ms: elapsed_ms(session.monotonic_start_ns, spike.switch_ns)
+            elapsed_ms: elapsed_ms(session.core.monotonic_start_ns, spike.switch_ns)
                 .or(spike.elapsed_ms),
             scx_ops: spike.scx_ops.clone(),
             scx_state: spike.scx_state.clone(),
@@ -1984,7 +1998,7 @@ fn flatten_top_spikes(session: &SessionFile) -> Vec<SpikePoint> {
             points.push(spike_point_from_task(
                 task,
                 spike,
-                elapsed_ms(session.monotonic_start_ns, spike.switch_ns),
+                elapsed_ms(session.core.monotonic_start_ns, spike.switch_ns),
             ));
         }
     }
@@ -1995,7 +2009,7 @@ fn flatten_top_spikes(session: &SessionFile) -> Vec<SpikePoint> {
 fn spike_point_from_task(
     task: &SessionTask,
     spike: &RecordedSpike,
-    elapsed_ms: Option<u128>,
+    elapsed_ms: Option<u64>,
 ) -> SpikePoint {
     SpikePoint {
         task: task.task,
@@ -2048,11 +2062,11 @@ fn format_task_cpu_perf(task: &SessionTask) -> String {
     format!(" cpu_perf: {}", parts.join(" "))
 }
 
-fn elapsed_ms(monotonic_start_ns: Option<u64>, switch_ns: u64) -> Option<u128> {
+fn elapsed_ms(monotonic_start_ns: Option<u64>, switch_ns: u64) -> Option<u64> {
     let start_ns = monotonic_start_ns?;
     switch_ns
         .checked_sub(start_ns)
-        .map(|elapsed_ns| u128::from(elapsed_ns / 1_000_000))
+        .map(|elapsed_ns| elapsed_ns / 1_000_000)
 }
 
 fn decrement_task_count(task_counts: &mut BTreeMap<u32, usize>, task: u32) {
@@ -2315,7 +2329,7 @@ fn render_correlation_sections(
     }
 
     // 3. Frame events
-    let padding_ms = u128::from(cluster_window_ns / 1_000_000).max(1);
+    let padding_ms = (cluster_window_ns / 1_000_000).max(1);
     let min_overall_opt = clusters
         .iter()
         .filter_map(|c| cluster_elapsed_range(c).map(|(min, _)| min))
@@ -2538,7 +2552,7 @@ fn render_correlation_sections(
     }
 }
 
-fn cluster_elapsed_range(cluster: &SpikeCluster) -> Option<(u128, u128)> {
+fn cluster_elapsed_range(cluster: &SpikeCluster) -> Option<(u64, u64)> {
     let mut elapsed = cluster.points.iter().filter_map(|point| point.elapsed_ms);
     let first = elapsed.next()?;
     let mut min_elapsed = first;
@@ -2717,7 +2731,7 @@ fn format_process_pid(process_pid: Option<u32>) -> String {
     }
 }
 
-fn cluster_elapsed(cluster: &SpikeCluster) -> Option<u128> {
+fn cluster_elapsed(cluster: &SpikeCluster) -> Option<u64> {
     cluster
         .points
         .iter()
@@ -2725,7 +2739,7 @@ fn cluster_elapsed(cluster: &SpikeCluster) -> Option<u128> {
         .min()
 }
 
-fn format_elapsed(elapsed_ms: Option<u128>) -> String {
+fn format_elapsed(elapsed_ms: Option<u64>) -> String {
     match elapsed_ms {
         Some(elapsed_ms) => format!("{elapsed_ms}ms"),
         None => "-".to_owned(),
@@ -2823,10 +2837,10 @@ fn perform_frame_diagnosis(
 ) -> Vec<FrameDiagnosis> {
     let mut diagnoses = Vec::new();
     for frame in frame_spikes {
-        let frame_monotonic_ns = if let Some(start_ns) = session.monotonic_start_ns {
-            start_ns + (frame.elapsed_ms as u64 * 1_000_000)
+        let frame_monotonic_ns = if let Some(start_ns) = session.core.monotonic_start_ns {
+            start_ns + (frame.elapsed_ms * 1_000_000)
         } else {
-            continue;
+            0
         };
 
         let nearby_points: Vec<_> = all_spike_points
@@ -2879,7 +2893,7 @@ fn compute_correlation_windows(
     cluster_window_ns: u64,
 ) -> session_io::CorrelationWindows {
     let mut windows = session_io::CorrelationWindows::default();
-    let padding_ms = u128::from(cluster_window_ns / 1_000_000).max(1);
+    let padding_ms = (cluster_window_ns / 1_000_000).max(1);
 
     for cluster in clusters {
         let min_ns = cluster.min_switch_ns.saturating_sub(cluster_window_ns);
@@ -2896,8 +2910,8 @@ fn compute_correlation_windows(
     }
 
     for frame in frame_spikes {
-        if let Some(start_ns) = session.monotonic_start_ns {
-            let frame_ns = start_ns + (frame.elapsed_ms as u64 * 1_000_000);
+        if let Some(start_ns) = session.core.monotonic_start_ns {
+            let frame_ns = start_ns + (frame.elapsed_ms * 1_000_000);
             windows.windows_ns.push((
                 frame_ns.saturating_sub(cluster_window_ns),
                 frame_ns.saturating_add(cluster_window_ns),
@@ -2915,6 +2929,29 @@ fn compute_correlation_windows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn event_stream_warning_is_absent_without_errors() {
+        assert!(event_stream_warning(0, None).is_none());
+    }
+
+    #[test]
+    fn event_stream_warning_includes_count_and_first_error() {
+        let warning =
+            event_stream_warning(2, Some("spike_events: No space left on device")).unwrap();
+
+        assert!(warning.contains("2 write error"));
+        assert!(warning.contains("event artifact files may be incomplete"));
+        assert!(warning.contains("spike_events: No space left on device"));
+    }
+
+    #[test]
+    fn event_stream_warning_handles_missing_first_error() {
+        let warning = event_stream_warning(1, None).unwrap();
+
+        assert!(warning.contains("1 write error"));
+        assert!(warning.contains("first error was not recorded"));
+    }
 
     #[test]
     fn classify_switch_prev_state_zero_is_preempted_or_runnable() {
@@ -3014,12 +3051,15 @@ mod tests {
 
     fn minimal_session_for_report_test() -> SessionFile {
         SessionFile {
-            schema_version: SESSION_SCHEMA_VERSION,
-            duration_ms: 1000,
+            core: crate::recorder::SessionMetadataCore {
+                schema_version: SESSION_SCHEMA_VERSION,
+                duration_ms: 1000,
+                interval_record_count: 1,
+                active_target_pids_count: 1,
+                block_io_correlation_basis: "request-pointer".to_owned(),
+                ..Default::default()
+            },
             stop_reason: "test".to_owned(),
-            interval_record_count: 1,
-            active_target_pids_count: 1,
-            block_io_correlation_basis: "request-pointer".to_owned(),
             ..Default::default()
         }
     }
@@ -3081,9 +3121,9 @@ mod tests {
     #[test]
     fn data_quality_warns_on_truncated_spikes() {
         let mut session = minimal_session_for_report_test();
-        session.spike_events_truncated = true;
-        session.spike_events_retained_count = 500_000;
-        session.spike_events_dropped_count = 1;
+        session.core.spike_events_truncated = true;
+        session.core.spike_events_retained_count = 500_000;
+        session.core.spike_events_dropped_count = 1;
 
         let validation = crate::session_io::RunValidationReport::default();
 
@@ -3121,8 +3161,8 @@ mod tests {
     fn data_quality_warns_on_cpu_perf_errors() {
         let mut session = minimal_session_for_report_test();
         session.config.cpu_perf = true;
-        session.cpu_perf_open_errors = 1;
-        session.cpu_perf_skipped_tasks = 2;
+        session.core.cpu_perf_open_errors = 1;
+        session.core.cpu_perf_skipped_tasks = 2;
         let validation = crate::session_io::RunValidationReport::default();
 
         let summary = data_quality_summary(&session, &validation);

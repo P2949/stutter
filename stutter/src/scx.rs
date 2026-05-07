@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ScxEvent {
-    pub elapsed_ms: u128,
+    pub elapsed_ms: u64,
     pub state: Option<String>,
     pub ops: Option<String>,
     pub enable_seq: Option<String>,
@@ -47,7 +47,7 @@ impl ScxTracker {
         })
     }
 
-    pub fn sample(&mut self, elapsed_ms: u128) -> Option<ScxEvent> {
+    pub fn sample(&mut self, elapsed_ms: u64) -> Option<ScxEvent> {
         self.sample_at(Path::new("/sys/kernel/sched_ext"), elapsed_ms)
     }
 
@@ -56,11 +56,11 @@ impl ScxTracker {
         &self.events
     }
 
-    pub fn sample_at(&mut self, root: &Path, elapsed_ms: u128) -> Option<ScxEvent> {
+    pub fn sample_at(&mut self, root: &Path, elapsed_ms: u64) -> Option<ScxEvent> {
         self.record_snapshot(snapshot_at(root), elapsed_ms)
     }
 
-    fn record_snapshot(&mut self, snapshot: ScxSnapshot, elapsed_ms: u128) -> Option<ScxEvent> {
+    fn record_snapshot(&mut self, snapshot: ScxSnapshot, elapsed_ms: u64) -> Option<ScxEvent> {
         let was_active = self.last.as_ref().is_some_and(|s| !s.is_empty());
 
         if snapshot.is_empty() {

@@ -16,7 +16,7 @@ pub struct RefreshInput<'a> {
     pub tree_events: &'a mut Vec<TreeEvent>,
     pub target_pid_map: &'a mut AyaHashMap<MapData, u32, u8>,
     pub prev_faults_map: Option<&'a mut AyaHashMap<MapData, u32, [u64; 2]>>,
-    pub elapsed_ms: u128,
+    pub elapsed_ms: u64,
     pub recording_started: Option<Instant>,
 }
 
@@ -85,7 +85,7 @@ impl TaskTracker {
         snapshot: crate::process_tree::TargetSnapshot,
         config: &Config,
         tree_events: &mut Vec<TreeEvent>,
-        elapsed_ms: u128,
+        elapsed_ms: u64,
         recording_started: Option<Instant>,
         mut prev_faults_map: Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
         target_pid_map: &mut dyn TaskMap,
@@ -207,7 +207,7 @@ impl TaskTracker {
         desired_tasks: &BTreeMap<u32, TaskInfo>,
         tree_events: &mut Vec<TreeEvent>,
         prev_faults_map: &mut Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
-        elapsed_ms: u128,
+        elapsed_ms: u64,
         recording_started: Option<Instant>,
     ) {
         for (tid, desired) in desired_tasks {
@@ -272,7 +272,7 @@ pub fn reset_stats_for_task_change(
     recording_started: Option<Instant>,
     tid: u32,
     task_info: &TaskInfo,
-    elapsed_ms: u128,
+    elapsed_ms: u64,
 ) {
     let mut stats = metrics::TaskStats::new(tid, task_info.comm.clone(), elapsed_ms);
     stats.apply_task_info(task_info);
@@ -287,7 +287,7 @@ pub fn reactivate_or_reset_stats_inner(
     recording_started: Option<Instant>,
     tid: u32,
     task_info: &TaskInfo,
-    elapsed_ms: u128,
+    elapsed_ms: u64,
 ) {
     if let Some(stats) = stats_by_task.get_mut(&tid)
         && same_task_info(task_info, &stats.task_info())

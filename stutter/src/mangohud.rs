@@ -8,7 +8,7 @@ pub fn read_frame_events(
     path: &Path,
     ignore_offset: u64,
     alignment_monotonic_ns: Option<u64>,
-    alignment_raw_elapsed_ms: Option<u128>,
+    alignment_raw_elapsed_ms: Option<u64>,
     recorder_start_monotonic_ns: Option<u64>,
 ) -> anyhow::Result<Vec<FrameEvent>> {
     let mut file = fs::File::open(path)
@@ -59,7 +59,7 @@ pub fn parse_frame_events<I>(
     header: &str,
     lines: I,
     alignment_monotonic_ns: Option<u64>,
-    alignment_raw_elapsed_ms: Option<u128>,
+    alignment_raw_elapsed_ms: Option<u64>,
     recorder_start_monotonic_ns: Option<u64>,
 ) -> anyhow::Result<Vec<FrameEvent>>
 where
@@ -92,13 +92,12 @@ where
     }
 
     let mut events = Vec::new();
-    let mut first_elapsed_ms: Option<u128> = None;
+    let mut first_elapsed_ms: Option<u64> = None;
     let mut accumulated_ms = 0.0;
 
     let alignment_recorder_elapsed_ms = alignment_monotonic_ns
         .zip(recorder_start_monotonic_ns)
-        .map(|(m, r)| m.saturating_sub(r) / 1_000_000)
-        .map(|ms| ms as u128);
+        .map(|(m, r)| m.saturating_sub(r) / 1_000_000);
 
     for line in lines {
         let line = line?;
@@ -116,7 +115,7 @@ where
                 .and_then(|value| value.parse::<f64>().ok())
                 .filter(|value| value.is_finite());
 
-            let raw_val = raw_elapsed.map(|raw| raw.max(0.0) as u128);
+            let raw_val = raw_elapsed.map(|raw| raw.max(0.0) as u64);
             if first_elapsed_ms.is_none() {
                 first_elapsed_ms = raw_val;
             }
@@ -134,12 +133,12 @@ where
                 raw.saturating_sub(first)
             } else if let Some(observed_ms) = alignment_recorder_elapsed_ms {
                 // No raw elapsed column, but we have alignment from first row
-                let val = observed_ms + accumulated_ms as u128;
+                let val = observed_ms + accumulated_ms as u64;
                 accumulated_ms += frametime_ms;
                 val
             } else {
                 // Fallback: zero-based accumulation
-                let val = accumulated_ms as u128;
+                let val = accumulated_ms as u64;
                 accumulated_ms += frametime_ms;
                 val
             };
@@ -202,7 +201,7 @@ impl MangoHudLiveParser {
             .and_then(|value| value.parse::<f64>().ok())
             .filter(|value| value.is_finite());
 
-        let elapsed_ms = raw_elapsed.map(|raw| raw.max(0.0) as u128).unwrap_or(0);
+        let elapsed_ms = raw_elapsed.map(|raw| raw.max(0.0) as u64).unwrap_or(0);
 
         Some(FrameEvent {
             elapsed_ms,
@@ -271,7 +270,7 @@ pub async fn tail_frames(
     }
 }
 
-pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u128, u64)> {
+pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u64, u64)> {
     use std::io::{Read, Seek, SeekFrom};
 
     use tokio::time::{Duration, sleep};
@@ -340,7 +339,7 @@ pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u
                     .and_then(|idx| columns.get(idx))
                     .and_then(|value| value.parse::<f64>().ok())
                 {
-                    return Ok((raw_elapsed.max(0.0) as u128, observed_ns));
+                    return Ok((raw_elapsed.max(0.0) as u64, observed_ns));
                 }
 
                 return Ok((0, observed_ns));

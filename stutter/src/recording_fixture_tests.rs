@@ -110,92 +110,97 @@ pub fn write_minimal_recording_fixture(dir: &Path) {
         top_wakers: vec![],
         sched_policy: None,
         stat_wait_sum_ns: None,
+        stat_wait_sum_ns_saturated: false,
         stat_wait_count: None,
         cpu_perf: None,
     };
 
     let session = SessionFile {
-        schema_version: SESSION_SCHEMA_VERSION,
-        run_name: Some("minimal".to_owned()),
-        started_at: mk_time(),
-        ended_at: mk_time(),
-        monotonic_start_ns: Some(0),
-        monotonic_end_ns: Some(1_000_000_000),
-        duration_ms: 1000,
-        mangohud_start_offset: None,
-        mangohud_first_frame_monotonic_ns: None,
-        mangohud_first_frame_raw_elapsed_ms: None,
+        core: crate::recorder::SessionMetadataCore {
+            schema_version: SESSION_SCHEMA_VERSION,
+            run_name: Some("minimal".to_owned()),
+            started_at: mk_time(),
+            ended_at: mk_time(),
+            monotonic_start_ns: Some(0),
+            monotonic_end_ns: Some(1_000_000_000),
+            duration_ms: 1000,
+            mangohud_start_offset: None,
+            mangohud_first_frame_monotonic_ns: None,
+            mangohud_first_frame_raw_elapsed_ms: None,
+            metadata: SystemMetadata::default(),
+            target_pids_max: 1024,
+            active_target_pids_count: 1,
+            active_expanded_tasks: vec![123],
+            interval_record_count: 0,
+            intervals_dropped: 0,
+            spike_events_retained_count: 0,
+            spike_events_dropped_count: 0,
+            spike_events_truncated: false,
+            scx_event_count: 0,
+            irq_event_count: 0,
+            migration_event_count: Some(0),
+            cpu_freq_sample_count: Some(0),
+            gpu_sample_count: 0,
+            frame_event_count: 0,
+            block_io_event_count: 0,
+            event_stream_write_errors: 0,
+            alert_events_dropped_count: 0,
+            alert_channel_closed_count: 0,
+            first_event_stream_write_error: None,
+            block_io_correlation_basis: "dev+sector".to_owned(),
+            drop_counters: DropCountersSnapshot::default(),
+            cpu_perf_sample_count: 0,
+            cpu_perf_open_errors: 0,
+            cpu_perf_read_errors: 0,
+            cpu_perf_skipped_tasks: 0,
+            cpu_perf_last_error: None,
+        },
         stop_reason: "manual".to_owned(),
         config: mk_config(),
-        metadata: SystemMetadata::default(),
-        target_pids_max: 1024,
-        active_target_pids_count: 1,
-        active_expanded_tasks: vec![123],
-        interval_record_count: 0,
-        intervals_dropped: 0,
-        spike_events_retained_count: 0,
-        spike_events_dropped_count: 0,
-        spike_events_truncated: false,
-        scx_event_count: 0,
-        irq_event_count: 0,
-        migration_event_count: Some(0),
-        cpu_freq_sample_count: Some(0),
-        gpu_sample_count: 0,
-        frame_event_count: 0,
-        block_io_event_count: 0,
-        event_stream_write_errors: 0,
-        alert_events_dropped_count: 0,
-        alert_channel_closed_count: 0,
-        first_event_stream_write_error: None,
-        block_io_correlation_basis: "dev+sector".to_owned(),
-        drop_counters: DropCountersSnapshot::default(),
-        cpu_perf_sample_count: 0,
-        cpu_perf_open_errors: 0,
-        cpu_perf_read_errors: 0,
-        cpu_perf_skipped_tasks: 0,
-        cpu_perf_last_error: None,
         tasks: vec![task],
         top_spikes: vec![],
     };
 
     let metadata_file = MetadataFile {
-        schema_version: SESSION_SCHEMA_VERSION,
-        run_name: Some("minimal".to_owned()),
-        started_at: mk_time(),
-        ended_at: mk_time(),
-        monotonic_start_ns: Some(0),
-        monotonic_end_ns: Some(1_000_000_000),
-        duration_ms: 1000,
-        mangohud_start_offset: None,
-        mangohud_first_frame_monotonic_ns: None,
-        mangohud_first_frame_raw_elapsed_ms: None,
-        metadata: SystemMetadata::default(),
-        target_pids_max: 1024,
-        active_target_pids_count: 1,
-        active_expanded_tasks: vec![123],
-        interval_record_count: 0,
-        intervals_dropped: 0,
-        spike_events_retained_count: 0,
-        spike_events_dropped_count: 0,
-        spike_events_truncated: false,
-        scx_event_count: 0,
-        irq_event_count: 0,
-        migration_event_count: Some(0),
-        cpu_freq_sample_count: Some(0),
-        gpu_sample_count: 0,
-        frame_event_count: 0,
-        block_io_event_count: 0,
-        event_stream_write_errors: 0,
-        alert_events_dropped_count: 0,
-        alert_channel_closed_count: 0,
-        first_event_stream_write_error: None,
-        block_io_correlation_basis: "dev+sector".to_owned(),
-        drop_counters: DropCountersSnapshot::default(),
-        cpu_perf_sample_count: 0,
-        cpu_perf_open_errors: 0,
-        cpu_perf_read_errors: 0,
-        cpu_perf_skipped_tasks: 0,
-        cpu_perf_last_error: None,
+        core: crate::recorder::SessionMetadataCore {
+            schema_version: SESSION_SCHEMA_VERSION,
+            run_name: Some("minimal".to_owned()),
+            started_at: mk_time(),
+            ended_at: mk_time(),
+            monotonic_start_ns: Some(0),
+            monotonic_end_ns: Some(1_000_000_000),
+            duration_ms: 1000,
+            mangohud_start_offset: None,
+            mangohud_first_frame_monotonic_ns: None,
+            mangohud_first_frame_raw_elapsed_ms: None,
+            metadata: SystemMetadata::default(),
+            target_pids_max: 1024,
+            active_target_pids_count: 1,
+            active_expanded_tasks: vec![123],
+            interval_record_count: 0,
+            intervals_dropped: 0,
+            spike_events_retained_count: 0,
+            spike_events_dropped_count: 0,
+            spike_events_truncated: false,
+            scx_event_count: 0,
+            irq_event_count: 0,
+            migration_event_count: Some(0),
+            cpu_freq_sample_count: Some(0),
+            gpu_sample_count: 0,
+            frame_event_count: 0,
+            block_io_event_count: 0,
+            event_stream_write_errors: 0,
+            alert_events_dropped_count: 0,
+            alert_channel_closed_count: 0,
+            first_event_stream_write_error: None,
+            block_io_correlation_basis: "dev+sector".to_owned(),
+            drop_counters: DropCountersSnapshot::default(),
+            cpu_perf_sample_count: 0,
+            cpu_perf_open_errors: 0,
+            cpu_perf_read_errors: 0,
+            cpu_perf_skipped_tasks: 0,
+            cpu_perf_last_error: None,
+        },
     };
 
     fs::create_dir_all(dir).unwrap();
@@ -284,6 +289,7 @@ fn task_for_fixture(task: u32, class: TaskClass, comm: &str) -> SessionTask {
         top_wakers: vec![],
         sched_policy: None,
         stat_wait_sum_ns: None,
+        stat_wait_sum_ns_saturated: false,
         stat_wait_count: None,
         cpu_perf: None,
     }
@@ -291,45 +297,47 @@ fn task_for_fixture(task: u32, class: TaskClass, comm: &str) -> SessionTask {
 
 fn base_session(run_name: &str) -> SessionFile {
     SessionFile {
-        schema_version: SESSION_SCHEMA_VERSION,
-        run_name: Some(run_name.to_owned()),
-        started_at: mk_dummy_time(),
-        ended_at: mk_dummy_time(),
-        monotonic_start_ns: Some(0),
-        monotonic_end_ns: Some(1_000_000_000),
-        duration_ms: 1000,
-        mangohud_start_offset: None,
-        mangohud_first_frame_monotonic_ns: None,
-        mangohud_first_frame_raw_elapsed_ms: None,
+        core: crate::recorder::SessionMetadataCore {
+            schema_version: SESSION_SCHEMA_VERSION,
+            run_name: Some(run_name.to_owned()),
+            started_at: mk_dummy_time(),
+            ended_at: mk_dummy_time(),
+            monotonic_start_ns: Some(0),
+            monotonic_end_ns: Some(1_000_000_000),
+            duration_ms: 1000,
+            mangohud_start_offset: None,
+            mangohud_first_frame_monotonic_ns: None,
+            mangohud_first_frame_raw_elapsed_ms: None,
+            metadata: SystemMetadata::default(),
+            target_pids_max: 1024,
+            active_target_pids_count: 1,
+            active_expanded_tasks: vec![100],
+            interval_record_count: 1,
+            intervals_dropped: 0,
+            spike_events_retained_count: 0,
+            spike_events_dropped_count: 0,
+            spike_events_truncated: false,
+            scx_event_count: 0,
+            irq_event_count: 0,
+            migration_event_count: Some(0),
+            cpu_freq_sample_count: Some(0),
+            gpu_sample_count: 0,
+            frame_event_count: 0,
+            block_io_event_count: 0,
+            event_stream_write_errors: 0,
+            alert_events_dropped_count: 0,
+            alert_channel_closed_count: 0,
+            first_event_stream_write_error: None,
+            block_io_correlation_basis: "dev+sector".to_owned(),
+            drop_counters: DropCountersSnapshot::default(),
+            cpu_perf_sample_count: 0,
+            cpu_perf_open_errors: 0,
+            cpu_perf_read_errors: 0,
+            cpu_perf_skipped_tasks: 0,
+            cpu_perf_last_error: None,
+        },
         stop_reason: "test".to_owned(),
         config: mk_dummy_config(),
-        metadata: SystemMetadata::default(),
-        target_pids_max: 1024,
-        active_target_pids_count: 1,
-        active_expanded_tasks: vec![100],
-        interval_record_count: 1,
-        intervals_dropped: 0,
-        spike_events_retained_count: 0,
-        spike_events_dropped_count: 0,
-        spike_events_truncated: false,
-        scx_event_count: 0,
-        irq_event_count: 0,
-        migration_event_count: Some(0),
-        cpu_freq_sample_count: Some(0),
-        gpu_sample_count: 0,
-        frame_event_count: 0,
-        block_io_event_count: 0,
-        event_stream_write_errors: 0,
-        alert_events_dropped_count: 0,
-        alert_channel_closed_count: 0,
-        first_event_stream_write_error: None,
-        block_io_correlation_basis: "dev+sector".to_owned(),
-        drop_counters: DropCountersSnapshot::default(),
-        cpu_perf_sample_count: 0,
-        cpu_perf_open_errors: 0,
-        cpu_perf_read_errors: 0,
-        cpu_perf_skipped_tasks: 0,
-        cpu_perf_last_error: None,
         tasks: vec![task_for_fixture(100, TaskClass::Unknown, "worker")],
         top_spikes: vec![],
     }
@@ -337,43 +345,7 @@ fn base_session(run_name: &str) -> SessionFile {
 
 fn base_metadata_from_session(session: &SessionFile) -> MetadataFile {
     MetadataFile {
-        schema_version: session.schema_version,
-        run_name: session.run_name.clone(),
-        started_at: session.started_at.clone(),
-        ended_at: session.ended_at.clone(),
-        monotonic_start_ns: session.monotonic_start_ns,
-        monotonic_end_ns: session.monotonic_end_ns,
-        duration_ms: session.duration_ms,
-        mangohud_start_offset: session.mangohud_start_offset,
-        mangohud_first_frame_monotonic_ns: session.mangohud_first_frame_monotonic_ns,
-        mangohud_first_frame_raw_elapsed_ms: session.mangohud_first_frame_raw_elapsed_ms,
-        metadata: session.metadata.clone(),
-        target_pids_max: session.target_pids_max,
-        active_target_pids_count: session.active_target_pids_count,
-        active_expanded_tasks: session.active_expanded_tasks.clone(),
-        interval_record_count: session.interval_record_count,
-        intervals_dropped: session.intervals_dropped,
-        spike_events_retained_count: session.spike_events_retained_count,
-        spike_events_dropped_count: session.spike_events_dropped_count,
-        spike_events_truncated: session.spike_events_truncated,
-        scx_event_count: session.scx_event_count,
-        irq_event_count: session.irq_event_count,
-        migration_event_count: session.migration_event_count,
-        cpu_freq_sample_count: session.cpu_freq_sample_count,
-        gpu_sample_count: session.gpu_sample_count,
-        frame_event_count: session.frame_event_count,
-        block_io_event_count: session.block_io_event_count,
-        event_stream_write_errors: session.event_stream_write_errors,
-        alert_events_dropped_count: session.alert_events_dropped_count,
-        alert_channel_closed_count: session.alert_channel_closed_count,
-        first_event_stream_write_error: session.first_event_stream_write_error.clone(),
-        block_io_correlation_basis: session.block_io_correlation_basis.clone(),
-        drop_counters: session.drop_counters.clone(),
-        cpu_perf_sample_count: session.cpu_perf_sample_count,
-        cpu_perf_open_errors: session.cpu_perf_open_errors,
-        cpu_perf_read_errors: session.cpu_perf_read_errors,
-        cpu_perf_skipped_tasks: session.cpu_perf_skipped_tasks,
-        cpu_perf_last_error: session.cpu_perf_last_error.clone(),
+        core: session.core.clone(),
     }
 }
 
@@ -435,9 +407,9 @@ fn clustered_spikes(
 }
 
 fn apply_spike_session_fields(session: &mut SessionFile, spikes: &[SpikeEvent]) {
-    session.spike_events_retained_count = spikes.len() as u64;
-    session.active_target_pids_count = spikes.len() as u64;
-    session.active_expanded_tasks = spikes.iter().map(|spike| spike.task).collect();
+    session.core.spike_events_retained_count = spikes.len() as u64;
+    session.core.active_target_pids_count = spikes.len() as u64;
+    session.core.active_expanded_tasks = spikes.iter().map(|spike| spike.task).collect();
     session.tasks = spikes
         .iter()
         .map(|spike| task_for_fixture(spike.task, spike.class, &spike.comm))
@@ -570,15 +542,15 @@ fn recording_schema_round_trip_keeps_core_fields() {
     let session: SessionFile = serde_json::from_reader(reader).unwrap();
 
     // Assert core fields survive (matching values from write_minimal_recording_fixture)
-    assert_eq!(session.schema_version, SESSION_SCHEMA_VERSION);
+    assert_eq!(session.core.schema_version, SESSION_SCHEMA_VERSION);
     assert_eq!(session.tasks.len(), 1);
     assert_eq!(session.tasks[0].comm, "game");
-    assert_eq!(session.spike_events_retained_count, 0);
-    assert!(!session.spike_events_truncated);
-    assert_eq!(session.block_io_correlation_basis, "dev+sector");
+    assert_eq!(session.core.spike_events_retained_count, 0);
+    assert!(!session.core.spike_events_truncated);
+    assert_eq!(session.core.block_io_correlation_basis, "dev+sector");
 
     // Assert drop counters (should be default/zero in the minimal fixture)
-    assert_eq!(session.drop_counters.total(), 0);
+    assert_eq!(session.core.drop_counters.total(), 0);
 
     let _ = fs::remove_dir_all(temp);
 }
@@ -648,7 +620,7 @@ fn report_replay_fixture_irq_overlap() {
     }];
     write_base_run(&dir, "irq_overlap", |session| {
         apply_spike_session_fields(session, &spikes);
-        session.irq_event_count = irq_events.len() as u64;
+        session.core.irq_event_count = irq_events.len() as u64;
     });
     write_ndjson(dir.join("spike_events.json"), &spikes);
     write_ndjson(dir.join("irq_events.json"), &irq_events);
@@ -679,7 +651,7 @@ fn report_replay_fixture_gpu_bound_candidate() {
     }];
     write_base_run(&dir, "gpu_bound", |session| {
         apply_spike_session_fields(session, &spikes);
-        session.gpu_sample_count = gpu_samples.len() as u64;
+        session.core.gpu_sample_count = gpu_samples.len() as u64;
     });
     write_ndjson(dir.join("spike_events.json"), &spikes);
     write_ndjson(dir.join("gpu_samples.json"), &gpu_samples);
@@ -709,7 +681,7 @@ fn report_replay_fixture_block_io_overlap_candidate() {
     let io_events = vec![BlockIoRecord {
         elapsed_ms: 100,
         tid: 100,
-        correlation_basis: "request-pointer".to_owned(),
+        correlation_basis: std::borrow::Cow::Borrowed("request-pointer"),
         dev: 1,
         nr_sector: 8,
         sector: 2048,
@@ -719,8 +691,8 @@ fn report_replay_fixture_block_io_overlap_candidate() {
     }];
     write_base_run(&dir, "block_io_overlap", |session| {
         apply_spike_session_fields(session, &spikes);
-        session.block_io_event_count = io_events.len() as u64;
-        session.block_io_correlation_basis = "request-pointer".to_owned();
+        session.core.block_io_event_count = io_events.len() as u64;
+        session.core.block_io_correlation_basis = "request-pointer".to_owned();
     });
     write_ndjson(dir.join("spike_events.json"), &spikes);
     write_ndjson(dir.join("io_events.json"), &io_events);
@@ -763,7 +735,7 @@ fn report_replay_fixture_cpu_psi_pressure_candidate() {
     }];
     write_base_run(&dir, "cpu_psi_pressure", |session| {
         apply_spike_session_fields(session, &spikes);
-        session.interval_record_count = intervals.len() as u64;
+        session.core.interval_record_count = intervals.len() as u64;
     });
     write_ndjson(dir.join("spike_events.json"), &spikes);
     write_ndjson(dir.join("interval.json"), &intervals);
@@ -832,45 +804,47 @@ fn report_check_detects_regression_from_new_scored_task() {
     // We'll just write an empty session file for simplicity.
     fs::create_dir_all(&baseline_dir).unwrap();
     let session_baseline = SessionFile {
-        schema_version: SESSION_SCHEMA_VERSION,
-        run_name: Some("baseline".to_owned()),
-        started_at: mk_dummy_time(),
-        ended_at: mk_dummy_time(),
-        monotonic_start_ns: Some(0),
-        monotonic_end_ns: Some(1000),
-        duration_ms: 1,
-        mangohud_start_offset: None,
-        mangohud_first_frame_monotonic_ns: None,
-        mangohud_first_frame_raw_elapsed_ms: None,
+        core: crate::recorder::SessionMetadataCore {
+            schema_version: SESSION_SCHEMA_VERSION,
+            run_name: Some("baseline".to_owned()),
+            started_at: mk_dummy_time(),
+            ended_at: mk_dummy_time(),
+            monotonic_start_ns: Some(0),
+            monotonic_end_ns: Some(1000),
+            duration_ms: 1,
+            mangohud_start_offset: None,
+            mangohud_first_frame_monotonic_ns: None,
+            mangohud_first_frame_raw_elapsed_ms: None,
+            metadata: SystemMetadata::default(),
+            target_pids_max: 1024,
+            active_target_pids_count: 0,
+            active_expanded_tasks: vec![],
+            interval_record_count: 0,
+            intervals_dropped: 0,
+            spike_events_retained_count: 0,
+            spike_events_dropped_count: 0,
+            spike_events_truncated: false,
+            scx_event_count: 0,
+            irq_event_count: 0,
+            migration_event_count: Some(0),
+            cpu_freq_sample_count: Some(0),
+            gpu_sample_count: 0,
+            frame_event_count: 0,
+            block_io_event_count: 0,
+            event_stream_write_errors: 0,
+            alert_events_dropped_count: 0,
+            alert_channel_closed_count: 0,
+            first_event_stream_write_error: None,
+            block_io_correlation_basis: "dev+sector".to_owned(),
+            drop_counters: DropCountersSnapshot::default(),
+            cpu_perf_sample_count: 0,
+            cpu_perf_open_errors: 0,
+            cpu_perf_read_errors: 0,
+            cpu_perf_skipped_tasks: 0,
+            cpu_perf_last_error: None,
+        },
         stop_reason: "manual".to_owned(),
         config: mk_dummy_config(),
-        metadata: SystemMetadata::default(),
-        target_pids_max: 1024,
-        active_target_pids_count: 0,
-        active_expanded_tasks: vec![],
-        interval_record_count: 0,
-        intervals_dropped: 0,
-        spike_events_retained_count: 0,
-        spike_events_dropped_count: 0,
-        spike_events_truncated: false,
-        scx_event_count: 0,
-        irq_event_count: 0,
-        migration_event_count: Some(0),
-        cpu_freq_sample_count: Some(0),
-        gpu_sample_count: 0,
-        frame_event_count: 0,
-        block_io_event_count: 0,
-        event_stream_write_errors: 0,
-        alert_events_dropped_count: 0,
-        alert_channel_closed_count: 0,
-        first_event_stream_write_error: None,
-        block_io_correlation_basis: "dev+sector".to_owned(),
-        drop_counters: DropCountersSnapshot::default(),
-        cpu_perf_sample_count: 0,
-        cpu_perf_open_errors: 0,
-        cpu_perf_read_errors: 0,
-        cpu_perf_skipped_tasks: 0,
-        cpu_perf_last_error: None,
         tasks: vec![],
         top_spikes: vec![],
     };
