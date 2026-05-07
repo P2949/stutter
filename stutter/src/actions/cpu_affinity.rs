@@ -1,7 +1,7 @@
-use std::{path::Path, time::Duration};
+use std::path::Path;
 
 use crate::actions::{
-    ActionId, ActionScope, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
+    ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
 };
 
 pub struct CpuAffinityProfileAction {
@@ -59,28 +59,6 @@ impl TuningAction for CpuAffinityProfileAction {
         )
     }
 
-    fn action_kind(&self) -> &'static str {
-        "cpu_affinity_profile"
-    }
-
-    fn scope(&self) -> ActionScope {
-        ActionScope::ProcessTree {
-            root_pid: self.tree_pid,
-        }
-    }
-
-    fn cooldown_hint(&self) -> Duration {
-        Duration::from_secs(60)
-    }
-
-    fn requires_privilege(&self) -> bool {
-        false
-    }
-
-    fn reversible(&self) -> bool {
-        true
-    }
-
     fn safety_class(&self) -> SafetyClass {
         SafetyClass::ReversibleLowRisk
     }
@@ -97,9 +75,13 @@ impl TuningAction for CpuAffinityProfileAction {
             self.force_restore_overwrite,
             true,
         )?;
+        let summary =
+            crate::profiles::profile_apply_summary_for_tree(self.tree_pid, &self.profile)?;
         Ok(ActionState {
             applied: false,
             affected_tasks: records.len(),
+            checked_tasks: summary.checked_tasks,
+            pending_changes: summary.pending_changes,
             warnings,
         })
     }
@@ -112,31 +94,28 @@ impl TuningAction for CpuAffinityProfileAction {
             self.force_restore_overwrite,
             false,
         )?;
-        Ok(RollbackToken {
-            kind: "cpu-affinity-restore-file".to_owned(),
-            restore_path: Some(crate::affinity::default_restore_path()),
+        Ok(RollbackToken::CpuAffinityRestoreFile {
+            path: crate::affinity::default_restore_path(),
             affected_tasks: records.len(),
         })
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
         let warnings = self.preflight()?;
-        let records = crate::profiles::apply_profile_to_tree(
-            self.tree_pid,
-            &self.profile,
-            self.force_restore_overwrite,
-            true,
-        )?;
+        let summary =
+            crate::profiles::profile_apply_summary_for_tree(self.tree_pid, &self.profile)?;
         Ok(ActionState {
-            applied: records.is_empty(),
-            affected_tasks: records.len(),
+            applied: summary.checked_tasks > 0 && summary.pending_changes == 0,
+            affected_tasks: summary.checked_tasks,
+            checked_tasks: summary.checked_tasks,
+            pending_changes: summary.pending_changes,
             warnings,
         })
     }
 
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
-        let Some(path) = &token.restore_path else {
-            anyhow::bail!("rollback token does not include a restore path");
+        let RollbackToken::CpuAffinityRestoreFile { path, .. } = token else {
+            anyhow::bail!("rollback token is not a CPU affinity restore file");
         };
         crate::affinity::restore_saved(path)?;
         Ok(())
@@ -147,12 +126,12 @@ impl TuningAction for CpuAffinityProfileAction {
 mod tests {
     use std::{
         fs,
-        time::{Duration, SystemTime, UNIX_EPOCH},
+        time::{SystemTime, UNIX_EPOCH},
     };
 
     use super::*;
     use crate::{
-        actions::{ActionScope, TuningAction},
+        actions::TuningAction,
         affinity::CpuMask,
         process_tree::TaskClass,
         profiles::{Profile, ProfileRule},
@@ -194,22 +173,6 @@ mod tests {
     #[test]
     fn safety_class_is_reversible_low_risk() {
         assert_eq!(action().safety_class(), SafetyClass::ReversibleLowRisk);
-    }
-
-    #[test]
-    fn metadata_describes_cpu_affinity_profile_action() {
-        let action = action();
-
-        assert_eq!(action.action_kind(), "cpu_affinity_profile");
-        assert_eq!(
-            action.scope(),
-            ActionScope::ProcessTree {
-                root_pid: u32::MAX
-            }
-        );
-        assert_eq!(action.cooldown_hint(), Duration::from_secs(60));
-        assert!(!action.requires_privilege());
-        assert!(action.reversible());
     }
 
     #[test]

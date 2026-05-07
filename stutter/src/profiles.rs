@@ -38,6 +38,12 @@ pub struct ProfileRule {
     pub match_comm: Vec<CompiledPattern>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProfileApplySummary {
+    pub checked_tasks: usize,
+    pub pending_changes: usize,
+}
+
 #[derive(Default)]
 pub struct ProfileApplyCache {
     known_correct: BTreeSet<ProfileApplyCacheKey>,
@@ -283,6 +289,90 @@ where
     }
 
     Ok(planned)
+}
+
+pub fn profile_apply_summary_for_tree(
+    tree_pid: u32,
+    profile: &Profile,
+) -> anyhow::Result<ProfileApplySummary> {
+    let snapshot = process_tree::target_snapshot(
+        process_tree::TargetSnapshotInput::default().tree_pids(&[tree_pid]),
+    );
+
+    profile_apply_summary(&snapshot.tasks, profile)
+}
+
+fn profile_apply_summary(
+    tasks: &BTreeMap<u32, TaskInfo>,
+    profile: &Profile,
+) -> anyhow::Result<ProfileApplySummary> {
+    profile_apply_summary_with_reader(tasks, profile, affinity::read_allowed_mask_raw)
+}
+
+fn profile_apply_summary_with_reader<F>(
+    tasks: &BTreeMap<u32, TaskInfo>,
+    profile: &Profile,
+    mut read_allowed_mask: F,
+) -> anyhow::Result<ProfileApplySummary>
+where
+    F: FnMut(u32) -> io::Result<CpuMask>,
+{
+    let mut summary = ProfileApplySummary::default();
+
+    for task in tasks.values() {
+        let Some(rule) = matching_profile_rule(task, profile) else {
+            continue;
+        };
+
+        let original_mask = match read_allowed_mask(task.tid) {
+            Ok(mask) => mask,
+            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
+                continue;
+            }
+            Err(err) => {
+                return Err(anyhow::anyhow!(
+                    "failed to read CPU affinity for TID {}: {err}",
+                    task.tid
+                ));
+            }
+        };
+
+        summary.checked_tasks += 1;
+
+        if original_mask != rule.affinity {
+            summary.pending_changes += 1;
+        }
+    }
+
+    Ok(summary)
+}
+
+fn matching_profile_rule<'a>(task: &TaskInfo, profile: &'a Profile) -> Option<&'a ProfileRule> {
+    for rule in &profile.rules {
+        if !rule.match_class.is_empty() && !rule.match_class.contains(&task.class) {
+            continue;
+        }
+
+        if !rule.match_comm.is_empty() {
+            let comms = [&task.comm, task.process_comm.as_ref()];
+            let mut comm_match = false;
+
+            for pattern in &rule.match_comm {
+                if comms.iter().any(|comm| pattern.matches(comm)) {
+                    comm_match = true;
+                    break;
+                }
+            }
+
+            if !comm_match {
+                continue;
+            }
+        }
+
+        return Some(rule);
+    }
+
+    None
 }
 
 fn class_dimension_may_overlap(a: &[TaskClass], b: &[TaskClass]) -> bool {
@@ -601,6 +691,77 @@ mod tests {
         let literal_bracket = CompiledPattern::new("[".to_owned()).unwrap();
         assert!(literal_bracket.matches("renderer[0]"));
         assert!(CompiledPattern::new("/[/".to_owned()).is_err());
+    }
+
+    #[test]
+    fn profile_apply_summary_counts_matching_tasks_and_pending_changes() {
+        let task_correct = TaskInfo {
+            tid: 7,
+            process_pid: 7,
+            process_ppid: 1,
+            comm: "RenderThread".into(),
+            process_comm: "game".into(),
+            process_starttime_ticks: Some(70),
+            task_starttime_ticks: Some(70),
+            exe_dev: None,
+            exe_ino: None,
+            class: TaskClass::Game,
+            sched_policy: None,
+            from_cgroup: false,
+        };
+        let task_pending = TaskInfo {
+            tid: 8,
+            process_pid: 8,
+            process_ppid: 1,
+            comm: "WorkerThread".into(),
+            process_comm: "game".into(),
+            process_starttime_ticks: Some(80),
+            task_starttime_ticks: Some(80),
+            exe_dev: None,
+            exe_ino: None,
+            class: TaskClass::Game,
+            sched_policy: None,
+            from_cgroup: false,
+        };
+        let task_unmatched = TaskInfo {
+            tid: 9,
+            process_pid: 9,
+            process_ppid: 1,
+            comm: "Compositor".into(),
+            process_comm: "sway".into(),
+            process_starttime_ticks: Some(90),
+            task_starttime_ticks: Some(90),
+            exe_dev: None,
+            exe_ino: None,
+            class: TaskClass::Compositor,
+            sched_policy: None,
+            from_cgroup: false,
+        };
+        let tasks = BTreeMap::from([(7, task_correct), (8, task_pending), (9, task_unmatched)]);
+        let profile = Profile {
+            name: "test".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: CpuMask::parse("0-1").unwrap(),
+                match_class: vec![TaskClass::Game],
+                match_comm: Vec::new(),
+            }],
+        };
+
+        let summary = profile_apply_summary_with_reader(&tasks, &profile, |tid| match tid {
+            7 => Ok(CpuMask::parse("0-1").unwrap()),
+            8 => Ok(CpuMask::parse("0").unwrap()),
+            9 => Ok(CpuMask::parse("0-1").unwrap()),
+            other => panic!("unexpected TID {other}"),
+        })
+        .unwrap();
+
+        assert_eq!(
+            summary,
+            ProfileApplySummary {
+                checked_tasks: 2,
+                pending_changes: 1,
+            }
+        );
     }
 
     #[test]

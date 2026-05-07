@@ -58,8 +58,8 @@ pub fn run_audited_action_with_audit_path<A: TuningAction>(
             })
         } else {
             let rollback = action.apply().context("apply failed")?;
-            audit_event.affected_tasks = rollback.affected_tasks;
-            audit_event.restore_path = rollback.restore_path.clone();
+            audit_event.affected_tasks = rollback.affected_tasks();
+            audit_event.restore_path = rollback.restore_path().cloned();
 
             let state = action.verify().context("verify failed")?;
             audit_event.affected_tasks = state.affected_tasks;
@@ -89,11 +89,11 @@ pub fn run_audited_action_with_audit_path<A: TuningAction>(
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf, time::Duration};
+    use std::{fs, path::PathBuf};
 
     use super::*;
     use crate::actions::{
-        ActionId, ActionScope, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
+        ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
     };
 
     struct TestAction {
@@ -109,21 +109,6 @@ mod tests {
         fn describe(&self) -> String {
             "test action".to_owned()
         }
-        fn action_kind(&self) -> &'static str {
-            "test_action"
-        }
-        fn scope(&self) -> ActionScope {
-            ActionScope::Task { tid: 1234 }
-        }
-        fn cooldown_hint(&self) -> Duration {
-            Duration::from_secs(1)
-        }
-        fn requires_privilege(&self) -> bool {
-            false
-        }
-        fn reversible(&self) -> bool {
-            true
-        }
         fn safety_class(&self) -> SafetyClass {
             SafetyClass::ReversibleLowRisk
         }
@@ -137,6 +122,8 @@ mod tests {
             Ok(ActionState {
                 applied: false,
                 affected_tasks: self.affected_tasks,
+                checked_tasks: self.affected_tasks,
+                pending_changes: self.affected_tasks,
                 warnings: vec![],
             })
         }
@@ -144,9 +131,8 @@ mod tests {
             if self.should_fail_apply {
                 anyhow::bail!("apply intentional failure");
             }
-            Ok(RollbackToken {
-                kind: "test".to_owned(),
-                restore_path: Some(PathBuf::from("/tmp/restore")),
+            Ok(RollbackToken::CpuAffinityRestoreFile {
+                path: PathBuf::from("/tmp/restore"),
                 affected_tasks: self.affected_tasks,
             })
         }
@@ -154,6 +140,8 @@ mod tests {
             Ok(ActionState {
                 applied: true,
                 affected_tasks: self.affected_tasks,
+                checked_tasks: self.affected_tasks,
+                pending_changes: 0,
                 warnings: vec![],
             })
         }
@@ -227,6 +215,8 @@ mod tests {
         let result =
             run_audited_action_with_audit_path("test-cmd", &action, true, &audit_path).unwrap();
         assert_eq!(result.state.affected_tasks, 5);
+        assert_eq!(result.state.checked_tasks, 5);
+        assert_eq!(result.state.pending_changes, 5);
         assert!(result.rollback.is_none());
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
@@ -234,6 +224,33 @@ mod tests {
         assert!(events[0].success);
         assert!(events[0].dry_run);
         assert_eq!(events[0].affected_tasks, 5);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn audited_action_logs_typed_rollback_restore_path() {
+        let dir = temp_dir("typed-rollback");
+        let audit_path = dir.join("audit.jsonl");
+        let action = TestAction {
+            should_fail_preflight: false,
+            should_fail_apply: false,
+            affected_tasks: 7,
+        };
+
+        let result =
+            run_audited_action_with_audit_path("test-cmd", &action, false, &audit_path).unwrap();
+
+        assert!(matches!(
+            result.rollback,
+            Some(RollbackToken::CpuAffinityRestoreFile { .. })
+        ));
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].success);
+        assert!(!events[0].dry_run);
+        assert_eq!(events[0].affected_tasks, 7);
+        assert_eq!(events[0].restore_path, Some(PathBuf::from("/tmp/restore")));
         fs::remove_dir_all(dir).ok();
     }
 }
