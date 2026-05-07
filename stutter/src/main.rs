@@ -5,6 +5,7 @@ mod agent;
 #[cfg(test)]
 mod artifact_contract_tests;
 mod audit;
+mod autotune;
 mod cli;
 mod config_file;
 
@@ -281,6 +282,12 @@ async fn main() -> anyhow::Result<()> {
         ),
         AppCommand::Audit { path, tail, json } => {
             audit::audit_command(audit::AuditCommandInput { path, tail, json })
+        }
+        AppCommand::AutotuneReplay { run, config } => {
+            autotune::replay::replay_command(autotune::replay::AutotuneReplayInput {
+                run_dir: run,
+                config_path: config,
+            })
         }
         AppCommand::Advisor {
             run,

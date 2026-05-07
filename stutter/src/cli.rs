@@ -47,6 +47,7 @@ enum Command {
     Man(ManArgs),
     Probes(ProbesArgs),
     Scenario(ScenarioArgs),
+    Autotune(AutotuneArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -273,6 +274,26 @@ pub struct MonitorArgs {
 
     #[arg(long = "remote", value_name = "URL")]
     pub remote: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AutotuneArgs {
+    #[command(subcommand)]
+    pub command: AutotuneCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum AutotuneCommand {
+    Replay(AutotuneReplayArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AutotuneReplayArgs {
+    #[arg(long = "run", value_name = "RUN_DIR")]
+    pub run: PathBuf,
+
+    #[arg(long = "config", value_name = "AUTOTUNE_TOML")]
+    pub config: PathBuf,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -888,6 +909,10 @@ pub enum AppCommand {
         tail: usize,
         json: bool,
     },
+    AutotuneReplay {
+        run: PathBuf,
+        config: PathBuf,
+    },
     Probes {
         json: bool,
     },
@@ -1395,6 +1420,12 @@ where
                 Ok(AppCommand::ScenarioPath { name: args.name })
             }
             ScenarioCommand::List => Ok(AppCommand::ScenarioList),
+        },
+        Some(Command::Autotune(args)) => match args.command {
+            AutotuneCommand::Replay(replay) => Ok(AppCommand::AutotuneReplay {
+                run: replay.run,
+                config: replay.config,
+            }),
         },
     }
 }
