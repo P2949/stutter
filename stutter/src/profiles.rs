@@ -375,6 +375,43 @@ fn matching_profile_rule<'a>(task: &TaskInfo, profile: &'a Profile) -> Option<&'
     None
 }
 
+pub fn profile_matched_task_count_for_tree(tree_pid: u32, profile: &Profile) -> usize {
+    let snapshot = process_tree::target_snapshot(
+        process_tree::TargetSnapshotInput::default().tree_pids(&[tree_pid]),
+    );
+    profile_matched_task_count(&snapshot.tasks, profile)
+}
+
+pub fn profile_matched_task_count(tasks: &BTreeMap<u32, TaskInfo>, profile: &Profile) -> usize {
+    tasks
+        .values()
+        .filter(|task| profile_matches_task(task, profile))
+        .count()
+}
+
+pub fn profile_matches_task(task: &TaskInfo, profile: &Profile) -> bool {
+    profile
+        .rules
+        .iter()
+        .any(|rule| profile_rule_matches_task(task, rule))
+}
+
+pub fn profile_rule_matches_task(task: &TaskInfo, rule: &ProfileRule) -> bool {
+    if !rule.match_class.is_empty() && !rule.match_class.contains(&task.class) {
+        return false;
+    }
+
+    if !rule.match_comm.is_empty() {
+        let comms = [&task.comm, task.process_comm.as_ref()];
+        return rule
+            .match_comm
+            .iter()
+            .any(|pattern| comms.iter().any(|comm| pattern.matches(comm)));
+    }
+
+    true
+}
+
 fn class_dimension_may_overlap(a: &[TaskClass], b: &[TaskClass]) -> bool {
     a.is_empty() || b.is_empty() || a.iter().any(|left| b.contains(left))
 }
@@ -762,6 +799,51 @@ mod tests {
                 pending_changes: 1,
             }
         );
+    }
+
+    #[test]
+    fn profile_matched_task_count_counts_only_matching_rules() {
+        let game_task = TaskInfo {
+            tid: 7,
+            process_pid: 7,
+            process_ppid: 1,
+            comm: "RenderThread".into(),
+            process_comm: "game".into(),
+            process_starttime_ticks: Some(70),
+            task_starttime_ticks: Some(70),
+            exe_dev: None,
+            exe_ino: None,
+            class: TaskClass::Game,
+            sched_policy: None,
+            from_cgroup: false,
+        };
+        let compositor_task = TaskInfo {
+            tid: 8,
+            process_pid: 8,
+            process_ppid: 1,
+            comm: "Compositor".into(),
+            process_comm: "sway".into(),
+            process_starttime_ticks: Some(80),
+            task_starttime_ticks: Some(80),
+            exe_dev: None,
+            exe_ino: None,
+            class: TaskClass::Compositor,
+            sched_policy: None,
+            from_cgroup: false,
+        };
+        let tasks = BTreeMap::from([(7, game_task), (8, compositor_task)]);
+        let profile = Profile {
+            name: "game-render".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: CpuMask::parse("0").unwrap(),
+                match_class: vec![TaskClass::Game],
+                match_comm: vec![CompiledPattern::new("RenderThread".to_owned()).unwrap()],
+            }],
+        };
+
+        assert_eq!(profile_matched_task_count(&tasks, &profile), 1);
+        assert!(profile_matches_task(tasks.get(&7).unwrap(), &profile));
+        assert!(!profile_matches_task(tasks.get(&8).unwrap(), &profile));
     }
 
     #[test]
