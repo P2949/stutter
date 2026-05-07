@@ -938,17 +938,7 @@ pub enum AppCommand {
         filter_class: Option<TaskClass>,
     },
     Autotune {
-        config: Option<PathBuf>,
-        watch_process: Option<String>,
-        tree_pid: Option<u32>,
-        profiles: Option<PathBuf>,
-        mode: String,
-        decision_log: Option<PathBuf>,
-        duration_seconds: Option<u64>,
-        summary_ms: u64,
-        preset: String,
-        hwmon: bool,
-        mangohud_log: Option<PathBuf>,
+        input: crate::autotune::AutotuneCommandInput,
     },
     Audit {
         path: Option<PathBuf>,
@@ -1337,17 +1327,19 @@ where
             } else {
                 validate_autotune_mode(&args.mode)?;
                 Ok(AppCommand::Autotune {
-                    config: args.config,
-                    watch_process: args.watch_process,
-                    tree_pid: args.tree_pid,
-                    profiles: args.profiles,
-                    mode: args.mode,
-                    decision_log: args.decision_log,
-                    duration_seconds: args.duration_seconds,
-                    summary_ms: args.summary_ms,
-                    preset: args.preset,
-                    hwmon: args.hwmon,
-                    mangohud_log: args.mangohud_log,
+                    input: crate::autotune::AutotuneCommandInput {
+                        config: args.config,
+                        watch_process: args.watch_process,
+                        tree_pid: args.tree_pid,
+                        profiles: args.profiles,
+                        mode: args.mode,
+                        decision_log: args.decision_log,
+                        duration_seconds: args.duration_seconds,
+                        summary_ms: args.summary_ms,
+                        preset: args.preset,
+                        hwmon: args.hwmon,
+                        mangohud_log: args.mangohud_log,
+                    },
                 })
             }
         }
