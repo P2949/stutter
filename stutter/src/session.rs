@@ -181,7 +181,6 @@ pub struct MonitorSession {
     pub interval_label: &'static str,
     pub block_io_correlation_basis: String,
     pub alert_sender: Option<tokio::sync::mpsc::Sender<AlertPayload>>,
-    #[allow(dead_code)]
     pub event_tx: Option<tokio::sync::mpsc::Sender<MonitorEvent>>,
     pub cpu_perf_sampler: Option<crate::perf_counters::CpuPerfSampler>,
     pub prometheus_state: Option<Arc<crate::prometheus::PrometheusState>>,
@@ -467,6 +466,20 @@ impl MonitorSession {
         })
     }
 
+    pub async fn emit(&self, event: MonitorEvent) {
+        let Some(tx) = &self.event_tx else {
+            return;
+        };
+
+        let kind = event.kind();
+        if let Err(err) = tx.try_send(event) {
+            warn!(
+                "monitor_event_channel_full dropped_event={} err={}",
+                kind, err
+            );
+        }
+    }
+
     pub async fn run(
         &mut self,
         mut stop_rx: Option<tokio::sync::oneshot::Receiver<()>>,
@@ -585,7 +598,7 @@ impl MonitorSession {
                 }
 
                 _ = summary_tick.tick() => {
-                    self.handle_summary_tick()?;
+                    self.handle_summary_tick().await?;
                 }
 
                 _ = epoch_tick.tick() => {
@@ -796,7 +809,7 @@ impl MonitorSession {
         None
     }
 
-    pub fn handle_summary_tick(&mut self) -> anyhow::Result<()> {
+    pub async fn handle_summary_tick(&mut self) -> anyhow::Result<()> {
         if !self.tui_state.paused {
             let elapsed_ms = self.started.elapsed().as_millis() as u64;
             if let Some(sampler) = self.cpu_perf_sampler.as_mut() {
@@ -820,6 +833,13 @@ impl MonitorSession {
                 &mut self.tasks.prev_faults_snapshot,
             );
             self.recorder.counters.interval_record_count += records.len() as u64;
+
+            self.emit(MonitorEvent::Interval {
+                elapsed_ms,
+                records: records.clone(),
+                drop_counters: drop_counters_snapshot.clone(),
+            })
+            .await;
 
             if let Some(writer) = self.recorder.streams.interval_writer.as_mut() {
                 for record in &records {

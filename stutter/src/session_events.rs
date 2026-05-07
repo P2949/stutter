@@ -46,3 +46,20 @@ pub enum MonitorEvent {
         reason: String,
     },
 }
+
+impl MonitorEvent {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::TargetSnapshot { .. } => "target_snapshot",
+            Self::Interval { .. } => "interval",
+            Self::Spike { .. } => "spike",
+            Self::Frame { .. } => "frame",
+            Self::GpuSample { .. } => "gpu_sample",
+            Self::IrqEvent { .. } => "irq_event",
+            Self::IoEvent { .. } => "io_event",
+            Self::LiveDiagnosis { .. } => "live_diagnosis",
+            Self::DataQualityWarning { .. } => "data_quality_warning",
+            Self::Finished { .. } => "finished",
+        }
+    }
+}
