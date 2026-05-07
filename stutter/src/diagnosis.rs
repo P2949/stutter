@@ -732,7 +732,7 @@ fn push_runnable_depth_evidence(
                 kind: EvidenceKind::SchedulerDelay,
                 strength: 0.40,
                 message: format!(
-                    "high global runnable depth ({} tasks) suggests CPU contention",
+                    "high monitored runnable depth ({} target tasks) suggests target-local CPU contention",
                     point.observed_runnable_depth
                 ),
                 timestamp_ms: point.elapsed_ms,
