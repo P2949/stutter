@@ -162,6 +162,7 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
             &dry_run_records,
             tree_pid,
             Some(profiles_path),
+            crate::actions::SafetyClass::ReversibleLowRisk,
             "scheduler pressure detected on Game/WineServer classes",
         );
         candidate::print_candidate_suggestions(&suggestions);
