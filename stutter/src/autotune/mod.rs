@@ -1,3 +1,4 @@
+pub mod candidate;
 pub mod controller;
 pub mod decision;
 pub mod decision_log;

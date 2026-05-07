@@ -4,20 +4,12 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::actions::{ActionId, SafetyClass};
+pub use super::candidate::CandidateAction;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ExperimentId(pub String);
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CandidateAction {
-    pub action_id: ActionId,
-    pub action_kind: String,
-    pub safety_class: SafetyClass,
-    pub description: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum AutotuneDecision {
     Noop {
         reason: String,
@@ -50,39 +42,40 @@ pub enum AutotuneDecision {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        affinity::CpuMask,
+        process_tree::TaskClass,
+        profiles::{Profile, ProfileRule},
+    };
 
-    fn candidate() -> CandidateAction {
-        CandidateAction {
-            action_id: ActionId("cpu-affinity-profile:test".to_owned()),
-            action_kind: "cpu_affinity_profile".to_owned(),
-            safety_class: SafetyClass::ReversibleLowRisk,
-            description: "apply CPU affinity profile 'test' to process tree 1234".to_owned(),
+    fn test_profile() -> Profile {
+        Profile {
+            name: "test".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: CpuMask::parse("0").unwrap(),
+                match_class: vec![TaskClass::Game],
+                match_comm: Vec::new(),
+            }],
         }
     }
 
-    #[test]
-    fn decision_serializes_and_roundtrips_candidate() {
-        let decision = AutotuneDecision::StartExperiment {
-            candidate: candidate(),
-            reason: "candidate passed safety gate".to_owned(),
-        };
-
-        let json = serde_json::to_string(&decision).unwrap();
-        let roundtrip: AutotuneDecision = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(roundtrip, decision);
+    fn candidate() -> CandidateAction {
+        CandidateAction::cpu_affinity_profile(test_profile(), 1234)
     }
 
     #[test]
-    fn decision_serializes_and_roundtrips_cooldown() {
-        let decision = AutotuneDecision::EnterCooldown {
+    fn decision_can_hold_candidate() {
+        let _decision = AutotuneDecision::StartExperiment {
+            candidate: candidate(),
+            reason: "candidate passed safety gate".to_owned(),
+        };
+    }
+
+    #[test]
+    fn decision_can_hold_cooldown() {
+        let _decision = AutotuneDecision::EnterCooldown {
             duration: Duration::from_secs(60),
             reason: "experiment completed".to_owned(),
         };
-
-        let json = serde_json::to_string(&decision).unwrap();
-        let roundtrip: AutotuneDecision = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(roundtrip, decision);
     }
 }

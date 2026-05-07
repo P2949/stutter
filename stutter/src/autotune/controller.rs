@@ -161,11 +161,12 @@ pub fn decide_autotune_transition(
         };
     };
 
-    if candidate.safety_class > policy.max_safety_class {
+    if candidate.safety_class() > policy.max_safety_class {
         return AutotuneDecision::Noop {
             reason: format!(
                 "candidate safety class {:?} exceeds mode maximum {:?}",
-                candidate.safety_class, policy.max_safety_class
+                candidate.safety_class(),
+                policy.max_safety_class
             ),
         };
     }
@@ -224,11 +225,9 @@ mod tests {
     };
 
     fn candidate_with_safety_class(safety_class: SafetyClass) -> CandidateAction {
-        CandidateAction {
-            action_id: ActionId("cpu-affinity-profile:test".to_owned()),
-            action_kind: "cpu_affinity_profile".to_owned(),
+        CandidateAction::Fake {
+            action_id: ActionId("test".to_owned()),
             safety_class,
-            description: "apply CPU affinity profile 'test' to process tree 1234".to_owned(),
         }
     }
 
