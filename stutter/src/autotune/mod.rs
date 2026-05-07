@@ -1,5 +1,6 @@
 pub mod controller;
 pub mod decision;
+pub mod decision_log;
 pub mod observation;
 pub mod quality;
 pub mod replay;
