@@ -26,8 +26,9 @@ pub struct SchedulerEvent {
     /// Diagnostic-only count of monitored pending wakeups for this target/task.
     /// This is not CPU runqueue depth and must not be used as true CPU contention.
     pub target_pending_wakeups: u32,
-    /// Approximate per-CPU runnable depth reconstructed from sched wakeup/switch
-    /// tracepoints. This is not literal rq->nr_running.
+    /// Approximate per-CPU runnable depth for monitored target tasks only,
+    /// reconstructed from sched wakeup/switch/migrate tracepoints.
+    /// This is not literal rq->nr_running and does not include unrelated system tasks.
     pub observed_runnable_depth: u32,
     pub maj_flt: u64,
     pub min_flt: u64,

@@ -32,8 +32,9 @@ pub struct SpikeRecord {
     /// This is not CPU runqueue depth and must not be used as true CPU contention.
     #[serde(alias = "target_runnable_depth")]
     pub target_pending_wakeups: u32,
-    /// Approximate per-CPU runnable depth reconstructed from sched wakeup/switch
-    /// tracepoints. This is not literal rq->nr_running.
+    /// Approximate per-CPU runnable depth for monitored target tasks only,
+    /// reconstructed from sched wakeup/switch/migrate tracepoints.
+    /// This is not literal rq->nr_running and does not include unrelated system tasks.
     #[serde(default)]
     pub observed_runnable_depth: u32,
     #[serde(default)]

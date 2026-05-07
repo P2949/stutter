@@ -68,13 +68,15 @@ static IRQ_START_TIMES: HashMap<u64, u64> = HashMap::<u64, u64>::with_max_entrie
 static TARGET_PENDING_WAKEUPS: Array<u32> = Array::<u32>::with_max_entries(1024, 0);
 
 #[map]
-// Approximate per-CPU runnable depth reconstructed from sched wakeup/switch
-// tracepoints. This is not literal rq->nr_running.
+// Approximate per-CPU runnable depth for monitored target tasks only,
+// reconstructed from sched wakeup/switch/migrate tracepoints.
+// This is not literal rq->nr_running and does not include unrelated system tasks.
 static CPU_RUNNABLE_DEPTH: Array<u32> = Array::<u32>::with_max_entries(1024, 0);
 
 #[map]
-// Per-pid mapping to the CPU where it was last counted as runnable.
-// Used to move counts during migration and avoid double-counting.
+// Per-target-TID mapping to the CPU where the monitored task was last counted
+// as runnable. Used to move monitored runnable counts during migration and
+// avoid double-counting duplicate wakeups.
 static RUNNABLE_TASK_CPU: LruHashMap<u32, u32> = LruHashMap::<u32, u32>::with_max_entries(65536, 0);
 
 #[repr(C)]
@@ -389,13 +391,18 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
 
     let pid = pid as u32;
 
-    // New: update global runnable tracking for every task first.
-    mark_task_runnable(pid, target_cpu);
-
     // Keep PID filtering here. current_cgroup is the waker, not the wakee.
+    // Runnable-depth accounting is intentionally target-local: only monitored
+    // target tasks are counted. Do not call mark_task_runnable() before this
+    // filter, or unrelated system wakeups can leak into CPU_RUNNABLE_DEPTH.
     if !is_target_pid(pid) {
         return Ok(0);
     }
+
+    // Count only monitored target tasks as runnable. This keeps the increment path
+    // aligned with sched_switch, which only decrements after consuming WAKEUP_DATA
+    // for a monitored target task.
+    mark_task_runnable(pid, target_cpu);
 
     let now = unsafe { bpf_ktime_get_ns() };
     let waker_tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
@@ -464,8 +471,9 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
     // counted as runnable in our approximation.
     mark_task_running(pid, cpu);
 
-    // Read depth after removing next_pid. This represents remaining runnable
-    // tasks on the CPU.
+    // Read monitored runnable depth after removing next_pid. This represents
+    // remaining monitored target tasks that are still counted runnable on this CPU,
+    // not total kernel runqueue depth.
     let observed_runnable_depth = read_cpu_runnable_depth(cpu);
 
     // Decrement the target-pending counter for the CPU where the task was
@@ -532,7 +540,7 @@ fn try_sched_migrate_task(ctx: TracePointContext) -> Result<u32, u32> {
     let dest_cpu: i32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
     let now = unsafe { bpf_ktime_get_ns() };
 
-    // Goal: Move global runnable count if this task migrates.
+    // Move monitored runnable count if this target task migrates while runnable.
     match unsafe { RUNNABLE_TASK_CPU.get(pid).copied() } {
         Some(old_cpu) if old_cpu != dest_cpu as u32 => {
             let new_cpu = dest_cpu as u32;

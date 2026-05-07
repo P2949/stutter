@@ -97,8 +97,11 @@ fn test_diagnosis_uses_runnable_depth() {
     let evidence = candidate
         .evidence
         .iter()
-        .find(|e| e.message.contains("high global runnable depth"))
+        .find(|e| e.message.contains("high monitored runnable depth"))
         .expect("Should have runnable depth evidence");
+
+    assert!(evidence.message.contains("target-local CPU contention"));
+    assert!(!evidence.message.contains("global runnable depth"));
 
     assert_eq!(evidence.kind, EvidenceKind::SchedulerDelay);
     assert!(evidence.strength >= 0.40);
