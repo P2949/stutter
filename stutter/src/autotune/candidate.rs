@@ -3,7 +3,10 @@
 use std::{collections::BTreeSet, path::Path};
 
 use crate::{
-    actions::{ActionWarning, SafetyClass, TuningAction, cpu_affinity::CpuAffinityProfileAction},
+    actions::{
+        ActionState, ActionWarning, SafetyClass, TuningAction,
+        cpu_affinity::CpuAffinityProfileAction,
+    },
     profiles::Profile,
 };
 
@@ -133,9 +136,14 @@ pub fn suggestion_from_dry_run_record(
     record: &CandidateDryRunRecord,
     tree_pid: u32,
     profile_path: Option<&Path>,
+    max_safety_class: SafetyClass,
     reason: impl Into<String>,
 ) -> Option<CandidateSuggestion> {
     if !record.eligible {
+        return None;
+    }
+
+    if record.safety_class > max_safety_class {
         return None;
     }
 
@@ -160,12 +168,19 @@ pub fn suggestions_from_dry_run_records(
     records: &[CandidateDryRunRecord],
     tree_pid: u32,
     profile_path: Option<&Path>,
+    max_safety_class: SafetyClass,
     reason: &str,
 ) -> Vec<CandidateSuggestion> {
     records
         .iter()
         .filter_map(|record| {
-            suggestion_from_dry_run_record(record, tree_pid, profile_path, reason.to_owned())
+            suggestion_from_dry_run_record(
+                record,
+                tree_pid,
+                profile_path,
+                max_safety_class.clone(),
+                reason.to_owned(),
+            )
         })
         .collect()
 }
@@ -228,8 +243,52 @@ fn escape_quoted_value(value: &str) -> String {
     escaped
 }
 
+pub trait CandidateDryRunner {
+    fn dry_run(&mut self, candidate: &CandidateAction) -> CandidateDryRunRecord;
+}
+
+#[derive(Default)]
+pub struct RealCandidateDryRunner;
+
+impl CandidateDryRunner for RealCandidateDryRunner {
+    fn dry_run(&mut self, candidate: &CandidateAction) -> CandidateDryRunRecord {
+        dry_run_candidate(candidate)
+    }
+}
+
 pub fn dry_run_candidates(candidates: &[CandidateAction]) -> Vec<CandidateDryRunRecord> {
-    candidates.iter().map(dry_run_candidate).collect()
+    let mut runner = RealCandidateDryRunner;
+    dry_run_candidates_with_runner(candidates, &mut runner)
+}
+
+pub fn dry_run_candidates_with_runner<R: CandidateDryRunner>(
+    candidates: &[CandidateAction],
+    runner: &mut R,
+) -> Vec<CandidateDryRunRecord> {
+    candidates
+        .iter()
+        .map(|candidate| runner.dry_run(candidate))
+        .collect()
+}
+
+pub fn dry_run_record_from_action_state(
+    candidate_name: String,
+    safety_class: SafetyClass,
+    state: ActionState,
+) -> CandidateDryRunRecord {
+    let affected_tasks = state.affected_tasks;
+    CandidateDryRunRecord {
+        candidate_name,
+        affected_tasks,
+        warnings: state.warnings,
+        safety_class,
+        eligible: affected_tasks > 0,
+        reason: if affected_tasks == 0 {
+            Some("dry-run matched zero affected tasks".to_owned())
+        } else {
+            None
+        },
+    }
 }
 
 pub fn dry_run_candidate(candidate: &CandidateAction) -> CandidateDryRunRecord {
@@ -248,19 +307,7 @@ pub fn dry_run_candidate(candidate: &CandidateAction) -> CandidateDryRunRecord {
 
             match action.dry_run() {
                 Ok(state) => {
-                    let affected_tasks = state.affected_tasks;
-                    CandidateDryRunRecord {
-                        candidate_name: profile_name.clone(),
-                        affected_tasks,
-                        warnings: state.warnings,
-                        safety_class,
-                        eligible: affected_tasks > 0,
-                        reason: if affected_tasks == 0 {
-                            Some("dry-run matched zero affected tasks".to_owned())
-                        } else {
-                            None
-                        },
-                    }
+                    dry_run_record_from_action_state(profile_name.clone(), safety_class, state)
                 }
                 Err(err) => CandidateDryRunRecord {
                     candidate_name: profile_name.clone(),
@@ -575,6 +622,7 @@ mod tests {
             &record,
             1234,
             None,
+            SafetyClass::ReversibleLowRisk,
             "scheduler pressure detected on Game/WineServer classes",
         )
         .unwrap();
@@ -602,6 +650,7 @@ mod tests {
             &record,
             1234,
             Some(Path::new("/tmp/profiles.toml")),
+            SafetyClass::ReversibleLowRisk,
             "scheduler pressure detected on Game/WineServer classes",
         )
         .unwrap();
@@ -627,6 +676,7 @@ mod tests {
             &record,
             1234,
             None,
+            SafetyClass::ReversibleLowRisk,
             "scheduler pressure detected on Game/WineServer classes",
         );
 
@@ -652,6 +702,158 @@ mod tests {
             rendered,
             "autotune suggestion:\n  candidate=\"candidate with space\"\n  action=cpu-affinity-profile\n  affected_tasks=31\n  safety=ReversibleLowRisk\n  reason=\"scheduler \\\"pressure\\\"\\nnext\"\n  apply_command=\"stutter apply-profile --tree-pid 1234 --profile /tmp/profile \\\"quoted\\\".toml\""
         );
+    }
+
+    fn eligible_record(name: &str, affected_tasks: usize) -> CandidateDryRunRecord {
+        CandidateDryRunRecord {
+            candidate_name: name.to_owned(),
+            affected_tasks,
+            warnings: Vec::new(),
+            safety_class: SafetyClass::ReversibleLowRisk,
+            eligible: true,
+            reason: None,
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeDryRunner {
+        dry_run_calls: usize,
+        apply_calls: usize,
+    }
+
+    impl CandidateDryRunner for FakeDryRunner {
+        fn dry_run(&mut self, candidate: &CandidateAction) -> CandidateDryRunRecord {
+            self.dry_run_calls += 1;
+            eligible_record(candidate.profile_name(), 31)
+        }
+    }
+
+    #[test]
+    fn suggest_mode_emits_candidates_but_never_calls_apply() {
+        let candidates = vec![CandidateAction::cpu_affinity_profile(
+            profile("game-main-suggested"),
+            1234,
+        )];
+        let mut runner = FakeDryRunner::default();
+
+        let records = dry_run_candidates_with_runner(&candidates, &mut runner);
+        let suggestions = suggestions_from_dry_run_records(
+            &records,
+            1234,
+            None,
+            SafetyClass::ReversibleLowRisk,
+            "scheduler pressure detected on Game/WineServer classes",
+        );
+
+        assert_eq!(runner.dry_run_calls, 1);
+        assert_eq!(runner.apply_calls, 0);
+        assert_eq!(suggestions.len(), 1);
+
+        let rendered = render_candidate_suggestion(&suggestions[0]);
+        assert_eq!(
+            rendered,
+            "autotune suggestion:\n  candidate=game-main-suggested\n  action=cpu-affinity-profile\n  affected_tasks=31\n  safety=ReversibleLowRisk\n  reason=\"scheduler pressure detected on Game/WineServer classes\"\n  apply_command=\"stutter apply-profile --tree-pid 1234 --profile <generated-or-existing-profile>\""
+        );
+    }
+
+    #[test]
+    fn profile_with_zero_affected_tasks_is_rejected() {
+        let record = CandidateDryRunRecord {
+            candidate_name: "zero-task-profile".to_owned(),
+            affected_tasks: 0,
+            warnings: Vec::new(),
+            safety_class: SafetyClass::ReversibleLowRisk,
+            eligible: false,
+            reason: Some("dry-run matched zero affected tasks".to_owned()),
+        };
+
+        let suggestion = suggestion_from_dry_run_record(
+            &record,
+            1234,
+            None,
+            SafetyClass::ReversibleLowRisk,
+            "scheduler pressure detected on Game/WineServer classes",
+        );
+
+        assert!(suggestion.is_none());
+        assert!(!record.eligible);
+        assert_eq!(
+            record.reason.as_deref(),
+            Some("dry-run matched zero affected tasks")
+        );
+    }
+
+    #[test]
+    fn profile_dry_run_warning_is_preserved() {
+        let state = ActionState {
+            applied: false,
+            affected_tasks: 31,
+            checked_tasks: 31,
+            pending_changes: 31,
+            warnings: vec![ActionWarning {
+                message: "restore file already exists at /tmp/stutter-restore.json; new affinity records will be merged".to_owned(),
+            }],
+        };
+
+        let record = dry_run_record_from_action_state(
+            "warned-profile".to_owned(),
+            SafetyClass::ReversibleLowRisk,
+            state,
+        );
+
+        assert!(record.eligible);
+        assert_eq!(record.affected_tasks, 31);
+        assert_eq!(record.warnings.len(), 1);
+        assert!(
+            record.warnings[0]
+                .message
+                .contains("restore file already exists")
+        );
+    }
+
+    #[test]
+    fn high_risk_candidates_are_blocked() {
+        let record = CandidateDryRunRecord {
+            candidate_name: "high-risk-profile".to_owned(),
+            affected_tasks: 31,
+            warnings: Vec::new(),
+            safety_class: SafetyClass::HighRisk,
+            eligible: true,
+            reason: None,
+        };
+
+        let suggestion = suggestion_from_dry_run_record(
+            &record,
+            1234,
+            None,
+            SafetyClass::ReversibleLowRisk,
+            "scheduler pressure detected on Game/WineServer classes",
+        );
+
+        assert!(suggestion.is_none());
+    }
+
+    #[test]
+    fn high_risk_candidates_are_allowed_when_policy_allows_high_risk() {
+        let record = CandidateDryRunRecord {
+            candidate_name: "high-risk-profile".to_owned(),
+            affected_tasks: 31,
+            warnings: Vec::new(),
+            safety_class: SafetyClass::HighRisk,
+            eligible: true,
+            reason: None,
+        };
+
+        let suggestion = suggestion_from_dry_run_record(
+            &record,
+            1234,
+            None,
+            SafetyClass::HighRisk,
+            "scheduler pressure detected on Game/WineServer classes",
+        );
+
+        assert!(suggestion.is_some());
+        assert_eq!(suggestion.unwrap().safety, SafetyClass::HighRisk);
     }
 
     #[test]
