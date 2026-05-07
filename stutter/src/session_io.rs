@@ -93,6 +93,19 @@ impl ArtifactLoadOptions {
         load_scx_events: false,
     };
 
+    pub const AUTOTUNE_REPLAY: Self = Self {
+        load_intervals: true,
+        load_spikes: true,
+        load_tree_events: true,
+        load_irq_events: true,
+        load_gpu_samples: true,
+        load_frame_events: true,
+        load_migration_events: true,
+        load_cpu_freq_events: true,
+        load_block_io_events: true,
+        load_scx_events: true,
+    };
+
     #[allow(dead_code)]
     pub const VALIDATE_ONLY: Self = Self {
         load_intervals: false,

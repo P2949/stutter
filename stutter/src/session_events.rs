@@ -62,4 +62,19 @@ impl MonitorEvent {
             Self::Finished { .. } => "finished",
         }
     }
+
+    pub fn elapsed_ms(&self) -> Option<u64> {
+        match self {
+            Self::TargetSnapshot { elapsed_ms, .. } => Some(*elapsed_ms),
+            Self::Interval { elapsed_ms, .. } => Some(*elapsed_ms),
+            Self::Spike { event } => event.elapsed_ms,
+            Self::Frame { event } => Some(event.elapsed_ms),
+            Self::GpuSample { sample } => Some(sample.elapsed_ms),
+            Self::IrqEvent { event } => event.elapsed_ms,
+            Self::IoEvent { event } => Some(event.elapsed_ms),
+            Self::LiveDiagnosis { entry } => Some(entry.elapsed_ms),
+            Self::DataQualityWarning { .. } => None,
+            Self::Finished { .. } => None,
+        }
+    }
 }
