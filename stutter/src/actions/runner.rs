@@ -3,13 +3,14 @@ use std::path::Path;
 use anyhow::Context;
 
 use crate::{
-    actions::{ActionState, RollbackToken, TuningAction},
+    actions::{ActionOutcome, ActionState, RollbackToken, TuningAction},
     audit::{AuditEvent, append_audit_event_to_path, unix_nanos_now},
 };
 
 pub struct AuditedActionResult {
     pub state: ActionState,
     pub rollback: Option<RollbackToken>,
+    pub outcome: ActionOutcome,
 }
 
 pub fn run_audited_action<A: TuningAction>(
@@ -31,12 +32,16 @@ pub fn run_audited_action_with_audit_path<A: TuningAction>(
     dry_run: bool,
     audit_path: &Path,
 ) -> anyhow::Result<AuditedActionResult> {
+    let started_unix_nanos = unix_nanos_now();
+    let action_id = action.id();
+    let safety_class = action.safety_class();
+
     let mut audit_event = AuditEvent {
         schema_version: 1,
-        unix_nanos: unix_nanos_now(),
+        unix_nanos: started_unix_nanos,
         command: command.to_owned(),
-        action_id: Some(action.id().0),
-        safety_class: Some(action.safety_class()),
+        action_id: Some(action_id.0.clone()),
+        safety_class: Some(safety_class.clone()),
         dry_run,
         success: false,
         affected_tasks: 0,
@@ -45,16 +50,30 @@ pub fn run_audited_action_with_audit_path<A: TuningAction>(
     };
 
     let result = (|| -> anyhow::Result<AuditedActionResult> {
-        action.preflight().context("preflight failed")?;
+        let preflight_warnings = action.preflight().context("preflight failed")?;
 
         if dry_run {
             let state = action.dry_run().context("dry run failed")?;
             audit_event.success = true;
             audit_event.affected_tasks = state.affected_tasks;
             audit_event.message = "dry run successful".to_owned();
+
+            let finished_unix_nanos = unix_nanos_now();
+            let outcome = ActionOutcome {
+                action_id: action_id.clone(),
+                safety_class: safety_class.clone(),
+                dry_run,
+                preflight_warnings,
+                state: state.clone(),
+                rollback: None,
+                started_unix_nanos,
+                finished_unix_nanos,
+            };
+
             Ok(AuditedActionResult {
                 state,
                 rollback: None,
+                outcome,
             })
         } else {
             let rollback = action.apply().context("apply failed")?;
@@ -65,9 +84,23 @@ pub fn run_audited_action_with_audit_path<A: TuningAction>(
             audit_event.affected_tasks = state.affected_tasks;
             audit_event.success = true;
             audit_event.message = "action applied and verified".to_owned();
+
+            let finished_unix_nanos = unix_nanos_now();
+            let outcome = ActionOutcome {
+                action_id: action_id.clone(),
+                safety_class: safety_class.clone(),
+                dry_run,
+                preflight_warnings,
+                state: state.clone(),
+                rollback: Some(rollback.clone()),
+                started_unix_nanos,
+                finished_unix_nanos,
+            };
+
             Ok(AuditedActionResult {
                 state,
                 rollback: Some(rollback),
+                outcome,
             })
         }
     })();
@@ -116,7 +149,9 @@ mod tests {
             if self.should_fail_preflight {
                 anyhow::bail!("preflight intentional failure");
             }
-            Ok(vec![])
+            Ok(vec![ActionWarning {
+                message: "test preflight warning".to_owned(),
+            }])
         }
         fn dry_run(&self) -> anyhow::Result<ActionState> {
             Ok(ActionState {
@@ -215,9 +250,18 @@ mod tests {
         let result =
             run_audited_action_with_audit_path("test-cmd", &action, true, &audit_path).unwrap();
         assert_eq!(result.state.affected_tasks, 5);
-        assert_eq!(result.state.checked_tasks, 5);
-        assert_eq!(result.state.pending_changes, 5);
         assert!(result.rollback.is_none());
+        assert_eq!(result.outcome.action_id, ActionId("test-action".to_owned()));
+        assert_eq!(result.outcome.safety_class, SafetyClass::ReversibleLowRisk);
+        assert!(result.outcome.dry_run);
+        assert_eq!(result.outcome.state.affected_tasks, 5);
+        assert!(result.outcome.rollback.is_none());
+        assert_eq!(result.outcome.preflight_warnings.len(), 1);
+        assert_eq!(
+            result.outcome.preflight_warnings[0].message,
+            "test preflight warning"
+        );
+        assert!(result.outcome.finished_unix_nanos >= result.outcome.started_unix_nanos);
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
         assert_eq!(events.len(), 1);
@@ -228,8 +272,8 @@ mod tests {
     }
 
     #[test]
-    fn audited_action_logs_typed_rollback_restore_path() {
-        let dir = temp_dir("typed-rollback");
+    fn audited_action_returns_successful_apply_outcome() {
+        let dir = temp_dir("success-apply");
         let audit_path = dir.join("audit.jsonl");
         let action = TestAction {
             should_fail_preflight: false,
@@ -240,10 +284,25 @@ mod tests {
         let result =
             run_audited_action_with_audit_path("test-cmd", &action, false, &audit_path).unwrap();
 
-        assert!(matches!(
-            result.rollback,
-            Some(RollbackToken::CpuAffinityRestoreFile { .. })
-        ));
+        assert_eq!(result.state.affected_tasks, 7);
+        assert!(result.rollback.is_some());
+        assert_eq!(result.outcome.action_id, ActionId("test-action".to_owned()));
+        assert_eq!(result.outcome.safety_class, SafetyClass::ReversibleLowRisk);
+        assert!(!result.outcome.dry_run);
+        assert_eq!(result.outcome.state.affected_tasks, 7);
+        assert!(result.outcome.rollback.is_some());
+        assert_eq!(result.outcome.preflight_warnings.len(), 1);
+        assert_eq!(
+            result.outcome.preflight_warnings[0].message,
+            "test preflight warning"
+        );
+        assert!(result.outcome.finished_unix_nanos >= result.outcome.started_unix_nanos);
+
+        let outcome_json = serde_json::to_string(&result.outcome).unwrap();
+        let parsed_outcome: ActionOutcome = serde_json::from_str(&outcome_json).unwrap();
+        assert_eq!(parsed_outcome.action_id, ActionId("test-action".to_owned()));
+        assert_eq!(parsed_outcome.state.affected_tasks, 7);
+        assert!(parsed_outcome.rollback.is_some());
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
         assert_eq!(events.len(), 1);

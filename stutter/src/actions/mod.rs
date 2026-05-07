@@ -50,6 +50,18 @@ pub struct CgroupRestoreRecord {
     pub original_cgroup: PathBuf,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionOutcome {
+    pub action_id: ActionId,
+    pub safety_class: SafetyClass,
+    pub dry_run: bool,
+    pub preflight_warnings: Vec<ActionWarning>,
+    pub state: ActionState,
+    pub rollback: Option<RollbackToken>,
+    pub started_unix_nanos: u128,
+    pub finished_unix_nanos: u128,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind")]
 pub enum RollbackToken {
