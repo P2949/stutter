@@ -319,6 +319,19 @@ async fn main() -> anyhow::Result<()> {
                 },
             )
         }
+        AppCommand::AutotuneRestore {
+            journal,
+            audit,
+            history,
+            dry_run,
+        } => autotune::emergency_restore::autotune_restore_command(
+            autotune::emergency_restore::AutotuneRestoreCommandInput {
+                journal_path: journal,
+                audit_path: audit,
+                history_path: history,
+                dry_run,
+            },
+        ),
         AppCommand::Audit { path, tail, json } => {
             audit::audit_command(audit::AuditCommandInput { path, tail, json })
         }
