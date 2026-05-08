@@ -524,6 +524,22 @@ pub fn plan_apply_low_risk_from_profiles(
     })
 }
 
+pub fn compare_low_risk_experiment(
+    baseline: &crate::autotune::experiment::WindowScore,
+    candidate: &crate::autotune::experiment::WindowScore,
+    data_quality: crate::autotune::comparison::ExperimentDataQuality,
+    target_disappeared: bool,
+) -> crate::autotune::comparison::ExperimentResult {
+    crate::autotune::comparison::compare_experiment(
+        crate::autotune::comparison::ExperimentComparisonInput {
+            baseline,
+            candidate,
+            data_quality,
+            target_disappeared,
+        },
+    )
+}
+
 pub fn ensure_candidate_measurement_ready_for_decision(
     measurement_status: &crate::autotune::measurement::CandidateMeasurementWindowStatus,
 ) -> anyhow::Result<crate::autotune::experiment::WindowScore> {
@@ -670,6 +686,50 @@ mod tests {
             self.rollback_calls += 1;
             Ok(())
         }
+    }
+
+    #[test]
+    fn low_risk_experiment_comparison_uses_conservative_thresholds() {
+        let baseline = crate::autotune::experiment::WindowScore {
+            started_unix_nanos: 100,
+            finished_unix_nanos: 200,
+            interval_count: 10,
+            scored_samples: 100,
+            scored_task_count: 2,
+            score: crate::scorer::StutterScore {
+                total: 1_000,
+                over_5ms: 10,
+                frame_p99_ms: 12.0,
+                frame_max_ms: 12.0,
+                ..crate::scorer::StutterScore::default()
+            },
+        };
+        let candidate = crate::autotune::experiment::WindowScore {
+            started_unix_nanos: 300,
+            finished_unix_nanos: 400,
+            interval_count: 10,
+            scored_samples: 100,
+            scored_task_count: 2,
+            score: crate::scorer::StutterScore {
+                total: 875,
+                over_5ms: 10,
+                frame_p99_ms: 13.0,
+                frame_max_ms: 13.0,
+                ..crate::scorer::StutterScore::default()
+            },
+        };
+
+        let result = compare_low_risk_experiment(
+            &baseline,
+            &candidate,
+            crate::autotune::comparison::ExperimentDataQuality::High,
+            false,
+        );
+
+        assert!(matches!(
+            result,
+            crate::autotune::comparison::ExperimentResult::Improved { .. }
+        ));
     }
 
     #[test]
