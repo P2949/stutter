@@ -124,7 +124,8 @@ impl GpuPowerAction {
 
         if matches!(policy.mode, GpuPowerMode::SuggestOnly) {
             warnings.push(ActionWarning {
-                message: "policy is suggest-only; no writes will be performed by dry-run/preflight".to_owned(),
+                message: "policy is suggest-only; no writes will be performed by dry-run/preflight"
+                    .to_owned(),
             });
         }
 
@@ -204,7 +205,10 @@ impl GpuPowerAction {
         }
 
         if let Some(profile) = &self.pp_power_profile_mode {
-            files.push(read_target_file(&device_dir.join("pp_power_profile_mode"), profile)?);
+            files.push(read_target_file(
+                &device_dir.join("pp_power_profile_mode"),
+                profile,
+            )?);
         }
 
         Ok(files)
@@ -298,9 +302,7 @@ fn validate_policy_and_request(
         );
     }
 
-    if action.power_dpm_force_performance_level.is_some()
-        && !policy.allow_force_performance_level
-    {
+    if action.power_dpm_force_performance_level.is_some() && !policy.allow_force_performance_level {
         anyhow::bail!("policy does not allow power_dpm_force_performance_level changes");
     }
 
@@ -415,13 +417,18 @@ fn validate_sysfs_value(name: &str, value: &str) -> anyhow::Result<()> {
 
 fn ensure_writable_file(path: &Path) -> anyhow::Result<()> {
     if !path.is_file() {
-        anyhow::bail!("required GPU power sysfs file does not exist: {}", path.display());
+        anyhow::bail!(
+            "required GPU power sysfs file does not exist: {}",
+            path.display()
+        );
     }
 
-    OpenOptions::new()
-        .write(true)
-        .open(path)
-        .with_context(|| format!("required GPU power sysfs file is not writable: {}", path.display()))?;
+    OpenOptions::new().write(true).open(path).with_context(|| {
+        format!(
+            "required GPU power sysfs file is not writable: {}",
+            path.display()
+        )
+    })?;
 
     Ok(())
 }
@@ -621,9 +628,7 @@ mod tests {
 
         assert_eq!(
             action.id(),
-            ActionId(
-                "gpu-power:set:card=card0:dpm=high:profile=3D_FULL_SCREEN".to_owned()
-            )
+            ActionId("gpu-power:set:card=card0:dpm=high:profile=3D_FULL_SCREEN".to_owned())
         );
         assert_eq!(
             action.describe(),
@@ -692,7 +697,10 @@ mod tests {
         let mut policy = policy_for(&[]);
         policy.allowed_drm_cards.clear();
 
-        let err = action_for(&root).preflight_at(&policy).unwrap_err().to_string();
+        let err = action_for(&root)
+            .preflight_at(&policy)
+            .unwrap_err()
+            .to_string();
 
         assert!(err.contains("requires a non-empty explicit DRM card allowlist"));
         fs::remove_dir_all(root).ok();
@@ -734,7 +742,10 @@ mod tests {
         let mut policy = policy_for(&["card0"]);
         policy.allow_force_performance_level = false;
 
-        let err = action_for(&root).preflight_at(&policy).unwrap_err().to_string();
+        let err = action_for(&root)
+            .preflight_at(&policy)
+            .unwrap_err()
+            .to_string();
 
         assert!(err.contains("policy does not allow power_dpm_force_performance_level changes"));
         fs::remove_dir_all(root).ok();
@@ -747,7 +758,10 @@ mod tests {
         let mut policy = policy_for(&["card0"]);
         policy.allow_power_profile_mode = false;
 
-        let err = action_for(&root).preflight_at(&policy).unwrap_err().to_string();
+        let err = action_for(&root)
+            .preflight_at(&policy)
+            .unwrap_err()
+            .to_string();
 
         assert!(err.contains("policy does not allow pp_power_profile_mode changes"));
         fs::remove_dir_all(root).ok();
