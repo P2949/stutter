@@ -40,6 +40,7 @@ mod session_events;
 mod session_io;
 mod summary;
 mod tasks;
+mod topology;
 mod tui;
 mod tune;
 mod validate;
