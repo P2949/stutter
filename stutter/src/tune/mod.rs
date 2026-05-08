@@ -549,7 +549,7 @@ async fn write_tune_summary(
                 unix_nanos: crate::audit::unix_nanos_now(),
                 command: "tune --keep-best".to_owned(),
                 action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
-                safety_class: Some(if profiles::profile_uses_priority_actions(&profile) {
+                safety_class: Some(if profiles::profile_uses_priority_actions(profile) {
                     crate::actions::SafetyClass::ReversibleMediumRisk
                 } else {
                     crate::actions::SafetyClass::ReversibleLowRisk
