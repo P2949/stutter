@@ -344,8 +344,9 @@ pub enum AutotuneCommand {
     GenerateProfiles(AutotuneGenerateProfilesArgs),
     Replay(AutotuneReplayArgs),
 
-    #[command(name = "replay-history")]
     ReplayHistory(AutotuneReplayHistoryArgs),
+
+    Restore(AutotuneRestoreArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -373,6 +374,33 @@ pub struct AutotuneGenerateProfilesArgs {
 
     #[arg(long = "min-background-cpus", default_value_t = 2)]
     pub min_background_cpus: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AutotuneRestoreArgs {
+    #[arg(
+        long = "journal",
+        value_name = "PATH",
+        help = "Path to autotune controller_journal.json; defaults to ~/.local/state/stutter/autotune/controller_journal.json"
+    )]
+    pub journal: Option<PathBuf>,
+
+    #[arg(
+        long = "audit",
+        value_name = "PATH",
+        help = "Path to audit JSONL output; defaults to the normal stutter audit log"
+    )]
+    pub audit: Option<PathBuf>,
+
+    #[arg(
+        long = "history",
+        value_name = "PATH",
+        help = "Path to autotune history JSONL output; defaults to the normal autotune history log"
+    )]
+    pub history: Option<PathBuf>,
+
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -1103,6 +1131,12 @@ pub enum AppCommand {
     AutotuneReplayHistory {
         history: PathBuf,
     },
+    AutotuneRestore {
+        journal: Option<PathBuf>,
+        audit: Option<PathBuf>,
+        history: Option<PathBuf>,
+        dry_run: bool,
+    },
     Man {
         output: Option<PathBuf>,
     },
@@ -1495,6 +1529,12 @@ where
                             history: replay_args.history,
                         })
                     }
+                    AutotuneCommand::Restore(args) => Ok(AppCommand::AutotuneRestore {
+                        journal: args.journal,
+                        audit: args.audit,
+                        history: args.history,
+                        dry_run: args.dry_run,
+                    }),
                 }
             } else {
                 validate_autotune_mode(&args.mode)?;

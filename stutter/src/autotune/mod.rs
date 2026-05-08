@@ -17,6 +17,7 @@ pub mod controller;
 pub mod controller_journal;
 pub mod decision;
 pub mod decision_log;
+pub mod emergency_restore;
 pub mod experiment;
 pub mod generate_profiles;
 pub mod history;
