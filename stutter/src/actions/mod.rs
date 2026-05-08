@@ -9,6 +9,7 @@ pub mod nice;
 pub mod ioprio;
 pub mod irq_affinity;
 pub mod uclamp;
+pub mod vm_knobs;
 
 pub mod runner;
 
@@ -77,6 +78,12 @@ pub struct IoPrioRestoreRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VmKnobRestoreRecord {
+    pub path: PathBuf,
+    pub original_value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GpuPowerRestoreRecord {
     pub path: PathBuf,
     pub original_value: String,
@@ -133,6 +140,9 @@ pub enum RollbackToken {
     CpuPowerRestore {
         records: Vec<CpuPowerRestoreRecord>,
     },
+    VmKnobRestore {
+        records: Vec<VmKnobRestoreRecord>,
+    },
     GpuPowerRestore {
         records: Vec<GpuPowerRestoreRecord>,
     },
@@ -152,6 +162,7 @@ impl RollbackToken {
             Self::UclampRestore { records } => records.len(),
             Self::CgroupRestore { records } => records.len(),
             Self::CpuPowerRestore { records } => records.len(),
+            Self::VmKnobRestore { records } => records.len(),
             Self::GpuPowerRestore { records } => records.len(),
             Self::SysfsRestore { .. } => 1,
         }
@@ -167,7 +178,8 @@ impl RollbackToken {
             | Self::UclampRestore { .. }
             | Self::CgroupRestore { .. }
             | Self::CpuPowerRestore { .. }
-            | Self::GpuPowerRestore { .. } => None,
+            | Self::GpuPowerRestore { .. }
+            | Self::VmKnobRestore { .. } => None,
         }
     }
 }
