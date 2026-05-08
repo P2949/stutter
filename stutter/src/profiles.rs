@@ -883,6 +883,43 @@ mod tests {
     }
 
     #[test]
+    fn profile_match_class_sees_community_rule_game_class() {
+        let class = process_tree::classify_task_with_context(
+            "KingdomCome",
+            "KingdomCome",
+            "/home/me/.steam/steamapps/compatdata/379430/pfx/drive_c/KingdomCome.exe",
+            "/usr/bin/wine",
+            "/user.slice/app-steam-379430.scope",
+            None,
+        );
+        let task = TaskInfo {
+            tid: 379430,
+            process_pid: 379430,
+            process_ppid: 1,
+            comm: "KingdomCome".into(),
+            process_comm: "KingdomCome".into(),
+            process_starttime_ticks: Some(379430),
+            task_starttime_ticks: Some(379430),
+            exe_dev: None,
+            exe_ino: None,
+            class,
+            sched_policy: None,
+            from_cgroup: false,
+        };
+        let profile = Profile {
+            name: "game".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: CpuMask::parse("0-1").unwrap(),
+                match_class: vec![TaskClass::Game],
+                match_comm: Vec::new(),
+            }],
+        };
+
+        assert_eq!(task.class, TaskClass::Game);
+        assert!(profile_matches_task(&task, &profile));
+    }
+
+    #[test]
     fn profile_apply_summary_counts_matching_tasks_and_pending_changes() {
         let task_correct = TaskInfo {
             tid: 7,
