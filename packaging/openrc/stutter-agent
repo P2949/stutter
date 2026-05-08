@@ -1,0 +1,24 @@
+#!/sbin/openrc-run
+
+name="stutter agent"
+description="Stutter remote agent with autotune emergency restore on stop"
+
+command="${stutter_command:-/usr/bin/stutter}"
+command_args="agent --bind ${stutter_bind:-127.0.0.1:9899} ${stutter_extra_args:-}"
+command_background="yes"
+pidfile="${stutter_pidfile:-/run/${RC_SVCNAME}.pid}"
+
+depend() {
+	need localmount
+	after net
+}
+
+start_pre() {
+	checkpath --directory --mode 0755 /run
+}
+
+stop_pre() {
+	ebegin "Restoring active stutter autotune actions"
+	"${command}" autotune restore
+	eend $?
+}
