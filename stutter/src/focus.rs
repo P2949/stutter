@@ -146,6 +146,14 @@ pub struct FocusScoreBreakdown {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SafetyWarning {
+    CriticalRealtimePresent { pid: u32, comm: String },
+    CompositorInFocusGroup { pid: u32, comm: String },
+    UnknownForegroundLike { pid: u32, comm: String },
+    TooBroadSystemServiceGroup { root_pids: Vec<u32> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FocusGroup {
     pub kind: FocusGroupKind,
     pub root_pids: Vec<u32>,
@@ -488,6 +496,140 @@ impl FocusResolver {
                     .unwrap_or(u32::MAX);
                 right_root.cmp(&left_root)
             })
+    }
+}
+
+pub fn safety_warnings_for_group(
+    group: &FocusGroup,
+    snapshot: &FocusSnapshot,
+) -> Vec<SafetyWarning> {
+    let mut warnings = Vec::new();
+
+    for pid in &group.member_pids {
+        let Some(process) = snapshot.processes.get(pid) else {
+            continue;
+        };
+
+        if is_critical_realtime_process(process) {
+            warnings.push(SafetyWarning::CriticalRealtimePresent {
+                pid: process.pid,
+                comm: process.comm.clone(),
+            });
+        }
+
+        if process.classification.class == SystemTaskClass::Compositor {
+            warnings.push(SafetyWarning::CompositorInFocusGroup {
+                pid: process.pid,
+                comm: process.comm.clone(),
+            });
+        }
+
+        if is_unknown_foreground_like(process) {
+            warnings.push(SafetyWarning::UnknownForegroundLike {
+                pid: process.pid,
+                comm: process.comm.clone(),
+            });
+        }
+    }
+
+    if is_too_broad_system_service_group(group, snapshot) {
+        warnings.push(SafetyWarning::TooBroadSystemServiceGroup {
+            root_pids: group.root_pids.clone(),
+        });
+    }
+
+    warnings
+}
+
+fn is_critical_realtime_process(process: &FocusProcess) -> bool {
+    matches!(
+        process.classification.class,
+        SystemTaskClass::AudioRealtime | SystemTaskClass::Input
+    ) || process.classification.priority_band == PriorityBand::CriticalRealtime
+}
+
+fn is_unknown_foreground_like(process: &FocusProcess) -> bool {
+    process.classification.class == SystemTaskClass::Unknown
+        && is_active_foreground_candidate(process)
+        && process.classification.priority_band != PriorityBand::Background
+}
+
+fn is_too_broad_system_service_group(group: &FocusGroup, snapshot: &FocusSnapshot) -> bool {
+    if group.kind != FocusGroupKind::Idle {
+        return false;
+    }
+
+    let root_is_system_service = group.root_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(is_system_service_root)
+            .unwrap_or(false)
+    });
+
+    let all_members_are_service_like = !group.member_pids.is_empty()
+        && group.member_pids.iter().all(|pid| {
+            snapshot
+                .processes
+                .get(pid)
+                .map(|process| {
+                    matches!(
+                        process.classification.class,
+                        SystemTaskClass::Service
+                            | SystemTaskClass::StorageDaemon
+                            | SystemTaskClass::NetworkDaemon
+                            | SystemTaskClass::KernelThread
+                            | SystemTaskClass::IrqThread
+                    )
+                })
+                .unwrap_or(false)
+        });
+
+    root_is_system_service && (group.member_pids.len() >= 4 || all_members_are_service_like)
+}
+
+fn is_system_service_root(process: &FocusProcess) -> bool {
+    if !matches!(
+        process.classification.class,
+        SystemTaskClass::Service
+            | SystemTaskClass::StorageDaemon
+            | SystemTaskClass::NetworkDaemon
+            | SystemTaskClass::KernelThread
+            | SystemTaskClass::IrqThread
+    ) {
+        return false;
+    }
+
+    let comm = process.comm.to_ascii_lowercase();
+    let cmdline = process.cmdline.to_ascii_lowercase();
+    comm == "systemd"
+        || comm == "dbus-daemon"
+        || comm == "networkmanager"
+        || comm == "udisksd"
+        || comm == "sshd"
+        || comm.starts_with("systemd-")
+        || cmdline.contains("/lib/systemd/")
+        || cmdline.contains("/usr/lib/systemd/")
+}
+
+fn safety_warning_reason(warning: &SafetyWarning) -> String {
+    match warning {
+        SafetyWarning::CriticalRealtimePresent { pid, comm } => format!(
+            "safety: critical realtime/input process present pid={} comm='{}'; never lower or deprioritize this task",
+            pid, comm
+        ),
+        SafetyWarning::CompositorInFocusGroup { pid, comm } => format!(
+            "safety: compositor process present pid={} comm='{}'; compositor is foreground latency context, not disposable background load",
+            pid, comm
+        ),
+        SafetyWarning::UnknownForegroundLike { pid, comm } => format!(
+            "safety: unknown active foreground-like process present pid={} comm='{}'; keep it Interactive/Unknown rather than Background",
+            pid, comm
+        ),
+        SafetyWarning::TooBroadSystemServiceGroup { root_pids } => format!(
+            "safety: broad service/system tree roots {:?}; do not select this as a mutation target",
+            root_pids
+        ),
     }
 }
 
@@ -1371,7 +1513,7 @@ fn make_focus_group(
         ));
     }
 
-    Some(FocusGroup {
+    let mut group = FocusGroup {
         kind,
         root_pids,
         member_pids,
@@ -1382,7 +1524,14 @@ fn make_focus_group(
         confidence,
         priority_band,
         reasons,
-    })
+    };
+
+    let safety_warnings = safety_warnings_for_group(&group, snapshot);
+    group
+        .reasons
+        .extend(safety_warnings.iter().map(safety_warning_reason));
+
+    Some(group)
 }
 
 fn root_pids_from_members(snapshot: &FocusSnapshot, member_pids: &BTreeSet<u32>) -> Vec<u32> {
@@ -2813,6 +2962,172 @@ fn is_realtime_policy(sched_policy: Option<u32>) -> bool {
 mod tests {
     use super::*;
     use crate::process_tree::TaskClass;
+
+    #[test]
+    fn safety_warnings_report_critical_realtime_and_compositor_members() {
+        let audio = test_process(
+            700,
+            1,
+            "pipewire",
+            SystemTaskClass::AudioRealtime,
+            PriorityBand::CriticalRealtime,
+            5,
+        );
+        let compositor = test_process(
+            701,
+            1,
+            "sway",
+            SystemTaskClass::Compositor,
+            PriorityBand::ForegroundLatency,
+            10,
+        );
+
+        let snapshot = test_snapshot(vec![audio, compositor]);
+        let group = FocusGroup {
+            kind: FocusGroupKind::Desktop,
+            root_pids: vec![700],
+            member_pids: vec![700, 701],
+            primary_pid: Some(701),
+            display_name: "Desktop".to_owned(),
+            score: 0.75,
+            score_breakdown: FocusScoreBreakdown::default(),
+            confidence: 0.80,
+            priority_band: PriorityBand::ForegroundLatency,
+            reasons: Vec::new(),
+        };
+
+        let warnings = safety_warnings_for_group(&group, &snapshot);
+
+        assert!(warnings.iter().any(|warning| matches!(
+            warning,
+            SafetyWarning::CriticalRealtimePresent { pid: 700, comm } if comm == "pipewire"
+        )));
+        assert!(warnings.iter().any(|warning| matches!(
+            warning,
+            SafetyWarning::CompositorInFocusGroup { pid: 701, comm } if comm == "sway"
+        )));
+    }
+
+    #[test]
+    fn safety_warnings_report_unknown_active_foreground_like_process() {
+        let mut unknown = test_process(
+            710,
+            1,
+            "unknown-app",
+            SystemTaskClass::Unknown,
+            PriorityBand::Interactive,
+            20,
+        );
+        unknown.voluntary_ctxt_switches_delta = 4;
+
+        let snapshot = test_snapshot(vec![unknown]);
+        let group = FocusGroup {
+            kind: FocusGroupKind::Unknown,
+            root_pids: vec![710],
+            member_pids: vec![710],
+            primary_pid: Some(710),
+            display_name: "unknown-app".to_owned(),
+            score: 0.50,
+            score_breakdown: FocusScoreBreakdown::default(),
+            confidence: 0.50,
+            priority_band: PriorityBand::Interactive,
+            reasons: Vec::new(),
+        };
+
+        let warnings = safety_warnings_for_group(&group, &snapshot);
+
+        assert!(warnings.iter().any(|warning| matches!(
+            warning,
+            SafetyWarning::UnknownForegroundLike { pid: 710, comm } if comm == "unknown-app"
+        )));
+    }
+
+    #[test]
+    fn safety_warnings_report_broad_system_service_group() {
+        let systemd = test_process(
+            720,
+            1,
+            "systemd",
+            SystemTaskClass::Service,
+            PriorityBand::Background,
+            0,
+        );
+        let dbus = test_process(
+            721,
+            720,
+            "dbus-daemon",
+            SystemTaskClass::Service,
+            PriorityBand::Background,
+            0,
+        );
+        let network = test_process(
+            722,
+            720,
+            "NetworkManager",
+            SystemTaskClass::NetworkDaemon,
+            PriorityBand::Background,
+            0,
+        );
+        let storage = test_process(
+            723,
+            720,
+            "udisksd",
+            SystemTaskClass::StorageDaemon,
+            PriorityBand::Background,
+            0,
+        );
+
+        let snapshot = test_snapshot(vec![systemd, dbus, network, storage]);
+        let group = FocusGroup {
+            kind: FocusGroupKind::Idle,
+            root_pids: vec![720],
+            member_pids: vec![720, 721, 722, 723],
+            primary_pid: Some(720),
+            display_name: "systemd".to_owned(),
+            score: 0.10,
+            score_breakdown: FocusScoreBreakdown::default(),
+            confidence: 0.40,
+            priority_band: PriorityBand::Background,
+            reasons: Vec::new(),
+        };
+
+        let warnings = safety_warnings_for_group(&group, &snapshot);
+
+        assert!(warnings.iter().any(|warning| matches!(
+            warning,
+            SafetyWarning::TooBroadSystemServiceGroup { root_pids } if root_pids == &vec![720]
+        )));
+    }
+
+    #[test]
+    fn make_focus_group_appends_safety_warning_reasons() {
+        let audio = test_process(
+            730,
+            1,
+            "pipewire",
+            SystemTaskClass::AudioRealtime,
+            PriorityBand::CriticalRealtime,
+            5,
+        );
+
+        let snapshot = test_snapshot(vec![audio]);
+        let group = make_focus_group(
+            &snapshot,
+            FocusGroupKind::Desktop,
+            vec![730],
+            vec![730],
+            Some(730),
+            vec!["desktop group test".to_owned()],
+        )
+        .unwrap();
+
+        assert!(
+            group
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("safety: critical realtime/input process present"))
+        );
+    }
 
     fn situation_mapping_test_group(kind: FocusGroupKind) -> FocusGroup {
         FocusGroup {
