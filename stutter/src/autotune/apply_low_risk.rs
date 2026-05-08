@@ -229,6 +229,13 @@ pub fn action_from_candidate(
     }
 }
 
+pub fn append_low_risk_history_event(
+    path: &std::path::Path,
+    event: &crate::autotune::history::AutotuneHistoryEvent,
+) -> anyhow::Result<()> {
+    crate::autotune::history::append_autotune_history_event(path, event)
+}
+
 pub fn register_audited_low_risk_outcome_for_exit_rollback(
     registry: &crate::autotune::shutdown::ActiveLowRiskActionRegistry,
     outcome: &AuditedCandidateApplyOutcome,
@@ -1057,6 +1064,59 @@ mod tests {
         assert_eq!(config.washout_seconds, 10);
         assert_eq!(config.verify_interval_ms, 1_000);
         assert_eq!(config.washout_ms(), 10_000);
+    }
+
+    #[test]
+    fn low_risk_history_event_helper_writes_jsonl() {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "stutter-autotune-low-risk-history-test-{}-{}",
+            std::process::id(),
+            crate::audit::unix_nanos_now()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("history.jsonl");
+
+        let score = crate::autotune::experiment::WindowScore {
+            started_unix_nanos: 100,
+            finished_unix_nanos: 200,
+            interval_count: 10,
+            scored_samples: 100,
+            scored_task_count: 2,
+            score: crate::scorer::StutterScore {
+                total: 143,
+                ..crate::scorer::StutterScore::default()
+            },
+        };
+
+        let event = crate::autotune::history::AutotuneHistoryEvent::new(
+            "controller-1",
+            crate::autotune::history::ControllerPhase::Cooldown,
+            crate::autotune::history::AutotuneMode::ApplyLowRisk,
+            None,
+            crate::autotune::history::SituationKind::GameCpuSchedulerPressure,
+            crate::autotune::history::observation_summary_from_window_score(
+                true, 31, 0, "High", &score,
+            ),
+            crate::autotune::history::AutotuneDecisionSummary {
+                decision: "Revert".to_owned(),
+                candidate_name: Some("game-main".to_owned()),
+                action_kind: Some("cpu_affinity_profile".to_owned()),
+                eligible: true,
+                rollback_policy: "rollback-on-exit".to_owned(),
+            },
+            "regressed; rollback performed",
+        )
+        .with_rollback_performed(true);
+
+        append_low_risk_history_event(&path, &event).unwrap();
+
+        let events = crate::autotune::history::read_autotune_history_events(&path).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], event);
+        assert!(events[0].rollback_performed);
+
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]
