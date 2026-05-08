@@ -320,6 +320,14 @@ pub struct AutotuneArgs {
 #[derive(Subcommand, Debug, Clone)]
 pub enum AutotuneCommand {
     Replay(AutotuneReplayArgs),
+    #[command(name = "replay-history")]
+    ReplayHistory(AutotuneReplayHistoryArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AutotuneReplayHistoryArgs {
+    #[arg(value_name = "HISTORY_JSONL")]
+    pub history: PathBuf,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -1024,6 +1032,9 @@ pub enum AppCommand {
     Completions {
         shell: clap_complete::Shell,
     },
+    AutotuneReplayHistory {
+        history: PathBuf,
+    },
     Man {
         output: Option<PathBuf>,
     },
@@ -1353,6 +1364,11 @@ where
                         run: replay.run,
                         config: replay.config,
                     }),
+                    AutotuneCommand::ReplayHistory(replay_args) => {
+                        Ok(AppCommand::AutotuneReplayHistory {
+                            history: replay_args.history,
+                        })
+                    }
                 }
             } else {
                 validate_autotune_mode(&args.mode)?;
