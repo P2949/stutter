@@ -65,12 +65,72 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub(crate) fn write_autotune_replay_corpus(root: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(root)
+        .with_context(|| format!("failed to create replay fixture root {}", root.display()))?;
+
+    write_fixture(
+        root,
+        "game_scheduler_pressure",
+        game_scheduler_pressure_fixture(),
+    )?;
+    write_fixture(root, "gpu_bound", gpu_bound_clean_cpu_fixture())?;
+    write_fixture(root, "low_quality", truncated_drop_counters_fixture())?;
+
+    Ok(())
+}
+
 pub(crate) fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
         .join("runs")
         .join(name)
+}
+
+fn game_scheduler_pressure_fixture() -> (SessionFile, FixtureArtifacts) {
+    let spikes = vec![
+        spike_event(100, TaskClass::Game, "GameMain", 4_000_000, 0),
+        spike_event(
+            101,
+            TaskClass::GameWorkerThread,
+            "GameWorker",
+            3_500_000,
+            250_000,
+        ),
+        spike_event(102, TaskClass::WineServer, "wineserver", 2_500_000, 500_000),
+    ];
+    let intervals = vec![
+        interval_record_with_class(100, 100, "GameMain", TaskClass::Game, 75.0, 3_000_000),
+        interval_record_with_class(
+            200,
+            101,
+            "GameWorker",
+            TaskClass::GameWorkerThread,
+            70.0,
+            2_500_000,
+        ),
+        interval_record_with_class(
+            300,
+            102,
+            "wineserver",
+            TaskClass::WineServer,
+            65.0,
+            2_000_000,
+        ),
+    ];
+
+    let mut session = base_session("game_scheduler_pressure");
+    session.config.tree_roots = vec![100];
+    apply_spike_session_fields(&mut session, &spikes);
+    apply_artifact_counts(
+        &mut session,
+        &FixtureArtifacts {
+            spikes,
+            intervals,
+            ..Default::default()
+        },
+    )
 }
 
 fn cpu_pressure_fixture() -> (SessionFile, FixtureArtifacts) {
@@ -443,6 +503,53 @@ fn interval_record(elapsed_ms: u64, task: u32, comm: &str, cpu_psi_some: f64) ->
         worst_cpu_max_ns: 5_000,
         spikiest_cpu: Some(0),
         spikiest_cpu_spikes: 0,
+        major_faults: 0,
+        minor_faults: 0,
+        cpu_psi_some,
+        mem_psi_some: 0.0,
+        mem_psi_full: 0.0,
+        io_psi_some: 0.0,
+        io_psi_full: 0.0,
+        percentile_scope: "exact".to_owned(),
+        histogram: vec![],
+        drop_counters: DropCountersSnapshot::default(),
+        cpu_perf: None,
+    }
+}
+
+fn interval_record_with_class(
+    elapsed_ms: u64,
+    task: u32,
+    comm: &str,
+    class: TaskClass,
+    cpu_psi_some: f64,
+    max_ns: u64,
+) -> IntervalRecord {
+    IntervalRecord {
+        elapsed_ms,
+        task,
+        active: true,
+        class,
+        comm: comm.to_owned(),
+        process_pid: Some(task),
+        process_comm: comm.into(),
+        samples: 10,
+        stored_samples: 10,
+        truncated_samples: 0,
+        min_ns: 100,
+        avg_ns: max_ns / 4,
+        p95_ns: max_ns.saturating_sub(250_000),
+        p99_ns: max_ns.saturating_sub(1),
+        max_ns,
+        over_1ms: u64::from(max_ns > 1_000_000),
+        over_2ms: u64::from(max_ns > 2_000_000),
+        over_5ms: u64::from(max_ns > 5_000_000),
+        busiest_cpu: Some(0),
+        busiest_cpu_samples: 10,
+        worst_cpu: Some(0),
+        worst_cpu_max_ns: max_ns,
+        spikiest_cpu: Some(0),
+        spikiest_cpu_spikes: u64::from(max_ns > 1_000_000),
         major_faults: 0,
         minor_faults: 0,
         cpu_psi_some,
