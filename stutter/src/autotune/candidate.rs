@@ -7,7 +7,9 @@ use crate::{
         ActionState, ActionWarning, SafetyClass, TuningAction,
         cpu_affinity::CpuAffinityProfileAction,
     },
-    profiles::Profile,
+    process_tree::{CompiledPattern, TaskClass},
+    profiles::{Profile, ProfileRule},
+    topology::{CoreInfo, TopologyModel, cpu_mask_to_vec, cpus_to_mask, sorted_unique},
 };
 
 #[derive(Clone, Debug)]
@@ -326,6 +328,394 @@ pub fn dry_run_candidate(candidate: &CandidateAction) -> CandidateDryRunRecord {
     }
 }
 
+pub fn generate_topology_aware_profile_candidates(
+    topology: &TopologyModel,
+    tree_pid: u32,
+) -> Vec<CandidateAction> {
+    generate_topology_aware_profiles(topology)
+        .into_iter()
+        .map(|profile| CandidateAction::cpu_affinity_profile(profile, tree_pid))
+        .collect()
+}
+
+pub fn generate_topology_aware_profiles(topology: &TopologyModel) -> Vec<Profile> {
+    let Some(layout) = CandidateCpuLayout::from_topology(topology) else {
+        return Vec::new();
+    };
+
+    let mut profiles = Vec::new();
+
+    profiles.push(baseline_online_profile(&layout));
+    profiles.push(game_isolate_render_profile(&layout));
+    profiles.push(game_compositor_separate_profile(&layout));
+    profiles.push(helper_spread_profile(&layout));
+    profiles.push(wine_server_dedicated_profile(&layout));
+    profiles.push(avoid_smt_contention_profile(&layout));
+
+    profiles
+}
+
+#[derive(Clone, Debug)]
+struct CandidateCpuLayout {
+    online_mask: crate::affinity::CpuMask,
+    render_mask: crate::affinity::CpuMask,
+    worker_mask: crate::affinity::CpuMask,
+    compositor_mask: crate::affinity::CpuMask,
+    helper_mask: crate::affinity::CpuMask,
+    wine_server_mask: crate::affinity::CpuMask,
+    separate_game_mask: crate::affinity::CpuMask,
+    separate_compositor_mask: crate::affinity::CpuMask,
+    avoid_smt_render_mask: crate::affinity::CpuMask,
+    avoid_smt_compositor_mask: crate::affinity::CpuMask,
+    avoid_smt_worker_mask: crate::affinity::CpuMask,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CoreChoice {
+    package_id: Option<u32>,
+    core_id: Option<u32>,
+    numa_node: Option<u32>,
+    cpus: Vec<u32>,
+    primary_cpu: u32,
+    max_mhz: Option<u64>,
+}
+
+impl CandidateCpuLayout {
+    fn from_topology(topology: &TopologyModel) -> Option<Self> {
+        let online_cpus = topology_online_cpus(topology);
+        if online_cpus.is_empty() {
+            return None;
+        }
+
+        let online_mask = cpus_to_mask(&online_cpus)?;
+        let cores = topology_core_choices(topology, &online_cpus);
+        let render_core_count = if cores.len() >= 6 { 2 } else { 1 };
+
+        let render_cores = cores
+            .iter()
+            .take(render_core_count)
+            .cloned()
+            .collect::<Vec<_>>();
+        let render_primary_cpus = render_cores
+            .iter()
+            .map(|core| core.primary_cpu)
+            .collect::<Vec<_>>();
+        let render_all_cpus = flatten_core_cpus(&render_cores);
+
+        let non_render_cores = cores
+            .iter()
+            .filter(|core| !render_cores.iter().any(|render| same_core(render, core)))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let worker_cpus = if non_render_cores.is_empty() {
+            online_cpus.clone()
+        } else {
+            flatten_core_cpus(&non_render_cores)
+        };
+
+        let compositor_core = non_render_cores
+            .iter()
+            .find(|core| core.cpus.iter().all(|cpu| !render_all_cpus.contains(cpu)))
+            .cloned()
+            .or_else(|| non_render_cores.first().cloned())
+            .or_else(|| cores.first().cloned())?;
+
+        let compositor_cpus = vec![compositor_core.primary_cpu];
+
+        let wine_core = non_render_cores
+            .iter()
+            .find(|core| !same_core(core, &compositor_core))
+            .cloned()
+            .or_else(|| Some(compositor_core.clone()))?;
+        let wine_server_cpus = wine_core.cpus.clone();
+
+        let separate_compositor_core = compositor_core.clone();
+        let separate_compositor_cpus = separate_compositor_core.cpus.clone();
+        let separate_game_cpus = cores
+            .iter()
+            .filter(|core| !same_core(core, &separate_compositor_core))
+            .flat_map(|core| core.cpus.iter().copied())
+            .collect::<Vec<_>>();
+        let separate_game_cpus = if separate_game_cpus.is_empty() {
+            online_cpus.clone()
+        } else {
+            separate_game_cpus
+        };
+
+        let render_sibling_set = topology
+            .smt_siblings
+            .get(render_primary_cpus.first().unwrap_or(&online_cpus[0]))
+            .cloned()
+            .unwrap_or_else(|| render_all_cpus.clone());
+
+        let avoid_smt_compositor_core = non_render_cores
+            .iter()
+            .find(|core| {
+                core.cpus
+                    .iter()
+                    .all(|cpu| !render_sibling_set.contains(cpu))
+            })
+            .cloned()
+            .or_else(|| non_render_cores.first().cloned())
+            .or_else(|| cores.first().cloned())?;
+
+        let avoid_smt_worker_cpus = online_cpus
+            .iter()
+            .copied()
+            .filter(|cpu| {
+                !render_sibling_set.contains(cpu) && !avoid_smt_compositor_core.cpus.contains(cpu)
+            })
+            .collect::<Vec<_>>();
+        let avoid_smt_worker_cpus = if avoid_smt_worker_cpus.is_empty() {
+            worker_cpus.clone()
+        } else {
+            avoid_smt_worker_cpus
+        };
+
+        Some(Self {
+            online_mask,
+            render_mask: cpus_to_mask(&render_primary_cpus)?,
+            worker_mask: cpus_to_mask(&worker_cpus)?,
+            compositor_mask: cpus_to_mask(&compositor_cpus)?,
+            helper_mask: cpus_to_mask(&worker_cpus)?,
+            wine_server_mask: cpus_to_mask(&wine_server_cpus)?,
+            separate_game_mask: cpus_to_mask(&separate_game_cpus)?,
+            separate_compositor_mask: cpus_to_mask(&separate_compositor_cpus)?,
+            avoid_smt_render_mask: cpus_to_mask(&render_primary_cpus)?,
+            avoid_smt_compositor_mask: cpus_to_mask(&[avoid_smt_compositor_core.primary_cpu])?,
+            avoid_smt_worker_mask: cpus_to_mask(&avoid_smt_worker_cpus)?,
+        })
+    }
+}
+
+fn topology_online_cpus(topology: &TopologyModel) -> Vec<u32> {
+    let online = topology.online_cpu_ids();
+    if online.is_empty() {
+        cpu_mask_to_vec(&topology.online_cpus)
+    } else {
+        online
+    }
+}
+
+fn topology_core_choices(topology: &TopologyModel, online_cpus: &[u32]) -> Vec<CoreChoice> {
+    let mut choices = topology
+        .cores
+        .iter()
+        .filter(|core| core.is_online)
+        .filter_map(|core| core_choice_from_core(core, online_cpus))
+        .collect::<Vec<_>>();
+
+    if choices.is_empty() {
+        choices = online_cpus
+            .iter()
+            .copied()
+            .map(|cpu| CoreChoice {
+                package_id: None,
+                core_id: Some(cpu),
+                numa_node: None,
+                cpus: vec![cpu],
+                primary_cpu: cpu,
+                max_mhz: topology.cpu_info(cpu).and_then(|info| info.max_mhz),
+            })
+            .collect();
+    }
+
+    choices.sort_by(|left, right| {
+        right
+            .max_mhz
+            .unwrap_or(0)
+            .cmp(&left.max_mhz.unwrap_or(0))
+            .then_with(|| left.package_id.cmp(&right.package_id))
+            .then_with(|| left.numa_node.cmp(&right.numa_node))
+            .then_with(|| left.core_id.cmp(&right.core_id))
+            .then_with(|| left.primary_cpu.cmp(&right.primary_cpu))
+    });
+
+    choices
+}
+
+fn core_choice_from_core(core: &CoreInfo, online_cpus: &[u32]) -> Option<CoreChoice> {
+    let cpus = sorted_unique(
+        core.cpus
+            .iter()
+            .copied()
+            .filter(|cpu| online_cpus.contains(cpu))
+            .collect(),
+    );
+    let primary_cpu = cpus.first().copied()?;
+
+    Some(CoreChoice {
+        package_id: core.package_id,
+        core_id: core.core_id,
+        numa_node: core.numa_node,
+        cpus,
+        primary_cpu,
+        max_mhz: core.max_mhz,
+    })
+}
+
+fn same_core(left: &CoreChoice, right: &CoreChoice) -> bool {
+    left.package_id == right.package_id
+        && left.core_id == right.core_id
+        && left.numa_node == right.numa_node
+}
+
+fn flatten_core_cpus(cores: &[CoreChoice]) -> Vec<u32> {
+    sorted_unique(
+        cores
+            .iter()
+            .flat_map(|core| core.cpus.iter().copied())
+            .collect(),
+    )
+}
+
+fn baseline_online_profile(layout: &CandidateCpuLayout) -> Profile {
+    Profile {
+        name: "baseline-online".to_owned(),
+        rules: vec![ProfileRule {
+            affinity: layout.online_mask.clone(),
+            match_class: Vec::new(),
+            match_comm: Vec::new(),
+        }],
+    }
+}
+
+fn game_isolate_render_profile(layout: &CandidateCpuLayout) -> Profile {
+    Profile {
+        name: "game-isolate-render".to_owned(),
+        rules: vec![
+            profile_rule(
+                &layout.render_mask,
+                vec![TaskClass::GameRenderThread],
+                Vec::new(),
+            ),
+            profile_rule(
+                &layout.render_mask,
+                vec![TaskClass::Game],
+                vec!["RenderThread", "Main"],
+            ),
+            profile_rule(
+                &layout.compositor_mask,
+                vec![TaskClass::Compositor, TaskClass::GameScope],
+                Vec::new(),
+            ),
+            profile_rule(
+                &layout.wine_server_mask,
+                vec![TaskClass::WineServer],
+                Vec::new(),
+            ),
+            profile_rule(
+                &layout.worker_mask,
+                vec![TaskClass::GameWorkerThread, TaskClass::GameHelper],
+                Vec::new(),
+            ),
+            profile_rule(&layout.worker_mask, vec![TaskClass::Game], Vec::new()),
+        ],
+    }
+}
+
+fn game_compositor_separate_profile(layout: &CandidateCpuLayout) -> Profile {
+    Profile {
+        name: "game-compositor-separate".to_owned(),
+        rules: vec![
+            profile_rule(
+                &layout.separate_compositor_mask,
+                vec![TaskClass::Compositor, TaskClass::GameScope],
+                Vec::new(),
+            ),
+            profile_rule(
+                &layout.separate_game_mask,
+                vec![
+                    TaskClass::Game,
+                    TaskClass::GameRenderThread,
+                    TaskClass::GameWorkerThread,
+                    TaskClass::GameHelper,
+                    TaskClass::WineServer,
+                ],
+                Vec::new(),
+            ),
+        ],
+    }
+}
+
+fn helper_spread_profile(layout: &CandidateCpuLayout) -> Profile {
+    Profile {
+        name: "helper-spread".to_owned(),
+        rules: vec![profile_rule(
+            &layout.helper_mask,
+            vec![
+                TaskClass::GameHelper,
+                TaskClass::GameWorkerThread,
+                TaskClass::SteamRuntime,
+                TaskClass::Helper,
+            ],
+            Vec::new(),
+        )],
+    }
+}
+
+fn wine_server_dedicated_profile(layout: &CandidateCpuLayout) -> Profile {
+    Profile {
+        name: "wine-server-dedicated".to_owned(),
+        rules: vec![profile_rule(
+            &layout.wine_server_mask,
+            vec![TaskClass::WineServer],
+            Vec::new(),
+        )],
+    }
+}
+
+fn avoid_smt_contention_profile(layout: &CandidateCpuLayout) -> Profile {
+    Profile {
+        name: "avoid-smt-contention".to_owned(),
+        rules: vec![
+            profile_rule(
+                &layout.avoid_smt_render_mask,
+                vec![TaskClass::GameRenderThread],
+                Vec::new(),
+            ),
+            profile_rule(
+                &layout.avoid_smt_render_mask,
+                vec![TaskClass::Game],
+                vec!["RenderThread", "Main"],
+            ),
+            profile_rule(
+                &layout.avoid_smt_compositor_mask,
+                vec![TaskClass::Compositor, TaskClass::GameScope],
+                Vec::new(),
+            ),
+            profile_rule(
+                &layout.avoid_smt_worker_mask,
+                vec![
+                    TaskClass::GameWorkerThread,
+                    TaskClass::GameHelper,
+                    TaskClass::WineServer,
+                ],
+                Vec::new(),
+            ),
+        ],
+    }
+}
+
+fn profile_rule(
+    affinity: &crate::affinity::CpuMask,
+    match_class: Vec<TaskClass>,
+    match_comm: Vec<&str>,
+) -> ProfileRule {
+    ProfileRule {
+        affinity: affinity.clone(),
+        match_class,
+        match_comm: match_comm
+            .into_iter()
+            .map(|pattern| {
+                CompiledPattern::new(pattern.to_owned())
+                    .expect("generated candidate command pattern must be valid")
+            })
+            .collect(),
+    }
+}
+
 pub fn generate_profile_candidates(
     profiles: &[Profile],
     tree_pid: u32,
@@ -448,8 +838,94 @@ fn is_baseline_online_profile(profile_name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
-    use crate::{affinity::CpuMask, process_tree::TaskClass, profiles::ProfileRule};
+    use crate::{
+        affinity::CpuMask,
+        process_tree::TaskClass,
+        profiles::ProfileRule,
+        topology::{CoreInfo, CpuInfo, TopologyModel},
+    };
+
+    fn fake_topology_4c8t() -> TopologyModel {
+        let online_cpus = CpuMask::parse("0-7").unwrap();
+
+        TopologyModel {
+            online_cpus,
+            cpus: vec![
+                fake_cpu(0, 0, 0, 0, 5000),
+                fake_cpu(1, 1, 0, 0, 4900),
+                fake_cpu(2, 2, 0, 0, 4800),
+                fake_cpu(3, 3, 0, 0, 4700),
+                fake_cpu(4, 0, 0, 0, 5000),
+                fake_cpu(5, 1, 0, 0, 4900),
+                fake_cpu(6, 2, 0, 0, 4800),
+                fake_cpu(7, 3, 0, 0, 4700),
+            ],
+            cores: vec![
+                fake_core(0, 0, 0, vec![0, 4], 5000),
+                fake_core(1, 0, 0, vec![1, 5], 4900),
+                fake_core(2, 0, 0, vec![2, 6], 4800),
+                fake_core(3, 0, 0, vec![3, 7], 4700),
+            ],
+            smt_siblings: BTreeMap::from([
+                (0, vec![0, 4]),
+                (4, vec![0, 4]),
+                (1, vec![1, 5]),
+                (5, vec![1, 5]),
+                (2, vec![2, 6]),
+                (6, vec![2, 6]),
+                (3, vec![3, 7]),
+                (7, vec![3, 7]),
+            ]),
+            numa_nodes: BTreeMap::from([(0, vec![0, 1, 2, 3, 4, 5, 6, 7])]),
+            packages: BTreeMap::from([(0, vec![0, 1, 2, 3, 4, 5, 6, 7])]),
+        }
+    }
+
+    fn fake_cpu(cpu: u32, core_id: u32, package_id: u32, numa_node: u32, max_mhz: u64) -> CpuInfo {
+        CpuInfo {
+            cpu,
+            core_id: Some(core_id),
+            package_id: Some(package_id),
+            numa_node: Some(numa_node),
+            max_mhz: Some(max_mhz),
+            is_online: true,
+        }
+    }
+
+    fn fake_core(
+        core_id: u32,
+        package_id: u32,
+        numa_node: u32,
+        cpus: Vec<u32>,
+        max_mhz: u64,
+    ) -> CoreInfo {
+        CoreInfo {
+            core_id: Some(core_id),
+            package_id: Some(package_id),
+            numa_node: Some(numa_node),
+            cpus,
+            max_mhz: Some(max_mhz),
+            is_online: true,
+        }
+    }
+
+    fn profile_by_name<'a>(profiles: &'a [Profile], name: &str) -> &'a Profile {
+        profiles
+            .iter()
+            .find(|profile| profile.name == name)
+            .unwrap_or_else(|| panic!("missing generated profile {name}"))
+    }
+
+    fn first_rule_for_class<'a>(profile: &'a Profile, class: TaskClass) -> &'a ProfileRule {
+        profile
+            .rules
+            .iter()
+            .find(|rule| rule.match_class.contains(&class))
+            .unwrap_or_else(|| panic!("missing rule for {class:?} in {}", profile.name))
+    }
 
     fn profile(name: &str) -> Profile {
         Profile {
@@ -474,6 +950,147 @@ mod tests {
                 dry_run_tasks: 1,
             }),
         }
+    }
+
+    #[test]
+    fn topology_aware_generation_includes_required_templates() {
+        let topology = fake_topology_4c8t();
+        let profiles = generate_topology_aware_profiles(&topology);
+        let names = profiles
+            .iter()
+            .map(|profile| profile.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec![
+                "baseline-online",
+                "game-isolate-render",
+                "game-compositor-separate",
+                "helper-spread",
+                "wine-server-dedicated",
+                "avoid-smt-contention"
+            ]
+        );
+    }
+
+    #[test]
+    fn baseline_online_profile_matches_all_target_tasks_on_online_cpus() {
+        let topology = fake_topology_4c8t();
+        let profiles = generate_topology_aware_profiles(&topology);
+        let baseline = profile_by_name(&profiles, "baseline-online");
+
+        assert_eq!(baseline.rules.len(), 1);
+        assert_eq!(baseline.rules[0].affinity.to_range_string(), "0-7");
+        assert!(baseline.rules[0].match_class.is_empty());
+        assert!(baseline.rules[0].match_comm.is_empty());
+    }
+
+    #[test]
+    fn game_isolate_render_uses_preferred_and_remaining_physical_cores() {
+        let topology = fake_topology_4c8t();
+        let profiles = generate_topology_aware_profiles(&topology);
+        let profile = profile_by_name(&profiles, "game-isolate-render");
+
+        let render_rule = first_rule_for_class(profile, TaskClass::GameRenderThread);
+        let compositor_rule = first_rule_for_class(profile, TaskClass::Compositor);
+        let worker_rule = first_rule_for_class(profile, TaskClass::GameWorkerThread);
+        let wine_rule = first_rule_for_class(profile, TaskClass::WineServer);
+
+        assert_eq!(render_rule.affinity.to_range_string(), "0");
+        assert_eq!(compositor_rule.affinity.to_range_string(), "1");
+        assert_eq!(worker_rule.affinity.to_range_string(), "1-3,5-7");
+        assert_eq!(wine_rule.affinity.to_range_string(), "2,6");
+
+        let game_main_rule = profile
+            .rules
+            .iter()
+            .find(|rule| {
+                rule.match_class.contains(&TaskClass::Game)
+                    && rule
+                        .match_comm
+                        .iter()
+                        .any(|pattern| pattern.raw() == "Main")
+            })
+            .unwrap();
+        assert_eq!(game_main_rule.affinity.to_range_string(), "0");
+    }
+
+    #[test]
+    fn game_compositor_separate_keeps_game_and_compositor_on_separate_physical_cores() {
+        let topology = fake_topology_4c8t();
+        let profiles = generate_topology_aware_profiles(&topology);
+        let profile = profile_by_name(&profiles, "game-compositor-separate");
+
+        let compositor_rule = first_rule_for_class(profile, TaskClass::Compositor);
+        let game_rule = first_rule_for_class(profile, TaskClass::Game);
+
+        assert_eq!(compositor_rule.affinity.to_range_string(), "1,5");
+        assert_eq!(game_rule.affinity.to_range_string(), "0,2-4,6-7");
+    }
+
+    #[test]
+    fn helper_spread_uses_non_critical_cores() {
+        let topology = fake_topology_4c8t();
+        let profiles = generate_topology_aware_profiles(&topology);
+        let profile = profile_by_name(&profiles, "helper-spread");
+        let helper_rule = first_rule_for_class(profile, TaskClass::GameHelper);
+
+        assert_eq!(helper_rule.affinity.to_range_string(), "1-3,5-7");
+        assert!(
+            helper_rule
+                .match_class
+                .contains(&TaskClass::GameWorkerThread)
+        );
+        assert!(helper_rule.match_class.contains(&TaskClass::SteamRuntime));
+        assert!(helper_rule.match_class.contains(&TaskClass::Helper));
+    }
+
+    #[test]
+    fn wine_server_dedicated_uses_one_non_render_core_pair() {
+        let topology = fake_topology_4c8t();
+        let profiles = generate_topology_aware_profiles(&topology);
+        let profile = profile_by_name(&profiles, "wine-server-dedicated");
+        let wine_rule = first_rule_for_class(profile, TaskClass::WineServer);
+
+        assert_eq!(wine_rule.affinity.to_range_string(), "2,6");
+    }
+
+    #[test]
+    fn avoid_smt_contention_keeps_render_and_compositor_off_smt_siblings() {
+        let topology = fake_topology_4c8t();
+        let profiles = generate_topology_aware_profiles(&topology);
+        let profile = profile_by_name(&profiles, "avoid-smt-contention");
+
+        let render_rule = first_rule_for_class(profile, TaskClass::GameRenderThread);
+        let compositor_rule = first_rule_for_class(profile, TaskClass::Compositor);
+        let worker_rule = first_rule_for_class(profile, TaskClass::GameWorkerThread);
+
+        assert_eq!(render_rule.affinity.to_range_string(), "0");
+        assert_eq!(compositor_rule.affinity.to_range_string(), "1");
+        assert_eq!(worker_rule.affinity.to_range_string(), "2-3,6-7");
+
+        let render_siblings = topology.smt_siblings.get(&0).unwrap();
+        let compositor_cpus =
+            crate::topology::parse_cpu_list(&compositor_rule.affinity.to_range_string()).unwrap();
+
+        assert!(
+            compositor_cpus
+                .iter()
+                .all(|cpu| !render_siblings.contains(cpu))
+        );
+    }
+
+    #[test]
+    fn topology_aware_candidates_wrap_generated_profiles_for_tree_pid() {
+        let topology = fake_topology_4c8t();
+        let candidates = generate_topology_aware_profile_candidates(&topology, 1234);
+
+        assert_eq!(candidates.len(), 6);
+        assert_eq!(candidates[0].profile_name(), "baseline-online");
+        assert_eq!(candidates[0].tree_pid(), 1234);
+        assert_eq!(candidates[1].profile_name(), "game-isolate-render");
+        assert_eq!(candidates[1].action_kind(), "cpu_affinity_profile");
     }
 
     #[test]
