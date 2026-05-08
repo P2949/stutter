@@ -197,9 +197,18 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
 
     match input.mode.as_str() {
         "observe" | "suggest" => {}
+        "apply-low-risk" => {
+            let outcome = apply_low_risk::apply_low_risk_command(&input).await?;
+            println!(
+                "apply-low-risk complete: candidate={} affected_tasks={} safety={:?}",
+                outcome.candidate_name, outcome.affected_tasks, outcome.safety_class
+            );
+            return Ok(());
+        }
         _ => {
             anyhow::bail!(
-                "apply mode is not implemented yet; use --mode observe, --mode suggest, or --mode apply-low-risk"
+                "mode '{}' is not supported; use --mode observe, --mode suggest, or --mode apply-low-risk",
+                input.mode
             )
         }
     }
@@ -274,7 +283,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_mode_is_rejected_before_monitor_starts() {
+    async fn apply_low_risk_requires_target() {
         let input = AutotuneCommandInput {
             config: None,
             watch_process: None,
@@ -292,7 +301,27 @@ mod tests {
         let err = autotune_command(input).await.unwrap_err().to_string();
         assert_eq!(
             err,
-            "apply mode is not implemented yet; use --mode observe, --mode suggest, or --mode apply-low-risk"
+            "apply-low-risk requires exactly one target selector; pass --tree-pid or --watch-process"
         );
+    }
+
+    #[tokio::test]
+    async fn unknown_mode_is_rejected() {
+        let input = AutotuneCommandInput {
+            config: None,
+            watch_process: None,
+            tree_pid: None,
+            profiles: None,
+            mode: "unknown-mode".to_owned(),
+            decision_log: None,
+            duration_seconds: Some(1),
+            summary_ms: 1000,
+            preset: "diagnosis".to_owned(),
+            hwmon: false,
+            mangohud_log: None,
+        };
+
+        let err = autotune_command(input).await.unwrap_err().to_string();
+        assert!(err.contains("mode 'unknown-mode' is not supported"));
     }
 }

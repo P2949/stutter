@@ -1190,6 +1190,13 @@ fn config_from_remote_request(
         wakeup_map_factor: None,
         otlp_endpoint: None,
         otel_service_name: "stutter".to_owned(),
+        auto_focus: false,
+        auto_focus_poll_ms: 1000,
+        auto_focus_min_confidence: 0.60,
+        auto_focus_switch_cooldown_ms: 5000,
+        auto_focus_switch_margin: 0.20,
+        auto_focus_required_polls: 2,
+        auto_focus_max_roots: 4,
         remote: None,
     })
 }

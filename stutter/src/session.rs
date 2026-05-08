@@ -197,11 +197,7 @@ impl MonitorSession {
         shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
         event_tx: Option<tokio::sync::mpsc::Sender<MonitorEvent>>,
     ) -> anyhow::Result<Self> {
-        if config.target_pids.is_empty()
-            && config.tree_pids.is_empty()
-            && config.watch_process.is_none()
-            && config.cgroupv2.is_none()
-        {
+        if !config.has_explicit_target() {
             let auto_targets = find_auto_target_pids(Path::new("/proc"));
             if auto_targets.is_empty() {
                 anyhow::bail!(
