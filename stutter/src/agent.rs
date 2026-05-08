@@ -584,6 +584,9 @@ fn capabilities_response(state: &AgentState) -> CapabilitiesResponse {
             stat_wait_request: true,
             block_io_request: true,
             irq_latency_request: true,
+            autotune_observe: true,
+            autotune_suggest: true,
+            autotune_apply_low_risk: false,
         },
     }
 }
@@ -755,6 +758,40 @@ fn config_from_remote_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_agent_state() -> AgentState {
+        AgentState {
+            active_run: Mutex::new(None),
+            runs_dir: PathBuf::from("/tmp/stutter-agent-test-runs"),
+            auth: AgentAuth { bearer_token: None },
+            limits: AgentLimits {
+                max_duration_seconds: DEFAULT_AGENT_MAX_DURATION_SECONDS,
+                max_targets: DEFAULT_AGENT_MAX_TARGETS,
+                max_concurrent_recordings: DEFAULT_AGENT_MAX_CONCURRENT_RECORDINGS,
+            },
+        }
+    }
+
+    #[test]
+    fn capabilities_response_advertises_autotune_feature_flags() {
+        let state = test_agent_state();
+        let response = capabilities_response(&state);
+
+        assert!(response.features.autotune_observe);
+        assert!(response.features.autotune_suggest);
+        assert!(!response.features.autotune_apply_low_risk);
+    }
+
+    #[test]
+    fn capabilities_response_serializes_autotune_feature_flags() {
+        let state = test_agent_state();
+        let response = capabilities_response(&state);
+        let json = serde_json::to_string(&response).unwrap();
+
+        assert!(json.contains("\"autotune_observe\":true"));
+        assert!(json.contains("\"autotune_suggest\":true"));
+        assert!(json.contains("\"autotune_apply_low_risk\":false"));
+    }
 
     #[test]
     fn validate_id_rejects_path_traversal() {
