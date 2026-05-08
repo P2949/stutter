@@ -7,7 +7,9 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::autotune::state::SituationKind;
+use crate::{
+    autotune::state::SituationKind, cli::FocusSource, foreground::ForegroundWindowSnapshot,
+};
 
 const SCHED_FIFO: u32 = 1;
 const SCHED_RR: u32 = 2;
@@ -98,6 +100,7 @@ pub struct ThreadIdentity<'a> {
 #[derive(Debug, Clone)]
 pub struct FocusSnapshot {
     pub elapsed_ms: u64,
+    pub foreground: Option<ForegroundWindowSnapshot>,
     pub processes: BTreeMap<u32, FocusProcess>,
     pub children_by_parent: BTreeMap<u32, Vec<u32>>,
     pub groups: Vec<FocusGroup>,
@@ -112,6 +115,7 @@ pub struct FocusProcess {
     pub cgroup_path: Option<PathBuf>,
     pub starttime_ticks: Option<u64>,
     pub sched_policy: Option<u32>,
+    pub is_foreground_window_process: bool,
 
     pub classification: Classification,
 
@@ -263,8 +267,19 @@ impl FocusResolver {
         }
     }
 
-    pub fn sample(&mut self, proc_root: &std::path::Path, elapsed_ms: u64) -> FocusDecision {
-        let snapshot = focus_snapshot_at(proc_root, &mut self.cache, elapsed_ms);
+    pub fn sample(
+        &mut self,
+        proc_root: &Path,
+        elapsed_ms: u64,
+        foreground: Option<&ForegroundWindowSnapshot>,
+        source_mode: FocusSource,
+    ) -> FocusDecision {
+        let snapshot = focus_snapshot_at(proc_root, &mut self.cache, elapsed_ms, foreground);
+
+        match source_mode {
+            FocusSource::Heuristic | FocusSource::Foreground | FocusSource::Hybrid => {}
+        }
+
         self.decide_from_snapshot(snapshot)
     }
 
@@ -499,6 +514,149 @@ impl FocusResolver {
     }
 }
 
+#[cfg(test)]
+mod foreground_focus_tests {
+    use super::*;
+
+    fn foreground_snapshot(pid: Option<u32>) -> ForegroundWindowSnapshot {
+        ForegroundWindowSnapshot {
+            elapsed_ms: 1_000,
+            source: Some(crate::foreground::ForegroundSource::Sway),
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid,
+            app_id: Some("steam".to_owned()),
+            class: Some("Steam".to_owned()),
+            title: None,
+            window_id: Some("7".to_owned()),
+            workspace: Some("games".to_owned()),
+            confidence: 0.95,
+            stale_ms: None,
+            reason: "test foreground snapshot".to_owned(),
+        }
+    }
+
+    #[test]
+    fn focus_snapshot_stores_foreground_snapshot() {
+        let proc = crate::test_support::FakeProc::new("focus-stores-foreground");
+        proc.write_process(
+            crate::test_support::FakeProcess::new(4242, "steam_app_379430", 12_345)
+                .cmdline(vec!["steam_app_379430".to_owned()])
+                .cgroup("/user.slice/app.slice"),
+        )
+        .unwrap();
+
+        let foreground = foreground_snapshot(Some(4242));
+        let mut cache = FocusCache::default();
+
+        let snapshot = focus_snapshot_at(proc.path(), &mut cache, 1_000, Some(&foreground));
+
+        assert_eq!(
+            snapshot.foreground.as_ref().and_then(|fg| fg.pid),
+            Some(4242)
+        );
+        assert_eq!(
+            snapshot
+                .foreground
+                .as_ref()
+                .and_then(|fg| fg.app_id.as_deref()),
+            Some("steam")
+        );
+    }
+
+    #[test]
+    fn focus_snapshot_marks_matching_foreground_process() {
+        let proc = crate::test_support::FakeProc::new("focus-marks-matching-foreground");
+        proc.write_process(
+            crate::test_support::FakeProcess::new(4242, "steam_app_379430", 12_345)
+                .cmdline(vec!["steam_app_379430".to_owned()])
+                .cgroup("/user.slice/app.slice"),
+        )
+        .unwrap();
+        proc.write_process(
+            crate::test_support::FakeProcess::new(9000, "firefox", 22_222)
+                .cmdline(vec!["firefox".to_owned()])
+                .cgroup("/user.slice/app.slice"),
+        )
+        .unwrap();
+
+        let foreground = foreground_snapshot(Some(4242));
+        let mut cache = FocusCache::default();
+
+        let snapshot = focus_snapshot_at(proc.path(), &mut cache, 1_000, Some(&foreground));
+
+        assert!(
+            snapshot
+                .processes
+                .get(&4242)
+                .unwrap()
+                .is_foreground_window_process
+        );
+        assert!(
+            !snapshot
+                .processes
+                .get(&9000)
+                .unwrap()
+                .is_foreground_window_process
+        );
+    }
+
+    #[test]
+    fn focus_snapshot_does_not_mark_any_process_without_foreground_pid() {
+        let proc = crate::test_support::FakeProc::new("focus-no-foreground-pid");
+        proc.write_process(
+            crate::test_support::FakeProcess::new(4242, "steam_app_379430", 12_345)
+                .cmdline(vec!["steam_app_379430".to_owned()])
+                .cgroup("/user.slice/app.slice"),
+        )
+        .unwrap();
+
+        let foreground = foreground_snapshot(None);
+        let mut cache = FocusCache::default();
+
+        let snapshot = focus_snapshot_at(proc.path(), &mut cache, 1_000, Some(&foreground));
+
+        assert!(
+            !snapshot
+                .processes
+                .get(&4242)
+                .unwrap()
+                .is_foreground_window_process
+        );
+    }
+
+    #[test]
+    fn focus_resolver_sample_accepts_foreground_and_source_mode() {
+        let proc = crate::test_support::FakeProc::new("focus-resolver-foreground-source-mode");
+        proc.write_process(
+            crate::test_support::FakeProcess::new(4242, "steam_app_379430", 12_345)
+                .cmdline(vec!["steam_app_379430".to_owned()])
+                .cgroup("/user.slice/app.slice"),
+        )
+        .unwrap();
+
+        let foreground = foreground_snapshot(Some(4242));
+        let mut resolver = FocusResolver::new(FocusPolicy {
+            min_confidence: 0.0,
+            required_winner_polls: 1,
+            ..FocusPolicy::default()
+        });
+
+        let decision = resolver.sample(
+            proc.path(),
+            1_000,
+            Some(&foreground),
+            FocusSource::Foreground,
+        );
+
+        match decision {
+            FocusDecision::Keep { .. }
+            | FocusDecision::Switch { .. }
+            | FocusDecision::Clear { .. }
+            | FocusDecision::NoTarget { .. } => {}
+        }
+    }
+}
+
 pub fn safety_warnings_for_group(
     group: &FocusGroup,
     snapshot: &FocusSnapshot,
@@ -650,6 +808,7 @@ pub fn focus_snapshot_at(
     proc_root: &Path,
     cache: &mut FocusCache,
     elapsed_ms: u64,
+    foreground: Option<&ForegroundWindowSnapshot>,
 ) -> FocusSnapshot {
     let budget = crate::process_tree::ScanBudget::default_proc_scan();
     let mut budget_report = crate::process_tree::ScanBudgetReport::default();
@@ -660,7 +819,13 @@ pub fn focus_snapshot_at(
         &mut budget_report,
     );
 
-    build_focus_snapshot_from_processes(proc_root, cache, elapsed_ms, processes)
+    build_focus_snapshot_from_processes(
+        proc_root,
+        cache,
+        elapsed_ms,
+        processes,
+        foreground.cloned(),
+    )
 }
 
 fn build_focus_snapshot_from_processes(
@@ -668,6 +833,7 @@ fn build_focus_snapshot_from_processes(
     cache: &mut FocusCache,
     elapsed_ms: u64,
     processes: BTreeMap<u32, crate::process_tree::ProcInfo>,
+    foreground: Option<ForegroundWindowSnapshot>,
 ) -> FocusSnapshot {
     let mut children_by_parent: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
     for proc_info in processes.values() {
@@ -691,6 +857,10 @@ fn build_focus_snapshot_from_processes(
 
         let exe_path = non_empty_str(&proc_info.exe_path);
         let cgroup_path = non_empty_str(&proc_info.cgroup_path);
+        let is_foreground_window_process = foreground
+            .as_ref()
+            .and_then(|fg| fg.pid)
+            .is_some_and(|pid| pid == proc_info.pid);
 
         let classification = classify_process(&ProcessIdentity {
             pid: proc_info.pid,
@@ -710,6 +880,7 @@ fn build_focus_snapshot_from_processes(
             cgroup_path: cgroup_path.map(PathBuf::from),
             starttime_ticks: proc_info.starttime_ticks.or(counters.starttime_ticks),
             sched_policy: proc_info.sched_policy,
+            is_foreground_window_process,
             classification,
             cpu_time_ticks_delta: deltas.cpu_time_ticks,
             read_bytes_delta: deltas.read_bytes,
@@ -726,6 +897,7 @@ fn build_focus_snapshot_from_processes(
 
     let mut snapshot = FocusSnapshot {
         elapsed_ms,
+        foreground,
         processes: focus_processes,
         children_by_parent,
         groups: Vec::new(),
@@ -3152,13 +3324,13 @@ mod tests {
             write_fake_proc_process(&proc_root, process);
         }
 
-        let _ = focus_snapshot_at(&proc_root, &mut cache, 0);
+        let _ = focus_snapshot_at(&proc_root, &mut cache, 0, None);
 
         for process in &second_sample {
             write_fake_proc_process(&proc_root, process);
         }
 
-        let snapshot = focus_snapshot_at(&proc_root, &mut cache, 1000);
+        let snapshot = focus_snapshot_at(&proc_root, &mut cache, 1000, None);
         std::fs::remove_dir_all(proc_root).ok();
         snapshot
     }
@@ -3192,6 +3364,7 @@ mod tests {
             cgroup_path: None,
             starttime_ticks: Some(pid as u64 * 100),
             sched_policy: None,
+            is_foreground_window_process: false,
             classification: required_test_classification(class, priority_band, 0.85),
             cpu_time_ticks_delta,
             read_bytes_delta: 0,
@@ -3255,6 +3428,7 @@ mod tests {
 
         FocusSnapshot {
             elapsed_ms,
+            foreground: None,
             processes: process_map,
             children_by_parent,
             groups,
@@ -3525,6 +3699,7 @@ mod tests {
             cgroup_path: None,
             starttime_ticks: Some(pid as u64 * 100),
             sched_policy: None,
+            is_foreground_window_process: false,
             classification: resolver_test_classification(class, PriorityBand::Interactive, 0.80),
             cpu_time_ticks_delta: 10,
             read_bytes_delta: 0,
@@ -3588,6 +3763,7 @@ mod tests {
 
         FocusSnapshot {
             elapsed_ms,
+            foreground: None,
             processes: process_map,
             children_by_parent,
             groups,
@@ -3921,6 +4097,7 @@ mod tests {
             cgroup_path: None,
             starttime_ticks: Some(pid as u64 * 10),
             sched_policy: None,
+            is_foreground_window_process: false,
             classification: test_classification(class, priority_band, 0.9),
             cpu_time_ticks_delta,
             read_bytes_delta: 0,
@@ -3948,6 +4125,7 @@ mod tests {
 
         FocusSnapshot {
             elapsed_ms: 1000,
+            foreground: None,
             processes: process_map,
             children_by_parent,
             groups: Vec::new(),

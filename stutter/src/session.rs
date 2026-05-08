@@ -403,7 +403,7 @@ impl MonitorSession {
             };
 
             let mut resolver = FocusResolver::new(policy);
-            match resolver.sample(Path::new("/proc"), 0) {
+            match resolver.sample(Path::new("/proc"), 0, None, FocusSource::Heuristic) {
                 FocusDecision::Switch { new, .. } | FocusDecision::Keep { focus: new } => {
                     config.tree_pids = new.group.root_pids.clone();
                     info!(
@@ -859,7 +859,13 @@ impl MonitorSession {
             return Ok(());
         };
 
-        let decision = resolver.sample(Path::new("/proc"), elapsed_ms);
+        let foreground = self.current_foreground.clone();
+        let decision = resolver.sample(
+            Path::new("/proc"),
+            elapsed_ms,
+            foreground.as_ref(),
+            self.config.focus_source,
+        );
 
         match decision {
             FocusDecision::Switch { old, new } => {
