@@ -558,6 +558,223 @@ mod tests {
     }
 
     #[test]
+    fn policy_observe_never_applies() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::Observe);
+        let state = ControllerRuntimeState::default();
+        let observation = high_quality_observation(100);
+        let candidate = candidate_with_safety_class(SafetyClass::ReversibleLowRisk);
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+        match decision {
+            AutotuneDecision::Noop { reason } => {
+                assert!(
+                    reason.contains("observe mode never applies"),
+                    "unexpected observe-mode reason: {reason}"
+                );
+            }
+            AutotuneDecision::StartExperiment { .. } => {
+                panic!("observe mode must never start an experiment")
+            }
+            AutotuneDecision::Suggest { .. } => {
+                panic!("observe mode must never suggest an action")
+            }
+            other => panic!("expected observe-mode Noop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn policy_suggest_never_applies() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::Suggest);
+        let state = ControllerRuntimeState::default();
+        let observation = high_quality_observation(100);
+        let candidate = candidate_with_safety_class(SafetyClass::HighRisk);
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+        match decision {
+            AutotuneDecision::Suggest { reason, .. } => {
+                assert!(
+                    reason.contains("suggest mode reports candidate without applying"),
+                    "unexpected suggest-mode reason: {reason}"
+                );
+            }
+            AutotuneDecision::StartExperiment { .. } => {
+                panic!("suggest mode must never start an experiment")
+            }
+            other => panic!("expected Suggest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn policy_apply_low_risk_blocks_medium_risk() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let state = ControllerRuntimeState::default();
+        let observation = high_quality_observation(100);
+        let candidate = candidate_with_safety_class(SafetyClass::ReversibleMediumRisk);
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+        match decision {
+            AutotuneDecision::Noop { reason } => {
+                assert!(
+                    reason.contains("candidate safety class ReversibleMediumRisk exceeds mode maximum ReversibleLowRisk"),
+                    "unexpected low-risk safety gate reason: {reason}"
+                );
+            }
+            AutotuneDecision::StartExperiment { .. } => {
+                panic!("apply-low-risk mode must not start a medium-risk experiment")
+            }
+            other => {
+                panic!("expected Noop for medium-risk candidate in low-risk mode, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn policy_low_data_quality_blocks_action() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let state = ControllerRuntimeState::default();
+        let mut observation = high_quality_observation(100);
+        observation.data_quality = OnlineDataQuality::Low {
+            reasons: vec!["fewer than min_scored_samples".to_owned()],
+        };
+        let candidate = candidate_with_safety_class(SafetyClass::ReversibleLowRisk);
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+        match decision {
+            AutotuneDecision::Noop { reason } => {
+                assert!(
+                    reason.contains("low data quality blocks experiment"),
+                    "unexpected low-data-quality reason: {reason}"
+                );
+                assert!(
+                    reason.contains("fewer than min_scored_samples"),
+                    "low-data-quality reason did not preserve source reason: {reason}"
+                );
+            }
+            AutotuneDecision::StartExperiment { .. } => {
+                panic!("low data quality must not start an experiment")
+            }
+            other => panic!("expected Noop for low data quality, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn policy_target_exit_reverts() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let state = active_state_with_baseline_score(100);
+        let mut observation = high_quality_observation(90);
+        observation.target_present = false;
+        observation.target_root_pid = None;
+        observation.active_target_count = 0;
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, None);
+
+        match decision {
+            AutotuneDecision::Revert {
+                experiment_id,
+                reason,
+            } => {
+                assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+                assert!(
+                    reason.contains("target disappeared during active experiment"),
+                    "unexpected target-exit revert reason: {reason}"
+                );
+            }
+            other => panic!("expected Revert after target exit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn policy_candidate_regression_reverts() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let state = active_state_with_baseline_score(100);
+        let observation = high_quality_observation(108);
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, None);
+
+        match decision {
+            AutotuneDecision::Revert {
+                experiment_id,
+                reason,
+            } => {
+                assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+                assert!(
+                    reason.contains("candidate regressed score by 8.0%"),
+                    "unexpected regression reason: {reason}"
+                );
+                assert!(
+                    reason.contains("exceeds max_regression_percent 7.5%"),
+                    "regression reason did not include threshold: {reason}"
+                );
+            }
+            other => panic!("expected Revert for candidate regression, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn policy_candidate_improvement_keeps() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let state = active_state_with_baseline_score(100);
+        let observation = high_quality_observation(87);
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, None);
+
+        match decision {
+            AutotuneDecision::KeepCurrent {
+                experiment_id,
+                reason,
+            } => {
+                assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+                assert!(
+                    reason.contains("candidate improved score by 13.0%"),
+                    "unexpected improvement reason: {reason}"
+                );
+                assert!(
+                    reason.contains("meets min_improvement_percent 12.5%"),
+                    "improvement reason did not include threshold: {reason}"
+                );
+            }
+            other => {
+                panic!("expected KeepCurrent for sufficient candidate improvement, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn policy_cooldown_prevents_thrashing() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let mut observation = high_quality_observation(100);
+        observation.now_unix_nanos = 1_000_000_000;
+        let candidate = candidate_with_safety_class(SafetyClass::ReversibleLowRisk);
+        let mut state = ControllerRuntimeState::default();
+
+        state.mark_candidate_action_attempted(&candidate, observation.now_unix_nanos);
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+        match decision {
+            AutotuneDecision::EnterCooldown { duration, reason } => {
+                assert_eq!(duration.as_secs(), 300);
+                assert!(
+                    reason.contains("same action 'test' is still cooling down"),
+                    "unexpected same-action cooldown reason: {reason}"
+                );
+                assert!(
+                    reason.contains("minimum_time_between_same_action is 300s"),
+                    "cooldown reason did not include anti-thrash minimum: {reason}"
+                );
+            }
+            AutotuneDecision::StartExperiment { .. } => {
+                panic!("cooldown must prevent immediately repeating the same action")
+            }
+            other => panic!("expected EnterCooldown for repeated action, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn observe_mode_never_applies() {
         let policy = ControllerPolicy::for_mode(AutotuneMode::Observe);
         let state = ControllerRuntimeState::default();
