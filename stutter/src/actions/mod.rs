@@ -2,6 +2,7 @@
 
 pub mod cgroup;
 pub mod cpu_affinity;
+pub mod cpu_power;
 pub mod nice;
 
 pub mod ioprio;
@@ -75,6 +76,12 @@ pub struct IoPrioRestoreRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CpuPowerRestoreRecord {
+    pub path: PathBuf,
+    pub original_value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CgroupRestoreRecord {
     pub pid: u32,
     pub original_cgroup: PathBuf,
@@ -116,6 +123,9 @@ pub enum RollbackToken {
     CgroupRestore {
         records: Vec<CgroupRestoreRecord>,
     },
+    CpuPowerRestore {
+        records: Vec<CpuPowerRestoreRecord>,
+    },
     SysfsRestore {
         path: PathBuf,
         original_value: String,
@@ -131,6 +141,7 @@ impl RollbackToken {
             Self::IoPrioRestore { records } => records.len(),
             Self::UclampRestore { records } => records.len(),
             Self::CgroupRestore { records } => records.len(),
+            Self::CpuPowerRestore { records } => records.len(),
             Self::SysfsRestore { .. } => 1,
         }
     }
@@ -143,7 +154,8 @@ impl RollbackToken {
             | Self::IrqAffinityRestore { .. }
             | Self::IoPrioRestore { .. }
             | Self::UclampRestore { .. }
-            | Self::CgroupRestore { .. } => None,
+            | Self::CgroupRestore { .. }
+            | Self::CpuPowerRestore { .. } => None,
         }
     }
 }
