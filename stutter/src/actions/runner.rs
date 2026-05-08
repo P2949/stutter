@@ -145,6 +145,7 @@ mod tests {
     use super::*;
     use crate::actions::{
         ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
+        fake_action::{FakeAction, FakeActionSwitches},
     };
 
     #[derive(Default)]
@@ -281,6 +282,201 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn fake_action_preflight_failure_blocks_apply_and_verify() {
+        let dir = temp_dir("fake-preflight-failure");
+        let audit_path = dir.join("audit.jsonl");
+        let action = FakeAction::new().with_fail_preflight();
+
+        let result =
+            run_audited_action_with_audit_path("fake-controller", &action, false, &audit_path);
+
+        assert!(result.is_err());
+        assert_eq!(action.events(), vec!["preflight"]);
+        assert!(!action.applied());
+        assert!(!action.rolled_back());
+
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(err.contains("preflight failed"));
+        assert!(err.contains("fake preflight failure"));
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(!events[0].success);
+        assert_eq!(events[0].command, "fake-controller");
+        assert!(events[0].message.contains("preflight failed"));
+        assert!(events[0].message.contains("fake preflight failure"));
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn fake_action_apply_failure_blocks_verify_and_rollback() {
+        let dir = temp_dir("fake-apply-failure");
+        let audit_path = dir.join("audit.jsonl");
+        let action = FakeAction::new().with_fail_apply();
+
+        let result =
+            run_audited_action_with_audit_path("fake-controller", &action, false, &audit_path);
+
+        assert!(result.is_err());
+        assert_eq!(action.events(), vec!["preflight", "apply"]);
+        assert!(!action.applied());
+        assert!(!action.rolled_back());
+
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(err.contains("apply failed"));
+        assert!(err.contains("fake apply failure"));
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(!events[0].success);
+        assert!(events[0].message.contains("apply failed"));
+        assert!(events[0].message.contains("fake apply failure"));
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn fake_action_verify_failure_rolls_back_mutation() {
+        let dir = temp_dir("fake-verify-failure");
+        let audit_path = dir.join("audit.jsonl");
+        let action = FakeAction::new().with_fail_verify();
+
+        let result =
+            run_audited_action_with_audit_path("fake-controller", &action, false, &audit_path);
+
+        assert!(result.is_err());
+        assert_eq!(
+            action.events(),
+            vec!["preflight", "apply", "verify", "rollback"]
+        );
+        assert!(!action.applied());
+        assert!(action.rolled_back());
+
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(err.contains("verify failed"));
+        assert!(err.contains("rollback completed"));
+        assert!(err.contains("fake verify failure"));
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(!events[0].success);
+        assert_eq!(events[0].affected_tasks, 5);
+        assert_eq!(
+            events[0].restore_path,
+            Some(PathBuf::from("/tmp/stutter-fake-action-restore.json"))
+        );
+        assert!(events[0].message.contains("verify failed"));
+        assert!(events[0].message.contains("rollback completed"));
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn fake_action_rollback_failure_keeps_mutation_and_reports_emergency() {
+        let dir = temp_dir("fake-rollback-failure");
+        let audit_path = dir.join("audit.jsonl");
+        let action = FakeAction::new().with_fail_verify().with_fail_rollback();
+
+        let result =
+            run_audited_action_with_audit_path("fake-controller", &action, false, &audit_path);
+
+        assert!(result.is_err());
+        assert_eq!(
+            action.events(),
+            vec!["preflight", "apply", "verify", "rollback"]
+        );
+        assert!(action.applied());
+        assert!(!action.rolled_back());
+
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(err.contains("emergency rollback failed"));
+        assert!(err.contains("fake verify failure"));
+        assert!(err.contains("fake rollback failure"));
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(!events[0].success);
+        assert_eq!(events[0].affected_tasks, 5);
+        assert!(events[0].message.contains("emergency rollback failed"));
+        assert!(events[0].message.contains("fake verify failure"));
+        assert!(events[0].message.contains("fake rollback failure"));
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn fake_action_slow_apply_still_verifies_and_returns_rollback_token() {
+        let dir = temp_dir("fake-slow-apply");
+        let audit_path = dir.join("audit.jsonl");
+        let action = FakeAction::new()
+            .with_switches(FakeActionSwitches {
+                slow_apply: true,
+                ..FakeActionSwitches::default()
+            })
+            .with_slow_apply_duration(std::time::Duration::from_millis(25))
+            .with_affected_tasks(9);
+        let started = std::time::Instant::now();
+
+        let result =
+            run_audited_action_with_audit_path("fake-controller", &action, false, &audit_path)
+                .unwrap();
+
+        assert!(
+            started.elapsed() >= std::time::Duration::from_millis(20),
+            "slow_apply switch did not delay apply path long enough"
+        );
+        assert_eq!(
+            action.events(),
+            vec!["preflight", "apply", "slow_apply", "verify"]
+        );
+        assert!(action.applied());
+        assert!(!action.rolled_back());
+        assert_eq!(result.state.affected_tasks, 9);
+        assert_eq!(
+            result.rollback,
+            Some(RollbackToken::CpuAffinityRestoreFile {
+                path: PathBuf::from("/tmp/stutter-fake-action-restore.json"),
+                affected_tasks: 9,
+            })
+        );
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].success);
+        assert_eq!(events[0].affected_tasks, 9);
+        assert_eq!(events[0].message, "action applied and verified");
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn fake_action_dry_run_never_applies() {
+        let dir = temp_dir("fake-dry-run");
+        let audit_path = dir.join("audit.jsonl");
+        let action = FakeAction::new().with_affected_tasks(7);
+
+        let result =
+            run_audited_action_with_audit_path("fake-controller", &action, true, &audit_path)
+                .unwrap();
+
+        assert_eq!(action.events(), vec!["preflight", "dry_run"]);
+        assert!(!action.applied());
+        assert!(!action.rolled_back());
+        assert_eq!(result.state.affected_tasks, 7);
+        assert_eq!(result.rollback, None);
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].success);
+        assert!(events[0].dry_run);
+        assert_eq!(events[0].affected_tasks, 7);
+        assert_eq!(events[0].message, "dry run successful");
+
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]

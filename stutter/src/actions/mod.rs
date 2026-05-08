@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+#[cfg(test)]
+pub mod fake_action;
+
 pub mod cgroup;
 pub mod cpu_affinity;
 pub mod cpu_power;
