@@ -12,7 +12,9 @@ pub mod controller;
 pub mod decision;
 pub mod decision_log;
 pub mod experiment;
+pub mod generate_profiles;
 pub mod history;
+
 pub mod history_replay;
 pub mod human_output;
 pub mod observation;

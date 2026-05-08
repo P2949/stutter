@@ -340,9 +340,39 @@ pub struct AutotuneArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum AutotuneCommand {
+    #[command(name = "generate-profiles")]
+    GenerateProfiles(AutotuneGenerateProfilesArgs),
     Replay(AutotuneReplayArgs),
+
     #[command(name = "replay-history")]
     ReplayHistory(AutotuneReplayHistoryArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AutotuneGenerateProfilesArgs {
+    #[arg(long = "watch-process", value_name = "COMM")]
+    pub watch_process: Option<String>,
+
+    #[arg(long = "out", value_name = "PATH_OR_-")]
+    pub out: PathBuf,
+
+    #[arg(long = "allow-cpus", value_name = "CPU_LIST")]
+    pub allow_cpus: Option<String>,
+
+    #[arg(long = "deny-cpus", value_name = "CPU_LIST")]
+    pub deny_cpus: Option<String>,
+
+    #[arg(long = "min-render-cpus", default_value_t = 1)]
+    pub min_render_cpus: usize,
+
+    #[arg(long = "min-game-cpus", default_value_t = 1)]
+    pub min_game_cpus: usize,
+
+    #[arg(long = "min-compositor-cpus", default_value_t = 1)]
+    pub min_compositor_cpus: usize,
+
+    #[arg(long = "min-background-cpus", default_value_t = 2)]
+    pub min_background_cpus: usize,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -1044,6 +1074,16 @@ pub enum AppCommand {
         filter: Vec<String>,
         top: usize,
     },
+    AutotuneGenerateProfiles {
+        watch_process: Option<String>,
+        out: PathBuf,
+        allow_cpus: Option<String>,
+        deny_cpus: Option<String>,
+        min_render_cpus: usize,
+        min_game_cpus: usize,
+        min_compositor_cpus: usize,
+        min_background_cpus: usize,
+    },
     AutotuneStatus {
         json: bool,
     },
@@ -1434,6 +1474,18 @@ where
         Some(Command::Autotune(args)) => {
             if let Some(cmd) = args.command {
                 match cmd {
+                    AutotuneCommand::GenerateProfiles(args) => {
+                        Ok(AppCommand::AutotuneGenerateProfiles {
+                            watch_process: args.watch_process,
+                            out: args.out,
+                            allow_cpus: args.allow_cpus,
+                            deny_cpus: args.deny_cpus,
+                            min_render_cpus: args.min_render_cpus,
+                            min_game_cpus: args.min_game_cpus,
+                            min_compositor_cpus: args.min_compositor_cpus,
+                            min_background_cpus: args.min_background_cpus,
+                        })
+                    }
                     AutotuneCommand::Replay(replay) => Ok(AppCommand::AutotuneReplay {
                         run: replay.run,
                         config: replay.config,

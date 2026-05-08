@@ -635,6 +635,109 @@ fn parse_task_class(value: &str) -> anyhow::Result<TaskClass> {
     }
 }
 
+pub fn render_profiles_toml(profiles: &[Profile]) -> String {
+    let mut out = String::new();
+
+    for profile in profiles {
+        out.push_str("[[profile]]\n");
+        out.push_str("name = ");
+        out.push_str(&toml_quoted_string(&profile.name));
+        out.push_str("\n\n");
+
+        for rule in &profile.rules {
+            out.push_str("[[profile.rules]]\n");
+            out.push_str("affinity = ");
+            out.push_str(&toml_quoted_string(&rule.affinity.to_range_string()));
+            out.push('\n');
+
+            if !rule.match_class.is_empty() {
+                out.push_str("match_class = [");
+                for (idx, class) in rule.match_class.iter().enumerate() {
+                    if idx > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&toml_quoted_string(task_class_toml_name(*class)));
+                }
+                out.push_str("]\n");
+            }
+
+            if !rule.match_comm.is_empty() {
+                out.push_str("match_comm = [");
+                for (idx, pattern) in rule.match_comm.iter().enumerate() {
+                    if idx > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&toml_quoted_string(pattern.raw()));
+                }
+                out.push_str("]\n");
+            }
+
+            out.push('\n');
+        }
+    }
+
+    out
+}
+
+fn toml_quoted_string(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+
+    for ch in value.chars() {
+        match ch {
+            '\\' => quoted.push_str("\\\\"),
+            '"' => quoted.push_str("\\\""),
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            other => quoted.push(other),
+        }
+    }
+
+    quoted.push('"');
+    quoted
+}
+
+fn task_class_toml_name(class: TaskClass) -> &'static str {
+    match class {
+        TaskClass::Game => "Game",
+        TaskClass::GameRenderThread => "GameRenderThread",
+        TaskClass::GameWorkerThread => "GameWorkerThread",
+        TaskClass::GameHelper => "GameHelper",
+        TaskClass::Launcher => "Launcher",
+        TaskClass::WineServer => "WineServer",
+        TaskClass::GameScope => "GameScope",
+        TaskClass::Compositor => "Compositor",
+        TaskClass::AudioRealtime => "AudioRealtime",
+        TaskClass::Input => "Input",
+        TaskClass::BrowserForeground => "BrowserForeground",
+        TaskClass::BrowserBackground => "BrowserBackground",
+        TaskClass::BrowserRenderer => "BrowserRenderer",
+        TaskClass::BrowserGpu => "BrowserGpu",
+        TaskClass::BrowserNetwork => "BrowserNetwork",
+        TaskClass::Compiler => "Compiler",
+        TaskClass::Linker => "Linker",
+        TaskClass::Indexer => "Indexer",
+        TaskClass::PackageManager => "PackageManager",
+        TaskClass::BuildJob => "BuildJob",
+        TaskClass::StorageDaemon => "StorageDaemon",
+        TaskClass::NetworkDaemon => "NetworkDaemon",
+        TaskClass::KernelThread => "KernelThread",
+        TaskClass::IrqThread => "IrqThread",
+        TaskClass::Editor => "Editor",
+        TaskClass::Terminal => "Terminal",
+        TaskClass::Shell => "Shell",
+        TaskClass::Media => "Media",
+        TaskClass::Recorder => "Recorder",
+        TaskClass::VirtualMachine => "VirtualMachine",
+        TaskClass::SteamRuntime => "SteamRuntime",
+        TaskClass::Render => "Render",
+        TaskClass::Helper => "Helper",
+        TaskClass::Service => "Service",
+        TaskClass::Unknown => "Unknown",
+    }
+}
+
 pub fn generate_topology_template() -> String {
     let mut out = String::new();
     out.push_str("[[profile]]\n");
@@ -684,6 +787,30 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["RenderThread", "Main"]
         );
+    }
+
+    #[test]
+    fn render_profiles_toml_outputs_profile_rules() {
+        let profile = Profile {
+            name: "generated \"profile\"".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: CpuMask::parse("0-1").unwrap(),
+                match_class: vec![TaskClass::Game, TaskClass::GameRenderThread],
+                match_comm: vec![
+                    CompiledPattern::new("RenderThread".to_owned()).unwrap(),
+                    CompiledPattern::new("Main".to_owned()).unwrap(),
+                ],
+            }],
+        };
+
+        let toml = render_profiles_toml(&[profile]);
+
+        assert!(toml.contains("[[profile]]"));
+        assert!(toml.contains("name = \"generated \\\"profile\\\"\""));
+        assert!(toml.contains("[[profile.rules]]"));
+        assert!(toml.contains("affinity = \"0-1\""));
+        assert!(toml.contains("match_class = [\"Game\", \"GameRenderThread\"]"));
+        assert!(toml.contains("match_comm = [\"RenderThread\", \"Main\"]"));
     }
 
     #[test]
