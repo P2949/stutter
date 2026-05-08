@@ -28,6 +28,7 @@ pub mod observation;
 pub mod profiles;
 pub mod quality;
 pub mod replay;
+pub mod report_overlay;
 pub mod state;
 pub mod status;
 
