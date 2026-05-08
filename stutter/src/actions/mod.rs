@@ -5,6 +5,7 @@ pub mod cpu_affinity;
 pub mod nice;
 
 pub mod ioprio;
+pub mod irq_affinity;
 pub mod uclamp;
 
 pub mod runner;
@@ -61,6 +62,13 @@ pub struct UclampRestoreRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IrqAffinityRestoreRecord {
+    pub irq: u32,
+    pub device_hint: String,
+    pub original_smp_affinity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IoPrioRestoreRecord {
     pub tid: u32,
     pub original_ioprio: i32,
@@ -96,6 +104,9 @@ pub enum RollbackToken {
     NiceRestore {
         records: Vec<NiceRestoreRecord>,
     },
+    IrqAffinityRestore {
+        records: Vec<IrqAffinityRestoreRecord>,
+    },
     IoPrioRestore {
         records: Vec<IoPrioRestoreRecord>,
     },
@@ -116,6 +127,7 @@ impl RollbackToken {
         match self {
             Self::CpuAffinityRestoreFile { affected_tasks, .. } => *affected_tasks,
             Self::NiceRestore { records } => records.len(),
+            Self::IrqAffinityRestore { records } => records.len(),
             Self::IoPrioRestore { records } => records.len(),
             Self::UclampRestore { records } => records.len(),
             Self::CgroupRestore { records } => records.len(),
@@ -128,6 +140,7 @@ impl RollbackToken {
             Self::CpuAffinityRestoreFile { path, .. } => Some(path),
             Self::SysfsRestore { path, .. } => Some(path),
             Self::NiceRestore { .. }
+            | Self::IrqAffinityRestore { .. }
             | Self::IoPrioRestore { .. }
             | Self::UclampRestore { .. }
             | Self::CgroupRestore { .. } => None,
