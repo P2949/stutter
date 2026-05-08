@@ -8,7 +8,11 @@ use super::{
     quality::OnlineDataQuality,
     state::{AutotuneMode, ControllerPhase},
 };
-use crate::{actions::SafetyClass, focus::FocusGroupKind, process_tree::TaskClass};
+use crate::{
+    actions::{ActionId, SafetyClass},
+    focus::FocusGroupKind,
+    process_tree::TaskClass,
+};
 
 #[derive(Clone, Debug)]
 pub struct ControllerPolicy {
@@ -16,7 +20,10 @@ pub struct ControllerPolicy {
     pub max_safety_class: SafetyClass,
     pub min_improvement_percent: f64,
     pub max_regression_percent: f64,
-    pub cooldown: Duration,
+    pub cooldown_after_keep: Duration,
+    pub cooldown_after_revert: Duration,
+    pub cooldown_after_fault: Duration,
+    pub minimum_time_between_same_action: Duration,
 }
 
 impl ControllerPolicy {
@@ -34,7 +41,10 @@ impl ControllerPolicy {
             max_safety_class,
             min_improvement_percent: 12.5,
             max_regression_percent: 7.5,
-            cooldown: Duration::from_secs(60),
+            cooldown_after_keep: Duration::from_secs(60),
+            cooldown_after_revert: Duration::from_secs(120),
+            cooldown_after_fault: Duration::from_secs(300),
+            minimum_time_between_same_action: Duration::from_secs(300),
         }
     }
 
@@ -60,6 +70,7 @@ pub struct ControllerRuntimeState {
     pub phase: ControllerPhase,
     pub active_experiment: Option<ActiveExperiment>,
     pub cooldown_until_unix_nanos: Option<u128>,
+    pub last_action_at_unix_nanos: Vec<(ActionId, u128)>,
 }
 
 impl Default for ControllerRuntimeState {
@@ -68,7 +79,50 @@ impl Default for ControllerRuntimeState {
             phase: ControllerPhase::Observing,
             active_experiment: None,
             cooldown_until_unix_nanos: None,
+            last_action_at_unix_nanos: Vec::new(),
         }
+    }
+}
+
+impl ControllerRuntimeState {
+    pub fn mark_candidate_action_attempted(
+        &mut self,
+        candidate: &CandidateAction,
+        now_unix_nanos: u128,
+    ) {
+        let action_id = candidate.action_id();
+
+        if let Some((_, last_at)) = self
+            .last_action_at_unix_nanos
+            .iter_mut()
+            .find(|(existing, _)| existing == &action_id)
+        {
+            *last_at = now_unix_nanos;
+            return;
+        }
+
+        self.last_action_at_unix_nanos
+            .push((action_id, now_unix_nanos));
+    }
+
+    pub fn enter_cooldown_after_keep(&mut self, policy: &ControllerPolicy, now_unix_nanos: u128) {
+        self.phase = ControllerPhase::Cooldown;
+        self.cooldown_until_unix_nanos =
+            cooldown_deadline(now_unix_nanos, policy.cooldown_after_keep);
+    }
+
+    pub fn enter_cooldown_after_revert(&mut self, policy: &ControllerPolicy, now_unix_nanos: u128) {
+        self.phase = ControllerPhase::Cooldown;
+        self.active_experiment = None;
+        self.cooldown_until_unix_nanos =
+            cooldown_deadline(now_unix_nanos, policy.cooldown_after_revert);
+    }
+
+    pub fn enter_cooldown_after_fault(&mut self, policy: &ControllerPolicy, now_unix_nanos: u128) {
+        self.phase = ControllerPhase::Faulted;
+        self.active_experiment = None;
+        self.cooldown_until_unix_nanos =
+            cooldown_deadline(now_unix_nanos, policy.cooldown_after_fault);
     }
 }
 
@@ -81,6 +135,20 @@ pub fn decide_autotune_transition(
     if state.phase == ControllerPhase::Disabled {
         return AutotuneDecision::Noop {
             reason: "controller is disabled".to_owned(),
+        };
+    }
+
+    if state.phase == ControllerPhase::Faulted {
+        if let Some(decision) = cooldown_block_decision(
+            state,
+            observation,
+            "fault cooldown blocks repeated action after controller fault",
+        ) {
+            return decision;
+        }
+
+        return AutotuneDecision::Fault {
+            reason: "controller is faulted; manual intervention required".to_owned(),
         };
     }
 
@@ -141,14 +209,10 @@ pub fn decide_autotune_transition(
         };
     }
 
-    if let Some(cooldown_until) = state.cooldown_until_unix_nanos
-        && observation.now_unix_nanos < cooldown_until
+    if let Some(decision) =
+        cooldown_block_decision(state, observation, "cooldown blocks repeated action")
     {
-        let remaining_nanos = cooldown_until.saturating_sub(observation.now_unix_nanos);
-        return AutotuneDecision::EnterCooldown {
-            duration: Duration::from_nanos(remaining_nanos.min(u64::MAX as u128) as u64),
-            reason: "cooldown blocks repeated action".to_owned(),
-        };
+        return decision;
     }
 
     if policy.mode == AutotuneMode::Observe {
@@ -183,6 +247,17 @@ pub fn decide_autotune_transition(
         };
     }
 
+    if let Some(duration) = same_action_cooldown_remaining(policy, state, observation, &candidate) {
+        return AutotuneDecision::EnterCooldown {
+            duration,
+            reason: format!(
+                "same action '{}' is still cooling down; minimum_time_between_same_action is {}s",
+                candidate.action_id().0,
+                policy.minimum_time_between_same_action.as_secs()
+            ),
+        };
+    }
+
     if policy.mode == AutotuneMode::Suggest {
         return AutotuneDecision::Suggest {
             candidate,
@@ -200,6 +275,62 @@ pub fn decide_autotune_transition(
         candidate,
         reason: "candidate passed data-quality and safety gates".to_owned(),
     }
+}
+
+fn cooldown_block_decision(
+    state: &ControllerRuntimeState,
+    observation: &AutotuneObservation,
+    reason: &str,
+) -> Option<AutotuneDecision> {
+    let cooldown_until = state.cooldown_until_unix_nanos?;
+
+    if observation.now_unix_nanos >= cooldown_until {
+        return None;
+    }
+
+    let remaining_nanos = cooldown_until.saturating_sub(observation.now_unix_nanos);
+    Some(AutotuneDecision::EnterCooldown {
+        duration: duration_from_remaining_nanos(remaining_nanos),
+        reason: reason.to_owned(),
+    })
+}
+
+fn same_action_cooldown_remaining(
+    policy: &ControllerPolicy,
+    state: &ControllerRuntimeState,
+    observation: &AutotuneObservation,
+    candidate: &CandidateAction,
+) -> Option<Duration> {
+    if policy.minimum_time_between_same_action.is_zero() {
+        return None;
+    }
+
+    let action_id = candidate.action_id();
+    let (_, last_at) = state
+        .last_action_at_unix_nanos
+        .iter()
+        .find(|(existing, _)| existing == &action_id)?;
+
+    let next_allowed = last_at.saturating_add(policy.minimum_time_between_same_action.as_nanos());
+    if observation.now_unix_nanos >= next_allowed {
+        return None;
+    }
+
+    Some(duration_from_remaining_nanos(
+        next_allowed.saturating_sub(observation.now_unix_nanos),
+    ))
+}
+
+fn cooldown_deadline(now_unix_nanos: u128, duration: Duration) -> Option<u128> {
+    if duration.is_zero() {
+        None
+    } else {
+        Some(now_unix_nanos.saturating_add(duration.as_nanos()))
+    }
+}
+
+fn duration_from_remaining_nanos(remaining_nanos: u128) -> Duration {
+    Duration::from_nanos(remaining_nanos.min(u64::MAX as u128) as u64)
 }
 
 fn focus_policy_block_reason(
@@ -375,6 +506,7 @@ mod tests {
                 baseline_score_total,
             }),
             cooldown_until_unix_nanos: None,
+            last_action_at_unix_nanos: Vec::new(),
         }
     }
 
@@ -636,6 +768,7 @@ mod tests {
             phase: ControllerPhase::Cooldown,
             active_experiment: None,
             cooldown_until_unix_nanos: Some(11_000_000_000),
+            last_action_at_unix_nanos: Vec::new(),
         };
         let candidate = candidate_with_safety_class(SafetyClass::ReversibleLowRisk);
 
@@ -647,6 +780,109 @@ mod tests {
                 assert!(reason.contains("cooldown blocks repeated action"));
             }
             other => panic!("expected EnterCooldown, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn policy_defaults_use_required_cooldown_values() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+
+        assert_eq!(policy.cooldown_after_keep, Duration::from_secs(60));
+        assert_eq!(policy.cooldown_after_revert, Duration::from_secs(120));
+        assert_eq!(policy.cooldown_after_fault, Duration::from_secs(300));
+        assert_eq!(
+            policy.minimum_time_between_same_action,
+            Duration::from_secs(300)
+        );
+    }
+
+    #[test]
+    fn same_action_hysteresis_blocks_repeated_candidate() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let observation = high_quality_observation(100);
+        let candidate = candidate_with_safety_class(SafetyClass::ReversibleLowRisk);
+        let mut state = ControllerRuntimeState::default();
+
+        state.mark_candidate_action_attempted(&candidate, observation.now_unix_nanos);
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+        match decision {
+            AutotuneDecision::EnterCooldown { duration, reason } => {
+                assert_eq!(duration.as_secs(), 300);
+                assert!(reason.contains("same action 'test' is still cooling down"));
+                assert!(reason.contains("minimum_time_between_same_action is 300s"));
+            }
+            other => panic!("expected same-action EnterCooldown, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn same_action_hysteresis_allows_candidate_after_minimum_elapsed() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let mut observation = high_quality_observation(100);
+        let candidate = candidate_with_safety_class(SafetyClass::ReversibleLowRisk);
+        let mut state = ControllerRuntimeState::default();
+
+        state.mark_candidate_action_attempted(&candidate, 1_000_000_000);
+        observation.now_unix_nanos = 301_000_000_000;
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+        match decision {
+            AutotuneDecision::StartExperiment { reason, .. } => {
+                assert!(reason.contains("candidate passed data-quality and safety gates"));
+            }
+            other => panic!("expected StartExperiment after same-action cooldown, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn runtime_state_records_keep_revert_and_fault_cooldowns() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let now = 1_000_000_000;
+        let mut state = ControllerRuntimeState::default();
+
+        state.enter_cooldown_after_keep(&policy, now);
+        assert_eq!(state.phase, ControllerPhase::Cooldown);
+        assert_eq!(state.cooldown_until_unix_nanos, Some(61_000_000_000));
+
+        state.enter_cooldown_after_revert(&policy, now);
+        assert_eq!(state.phase, ControllerPhase::Cooldown);
+        assert_eq!(state.cooldown_until_unix_nanos, Some(121_000_000_000));
+
+        state.enter_cooldown_after_fault(&policy, now);
+        assert_eq!(state.phase, ControllerPhase::Faulted);
+        assert_eq!(state.cooldown_until_unix_nanos, Some(301_000_000_000));
+    }
+
+    #[test]
+    fn faulted_controller_enters_fault_cooldown_then_reports_fault() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let mut observation = high_quality_observation(100);
+        let mut state = ControllerRuntimeState::default();
+
+        state.enter_cooldown_after_fault(&policy, 1_000_000_000);
+        observation.now_unix_nanos = 2_000_000_000;
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, None);
+
+        match decision {
+            AutotuneDecision::EnterCooldown { duration, reason } => {
+                assert_eq!(duration.as_secs(), 299);
+                assert!(reason.contains("fault cooldown blocks repeated action"));
+            }
+            other => panic!("expected EnterCooldown during fault cooldown, got {other:?}"),
+        }
+
+        observation.now_unix_nanos = 301_000_000_000;
+        let decision = decide_autotune_transition(&policy, &state, &observation, None);
+
+        match decision {
+            AutotuneDecision::Fault { reason } => {
+                assert!(reason.contains("controller is faulted"));
+            }
+            other => panic!("expected Fault after fault cooldown expires, got {other:?}"),
         }
     }
 }
