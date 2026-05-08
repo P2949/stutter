@@ -42,6 +42,11 @@ summary { cursor: pointer; font-weight: 600; color: #111827; }
   <div class="summary-cards" id="summary-cards"></div>
 </section>
 
+<section id="auto-focus-section">
+  <h2>Auto Focus</h2>
+  <div id="auto-focus-content"></div>
+</section>
+
 <section id="data-quality-section">
   <h2>Data Quality</h2>
   <div id="data-quality-warnings"></div>
@@ -207,6 +212,49 @@ document.addEventListener('DOMContentLoaded', () => {
               <div class="summary-card-value">${escapeHtml(value)}</div>
             </div>
         `).join('');
+    }
+
+    function renderAutoFocus(model) {
+        const section = document.getElementById('auto-focus-section');
+        const container = document.getElementById('auto-focus-content');
+        if (!section || !container) return;
+
+        const focus = model.focus_summary || {};
+        const visible = focus.mode || focus.final_focus || focus.situation || (focus.confidence !== null && focus.confidence !== undefined) || (focus.roots && focus.roots.length) || focus.focus_switches || (focus.reasons && focus.reasons.length);
+
+        if (!visible) {
+            section.style.display = 'none';
+            return;
+        }
+
+        const confidence = focus.confidence === null || focus.confidence === undefined
+            ? 'unknown'
+            : Number(focus.confidence).toFixed(2);
+
+        const roots = Array.isArray(focus.roots) && focus.roots.length > 0
+            ? `[${focus.roots.join(', ')}]`
+            : '[]';
+
+        const reasons = Array.isArray(focus.reasons) ? focus.reasons : [];
+
+        container.innerHTML = `
+            <table>
+              <tbody>
+                <tr><th>Mode</th><td>${escapeHtml(focus.mode || 'unknown')}</td></tr>
+                <tr><th>Final focus</th><td>${escapeHtml(focus.final_focus || 'none')}</td></tr>
+                <tr><th>Situation</th><td>${escapeHtml(focus.situation || 'unknown')}</td></tr>
+                <tr><th>Confidence</th><td>${escapeHtml(confidence)}</td></tr>
+                <tr><th>Roots</th><td>${escapeHtml(roots)}</td></tr>
+                <tr><th>Focus switches</th><td>${escapeHtml(focus.focus_switches ?? 0)}</td></tr>
+              </tbody>
+            </table>
+            ${reasons.length === 0 ? '<p class="muted">No resolver reasons recorded.</p>' : `
+              <h3>Reasons</h3>
+              <ul>
+                ${reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}
+              </ul>
+            `}
+        `;
     }
 
     function renderDataQuality(model) {
@@ -433,6 +481,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const topLimit = Number(reportModel.top_limit || {top} || 10);
 
     renderSummaryCards(reportModel);
+    renderAutoFocus(reportModel);
     renderDataQuality(reportModel);
     renderTaskTable('top-tasks-by-max', reportModel.top_tasks_by_max || []);
     renderTaskTable('top-tasks-by-p99', reportModel.top_tasks_by_p99 || []);
