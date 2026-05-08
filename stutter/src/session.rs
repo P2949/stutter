@@ -336,6 +336,12 @@ impl MonitorSession {
             recorder.streams.focus_event_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("focus_events.json"),
             )?);
+
+            if config.foreground_window_config().enabled {
+                recorder.streams.foreground_event_writer = Some(JsonArrayWriter::create(
+                    run.run_dir.join("foreground_events.json"),
+                )?);
+            }
         }
 
         if let Some(csv_stream) = &config.csv_stream {
@@ -1513,6 +1519,8 @@ impl MonitorSession {
                     .as_ref()
                     .map(|focus| format!("{:?}", focus.group.kind)),
                 focus_switch_count: self.focus_switch_count,
+                current_focus: self.current_focus.clone(),
+                final_foreground_event: self.recorder.last_foreground_event.clone(),
                 drop_counters,
                 cpu_perf_status: self.cpu_perf_sampler.as_ref().map(|sampler| {
                     recorder::CpuPerfStatus {

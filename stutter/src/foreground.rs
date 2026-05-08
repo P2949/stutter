@@ -4,9 +4,10 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ForegroundSource {
+    #[default]
     Auto,
     Sway,
     Hyprland,
@@ -132,7 +133,7 @@ impl ForegroundWindowSnapshot {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ForegroundEvent {
     pub elapsed_ms: u64,
     pub source: ForegroundSource,

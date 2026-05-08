@@ -875,6 +875,8 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         focus_mode: None,
         final_focus_kind: None,
         focus_switch_count: 0,
+        current_focus: None,
+        final_foreground_event: None,
     })
     .unwrap();
 
@@ -1335,6 +1337,8 @@ fn report_reads_recorded_session_and_spike_events() {
         focus_mode: None,
         final_focus_kind: None,
         focus_switch_count: 0,
+        current_focus: None,
+        final_foreground_event: None,
     })
     .unwrap();
 
@@ -1408,6 +1412,8 @@ fn report_cluster_output_caps_inline_points() {
         focus_mode: None,
         final_focus_kind: None,
         focus_switch_count: 0,
+        current_focus: None,
+        final_foreground_event: None,
     })
     .unwrap();
 

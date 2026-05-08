@@ -30,6 +30,8 @@ A typical run directory contains:
   cpu_freq_samples.json
   io_events.json
   scx_events.json
+  focus_events.json
+  foreground_events.json
 ```
 
 Required:
@@ -53,6 +55,8 @@ Optional streams:
 - `cpu_freq_samples.json`
 - `io_events.json`
 - `scx_events.json`
+- `focus_events.json`
+- `foreground_events.json`
 
 ## JSON vs NDJSON
 
@@ -77,7 +81,7 @@ The schema version is stored in:
   `metadata.json`
 
 The current supported version is `recorder::SESSION_SCHEMA_VERSION`. For this
-document version, that value is `20`.
+document version, that value is `21`.
 
 Version behavior:
 
@@ -131,6 +135,12 @@ Key fields:
 - `cpu_perf_read_errors`
 - `cpu_perf_skipped_tasks`
 - `cpu_perf_last_error`
+- `focus_event_count`
+- `foreground_event_count`
+- `foreground_source`
+- `final_foreground_pid`
+- `final_foreground_app_id`
+- `final_foreground_class`
 
 Consistency rules:
 
@@ -141,6 +151,7 @@ Consistency rules:
 - `block_io_event_count` should match `io_events.json` when present.
 - `frame_event_count` should match `frame_correlation.json` or
   `frame_events.json` when present.
+- `foreground_event_count` should match `foreground_events.json` when present.
 - `event_stream_write_errors > 0` means stream artifacts may be incomplete.
 - Nonzero `drop_counters` means kernel-side event loss occurred.
 
@@ -169,6 +180,8 @@ Key fields:
 - `ended_at`
 - `duration_ms`
 - `active_expanded_tasks`
+- `focus_event_count`
+- `foreground_event_count`
 - artifact count fields copied from `session.json`
 
 Consistency rules:
@@ -363,12 +376,44 @@ Compatibility notes:
 - Consumers should use `report --analysis-json` for stable frame diagnosis
   output.
 
-Consistency rules:
-
-- The number of frame records used for reporting should match
-  `session.json` field `frame_event_count`.
 - If frame timestamps are not anchored to an observed monotonic timestamp,
   frame alignment is approximate and data quality may be downgraded.
+
+### `foreground_events.json`
+
+Purpose:
+
+- High-resolution foreground window identity and metadata snapshots.
+- Includes window titles (redacted by default), PIDs, app IDs, classes, and
+  window manager identities.
+
+Format: NDJSON.
+
+Status: Optional stream.
+
+Version behavior:
+
+- Missing file is tolerated.
+- Invalid present file is an error.
+
+Important fields:
+
+- `elapsed_ms`
+- `source`: identity of the provider (e.g., `sway`, `hyprland`, `x11`)
+- `status`: provider availability status
+- `pid`: process ID of the window owner
+- `app_id`: Wayland application identifier
+- `class`: X11 window class
+- `title`: window title (often `null` due to privacy policy)
+- `window_id`: platform-specific window handle
+- `workspace`: active workspace name/ID
+- `confidence`: provider-reported measurement confidence (0.0 to 1.0)
+- `reason`: diagnostic note for why this window was selected
+
+Consistency rules:
+
+- The number of records should match `session.json` field
+  `foreground_event_count`.
 
 ## Data-Quality Levels
 
@@ -391,6 +436,7 @@ Likely downgrade reasons include:
 - percentile truncation or approximation
 - block-I/O correlation basis limitations
 - frame timestamp alignment issues
+- malformed foreground-window event artifacts
 - CPU perf open, read, or skipped-task status
 
 ## Canonical Interface: `report --analysis-json`
@@ -474,7 +520,7 @@ Strict exit policy:
 Versioned examples live under:
 
 ```text
-docs/examples/artifacts/v20/
+docs/examples/artifacts/v21/
 ```
 
 The version number matches `recorder::SESSION_SCHEMA_VERSION`. These examples

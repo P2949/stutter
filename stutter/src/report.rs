@@ -1917,7 +1917,10 @@ pub(crate) fn data_quality_summary(
     let missing_non_focus_optional = validation
         .missing_optional_files
         .iter()
-        .filter(|f| *f != crate::session_io::FOCUS_EVENTS_FILE)
+        .filter(|f| {
+            *f != crate::session_io::FOCUS_EVENTS_FILE
+                && *f != crate::session_io::FOREGROUND_EVENTS_FILE
+        })
         .collect::<Vec<_>>();
 
     if !missing_non_focus_optional.is_empty() {
