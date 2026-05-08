@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub mod cgroup;
 pub mod cpu_affinity;
 pub mod nice;
 
