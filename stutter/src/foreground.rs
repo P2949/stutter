@@ -297,6 +297,67 @@ fn current_desktop_looks_like_gnome_or_kde() -> bool {
     desktop.contains("gnome") || desktop.contains("kde") || desktop.contains("plasma")
 }
 
+#[derive(Debug, Deserialize)]
+struct HyprlandActiveWindow {
+    address: Option<String>,
+    class: Option<String>,
+    #[serde(rename = "initialClass")]
+    initial_class: Option<String>,
+    title: Option<String>,
+    pid: Option<u32>,
+    workspace: Option<HyprlandWorkspace>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HyprlandWorkspace {
+    name: Option<String>,
+}
+
+fn hyprland_snapshot_from_activewindow_json(
+    elapsed_ms: u64,
+    active_window_json: &str,
+) -> ForegroundWindowSnapshot {
+    let active_window = match serde_json::from_str::<HyprlandActiveWindow>(active_window_json) {
+        Ok(active_window) => active_window,
+        Err(err) => {
+            return ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::Hyprland),
+                status: ForegroundProviderStatus::Error,
+                confidence: 0.0,
+                reason: format!("failed to parse hyprctl activewindow JSON: {err}"),
+                ..ForegroundWindowSnapshot::default()
+            };
+        }
+    };
+
+    let class = active_window.class.or(active_window.initial_class);
+    let confidence = if active_window.pid.is_some() {
+        0.95
+    } else if class.is_some() {
+        0.65
+    } else if active_window.title.is_some() || active_window.address.is_some() {
+        0.35
+    } else {
+        0.0
+    };
+
+    ForegroundWindowSnapshot {
+        elapsed_ms,
+        source: Some(ForegroundSource::Hyprland),
+        status: ForegroundProviderStatus::Available,
+        pid: active_window.pid,
+        app_id: None,
+        class,
+        title: active_window.title,
+        window_id: active_window.address,
+        workspace: active_window.workspace.and_then(|workspace| workspace.name),
+        confidence,
+        stale_ms: None,
+        reason: "active Hyprland window from hyprctl activewindow".to_owned(),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SwayForegroundProvider {
     swaymsg: String,
@@ -972,7 +1033,283 @@ fn reduce_stale_confidence(confidence: f32, stale_ms: u64, max_stale_ms: u64) ->
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+
     use super::*;
+
+    #[derive(Debug)]
+    struct ScriptedForegroundProvider {
+        source: ForegroundSource,
+        samples: VecDeque<ForegroundWindowSnapshot>,
+    }
+
+    impl ScriptedForegroundProvider {
+        fn new(source: ForegroundSource, samples: Vec<ForegroundWindowSnapshot>) -> Self {
+            Self {
+                source,
+                samples: VecDeque::from(samples),
+            }
+        }
+    }
+
+    impl ForegroundProvider for ScriptedForegroundProvider {
+        fn source(&self) -> ForegroundSource {
+            self.source
+        }
+
+        fn sample(&mut self, elapsed_ms: u64) -> ForegroundWindowSnapshot {
+            self.samples.pop_front().unwrap_or_else(|| {
+                ForegroundWindowSnapshot::unavailable(
+                    elapsed_ms,
+                    self.source,
+                    "scripted provider has no more samples",
+                )
+            })
+        }
+    }
+
+    #[test]
+    fn parse_sway_tree_finds_focused_node_with_pid() {
+        let json = r#"
+        {
+          "id": 1,
+          "name": "root",
+          "type": "root",
+          "focused": false,
+          "nodes": [
+            {
+              "id": 2,
+              "name": "gaming",
+              "type": "workspace",
+              "focused": false,
+              "nodes": [
+                {
+                  "id": 3,
+                  "name": "Kingdom Come: Deliverance",
+                  "focused": true,
+                  "pid": 4242,
+                  "app_id": "steam_app_379430",
+                  "window": 73400327,
+                  "window_properties": {
+                    "class": "steam_app_379430",
+                    "instance": "steam_app_379430",
+                    "title": "Kingdom Come: Deliverance"
+                  },
+                  "nodes": [],
+                  "floating_nodes": []
+                }
+              ],
+              "floating_nodes": []
+            }
+          ],
+          "floating_nodes": []
+        }
+        "#;
+
+        let provider = SwayForegroundProvider::new();
+        let snapshot = provider.sample_from_tree_json(1_000, json);
+
+        assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, Some(4242));
+        assert_eq!(snapshot.app_id.as_deref(), Some("steam_app_379430"));
+        assert_eq!(snapshot.class.as_deref(), Some("steam_app_379430"));
+        assert_eq!(snapshot.window_id.as_deref(), Some("73400327"));
+        assert_eq!(snapshot.workspace.as_deref(), Some("gaming"));
+        assert!((snapshot.confidence - 0.95).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn parse_sway_tree_prefers_app_id_and_redacts_title_by_default() {
+        let json = r#"
+        {
+          "id": 1,
+          "name": "root",
+          "type": "root",
+          "focused": false,
+          "nodes": [
+            {
+              "id": 2,
+              "name": "gaming",
+              "type": "workspace",
+              "focused": false,
+              "nodes": [
+                {
+                  "id": 3,
+                  "name": "Private browser tab title",
+                  "focused": true,
+                  "pid": 9000,
+                  "app_id": "firefox",
+                  "window": 123,
+                  "window_properties": {
+                    "class": "Navigator",
+                    "instance": "Navigator",
+                    "title": "Private browser tab title"
+                  },
+                  "nodes": [],
+                  "floating_nodes": []
+                }
+              ],
+              "floating_nodes": []
+            }
+          ],
+          "floating_nodes": []
+        }
+        "#;
+
+        let provider = SwayForegroundProvider::new();
+        let snapshot = provider.sample_from_tree_json(2_000, json);
+        let event = snapshot.to_event(false).unwrap();
+
+        assert_eq!(snapshot.app_id.as_deref(), Some("firefox"));
+        assert_eq!(snapshot.class.as_deref(), Some("Navigator"));
+        assert_eq!(snapshot.title.as_deref(), Some("Private browser tab title"));
+        assert_eq!(event.app_id.as_deref(), Some("firefox"));
+        assert_eq!(event.class.as_deref(), Some("Navigator"));
+        assert_eq!(event.title, None);
+    }
+
+    #[test]
+    fn parse_hyprland_activewindow_extracts_pid_class_workspace() {
+        let json = r#"
+        {
+          "address": "0x123456789abcdef",
+          "mapped": true,
+          "hidden": false,
+          "at": [10, 20],
+          "size": [1920, 1080],
+          "workspace": {
+            "id": 3,
+            "name": "gaming"
+          },
+          "floating": false,
+          "monitor": 0,
+          "class": "steam_app_379430",
+          "initialClass": "steam_app_379430",
+          "title": "Kingdom Come: Deliverance",
+          "initialTitle": "Kingdom Come: Deliverance",
+          "pid": 4242,
+          "xwayland": false
+        }
+        "#;
+
+        let snapshot = hyprland_snapshot_from_activewindow_json(3_000, json);
+        let event = snapshot.to_event(false).unwrap();
+
+        assert_eq!(snapshot.source, Some(ForegroundSource::Hyprland));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, Some(4242));
+        assert_eq!(snapshot.class.as_deref(), Some("steam_app_379430"));
+        assert_eq!(snapshot.workspace.as_deref(), Some("gaming"));
+        assert_eq!(snapshot.window_id.as_deref(), Some("0x123456789abcdef"));
+        assert!((snapshot.confidence - 0.95).abs() < f32::EPSILON);
+        assert_eq!(event.title, None);
+    }
+
+    #[test]
+    fn parse_xprop_active_window_pid_and_class() {
+        let root_output = "_NET_ACTIVE_WINDOW(WINDOW): window id # 0x4600007\n";
+        let properties_output = r#"
+_NET_WM_PID(CARDINAL) = 12345
+WM_CLASS(STRING) = "steam_app_379430", "steam_app_379430"
+_NET_WM_NAME(UTF8_STRING) = "Kingdom Come: Deliverance"
+WM_NAME(STRING) = "Kingdom Come: Deliverance"
+"#;
+
+        let provider = X11ForegroundProvider::new();
+        let snapshot = provider.sample_from_xprop_outputs(4_000, root_output, properties_output);
+
+        assert_eq!(snapshot.source, Some(ForegroundSource::X11));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, Some(12345));
+        assert_eq!(snapshot.app_id.as_deref(), Some("steam_app_379430"));
+        assert_eq!(snapshot.class.as_deref(), Some("steam_app_379430"));
+        assert_eq!(snapshot.window_id.as_deref(), Some("0x4600007"));
+        assert_eq!(snapshot.title.as_deref(), Some("Kingdom Come: Deliverance"));
+        assert!((snapshot.confidence - 0.90).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn foreground_resolver_returns_stale_snapshot_with_lower_confidence() {
+        let good = ForegroundWindowSnapshot::available(
+            1_000,
+            ForegroundSource::Sway,
+            Some(4242),
+            Some("steam_app_379430".to_owned()),
+            Some("steam_app_379430".to_owned()),
+            Some("private title".to_owned()),
+            true,
+            Some("7".to_owned()),
+            Some("gaming".to_owned()),
+            0.95,
+            "focused Sway node from swaymsg get_tree",
+        );
+        let error = ForegroundWindowSnapshot {
+            elapsed_ms: 1_500,
+            source: Some(ForegroundSource::Sway),
+            status: ForegroundProviderStatus::Error,
+            confidence: 0.0,
+            reason: "swaymsg failed".to_owned(),
+            ..ForegroundWindowSnapshot::default()
+        };
+        let provider = ScriptedForegroundProvider::new(ForegroundSource::Sway, vec![good, error]);
+        let mut resolver = ForegroundResolver::new(Box::new(provider))
+            .with_include_title(false)
+            .with_max_stale_ms(2_500);
+
+        let first = resolver.sample(1_000);
+        let stale = resolver.sample(1_500);
+
+        assert_eq!(first.status, ForegroundProviderStatus::Available);
+        assert_eq!(stale.status, ForegroundProviderStatus::Available);
+        assert_eq!(stale.pid, Some(4242));
+        assert_eq!(stale.title, None);
+        assert_eq!(stale.stale_ms, Some(500));
+        assert!(stale.confidence < first.confidence);
+        assert!(
+            stale
+                .reason
+                .contains("using stale foreground snapshot from 500ms ago")
+        );
+    }
+
+    #[test]
+    fn foreground_resolver_drops_snapshot_after_max_stale() {
+        let good = ForegroundWindowSnapshot::available(
+            1_000,
+            ForegroundSource::X11,
+            Some(12345),
+            Some("steam_app_379430".to_owned()),
+            Some("steam_app_379430".to_owned()),
+            Some("private title".to_owned()),
+            true,
+            Some("0x4600007".to_owned()),
+            None,
+            0.90,
+            "active X11 window from xprop",
+        );
+        let error = ForegroundWindowSnapshot {
+            elapsed_ms: 4_000,
+            source: Some(ForegroundSource::X11),
+            status: ForegroundProviderStatus::Error,
+            confidence: 0.0,
+            reason: "xprop failed".to_owned(),
+            ..ForegroundWindowSnapshot::default()
+        };
+        let provider = ScriptedForegroundProvider::new(ForegroundSource::X11, vec![good, error]);
+        let mut resolver = ForegroundResolver::new(Box::new(provider))
+            .with_include_title(false)
+            .with_max_stale_ms(1_000);
+
+        let first = resolver.sample(1_000);
+        let dropped = resolver.sample(4_000);
+
+        assert_eq!(first.status, ForegroundProviderStatus::Available);
+        assert_eq!(dropped.status, ForegroundProviderStatus::Error);
+        assert_eq!(dropped.pid, None);
+        assert_eq!(dropped.stale_ms, None);
+        assert_eq!(dropped.reason, "xprop failed");
+    }
 
     #[test]
     fn sway_provider_detection_uses_swaysock_environment() {

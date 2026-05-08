@@ -2025,6 +2025,7 @@ fn config_from_monitor_args_with_file(
         args.foreground_include_title = foreground_include_title;
     }
 
+    validate_foreground_title_monitor_args(&args)?;
     normalize_foreground_monitor_args(&mut args);
     validate_foreground_monitor_args(&args)?;
 
@@ -2268,6 +2269,22 @@ fn normalize_foreground_monitor_args(args: &mut MonitorArgs) {
     }
 }
 
+fn validate_foreground_title_monitor_args(args: &MonitorArgs) -> anyhow::Result<()> {
+    let foreground_focus_requested = args.auto_focus
+        && matches!(
+            args.focus_source,
+            FocusSource::Foreground | FocusSource::Hybrid
+        );
+
+    if args.foreground_include_title && !args.foreground_window && !foreground_focus_requested {
+        anyhow::bail!(
+            "--foreground-include-title requires --foreground-window or --auto-focus with --focus-source foreground or hybrid"
+        );
+    }
+
+    Ok(())
+}
+
 fn validate_foreground_monitor_args(args: &MonitorArgs) -> anyhow::Result<()> {
     if args.foreground_poll_ms < 100 {
         anyhow::bail!("--foreground-poll-ms must be >= 100");
@@ -2291,6 +2308,74 @@ fn validate_comm_patterns(flag: &str, patterns: &[String]) -> anyhow::Result<Vec
         compiled.push(CompiledPattern::new(pattern.clone())?);
     }
     Ok(compiled)
+}
+
+#[cfg(test)]
+fn parse_monitor_config_for_phase15<const N: usize>(
+    args: [&str; N],
+) -> anyhow::Result<Arc<Config>> {
+    let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+    match parse_app_command_from(args.iter().map(OsString::from))? {
+        AppCommand::Monitor(config) => Ok(config),
+        other => anyhow::bail!("expected AppCommand::Monitor, got {other:?}"),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn cli_accepts_auto_focus_foreground_source() {
+    let config = parse_monitor_config_for_phase15([
+        "stutter",
+        "monitor",
+        "--auto-focus",
+        "--focus-source",
+        "foreground",
+        "--foreground-source",
+        "sway",
+    ])
+    .unwrap();
+
+    assert!(config.auto_focus);
+    assert_eq!(config.focus_source, FocusSource::Foreground);
+    assert!(config.foreground_window);
+    assert_eq!(config.foreground_source, ForegroundSourceArg::Sway);
+}
+
+#[cfg(test)]
+#[test]
+fn foreground_include_title_requires_foreground_window_or_auto_focus_foreground() {
+    let err =
+        parse_monitor_config_for_phase15(["stutter", "monitor", "--foreground-include-title"])
+            .unwrap_err()
+            .to_string();
+
+    assert!(err.contains(
+        "--foreground-include-title requires --foreground-window or --auto-focus with --focus-source foreground or hybrid"
+    ));
+
+    let foreground_window = parse_monitor_config_for_phase15([
+        "stutter",
+        "monitor",
+        "--foreground-window",
+        "--foreground-include-title",
+    ])
+    .unwrap();
+    assert!(foreground_window.foreground_window);
+    assert!(foreground_window.foreground_include_title);
+
+    let foreground_focus = parse_monitor_config_for_phase15([
+        "stutter",
+        "monitor",
+        "--auto-focus",
+        "--focus-source",
+        "foreground",
+        "--foreground-include-title",
+    ])
+    .unwrap();
+    assert!(foreground_focus.auto_focus);
+    assert_eq!(foreground_focus.focus_source, FocusSource::Foreground);
+    assert!(foreground_focus.foreground_window);
+    assert!(foreground_focus.foreground_include_title);
 }
 
 #[cfg(test)]
@@ -3939,6 +4024,60 @@ mod tests {
         assert_eq!(foreground.poll_ms, 750);
         assert_eq!(foreground.max_stale_ms, 3000);
         assert!(!foreground.include_title);
+    }
+
+    #[test]
+    fn cli_accepts_auto_focus_foreground_source() {
+        let config = parse_monitor_config_from([
+            "stutter",
+            "monitor",
+            "--auto-focus",
+            "--focus-source",
+            "foreground",
+            "--foreground-source",
+            "sway",
+        ])
+        .unwrap();
+
+        assert!(config.auto_focus);
+        assert_eq!(config.focus_source, FocusSource::Foreground);
+        assert!(config.foreground_window);
+        assert_eq!(config.foreground_source, ForegroundSourceArg::Sway);
+    }
+
+    #[test]
+    fn foreground_include_title_requires_foreground_window_or_auto_focus_foreground() {
+        let err = parse_monitor_config_from(["stutter", "monitor", "--foreground-include-title"])
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains(
+            "--foreground-include-title requires --foreground-window or --auto-focus with --focus-source foreground or hybrid"
+        ));
+
+        let foreground_window = parse_monitor_config_from([
+            "stutter",
+            "monitor",
+            "--foreground-window",
+            "--foreground-include-title",
+        ])
+        .unwrap();
+        assert!(foreground_window.foreground_window);
+        assert!(foreground_window.foreground_include_title);
+
+        let foreground_focus = parse_monitor_config_from([
+            "stutter",
+            "monitor",
+            "--auto-focus",
+            "--focus-source",
+            "foreground",
+            "--foreground-include-title",
+        ])
+        .unwrap();
+        assert!(foreground_focus.auto_focus);
+        assert_eq!(foreground_focus.focus_source, FocusSource::Foreground);
+        assert!(foreground_focus.foreground_window);
+        assert!(foreground_focus.foreground_include_title);
     }
 
     #[test]

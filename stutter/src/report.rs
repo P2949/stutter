@@ -3489,6 +3489,106 @@ mod tests {
     }
 
     #[test]
+    fn report_includes_foreground_summary_when_events_present() {
+        let mut session = minimal_session_for_report_test();
+        session.config.foreground_window = true;
+        session.config.foreground_source = "sway".to_owned();
+        session.core.foreground_event_count = 1;
+
+        let summary = foreground_report_summary(
+            &session,
+            &[foreground_event(
+                1_000,
+                Some(4242),
+                Some("steam_app_379430"),
+                Some("steam_app_379430"),
+                None,
+                Some("gaming"),
+                0.95,
+            )],
+        );
+
+        assert!(summary.enabled);
+        assert_eq!(summary.source.as_deref(), Some("sway"));
+        assert_eq!(summary.final_pid, Some(4242));
+        assert_eq!(summary.final_app_id.as_deref(), Some("steam_app_379430"));
+        assert_eq!(summary.final_class.as_deref(), Some("steam_app_379430"));
+        assert_eq!(summary.final_workspace.as_deref(), Some("gaming"));
+        assert_eq!(summary.event_count, 1);
+        assert_eq!(summary.confidence, Some(0.95));
+    }
+
+    #[test]
+    fn report_redacts_missing_title_cleanly() {
+        let summary = ForegroundReportSummary {
+            enabled: true,
+            source: Some("sway".to_owned()),
+            final_pid: Some(4242),
+            final_app_id: Some("steam_app_379430".to_owned()),
+            final_class: Some("steam_app_379430".to_owned()),
+            final_title: None,
+            final_workspace: Some("gaming".to_owned()),
+            event_count: 1,
+            confidence: Some(0.95),
+            provider_status: Some("available".to_owned()),
+            reasons: Vec::new(),
+        };
+
+        let text = render_foreground_summary_text(&summary);
+
+        assert!(text.contains("Foreground window:"));
+        assert!(text.contains("title: redacted (pass --foreground-include-title to record it)"));
+        assert!(!text.contains("Private"));
+    }
+
+    #[test]
+    fn spike_cluster_gets_nearest_foreground_context() {
+        let mut clusters = vec![cluster_at(1_500)];
+        let events = vec![
+            foreground_event(
+                1_000,
+                Some(1111),
+                Some("steamwebhelper"),
+                Some("steamwebhelper"),
+                None,
+                None,
+                0.60,
+            ),
+            foreground_event(
+                1_400,
+                Some(4242),
+                Some("steam_app_379430"),
+                Some("steam_app_379430"),
+                None,
+                Some("gaming"),
+                0.95,
+            ),
+            foreground_event(
+                1_600,
+                Some(9999),
+                Some("future"),
+                Some("future"),
+                None,
+                None,
+                0.95,
+            ),
+        ];
+
+        annotate_clusters_with_foreground(&mut clusters, &events, 1_000);
+
+        assert_eq!(clusters[0].foreground_pid, Some(4242));
+        assert_eq!(
+            clusters[0].foreground_app_id.as_deref(),
+            Some("steam_app_379430")
+        );
+        assert_eq!(
+            clusters[0].foreground_class.as_deref(),
+            Some("steam_app_379430")
+        );
+        assert_eq!(clusters[0].foreground_confidence, Some(0.95));
+    }
+
+    #[test]
     fn foreground_report_summary_uses_final_event_and_redacted_title() {
         let mut session = minimal_session_for_report_test();
         session.config.foreground_window = true;
