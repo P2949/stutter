@@ -202,6 +202,100 @@ pub trait ForegroundProvider {
     fn sample(&mut self, elapsed_ms: u64) -> ForegroundWindowSnapshot;
 }
 
+pub const GENERIC_WAYLAND_UNSUPPORTED_REASON: &str =
+    "no safe generic Wayland foreground-window API detected";
+
+#[derive(Debug, Clone)]
+pub struct UnsupportedForegroundProvider {
+    reason: String,
+}
+
+impl Default for UnsupportedForegroundProvider {
+    fn default() -> Self {
+        Self::generic_wayland()
+    }
+}
+
+impl UnsupportedForegroundProvider {
+    pub fn new(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+        }
+    }
+
+    pub fn generic_wayland() -> Self {
+        Self::new(GENERIC_WAYLAND_UNSUPPORTED_REASON)
+    }
+
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+}
+
+impl ForegroundProvider for UnsupportedForegroundProvider {
+    fn source(&self) -> ForegroundSource {
+        ForegroundSource::Unsupported
+    }
+
+    fn sample(&mut self, elapsed_ms: u64) -> ForegroundWindowSnapshot {
+        ForegroundWindowSnapshot {
+            elapsed_ms,
+            source: Some(ForegroundSource::Unsupported),
+            status: ForegroundProviderStatus::Unsupported,
+            confidence: 0.0,
+            reason: self.reason.clone(),
+            ..ForegroundWindowSnapshot::default()
+        }
+    }
+}
+
+pub fn auto_foreground_provider() -> Box<dyn ForegroundProvider + Send> {
+    if SwayForegroundProvider::is_detected() {
+        return Box::new(SwayForegroundProvider::new());
+    }
+
+    if is_generic_wayland_without_supported_foreground_api() {
+        return Box::new(UnsupportedForegroundProvider::generic_wayland());
+    }
+
+    if X11ForegroundProvider::is_detected() {
+        return Box::new(X11ForegroundProvider::new());
+    }
+
+    Box::new(UnsupportedForegroundProvider::new(
+        "no supported foreground-window provider detected",
+    ))
+}
+
+pub fn auto_foreground_resolver() -> ForegroundResolver {
+    ForegroundResolver::new(auto_foreground_provider())
+}
+
+fn is_generic_wayland_without_supported_foreground_api() -> bool {
+    if std::env::var("WAYLAND_DISPLAY").is_err() {
+        return false;
+    }
+
+    if std::env::var("SWAYSOCK").is_ok() {
+        return false;
+    }
+
+    if std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok() {
+        return false;
+    }
+
+    true
+}
+
+fn current_desktop_looks_like_gnome_or_kde() -> bool {
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
+        .or_else(|_| std::env::var("DESKTOP_SESSION"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    desktop.contains("gnome") || desktop.contains("kde") || desktop.contains("plasma")
+}
+
 #[derive(Debug, Clone)]
 pub struct SwayForegroundProvider {
     swaymsg: String,
@@ -1347,6 +1441,139 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
         assert_eq!(snapshot.title, None);
     }
 
+    #[test]
+    fn unsupported_provider_reports_generic_wayland_reason() {
+        let mut provider = UnsupportedForegroundProvider::generic_wayland();
+
+        let snapshot = provider.sample(1_234);
+
+        assert_eq!(snapshot.elapsed_ms, 1_234);
+        assert_eq!(snapshot.source, Some(ForegroundSource::Unsupported));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Unsupported);
+        assert_eq!(snapshot.pid, None);
+        assert_eq!(snapshot.app_id, None);
+        assert_eq!(snapshot.class, None);
+        assert_eq!(snapshot.title, None);
+        assert_eq!(snapshot.window_id, None);
+        assert_eq!(snapshot.workspace, None);
+        assert_eq!(snapshot.confidence, 0.0);
+        assert_eq!(snapshot.reason, GENERIC_WAYLAND_UNSUPPORTED_REASON);
+    }
+
+    #[test]
+    fn generic_wayland_without_sway_or_hyprland_is_unsupported() {
+        let previous_wayland_display = std::env::var_os("WAYLAND_DISPLAY");
+        let previous_swaysock = std::env::var_os("SWAYSOCK");
+        let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
+        let previous_display = std::env::var_os("DISPLAY");
+        let previous_desktop = std::env::var_os("XDG_CURRENT_DESKTOP");
+
+        unsafe {
+            std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
+            std::env::remove_var("SWAYSOCK");
+            std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+            std::env::set_var("DISPLAY", ":0");
+            std::env::set_var("XDG_CURRENT_DESKTOP", "GNOME");
+        }
+
+        assert!(is_generic_wayland_without_supported_foreground_api());
+        assert!(current_desktop_looks_like_gnome_or_kde());
+
+        let mut provider = auto_foreground_provider();
+        let snapshot = provider.sample(2_000);
+
+        assert_eq!(provider.source(), ForegroundSource::Unsupported);
+        assert_eq!(snapshot.source, Some(ForegroundSource::Unsupported));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Unsupported);
+        assert_eq!(snapshot.reason, GENERIC_WAYLAND_UNSUPPORTED_REASON);
+        assert_eq!(snapshot.title, None);
+
+        unsafe {
+            restore_env_var("WAYLAND_DISPLAY", previous_wayland_display);
+            restore_env_var("SWAYSOCK", previous_swaysock);
+            restore_env_var("HYPRLAND_INSTANCE_SIGNATURE", previous_hyprland);
+            restore_env_var("DISPLAY", previous_display);
+            restore_env_var("XDG_CURRENT_DESKTOP", previous_desktop);
+        }
+    }
+
+    #[test]
+    fn kde_wayland_without_compositor_specific_provider_is_unsupported() {
+        let previous_wayland_display = std::env::var_os("WAYLAND_DISPLAY");
+        let previous_swaysock = std::env::var_os("SWAYSOCK");
+        let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
+        let previous_display = std::env::var_os("DISPLAY");
+        let previous_desktop = std::env::var_os("XDG_CURRENT_DESKTOP");
+
+        unsafe {
+            std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
+            std::env::remove_var("SWAYSOCK");
+            std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+            std::env::set_var("DISPLAY", ":0");
+            std::env::set_var("XDG_CURRENT_DESKTOP", "KDE");
+        }
+
+        assert!(is_generic_wayland_without_supported_foreground_api());
+        assert!(current_desktop_looks_like_gnome_or_kde());
+
+        let mut provider = auto_foreground_provider();
+        let snapshot = provider.sample(3_000);
+
+        assert_eq!(provider.source(), ForegroundSource::Unsupported);
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Unsupported);
+        assert_eq!(snapshot.reason, GENERIC_WAYLAND_UNSUPPORTED_REASON);
+
+        unsafe {
+            restore_env_var("WAYLAND_DISPLAY", previous_wayland_display);
+            restore_env_var("SWAYSOCK", previous_swaysock);
+            restore_env_var("HYPRLAND_INSTANCE_SIGNATURE", previous_hyprland);
+            restore_env_var("DISPLAY", previous_display);
+            restore_env_var("XDG_CURRENT_DESKTOP", previous_desktop);
+        }
+    }
+
+    #[test]
+    fn sway_wayland_is_not_treated_as_generic_unsupported_wayland() {
+        let previous_wayland_display = std::env::var_os("WAYLAND_DISPLAY");
+        let previous_swaysock = std::env::var_os("SWAYSOCK");
+        let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
+
+        unsafe {
+            std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+            std::env::set_var("SWAYSOCK", "/tmp/sway-ipc.sock");
+            std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        }
+
+        assert!(!is_generic_wayland_without_supported_foreground_api());
+
+        unsafe {
+            restore_env_var("WAYLAND_DISPLAY", previous_wayland_display);
+            restore_env_var("SWAYSOCK", previous_swaysock);
+            restore_env_var("HYPRLAND_INSTANCE_SIGNATURE", previous_hyprland);
+        }
+    }
+
+    #[test]
+    fn hyprland_wayland_is_reserved_for_future_compositor_specific_provider() {
+        let previous_wayland_display = std::env::var_os("WAYLAND_DISPLAY");
+        let previous_swaysock = std::env::var_os("SWAYSOCK");
+        let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
+
+        unsafe {
+            std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+            std::env::remove_var("SWAYSOCK");
+            std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "fake-hyprland-instance");
+        }
+
+        assert!(!is_generic_wayland_without_supported_foreground_api());
+
+        unsafe {
+            restore_env_var("WAYLAND_DISPLAY", previous_wayland_display);
+            restore_env_var("SWAYSOCK", previous_swaysock);
+            restore_env_var("HYPRLAND_INSTANCE_SIGNATURE", previous_hyprland);
+        }
+    }
+
     struct SequenceProvider {
         source: ForegroundSource,
         snapshots: Vec<ForegroundWindowSnapshot>,
@@ -1360,6 +1587,14 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
                 snapshots,
                 index: 0,
             }
+        }
+    }
+
+    unsafe fn restore_env_var(name: &str, value: Option<std::ffi::OsString>) {
+        if let Some(value) = value {
+            unsafe { std::env::set_var(name, value) };
+        } else {
+            unsafe { std::env::remove_var(name) };
         }
     }
 
