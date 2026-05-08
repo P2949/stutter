@@ -277,6 +277,37 @@ pub struct MonitorArgs {
     #[arg(long = "auto-focus")]
     auto_focus: bool,
 
+    #[arg(
+        long = "focus-source",
+        value_enum,
+        default_value_t = FocusSource::Heuristic,
+        help = "Auto-focus source: heuristic, foreground, or hybrid"
+    )]
+    focus_source: FocusSource,
+
+    #[arg(
+        long = "foreground-window",
+        help = "Record foreground-window events even when explicit targets are used"
+    )]
+    foreground_window: bool,
+
+    #[arg(
+        long = "foreground-source",
+        value_enum,
+        default_value_t = ForegroundSourceArg::Auto,
+        help = "Foreground-window provider: auto, sway, hyprland, x11"
+    )]
+    foreground_source: ForegroundSourceArg,
+
+    #[arg(long = "foreground-poll-ms", default_value_t = 1000)]
+    foreground_poll_ms: u64,
+
+    #[arg(long = "foreground-max-stale-ms", default_value_t = 2500)]
+    foreground_max_stale_ms: u64,
+
+    #[arg(long = "foreground-include-title")]
+    foreground_include_title: bool,
+
     #[arg(long = "auto-focus-poll-ms", default_value_t = 1000)]
     auto_focus_poll_ms: u64,
 
@@ -532,6 +563,12 @@ impl Default for MonitorArgs {
             otlp_endpoint: None,
             otel_service_name: "stutter".to_owned(),
             auto_focus: false,
+            focus_source: FocusSource::Heuristic,
+            foreground_window: false,
+            foreground_source: ForegroundSourceArg::Auto,
+            foreground_poll_ms: 1000,
+            foreground_max_stale_ms: 2500,
+            foreground_include_title: false,
             auto_focus_poll_ms: 1000,
             auto_focus_min_confidence: 0.60,
             auto_focus_switch_cooldown_ms: 5000,
@@ -1142,6 +1179,23 @@ pub enum AppCommand {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FocusSource {
+    Heuristic,
+    Foreground,
+    Hybrid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ForegroundSourceArg {
+    Auto,
+    Sway,
+    Hyprland,
+    X11,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CsvStreamTarget {
     File(PathBuf),
@@ -1151,12 +1205,23 @@ pub enum CsvStreamTarget {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AutoFocusConfig {
     pub enabled: bool,
+    pub source: FocusSource,
     pub poll_ms: u64,
     pub min_confidence: f32,
     pub switch_cooldown_ms: u64,
     pub switch_margin: f32,
     pub required_polls: u32,
     pub max_roots: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
+pub struct ForegroundWindowConfig {
+    pub enabled: bool,
+    pub source: ForegroundSourceArg,
+    pub poll_ms: u64,
+    pub max_stale_ms: u64,
+    pub include_title: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1188,6 +1253,17 @@ pub struct Config {
     pub otlp_endpoint: Option<String>,
     pub otel_service_name: String,
     pub auto_focus: bool,
+    pub focus_source: FocusSource,
+    #[allow(dead_code)]
+    pub foreground_window: bool,
+    #[allow(dead_code)]
+    pub foreground_source: ForegroundSourceArg,
+    #[allow(dead_code)]
+    pub foreground_poll_ms: u64,
+    #[allow(dead_code)]
+    pub foreground_max_stale_ms: u64,
+    #[allow(dead_code)]
+    pub foreground_include_title: bool,
     #[allow(dead_code)]
     pub auto_focus_poll_ms: u64,
     pub auto_focus_min_confidence: f32,
@@ -1244,12 +1320,29 @@ impl Config {
     pub fn auto_focus_config(&self) -> AutoFocusConfig {
         AutoFocusConfig {
             enabled: self.auto_focus_enabled(),
+            source: self.focus_source,
             poll_ms: self.auto_focus_poll_ms,
             min_confidence: self.auto_focus_min_confidence,
             switch_cooldown_ms: self.auto_focus_switch_cooldown_ms,
             switch_margin: self.auto_focus_switch_margin,
             required_polls: self.auto_focus_required_polls,
             max_roots: self.auto_focus_max_roots,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn foreground_window_config(&self) -> ForegroundWindowConfig {
+        ForegroundWindowConfig {
+            enabled: self.foreground_window
+                || (self.auto_focus
+                    && matches!(
+                        self.focus_source,
+                        FocusSource::Foreground | FocusSource::Hybrid
+                    )),
+            source: self.foreground_source,
+            poll_ms: self.foreground_poll_ms,
+            max_stale_ms: self.foreground_max_stale_ms,
+            include_title: self.foreground_include_title,
         }
     }
 }
@@ -2092,6 +2185,12 @@ fn config_from_monitor_args_with_file(
         otlp_endpoint: args.otlp_endpoint,
         otel_service_name: args.otel_service_name,
         auto_focus: args.auto_focus,
+        focus_source: args.focus_source,
+        foreground_window: args.foreground_window,
+        foreground_source: args.foreground_source,
+        foreground_poll_ms: args.foreground_poll_ms,
+        foreground_max_stale_ms: args.foreground_max_stale_ms,
+        foreground_include_title: args.foreground_include_title,
         auto_focus_poll_ms: args.auto_focus_poll_ms,
         auto_focus_min_confidence: args.auto_focus_min_confidence,
         auto_focus_switch_cooldown_ms: args.auto_focus_switch_cooldown_ms,
@@ -2122,6 +2221,12 @@ fn validate_comm_patterns(flag: &str, patterns: &[String]) -> anyhow::Result<Vec
 
 #[cfg(test)]
 mod tests {
+    fn parse_monitor_config_from<const N: usize>(args: [&str; N]) -> anyhow::Result<Arc<Config>> {
+        match parse_app_command_from(args.iter().map(OsString::from))? {
+            AppCommand::Monitor(config) => Ok(config),
+            other => anyhow::bail!("expected AppCommand::Monitor, got {other:?}"),
+        }
+    }
     use super::*;
 
     #[test]
@@ -3677,5 +3782,115 @@ mod tests {
             panic!("expected ScenarioPath command");
         };
         assert_eq!(name, "kcd-route");
+    }
+
+    #[test]
+    fn monitor_defaults_keep_heuristic_focus_and_no_foreground_window() {
+        let config = parse_monitor_config_from(["stutter", "monitor"]).unwrap();
+
+        assert!(!config.auto_focus);
+        assert_eq!(config.focus_source, FocusSource::Heuristic);
+        assert!(!config.foreground_window);
+        assert_eq!(config.foreground_source, ForegroundSourceArg::Auto);
+        assert_eq!(config.foreground_poll_ms, 1000);
+        assert_eq!(config.foreground_max_stale_ms, 2500);
+        assert!(!config.foreground_include_title);
+
+        let foreground = config.foreground_window_config();
+        assert!(!foreground.enabled);
+        assert_eq!(foreground.source, ForegroundSourceArg::Auto);
+        assert_eq!(foreground.poll_ms, 1000);
+        assert_eq!(foreground.max_stale_ms, 2500);
+        assert!(!foreground.include_title);
+    }
+
+    #[test]
+    fn foreground_window_records_context_without_changing_explicit_targets() {
+        let config = parse_monitor_config_from([
+            "stutter",
+            "monitor",
+            "--pid",
+            "1234",
+            "--tree-pid",
+            "5678",
+            "--foreground-window",
+            "--foreground-source",
+            "sway",
+            "--foreground-poll-ms",
+            "750",
+            "--foreground-max-stale-ms",
+            "3000",
+        ])
+        .unwrap();
+
+        assert_eq!(config.target_pids, vec![1234]);
+        assert_eq!(config.tree_pids, vec![5678]);
+        assert!(!config.auto_focus);
+        assert_eq!(config.focus_source, FocusSource::Heuristic);
+        assert!(config.foreground_window);
+        assert_eq!(config.foreground_source, ForegroundSourceArg::Sway);
+        assert_eq!(config.foreground_poll_ms, 750);
+        assert_eq!(config.foreground_max_stale_ms, 3000);
+
+        let foreground = config.foreground_window_config();
+        assert!(foreground.enabled);
+        assert_eq!(foreground.source, ForegroundSourceArg::Sway);
+        assert_eq!(foreground.poll_ms, 750);
+        assert_eq!(foreground.max_stale_ms, 3000);
+        assert!(!foreground.include_title);
+    }
+
+    #[test]
+    fn auto_focus_foreground_enables_foreground_config_without_foreground_window_flag() {
+        let config = parse_monitor_config_from([
+            "stutter",
+            "monitor",
+            "--auto-focus",
+            "--focus-source",
+            "foreground",
+            "--foreground-source",
+            "x11",
+            "--foreground-include-title",
+        ])
+        .unwrap();
+
+        assert!(config.auto_focus);
+        assert_eq!(config.focus_source, FocusSource::Foreground);
+        assert!(!config.foreground_window);
+        assert_eq!(config.foreground_source, ForegroundSourceArg::X11);
+        assert!(config.foreground_include_title);
+
+        let auto_focus = config.auto_focus_config();
+        assert!(auto_focus.enabled);
+        assert_eq!(auto_focus.source, FocusSource::Foreground);
+
+        let foreground = config.foreground_window_config();
+        assert!(foreground.enabled);
+        assert_eq!(foreground.source, ForegroundSourceArg::X11);
+        assert!(foreground.include_title);
+    }
+
+    #[test]
+    fn auto_focus_hybrid_enables_foreground_with_heuristic_fallback_mode() {
+        let config = parse_monitor_config_from([
+            "stutter",
+            "monitor",
+            "--auto-focus",
+            "--focus-source",
+            "hybrid",
+        ])
+        .unwrap();
+
+        assert!(config.auto_focus);
+        assert_eq!(config.focus_source, FocusSource::Hybrid);
+        assert!(!config.foreground_window);
+
+        let auto_focus = config.auto_focus_config();
+        assert!(auto_focus.enabled);
+        assert_eq!(auto_focus.source, FocusSource::Hybrid);
+
+        let foreground = config.foreground_window_config();
+        assert!(foreground.enabled);
+        assert_eq!(foreground.source, ForegroundSourceArg::Auto);
     }
 }
