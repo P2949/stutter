@@ -8,7 +8,7 @@ use super::{
     quality::OnlineDataQuality,
     state::{AutotuneMode, ControllerPhase},
 };
-use crate::actions::SafetyClass;
+use crate::{actions::SafetyClass, focus::FocusGroupKind, process_tree::TaskClass};
 
 #[derive(Clone, Debug)]
 pub struct ControllerPolicy {
@@ -22,7 +22,8 @@ pub struct ControllerPolicy {
 impl ControllerPolicy {
     pub fn for_mode(mode: AutotuneMode) -> Self {
         let max_safety_class = match mode {
-            AutotuneMode::Observe | AutotuneMode::Suggest => SafetyClass::ObserveOnly,
+            AutotuneMode::Observe => SafetyClass::ObserveOnly,
+            AutotuneMode::Suggest => SafetyClass::HighRisk,
             AutotuneMode::ApplyLowRisk => SafetyClass::ReversibleLowRisk,
             AutotuneMode::ApplyMediumRisk => SafetyClass::ReversibleMediumRisk,
             AutotuneMode::ApplyHighRisk => SafetyClass::HighRisk,
@@ -101,6 +102,13 @@ pub fn decide_autotune_transition(
             };
         }
 
+        if let Some(reason) = focus_policy_block_reason(observation, &active.candidate) {
+            return AutotuneDecision::Revert {
+                experiment_id: active.experiment_id.clone(),
+                reason: format!("focus policy blocks active experiment: {reason}"),
+            };
+        }
+
         let regression_percent =
             score_regression_percent(active.baseline_score_total, observation.score.total);
         if regression_percent > policy.max_regression_percent {
@@ -161,6 +169,10 @@ pub fn decide_autotune_transition(
         };
     };
 
+    if let Some(reason) = focus_policy_block_reason(observation, &candidate) {
+        return AutotuneDecision::Noop { reason };
+    }
+
     if candidate.safety_class() > policy.max_safety_class {
         return AutotuneDecision::Noop {
             reason: format!(
@@ -190,6 +202,85 @@ pub fn decide_autotune_transition(
     }
 }
 
+fn focus_policy_block_reason(
+    observation: &AutotuneObservation,
+    candidate: &CandidateAction,
+) -> Option<String> {
+    if observation.focus_has_critical_realtime_warning()
+        && candidate.safety_class() > SafetyClass::ObserveOnly
+    {
+        return Some(
+            "critical realtime/input process is present in the focus context; unsafe action classes are blocked"
+                .to_owned(),
+        );
+    }
+
+    if observation.focus_is_idle_or_unknown() {
+        return Some("focus is idle or unknown; autotune remains observe-only".to_owned());
+    }
+
+    match observation.focus_kind {
+        Some(FocusGroupKind::Game) => None,
+        Some(FocusGroupKind::Compile) => {
+            if candidate_looks_like_game_cpu_isolation_profile(candidate) {
+                Some(
+                    "compile focus must not apply gaming CPU-isolation profile candidates"
+                        .to_owned(),
+                )
+            } else {
+                None
+            }
+        }
+        Some(FocusGroupKind::Browser) => {
+            if candidate_looks_like_game_cpu_isolation_profile(candidate) {
+                Some(
+                    "browser focus avoids gaming CPU-isolation profiles that may hurt desktop responsiveness"
+                        .to_owned(),
+                )
+            } else {
+                None
+            }
+        }
+        Some(FocusGroupKind::Idle) | Some(FocusGroupKind::Unknown) | None => {
+            Some("focus is idle or unknown; autotune remains observe-only".to_owned())
+        }
+        Some(FocusGroupKind::Desktop)
+        | Some(FocusGroupKind::Media)
+        | Some(FocusGroupKind::Recording)
+        | Some(FocusGroupKind::VirtualMachine) => None,
+    }
+}
+
+fn candidate_looks_like_game_cpu_isolation_profile(candidate: &CandidateAction) -> bool {
+    match candidate {
+        CandidateAction::CpuAffinityProfile {
+            profile_name,
+            profile,
+            ..
+        } => {
+            let lower_name = profile_name.to_ascii_lowercase();
+            lower_name.contains("game")
+                || lower_name.contains("gaming")
+                || lower_name.contains("isolation")
+                || profile.rules.iter().any(|rule| {
+                    rule.match_class.iter().any(|class| {
+                        matches!(
+                            class,
+                            TaskClass::Game
+                                | TaskClass::GameHelper
+                                | TaskClass::GameRenderThread
+                                | TaskClass::GameWorkerThread
+                                | TaskClass::WineServer
+                                | TaskClass::GameScope
+                        )
+                    })
+                })
+        }
+        #[cfg(test)]
+        CandidateAction::Fake { .. } => false,
+    }
+}
+
 fn score_regression_percent(baseline: u64, current: u64) -> f64 {
     if current <= baseline {
         0.0
@@ -210,19 +301,35 @@ fn score_improvement_percent(baseline: u64, current: u64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ActiveExperiment, ControllerPolicy, ControllerRuntimeState, decide_autotune_transition,
-    };
+    use super::*;
     use crate::{
         actions::{ActionId, SafetyClass},
+        affinity::CpuMask,
         autotune::{
             decision::{AutotuneDecision, CandidateAction, ExperimentId},
             observation::AutotuneObservation,
             quality::OnlineDataQuality,
             state::{AutotuneMode, ControllerPhase, SituationKind},
         },
+        focus::FocusGroupKind,
+        process_tree::TaskClass,
+        profiles::{Profile, ProfileRule},
         scorer::StutterScore,
     };
+
+    fn gaming_cpu_affinity_candidate() -> CandidateAction {
+        CandidateAction::cpu_affinity_profile(
+            Profile {
+                name: "game-main-suggested".to_owned(),
+                rules: vec![ProfileRule {
+                    affinity: CpuMask::parse("0").unwrap(),
+                    match_class: vec![TaskClass::Game],
+                    match_comm: Vec::new(),
+                }],
+            },
+            1234,
+        )
+    }
 
     fn candidate_with_safety_class(safety_class: SafetyClass) -> CandidateAction {
         CandidateAction::Fake {
@@ -247,6 +354,10 @@ mod tests {
             },
             data_quality: OnlineDataQuality::High,
             primary_situation: SituationKind::GameCpuSchedulerPressure,
+            focus_kind: Some(FocusGroupKind::Game),
+            focus_confidence: 0.80,
+            focus_roots: vec![1234],
+            focus_reasons: vec!["game focus selected".to_owned()],
             recent_diagnoses: Vec::new(),
             frame_count: 100,
             frame_p99_ms: 12.0,
@@ -387,6 +498,132 @@ mod tests {
                 assert!(reason.contains("meets min_improvement_percent"));
             }
             other => panic!("expected KeepCurrent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn idle_focus_blocks_new_experiment() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let state = ControllerRuntimeState::default();
+        let mut observation = high_quality_observation(100);
+        observation.focus_kind = Some(FocusGroupKind::Idle);
+        observation.primary_situation = SituationKind::Idle;
+        observation.focus_reasons = vec!["idle focus selected".to_owned()];
+        let candidate = candidate_with_safety_class(SafetyClass::ReversibleLowRisk);
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+        match decision {
+            AutotuneDecision::Noop { reason } => {
+                assert!(reason.contains("idle or unknown"));
+                assert!(reason.contains("observe-only"));
+            }
+            other => panic!("expected Noop for idle focus, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compile_focus_blocks_gaming_cpu_isolation_profile() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let state = ControllerRuntimeState::default();
+        let mut observation = high_quality_observation(100);
+        observation.focus_kind = Some(FocusGroupKind::Compile);
+        observation.primary_situation = SituationKind::CompileLoad;
+        observation.focus_reasons = vec!["compile focus selected".to_owned()];
+        let candidate = gaming_cpu_affinity_candidate();
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+        match decision {
+            AutotuneDecision::Noop { reason } => {
+                assert!(reason.contains("compile focus"));
+                assert!(reason.contains("gaming CPU-isolation"));
+            }
+            other => panic!("expected Noop for compile focus gaming profile block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn browser_focus_blocks_gaming_cpu_isolation_profile() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::Suggest);
+        let state = ControllerRuntimeState::default();
+        let mut observation = high_quality_observation(100);
+        observation.focus_kind = Some(FocusGroupKind::Browser);
+        observation.primary_situation = SituationKind::BrowserFocused;
+        observation.focus_reasons = vec!["browser focus selected".to_owned()];
+        let candidate = gaming_cpu_affinity_candidate();
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+        match decision {
+            AutotuneDecision::Noop { reason } => {
+                assert!(reason.contains("browser focus"));
+                assert!(reason.contains("desktop responsiveness"));
+            }
+            other => panic!("expected Noop for browser focus gaming profile block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn critical_realtime_focus_warning_blocks_unsafe_candidate() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let state = ControllerRuntimeState::default();
+        let mut observation = high_quality_observation(100);
+        observation.focus_kind = Some(FocusGroupKind::Game);
+        observation.focus_reasons = vec![
+            "safety: critical realtime/input process present pid=55 comm='pipewire'; never lower or deprioritize this task".to_owned(),
+        ];
+        let candidate = candidate_with_safety_class(SafetyClass::ReversibleLowRisk);
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+        match decision {
+            AutotuneDecision::Noop { reason } => {
+                assert!(reason.contains("critical realtime/input"));
+                assert!(reason.contains("blocked"));
+            }
+            other => panic!("expected Noop for critical realtime warning, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn game_focus_allows_existing_gaming_profile_path() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::Suggest);
+        let state = ControllerRuntimeState::default();
+        let observation = high_quality_observation(100);
+        let candidate = gaming_cpu_affinity_candidate();
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+        match decision {
+            AutotuneDecision::Suggest { reason, .. } => {
+                assert!(reason.contains("suggest mode reports candidate"));
+            }
+            other => panic!("expected Suggest for game focus, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn focus_policy_reverts_active_experiment_when_focus_becomes_idle() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let state = active_state_with_baseline_score(100);
+        let mut observation = high_quality_observation(90);
+        observation.focus_kind = Some(FocusGroupKind::Idle);
+        observation.primary_situation = SituationKind::Idle;
+        observation.focus_reasons = vec!["idle focus selected".to_owned()];
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, None);
+
+        match decision {
+            AutotuneDecision::Revert {
+                experiment_id,
+                reason,
+            } => {
+                assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+                assert!(reason.contains("focus policy blocks active experiment"));
+                assert!(reason.contains("idle or unknown"));
+            }
+            other => panic!("expected Revert for active experiment with idle focus, got {other:?}"),
         }
     }
 
