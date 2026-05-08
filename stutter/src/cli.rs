@@ -730,6 +730,9 @@ struct ApplyProfileArgs {
     #[arg(long = "dry-run")]
     dry_run: bool,
 
+    #[arg(long = "allow-medium-risk")]
+    allow_medium_risk: bool,
+
     #[arg(long)]
     watch: bool,
 
@@ -1016,6 +1019,7 @@ pub enum AppCommand {
         profile: PathBuf,
         force: bool,
         dry_run: bool,
+        allow_medium_risk: bool,
         watch: bool,
         keep_applied: bool,
         refresh_ms: u64,
@@ -1549,6 +1553,7 @@ where
                 profile: args.profile,
                 force: args.force,
                 dry_run: args.dry_run,
+                allow_medium_risk: args.allow_medium_risk,
                 watch: args.watch,
                 keep_applied: args.keep_applied,
                 refresh_ms: args.refresh_ms,
@@ -2975,6 +2980,7 @@ mod tests {
             profile,
             force,
             dry_run,
+            allow_medium_risk,
             watch,
             keep_applied,
             refresh_ms,
@@ -2988,6 +2994,7 @@ mod tests {
         assert_eq!(profile, PathBuf::from("/tmp/profile.toml"));
         assert!(!force);
         assert!(!dry_run);
+        assert!(!allow_medium_risk);
         assert!(!watch);
         assert!(!keep_applied);
         assert_eq!(refresh_ms, 1_000);
@@ -3004,6 +3011,7 @@ mod tests {
             "--profile",
             "/tmp/profile.toml",
             "--force",
+            "--allow-medium-risk",
             "--watch",
             "--keep-applied",
             "--refresh-ms",
@@ -3013,6 +3021,7 @@ mod tests {
 
         let AppCommand::ApplyProfile {
             force,
+            allow_medium_risk,
             dry_run: _,
             watch,
             keep_applied,
@@ -3024,6 +3033,7 @@ mod tests {
         };
 
         assert!(force);
+        assert!(allow_medium_risk);
         assert!(watch);
         assert!(keep_applied);
         assert_eq!(refresh_ms, 250);

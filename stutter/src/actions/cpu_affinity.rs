@@ -60,16 +60,20 @@ impl TuningAction for CpuAffinityProfileAction {
     }
 
     fn safety_class(&self) -> SafetyClass {
-        SafetyClass::ReversibleLowRisk
+        if crate::profiles::profile_uses_priority_actions(&self.profile) {
+            SafetyClass::ReversibleMediumRisk
+        } else {
+            SafetyClass::ReversibleLowRisk
+        }
     }
 
     fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
-        self.preflight_for_restore_path(&crate::affinity::default_restore_path())
+        self.preflight_for_restore_path(&crate::profile_restore::default_restore_path())
     }
 
     fn dry_run(&self) -> anyhow::Result<ActionState> {
         let warnings = self.preflight()?;
-        let records = crate::profiles::apply_profile_to_tree(
+        let result = crate::profiles::apply_managed_profile_to_tree(
             self.tree_pid,
             &self.profile,
             self.force_restore_overwrite,
@@ -79,7 +83,7 @@ impl TuningAction for CpuAffinityProfileAction {
             crate::profiles::profile_apply_summary_for_tree(self.tree_pid, &self.profile)?;
         Ok(ActionState {
             applied: false,
-            affected_tasks: records.len(),
+            affected_tasks: result.affected_tasks(),
             checked_tasks: summary.checked_tasks,
             pending_changes: summary.pending_changes,
             warnings,
@@ -88,15 +92,15 @@ impl TuningAction for CpuAffinityProfileAction {
 
     fn apply(&self) -> anyhow::Result<RollbackToken> {
         self.preflight()?;
-        let records = crate::profiles::apply_profile_to_tree(
+        let result = crate::profiles::apply_managed_profile_to_tree(
             self.tree_pid,
             &self.profile,
             self.force_restore_overwrite,
             false,
         )?;
         Ok(RollbackToken::CpuAffinityRestoreFile {
-            path: crate::affinity::default_restore_path(),
-            affected_tasks: records.len(),
+            path: crate::profile_restore::default_restore_path(),
+            affected_tasks: result.affected_tasks(),
         })
     }
 
@@ -117,7 +121,9 @@ impl TuningAction for CpuAffinityProfileAction {
         let RollbackToken::CpuAffinityRestoreFile { path, .. } = token else {
             anyhow::bail!("rollback token is not a CPU affinity restore file");
         };
-        crate::affinity::restore_saved(path)?;
+        crate::profile_restore::restore_saved(path)
+            .map(|_| ())
+            .or_else(|_| crate::affinity::restore_saved(path).map(|_| ()))?;
         Ok(())
     }
 }
@@ -141,7 +147,9 @@ mod tests {
         Profile {
             name: name.to_owned(),
             rules: vec![ProfileRule {
-                affinity: CpuMask::parse("0").unwrap(),
+                affinity: Some(CpuMask::parse("0").unwrap()),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::Game],
                 match_comm: Vec::new(),
             }],

@@ -61,7 +61,13 @@ impl CandidateAction {
 
     pub fn safety_class(&self) -> crate::actions::SafetyClass {
         match self {
-            Self::CpuAffinityProfile { .. } => crate::actions::SafetyClass::ReversibleLowRisk,
+            Self::CpuAffinityProfile { profile, .. } => {
+                if crate::profiles::profile_uses_priority_actions(profile) {
+                    crate::actions::SafetyClass::ReversibleMediumRisk
+                } else {
+                    crate::actions::SafetyClass::ReversibleLowRisk
+                }
+            }
             #[cfg(test)]
             Self::Fake { safety_class, .. } => safety_class.clone(),
         }
@@ -669,7 +675,9 @@ fn baseline_online_profile(layout: &CandidateCpuLayout) -> Profile {
     Profile {
         name: "baseline-online".to_owned(),
         rules: vec![ProfileRule {
-            affinity: layout.online_mask.clone(),
+            affinity: Some(layout.online_mask.clone()),
+            nice: None,
+            ionice: None,
             match_class: Vec::new(),
             match_comm: Vec::new(),
         }],
@@ -799,7 +807,9 @@ fn profile_rule(
     match_comm: Vec<&str>,
 ) -> ProfileRule {
     ProfileRule {
-        affinity: affinity.clone(),
+        affinity: Some(affinity.clone()),
+        nice: None,
+        ionice: None,
         match_class,
         match_comm: match_comm
             .into_iter()
@@ -840,30 +850,34 @@ fn validate_generated_rule_mask(
     online: &crate::affinity::CpuMask,
     policy: &GeneratedCpuSetPolicy,
 ) -> Result<(), String> {
-    if rule.affinity.is_empty() {
+    let Some(affinity) = rule.affinity.as_ref() else {
+        return Err(format!("rule {index} is missing CPU mask"));
+    };
+
+    if affinity.is_empty() {
         return Err(format!("rule {index} has empty CPU mask"));
     }
 
-    if !rule.affinity.is_subset_of(online) {
+    if !affinity.is_subset_of(online) {
         return Err(format!(
             "rule {index} requests offline CPUs: requested={} online={}",
-            rule.affinity.to_range_string(),
+            affinity.to_range_string(),
             online.to_range_string()
         ));
     }
 
     if let Some(allowed) = &policy.allowed_cpus
-        && !rule.affinity.is_subset_of(allowed)
+        && !affinity.is_subset_of(allowed)
     {
         return Err(format!(
             "rule {index} violates allowed CPU set: requested={} allowed={}",
-            rule.affinity.to_range_string(),
+            affinity.to_range_string(),
             allowed.to_range_string()
         ));
     }
 
     if let Some(denied) = &policy.denied_cpus {
-        let requested = cpu_mask_to_vec(&rule.affinity);
+        let requested = cpu_mask_to_vec(affinity);
         let denied = cpu_mask_to_vec(denied);
         let overlap = requested
             .into_iter()
@@ -873,7 +887,7 @@ fn validate_generated_rule_mask(
         if !overlap.is_empty() {
             return Err(format!(
                 "rule {index} violates denied CPU set: requested={} denied={} overlap={}",
-                rule.affinity.to_range_string(),
+                affinity.to_range_string(),
                 policy
                     .denied_cpus
                     .as_ref()
@@ -898,7 +912,10 @@ fn validate_render_and_game_minimums(
     policy: &GeneratedCpuSetPolicy,
 ) -> Result<(), String> {
     for (index, rule) in profile.rules.iter().enumerate() {
-        let cpu_count = cpu_mask_to_vec(&rule.affinity).len();
+        let Some(affinity) = rule.affinity.as_ref() else {
+            return Err(format!("rule {index} is missing CPU mask"));
+        };
+        let cpu_count = cpu_mask_to_vec(affinity).len();
 
         if rule_matches_render_or_main_game(rule) && cpu_count < policy.min_render_cpus {
             return Err(format!(
@@ -927,7 +944,10 @@ fn validate_compositor_minimum(
             continue;
         }
 
-        let cpu_count = cpu_mask_to_vec(&rule.affinity).len();
+        let Some(affinity) = rule.affinity.as_ref() else {
+            return Err(format!("rule {index} is missing CPU mask"));
+        };
+        let cpu_count = cpu_mask_to_vec(affinity).len();
         if cpu_count < policy.min_compositor_cpus {
             return Err(format!(
                 "rule {index} gives compositor/gamescope fewer than minimum CPUs: cpus={} min={}",
@@ -952,7 +972,10 @@ fn validate_background_capacity(
             continue;
         }
 
-        let cpu_count = cpu_mask_to_vec(&rule.affinity).len();
+        let Some(affinity) = rule.affinity.as_ref() else {
+            return Err(format!("rule {index} is missing CPU mask"));
+        };
+        let cpu_count = cpu_mask_to_vec(affinity).len();
         if cpu_count < policy.min_background_cpus {
             return Err(format!(
                 "rule {index} pushes background/helper work onto too few CPUs: cpus={} min={}",
@@ -1222,11 +1245,17 @@ mod tests {
             .unwrap_or_else(|| panic!("missing rule for {class:?} in {}", profile.name))
     }
 
+    fn affinity(rule: &ProfileRule) -> &CpuMask {
+        rule.affinity.as_ref().unwrap()
+    }
+
     fn profile(name: &str) -> Profile {
         Profile {
             name: name.to_owned(),
             rules: vec![ProfileRule {
-                affinity: CpuMask::parse("0").unwrap(),
+                affinity: Some(CpuMask::parse("0").unwrap()),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::Game],
                 match_comm: Vec::new(),
             }],
@@ -1276,7 +1305,7 @@ mod tests {
         let baseline = profile_by_name(&profiles, "baseline-online");
 
         assert_eq!(baseline.rules.len(), 1);
-        assert_eq!(baseline.rules[0].affinity.to_range_string(), "0-7");
+        assert_eq!(affinity(&baseline.rules[0]).to_range_string(), "0-7");
         assert!(baseline.rules[0].match_class.is_empty());
         assert!(baseline.rules[0].match_comm.is_empty());
     }
@@ -1292,10 +1321,10 @@ mod tests {
         let worker_rule = first_rule_for_class(profile, TaskClass::GameWorkerThread);
         let wine_rule = first_rule_for_class(profile, TaskClass::WineServer);
 
-        assert_eq!(render_rule.affinity.to_range_string(), "0");
-        assert_eq!(compositor_rule.affinity.to_range_string(), "1");
-        assert_eq!(worker_rule.affinity.to_range_string(), "1-3,5-7");
-        assert_eq!(wine_rule.affinity.to_range_string(), "2,6");
+        assert_eq!(affinity(render_rule).to_range_string(), "0");
+        assert_eq!(affinity(compositor_rule).to_range_string(), "1");
+        assert_eq!(affinity(worker_rule).to_range_string(), "1-3,5-7");
+        assert_eq!(affinity(wine_rule).to_range_string(), "2,6");
 
         let game_main_rule = profile
             .rules
@@ -1308,7 +1337,7 @@ mod tests {
                         .any(|pattern| pattern.raw() == "Main")
             })
             .unwrap();
-        assert_eq!(game_main_rule.affinity.to_range_string(), "0");
+        assert_eq!(affinity(game_main_rule).to_range_string(), "0");
     }
 
     #[test]
@@ -1320,8 +1349,8 @@ mod tests {
         let compositor_rule = first_rule_for_class(profile, TaskClass::Compositor);
         let game_rule = first_rule_for_class(profile, TaskClass::Game);
 
-        assert_eq!(compositor_rule.affinity.to_range_string(), "1,5");
-        assert_eq!(game_rule.affinity.to_range_string(), "0,2-4,6-7");
+        assert_eq!(affinity(compositor_rule).to_range_string(), "1,5");
+        assert_eq!(affinity(game_rule).to_range_string(), "0,2-4,6-7");
     }
 
     #[test]
@@ -1331,7 +1360,7 @@ mod tests {
         let profile = profile_by_name(&profiles, "helper-spread");
         let helper_rule = first_rule_for_class(profile, TaskClass::GameHelper);
 
-        assert_eq!(helper_rule.affinity.to_range_string(), "1-3,5-7");
+        assert_eq!(affinity(helper_rule).to_range_string(), "1-3,5-7");
         assert!(
             helper_rule
                 .match_class
@@ -1348,7 +1377,7 @@ mod tests {
         let profile = profile_by_name(&profiles, "wine-server-dedicated");
         let wine_rule = first_rule_for_class(profile, TaskClass::WineServer);
 
-        assert_eq!(wine_rule.affinity.to_range_string(), "2,6");
+        assert_eq!(affinity(wine_rule).to_range_string(), "2,6");
     }
 
     #[test]
@@ -1361,13 +1390,13 @@ mod tests {
         let compositor_rule = first_rule_for_class(profile, TaskClass::Compositor);
         let worker_rule = first_rule_for_class(profile, TaskClass::GameWorkerThread);
 
-        assert_eq!(render_rule.affinity.to_range_string(), "0");
-        assert_eq!(compositor_rule.affinity.to_range_string(), "1");
-        assert_eq!(worker_rule.affinity.to_range_string(), "2-3,6-7");
+        assert_eq!(affinity(render_rule).to_range_string(), "0");
+        assert_eq!(affinity(compositor_rule).to_range_string(), "1");
+        assert_eq!(affinity(worker_rule).to_range_string(), "2-3,6-7");
 
         let render_siblings = topology.smt_siblings.get(&0).unwrap();
         let compositor_cpus =
-            crate::topology::parse_cpu_list(&compositor_rule.affinity.to_range_string()).unwrap();
+            crate::topology::parse_cpu_list(&affinity(compositor_rule).to_range_string()).unwrap();
 
         assert!(
             compositor_cpus
@@ -1479,7 +1508,9 @@ mod tests {
         let profile = Profile {
             name: "bad-offline".to_owned(),
             rules: vec![ProfileRule {
-                affinity: crate::affinity::CpuMask::parse("0,99").unwrap(),
+                affinity: Some(crate::affinity::CpuMask::parse("0,99").unwrap()),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::Game],
                 match_comm: Vec::new(),
             }],
@@ -1500,20 +1531,24 @@ mod tests {
         let profile = Profile {
             name: "bad-empty".to_owned(),
             rules: vec![ProfileRule {
-                affinity: crate::affinity::CpuMask::parse("")
-                    .unwrap_or_else(|_| crate::affinity::CpuMask::parse("0").unwrap()),
+                affinity: Some(
+                    crate::affinity::CpuMask::parse("")
+                        .unwrap_or_else(|_| crate::affinity::CpuMask::parse("0").unwrap()),
+                ),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::Game],
                 match_comm: Vec::new(),
             }],
         };
 
-        if profile.rules[0].affinity.is_empty() {
+        if profile.rules[0].affinity.as_ref().unwrap().is_empty() {
             let err =
                 validate_generated_profile(&profile, &topology, &GeneratedCpuSetPolicy::default())
                     .unwrap_err();
             assert!(err.contains("empty CPU mask"));
         } else {
-            assert!(!profile.rules[0].affinity.is_empty());
+            assert!(!profile.rules[0].affinity.as_ref().unwrap().is_empty());
         }
     }
 
@@ -1543,7 +1578,9 @@ mod tests {
         let profile = Profile {
             name: "bad-critical".to_owned(),
             rules: vec![ProfileRule {
-                affinity: crate::affinity::CpuMask::parse("0").unwrap(),
+                affinity: Some(crate::affinity::CpuMask::parse("0").unwrap()),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::AudioRealtime, TaskClass::Input],
                 match_comm: Vec::new(),
             }],
@@ -2037,5 +2074,25 @@ mod tests {
         assert_eq!(candidate.profile_name(), "game-main");
         assert_eq!(candidate.tree_pid(), 1234);
         assert_eq!(candidate.action_kind(), "cpu_affinity_profile");
+        assert_eq!(candidate.safety_class(), SafetyClass::ReversibleLowRisk);
+    }
+
+    #[test]
+    fn profile_with_nice_or_ionice_is_medium_risk_candidate() {
+        let candidate = CandidateAction::cpu_affinity_profile(
+            Profile {
+                name: "background-demotion".to_owned(),
+                rules: vec![ProfileRule {
+                    affinity: None,
+                    nice: Some(10),
+                    ionice: Some(crate::actions::ioprio::IoPrioValue::idle()),
+                    match_class: vec![TaskClass::Indexer],
+                    match_comm: Vec::new(),
+                }],
+            },
+            1234,
+        );
+
+        assert_eq!(candidate.safety_class(), SafetyClass::ReversibleMediumRisk);
     }
 }

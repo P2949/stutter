@@ -240,11 +240,26 @@ pub fn force_for_watch_apply(initial: bool, user_force: bool) -> bool {
     initial && user_force
 }
 
+pub fn validate_apply_profile_risk(
+    profile: &crate::profiles::Profile,
+    dry_run: bool,
+    allow_medium_risk: bool,
+) -> anyhow::Result<()> {
+    if !dry_run && crate::profiles::profile_uses_priority_actions(profile) && !allow_medium_risk {
+        anyhow::bail!(
+            "profile '{}' contains nice or ionice actions; rerun with --allow-medium-risk to apply it",
+            profile.name
+        );
+    }
+    Ok(())
+}
+
 pub struct ApplyProfileCommandInput {
     pub tree_pid: u32,
     pub profile_path: PathBuf,
     pub force: bool,
     pub dry_run: bool,
+    pub allow_medium_risk: bool,
     pub watch: bool,
     pub keep_applied: bool,
     pub refresh_ms: u64,
@@ -257,15 +272,24 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         profile_path,
         force,
         dry_run,
+        allow_medium_risk,
         watch,
         keep_applied,
         refresh_ms,
         enforce,
     } = input;
     let profile = crate::profiles::load_first_profile(&profile_path)?;
+    validate_apply_profile_risk(&profile, dry_run, allow_medium_risk)?;
     let mut cache = crate::profiles::ProfileApplyCache::default();
 
     if !watch {
+        let dry_run_summary = if dry_run {
+            Some(crate::profiles::profile_apply_summary_for_tree(
+                tree_pid, &profile,
+            )?)
+        } else {
+            None
+        };
         let action = crate::actions::cpu_affinity::CpuAffinityProfileAction {
             tree_pid,
             profile,
@@ -277,15 +301,19 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         .await
         .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))??;
 
-        println!(
-            "applied profile affinity to {} task(s); restore with: stutter restore",
-            result.state.affected_tasks
-        );
+        if let Some(summary) = dry_run_summary {
+            print_profile_dry_run_summary(&summary);
+        } else {
+            println!(
+                "applied profile to {} task(s); restore with: stutter restore",
+                result.state.affected_tasks
+            );
+        }
         println!("apply-profile is one-shot; use --watch to keep applying to new threads");
         return Ok(());
     }
 
-    let (records, updated_cache) = match apply_profile_to_tree_cached_blocking(
+    let (apply_result, updated_cache) = match apply_profile_to_tree_cached_blocking(
         tree_pid,
         profile.clone(),
         force_for_watch_apply(true, force),
@@ -305,20 +333,31 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
     cache = updated_cache;
 
     println!(
-        "applied profile affinity to {} task(s); restore with: stutter restore",
-        records.len()
+        "applied profile to {} task(s); restore with: stutter restore",
+        apply_result.affected_tasks()
     );
     crate::audit::audit_or_warn(&crate::audit::AuditEvent {
         schema_version: 1,
         unix_nanos: crate::audit::unix_nanos_now(),
         command: "apply-profile --watch".to_owned(),
         action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
-        safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+        safety_class: Some(
+            if crate::profiles::profile_uses_priority_actions(&profile) {
+                crate::actions::SafetyClass::ReversibleMediumRisk
+            } else {
+                crate::actions::SafetyClass::ReversibleLowRisk
+            },
+        ),
         dry_run,
         success: true,
-        affected_tasks: records.len(),
-        restore_path: Some(crate::affinity::default_restore_path()),
-        message: "initial CPU affinity profile application completed".to_owned(),
+        affected_tasks: apply_result.affected_tasks(),
+        restore_path: Some(crate::profile_restore::default_restore_path()),
+        message: format!(
+            "initial profile application completed affinity={} nice={} ionice={}",
+            apply_result.affinity_records.len(),
+            apply_result.nice_records.len(),
+            apply_result.ionice_records.len()
+        ),
     });
 
     let mut tick = interval(Duration::from_millis(refresh_ms));
@@ -353,10 +392,10 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
                 )
                 .await;
 
-                let records = match result {
-                    Ok((records, updated_cache)) => {
+                let apply_result = match result {
+                    Ok((apply_result, updated_cache)) => {
                         cache = updated_cache;
-                        records
+                        apply_result
                     }
                     Err(err) => {
                         if !keep_applied
@@ -368,8 +407,14 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
                     }
                 };
 
-                if !records.is_empty() {
-                    info!("profile_watch_applied tasks={}", records.len());
+                if apply_result.affected_tasks() > 0 {
+                    info!(
+                        "profile_watch_applied tasks={} affinity={} nice={} ionice={}",
+                        apply_result.affected_tasks(),
+                        apply_result.affinity_records.len(),
+                        apply_result.nice_records.len(),
+                        apply_result.ionice_records.len()
+                    );
                 }
             }
         }
@@ -404,52 +449,63 @@ pub async fn apply_profile_to_tree_cached_blocking(
     dry_run: bool,
     mut cache: crate::profiles::ProfileApplyCache,
 ) -> anyhow::Result<(
-    Vec<crate::affinity::AffinityRecord>,
+    crate::profiles::ProfileApplyResult,
     crate::profiles::ProfileApplyCache,
 )> {
     tokio::task::spawn_blocking(move || {
-        crate::profiles::apply_profile_to_tree_cached(
+        crate::profiles::apply_managed_profile_to_tree_cached(
             tree_pid, &profile, force, dry_run, &mut cache,
         )
-        .map(|records| (records, cache))
+        .map(|result| (result, cache))
     })
     .await
     .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))?
 }
 
+fn print_profile_dry_run_summary(summary: &crate::profiles::ProfileApplySummary) {
+    println!("profile dry-run:");
+    println!("  checked_tasks={}", summary.checked_tasks);
+    println!("  pending_affinity={}", summary.pending_affinity);
+    println!("  pending_nice={}", summary.pending_nice);
+    println!("  pending_ionice={}", summary.pending_ionice);
+    println!("  total_pending_tasks={}", summary.pending_changes);
+}
+
 pub fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
-    let path = crate::affinity::default_restore_path();
+    let path = crate::profile_restore::default_restore_path();
     if !path.exists() {
         println!("stopped profile watch; no restore file was written");
         return Ok(());
     }
 
-    match crate::affinity::restore_saved(&path) {
+    match crate::profile_restore::restore_saved(&path) {
         Ok(summary) => {
             crate::audit::audit_or_warn(&crate::audit::AuditEvent {
                 schema_version: 1,
                 unix_nanos: crate::audit::unix_nanos_now(),
                 command: "apply-profile --watch restore".to_owned(),
-                action_id: Some("cpu-affinity-restore".to_owned()),
-                safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+                action_id: Some("profile-restore".to_owned()),
+                safety_class: Some(crate::actions::SafetyClass::ReversibleMediumRisk),
                 dry_run: false,
                 success: true,
-                affected_tasks: summary.restored,
+                affected_tasks: summary.restored_total(),
                 restore_path: Some(path.clone()),
                 message: format!(
-                    "watch restore completed restored={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
-                    summary.restored,
+                    "watch restore completed affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={}",
+                    summary.affinity,
+                    summary.nice,
+                    summary.ionice,
                     summary.skipped_dead,
-                    summary.skipped_identity_mismatch,
-                    summary.legacy_unverified
+                    summary.skipped_identity_mismatch
                 ),
             });
             println!(
-                "stopped profile watch; restored {} affinity record(s); skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
-                summary.restored,
+                "stopped profile watch; restored profile state: affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={}",
+                summary.affinity,
+                summary.nice,
+                summary.ionice,
                 summary.skipped_dead,
-                summary.skipped_identity_mismatch,
-                summary.legacy_unverified
+                summary.skipped_identity_mismatch
             );
         }
         Err(err) => {
@@ -457,8 +513,8 @@ pub fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
                 schema_version: 1,
                 unix_nanos: crate::audit::unix_nanos_now(),
                 command: "apply-profile --watch restore".to_owned(),
-                action_id: Some("cpu-affinity-restore".to_owned()),
-                safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+                action_id: Some("profile-restore".to_owned()),
+                safety_class: Some(crate::actions::SafetyClass::ReversibleMediumRisk),
                 dry_run: false,
                 success: false,
                 affected_tasks: 0,
@@ -475,6 +531,12 @@ pub fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        actions::ioprio::IoPrioValue,
+        affinity::CpuMask,
+        process_tree::TaskClass,
+        profiles::{Profile, ProfileRule},
+    };
 
     #[test]
     fn force_for_watch_apply_only_uses_user_force_on_initial_apply() {
@@ -482,6 +544,51 @@ mod tests {
         assert!(!force_for_watch_apply(false, true));
         assert!(!force_for_watch_apply(true, false));
         assert!(!force_for_watch_apply(false, false));
+    }
+
+    #[test]
+    fn apply_profile_risk_allows_dry_run_without_medium_flag() {
+        let profile = priority_profile();
+
+        validate_apply_profile_risk(&profile, true, false).unwrap();
+    }
+
+    #[test]
+    fn apply_profile_risk_rejects_priority_profile_without_medium_flag() {
+        let profile = priority_profile();
+
+        let err = validate_apply_profile_risk(&profile, false, false).unwrap_err();
+
+        assert!(err.to_string().contains("--allow-medium-risk"));
+    }
+
+    #[test]
+    fn apply_profile_risk_allows_affinity_only_profile_without_medium_flag() {
+        let profile = Profile {
+            name: "affinity".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: Some(CpuMask::parse("0").unwrap()),
+                nice: None,
+                ionice: None,
+                match_class: vec![TaskClass::Game],
+                match_comm: Vec::new(),
+            }],
+        };
+
+        validate_apply_profile_risk(&profile, false, false).unwrap();
+    }
+
+    fn priority_profile() -> Profile {
+        Profile {
+            name: "priority".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: None,
+                nice: Some(10),
+                ionice: Some(IoPrioValue::idle()),
+                match_class: vec![TaskClass::Indexer],
+                match_comm: Vec::new(),
+            }],
+        }
     }
 
     #[test]

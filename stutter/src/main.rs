@@ -28,6 +28,7 @@ mod perf_counters;
 mod presets;
 mod probe_catalog;
 mod process_tree;
+mod profile_restore;
 mod profiles;
 mod prometheus;
 mod psi;
@@ -103,53 +104,109 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         AppCommand::Restore { dry_run } => {
-            let path = affinity::default_restore_path();
+            let affinity_path = affinity::default_restore_path();
+            let profile_path = profile_restore::default_restore_path();
             if dry_run {
-                print_restore_dry_run(&path)?;
+                print_restore_dry_run(&affinity_path, &profile_path)?;
             } else {
-                match affinity::restore_saved(&path) {
-                    Ok(summary) => {
-                        audit::audit_or_warn(&audit::AuditEvent {
-                            schema_version: 1,
-                            unix_nanos: audit::unix_nanos_now(),
-                            command: "restore".to_owned(),
-                            action_id: Some("cpu-affinity-restore".to_owned()),
-                            safety_class: Some(actions::SafetyClass::ReversibleLowRisk),
-                            dry_run: false,
-                            success: true,
-                            affected_tasks: summary.restored,
-                            restore_path: Some(path.clone()),
-                            message: format!(
-                                "restored={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
-                                summary.restored,
-                                summary.skipped_dead,
-                                summary.skipped_identity_mismatch,
-                                summary.legacy_unverified
-                            ),
-                        });
-                        println!(
-                            "restored {} affinity record(s); skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
-                            summary.restored,
+                let mut summary = profile_restore::ProfileRestoreSummary::default();
+                let mut restored_any = false;
+
+                if affinity_path.exists() {
+                    match affinity::restore_saved(&affinity_path) {
+                        Ok(old_summary) => {
+                            restored_any = true;
+                            summary.affinity += old_summary.restored;
+                            summary.skipped_dead += old_summary.skipped_dead;
+                            summary.skipped_identity_mismatch +=
+                                old_summary.skipped_identity_mismatch;
+                            summary.legacy_unverified += old_summary.legacy_unverified;
+                            summary.errors += old_summary.errors;
+                        }
+                        Err(err) => {
+                            audit::audit_or_warn(&audit::AuditEvent {
+                                schema_version: 1,
+                                unix_nanos: audit::unix_nanos_now(),
+                                command: "restore".to_owned(),
+                                action_id: Some("profile-restore".to_owned()),
+                                safety_class: Some(actions::SafetyClass::ReversibleMediumRisk),
+                                dry_run: false,
+                                success: false,
+                                affected_tasks: 0,
+                                restore_path: Some(affinity_path.clone()),
+                                message: format!("restore failed: {err:#}"),
+                            });
+                            return Err(err);
+                        }
+                    }
+                }
+
+                if profile_path.exists() {
+                    match profile_restore::restore_saved(&profile_path) {
+                        Ok(profile_summary) => {
+                            restored_any = true;
+                            summary.affinity += profile_summary.affinity;
+                            summary.nice += profile_summary.nice;
+                            summary.ionice += profile_summary.ionice;
+                            summary.skipped_dead += profile_summary.skipped_dead;
+                            summary.skipped_identity_mismatch +=
+                                profile_summary.skipped_identity_mismatch;
+                            summary.legacy_unverified += profile_summary.legacy_unverified;
+                            summary.errors += profile_summary.errors;
+                        }
+                        Err(err) => {
+                            audit::audit_or_warn(&audit::AuditEvent {
+                                schema_version: 1,
+                                unix_nanos: audit::unix_nanos_now(),
+                                command: "restore".to_owned(),
+                                action_id: Some("profile-restore".to_owned()),
+                                safety_class: Some(actions::SafetyClass::ReversibleMediumRisk),
+                                dry_run: false,
+                                success: false,
+                                affected_tasks: 0,
+                                restore_path: Some(profile_path.clone()),
+                                message: format!("restore failed: {err:#}"),
+                            });
+                            return Err(err);
+                        }
+                    }
+                }
+
+                if restored_any {
+                    audit::audit_or_warn(&audit::AuditEvent {
+                        schema_version: 1,
+                        unix_nanos: audit::unix_nanos_now(),
+                        command: "restore".to_owned(),
+                        action_id: Some("profile-restore".to_owned()),
+                        safety_class: Some(actions::SafetyClass::ReversibleMediumRisk),
+                        dry_run: false,
+                        success: true,
+                        affected_tasks: summary.restored_total(),
+                        restore_path: Some(profile_path.clone()),
+                        message: format!(
+                            "affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
+                            summary.affinity,
+                            summary.nice,
+                            summary.ionice,
                             summary.skipped_dead,
                             summary.skipped_identity_mismatch,
                             summary.legacy_unverified
-                        );
-                    }
-                    Err(err) => {
-                        audit::audit_or_warn(&audit::AuditEvent {
-                            schema_version: 1,
-                            unix_nanos: audit::unix_nanos_now(),
-                            command: "restore".to_owned(),
-                            action_id: Some("cpu-affinity-restore".to_owned()),
-                            safety_class: Some(actions::SafetyClass::ReversibleLowRisk),
-                            dry_run: false,
-                            success: false,
-                            affected_tasks: 0,
-                            restore_path: Some(path.clone()),
-                            message: format!("restore failed: {err:#}"),
-                        });
-                        return Err(err);
-                    }
+                        ),
+                    });
+                    println!(
+                        "restored profile state: affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={}",
+                        summary.affinity,
+                        summary.nice,
+                        summary.ionice,
+                        summary.skipped_dead,
+                        summary.skipped_identity_mismatch
+                    );
+                } else {
+                    println!(
+                        "no restore file found at {} or {}",
+                        affinity_path.display(),
+                        profile_path.display()
+                    );
                 }
             }
             Ok(())
@@ -159,6 +216,7 @@ async fn main() -> anyhow::Result<()> {
             profile,
             force,
             dry_run,
+            allow_medium_risk,
             watch,
             keep_applied,
             refresh_ms,
@@ -169,6 +227,7 @@ async fn main() -> anyhow::Result<()> {
                 profile_path: profile,
                 force,
                 dry_run,
+                allow_medium_risk,
                 watch,
                 keep_applied,
                 refresh_ms,
@@ -523,22 +582,39 @@ fn render_man_page(output: Option<&std::path::Path>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn print_restore_dry_run(path: &Path) -> anyhow::Result<()> {
-    if !path.exists() {
-        println!("no restore file found at {}", path.display());
+fn print_restore_dry_run(affinity_path: &Path, profile_path: &Path) -> anyhow::Result<()> {
+    if !affinity_path.exists() && !profile_path.exists() {
+        println!(
+            "no restore file found at {} or {}",
+            affinity_path.display(),
+            profile_path.display()
+        );
         return Ok(());
     }
 
-    let records = affinity::read_restore_records(path)?;
-    println!(
-        "found {} affinity record(s) in {}",
-        records.len(),
-        path.display()
-    );
-    for record in records {
+    if affinity_path.exists() {
+        let records = affinity::read_restore_records(affinity_path)?;
         println!(
-            "tid={} process_pid={:?} mask={:?}",
-            record.tid, record.process_pid, record.original_mask
+            "found {} legacy affinity record(s) in {}",
+            records.len(),
+            affinity_path.display()
+        );
+        for record in records {
+            println!(
+                "tid={} process_pid={:?} mask={:?}",
+                record.tid, record.process_pid, record.original_mask
+            );
+        }
+    }
+
+    if profile_path.exists() {
+        let state = profile_restore::load_restore_state(profile_path)?;
+        println!(
+            "found profile restore state in {}: affinity={} nice={} ionice={}",
+            profile_path.display(),
+            state.affinity_records.len(),
+            state.nice_records.len(),
+            state.ionice_records.len()
         );
     }
     Ok(())

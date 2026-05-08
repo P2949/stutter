@@ -317,6 +317,27 @@ fn restore_applied_journal_record(
 pub fn restore_rollback_token(token: &RollbackToken) -> anyhow::Result<RollbackRestoreSummary> {
     match token {
         RollbackToken::CpuAffinityRestoreFile { path, .. } => {
+            if crate::profile_restore::load_restore_state(path).is_ok() {
+                let summary = crate::profile_restore::restore_saved(path).with_context(|| {
+                    format!("failed to restore profile state from {}", path.display())
+                })?;
+
+                return Ok(RollbackRestoreSummary {
+                    rollback_kind: rollback_token_kind(token).to_owned(),
+                    restored_items: summary.restored_total(),
+                    skipped_items: summary.skipped_dead + summary.skipped_identity_mismatch,
+                    messages: vec![format!(
+                        "affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={} errors={}",
+                        summary.affinity,
+                        summary.nice,
+                        summary.ionice,
+                        summary.skipped_dead,
+                        summary.skipped_identity_mismatch,
+                        summary.errors
+                    )],
+                });
+            }
+
             let summary = crate::affinity::restore_saved(path).with_context(|| {
                 format!("failed to restore CPU affinity from {}", path.display())
             })?;

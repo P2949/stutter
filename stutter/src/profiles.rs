@@ -8,8 +8,15 @@ use anyhow::Context;
 use serde::Deserialize;
 
 use crate::{
+    actions::{
+        TaskIdentity, TuningAction,
+        ioprio::{IoPrioAction, IoPrioPolicy, IoPrioValue},
+        nice::{NiceAction, NicePolicy},
+        runner::run_audited_action,
+    },
     affinity::{self, AffinityRecord, CpuMask},
     process_tree::{self, CompiledPattern, TaskClass, TaskInfo},
+    profile_restore::{self, IoPrioRestoreRecordV2, NiceRestoreRecordV2},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,7 +40,9 @@ pub struct Profile {
 
 #[derive(Clone, Debug)]
 pub struct ProfileRule {
-    pub affinity: CpuMask,
+    pub affinity: Option<CpuMask>,
+    pub nice: Option<i32>,
+    pub ionice: Option<IoPrioValue>,
     pub match_class: Vec<TaskClass>,
     pub match_comm: Vec<CompiledPattern>,
 }
@@ -42,6 +51,9 @@ pub struct ProfileRule {
 pub struct ProfileApplySummary {
     pub checked_tasks: usize,
     pub pending_changes: usize,
+    pub pending_affinity: usize,
+    pub pending_nice: usize,
+    pub pending_ionice: usize,
 }
 
 #[derive(Default)]
@@ -60,12 +72,61 @@ struct ProfileApplyCacheKey {
     tid: u32,
     process_starttime_ticks: Option<u64>,
     task_starttime_ticks: Option<u64>,
-    desired_mask: CpuMask,
+    desired_affinity: Option<CpuMask>,
+    desired_nice: Option<i32>,
+    desired_ionice: Option<IoPrioValue>,
 }
 
-struct PlannedAffinityChange {
-    record: AffinityRecord,
-    cache_key: ProfileApplyCacheKey,
+#[derive(Clone, Debug)]
+pub struct PlannedAffinityChange {
+    pub record: AffinityRecord,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ProfileApplyPlan {
+    pub affinity_changes: Vec<PlannedAffinityChange>,
+    pub nice_groups: BTreeMap<i32, Vec<TaskIdentity>>,
+    pub ionice_groups: BTreeMap<IoPrioValue, Vec<TaskIdentity>>,
+    pub summary: ProfileApplySummary,
+    nice_records: Vec<NiceRestoreRecordV2>,
+    ionice_records: Vec<IoPrioRestoreRecordV2>,
+    cache_keys: Vec<ProfileApplyCacheKey>,
+}
+
+impl ProfileApplyPlan {
+    pub fn is_empty(&self) -> bool {
+        self.affinity_changes.is_empty()
+            && self.nice_groups.is_empty()
+            && self.ionice_groups.is_empty()
+    }
+
+    fn affinity_records(&self) -> Vec<AffinityRecord> {
+        self.affinity_changes
+            .iter()
+            .map(|planned| planned.record.clone())
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ProfileApplyResult {
+    pub affinity_records: Vec<AffinityRecord>,
+    pub nice_records: Vec<NiceRestoreRecordV2>,
+    pub ionice_records: Vec<IoPrioRestoreRecordV2>,
+    pub summary: ProfileApplySummary,
+}
+
+impl ProfileApplyResult {
+    pub fn affected_tasks(&self) -> usize {
+        self.summary.pending_changes
+    }
+}
+
+pub fn profile_uses_priority_actions(profile: &Profile) -> bool {
+    profile
+        .rules
+        .iter()
+        .any(|rule| rule.nice.is_some() || rule.ionice.is_some())
 }
 
 pub fn load_first_profile(path: &Path) -> anyhow::Result<Profile> {
@@ -89,9 +150,17 @@ pub fn apply_profile_to_tree(
     force_restore_overwrite: bool,
     dry_run: bool,
 ) -> anyhow::Result<Vec<AffinityRecord>> {
-    apply_profile_to_tree_with_cache(tree_pid, profile, force_restore_overwrite, dry_run, None)
+    apply_managed_profile_to_tree_with_cache(
+        tree_pid,
+        profile,
+        force_restore_overwrite,
+        dry_run,
+        None,
+    )
+    .map(|result| result.affinity_records)
 }
 
+#[allow(dead_code)]
 pub fn apply_profile_to_tree_cached(
     tree_pid: u32,
     profile: &Profile,
@@ -99,7 +168,39 @@ pub fn apply_profile_to_tree_cached(
     dry_run: bool,
     cache: &mut ProfileApplyCache,
 ) -> anyhow::Result<Vec<AffinityRecord>> {
-    apply_profile_to_tree_with_cache(
+    apply_managed_profile_to_tree_with_cache(
+        tree_pid,
+        profile,
+        force_restore_overwrite,
+        dry_run,
+        Some(cache),
+    )
+    .map(|result| result.affinity_records)
+}
+
+pub fn apply_managed_profile_to_tree(
+    tree_pid: u32,
+    profile: &Profile,
+    force_restore_overwrite: bool,
+    dry_run: bool,
+) -> anyhow::Result<ProfileApplyResult> {
+    apply_managed_profile_to_tree_with_cache(
+        tree_pid,
+        profile,
+        force_restore_overwrite,
+        dry_run,
+        None,
+    )
+}
+
+pub fn apply_managed_profile_to_tree_cached(
+    tree_pid: u32,
+    profile: &Profile,
+    force_restore_overwrite: bool,
+    dry_run: bool,
+    cache: &mut ProfileApplyCache,
+) -> anyhow::Result<ProfileApplyResult> {
+    apply_managed_profile_to_tree_with_cache(
         tree_pid,
         profile,
         force_restore_overwrite,
@@ -108,13 +209,13 @@ pub fn apply_profile_to_tree_cached(
     )
 }
 
-fn apply_profile_to_tree_with_cache(
+fn apply_managed_profile_to_tree_with_cache(
     tree_pid: u32,
     profile: &Profile,
     force_restore_overwrite: bool,
     dry_run: bool,
     mut cache: Option<&mut ProfileApplyCache>,
-) -> anyhow::Result<Vec<AffinityRecord>> {
+) -> anyhow::Result<ProfileApplyResult> {
     let snapshot = process_tree::target_snapshot(
         process_tree::TargetSnapshotInput::default().tree_pids(&[tree_pid]),
     );
@@ -123,110 +224,108 @@ fn apply_profile_to_tree_with_cache(
         log::warn!("profile_online_cpu_check_failed err={err:#}");
     }
 
-    let planned = planned_affinity_changes(&snapshot.tasks, profile, cache.as_deref_mut())?;
+    let planned = planned_profile_apply(&snapshot.tasks, profile, cache.as_deref_mut())?;
     if planned.is_empty() {
-        return Ok(Vec::new());
+        return Ok(ProfileApplyResult {
+            summary: planned.summary,
+            ..ProfileApplyResult::default()
+        });
     }
 
-    let restore_path = affinity::default_restore_path();
-    let mut applied_records = Vec::new();
-
     if dry_run {
-        for planned in &planned {
+        for planned in &planned.affinity_changes {
             log::info!(
                 "dry_run: would apply mask {} to TID {}",
                 planned.record.applied_mask.to_range_string(),
                 planned.record.tid
             );
-            applied_records.push(planned.record.clone());
         }
-        applied_records.sort_by_key(|record| record.tid);
-        return Ok(applied_records);
+        return Ok(result_from_plan(&planned));
     }
 
-    let restore_records = planned
-        .iter()
-        .map(|planned| planned.record.clone())
-        .collect::<Vec<_>>();
-    affinity::save_merged_restore_state(&restore_path, &restore_records, force_restore_overwrite)?;
+    preflight_profile_plan(&planned)?;
 
-    for planned in &planned {
-        match affinity::set_affinity_raw(planned.record.tid, &planned.record.applied_mask) {
-            Ok(()) => {
-                applied_records.push(planned.record.clone());
-                if let Some(cache) = cache.as_deref_mut() {
-                    cache.known_correct.insert(planned.cache_key.clone());
-                }
-            }
-            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
-                // ESRCH during set_affinity is fine because restore_all skips dead TIDs.
-            }
-            Err(err) => {
-                anyhow::bail!(
-                    "failed to set affinity for TID {}: {err}",
-                    planned.record.tid
-                );
-            }
+    let restore_path = profile_restore::default_restore_path();
+    let affinity_records = planned.affinity_records();
+    profile_restore::save_merged_restore_state(
+        &restore_path,
+        &affinity_records,
+        &planned.nice_records,
+        &planned.ionice_records,
+        force_restore_overwrite,
+    )?;
+
+    let mut result = result_from_plan(&planned);
+    result.affinity_records.clear();
+
+    if let Err(err) = apply_profile_plan(&planned, &mut result) {
+        if let Err(restore_err) = profile_restore::restore_saved(&restore_path) {
+            anyhow::bail!(
+                "profile apply failed: {err:#}; emergency restore failed: {restore_err:#}"
+            );
+        }
+        anyhow::bail!("profile apply failed; restore completed: {err:#}");
+    }
+
+    if let Err(err) = verify_affinity_plan(&planned) {
+        if let Err(restore_err) = profile_restore::restore_saved(&restore_path) {
+            anyhow::bail!(
+                "profile verify failed: {err:#}; emergency restore failed: {restore_err:#}"
+            );
+        }
+        anyhow::bail!("profile verify failed; restore completed: {err:#}");
+    }
+
+    if let Some(cache) = cache.as_deref_mut() {
+        for cache_key in &planned.cache_keys {
+            cache.known_correct.insert(cache_key.clone());
         }
     }
 
-    applied_records.sort_by_key(|record| record.tid);
-
-    Ok(applied_records)
+    result.affinity_records.sort_by_key(|record| record.tid);
+    Ok(result)
 }
 
-fn planned_affinity_changes(
+fn planned_profile_apply(
     tasks: &BTreeMap<u32, TaskInfo>,
     profile: &Profile,
     cache: Option<&mut ProfileApplyCache>,
-) -> anyhow::Result<Vec<PlannedAffinityChange>> {
-    planned_affinity_changes_with_reader(tasks, profile, cache, affinity::read_allowed_mask_raw)
+) -> anyhow::Result<ProfileApplyPlan> {
+    planned_profile_apply_with_readers(
+        tasks,
+        profile,
+        cache,
+        affinity::read_allowed_mask_raw,
+        crate::actions::nice::read_task_nice,
+        crate::actions::ioprio::read_task_ioprio,
+    )
 }
 
-fn planned_affinity_changes_with_reader<F>(
+fn planned_profile_apply_with_readers<FA, FN, FI>(
     tasks: &BTreeMap<u32, TaskInfo>,
     profile: &Profile,
     mut cache: Option<&mut ProfileApplyCache>,
-    mut read_allowed_mask: F,
-) -> anyhow::Result<Vec<PlannedAffinityChange>>
+    mut read_allowed_mask: FA,
+    mut read_nice: FN,
+    mut read_ioprio: FI,
+) -> anyhow::Result<ProfileApplyPlan>
 where
-    F: FnMut(u32) -> io::Result<CpuMask>,
+    FA: FnMut(u32) -> io::Result<CpuMask>,
+    FN: FnMut(u32) -> anyhow::Result<i32>,
+    FI: FnMut(u32) -> anyhow::Result<i32>,
 {
-    let mut planned = Vec::new();
+    let mut plan = ProfileApplyPlan::default();
     let mut seen_cache_keys = BTreeSet::new();
+    let mut pending_tids = BTreeSet::new();
 
     for task in tasks.values() {
-        let mut matched_rule = None;
-        for rule in &profile.rules {
-            if !rule.match_class.is_empty() && !rule.match_class.contains(&task.class) {
-                continue;
-            }
-
-            if !rule.match_comm.is_empty() {
-                let comms = [&task.comm, task.process_comm.as_ref()];
-                let mut comm_match = false;
-
-                for pattern in &rule.match_comm {
-                    if comms.iter().any(|comm| pattern.matches(comm)) {
-                        comm_match = true;
-                        break;
-                    }
-                }
-
-                if !comm_match {
-                    continue;
-                }
-            }
-
-            matched_rule = Some(rule);
-            break;
-        }
-
-        let Some(rule) = matched_rule else {
+        let Some(rule) = matching_profile_rule(task, profile) else {
             continue;
         };
 
-        let cache_key = ProfileApplyCacheKey::new(task, &rule.affinity);
+        plan.summary.checked_tasks += 1;
+
+        let cache_key = ProfileApplyCacheKey::new(task, rule);
         seen_cache_keys.insert(cache_key.clone());
 
         if cache
@@ -236,51 +335,140 @@ where
             continue;
         }
 
-        let original_mask = match read_allowed_mask(task.tid) {
-            Ok(mask) => mask,
-            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
-                continue; // Task is dead, skip it.
+        let mut task_pending = false;
+
+        if let Some(desired_mask) = &rule.affinity {
+            let original_mask = match read_allowed_mask(task.tid) {
+                Ok(mask) => mask,
+                Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
+                    continue; // Task is dead, skip it.
+                }
+                Err(err) => {
+                    return Err(anyhow::anyhow!(
+                        "failed to read CPU affinity for TID {}: {err}",
+                        task.tid
+                    ));
+                }
+            };
+
+            if original_mask != *desired_mask {
+                if !task_has_complete_identity(task) {
+                    log::warn!(
+                        "profile_skip_incomplete_identity tid={} comm={} process_pid={}",
+                        task.tid,
+                        task.comm,
+                        task.process_pid
+                    );
+                } else {
+                    plan.summary.pending_affinity += 1;
+                    pending_tids.insert(task.tid);
+                    task_pending = true;
+                    plan.affinity_changes.push(PlannedAffinityChange {
+                        record: AffinityRecord {
+                            tid: task.tid,
+                            process_pid: Some(task.process_pid),
+                            process_starttime_ticks: task.process_starttime_ticks,
+                            task_starttime_ticks: task.task_starttime_ticks,
+                            original_mask,
+                            applied_mask: desired_mask.clone(),
+                        },
+                    });
+                }
             }
-            Err(err) => {
-                return Err(anyhow::anyhow!(
-                    "failed to read CPU affinity for TID {}: {err}",
-                    task.tid
-                ));
-            }
-        };
-        if original_mask == rule.affinity {
-            if let Some(cache) = cache.as_mut() {
-                cache.known_correct.insert(cache_key);
-            }
-            continue;
         }
 
-        // Ensure we only create restore records with full identity. If the
-        // process or task starttime ticks are missing then we must not record
-        // a partial identity that could later be mis-applied or left in an
-        // inconsistent state. Skip and warn instead.
-        if task.process_starttime_ticks.is_none() || task.task_starttime_ticks.is_none() {
-            log::warn!(
-                "profile_skip_incomplete_identity tid={} comm={} process_pid={}",
-                task.tid,
-                task.comm,
-                task.process_pid
-            );
-            continue;
+        if let Some(desired_nice) = rule.nice {
+            let original_nice = match read_nice(task.tid) {
+                Ok(nice) => nice,
+                Err(err) if anyhow_raw_os_error(&err) == Some(libc::ESRCH) => continue,
+                Err(err) => {
+                    return Err(err).with_context(|| {
+                        format!("failed to read nice for profile target TID {}", task.tid)
+                    });
+                }
+            };
+
+            if original_nice != desired_nice {
+                if !task_has_complete_identity(task) {
+                    log::warn!(
+                        "profile_skip_priority_incomplete_identity tid={} comm={} process_pid={}",
+                        task.tid,
+                        task.comm,
+                        task.process_pid
+                    );
+                } else {
+                    plan.summary.pending_nice += 1;
+                    pending_tids.insert(task.tid);
+                    task_pending = true;
+                    plan.nice_groups
+                        .entry(desired_nice)
+                        .or_default()
+                        .push(TaskIdentity::from_task_info(task));
+                    plan.nice_records.push(NiceRestoreRecordV2 {
+                        tid: task.tid,
+                        process_pid: Some(task.process_pid),
+                        process_starttime_ticks: task.process_starttime_ticks,
+                        task_starttime_ticks: task.task_starttime_ticks,
+                        comm: Some(task.comm.clone()),
+                        original_nice,
+                        applied_nice: desired_nice,
+                    });
+                }
+            }
         }
 
-        planned.push(PlannedAffinityChange {
-            record: AffinityRecord {
-                tid: task.tid,
-                process_pid: Some(task.process_pid),
-                process_starttime_ticks: task.process_starttime_ticks,
-                task_starttime_ticks: task.task_starttime_ticks,
-                original_mask,
-                applied_mask: rule.affinity.clone(),
-            },
-            cache_key,
-        });
+        if let Some(desired_ioprio) = rule.ionice {
+            let original_ioprio = match read_ioprio(task.tid) {
+                Ok(ioprio) => ioprio,
+                Err(err) if anyhow_raw_os_error(&err) == Some(libc::ESRCH) => continue,
+                Err(err) => {
+                    return Err(err).with_context(|| {
+                        format!(
+                            "failed to read I/O priority for profile target TID {}",
+                            task.tid
+                        )
+                    });
+                }
+            };
+            let desired_encoded = desired_ioprio.encode()?;
+
+            if original_ioprio != desired_encoded {
+                if !task_has_complete_identity(task) {
+                    log::warn!(
+                        "profile_skip_priority_incomplete_identity tid={} comm={} process_pid={}",
+                        task.tid,
+                        task.comm,
+                        task.process_pid
+                    );
+                } else {
+                    plan.summary.pending_ionice += 1;
+                    pending_tids.insert(task.tid);
+                    task_pending = true;
+                    plan.ionice_groups
+                        .entry(desired_ioprio)
+                        .or_default()
+                        .push(TaskIdentity::from_task_info(task));
+                    plan.ionice_records.push(IoPrioRestoreRecordV2 {
+                        tid: task.tid,
+                        process_pid: Some(task.process_pid),
+                        process_starttime_ticks: task.process_starttime_ticks,
+                        task_starttime_ticks: task.task_starttime_ticks,
+                        comm: Some(task.comm.clone()),
+                        original_ioprio,
+                        applied_ioprio: desired_encoded,
+                    });
+                }
+            }
+        }
+
+        if task_pending {
+            plan.cache_keys.push(cache_key);
+        } else if let Some(cache) = cache.as_mut() {
+            cache.known_correct.insert(cache_key);
+        }
     }
+
+    plan.summary.pending_changes = pending_tids.len();
 
     if let Some(cache) = cache.as_mut() {
         cache
@@ -288,7 +476,7 @@ where
             .retain(|cache_key| seen_cache_keys.contains(cache_key));
     }
 
-    Ok(planned)
+    Ok(plan)
 }
 
 pub fn profile_apply_summary_for_tree(
@@ -306,45 +494,225 @@ fn profile_apply_summary(
     tasks: &BTreeMap<u32, TaskInfo>,
     profile: &Profile,
 ) -> anyhow::Result<ProfileApplySummary> {
-    profile_apply_summary_with_reader(tasks, profile, affinity::read_allowed_mask_raw)
+    profile_apply_summary_with_readers(
+        tasks,
+        profile,
+        affinity::read_allowed_mask_raw,
+        crate::actions::nice::read_task_nice,
+        crate::actions::ioprio::read_task_ioprio,
+    )
 }
 
+#[allow(dead_code)]
 fn profile_apply_summary_with_reader<F>(
     tasks: &BTreeMap<u32, TaskInfo>,
     profile: &Profile,
-    mut read_allowed_mask: F,
+    read_allowed_mask: F,
 ) -> anyhow::Result<ProfileApplySummary>
 where
     F: FnMut(u32) -> io::Result<CpuMask>,
 {
+    profile_apply_summary_with_readers(tasks, profile, read_allowed_mask, |_| Ok(0), |_| Ok(0))
+}
+
+fn profile_apply_summary_with_readers<FA, FN, FI>(
+    tasks: &BTreeMap<u32, TaskInfo>,
+    profile: &Profile,
+    mut read_allowed_mask: FA,
+    mut read_nice: FN,
+    mut read_ioprio: FI,
+) -> anyhow::Result<ProfileApplySummary>
+where
+    FA: FnMut(u32) -> io::Result<CpuMask>,
+    FN: FnMut(u32) -> anyhow::Result<i32>,
+    FI: FnMut(u32) -> anyhow::Result<i32>,
+{
     let mut summary = ProfileApplySummary::default();
+    let mut pending_tids = BTreeSet::new();
 
     for task in tasks.values() {
         let Some(rule) = matching_profile_rule(task, profile) else {
             continue;
         };
 
-        let original_mask = match read_allowed_mask(task.tid) {
-            Ok(mask) => mask,
-            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
-                continue;
-            }
-            Err(err) => {
-                return Err(anyhow::anyhow!(
-                    "failed to read CPU affinity for TID {}: {err}",
-                    task.tid
-                ));
-            }
-        };
-
         summary.checked_tasks += 1;
 
-        if original_mask != rule.affinity {
-            summary.pending_changes += 1;
+        if let Some(desired_mask) = &rule.affinity {
+            let original_mask = match read_allowed_mask(task.tid) {
+                Ok(mask) => mask,
+                Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {
+                    continue;
+                }
+                Err(err) => {
+                    return Err(anyhow::anyhow!(
+                        "failed to read CPU affinity for TID {}: {err}",
+                        task.tid
+                    ));
+                }
+            };
+
+            if original_mask != *desired_mask {
+                summary.pending_affinity += 1;
+                pending_tids.insert(task.tid);
+            }
+        }
+
+        if let Some(desired_nice) = rule.nice {
+            let original_nice = match read_nice(task.tid) {
+                Ok(nice) => nice,
+                Err(err) if anyhow_raw_os_error(&err) == Some(libc::ESRCH) => continue,
+                Err(err) => return Err(err),
+            };
+
+            if original_nice != desired_nice {
+                summary.pending_nice += 1;
+                pending_tids.insert(task.tid);
+            }
+        }
+
+        if let Some(desired_ioprio) = rule.ionice {
+            let original_ioprio = match read_ioprio(task.tid) {
+                Ok(ioprio) => ioprio,
+                Err(err) if anyhow_raw_os_error(&err) == Some(libc::ESRCH) => continue,
+                Err(err) => return Err(err),
+            };
+
+            if original_ioprio != desired_ioprio.encode()? {
+                summary.pending_ionice += 1;
+                pending_tids.insert(task.tid);
+            }
         }
     }
 
+    summary.pending_changes = pending_tids.len();
     Ok(summary)
+}
+
+fn preflight_profile_plan(plan: &ProfileApplyPlan) -> anyhow::Result<()> {
+    for (nice, targets) in &plan.nice_groups {
+        NiceAction {
+            targets: targets.clone(),
+            nice: *nice,
+            policy: NicePolicy::default(),
+        }
+        .preflight()
+        .with_context(|| format!("nice profile action preflight failed for nice={nice}"))?;
+    }
+
+    for (ioprio, targets) in &plan.ionice_groups {
+        IoPrioAction {
+            targets: targets.clone(),
+            ioprio: *ioprio,
+            policy: profile_ioprio_policy(),
+        }
+        .preflight()
+        .with_context(|| {
+            format!(
+                "I/O priority profile action preflight failed for ionice={}",
+                ioprio.label()
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn apply_profile_plan(
+    plan: &ProfileApplyPlan,
+    result: &mut ProfileApplyResult,
+) -> anyhow::Result<()> {
+    for planned in &plan.affinity_changes {
+        match affinity::set_affinity_raw(planned.record.tid, &planned.record.applied_mask) {
+            Ok(()) => result.affinity_records.push(planned.record.clone()),
+            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {}
+            Err(err) => {
+                anyhow::bail!(
+                    "failed to set affinity for TID {}: {err}",
+                    planned.record.tid
+                );
+            }
+        }
+    }
+
+    for (nice, targets) in &plan.nice_groups {
+        let action = NiceAction {
+            targets: targets.clone(),
+            nice: *nice,
+            policy: NicePolicy::default(),
+        };
+        run_audited_action("apply-profile nice", &action, false)
+            .with_context(|| format!("failed to apply profile nice={nice}"))?;
+    }
+
+    for (ioprio, targets) in &plan.ionice_groups {
+        let action = IoPrioAction {
+            targets: targets.clone(),
+            ioprio: *ioprio,
+            policy: profile_ioprio_policy(),
+        };
+        run_audited_action("apply-profile ionice", &action, false)
+            .with_context(|| format!("failed to apply profile I/O priority={}", ioprio.label()))?;
+    }
+
+    Ok(())
+}
+
+fn verify_affinity_plan(plan: &ProfileApplyPlan) -> anyhow::Result<()> {
+    for planned in &plan.affinity_changes {
+        match affinity::read_allowed_mask_raw(planned.record.tid) {
+            Ok(mask) if mask == planned.record.applied_mask => {}
+            Ok(mask) => {
+                anyhow::bail!(
+                    "affinity verify failed for TID {}: requested={} actual={}",
+                    planned.record.tid,
+                    planned.record.applied_mask.to_range_string(),
+                    mask.to_range_string()
+                );
+            }
+            Err(err) if err.raw_os_error() == Some(libc::ESRCH) => {}
+            Err(err) => {
+                anyhow::bail!(
+                    "failed to verify affinity for TID {}: {err}",
+                    planned.record.tid
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn result_from_plan(plan: &ProfileApplyPlan) -> ProfileApplyResult {
+    let mut affinity_records = plan.affinity_records();
+    affinity_records.sort_by_key(|record| record.tid);
+
+    ProfileApplyResult {
+        affinity_records,
+        nice_records: plan.nice_records.clone(),
+        ionice_records: plan.ionice_records.clone(),
+        summary: plan.summary.clone(),
+    }
+}
+
+fn profile_ioprio_policy() -> IoPrioPolicy {
+    IoPrioPolicy {
+        allow_ioprio_changes: true,
+        allow_realtime_class: true,
+        allow_none_class: true,
+        max_best_effort_level: 7,
+        require_strong_block_io_evidence: false,
+        strong_block_io_evidence: true,
+    }
+}
+
+fn task_has_complete_identity(task: &TaskInfo) -> bool {
+    task.process_starttime_ticks.is_some() && task.task_starttime_ticks.is_some()
+}
+
+fn anyhow_raw_os_error(err: &anyhow::Error) -> Option<i32> {
+    err.chain()
+        .find_map(|cause| cause.downcast_ref::<io::Error>())
+        .and_then(io::Error::raw_os_error)
 }
 
 fn matching_profile_rule<'a>(task: &TaskInfo, profile: &'a Profile) -> Option<&'a ProfileRule> {
@@ -453,15 +821,12 @@ pub fn profile_offline_cpu_warnings(profile: &Profile, online: &CpuMask) -> Vec<
         .iter()
         .enumerate()
         .filter_map(|(idx, rule)| {
-            if rule.affinity.is_subset_of(online) {
-                None
-            } else {
-                Some(ProfileCpuWarning {
-                    rule_index: idx,
-                    requested: rule.affinity.to_range_string(),
-                    online: online.to_range_string(),
-                })
-            }
+            let affinity = rule.affinity.as_ref()?;
+            (!affinity.is_subset_of(online)).then(|| ProfileCpuWarning {
+                rule_index: idx,
+                requested: affinity.to_range_string(),
+                online: online.to_range_string(),
+            })
         })
         .collect()
 }
@@ -483,12 +848,14 @@ fn warn_profile_offline_cpus(profile: &Profile) -> anyhow::Result<()> {
 }
 
 impl ProfileApplyCacheKey {
-    fn new(task: &TaskInfo, desired_mask: &CpuMask) -> Self {
+    fn new(task: &TaskInfo, rule: &ProfileRule) -> Self {
         Self {
             tid: task.tid,
             process_starttime_ticks: task.process_starttime_ticks,
             task_starttime_ticks: task.task_starttime_ticks,
-            desired_mask: desired_mask.clone(),
+            desired_affinity: rule.affinity.clone(),
+            desired_nice: rule.nice,
+            desired_ionice: rule.ionice,
         }
     }
 }
@@ -511,15 +878,23 @@ fn validate_profile(profile: Profile) -> anyhow::Result<Profile> {
         .context("failed to read online CPU mask while validating profile")?;
 
     for (i, rule) in profile.rules.iter().enumerate() {
-        if rule.affinity.is_empty() {
-            anyhow::bail!("profile rule {} is missing affinity", i);
-        }
-        if !rule.affinity.is_subset_of(&online) {
+        if rule.affinity.is_none() && rule.nice.is_none() && rule.ionice.is_none() {
             anyhow::bail!(
-                "profile rule {} requests CPUs not currently online. Online: {}",
-                i,
-                online.to_range_string()
+                "profile rule {} must specify at least one action field: affinity, nice, or ionice",
+                i
             );
+        }
+        if let Some(affinity) = &rule.affinity {
+            if affinity.is_empty() {
+                anyhow::bail!("profile rule {} has empty affinity", i);
+            }
+            if !affinity.is_subset_of(&online) {
+                anyhow::bail!(
+                    "profile rule {} requests CPUs not currently online. Online: {}",
+                    i,
+                    online.to_range_string()
+                );
+            }
         }
     }
 
@@ -550,7 +925,9 @@ struct ProfileToml {
 
 #[derive(Deserialize)]
 struct ProfileRuleToml {
-    affinity: String,
+    affinity: Option<String>,
+    nice: Option<i32>,
+    ionice: Option<String>,
     #[serde(default)]
     match_class: Vec<String>,
     #[serde(default)]
@@ -573,8 +950,29 @@ impl ProfileToml {
                 .map(CompiledPattern::new)
                 .collect::<anyhow::Result<Vec<_>>>()?;
 
+            let affinity = rule
+                .affinity
+                .as_deref()
+                .map(parse_affinity_value)
+                .transpose()?;
+            let ionice = rule.ionice.as_deref().map(parse_ionice_value).transpose()?;
+
+            if rule.nice.is_none() && affinity.is_none() && ionice.is_none() {
+                anyhow::bail!(
+                    "profile rule must specify at least one action field: affinity, nice, or ionice"
+                );
+            }
+
+            if let Some(nice) = rule.nice
+                && !(-20..=19).contains(&nice)
+            {
+                anyhow::bail!("nice value {nice} is outside Linux range -20..=19");
+            }
+
             rules.push(ProfileRule {
-                affinity: parse_affinity_value(&rule.affinity)?,
+                affinity,
+                nice: rule.nice,
+                ionice,
                 match_class,
                 match_comm,
             });
@@ -593,6 +991,37 @@ fn parse_affinity_value(value: &str) -> anyhow::Result<CpuMask> {
     } else {
         CpuMask::parse(value)
     }
+}
+
+fn parse_ionice_value(value: &str) -> anyhow::Result<IoPrioValue> {
+    let trimmed = value.trim().to_ascii_lowercase();
+
+    match trimmed.as_str() {
+        "idle" => return Ok(IoPrioValue::idle()),
+        "none" => return Ok(IoPrioValue::none()),
+        "best-effort" | "be" | "realtime" | "rt" => {
+            anyhow::bail!("ionice value {value:?} requires a level 0..=7")
+        }
+        _ => {}
+    }
+
+    let Some((class, level)) = trimmed.split_once(':') else {
+        anyhow::bail!("invalid ionice value {value:?}");
+    };
+    let level = level
+        .parse::<u8>()
+        .with_context(|| format!("invalid ionice level in {value:?}"))?;
+
+    let parsed = match class {
+        "best-effort" | "be" => IoPrioValue::best_effort(level),
+        "realtime" | "rt" => IoPrioValue::realtime(level),
+        "idle" => anyhow::bail!("ionice class idle must not specify a level"),
+        "none" => anyhow::bail!("ionice class none must not specify a level"),
+        _ => anyhow::bail!("invalid ionice class {class:?}"),
+    };
+
+    parsed.encode()?;
+    Ok(parsed)
 }
 
 fn parse_task_class(value: &str) -> anyhow::Result<TaskClass> {
@@ -628,6 +1057,7 @@ fn parse_task_class(value: &str) -> anyhow::Result<TaskClass> {
         "Recorder" => Ok(TaskClass::Recorder),
         "VirtualMachine" => Ok(TaskClass::VirtualMachine),
         "SteamRuntime" => Ok(TaskClass::SteamRuntime),
+        "Render" => Ok(TaskClass::Render),
         "Helper" => Ok(TaskClass::Helper),
         "Service" => Ok(TaskClass::Service),
         "Unknown" => Ok(TaskClass::Unknown),
@@ -646,9 +1076,23 @@ pub fn render_profiles_toml(profiles: &[Profile]) -> String {
 
         for rule in &profile.rules {
             out.push_str("[[profile.rules]]\n");
-            out.push_str("affinity = ");
-            out.push_str(&toml_quoted_string(&rule.affinity.to_range_string()));
-            out.push('\n');
+            if let Some(affinity) = &rule.affinity {
+                out.push_str("affinity = ");
+                out.push_str(&toml_quoted_string(&affinity.to_range_string()));
+                out.push('\n');
+            }
+
+            if let Some(nice) = rule.nice {
+                out.push_str("nice = ");
+                out.push_str(&nice.to_string());
+                out.push('\n');
+            }
+
+            if let Some(ionice) = rule.ionice {
+                out.push_str("ionice = ");
+                out.push_str(&toml_quoted_string(&ionice.label()));
+                out.push('\n');
+            }
 
             if !rule.match_class.is_empty() {
                 out.push_str("match_class = [");
@@ -753,12 +1197,33 @@ pub fn generate_topology_template() -> String {
     out.push_str("[[profile.rules]]\n");
     out.push_str("affinity = \"<edit-me>\"\n");
     out.push_str("match_class = [\"GameScope\", \"Compositor\"]\n");
+    out.push_str("\n[[profile.rules]]\n");
+    out.push_str("nice = 10\n");
+    out.push_str("ionice = \"idle\"\n");
+    out.push_str("match_class = [\"BuildJob\", \"Indexer\", \"PackageManager\"]\n");
     out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_task(tid: u32, class: TaskClass, comm: &str) -> TaskInfo {
+        TaskInfo {
+            tid,
+            process_pid: tid,
+            process_ppid: 1,
+            comm: comm.into(),
+            process_comm: "process".into(),
+            process_starttime_ticks: Some(u64::from(tid) * 10),
+            task_starttime_ticks: Some(u64::from(tid) * 10 + 1),
+            exe_dev: None,
+            exe_ino: None,
+            class,
+            sched_policy: None,
+            from_cgroup: false,
+        }
+    }
 
     #[test]
     fn parses_minimal_profile() {
@@ -778,7 +1243,7 @@ mod tests {
         assert_eq!(profiles.len(), 1);
         assert_eq!(profiles[0].name, "kcd # not a comment");
         let rule = &profiles[0].rules[0];
-        assert_eq!(rule.affinity.to_range_string(), "0-3");
+        assert_eq!(rule.affinity.as_ref().unwrap().to_range_string(), "0-3");
         assert_eq!(rule.match_class, vec![TaskClass::Game]);
         assert_eq!(
             rule.match_comm
@@ -794,7 +1259,9 @@ mod tests {
         let profile = Profile {
             name: "generated \"profile\"".to_owned(),
             rules: vec![ProfileRule {
-                affinity: CpuMask::parse("0-1").unwrap(),
+                affinity: Some(CpuMask::parse("0-1").unwrap()),
+                nice: Some(5),
+                ionice: Some(IoPrioValue::idle()),
                 match_class: vec![TaskClass::Game, TaskClass::GameRenderThread],
                 match_comm: vec![
                     CompiledPattern::new("RenderThread".to_owned()).unwrap(),
@@ -809,6 +1276,8 @@ mod tests {
         assert!(toml.contains("name = \"generated \\\"profile\\\"\""));
         assert!(toml.contains("[[profile.rules]]"));
         assert!(toml.contains("affinity = \"0-1\""));
+        assert!(toml.contains("nice = 5"));
+        assert!(toml.contains("ionice = \"idle\""));
         assert!(toml.contains("match_class = [\"Game\", \"GameRenderThread\"]"));
         assert!(toml.contains("match_comm = [\"RenderThread\", \"Main\"]"));
     }
@@ -828,7 +1297,122 @@ mod tests {
         .unwrap();
 
         assert_eq!(profiles.len(), 1);
-        assert!(!profiles[0].rules[0].affinity.is_empty());
+        assert!(!profiles[0].rules[0].affinity.as_ref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn profile_parser_accepts_nice_only_rule() {
+        let profiles = parse_profiles(
+            r#"
+            [[profile]]
+            name = "background"
+
+            [[profile.rules]]
+            match_class = ["Indexer"]
+            nice = 10
+            "#,
+        )
+        .unwrap();
+
+        let rule = &profiles[0].rules[0];
+        assert!(rule.affinity.is_none());
+        assert_eq!(rule.nice, Some(10));
+        assert_eq!(rule.ionice, None);
+    }
+
+    #[test]
+    fn profile_parser_accepts_ionice_only_rule() {
+        let profiles = parse_profiles(
+            r#"
+            [[profile]]
+            name = "background"
+
+            [[profile.rules]]
+            match_class = ["PackageManager"]
+            ionice = "idle"
+            "#,
+        )
+        .unwrap();
+
+        let rule = &profiles[0].rules[0];
+        assert!(rule.affinity.is_none());
+        assert_eq!(rule.nice, None);
+        assert_eq!(rule.ionice, Some(IoPrioValue::idle()));
+    }
+
+    #[test]
+    fn profile_parser_accepts_combined_affinity_nice_ionice_rule() {
+        let profiles = parse_profiles(
+            r#"
+            [[profile]]
+            name = "game-latency"
+
+            [[profile.rules]]
+            match_class = ["Game", "GameRenderThread"]
+            affinity = "0-3"
+            nice = -5
+            ionice = "be:2"
+            "#,
+        )
+        .unwrap();
+
+        let rule = &profiles[0].rules[0];
+        assert_eq!(rule.affinity.as_ref().unwrap().to_range_string(), "0-3");
+        assert_eq!(rule.nice, Some(-5));
+        assert_eq!(rule.ionice, Some(IoPrioValue::best_effort(2)));
+    }
+
+    #[test]
+    fn profile_parser_rejects_invalid_nice_range() {
+        let err = parse_profiles(
+            r#"
+            [[profile]]
+            name = "bad"
+
+            [[profile.rules]]
+            nice = 20
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("outside Linux range"));
+    }
+
+    #[test]
+    fn profile_parser_rejects_invalid_ionice_strings() {
+        for ionice in ["best-effort", "realtime", "be:8", "rt:9", "idle:4"] {
+            let err = parse_profiles(&format!(
+                r#"
+                [[profile]]
+                name = "bad"
+
+                [[profile.rules]]
+                ionice = "{ionice}"
+                "#
+            ))
+            .unwrap_err();
+
+            assert!(
+                format!("{err:#}").contains("ionice")
+                    || format!("{err:#}").contains("I/O priority")
+            );
+        }
+    }
+
+    #[test]
+    fn profile_parser_rejects_rule_with_no_action_fields() {
+        let err = parse_profiles(
+            r#"
+            [[profile]]
+            name = "bad"
+
+            [[profile.rules]]
+            match_class = ["Game"]
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("at least one action field"));
     }
 
     #[test]
@@ -909,7 +1493,9 @@ mod tests {
         let profile = Profile {
             name: "game".to_owned(),
             rules: vec![ProfileRule {
-                affinity: CpuMask::parse("0-1").unwrap(),
+                affinity: Some(CpuMask::parse("0-1").unwrap()),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::Game],
                 match_comm: Vec::new(),
             }],
@@ -967,7 +1553,9 @@ mod tests {
         let profile = Profile {
             name: "test".to_owned(),
             rules: vec![ProfileRule {
-                affinity: CpuMask::parse("0-1").unwrap(),
+                affinity: Some(CpuMask::parse("0-1").unwrap()),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::Game],
                 match_comm: Vec::new(),
             }],
@@ -986,8 +1574,229 @@ mod tests {
             ProfileApplySummary {
                 checked_tasks: 2,
                 pending_changes: 1,
+                pending_affinity: 1,
+                pending_nice: 0,
+                pending_ionice: 0,
             }
         );
+    }
+
+    #[test]
+    fn profile_plan_constructs_task_identity_for_priority_targets() {
+        let task = test_task(42, TaskClass::Indexer, "indexer");
+        let tasks = BTreeMap::from([(42, task)]);
+        let profile = Profile {
+            name: "priority".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: None,
+                nice: Some(10),
+                ionice: None,
+                match_class: vec![TaskClass::Indexer],
+                match_comm: Vec::new(),
+            }],
+        };
+
+        let plan = planned_profile_apply_with_readers(
+            &tasks,
+            &profile,
+            None,
+            |_| panic!("affinity should not be read"),
+            |_| Ok(0),
+            |_| Ok(0),
+        )
+        .unwrap();
+        let identity = &plan.nice_groups.get(&10).unwrap()[0];
+
+        assert_eq!(identity.tid, 42);
+        assert_eq!(identity.process_pid, Some(42));
+        assert_eq!(identity.comm.as_deref(), Some("indexer"));
+        assert_eq!(identity.starttime_ticks, Some(421));
+    }
+
+    #[test]
+    fn profile_apply_summary_counts_priority_actions_without_double_counting_tasks() {
+        let task = test_task(42, TaskClass::PackageManager, "pacman");
+        let tasks = BTreeMap::from([(42, task)]);
+        let profile = Profile {
+            name: "priority".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: None,
+                nice: Some(10),
+                ionice: Some(IoPrioValue::idle()),
+                match_class: vec![TaskClass::PackageManager],
+                match_comm: Vec::new(),
+            }],
+        };
+
+        let summary = profile_apply_summary_with_readers(
+            &tasks,
+            &profile,
+            |_| panic!("affinity should not be read"),
+            |_| Ok(0),
+            |_| Ok(IoPrioValue::best_effort(4).encode().unwrap()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            summary,
+            ProfileApplySummary {
+                checked_tasks: 1,
+                pending_changes: 1,
+                pending_affinity: 0,
+                pending_nice: 1,
+                pending_ionice: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn profile_apply_cache_invalidates_when_desired_nice_changes() {
+        let task = test_task(42, TaskClass::Indexer, "indexer");
+        let tasks = BTreeMap::from([(42, task)]);
+        let mut cache = ProfileApplyCache::default();
+        let mut nice_reads = 0;
+
+        let profile_nice_5 = Profile {
+            name: "priority".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: None,
+                nice: Some(5),
+                ionice: None,
+                match_class: vec![TaskClass::Indexer],
+                match_comm: Vec::new(),
+            }],
+        };
+        let profile_nice_6 = Profile {
+            name: "priority".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: None,
+                nice: Some(6),
+                ionice: None,
+                match_class: vec![TaskClass::Indexer],
+                match_comm: Vec::new(),
+            }],
+        };
+
+        let first = planned_profile_apply_with_readers(
+            &tasks,
+            &profile_nice_5,
+            Some(&mut cache),
+            |_| panic!("affinity should not be read"),
+            |_| {
+                nice_reads += 1;
+                Ok(5)
+            },
+            |_| Ok(0),
+        )
+        .unwrap();
+        assert!(first.is_empty());
+        assert_eq!(nice_reads, 1);
+
+        let second = planned_profile_apply_with_readers(
+            &tasks,
+            &profile_nice_5,
+            Some(&mut cache),
+            |_| panic!("affinity should not be read"),
+            |_| {
+                nice_reads += 1;
+                Ok(5)
+            },
+            |_| Ok(0),
+        )
+        .unwrap();
+        assert!(second.is_empty());
+        assert_eq!(nice_reads, 1);
+
+        let third = planned_profile_apply_with_readers(
+            &tasks,
+            &profile_nice_6,
+            Some(&mut cache),
+            |_| panic!("affinity should not be read"),
+            |_| {
+                nice_reads += 1;
+                Ok(5)
+            },
+            |_| Ok(0),
+        )
+        .unwrap();
+        assert_eq!(third.summary.pending_nice, 1);
+        assert_eq!(nice_reads, 2);
+    }
+
+    #[test]
+    fn profile_apply_cache_invalidates_when_desired_ionice_changes() {
+        let task = test_task(42, TaskClass::PackageManager, "pacman");
+        let tasks = BTreeMap::from([(42, task)]);
+        let mut cache = ProfileApplyCache::default();
+        let mut ionice_reads = 0;
+        let idle = IoPrioValue::idle();
+        let best_effort = IoPrioValue::best_effort(6);
+
+        let profile_idle = Profile {
+            name: "priority".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: None,
+                nice: None,
+                ionice: Some(idle),
+                match_class: vec![TaskClass::PackageManager],
+                match_comm: Vec::new(),
+            }],
+        };
+        let profile_be = Profile {
+            name: "priority".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: None,
+                nice: None,
+                ionice: Some(best_effort),
+                match_class: vec![TaskClass::PackageManager],
+                match_comm: Vec::new(),
+            }],
+        };
+
+        let first = planned_profile_apply_with_readers(
+            &tasks,
+            &profile_idle,
+            Some(&mut cache),
+            |_| panic!("affinity should not be read"),
+            |_| Ok(0),
+            |_| {
+                ionice_reads += 1;
+                Ok(idle.encode().unwrap())
+            },
+        )
+        .unwrap();
+        assert!(first.is_empty());
+        assert_eq!(ionice_reads, 1);
+
+        let second = planned_profile_apply_with_readers(
+            &tasks,
+            &profile_idle,
+            Some(&mut cache),
+            |_| panic!("affinity should not be read"),
+            |_| Ok(0),
+            |_| {
+                ionice_reads += 1;
+                Ok(idle.encode().unwrap())
+            },
+        )
+        .unwrap();
+        assert!(second.is_empty());
+        assert_eq!(ionice_reads, 1);
+
+        let third = planned_profile_apply_with_readers(
+            &tasks,
+            &profile_be,
+            Some(&mut cache),
+            |_| panic!("affinity should not be read"),
+            |_| Ok(0),
+            |_| {
+                ionice_reads += 1;
+                Ok(idle.encode().unwrap())
+            },
+        )
+        .unwrap();
+        assert_eq!(third.summary.pending_ionice, 1);
+        assert_eq!(ionice_reads, 2);
     }
 
     #[test]
@@ -1024,7 +1833,9 @@ mod tests {
         let profile = Profile {
             name: "game-render".to_owned(),
             rules: vec![ProfileRule {
-                affinity: CpuMask::parse("0").unwrap(),
+                affinity: Some(CpuMask::parse("0").unwrap()),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::Game],
                 match_comm: vec![CompiledPattern::new("RenderThread".to_owned()).unwrap()],
             }],
@@ -1055,7 +1866,9 @@ mod tests {
         let profile = Profile {
             name: "test".to_owned(),
             rules: vec![ProfileRule {
-                affinity: CpuMask::parse("0-1").unwrap(),
+                affinity: Some(CpuMask::parse("0-1").unwrap()),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::Game],
                 match_comm: Vec::new(),
             }],
@@ -1063,32 +1876,50 @@ mod tests {
         let mut cache = ProfileApplyCache::default();
         let mut reads = 0;
 
-        let first =
-            planned_affinity_changes_with_reader(&tasks, &profile, Some(&mut cache), |tid| {
+        let first = planned_profile_apply_with_readers(
+            &tasks,
+            &profile,
+            Some(&mut cache),
+            |tid| {
                 reads += 1;
                 assert_eq!(tid, 7);
                 Ok(CpuMask::parse("0-1").unwrap())
-            })
-            .unwrap();
+            },
+            |_| Ok(0),
+            |_| Ok(0),
+        )
+        .unwrap();
         assert!(first.is_empty());
         assert_eq!(reads, 1);
 
-        let second =
-            planned_affinity_changes_with_reader(&tasks, &profile, Some(&mut cache), |_| {
+        let second = planned_profile_apply_with_readers(
+            &tasks,
+            &profile,
+            Some(&mut cache),
+            |_| {
                 reads += 1;
                 Ok(CpuMask::parse("0-1").unwrap())
-            })
-            .unwrap();
+            },
+            |_| Ok(0),
+            |_| Ok(0),
+        )
+        .unwrap();
         assert!(second.is_empty());
         assert_eq!(reads, 1);
 
         cache.clear();
-        let third =
-            planned_affinity_changes_with_reader(&tasks, &profile, Some(&mut cache), |_| {
+        let third = planned_profile_apply_with_readers(
+            &tasks,
+            &profile,
+            Some(&mut cache),
+            |_| {
                 reads += 1;
                 Ok(CpuMask::parse("0-1").unwrap())
-            })
-            .unwrap();
+            },
+            |_| Ok(0),
+            |_| Ok(0),
+        )
+        .unwrap();
         assert!(third.is_empty());
         assert_eq!(reads, 2);
     }
@@ -1098,7 +1929,9 @@ mod tests {
         let profile = Profile {
             name: "test".to_owned(),
             rules: vec![ProfileRule {
-                affinity: CpuMask::parse("0-3").unwrap(),
+                affinity: Some(CpuMask::parse("0-3").unwrap()),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::Game],
                 match_comm: Vec::new(),
             }],
@@ -1118,7 +1951,9 @@ mod tests {
         let profile = Profile {
             name: "test".to_owned(),
             rules: vec![ProfileRule {
-                affinity: CpuMask::parse("0-1").unwrap(),
+                affinity: Some(CpuMask::parse("0-1").unwrap()),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::Game],
                 match_comm: Vec::new(),
             }],
@@ -1136,12 +1971,16 @@ mod tests {
             name: "test".to_owned(),
             rules: vec![
                 ProfileRule {
-                    affinity: CpuMask::parse("0-1").unwrap(),
+                    affinity: Some(CpuMask::parse("0-1").unwrap()),
+                    nice: None,
+                    ionice: None,
                     match_class: vec![TaskClass::Game],
                     match_comm: Vec::new(),
                 },
                 ProfileRule {
-                    affinity: CpuMask::parse("2-3").unwrap(),
+                    affinity: Some(CpuMask::parse("2-3").unwrap()),
+                    nice: None,
+                    ionice: None,
                     match_class: vec![TaskClass::GameHelper],
                     match_comm: Vec::new(),
                 },

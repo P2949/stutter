@@ -92,6 +92,28 @@ impl StartupRecoveryRollbackExecutor for RealStartupRecoveryRollbackExecutor {
     ) -> anyhow::Result<StartupRecoveryRollbackSummary> {
         match token {
             RollbackToken::CpuAffinityRestoreFile { path, .. } => {
+                if crate::profile_restore::load_restore_state(path).is_ok() {
+                    let summary = crate::profile_restore::restore_saved(path).with_context(|| {
+                        format!(
+                            "failed to restore profile state from crash-recovery restore file {}",
+                            path.display()
+                        )
+                    })?;
+
+                    return Ok(StartupRecoveryRollbackSummary {
+                        affected_tasks: summary.restored_total(),
+                        message: format!(
+                            "affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={} errors={}",
+                            summary.affinity,
+                            summary.nice,
+                            summary.ionice,
+                            summary.skipped_dead,
+                            summary.skipped_identity_mismatch,
+                            summary.errors
+                        ),
+                    });
+                }
+
                 let summary = crate::affinity::restore_saved(path).with_context(|| {
                     format!(
                         "failed to restore CPU affinity from crash-recovery restore file {}",
