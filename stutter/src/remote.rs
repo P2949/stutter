@@ -60,6 +60,61 @@ pub struct RunsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutotuneStartRequest {
+    pub mode: String,
+    pub watch_process: Option<String>,
+    pub tree_pid: Option<u32>,
+    pub profiles: Option<String>,
+    pub config: Option<String>,
+    pub duration_seconds: Option<u64>,
+    pub decision_log: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutotuneStatusResponse {
+    pub active: bool,
+    pub mode: Option<String>,
+    pub watch_process: Option<String>,
+    pub tree_pid: Option<u32>,
+    pub started_unix_nanos: Option<u128>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutotuneStartResponse {
+    pub status: String,
+    pub mode: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutotuneStopResponse {
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutotuneRestoreResponse {
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutotuneHistoryResponse {
+    pub path: String,
+    pub events: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutotuneConfigResponse {
+    pub default_mode: String,
+    pub supported_modes: Vec<String>,
+    pub apply_low_risk_remote_enabled: bool,
+    pub local_only_by_default: bool,
+    pub history_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VersionResponse {
     pub name: String,
     pub version: String,

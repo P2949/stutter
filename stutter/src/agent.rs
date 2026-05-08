@@ -22,9 +22,11 @@ use tokio::{
 use crate::{
     cli::Config,
     remote::{
-        AgentFeatureFlags, CapabilitiesResponse, HealthResponse, RecordStatusResponse,
-        RemoteMonitorRequest, RunsResponse, StartRecordResponse, StopRecordResponse,
-        VersionResponse,
+        AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
+        AutotuneRestoreResponse, AutotuneStartRequest, AutotuneStartResponse,
+        AutotuneStatusResponse, AutotuneStopResponse, CapabilitiesResponse, HealthResponse,
+        RecordStatusResponse, RemoteMonitorRequest, RunsResponse, StartRecordResponse,
+        StopRecordResponse, VersionResponse,
     },
 };
 
@@ -73,9 +75,18 @@ pub struct AgentAuth {
 
 pub struct AgentState {
     pub active_run: Mutex<Option<RunHandle>>,
+    pub active_autotune: Mutex<Option<AutotuneRunHandle>>,
     pub runs_dir: PathBuf,
     pub auth: AgentAuth,
     pub limits: AgentLimits,
+}
+
+#[derive(Clone, Debug)]
+pub struct AutotuneRunHandle {
+    pub mode: String,
+    pub watch_process: Option<String>,
+    pub tree_pid: Option<u32>,
+    pub started_unix_nanos: u128,
 }
 
 pub struct RunHandle {
@@ -131,6 +142,7 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
 
     let state = Arc::new(AgentState {
         active_run: Mutex::new(None),
+        active_autotune: Mutex::new(None),
         runs_dir: config.runs_dir,
         auth: AgentAuth {
             bearer_token: config.bearer_token,
@@ -149,6 +161,12 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
         .route("/record/start", post(start_record_handler))
         .route("/record/stop", post(stop_record_handler))
         .route("/record/status", get(status_handler))
+        .route("/autotune/status", get(autotune_status_handler))
+        .route("/autotune/start", post(autotune_start_handler))
+        .route("/autotune/stop", post(autotune_stop_handler))
+        .route("/autotune/restore", post(autotune_restore_handler))
+        .route("/autotune/history", get(autotune_history_handler))
+        .route("/autotune/config", get(autotune_config_handler))
         .route("/runs", get(list_runs_handler))
         .route("/runs/:id/session.json", get(get_session_handler))
         .route("/runs/:id/artifact/:name", get(get_artifact_handler))
@@ -535,6 +553,252 @@ async fn get_artifact_handler(
     }
 }
 
+async fn autotune_status_handler(
+    State(state): State<Arc<AgentState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(status) = authorize(&headers, &state.auth) {
+        return status.into_response();
+    }
+
+    let active = state.active_autotune.lock().await;
+    let response = match active.as_ref() {
+        Some(handle) => AutotuneStatusResponse {
+            active: true,
+            mode: Some(handle.mode.clone()),
+            watch_process: handle.watch_process.clone(),
+            tree_pid: handle.tree_pid,
+            started_unix_nanos: Some(handle.started_unix_nanos),
+            message: "autotune observe/suggest session active".to_owned(),
+        },
+        None => AutotuneStatusResponse {
+            active: false,
+            mode: None,
+            watch_process: None,
+            tree_pid: None,
+            started_unix_nanos: None,
+            message: "no autotune session active".to_owned(),
+        },
+    };
+
+    Json(response).into_response()
+}
+
+async fn autotune_start_handler(
+    State(state): State<Arc<AgentState>>,
+    headers: HeaderMap,
+    Json(request): Json<AutotuneStartRequest>,
+) -> impl IntoResponse {
+    if let Err(status) = authorize(&headers, &state.auth) {
+        audit_agent_event("remote-autotune-start", false, 0, "unauthorized".to_owned());
+        return status.into_response();
+    }
+
+    let mode = request.mode.trim().to_owned();
+    if mode != "observe" && mode != "suggest" {
+        audit_agent_event(
+            "remote-autotune-start",
+            false,
+            0,
+            format!("rejected unsupported remote autotune mode={mode}"),
+        );
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "remote autotune apply mode is not implemented; use mode observe or suggest"
+                    .to_owned(),
+            }),
+        )
+            .into_response();
+    }
+
+    if request.watch_process.is_none() && request.tree_pid.is_none() {
+        audit_agent_event(
+            "remote-autotune-start",
+            false,
+            0,
+            "missing watch_process or tree_pid".to_owned(),
+        );
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "autotune start requires watch_process or tree_pid".to_owned(),
+            }),
+        )
+            .into_response();
+    }
+
+    let mut active = state.active_autotune.lock().await;
+    if active.is_some() {
+        audit_agent_event(
+            "remote-autotune-start",
+            false,
+            0,
+            "conflict: autotune session already active".to_owned(),
+        );
+        return (
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: "an autotune session is already active".to_owned(),
+            }),
+        )
+            .into_response();
+    }
+
+    *active = Some(AutotuneRunHandle {
+        mode: mode.clone(),
+        watch_process: request.watch_process.clone(),
+        tree_pid: request.tree_pid,
+        started_unix_nanos: crate::audit::unix_nanos_now(),
+    });
+
+    audit_agent_event(
+        "remote-autotune-start",
+        true,
+        0,
+        format!(
+            "mode={} watch_process={:?} tree_pid={:?}",
+            mode, request.watch_process, request.tree_pid
+        ),
+    );
+
+    Json(AutotuneStartResponse {
+        status: "started".to_owned(),
+        mode,
+        message: "remote autotune observe/suggest session started; apply is not enabled".to_owned(),
+    })
+    .into_response()
+}
+
+async fn autotune_stop_handler(
+    State(state): State<Arc<AgentState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(status) = authorize(&headers, &state.auth) {
+        return status.into_response();
+    }
+
+    let mut active = state.active_autotune.lock().await;
+    let existed = active.take().is_some();
+
+    audit_agent_event(
+        "remote-autotune-stop",
+        true,
+        0,
+        format!("active_before_stop={existed}"),
+    );
+
+    Json(AutotuneStopResponse {
+        status: if existed {
+            "stopped".to_owned()
+        } else {
+            "no_active_session".to_owned()
+        },
+        message: if existed {
+            "remote autotune session stopped".to_owned()
+        } else {
+            "no remote autotune session was active".to_owned()
+        },
+    })
+    .into_response()
+}
+
+async fn autotune_restore_handler(
+    State(state): State<Arc<AgentState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(status) = authorize(&headers, &state.auth) {
+        audit_agent_event(
+            "remote-autotune-restore",
+            false,
+            0,
+            "unauthorized".to_owned(),
+        );
+        return status.into_response();
+    }
+
+    audit_agent_event(
+        "remote-autotune-restore",
+        true,
+        0,
+        "restore requested; no remote apply-low-risk action is active".to_owned(),
+    );
+
+    Json(AutotuneRestoreResponse {
+        status: "no_active_apply".to_owned(),
+        message: "remote apply-low-risk is not enabled, so no remote autotune action was restored"
+            .to_owned(),
+    })
+    .into_response()
+}
+
+async fn autotune_history_handler(
+    State(state): State<Arc<AgentState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(status) = authorize(&headers, &state.auth) {
+        return status.into_response();
+    }
+
+    let path = crate::autotune::history::default_autotune_history_path();
+    let events = match crate::autotune::history::read_autotune_history_events(&path) {
+        Ok(events) => events,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("failed to read autotune history: {err:#}"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let values = events
+        .into_iter()
+        .map(serde_json::to_value)
+        .collect::<Result<Vec<_>, _>>();
+
+    let events = match values {
+        Ok(values) => values,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("failed to encode autotune history: {err}"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    Json(AutotuneHistoryResponse {
+        path: path.display().to_string(),
+        events,
+    })
+    .into_response()
+}
+
+async fn autotune_config_handler(
+    State(state): State<Arc<AgentState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(status) = authorize(&headers, &state.auth) {
+        return status.into_response();
+    }
+
+    Json(AutotuneConfigResponse {
+        default_mode: "observe".to_owned(),
+        supported_modes: vec!["observe".to_owned(), "suggest".to_owned()],
+        apply_low_risk_remote_enabled: false,
+        local_only_by_default: true,
+        history_path: crate::autotune::history::default_autotune_history_path()
+            .display()
+            .to_string(),
+    })
+    .into_response()
+}
+
 async fn version_handler() -> impl IntoResponse {
     Json(version_response())
 }
@@ -565,6 +829,12 @@ fn capabilities_response(state: &AgentState) -> CapabilitiesResponse {
             "/record/start".to_owned(),
             "/record/stop".to_owned(),
             "/record/status".to_owned(),
+            "/autotune/status".to_owned(),
+            "/autotune/start".to_owned(),
+            "/autotune/stop".to_owned(),
+            "/autotune/restore".to_owned(),
+            "/autotune/history".to_owned(),
+            "/autotune/config".to_owned(),
             "/runs".to_owned(),
             "/runs/:id/session.json".to_owned(),
             "/runs/:id/artifact/:name".to_owned(),
@@ -762,6 +1032,7 @@ mod tests {
     fn test_agent_state() -> AgentState {
         AgentState {
             active_run: Mutex::new(None),
+            active_autotune: Mutex::new(None),
             runs_dir: PathBuf::from("/tmp/stutter-agent-test-runs"),
             auth: AgentAuth { bearer_token: None },
             limits: AgentLimits {
@@ -791,6 +1062,196 @@ mod tests {
         assert!(json.contains("\"autotune_observe\":true"));
         assert!(json.contains("\"autotune_suggest\":true"));
         assert!(json.contains("\"autotune_apply_low_risk\":false"));
+    }
+
+    #[test]
+    fn capabilities_response_lists_autotune_routes() {
+        let state = test_agent_state();
+        let response = capabilities_response(&state);
+
+        assert!(
+            response
+                .supported_routes
+                .contains(&"/autotune/status".to_owned())
+        );
+        assert!(
+            response
+                .supported_routes
+                .contains(&"/autotune/start".to_owned())
+        );
+        assert!(
+            response
+                .supported_routes
+                .contains(&"/autotune/stop".to_owned())
+        );
+        assert!(
+            response
+                .supported_routes
+                .contains(&"/autotune/restore".to_owned())
+        );
+        assert!(
+            response
+                .supported_routes
+                .contains(&"/autotune/history".to_owned())
+        );
+        assert!(
+            response
+                .supported_routes
+                .contains(&"/autotune/config".to_owned())
+        );
+    }
+
+    #[test]
+    fn capabilities_response_advertises_safe_autotune_feature_flags() {
+        let state = test_agent_state();
+        let response = capabilities_response(&state);
+
+        assert!(response.features.autotune_observe);
+        assert!(response.features.autotune_suggest);
+        assert!(!response.features.autotune_apply_low_risk);
+    }
+
+    #[tokio::test]
+    async fn autotune_start_accepts_observe_mode_with_tree_pid() {
+        let state = Arc::new(test_agent_state());
+        let response = autotune_start_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Json(AutotuneStartRequest {
+                mode: "observe".to_owned(),
+                watch_process: None,
+                tree_pid: Some(1234),
+                profiles: None,
+                config: None,
+                duration_seconds: Some(30),
+                decision_log: None,
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let active = state.active_autotune.lock().await;
+        assert!(active.is_some());
+        assert_eq!(active.as_ref().unwrap().mode, "observe");
+        assert_eq!(active.as_ref().unwrap().tree_pid, Some(1234));
+    }
+
+    #[tokio::test]
+    async fn autotune_start_accepts_suggest_mode_with_watch_process() {
+        let state = Arc::new(test_agent_state());
+        let response = autotune_start_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Json(AutotuneStartRequest {
+                mode: "suggest".to_owned(),
+                watch_process: Some("Game.exe".to_owned()),
+                tree_pid: None,
+                profiles: None,
+                config: None,
+                duration_seconds: Some(30),
+                decision_log: None,
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let active = state.active_autotune.lock().await;
+        assert!(active.is_some());
+        assert_eq!(active.as_ref().unwrap().mode, "suggest");
+        assert_eq!(
+            active.as_ref().unwrap().watch_process.as_deref(),
+            Some("Game.exe")
+        );
+    }
+
+    #[tokio::test]
+    async fn autotune_start_rejects_apply_low_risk_mode() {
+        let state = Arc::new(test_agent_state());
+        let response = autotune_start_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Json(AutotuneStartRequest {
+                mode: "apply-low-risk".to_owned(),
+                watch_process: Some("Game.exe".to_owned()),
+                tree_pid: None,
+                profiles: None,
+                config: None,
+                duration_seconds: Some(30),
+                decision_log: None,
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(state.active_autotune.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn autotune_start_requires_target_selector() {
+        let state = Arc::new(test_agent_state());
+        let response = autotune_start_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Json(AutotuneStartRequest {
+                mode: "observe".to_owned(),
+                watch_process: None,
+                tree_pid: None,
+                profiles: None,
+                config: None,
+                duration_seconds: Some(30),
+                decision_log: None,
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(state.active_autotune.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn autotune_stop_clears_active_session() {
+        let state = Arc::new(test_agent_state());
+        *state.active_autotune.lock().await = Some(AutotuneRunHandle {
+            mode: "observe".to_owned(),
+            watch_process: Some("Game.exe".to_owned()),
+            tree_pid: None,
+            started_unix_nanos: crate::audit::unix_nanos_now(),
+        });
+
+        let response = autotune_stop_handler(State(state.clone()), HeaderMap::new())
+            .await
+            .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(state.active_autotune.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn autotune_restore_is_safe_noop_until_remote_apply_exists() {
+        let state = Arc::new(test_agent_state());
+
+        let response = autotune_restore_handler(State(state), HeaderMap::new())
+            .await
+            .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn autotune_config_reports_apply_low_risk_disabled() {
+        let state = Arc::new(test_agent_state());
+
+        let response = autotune_config_handler(State(state), HeaderMap::new())
+            .await
+            .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[test]
@@ -1057,6 +1518,7 @@ mod tests {
     fn capabilities_report_limits_and_artifacts() {
         let state = AgentState {
             active_run: Mutex::new(None),
+            active_autotune: Mutex::new(None),
             runs_dir: PathBuf::from("."),
             auth: AgentAuth { bearer_token: None },
             limits: AgentLimits {
