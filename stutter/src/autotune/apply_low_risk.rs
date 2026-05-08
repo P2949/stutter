@@ -9,9 +9,13 @@ use std::{
 use anyhow::Context;
 
 #[cfg(test)]
-use crate::actions::{ActionState, ActionWarning};
+use crate::actions::{ActionId, ActionWarning};
 use crate::{
-    actions::{RollbackToken, SafetyClass, TuningAction, cpu_affinity::CpuAffinityProfileAction},
+    actions::{
+        ActionState, RollbackToken, SafetyClass, TuningAction,
+        cpu_affinity::CpuAffinityProfileAction,
+        runner::{AuditedActionResult, run_audited_action, run_audited_action_with_audit_path},
+    },
     autotune::candidate::{
         CandidateAction, CandidateDryRunRecord, dry_run_candidates,
         dry_run_record_from_action_state, generate_profile_candidates,
@@ -106,6 +110,46 @@ impl LowRiskActionExecutor for CpuAffinityCandidateExecutor {
     }
 }
 
+pub struct AuditedRollbackGuard<'a, A: TuningAction + ?Sized> {
+    action: &'a A,
+    token: Option<RollbackToken>,
+    rollback_performed: bool,
+}
+
+impl<'a, A: TuningAction + ?Sized> AuditedRollbackGuard<'a, A> {
+    pub fn new(action: &'a A, token: RollbackToken) -> Self {
+        Self {
+            action,
+            token: Some(token),
+            rollback_performed: false,
+        }
+    }
+
+    pub fn rollback_now(&mut self) -> anyhow::Result<()> {
+        if let Some(token) = self.token.take() {
+            self.action.rollback(&token)?;
+            self.rollback_performed = true;
+        }
+        Ok(())
+    }
+
+    pub fn rollback_performed(&self) -> bool {
+        self.rollback_performed
+    }
+}
+
+impl<A: TuningAction + ?Sized> Drop for AuditedRollbackGuard<'_, A> {
+    fn drop(&mut self) {
+        if let Some(token) = self.token.take() {
+            if let Err(err) = self.action.rollback(&token) {
+                log::error!("autotune_candidate_rollback_failed error={err:#}");
+            } else {
+                self.rollback_performed = true;
+            }
+        }
+    }
+}
+
 struct RollbackGuard<'a, E: LowRiskActionExecutor + ?Sized> {
     executor: &'a mut E,
     token: Option<RollbackToken>,
@@ -147,6 +191,112 @@ impl<E: LowRiskActionExecutor + ?Sized> Drop for RollbackGuard<'_, E> {
             }
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct AuditedCandidateApplyOutcome {
+    pub candidate_name: String,
+    pub action_kind: String,
+    pub affected_tasks: usize,
+    pub safety_class: SafetyClass,
+    pub state: ActionState,
+    pub rollback: RollbackToken,
+}
+
+pub fn action_from_candidate(
+    candidate: CandidateAction,
+) -> anyhow::Result<(String, CpuAffinityProfileAction)> {
+    match candidate {
+        CandidateAction::CpuAffinityProfile {
+            profile_name,
+            profile,
+            tree_pid,
+        } => Ok((
+            profile_name,
+            CpuAffinityProfileAction {
+                tree_pid,
+                profile,
+                force_restore_overwrite: false,
+            },
+        )),
+        #[cfg(test)]
+        CandidateAction::Fake { .. } => {
+            anyhow::bail!("apply-low-risk only supports CPU affinity profile actions")
+        }
+    }
+}
+
+pub fn apply_candidate_with_audit(
+    candidate: CandidateAction,
+) -> anyhow::Result<AuditedCandidateApplyOutcome> {
+    let (candidate_name, action) = action_from_candidate(candidate)?;
+    apply_cpu_affinity_candidate_with_audit(candidate_name, &action)
+}
+
+pub fn apply_cpu_affinity_candidate_with_audit(
+    candidate_name: String,
+    action: &CpuAffinityProfileAction,
+) -> anyhow::Result<AuditedCandidateApplyOutcome> {
+    ensure_low_risk_action_allowed("cpu_affinity_profile", &action.safety_class())?;
+
+    let AuditedActionResult {
+        state, rollback, ..
+    } = run_audited_action("autotune candidate", action, false).with_context(|| {
+        format!(
+            "audited apply failed for autotune candidate '{}'",
+            candidate_name
+        )
+    })?;
+
+    let rollback = rollback.with_context(|| {
+        format!(
+            "audited apply for autotune candidate '{}' succeeded without rollback token",
+            candidate_name
+        )
+    })?;
+
+    Ok(AuditedCandidateApplyOutcome {
+        candidate_name,
+        action_kind: "cpu_affinity_profile".to_owned(),
+        affected_tasks: rollback.affected_tasks(),
+        safety_class: action.safety_class(),
+        state,
+        rollback,
+    })
+}
+
+pub fn apply_cpu_affinity_candidate_with_audit_path_for_tests(
+    candidate_name: String,
+    action: &CpuAffinityProfileAction,
+    audit_path: &std::path::Path,
+) -> anyhow::Result<AuditedCandidateApplyOutcome> {
+    ensure_low_risk_action_allowed("cpu_affinity_profile", &action.safety_class())?;
+
+    let AuditedActionResult {
+        state, rollback, ..
+    } = run_audited_action_with_audit_path("autotune candidate", action, false, audit_path)
+        .with_context(|| {
+            format!(
+                "audited apply failed for autotune candidate '{}'",
+                candidate_name
+            )
+        })?;
+
+    let rollback = rollback.with_context(|| {
+        format!(
+            "audited apply for autotune candidate '{}' succeeded without rollback token",
+            candidate_name
+        )
+    })?;
+
+    Ok(AuditedCandidateApplyOutcome {
+        candidate_name,
+        action_kind: "cpu_affinity_profile".to_owned(),
+        affected_tasks: rollback.affected_tasks(),
+        safety_class: action.safety_class(),
+        state,
+        rollback,
+    })
 }
 
 pub async fn run_apply_low_risk_candidate(
@@ -406,7 +556,28 @@ pub async fn apply_low_risk_command(
     let duration = Duration::from_secs(input.duration_seconds.unwrap_or(30));
     let plan = plan_apply_low_risk_from_profiles(tree_pid, profiles_path, &profiles, duration)?;
 
-    run_apply_low_risk_candidate(plan.candidate, plan.duration).await
+    let (candidate_name, action) = action_from_candidate(plan.candidate)?;
+    let audited = apply_cpu_affinity_candidate_with_audit(candidate_name, &action)?;
+    let mut guard = AuditedRollbackGuard::new(&action, audited.rollback.clone());
+
+    if !plan.duration.is_zero() {
+        tokio::time::sleep(plan.duration).await;
+    }
+
+    guard.rollback_now().with_context(|| {
+        format!(
+            "rollback failed for autotune candidate '{}'",
+            audited.candidate_name
+        )
+    })?;
+
+    Ok(ApplyLowRiskOutcome {
+        candidate_name: audited.candidate_name,
+        action_kind: audited.action_kind,
+        affected_tasks: audited.affected_tasks,
+        safety_class: audited.safety_class,
+        rollback_performed: guard.rollback_performed(),
+    })
 }
 
 #[cfg(test)]
@@ -502,6 +673,157 @@ mod tests {
 
         assert!(err.contains("baseline window is not ready"));
         assert!(err.contains("baseline window not complete"));
+    }
+
+    struct TestAction {
+        id: &'static str,
+        safety_class: SafetyClass,
+        should_fail_apply: bool,
+        should_fail_verify: bool,
+        affected_tasks: usize,
+    }
+
+    impl TuningAction for TestAction {
+        fn id(&self) -> ActionId {
+            ActionId(self.id.to_owned())
+        }
+
+        fn describe(&self) -> String {
+            "test action".to_owned()
+        }
+
+        fn safety_class(&self) -> SafetyClass {
+            self.safety_class.clone()
+        }
+
+        fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
+            Ok(Vec::new())
+        }
+
+        fn dry_run(&self) -> anyhow::Result<ActionState> {
+            Ok(ActionState {
+                applied: false,
+                affected_tasks: self.affected_tasks,
+                checked_tasks: self.affected_tasks,
+                pending_changes: self.affected_tasks,
+                warnings: Vec::new(),
+            })
+        }
+
+        fn apply(&self) -> anyhow::Result<RollbackToken> {
+            if self.should_fail_apply {
+                anyhow::bail!("intentional apply failure");
+            }
+
+            Ok(RollbackToken::CpuAffinityRestoreFile {
+                path: PathBuf::from("/tmp/stutter-test-restore.json"),
+                affected_tasks: self.affected_tasks,
+            })
+        }
+
+        fn verify(&self) -> anyhow::Result<ActionState> {
+            if self.should_fail_verify {
+                anyhow::bail!("intentional verify failure");
+            }
+
+            Ok(ActionState {
+                applied: true,
+                affected_tasks: self.affected_tasks,
+                checked_tasks: self.affected_tasks,
+                pending_changes: 0,
+                warnings: Vec::new(),
+            })
+        }
+
+        fn rollback(&self, _token: &RollbackToken) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn audited_runner_logs_success_for_autotune_candidate() {
+        let dir = temp_dir("audited-success");
+        let audit_path = dir.join("audit.jsonl");
+        let action = TestAction {
+            id: "test-candidate",
+            safety_class: SafetyClass::ReversibleLowRisk,
+            should_fail_apply: false,
+            should_fail_verify: false,
+            affected_tasks: 31,
+        };
+
+        let result =
+            run_audited_action_with_audit_path("autotune candidate", &action, false, &audit_path)
+                .unwrap();
+
+        assert_eq!(result.state.affected_tasks, 31);
+        assert!(result.rollback.is_some());
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].command, "autotune candidate");
+        assert_eq!(events[0].action_id.as_deref(), Some("test-candidate"));
+        assert_eq!(events[0].safety_class, Some(SafetyClass::ReversibleLowRisk));
+        assert!(!events[0].dry_run);
+        assert!(events[0].success);
+        assert_eq!(events[0].affected_tasks, 31);
+        assert!(events[0].message.contains("action applied and verified"));
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn audited_runner_logs_apply_failure_for_autotune_candidate() {
+        let dir = temp_dir("audited-apply-failure");
+        let audit_path = dir.join("audit.jsonl");
+        let action = TestAction {
+            id: "test-candidate",
+            safety_class: SafetyClass::ReversibleLowRisk,
+            should_fail_apply: true,
+            should_fail_verify: false,
+            affected_tasks: 31,
+        };
+
+        let result =
+            run_audited_action_with_audit_path("autotune candidate", &action, false, &audit_path);
+
+        assert!(result.is_err());
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].command, "autotune candidate");
+        assert!(!events[0].success);
+        assert!(events[0].message.contains("apply failed"));
+        assert!(events[0].message.contains("intentional apply failure"));
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn audited_runner_logs_verify_failure_for_autotune_candidate() {
+        let dir = temp_dir("audited-verify-failure");
+        let audit_path = dir.join("audit.jsonl");
+        let action = TestAction {
+            id: "test-candidate",
+            safety_class: SafetyClass::ReversibleLowRisk,
+            should_fail_apply: false,
+            should_fail_verify: true,
+            affected_tasks: 31,
+        };
+
+        let result =
+            run_audited_action_with_audit_path("autotune candidate", &action, false, &audit_path);
+
+        assert!(result.is_err());
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].command, "autotune candidate");
+        assert!(!events[0].success);
+        assert!(events[0].message.contains("verify failed"));
+        assert!(events[0].message.contains("intentional verify failure"));
+
+        fs::remove_dir_all(dir).ok();
     }
 
     #[tokio::test]
