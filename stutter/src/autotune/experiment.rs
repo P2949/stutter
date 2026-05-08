@@ -111,6 +111,11 @@ impl ActiveExperiment {
         self.phase = ExperimentPhase::CandidateReverting;
     }
 
+    pub fn mark_candidate_kept_and_enter_cooldown(&mut self) {
+        self.rollback = None;
+        self.phase = ExperimentPhase::Cooldown;
+    }
+
     pub fn mark_cooldown(&mut self) {
         self.phase = ExperimentPhase::Cooldown;
     }

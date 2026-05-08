@@ -524,6 +524,16 @@ pub fn plan_apply_low_risk_from_profiles(
     })
 }
 
+pub fn resolve_low_risk_experiment<
+    E: crate::autotune::resolution::ExperimentRollbackExecutor + ?Sized,
+>(
+    experiment: &mut crate::autotune::experiment::ActiveExperiment,
+    result: &crate::autotune::comparison::ExperimentResult,
+    rollback_executor: &mut E,
+) -> anyhow::Result<crate::autotune::resolution::ExperimentResolution> {
+    crate::autotune::resolution::resolve_experiment(experiment, result, rollback_executor)
+}
+
 pub fn compare_low_risk_experiment(
     baseline: &crate::autotune::experiment::WindowScore,
     candidate: &crate::autotune::experiment::WindowScore,
@@ -686,6 +696,79 @@ mod tests {
             self.rollback_calls += 1;
             Ok(())
         }
+    }
+
+    #[test]
+    fn low_risk_resolution_reverts_inconclusive_result() {
+        use crate::{
+            actions::RollbackToken,
+            affinity::CpuMask,
+            autotune::{
+                candidate::CandidateAction,
+                comparison::ExperimentResult,
+                experiment::{ActiveExperiment, ExperimentId, ExperimentPhase, WindowScore},
+                resolution::{ExperimentResolution, ExperimentRollbackExecutor},
+            },
+            process_tree::TaskClass,
+            profiles::{Profile, ProfileRule},
+            scorer::StutterScore,
+        };
+
+        struct FakeRollback {
+            calls: usize,
+        }
+
+        impl ExperimentRollbackExecutor for FakeRollback {
+            fn rollback(&mut self, _token: &RollbackToken) -> anyhow::Result<()> {
+                self.calls += 1;
+                Ok(())
+            }
+        }
+
+        let profile = Profile {
+            name: "game-main".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: CpuMask::parse("0").unwrap(),
+                match_class: vec![TaskClass::Game],
+                match_comm: Vec::new(),
+            }],
+        };
+        let candidate = CandidateAction::cpu_affinity_profile(profile, 1234);
+        let score = WindowScore {
+            started_unix_nanos: 100,
+            finished_unix_nanos: 200,
+            interval_count: 10,
+            scored_samples: 100,
+            scored_task_count: 2,
+            score: StutterScore {
+                total: 1_000,
+                ..StutterScore::default()
+            },
+        };
+        let mut experiment =
+            ActiveExperiment::new(ExperimentId::new("low-risk-test"), candidate, score, 1_000);
+        experiment.mark_candidate_applied(
+            1_100,
+            RollbackToken::CpuAffinityRestoreFile {
+                path: std::path::PathBuf::from("/tmp/stutter-restore.json"),
+                affected_tasks: 31,
+            },
+        );
+
+        let mut rollback = FakeRollback { calls: 0 };
+        let resolution = resolve_low_risk_experiment(
+            &mut experiment,
+            &ExperimentResult::Inconclusive {
+                reason: "not enough improvement".to_owned(),
+            },
+            &mut rollback,
+        )
+        .unwrap();
+
+        assert!(matches!(resolution, ExperimentResolution::Reverted { .. }));
+        assert_eq!(rollback.calls, 1);
+        assert_eq!(experiment.phase, ExperimentPhase::Cooldown);
+        assert!(!experiment.has_rollback());
     }
 
     #[test]
