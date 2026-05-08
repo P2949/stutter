@@ -621,6 +621,196 @@ mod foreground_focus_tests {
     }
 
     #[test]
+    fn foreground_source_preserves_existing_group_roots_when_group_contains_foreground_pid() {
+        let foreground = foreground_snapshot(Some(11));
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(foreground),
+            vec![test_group(
+                FocusGroupKind::Game,
+                vec![10],
+                vec![10, 11],
+                Some(10),
+                "game-with-helper-root",
+                0.40,
+            )],
+        );
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
+
+        assert_eq!(snapshot.groups.len(), 1);
+        assert_eq!(snapshot.groups[0].display_name, "game-with-helper-root");
+        assert_eq!(snapshot.groups[0].root_pids, vec![10]);
+        assert_eq!(snapshot.groups[0].member_pids, vec![10, 11]);
+        assert!(
+            snapshot.groups[0].reasons.iter().all(|reason| reason
+                != "foreground window PID selected but no known focus group matched")
+        );
+    }
+
+    #[test]
+    fn foreground_source_adds_conservative_unknown_fallback_when_no_group_contains_foreground_pid()
+    {
+        let foreground = foreground_snapshot(Some(30));
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(foreground),
+            vec![test_group(
+                FocusGroupKind::Browser,
+                vec![20],
+                vec![20, 21],
+                Some(20),
+                "browser",
+                0.90,
+            )],
+        );
+        // Break family match between browser (PPID 1) and compiler (PID 30)
+        snapshot.processes.get_mut(&30).unwrap().ppid = 99;
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
+
+        assert_eq!(snapshot.groups.len(), 1);
+        assert_eq!(snapshot.groups[0].kind, FocusGroupKind::Unknown);
+        assert_eq!(snapshot.groups[0].root_pids, vec![30]);
+        assert_eq!(snapshot.groups[0].member_pids, Vec::<u32>::new());
+        assert_eq!(snapshot.groups[0].primary_pid, Some(30));
+        assert_eq!(snapshot.groups[0].display_name, "foreground:process-30");
+        assert!((snapshot.groups[0].confidence - (0.95 * 0.75)).abs() < f32::EPSILON);
+        assert!(
+            snapshot.groups[0].reasons.iter().any(|reason| reason
+                == "foreground window PID selected but no known focus group matched")
+        );
+        assert!(
+            snapshot.groups[0]
+                .reasons
+                .iter()
+                .any(|reason| reason == "conservative foreground fallback root pid=30")
+        );
+        assert!(snapshot.groups[0].score_breakdown.foreground_score > 0.0);
+    }
+
+    #[test]
+    fn foreground_source_fallback_member_pids_are_descendants_not_the_root_pid() {
+        let foreground = foreground_snapshot(Some(10));
+        let mut snapshot = foreground_scoring_snapshot(Some(foreground), Vec::new());
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
+
+        assert_eq!(snapshot.groups.len(), 1);
+        assert_eq!(snapshot.groups[0].root_pids, vec![10]);
+        assert_eq!(snapshot.groups[0].member_pids, vec![11]);
+        assert!(!snapshot.groups[0].member_pids.contains(&10));
+    }
+
+    #[test]
+    fn foreground_source_does_not_auto_target_pid_one() {
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(foreground_snapshot(Some(1))),
+            vec![test_group(
+                FocusGroupKind::Browser,
+                vec![20],
+                vec![20, 21],
+                Some(20),
+                "browser",
+                0.90,
+            )],
+        );
+        snapshot
+            .processes
+            .insert(1, test_process(1, 0, SystemTaskClass::Service));
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
+
+        assert!(snapshot.groups.is_empty());
+    }
+
+    #[test]
+    fn foreground_source_does_not_auto_target_systemd() {
+        let mut snapshot =
+            foreground_scoring_snapshot(Some(foreground_snapshot(Some(30))), Vec::new());
+        let process = snapshot.processes.get_mut(&30).unwrap();
+        process.comm = "systemd".to_owned();
+        process.cmdline = "/usr/lib/systemd/systemd --user".to_owned();
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
+
+        assert!(snapshot.groups.is_empty());
+    }
+
+    #[test]
+    fn foreground_source_does_not_auto_target_compositor() {
+        let mut snapshot =
+            foreground_scoring_snapshot(Some(foreground_snapshot(Some(30))), Vec::new());
+        let process = snapshot.processes.get_mut(&30).unwrap();
+        process.classification.class = SystemTaskClass::Compositor;
+        process.classification.priority_band = PriorityBand::ForegroundLatency;
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
+
+        assert!(snapshot.groups.is_empty());
+    }
+
+    #[test]
+    fn foreground_source_does_not_auto_target_realtime_audio_or_input() {
+        let mut audio_snapshot =
+            foreground_scoring_snapshot(Some(foreground_snapshot(Some(30))), Vec::new());
+        let audio_process = audio_snapshot.processes.get_mut(&30).unwrap();
+        audio_process.classification.class = SystemTaskClass::AudioRealtime;
+        audio_process.classification.priority_band = PriorityBand::CriticalRealtime;
+
+        apply_foreground_source_mode_to_snapshot(&mut audio_snapshot, FocusSource::Foreground);
+
+        assert!(audio_snapshot.groups.is_empty());
+
+        let mut input_snapshot =
+            foreground_scoring_snapshot(Some(foreground_snapshot(Some(30))), Vec::new());
+        let input_process = input_snapshot.processes.get_mut(&30).unwrap();
+        input_process.classification.class = SystemTaskClass::Input;
+        input_process.classification.priority_band = PriorityBand::CriticalRealtime;
+
+        apply_foreground_source_mode_to_snapshot(&mut input_snapshot, FocusSource::Foreground);
+
+        assert!(input_snapshot.groups.is_empty());
+    }
+
+    #[test]
+    fn foreground_source_does_not_auto_target_xwayland() {
+        let mut snapshot =
+            foreground_scoring_snapshot(Some(foreground_snapshot(Some(30))), Vec::new());
+        let process = snapshot.processes.get_mut(&30).unwrap();
+        process.comm = "Xwayland".to_owned();
+        process.cmdline = "/usr/bin/Xwayland :0 -rootless".to_owned();
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
+
+        assert!(snapshot.groups.is_empty());
+    }
+
+    #[test]
+    fn hybrid_source_unsafe_foreground_falls_back_to_existing_heuristic_groups() {
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(foreground_snapshot(Some(30))),
+            vec![test_group(
+                FocusGroupKind::Browser,
+                vec![20],
+                vec![20, 21],
+                Some(20),
+                "browser",
+                0.90,
+            )],
+        );
+        let process = snapshot.processes.get_mut(&30).unwrap();
+        process.comm = "Xwayland".to_owned();
+        process.cmdline = "/usr/bin/Xwayland :0 -rootless".to_owned();
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Hybrid);
+
+        assert_eq!(snapshot.groups.len(), 1);
+        assert_eq!(snapshot.groups[0].display_name, "browser");
+        assert_eq!(snapshot.groups[0].root_pids, vec![20]);
+        assert_eq!(snapshot.groups[0].score, 0.90);
+        assert_eq!(snapshot.groups[0].score_breakdown.foreground_score, 0.0);
+    }
+
+    #[test]
     fn foreground_score_is_full_confidence_for_member_pid() {
         let foreground = foreground_snapshot(Some(11));
         let snapshot = foreground_scoring_snapshot(
@@ -1005,11 +1195,20 @@ fn apply_foreground_source_mode_to_snapshot(
         return;
     }
 
-    let foreground_usable = foreground_context_is_usable_for_focus(snapshot);
+    let foreground_available = foreground_context_is_available_for_focus(snapshot);
 
-    if !foreground_usable {
+    if !foreground_available {
         return;
     }
+
+    if !foreground_target_is_safe_to_score(snapshot) {
+        if source_mode == FocusSource::Foreground {
+            snapshot.groups.clear();
+        }
+        return;
+    }
+
+    add_foreground_fallback_group_if_needed(snapshot);
 
     let mut groups = std::mem::take(&mut snapshot.groups);
 
@@ -1019,7 +1218,7 @@ fn apply_foreground_source_mode_to_snapshot(
 
         if foreground_score > 0.0 {
             group.score = foreground_aware_total_score(&group.score_breakdown);
-            if group.confidence < foreground_score {
+            if group.confidence < foreground_score && !is_foreground_fallback_group(group) {
                 group.confidence = foreground_score;
             }
             group
@@ -1048,7 +1247,7 @@ fn apply_foreground_source_mode_to_snapshot(
     snapshot.groups = groups;
 }
 
-fn foreground_context_is_usable_for_focus(snapshot: &FocusSnapshot) -> bool {
+fn foreground_context_is_available_for_focus(snapshot: &FocusSnapshot) -> bool {
     let Some(foreground) = snapshot.foreground.as_ref() else {
         return false;
     };
@@ -1057,6 +1256,161 @@ fn foreground_context_is_usable_for_focus(snapshot: &FocusSnapshot) -> bool {
         && foreground.pid.is_some()
         && foreground.confidence > 0.0
         && foreground.stale_ms.is_none()
+}
+
+fn foreground_target_is_safe_to_score(snapshot: &FocusSnapshot) -> bool {
+    let Some(pid) = snapshot
+        .foreground
+        .as_ref()
+        .and_then(|foreground| foreground.pid)
+    else {
+        return false;
+    };
+
+    let Some(process) = snapshot.processes.get(&pid) else {
+        return false;
+    };
+
+    foreground_process_is_safe_auto_target(process)
+}
+
+fn foreground_process_is_safe_auto_target(process: &FocusProcess) -> bool {
+    if process.pid == 1 {
+        return false;
+    }
+
+    if process_name_looks_like_systemd(process) {
+        return false;
+    }
+
+    if process.classification.class == SystemTaskClass::Compositor {
+        return false;
+    }
+
+    if is_critical_realtime_process(process) {
+        return false;
+    }
+
+    if process_name_looks_like_xwayland(process) {
+        return false;
+    }
+
+    true
+}
+
+fn process_name_looks_like_systemd(process: &FocusProcess) -> bool {
+    let comm = process.comm.to_ascii_lowercase();
+    let cmdline = process.cmdline.to_ascii_lowercase();
+
+    comm == "systemd"
+        || comm.starts_with("systemd-")
+        || cmdline == "systemd"
+        || cmdline.contains("/systemd ")
+        || cmdline.contains("/systemd\0")
+        || cmdline.ends_with("/systemd")
+}
+
+fn process_name_looks_like_xwayland(process: &FocusProcess) -> bool {
+    let comm = process.comm.to_ascii_lowercase();
+    let cmdline = process.cmdline.to_ascii_lowercase();
+
+    comm == "xwayland" || comm == "xwayland.bin" || cmdline.contains("xwayland")
+}
+
+fn is_foreground_fallback_group(group: &FocusGroup) -> bool {
+    group
+        .reasons
+        .iter()
+        .any(|reason| reason == "foreground window PID selected but no known focus group matched")
+}
+
+fn add_foreground_fallback_group_if_needed(snapshot: &mut FocusSnapshot) {
+    let Some(foreground) = snapshot.foreground.as_ref() else {
+        return;
+    };
+
+    let Some(pid) = foreground.pid else {
+        return;
+    };
+
+    if snapshot
+        .groups
+        .iter()
+        .any(|group| focus_group_contains_pid(group, pid))
+    {
+        return;
+    }
+
+    let Some(process) = snapshot.processes.get(&pid) else {
+        return;
+    };
+
+    if !foreground_process_is_safe_auto_target(process) {
+        return;
+    }
+
+    let member_pids = descendants_of_process(snapshot, pid);
+    let confidence = (foreground.confidence * 0.75).clamp(0.0, 1.0);
+    let display_name = if process.comm.trim().is_empty() {
+        format!("foreground:{pid}")
+    } else {
+        format!("foreground:{}", process.comm)
+    };
+
+    snapshot.groups.push(FocusGroup {
+        kind: FocusGroupKind::Unknown,
+        root_pids: vec![pid],
+        member_pids,
+        primary_pid: Some(pid),
+        display_name,
+        score: confidence,
+        score_breakdown: FocusScoreBreakdown {
+            cpu_score: 0.0,
+            io_score: 0.0,
+            interactivity_score: 0.0,
+            class_priority_score: 0.0,
+            stability_score: 0.0,
+            foreground_score: 0.0,
+            penalty: 0.0,
+        },
+        confidence,
+        priority_band: process.classification.priority_band,
+        reasons: vec![
+            "foreground window PID selected but no known focus group matched".to_owned(),
+            format!("conservative foreground fallback root pid={pid}"),
+        ],
+    });
+}
+
+fn focus_group_contains_pid(group: &FocusGroup, pid: u32) -> bool {
+    group.root_pids.contains(&pid)
+        || group.member_pids.contains(&pid)
+        || group.primary_pid == Some(pid)
+}
+
+fn descendants_of_process(snapshot: &FocusSnapshot, root_pid: u32) -> Vec<u32> {
+    let mut descendants = BTreeSet::new();
+    let mut stack = snapshot
+        .children_by_parent
+        .get(&root_pid)
+        .cloned()
+        .unwrap_or_default();
+
+    while let Some(pid) = stack.pop() {
+        if !snapshot.processes.contains_key(&pid) {
+            continue;
+        }
+
+        if !descendants.insert(pid) {
+            continue;
+        }
+
+        if let Some(children) = snapshot.children_by_parent.get(&pid) {
+            stack.extend(children.iter().copied());
+        }
+    }
+
+    descendants.into_iter().collect()
 }
 
 fn foreground_aware_total_score(breakdown: &FocusScoreBreakdown) -> f32 {

@@ -83,7 +83,7 @@ impl ArtifactLoadOptions {
         load_block_io_events: false,
         load_scx_events: false,
         load_focus_events: true,
-        load_foreground_events: false,
+        load_foreground_events: true,
     };
 
     pub const TUNE: Self = Self {
