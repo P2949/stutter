@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use crate::{
     diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
-    focus::ResolvedFocus,
+    focus::FocusGroupKind,
     process_tree::TaskInfo,
     recorder::{BlockIoRecord, FrameEvent, GpuSample, IntervalRecord, IrqEventRecord, SpikeEvent},
 };
@@ -45,12 +45,18 @@ pub enum MonitorEvent {
     },
     FocusChanged {
         elapsed_ms: u64,
-        old: Option<Box<ResolvedFocus>>,
-        new: Box<ResolvedFocus>,
+        old_kind: Option<FocusGroupKind>,
+        new_kind: FocusGroupKind,
+        root_pids: Vec<u32>,
+        member_pids: Vec<u32>,
+        confidence: f32,
+        score: f32,
+        situation: crate::autotune::state::SituationKind,
+        reasons: Vec<String>,
     },
     FocusCleared {
         elapsed_ms: u64,
-        old: Option<Box<ResolvedFocus>>,
+        old_kind: Option<FocusGroupKind>,
         reason: String,
     },
     Finished {
@@ -91,5 +97,41 @@ impl MonitorEvent {
             Self::FocusCleared { elapsed_ms, .. } => Some(*elapsed_ms),
             Self::Finished { .. } => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{autotune::state::SituationKind, focus::FocusGroupKind};
+
+    #[test]
+    fn focus_changed_event_reports_kind_and_elapsed_ms() {
+        let event = MonitorEvent::FocusChanged {
+            elapsed_ms: 1234,
+            old_kind: Some(FocusGroupKind::Browser),
+            new_kind: FocusGroupKind::Game,
+            root_pids: vec![10],
+            member_pids: vec![10, 11, 12],
+            confidence: 0.75,
+            score: 0.82,
+            situation: SituationKind::GameFocused,
+            reasons: vec!["test focus change".to_owned()],
+        };
+
+        assert_eq!(event.kind(), "focus_changed");
+        assert_eq!(event.elapsed_ms(), Some(1234));
+    }
+
+    #[test]
+    fn focus_cleared_event_reports_kind_and_elapsed_ms() {
+        let event = MonitorEvent::FocusCleared {
+            elapsed_ms: 5678,
+            old_kind: Some(FocusGroupKind::Compile),
+            reason: "no eligible focus group".to_owned(),
+        };
+
+        assert_eq!(event.kind(), "focus_cleared");
+        assert_eq!(event.elapsed_ms(), Some(5678));
     }
 }

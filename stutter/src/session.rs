@@ -560,8 +560,14 @@ impl MonitorSession {
 
         self.emit(MonitorEvent::FocusChanged {
             elapsed_ms,
-            old: old.cloned().map(Box::new),
-            new: Box::new(new.clone()),
+            old_kind: old.map(|focus| focus.group.kind),
+            new_kind: new.group.kind,
+            root_pids: new.group.root_pids.clone(),
+            member_pids: new.group.member_pids.clone(),
+            confidence: new.group.confidence,
+            score: new.group.score,
+            situation: new.situation,
+            reasons: new.group.reasons.clone(),
         })
         .await;
 
@@ -583,7 +589,7 @@ impl MonitorSession {
 
         self.emit(MonitorEvent::FocusCleared {
             elapsed_ms,
-            old: old.cloned().map(Box::new),
+            old_kind: old.map(|focus| focus.group.kind),
             reason,
         })
         .await;
