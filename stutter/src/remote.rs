@@ -90,6 +90,9 @@ pub struct AgentFeatureFlags {
     pub stat_wait_request: bool,
     pub block_io_request: bool,
     pub irq_latency_request: bool,
+    pub autotune_observe: bool,
+    pub autotune_suggest: bool,
+    pub autotune_apply_low_risk: bool,
 }
 
 pub fn request_from_monitor_config(config: &Config) -> anyhow::Result<RemoteMonitorRequest> {
