@@ -14,6 +14,8 @@ pub struct TestRoot {
     path: PathBuf,
 }
 
+pub static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 impl TestRoot {
     pub fn new(prefix: &str) -> Self {
         let mut path = std::env::temp_dir();

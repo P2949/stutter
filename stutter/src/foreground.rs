@@ -975,6 +975,7 @@ mod tests {
 
     #[test]
     fn sway_provider_detection_uses_swaysock_environment() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous = std::env::var_os("SWAYSOCK");
 
         unsafe {
@@ -1259,6 +1260,7 @@ mod tests {
 
     #[test]
     fn x11_provider_reports_unavailable_without_display() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous = std::env::var_os("DISPLAY");
 
         unsafe {
@@ -1284,6 +1286,7 @@ mod tests {
 
     #[test]
     fn x11_provider_checks_xprop_before_sampling() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous = std::env::var_os("DISPLAY");
 
         unsafe {
@@ -1462,6 +1465,7 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
 
     #[test]
     fn generic_wayland_without_sway_or_hyprland_is_unsupported() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous_wayland_display = std::env::var_os("WAYLAND_DISPLAY");
         let previous_swaysock = std::env::var_os("SWAYSOCK");
         let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
@@ -1499,6 +1503,7 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
 
     #[test]
     fn kde_wayland_without_compositor_specific_provider_is_unsupported() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous_wayland_display = std::env::var_os("WAYLAND_DISPLAY");
         let previous_swaysock = std::env::var_os("SWAYSOCK");
         let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
@@ -1534,6 +1539,7 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
 
     #[test]
     fn sway_wayland_is_not_treated_as_generic_unsupported_wayland() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous_wayland_display = std::env::var_os("WAYLAND_DISPLAY");
         let previous_swaysock = std::env::var_os("SWAYSOCK");
         let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
@@ -1555,6 +1561,7 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
 
     #[test]
     fn hyprland_wayland_is_reserved_for_future_compositor_specific_provider() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous_wayland_display = std::env::var_os("WAYLAND_DISPLAY");
         let previous_swaysock = std::env::var_os("SWAYSOCK");
         let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");

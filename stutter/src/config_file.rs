@@ -16,6 +16,12 @@ pub struct UserConfigFile {
     pub exclude_comm: Option<Vec<String>>,
     pub max_tasks: Option<usize>,
     pub retain_intervals: Option<usize>,
+    pub foreground_window: Option<bool>,
+    pub focus_source: Option<String>,
+    pub foreground_source: Option<String>,
+    pub foreground_poll_ms: Option<u64>,
+    pub foreground_max_stale_ms: Option<u64>,
+    pub foreground_include_title: Option<bool>,
     pub agent: Option<AgentConfigFile>,
 }
 
@@ -197,6 +203,27 @@ mod tests {
         assert_eq!(config.hwmon, Some(true));
         assert_eq!(config.cpu_freq, Some(true));
         assert_eq!(config.include_comm.unwrap(), vec!["Game", "Render"]);
+    }
+
+    #[test]
+    fn test_parse_foreground_config_fields() {
+        let toml = r#"
+            foreground_window = true
+            focus_source = "hybrid"
+            foreground_source = "sway"
+            foreground_poll_ms = 750
+            foreground_max_stale_ms = 3000
+            foreground_include_title = true
+        "#;
+
+        let config = parse_user_config_toml(toml).unwrap();
+
+        assert_eq!(config.foreground_window, Some(true));
+        assert_eq!(config.focus_source.as_deref(), Some("hybrid"));
+        assert_eq!(config.foreground_source.as_deref(), Some("sway"));
+        assert_eq!(config.foreground_poll_ms, Some(750));
+        assert_eq!(config.foreground_max_stale_ms, Some(3000));
+        assert_eq!(config.foreground_include_title, Some(true));
     }
 
     #[test]

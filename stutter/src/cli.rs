@@ -1196,6 +1196,33 @@ pub enum ForegroundSourceArg {
     X11,
 }
 
+impl FocusSource {
+    fn parse_config_value(value: &str) -> anyhow::Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "heuristic" => Ok(Self::Heuristic),
+            "foreground" => Ok(Self::Foreground),
+            "hybrid" => Ok(Self::Hybrid),
+            other => anyhow::bail!(
+                "focus_source must be heuristic, foreground, or hybrid, got {other:?}"
+            ),
+        }
+    }
+}
+
+impl ForegroundSourceArg {
+    fn parse_config_value(value: &str) -> anyhow::Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "sway" => Ok(Self::Sway),
+            "hyprland" => Ok(Self::Hyprland),
+            "x11" => Ok(Self::X11),
+            other => anyhow::bail!(
+                "foreground_source must be auto, sway, hyprland, or x11, got {other:?}"
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CsvStreamTarget {
     File(PathBuf),
@@ -1974,6 +2001,33 @@ fn config_from_monitor_args_with_file(
 
     let retain_intervals = args.retain_intervals.or(file_config.retain_intervals);
 
+    if let Some(foreground_window) = file_config.foreground_window {
+        args.foreground_window = foreground_window;
+    }
+
+    if let Some(focus_source) = file_config.focus_source.as_deref() {
+        args.focus_source = FocusSource::parse_config_value(focus_source)?;
+    }
+
+    if let Some(foreground_source) = file_config.foreground_source.as_deref() {
+        args.foreground_source = ForegroundSourceArg::parse_config_value(foreground_source)?;
+    }
+
+    if let Some(foreground_poll_ms) = file_config.foreground_poll_ms {
+        args.foreground_poll_ms = foreground_poll_ms;
+    }
+
+    if let Some(foreground_max_stale_ms) = file_config.foreground_max_stale_ms {
+        args.foreground_max_stale_ms = foreground_max_stale_ms;
+    }
+
+    if let Some(foreground_include_title) = file_config.foreground_include_title {
+        args.foreground_include_title = foreground_include_title;
+    }
+
+    normalize_foreground_monitor_args(&mut args);
+    validate_foreground_monitor_args(&args)?;
+
     validate_pids("--pid", &args.target_pids)?;
     validate_pids("--tree-pid", &args.tree_pids)?;
     validate_pids("--exclude-tree-pid", &args.exclude_tree_pids)?;
@@ -2208,6 +2262,26 @@ fn validate_pids(flag: &str, pids: &[u32]) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn normalize_foreground_monitor_args(args: &mut MonitorArgs) {
+    if args.focus_source != FocusSource::Heuristic {
+        args.foreground_window = true;
+    }
+}
+
+fn validate_foreground_monitor_args(args: &MonitorArgs) -> anyhow::Result<()> {
+    if args.foreground_poll_ms < 100 {
+        anyhow::bail!("--foreground-poll-ms must be >= 100");
+    }
+
+    if args.foreground_max_stale_ms < args.foreground_poll_ms {
+        eprintln!(
+            "warning: foreground max stale is lower than poll interval; provider errors may clear focus quickly"
+        );
+    }
+
+    Ok(())
+}
+
 fn validate_comm_patterns(flag: &str, patterns: &[String]) -> anyhow::Result<Vec<CompiledPattern>> {
     let mut compiled = Vec::new();
     for pattern in patterns {
@@ -2221,6 +2295,32 @@ fn validate_comm_patterns(flag: &str, patterns: &[String]) -> anyhow::Result<Vec
 
 #[cfg(test)]
 mod tests {
+    fn parse_app_command_from_inner<I, T>(args: I) -> anyhow::Result<AppCommand>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<OsString> + Clone,
+    {
+        super::parse_app_command_from(args)
+    }
+
+    fn parse_app_command_from<I, T>(args: I) -> anyhow::Result<AppCommand>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<OsString> + Clone,
+    {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+        parse_app_command_from_inner(args)
+    }
+
+    fn parse_monitor_config_from_inner<const N: usize>(
+        args: [&str; N],
+    ) -> anyhow::Result<Arc<Config>> {
+        match parse_app_command_from_inner(args.iter().map(OsString::from))? {
+            AppCommand::Monitor(config) => Ok(config),
+            other => anyhow::bail!("expected AppCommand::Monitor, got {other:?}"),
+        }
+    }
+
     fn parse_monitor_config_from<const N: usize>(args: [&str; N]) -> anyhow::Result<Arc<Config>> {
         match parse_app_command_from(args.iter().map(OsString::from))? {
             AppCommand::Monitor(config) => Ok(config),
@@ -3791,6 +3891,7 @@ mod tests {
         assert!(!config.auto_focus);
         assert_eq!(config.focus_source, FocusSource::Heuristic);
         assert!(!config.foreground_window);
+        assert!(!config.foreground_window_config().enabled);
         assert_eq!(config.foreground_source, ForegroundSourceArg::Auto);
         assert_eq!(config.foreground_poll_ms, 1000);
         assert_eq!(config.foreground_max_stale_ms, 2500);
@@ -3856,7 +3957,10 @@ mod tests {
 
         assert!(config.auto_focus);
         assert_eq!(config.focus_source, FocusSource::Foreground);
-        assert!(!config.foreground_window);
+        assert!(
+            config.foreground_window,
+            "non-heuristic focus_source must normalize foreground_window to true"
+        );
         assert_eq!(config.foreground_source, ForegroundSourceArg::X11);
         assert!(config.foreground_include_title);
 
@@ -3883,7 +3987,10 @@ mod tests {
 
         assert!(config.auto_focus);
         assert_eq!(config.focus_source, FocusSource::Hybrid);
-        assert!(!config.foreground_window);
+        assert!(
+            config.foreground_window,
+            "hybrid focus_source must normalize foreground_window to true"
+        );
 
         let auto_focus = config.auto_focus_config();
         assert!(auto_focus.enabled);
@@ -3892,5 +3999,149 @@ mod tests {
         let foreground = config.foreground_window_config();
         assert!(foreground.enabled);
         assert_eq!(foreground.source, ForegroundSourceArg::Auto);
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(old) = &self.old {
+                unsafe {
+                    std::env::set_var(self.key, old);
+                }
+            } else {
+                unsafe {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!("stutter-test-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn config_file_foreground_fields_merge_into_monitor_config() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+        let dir = temp_dir("config-file-foreground-fields");
+        let config_path = dir.join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+foreground_window = true
+focus_source = "foreground"
+foreground_source = "sway"
+foreground_poll_ms = 750
+foreground_max_stale_ms = 3000
+foreground_include_title = true
+"#,
+        )
+        .unwrap();
+
+        let _guard = EnvGuard::set("STUTTER_CONFIG", config_path.to_str().unwrap());
+
+        let config = parse_monitor_config_from_inner(["stutter", "monitor"]).unwrap();
+
+        assert_eq!(config.focus_source, FocusSource::Foreground);
+        assert!(config.foreground_window);
+        assert_eq!(config.foreground_source, ForegroundSourceArg::Sway);
+        assert_eq!(config.foreground_poll_ms, 750);
+        assert_eq!(config.foreground_max_stale_ms, 3000);
+        assert!(config.foreground_include_title);
+
+        let foreground = config.foreground_window_config();
+        assert!(foreground.enabled);
+        assert_eq!(foreground.source, ForegroundSourceArg::Sway);
+        assert_eq!(foreground.poll_ms, 750);
+        assert_eq!(foreground.max_stale_ms, 3000);
+        assert!(foreground.include_title);
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn config_file_invalid_focus_source_is_rejected() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+        let dir = temp_dir("config-file-invalid-focus-source");
+        let config_path = dir.join("config.toml");
+        std::fs::write(&config_path, r#"focus_source = "dbus""#).unwrap();
+
+        let _guard = EnvGuard::set("STUTTER_CONFIG", config_path.to_str().unwrap());
+
+        let err = parse_monitor_config_from_inner(["stutter", "monitor"])
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("focus_source must be heuristic, foreground, or hybrid"));
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn config_file_invalid_foreground_source_is_rejected() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+        let dir = temp_dir("config-file-invalid-foreground-source");
+        let config_path = dir.join("config.toml");
+        std::fs::write(&config_path, r#"foreground_source = "gnome""#).unwrap();
+
+        let _guard = EnvGuard::set("STUTTER_CONFIG", config_path.to_str().unwrap());
+
+        let err = parse_monitor_config_from_inner(["stutter", "monitor"])
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("foreground_source must be auto, sway, hyprland, or x11"));
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn foreground_poll_ms_below_minimum_is_rejected() {
+        let err = parse_monitor_config_from([
+            "stutter",
+            "monitor",
+            "--foreground-window",
+            "--foreground-poll-ms",
+            "99",
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("--foreground-poll-ms must be >= 100"));
+    }
+
+    #[test]
+    fn foreground_max_stale_below_poll_interval_is_allowed_with_warning() {
+        let config = parse_monitor_config_from([
+            "stutter",
+            "monitor",
+            "--foreground-window",
+            "--foreground-poll-ms",
+            "1000",
+            "--foreground-max-stale-ms",
+            "500",
+        ])
+        .unwrap();
+
+        assert!(config.foreground_window);
+        assert_eq!(config.foreground_poll_ms, 1000);
+        assert_eq!(config.foreground_max_stale_ms, 500);
     }
 }
