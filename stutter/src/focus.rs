@@ -133,6 +133,16 @@ pub enum FocusGroupKind {
     Unknown,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FocusScoreBreakdown {
+    pub cpu_score: f32,
+    pub io_score: f32,
+    pub interactivity_score: f32,
+    pub class_priority_score: f32,
+    pub stability_score: f32,
+    pub penalty: f32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FocusGroup {
     pub kind: FocusGroupKind,
@@ -141,6 +151,7 @@ pub struct FocusGroup {
     pub primary_pid: Option<u32>,
     pub display_name: String,
     pub score: f32,
+    pub score_breakdown: FocusScoreBreakdown,
     pub confidence: f32,
     pub priority_band: PriorityBand,
     pub reasons: Vec<String>,
@@ -1007,17 +1018,17 @@ fn make_focus_group(
             .max_by(|left, right| compare_process_preference(snapshot, *left, *right))
     });
 
-    let score = member_pids
-        .iter()
-        .filter_map(|pid| snapshot.processes.get(pid))
-        .map(process_focus_score)
-        .sum::<f32>();
+    let score_breakdown = score_focus_group(snapshot, kind, &root_pids, &member_pids, primary_pid);
+    let score = clamp_score(
+        score_breakdown.cpu_score
+            + score_breakdown.io_score
+            + score_breakdown.interactivity_score
+            + score_breakdown.class_priority_score
+            + score_breakdown.stability_score
+            - score_breakdown.penalty,
+    );
 
-    let confidence = member_pids
-        .iter()
-        .filter_map(|pid| snapshot.processes.get(pid))
-        .map(|process| process.classification.confidence)
-        .fold(0.0_f32, f32::max);
+    let confidence = focus_group_confidence(snapshot, &member_pids, &score_breakdown);
 
     let priority_band = member_pids
         .iter()
@@ -1047,6 +1058,7 @@ fn make_focus_group(
         primary_pid,
         display_name,
         score,
+        score_breakdown,
         confidence,
         priority_band,
         reasons,
@@ -1330,6 +1342,639 @@ fn process_identity_text(process: &FocusProcess) -> String {
         process.cmdline.to_ascii_lowercase(),
         cgroup_path.to_ascii_lowercase()
     )
+}
+
+fn score_focus_group(
+    snapshot: &FocusSnapshot,
+    kind: FocusGroupKind,
+    root_pids: &[u32],
+    member_pids: &[u32],
+    primary_pid: Option<u32>,
+) -> FocusScoreBreakdown {
+    let cpu_score = focus_group_cpu_score(snapshot, member_pids);
+    let io_score = focus_group_io_score(snapshot, kind, member_pids);
+    let interactivity_score = focus_group_interactivity_score(snapshot, member_pids);
+    let class_priority_score = focus_group_class_priority_score(snapshot, kind, member_pids);
+    let stability_score = focus_group_stability_score(snapshot, kind, root_pids, primary_pid);
+    let penalty = focus_group_penalty(snapshot, kind, root_pids, member_pids, primary_pid);
+
+    FocusScoreBreakdown {
+        cpu_score,
+        io_score,
+        interactivity_score,
+        class_priority_score,
+        stability_score,
+        penalty,
+    }
+}
+
+fn focus_group_cpu_score(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let cpu_ticks = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .map(|process| process.cpu_time_ticks_delta)
+        .sum::<u64>();
+
+    clamp_score(cpu_ticks as f32 / 250.0)
+}
+
+fn focus_group_io_score(
+    snapshot: &FocusSnapshot,
+    kind: FocusGroupKind,
+    member_pids: &[u32],
+) -> f32 {
+    let io_bytes = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .map(|process| {
+            process
+                .read_bytes_delta
+                .saturating_add(process.write_bytes_delta)
+        })
+        .sum::<u64>();
+
+    let base = clamp_score(io_bytes as f32 / 67_108_864.0);
+
+    if kind == FocusGroupKind::Compile {
+        let linker_io_bytes = member_pids
+            .iter()
+            .filter_map(|pid| snapshot.processes.get(pid))
+            .filter(|process| process.classification.class == SystemTaskClass::Linker)
+            .map(|process| {
+                process
+                    .read_bytes_delta
+                    .saturating_add(process.write_bytes_delta)
+            })
+            .sum::<u64>();
+
+        clamp_score(base + (linker_io_bytes as f32 / 33_554_432.0).min(0.20))
+    } else {
+        base
+    }
+}
+
+fn focus_group_interactivity_score(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let ctxt_switches = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .map(|process| {
+            process
+                .voluntary_ctxt_switches_delta
+                .saturating_add(process.nonvoluntary_ctxt_switches_delta)
+        })
+        .sum::<u64>();
+
+    clamp_score(ctxt_switches as f32 / 250.0)
+}
+
+fn focus_group_class_priority_score(
+    snapshot: &FocusSnapshot,
+    kind: FocusGroupKind,
+    member_pids: &[u32],
+) -> f32 {
+    match kind {
+        FocusGroupKind::Game => score_game_class_evidence(snapshot, member_pids),
+        FocusGroupKind::Browser => score_browser_class_evidence(snapshot, member_pids),
+        FocusGroupKind::Compile => score_compile_class_evidence(snapshot, member_pids),
+        FocusGroupKind::Media => score_media_class_evidence(snapshot, member_pids),
+        FocusGroupKind::Recording => score_recording_class_evidence(snapshot, member_pids),
+        FocusGroupKind::VirtualMachine => {
+            score_virtual_machine_class_evidence(snapshot, member_pids)
+        }
+        FocusGroupKind::Desktop => score_desktop_class_evidence(snapshot, member_pids),
+        FocusGroupKind::Idle => score_idle_class_evidence(snapshot, member_pids),
+        FocusGroupKind::Unknown => 0.05,
+    }
+}
+
+fn score_game_class_evidence(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let mut score = 0.0_f32;
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| process.classification.class == SystemTaskClass::Game)
+            .unwrap_or(false)
+    }) {
+        score += 0.25;
+    }
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| process.classification.class == SystemTaskClass::GameScope)
+            .unwrap_or(false)
+    }) {
+        score += 0.20;
+    }
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| process.classification.class == SystemTaskClass::WineServer)
+            .unwrap_or(false)
+    }) {
+        score += 0.10;
+    }
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| {
+                process.classification.class == SystemTaskClass::GameRenderThread
+                    || process.classification.class == SystemTaskClass::GameWorkerThread
+            })
+            .unwrap_or(false)
+    }) {
+        score += 0.15;
+    }
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(contains_game_runtime_text)
+            .unwrap_or(false)
+    }) {
+        score += 0.15;
+    }
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| {
+                process_identity_text(process).contains("steamapps/common")
+                    || process_identity_text(process).contains("steamapps")
+            })
+            .unwrap_or(false)
+    }) {
+        score += 0.15;
+    }
+
+    clamp_score(score)
+}
+
+fn score_browser_class_evidence(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let mut score = 0.0_f32;
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| process.classification.class == SystemTaskClass::BrowserForeground)
+            .unwrap_or(false)
+    }) {
+        score += 0.30;
+    }
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| process.classification.class == SystemTaskClass::BrowserRenderer)
+            .unwrap_or(false)
+    }) {
+        score += 0.15;
+    }
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| process.classification.class == SystemTaskClass::BrowserGpu)
+            .unwrap_or(false)
+    }) {
+        score += 0.15;
+    }
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| process.classification.class == SystemTaskClass::BrowserNetwork)
+            .unwrap_or(false)
+    }) {
+        score += 0.10;
+    }
+
+    if active_process_count(snapshot, member_pids) >= 2 {
+        score += 0.20;
+    }
+
+    clamp_score(score)
+}
+
+fn score_compile_class_evidence(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let mut score = 0.0_f32;
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(is_stable_build_root)
+            .unwrap_or(false)
+    }) {
+        score += 0.35;
+    }
+
+    let active_compiler_or_linker_count = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .filter(|process| {
+            matches!(
+                process.classification.class,
+                SystemTaskClass::Compiler | SystemTaskClass::Linker
+            ) && is_active_foreground_candidate(process)
+        })
+        .count();
+
+    score += (active_compiler_or_linker_count as f32 * 0.12).min(0.35);
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| {
+                process.classification.class == SystemTaskClass::Linker
+                    && process
+                        .read_bytes_delta
+                        .saturating_add(process.write_bytes_delta)
+                        > 0
+            })
+            .unwrap_or(false)
+    }) {
+        score += 0.15;
+    }
+
+    if total_cpu_ticks(snapshot, member_pids) >= 100 {
+        score += 0.15;
+    }
+
+    clamp_score(score)
+}
+
+fn score_media_class_evidence(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let has_media = member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| process.classification.class == SystemTaskClass::Media)
+            .unwrap_or(false)
+    });
+
+    if has_media {
+        clamp_score(0.35 + low_to_moderate_activity_bonus(snapshot, member_pids))
+    } else {
+        0.0
+    }
+}
+
+fn score_recording_class_evidence(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let has_recorder = member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| process.classification.class == SystemTaskClass::Recorder)
+            .unwrap_or(false)
+    });
+
+    if has_recorder {
+        clamp_score(0.40 + low_to_moderate_activity_bonus(snapshot, member_pids))
+    } else {
+        0.0
+    }
+}
+
+fn score_virtual_machine_class_evidence(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let has_vm = member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| process.classification.class == SystemTaskClass::VirtualMachine)
+            .unwrap_or(false)
+    });
+
+    if has_vm {
+        clamp_score(0.45 + focus_group_cpu_score(snapshot, member_pids) * 0.25)
+    } else {
+        0.0
+    }
+}
+
+fn score_desktop_class_evidence(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let mut score = 0.0_f32;
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| process.classification.class == SystemTaskClass::Compositor)
+            .unwrap_or(false)
+    }) {
+        score += 0.25;
+    }
+
+    if member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| {
+                matches!(
+                    process.classification.class,
+                    SystemTaskClass::AudioRealtime
+                        | SystemTaskClass::Input
+                        | SystemTaskClass::Editor
+                        | SystemTaskClass::Terminal
+                        | SystemTaskClass::Shell
+                )
+            })
+            .unwrap_or(false)
+    }) {
+        score += 0.20;
+    }
+
+    clamp_score(score)
+}
+
+fn score_idle_class_evidence(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let has_idle_class = member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| {
+                matches!(
+                    process.classification.class,
+                    SystemTaskClass::Service
+                        | SystemTaskClass::StorageDaemon
+                        | SystemTaskClass::NetworkDaemon
+                        | SystemTaskClass::KernelThread
+                        | SystemTaskClass::IrqThread
+                )
+            })
+            .unwrap_or(false)
+    });
+
+    if has_idle_class { 0.05 } else { 0.0 }
+}
+
+fn low_to_moderate_activity_bonus(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let cpu_ticks = total_cpu_ticks(snapshot, member_pids);
+    if cpu_ticks == 0 {
+        0.0
+    } else if cpu_ticks <= 150 {
+        0.25
+    } else {
+        0.15
+    }
+}
+
+fn focus_group_stability_score(
+    snapshot: &FocusSnapshot,
+    kind: FocusGroupKind,
+    root_pids: &[u32],
+    primary_pid: Option<u32>,
+) -> f32 {
+    let mut score = 0.0_f32;
+
+    for root_pid in root_pids {
+        if let Some(root) = snapshot.processes.get(root_pid) {
+            match kind {
+                FocusGroupKind::Game => {
+                    if root.classification.class == SystemTaskClass::GameScope
+                        || root.classification.class == SystemTaskClass::Game
+                        || is_game_runtime_process(root)
+                    {
+                        score += 0.20;
+                    }
+                }
+                FocusGroupKind::Browser => {
+                    if root.classification.class == SystemTaskClass::BrowserForeground {
+                        score += 0.25;
+                    }
+                }
+                FocusGroupKind::Compile => {
+                    if is_stable_build_root(root) {
+                        score += 0.30;
+                    } else if matches!(
+                        root.classification.class,
+                        SystemTaskClass::Terminal | SystemTaskClass::Shell
+                    ) {
+                        score += 0.15;
+                    }
+                }
+                FocusGroupKind::Media
+                | FocusGroupKind::Recording
+                | FocusGroupKind::VirtualMachine => {
+                    if Some(root.pid) == primary_pid {
+                        score += 0.15;
+                    }
+                }
+                FocusGroupKind::Desktop => {
+                    if root.classification.class == SystemTaskClass::Compositor {
+                        score += 0.10;
+                    }
+                }
+                FocusGroupKind::Idle | FocusGroupKind::Unknown => {}
+            }
+        }
+    }
+
+    clamp_score(score)
+}
+
+fn focus_group_penalty(
+    snapshot: &FocusSnapshot,
+    kind: FocusGroupKind,
+    root_pids: &[u32],
+    member_pids: &[u32],
+    primary_pid: Option<u32>,
+) -> f32 {
+    match kind {
+        FocusGroupKind::Game => game_group_penalty(snapshot, root_pids, member_pids),
+        FocusGroupKind::Browser => browser_group_penalty(snapshot, member_pids),
+        FocusGroupKind::Compile => compile_group_penalty(snapshot, member_pids),
+        FocusGroupKind::Idle => idle_group_penalty(snapshot, member_pids),
+        FocusGroupKind::Desktop => desktop_group_penalty(snapshot, primary_pid),
+        FocusGroupKind::Media
+        | FocusGroupKind::Recording
+        | FocusGroupKind::VirtualMachine
+        | FocusGroupKind::Unknown => 0.0,
+    }
+}
+
+fn game_group_penalty(snapshot: &FocusSnapshot, root_pids: &[u32], member_pids: &[u32]) -> f32 {
+    let root_is_launcher_only = root_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| {
+                let text = process_identity_text(process);
+                text.contains("steam")
+                    && !text.contains("steamapps")
+                    && !text.contains("pressure-vessel")
+                    && !text.contains("proton")
+            })
+            .unwrap_or(false)
+    });
+
+    let active_game_child_count = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .filter(|process| {
+            process.classification.class == SystemTaskClass::Game
+                || process.classification.class == SystemTaskClass::GameRenderThread
+                || process.classification.class == SystemTaskClass::GameWorkerThread
+        })
+        .filter(|process| is_active_foreground_candidate(process))
+        .count();
+
+    if root_is_launcher_only && active_game_child_count == 0 {
+        0.45
+    } else if total_cpu_ticks(snapshot, member_pids) < 5 && active_game_child_count == 0 {
+        0.20
+    } else {
+        0.0
+    }
+}
+
+fn browser_group_penalty(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let idle_renderer_count = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .filter(|process| process.classification.class == SystemTaskClass::BrowserRenderer)
+        .filter(|process| !is_active_foreground_candidate(process))
+        .count();
+
+    let active_child_count = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .filter(|process| process.classification.class != SystemTaskClass::BrowserForeground)
+        .filter(|process| is_active_foreground_candidate(process))
+        .count();
+
+    if idle_renderer_count > active_child_count.saturating_mul(2).saturating_add(2) {
+        ((idle_renderer_count - active_child_count) as f32 * 0.04).min(0.25)
+    } else {
+        0.0
+    }
+}
+
+fn compile_group_penalty(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let has_stable_build_root = member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(is_stable_build_root)
+            .unwrap_or(false)
+    });
+
+    let active_compiler_or_linker_count = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .filter(|process| {
+            matches!(
+                process.classification.class,
+                SystemTaskClass::Compiler | SystemTaskClass::Linker
+            ) && is_active_foreground_candidate(process)
+        })
+        .count();
+
+    let indexer_only = member_pids.iter().all(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| process.classification.class == SystemTaskClass::Indexer)
+            .unwrap_or(false)
+    });
+
+    if indexer_only {
+        0.55
+    } else if !has_stable_build_root && active_compiler_or_linker_count == 0 {
+        0.35
+    } else {
+        0.0
+    }
+}
+
+fn idle_group_penalty(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    if total_cpu_ticks(snapshot, member_pids) == 0 {
+        0.20
+    } else {
+        0.10
+    }
+}
+
+fn desktop_group_penalty(snapshot: &FocusSnapshot, primary_pid: Option<u32>) -> f32 {
+    let Some(primary_pid) = primary_pid else {
+        return 0.10;
+    };
+
+    let Some(primary) = snapshot.processes.get(&primary_pid) else {
+        return 0.10;
+    };
+
+    if primary.classification.class == SystemTaskClass::Compositor
+        && !is_active_foreground_candidate(primary)
+    {
+        0.20
+    } else {
+        0.0
+    }
+}
+
+fn focus_group_confidence(
+    snapshot: &FocusSnapshot,
+    member_pids: &[u32],
+    breakdown: &FocusScoreBreakdown,
+) -> f32 {
+    let max_class_confidence = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .map(|process| process.classification.confidence)
+        .fold(0.0_f32, f32::max);
+
+    let activity_evidence =
+        clamp_score(breakdown.cpu_score + breakdown.io_score + breakdown.interactivity_score);
+
+    let mut confidence = clamp_score(
+        (max_class_confidence * 0.45)
+            + (activity_evidence * 0.40)
+            + (breakdown.stability_score * 0.25)
+            - (breakdown.penalty * 0.50),
+    );
+
+    if activity_evidence < 0.05 {
+        confidence = confidence.min(0.55);
+    } else if activity_evidence < 0.20 {
+        confidence = confidence.min(0.75);
+    }
+
+    confidence
+}
+
+fn active_process_count(snapshot: &FocusSnapshot, member_pids: &[u32]) -> usize {
+    member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .filter(|process| is_active_foreground_candidate(process))
+        .count()
+}
+
+fn total_cpu_ticks(snapshot: &FocusSnapshot, member_pids: &[u32]) -> u64 {
+    member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .map(|process| process.cpu_time_ticks_delta)
+        .sum::<u64>()
+}
+
+fn clamp_score(score: f32) -> f32 {
+    score.clamp(0.0, 1.0)
 }
 
 fn focus_group_kind_for_class(class: SystemTaskClass) -> FocusGroupKind {
@@ -2092,6 +2737,239 @@ mod tests {
         assert_eq!(game_group.root_pids, vec![40]);
         assert_eq!(game_group.primary_pid, Some(40));
         assert_eq!(game_group.member_pids, vec![40, 41, 42]);
+    }
+
+    #[test]
+    fn focus_group_score_is_clamped_and_exposes_breakdown() {
+        let cargo = test_process(
+            600,
+            1,
+            "cargo",
+            SystemTaskClass::BuildJob,
+            PriorityBand::Throughput,
+            10_000,
+        );
+        let rustc = test_process(
+            601,
+            600,
+            "rustc",
+            SystemTaskClass::Compiler,
+            PriorityBand::Throughput,
+            10_000,
+        );
+
+        let snapshot = test_snapshot(vec![cargo, rustc]);
+        let groups = build_focus_groups(&snapshot);
+        let compile = groups
+            .iter()
+            .find(|group| group.kind == FocusGroupKind::Compile)
+            .unwrap();
+
+        assert_eq!(compile.score, 1.0);
+        assert!(compile.score_breakdown.cpu_score > 0.0);
+        assert!(compile.score_breakdown.class_priority_score > 0.0);
+        assert!(compile.score_breakdown.stability_score > 0.0);
+    }
+
+    #[test]
+    fn focus_group_confidence_is_not_high_from_name_only() {
+        let cargo = test_process(
+            610,
+            1,
+            "cargo",
+            SystemTaskClass::BuildJob,
+            PriorityBand::Throughput,
+            0,
+        );
+
+        let snapshot = test_snapshot(vec![cargo]);
+        let groups = build_focus_groups(&snapshot);
+        let compile = groups
+            .iter()
+            .find(|group| group.kind == FocusGroupKind::Compile)
+            .unwrap();
+
+        assert!(compile.score_breakdown.class_priority_score > 0.0);
+        assert_eq!(compile.score_breakdown.cpu_score, 0.0);
+        assert!(compile.confidence <= 0.55);
+    }
+
+    #[test]
+    fn focus_group_penalizes_indexer_only_compile_group() {
+        let clangd = test_process(
+            620,
+            1,
+            "clangd",
+            SystemTaskClass::Indexer,
+            PriorityBand::Background,
+            25,
+        );
+
+        let snapshot = test_snapshot(vec![clangd]);
+        let groups = build_focus_groups(&snapshot);
+        let compile = groups
+            .iter()
+            .find(|group| group.kind == FocusGroupKind::Compile)
+            .unwrap();
+
+        assert!(compile.score_breakdown.penalty >= 0.55);
+        assert!(compile.score < 0.50);
+    }
+
+    #[test]
+    fn focus_group_scores_game_from_runtime_and_active_descendants() {
+        let mut runtime = test_process(
+            630,
+            1,
+            "pressure-vessel",
+            SystemTaskClass::Game,
+            PriorityBand::ForegroundLatency,
+            5,
+        );
+        runtime.cmdline = "/home/user/.steam/steamapps/common/Game/pressure-vessel".to_owned();
+
+        let mut game = test_process(
+            631,
+            630,
+            "Game.exe",
+            SystemTaskClass::GameRenderThread,
+            PriorityBand::ForegroundLatency,
+            80,
+        );
+        game.cmdline = "/home/user/.steam/steamapps/common/Game/Game.exe".to_owned();
+
+        let snapshot = test_snapshot(vec![runtime, game]);
+        let groups = build_focus_groups(&snapshot);
+        let game_group = groups
+            .iter()
+            .find(|group| group.kind == FocusGroupKind::Game)
+            .unwrap();
+
+        assert!(game_group.score > 0.50);
+        assert!(game_group.confidence > 0.55);
+        assert!(game_group.score_breakdown.class_priority_score > 0.0);
+        assert_eq!(game_group.score_breakdown.penalty, 0.0);
+    }
+
+    #[test]
+    fn focus_group_penalizes_launcher_only_game_group() {
+        let steam = test_process(
+            640,
+            1,
+            "steam",
+            SystemTaskClass::Game,
+            PriorityBand::ForegroundLatency,
+            0,
+        );
+
+        let snapshot = test_snapshot(vec![steam]);
+        let groups = build_focus_groups(&snapshot);
+        let game_group = groups
+            .iter()
+            .find(|group| group.kind == FocusGroupKind::Game)
+            .unwrap();
+
+        assert!(game_group.score_breakdown.penalty >= 0.20);
+        assert!(game_group.confidence <= 0.55);
+    }
+
+    #[test]
+    fn focus_group_scores_browser_from_active_children() {
+        let parent = test_process(
+            650,
+            1,
+            "firefox",
+            SystemTaskClass::BrowserForeground,
+            PriorityBand::ForegroundLatency,
+            5,
+        );
+        let renderer = test_process(
+            651,
+            650,
+            "Web Content",
+            SystemTaskClass::BrowserRenderer,
+            PriorityBand::Interactive,
+            60,
+        );
+        let gpu = test_process(
+            652,
+            650,
+            "GPU Process",
+            SystemTaskClass::BrowserGpu,
+            PriorityBand::Interactive,
+            20,
+        );
+
+        let snapshot = test_snapshot(vec![parent, renderer, gpu]);
+        let groups = build_focus_groups(&snapshot);
+        let browser = groups
+            .iter()
+            .find(|group| group.kind == FocusGroupKind::Browser)
+            .unwrap();
+
+        assert!(browser.score > 0.40);
+        assert!(browser.confidence > 0.55);
+        assert_eq!(browser.score_breakdown.penalty, 0.0);
+    }
+
+    #[test]
+    fn focus_group_penalizes_many_idle_browser_renderers() {
+        let parent = test_process(
+            660,
+            1,
+            "firefox",
+            SystemTaskClass::BrowserForeground,
+            PriorityBand::ForegroundLatency,
+            1,
+        );
+        let renderer_one = test_process(
+            661,
+            660,
+            "Web Content",
+            SystemTaskClass::BrowserRenderer,
+            PriorityBand::Interactive,
+            0,
+        );
+        let renderer_two = test_process(
+            662,
+            660,
+            "Web Content",
+            SystemTaskClass::BrowserRenderer,
+            PriorityBand::Interactive,
+            0,
+        );
+        let renderer_three = test_process(
+            663,
+            660,
+            "Web Content",
+            SystemTaskClass::BrowserRenderer,
+            PriorityBand::Interactive,
+            0,
+        );
+        let renderer_four = test_process(
+            664,
+            660,
+            "Web Content",
+            SystemTaskClass::BrowserRenderer,
+            PriorityBand::Interactive,
+            0,
+        );
+
+        let snapshot = test_snapshot(vec![
+            parent,
+            renderer_one,
+            renderer_two,
+            renderer_three,
+            renderer_four,
+        ]);
+        let groups = build_focus_groups(&snapshot);
+        let browser = groups
+            .iter()
+            .find(|group| group.kind == FocusGroupKind::Browser)
+            .unwrap();
+
+        assert!(browser.score_breakdown.penalty > 0.0);
+        assert!(browser.confidence <= 0.75);
     }
 
     #[test]
