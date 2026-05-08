@@ -3,6 +3,7 @@
 pub mod cpu_affinity;
 pub mod nice;
 
+pub mod ioprio;
 pub mod runner;
 
 use std::path::PathBuf;
