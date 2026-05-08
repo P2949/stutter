@@ -20,7 +20,7 @@ use tokio::{
 };
 
 use crate::{
-    cli::Config,
+    cli::{Config, FocusSource, ForegroundSourceArg},
     remote::{
         AgentAutotuneLimits, AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
         AutotuneRestoreResponse, AutotuneStartRequest, AutotuneStartResponse,
@@ -48,6 +48,7 @@ pub(crate) const AGENT_ARTIFACT_ALLOWLIST: &[&str] = &[
     "cpu_freq_samples.json",
     "io_events.json",
     "scx_events.json",
+    "foreground_events.json",
 ];
 
 #[derive(Clone, Debug)]
@@ -491,6 +492,22 @@ async fn start_record_handler(
         return status.into_response();
     }
 
+    if let Err(status) = validate_foreground_title_capture_security(&request, &state, &headers) {
+        audit_agent_event(
+            "remote-record-start",
+            false,
+            0,
+            "rejected foreground_include_title request: title capture requires loopback bind or valid bearer token".to_owned(),
+        );
+        return (
+            status,
+            Json(ErrorResponse {
+                error: "foreground_include_title requires a loopback-bound agent or a valid bearer token".to_owned(),
+            }),
+        )
+            .into_response();
+    }
+
     if let Err(e) = validate_remote_request_limits(&request, &state.limits) {
         audit_agent_event(
             "remote-record-start",
@@ -554,7 +571,7 @@ async fn start_record_handler(
         true,
         target_count,
         format!(
-            "run_id={} duration={} targets={} hwmon={} cpu_freq={} faults={} stat_wait={} block_io={} irq_latency={}",
+            "run_id={} duration={} targets={} hwmon={} cpu_freq={} faults={} stat_wait={} block_io={} irq_latency={} foreground_window={} focus_source={:?} foreground_source={:?} foreground_include_title={}",
             run_id,
             request
                 .duration_seconds
@@ -565,7 +582,11 @@ async fn start_record_handler(
             request.faults,
             request.stat_wait,
             request.block_io,
-            request.irq_latency
+            request.irq_latency,
+            request.foreground_window,
+            request.focus_source,
+            request.foreground_source,
+            request.foreground_include_title
         ),
     );
 
@@ -1082,6 +1103,7 @@ fn capabilities_response(state: &AgentState) -> CapabilitiesResponse {
             stat_wait_request: true,
             block_io_request: true,
             irq_latency_request: true,
+            foreground_window_request: true,
             autotune_observe: true,
             autotune_suggest: true,
             autotune_apply_low_risk: false,
@@ -1105,6 +1127,81 @@ fn artifact_content_type(name: &str) -> &'static str {
     } else {
         "application/octet-stream"
     }
+}
+
+fn parse_remote_focus_source(value: Option<&str>) -> anyhow::Result<FocusSource> {
+    match value
+        .unwrap_or("heuristic")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "heuristic" => Ok(FocusSource::Heuristic),
+        "foreground" => Ok(FocusSource::Foreground),
+        "hybrid" => Ok(FocusSource::Hybrid),
+        other => {
+            anyhow::bail!("focus_source must be heuristic, foreground, or hybrid, got {other:?}")
+        }
+    }
+}
+
+fn parse_remote_foreground_source(value: Option<&str>) -> anyhow::Result<ForegroundSourceArg> {
+    match value.unwrap_or("auto").trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(ForegroundSourceArg::Auto),
+        "sway" => Ok(ForegroundSourceArg::Sway),
+        "hyprland" => Ok(ForegroundSourceArg::Hyprland),
+        "x11" => Ok(ForegroundSourceArg::X11),
+        other => {
+            anyhow::bail!("foreground_source must be auto, sway, hyprland, or x11, got {other:?}")
+        }
+    }
+}
+
+fn remote_foreground_enabled(request: &RemoteMonitorRequest) -> anyhow::Result<bool> {
+    let focus_source = parse_remote_focus_source(request.focus_source.as_deref())?;
+    Ok(request.foreground_window || focus_source != FocusSource::Heuristic)
+}
+
+fn validate_remote_foreground_request(request: &RemoteMonitorRequest) -> anyhow::Result<()> {
+    let _foreground_enabled = remote_foreground_enabled(request)?;
+    let _foreground_source = parse_remote_foreground_source(request.foreground_source.as_deref())?;
+
+    if let Some(foreground_poll_ms) = request.foreground_poll_ms
+        && foreground_poll_ms < 100
+    {
+        anyhow::bail!("foreground_poll_ms must be >= 100");
+    }
+
+    if let (Some(max_stale), Some(poll)) =
+        (request.foreground_max_stale_ms, request.foreground_poll_ms)
+        && max_stale < poll
+    {
+        log::warn!(
+            "remote foreground max stale is lower than poll interval; provider errors may clear focus quickly"
+        );
+    }
+
+    Ok(())
+}
+
+fn validate_foreground_title_capture_security(
+    request: &RemoteMonitorRequest,
+    state: &AgentState,
+    headers: &HeaderMap,
+) -> Result<(), StatusCode> {
+    if !request.foreground_include_title {
+        return Ok(());
+    }
+
+    if is_local_bind(&state.bind) {
+        return Ok(());
+    }
+
+    if state.auth.bearer_token.is_none() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    authorize(headers, &state.auth)
 }
 
 fn validate_remote_request_limits(
@@ -1152,6 +1249,8 @@ fn validate_remote_request_limits(
         anyhow::bail!("irq_latency requires explicit IRQ list");
     }
 
+    validate_remote_foreground_request(request)?;
+
     Ok(())
 }
 
@@ -1188,7 +1287,7 @@ fn config_from_remote_request(
         exclude_comm.push(CompiledPattern::new(p.clone())?);
     }
 
-    Ok(Config {
+    let mut config = Config {
         target_pids: request.target_pids.clone(),
         tree_pids: request.tree_pids.clone(),
         exclude_tree_pids: request.exclude_tree_pids.clone(),
@@ -1263,12 +1362,72 @@ fn config_from_remote_request(
         auto_focus_required_polls: 2,
         auto_focus_max_roots: 4,
         remote: None,
-    })
+    };
+
+    let focus_source = parse_remote_focus_source(request.focus_source.as_deref())?;
+    let foreground_source = parse_remote_foreground_source(request.foreground_source.as_deref())?;
+
+    config.focus_source = focus_source;
+    config.foreground_window = request.foreground_window || focus_source != FocusSource::Heuristic;
+    config.foreground_source = foreground_source;
+    if let Some(foreground_poll_ms) = request.foreground_poll_ms {
+        config.foreground_poll_ms = foreground_poll_ms;
+    }
+    if let Some(foreground_max_stale_ms) = request.foreground_max_stale_ms {
+        config.foreground_max_stale_ms = foreground_max_stale_ms;
+    }
+    config.foreground_include_title = request.foreground_include_title;
+
+    Ok(config)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn minimal_remote_request() -> RemoteMonitorRequest {
+        RemoteMonitorRequest {
+            target_pids: vec![1234],
+            tree_pids: Vec::new(),
+            exclude_tree_pids: Vec::new(),
+            duration_seconds: Some(5),
+            spike_us: Some(1000),
+            summary_ms: Some(500),
+            include_comm: Vec::new(),
+            exclude_comm: Vec::new(),
+            hwmon: false,
+            cpu_freq: false,
+            faults: false,
+            stat_wait: false,
+            block_io: false,
+            irq_latency: false,
+            irqs: Vec::new(),
+            foreground_window: false,
+            focus_source: None,
+            foreground_source: None,
+            foreground_poll_ms: None,
+            foreground_max_stale_ms: None,
+            foreground_include_title: false,
+            record: true,
+            run_name: Some("remote-test".to_owned()),
+        }
+    }
+
+    fn test_agent_state_custom(bind: SocketAddr, bearer_token: Option<String>) -> AgentState {
+        AgentState {
+            active_run: Mutex::new(None),
+            active_autotune: Mutex::new(None),
+            runs_dir: std::env::temp_dir(),
+            auth: AgentAuth { bearer_token },
+            bind,
+            limits: AgentLimits {
+                max_duration_seconds: DEFAULT_AGENT_MAX_DURATION_SECONDS,
+                max_targets: DEFAULT_AGENT_MAX_TARGETS,
+                max_concurrent_recordings: DEFAULT_AGENT_MAX_CONCURRENT_RECORDINGS,
+            },
+            autotune_limits: AgentAutotuneLimits::default(),
+        }
+    }
 
     fn test_agent_state() -> AgentState {
         AgentState {
@@ -1968,25 +2127,11 @@ mod tests {
             max_targets: 10,
             max_concurrent_recordings: 1,
         };
-        let mut request = RemoteMonitorRequest {
-            target_pids: vec![1],
-            tree_pids: vec![],
-            exclude_tree_pids: vec![],
-            duration_seconds: Some(120),
-            spike_us: Some(1000),
-            summary_ms: Some(1000),
-            include_comm: vec![],
-            exclude_comm: vec![],
-            hwmon: false,
-            cpu_freq: false,
-            faults: false,
-            stat_wait: false,
-            block_io: false,
-            irq_latency: false,
-            irqs: vec![],
-            record: true,
-            run_name: None,
-        };
+        let mut request = minimal_remote_request();
+        request.target_pids = vec![1];
+        request.duration_seconds = Some(120);
+        request.summary_ms = Some(1000);
+        request.run_name = None;
         assert!(validate_remote_request_limits(&request, &limits).is_err());
 
         request.duration_seconds = Some(30);
@@ -2000,25 +2145,11 @@ mod tests {
             max_targets: 2,
             max_concurrent_recordings: 1,
         };
-        let request = RemoteMonitorRequest {
-            target_pids: vec![1, 2, 3],
-            tree_pids: vec![],
-            exclude_tree_pids: vec![],
-            duration_seconds: Some(30),
-            spike_us: Some(1000),
-            summary_ms: Some(1000),
-            include_comm: vec![],
-            exclude_comm: vec![],
-            hwmon: false,
-            cpu_freq: false,
-            faults: false,
-            stat_wait: false,
-            block_io: false,
-            irq_latency: false,
-            irqs: vec![],
-            record: true,
-            run_name: None,
-        };
+        let mut request = minimal_remote_request();
+        request.target_pids = vec![1, 2, 3];
+        request.duration_seconds = Some(30);
+        request.summary_ms = Some(1000);
+        request.run_name = None;
         assert!(validate_remote_request_limits(&request, &limits).is_err());
     }
 
@@ -2029,25 +2160,11 @@ mod tests {
             max_targets: 10,
             max_concurrent_recordings: 1,
         };
-        let request = RemoteMonitorRequest {
-            target_pids: vec![1],
-            tree_pids: vec![],
-            exclude_tree_pids: vec![],
-            duration_seconds: Some(30),
-            spike_us: Some(1000),
-            summary_ms: Some(0),
-            include_comm: vec![],
-            exclude_comm: vec![],
-            hwmon: false,
-            cpu_freq: false,
-            faults: false,
-            stat_wait: false,
-            block_io: false,
-            irq_latency: false,
-            irqs: vec![],
-            record: true,
-            run_name: None,
-        };
+        let mut request = minimal_remote_request();
+        request.target_pids = vec![1];
+        request.duration_seconds = Some(30);
+        request.summary_ms = Some(0);
+        request.run_name = None;
         assert!(validate_remote_request_limits(&request, &limits).is_err());
     }
 
@@ -2058,25 +2175,12 @@ mod tests {
             max_targets: 10,
             max_concurrent_recordings: 1,
         };
-        let request = RemoteMonitorRequest {
-            target_pids: vec![1],
-            tree_pids: vec![],
-            exclude_tree_pids: vec![],
-            duration_seconds: Some(30),
-            spike_us: Some(0),
-            summary_ms: Some(1000),
-            include_comm: vec![],
-            exclude_comm: vec![],
-            hwmon: false,
-            cpu_freq: false,
-            faults: false,
-            stat_wait: false,
-            block_io: false,
-            irq_latency: false,
-            irqs: vec![],
-            record: true,
-            run_name: None,
-        };
+        let mut request = minimal_remote_request();
+        request.target_pids = vec![1];
+        request.duration_seconds = Some(30);
+        request.spike_us = Some(0);
+        request.summary_ms = Some(1000);
+        request.run_name = None;
         assert!(validate_remote_request_limits(&request, &limits).is_err());
     }
 
@@ -2087,25 +2191,12 @@ mod tests {
             max_targets: 10,
             max_concurrent_recordings: 1,
         };
-        let request = RemoteMonitorRequest {
-            target_pids: vec![1],
-            tree_pids: vec![],
-            exclude_tree_pids: vec![],
-            duration_seconds: Some(30),
-            spike_us: Some(1000),
-            summary_ms: Some(1000),
-            include_comm: vec![],
-            exclude_comm: vec![],
-            hwmon: false,
-            cpu_freq: false,
-            faults: false,
-            stat_wait: false,
-            block_io: false,
-            irq_latency: true,
-            irqs: vec![],
-            record: true,
-            run_name: None,
-        };
+        let mut request = minimal_remote_request();
+        request.target_pids = vec![1];
+        request.duration_seconds = Some(30);
+        request.summary_ms = Some(1000);
+        request.irq_latency = true;
+        request.run_name = None;
         assert!(validate_remote_request_limits(&request, &limits).is_err());
     }
 
@@ -2137,6 +2228,179 @@ mod tests {
         assert!(
             resp.supported_artifacts
                 .contains(&"session.json".to_owned())
+        );
+    }
+
+    #[test]
+    fn agent_artifact_allowlist_includes_foreground_events() {
+        assert!(AGENT_ARTIFACT_ALLOWLIST.contains(&"foreground_events.json"));
+        assert!(validate_artifact_name("foreground_events.json").is_ok());
+    }
+
+    #[test]
+    fn validate_remote_request_accepts_foreground_defaults() {
+        let request = minimal_remote_request();
+        let limits = AgentLimits {
+            max_duration_seconds: 60,
+            max_targets: 4,
+            max_concurrent_recordings: 1,
+        };
+
+        validate_remote_request_limits(&request, &limits).unwrap();
+        assert!(!remote_foreground_enabled(&request).unwrap());
+    }
+
+    #[test]
+    fn validate_remote_request_rejects_invalid_focus_source() {
+        let mut request = minimal_remote_request();
+        request.focus_source = Some("dbus".to_owned());
+        let limits = AgentLimits {
+            max_duration_seconds: 60,
+            max_targets: 4,
+            max_concurrent_recordings: 1,
+        };
+
+        let err = validate_remote_request_limits(&request, &limits)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("focus_source must be heuristic, foreground, or hybrid"));
+    }
+
+    #[test]
+    fn validate_remote_request_rejects_invalid_foreground_source() {
+        let mut request = minimal_remote_request();
+        request.foreground_source = Some("gnome".to_owned());
+        let limits = AgentLimits {
+            max_duration_seconds: 60,
+            max_targets: 4,
+            max_concurrent_recordings: 1,
+        };
+
+        let err = validate_remote_request_limits(&request, &limits)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("foreground_source must be auto, sway, hyprland, or x11"));
+    }
+
+    #[test]
+    fn validate_remote_request_rejects_too_fast_foreground_poll() {
+        let mut request = minimal_remote_request();
+        request.foreground_window = true;
+        request.foreground_poll_ms = Some(99);
+        let limits = AgentLimits {
+            max_duration_seconds: 60,
+            max_targets: 4,
+            max_concurrent_recordings: 1,
+        };
+
+        let err = validate_remote_request_limits(&request, &limits)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("foreground_poll_ms must be >= 100"));
+    }
+
+    #[test]
+    fn config_from_remote_request_applies_foreground_fields() {
+        let mut request = minimal_remote_request();
+        request.foreground_window = true;
+        request.focus_source = Some("hybrid".to_owned());
+        request.foreground_source = Some("sway".to_owned());
+        request.foreground_poll_ms = Some(750);
+        request.foreground_max_stale_ms = Some(3000);
+        request.foreground_include_title = false;
+
+        let dir = std::env::temp_dir().join("stutter-agent-foreground-config-test");
+        let limits = AgentLimits {
+            max_duration_seconds: 60,
+            max_targets: 4,
+            max_concurrent_recordings: 1,
+        };
+
+        let config = config_from_remote_request(&request, &dir, &limits).unwrap();
+
+        assert!(config.foreground_window);
+        assert_eq!(config.focus_source, FocusSource::Hybrid);
+        assert_eq!(config.foreground_source, ForegroundSourceArg::Sway);
+        assert_eq!(config.foreground_poll_ms, 750);
+        assert_eq!(config.foreground_max_stale_ms, 3000);
+        assert!(!config.foreground_include_title);
+    }
+
+    #[test]
+    fn config_from_remote_request_enables_foreground_window_for_non_heuristic_focus() {
+        let mut request = minimal_remote_request();
+        request.foreground_window = false;
+        request.focus_source = Some("foreground".to_owned());
+
+        let dir = std::env::temp_dir().join("stutter-agent-foreground-focus-test");
+        let limits = AgentLimits {
+            max_duration_seconds: 60,
+            max_targets: 4,
+            max_concurrent_recordings: 1,
+        };
+
+        let config = config_from_remote_request(&request, &dir, &limits).unwrap();
+
+        assert!(config.foreground_window);
+        assert_eq!(config.focus_source, FocusSource::Foreground);
+    }
+
+    #[test]
+    fn foreground_title_capture_allowed_on_loopback_without_token() {
+        let mut request = minimal_remote_request();
+        request.foreground_include_title = true;
+        let state = test_agent_state_custom("127.0.0.1:0".parse().unwrap(), None);
+        let headers = HeaderMap::new();
+
+        assert!(validate_foreground_title_capture_security(&request, &state, &headers).is_ok());
+    }
+
+    #[test]
+    fn foreground_title_capture_rejected_on_non_loopback_without_token() {
+        let mut request = minimal_remote_request();
+        request.foreground_include_title = true;
+        let state = test_agent_state_custom("0.0.0.0:0".parse().unwrap(), None);
+        let headers = HeaderMap::new();
+
+        assert_eq!(
+            validate_foreground_title_capture_security(&request, &state, &headers),
+            Err(StatusCode::FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn foreground_title_capture_allowed_on_non_loopback_with_valid_bearer_token() {
+        let mut request = minimal_remote_request();
+        request.foreground_include_title = true;
+        let state =
+            test_agent_state_custom("0.0.0.0:0".parse().unwrap(), Some("secret".to_owned()));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer secret".parse().unwrap(),
+        );
+
+        assert!(validate_foreground_title_capture_security(&request, &state, &headers).is_ok());
+    }
+
+    #[test]
+    fn foreground_title_capture_rejected_on_non_loopback_with_invalid_bearer_token() {
+        let mut request = minimal_remote_request();
+        request.foreground_include_title = true;
+        let state =
+            test_agent_state_custom("0.0.0.0:0".parse().unwrap(), Some("secret".to_owned()));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer wrong".parse().unwrap(),
+        );
+
+        assert_eq!(
+            validate_foreground_title_capture_security(&request, &state, &headers),
+            Err(StatusCode::FORBIDDEN)
         );
     }
 }
