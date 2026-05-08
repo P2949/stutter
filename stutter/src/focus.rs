@@ -621,6 +621,163 @@ mod foreground_focus_tests {
     }
 
     #[test]
+    fn foreground_pid_boosts_matching_game_group() {
+        let foreground = foreground_snapshot(Some(11));
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(foreground),
+            vec![
+                test_group(
+                    FocusGroupKind::Game,
+                    vec![10],
+                    vec![10, 11],
+                    Some(10),
+                    "game",
+                    0.30,
+                ),
+                test_group(
+                    FocusGroupKind::Browser,
+                    vec![20],
+                    vec![20, 21],
+                    Some(20),
+                    "browser",
+                    0.70,
+                ),
+            ],
+        );
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Hybrid);
+
+        let game = snapshot
+            .groups
+            .iter()
+            .find(|group| group.display_name == "game")
+            .unwrap();
+        assert!(game.score_breakdown.foreground_score > 0.0);
+        assert!(game.score > 0.30);
+        assert!(
+            game.reasons
+                .iter()
+                .any(|reason| reason.contains("foreground-window score"))
+        );
+    }
+
+    #[test]
+    fn foreground_source_rejects_non_foreground_heuristic_winner() {
+        let foreground = foreground_snapshot(Some(11));
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(foreground),
+            vec![
+                test_group(
+                    FocusGroupKind::Game,
+                    vec![10],
+                    vec![10, 11],
+                    Some(10),
+                    "game",
+                    0.30,
+                ),
+                test_group(
+                    FocusGroupKind::Browser,
+                    vec![20],
+                    vec![20, 21],
+                    Some(20),
+                    "browser",
+                    0.95,
+                ),
+            ],
+        );
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
+
+        assert_eq!(snapshot.groups.len(), 1);
+        assert_eq!(snapshot.groups[0].display_name, "game");
+        assert!(snapshot.groups[0].score_breakdown.foreground_score > 0.0);
+    }
+
+    #[test]
+    fn hybrid_source_falls_back_when_provider_unavailable() {
+        let mut unavailable = foreground_snapshot(Some(11));
+        unavailable.status = crate::foreground::ForegroundProviderStatus::Unavailable;
+        unavailable.confidence = 0.0;
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(unavailable),
+            vec![
+                test_group(
+                    FocusGroupKind::Game,
+                    vec![10],
+                    vec![10, 11],
+                    Some(10),
+                    "game",
+                    0.30,
+                ),
+                test_group(
+                    FocusGroupKind::Browser,
+                    vec![20],
+                    vec![20, 21],
+                    Some(20),
+                    "browser",
+                    0.95,
+                ),
+            ],
+        );
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Hybrid);
+
+        assert_eq!(snapshot.groups.len(), 2);
+        assert_eq!(snapshot.groups[0].display_name, "game");
+        assert_eq!(snapshot.groups[0].score, 0.30);
+        assert_eq!(snapshot.groups[1].display_name, "browser");
+        assert_eq!(snapshot.groups[1].score, 0.95);
+    }
+
+    #[test]
+    fn foreground_pid_does_not_select_system_service_root() {
+        let mut snapshot =
+            foreground_scoring_snapshot(Some(foreground_snapshot(Some(30))), Vec::new());
+        let process = snapshot.processes.get_mut(&30).unwrap();
+        process.comm = "systemd".to_owned();
+        process.cmdline = "/usr/lib/systemd/systemd --user".to_owned();
+        process.classification.class = SystemTaskClass::Service;
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
+
+        assert!(snapshot.groups.is_empty());
+    }
+
+    #[test]
+    fn foreground_browser_maps_to_browser_foreground_band() {
+        let foreground = foreground_snapshot(Some(20));
+        let mut browser = test_group(
+            FocusGroupKind::Browser,
+            vec![20],
+            vec![20, 21],
+            Some(20),
+            "browser",
+            0.20,
+        );
+        browser.priority_band = PriorityBand::ForegroundLatency;
+        browser.confidence = 0.80;
+
+        let mut snapshot = foreground_scoring_snapshot(Some(foreground), vec![browser]);
+        snapshot
+            .processes
+            .get_mut(&20)
+            .unwrap()
+            .classification
+            .priority_band = PriorityBand::ForegroundLatency;
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
+
+        assert_eq!(snapshot.groups.len(), 1);
+        assert_eq!(snapshot.groups[0].kind, FocusGroupKind::Browser);
+        assert_eq!(
+            snapshot.groups[0].priority_band,
+            PriorityBand::ForegroundLatency
+        );
+        assert_eq!(snapshot.groups[0].root_pids, vec![20]);
+        assert!(snapshot.groups[0].score_breakdown.foreground_score > 0.0);
+    }
+
+    #[test]
     fn foreground_source_preserves_existing_group_roots_when_group_contains_foreground_pid() {
         let foreground = foreground_snapshot(Some(11));
         let mut snapshot = foreground_scoring_snapshot(

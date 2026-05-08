@@ -1198,6 +1198,45 @@ mod tests {
     }
 
     #[test]
+    fn validate_run_dir_accepts_missing_foreground_events_when_not_requested() {
+        let dir = temp_dir("missing-foreground-events-not-requested");
+        write_minimal_session(&dir);
+
+        let report = validate_run_dir(&dir).unwrap();
+
+        assert!(
+            report
+                .errors
+                .iter()
+                .all(|error| !error.contains("foreground_events.json")),
+            "errors={:?}",
+            report.errors
+        );
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn validate_run_dir_errors_on_invalid_present_foreground_events() {
+        let dir = temp_dir("invalid-present-foreground-events");
+        write_minimal_session(&dir);
+        std::fs::write(dir.join(FOREGROUND_EVENTS_FILE), "not valid json\n").unwrap();
+
+        let report = validate_run_dir(&dir).unwrap();
+
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|error| error.contains("foreground_events.json invalid")),
+            "errors={:?}",
+            report.errors
+        );
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn load_run_artifacts_reads_foreground_events_when_requested() {
         let dir = tempfile::tempdir().unwrap();
         let run_dir = dir.path();

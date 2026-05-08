@@ -699,6 +699,56 @@ mod focus_recording_tests {
     use super::*;
 
     #[test]
+    fn foreground_event_serializes_without_title_by_default() {
+        let event = ForegroundEvent::new(
+            1_000,
+            crate::foreground::ForegroundSource::Sway,
+            crate::foreground::ForegroundProviderStatus::Available,
+            Some(4242),
+            Some("steam_app_379430".to_owned()),
+            Some("steam_app_379430".to_owned()),
+            Some("Private game or browser title".to_owned()),
+            false,
+            Some("7".to_owned()),
+            Some("gaming".to_owned()),
+            0.95,
+            "focused Sway node from swaymsg get_tree",
+        );
+
+        let value = serde_json::to_value(&event).unwrap();
+
+        assert_eq!(
+            value.get("elapsed_ms").and_then(serde_json::Value::as_u64),
+            Some(1_000)
+        );
+        assert_eq!(
+            value.get("source").and_then(serde_json::Value::as_str),
+            Some("sway")
+        );
+        assert_eq!(
+            value.get("status").and_then(serde_json::Value::as_str),
+            Some("available")
+        );
+        assert_eq!(
+            value.get("pid").and_then(serde_json::Value::as_u64),
+            Some(4242)
+        );
+        assert_eq!(
+            value.get("app_id").and_then(serde_json::Value::as_str),
+            Some("steam_app_379430")
+        );
+        assert_eq!(
+            value.get("class").and_then(serde_json::Value::as_str),
+            Some("steam_app_379430")
+        );
+        assert!(value.get("title").unwrap().is_null());
+        assert_eq!(
+            value.get("workspace").and_then(serde_json::Value::as_str),
+            Some("gaming")
+        );
+    }
+
+    #[test]
     fn foreground_event_serializes_expected_fields() {
         let event = ForegroundEvent {
             elapsed_ms: 1234,
@@ -806,6 +856,17 @@ mod focus_recording_tests {
         assert!(json.contains("\"confidence\":0.75"));
         assert!(json.contains("\"score\":0.82"));
         assert!(json.contains("\"situation\":\"GameFocused\""));
+    }
+
+    #[test]
+    fn recorded_config_defaults_foreground_fields_for_old_sessions() {
+        let config = RecordedConfig::default();
+
+        assert!(!config.foreground_window);
+        assert_eq!(config.foreground_source, "");
+        assert_eq!(config.foreground_poll_ms, 0);
+        assert_eq!(config.foreground_max_stale_ms, 0);
+        assert!(!config.foreground_include_title);
     }
 
     #[test]
