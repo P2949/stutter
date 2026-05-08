@@ -14,8 +14,8 @@ use crate::{
     metrics::format_latency,
     process_tree::TaskClass,
     recorder::{
-        FocusEvent, FrameEvent, GpuSample, IntervalRecord, RecordedSpike, SESSION_SCHEMA_VERSION,
-        SessionFile, SessionTask, SpikeEvent,
+        FocusEvent, ForegroundEvent, FrameEvent, GpuSample, IntervalRecord, RecordedSpike,
+        SESSION_SCHEMA_VERSION, SessionFile, SessionTask, SpikeEvent,
     },
     session_io::{self, ArtifactLoadOptions},
     summary::{self, RunDiffSummary, TaskDeltaSummary, format_latency_signed},
@@ -89,6 +89,10 @@ pub(crate) struct SpikeCluster {
     pub(crate) anchor_class: Option<TaskClass>,
     pub(crate) anchor_comm: Option<String>,
     pub(crate) anchor_kind: Option<ClusterAnchorKind>,
+    pub(crate) foreground_pid: Option<u32>,
+    pub(crate) foreground_app_id: Option<String>,
+    pub(crate) foreground_class: Option<String>,
+    pub(crate) foreground_confidence: Option<f32>,
     pub(crate) wake_graph: Vec<WakeGraphEdge>,
 }
 
@@ -128,6 +132,7 @@ pub struct ArtifactsSummary {
     pub interval_record_count: u64,
     pub scx_event_count: u64,
     pub focus_event_count: u64,
+    pub foreground_event_count: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -160,6 +165,88 @@ pub enum DataQualityLevel {
     High,
     Medium,
     Low,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ForegroundReportSummary {
+    pub enabled: bool,
+    pub source: Option<String>,
+    pub final_pid: Option<u32>,
+    pub final_app_id: Option<String>,
+    pub final_class: Option<String>,
+    pub final_title: Option<String>,
+    pub final_workspace: Option<String>,
+    pub event_count: u64,
+    pub confidence: Option<f32>,
+    pub provider_status: Option<String>,
+    pub reasons: Vec<String>,
+}
+
+impl ForegroundReportSummary {
+    pub fn is_visible(&self) -> bool {
+        self.enabled
+            || self.source.is_some()
+            || self.final_pid.is_some()
+            || self.final_app_id.is_some()
+            || self.final_class.is_some()
+            || self.final_title.is_some()
+            || self.final_workspace.is_some()
+            || self.event_count > 0
+            || self.confidence.is_some()
+            || self.provider_status.is_some()
+            || !self.reasons.is_empty()
+    }
+}
+
+fn foreground_report_summary(
+    session: &SessionFile,
+    foreground_events: &[ForegroundEvent],
+) -> ForegroundReportSummary {
+    let final_event = foreground_events.last();
+
+    let enabled = session.config.foreground_window || session.core.foreground_event_count > 0;
+    let source = final_event
+        .map(|event| format!("{:?}", event.source).to_ascii_lowercase())
+        .or_else(|| session.core.foreground_source.clone())
+        .or_else(|| {
+            (!session.config.foreground_source.is_empty())
+                .then(|| session.config.foreground_source.clone())
+        });
+
+    let final_pid = final_event
+        .and_then(|event| event.pid)
+        .or(session.core.final_foreground_pid);
+    let final_app_id = final_event
+        .and_then(|event| event.app_id.clone())
+        .or_else(|| session.core.final_foreground_app_id.clone());
+    let final_class = final_event
+        .and_then(|event| event.class.clone())
+        .or_else(|| session.core.final_foreground_class.clone());
+    let final_title = final_event.and_then(|event| event.title.clone());
+    let final_workspace = final_event.and_then(|event| event.workspace.clone());
+    let confidence = final_event.map(|event| event.confidence);
+    let provider_status =
+        final_event.map(|event| format!("{:?}", event.status).to_ascii_lowercase());
+    let reasons = final_event
+        .map(|event| vec![event.reason.clone()])
+        .unwrap_or_default();
+
+    ForegroundReportSummary {
+        enabled,
+        source,
+        final_pid,
+        final_app_id,
+        final_class,
+        final_title,
+        final_workspace,
+        event_count: session
+            .core
+            .foreground_event_count
+            .max(foreground_events.len() as u64),
+        confidence,
+        provider_status,
+        reasons,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -244,6 +331,7 @@ pub struct ReportAnalysisJson {
     pub artifacts_summary: ArtifactsSummary,
     pub data_quality: DataQualitySummary,
     pub focus_summary: FocusReportSummary,
+    pub foreground_summary: ForegroundReportSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -299,6 +387,7 @@ pub struct HtmlReportModel {
     pub frame_diagnoses: Vec<FrameDiagnosis>,
     pub artifacts_summary: ArtifactsSummary,
     pub focus_summary: FocusReportSummary,
+    pub foreground_summary: ForegroundReportSummary,
     pub top_tasks_by_max: Vec<TaskHtmlRow>,
     pub top_tasks_by_p99: Vec<TaskHtmlRow>,
     pub spike_density: Vec<SpikeDensityBucket>,
@@ -367,6 +456,7 @@ fn artifacts_summary_from_session(session: &SessionFile) -> ArtifactsSummary {
         interval_record_count: session.core.interval_record_count,
         scx_event_count: session.core.scx_event_count,
         focus_event_count: session.core.focus_event_count,
+        foreground_event_count: session.core.foreground_event_count,
     }
 }
 
@@ -438,6 +528,12 @@ fn build_report_analysis_with_artifacts(
         cluster_window_ns,
     );
 
+    annotate_clusters_with_foreground(
+        &mut cluster_analysis.clusters,
+        &artifacts.foreground_events,
+        session.config.foreground_max_stale_ms.max(2_500),
+    );
+
     let all_spike_points = if !artifacts.spikes.is_empty() {
         flatten_spike_events(&session, &artifacts.spikes)
     } else {
@@ -461,6 +557,7 @@ fn build_report_analysis_with_artifacts(
     );
 
     let focus_summary = focus_report_summary(&session, &artifacts.focus_events);
+    let foreground_summary = foreground_report_summary(&session, &artifacts.foreground_events);
 
     Ok(ReportBuildResult {
         analysis: ReportAnalysisJson {
@@ -471,6 +568,7 @@ fn build_report_analysis_with_artifacts(
             artifacts_summary,
             data_quality,
             focus_summary,
+            foreground_summary,
         },
         artifacts,
     })
@@ -524,6 +622,8 @@ pub fn print_report(
             &analysis.cluster_analysis,
             &analysis.frame_diagnoses,
             &artifacts,
+            &analysis.focus_summary,
+            &analysis.foreground_summary,
             top,
             cluster_window_ms,
             filter_class,
@@ -585,6 +685,73 @@ fn render_focus_summary_text(focus: &FocusReportSummary) -> String {
     if !focus.reasons.is_empty() {
         pushln(&mut output, "  reasons:");
         for reason in &focus.reasons {
+            pushln(&mut output, format!("    - {reason}"));
+        }
+    }
+
+    pushln(&mut output, "");
+    output
+}
+
+fn render_foreground_summary_text(foreground: &ForegroundReportSummary) -> String {
+    let mut output = String::new();
+
+    if !foreground.is_visible() {
+        return output;
+    }
+
+    pushln(&mut output, "Foreground window:");
+    pushln(
+        &mut output,
+        format!(
+            "  source: {}",
+            foreground.source.as_deref().unwrap_or("unknown")
+        ),
+    );
+
+    if let Some(pid) = foreground.final_pid {
+        pushln(&mut output, format!("  final pid: {pid}"));
+    } else {
+        pushln(&mut output, "  final pid: none");
+    }
+
+    let app_or_class = foreground
+        .final_app_id
+        .as_deref()
+        .or(foreground.final_class.as_deref())
+        .unwrap_or("unknown");
+    pushln(&mut output, format!("  app_id/class: {app_or_class}"));
+
+    if let Some(workspace) = foreground.final_workspace.as_deref() {
+        pushln(&mut output, format!("  workspace: {workspace}"));
+    } else {
+        pushln(&mut output, "  workspace: unknown");
+    }
+
+    if let Some(title) = foreground.final_title.as_deref() {
+        pushln(&mut output, format!("  title: {title}"));
+    } else if foreground.enabled || foreground.event_count > 0 {
+        pushln(
+            &mut output,
+            "  title: redacted (pass --foreground-include-title to record it)",
+        );
+    }
+
+    if let Some(confidence) = foreground.confidence {
+        pushln(&mut output, format!("  confidence: {:.2}", confidence));
+    } else {
+        pushln(&mut output, "  confidence: unknown");
+    }
+
+    if let Some(status) = foreground.provider_status.as_deref() {
+        pushln(&mut output, format!("  provider status: {status}"));
+    }
+
+    pushln(&mut output, format!("  events: {}", foreground.event_count));
+
+    if !foreground.reasons.is_empty() {
+        pushln(&mut output, "  reasons:");
+        for reason in &foreground.reasons {
             pushln(&mut output, format!("    - {reason}"));
         }
     }
@@ -1094,6 +1261,7 @@ pub fn build_html_report_model(
         frame_diagnoses: analysis.frame_diagnoses.clone(),
         artifacts_summary: analysis.artifacts_summary.clone(),
         focus_summary: analysis.focus_summary.clone(),
+        foreground_summary: analysis.foreground_summary.clone(),
         top_tasks_by_max: top_task_rows_by_max_latency(session, top, filter_class),
         top_tasks_by_p99: top_task_rows_by_p99_latency(session, top, filter_class),
         spike_density,
@@ -1184,6 +1352,8 @@ pub fn write_html_report(
         &analysis.cluster_analysis,
         &analysis.frame_diagnoses,
         &artifacts,
+        &analysis.focus_summary,
+        &analysis.foreground_summary,
         top,
         cluster_window_ms,
         filter_class,
@@ -1336,11 +1506,13 @@ pub fn classify_switch_prev_state(prev_state: i64) -> &'static str {
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_report(
-    session_path: &Path,
+    path: &Path,
     session: &SessionFile,
     cluster_analysis: &SpikeClusterAnalysis,
     frame_diagnoses: &[FrameDiagnosis],
     artifacts: &session_io::RunArtifacts,
+    focus_summary: &FocusReportSummary,
+    foreground_summary: &ForegroundReportSummary,
     top: usize,
     cluster_window_ms: u64,
     filter_class: Option<TaskClass>,
@@ -1351,12 +1523,10 @@ pub(crate) fn render_report(
     pushln(&mut output, "stutter report");
     pushln(&mut output, "==============");
 
-    output.push_str(&render_focus_summary_text(&focus_report_summary(
-        session,
-        &artifacts.focus_events,
-    )));
+    output.push_str(&render_focus_summary_text(focus_summary));
+    output.push_str(&render_foreground_summary_text(foreground_summary));
 
-    pushln(&mut output, format!("file: {}", session_path.display()));
+    pushln(&mut output, format!("file: {}", path.display()));
     pushln(
         &mut output,
         format!("schema: {}", session.core.schema_version),
@@ -2401,6 +2571,10 @@ fn cluster_from_points(mut points: Vec<SpikePoint>, distinct_tasks: usize) -> Sp
         anchor_class: None,
         anchor_comm: None,
         anchor_kind: None,
+        foreground_pid: None,
+        foreground_app_id: None,
+        foreground_class: None,
+        foreground_confidence: None,
         wake_graph,
     }
 }
@@ -2463,6 +2637,42 @@ fn perform_diagnosis(
         cluster.anchor_kind = Some(anchor.kind);
         cluster.diagnosis = Some(diagnosis);
     }
+}
+
+fn annotate_clusters_with_foreground(
+    clusters: &mut [SpikeCluster],
+    foreground_events: &[ForegroundEvent],
+    max_stale_ms: u64,
+) {
+    for cluster in clusters {
+        if let Some(event) = foreground_for_cluster(cluster, foreground_events, max_stale_ms) {
+            cluster.foreground_pid = event.pid;
+            cluster.foreground_app_id = event.app_id.clone();
+            cluster.foreground_class = event.class.clone();
+            cluster.foreground_confidence = Some(event.confidence);
+        }
+    }
+}
+
+fn foreground_for_cluster<'a>(
+    cluster: &SpikeCluster,
+    foreground_events: &'a [ForegroundEvent],
+    max_stale_ms: u64,
+) -> Option<&'a ForegroundEvent> {
+    let cluster_ms = cluster_elapsed_ms(cluster)?;
+    foreground_events
+        .iter()
+        .filter(|event| event.elapsed_ms <= cluster_ms)
+        .filter(|event| cluster_ms.saturating_sub(event.elapsed_ms) <= max_stale_ms)
+        .max_by_key(|event| event.elapsed_ms)
+}
+
+fn cluster_elapsed_ms(cluster: &SpikeCluster) -> Option<u64> {
+    cluster
+        .points
+        .iter()
+        .filter_map(|point| point.elapsed_ms)
+        .min()
 }
 
 fn render_cluster_source(analysis: &SpikeClusterAnalysis, cluster_window_ms: u64) -> String {
@@ -3229,6 +3439,229 @@ fn compute_correlation_windows(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn foreground_event(
+        elapsed_ms: u64,
+        pid: Option<u32>,
+        app_id: Option<&str>,
+        class: Option<&str>,
+        title: Option<&str>,
+        workspace: Option<&str>,
+        confidence: f32,
+    ) -> ForegroundEvent {
+        ForegroundEvent {
+            elapsed_ms,
+            source: crate::foreground::ForegroundSource::Sway,
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid,
+            app_id: app_id.map(str::to_owned),
+            class: class.map(str::to_owned),
+            title: title.map(str::to_owned),
+            window_id: Some("7".to_owned()),
+            workspace: workspace.map(str::to_owned),
+            confidence,
+            reason: "test foreground event".to_owned(),
+        }
+    }
+
+    fn cluster_at(elapsed_ms: u64) -> SpikeCluster {
+        SpikeCluster {
+            points: vec![SpikePoint {
+                elapsed_ms: Some(elapsed_ms),
+                ..SpikePoint::default()
+            }],
+            distinct_tasks: 1,
+            min_switch_ns: 0,
+            max_switch_ns: 0,
+            max_latency_ns: 0,
+            diagnosis: None,
+            anchor_task: None,
+            anchor_class: None,
+            anchor_comm: None,
+            anchor_kind: None,
+            foreground_pid: None,
+            foreground_app_id: None,
+            foreground_class: None,
+            foreground_confidence: None,
+            wake_graph: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn foreground_report_summary_uses_final_event_and_redacted_title() {
+        let mut session = minimal_session_for_report_test();
+        session.config.foreground_window = true;
+        session.config.foreground_source = "sway".to_owned();
+        session.core.foreground_event_count = 2;
+        session.core.foreground_source = Some("sway".to_owned());
+        session.core.final_foreground_pid = Some(12345);
+        session.core.final_foreground_app_id = Some("steam_app_379430".to_owned());
+        session.core.final_foreground_class = Some("steam_app_379430".to_owned());
+
+        let events = vec![
+            foreground_event(
+                100,
+                Some(1000),
+                Some("steam"),
+                Some("Steam"),
+                None,
+                Some("gaming"),
+                0.90,
+            ),
+            foreground_event(
+                200,
+                Some(12345),
+                Some("steam_app_379430"),
+                Some("steam_app_379430"),
+                None,
+                Some("gaming"),
+                0.95,
+            ),
+        ];
+
+        let summary = foreground_report_summary(&session, &events);
+
+        assert!(summary.enabled);
+        assert_eq!(summary.source.as_deref(), Some("sway"));
+        assert_eq!(summary.final_pid, Some(12345));
+        assert_eq!(summary.final_app_id.as_deref(), Some("steam_app_379430"));
+        assert_eq!(summary.final_class.as_deref(), Some("steam_app_379430"));
+        assert_eq!(summary.final_title, None);
+        assert_eq!(summary.final_workspace.as_deref(), Some("gaming"));
+        assert_eq!(summary.event_count, 2);
+        assert_eq!(summary.confidence, Some(0.95));
+        assert_eq!(summary.provider_status.as_deref(), Some("available"));
+    }
+
+    #[test]
+    fn render_foreground_summary_text_mentions_redacted_title() {
+        let summary = ForegroundReportSummary {
+            enabled: true,
+            source: Some("sway".to_owned()),
+            final_pid: Some(12345),
+            final_app_id: Some("steam_app_379430".to_owned()),
+            final_class: Some("steam_app_379430".to_owned()),
+            final_title: None,
+            final_workspace: Some("gaming".to_owned()),
+            event_count: 7,
+            confidence: Some(0.95),
+            provider_status: Some("available".to_owned()),
+            reasons: vec!["focused Sway node from swaymsg get_tree".to_owned()],
+        };
+
+        let text = render_foreground_summary_text(&summary);
+
+        assert!(text.contains("Foreground window:"));
+        assert!(text.contains("  source: sway"));
+        assert!(text.contains("  final pid: 12345"));
+        assert!(text.contains("  app_id/class: steam_app_379430"));
+        assert!(text.contains("  workspace: gaming"));
+        assert!(text.contains("  confidence: 0.95"));
+        assert!(text.contains("  events: 7"));
+        assert!(text.contains("  title: redacted (pass --foreground-include-title to record it)"));
+    }
+
+    #[test]
+    fn foreground_for_cluster_uses_nearest_event_at_or_before_cluster_time() {
+        let cluster = cluster_at(1_500);
+        let events = vec![
+            foreground_event(500, Some(1), Some("old"), Some("Old"), None, None, 0.50),
+            foreground_event(
+                1_200,
+                Some(2),
+                Some("game"),
+                Some("Game"),
+                None,
+                Some("gaming"),
+                0.95,
+            ),
+            foreground_event(
+                1_600,
+                Some(3),
+                Some("future"),
+                Some("Future"),
+                None,
+                None,
+                0.95,
+            ),
+        ];
+
+        let selected = foreground_for_cluster(&cluster, &events, 1_000).unwrap();
+
+        assert_eq!(selected.pid, Some(2));
+        assert_eq!(selected.app_id.as_deref(), Some("game"));
+    }
+
+    #[test]
+    fn foreground_for_cluster_respects_max_stale_ms() {
+        let cluster = cluster_at(2_000);
+        let events = vec![foreground_event(
+            500,
+            Some(1),
+            Some("old"),
+            Some("Old"),
+            None,
+            None,
+            0.50,
+        )];
+
+        assert!(foreground_for_cluster(&cluster, &events, 1_000).is_none());
+    }
+
+    #[test]
+    fn annotate_clusters_with_foreground_sets_cluster_fields() {
+        let mut clusters = vec![cluster_at(1_500)];
+        let events = vec![foreground_event(
+            1_200,
+            Some(12345),
+            Some("steam_app_379430"),
+            Some("steam_app_379430"),
+            None,
+            Some("gaming"),
+            0.95,
+        )];
+
+        annotate_clusters_with_foreground(&mut clusters, &events, 1_000);
+
+        assert_eq!(clusters[0].foreground_pid, Some(12345));
+        assert_eq!(
+            clusters[0].foreground_app_id.as_deref(),
+            Some("steam_app_379430")
+        );
+        assert_eq!(
+            clusters[0].foreground_class.as_deref(),
+            Some("steam_app_379430")
+        );
+        assert_eq!(clusters[0].foreground_confidence, Some(0.95));
+    }
+
+    #[test]
+    fn report_analysis_json_contains_foreground_summary() {
+        let mut session = minimal_session_for_report_test();
+        session.config.foreground_window = true;
+        session.config.foreground_source = "sway".to_owned();
+        session.core.foreground_event_count = 1;
+        let summary = foreground_report_summary(
+            &session,
+            &[foreground_event(
+                100,
+                Some(12345),
+                Some("steam_app_379430"),
+                Some("steam_app_379430"),
+                None,
+                Some("gaming"),
+                0.95,
+            )],
+        );
+
+        let json = serde_json::to_string(&summary).unwrap();
+
+        assert!(json.contains("\"enabled\":true"));
+        assert!(json.contains("\"source\":\"sway\""));
+        assert!(json.contains("\"final_pid\":12345"));
+        assert!(json.contains("\"event_count\":1"));
+    }
     use crate::{
         autotune::state::SituationKind,
         recorder::{FocusEvent, RecordedConfig, SessionMetadataCore},
@@ -3321,7 +3754,6 @@ mod tests {
         assert!(text.contains("    - cargo root with 14 active compiler descendants"));
         assert!(text.contains("    - CPU delta 780% over 1s"));
     }
-    use super::*;
 
     #[test]
     fn event_stream_warning_is_absent_without_errors() {
@@ -3632,6 +4064,8 @@ mod tests {
             },
             &[],
             &session_io::RunArtifacts::default(),
+            &FocusReportSummary::default(),
+            &ForegroundReportSummary::default(),
             10,
             500,
             None,
@@ -3732,6 +4166,8 @@ mod tests {
             &cluster_analysis,
             &[],
             &artifacts,
+            &FocusReportSummary::default(),
+            &ForegroundReportSummary::default(),
             10,
             5,
             None,
@@ -3763,6 +4199,7 @@ mod tests {
             artifacts_summary: artifacts_summary_from_session(&session),
             data_quality: data_quality_summary(&session, &validation),
             focus_summary: FocusReportSummary::default(),
+            foreground_summary: ForegroundReportSummary::default(),
         };
 
         let value = serde_json::to_value(&analysis).unwrap();
@@ -3808,6 +4245,7 @@ mod tests {
             artifacts_summary: artifacts_summary_from_session(&session),
             data_quality: data_quality_summary(&session, &validation),
             focus_summary: FocusReportSummary::default(),
+            foreground_summary: ForegroundReportSummary::default(),
         };
 
         build_html_report_model(

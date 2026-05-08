@@ -512,6 +512,8 @@ fn minimal_recording_report_text_does_not_panic() {
         },
         &[],
         &RunArtifacts::default(),
+        &report::FocusReportSummary::default(),
+        &report::ForegroundReportSummary::default(),
         10,
         500,
         None,
