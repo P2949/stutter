@@ -22,7 +22,7 @@ use tokio::{
 use crate::{
     cli::Config,
     remote::{
-        AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
+        AgentAutotuneLimits, AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
         AutotuneRestoreResponse, AutotuneStartRequest, AutotuneStartResponse,
         AutotuneStatusResponse, AutotuneStopResponse, CapabilitiesResponse, HealthResponse,
         RecordStatusResponse, RemoteMonitorRequest, RunsResponse, StartRecordResponse,
@@ -59,6 +59,7 @@ pub struct AgentConfig {
     pub max_duration_seconds: u64,
     pub max_targets: usize,
     pub max_concurrent_recordings: usize,
+    pub autotune_limits: AgentAutotuneLimits,
 }
 
 #[derive(Clone, Debug)]
@@ -79,9 +80,8 @@ pub struct AgentState {
     pub runs_dir: PathBuf,
     pub auth: AgentAuth,
     pub bind: SocketAddr,
-    #[allow(dead_code)]
-    pub allow_unsafe_bind: bool,
     pub limits: AgentLimits,
+    pub autotune_limits: AgentAutotuneLimits,
 }
 
 #[derive(Clone, Debug)]
@@ -148,10 +148,10 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
         active_autotune: Mutex::new(None),
         runs_dir: config.runs_dir,
         bind: config.bind,
-        allow_unsafe_bind: config.allow_unsafe_bind,
         auth: AgentAuth {
             bearer_token: config.bearer_token,
         },
+        autotune_limits: config.autotune_limits,
         limits: AgentLimits {
             max_duration_seconds: config.max_duration_seconds,
             max_targets: config.max_targets,
@@ -250,6 +250,53 @@ fn parse_autotune_remote_mode(mode: &str) -> AutotuneRemoteMode {
         "apply-high-risk" => AutotuneRemoteMode::ApplyHighRisk,
         _ => AutotuneRemoteMode::Unknown,
     }
+}
+
+fn validate_autotune_start_limits(
+    request: &AutotuneStartRequest,
+    state: &AgentState,
+) -> anyhow::Result<()> {
+    let limits = &state.autotune_limits;
+
+    if limits.max_active_controllers != 1 {
+        anyhow::bail!("remote autotune supports exactly one active controller");
+    }
+
+    if limits.max_safety_class != "ReversibleLowRisk" {
+        anyhow::bail!("remote autotune max_safety_class must be ReversibleLowRisk");
+    }
+
+    if limits.allow_system_wide_actions {
+        anyhow::bail!("remote autotune system-wide actions are disabled");
+    }
+
+    let requested_target_count =
+        usize::from(request.watch_process.is_some()) + usize::from(request.tree_pid.is_some());
+
+    if requested_target_count == 0 {
+        anyhow::bail!("autotune start requires watch_process or tree_pid");
+    }
+
+    if requested_target_count > limits.max_targets {
+        anyhow::bail!(
+            "autotune target count {} exceeds max_targets {}",
+            requested_target_count,
+            limits.max_targets
+        );
+    }
+
+    if let Some(duration_seconds) = request
+        .duration_seconds
+        .filter(|&d| d > limits.max_candidate_window_seconds)
+    {
+        anyhow::bail!(
+            "autotune duration_seconds {} exceeds max_candidate_window_seconds {}",
+            duration_seconds,
+            limits.max_candidate_window_seconds
+        );
+    }
+
+    Ok(())
 }
 
 fn validate_autotune_start_security(
@@ -717,17 +764,33 @@ async fn autotune_start_handler(
             .into_response();
     }
 
-    if request.watch_process.is_none() && request.tree_pid.is_none() {
+    if let Err(err) = validate_autotune_start_limits(&request, &state) {
         audit_agent_event(
             "remote-autotune-start",
             false,
             0,
-            "missing watch_process or tree_pid".to_owned(),
+            format!("limit_rejected reason={err:#}"),
         );
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
-                error: "autotune start requires watch_process or tree_pid".to_owned(),
+                error: format!("autotune limit rejected: {err}"),
+            }),
+        )
+            .into_response();
+    }
+
+    if state.autotune_limits.max_active_controllers != 1 {
+        audit_agent_event(
+            "remote-autotune-start",
+            false,
+            0,
+            "limit_rejected reason=max_active_controllers must be 1".to_owned(),
+        );
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "remote autotune supports exactly one active controller".to_owned(),
             }),
         )
             .into_response();
@@ -900,6 +963,7 @@ async fn autotune_config_handler(
         history_path: crate::autotune::history::default_autotune_history_path()
             .display()
             .to_string(),
+        autotune_limits: state.autotune_limits.clone(),
     })
     .into_response()
 }
@@ -1141,12 +1205,12 @@ mod tests {
             runs_dir: PathBuf::from("/tmp/stutter-agent-test-runs"),
             auth: AgentAuth { bearer_token: None },
             bind: "127.0.0.1:9899".parse().unwrap(),
-            allow_unsafe_bind: false,
             limits: AgentLimits {
                 max_duration_seconds: DEFAULT_AGENT_MAX_DURATION_SECONDS,
                 max_targets: DEFAULT_AGENT_MAX_TARGETS,
                 max_concurrent_recordings: DEFAULT_AGENT_MAX_CONCURRENT_RECORDINGS,
             },
+            autotune_limits: AgentAutotuneLimits::default(),
         }
     }
 
@@ -1227,6 +1291,115 @@ mod tests {
             );
         }
         headers
+    }
+
+    #[test]
+    fn default_agent_autotune_limits_match_policy() {
+        let limits = AgentAutotuneLimits::default();
+
+        assert_eq!(limits.max_active_controllers, 1);
+        assert_eq!(limits.max_safety_class, "ReversibleLowRisk");
+        assert_eq!(limits.max_candidate_window_seconds, 120);
+        assert_eq!(limits.max_targets, 1);
+        assert!(!limits.allow_system_wide_actions);
+    }
+
+    #[test]
+    fn autotune_start_limits_accept_single_target_under_window_cap() {
+        let state = test_agent_state();
+        let request = AutotuneStartRequest {
+            mode: "observe".to_owned(),
+            watch_process: Some("Game.exe".to_owned()),
+            tree_pid: None,
+            profiles: None,
+            config: None,
+            duration_seconds: Some(120),
+            decision_log: None,
+        };
+
+        validate_autotune_start_limits(&request, &state).unwrap();
+    }
+
+    #[test]
+    fn autotune_start_limits_reject_two_targets() {
+        let state = test_agent_state();
+        let request = AutotuneStartRequest {
+            mode: "observe".to_owned(),
+            watch_process: Some("Game.exe".to_owned()),
+            tree_pid: Some(1234),
+            profiles: None,
+            config: None,
+            duration_seconds: Some(30),
+            decision_log: None,
+        };
+
+        let err = validate_autotune_start_limits(&request, &state)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("exceeds max_targets 1"));
+    }
+
+    #[test]
+    fn autotune_start_limits_reject_candidate_window_above_cap() {
+        let state = test_agent_state();
+        let request = AutotuneStartRequest {
+            mode: "observe".to_owned(),
+            watch_process: Some("Game.exe".to_owned()),
+            tree_pid: None,
+            profiles: None,
+            config: None,
+            duration_seconds: Some(121),
+            decision_log: None,
+        };
+
+        let err = validate_autotune_start_limits(&request, &state)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("exceeds max_candidate_window_seconds 120"));
+    }
+
+    #[test]
+    fn autotune_start_limits_reject_system_wide_actions_enabled() {
+        let mut state = test_agent_state();
+        state.autotune_limits.allow_system_wide_actions = true;
+        let request = AutotuneStartRequest {
+            mode: "observe".to_owned(),
+            watch_process: Some("Game.exe".to_owned()),
+            tree_pid: None,
+            profiles: None,
+            config: None,
+            duration_seconds: Some(30),
+            decision_log: None,
+        };
+
+        let err = validate_autotune_start_limits(&request, &state)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("system-wide actions are disabled"));
+    }
+
+    #[test]
+    fn autotune_start_limits_reject_safety_class_above_low_risk() {
+        let mut state = test_agent_state();
+        state.autotune_limits.max_safety_class = "HighRisk".to_owned();
+        let request = AutotuneStartRequest {
+            mode: "observe".to_owned(),
+            watch_process: Some("Game.exe".to_owned()),
+            tree_pid: None,
+            profiles: None,
+            config: None,
+            duration_seconds: Some(30),
+            decision_log: None,
+        };
+
+        let err = validate_autotune_start_limits(&request, &state)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("max_safety_class must be ReversibleLowRisk"));
     }
 
     #[test]
@@ -1315,7 +1488,6 @@ mod tests {
             bearer_token: Some("secret".to_owned()),
         };
         state.bind = "0.0.0.0:9899".parse().unwrap();
-        state.allow_unsafe_bind = true;
         let headers = autotune_headers(Some("secret"));
 
         let rejection =
@@ -1456,7 +1628,6 @@ mod tests {
             bearer_token: Some("secret".to_owned()),
         };
         state_value.bind = "0.0.0.0:9899".parse().unwrap();
-        state_value.allow_unsafe_bind = true;
         let state = Arc::new(state_value);
 
         let response = autotune_start_handler(
@@ -1476,6 +1647,52 @@ mod tests {
         .into_response();
 
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(state.active_autotune.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn autotune_start_rejects_request_above_candidate_window_cap() {
+        let state = Arc::new(test_agent_state());
+        let response = autotune_start_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Json(AutotuneStartRequest {
+                mode: "observe".to_owned(),
+                watch_process: Some("Game.exe".to_owned()),
+                tree_pid: None,
+                profiles: None,
+                config: None,
+                duration_seconds: Some(121),
+                decision_log: None,
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(state.active_autotune.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn autotune_start_rejects_more_than_one_target() {
+        let state = Arc::new(test_agent_state());
+        let response = autotune_start_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Json(AutotuneStartRequest {
+                mode: "observe".to_owned(),
+                watch_process: Some("Game.exe".to_owned()),
+                tree_pid: Some(1234),
+                profiles: None,
+                config: None,
+                duration_seconds: Some(30),
+                decision_log: None,
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert!(state.active_autotune.lock().await.is_none());
     }
 
@@ -1529,6 +1746,31 @@ mod tests {
             .into_response();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn autotune_config_response_includes_limits() {
+        let state = test_agent_state();
+        let response = AutotuneConfigResponse {
+            default_mode: "observe".to_owned(),
+            supported_modes: vec!["observe".to_owned(), "suggest".to_owned()],
+            apply_low_risk_remote_enabled: false,
+            local_only_by_default: true,
+            history_path: crate::autotune::history::default_autotune_history_path()
+                .display()
+                .to_string(),
+            autotune_limits: state.autotune_limits.clone(),
+        };
+
+        assert_eq!(response.autotune_limits, AgentAutotuneLimits::default());
+        assert_eq!(response.autotune_limits.max_active_controllers, 1);
+        assert_eq!(
+            response.autotune_limits.max_safety_class,
+            "ReversibleLowRisk"
+        );
+        assert_eq!(response.autotune_limits.max_candidate_window_seconds, 120);
+        assert_eq!(response.autotune_limits.max_targets, 1);
+        assert!(!response.autotune_limits.allow_system_wide_actions);
     }
 
     #[tokio::test]
@@ -1810,12 +2052,12 @@ mod tests {
             runs_dir: PathBuf::from("."),
             auth: AgentAuth { bearer_token: None },
             bind: "127.0.0.1:9899".parse().unwrap(),
-            allow_unsafe_bind: false,
             limits: AgentLimits {
                 max_duration_seconds: 123,
                 max_targets: 456,
                 max_concurrent_recordings: 1,
             },
+            autotune_limits: AgentAutotuneLimits::default(),
         };
         let resp = capabilities_response(&state);
         assert_eq!(resp.max_duration_seconds, 123);

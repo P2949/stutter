@@ -350,6 +350,10 @@ async fn main() -> anyhow::Result<()> {
             let bearer_token =
                 agent::load_bearer_token(&bearer_token_env, bearer_token_file.as_deref())?;
 
+            let user_config = config_file::load_user_config()?;
+            let autotune_limits =
+                config_file::agent_autotune_limits_from_user_config(user_config.as_ref())?;
+
             agent::run_agent(agent::AgentConfig {
                 bind,
                 runs_dir,
@@ -358,6 +362,7 @@ async fn main() -> anyhow::Result<()> {
                 max_duration_seconds,
                 max_targets,
                 max_concurrent_recordings,
+                autotune_limits,
             })
             .await
         }

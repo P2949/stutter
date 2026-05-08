@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
+use crate::remote::AgentAutotuneLimits;
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct UserConfigFile {
     pub summary_ms: Option<u64>,
@@ -14,6 +16,114 @@ pub struct UserConfigFile {
     pub exclude_comm: Option<Vec<String>>,
     pub max_tasks: Option<usize>,
     pub retain_intervals: Option<usize>,
+    pub agent: Option<AgentConfigFile>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct AgentConfigFile {
+    pub autotune_limits: Option<AgentAutotuneLimitsFile>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct AgentAutotuneLimitsFile {
+    pub max_active_controllers: Option<usize>,
+    pub max_safety_class: Option<String>,
+    pub max_candidate_window_seconds: Option<u64>,
+    pub max_targets: Option<usize>,
+    pub allow_system_wide_actions: Option<bool>,
+}
+
+impl AgentAutotuneLimitsFile {
+    pub fn into_limits(self) -> Result<AgentAutotuneLimits> {
+        let defaults = AgentAutotuneLimits::default();
+
+        let limits = AgentAutotuneLimits {
+            max_active_controllers: self
+                .max_active_controllers
+                .unwrap_or(defaults.max_active_controllers),
+            max_safety_class: self.max_safety_class.unwrap_or(defaults.max_safety_class),
+            max_candidate_window_seconds: self
+                .max_candidate_window_seconds
+                .unwrap_or(defaults.max_candidate_window_seconds),
+            max_targets: self.max_targets.unwrap_or(defaults.max_targets),
+            allow_system_wide_actions: self
+                .allow_system_wide_actions
+                .unwrap_or(defaults.allow_system_wide_actions),
+        };
+
+        validate_agent_autotune_limits(&limits)?;
+        Ok(limits)
+    }
+}
+
+pub fn validate_agent_autotune_limits(limits: &AgentAutotuneLimits) -> Result<()> {
+    if limits.max_active_controllers == 0 {
+        anyhow::bail!("agent.autotune_limits.max_active_controllers must be greater than zero");
+    }
+
+    if limits.max_active_controllers > 1 {
+        anyhow::bail!(
+            "agent.autotune_limits.max_active_controllers greater than 1 is not supported yet"
+        );
+    }
+
+    if limits.max_safety_class != "ObserveOnly"
+        && limits.max_safety_class != "ReversibleLowRisk"
+        && limits.max_safety_class != "ReversibleMediumRisk"
+        && limits.max_safety_class != "HighRisk"
+    {
+        anyhow::bail!(
+            "agent.autotune_limits.max_safety_class must be ObserveOnly, ReversibleLowRisk, ReversibleMediumRisk, or HighRisk"
+        );
+    }
+
+    if limits.max_safety_class != "ReversibleLowRisk" {
+        anyhow::bail!(
+            "remote autotune currently supports max_safety_class = ReversibleLowRisk only"
+        );
+    }
+
+    if limits.max_candidate_window_seconds == 0 {
+        anyhow::bail!(
+            "agent.autotune_limits.max_candidate_window_seconds must be greater than zero"
+        );
+    }
+
+    if limits.max_candidate_window_seconds > 120 {
+        anyhow::bail!("agent.autotune_limits.max_candidate_window_seconds must be <= 120");
+    }
+
+    if limits.max_targets == 0 {
+        anyhow::bail!("agent.autotune_limits.max_targets must be greater than zero");
+    }
+
+    if limits.max_targets > 1 {
+        anyhow::bail!("remote autotune currently supports max_targets = 1 only");
+    }
+
+    if limits.allow_system_wide_actions {
+        anyhow::bail!("agent.autotune_limits.allow_system_wide_actions must be false");
+    }
+
+    Ok(())
+}
+
+pub fn agent_autotune_limits_from_user_config(
+    config: Option<&UserConfigFile>,
+) -> Result<AgentAutotuneLimits> {
+    let Some(config) = config else {
+        return Ok(AgentAutotuneLimits::default());
+    };
+
+    let Some(agent) = config.agent.as_ref() else {
+        return Ok(AgentAutotuneLimits::default());
+    };
+
+    let Some(autotune_limits) = agent.autotune_limits.clone() else {
+        return Ok(AgentAutotuneLimits::default());
+    };
+
+    autotune_limits.into_limits()
 }
 
 pub fn load_user_config() -> Result<Option<UserConfigFile>> {
@@ -87,6 +197,99 @@ mod tests {
         assert_eq!(config.hwmon, Some(true));
         assert_eq!(config.cpu_freq, Some(true));
         assert_eq!(config.include_comm.unwrap(), vec!["Game", "Render"]);
+    }
+
+    #[test]
+    fn test_parse_agent_autotune_limits() {
+        let toml = r#"
+            [agent.autotune_limits]
+            max_active_controllers = 1
+            max_safety_class = "ReversibleLowRisk"
+            max_candidate_window_seconds = 120
+            max_targets = 1
+            allow_system_wide_actions = false
+        "#;
+
+        let config = parse_user_config_toml(toml).unwrap();
+        let limits = agent_autotune_limits_from_user_config(Some(&config)).unwrap();
+
+        assert_eq!(limits.max_active_controllers, 1);
+        assert_eq!(limits.max_safety_class, "ReversibleLowRisk");
+        assert_eq!(limits.max_candidate_window_seconds, 120);
+        assert_eq!(limits.max_targets, 1);
+        assert!(!limits.allow_system_wide_actions);
+    }
+
+    #[test]
+    fn test_missing_agent_autotune_limits_uses_defaults() {
+        let toml = r#"
+            summary_ms = 500
+        "#;
+
+        let config = parse_user_config_toml(toml).unwrap();
+        let limits = agent_autotune_limits_from_user_config(Some(&config)).unwrap();
+
+        assert_eq!(limits, AgentAutotuneLimits::default());
+    }
+
+    #[test]
+    fn test_agent_autotune_limits_reject_system_wide_actions() {
+        let toml = r#"
+            [agent.autotune_limits]
+            allow_system_wide_actions = true
+        "#;
+
+        let config = parse_user_config_toml(toml).unwrap();
+        let err = agent_autotune_limits_from_user_config(Some(&config))
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("allow_system_wide_actions must be false"));
+    }
+
+    #[test]
+    fn test_agent_autotune_limits_reject_too_many_targets() {
+        let toml = r#"
+            [agent.autotune_limits]
+            max_targets = 2
+        "#;
+
+        let config = parse_user_config_toml(toml).unwrap();
+        let err = agent_autotune_limits_from_user_config(Some(&config))
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("max_targets = 1"));
+    }
+
+    #[test]
+    fn test_agent_autotune_limits_reject_too_long_candidate_window() {
+        let toml = r#"
+            [agent.autotune_limits]
+            max_candidate_window_seconds = 121
+        "#;
+
+        let config = parse_user_config_toml(toml).unwrap();
+        let err = agent_autotune_limits_from_user_config(Some(&config))
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("max_candidate_window_seconds must be <= 120"));
+    }
+
+    #[test]
+    fn test_agent_autotune_limits_reject_high_risk_ceiling() {
+        let toml = r#"
+            [agent.autotune_limits]
+            max_safety_class = "HighRisk"
+        "#;
+
+        let config = parse_user_config_toml(toml).unwrap();
+        let err = agent_autotune_limits_from_user_config(Some(&config))
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("ReversibleLowRisk only"));
     }
 
     #[test]
