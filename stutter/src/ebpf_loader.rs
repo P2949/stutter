@@ -1645,6 +1645,7 @@ format:
 
     #[test]
     fn gates_optional_tracepoint_validation_by_config() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let dir = temp_dir("gate-validation");
 
         // Required tracepoints must exist for validate_tracepoint_formats to succeed
@@ -1747,6 +1748,7 @@ format:
 
     #[test]
     fn validates_sched_process_exit_availability() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let dir = temp_dir("process-exit");
 
         // Required tracepoints
@@ -1792,6 +1794,7 @@ format:
 
     #[test]
     fn ringbuf_override_applies_and_rounds() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let config = match crate::cli::parse_app_command_from([
             "stutter",
             "monitor",
@@ -1814,6 +1817,7 @@ format:
 
     #[test]
     fn wakeup_map_factor_applies_and_clamps() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let config = match crate::cli::parse_app_command_from([
             "stutter",
             "monitor",
@@ -1857,6 +1861,7 @@ format:
 
     #[test]
     fn rejects_invalid_map_tuning_values() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         // ringbuf too small
         let err = crate::cli::parse_app_command_from([
             "stutter",
