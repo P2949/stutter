@@ -821,6 +821,7 @@ mod tests {
                 cpu_perf_read_errors: 0,
                 cpu_perf_skipped_tasks: 0,
                 cpu_perf_last_error: None,
+                ..Default::default()
             },
             stop_reason: "test".into(),
             config: RecordedConfig {
@@ -863,6 +864,7 @@ mod tests {
                 stat_wait: false,
                 otlp_endpoint: None,
                 otel_service_name: "stutter".to_owned(),
+                ..Default::default()
             },
             tasks: vec![],
             top_spikes: vec![],

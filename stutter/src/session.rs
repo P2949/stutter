@@ -332,6 +332,9 @@ impl MonitorSession {
             recorder.streams.frame_event_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("frame_events.json"),
             )?);
+            recorder.streams.focus_event_writer = Some(JsonArrayWriter::create(
+                run.run_dir.join("focus_events.json"),
+            )?);
         }
 
         if let Some(csv_stream) = &config.csv_stream {
@@ -541,8 +544,16 @@ impl MonitorSession {
         Ok(())
     }
 
+    fn write_focus_event(&mut self, event: recorder::FocusEvent) -> anyhow::Result<()> {
+        if let Some(writer) = self.recorder.streams.focus_event_writer.as_mut() {
+            writer.push(&event)?;
+            self.recorder.counters.focus_event_count += 1;
+        }
+        Ok(())
+    }
+
     async fn emit_focus_changed(
-        &self,
+        &mut self,
         elapsed_ms: u64,
         old: Option<&ResolvedFocus>,
         new: &ResolvedFocus,
@@ -557,6 +568,28 @@ impl MonitorSession {
             new.group.root_pids,
             new.situation
         );
+
+        let focus_event = recorder::FocusEvent {
+            elapsed_ms,
+            action: "changed".to_owned(),
+            old_kind: old.map(|focus| format!("{:?}", focus.group.kind)),
+            kind: Some(format!("{:?}", new.group.kind)),
+            root_pids: new.group.root_pids.clone(),
+            member_pids: new.group.member_pids.clone(),
+            confidence: new.group.confidence,
+            score: new.group.score,
+            situation: Some(new.situation),
+            reasons: new.group.reasons.clone(),
+        };
+        self.write_focus_event(focus_event)?;
+
+        if self.recorder.streams.focus_event_writer.is_some() {
+            log::debug!(
+                "focus_event_recorded action=changed elapsed_ms={} kind={:?}",
+                elapsed_ms,
+                new.group.kind
+            );
+        }
 
         self.emit(MonitorEvent::FocusChanged {
             elapsed_ms,
@@ -575,7 +608,7 @@ impl MonitorSession {
     }
 
     async fn emit_focus_cleared(
-        &self,
+        &mut self,
         elapsed_ms: u64,
         old: Option<&ResolvedFocus>,
         reason: String,
@@ -586,6 +619,28 @@ impl MonitorSession {
             old.map(|focus| focus.group.kind),
             reason
         );
+
+        let focus_event = recorder::FocusEvent {
+            elapsed_ms,
+            action: "cleared".to_owned(),
+            old_kind: old.map(|focus| format!("{:?}", focus.group.kind)),
+            kind: None,
+            root_pids: Vec::new(),
+            member_pids: Vec::new(),
+            confidence: 0.0,
+            score: 0.0,
+            situation: None,
+            reasons: vec![reason.clone()],
+        };
+        self.write_focus_event(focus_event)?;
+
+        if self.recorder.streams.focus_event_writer.is_some() {
+            log::debug!(
+                "focus_event_recorded action=cleared elapsed_ms={} old_kind={:?}",
+                elapsed_ms,
+                old.map(|focus| focus.group.kind)
+            );
+        }
 
         self.emit(MonitorEvent::FocusCleared {
             elapsed_ms,
@@ -1443,6 +1498,18 @@ impl MonitorSession {
                 tasks: &self.tasks,
                 frame_events: &frame_events,
                 block_io_correlation_basis: &self.block_io_correlation_basis,
+                focus_mode: if self.config.auto_focus {
+                    Some("auto".to_owned())
+                } else if self.config.has_explicit_target() {
+                    Some("explicit".to_owned())
+                } else {
+                    Some("legacy-auto-detect".to_owned())
+                },
+                final_focus_kind: self
+                    .current_focus
+                    .as_ref()
+                    .map(|focus| format!("{:?}", focus.group.kind)),
+                focus_switch_count: self.focus_switch_count,
                 drop_counters,
                 cpu_perf_status: self.cpu_perf_sampler.as_ref().map(|sampler| {
                     recorder::CpuPerfStatus {

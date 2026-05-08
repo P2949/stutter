@@ -64,6 +64,7 @@ pub fn write_minimal_recording_fixture(dir: &Path) {
         stat_wait: false,
         otlp_endpoint: None,
         otel_service_name: "stutter".to_owned(),
+        ..Default::default()
     };
 
     let task = SessionTask {
@@ -154,6 +155,7 @@ pub fn write_minimal_recording_fixture(dir: &Path) {
             cpu_perf_read_errors: 0,
             cpu_perf_skipped_tasks: 0,
             cpu_perf_last_error: None,
+            ..Default::default()
         },
         stop_reason: "manual".to_owned(),
         config: mk_config(),
@@ -200,6 +202,7 @@ pub fn write_minimal_recording_fixture(dir: &Path) {
             cpu_perf_read_errors: 0,
             cpu_perf_skipped_tasks: 0,
             cpu_perf_last_error: None,
+            ..Default::default()
         },
     };
 
@@ -335,6 +338,7 @@ fn base_session(run_name: &str) -> SessionFile {
             cpu_perf_read_errors: 0,
             cpu_perf_skipped_tasks: 0,
             cpu_perf_last_error: None,
+            ..Default::default()
         },
         stop_reason: "test".to_owned(),
         config: mk_dummy_config(),
@@ -842,6 +846,7 @@ fn report_check_detects_regression_from_new_scored_task() {
             cpu_perf_read_errors: 0,
             cpu_perf_skipped_tasks: 0,
             cpu_perf_last_error: None,
+            ..Default::default()
         },
         stop_reason: "manual".to_owned(),
         config: mk_dummy_config(),
@@ -913,5 +918,6 @@ fn mk_dummy_config() -> RecordedConfig {
         stat_wait: false,
         otlp_endpoint: None,
         otel_service_name: "stutter".to_owned(),
+        ..Default::default()
     }
 }
