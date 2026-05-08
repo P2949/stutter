@@ -23,6 +23,12 @@ Before a probe is accepted, it must have:
 - Works without root in tests
 - Missing/unavailable probe degrades gracefully
 
+## Admitted Probes
+
+| Probe | Diagnostic question | CLI / artifact contract | Admission status |
+| --- | --- | --- | --- |
+| Foreground window context | Which application/window was foreground near scheduler or frame spikes? | `--foreground-window` and `--focus-source foreground`/`hybrid`; writes optional `foreground_events.json`; titles are redacted unless `--foreground-include-title` is set. | Implemented; documented in `docs/ARTIFACT_SCHEMA.md`, reported through `foreground_summary`, validated as optional NDJSON, and exposed in `stutter probes`. |
+
 ## Probe Candidates
 
 | Candidate | Diagnostic question | Existing foundation | Admission status |
@@ -66,4 +72,5 @@ Compositor/frame-pacing work should be admitted as a report/view feature before 
 - Do not add unbounded event streams.
 - Do not make optional probes required for basic reports.
 - Do not make live kernel/GPU availability required for tests.
+- Do not expose private foreground-window titles unless the user explicitly opts in.
 - Do not silently turn on high-overhead probes in presets.

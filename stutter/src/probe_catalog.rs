@@ -80,6 +80,18 @@ pub const PROBE_CATALOG: &[ProbeCatalogEntry] = &[
         validation_contract: "frame_correlation.json and frame_events.json are optional NDJSON frame contracts with timestamp-alignment data quality.",
     },
     ProbeCatalogEntry {
+        key: "foreground_window",
+        title: "Foreground window context",
+        status: ProbeStatus::Implemented,
+        answers_question: "Which application/window was foreground near scheduler or frame spikes?",
+        cli_flag: Some("--foreground-window / --focus-source foreground"),
+        artifact_files: &["foreground_events.json", "focus_events.json"],
+        default_enabled: false,
+        overhead: ProbeOverhead::Low,
+        requires_privilege_or_kernel_support: false,
+        validation_contract: "foreground_events.json is optional NDJSON; missing file is tolerated unless foreground collection was requested; window titles are redacted by default.",
+    },
+    ProbeCatalogEntry {
         key: "block_io",
         title: "Block I/O",
         status: ProbeStatus::Implemented,
@@ -324,5 +336,40 @@ mod tests {
         assert!(output.contains("scheduler_runnable_latency"));
         assert!(output.contains("implemented"));
         assert!(output.contains("core"));
+    }
+
+    #[test]
+    fn probe_catalog_mentions_foreground_window_probe() {
+        let entry = PROBE_CATALOG
+            .iter()
+            .find(|entry| entry.key == "foreground_window")
+            .expect("foreground_window probe catalog entry must exist");
+
+        assert_eq!(entry.title, "Foreground window context");
+        assert_eq!(entry.status, ProbeStatus::Implemented);
+        assert_eq!(
+            entry.answers_question,
+            "Which application/window was foreground near scheduler or frame spikes?"
+        );
+        assert_eq!(
+            entry.cli_flag,
+            Some("--foreground-window / --focus-source foreground")
+        );
+        assert_eq!(
+            entry.artifact_files,
+            &["foreground_events.json", "focus_events.json"]
+        );
+        assert!(!entry.default_enabled);
+        assert_eq!(entry.overhead, ProbeOverhead::Low);
+        assert!(!entry.requires_privilege_or_kernel_support);
+        assert!(
+            entry
+                .validation_contract
+                .contains("window titles are redacted by default")
+        );
+
+        let rendered = render_probe_catalog(PROBE_CATALOG);
+        assert!(rendered.contains("foreground_window"));
+        assert!(rendered.contains("--foreground-window / --focus-source foreground"));
     }
 }

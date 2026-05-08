@@ -383,9 +383,8 @@ Compatibility notes:
 
 Purpose:
 
-- High-resolution foreground window identity and metadata snapshots.
-- Includes window titles (redacted by default), PIDs, app IDs, classes, and
-  window manager identities.
+- Foreground-window context from compositor/X11 providers.
+- Used to correlate scheduler/frame spikes with the user-visible active app.
 
 Format: NDJSON.
 
@@ -393,27 +392,35 @@ Status: Optional stream.
 
 Version behavior:
 
-- Missing file is tolerated.
+- Missing file is tolerated unless foreground collection was requested.
 - Invalid present file is an error.
 
 Important fields:
 
 - `elapsed_ms`
-- `source`: identity of the provider (e.g., `sway`, `hyprland`, `x11`)
-- `status`: provider availability status
-- `pid`: process ID of the window owner
-- `app_id`: Wayland application identifier
-- `class`: X11 window class
-- `title`: window title (often `null` due to privacy policy)
-- `window_id`: platform-specific window handle
-- `workspace`: active workspace name/ID
-- `confidence`: provider-reported measurement confidence (0.0 to 1.0)
-- `reason`: diagnostic note for why this window was selected
+- `source`
+- `status`
+- `pid`
+- `app_id`
+- `class`
+- `title`
+- `window_id`
+- `workspace`
+- `confidence`
+- `reason`
+
+Privacy:
+
+- `title` is `null` unless `--foreground-include-title` is set.
+- Browser tab titles and terminal titles can leak private data; consumers must
+  not assume titles are present.
 
 Consistency rules:
 
 - The number of records should match `session.json` field
   `foreground_event_count`.
+- The final foreground identity fields in `session.json` are derived from the
+  last recorded foreground event.
 
 ## Data-Quality Levels
 
@@ -450,6 +457,8 @@ interface. It includes:
 - `pressure_timeline`
 - `artifacts_summary`
 - `data_quality`
+- `focus_summary`
+- `foreground_summary`
 
 External automation should prefer this over parsing raw report text. Text
 reports and HTML reports are user-facing and less stable. Raw artifacts are

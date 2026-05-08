@@ -89,6 +89,20 @@ built-in defaults < config file < CLI arguments
 
 Target selection stays CLI-only; the config file does not set target PIDs or cgroups.
 
+Foreground-window context can also be configured explicitly:
+
+```toml
+foreground_window = true
+focus_source = "hybrid"
+foreground_source = "auto"
+foreground_poll_ms = 1000
+foreground_max_stale_ms = 2500
+foreground_include_title = false
+```
+
+`foreground_include_title` defaults to `false` because browser tab titles and
+terminal titles can leak private data.
+
 ### Monitor presets
 
 `stutter monitor` supports named presets for common collection settings:
@@ -263,6 +277,53 @@ RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
 
 `--watch-process` scans `/proc` only while waiting for the process to appear or relaunch. Once a process is found, `stutter` follows that root PID and its descendants. `--persistent` requires `--watch-process`; if the watched process exits, stale TIDs are removed and the monitor waits for the next matching launch. Note that `--duration` begins after the watched process is found, not while waiting for it. Missing manual `--pid` targets are dropped with a warning by default; add `--keep-missing-pid` if you want an unknown fallback task retained. `--keep-missing-pid` is intended for manual PID workflows where the PID may appear later; it is not a substitute for tree-root based monitoring and should not be relied on to keep arbitrary tree roots.
 
+## Foreground window context
+
+Use `--foreground-window` to record the currently foreground application/window
+as environmental context:
+
+```bash
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
+  --tree-pid <root-pid> \
+  --foreground-window
+```
+
+This writes `foreground_events.json` when recording is enabled. Foreground
+events are not focus target-selection events; they answer which visible app was
+active near scheduler or frame spikes.
+
+Foreground-aware auto-focus is explicit:
+
+```bash
+RUST_LOG=info RUSTUP_TOOLCHAIN=nightly cargo run -- monitor \
+  --auto-focus \
+  --focus-source hybrid \
+  --foreground-source auto
+```
+
+Modes:
+
+- `--focus-source heuristic`: existing heuristic behavior.
+- `--focus-source foreground`: choose focus groups that match the foreground
+  window when provider data is available and safe.
+- `--focus-source hybrid`: prefer foreground-matching focus groups, then fall
+  back to the existing heuristic when foreground data is unavailable or stale.
+
+Provider selection:
+
+- `--foreground-source auto`: choose a supported provider automatically.
+- `--foreground-source sway`: use `swaymsg -t get_tree -r`.
+- `--foreground-source x11`: use `xprop`.
+- `--foreground-source hyprland`: accepted as a provider selector, but currently
+  returns unsupported until a safe Hyprland-specific implementation is added.
+
+Privacy:
+
+- Window titles are redacted by default.
+- `title` is recorded as `null` unless `--foreground-include-title` is passed.
+- Do not enable title capture on shared recordings unless tab and terminal
+  titles are safe to expose.
+
 ## Inspect a tree before tracing
 
 ```bash
@@ -433,6 +494,8 @@ TUI notes:
 - The UI shows:
   - active/known task counts
   - eBPF drop-counter status
+  - compact foreground-window line when foreground context is enabled
+  - compact focus line with focus roots and switch count
   - sortable task latency table
   - global max-latency sparkline
   - per-CPU max-latency heat bars
@@ -463,6 +526,11 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- report \
 ```
 
 Reports use `spike_events.json` for spike cluster detection when it is present. Older runs without that file still report clusters from retained per-task `top_spikes`.
+
+When `foreground_events.json` is present, reports include a foreground-window
+summary and annotate spike clusters with the nearest foreground event at or
+before the cluster time. This helps distinguish a spike in a helper process
+while a game is foreground from a spike in the foreground game process itself.
 
 Reports include a `data quality` section. This is a run-level trust summary derived from schema validation, optional artifact presence, spike-event truncation, eBPF drop counters, event-stream write errors, percentile scope, block-I/O correlation basis, and MangoHud timestamp alignment.
 
@@ -667,6 +735,8 @@ Unknown `.exe` processes are no longer automatically treated as critical game ta
 - `session.json`: per-task summary, histogram buckets, and `percentile_scope` telling whether exact samples were used or histogram-based percentiles.
 - `interval.json`: periodic interval summaries used by the `report` command.
 - `spike_events.json`: detected spike clusters used for HTML report generation.
+- `foreground_events.json`: foreground-window context when enabled; titles are
+  `null` unless `--foreground-include-title` is set.
 
 For programmatic consumption, inspect the example outputs in a sample run directory created under `~/.local/state/stutter/runs/`.
 
@@ -678,7 +748,7 @@ Note: the CSV exporter is intentionally compact and omits some newer fields. `in
 
 New probes must answer a specific diagnostic question and include schema docs, fixture/replay tests, data-quality behavior, validation behavior, and cautious diagnosis/report integration before they are accepted. See `docs/PROBE_ADMISSION.md` for the full checklist.
 
-Use `stutter probes` or `stutter probes --json` to list implemented, view-only, and planned telemetry. The pressure timeline overlay in `report --analysis-json` is derived from existing interval PSI data; it does not add a new live probe.
+Use `stutter probes` or `stutter probes --json` to list implemented, view-only, and planned telemetry. Foreground-window context appears as the `foreground_window` probe. The pressure timeline overlay in `report --analysis-json` is derived from existing interval PSI data; it does not add a new live probe.
 
 ## CLI flags (quick reference)
 
@@ -687,6 +757,13 @@ Use `stutter probes` or `stutter probes --json` to list implemented, view-only, 
 - `--exclude-tree-pid <PID>`: exclude a process subtree from monitored tree roots (can repeat).
 - `--watch-process <COMM>`: poll `/proc` for a process whose name/comm matches `<COMM>` and automatically follow its tree; combine with `--persistent` to keep waiting across restarts.
 - `--persistent`: use with `--watch-process` to continue monitoring across relaunches.
+- `--auto-focus`: automatically choose a process tree using the focus resolver when no explicit target is provided.
+- `--focus-source <heuristic|foreground|hybrid>`: choose whether auto-focus uses the existing heuristic, foreground-window context, or foreground-first hybrid fallback.
+- `--foreground-window`: record foreground-window context to `foreground_events.json` even when explicit targets are used.
+- `--foreground-source <auto|sway|hyprland|x11>`: choose the foreground-window provider.
+- `--foreground-poll-ms <MS>`: foreground-window polling interval; must be at least 100ms.
+- `--foreground-max-stale-ms <MS>`: maximum stale foreground snapshot age before focus context is cleared.
+- `--foreground-include-title`: record window titles; disabled by default because titles may expose private tab or terminal text.
 - `--summary-ms <MS>`: interval for interval summaries written to `interval.json` and printed to the TUI.
 - `--epoch <MS>`: explicit reset-and-report mode; prints interval stats with the `epoch` label every `<MS>` and skips the final cumulative session recap.
 - `--spike-us <US>`: spike detection threshold in microseconds (e.g., `--spike-us 1000` for 1ms).
@@ -711,7 +788,7 @@ Tune counterbalances profile order across iterations to reduce order bias. `tuni
 
 ## What TUI shows
 
-The `--tui` mode uses ratatui and crossterm alternate-screen rendering. It shows active and known task counts, eBPF drop-counter status, a sortable per-task latency table, a global max-latency sparkline, per-CPU max-latency heat bars, and recent live diagnosis candidates. Press `q` to quit, `p` to pause or resume interval collection and render updates, `s` to cycle sort fields, and `f` to cycle the task-class filter.
+The `--tui` mode uses ratatui and crossterm alternate-screen rendering. It shows active and known task counts, eBPF drop-counter status, compact foreground-window and focus lines when enabled, a sortable per-task latency table, a global max-latency sparkline, per-CPU max-latency heat bars, and recent live diagnosis candidates. Press `q` to quit, `p` to pause or resume interval collection and render updates, `s` to cycle sort fields, and `f` to cycle the task-class filter.
 
 ## Generated JSON files (overview)
 
@@ -721,6 +798,9 @@ The `--tui` mode uses ratatui and crossterm alternate-screen rendering. It shows
 - `spike_events.json` — detected latency spike clusters used by the HTML report and cluster summaries.
 - `irq_events.json` — IRQ enter/exit capture when `--irq-latency` is enabled.
 - `gpu_samples.json` — periodic hwmon samples when `--hwmon` is enabled.
+- `foreground_events.json` — foreground-window context when `--foreground-window`
+  or foreground-aware focus is enabled; titles are `null` unless
+  `--foreground-include-title` is set.
 
 Note: when present, `cpu_frequency` tracepoint samples are emitted as system-wide telemetry and are not filtered to individual target tasks; treat them as global context rather than per-task signals.
 
