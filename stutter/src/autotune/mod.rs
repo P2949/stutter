@@ -6,6 +6,8 @@ pub mod measurement;
 pub mod resolution;
 pub mod rolling_window;
 pub mod shutdown;
+pub mod startup_recovery;
+
 pub mod washout;
 
 pub mod baseline;
