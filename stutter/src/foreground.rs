@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use std::process::Command;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -200,6 +202,233 @@ pub trait ForegroundProvider {
     fn sample(&mut self, elapsed_ms: u64) -> ForegroundWindowSnapshot;
 }
 
+#[derive(Debug, Clone)]
+pub struct SwayForegroundProvider {
+    swaymsg: String,
+}
+
+impl Default for SwayForegroundProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SwayForegroundProvider {
+    pub fn new() -> Self {
+        Self {
+            swaymsg: "swaymsg".to_owned(),
+        }
+    }
+
+    pub fn with_swaymsg(mut self, swaymsg: impl Into<String>) -> Self {
+        self.swaymsg = swaymsg.into();
+        self
+    }
+
+    pub fn is_detected() -> bool {
+        std::env::var("SWAYSOCK").is_ok()
+    }
+
+    pub fn sample_from_tree_json(
+        &self,
+        elapsed_ms: u64,
+        tree_json: &str,
+    ) -> ForegroundWindowSnapshot {
+        match serde_json::from_str::<SwayNode>(tree_json) {
+            Ok(root) => focused_sway_snapshot_from_tree(elapsed_ms, &root),
+            Err(err) => ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::Sway),
+                status: ForegroundProviderStatus::Error,
+                confidence: 0.0,
+                reason: format!("failed to parse swaymsg get_tree JSON: {err}"),
+                ..ForegroundWindowSnapshot::default()
+            },
+        }
+    }
+}
+
+impl ForegroundProvider for SwayForegroundProvider {
+    fn source(&self) -> ForegroundSource {
+        ForegroundSource::Sway
+    }
+
+    fn sample(&mut self, elapsed_ms: u64) -> ForegroundWindowSnapshot {
+        if !Self::is_detected() {
+            return ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::Sway),
+                status: ForegroundProviderStatus::Unavailable,
+                confidence: 0.0,
+                reason: "SWAYSOCK is not set; Sway foreground provider is unavailable".to_owned(),
+                ..ForegroundWindowSnapshot::default()
+            };
+        }
+
+        let output = match Command::new(&self.swaymsg)
+            .args(["-t", "get_tree", "-r"])
+            .output()
+        {
+            Ok(output) => output,
+            Err(err) => {
+                return ForegroundWindowSnapshot {
+                    elapsed_ms,
+                    source: Some(ForegroundSource::Sway),
+                    status: ForegroundProviderStatus::Error,
+                    confidence: 0.0,
+                    reason: format!("failed to run {} -t get_tree -r: {err}", self.swaymsg),
+                    ..ForegroundWindowSnapshot::default()
+                };
+            }
+        };
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::Sway),
+                status: ForegroundProviderStatus::Error,
+                confidence: 0.0,
+                reason: format!(
+                    "{} -t get_tree -r exited with status {}; stderr={}",
+                    self.swaymsg,
+                    output.status,
+                    stderr.trim()
+                ),
+                ..ForegroundWindowSnapshot::default()
+            };
+        }
+
+        match String::from_utf8(output.stdout) {
+            Ok(stdout) => self.sample_from_tree_json(elapsed_ms, &stdout),
+            Err(err) => ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::Sway),
+                status: ForegroundProviderStatus::Error,
+                confidence: 0.0,
+                reason: format!("swaymsg get_tree output was not valid UTF-8: {err}"),
+                ..ForegroundWindowSnapshot::default()
+            },
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SwayNode {
+    id: Option<i64>,
+    name: Option<String>,
+    focused: Option<bool>,
+    pid: Option<u32>,
+    app_id: Option<String>,
+    window: Option<i64>,
+    window_properties: Option<SwayWindowProperties>,
+    nodes: Option<Vec<SwayNode>>,
+    floating_nodes: Option<Vec<SwayNode>>,
+    #[serde(rename = "type")]
+    node_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SwayWindowProperties {
+    class: Option<String>,
+    instance: Option<String>,
+    title: Option<String>,
+}
+
+fn focused_sway_snapshot_from_tree(elapsed_ms: u64, root: &SwayNode) -> ForegroundWindowSnapshot {
+    let Some((focused, workspace)) = find_focused_sway_node(root, None) else {
+        return ForegroundWindowSnapshot {
+            elapsed_ms,
+            source: Some(ForegroundSource::Sway),
+            status: ForegroundProviderStatus::Unavailable,
+            confidence: 0.0,
+            reason: "sway tree did not contain a focused node".to_owned(),
+            ..ForegroundWindowSnapshot::default()
+        };
+    };
+
+    let class = focused
+        .window_properties
+        .as_ref()
+        .and_then(|properties| properties.class.clone())
+        .or_else(|| {
+            focused
+                .window_properties
+                .as_ref()
+                .and_then(|properties| properties.instance.clone())
+        });
+    let title = focused
+        .window_properties
+        .as_ref()
+        .and_then(|properties| properties.title.clone())
+        .or_else(|| focused.name.clone());
+    let window_id = focused
+        .window
+        .map(|window| window.to_string())
+        .or_else(|| focused.id.map(|id| id.to_string()));
+    let confidence = sway_confidence(focused);
+
+    ForegroundWindowSnapshot {
+        elapsed_ms,
+        source: Some(ForegroundSource::Sway),
+        status: ForegroundProviderStatus::Available,
+        pid: focused.pid,
+        app_id: focused.app_id.clone(),
+        class,
+        title,
+        window_id,
+        workspace: workspace.cloned(),
+        confidence,
+        stale_ms: None,
+        reason: "focused Sway node from swaymsg get_tree".to_owned(),
+    }
+}
+
+fn find_focused_sway_node<'a>(
+    node: &'a SwayNode,
+    workspace: Option<&'a String>,
+) -> Option<(&'a SwayNode, Option<&'a String>)> {
+    let current_workspace = if node.node_type.as_deref() == Some("workspace") {
+        node.name.as_ref()
+    } else {
+        workspace
+    };
+
+    if node.focused.unwrap_or(false) {
+        return Some((node, current_workspace));
+    }
+
+    for child in node
+        .nodes
+        .iter()
+        .flatten()
+        .chain(node.floating_nodes.iter().flatten())
+    {
+        if let Some(found) = find_focused_sway_node(child, current_workspace) {
+            return Some(found);
+        }
+    }
+
+    None
+}
+
+fn sway_confidence(node: &SwayNode) -> f32 {
+    if node.pid.is_some() {
+        0.95
+    } else if node.app_id.is_some()
+        || node
+            .window_properties
+            .as_ref()
+            .is_some_and(|properties| properties.class.is_some())
+    {
+        0.65
+    } else if node.name.is_some() || node.window.is_some() || node.id.is_some() {
+        0.35
+    } else {
+        0.0
+    }
+}
+
 pub struct ForegroundResolver {
     provider: Box<dyn ForegroundProvider + Send>,
     include_title: bool,
@@ -311,6 +540,290 @@ fn reduce_stale_confidence(confidence: f32, stale_ms: u64, max_stale_ms: u64) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sway_provider_detection_uses_swaysock_environment() {
+        let previous = std::env::var_os("SWAYSOCK");
+
+        unsafe {
+            std::env::remove_var("SWAYSOCK");
+        }
+        assert!(!SwayForegroundProvider::is_detected());
+
+        unsafe {
+            std::env::set_var("SWAYSOCK", "/tmp/sway-ipc.sock");
+        }
+        assert!(SwayForegroundProvider::is_detected());
+
+        unsafe {
+            if let Some(previous) = previous {
+                std::env::set_var("SWAYSOCK", previous);
+            } else {
+                std::env::remove_var("SWAYSOCK");
+            }
+        }
+    }
+
+    #[test]
+    fn sway_tree_parser_finds_focused_tiled_node_with_pid() {
+        let json = r#"
+        {
+          "id": 1,
+          "name": "root",
+          "type": "root",
+          "focused": false,
+          "nodes": [
+            {
+              "id": 2,
+              "name": "games",
+              "type": "workspace",
+              "focused": false,
+              "nodes": [
+                {
+                  "id": 3,
+                  "name": "Steam - private title",
+                  "focused": true,
+                  "pid": 4242,
+                  "app_id": "steam",
+                  "window": 12345,
+                  "window_properties": {
+                    "class": "Steam",
+                    "instance": "steam",
+                    "title": "Steam - private title"
+                  },
+                  "nodes": [],
+                  "floating_nodes": []
+                }
+              ],
+              "floating_nodes": []
+            }
+          ],
+          "floating_nodes": []
+        }
+        "#;
+
+        let provider = SwayForegroundProvider::new();
+        let snapshot = provider.sample_from_tree_json(2_000, json);
+
+        assert_eq!(snapshot.elapsed_ms, 2_000);
+        assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, Some(4242));
+        assert_eq!(snapshot.app_id.as_deref(), Some("steam"));
+        assert_eq!(snapshot.class.as_deref(), Some("Steam"));
+        assert_eq!(snapshot.title.as_deref(), Some("Steam - private title"));
+        assert_eq!(snapshot.window_id.as_deref(), Some("12345"));
+        assert_eq!(snapshot.workspace.as_deref(), Some("games"));
+        assert_eq!(snapshot.confidence, 0.95);
+    }
+
+    #[test]
+    fn sway_tree_parser_finds_focused_floating_node() {
+        let json = r#"
+        {
+          "id": 1,
+          "name": "root",
+          "type": "root",
+          "focused": false,
+          "nodes": [
+            {
+              "id": 2,
+              "name": "dev",
+              "type": "workspace",
+              "focused": false,
+              "nodes": [],
+              "floating_nodes": [
+                {
+                  "id": 9,
+                  "name": "floating terminal",
+                  "focused": true,
+                  "pid": 7777,
+                  "app_id": "foot",
+                  "window": null,
+                  "window_properties": {
+                    "class": "foot",
+                    "instance": "foot",
+                    "title": "floating terminal"
+                  },
+                  "nodes": [],
+                  "floating_nodes": []
+                }
+              ]
+            }
+          ],
+          "floating_nodes": []
+        }
+        "#;
+
+        let provider = SwayForegroundProvider::new();
+        let snapshot = provider.sample_from_tree_json(3_000, json);
+
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, Some(7777));
+        assert_eq!(snapshot.app_id.as_deref(), Some("foot"));
+        assert_eq!(snapshot.window_id.as_deref(), Some("9"));
+        assert_eq!(snapshot.workspace.as_deref(), Some("dev"));
+        assert_eq!(snapshot.confidence, 0.95);
+    }
+
+    #[test]
+    fn sway_tree_parser_uses_medium_confidence_without_pid() {
+        let json = r#"
+        {
+          "id": 1,
+          "name": "root",
+          "type": "root",
+          "focused": false,
+          "nodes": [
+            {
+              "id": 2,
+              "name": "web",
+              "type": "workspace",
+              "focused": false,
+              "nodes": [
+                {
+                  "id": 3,
+                  "name": "Firefox",
+                  "focused": true,
+                  "pid": null,
+                  "app_id": "firefox",
+                  "window": null,
+                  "window_properties": {
+                    "class": "Firefox",
+                    "instance": "Navigator",
+                    "title": "Private tab title"
+                  },
+                  "nodes": [],
+                  "floating_nodes": []
+                }
+              ],
+              "floating_nodes": []
+            }
+          ],
+          "floating_nodes": []
+        }
+        "#;
+
+        let provider = SwayForegroundProvider::new();
+        let snapshot = provider.sample_from_tree_json(4_000, json);
+
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, None);
+        assert_eq!(snapshot.app_id.as_deref(), Some("firefox"));
+        assert_eq!(snapshot.class.as_deref(), Some("Firefox"));
+        assert_eq!(snapshot.confidence, 0.65);
+    }
+
+    #[test]
+    fn sway_tree_parser_uses_low_confidence_for_title_or_window_only() {
+        let json = r#"
+        {
+          "id": 1,
+          "name": "root",
+          "type": "root",
+          "focused": false,
+          "nodes": [
+            {
+              "id": 2,
+              "name": "misc",
+              "type": "workspace",
+              "focused": false,
+              "nodes": [
+                {
+                  "id": 3,
+                  "name": "unknown window",
+                  "focused": true,
+                  "pid": null,
+                  "app_id": null,
+                  "window": 9988,
+                  "window_properties": null,
+                  "nodes": [],
+                  "floating_nodes": []
+                }
+              ],
+              "floating_nodes": []
+            }
+          ],
+          "floating_nodes": []
+        }
+        "#;
+
+        let provider = SwayForegroundProvider::new();
+        let snapshot = provider.sample_from_tree_json(5_000, json);
+
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, None);
+        assert_eq!(snapshot.app_id, None);
+        assert_eq!(snapshot.class, None);
+        assert_eq!(snapshot.title.as_deref(), Some("unknown window"));
+        assert_eq!(snapshot.window_id.as_deref(), Some("9988"));
+        assert_eq!(snapshot.confidence, 0.35);
+    }
+
+    #[test]
+    fn sway_tree_parser_reports_unavailable_when_no_focused_node_exists() {
+        let json = r#"
+        {
+          "id": 1,
+          "name": "root",
+          "type": "root",
+          "focused": false,
+          "nodes": [],
+          "floating_nodes": []
+        }
+        "#;
+
+        let provider = SwayForegroundProvider::new();
+        let snapshot = provider.sample_from_tree_json(6_000, json);
+
+        assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
+        assert_eq!(snapshot.confidence, 0.0);
+        assert!(snapshot.reason.contains("did not contain a focused node"));
+    }
+
+    #[test]
+    fn sway_tree_parser_reports_error_for_invalid_json() {
+        let provider = SwayForegroundProvider::new();
+        let snapshot = provider.sample_from_tree_json(7_000, "{not-json}");
+
+        assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Error);
+        assert_eq!(snapshot.confidence, 0.0);
+        assert!(
+            snapshot
+                .reason
+                .contains("failed to parse swaymsg get_tree JSON")
+        );
+    }
+
+    #[test]
+    fn sway_provider_titles_are_redacted_by_resolver_default() {
+        let provider = SequenceProvider::new(
+            ForegroundSource::Sway,
+            vec![ForegroundWindowSnapshot {
+                elapsed_ms: 0,
+                source: Some(ForegroundSource::Sway),
+                status: ForegroundProviderStatus::Available,
+                pid: Some(4242),
+                app_id: Some("steam".to_owned()),
+                class: Some("Steam".to_owned()),
+                title: Some("Sensitive foreground title".to_owned()),
+                window_id: Some("12345".to_owned()),
+                workspace: Some("games".to_owned()),
+                confidence: 0.95,
+                stale_ms: None,
+                reason: "test sway provider snapshot".to_owned(),
+            }],
+        );
+        let mut resolver = ForegroundResolver::new(Box::new(provider));
+
+        let snapshot = resolver.sample(8_000);
+
+        assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.title, None);
+    }
 
     struct SequenceProvider {
         source: ForegroundSource,
