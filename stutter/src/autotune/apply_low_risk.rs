@@ -524,6 +524,24 @@ pub fn plan_apply_low_risk_from_profiles(
     })
 }
 
+pub fn resolve_low_risk_experiment_with_active_profile_state<
+    E: crate::autotune::resolution::ExperimentRollbackExecutor + ?Sized,
+>(
+    experiment: &mut crate::autotune::experiment::ActiveExperiment,
+    result: &crate::autotune::comparison::ExperimentResult,
+    rollback_executor: &mut E,
+    active_profile_state: &mut crate::autotune::kept::ActiveProfileState,
+    now_unix_nanos: u128,
+) -> anyhow::Result<crate::autotune::resolution::ExperimentResolution> {
+    crate::autotune::resolution::resolve_experiment_with_active_profile_state(
+        experiment,
+        result,
+        rollback_executor,
+        active_profile_state,
+        now_unix_nanos,
+    )
+}
+
 pub fn resolve_low_risk_experiment<
     E: crate::autotune::resolution::ExperimentRollbackExecutor + ?Sized,
 >(
@@ -696,6 +714,109 @@ mod tests {
             self.rollback_calls += 1;
             Ok(())
         }
+    }
+
+    #[test]
+    fn low_risk_resolution_keeps_improved_candidate_as_current_profile() {
+        use crate::{
+            actions::RollbackToken,
+            affinity::CpuMask,
+            autotune::{
+                candidate::CandidateAction,
+                comparison::ExperimentResult,
+                experiment::{ActiveExperiment, ExperimentId, ExperimentPhase, WindowScore},
+                kept::ActiveProfileState,
+                resolution::{ExperimentResolution, ExperimentRollbackExecutor},
+            },
+            process_tree::TaskClass,
+            profiles::{Profile, ProfileRule},
+            scorer::StutterScore,
+        };
+
+        struct FakeRollback {
+            calls: usize,
+        }
+
+        impl ExperimentRollbackExecutor for FakeRollback {
+            fn rollback(&mut self, _token: &RollbackToken) -> anyhow::Result<()> {
+                self.calls += 1;
+                Ok(())
+            }
+        }
+
+        let profile = Profile {
+            name: "game-main".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: CpuMask::parse("0").unwrap(),
+                match_class: vec![TaskClass::Game],
+                match_comm: Vec::new(),
+            }],
+        };
+        let candidate = CandidateAction::cpu_affinity_profile(profile, 1234);
+        let baseline = WindowScore {
+            started_unix_nanos: 100,
+            finished_unix_nanos: 200,
+            interval_count: 10,
+            scored_samples: 100,
+            scored_task_count: 2,
+            score: StutterScore {
+                total: 1_000,
+                ..StutterScore::default()
+            },
+        };
+        let candidate_score = WindowScore {
+            started_unix_nanos: 300,
+            finished_unix_nanos: 400,
+            interval_count: 10,
+            scored_samples: 100,
+            scored_task_count: 2,
+            score: StutterScore {
+                total: 875,
+                ..StutterScore::default()
+            },
+        };
+        let mut experiment = ActiveExperiment::new(
+            ExperimentId::new("low-risk-test"),
+            candidate,
+            baseline,
+            1_000,
+        );
+        experiment.mark_candidate_applied(
+            1_100,
+            RollbackToken::CpuAffinityRestoreFile {
+                path: std::path::PathBuf::from("/tmp/stutter-restore.json"),
+                affected_tasks: 31,
+            },
+        );
+        experiment.set_candidate_score(candidate_score);
+
+        let mut rollback = FakeRollback { calls: 0 };
+        let mut active_profile_state = ActiveProfileState::default();
+        let resolution = resolve_low_risk_experiment_with_active_profile_state(
+            &mut experiment,
+            &ExperimentResult::Improved {
+                improvement_percent: 12.5,
+            },
+            &mut rollback,
+            &mut active_profile_state,
+            9_999,
+        )
+        .unwrap();
+
+        assert!(matches!(resolution, ExperimentResolution::Kept { .. }));
+        assert_eq!(rollback.calls, 0);
+        assert_eq!(experiment.phase, ExperimentPhase::Cooldown);
+        assert!(experiment.has_rollback());
+        assert_eq!(
+            active_profile_state.current_profile_name(),
+            Some("game-main")
+        );
+        assert_eq!(
+            active_profile_state
+                .current_rollback()
+                .map(|rollback| rollback.affected_tasks()),
+            Some(31)
+        );
     }
 
     #[test]
