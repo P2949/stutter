@@ -3,16 +3,15 @@
 use std::time::Duration;
 
 use super::{
+    candidate_memory::{
+        CandidateContextHashInput, CandidateMemory, CandidateMemoryRecord, CandidateMemoryResult,
+    },
     decision::{AutotuneDecision, CandidateAction, ExperimentId},
     observation::AutotuneObservation,
     quality::OnlineDataQuality,
     state::{AutotuneMode, ControllerPhase},
 };
-use crate::{
-    actions::{ActionId, SafetyClass},
-    focus::FocusGroupKind,
-    process_tree::TaskClass,
-};
+use crate::{actions::SafetyClass, focus::FocusGroupKind, process_tree::TaskClass};
 
 #[derive(Clone, Debug)]
 pub struct ControllerPolicy {
@@ -70,7 +69,7 @@ pub struct ControllerRuntimeState {
     pub phase: ControllerPhase,
     pub active_experiment: Option<ActiveExperiment>,
     pub cooldown_until_unix_nanos: Option<u128>,
-    pub last_action_at_unix_nanos: Vec<(ActionId, u128)>,
+    pub candidate_memory: CandidateMemory,
 }
 
 impl Default for ControllerRuntimeState {
@@ -79,7 +78,7 @@ impl Default for ControllerRuntimeState {
             phase: ControllerPhase::Observing,
             active_experiment: None,
             cooldown_until_unix_nanos: None,
-            last_action_at_unix_nanos: Vec::new(),
+            candidate_memory: CandidateMemory::default(),
         }
     }
 }
@@ -90,19 +89,60 @@ impl ControllerRuntimeState {
         candidate: &CandidateAction,
         now_unix_nanos: u128,
     ) {
-        let action_id = candidate.action_id();
+        let context = CandidateContextHashInput::for_candidate(candidate);
+        self.candidate_memory
+            .record_attempt(candidate, &context, now_unix_nanos, None);
+    }
 
-        if let Some((_, last_at)) = self
-            .last_action_at_unix_nanos
-            .iter_mut()
-            .find(|(existing, _)| existing == &action_id)
-        {
-            *last_at = now_unix_nanos;
-            return;
-        }
+    pub fn record_candidate_attempt(
+        &mut self,
+        candidate: &CandidateAction,
+        observation: &AutotuneObservation,
+        cpu_topology_signature: Option<&str>,
+        cooldown_expires_unix_nanos: Option<u128>,
+    ) -> CandidateMemoryRecord {
+        let context = CandidateContextHashInput::from_observation(
+            candidate,
+            observation,
+            cpu_topology_signature,
+        );
 
-        self.last_action_at_unix_nanos
-            .push((action_id, now_unix_nanos));
+        self.candidate_memory.record_attempt(
+            candidate,
+            &context,
+            observation.now_unix_nanos,
+            cooldown_expires_unix_nanos,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_candidate_result(
+        &mut self,
+        candidate: &CandidateAction,
+        observation: &AutotuneObservation,
+        cpu_topology_signature: Option<&str>,
+        result: CandidateMemoryResult,
+        baseline_score_total: Option<u64>,
+        current_score_total: Option<u64>,
+        rollback_reason: Option<String>,
+        cooldown_expires_unix_nanos: Option<u128>,
+    ) -> CandidateMemoryRecord {
+        let context = CandidateContextHashInput::from_observation(
+            candidate,
+            observation,
+            cpu_topology_signature,
+        );
+
+        self.candidate_memory.record_result(
+            candidate,
+            &context,
+            observation.now_unix_nanos,
+            result,
+            baseline_score_total,
+            current_score_total,
+            rollback_reason,
+            cooldown_expires_unix_nanos,
+        )
     }
 
     pub fn enter_cooldown_after_keep(&mut self, policy: &ControllerPolicy, now_unix_nanos: u128) {
@@ -301,17 +341,24 @@ fn same_action_cooldown_remaining(
     observation: &AutotuneObservation,
     candidate: &CandidateAction,
 ) -> Option<Duration> {
+    let action_id = candidate.action_id();
+
+    if let Some(duration) = state
+        .candidate_memory
+        .cooldown_remaining_for_action(&action_id, observation.now_unix_nanos)
+    {
+        return Some(duration);
+    }
+
     if policy.minimum_time_between_same_action.is_zero() {
         return None;
     }
 
-    let action_id = candidate.action_id();
-    let (_, last_at) = state
-        .last_action_at_unix_nanos
-        .iter()
-        .find(|(existing, _)| existing == &action_id)?;
+    let record = state.candidate_memory.last_for_action(&action_id)?;
 
-    let next_allowed = last_at.saturating_add(policy.minimum_time_between_same_action.as_nanos());
+    let next_allowed = record
+        .last_tried_unix_nanos
+        .saturating_add(policy.minimum_time_between_same_action.as_nanos());
     if observation.now_unix_nanos >= next_allowed {
         return None;
     }
@@ -506,7 +553,7 @@ mod tests {
                 baseline_score_total,
             }),
             cooldown_until_unix_nanos: None,
-            last_action_at_unix_nanos: Vec::new(),
+            candidate_memory: CandidateMemory::default(),
         }
     }
 
@@ -768,7 +815,7 @@ mod tests {
             phase: ControllerPhase::Cooldown,
             active_experiment: None,
             cooldown_until_unix_nanos: Some(11_000_000_000),
-            last_action_at_unix_nanos: Vec::new(),
+            candidate_memory: CandidateMemory::default(),
         };
         let candidate = candidate_with_safety_class(SafetyClass::ReversibleLowRisk);
 
@@ -883,6 +930,68 @@ mod tests {
                 assert!(reason.contains("controller is faulted"));
             }
             other => panic!("expected Fault after fault cooldown expires, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn controller_candidate_memory_records_result_fields() {
+        let mut state = ControllerRuntimeState::default();
+        let mut observation = high_quality_observation(1_125);
+        observation.now_unix_nanos = 9_000;
+        let candidate = candidate_with_safety_class(SafetyClass::ReversibleLowRisk);
+
+        let record = state.record_candidate_result(
+            &candidate,
+            &observation,
+            Some("cpu0-7:smt:on"),
+            CandidateMemoryResult::Reverted,
+            Some(1_000),
+            Some(1_125),
+            Some("candidate regressed score".to_owned()),
+            Some(309_000_000_000),
+        );
+
+        assert_eq!(record.candidate_name, "fake-profile");
+        assert_eq!(record.result, CandidateMemoryResult::Reverted);
+        assert_eq!(record.score_delta, 125);
+        assert_eq!(
+            record.rollback_reason.as_deref(),
+            Some("candidate regressed score")
+        );
+        assert_eq!(record.cooldown_expires_unix_nanos, Some(309_000_000_000));
+        assert_eq!(state.candidate_memory.latest(), Some(&record));
+    }
+
+    #[test]
+    fn explicit_candidate_memory_cooldown_blocks_same_action_after_minimum_elapsed() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let mut state = ControllerRuntimeState::default();
+        let candidate = candidate_with_safety_class(SafetyClass::ReversibleLowRisk);
+        let mut observation = high_quality_observation(100);
+        observation.now_unix_nanos = 1_000_000_000;
+
+        state.record_candidate_result(
+            &candidate,
+            &observation,
+            Some("cpu0-7:smt:on"),
+            CandidateMemoryResult::Reverted,
+            Some(1_000),
+            Some(1_200),
+            Some("candidate regressed score".to_owned()),
+            Some(401_000_000_000),
+        );
+
+        observation.now_unix_nanos = 350_000_000_000;
+        let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));
+
+        match decision {
+            AutotuneDecision::EnterCooldown { duration, reason } => {
+                assert_eq!(duration.as_secs(), 51);
+                assert!(reason.contains("same action 'test' is still cooling down"));
+            }
+            other => {
+                panic!("expected same-action EnterCooldown from candidate memory, got {other:?}")
+            }
         }
     }
 }
