@@ -1,4 +1,10 @@
 #![allow(dead_code)]
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::{Path, PathBuf},
+};
+
 use serde::{Deserialize, Serialize};
 
 const SCHED_FIFO: u32 = 1;
@@ -85,6 +91,512 @@ pub struct ThreadIdentity<'a> {
     pub thread_comm: &'a str,
     pub process_comm: &'a str,
     pub sched_policy: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FocusSnapshot {
+    pub elapsed_ms: u64,
+    pub processes: BTreeMap<u32, FocusProcess>,
+    pub children_by_parent: BTreeMap<u32, Vec<u32>>,
+    pub groups: Vec<FocusGroup>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FocusProcess {
+    pub pid: u32,
+    pub ppid: u32,
+    pub comm: String,
+    pub cmdline: String,
+    pub cgroup_path: Option<PathBuf>,
+    pub starttime_ticks: Option<u64>,
+    pub sched_policy: Option<u32>,
+
+    pub classification: Classification,
+
+    pub cpu_time_ticks_delta: u64,
+    pub read_bytes_delta: u64,
+    pub write_bytes_delta: u64,
+    pub voluntary_ctxt_switches_delta: u64,
+    pub nonvoluntary_ctxt_switches_delta: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FocusGroupKind {
+    Game,
+    Browser,
+    Compile,
+    Media,
+    Recording,
+    VirtualMachine,
+    Desktop,
+    Idle,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FocusGroup {
+    pub kind: FocusGroupKind,
+    pub root_pids: Vec<u32>,
+    pub member_pids: Vec<u32>,
+    pub primary_pid: Option<u32>,
+    pub display_name: String,
+    pub score: f32,
+    pub confidence: f32,
+    pub priority_band: PriorityBand,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FocusCache {
+    previous: BTreeMap<u32, FocusCounters>,
+    proc_cache: crate::process_tree::ProcessCache,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FocusCounters {
+    pub starttime_ticks: Option<u64>,
+    pub cpu_time_ticks: u64,
+    pub read_bytes: u64,
+    pub write_bytes: u64,
+    pub voluntary_ctxt_switches: u64,
+    pub nonvoluntary_ctxt_switches: u64,
+}
+
+impl FocusCache {
+    pub fn clear(&mut self) {
+        self.previous.clear();
+        self.proc_cache = crate::process_tree::ProcessCache::default();
+    }
+
+    pub fn previous_len(&self) -> usize {
+        self.previous.len()
+    }
+}
+
+pub fn focus_snapshot_at(
+    proc_root: &Path,
+    cache: &mut FocusCache,
+    elapsed_ms: u64,
+) -> FocusSnapshot {
+    let budget = crate::process_tree::ScanBudget::default_proc_scan();
+    let mut budget_report = crate::process_tree::ScanBudgetReport::default();
+    let processes = crate::process_tree::scan_processes_at(
+        proc_root,
+        &mut cache.proc_cache,
+        &budget,
+        &mut budget_report,
+    );
+
+    build_focus_snapshot_from_processes(proc_root, cache, elapsed_ms, processes)
+}
+
+fn build_focus_snapshot_from_processes(
+    proc_root: &Path,
+    cache: &mut FocusCache,
+    elapsed_ms: u64,
+    processes: BTreeMap<u32, crate::process_tree::ProcInfo>,
+) -> FocusSnapshot {
+    let mut children_by_parent: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+    for proc_info in processes.values() {
+        children_by_parent
+            .entry(proc_info.ppid)
+            .or_default()
+            .push(proc_info.pid);
+    }
+    for children in children_by_parent.values_mut() {
+        children.sort_unstable();
+    }
+
+    let mut focus_processes = BTreeMap::new();
+    let mut next_counters = BTreeMap::new();
+
+    for proc_info in processes.values() {
+        let mut counters = read_focus_counters_at(proc_root, proc_info.pid);
+        counters.starttime_ticks = proc_info.starttime_ticks.or(counters.starttime_ticks);
+
+        let deltas = counter_deltas(cache.previous.get(&proc_info.pid), &counters);
+
+        let exe_path = non_empty_str(&proc_info.exe_path);
+        let cgroup_path = non_empty_str(&proc_info.cgroup_path);
+
+        let classification = classify_process(&ProcessIdentity {
+            pid: proc_info.pid,
+            ppid: proc_info.ppid,
+            comm: &proc_info.comm,
+            cmdline: &proc_info.cmdline,
+            exe_path,
+            cgroup_path,
+            sched_policy: proc_info.sched_policy,
+        });
+
+        let focus_process = FocusProcess {
+            pid: proc_info.pid,
+            ppid: proc_info.ppid,
+            comm: proc_info.comm.clone(),
+            cmdline: proc_info.cmdline.clone(),
+            cgroup_path: cgroup_path.map(PathBuf::from),
+            starttime_ticks: proc_info.starttime_ticks.or(counters.starttime_ticks),
+            sched_policy: proc_info.sched_policy,
+            classification,
+            cpu_time_ticks_delta: deltas.cpu_time_ticks,
+            read_bytes_delta: deltas.read_bytes,
+            write_bytes_delta: deltas.write_bytes,
+            voluntary_ctxt_switches_delta: deltas.voluntary_ctxt_switches,
+            nonvoluntary_ctxt_switches_delta: deltas.nonvoluntary_ctxt_switches,
+        };
+
+        next_counters.insert(proc_info.pid, counters);
+        focus_processes.insert(proc_info.pid, focus_process);
+    }
+
+    cache.previous = next_counters;
+
+    let groups = build_focus_groups(&focus_processes);
+
+    FocusSnapshot {
+        elapsed_ms,
+        processes: focus_processes,
+        children_by_parent,
+        groups,
+    }
+}
+
+fn non_empty_str(value: &str) -> Option<&str> {
+    if value.is_empty() { None } else { Some(value) }
+}
+
+fn read_focus_counters_at(proc_root: &Path, pid: u32) -> FocusCounters {
+    let mut counters = FocusCounters::default();
+    let process_root = proc_root.join(pid.to_string());
+
+    if let Some((cpu_time_ticks, starttime_ticks)) =
+        read_focus_stat_counters_at(&process_root.join("stat"))
+    {
+        counters.cpu_time_ticks = cpu_time_ticks;
+        counters.starttime_ticks = starttime_ticks;
+    }
+
+    if let Some((read_bytes, write_bytes)) = read_focus_io_counters_at(&process_root.join("io")) {
+        counters.read_bytes = read_bytes;
+        counters.write_bytes = write_bytes;
+    }
+
+    if let Some((voluntary, nonvoluntary)) =
+        read_focus_status_context_switches_at(&process_root.join("status"))
+    {
+        counters.voluntary_ctxt_switches = voluntary;
+        counters.nonvoluntary_ctxt_switches = nonvoluntary;
+    }
+
+    counters
+}
+
+fn read_focus_stat_counters_at(path: &Path) -> Option<(u64, Option<u64>)> {
+    let stat = fs::read_to_string(path).ok()?;
+    let (_, after_comm) = stat.rsplit_once(") ")?;
+    let fields = after_comm.split_whitespace().collect::<Vec<_>>();
+
+    let utime = fields.get(11)?.parse::<u64>().ok()?;
+    let stime = fields.get(12)?.parse::<u64>().ok()?;
+    let starttime_ticks = fields.get(19).and_then(|value| value.parse::<u64>().ok());
+
+    Some((utime.saturating_add(stime), starttime_ticks))
+}
+
+fn read_focus_io_counters_at(path: &Path) -> Option<(u64, u64)> {
+    let contents = fs::read_to_string(path).ok()?;
+    let mut read_bytes = 0;
+    let mut write_bytes = 0;
+
+    for line in contents.lines() {
+        if let Some(value) = line.strip_prefix("read_bytes:") {
+            read_bytes = value.trim().parse::<u64>().unwrap_or(0);
+        } else if let Some(value) = line.strip_prefix("write_bytes:") {
+            write_bytes = value.trim().parse::<u64>().unwrap_or(0);
+        }
+    }
+
+    Some((read_bytes, write_bytes))
+}
+
+fn read_focus_status_context_switches_at(path: &Path) -> Option<(u64, u64)> {
+    let contents = fs::read_to_string(path).ok()?;
+    let mut voluntary = 0;
+    let mut nonvoluntary = 0;
+
+    for line in contents.lines() {
+        if let Some(value) = line.strip_prefix("voluntary_ctxt_switches:") {
+            voluntary = value.trim().parse::<u64>().unwrap_or(0);
+        } else if let Some(value) = line.strip_prefix("nonvoluntary_ctxt_switches:") {
+            nonvoluntary = value.trim().parse::<u64>().unwrap_or(0);
+        }
+    }
+
+    Some((voluntary, nonvoluntary))
+}
+
+fn counter_deltas(previous: Option<&FocusCounters>, current: &FocusCounters) -> FocusCounters {
+    let Some(previous) = previous else {
+        return FocusCounters {
+            starttime_ticks: current.starttime_ticks,
+            ..FocusCounters::default()
+        };
+    };
+
+    if previous.starttime_ticks != current.starttime_ticks {
+        return FocusCounters {
+            starttime_ticks: current.starttime_ticks,
+            ..FocusCounters::default()
+        };
+    }
+
+    FocusCounters {
+        starttime_ticks: current.starttime_ticks,
+        cpu_time_ticks: current
+            .cpu_time_ticks
+            .saturating_sub(previous.cpu_time_ticks),
+        read_bytes: current.read_bytes.saturating_sub(previous.read_bytes),
+        write_bytes: current.write_bytes.saturating_sub(previous.write_bytes),
+        voluntary_ctxt_switches: current
+            .voluntary_ctxt_switches
+            .saturating_sub(previous.voluntary_ctxt_switches),
+        nonvoluntary_ctxt_switches: current
+            .nonvoluntary_ctxt_switches
+            .saturating_sub(previous.nonvoluntary_ctxt_switches),
+    }
+}
+
+fn build_focus_groups(processes: &BTreeMap<u32, FocusProcess>) -> Vec<FocusGroup> {
+    const ORDER: [FocusGroupKind; 9] = [
+        FocusGroupKind::Game,
+        FocusGroupKind::Browser,
+        FocusGroupKind::Compile,
+        FocusGroupKind::Media,
+        FocusGroupKind::Recording,
+        FocusGroupKind::VirtualMachine,
+        FocusGroupKind::Desktop,
+        FocusGroupKind::Idle,
+        FocusGroupKind::Unknown,
+    ];
+
+    let mut groups = Vec::new();
+
+    for kind in ORDER {
+        let member_pids = processes
+            .values()
+            .filter(|process| focus_group_kind_for_class(process.classification.class) == kind)
+            .map(|process| process.pid)
+            .collect::<Vec<_>>();
+
+        if member_pids.is_empty() {
+            continue;
+        }
+
+        let member_set = member_pids.iter().copied().collect::<BTreeSet<_>>();
+        let root_pids = member_pids
+            .iter()
+            .copied()
+            .filter(|pid| {
+                processes
+                    .get(pid)
+                    .map(|process| !member_set.contains(&process.ppid))
+                    .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+
+        let primary_pid = member_pids.iter().copied().max_by(|left, right| {
+            let left_score = processes
+                .get(left)
+                .map(process_focus_score)
+                .unwrap_or_default();
+            let right_score = processes
+                .get(right)
+                .map(process_focus_score)
+                .unwrap_or_default();
+
+            left_score
+                .partial_cmp(&right_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let score = member_pids
+            .iter()
+            .filter_map(|pid| processes.get(pid))
+            .map(process_focus_score)
+            .sum::<f32>();
+
+        let confidence = member_pids
+            .iter()
+            .filter_map(|pid| processes.get(pid))
+            .map(|process| process.classification.confidence)
+            .fold(0.0_f32, f32::max);
+
+        let priority_band = member_pids
+            .iter()
+            .filter_map(|pid| processes.get(pid))
+            .map(|process| process.classification.priority_band)
+            .max_by_key(|band| priority_band_rank(*band))
+            .unwrap_or(PriorityBand::Unknown);
+
+        let display_name =
+            display_name_for_group(kind, primary_pid.and_then(|pid| processes.get(&pid)));
+
+        let mut reasons = vec![format!(
+            "{} process(es) classified as {:?}",
+            member_pids.len(),
+            kind
+        )];
+        if let Some(primary_pid) = primary_pid
+            && let Some(primary) = processes.get(&primary_pid)
+        {
+            reasons.push(format!(
+                "primary pid={} comm='{}' class={:?}",
+                primary.pid, primary.comm, primary.classification.class
+            ));
+        }
+
+        groups.push(FocusGroup {
+            kind,
+            root_pids,
+            member_pids,
+            primary_pid,
+            display_name,
+            score,
+            confidence,
+            priority_band,
+            reasons,
+        });
+    }
+
+    groups.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                priority_band_rank(right.priority_band).cmp(&priority_band_rank(left.priority_band))
+            })
+            .then_with(|| left.display_name.cmp(&right.display_name))
+    });
+
+    groups
+}
+
+fn focus_group_kind_for_class(class: SystemTaskClass) -> FocusGroupKind {
+    match class {
+        SystemTaskClass::Game
+        | SystemTaskClass::GameRenderThread
+        | SystemTaskClass::GameWorkerThread
+        | SystemTaskClass::WineServer
+        | SystemTaskClass::GameScope => FocusGroupKind::Game,
+
+        SystemTaskClass::BrowserForeground
+        | SystemTaskClass::BrowserBackground
+        | SystemTaskClass::BrowserRenderer
+        | SystemTaskClass::BrowserGpu
+        | SystemTaskClass::BrowserNetwork => FocusGroupKind::Browser,
+
+        SystemTaskClass::BuildJob
+        | SystemTaskClass::Compiler
+        | SystemTaskClass::Linker
+        | SystemTaskClass::Indexer
+        | SystemTaskClass::PackageManager => FocusGroupKind::Compile,
+
+        SystemTaskClass::Media => FocusGroupKind::Media,
+        SystemTaskClass::Recorder => FocusGroupKind::Recording,
+        SystemTaskClass::VirtualMachine => FocusGroupKind::VirtualMachine,
+
+        SystemTaskClass::Compositor
+        | SystemTaskClass::AudioRealtime
+        | SystemTaskClass::Input
+        | SystemTaskClass::Editor
+        | SystemTaskClass::Terminal
+        | SystemTaskClass::Shell => FocusGroupKind::Desktop,
+
+        SystemTaskClass::StorageDaemon
+        | SystemTaskClass::NetworkDaemon
+        | SystemTaskClass::KernelThread
+        | SystemTaskClass::IrqThread
+        | SystemTaskClass::Service => FocusGroupKind::Idle,
+
+        SystemTaskClass::Unknown => FocusGroupKind::Unknown,
+    }
+}
+
+fn process_focus_score(process: &FocusProcess) -> f32 {
+    let class_base = match process.classification.class {
+        SystemTaskClass::AudioRealtime | SystemTaskClass::Input => 90.0,
+        SystemTaskClass::Game
+        | SystemTaskClass::GameRenderThread
+        | SystemTaskClass::GameWorkerThread
+        | SystemTaskClass::WineServer
+        | SystemTaskClass::GameScope => 80.0,
+        SystemTaskClass::Compositor | SystemTaskClass::BrowserForeground => 70.0,
+        SystemTaskClass::BrowserRenderer
+        | SystemTaskClass::BrowserGpu
+        | SystemTaskClass::BrowserNetwork
+        | SystemTaskClass::Editor
+        | SystemTaskClass::Terminal
+        | SystemTaskClass::Shell
+        | SystemTaskClass::Media
+        | SystemTaskClass::Recorder
+        | SystemTaskClass::VirtualMachine => 50.0,
+        SystemTaskClass::BuildJob
+        | SystemTaskClass::Compiler
+        | SystemTaskClass::Linker
+        | SystemTaskClass::Indexer
+        | SystemTaskClass::PackageManager => 35.0,
+        SystemTaskClass::StorageDaemon
+        | SystemTaskClass::NetworkDaemon
+        | SystemTaskClass::KernelThread
+        | SystemTaskClass::IrqThread
+        | SystemTaskClass::Service
+        | SystemTaskClass::BrowserBackground => 15.0,
+        SystemTaskClass::Unknown => 0.0,
+    };
+
+    let cpu_score = process.cpu_time_ticks_delta as f32;
+    let io_score = (process
+        .read_bytes_delta
+        .saturating_add(process.write_bytes_delta) as f32)
+        / 1_048_576.0;
+    let ctxt_score = (process
+        .voluntary_ctxt_switches_delta
+        .saturating_add(process.nonvoluntary_ctxt_switches_delta) as f32)
+        * 0.05;
+
+    class_base + process.classification.confidence + cpu_score + io_score + ctxt_score
+}
+
+fn display_name_for_group(kind: FocusGroupKind, primary: Option<&FocusProcess>) -> String {
+    if let Some(primary) = primary
+        && !primary.comm.is_empty()
+    {
+        return primary.comm.clone();
+    }
+
+    match kind {
+        FocusGroupKind::Game => "Game".to_owned(),
+        FocusGroupKind::Browser => "Browser".to_owned(),
+        FocusGroupKind::Compile => "Compile".to_owned(),
+        FocusGroupKind::Media => "Media".to_owned(),
+        FocusGroupKind::Recording => "Recording".to_owned(),
+        FocusGroupKind::VirtualMachine => "VirtualMachine".to_owned(),
+        FocusGroupKind::Desktop => "Desktop".to_owned(),
+        FocusGroupKind::Idle => "Idle".to_owned(),
+        FocusGroupKind::Unknown => "Unknown".to_owned(),
+    }
+}
+
+fn priority_band_rank(priority_band: PriorityBand) -> u8 {
+    match priority_band {
+        PriorityBand::Unknown => 0,
+        PriorityBand::Background => 1,
+        PriorityBand::Throughput => 2,
+        PriorityBand::Interactive => 3,
+        PriorityBand::ForegroundLatency => 4,
+        PriorityBand::CriticalRealtime => 5,
+    }
 }
 
 pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
@@ -486,6 +998,100 @@ fn is_realtime_policy(sched_policy: Option<u32>) -> bool {
 mod tests {
     use super::*;
     use crate::process_tree::TaskClass;
+
+    #[test]
+    fn focus_counter_deltas_are_zero_on_first_seen_and_reset_on_pid_reuse() {
+        let current = FocusCounters {
+            starttime_ticks: Some(10),
+            cpu_time_ticks: 100,
+            read_bytes: 200,
+            write_bytes: 300,
+            voluntary_ctxt_switches: 40,
+            nonvoluntary_ctxt_switches: 50,
+        };
+
+        let first_seen = counter_deltas(None, &current);
+        assert_eq!(first_seen.starttime_ticks, Some(10));
+        assert_eq!(first_seen.cpu_time_ticks, 0);
+        assert_eq!(first_seen.read_bytes, 0);
+        assert_eq!(first_seen.write_bytes, 0);
+        assert_eq!(first_seen.voluntary_ctxt_switches, 0);
+        assert_eq!(first_seen.nonvoluntary_ctxt_switches, 0);
+
+        let previous = FocusCounters {
+            starttime_ticks: Some(10),
+            cpu_time_ticks: 70,
+            read_bytes: 125,
+            write_bytes: 250,
+            voluntary_ctxt_switches: 35,
+            nonvoluntary_ctxt_switches: 45,
+        };
+
+        let deltas = counter_deltas(Some(&previous), &current);
+        assert_eq!(deltas.starttime_ticks, Some(10));
+        assert_eq!(deltas.cpu_time_ticks, 30);
+        assert_eq!(deltas.read_bytes, 75);
+        assert_eq!(deltas.write_bytes, 50);
+        assert_eq!(deltas.voluntary_ctxt_switches, 5);
+        assert_eq!(deltas.nonvoluntary_ctxt_switches, 5);
+
+        let reused_pid_previous = FocusCounters {
+            starttime_ticks: Some(9),
+            cpu_time_ticks: 500,
+            read_bytes: 600,
+            write_bytes: 700,
+            voluntary_ctxt_switches: 80,
+            nonvoluntary_ctxt_switches: 90,
+        };
+
+        let reused_pid_deltas = counter_deltas(Some(&reused_pid_previous), &current);
+        assert_eq!(reused_pid_deltas.starttime_ticks, Some(10));
+        assert_eq!(reused_pid_deltas.cpu_time_ticks, 0);
+        assert_eq!(reused_pid_deltas.read_bytes, 0);
+        assert_eq!(reused_pid_deltas.write_bytes, 0);
+        assert_eq!(reused_pid_deltas.voluntary_ctxt_switches, 0);
+        assert_eq!(reused_pid_deltas.nonvoluntary_ctxt_switches, 0);
+    }
+
+    #[test]
+    fn focus_group_kind_maps_system_classes() {
+        assert_eq!(
+            focus_group_kind_for_class(SystemTaskClass::GameRenderThread),
+            FocusGroupKind::Game
+        );
+        assert_eq!(
+            focus_group_kind_for_class(SystemTaskClass::BrowserGpu),
+            FocusGroupKind::Browser
+        );
+        assert_eq!(
+            focus_group_kind_for_class(SystemTaskClass::Compiler),
+            FocusGroupKind::Compile
+        );
+        assert_eq!(
+            focus_group_kind_for_class(SystemTaskClass::Media),
+            FocusGroupKind::Media
+        );
+        assert_eq!(
+            focus_group_kind_for_class(SystemTaskClass::Recorder),
+            FocusGroupKind::Recording
+        );
+        assert_eq!(
+            focus_group_kind_for_class(SystemTaskClass::VirtualMachine),
+            FocusGroupKind::VirtualMachine
+        );
+        assert_eq!(
+            focus_group_kind_for_class(SystemTaskClass::Compositor),
+            FocusGroupKind::Desktop
+        );
+        assert_eq!(
+            focus_group_kind_for_class(SystemTaskClass::Service),
+            FocusGroupKind::Idle
+        );
+        assert_eq!(
+            focus_group_kind_for_class(SystemTaskClass::Unknown),
+            FocusGroupKind::Unknown
+        );
+    }
 
     #[test]
     fn legacy_task_class_maps_game_related_system_classes_to_game() {
