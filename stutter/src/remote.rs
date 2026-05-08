@@ -26,6 +26,19 @@ pub struct RemoteMonitorRequest {
     pub irq_latency: bool,
     pub irqs: Vec<u32>,
 
+    #[serde(default)]
+    pub foreground_window: bool,
+    #[serde(default)]
+    pub focus_source: Option<String>,
+    #[serde(default)]
+    pub foreground_source: Option<String>,
+    #[serde(default)]
+    pub foreground_poll_ms: Option<u64>,
+    #[serde(default)]
+    pub foreground_max_stale_ms: Option<u64>,
+    #[serde(default)]
+    pub foreground_include_title: bool,
+
     pub record: bool,
     pub run_name: Option<String>,
 }
@@ -168,8 +181,28 @@ pub struct AgentFeatureFlags {
     pub block_io_request: bool,
     pub irq_latency_request: bool,
     pub autotune_observe: bool,
+    pub foreground_window_request: bool,
     pub autotune_suggest: bool,
     pub autotune_apply_low_risk: bool,
+}
+
+fn focus_source_label(source: crate::cli::FocusSource) -> String {
+    match source {
+        crate::cli::FocusSource::Heuristic => "heuristic",
+        crate::cli::FocusSource::Foreground => "foreground",
+        crate::cli::FocusSource::Hybrid => "hybrid",
+    }
+    .to_owned()
+}
+
+fn foreground_source_label(source: crate::cli::ForegroundSourceArg) -> String {
+    match source {
+        crate::cli::ForegroundSourceArg::Auto => "auto",
+        crate::cli::ForegroundSourceArg::Sway => "sway",
+        crate::cli::ForegroundSourceArg::Hyprland => "hyprland",
+        crate::cli::ForegroundSourceArg::X11 => "x11",
+    }
+    .to_owned()
 }
 
 pub fn request_from_monitor_config(config: &Config) -> anyhow::Result<RemoteMonitorRequest> {
@@ -199,6 +232,12 @@ pub fn request_from_monitor_config(config: &Config) -> anyhow::Result<RemoteMoni
         block_io: config.block_io,
         irq_latency: config.irq_latency,
         irqs: config.irqs.clone(),
+        foreground_window: config.foreground_window,
+        focus_source: Some(focus_source_label(config.focus_source)),
+        foreground_source: Some(foreground_source_label(config.foreground_source)),
+        foreground_poll_ms: Some(config.foreground_poll_ms),
+        foreground_max_stale_ms: Some(config.foreground_max_stale_ms),
+        foreground_include_title: config.foreground_include_title,
         record: config.recording.is_some(),
         run_name: config.recording.as_ref().and_then(|r| r.run_name.clone()),
     })
@@ -301,6 +340,12 @@ mod tests {
             block_io: false,
             irq_latency: false,
             irqs: vec![],
+            foreground_window: true,
+            focus_source: Some("hybrid".to_string()),
+            foreground_source: Some("sway".to_string()),
+            foreground_poll_ms: Some(1000),
+            foreground_max_stale_ms: Some(2500),
+            foreground_include_title: false,
             record: true,
             run_name: Some("test".to_string()),
         };
@@ -311,5 +356,43 @@ mod tests {
         assert_eq!(decoded.target_pids, vec![1234]);
         assert_eq!(decoded.duration_seconds, Some(5));
         assert!(decoded.hwmon);
+        assert!(decoded.foreground_window);
+        assert_eq!(decoded.focus_source.as_deref(), Some("hybrid"));
+        assert_eq!(decoded.foreground_source.as_deref(), Some("sway"));
+        assert_eq!(decoded.foreground_poll_ms, Some(1000));
+        assert_eq!(decoded.foreground_max_stale_ms, Some(2500));
+        assert!(!decoded.foreground_include_title);
+    }
+
+    #[test]
+    fn remote_monitor_request_defaults_foreground_fields_for_old_clients() {
+        let json = r#"{
+         "target_pids": [],
+         "tree_pids": [],
+         "exclude_tree_pids": [],
+         "duration_seconds": null,
+         "spike_us": null,
+         "summary_ms": null,
+         "include_comm": [],
+         "exclude_comm": [],
+         "hwmon": false,
+         "cpu_freq": false,
+         "faults": false,
+         "stat_wait": false,
+         "block_io": false,
+         "irq_latency": false,
+         "irqs": [],
+         "record": false,
+         "run_name": null
+     }"#;
+
+        let decoded: RemoteMonitorRequest = serde_json::from_str(json).unwrap();
+
+        assert!(!decoded.foreground_window);
+        assert_eq!(decoded.focus_source, None);
+        assert_eq!(decoded.foreground_source, None);
+        assert_eq!(decoded.foreground_poll_ms, None);
+        assert_eq!(decoded.foreground_max_stale_ms, None);
+        assert!(!decoded.foreground_include_title);
     }
 }
