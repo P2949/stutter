@@ -13,10 +13,11 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{BarChart, Block, Borders, Cell, Paragraph, Row, Sparkline, Table},
+    widgets::{BarChart, Block, Borders, Cell, Paragraph, Row, Sparkline, Table, Wrap},
 };
 
 use crate::{
+    autotune::tui_panel::{AutotuneTuiPanelSnapshot, load_default_autotune_tui_panel_snapshot},
     diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
     focus::ResolvedFocus,
@@ -168,7 +169,14 @@ pub fn render_tui(
     render_sparkline(f, interval_records, bottom[0]);
     render_cpu_heat(f, stats_by_task, bottom[1]);
 
-    render_diagnoses(f, recent_diagnoses, chunks[3]);
+    let lower = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(chunks[3]);
+
+    let autotune_snapshot = load_default_autotune_tui_panel_snapshot();
+    render_autotune_panel(f, Some(&autotune_snapshot), lower[0]);
+    render_diagnoses(f, recent_diagnoses, lower[1]);
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +443,97 @@ fn render_cpu_heat(f: &mut Frame, stats_by_task: &BTreeMap<u32, TaskStats>, area
 }
 
 // ---------------------------------------------------------------------------
+// Autotune panel
+// ---------------------------------------------------------------------------
+
+fn render_autotune_panel(f: &mut Frame, snapshot: Option<&AutotuneTuiPanelSnapshot>, area: Rect) {
+    let block = Block::default().borders(Borders::ALL).title(" Autotune ");
+    let paragraph = Paragraph::new(autotune_panel_lines(snapshot))
+        .block(block)
+        .wrap(Wrap { trim: true });
+
+    f.render_widget(paragraph, area);
+}
+
+fn autotune_panel_lines(snapshot: Option<&AutotuneTuiPanelSnapshot>) -> Vec<Line<'static>> {
+    let Some(snapshot) = snapshot else {
+        return vec![Line::from(vec![Span::raw(" no autotune status")])];
+    };
+
+    let rollback_style = if snapshot.rollback_available {
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+
+    let mut lines = vec![
+        label_value_line("mode", &snapshot.mode, Style::default().fg(Color::White)),
+        label_value_line("phase", &snapshot.phase, Style::default().fg(Color::Cyan)),
+        label_value_line(
+            "current profile",
+            snapshot.current_profile.as_deref().unwrap_or("none"),
+            Style::default().fg(Color::White),
+        ),
+        label_value_line(
+            "baseline score",
+            &format_optional_u64(snapshot.baseline_score),
+            Style::default().fg(Color::White),
+        ),
+        label_value_line(
+            "candidate score",
+            &format_optional_u64(snapshot.candidate_score),
+            Style::default().fg(Color::White),
+        ),
+        label_value_line(
+            "decision in",
+            &format_decision_in(snapshot.decision_in_seconds),
+            Style::default().fg(Color::Yellow),
+        ),
+        label_value_line(
+            "rollback available",
+            if snapshot.rollback_available {
+                "yes"
+            } else {
+                "no"
+            },
+            rollback_style,
+        ),
+    ];
+
+    if let Some(warning) = snapshot.warning.as_ref()
+        && !warning.trim().is_empty()
+    {
+        lines.push(Line::from(vec![
+            Span::styled("warning: ", Style::default().fg(Color::Yellow)),
+            Span::raw(warning.clone()),
+        ]));
+    }
+
+    lines
+}
+
+fn label_value_line(label: &str, value: &str, value_style: Style) -> Line<'static> {
+    Line::from(vec![
+        Span::raw(format!(" {label}: ")),
+        Span::styled(value.to_owned(), value_style),
+    ])
+}
+
+fn format_optional_u64(value: Option<u64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
+fn format_decision_in(value: Option<u64>) -> String {
+    value
+        .map(|seconds| format!("{seconds}s"))
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
+// ---------------------------------------------------------------------------
 // Recent stutter diagnoses
 // ---------------------------------------------------------------------------
 
@@ -487,6 +586,48 @@ fn render_diagnoses(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn autotune_panel_lines_match_requested_fields() {
+        let snapshot = AutotuneTuiPanelSnapshot {
+            mode: "ApplyLowRisk".to_owned(),
+            phase: "Measuring".to_owned(),
+            current_profile: Some("game-main-suggested".to_owned()),
+            baseline_score: Some(412),
+            candidate_score: Some(330),
+            decision_in_seconds: Some(12),
+            rollback_available: true,
+            history_path: std::path::PathBuf::from("/tmp/history.jsonl"),
+            journal_path: std::path::PathBuf::from("/tmp/controller_journal.json"),
+            warning: None,
+        };
+
+        let rendered = autotune_panel_lines(Some(&snapshot))
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("mode: \nApplyLowRisk"));
+        assert!(rendered.contains("phase: \nMeasuring"));
+        assert!(rendered.contains("current profile: \ngame-main-suggested"));
+        assert!(rendered.contains("baseline score: \n412"));
+        assert!(rendered.contains("candidate score: \n330"));
+        assert!(rendered.contains("decision in: \n12s"));
+        assert!(rendered.contains("rollback available: \nyes"));
+    }
+
+    #[test]
+    fn autotune_panel_lines_handle_missing_snapshot() {
+        let rendered = autotune_panel_lines(None)
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(rendered, " no autotune status");
+    }
 
     #[test]
     fn focus_status_line_formats_current_focus() {

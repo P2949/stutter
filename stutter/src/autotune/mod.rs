@@ -31,6 +31,7 @@ pub mod replay;
 pub mod report_overlay;
 pub mod state;
 pub mod status;
+pub mod tui_panel;
 
 use std::{
     fs::{self, OpenOptions},
