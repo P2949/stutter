@@ -371,6 +371,20 @@ pub fn plan_apply_low_risk_from_profiles(
     })
 }
 
+pub fn ensure_baseline_ready_for_apply(
+    baseline_status: &crate::autotune::baseline::BaselineWindowStatus,
+) -> anyhow::Result<crate::autotune::experiment::WindowScore> {
+    match baseline_status {
+        crate::autotune::baseline::BaselineWindowStatus::Ready { score } => Ok(score.clone()),
+        crate::autotune::baseline::BaselineWindowStatus::Collecting { reasons, .. } => {
+            anyhow::bail!(
+                "baseline window is not ready; action blocked: {}",
+                reasons.join("; ")
+            )
+        }
+    }
+}
+
 pub async fn apply_low_risk_command(
     input: &crate::autotune::AutotuneCommandInput,
 ) -> anyhow::Result<ApplyLowRiskOutcome> {
@@ -469,6 +483,25 @@ mod tests {
             self.rollback_calls += 1;
             Ok(())
         }
+    }
+
+    #[test]
+    fn baseline_not_ready_blocks_apply_gate() {
+        let status = crate::autotune::baseline::BaselineWindowStatus::Collecting {
+            elapsed_ms: 10_000,
+            scored_intervals: 5,
+            scored_samples: 50,
+            scored_task_count: 1,
+            drop_counter_total: 0,
+            reasons: vec!["baseline window not complete".to_owned()],
+        };
+
+        let err = ensure_baseline_ready_for_apply(&status)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("baseline window is not ready"));
+        assert!(err.contains("baseline window not complete"));
     }
 
     #[tokio::test]

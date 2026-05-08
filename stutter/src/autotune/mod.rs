@@ -1,4 +1,5 @@
 pub mod apply_low_risk;
+pub mod baseline;
 pub mod candidate;
 pub mod controller;
 pub mod decision;
