@@ -251,14 +251,15 @@ fn build_focus_snapshot_from_processes(
 
     cache.previous = next_counters;
 
-    let groups = build_focus_groups(&focus_processes);
-
-    FocusSnapshot {
+    let mut snapshot = FocusSnapshot {
         elapsed_ms,
         processes: focus_processes,
         children_by_parent,
-        groups,
-    }
+        groups: Vec::new(),
+    };
+    snapshot.groups = build_focus_groups(&snapshot);
+
+    snapshot
 }
 
 fn non_empty_str(value: &str) -> Option<&str> {
@@ -366,106 +367,66 @@ fn counter_deltas(previous: Option<&FocusCounters>, current: &FocusCounters) -> 
     }
 }
 
-fn build_focus_groups(processes: &BTreeMap<u32, FocusProcess>) -> Vec<FocusGroup> {
-    const ORDER: [FocusGroupKind; 9] = [
-        FocusGroupKind::Game,
-        FocusGroupKind::Browser,
-        FocusGroupKind::Compile,
-        FocusGroupKind::Media,
-        FocusGroupKind::Recording,
-        FocusGroupKind::VirtualMachine,
-        FocusGroupKind::Desktop,
-        FocusGroupKind::Idle,
-        FocusGroupKind::Unknown,
-    ];
-
+fn build_focus_groups(snapshot: &FocusSnapshot) -> Vec<FocusGroup> {
+    let mut claimed_pids = BTreeSet::new();
     let mut groups = Vec::new();
 
-    for kind in ORDER {
-        let member_pids = processes
-            .values()
-            .filter(|process| focus_group_kind_for_class(process.classification.class) == kind)
-            .map(|process| process.pid)
-            .collect::<Vec<_>>();
+    if let Some(group) = build_game_group(snapshot, &claimed_pids) {
+        claimed_pids.extend(group.member_pids.iter().copied());
+        groups.push(group);
+    }
 
-        if member_pids.is_empty() {
-            continue;
-        }
+    for group in build_browser_groups(snapshot, &claimed_pids) {
+        claimed_pids.extend(group.member_pids.iter().copied());
+        groups.push(group);
+    }
 
-        let member_set = member_pids.iter().copied().collect::<BTreeSet<_>>();
-        let root_pids = member_pids
-            .iter()
-            .copied()
-            .filter(|pid| {
-                processes
-                    .get(pid)
-                    .map(|process| !member_set.contains(&process.ppid))
-                    .unwrap_or(false)
-            })
-            .collect::<Vec<_>>();
+    for group in build_compile_groups(snapshot, &claimed_pids) {
+        claimed_pids.extend(group.member_pids.iter().copied());
+        groups.push(group);
+    }
 
-        let primary_pid = member_pids.iter().copied().max_by(|left, right| {
-            let left_score = processes
-                .get(left)
-                .map(process_focus_score)
-                .unwrap_or_default();
-            let right_score = processes
-                .get(right)
-                .map(process_focus_score)
-                .unwrap_or_default();
+    for group in
+        build_tree_groups_for_kind(snapshot, &claimed_pids, FocusGroupKind::Media, |process| {
+            process.classification.class == SystemTaskClass::Media
+        })
+    {
+        claimed_pids.extend(group.member_pids.iter().copied());
+        groups.push(group);
+    }
 
-            left_score
-                .partial_cmp(&right_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+    for group in build_tree_groups_for_kind(
+        snapshot,
+        &claimed_pids,
+        FocusGroupKind::Recording,
+        |process| process.classification.class == SystemTaskClass::Recorder,
+    ) {
+        claimed_pids.extend(group.member_pids.iter().copied());
+        groups.push(group);
+    }
 
-        let score = member_pids
-            .iter()
-            .filter_map(|pid| processes.get(pid))
-            .map(process_focus_score)
-            .sum::<f32>();
+    for group in build_tree_groups_for_kind(
+        snapshot,
+        &claimed_pids,
+        FocusGroupKind::VirtualMachine,
+        |process| process.classification.class == SystemTaskClass::VirtualMachine,
+    ) {
+        claimed_pids.extend(group.member_pids.iter().copied());
+        groups.push(group);
+    }
 
-        let confidence = member_pids
-            .iter()
-            .filter_map(|pid| processes.get(pid))
-            .map(|process| process.classification.confidence)
-            .fold(0.0_f32, f32::max);
+    if let Some(group) = build_desktop_group(snapshot, &claimed_pids) {
+        claimed_pids.extend(group.member_pids.iter().copied());
+        groups.push(group);
+    }
 
-        let priority_band = member_pids
-            .iter()
-            .filter_map(|pid| processes.get(pid))
-            .map(|process| process.classification.priority_band)
-            .max_by_key(|band| priority_band_rank(*band))
-            .unwrap_or(PriorityBand::Unknown);
+    if let Some(group) = build_idle_group(snapshot, &claimed_pids) {
+        claimed_pids.extend(group.member_pids.iter().copied());
+        groups.push(group);
+    }
 
-        let display_name =
-            display_name_for_group(kind, primary_pid.and_then(|pid| processes.get(&pid)));
-
-        let mut reasons = vec![format!(
-            "{} process(es) classified as {:?}",
-            member_pids.len(),
-            kind
-        )];
-        if let Some(primary_pid) = primary_pid
-            && let Some(primary) = processes.get(&primary_pid)
-        {
-            reasons.push(format!(
-                "primary pid={} comm='{}' class={:?}",
-                primary.pid, primary.comm, primary.classification.class
-            ));
-        }
-
-        groups.push(FocusGroup {
-            kind,
-            root_pids,
-            member_pids,
-            primary_pid,
-            display_name,
-            score,
-            confidence,
-            priority_band,
-            reasons,
-        });
+    if let Some(group) = build_fallback_group(snapshot, &claimed_pids) {
+        groups.push(group);
     }
 
     groups.sort_by(|left, right| {
@@ -480,6 +441,895 @@ fn build_focus_groups(processes: &BTreeMap<u32, FocusProcess>) -> Vec<FocusGroup
     });
 
     groups
+}
+
+fn build_game_group(snapshot: &FocusSnapshot, claimed_pids: &BTreeSet<u32>) -> Option<FocusGroup> {
+    let game_like_pids = snapshot
+        .processes
+        .values()
+        .filter(|process| !claimed_pids.contains(&process.pid))
+        .filter(|process| {
+            is_game_class(process.classification.class) || is_game_runtime_process(process)
+        })
+        .map(|process| process.pid)
+        .collect::<BTreeSet<_>>();
+
+    if game_like_pids.is_empty() {
+        return None;
+    }
+
+    let root_pid = game_like_pids
+        .iter()
+        .copied()
+        .filter(|pid| {
+            snapshot
+                .processes
+                .get(pid)
+                .map(|process| process.classification.class == SystemTaskClass::GameScope)
+                .unwrap_or(false)
+        })
+        .max_by(|left, right| compare_process_preference(snapshot, *left, *right))
+        .or_else(|| {
+            game_like_pids
+                .iter()
+                .copied()
+                .filter(|pid| {
+                    snapshot
+                        .processes
+                        .get(pid)
+                        .map(|process| process.classification.class == SystemTaskClass::Game)
+                        .unwrap_or(false)
+                })
+                .filter(|pid| !has_ancestor_in_set(snapshot, *pid, &game_like_pids))
+                .max_by(|left, right| compare_process_preference(snapshot, *left, *right))
+        })
+        .or_else(|| {
+            game_like_pids
+                .iter()
+                .copied()
+                .filter(|pid| {
+                    snapshot
+                        .processes
+                        .get(pid)
+                        .map(|process| {
+                            is_game_runtime_process(process)
+                                && descendants_of_pid(snapshot, process.pid).iter().any(
+                                    |child_pid| {
+                                        snapshot
+                                            .processes
+                                            .get(child_pid)
+                                            .map(|child| {
+                                                child.classification.class == SystemTaskClass::Game
+                                                    || child.classification.class
+                                                        == SystemTaskClass::GameRenderThread
+                                                    || child.classification.class
+                                                        == SystemTaskClass::GameWorkerThread
+                                            })
+                                            .unwrap_or(false)
+                                    },
+                                )
+                        })
+                        .unwrap_or(false)
+                })
+                .max_by(|left, right| compare_process_preference(snapshot, *left, *right))
+        })
+        .or_else(|| {
+            game_like_pids
+                .iter()
+                .copied()
+                .max_by(|left, right| compare_process_preference(snapshot, *left, *right))
+        })?;
+
+    let mut member_pids = descendants_of_pid(snapshot, root_pid)
+        .into_iter()
+        .filter(|pid| !claimed_pids.contains(pid))
+        .collect::<BTreeSet<_>>();
+
+    for process in snapshot.processes.values() {
+        if claimed_pids.contains(&process.pid) {
+            continue;
+        }
+
+        if process.classification.class == SystemTaskClass::WineServer
+            && process_appears_tied_to_root(snapshot, process.pid, root_pid)
+        {
+            member_pids.insert(process.pid);
+        }
+    }
+
+    for pid in &game_like_pids {
+        if !claimed_pids.contains(pid) && process_appears_tied_to_root(snapshot, *pid, root_pid) {
+            member_pids.insert(*pid);
+        }
+    }
+
+    make_focus_group(
+        snapshot,
+        FocusGroupKind::Game,
+        vec![root_pid],
+        member_pids.into_iter().collect(),
+        Some(root_pid),
+        vec![
+            "game group selected from gamescope/game/runtime roots".to_owned(),
+            "wineserver is included only when tied to the same parent/session/cgroup/runtime"
+                .to_owned(),
+        ],
+    )
+}
+
+fn build_browser_groups(snapshot: &FocusSnapshot, claimed_pids: &BTreeSet<u32>) -> Vec<FocusGroup> {
+    let browser_pids = snapshot
+        .processes
+        .values()
+        .filter(|process| !claimed_pids.contains(&process.pid))
+        .filter(|process| is_browser_class(process.classification.class))
+        .map(|process| process.pid)
+        .collect::<BTreeSet<_>>();
+
+    let mut roots = browser_pids
+        .iter()
+        .copied()
+        .filter(|pid| {
+            snapshot
+                .processes
+                .get(pid)
+                .map(|process| {
+                    process.classification.class == SystemTaskClass::BrowserForeground
+                        || !has_ancestor_in_set(snapshot, *pid, &browser_pids)
+                })
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+
+    roots.sort_by(|left, right| compare_process_preference(snapshot, *right, *left));
+
+    let mut used = BTreeSet::new();
+    let mut groups = Vec::new();
+
+    for root_pid in roots {
+        if used.contains(&root_pid) {
+            continue;
+        }
+
+        let mut member_pids = descendants_of_pid(snapshot, root_pid)
+            .into_iter()
+            .filter(|pid| !claimed_pids.contains(pid))
+            .filter(|pid| {
+                snapshot
+                    .processes
+                    .get(pid)
+                    .map(|process| is_browser_class(process.classification.class))
+                    .unwrap_or(false)
+            })
+            .collect::<BTreeSet<_>>();
+
+        member_pids.insert(root_pid);
+
+        if member_pids.is_empty() {
+            continue;
+        }
+
+        let primary_pid = member_pids
+            .iter()
+            .copied()
+            .filter(|pid| {
+                snapshot
+                    .processes
+                    .get(pid)
+                    .map(|process| {
+                        process.classification.class == SystemTaskClass::BrowserForeground
+                    })
+                    .unwrap_or(false)
+            })
+            .max_by(|left, right| compare_process_preference(snapshot, *left, *right))
+            .or(Some(root_pid));
+
+        if let Some(group) = make_focus_group(
+            snapshot,
+            FocusGroupKind::Browser,
+            vec![root_pid],
+            member_pids.iter().copied().collect(),
+            primary_pid,
+            vec![
+                "browser group rooted at browser parent process".to_owned(),
+                "renderer/GPU/network descendants are included under the browser parent".to_owned(),
+            ],
+        ) {
+            used.extend(member_pids);
+            groups.push(group);
+        }
+    }
+
+    groups
+}
+
+fn build_compile_groups(snapshot: &FocusSnapshot, claimed_pids: &BTreeSet<u32>) -> Vec<FocusGroup> {
+    let compile_pids = snapshot
+        .processes
+        .values()
+        .filter(|process| !claimed_pids.contains(&process.pid))
+        .filter(|process| is_compile_class(process.classification.class))
+        .map(|process| process.pid)
+        .collect::<BTreeSet<_>>();
+
+    if compile_pids.is_empty() {
+        return Vec::new();
+    }
+
+    let mut roots = compile_pids
+        .iter()
+        .copied()
+        .filter(|pid| {
+            snapshot
+                .processes
+                .get(pid)
+                .map(is_stable_build_root)
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+
+    if roots.is_empty() {
+        roots = compile_pids
+            .iter()
+            .copied()
+            .filter_map(|pid| nearest_compile_session_root(snapshot, pid))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+    }
+
+    if roots.is_empty() {
+        roots = compile_pids
+            .iter()
+            .copied()
+            .filter(|pid| !has_ancestor_in_set(snapshot, *pid, &compile_pids))
+            .collect::<Vec<_>>();
+    }
+
+    if roots.is_empty() {
+        roots = compile_pids.iter().copied().collect::<Vec<_>>();
+    }
+
+    roots.sort_by(|left, right| {
+        stable_build_root_rank(snapshot, *right)
+            .cmp(&stable_build_root_rank(snapshot, *left))
+            .then_with(|| compare_process_preference(snapshot, *right, *left))
+    });
+
+    let mut used = BTreeSet::new();
+    let mut groups = Vec::new();
+
+    for root_pid in roots {
+        if used.contains(&root_pid) || claimed_pids.contains(&root_pid) {
+            continue;
+        }
+
+        let mut member_pids = descendants_of_pid(snapshot, root_pid)
+            .into_iter()
+            .filter(|pid| !claimed_pids.contains(pid))
+            .filter(|pid| {
+                snapshot
+                    .processes
+                    .get(pid)
+                    .map(|process| {
+                        is_compile_class(process.classification.class)
+                            || process.pid == root_pid
+                            || process.classification.class == SystemTaskClass::Terminal
+                            || process.classification.class == SystemTaskClass::Shell
+                    })
+                    .unwrap_or(false)
+            })
+            .collect::<BTreeSet<_>>();
+
+        if compile_pids.contains(&root_pid) {
+            member_pids.insert(root_pid);
+        }
+
+        if !member_pids.iter().any(|pid| compile_pids.contains(pid)) {
+            continue;
+        }
+
+        let primary_pid = member_pids
+            .iter()
+            .copied()
+            .filter(|pid| {
+                snapshot
+                    .processes
+                    .get(pid)
+                    .map(is_stable_build_root)
+                    .unwrap_or(false)
+            })
+            .max_by(|left, right| compare_process_preference(snapshot, *left, *right))
+            .or_else(|| {
+                member_pids
+                    .iter()
+                    .copied()
+                    .max_by(|left, right| compare_process_preference(snapshot, *left, *right))
+            });
+
+        if let Some(group) = make_focus_group(
+            snapshot,
+            FocusGroupKind::Compile,
+            vec![root_pid],
+            member_pids.iter().copied().collect(),
+            primary_pid,
+            vec![
+                "compile group prefers stable build roots such as cargo/ninja/make/cmake/meson"
+                    .to_owned(),
+                "compiler/linker descendants are grouped under the stable build/session root"
+                    .to_owned(),
+            ],
+        ) {
+            used.extend(member_pids);
+            groups.push(group);
+        }
+    }
+
+    groups
+}
+
+fn build_tree_groups_for_kind<F>(
+    snapshot: &FocusSnapshot,
+    claimed_pids: &BTreeSet<u32>,
+    kind: FocusGroupKind,
+    predicate: F,
+) -> Vec<FocusGroup>
+where
+    F: Fn(&FocusProcess) -> bool,
+{
+    let matching_pids = snapshot
+        .processes
+        .values()
+        .filter(|process| !claimed_pids.contains(&process.pid))
+        .filter(|process| predicate(process))
+        .map(|process| process.pid)
+        .collect::<BTreeSet<_>>();
+
+    let mut roots = matching_pids
+        .iter()
+        .copied()
+        .filter(|pid| !has_ancestor_in_set(snapshot, *pid, &matching_pids))
+        .collect::<Vec<_>>();
+
+    if roots.is_empty() {
+        roots = matching_pids.iter().copied().collect::<Vec<_>>();
+    }
+
+    roots.sort_by(|left, right| compare_process_preference(snapshot, *right, *left));
+
+    let mut used = BTreeSet::new();
+    let mut groups = Vec::new();
+
+    for root_pid in roots {
+        if used.contains(&root_pid) {
+            continue;
+        }
+
+        let member_pids = descendants_of_pid(snapshot, root_pid)
+            .into_iter()
+            .filter(|pid| !claimed_pids.contains(pid))
+            .filter(|pid| matching_pids.contains(pid) || *pid == root_pid)
+            .collect::<Vec<_>>();
+
+        if member_pids.is_empty() {
+            continue;
+        }
+
+        let primary_pid = member_pids
+            .iter()
+            .copied()
+            .max_by(|left, right| compare_process_preference(snapshot, *left, *right));
+
+        if let Some(group) = make_focus_group(
+            snapshot,
+            kind,
+            vec![root_pid],
+            member_pids.clone(),
+            primary_pid,
+            vec![format!("{kind:?} group rooted at stable process tree")],
+        ) {
+            used.extend(member_pids);
+            groups.push(group);
+        }
+    }
+
+    groups
+}
+
+fn build_desktop_group(
+    snapshot: &FocusSnapshot,
+    claimed_pids: &BTreeSet<u32>,
+) -> Option<FocusGroup> {
+    let desktop_pids = snapshot
+        .processes
+        .values()
+        .filter(|process| !claimed_pids.contains(&process.pid))
+        .filter(|process| {
+            focus_group_kind_for_class(process.classification.class) == FocusGroupKind::Desktop
+        })
+        .map(|process| process.pid)
+        .collect::<BTreeSet<_>>();
+
+    if desktop_pids.is_empty() {
+        return None;
+    }
+
+    let primary_pid = desktop_pids
+        .iter()
+        .copied()
+        .filter(|pid| {
+            snapshot
+                .processes
+                .get(pid)
+                .map(|process| process.classification.class == SystemTaskClass::Compositor)
+                .unwrap_or(false)
+        })
+        .filter(|pid| {
+            snapshot
+                .processes
+                .get(pid)
+                .map(is_active_foreground_candidate)
+                .unwrap_or(false)
+        })
+        .max_by(|left, right| compare_process_preference(snapshot, *left, *right))
+        .or_else(|| {
+            desktop_pids
+                .iter()
+                .copied()
+                .filter(|pid| {
+                    snapshot
+                        .processes
+                        .get(pid)
+                        .map(is_active_foreground_candidate)
+                        .unwrap_or(false)
+                })
+                .max_by(|left, right| compare_process_preference(snapshot, *left, *right))
+        })
+        .or_else(|| {
+            desktop_pids
+                .iter()
+                .copied()
+                .max_by(|left, right| compare_process_preference(snapshot, *left, *right))
+        });
+
+    make_focus_group(
+        snapshot,
+        FocusGroupKind::Desktop,
+        root_pids_from_members(snapshot, &desktop_pids),
+        desktop_pids.into_iter().collect(),
+        primary_pid,
+        vec![
+            "desktop group is supporting context".to_owned(),
+            "compositor becomes primary only when it is an active foreground-latency candidate"
+                .to_owned(),
+        ],
+    )
+}
+
+fn build_idle_group(snapshot: &FocusSnapshot, claimed_pids: &BTreeSet<u32>) -> Option<FocusGroup> {
+    let idle_pids = snapshot
+        .processes
+        .values()
+        .filter(|process| !claimed_pids.contains(&process.pid))
+        .filter(|process| {
+            focus_group_kind_for_class(process.classification.class) == FocusGroupKind::Idle
+        })
+        .map(|process| process.pid)
+        .collect::<BTreeSet<_>>();
+
+    if idle_pids.is_empty() {
+        return None;
+    }
+
+    let primary_pid = idle_pids
+        .iter()
+        .copied()
+        .max_by(|left, right| compare_process_preference(snapshot, *left, *right));
+
+    make_focus_group(
+        snapshot,
+        FocusGroupKind::Idle,
+        root_pids_from_members(snapshot, &idle_pids),
+        idle_pids.into_iter().collect(),
+        primary_pid,
+        vec!["idle/background service group is never allowed to outrank active foreground work by base score alone".to_owned()],
+    )
+}
+
+fn build_fallback_group(
+    snapshot: &FocusSnapshot,
+    claimed_pids: &BTreeSet<u32>,
+) -> Option<FocusGroup> {
+    let root_pid = snapshot
+        .processes
+        .values()
+        .filter(|process| !claimed_pids.contains(&process.pid))
+        .filter(|process| is_non_service_interactive_class(process.classification.class))
+        .max_by(|left, right| {
+            left.cpu_time_ticks_delta
+                .cmp(&right.cpu_time_ticks_delta)
+                .then_with(|| {
+                    process_focus_score(left)
+                        .partial_cmp(&process_focus_score(right))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        })
+        .map(|process| process.pid)?;
+
+    let member_pids = descendants_of_pid(snapshot, root_pid)
+        .into_iter()
+        .filter(|pid| !claimed_pids.contains(pid))
+        .collect::<Vec<_>>();
+
+    if member_pids.is_empty() {
+        return None;
+    }
+
+    let primary_pid = member_pids
+        .iter()
+        .copied()
+        .max_by(|left, right| compare_process_preference(snapshot, *left, *right));
+
+    make_focus_group(
+        snapshot,
+        FocusGroupKind::Unknown,
+        vec![root_pid],
+        member_pids,
+        primary_pid,
+        vec![
+            "fallback selected highest non-service interactive process tree by recent CPU delta"
+                .to_owned(),
+        ],
+    )
+}
+
+fn make_focus_group(
+    snapshot: &FocusSnapshot,
+    kind: FocusGroupKind,
+    mut root_pids: Vec<u32>,
+    mut member_pids: Vec<u32>,
+    primary_pid: Option<u32>,
+    mut reasons: Vec<String>,
+) -> Option<FocusGroup> {
+    root_pids.sort_unstable();
+    root_pids.dedup();
+    member_pids.sort_unstable();
+    member_pids.dedup();
+
+    if member_pids.is_empty() {
+        return None;
+    }
+
+    let primary_pid = primary_pid.or_else(|| {
+        member_pids
+            .iter()
+            .copied()
+            .max_by(|left, right| compare_process_preference(snapshot, *left, *right))
+    });
+
+    let score = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .map(process_focus_score)
+        .sum::<f32>();
+
+    let confidence = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .map(|process| process.classification.confidence)
+        .fold(0.0_f32, f32::max);
+
+    let priority_band = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .map(|process| process.classification.priority_band)
+        .max_by_key(|band| priority_band_rank(*band))
+        .unwrap_or(PriorityBand::Unknown);
+
+    let display_name = display_name_for_group(
+        kind,
+        primary_pid.and_then(|pid| snapshot.processes.get(&pid)),
+    );
+
+    if let Some(primary_pid) = primary_pid
+        && let Some(primary) = snapshot.processes.get(&primary_pid)
+    {
+        reasons.push(format!(
+            "primary pid={} comm='{}' class={:?}",
+            primary.pid, primary.comm, primary.classification.class
+        ));
+    }
+
+    Some(FocusGroup {
+        kind,
+        root_pids,
+        member_pids,
+        primary_pid,
+        display_name,
+        score,
+        confidence,
+        priority_band,
+        reasons,
+    })
+}
+
+fn root_pids_from_members(snapshot: &FocusSnapshot, member_pids: &BTreeSet<u32>) -> Vec<u32> {
+    member_pids
+        .iter()
+        .copied()
+        .filter(|pid| {
+            snapshot
+                .processes
+                .get(pid)
+                .map(|process| !member_pids.contains(&process.ppid))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>()
+}
+
+fn descendants_of_pid(snapshot: &FocusSnapshot, root_pid: u32) -> BTreeSet<u32> {
+    let mut result = BTreeSet::new();
+    let mut stack = vec![root_pid];
+
+    while let Some(pid) = stack.pop() {
+        if !result.insert(pid) {
+            continue;
+        }
+
+        if let Some(children) = snapshot.children_by_parent.get(&pid) {
+            for child in children.iter().rev() {
+                stack.push(*child);
+            }
+        }
+    }
+
+    result
+}
+
+fn has_ancestor_in_set(snapshot: &FocusSnapshot, pid: u32, pids: &BTreeSet<u32>) -> bool {
+    let mut current = pid;
+    let mut seen = BTreeSet::new();
+
+    while let Some(process) = snapshot.processes.get(&current) {
+        if !seen.insert(current) {
+            return false;
+        }
+
+        let parent = process.ppid;
+        if parent == current || parent == 0 {
+            return false;
+        }
+
+        if pids.contains(&parent) {
+            return true;
+        }
+
+        current = parent;
+    }
+
+    false
+}
+
+fn compare_process_preference(
+    snapshot: &FocusSnapshot,
+    left_pid: u32,
+    right_pid: u32,
+) -> std::cmp::Ordering {
+    let left_score = snapshot
+        .processes
+        .get(&left_pid)
+        .map(process_focus_score)
+        .unwrap_or_default();
+    let right_score = snapshot
+        .processes
+        .get(&right_pid)
+        .map(process_focus_score)
+        .unwrap_or_default();
+
+    left_score
+        .partial_cmp(&right_score)
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| left_pid.cmp(&right_pid))
+}
+
+fn process_appears_tied_to_root(snapshot: &FocusSnapshot, pid: u32, root_pid: u32) -> bool {
+    if pid == root_pid {
+        return true;
+    }
+
+    let Some(process) = snapshot.processes.get(&pid) else {
+        return false;
+    };
+    let Some(root) = snapshot.processes.get(&root_pid) else {
+        return false;
+    };
+
+    descendants_of_pid(snapshot, root_pid).contains(&pid)
+        || process.ppid == root.ppid
+        || same_non_empty_cgroup(process, root)
+        || (contains_game_runtime_text(process) && contains_game_runtime_text(root))
+}
+
+fn same_non_empty_cgroup(left: &FocusProcess, right: &FocusProcess) -> bool {
+    match (&left.cgroup_path, &right.cgroup_path) {
+        (Some(left), Some(right)) => {
+            !left.as_os_str().is_empty() && !right.as_os_str().is_empty() && left == right
+        }
+        _ => false,
+    }
+}
+
+fn contains_game_runtime_text(process: &FocusProcess) -> bool {
+    let text = process_identity_text(process);
+    text.contains("steamapps")
+        || text.contains("pressure-vessel")
+        || text.contains("proton")
+        || text.contains("wineserver")
+}
+
+fn is_game_runtime_process(process: &FocusProcess) -> bool {
+    let text = process_identity_text(process);
+    text.contains("pressure-vessel")
+        || text.contains("steam-runtime")
+        || text.contains("proton")
+        || text.contains("steamapps")
+}
+
+fn is_game_class(class: SystemTaskClass) -> bool {
+    matches!(
+        class,
+        SystemTaskClass::Game
+            | SystemTaskClass::GameRenderThread
+            | SystemTaskClass::GameWorkerThread
+            | SystemTaskClass::WineServer
+            | SystemTaskClass::GameScope
+    )
+}
+
+fn is_browser_class(class: SystemTaskClass) -> bool {
+    matches!(
+        class,
+        SystemTaskClass::BrowserForeground
+            | SystemTaskClass::BrowserBackground
+            | SystemTaskClass::BrowserRenderer
+            | SystemTaskClass::BrowserGpu
+            | SystemTaskClass::BrowserNetwork
+    )
+}
+
+fn is_compile_class(class: SystemTaskClass) -> bool {
+    matches!(
+        class,
+        SystemTaskClass::BuildJob
+            | SystemTaskClass::Compiler
+            | SystemTaskClass::Linker
+            | SystemTaskClass::Indexer
+            | SystemTaskClass::PackageManager
+    )
+}
+
+fn is_non_service_interactive_class(class: SystemTaskClass) -> bool {
+    matches!(
+        class,
+        SystemTaskClass::AudioRealtime
+            | SystemTaskClass::Input
+            | SystemTaskClass::Game
+            | SystemTaskClass::GameRenderThread
+            | SystemTaskClass::GameWorkerThread
+            | SystemTaskClass::WineServer
+            | SystemTaskClass::GameScope
+            | SystemTaskClass::Compositor
+            | SystemTaskClass::BrowserForeground
+            | SystemTaskClass::BrowserRenderer
+            | SystemTaskClass::BrowserGpu
+            | SystemTaskClass::BrowserNetwork
+            | SystemTaskClass::Editor
+            | SystemTaskClass::Terminal
+            | SystemTaskClass::Shell
+            | SystemTaskClass::Media
+            | SystemTaskClass::Recorder
+            | SystemTaskClass::VirtualMachine
+    )
+}
+
+fn is_active_foreground_candidate(process: &FocusProcess) -> bool {
+    process.cpu_time_ticks_delta > 0
+        || process.read_bytes_delta > 0
+        || process.write_bytes_delta > 0
+        || process.voluntary_ctxt_switches_delta > 0
+        || process.nonvoluntary_ctxt_switches_delta > 0
+}
+
+fn is_stable_build_root(process: &FocusProcess) -> bool {
+    let comm = process.comm.to_ascii_lowercase();
+    matches!(
+        comm.as_str(),
+        "cargo" | "ninja" | "make" | "cmake" | "meson" | "scons"
+    ) || process.classification.class == SystemTaskClass::BuildJob
+}
+
+fn stable_build_root_rank(snapshot: &FocusSnapshot, pid: u32) -> u8 {
+    snapshot
+        .processes
+        .get(&pid)
+        .map(|process| {
+            if is_stable_build_root(process) {
+                3
+            } else if process.classification.class == SystemTaskClass::Terminal {
+                2
+            } else if process.classification.class == SystemTaskClass::Shell {
+                1
+            } else {
+                0
+            }
+        })
+        .unwrap_or(0)
+}
+
+fn nearest_compile_session_root(snapshot: &FocusSnapshot, pid: u32) -> Option<u32> {
+    let mut current = pid;
+    let mut nearest_shell_or_terminal = None;
+    let process_cgroup = snapshot
+        .processes
+        .get(&pid)
+        .and_then(|process| process.cgroup_path.clone());
+
+    while let Some(process) = snapshot.processes.get(&current) {
+        if is_stable_build_root(process) {
+            return Some(process.pid);
+        }
+
+        if matches!(
+            process.classification.class,
+            SystemTaskClass::Terminal | SystemTaskClass::Shell
+        ) {
+            nearest_shell_or_terminal = Some(process.pid);
+            break; // Stop at the NEAREST shell/terminal
+        }
+
+        let parent = process.ppid;
+        if parent == current || parent == 0 {
+            break;
+        }
+
+        current = parent;
+    }
+
+    nearest_shell_or_terminal.or_else(|| {
+        process_cgroup.and_then(|cgroup| {
+            snapshot
+                .processes
+                .values()
+                .filter(|process| process.cgroup_path.as_ref() == Some(&cgroup))
+                .filter(|process| {
+                    matches!(
+                        process.classification.class,
+                        SystemTaskClass::Terminal | SystemTaskClass::Shell
+                    )
+                })
+                .max_by(|left, right| {
+                    process_focus_score(left)
+                        .partial_cmp(&process_focus_score(right))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|process| process.pid)
+        })
+    })
+}
+
+fn process_identity_text(process: &FocusProcess) -> String {
+    let cgroup_path = process
+        .cgroup_path
+        .as_ref()
+        .map(|path| path.to_string_lossy())
+        .unwrap_or_default();
+
+    format!(
+        "{} {} {}",
+        process.comm.to_ascii_lowercase(),
+        process.cmdline.to_ascii_lowercase(),
+        cgroup_path.to_ascii_lowercase()
+    )
 }
 
 fn focus_group_kind_for_class(class: SystemTaskClass) -> FocusGroupKind {
@@ -506,20 +1356,20 @@ fn focus_group_kind_for_class(class: SystemTaskClass) -> FocusGroupKind {
         SystemTaskClass::Recorder => FocusGroupKind::Recording,
         SystemTaskClass::VirtualMachine => FocusGroupKind::VirtualMachine,
 
-        SystemTaskClass::Compositor
-        | SystemTaskClass::AudioRealtime
-        | SystemTaskClass::Input
-        | SystemTaskClass::Editor
+        SystemTaskClass::Compositor | SystemTaskClass::AudioRealtime | SystemTaskClass::Input => {
+            FocusGroupKind::Desktop
+        }
+
+        SystemTaskClass::Editor
         | SystemTaskClass::Terminal
-        | SystemTaskClass::Shell => FocusGroupKind::Desktop,
+        | SystemTaskClass::Shell
+        | SystemTaskClass::Unknown => FocusGroupKind::Unknown,
 
         SystemTaskClass::StorageDaemon
         | SystemTaskClass::NetworkDaemon
         | SystemTaskClass::KernelThread
         | SystemTaskClass::IrqThread
         | SystemTaskClass::Service => FocusGroupKind::Idle,
-
-        SystemTaskClass::Unknown => FocusGroupKind::Unknown,
     }
 }
 
@@ -998,6 +1848,358 @@ fn is_realtime_policy(sched_policy: Option<u32>) -> bool {
 mod tests {
     use super::*;
     use crate::process_tree::TaskClass;
+
+    fn test_classification(
+        class: SystemTaskClass,
+        priority_band: PriorityBand,
+        confidence: f32,
+    ) -> Classification {
+        Classification {
+            class,
+            priority_band,
+            confidence,
+            reasons: vec![format!("test classification {class:?}")],
+        }
+    }
+
+    fn test_process(
+        pid: u32,
+        ppid: u32,
+        comm: &str,
+        class: SystemTaskClass,
+        priority_band: PriorityBand,
+        cpu_time_ticks_delta: u64,
+    ) -> FocusProcess {
+        FocusProcess {
+            pid,
+            ppid,
+            comm: comm.to_owned(),
+            cmdline: comm.to_owned(),
+            cgroup_path: None,
+            starttime_ticks: Some(pid as u64 * 10),
+            sched_policy: None,
+            classification: test_classification(class, priority_band, 0.9),
+            cpu_time_ticks_delta,
+            read_bytes_delta: 0,
+            write_bytes_delta: 0,
+            voluntary_ctxt_switches_delta: 0,
+            nonvoluntary_ctxt_switches_delta: 0,
+        }
+    }
+
+    fn test_snapshot(processes: Vec<FocusProcess>) -> FocusSnapshot {
+        let mut process_map = BTreeMap::new();
+        let mut children_by_parent: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+
+        for process in processes {
+            children_by_parent
+                .entry(process.ppid)
+                .or_default()
+                .push(process.pid);
+            process_map.insert(process.pid, process);
+        }
+
+        for children in children_by_parent.values_mut() {
+            children.sort_unstable();
+        }
+
+        FocusSnapshot {
+            elapsed_ms: 1000,
+            processes: process_map,
+            children_by_parent,
+            groups: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn focus_groups_prefer_stable_compile_root_over_compiler_children() {
+        let snapshot = test_snapshot(vec![
+            test_process(
+                10,
+                1,
+                "foot",
+                SystemTaskClass::Terminal,
+                PriorityBand::Interactive,
+                1,
+            ),
+            test_process(
+                11,
+                10,
+                "cargo",
+                SystemTaskClass::BuildJob,
+                PriorityBand::Throughput,
+                2,
+            ),
+            test_process(
+                12,
+                11,
+                "rustc",
+                SystemTaskClass::Compiler,
+                PriorityBand::Throughput,
+                80,
+            ),
+            test_process(
+                13,
+                11,
+                "ld.lld",
+                SystemTaskClass::Linker,
+                PriorityBand::Throughput,
+                25,
+            ),
+        ]);
+
+        let groups = build_focus_groups(&snapshot);
+        let compile = groups
+            .iter()
+            .find(|group| group.kind == FocusGroupKind::Compile)
+            .unwrap();
+
+        assert_eq!(compile.root_pids, vec![11]);
+        assert_eq!(compile.primary_pid, Some(11));
+        assert_eq!(compile.member_pids, vec![11, 12, 13]);
+    }
+
+    #[test]
+    fn focus_groups_group_orphan_compilers_under_nearest_terminal_session() {
+        let snapshot = test_snapshot(vec![
+            test_process(
+                20,
+                1,
+                "kitty",
+                SystemTaskClass::Terminal,
+                PriorityBand::Interactive,
+                3,
+            ),
+            test_process(
+                21,
+                20,
+                "zsh",
+                SystemTaskClass::Shell,
+                PriorityBand::Interactive,
+                4,
+            ),
+            test_process(
+                22,
+                21,
+                "rustc",
+                SystemTaskClass::Compiler,
+                PriorityBand::Throughput,
+                60,
+            ),
+            test_process(
+                23,
+                21,
+                "clang",
+                SystemTaskClass::Compiler,
+                PriorityBand::Throughput,
+                50,
+            ),
+        ]);
+
+        let groups = build_focus_groups(&snapshot);
+        let compile = groups
+            .iter()
+            .find(|group| group.kind == FocusGroupKind::Compile)
+            .unwrap();
+
+        assert_eq!(compile.root_pids, vec![21]);
+        assert_eq!(compile.primary_pid, Some(22));
+        assert_eq!(compile.member_pids, vec![21, 22, 23]);
+    }
+
+    #[test]
+    fn focus_groups_root_browser_at_parent_not_idle_renderer() {
+        let snapshot = test_snapshot(vec![
+            test_process(
+                30,
+                1,
+                "firefox",
+                SystemTaskClass::BrowserForeground,
+                PriorityBand::ForegroundLatency,
+                5,
+            ),
+            test_process(
+                31,
+                30,
+                "Web Content",
+                SystemTaskClass::BrowserRenderer,
+                PriorityBand::Interactive,
+                100,
+            ),
+            test_process(
+                32,
+                30,
+                "GPU Process",
+                SystemTaskClass::BrowserGpu,
+                PriorityBand::Interactive,
+                20,
+            ),
+        ]);
+
+        let groups = build_focus_groups(&snapshot);
+        let browser = groups
+            .iter()
+            .find(|group| group.kind == FocusGroupKind::Browser)
+            .unwrap();
+
+        assert_eq!(browser.root_pids, vec![30]);
+        assert_eq!(browser.primary_pid, Some(30));
+        assert_eq!(browser.member_pids, vec![30, 31, 32]);
+    }
+
+    #[test]
+    fn focus_groups_include_wineserver_tied_to_game_runtime() {
+        let mut game = test_process(
+            40,
+            1,
+            "pressure-vessel",
+            SystemTaskClass::Game,
+            PriorityBand::ForegroundLatency,
+            10,
+        );
+        game.cmdline = "/home/user/.steam/steamapps/common/Game/pressure-vessel".to_owned();
+        game.cgroup_path = Some(PathBuf::from("/user.slice/app-steam-game.scope"));
+
+        let mut game_child = test_process(
+            41,
+            40,
+            "Game.exe",
+            SystemTaskClass::Game,
+            PriorityBand::ForegroundLatency,
+            120,
+        );
+        game_child.cmdline = "/home/user/.steam/steamapps/common/Game/Game.exe".to_owned();
+        game_child.cgroup_path = Some(PathBuf::from("/user.slice/app-steam-game.scope"));
+
+        let mut wineserver = test_process(
+            42,
+            1,
+            "wineserver",
+            SystemTaskClass::WineServer,
+            PriorityBand::ForegroundLatency,
+            15,
+        );
+        wineserver.cgroup_path = Some(PathBuf::from("/user.slice/app-steam-game.scope"));
+
+        let snapshot = test_snapshot(vec![game, game_child, wineserver]);
+
+        let groups = build_focus_groups(&snapshot);
+        let game_group = groups
+            .iter()
+            .find(|group| group.kind == FocusGroupKind::Game)
+            .unwrap();
+
+        assert_eq!(game_group.root_pids, vec![40]);
+        assert_eq!(game_group.primary_pid, Some(40));
+        assert_eq!(game_group.member_pids, vec![40, 41, 42]);
+    }
+
+    #[test]
+    fn focus_groups_do_not_let_idle_steam_beat_active_compile() {
+        let mut steam = test_process(
+            50,
+            1,
+            "steam",
+            SystemTaskClass::Service,
+            PriorityBand::Background,
+            0,
+        );
+        steam.cmdline = "steam".to_owned();
+
+        let cargo = test_process(
+            60,
+            1,
+            "cargo",
+            SystemTaskClass::BuildJob,
+            PriorityBand::Throughput,
+            30,
+        );
+        let rustc = test_process(
+            61,
+            60,
+            "rustc",
+            SystemTaskClass::Compiler,
+            PriorityBand::Throughput,
+            90,
+        );
+
+        let snapshot = test_snapshot(vec![steam, cargo, rustc]);
+
+        let groups = build_focus_groups(&snapshot);
+
+        assert_eq!(groups.first().unwrap().kind, FocusGroupKind::Compile);
+        assert!(
+            groups
+                .iter()
+                .position(|group| group.kind == FocusGroupKind::Idle)
+                .unwrap()
+                > groups
+                    .iter()
+                    .position(|group| group.kind == FocusGroupKind::Compile)
+                    .unwrap()
+        );
+    }
+
+    #[test]
+    fn focus_groups_fallback_selects_highest_non_service_interactive_tree_by_cpu() {
+        let service = test_process(
+            70,
+            1,
+            "systemd",
+            SystemTaskClass::Service,
+            PriorityBand::Background,
+            500,
+        );
+        let editor = test_process(
+            80,
+            1,
+            "nvim",
+            SystemTaskClass::Editor,
+            PriorityBand::Interactive,
+            20,
+        );
+        let terminal = test_process(
+            90,
+            1,
+            "foot",
+            SystemTaskClass::Terminal,
+            PriorityBand::Interactive,
+            60,
+        );
+
+        let mut snapshot = test_snapshot(vec![service, editor, terminal]);
+        for process in snapshot.processes.values_mut() {
+            process.classification.class = SystemTaskClass::Unknown;
+        }
+        snapshot
+            .processes
+            .get_mut(&70)
+            .unwrap()
+            .classification
+            .class = SystemTaskClass::Service;
+        snapshot
+            .processes
+            .get_mut(&80)
+            .unwrap()
+            .classification
+            .class = SystemTaskClass::Editor;
+        snapshot
+            .processes
+            .get_mut(&90)
+            .unwrap()
+            .classification
+            .class = SystemTaskClass::Terminal;
+
+        let groups = build_focus_groups(&snapshot);
+        let fallback = groups
+            .iter()
+            .find(|group| group.kind == FocusGroupKind::Unknown)
+            .unwrap();
+
+        assert_eq!(fallback.root_pids, vec![90]);
+        assert_eq!(fallback.primary_pid, Some(90));
+        assert_eq!(fallback.member_pids, vec![90]);
+    }
 
     #[test]
     fn focus_counter_deltas_are_zero_on_first_seen_and_reset_on_pid_reuse() {
