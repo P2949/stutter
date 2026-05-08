@@ -62,6 +62,15 @@ impl CgroupPlacementAction {
         self.preflight_at(Path::new("/proc"), policy)
     }
 
+    #[cfg(test)]
+    pub(crate) fn preflight_with_policy_at_for_tests(
+        &self,
+        proc_root: &Path,
+        policy: &CgroupPlacementPolicy,
+    ) -> anyhow::Result<Vec<ActionWarning>> {
+        self.preflight_at(proc_root, policy)
+    }
+
     fn preflight_at(
         &self,
         proc_root: &Path,
