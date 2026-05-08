@@ -2963,6 +2963,323 @@ mod tests {
     use super::*;
     use crate::process_tree::TaskClass;
 
+    #[derive(Debug, Clone)]
+    struct FakeProcProcess {
+        pid: u32,
+        ppid: u32,
+        comm: String,
+        cmdline: String,
+        cgroup_path: String,
+        sched_policy: Option<u32>,
+        starttime_ticks: u64,
+        cpu_time_ticks: u64,
+        read_bytes: u64,
+        write_bytes: u64,
+        voluntary_ctxt_switches: u64,
+        nonvoluntary_ctxt_switches: u64,
+    }
+
+    impl FakeProcProcess {
+        fn new(pid: u32, ppid: u32, comm: &str, cmdline: &str) -> Self {
+            Self {
+                pid,
+                ppid,
+                comm: comm.to_owned(),
+                cmdline: cmdline.to_owned(),
+                cgroup_path: format!("/user.slice/test-{}.scope", pid),
+                sched_policy: None,
+                starttime_ticks: pid as u64 * 100,
+                cpu_time_ticks: 0,
+                read_bytes: 0,
+                write_bytes: 0,
+                voluntary_ctxt_switches: 0,
+                nonvoluntary_ctxt_switches: 0,
+            }
+        }
+
+        fn with_cgroup(mut self, cgroup_path: &str) -> Self {
+            self.cgroup_path = cgroup_path.to_owned();
+            self
+        }
+
+        fn with_sched_policy(mut self, sched_policy: u32) -> Self {
+            self.sched_policy = Some(sched_policy);
+            self
+        }
+
+        fn with_activity(
+            mut self,
+            cpu_time_ticks: u64,
+            read_bytes: u64,
+            write_bytes: u64,
+            voluntary_ctxt_switches: u64,
+            nonvoluntary_ctxt_switches: u64,
+        ) -> Self {
+            self.cpu_time_ticks = cpu_time_ticks;
+            self.read_bytes = read_bytes;
+            self.write_bytes = write_bytes;
+            self.voluntary_ctxt_switches = voluntary_ctxt_switches;
+            self.nonvoluntary_ctxt_switches = nonvoluntary_ctxt_switches;
+            self
+        }
+    }
+
+    fn focus_temp_dir(name: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "stutter-focus-test-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_fake_proc_process(proc_root: &Path, process: &FakeProcProcess) {
+        let process_dir = proc_root.join(process.pid.to_string());
+        std::fs::create_dir_all(&process_dir).unwrap();
+
+        std::fs::write(
+            process_dir.join("status"),
+            format!(
+                "Name:\t{}\nPPid:\t{}\nvoluntary_ctxt_switches:\t{}\nnonvoluntary_ctxt_switches:\t{}\n",
+                process.comm,
+                process.ppid,
+                process.voluntary_ctxt_switches,
+                process.nonvoluntary_ctxt_switches
+            ),
+        )
+        .unwrap();
+
+        std::fs::write(
+            process_dir.join("cmdline"),
+            process
+                .cmdline
+                .split(' ')
+                .collect::<Vec<_>>()
+                .join("\0")
+                .into_bytes(),
+        )
+        .unwrap();
+
+        std::fs::write(
+            process_dir.join("cgroup"),
+            format!("0::{}\n", process.cgroup_path),
+        )
+        .unwrap();
+
+        std::fs::write(
+            process_dir.join("io"),
+            format!(
+                "read_bytes: {}\nwrite_bytes: {}\n",
+                process.read_bytes, process.write_bytes
+            ),
+        )
+        .unwrap();
+
+        std::fs::write(process_dir.join("stat"), fake_stat_line(process)).unwrap();
+    }
+
+    fn fake_stat_line(process: &FakeProcProcess) -> String {
+        let mut fields_after_comm = vec![
+            "S".to_owned(),
+            process.ppid.to_string(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            process.cpu_time_ticks.to_string(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "20".to_owned(),
+            "0".to_owned(),
+            "1".to_owned(),
+            "0".to_owned(),
+            process.starttime_ticks.to_string(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            process.sched_policy.unwrap_or(0).to_string(),
+        ];
+
+        while fields_after_comm.len() < 42 {
+            fields_after_comm.push("0".to_owned());
+        }
+
+        format!(
+            "{} ({}) {}",
+            process.pid,
+            process.comm,
+            fields_after_comm.join(" ")
+        )
+    }
+
+    fn focus_snapshot_from_fake_proc(
+        test_name: &str,
+        first_sample: Vec<FakeProcProcess>,
+        second_sample: Vec<FakeProcProcess>,
+    ) -> FocusSnapshot {
+        let proc_root = focus_temp_dir(test_name);
+        let mut cache = FocusCache::default();
+
+        for process in &first_sample {
+            write_fake_proc_process(&proc_root, process);
+        }
+
+        let _ = focus_snapshot_at(&proc_root, &mut cache, 0);
+
+        for process in &second_sample {
+            write_fake_proc_process(&proc_root, process);
+        }
+
+        let snapshot = focus_snapshot_at(&proc_root, &mut cache, 1000);
+        std::fs::remove_dir_all(proc_root).ok();
+        snapshot
+    }
+
+    fn required_test_classification(
+        class: SystemTaskClass,
+        priority_band: PriorityBand,
+        confidence: f32,
+    ) -> Classification {
+        Classification {
+            class,
+            priority_band,
+            confidence,
+            reasons: vec![format!("required focus test classification {class:?}")],
+        }
+    }
+
+    fn required_test_process(
+        pid: u32,
+        ppid: u32,
+        comm: &str,
+        class: SystemTaskClass,
+        priority_band: PriorityBand,
+        cpu_time_ticks_delta: u64,
+    ) -> FocusProcess {
+        FocusProcess {
+            pid,
+            ppid,
+            comm: comm.to_owned(),
+            cmdline: comm.to_owned(),
+            cgroup_path: None,
+            starttime_ticks: Some(pid as u64 * 100),
+            sched_policy: None,
+            classification: required_test_classification(class, priority_band, 0.85),
+            cpu_time_ticks_delta,
+            read_bytes_delta: 0,
+            write_bytes_delta: 0,
+            voluntary_ctxt_switches_delta: 0,
+            nonvoluntary_ctxt_switches_delta: 0,
+        }
+    }
+
+    fn required_test_group(
+        kind: FocusGroupKind,
+        root_pids: Vec<u32>,
+        member_pids: Vec<u32>,
+        primary_pid: Option<u32>,
+        score: f32,
+        confidence: f32,
+    ) -> FocusGroup {
+        FocusGroup {
+            kind,
+            root_pids,
+            member_pids,
+            primary_pid,
+            display_name: format!("{kind:?}"),
+            score,
+            score_breakdown: FocusScoreBreakdown::default(),
+            confidence,
+            priority_band: match kind {
+                FocusGroupKind::Game | FocusGroupKind::Browser | FocusGroupKind::Desktop => {
+                    PriorityBand::ForegroundLatency
+                }
+                FocusGroupKind::Compile => PriorityBand::Throughput,
+                FocusGroupKind::Idle => PriorityBand::Background,
+                FocusGroupKind::Media
+                | FocusGroupKind::Recording
+                | FocusGroupKind::VirtualMachine
+                | FocusGroupKind::Unknown => PriorityBand::Interactive,
+            },
+            reasons: vec![format!("required focus test group {kind:?}")],
+        }
+    }
+
+    fn required_test_snapshot(
+        groups: Vec<FocusGroup>,
+        processes: Vec<FocusProcess>,
+        elapsed_ms: u64,
+    ) -> FocusSnapshot {
+        let mut process_map = BTreeMap::new();
+        let mut children_by_parent: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+
+        for process in processes {
+            children_by_parent
+                .entry(process.ppid)
+                .or_default()
+                .push(process.pid);
+            process_map.insert(process.pid, process);
+        }
+
+        for children in children_by_parent.values_mut() {
+            children.sort_unstable();
+        }
+
+        FocusSnapshot {
+            elapsed_ms,
+            processes: process_map,
+            children_by_parent,
+            groups,
+        }
+    }
+
+    fn required_focus_policy() -> FocusPolicy {
+        FocusPolicy {
+            poll_ms: 1000,
+            min_confidence: 0.60,
+            switch_margin: 0.20,
+            switch_cooldown_ms: 0,
+            required_winner_polls: 2,
+            max_roots: 4,
+        }
+    }
+
+    fn first_focus_group(snapshot: &FocusSnapshot, kind: FocusGroupKind) -> &FocusGroup {
+        snapshot
+            .groups
+            .iter()
+            .find(|group| group.kind == kind)
+            .unwrap()
+    }
+
     #[test]
     fn safety_warnings_report_critical_realtime_and_compositor_members() {
         let audio = test_process(
@@ -4158,6 +4475,589 @@ mod tests {
         assert_eq!(fallback.root_pids, vec![90]);
         assert_eq!(fallback.primary_pid, Some(90));
         assert_eq!(fallback.member_pids, vec![90]);
+    }
+
+    #[test]
+    fn gaming_wins_over_idle_steam() {
+        let cgroup = "/user.slice/app-steam-game.scope";
+        let first_sample = vec![
+            FakeProcProcess::new(100, 1, "steam", "steam").with_cgroup("/user.slice/steam.scope"),
+            FakeProcProcess::new(
+                110,
+                99, // Use a different PPID so they aren't siblings
+                "pressure-vessel",
+                "/home/user/.steam/steamapps/common/Game/pressure-vessel",
+            )
+            .with_cgroup(cgroup),
+            FakeProcProcess::new(
+                111,
+                110,
+                "Game.exe",
+                "/home/user/.steam/steamapps/common/Game/Game.exe",
+            )
+            .with_cgroup(cgroup),
+        ];
+        let second_sample = vec![
+            FakeProcProcess::new(100, 1, "steam", "steam").with_cgroup("/user.slice/steam.scope"),
+            FakeProcProcess::new(
+                110,
+                99,
+                "pressure-vessel",
+                "/home/user/.steam/steamapps/common/Game/pressure-vessel",
+            )
+            .with_cgroup(cgroup)
+            .with_activity(5, 0, 0, 1, 0),
+            FakeProcProcess::new(
+                111,
+                110,
+                "Game.exe",
+                "/home/user/.steam/steamapps/common/Game/Game.exe",
+            )
+            .with_cgroup(cgroup)
+            .with_activity(180, 0, 0, 20, 5),
+        ];
+
+        let snapshot = focus_snapshot_from_fake_proc(
+            "gaming_wins_over_idle_steam",
+            first_sample,
+            second_sample,
+        );
+
+        assert_eq!(snapshot.groups.first().unwrap().kind, FocusGroupKind::Game);
+        let game_group = first_focus_group(&snapshot, FocusGroupKind::Game);
+        assert_eq!(game_group.root_pids, vec![110]);
+        assert_eq!(game_group.primary_pid, Some(110));
+        assert!(game_group.member_pids.contains(&110));
+        assert!(game_group.member_pids.contains(&111));
+        assert!(!game_group.member_pids.contains(&100));
+    }
+
+    #[test]
+    fn idle_launcher_does_not_win() {
+        let first_sample = vec![
+            FakeProcProcess::new(200, 1, "steam", "steam"),
+            FakeProcProcess::new(210, 1, "firefox", "firefox"),
+            FakeProcProcess::new(211, 210, "firefox: Web Content", "firefox web content"),
+            FakeProcProcess::new(
+                212,
+                210,
+                "firefox: GPU Process",
+                "firefox --type=gpu-process",
+            ),
+        ];
+        let second_sample = vec![
+            FakeProcProcess::new(200, 1, "steam", "steam"),
+            FakeProcProcess::new(210, 1, "firefox", "firefox").with_activity(15, 0, 0, 8, 1),
+            FakeProcProcess::new(211, 210, "firefox: Web Content", "firefox web content")
+                .with_activity(160, 0, 0, 30, 2),
+            FakeProcProcess::new(
+                212,
+                210,
+                "firefox: GPU Process",
+                "firefox --type=gpu-process",
+            )
+            .with_activity(30, 0, 0, 12, 1),
+        ];
+
+        let snapshot = focus_snapshot_from_fake_proc(
+            "idle_launcher_does_not_win",
+            first_sample,
+            second_sample,
+        );
+
+        assert_eq!(
+            snapshot.groups.first().unwrap().kind,
+            FocusGroupKind::Browser
+        );
+        let browser_group = first_focus_group(&snapshot, FocusGroupKind::Browser);
+        assert_eq!(browser_group.root_pids, vec![210]);
+        assert_eq!(browser_group.primary_pid, Some(210));
+        assert!(browser_group.member_pids.contains(&211));
+        assert!(browser_group.member_pids.contains(&212));
+    }
+
+    #[test]
+    fn compile_root_is_stable() {
+        let first_sample = vec![
+            FakeProcProcess::new(300, 1, "cargo", "cargo build"),
+            FakeProcProcess::new(301, 300, "rustc", "rustc crate_a"),
+            FakeProcProcess::new(302, 300, "rustc", "rustc crate_b"),
+        ];
+        let second_sample = vec![
+            FakeProcProcess::new(300, 1, "cargo", "cargo build").with_activity(20, 0, 0, 8, 1),
+            FakeProcProcess::new(301, 300, "rustc", "rustc crate_a")
+                .with_activity(200, 0, 0, 10, 2),
+            FakeProcProcess::new(302, 300, "rustc", "rustc crate_b").with_activity(180, 0, 0, 9, 2),
+        ];
+
+        let snapshot =
+            focus_snapshot_from_fake_proc("compile_root_is_stable", first_sample, second_sample);
+
+        let compile_group = first_focus_group(&snapshot, FocusGroupKind::Compile);
+        assert_eq!(compile_group.root_pids, vec![300]);
+        assert_eq!(compile_group.primary_pid, Some(300));
+        assert_eq!(compile_group.member_pids, vec![300, 301, 302]);
+        assert!(!compile_group.root_pids.contains(&301));
+        assert!(!compile_group.root_pids.contains(&302));
+    }
+
+    #[test]
+    fn linker_pressure_sets_compile_linker_situation() {
+        let first_sample = vec![
+            FakeProcProcess::new(400, 1, "cargo", "cargo build"),
+            FakeProcProcess::new(401, 400, "rustc", "rustc crate_a"),
+            FakeProcProcess::new(402, 400, "ld.lld", "ld.lld -o target/debug/app"),
+        ];
+        let second_sample =
+            vec![
+                FakeProcProcess::new(400, 1, "cargo", "cargo build").with_activity(20, 0, 0, 8, 1),
+                FakeProcProcess::new(401, 400, "rustc", "rustc crate_a")
+                    .with_activity(120, 0, 0, 10, 2),
+                FakeProcProcess::new(402, 400, "ld.lld", "ld.lld -o target/debug/app")
+                    .with_activity(250, 64 * 1024 * 1024, 128 * 1024 * 1024, 8, 2),
+            ];
+
+        let snapshot = focus_snapshot_from_fake_proc(
+            "linker_pressure_sets_compile_linker_situation",
+            first_sample,
+            second_sample,
+        );
+
+        let compile_group = first_focus_group(&snapshot, FocusGroupKind::Compile);
+        assert_eq!(compile_group.root_pids, vec![400]);
+        assert!(compile_group.member_pids.contains(&402));
+        assert!(compile_group.score_breakdown.io_score > 0.0);
+        assert!(
+            compile_group
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("compile group prefers stable build roots"))
+        );
+        assert!(matches!(
+            situation_for_group(compile_group),
+            SituationKind::CompileLoad | SituationKind::CompileLinkerPressure
+        ));
+    }
+
+    #[test]
+    fn browser_renderer_grouping() {
+        let first_sample = vec![
+            FakeProcProcess::new(500, 1, "firefox", "firefox"),
+            FakeProcProcess::new(
+                501,
+                500,
+                "firefox: Web Content",
+                "firefox isolated web content",
+            ),
+            FakeProcProcess::new(502, 500, "firefox: Web Content", "firefox web content tab"),
+            FakeProcProcess::new(
+                503,
+                500,
+                "firefox: GPU Process",
+                "firefox --type=gpu-process",
+            ),
+        ];
+        let second_sample = vec![
+            FakeProcProcess::new(500, 1, "firefox", "firefox").with_activity(10, 0, 0, 5, 1),
+            FakeProcProcess::new(
+                501,
+                500,
+                "firefox: Web Content",
+                "firefox isolated web content",
+            )
+            .with_activity(90, 0, 0, 20, 2),
+            FakeProcProcess::new(502, 500, "firefox: Web Content", "firefox web content tab")
+                .with_activity(70, 0, 0, 16, 2),
+            FakeProcProcess::new(
+                503,
+                500,
+                "firefox: GPU Process",
+                "firefox --type=gpu-process",
+            )
+            .with_activity(30, 0, 0, 8, 1),
+        ];
+
+        let snapshot =
+            focus_snapshot_from_fake_proc("browser_renderer_grouping", first_sample, second_sample);
+
+        let browser_group = first_focus_group(&snapshot, FocusGroupKind::Browser);
+        assert_eq!(browser_group.root_pids, vec![500]);
+        assert_eq!(browser_group.primary_pid, Some(500));
+        assert_eq!(browser_group.member_pids, vec![500, 501, 502, 503]);
+    }
+
+    #[test]
+    fn hysteresis_keeps_current_focus() {
+        let mut policy = required_focus_policy();
+        policy.required_winner_polls = 1;
+        policy.switch_margin = 0.20;
+        policy.switch_cooldown_ms = 0;
+        let mut resolver = FocusResolver::new(policy);
+
+        let browser_group = required_test_group(
+            FocusGroupKind::Browser,
+            vec![600],
+            vec![600],
+            Some(600),
+            0.70,
+            0.90,
+        );
+        let browser_process = required_test_process(
+            600,
+            1,
+            "firefox",
+            SystemTaskClass::BrowserForeground,
+            PriorityBand::ForegroundLatency,
+            30,
+        );
+
+        let initial = resolver.decide_from_snapshot(required_test_snapshot(
+            vec![browser_group.clone()],
+            vec![browser_process.clone()],
+            0,
+        ));
+
+        assert!(matches!(initial, FocusDecision::Switch { .. }));
+
+        let compile_group = required_test_group(
+            FocusGroupKind::Compile,
+            vec![700],
+            vec![700],
+            Some(700),
+            0.75,
+            0.95,
+        );
+        let compile_process = required_test_process(
+            700,
+            1,
+            "cargo",
+            SystemTaskClass::BuildJob,
+            PriorityBand::Throughput,
+            200,
+        );
+
+        let decision = resolver.decide_from_snapshot(required_test_snapshot(
+            vec![browser_group, compile_group],
+            vec![browser_process, compile_process],
+            1000,
+        ));
+
+        match decision {
+            FocusDecision::Keep { focus } => {
+                assert_eq!(focus.group.kind, FocusGroupKind::Browser);
+                assert_eq!(focus.group.score, 0.70);
+            }
+            other => panic!("expected browser focus to be kept, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sustained_winner_switches() {
+        let mut policy = required_focus_policy();
+        policy.required_winner_polls = 2;
+        policy.switch_margin = 0.20;
+        policy.switch_cooldown_ms = 0;
+        let mut resolver = FocusResolver::new(policy);
+
+        let browser_group = required_test_group(
+            FocusGroupKind::Browser,
+            vec![800],
+            vec![800],
+            Some(800),
+            0.60,
+            0.90,
+        );
+        let browser_process = required_test_process(
+            800,
+            1,
+            "firefox",
+            SystemTaskClass::BrowserForeground,
+            PriorityBand::ForegroundLatency,
+            30,
+        );
+
+        let first = resolver.decide_from_snapshot(required_test_snapshot(
+            vec![browser_group.clone()],
+            vec![browser_process.clone()],
+            0,
+        ));
+        assert!(matches!(first, FocusDecision::NoTarget { .. }));
+
+        let second = resolver.decide_from_snapshot(required_test_snapshot(
+            vec![browser_group.clone()],
+            vec![browser_process.clone()],
+            1000,
+        ));
+        assert!(matches!(second, FocusDecision::Switch { old: None, .. }));
+
+        let compile_group = required_test_group(
+            FocusGroupKind::Compile,
+            vec![900],
+            vec![900],
+            Some(900),
+            0.95,
+            0.95,
+        );
+        let compile_process = required_test_process(
+            900,
+            1,
+            "cargo",
+            SystemTaskClass::BuildJob,
+            PriorityBand::Throughput,
+            300,
+        );
+
+        let pending = resolver.decide_from_snapshot(required_test_snapshot(
+            vec![browser_group, compile_group.clone()],
+            vec![browser_process, compile_process.clone()],
+            2000,
+        ));
+
+        match pending {
+            FocusDecision::Keep { focus } => {
+                assert_eq!(focus.group.kind, FocusGroupKind::Browser);
+            }
+            other => panic!("expected keep while compile winner is pending, got {other:?}"),
+        }
+
+        let switched = resolver.decide_from_snapshot(required_test_snapshot(
+            vec![compile_group],
+            vec![compile_process],
+            3000,
+        ));
+
+        match switched {
+            FocusDecision::Switch { old, new } => {
+                assert_eq!(old.unwrap().group.kind, FocusGroupKind::Browser);
+                assert_eq!(new.group.kind, FocusGroupKind::Compile);
+                assert_eq!(new.group.score, 0.95);
+            }
+            other => panic!("expected sustained compile winner to switch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn idle_has_no_target() {
+        let mut policy = required_focus_policy();
+        policy.min_confidence = 0.80;
+        let mut resolver = FocusResolver::new(policy);
+
+        let idle_group = required_test_group(
+            FocusGroupKind::Idle,
+            vec![1000],
+            vec![1000],
+            Some(1000),
+            0.10,
+            0.30,
+        );
+        let idle_process = required_test_process(
+            1000,
+            1,
+            "systemd",
+            SystemTaskClass::Service,
+            PriorityBand::Background,
+            0,
+        );
+
+        let decision = resolver.decide_from_snapshot(required_test_snapshot(
+            vec![idle_group],
+            vec![idle_process],
+            1000,
+        ));
+
+        match decision {
+            FocusDecision::NoTarget { reason } => {
+                assert!(reason.contains("min_confidence"));
+            }
+            other => panic!("expected NoTarget for idle below threshold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn max_roots_is_enforced() {
+        let mut policy = required_focus_policy();
+        policy.required_winner_polls = 1;
+        policy.max_roots = 2;
+        let mut resolver = FocusResolver::new(policy);
+
+        let group = required_test_group(
+            FocusGroupKind::Compile,
+            vec![1100, 1101, 1102, 1103, 1104],
+            vec![1100, 1101, 1102, 1103, 1104],
+            Some(1100),
+            0.95,
+            0.95,
+        );
+        let processes = vec![
+            required_test_process(
+                1100,
+                1,
+                "cargo-a",
+                SystemTaskClass::BuildJob,
+                PriorityBand::Throughput,
+                100,
+            ),
+            required_test_process(
+                1101,
+                1,
+                "cargo-b",
+                SystemTaskClass::BuildJob,
+                PriorityBand::Throughput,
+                100,
+            ),
+            required_test_process(
+                1102,
+                1,
+                "cargo-c",
+                SystemTaskClass::BuildJob,
+                PriorityBand::Throughput,
+                100,
+            ),
+            required_test_process(
+                1103,
+                1,
+                "cargo-d",
+                SystemTaskClass::BuildJob,
+                PriorityBand::Throughput,
+                100,
+            ),
+            required_test_process(
+                1104,
+                1,
+                "cargo-e",
+                SystemTaskClass::BuildJob,
+                PriorityBand::Throughput,
+                100,
+            ),
+        ];
+
+        let decision =
+            resolver.decide_from_snapshot(required_test_snapshot(vec![group], processes, 1000));
+
+        match decision {
+            FocusDecision::Switch { new, .. } => {
+                assert_eq!(new.group.root_pids, vec![1100, 1101]);
+                assert_eq!(new.group.member_pids, vec![1100, 1101, 1102, 1103, 1104]);
+            }
+            other => panic!("expected Switch with capped roots, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dead_root_clears_or_switches() {
+        let mut policy = required_focus_policy();
+        policy.required_winner_polls = 1;
+        policy.switch_margin = 0.20;
+        policy.switch_cooldown_ms = 0;
+        let mut resolver = FocusResolver::new(policy);
+
+        let browser_group = required_test_group(
+            FocusGroupKind::Browser,
+            vec![1200],
+            vec![1200],
+            Some(1200),
+            0.80,
+            0.90,
+        );
+        let browser_process = required_test_process(
+            1200,
+            1,
+            "firefox",
+            SystemTaskClass::BrowserForeground,
+            PriorityBand::ForegroundLatency,
+            100,
+        );
+
+        let initial = resolver.decide_from_snapshot(required_test_snapshot(
+            vec![browser_group],
+            vec![browser_process],
+            0,
+        ));
+        assert!(matches!(initial, FocusDecision::Switch { .. }));
+
+        let compile_group = required_test_group(
+            FocusGroupKind::Compile,
+            vec![1300],
+            vec![1300],
+            Some(1300),
+            0.95,
+            0.95,
+        );
+        let compile_process = required_test_process(
+            1300,
+            1,
+            "cargo",
+            SystemTaskClass::BuildJob,
+            PriorityBand::Throughput,
+            200,
+        );
+
+        let switch_decision = resolver.decide_from_snapshot(required_test_snapshot(
+            vec![compile_group],
+            vec![compile_process],
+            1000,
+        ));
+
+        match switch_decision {
+            FocusDecision::Switch { old, new } => {
+                assert_eq!(old.unwrap().group.kind, FocusGroupKind::Browser);
+                assert_eq!(new.group.kind, FocusGroupKind::Compile);
+            }
+            FocusDecision::Clear { old, reason } => {
+                assert_eq!(old.unwrap().group.kind, FocusGroupKind::Browser);
+                assert!(reason.contains("current focus root disappeared"));
+            }
+            other => panic!("expected dead root to switch or clear cleanly, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn audio_realtime_priority_band() {
+        let classification = classify_process(&ProcessIdentity {
+            pid: 1400,
+            ppid: 1,
+            comm: "pipewire",
+            cmdline: "pipewire",
+            exe_path: None,
+            cgroup_path: None,
+            sched_policy: Some(SCHED_FIFO),
+        });
+
+        assert_eq!(classification.class, SystemTaskClass::AudioRealtime);
+        assert_eq!(classification.priority_band, PriorityBand::CriticalRealtime);
+        assert!(classification.confidence >= 0.60);
+
+        assert_eq!(
+            priority_band_for_class(SystemTaskClass::AudioRealtime, Some(SCHED_RR)),
+            PriorityBand::CriticalRealtime
+        );
+    }
+
+    #[test]
+    fn compositor_not_background() {
+        for comm in ["sway", "kwin_wayland", "mutter", "gnome-shell"] {
+            let classification = classify_process(&ProcessIdentity {
+                pid: 1500,
+                ppid: 1,
+                comm,
+                cmdline: comm,
+                exe_path: None,
+                cgroup_path: None,
+                sched_policy: None,
+            });
+
+            assert_eq!(classification.class, SystemTaskClass::Compositor);
+            assert_eq!(
+                classification.priority_band,
+                PriorityBand::ForegroundLatency
+            );
+            assert_ne!(classification.priority_band, PriorityBand::Background);
+        }
+
+        assert_eq!(
+            priority_band_for_class(SystemTaskClass::Compositor, None),
+            PriorityBand::ForegroundLatency
+        );
     }
 
     #[test]
