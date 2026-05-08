@@ -429,6 +429,344 @@ fn sway_confidence(node: &SwayNode) -> f32 {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct X11ForegroundProvider {
+    xprop: String,
+}
+
+impl Default for X11ForegroundProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl X11ForegroundProvider {
+    pub fn new() -> Self {
+        Self {
+            xprop: "xprop".to_owned(),
+        }
+    }
+
+    pub fn with_xprop(mut self, xprop: impl Into<String>) -> Self {
+        self.xprop = xprop.into();
+        self
+    }
+
+    pub fn is_detected() -> bool {
+        std::env::var("DISPLAY").is_ok() && which::which("xprop").is_ok()
+    }
+
+    pub fn sample_from_xprop_outputs(
+        &self,
+        elapsed_ms: u64,
+        active_window_output: &str,
+        window_properties_output: &str,
+    ) -> ForegroundWindowSnapshot {
+        let Some(window_id) = parse_x11_active_window_id(active_window_output) else {
+            return ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::X11),
+                status: ForegroundProviderStatus::Unavailable,
+                confidence: 0.0,
+                reason: "xprop root output did not contain an active X11 window".to_owned(),
+                ..ForegroundWindowSnapshot::default()
+            };
+        };
+
+        let properties = parse_x11_window_properties(window_properties_output);
+        let confidence = x11_confidence(&properties, &window_id);
+
+        ForegroundWindowSnapshot {
+            elapsed_ms,
+            source: Some(ForegroundSource::X11),
+            status: ForegroundProviderStatus::Available,
+            pid: properties.pid,
+            app_id: properties.instance,
+            class: properties.class,
+            title: properties.net_wm_name.or(properties.wm_name),
+            window_id: Some(window_id),
+            workspace: None,
+            confidence,
+            stale_ms: None,
+            reason: "active X11 window from xprop".to_owned(),
+        }
+    }
+}
+
+impl ForegroundProvider for X11ForegroundProvider {
+    fn source(&self) -> ForegroundSource {
+        ForegroundSource::X11
+    }
+
+    fn sample(&mut self, elapsed_ms: u64) -> ForegroundWindowSnapshot {
+        if std::env::var("DISPLAY").is_err() {
+            return ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::X11),
+                status: ForegroundProviderStatus::Unavailable,
+                confidence: 0.0,
+                reason: "DISPLAY is not set; X11 foreground provider is unavailable".to_owned(),
+                ..ForegroundWindowSnapshot::default()
+            };
+        }
+
+        if which::which(&self.xprop).is_err() {
+            return ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::X11),
+                status: ForegroundProviderStatus::Unavailable,
+                confidence: 0.0,
+                reason: format!(
+                    "{} was not found in PATH; X11 foreground provider is unavailable",
+                    self.xprop
+                ),
+                ..ForegroundWindowSnapshot::default()
+            };
+        }
+
+        let active_output = match Command::new(&self.xprop)
+            .args(["-root", "_NET_ACTIVE_WINDOW"])
+            .output()
+        {
+            Ok(output) => output,
+            Err(err) => {
+                return ForegroundWindowSnapshot {
+                    elapsed_ms,
+                    source: Some(ForegroundSource::X11),
+                    status: ForegroundProviderStatus::Error,
+                    confidence: 0.0,
+                    reason: format!(
+                        "failed to run {} -root _NET_ACTIVE_WINDOW: {err}",
+                        self.xprop
+                    ),
+                    ..ForegroundWindowSnapshot::default()
+                };
+            }
+        };
+
+        if !active_output.status.success() {
+            let stderr = String::from_utf8_lossy(&active_output.stderr);
+            return ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::X11),
+                status: ForegroundProviderStatus::Error,
+                confidence: 0.0,
+                reason: format!(
+                    "{} -root _NET_ACTIVE_WINDOW exited with status {}; stderr={}",
+                    self.xprop,
+                    active_output.status,
+                    stderr.trim()
+                ),
+                ..ForegroundWindowSnapshot::default()
+            };
+        }
+
+        let active_stdout = match String::from_utf8(active_output.stdout) {
+            Ok(stdout) => stdout,
+            Err(err) => {
+                return ForegroundWindowSnapshot {
+                    elapsed_ms,
+                    source: Some(ForegroundSource::X11),
+                    status: ForegroundProviderStatus::Error,
+                    confidence: 0.0,
+                    reason: format!("xprop _NET_ACTIVE_WINDOW output was not valid UTF-8: {err}"),
+                    ..ForegroundWindowSnapshot::default()
+                };
+            }
+        };
+
+        let Some(window_id) = parse_x11_active_window_id(&active_stdout) else {
+            return ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::X11),
+                status: ForegroundProviderStatus::Unavailable,
+                confidence: 0.0,
+                reason: "xprop root output did not contain an active X11 window".to_owned(),
+                ..ForegroundWindowSnapshot::default()
+            };
+        };
+
+        let properties_output = match Command::new(&self.xprop)
+            .args([
+                "-id",
+                &window_id,
+                "_NET_WM_PID",
+                "WM_CLASS",
+                "_NET_WM_NAME",
+                "WM_NAME",
+            ])
+            .output()
+        {
+            Ok(output) => output,
+            Err(err) => {
+                return ForegroundWindowSnapshot {
+                    elapsed_ms,
+                    source: Some(ForegroundSource::X11),
+                    status: ForegroundProviderStatus::Error,
+                    confidence: 0.0,
+                    reason: format!(
+                        "failed to run {} -id {} _NET_WM_PID WM_CLASS _NET_WM_NAME WM_NAME: {err}",
+                        self.xprop, window_id
+                    ),
+                    ..ForegroundWindowSnapshot::default()
+                };
+            }
+        };
+
+        if !properties_output.status.success() {
+            let stderr = String::from_utf8_lossy(&properties_output.stderr);
+            return ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::X11),
+                status: ForegroundProviderStatus::Error,
+                confidence: 0.0,
+                reason: format!(
+                    "{} -id {} _NET_WM_PID WM_CLASS _NET_WM_NAME WM_NAME exited with status {}; stderr={}",
+                    self.xprop,
+                    window_id,
+                    properties_output.status,
+                    stderr.trim()
+                ),
+                ..ForegroundWindowSnapshot::default()
+            };
+        }
+
+        match String::from_utf8(properties_output.stdout) {
+            Ok(stdout) => self.sample_from_xprop_outputs(elapsed_ms, &active_stdout, &stdout),
+            Err(err) => ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::X11),
+                status: ForegroundProviderStatus::Error,
+                confidence: 0.0,
+                reason: format!("xprop active window properties output was not valid UTF-8: {err}"),
+                ..ForegroundWindowSnapshot::default()
+            },
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct X11WindowProperties {
+    pid: Option<u32>,
+    instance: Option<String>,
+    class: Option<String>,
+    net_wm_name: Option<String>,
+    wm_name: Option<String>,
+}
+
+fn parse_x11_active_window_id(output: &str) -> Option<String> {
+    for line in output.lines() {
+        if !line.contains("_NET_ACTIVE_WINDOW") {
+            continue;
+        }
+
+        let Some((_, value)) = line.split_once('#') else {
+            continue;
+        };
+
+        let value = value.trim().trim_end_matches(',');
+        if value.is_empty() || value == "0x0" || value.eq_ignore_ascii_case("none") {
+            return None;
+        }
+
+        return Some(value.to_owned());
+    }
+
+    None
+}
+
+fn parse_x11_window_properties(output: &str) -> X11WindowProperties {
+    let mut properties = X11WindowProperties::default();
+
+    for line in output.lines() {
+        if line.starts_with("_NET_WM_PID") {
+            properties.pid = parse_x11_u32_value(line);
+        } else if line.starts_with("WM_CLASS") {
+            let values = parse_x11_quoted_strings(line);
+            properties.instance = values.first().cloned();
+            properties.class = values.get(1).cloned().or_else(|| values.first().cloned());
+        } else if line.starts_with("_NET_WM_NAME") {
+            properties.net_wm_name = parse_x11_string_value(line);
+        } else if line.starts_with("WM_NAME") {
+            properties.wm_name = parse_x11_string_value(line);
+        }
+    }
+
+    properties
+}
+
+fn parse_x11_u32_value(line: &str) -> Option<u32> {
+    let (_, value) = line.split_once('=')?;
+    value.trim().parse::<u32>().ok()
+}
+
+fn parse_x11_string_value(line: &str) -> Option<String> {
+    let values = parse_x11_quoted_strings(line);
+    if let Some(value) = values.first() {
+        return Some(value.clone());
+    }
+
+    let (_, value) = line.split_once('=')?;
+    let value = value.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_owned())
+    }
+}
+
+fn parse_x11_quoted_strings(line: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut chars = line.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch != '"' {
+            continue;
+        }
+
+        let mut value = String::new();
+        let mut escaped = false;
+
+        for inner in chars.by_ref() {
+            if escaped {
+                value.push(inner);
+                escaped = false;
+                continue;
+            }
+
+            if inner == '\\' {
+                escaped = true;
+                continue;
+            }
+
+            if inner == '"' {
+                break;
+            }
+
+            value.push(inner);
+        }
+
+        values.push(value);
+    }
+
+    values
+}
+
+fn x11_confidence(properties: &X11WindowProperties, window_id: &str) -> f32 {
+    if properties.pid.is_some() {
+        0.90
+    } else if properties.class.is_some() || properties.instance.is_some() {
+        0.55
+    } else if properties.net_wm_name.is_some()
+        || properties.wm_name.is_some()
+        || !window_id.is_empty()
+    {
+        0.35
+    } else {
+        0.0
+    }
+}
+
 pub struct ForegroundResolver {
     provider: Box<dyn ForegroundProvider + Send>,
     include_title: bool,
@@ -821,6 +1159,190 @@ mod tests {
         let snapshot = resolver.sample(8_000);
 
         assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.title, None);
+    }
+
+    #[test]
+    fn x11_provider_reports_unavailable_without_display() {
+        let previous = std::env::var_os("DISPLAY");
+
+        unsafe {
+            std::env::remove_var("DISPLAY");
+        }
+
+        let mut provider = X11ForegroundProvider::new();
+        let snapshot = provider.sample(1_000);
+
+        assert_eq!(snapshot.source, Some(ForegroundSource::X11));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
+        assert_eq!(snapshot.confidence, 0.0);
+        assert!(snapshot.reason.contains("DISPLAY is not set"));
+
+        unsafe {
+            if let Some(previous) = previous {
+                std::env::set_var("DISPLAY", previous);
+            } else {
+                std::env::remove_var("DISPLAY");
+            }
+        }
+    }
+
+    #[test]
+    fn x11_provider_checks_xprop_before_sampling() {
+        let previous = std::env::var_os("DISPLAY");
+
+        unsafe {
+            std::env::set_var("DISPLAY", ":99");
+        }
+
+        let mut provider =
+            X11ForegroundProvider::new().with_xprop("stutter-definitely-missing-xprop-binary");
+        let snapshot = provider.sample(1_000);
+
+        assert_eq!(snapshot.source, Some(ForegroundSource::X11));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
+        assert_eq!(snapshot.confidence, 0.0);
+        assert!(
+            snapshot
+                .reason
+                .contains("stutter-definitely-missing-xprop-binary")
+        );
+        assert!(snapshot.reason.contains("was not found in PATH"));
+
+        unsafe {
+            if let Some(previous) = previous {
+                std::env::set_var("DISPLAY", previous);
+            } else {
+                std::env::remove_var("DISPLAY");
+            }
+        }
+    }
+
+    #[test]
+    fn x11_parser_extracts_pid_class_and_title_with_high_confidence() {
+        let active = "_NET_ACTIVE_WINDOW(WINDOW): window id # 0x4600007\n";
+        let props = r#"
+_NET_WM_PID(CARDINAL) = 12345
+WM_CLASS(STRING) = "steam_app_379430", "steam_app_379430"
+_NET_WM_NAME(UTF8_STRING) = "Kingdom Come: Deliverance"
+WM_NAME(STRING) = "fallback title"
+"#;
+
+        let provider = X11ForegroundProvider::new();
+        let snapshot = provider.sample_from_xprop_outputs(2_000, active, props);
+
+        assert_eq!(snapshot.elapsed_ms, 2_000);
+        assert_eq!(snapshot.source, Some(ForegroundSource::X11));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, Some(12345));
+        assert_eq!(snapshot.app_id.as_deref(), Some("steam_app_379430"));
+        assert_eq!(snapshot.class.as_deref(), Some("steam_app_379430"));
+        assert_eq!(snapshot.title.as_deref(), Some("Kingdom Come: Deliverance"));
+        assert_eq!(snapshot.window_id.as_deref(), Some("0x4600007"));
+        assert_eq!(snapshot.workspace, None);
+        assert_eq!(snapshot.confidence, 0.90);
+        assert_eq!(snapshot.reason, "active X11 window from xprop");
+    }
+
+    #[test]
+    fn x11_parser_uses_wm_name_fallback_when_net_wm_name_missing() {
+        let active = "_NET_ACTIVE_WINDOW(WINDOW): window id # 0x1200007\n";
+        let props = r#"
+WM_CLASS(STRING) = "foot", "foot"
+WM_NAME(STRING) = "terminal title"
+"#;
+
+        let provider = X11ForegroundProvider::new();
+        let snapshot = provider.sample_from_xprop_outputs(3_000, active, props);
+
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, None);
+        assert_eq!(snapshot.app_id.as_deref(), Some("foot"));
+        assert_eq!(snapshot.class.as_deref(), Some("foot"));
+        assert_eq!(snapshot.title.as_deref(), Some("terminal title"));
+        assert_eq!(snapshot.confidence, 0.55);
+    }
+
+    #[test]
+    fn x11_parser_uses_medium_confidence_for_wm_class_without_pid() {
+        let active = "_NET_ACTIVE_WINDOW(WINDOW): window id # 0x4600007\n";
+        let props = r#"
+WM_CLASS(STRING) = "Navigator", "Firefox"
+_NET_WM_NAME(UTF8_STRING) = "Private browser tab"
+"#;
+
+        let provider = X11ForegroundProvider::new();
+        let snapshot = provider.sample_from_xprop_outputs(4_000, active, props);
+
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, None);
+        assert_eq!(snapshot.app_id.as_deref(), Some("Navigator"));
+        assert_eq!(snapshot.class.as_deref(), Some("Firefox"));
+        assert_eq!(snapshot.title.as_deref(), Some("Private browser tab"));
+        assert_eq!(snapshot.confidence, 0.55);
+    }
+
+    #[test]
+    fn x11_parser_reports_unavailable_for_missing_active_window() {
+        let provider = X11ForegroundProvider::new();
+
+        for active in [
+            "_NET_ACTIVE_WINDOW(WINDOW): window id # 0x0\n",
+            "_NET_ACTIVE_WINDOW:  not found.\n",
+            "unrelated xprop output\n",
+        ] {
+            let snapshot = provider.sample_from_xprop_outputs(
+                5_000,
+                active,
+                "WM_CLASS(STRING) = \"steam\", \"Steam\"\n",
+            );
+
+            assert_eq!(snapshot.source, Some(ForegroundSource::X11));
+            assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
+            assert_eq!(snapshot.confidence, 0.0);
+            assert!(
+                snapshot
+                    .reason
+                    .contains("did not contain an active X11 window")
+            );
+        }
+    }
+
+    #[test]
+    fn x11_parser_handles_escaped_quoted_strings() {
+        let values = parse_x11_quoted_strings(r#"WM_CLASS(STRING) = "term\"inal", "Class\\Name""#);
+
+        assert_eq!(
+            values,
+            vec!["term\"inal".to_owned(), "Class\\Name".to_owned()]
+        );
+    }
+
+    #[test]
+    fn x11_provider_titles_are_redacted_by_resolver_default() {
+        let provider = SequenceProvider::new(
+            ForegroundSource::X11,
+            vec![ForegroundWindowSnapshot {
+                elapsed_ms: 0,
+                source: Some(ForegroundSource::X11),
+                status: ForegroundProviderStatus::Available,
+                pid: Some(12345),
+                app_id: Some("steam_app_379430".to_owned()),
+                class: Some("steam_app_379430".to_owned()),
+                title: Some("Kingdom Come: Deliverance".to_owned()),
+                window_id: Some("0x4600007".to_owned()),
+                workspace: None,
+                confidence: 0.90,
+                stale_ms: None,
+                reason: "test x11 provider snapshot".to_owned(),
+            }],
+        );
+        let mut resolver = ForegroundResolver::new(Box::new(provider));
+
+        let snapshot = resolver.sample(6_000);
+
+        assert_eq!(snapshot.source, Some(ForegroundSource::X11));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
         assert_eq!(snapshot.title, None);
     }

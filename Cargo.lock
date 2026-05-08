@@ -2663,6 +2663,7 @@ dependencies = [
  "tokio",
  "toml",
  "url",
+ "which 6.0.3",
 ]
 
 [[package]]
