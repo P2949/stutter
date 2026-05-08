@@ -630,9 +630,38 @@ pub async fn apply_low_risk_command(
     let plan = plan_apply_low_risk_from_profiles(tree_pid, profiles_path, &profiles, duration)?;
 
     let (candidate_name, action) = action_from_candidate(plan.candidate)?;
+    let experiment_id = format!("apply-low-risk:{}", candidate_name);
+    let action_id = format!("cpu-affinity-profile:{}", candidate_name);
+    let journal_path = crate::autotune::controller_journal::default_controller_journal_path();
+
+    crate::autotune::controller_journal::write_controller_journal_applying(
+        &journal_path,
+        &experiment_id,
+        &action_id,
+    )
+    .with_context(|| {
+        format!(
+            "failed to write applying controller journal for autotune candidate '{}'",
+            candidate_name
+        )
+    })?;
+
     let audited = apply_cpu_affinity_candidate_with_audit(candidate_name.clone(), &action)?;
     let _affected_tasks = audited.affected_tasks;
     let mut guard = AuditedRollbackGuard::new(&action, audited.rollback.clone());
+
+    crate::autotune::controller_journal::write_controller_journal_applied(
+        &journal_path,
+        &experiment_id,
+        &action_id,
+        audited.rollback.clone(),
+    )
+    .with_context(|| {
+        format!(
+            "failed to write applied controller journal for autotune candidate '{}'",
+            audited.candidate_name
+        )
+    })?;
 
     run_washout_for_action(&action, action.tree_pid, WashoutWindowConfig::default())
         .await
@@ -648,6 +677,14 @@ pub async fn apply_low_risk_command(
             audited.candidate_name
         )
     })?;
+
+    crate::autotune::controller_journal::write_controller_journal_clean(&journal_path)
+        .with_context(|| {
+            format!(
+                "failed to write clean controller journal after rolling back autotune candidate '{}'",
+                audited.candidate_name
+            )
+        })?;
 
     Ok(ApplyLowRiskOutcome {
         candidate_name: audited.candidate_name,
