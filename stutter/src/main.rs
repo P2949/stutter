@@ -281,6 +281,12 @@ async fn main() -> anyhow::Result<()> {
             filter_class,
         ),
         AppCommand::Autotune { input } => autotune::autotune_command(input).await,
+        AppCommand::AutotuneStatus { json } => autotune::status::autotune_status_command(
+            autotune::status::AutotuneStatusCommandInput {
+                json,
+                history_path: None,
+            },
+        ),
         AppCommand::Audit { path, tail, json } => {
             audit::audit_command(audit::AuditCommandInput { path, tail, json })
         }
