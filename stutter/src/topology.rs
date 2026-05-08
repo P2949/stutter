@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use anyhow::Context;
@@ -126,6 +126,7 @@ impl TopologyModel {
             .collect()
     }
 
+    #[cfg(test)]
     pub fn online_core_count(&self) -> usize {
         self.cores.iter().filter(|core| core.is_online).count()
     }
@@ -338,6 +339,8 @@ pub(crate) fn sorted_unique(mut cpus: Vec<u32>) -> Vec<u32> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]

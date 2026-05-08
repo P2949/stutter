@@ -1214,7 +1214,7 @@ mod tests {
             .unwrap_or_else(|| panic!("missing generated profile {name}"))
     }
 
-    fn first_rule_for_class<'a>(profile: &'a Profile, class: TaskClass) -> &'a ProfileRule {
+    fn first_rule_for_class(profile: &Profile, class: TaskClass) -> &ProfileRule {
         profile
             .rules
             .iter()

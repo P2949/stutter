@@ -282,7 +282,29 @@ async fn main() -> anyhow::Result<()> {
             top,
             filter_class,
         ),
+        AppCommand::AutotuneGenerateProfiles {
+            watch_process,
+            out,
+            allow_cpus,
+            deny_cpus,
+            min_render_cpus,
+            min_game_cpus,
+            min_compositor_cpus,
+            min_background_cpus,
+        } => autotune::generate_profiles::generate_profiles_command(
+            autotune::generate_profiles::GenerateProfilesCommandInput {
+                watch_process,
+                out,
+                allow_cpus,
+                deny_cpus,
+                min_render_cpus,
+                min_game_cpus,
+                min_compositor_cpus,
+                min_background_cpus,
+            },
+        ),
         AppCommand::Autotune { input } => autotune::autotune_command(input).await,
+
         AppCommand::AutotuneStatus { json } => autotune::status::autotune_status_command(
             autotune::status::AutotuneStatusCommandInput {
                 json,
