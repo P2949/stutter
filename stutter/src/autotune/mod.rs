@@ -10,6 +10,7 @@ pub mod washout;
 
 pub mod baseline;
 pub mod candidate;
+pub mod candidate_memory;
 pub mod controller;
 pub mod decision;
 pub mod decision_log;
