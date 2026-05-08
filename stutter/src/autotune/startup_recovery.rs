@@ -675,6 +675,193 @@ mod tests {
     }
 
     #[test]
+    fn journal_applied_state_rolls_back_on_start() {
+        let dir = temp_dir("phase-15-5-applied-rolls-back");
+        let config = config_for_dir(&dir, true);
+
+        write_controller_journal_applied(
+            &config.journal_path,
+            "experiment-1",
+            "cpu-affinity-profile:game-main",
+            rollback_token(),
+        )
+        .unwrap();
+
+        let mut executor = FakeRollbackExecutor {
+            calls: 0,
+            fail: false,
+            affected_tasks: 31,
+        };
+
+        let outcome =
+            recover_controller_journal_with_executor(config.clone(), &mut executor).unwrap();
+
+        assert_eq!(
+            outcome,
+            StartupRecoveryOutcome::Recovered {
+                experiment_id: "experiment-1".to_owned(),
+                action_id: "cpu-affinity-profile:game-main".to_owned(),
+                affected_tasks: 31,
+                manual_restore_command: "stutter restore".to_owned(),
+            }
+        );
+        assert_eq!(executor.calls, 1);
+
+        assert!(
+            crate::autotune::controller_journal::read_controller_journal(&config.journal_path)
+                .unwrap()
+                .is_clean()
+        );
+
+        let audit = crate::audit::read_audit_tail(&config.audit_path, 10).unwrap();
+        assert_eq!(audit.len(), 1);
+        assert!(audit[0].success);
+        assert_eq!(audit[0].command, "autotune-startup-recovery");
+        assert_eq!(
+            audit[0].action_id.as_deref(),
+            Some("cpu-affinity-profile:game-main")
+        );
+        assert_eq!(audit[0].affected_tasks, 31);
+        assert!(
+            audit[0]
+                .message
+                .contains("startup crash recovery rollback succeeded")
+        );
+
+        let history =
+            crate::autotune::history::read_autotune_history_events(&config.history_path).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].phase, ControllerPhase::Cooldown);
+        assert_eq!(history[0].decision.decision, "CrashRecoveryRollback");
+        assert_eq!(
+            history[0].action_id.as_deref(),
+            Some("cpu-affinity-profile:game-main")
+        );
+        assert_eq!(history[0].experiment_id.as_deref(), Some("experiment-1"));
+        assert!(history[0].rollback_performed);
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn journal_clean_state_does_nothing() {
+        let dir = temp_dir("phase-15-5-clean-does-nothing");
+        let config = config_for_dir(&dir, true);
+
+        write_controller_journal_clean(&config.journal_path).unwrap();
+
+        let mut executor = FakeRollbackExecutor {
+            calls: 0,
+            fail: false,
+            affected_tasks: 31,
+        };
+
+        let outcome =
+            recover_controller_journal_with_executor(config.clone(), &mut executor).unwrap();
+
+        assert_eq!(outcome, StartupRecoveryOutcome::Clean);
+        assert_eq!(executor.calls, 0);
+
+        assert!(
+            crate::autotune::controller_journal::read_controller_journal(&config.journal_path)
+                .unwrap()
+                .is_clean()
+        );
+        assert!(
+            !config.audit_path.exists(),
+            "clean recovery must not write an audit event"
+        );
+        assert!(
+            !config.history_path.exists(),
+            "clean recovery must not write a history event"
+        );
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn rollback_failure_enters_faulted() {
+        let dir = temp_dir("phase-15-5-rollback-failure-faulted");
+        let config = config_for_dir(&dir, true);
+
+        write_controller_journal_applied(
+            &config.journal_path,
+            "experiment-1",
+            "cpu-affinity-profile:game-main",
+            rollback_token(),
+        )
+        .unwrap();
+
+        let mut executor = FakeRollbackExecutor {
+            calls: 0,
+            fail: true,
+            affected_tasks: 0,
+        };
+
+        let outcome =
+            recover_controller_journal_with_executor(config.clone(), &mut executor).unwrap();
+
+        match outcome {
+            StartupRecoveryOutcome::Faulted {
+                experiment_id,
+                action_id,
+                manual_restore_command,
+                reason,
+            } => {
+                assert_eq!(experiment_id, "experiment-1");
+                assert_eq!(action_id, "cpu-affinity-profile:game-main");
+                assert_eq!(manual_restore_command, "stutter restore");
+                assert!(reason.contains("startup crash recovery rollback failed"));
+                assert!(reason.contains("intentional recovery rollback failure"));
+            }
+            other => panic!("expected Faulted recovery outcome, got {other:?}"),
+        }
+
+        assert_eq!(executor.calls, 1);
+
+        assert!(
+            !crate::autotune::controller_journal::read_controller_journal(&config.journal_path)
+                .unwrap()
+                .is_clean(),
+            "failed rollback must leave the applied journal intact for manual recovery"
+        );
+
+        let audit = crate::audit::read_audit_tail(&config.audit_path, 10).unwrap();
+        assert_eq!(audit.len(), 1);
+        assert!(!audit[0].success);
+        assert_eq!(audit[0].command, "autotune-startup-recovery");
+        assert_eq!(
+            audit[0].action_id.as_deref(),
+            Some("cpu-affinity-profile:game-main")
+        );
+        assert_eq!(audit[0].affected_tasks, 0);
+        assert!(
+            audit[0]
+                .message
+                .contains("manual_restore_command=\"stutter restore\"")
+        );
+
+        let history =
+            crate::autotune::history::read_autotune_history_events(&config.history_path).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].phase, ControllerPhase::Faulted);
+        assert_eq!(history[0].decision.decision, "CrashRecoveryFault");
+        assert_eq!(
+            history[0].action_id.as_deref(),
+            Some("cpu-affinity-profile:game-main")
+        );
+        assert_eq!(history[0].experiment_id.as_deref(), Some("experiment-1"));
+        assert!(!history[0].rollback_performed);
+        assert!(
+            history[0]
+                .reason
+                .contains("manual_restore_command=\"stutter restore\"")
+        );
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn manual_restore_command_for_non_default_cpu_affinity_restore_file_copies_then_restores() {
         let token = RollbackToken::CpuAffinityRestoreFile {
             path: PathBuf::from("/tmp/custom restore.json"),
