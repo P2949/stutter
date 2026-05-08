@@ -56,6 +56,9 @@ mod runnable_depth_tests;
 #[cfg(test)]
 mod test_fixture_builder;
 #[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
 mod validation_corpus_tests;
 
 use std::{path::Path, sync::Arc};
