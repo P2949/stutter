@@ -3,6 +3,7 @@
 use super::{
     comparison::ExperimentResult,
     experiment::{ActiveExperiment, ExperimentId, ExperimentPhase},
+    kept::{ActiveProfileState, KeptCandidateState},
 };
 use crate::actions::{RollbackToken, TuningAction};
 
@@ -72,10 +73,33 @@ pub fn resolve_experiment<E: ExperimentRollbackExecutor + ?Sized>(
     result: &ExperimentResult,
     rollback_executor: &mut E,
 ) -> anyhow::Result<ExperimentResolution> {
+    let mut active_profile_state = ActiveProfileState::default();
+    resolve_experiment_with_active_profile_state(
+        experiment,
+        result,
+        rollback_executor,
+        &mut active_profile_state,
+        crate::audit::unix_nanos_now(),
+    )
+}
+
+pub fn resolve_experiment_with_active_profile_state<E: ExperimentRollbackExecutor + ?Sized>(
+    experiment: &mut ActiveExperiment,
+    result: &ExperimentResult,
+    rollback_executor: &mut E,
+    active_profile_state: &mut ActiveProfileState,
+    now_unix_nanos: u128,
+) -> anyhow::Result<ExperimentResolution> {
     match result {
         ExperimentResult::Improved {
             improvement_percent,
-        } => keep_improved_experiment(experiment, *improvement_percent),
+        } => keep_improved_experiment(
+            experiment,
+            active_profile_state,
+            result.clone(),
+            *improvement_percent,
+            now_unix_nanos,
+        ),
         ExperimentResult::Regressed { regression_percent } => rollback_and_enter_cooldown(
             experiment,
             rollback_executor,
@@ -99,18 +123,44 @@ pub fn resolve_experiment<E: ExperimentRollbackExecutor + ?Sized>(
 
 fn keep_improved_experiment(
     experiment: &mut ActiveExperiment,
+    active_profile_state: &mut ActiveProfileState,
+    result: ExperimentResult,
     improvement_percent: f64,
+    now_unix_nanos: u128,
 ) -> anyhow::Result<ExperimentResolution> {
     experiment.phase = ExperimentPhase::CandidateKeeping;
-    let _kept_token = experiment.take_rollback();
+
+    let candidate_score = experiment
+        .candidate_score
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("cannot keep experiment without candidate score"))?;
+
+    let rollback = experiment
+        .rollback
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("cannot keep experiment without rollback token"))?;
+
+    let reason = format!(
+        "candidate improved by {:.2}%; kept as current active profile and entered cooldown",
+        improvement_percent
+    );
+
+    let kept = KeptCandidateState::new(
+        experiment.id.clone(),
+        experiment.candidate.clone(),
+        experiment.baseline_score.clone(),
+        candidate_score,
+        rollback,
+        now_unix_nanos,
+        reason.clone(),
+    );
+
+    active_profile_state.record_kept_candidate(kept, result);
     experiment.phase = ExperimentPhase::Cooldown;
 
     Ok(ExperimentResolution::Kept {
         experiment_id: experiment.id.clone(),
-        reason: format!(
-            "candidate improved by {:.2}%; kept and entered cooldown",
-            improvement_percent
-        ),
+        reason,
     })
 }
 
@@ -153,7 +203,7 @@ mod tests {
     use crate::{
         actions::RollbackToken,
         affinity::CpuMask,
-        autotune::{candidate::CandidateAction, experiment::WindowScore},
+        autotune::{candidate::CandidateAction, experiment::WindowScore, kept::ActiveProfileState},
         process_tree::TaskClass,
         profiles::{Profile, ProfileRule},
         scorer::StutterScore,
@@ -229,16 +279,19 @@ mod tests {
     }
 
     #[test]
-    fn improved_keeps_candidate_and_enters_cooldown_without_rollback() {
+    fn improved_keeps_candidate_enters_cooldown_and_preserves_rollback_in_active_profile_state() {
         let mut experiment = active_experiment();
         let mut rollback_executor = FakeRollbackExecutor::default();
+        let mut active_profile_state = ActiveProfileState::default();
 
-        let resolution = resolve_experiment(
+        let resolution = resolve_experiment_with_active_profile_state(
             &mut experiment,
             &ExperimentResult::Improved {
                 improvement_percent: 12.5,
             },
             &mut rollback_executor,
+            &mut active_profile_state,
+            9_999,
         )
         .unwrap();
 
@@ -249,14 +302,34 @@ mod tests {
             } => {
                 assert_eq!(experiment_id.as_str(), "experiment-1");
                 assert!(reason.contains("improved by 12.50%"));
-                assert!(reason.contains("kept and entered cooldown"));
+                assert!(reason.contains("kept as current active profile"));
+                assert!(reason.contains("entered cooldown"));
             }
             other => panic!("expected kept resolution, got {other:?}"),
         }
 
         assert_eq!(rollback_executor.calls, 0);
         assert_eq!(experiment.phase, ExperimentPhase::Cooldown);
-        assert!(!experiment.has_rollback());
+        assert!(experiment.has_rollback());
+        assert_eq!(
+            active_profile_state.current_profile_name(),
+            Some("game-main")
+        );
+        assert_eq!(
+            active_profile_state
+                .current_rollback()
+                .map(|rollback| rollback.affected_tasks()),
+            Some(31)
+        );
+        assert_eq!(
+            active_profile_state
+                .comparison_baseline_for_next_experiment()
+                .map(|score| score.score.total),
+            Some(875)
+        );
+        assert_eq!(active_profile_state.history.len(), 1);
+        assert_eq!(active_profile_state.history[0].profile_name, "game-main");
+        assert!(active_profile_state.history[0].rollback_available);
     }
 
     #[test]
@@ -381,6 +454,55 @@ mod tests {
         assert_eq!(err, "cannot revert experiment without rollback token");
         assert_eq!(rollback_executor.calls, 0);
         assert_eq!(experiment.phase, ExperimentPhase::CandidateReverting);
+    }
+
+    #[test]
+    fn improved_without_candidate_score_is_invalid_to_keep() {
+        let mut experiment = active_experiment();
+        experiment.candidate_score = None;
+        let mut rollback_executor = FakeRollbackExecutor::default();
+        let mut active_profile_state = ActiveProfileState::default();
+
+        let err = resolve_experiment_with_active_profile_state(
+            &mut experiment,
+            &ExperimentResult::Improved {
+                improvement_percent: 12.5,
+            },
+            &mut rollback_executor,
+            &mut active_profile_state,
+            9_999,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(err, "cannot keep experiment without candidate score");
+        assert_eq!(rollback_executor.calls, 0);
+        assert!(active_profile_state.current.is_none());
+        assert!(experiment.has_rollback());
+    }
+
+    #[test]
+    fn improved_without_rollback_token_is_invalid_to_keep() {
+        let mut experiment = active_experiment();
+        let _ = experiment.take_rollback();
+        let mut rollback_executor = FakeRollbackExecutor::default();
+        let mut active_profile_state = ActiveProfileState::default();
+
+        let err = resolve_experiment_with_active_profile_state(
+            &mut experiment,
+            &ExperimentResult::Improved {
+                improvement_percent: 12.5,
+            },
+            &mut rollback_executor,
+            &mut active_profile_state,
+            9_999,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(err, "cannot keep experiment without rollback token");
+        assert_eq!(rollback_executor.calls, 0);
+        assert!(active_profile_state.current.is_none());
     }
 
     #[test]

@@ -103,17 +103,20 @@ impl ActiveExperiment {
         self.candidate_score = Some(candidate_score);
     }
 
+    pub fn mark_candidate_kept(&mut self) {
+        self.phase = ExperimentPhase::CandidateKeeping;
+    }
+
+    pub fn mark_candidate_kept_and_enter_cooldown(&mut self) {
+        self.phase = ExperimentPhase::Cooldown;
+    }
+
     pub fn mark_candidate_keeping(&mut self) {
         self.phase = ExperimentPhase::CandidateKeeping;
     }
 
     pub fn mark_candidate_reverting(&mut self) {
         self.phase = ExperimentPhase::CandidateReverting;
-    }
-
-    pub fn mark_candidate_kept_and_enter_cooldown(&mut self) {
-        self.rollback = None;
-        self.phase = ExperimentPhase::Cooldown;
     }
 
     pub fn mark_cooldown(&mut self) {
