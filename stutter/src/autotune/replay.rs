@@ -87,6 +87,8 @@ impl ReplayPolicyEngine for ObserveOnlyReplayPolicy {
                 self.report.io_events += 1;
             }
             MonitorEvent::LiveDiagnosis { .. } => {}
+            MonitorEvent::FocusChanged { .. } => {}
+            MonitorEvent::FocusCleared { .. } => {}
             MonitorEvent::DataQualityWarning { message } => {
                 self.report.data_quality_warnings += 1;
                 self.report.validation_warnings.push(message.clone());

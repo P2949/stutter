@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use crate::{
     diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
+    focus::ResolvedFocus,
     process_tree::TaskInfo,
     recorder::{BlockIoRecord, FrameEvent, GpuSample, IntervalRecord, IrqEventRecord, SpikeEvent},
 };
@@ -42,6 +43,16 @@ pub enum MonitorEvent {
     DataQualityWarning {
         message: String,
     },
+    FocusChanged {
+        elapsed_ms: u64,
+        old: Option<Box<ResolvedFocus>>,
+        new: Box<ResolvedFocus>,
+    },
+    FocusCleared {
+        elapsed_ms: u64,
+        old: Option<Box<ResolvedFocus>>,
+        reason: String,
+    },
     Finished {
         reason: String,
     },
@@ -59,6 +70,8 @@ impl MonitorEvent {
             Self::IoEvent { .. } => "io_event",
             Self::LiveDiagnosis { .. } => "live_diagnosis",
             Self::DataQualityWarning { .. } => "data_quality_warning",
+            Self::FocusChanged { .. } => "focus_changed",
+            Self::FocusCleared { .. } => "focus_cleared",
             Self::Finished { .. } => "finished",
         }
     }
@@ -74,6 +87,8 @@ impl MonitorEvent {
             Self::IoEvent { event } => Some(event.elapsed_ms),
             Self::LiveDiagnosis { entry } => Some(entry.elapsed_ms),
             Self::DataQualityWarning { .. } => None,
+            Self::FocusChanged { elapsed_ms, .. } => Some(*elapsed_ms),
+            Self::FocusCleared { elapsed_ms, .. } => Some(*elapsed_ms),
             Self::Finished { .. } => None,
         }
     }

@@ -18,6 +18,7 @@ use crate::{
     diagnosis::{LiveDiagnosisEntry, diagnose_cluster},
     ebpf_loader,
     events::AlertPayload,
+    focus::{FocusDecision, FocusPolicy, FocusResolver, ResolvedFocus},
     hwmon, mangohud,
     metrics::{collect_interval_summaries_labeled, log_drop_counters, print_session_summaries},
     process_tree::{self, find_auto_target_pids},
@@ -173,6 +174,9 @@ pub struct MonitorSession {
     pub scx_tracker: scx::ScxTracker,
     pub hwmon_reader: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
     pub watch_process_cache: process_tree::ProcessCache,
+    pub focus_resolver: Option<FocusResolver>,
+    pub current_focus: Option<ResolvedFocus>,
+    pub focus_switch_count: u64,
 
     pub started: Instant,
     pub tui_state: crate::tui::TuiState,
@@ -197,7 +201,43 @@ impl MonitorSession {
         shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
         event_tx: Option<tokio::sync::mpsc::Sender<MonitorEvent>>,
     ) -> anyhow::Result<Self> {
-        if !config.has_explicit_target() {
+        let explicit_target = config.has_explicit_target();
+
+        let mut focus_resolver = None;
+        let mut current_focus = None;
+        let focus_switch_count = 0;
+
+        if !explicit_target && config.auto_focus {
+            let policy = FocusPolicy {
+                poll_ms: config.auto_focus_poll_ms,
+                min_confidence: config.auto_focus_min_confidence,
+                switch_margin: config.auto_focus_switch_margin,
+                switch_cooldown_ms: config.auto_focus_switch_cooldown_ms,
+                required_winner_polls: config.auto_focus_required_polls,
+                max_roots: config.auto_focus_max_roots,
+            };
+
+            let mut resolver = FocusResolver::new(policy);
+            match resolver.sample(Path::new("/proc"), 0) {
+                FocusDecision::Switch { new, .. } | FocusDecision::Keep { focus: new } => {
+                    config.tree_pids = new.group.root_pids.clone();
+                    info!(
+                        "auto_focus_initial_target kind={:?} score={:.3} confidence={:.3} roots={:?} situation={:?}",
+                        new.group.kind,
+                        new.group.score,
+                        new.group.confidence,
+                        new.group.root_pids,
+                        new.situation
+                    );
+                    current_focus = Some(new);
+                }
+                FocusDecision::NoTarget { reason } | FocusDecision::Clear { reason, .. } => {
+                    info!("auto_focus_no_initial_target reason={reason}");
+                }
+            }
+
+            focus_resolver = Some(resolver);
+        } else if !explicit_target {
             let auto_targets = find_auto_target_pids(Path::new("/proc"));
             if auto_targets.is_empty() {
                 anyhow::bail!(
@@ -446,6 +486,9 @@ impl MonitorSession {
             scx_tracker,
             hwmon_reader,
             watch_process_cache: process_tree::ProcessCache::default(),
+            focus_resolver,
+            current_focus,
+            focus_switch_count,
             started,
             tui_state,
             terminal,
@@ -498,6 +541,93 @@ impl MonitorSession {
         Ok(())
     }
 
+    async fn emit_focus_changed(
+        &self,
+        elapsed_ms: u64,
+        old: Option<&ResolvedFocus>,
+        new: &ResolvedFocus,
+    ) -> anyhow::Result<()> {
+        info!(
+            "auto_focus_changed elapsed_ms={} old_kind={:?} new_kind={:?} score={:.3} confidence={:.3} roots={:?} situation={:?}",
+            elapsed_ms,
+            old.map(|focus| focus.group.kind),
+            new.group.kind,
+            new.group.score,
+            new.group.confidence,
+            new.group.root_pids,
+            new.situation
+        );
+
+        self.emit(MonitorEvent::FocusChanged {
+            elapsed_ms,
+            old: old.cloned().map(Box::new),
+            new: Box::new(new.clone()),
+        })
+        .await;
+
+        Ok(())
+    }
+
+    async fn emit_focus_cleared(
+        &self,
+        elapsed_ms: u64,
+        old: Option<&ResolvedFocus>,
+        reason: String,
+    ) -> anyhow::Result<()> {
+        info!(
+            "auto_focus_cleared elapsed_ms={} old_kind={:?} reason={}",
+            elapsed_ms,
+            old.map(|focus| focus.group.kind),
+            reason
+        );
+
+        self.emit(MonitorEvent::FocusCleared {
+            elapsed_ms,
+            old: old.cloned().map(Box::new),
+            reason,
+        })
+        .await;
+
+        Ok(())
+    }
+
+    async fn handle_focus_tick(&mut self) -> anyhow::Result<()> {
+        let elapsed_ms = self.started.elapsed().as_millis() as u64;
+        let Some(resolver) = self.focus_resolver.as_mut() else {
+            return Ok(());
+        };
+
+        let decision = resolver.sample(Path::new("/proc"), elapsed_ms);
+
+        match decision {
+            FocusDecision::Switch { old, new } => {
+                self.tree_pids = new.group.root_pids.clone();
+                self.tree_root_starttimes = capture_tree_root_starttimes(&self.tree_pids);
+                self.had_tree_roots = !self.tree_pids.is_empty();
+                self.current_focus = Some(new.clone());
+                self.focus_switch_count = self.focus_switch_count.saturating_add(1);
+                self.refresh_tasks_and_emit_snapshot().await?;
+                self.emit_focus_changed(elapsed_ms, old.as_ref(), &new)
+                    .await?;
+            }
+            FocusDecision::Clear { old, reason } => {
+                self.tree_pids.clear();
+                self.tree_root_starttimes.clear();
+                self.had_tree_roots = false;
+                self.current_focus = None;
+                self.refresh_tasks_and_emit_snapshot().await?;
+                self.emit_focus_cleared(elapsed_ms, old.as_ref(), reason)
+                    .await?;
+            }
+            FocusDecision::Keep { focus } => {
+                self.current_focus = Some(focus);
+            }
+            FocusDecision::NoTarget { .. } => {}
+        }
+
+        Ok(())
+    }
+
     pub async fn run(
         &mut self,
         mut stop_rx: Option<tokio::sync::oneshot::Receiver<()>>,
@@ -515,6 +645,14 @@ impl MonitorSession {
 
         let mut tree_tick = if needs_tree_tick(&self.config, self.had_tree_roots) {
             let mut tick = interval(Duration::from_millis(2_000));
+            tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+            Some(tick)
+        } else {
+            None
+        };
+
+        let mut focus_tick = if self.focus_resolver.is_some() {
+            let mut tick = interval(Duration::from_millis(self.config.auto_focus_poll_ms));
             tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
             Some(tick)
         } else {
@@ -635,6 +773,16 @@ impl MonitorSession {
                     if let Some(reason) = self.handle_tree_tick().await? {
                         return Ok(reason);
                     }
+                }
+
+                _ = async {
+                    if let Some(tick) = focus_tick.as_mut() {
+                        tick.tick().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
+                    self.handle_focus_tick().await?;
                 }
 
                 _ = watch_tick.tick() => {
