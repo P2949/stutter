@@ -19,6 +19,7 @@ use ratatui::{
 use crate::{
     diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
+    focus::ResolvedFocus,
     metrics::{IntervalRecord, TaskStats, format_latency},
     process_tree::{TaskClass, TaskInfo},
 };
@@ -134,11 +135,12 @@ pub fn render_tui(
     recent_diagnoses: &std::collections::VecDeque<LiveDiagnosisEntry>,
     elapsed_ms: u128,
     drop_counters: &DropCountersSnapshot,
+    current_focus: Option<&ResolvedFocus>,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // status bar
+            Constraint::Length(4), // status bar + focus line
             Constraint::Min(10),   // task table
             Constraint::Length(8), // sparkline / heat
             Constraint::Length(8), // recent diagnoses
@@ -152,6 +154,7 @@ pub fn render_tui(
         stats_by_task,
         elapsed_ms,
         drop_counters,
+        current_focus,
         chunks[0],
     );
 
@@ -172,6 +175,7 @@ pub fn render_tui(
 // Status bar
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn render_status_bar(
     f: &mut Frame,
     state: &TuiState,
@@ -179,6 +183,7 @@ fn render_status_bar(
     stats_by_task: &BTreeMap<u32, TaskStats>,
     elapsed_ms: u128,
     drop_counters: &DropCountersSnapshot,
+    current_focus: Option<&ResolvedFocus>,
     area: Rect,
 ) {
     let secs = elapsed_ms / 1000;
@@ -231,8 +236,42 @@ fn render_status_bar(
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" stutter profiler ");
-    let paragraph = Paragraph::new(Line::from(parts)).block(block);
+    let focus_line = focus_status_line(current_focus);
+    let paragraph = Paragraph::new(vec![Line::from(parts), focus_line]).block(block);
     f.render_widget(paragraph, area);
+}
+
+fn focus_status_line(current_focus: Option<&ResolvedFocus>) -> Line<'static> {
+    let Some(focus) = current_focus else {
+        return Line::from(vec![Span::raw(" Focus: none")]);
+    };
+
+    let confidence_percent = (focus.group.confidence * 100.0).round() as u32;
+    let roots = if focus.group.root_pids.is_empty() {
+        "-".to_owned()
+    } else {
+        focus
+            .group
+            .root_pids
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+
+    let display_name = if focus.group.display_name.is_empty() {
+        format!("{:?}", focus.group.kind)
+    } else {
+        focus.group.display_name.clone()
+    };
+
+    Line::from(vec![Span::styled(
+        format!(
+            " Focus: {:?} {} | confidence {}% | roots: {} | situation: {:?}",
+            focus.group.kind, display_name, confidence_percent, roots, focus.situation
+        ),
+        Style::default().fg(Color::Cyan),
+    )])
 }
 
 // ---------------------------------------------------------------------------
@@ -448,6 +487,51 @@ fn render_diagnoses(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn focus_status_line_formats_current_focus() {
+        let focus = ResolvedFocus {
+            group: crate::focus::FocusGroup {
+                kind: crate::focus::FocusGroupKind::Compile,
+                root_pids: vec![1234],
+                member_pids: vec![1234, 1235],
+                primary_pid: Some(1234),
+                display_name: "cargo build".to_owned(),
+                score: 0.91,
+                score_breakdown: crate::focus::FocusScoreBreakdown::default(),
+                confidence: 0.87,
+                priority_band: crate::focus::PriorityBand::Throughput,
+                reasons: vec!["cargo root with active compiler descendants".to_owned()],
+            },
+            selected_at_ms: 1000,
+            last_confirmed_ms: 2000,
+            situation: crate::autotune::state::SituationKind::CompileLoad,
+        };
+
+        let line = focus_status_line(Some(&focus));
+        let rendered = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(rendered.contains("Focus: Compile cargo build"));
+        assert!(rendered.contains("confidence 87%"));
+        assert!(rendered.contains("roots: 1234"));
+        assert!(rendered.contains("situation: CompileLoad"));
+    }
+
+    #[test]
+    fn focus_status_line_formats_empty_focus() {
+        let line = focus_status_line(None);
+        let rendered = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(rendered, " Focus: none");
+    }
 
     #[test]
     fn sort_field_cycles() {

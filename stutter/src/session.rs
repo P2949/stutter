@@ -158,6 +158,7 @@ pub(crate) struct TuiRenderSnapshot {
     pub(crate) stats_by_task: std::collections::BTreeMap<u32, crate::metrics::TaskStats>,
     pub(crate) interval_records: Vec<crate::recorder::IntervalRecord>,
     pub(crate) recent_diagnoses: std::collections::VecDeque<crate::diagnosis::LiveDiagnosisEntry>,
+    pub(crate) current_focus: Option<ResolvedFocus>,
 }
 
 pub struct MonitorSession {
@@ -1117,6 +1118,7 @@ impl MonitorSession {
                 stats_by_task: self.tasks.stats_by_task.clone(),
                 interval_records: self.recorder.buffers.interval_records.clone(),
                 recent_diagnoses: self.recent_telemetry.diagnoses.clone(),
+                current_focus: self.current_focus.clone(),
             };
 
             // TUI rendering errors and panics should be logged and dismissed,
@@ -1132,6 +1134,7 @@ impl MonitorSession {
                         &snapshot.recent_diagnoses,
                         snapshot.elapsed_ms.into(),
                         &snapshot.drop_counters,
+                        snapshot.current_focus.as_ref(),
                     );
                 })
             }));

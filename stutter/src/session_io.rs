@@ -7,9 +7,9 @@ use anyhow::{Context, Result};
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::recorder::{
-    BlockIoRecord, CpuFreqRecord, FrameEvent, GpuSample, IntervalRecord, IrqEventRecord,
-    MetadataFile, MigrationEventRecord, SESSION_SCHEMA_VERSION, ScxEvent, SessionFile, SpikeEvent,
-    TreeEvent,
+    BlockIoRecord, CpuFreqRecord, FocusEvent, FrameEvent, GpuSample, IntervalRecord,
+    IrqEventRecord, MetadataFile, MigrationEventRecord, SESSION_SCHEMA_VERSION, ScxEvent,
+    SessionFile, SpikeEvent, TreeEvent,
 };
 
 #[derive(Debug, Serialize, Default)]
@@ -28,6 +28,7 @@ pub struct RunArtifacts {
     pub cpu_freq_events: Vec<CpuFreqRecord>,
     pub block_io_events: Vec<BlockIoRecord>,
     pub scx_events: Vec<ScxEvent>,
+    pub focus_events: Vec<FocusEvent>,
 
     pub validation: RunValidationReport,
 }
@@ -64,6 +65,7 @@ pub struct ArtifactLoadOptions {
     pub load_cpu_freq_events: bool,
     pub load_block_io_events: bool,
     pub load_scx_events: bool,
+    pub load_focus_events: bool,
 }
 
 impl ArtifactLoadOptions {
@@ -78,6 +80,7 @@ impl ArtifactLoadOptions {
         load_cpu_freq_events: false,
         load_block_io_events: false,
         load_scx_events: false,
+        load_focus_events: true,
     };
 
     pub const TUNE: Self = Self {
@@ -91,6 +94,7 @@ impl ArtifactLoadOptions {
         load_cpu_freq_events: false,
         load_block_io_events: false,
         load_scx_events: false,
+        load_focus_events: false,
     };
 
     pub const AUTOTUNE_REPLAY: Self = Self {
@@ -104,6 +108,7 @@ impl ArtifactLoadOptions {
         load_cpu_freq_events: true,
         load_block_io_events: true,
         load_scx_events: true,
+        load_focus_events: true,
     };
 
     #[allow(dead_code)]
@@ -118,6 +123,7 @@ impl ArtifactLoadOptions {
         load_cpu_freq_events: false,
         load_block_io_events: false,
         load_scx_events: false,
+        load_focus_events: false,
     };
 }
 
@@ -149,6 +155,7 @@ pub(crate) const MIGRATION_EVENTS_FILE: &str = "migration_events.json";
 pub(crate) const CPU_FREQ_EVENTS_FILE: &str = "cpu_freq_samples.json";
 pub(crate) const BLOCK_IO_EVENTS_FILE: &str = "io_events.json";
 pub(crate) const SCX_EVENTS_FILE: &str = "scx_events.json";
+pub(crate) const FOCUS_EVENTS_FILE: &str = "focus_events.json";
 
 fn load_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let file =
@@ -378,6 +385,12 @@ pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<R
         Vec::new()
     };
 
+    let focus_events = if options.load_focus_events {
+        load_optional_json_vec(&run_dir, FOCUS_EVENTS_FILE, &mut validation)?
+    } else {
+        Vec::new()
+    };
+
     let mut artifacts = RunArtifacts {
         run_dir,
         session,
@@ -392,6 +405,7 @@ pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<R
         cpu_freq_events,
         block_io_events,
         scx_events,
+        focus_events,
         validation,
     };
 
@@ -623,6 +637,7 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
         (CPU_FREQ_EVENTS_FILE, "CpuFreqRecord"),
         (BLOCK_IO_EVENTS_FILE, "BlockIoRecord"),
         (SCX_EVENTS_FILE, "ScxEvent"),
+        (FOCUS_EVENTS_FILE, "FocusEvent"),
     ];
 
     for (file_name, type_name) in optional_artifacts {
@@ -639,6 +654,7 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
                 "CpuFreqRecord" => validate_ndjson_file::<CpuFreqRecord>(&path),
                 "BlockIoRecord" => validate_ndjson_file::<BlockIoRecord>(&path),
                 "ScxEvent" => validate_ndjson_file::<ScxEvent>(&path),
+                "FocusEvent" => validate_ndjson_file::<FocusEvent>(&path),
                 _ => unreachable!(),
             };
 

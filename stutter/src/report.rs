@@ -14,8 +14,8 @@ use crate::{
     metrics::format_latency,
     process_tree::TaskClass,
     recorder::{
-        FrameEvent, GpuSample, IntervalRecord, RecordedSpike, SESSION_SCHEMA_VERSION, SessionFile,
-        SessionTask, SpikeEvent,
+        FocusEvent, FrameEvent, GpuSample, IntervalRecord, RecordedSpike, SESSION_SCHEMA_VERSION,
+        SessionFile, SessionTask, SpikeEvent,
     },
     session_io::{self, ArtifactLoadOptions},
     summary::{self, RunDiffSummary, TaskDeltaSummary, format_latency_signed},
@@ -127,6 +127,7 @@ pub struct ArtifactsSummary {
     pub block_io_event_count: u64,
     pub interval_record_count: u64,
     pub scx_event_count: u64,
+    pub focus_event_count: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -161,6 +162,79 @@ pub enum DataQualityLevel {
     Low,
 }
 
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct FocusReportSummary {
+    pub mode: Option<String>,
+    pub final_focus: Option<String>,
+    pub display_name: Option<String>,
+    pub situation: Option<String>,
+    pub confidence: Option<f32>,
+    pub score: Option<f32>,
+    pub roots: Vec<u32>,
+    pub member_pids: Vec<u32>,
+    pub focus_switches: u64,
+    pub reasons: Vec<String>,
+}
+
+impl FocusReportSummary {
+    pub fn is_visible(&self) -> bool {
+        self.mode.is_some()
+            || self.final_focus.is_some()
+            || self.situation.is_some()
+            || self.confidence.is_some()
+            || !self.roots.is_empty()
+            || self.focus_switches > 0
+            || !self.reasons.is_empty()
+    }
+}
+
+fn focus_report_summary(session: &SessionFile, focus_events: &[FocusEvent]) -> FocusReportSummary {
+    let final_event = focus_events
+        .iter()
+        .rev()
+        .find(|event| event.action == "changed" || event.kind.is_some());
+
+    let mode = session
+        .core
+        .focus_mode
+        .clone()
+        .or_else(|| session.config.auto_focus.then(|| "auto-focus".to_owned()));
+
+    let final_focus = final_event
+        .and_then(|event| event.kind.clone())
+        .or_else(|| session.core.final_focus_kind.clone());
+
+    let situation =
+        final_event.and_then(|event| event.situation.map(|situation| format!("{situation:?}")));
+
+    let confidence = final_event.map(|event| event.confidence);
+    let score = final_event.map(|event| event.score);
+    let roots = final_event
+        .map(|event| event.root_pids.clone())
+        .unwrap_or_default();
+    let member_pids = final_event
+        .map(|event| event.member_pids.clone())
+        .unwrap_or_default();
+    let reasons = final_event
+        .map(|event| event.reasons.clone())
+        .unwrap_or_default();
+
+    let display_name = final_focus.clone();
+
+    FocusReportSummary {
+        mode,
+        final_focus,
+        display_name,
+        situation,
+        confidence,
+        score,
+        roots,
+        member_pids,
+        focus_switches: session.core.focus_switch_count,
+        reasons,
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ReportAnalysisJson {
     pub session: SessionFile,
@@ -169,6 +243,7 @@ pub struct ReportAnalysisJson {
     pub pressure_timeline: PressureTimelineSummary,
     pub artifacts_summary: ArtifactsSummary,
     pub data_quality: DataQualitySummary,
+    pub focus_summary: FocusReportSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -223,6 +298,7 @@ pub struct HtmlReportModel {
     pub cluster_analysis: SpikeClusterAnalysis,
     pub frame_diagnoses: Vec<FrameDiagnosis>,
     pub artifacts_summary: ArtifactsSummary,
+    pub focus_summary: FocusReportSummary,
     pub top_tasks_by_max: Vec<TaskHtmlRow>,
     pub top_tasks_by_p99: Vec<TaskHtmlRow>,
     pub spike_density: Vec<SpikeDensityBucket>,
@@ -290,6 +366,7 @@ fn artifacts_summary_from_session(session: &SessionFile) -> ArtifactsSummary {
         block_io_event_count: session.core.block_io_event_count,
         interval_record_count: session.core.interval_record_count,
         scx_event_count: session.core.scx_event_count,
+        focus_event_count: session.core.focus_event_count,
     }
 }
 
@@ -383,6 +460,8 @@ fn build_report_analysis_with_artifacts(
         cluster_window_ms,
     );
 
+    let focus_summary = focus_report_summary(&session, &artifacts.focus_events);
+
     Ok(ReportBuildResult {
         analysis: ReportAnalysisJson {
             session,
@@ -391,6 +470,7 @@ fn build_report_analysis_with_artifacts(
             pressure_timeline,
             artifacts_summary,
             data_quality,
+            focus_summary,
         },
         artifacts,
     })
@@ -461,6 +541,56 @@ pub fn render_diff_report(
 ) -> anyhow::Result<String> {
     let diff = summary::build_run_diff_summary(path_a, path_b, filter_class)?;
     Ok(render_run_diff_summary(&diff, top))
+}
+
+fn render_focus_summary_text(focus: &FocusReportSummary) -> String {
+    let mut output = String::new();
+
+    if !focus.is_visible() {
+        return output;
+    }
+
+    pushln(&mut output, "Auto focus:");
+    pushln(
+        &mut output,
+        format!("  mode: {}", focus.mode.as_deref().unwrap_or("unknown")),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "  final focus: {}",
+            focus.final_focus.as_deref().unwrap_or("none")
+        ),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "  situation: {}",
+            focus.situation.as_deref().unwrap_or("unknown")
+        ),
+    );
+
+    if let Some(confidence) = focus.confidence {
+        pushln(&mut output, format!("  confidence: {:.2}", confidence));
+    } else {
+        pushln(&mut output, "  confidence: unknown");
+    }
+
+    pushln(&mut output, format!("  roots: {:?}", focus.roots));
+    pushln(
+        &mut output,
+        format!("  focus switches: {}", focus.focus_switches),
+    );
+
+    if !focus.reasons.is_empty() {
+        pushln(&mut output, "  reasons:");
+        for reason in &focus.reasons {
+            pushln(&mut output, format!("    - {reason}"));
+        }
+    }
+
+    pushln(&mut output, "");
+    output
 }
 
 fn render_run_diff_summary(diff: &RunDiffSummary, top: usize) -> String {
@@ -963,6 +1093,7 @@ pub fn build_html_report_model(
         cluster_analysis: analysis.cluster_analysis.clone(),
         frame_diagnoses: analysis.frame_diagnoses.clone(),
         artifacts_summary: analysis.artifacts_summary.clone(),
+        focus_summary: analysis.focus_summary.clone(),
         top_tasks_by_max: top_task_rows_by_max_latency(session, top, filter_class),
         top_tasks_by_p99: top_task_rows_by_p99_latency(session, top, filter_class),
         spike_density,
@@ -1219,6 +1350,12 @@ pub(crate) fn render_report(
 
     pushln(&mut output, "stutter report");
     pushln(&mut output, "==============");
+
+    output.push_str(&render_focus_summary_text(&focus_report_summary(
+        session,
+        &artifacts.focus_events,
+    )));
+
     pushln(&mut output, format!("file: {}", session_path.display()));
     pushln(
         &mut output,
@@ -1777,7 +1914,13 @@ pub(crate) fn data_quality_summary(
         reasons.push("recording stream had write errors".to_owned());
     }
 
-    if !validation.missing_optional_files.is_empty() {
+    let missing_non_focus_optional = validation
+        .missing_optional_files
+        .iter()
+        .filter(|f| *f != crate::session_io::FOCUS_EVENTS_FILE)
+        .collect::<Vec<_>>();
+
+    if !missing_non_focus_optional.is_empty() {
         level = downgrade_quality(level, DataQualityLevel::Medium);
         reasons.push("optional correlation artifacts are missing".to_owned());
     }
@@ -3083,6 +3226,98 @@ fn compute_correlation_windows(
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        autotune::state::SituationKind,
+        recorder::{FocusEvent, RecordedConfig, SessionMetadataCore},
+    };
+
+    #[test]
+    fn focus_report_summary_prefers_latest_changed_focus_event() {
+        let session = SessionFile {
+            core: SessionMetadataCore {
+                focus_mode: Some("auto-focus".to_owned()),
+                final_focus_kind: Some("Browser".to_owned()),
+                focus_switch_count: 2,
+                ..Default::default()
+            },
+            config: RecordedConfig {
+                auto_focus: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let events = vec![
+            FocusEvent {
+                elapsed_ms: 100,
+                action: "changed".to_owned(),
+                kind: Some("Browser".to_owned()),
+                confidence: 0.62,
+                situation: Some(SituationKind::BrowserFocused),
+                root_pids: vec![111],
+                member_pids: vec![111, 112],
+                reasons: vec!["browser parent with active renderer".to_owned()],
+                ..Default::default()
+            },
+            FocusEvent {
+                elapsed_ms: 200,
+                action: "changed".to_owned(),
+                kind: Some("Compile".to_owned()),
+                confidence: 0.87,
+                score: 0.91,
+                situation: Some(SituationKind::CompileLoad),
+                root_pids: vec![1234],
+                member_pids: vec![1234, 1235],
+                reasons: vec![
+                    "cargo root with 14 active compiler descendants".to_owned(),
+                    "linker/write IO evidence observed".to_owned(),
+                ],
+                ..Default::default()
+            },
+        ];
+
+        let summary = focus_report_summary(&session, &events);
+
+        assert_eq!(summary.mode.as_deref(), Some("auto-focus"));
+        assert_eq!(summary.final_focus.as_deref(), Some("Compile"));
+        assert_eq!(summary.situation.as_deref(), Some("CompileLoad"));
+        assert_eq!(summary.confidence, Some(0.87));
+        assert_eq!(summary.score, Some(0.91));
+        assert_eq!(summary.roots, vec![1234]);
+        assert_eq!(summary.member_pids, vec![1234, 1235]);
+        assert_eq!(summary.focus_switches, 2);
+        assert_eq!(summary.reasons.len(), 2);
+    }
+
+    #[test]
+    fn render_focus_summary_text_includes_visible_reasons() {
+        let summary = FocusReportSummary {
+            mode: Some("auto-focus".to_owned()),
+            final_focus: Some("Compile".to_owned()),
+            display_name: Some("cargo build".to_owned()),
+            situation: Some("CompileLoad".to_owned()),
+            confidence: Some(0.87),
+            score: Some(0.91),
+            roots: vec![1234],
+            member_pids: vec![1234, 1235],
+            focus_switches: 2,
+            reasons: vec![
+                "cargo root with 14 active compiler descendants".to_owned(),
+                "CPU delta 780% over 1s".to_owned(),
+            ],
+        };
+
+        let text = render_focus_summary_text(&summary);
+
+        assert!(text.contains("Auto focus:"));
+        assert!(text.contains("  mode: auto-focus"));
+        assert!(text.contains("  final focus: Compile"));
+        assert!(text.contains("  situation: CompileLoad"));
+        assert!(text.contains("  confidence: 0.87"));
+        assert!(text.contains("  roots: [1234]"));
+        assert!(text.contains("  focus switches: 2"));
+        assert!(text.contains("    - cargo root with 14 active compiler descendants"));
+        assert!(text.contains("    - CPU delta 780% over 1s"));
+    }
     use super::*;
 
     #[test]
@@ -3524,6 +3759,7 @@ mod tests {
             ),
             artifacts_summary: artifacts_summary_from_session(&session),
             data_quality: data_quality_summary(&session, &validation),
+            focus_summary: FocusReportSummary::default(),
         };
 
         let value = serde_json::to_value(&analysis).unwrap();
@@ -3568,6 +3804,7 @@ mod tests {
             pressure_timeline: PressureTimelineSummary::default(),
             artifacts_summary: artifacts_summary_from_session(&session),
             data_quality: data_quality_summary(&session, &validation),
+            focus_summary: FocusReportSummary::default(),
         };
 
         build_html_report_model(
