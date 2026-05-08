@@ -1,0 +1,22 @@
+[Unit]
+Description=Stutter remote agent
+Documentation=https://github.com/P2949/stutter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/stutter agent --bind 127.0.0.1:9899
+ExecStop=/usr/bin/stutter autotune restore
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillMode=control-group
+
+# The agent can perform system tuning and restore operations, so do not
+# enable hardening options here that would block /proc, /sys, cgroup, or
+# scheduler syscalls. Downstream packagers may add site-specific sandboxing
+# after confirming their enabled actions still restore correctly.
+
+[Install]
+WantedBy=multi-user.target
