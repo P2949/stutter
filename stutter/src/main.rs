@@ -14,6 +14,7 @@ mod doctor;
 mod ebpf_loader;
 mod events;
 mod flamegraph;
+mod focus;
 mod hwmon;
 mod irq_inspect;
 mod mangohud;
