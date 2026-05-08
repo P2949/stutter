@@ -524,6 +524,14 @@ pub fn plan_apply_low_risk_from_profiles(
     })
 }
 
+pub fn ensure_candidate_measurement_ready_for_decision(
+    measurement_status: &crate::autotune::measurement::CandidateMeasurementWindowStatus,
+) -> anyhow::Result<crate::autotune::experiment::WindowScore> {
+    crate::autotune::measurement::ensure_candidate_measurement_ready_for_decision(
+        measurement_status,
+    )
+}
+
 pub fn ensure_baseline_ready_for_apply(
     baseline_status: &crate::autotune::baseline::BaselineWindowStatus,
 ) -> anyhow::Result<crate::autotune::experiment::WindowScore> {
@@ -662,6 +670,25 @@ mod tests {
             self.rollback_calls += 1;
             Ok(())
         }
+    }
+
+    #[test]
+    fn candidate_measurement_not_ready_blocks_decision_gate() {
+        let status = crate::autotune::measurement::CandidateMeasurementWindowStatus::Collecting {
+            elapsed_ms: 10_000,
+            scored_intervals: 5,
+            scored_samples: 50,
+            scored_task_count: 1,
+            drop_counter_total: 0,
+            reasons: vec!["candidate measurement window not complete".to_owned()],
+        };
+
+        let err = ensure_candidate_measurement_ready_for_decision(&status)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("candidate measurement window is not ready"));
+        assert!(err.contains("candidate measurement window not complete"));
     }
 
     #[test]
