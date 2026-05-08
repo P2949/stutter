@@ -190,9 +190,351 @@ pub fn redact_title_unless_allowed(title: Option<String>, include_title: bool) -
     if include_title { title } else { None }
 }
 
+pub const DEFAULT_FOREGROUND_POLL_MS: u64 = 1_000;
+pub const DEFAULT_FOREGROUND_MAX_STALE_MS: u64 = 2_500;
+pub const DEFAULT_FOREGROUND_MIN_CONFIDENCE: f32 = 0.75;
+pub const DEFAULT_FOREGROUND_INCLUDE_TITLE: bool = false;
+
+pub trait ForegroundProvider {
+    fn source(&self) -> ForegroundSource;
+    fn sample(&mut self, elapsed_ms: u64) -> ForegroundWindowSnapshot;
+}
+
+pub struct ForegroundResolver {
+    provider: Box<dyn ForegroundProvider + Send>,
+    include_title: bool,
+    last_snapshot: Option<ForegroundWindowSnapshot>,
+    max_stale_ms: u64,
+}
+
+impl ForegroundResolver {
+    pub fn new(provider: Box<dyn ForegroundProvider + Send>) -> Self {
+        Self {
+            provider,
+            include_title: DEFAULT_FOREGROUND_INCLUDE_TITLE,
+            last_snapshot: None,
+            max_stale_ms: DEFAULT_FOREGROUND_MAX_STALE_MS,
+        }
+    }
+
+    pub fn with_include_title(mut self, include_title: bool) -> Self {
+        self.include_title = include_title;
+        self
+    }
+
+    pub fn with_max_stale_ms(mut self, max_stale_ms: u64) -> Self {
+        self.max_stale_ms = max_stale_ms;
+        self
+    }
+
+    pub fn include_title(&self) -> bool {
+        self.include_title
+    }
+
+    pub fn max_stale_ms(&self) -> u64 {
+        self.max_stale_ms
+    }
+
+    pub fn last_snapshot(&self) -> Option<&ForegroundWindowSnapshot> {
+        self.last_snapshot.as_ref()
+    }
+
+    pub fn provider_source(&self) -> ForegroundSource {
+        self.provider.source()
+    }
+
+    pub fn sample(&mut self, elapsed_ms: u64) -> ForegroundWindowSnapshot {
+        let mut snapshot = self.provider.sample(elapsed_ms);
+        snapshot.source = snapshot.source.or(Some(self.provider.source()));
+        snapshot.title = redact_title_unless_allowed(snapshot.title, self.include_title);
+
+        if is_good_foreground_snapshot(&snapshot) {
+            snapshot.stale_ms = None;
+            self.last_snapshot = Some(snapshot.clone());
+            return snapshot;
+        }
+
+        if let Some(stale) = self.stale_snapshot(elapsed_ms, &snapshot.reason) {
+            return stale;
+        }
+
+        snapshot
+    }
+
+    fn stale_snapshot(
+        &self,
+        elapsed_ms: u64,
+        failed_reason: &str,
+    ) -> Option<ForegroundWindowSnapshot> {
+        let last = self.last_snapshot.as_ref()?;
+        let stale_ms = elapsed_ms.checked_sub(last.elapsed_ms)?;
+
+        if stale_ms > self.max_stale_ms {
+            return None;
+        }
+
+        let mut snapshot = last.clone();
+        snapshot.elapsed_ms = elapsed_ms;
+        snapshot.title = redact_title_unless_allowed(snapshot.title, self.include_title);
+        snapshot.confidence =
+            reduce_stale_confidence(snapshot.confidence, stale_ms, self.max_stale_ms);
+        snapshot.stale_ms = Some(stale_ms);
+        snapshot.reason = if failed_reason.trim().is_empty() {
+            format!("using stale foreground snapshot from {}ms ago", stale_ms)
+        } else {
+            format!(
+                "using stale foreground snapshot from {}ms ago after provider sample failed: {}",
+                stale_ms, failed_reason
+            )
+        };
+
+        Some(snapshot)
+    }
+}
+
+fn is_good_foreground_snapshot(snapshot: &ForegroundWindowSnapshot) -> bool {
+    snapshot.status == ForegroundProviderStatus::Available
+        && snapshot.source.is_some()
+        && snapshot.confidence >= DEFAULT_FOREGROUND_MIN_CONFIDENCE
+}
+
+fn reduce_stale_confidence(confidence: f32, stale_ms: u64, max_stale_ms: u64) -> f32 {
+    if max_stale_ms == 0 {
+        return 0.0;
+    }
+
+    let stale_fraction = (stale_ms as f32 / max_stale_ms as f32).clamp(0.0, 1.0);
+    let multiplier = 0.75 - (0.50 * stale_fraction);
+    (confidence * multiplier).clamp(0.0, confidence)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct SequenceProvider {
+        source: ForegroundSource,
+        snapshots: Vec<ForegroundWindowSnapshot>,
+        index: usize,
+    }
+
+    impl SequenceProvider {
+        fn new(source: ForegroundSource, snapshots: Vec<ForegroundWindowSnapshot>) -> Self {
+            Self {
+                source,
+                snapshots,
+                index: 0,
+            }
+        }
+    }
+
+    impl ForegroundProvider for SequenceProvider {
+        fn source(&self) -> ForegroundSource {
+            self.source
+        }
+
+        fn sample(&mut self, elapsed_ms: u64) -> ForegroundWindowSnapshot {
+            let mut snapshot = self.snapshots.get(self.index).cloned().unwrap_or_else(|| {
+                ForegroundWindowSnapshot::unavailable(
+                    elapsed_ms,
+                    self.source,
+                    "sequence provider exhausted",
+                )
+            });
+
+            self.index = self.index.saturating_add(1);
+            snapshot.elapsed_ms = elapsed_ms;
+            snapshot
+        }
+    }
+
+    #[test]
+    fn foreground_resolver_redacts_title_by_default() {
+        let provider = SequenceProvider::new(
+            ForegroundSource::Sway,
+            vec![ForegroundWindowSnapshot::available(
+                0,
+                ForegroundSource::Sway,
+                Some(1234),
+                Some("firefox".to_owned()),
+                Some("Firefox".to_owned()),
+                Some("private browser tab".to_owned()),
+                true,
+                Some("42".to_owned()),
+                Some("web".to_owned()),
+                0.95,
+                "active sway node",
+            )],
+        );
+        let mut resolver = ForegroundResolver::new(Box::new(provider));
+
+        let snapshot = resolver.sample(1_000);
+
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
+        assert_eq!(snapshot.title, None);
+        assert_eq!(snapshot.pid, Some(1234));
+        assert_eq!(snapshot.confidence, 0.95);
+        assert_eq!(snapshot.stale_ms, None);
+    }
+
+    #[test]
+    fn foreground_resolver_keeps_title_when_enabled() {
+        let provider = SequenceProvider::new(
+            ForegroundSource::Hyprland,
+            vec![ForegroundWindowSnapshot::available(
+                0,
+                ForegroundSource::Hyprland,
+                Some(1234),
+                Some("foot".to_owned()),
+                Some("foot".to_owned()),
+                Some("terminal private title".to_owned()),
+                true,
+                Some("0xabc".to_owned()),
+                Some("dev".to_owned()),
+                0.95,
+                "active hyprland client",
+            )],
+        );
+        let mut resolver = ForegroundResolver::new(Box::new(provider)).with_include_title(true);
+
+        let snapshot = resolver.sample(1_000);
+
+        assert_eq!(snapshot.title.as_deref(), Some("terminal private title"));
+    }
+
+    #[test]
+    fn foreground_resolver_returns_stale_last_good_snapshot_inside_window() {
+        let provider = SequenceProvider::new(
+            ForegroundSource::Sway,
+            vec![
+                ForegroundWindowSnapshot::available(
+                    0,
+                    ForegroundSource::Sway,
+                    Some(2222),
+                    Some("steam".to_owned()),
+                    Some("Steam".to_owned()),
+                    Some("private title".to_owned()),
+                    true,
+                    Some("17".to_owned()),
+                    Some("games".to_owned()),
+                    0.95,
+                    "active sway node",
+                ),
+                ForegroundWindowSnapshot::unavailable(
+                    0,
+                    ForegroundSource::Sway,
+                    "sway IPC timed out",
+                ),
+            ],
+        );
+        let mut resolver = ForegroundResolver::new(Box::new(provider));
+
+        let first = resolver.sample(1_000);
+        let stale = resolver.sample(2_000);
+
+        assert_eq!(first.status, ForegroundProviderStatus::Available);
+        assert_eq!(stale.status, ForegroundProviderStatus::Available);
+        assert_eq!(stale.pid, Some(2222));
+        assert_eq!(stale.app_id.as_deref(), Some("steam"));
+        assert_eq!(stale.title, None);
+        assert_eq!(stale.stale_ms, Some(1_000));
+        assert!(stale.confidence < first.confidence);
+        assert!(
+            stale
+                .reason
+                .contains("using stale foreground snapshot from 1000ms ago")
+        );
+        assert!(stale.reason.contains("sway IPC timed out"));
+    }
+
+    #[test]
+    fn foreground_resolver_does_not_return_stale_snapshot_after_window() {
+        let provider = SequenceProvider::new(
+            ForegroundSource::Sway,
+            vec![
+                ForegroundWindowSnapshot::available(
+                    0,
+                    ForegroundSource::Sway,
+                    Some(2222),
+                    Some("steam".to_owned()),
+                    Some("Steam".to_owned()),
+                    None,
+                    false,
+                    Some("17".to_owned()),
+                    Some("games".to_owned()),
+                    0.95,
+                    "active sway node",
+                ),
+                ForegroundWindowSnapshot::unavailable(
+                    0,
+                    ForegroundSource::Sway,
+                    "sway IPC timed out",
+                ),
+            ],
+        );
+        let mut resolver = ForegroundResolver::new(Box::new(provider)).with_max_stale_ms(500);
+
+        let first = resolver.sample(1_000);
+        let second = resolver.sample(2_000);
+
+        assert_eq!(first.status, ForegroundProviderStatus::Available);
+        assert_eq!(second.status, ForegroundProviderStatus::Unavailable);
+        assert_eq!(second.reason, "sway IPC timed out");
+        assert_eq!(second.stale_ms, None);
+    }
+
+    #[test]
+    fn foreground_resolver_retains_only_available_high_confidence_snapshots() {
+        let provider = SequenceProvider::new(
+            ForegroundSource::X11,
+            vec![
+                ForegroundWindowSnapshot::available(
+                    0,
+                    ForegroundSource::X11,
+                    Some(3333),
+                    None,
+                    Some("Firefox".to_owned()),
+                    None,
+                    false,
+                    Some("0x1200007".to_owned()),
+                    Some("1".to_owned()),
+                    0.50,
+                    "low-confidence x11 focus",
+                ),
+                ForegroundWindowSnapshot::unavailable(
+                    0,
+                    ForegroundSource::X11,
+                    "xprop unavailable",
+                ),
+            ],
+        );
+        let mut resolver = ForegroundResolver::new(Box::new(provider));
+
+        let low_confidence = resolver.sample(1_000);
+        let unavailable = resolver.sample(1_500);
+
+        assert_eq!(low_confidence.status, ForegroundProviderStatus::Available);
+        assert_eq!(low_confidence.confidence, 0.50);
+        assert!(resolver.last_snapshot().is_none());
+        assert_eq!(unavailable.status, ForegroundProviderStatus::Unavailable);
+        assert_eq!(unavailable.reason, "xprop unavailable");
+    }
+
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn foreground_resolver_defaults_match_phase_two_policy() {
+        let provider = SequenceProvider::new(ForegroundSource::Unsupported, Vec::new());
+        let resolver = ForegroundResolver::new(Box::new(provider));
+
+        assert_eq!(DEFAULT_FOREGROUND_POLL_MS, 1_000);
+        assert_eq!(DEFAULT_FOREGROUND_MAX_STALE_MS, 2_500);
+        assert_eq!(DEFAULT_FOREGROUND_MIN_CONFIDENCE, 0.75);
+        assert!(!DEFAULT_FOREGROUND_INCLUDE_TITLE);
+        assert!(!resolver.include_title());
+        assert_eq!(resolver.max_stale_ms(), 2_500);
+        assert_eq!(resolver.provider_source(), ForegroundSource::Unsupported);
+    }
 
     #[test]
     fn snapshot_default_redacts_title_and_is_unsupported() {
