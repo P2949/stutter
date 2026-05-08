@@ -415,7 +415,7 @@ pub struct AutotuneReplayArgs {
     pub run: PathBuf,
 
     #[arg(long = "config", value_name = "AUTOTUNE_TOML")]
-    pub config: PathBuf,
+    pub config: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -1049,7 +1049,7 @@ pub enum AppCommand {
     },
     AutotuneReplay {
         run: PathBuf,
-        config: PathBuf,
+        config: Option<PathBuf>,
     },
     Probes {
         json: bool,
