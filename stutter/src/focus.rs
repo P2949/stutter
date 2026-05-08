@@ -178,9 +178,324 @@ impl FocusCache {
         self.previous.clear();
         self.proc_cache = crate::process_tree::ProcessCache::default();
     }
+}
 
-    pub fn previous_len(&self) -> usize {
-        self.previous.len()
+#[derive(Debug, Clone)]
+pub struct FocusPolicy {
+    pub poll_ms: u64,
+    pub min_confidence: f32,
+    pub switch_margin: f32,
+    pub switch_cooldown_ms: u64,
+    pub required_winner_polls: u32,
+    pub max_roots: usize,
+}
+
+impl Default for FocusPolicy {
+    fn default() -> Self {
+        Self {
+            poll_ms: 1000,
+            min_confidence: 0.60,
+            switch_margin: 0.20,
+            switch_cooldown_ms: 5000,
+            required_winner_polls: 2,
+            max_roots: 4,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedFocus {
+    pub group: FocusGroup,
+    pub selected_at_ms: u64,
+    pub last_confirmed_ms: u64,
+    pub situation: crate::autotune::state::SituationKind,
+}
+
+#[derive(Debug, Clone)]
+struct PendingFocus {
+    group: FocusGroup,
+    first_seen_ms: u64,
+    polls: u32,
+}
+
+pub struct FocusResolver {
+    cache: FocusCache,
+    current: Option<ResolvedFocus>,
+    pending: Option<PendingFocus>,
+    policy: FocusPolicy,
+}
+
+#[derive(Debug, Clone)]
+pub enum FocusDecision {
+    Keep {
+        focus: ResolvedFocus,
+    },
+    Switch {
+        old: Option<ResolvedFocus>,
+        new: ResolvedFocus,
+    },
+    Clear {
+        old: Option<ResolvedFocus>,
+        reason: String,
+    },
+    NoTarget {
+        reason: String,
+    },
+}
+
+impl FocusResolver {
+    pub fn new(policy: FocusPolicy) -> Self {
+        Self {
+            cache: FocusCache::default(),
+            current: None,
+            pending: None,
+            policy,
+        }
+    }
+
+    pub fn sample(&mut self, proc_root: &std::path::Path, elapsed_ms: u64) -> FocusDecision {
+        let snapshot = focus_snapshot_at(proc_root, &mut self.cache, elapsed_ms);
+        self.decide_from_snapshot(snapshot)
+    }
+
+    pub fn decide_from_snapshot(&mut self, snapshot: FocusSnapshot) -> FocusDecision {
+        let candidate = self.best_eligible_group(&snapshot);
+
+        let Some(candidate) = candidate else {
+            self.pending = None;
+            if let Some(old) = self.current.take() {
+                return FocusDecision::Clear {
+                    old: Some(old),
+                    reason: format!(
+                        "no focus group confidence met min_confidence={:.2}",
+                        self.policy.min_confidence
+                    ),
+                };
+            }
+
+            return FocusDecision::NoTarget {
+                reason: format!(
+                    "no focus group confidence met min_confidence={:.2}",
+                    self.policy.min_confidence
+                ),
+            };
+        };
+
+        let candidate = self.limit_group_roots(candidate);
+
+        if let Some(existing_current) = self.current.clone() {
+            let current_group = snapshot
+                .groups
+                .iter()
+                .find(|group| Self::same_focus_identity(group, &existing_current.group))
+                .cloned()
+                .map(|group| self.limit_group_roots(group));
+
+            if let Some(current_group) =
+                current_group.filter(|g| Self::group_roots_alive(&snapshot, g) && g.score >= 0.45)
+            {
+                let mut refreshed = existing_current.clone();
+                refreshed.group = current_group;
+                refreshed.last_confirmed_ms = snapshot.elapsed_ms;
+                refreshed.situation = Self::situation_for_group(&refreshed.group);
+
+                if Self::same_focus_identity(&refreshed.group, &candidate) {
+                    self.current = Some(refreshed.clone());
+                    self.pending = None;
+                    return FocusDecision::Keep { focus: refreshed };
+                }
+
+                if candidate.score < refreshed.group.score + self.policy.switch_margin {
+                    self.current = Some(refreshed.clone());
+                    self.pending = None;
+                    return FocusDecision::Keep { focus: refreshed };
+                }
+
+                if snapshot.elapsed_ms.saturating_sub(refreshed.selected_at_ms)
+                    < self.policy.switch_cooldown_ms
+                {
+                    self.current = Some(refreshed.clone());
+                    self.pending = None;
+                    return FocusDecision::Keep { focus: refreshed };
+                }
+
+                if !self.confirm_pending_winner(&candidate, snapshot.elapsed_ms) {
+                    self.current = Some(refreshed.clone());
+                    return FocusDecision::Keep { focus: refreshed };
+                }
+
+                let old = Some(refreshed);
+                let new = Self::resolved_focus_from_group(candidate, snapshot.elapsed_ms);
+                self.current = Some(new.clone());
+                self.pending = None;
+                return FocusDecision::Switch { old, new };
+            }
+
+            if !self.confirm_pending_winner(&candidate, snapshot.elapsed_ms) {
+                let old = self.current.take();
+                return FocusDecision::Clear {
+                    old,
+                    reason:
+                        "current focus root disappeared or score fell below 0.45; waiting for a stable replacement winner"
+                            .to_owned(),
+                };
+            }
+
+            let old = self.current.take();
+            let new = Self::resolved_focus_from_group(candidate, snapshot.elapsed_ms);
+            self.current = Some(new.clone());
+            self.pending = None;
+            return FocusDecision::Switch { old, new };
+        }
+
+        if !self.confirm_pending_winner(&candidate, snapshot.elapsed_ms) {
+            return FocusDecision::NoTarget {
+                reason: format!(
+                    "waiting for stable winner poll {}/{}",
+                    self.pending
+                        .as_ref()
+                        .map(|pending| pending.polls)
+                        .unwrap_or(0),
+                    self.policy.required_winner_polls.max(1)
+                ),
+            };
+        }
+
+        let new = Self::resolved_focus_from_group(candidate, snapshot.elapsed_ms);
+        self.current = Some(new.clone());
+        self.pending = None;
+        FocusDecision::Switch { old: None, new }
+    }
+
+    fn best_eligible_group(&self, snapshot: &FocusSnapshot) -> Option<FocusGroup> {
+        snapshot
+            .groups
+            .iter()
+            .filter(|group| group.confidence >= self.policy.min_confidence)
+            .filter(|group| Self::group_roots_alive(snapshot, group))
+            .cloned()
+            .max_by(Self::compare_group_preference)
+    }
+
+    fn confirm_pending_winner(&mut self, candidate: &FocusGroup, elapsed_ms: u64) -> bool {
+        let required = self.policy.required_winner_polls.max(1);
+
+        if required == 1 {
+            self.pending = Some(PendingFocus {
+                group: candidate.clone(),
+                first_seen_ms: elapsed_ms,
+                polls: 1,
+            });
+            return true;
+        }
+
+        match self.pending.as_mut() {
+            Some(pending) if Self::same_focus_identity(&pending.group, candidate) => {
+                pending.group = candidate.clone();
+                pending.polls = pending.polls.saturating_add(1);
+                pending.polls >= required
+            }
+            _ => {
+                self.pending = Some(PendingFocus {
+                    group: candidate.clone(),
+                    first_seen_ms: elapsed_ms,
+                    polls: 1,
+                });
+                false
+            }
+        }
+    }
+
+    fn resolved_focus_from_group(group: FocusGroup, elapsed_ms: u64) -> ResolvedFocus {
+        let situation = Self::situation_for_group(&group);
+        ResolvedFocus {
+            group,
+            selected_at_ms: elapsed_ms,
+            last_confirmed_ms: elapsed_ms,
+            situation,
+        }
+    }
+
+    fn situation_for_group(group: &FocusGroup) -> crate::autotune::state::SituationKind {
+        match group.kind {
+            FocusGroupKind::Game => crate::autotune::state::SituationKind::GameFocused,
+            FocusGroupKind::Compile => crate::autotune::state::SituationKind::CompileLoad,
+            FocusGroupKind::Desktop => crate::autotune::state::SituationKind::CompositorPressure,
+            FocusGroupKind::Idle => crate::autotune::state::SituationKind::Idle,
+            FocusGroupKind::Browser
+            | FocusGroupKind::Media
+            | FocusGroupKind::Recording
+            | FocusGroupKind::VirtualMachine => crate::autotune::state::SituationKind::CpuPressure,
+            FocusGroupKind::Unknown => crate::autotune::state::SituationKind::Unknown,
+        }
+    }
+
+    fn limit_group_roots(&self, mut group: FocusGroup) -> FocusGroup {
+        if group.root_pids.len() > self.policy.max_roots {
+            group.root_pids.truncate(self.policy.max_roots);
+        }
+        group
+    }
+
+    fn group_roots_alive(snapshot: &FocusSnapshot, group: &FocusGroup) -> bool {
+        if group.root_pids.is_empty() {
+            return group
+                .primary_pid
+                .map(|pid| snapshot.processes.contains_key(&pid))
+                .unwrap_or(false);
+        }
+
+        group
+            .root_pids
+            .iter()
+            .any(|pid| snapshot.processes.contains_key(pid))
+    }
+
+    fn same_focus_identity(left: &FocusGroup, right: &FocusGroup) -> bool {
+        if left.kind != right.kind {
+            return false;
+        }
+
+        if !left.root_pids.is_empty() && !right.root_pids.is_empty() {
+            return left
+                .root_pids
+                .iter()
+                .any(|pid| right.root_pids.contains(pid));
+        }
+
+        match (left.primary_pid, right.primary_pid) {
+            (Some(left), Some(right)) => left == right,
+            _ => false,
+        }
+    }
+
+    fn compare_group_preference(left: &FocusGroup, right: &FocusGroup) -> std::cmp::Ordering {
+        left.score
+            .partial_cmp(&right.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                left.confidence
+                    .partial_cmp(&right.confidence)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| {
+                priority_band_rank(left.priority_band).cmp(&priority_band_rank(right.priority_band))
+            })
+            .then_with(|| {
+                let left_root = left
+                    .root_pids
+                    .first()
+                    .copied()
+                    .or(left.primary_pid)
+                    .unwrap_or(u32::MAX);
+                let right_root = right
+                    .root_pids
+                    .first()
+                    .copied()
+                    .or(right.primary_pid)
+                    .unwrap_or(u32::MAX);
+                right_root.cmp(&left_root)
+            })
     }
 }
 
@@ -2493,6 +2808,395 @@ fn is_realtime_policy(sched_policy: Option<u32>) -> bool {
 mod tests {
     use super::*;
     use crate::process_tree::TaskClass;
+
+    fn resolver_test_classification(
+        class: SystemTaskClass,
+        priority_band: PriorityBand,
+        confidence: f32,
+    ) -> Classification {
+        Classification {
+            class,
+            priority_band,
+            confidence,
+            reasons: vec![format!("resolver test classification {class:?}")],
+        }
+    }
+
+    fn resolver_test_process(pid: u32, comm: &str, class: SystemTaskClass) -> FocusProcess {
+        FocusProcess {
+            pid,
+            ppid: 1,
+            comm: comm.to_owned(),
+            cmdline: comm.to_owned(),
+            cgroup_path: None,
+            starttime_ticks: Some(pid as u64 * 100),
+            sched_policy: None,
+            classification: resolver_test_classification(class, PriorityBand::Interactive, 0.80),
+            cpu_time_ticks_delta: 10,
+            read_bytes_delta: 0,
+            write_bytes_delta: 0,
+            voluntary_ctxt_switches_delta: 0,
+            nonvoluntary_ctxt_switches_delta: 0,
+        }
+    }
+
+    fn resolver_test_group(
+        kind: FocusGroupKind,
+        root_pids: Vec<u32>,
+        member_pids: Vec<u32>,
+        primary_pid: Option<u32>,
+        score: f32,
+        confidence: f32,
+    ) -> FocusGroup {
+        FocusGroup {
+            kind,
+            root_pids,
+            member_pids,
+            primary_pid,
+            display_name: format!("{kind:?}"),
+            score,
+            score_breakdown: FocusScoreBreakdown::default(),
+            confidence,
+            priority_band: match kind {
+                FocusGroupKind::Game | FocusGroupKind::Browser | FocusGroupKind::Desktop => {
+                    PriorityBand::ForegroundLatency
+                }
+                FocusGroupKind::Compile => PriorityBand::Throughput,
+                FocusGroupKind::Idle => PriorityBand::Background,
+                FocusGroupKind::Media
+                | FocusGroupKind::Recording
+                | FocusGroupKind::VirtualMachine
+                | FocusGroupKind::Unknown => PriorityBand::Interactive,
+            },
+            reasons: vec![format!("resolver test group {kind:?}")],
+        }
+    }
+
+    fn resolver_test_snapshot(
+        groups: Vec<FocusGroup>,
+        processes: Vec<FocusProcess>,
+        elapsed_ms: u64,
+    ) -> FocusSnapshot {
+        let mut process_map = BTreeMap::new();
+        let mut children_by_parent: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+
+        for process in processes {
+            children_by_parent
+                .entry(process.ppid)
+                .or_default()
+                .push(process.pid);
+            process_map.insert(process.pid, process);
+        }
+
+        for children in children_by_parent.values_mut() {
+            children.sort_unstable();
+        }
+
+        FocusSnapshot {
+            elapsed_ms,
+            processes: process_map,
+            children_by_parent,
+            groups,
+        }
+    }
+
+    fn resolver_test_policy() -> FocusPolicy {
+        FocusPolicy {
+            poll_ms: 1000,
+            min_confidence: 0.60,
+            switch_margin: 0.20,
+            switch_cooldown_ms: 5000,
+            required_winner_polls: 2,
+            max_roots: 4,
+        }
+    }
+
+    #[test]
+    fn focus_resolver_requires_repeated_winner_before_initial_switch() {
+        let mut resolver = FocusResolver::new(resolver_test_policy());
+        let group = resolver_test_group(
+            FocusGroupKind::Game,
+            vec![10],
+            vec![10],
+            Some(10),
+            0.80,
+            0.80,
+        );
+        let process = resolver_test_process(10, "Game.exe", SystemTaskClass::Game);
+
+        let first = resolver.decide_from_snapshot(resolver_test_snapshot(
+            vec![group.clone()],
+            vec![process.clone()],
+            1000,
+        ));
+
+        match first {
+            FocusDecision::NoTarget { reason } => {
+                assert!(reason.contains("waiting for stable winner"));
+            }
+            other => panic!("expected NoTarget on first pending poll, got {other:?}"),
+        }
+
+        let second =
+            resolver.decide_from_snapshot(resolver_test_snapshot(vec![group], vec![process], 2000));
+
+        match second {
+            FocusDecision::Switch { old, new } => {
+                assert!(old.is_none());
+                assert_eq!(new.group.kind, FocusGroupKind::Game);
+                assert_eq!(new.group.root_pids, vec![10]);
+                assert_eq!(new.selected_at_ms, 2000);
+                assert_eq!(new.last_confirmed_ms, 2000);
+                assert_eq!(
+                    new.situation,
+                    crate::autotune::state::SituationKind::GameFocused
+                );
+            }
+            other => panic!("expected initial Switch after repeated winner, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn focus_resolver_keeps_current_when_alive_and_score_floor_met() {
+        let mut policy = resolver_test_policy();
+        policy.required_winner_polls = 1;
+        let mut resolver = FocusResolver::new(policy);
+
+        let first_group = resolver_test_group(
+            FocusGroupKind::Browser,
+            vec![20],
+            vec![20],
+            Some(20),
+            0.90,
+            0.90,
+        );
+        let first_process =
+            resolver_test_process(20, "firefox", SystemTaskClass::BrowserForeground);
+
+        let first = resolver.decide_from_snapshot(resolver_test_snapshot(
+            vec![first_group],
+            vec![first_process],
+            0,
+        ));
+
+        match first {
+            FocusDecision::Switch { new, .. } => {
+                assert_eq!(new.group.kind, FocusGroupKind::Browser);
+            }
+            other => panic!("expected initial Switch, got {other:?}"),
+        }
+
+        let keep_group = resolver_test_group(
+            FocusGroupKind::Browser,
+            vec![20],
+            vec![20],
+            Some(20),
+            0.45,
+            0.70,
+        );
+        let keep_process = resolver_test_process(20, "firefox", SystemTaskClass::BrowserForeground);
+
+        let keep = resolver.decide_from_snapshot(resolver_test_snapshot(
+            vec![keep_group],
+            vec![keep_process],
+            1000,
+        ));
+
+        match keep {
+            FocusDecision::Keep { focus } => {
+                assert_eq!(focus.group.kind, FocusGroupKind::Browser);
+                assert_eq!(focus.group.score, 0.45);
+                assert_eq!(focus.selected_at_ms, 0);
+                assert_eq!(focus.last_confirmed_ms, 1000);
+            }
+            other => {
+                panic!("expected Keep for live current focus above score floor, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn focus_resolver_enforces_switch_margin_and_cooldown() {
+        let mut policy = resolver_test_policy();
+        policy.required_winner_polls = 1;
+        policy.switch_margin = 0.20;
+        policy.switch_cooldown_ms = 5000;
+        let mut resolver = FocusResolver::new(policy);
+
+        let old_group = resolver_test_group(
+            FocusGroupKind::Browser,
+            vec![30],
+            vec![30],
+            Some(30),
+            0.60,
+            0.90,
+        );
+        let old_process = resolver_test_process(30, "firefox", SystemTaskClass::BrowserForeground);
+
+        let initial = resolver.decide_from_snapshot(resolver_test_snapshot(
+            vec![old_group.clone()],
+            vec![old_process.clone()],
+            0,
+        ));
+
+        match initial {
+            FocusDecision::Switch { new, .. } => {
+                assert_eq!(new.group.kind, FocusGroupKind::Browser);
+            }
+            other => panic!("expected initial Switch, got {other:?}"),
+        }
+
+        let weak_new_group = resolver_test_group(
+            FocusGroupKind::Compile,
+            vec![40],
+            vec![40],
+            Some(40),
+            0.75,
+            0.95,
+        );
+        let weak_new_process = resolver_test_process(40, "cargo", SystemTaskClass::BuildJob);
+
+        let below_margin = resolver.decide_from_snapshot(resolver_test_snapshot(
+            vec![old_group.clone(), weak_new_group],
+            vec![old_process.clone(), weak_new_process],
+            1000,
+        ));
+
+        match below_margin {
+            FocusDecision::Keep { focus } => {
+                assert_eq!(focus.group.kind, FocusGroupKind::Browser);
+            }
+            other => panic!("expected Keep when candidate fails switch margin, got {other:?}"),
+        }
+
+        let strong_new_group = resolver_test_group(
+            FocusGroupKind::Compile,
+            vec![41],
+            vec![41],
+            Some(41),
+            0.90,
+            0.95,
+        );
+        let strong_new_process = resolver_test_process(41, "cargo", SystemTaskClass::BuildJob);
+
+        let during_cooldown = resolver.decide_from_snapshot(resolver_test_snapshot(
+            vec![old_group.clone(), strong_new_group.clone()],
+            vec![old_process.clone(), strong_new_process.clone()],
+            2000,
+        ));
+
+        match during_cooldown {
+            FocusDecision::Keep { focus } => {
+                assert_eq!(focus.group.kind, FocusGroupKind::Browser);
+            }
+            other => panic!("expected Keep during switch cooldown, got {other:?}"),
+        }
+
+        let after_cooldown = resolver.decide_from_snapshot(resolver_test_snapshot(
+            vec![old_group, strong_new_group],
+            vec![old_process, strong_new_process],
+            6000,
+        ));
+
+        match after_cooldown {
+            FocusDecision::Switch { old, new } => {
+                assert_eq!(old.unwrap().group.kind, FocusGroupKind::Browser);
+                assert_eq!(new.group.kind, FocusGroupKind::Compile);
+                assert_eq!(
+                    new.situation,
+                    crate::autotune::state::SituationKind::CompileLoad
+                );
+            }
+            other => panic!("expected Switch after cooldown and margin, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn focus_resolver_clears_when_no_group_meets_confidence() {
+        let mut policy = resolver_test_policy();
+        policy.required_winner_polls = 1;
+        let mut resolver = FocusResolver::new(policy);
+
+        let high_conf_group = resolver_test_group(
+            FocusGroupKind::Game,
+            vec![50],
+            vec![50],
+            Some(50),
+            0.90,
+            0.90,
+        );
+        let process = resolver_test_process(50, "Game.exe", SystemTaskClass::Game);
+
+        let initial = resolver.decide_from_snapshot(resolver_test_snapshot(
+            vec![high_conf_group],
+            vec![process.clone()],
+            0,
+        ));
+
+        match initial {
+            FocusDecision::Switch { new, .. } => {
+                assert_eq!(new.group.kind, FocusGroupKind::Game);
+            }
+            other => panic!("expected initial Switch, got {other:?}"),
+        }
+
+        let low_conf_group = resolver_test_group(
+            FocusGroupKind::Game,
+            vec![50],
+            vec![50],
+            Some(50),
+            0.90,
+            0.40,
+        );
+
+        let clear = resolver.decide_from_snapshot(resolver_test_snapshot(
+            vec![low_conf_group],
+            vec![process],
+            1000,
+        ));
+
+        match clear {
+            FocusDecision::Clear { old, reason } => {
+                assert!(old.is_some());
+                assert!(reason.contains("min_confidence"));
+            }
+            other => panic!("expected Clear when no group meets confidence, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn focus_resolver_limits_selected_root_pids_to_policy_max_roots() {
+        let mut policy = resolver_test_policy();
+        policy.required_winner_polls = 1;
+        policy.max_roots = 2;
+        let mut resolver = FocusResolver::new(policy);
+
+        let group = resolver_test_group(
+            FocusGroupKind::Game,
+            vec![60, 61, 62],
+            vec![60, 61, 62],
+            Some(60),
+            0.90,
+            0.90,
+        );
+
+        let processes = vec![
+            resolver_test_process(60, "GameA.exe", SystemTaskClass::Game),
+            resolver_test_process(61, "GameB.exe", SystemTaskClass::Game),
+            resolver_test_process(62, "GameC.exe", SystemTaskClass::Game),
+        ];
+
+        let decision =
+            resolver.decide_from_snapshot(resolver_test_snapshot(vec![group], processes, 0));
+
+        match decision {
+            FocusDecision::Switch { new, .. } => {
+                assert_eq!(new.group.root_pids, vec![60, 61]);
+                assert_eq!(new.group.member_pids, vec![60, 61, 62]);
+            }
+            other => panic!("expected Switch with truncated roots, got {other:?}"),
+        }
+    }
 
     fn test_classification(
         class: SystemTaskClass,
