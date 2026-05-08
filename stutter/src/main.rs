@@ -287,6 +287,13 @@ async fn main() -> anyhow::Result<()> {
                 history_path: None,
             },
         ),
+        AppCommand::AutotuneReplayHistory { history } => {
+            autotune::history_replay::autotune_replay_history_command(
+                autotune::history_replay::AutotuneReplayHistoryCommandInput {
+                    history_path: history,
+                },
+            )
+        }
         AppCommand::Audit { path, tail, json } => {
             audit::audit_command(audit::AuditCommandInput { path, tail, json })
         }
