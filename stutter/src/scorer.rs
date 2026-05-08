@@ -19,7 +19,12 @@ pub struct StutterScore {
 pub fn class_contributes_to_score(class: TaskClass) -> bool {
     matches!(
         class,
-        TaskClass::Game | TaskClass::GameHelper | TaskClass::WineServer | TaskClass::GameScope
+        TaskClass::Game
+            | TaskClass::GameHelper
+            | TaskClass::WineServer
+            | TaskClass::GameScope
+            | TaskClass::GameRenderThread
+            | TaskClass::GameWorkerThread
     )
 }
 
