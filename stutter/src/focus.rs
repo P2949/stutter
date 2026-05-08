@@ -3927,10 +3927,25 @@ pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
             identity.comm
         ));
         (SystemTaskClass::VirtualMachine, 0.85)
+    } else if identity.pid != 1
+        && !cgroup_path.contains(".service")
+        && !cgroup_path.contains("/system.slice/")
+        && let Some(hit) = crate::community_rules::classify_process_identity(
+            &crate::community_rules::CommunityProcessIdentity {
+                thread_comm: identity.comm,
+                process_comm: identity.comm,
+                cmdline: identity.cmdline,
+                exe_path: identity.exe_path.unwrap_or_default(),
+                cgroup_path: identity.cgroup_path.unwrap_or_default(),
+            },
+        )
+        && let Some(class) = system_class_for_community_task_class(hit.class)
+    {
+        reasons.push(hit.reason);
+        (class, hit.confidence)
     } else if cgroup_path.contains("steam")
         || cgroup_path.contains("games")
         || cmdline.contains("steamapps")
-        || cmdline.contains(".exe")
         || exe_path.contains("steamapps")
     {
         reasons.push("cgroup, cmdline, or exe path suggests a game process".to_owned());
@@ -3957,6 +3972,15 @@ pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
         priority_band: priority_band_for_class(class, identity.sched_policy),
         confidence,
         reasons,
+    }
+}
+
+fn system_class_for_community_task_class(
+    class: crate::process_tree::TaskClass,
+) -> Option<SystemTaskClass> {
+    match class {
+        crate::process_tree::TaskClass::Game => Some(SystemTaskClass::Game),
+        _ => None,
     }
 }
 
@@ -6235,6 +6259,70 @@ mod tests {
         assert_eq!(
             priority_band_for_class(SystemTaskClass::Compositor, None),
             PriorityBand::ForegroundLatency
+        );
+    }
+
+    #[test]
+    fn focus_classification_uses_community_rule_reason_for_proton_game() {
+        let classification = classify_process(&ProcessIdentity {
+            pid: 1600,
+            ppid: 1,
+            comm: "KingdomCome",
+            cmdline: "/home/me/.steam/steamapps/compatdata/379430/pfx/drive_c/KingdomCome.exe --game",
+            exe_path: Some("/usr/bin/wine"),
+            cgroup_path: Some("/user.slice/app-steam-379430.scope"),
+            sched_policy: None,
+        });
+
+        assert_eq!(classification.class, SystemTaskClass::Game);
+        assert_eq!(
+            classification.priority_band,
+            PriorityBand::ForegroundLatency
+        );
+        assert!(
+            classification.reasons.iter().any(|reason| {
+                reason.contains("community-rules") && reason.contains("wine_proton_k.rules")
+            }),
+            "reasons={:?}",
+            classification.reasons
+        );
+    }
+
+    #[test]
+    fn focus_ambiguous_exe_without_context_is_not_game() {
+        let classification = classify_process(&ProcessIdentity {
+            pid: 1601,
+            ppid: 1,
+            comm: "build.exe",
+            cmdline: "/tmp/build.exe --compile",
+            exe_path: Some("/tmp/build.exe"),
+            cgroup_path: Some("/user.slice/app-builder.scope"),
+            sched_policy: None,
+        });
+
+        assert_ne!(classification.class, SystemTaskClass::Game);
+    }
+
+    #[test]
+    fn focus_hardcoded_audio_classification_wins_over_community_context() {
+        let classification = classify_process(&ProcessIdentity {
+            pid: 1602,
+            ppid: 1,
+            comm: "pipewire",
+            cmdline: "/home/me/.steam/steamapps/compatdata/379430/pfx/drive_c/KingdomCome.exe",
+            exe_path: Some("/home/me/.steam/steamapps/common/KingdomCome/KingdomCome.exe"),
+            cgroup_path: Some("/user.slice/app-steam-379430.scope"),
+            sched_policy: Some(SCHED_FIFO),
+        });
+
+        assert_eq!(classification.class, SystemTaskClass::AudioRealtime);
+        assert!(
+            classification
+                .reasons
+                .iter()
+                .all(|reason| !reason.contains("community-rules")),
+            "reasons={:?}",
+            classification.reasons
         );
     }
 

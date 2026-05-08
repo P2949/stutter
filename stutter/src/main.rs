@@ -8,6 +8,7 @@ mod artifact_contract_tests;
 mod audit;
 mod autotune;
 mod cli;
+mod community_rules;
 mod config_file;
 
 mod diagnosis;

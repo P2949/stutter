@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "source": {
+    "name": "stutter phase-1 fixture derived from CachyOS/ananicy-rules shape",
+    "repo": "https://github.com/CachyOS/ananicy-rules",
+    "commit": "fixture-only",
+    "generated_at": "2026-05-08T00:00:00Z"
+  },
+  "rules": [
+    {
+      "name": "KingdomCome.exe",
+      "normalized_name": "kingdomcome.exe",
+      "type": "Game",
+      "stutter_class": "Game",
+      "confidence": 0.9,
+      "source_path": "00-default/Games/wine_proton/wine_proton_k.rules",
+      "context": ["wine_or_proton_or_steam"],
+      "title": "Kingdom Come: Deliverance",
+      "ambiguous": false
+    },
+    {
+      "name": "build.exe",
+      "normalized_name": "build.exe",
+      "type": "Game",
+      "stutter_class": "Game",
+      "confidence": 0.7,
+      "source_path": "00-default/Games/wine_proton/wine_proton_b.rules",
+      "context": ["wine_or_proton_or_steam"],
+      "title": "Ambiguous game executable fixture",
+      "ambiguous": true
+    },
+    {
+      "name": "factorio",
+      "normalized_name": "factorio",
+      "type": "Game",
+      "stutter_class": "Game",
+      "confidence": 0.82,
+      "source_path": "00-default/Games/linux-native/linux_native_f.rules",
+      "context": ["linux_native"],
+      "title": "Factorio",
+      "ambiguous": false
+    }
+  ]
+}

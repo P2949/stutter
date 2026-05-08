@@ -1451,7 +1451,21 @@ pub fn classify_task_with_context(
         return TaskClass::NetworkDaemon;
     }
 
-    // 7. Generic Process Fallbacks
+    // 7. Community app-name hints, then generic process fallbacks.
+    if !is_service_looking_process(&lower_process_comm, &lower_cgroup_path)
+        && let Some(hit) = crate::community_rules::classify_process_identity(
+            &crate::community_rules::CommunityProcessIdentity {
+                thread_comm: comm,
+                process_comm,
+                cmdline,
+                exe_path,
+                cgroup_path,
+            },
+        )
+    {
+        return hit.class;
+    }
+
     if is_game {
         return TaskClass::Game;
     }
@@ -1542,7 +1556,6 @@ fn is_game_render_comm(comm: &str) -> bool {
 fn is_game_exe(exe_path: &str) -> bool {
     exe_path.contains("steamapps/common")
         || exe_path.contains("/games/")
-        || exe_path.contains(".exe")
         || exe_path.contains("pressure-vessel")
 }
 
@@ -1566,7 +1579,7 @@ fn is_compiler_comm(comm: &str) -> bool {
 }
 
 fn is_linker_comm(comm: &str) -> bool {
-    contains_any(comm, &["ld", "ld.lld", "mold", "gold", "lld"])
+    matches!(comm, "ld" | "ld.lld" | "ld.gold" | "mold" | "gold" | "lld")
 }
 
 fn is_indexer_comm(comm: &str) -> bool {
@@ -2026,6 +2039,62 @@ mod tests {
         )?;
 
         Ok(())
+    }
+
+    #[test]
+    fn community_rule_cmdline_basename_classifies_truncated_proton_game() {
+        let class = classify_task_with_context(
+            "KingdomCome",
+            "KingdomCome",
+            "/home/me/.steam/steamapps/compatdata/379430/pfx/drive_c/KingdomCome.exe --windowed",
+            "/usr/bin/wine",
+            "/user.slice/app-steam-379430.scope",
+            None,
+        );
+
+        assert_eq!(class, TaskClass::Game);
+    }
+
+    #[test]
+    fn ambiguous_community_rule_outside_steam_context_is_not_game() {
+        let class = classify_task_with_context(
+            "build.exe",
+            "build.exe",
+            "/tmp/build.exe --compile",
+            "/tmp/build.exe",
+            "/user.slice/app-builder.scope",
+            None,
+        );
+
+        assert_ne!(class, TaskClass::Game);
+    }
+
+    #[test]
+    fn ambiguous_community_rule_inside_compatdata_context_can_be_game() {
+        let class = classify_task_with_context(
+            "build.exe",
+            "build.exe",
+            "/home/me/.steam/steamapps/compatdata/123/pfx/drive_c/build.exe",
+            "/usr/bin/wine",
+            "/user.slice/app-steam-123.scope",
+            None,
+        );
+
+        assert_eq!(class, TaskClass::Game);
+    }
+
+    #[test]
+    fn hardcoded_audio_classification_wins_over_game_like_context() {
+        let class = classify_task_with_context(
+            "pipewire",
+            "pipewire",
+            "/home/me/.steam/steamapps/compatdata/379430/pfx/drive_c/KingdomCome.exe",
+            "/home/me/.steam/steamapps/common/KingdomCome/KingdomCome.exe",
+            "/user.slice/app-steam-379430.scope",
+            Some(2),
+        );
+
+        assert_eq!(class, TaskClass::AudioRealtime);
     }
 
     #[test]
