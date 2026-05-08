@@ -872,6 +872,9 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         block_io_correlation_basis: "dev+sector",
         drop_counters,
         cpu_perf_status: None,
+        focus_mode: None,
+        final_focus_kind: None,
+        focus_switch_count: 0,
     })
     .unwrap();
 
@@ -1329,6 +1332,9 @@ fn report_reads_recorded_session_and_spike_events() {
         block_io_correlation_basis: "dev+sector",
         drop_counters: DropCountersSnapshot::default(),
         cpu_perf_status: None,
+        focus_mode: None,
+        final_focus_kind: None,
+        focus_switch_count: 0,
     })
     .unwrap();
 
@@ -1399,6 +1405,9 @@ fn report_cluster_output_caps_inline_points() {
         block_io_correlation_basis: "dev+sector",
         drop_counters: DropCountersSnapshot::default(),
         cpu_perf_status: None,
+        focus_mode: None,
+        final_focus_kind: None,
+        focus_switch_count: 0,
     })
     .unwrap();
 
@@ -1752,6 +1761,7 @@ fn minimal_session_for_report() -> SessionFile {
             cpu_perf_read_errors: 0,
             cpu_perf_skipped_tasks: 0,
             cpu_perf_last_error: None,
+            ..Default::default()
         },
         stop_reason: "test".to_owned(),
         config: recorded_config(&config, &config.tree_pids),

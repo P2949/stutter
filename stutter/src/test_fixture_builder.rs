@@ -567,6 +567,7 @@ fn base_session(run_name: &str) -> SessionFile {
             cpu_perf_read_errors: 0,
             cpu_perf_skipped_tasks: 0,
             cpu_perf_last_error: None,
+            ..Default::default()
         },
         stop_reason: "test".to_owned(),
         config: dummy_config(),
@@ -630,5 +631,6 @@ fn dummy_config() -> RecordedConfig {
         stat_wait: false,
         otlp_endpoint: None,
         otel_service_name: "stutter".to_owned(),
+        ..Default::default()
     }
 }

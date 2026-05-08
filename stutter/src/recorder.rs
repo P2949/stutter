@@ -49,6 +49,7 @@ pub struct RecordingStreams {
     pub scx_event_writer: Option<JsonArrayWriter>,
     pub spike_event_writer: Option<JsonArrayWriter>,
     pub frame_event_writer: Option<JsonArrayWriter>,
+    pub focus_event_writer: Option<JsonArrayWriter>,
     pub csv_writer: Option<IntervalCsvWriter>,
     pub stdout_spike_stream: Option<StdoutJsonStream>,
 }
@@ -64,6 +65,7 @@ pub struct RecordingCounters {
     pub block_io_event_count: u64,
     pub interval_record_count: u64,
     pub frame_event_count: u64,
+    pub focus_event_count: u64,
     pub process_scan_budget_exceeded_count: u64,
     pub thread_scan_limited_count: u64,
 
@@ -403,6 +405,20 @@ impl Default for SpikeEventBuffer {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub struct FocusEvent {
+    pub elapsed_ms: u64,
+    pub action: String,
+    pub old_kind: Option<String>,
+    pub kind: Option<String>,
+    pub root_pids: Vec<u32>,
+    pub member_pids: Vec<u32>,
+    pub confidence: f32,
+    pub score: f32,
+    pub situation: Option<crate::autotune::state::SituationKind>,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct TreeEvent {
     pub elapsed_ms: u64,
     pub action: String,
@@ -434,6 +450,14 @@ pub struct SessionMetadataCore {
     pub target_pids_max: u64,
     pub active_target_pids_count: u64,
     pub active_expanded_tasks: Vec<u32>,
+    #[serde(default)]
+    pub focus_mode: Option<String>,
+    #[serde(default)]
+    pub final_focus_kind: Option<String>,
+    #[serde(default)]
+    pub focus_switch_count: u64,
+    #[serde(default)]
+    pub focus_event_count: u64,
     #[serde(default)]
     pub interval_record_count: u64,
     #[serde(default)]
@@ -573,6 +597,20 @@ pub struct RecordedConfig {
     pub otlp_endpoint: Option<String>,
     #[serde(default)]
     pub otel_service_name: String,
+    #[serde(default)]
+    pub auto_focus: bool,
+    #[serde(default)]
+    pub auto_focus_poll_ms: u64,
+    #[serde(default)]
+    pub auto_focus_min_confidence: f32,
+    #[serde(default)]
+    pub auto_focus_switch_cooldown_ms: u64,
+    #[serde(default)]
+    pub auto_focus_switch_margin: f32,
+    #[serde(default)]
+    pub auto_focus_required_polls: u32,
+    #[serde(default)]
+    pub auto_focus_max_roots: usize,
 }
 
 fn default_recorded_max_tasks() -> usize {
@@ -585,6 +623,62 @@ fn default_recorded_follow_exec() -> bool {
 
 fn default_recorded_cpu_perf_max_tasks() -> usize {
     128
+}
+
+#[cfg(test)]
+mod focus_recording_tests {
+    use super::*;
+
+    #[test]
+    fn focus_event_serializes_expected_fields() {
+        let event = FocusEvent {
+            elapsed_ms: 1234,
+            action: "changed".to_owned(),
+            old_kind: Some("Browser".to_owned()),
+            kind: Some("Game".to_owned()),
+            root_pids: vec![10],
+            member_pids: vec![10, 11],
+            confidence: 0.75,
+            score: 0.82,
+            situation: Some(crate::autotune::state::SituationKind::GameFocused),
+            reasons: vec!["focus resolver selected game".to_owned()],
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+
+        assert!(json.contains("\"elapsed_ms\":1234"));
+        assert!(json.contains("\"action\":\"changed\""));
+        assert!(json.contains("\"old_kind\":\"Browser\""));
+        assert!(json.contains("\"kind\":\"Game\""));
+        assert!(json.contains("\"root_pids\":[10]"));
+        assert!(json.contains("\"member_pids\":[10,11]"));
+        assert!(json.contains("\"confidence\":0.75"));
+        assert!(json.contains("\"score\":0.82"));
+        assert!(json.contains("\"situation\":\"GameFocused\""));
+    }
+
+    #[test]
+    fn recorded_config_defaults_auto_focus_fields_for_old_sessions() {
+        let config = RecordedConfig::default();
+
+        assert!(!config.auto_focus);
+        assert_eq!(config.auto_focus_poll_ms, 0);
+        assert_eq!(config.auto_focus_min_confidence, 0.0);
+        assert_eq!(config.auto_focus_switch_cooldown_ms, 0);
+        assert_eq!(config.auto_focus_switch_margin, 0.0);
+        assert_eq!(config.auto_focus_required_polls, 0);
+        assert_eq!(config.auto_focus_max_roots, 0);
+    }
+
+    #[test]
+    fn session_metadata_defaults_focus_fields_for_old_sessions() {
+        let core = SessionMetadataCore::default();
+
+        assert_eq!(core.focus_mode, None);
+        assert_eq!(core.final_focus_kind, None);
+        assert_eq!(core.focus_switch_count, 0);
+        assert_eq!(core.focus_event_count, 0);
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -970,6 +1064,9 @@ pub struct FinalizeRecordingInput<'a> {
     pub block_io_correlation_basis: &'a str,
     pub drop_counters: crate::ebpf_loader::DropCountersSnapshot,
     pub cpu_perf_status: Option<CpuPerfStatus>,
+    pub focus_mode: Option<String>,
+    pub final_focus_kind: Option<String>,
+    pub focus_switch_count: u64,
 }
 
 pub fn prepare_recording(config: &Config) -> anyhow::Result<Option<RecordingRun>> {
@@ -1060,6 +1157,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         block_io_correlation_basis,
         drop_counters,
         cpu_perf_status,
+        focus_mode,
+        final_focus_kind,
+        focus_switch_count,
     } = input;
 
     let Some(recording) = recorder.run.as_ref() else {
@@ -1202,6 +1302,10 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         target_pids_max: TARGET_PIDS_MAX as u64,
         active_target_pids_count: active_targets.len() as u64,
         active_expanded_tasks,
+        focus_mode,
+        final_focus_kind,
+        focus_switch_count,
+        focus_event_count: recorder.counters.focus_event_count,
         interval_record_count,
         intervals_dropped: recorder.counters.intervals_dropped,
         spike_events_retained_count: if recorder.streams.spike_event_writer.is_some() {
@@ -1403,6 +1507,13 @@ pub fn recorded_config(config: &Config, tree_pids: &[u32]) -> RecordedConfig {
         stat_wait: config.stat_wait,
         otlp_endpoint: config.otlp_endpoint.clone(),
         otel_service_name: config.otel_service_name.clone(),
+        auto_focus: config.auto_focus,
+        auto_focus_poll_ms: config.auto_focus_poll_ms,
+        auto_focus_min_confidence: config.auto_focus_min_confidence,
+        auto_focus_switch_cooldown_ms: config.auto_focus_switch_cooldown_ms,
+        auto_focus_switch_margin: config.auto_focus_switch_margin,
+        auto_focus_required_polls: config.auto_focus_required_polls,
+        auto_focus_max_roots: config.auto_focus_max_roots,
     }
 }
 
@@ -1959,7 +2070,7 @@ mod tests {
             percentile_scope: "all".to_owned(),
             histogram: Vec::new(),
             drop_counters: crate::ebpf_loader::DropCountersSnapshot::default(),
-            cpu_perf: None,
+            ..Default::default()
         }
     }
 
