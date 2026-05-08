@@ -3,6 +3,7 @@ pub mod comparison;
 pub mod kept;
 pub mod measurement;
 pub mod resolution;
+pub mod shutdown;
 pub mod washout;
 
 pub mod baseline;
