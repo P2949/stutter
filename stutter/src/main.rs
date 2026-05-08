@@ -388,6 +388,7 @@ async fn main() -> anyhow::Result<()> {
                 max_targets,
                 max_concurrent_recordings,
                 autotune_limits,
+                rollback_on_crash_recovery: true,
             })
             .await
         }
