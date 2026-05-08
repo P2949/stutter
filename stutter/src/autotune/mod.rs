@@ -26,6 +26,7 @@ pub mod history_replay;
 pub mod human_output;
 pub mod observation;
 pub mod profiles;
+pub mod prometheus_metrics;
 pub mod quality;
 pub mod replay;
 pub mod report_overlay;
