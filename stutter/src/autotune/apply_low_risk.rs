@@ -16,9 +16,12 @@ use crate::{
         cpu_affinity::CpuAffinityProfileAction,
         runner::{AuditedActionResult, run_audited_action, run_audited_action_with_audit_path},
     },
-    autotune::candidate::{
-        CandidateAction, CandidateDryRunRecord, dry_run_candidates,
-        dry_run_record_from_action_state, generate_profile_candidates,
+    autotune::{
+        candidate::{
+            CandidateAction, CandidateDryRunRecord, dry_run_candidates,
+            dry_run_record_from_action_state, generate_profile_candidates,
+        },
+        washout::{WashoutWindowConfig, run_washout_for_action},
     },
     profiles::Profile,
 };
@@ -557,8 +560,13 @@ pub async fn apply_low_risk_command(
     let plan = plan_apply_low_risk_from_profiles(tree_pid, profiles_path, &profiles, duration)?;
 
     let (candidate_name, action) = action_from_candidate(plan.candidate)?;
-    let audited = apply_cpu_affinity_candidate_with_audit(candidate_name, &action)?;
+    let audited = apply_cpu_affinity_candidate_with_audit(candidate_name.clone(), &action)?;
+    let _affected_tasks = audited.affected_tasks;
     let mut guard = AuditedRollbackGuard::new(&action, audited.rollback.clone());
+
+    run_washout_for_action(&action, action.tree_pid, WashoutWindowConfig::default())
+        .await
+        .with_context(|| format!("washout failed for autotune candidate '{}'", candidate_name))?;
 
     if !plan.duration.is_zero() {
         tokio::time::sleep(plan.duration).await;
@@ -738,6 +746,15 @@ mod tests {
         fn rollback(&self, _token: &RollbackToken) -> anyhow::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn washout_config_defaults_are_safe_for_apply_low_risk() {
+        let config = WashoutWindowConfig::default();
+
+        assert_eq!(config.washout_seconds, 10);
+        assert_eq!(config.verify_interval_ms, 1_000);
+        assert_eq!(config.washout_ms(), 10_000);
     }
 
     #[test]

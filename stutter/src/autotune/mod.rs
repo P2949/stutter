@@ -1,4 +1,6 @@
 pub mod apply_low_risk;
+pub mod washout;
+
 pub mod baseline;
 pub mod candidate;
 pub mod controller;
