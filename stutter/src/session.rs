@@ -335,6 +335,9 @@ pub(crate) struct TuiRenderSnapshot {
     pub(crate) interval_records: Vec<crate::recorder::IntervalRecord>,
     pub(crate) recent_diagnoses: std::collections::VecDeque<crate::diagnosis::LiveDiagnosisEntry>,
     pub(crate) current_focus: Option<ResolvedFocus>,
+    pub(crate) current_foreground: Option<crate::foreground::ForegroundWindowSnapshot>,
+    pub(crate) focus_switch_count: u64,
+    pub(crate) foreground_include_title: bool,
 }
 
 pub struct MonitorSession {
@@ -1363,6 +1366,9 @@ impl MonitorSession {
                 interval_records: self.recorder.buffers.interval_records.clone(),
                 recent_diagnoses: self.recent_telemetry.diagnoses.clone(),
                 current_focus: self.current_focus.clone(),
+                current_foreground: self.current_foreground.clone(),
+                focus_switch_count: self.focus_switch_count,
+                foreground_include_title: self.config.foreground_include_title,
             };
 
             // TUI rendering errors and panics should be logged and dismissed,
@@ -1379,6 +1385,9 @@ impl MonitorSession {
                         snapshot.elapsed_ms.into(),
                         &snapshot.drop_counters,
                         snapshot.current_focus.as_ref(),
+                        snapshot.current_foreground.as_ref(),
+                        snapshot.focus_switch_count,
+                        snapshot.foreground_include_title,
                     );
                 })
             }));

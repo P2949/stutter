@@ -21,6 +21,7 @@ use crate::{
     diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
     focus::ResolvedFocus,
+    foreground::{ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot},
     metrics::{IntervalRecord, TaskStats, format_latency},
     process_tree::{TaskClass, TaskInfo},
 };
@@ -137,11 +138,14 @@ pub fn render_tui(
     elapsed_ms: u128,
     drop_counters: &DropCountersSnapshot,
     current_focus: Option<&ResolvedFocus>,
+    current_foreground: Option<&ForegroundWindowSnapshot>,
+    focus_switch_count: u64,
+    foreground_include_title: bool,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4), // status bar + focus line
+            Constraint::Length(5), // status bar + foreground line + focus line
             Constraint::Min(10),   // task table
             Constraint::Length(8), // sparkline / heat
             Constraint::Length(8), // recent diagnoses
@@ -156,6 +160,9 @@ pub fn render_tui(
         elapsed_ms,
         drop_counters,
         current_focus,
+        current_foreground,
+        focus_switch_count,
+        foreground_include_title,
         chunks[0],
     );
 
@@ -192,6 +199,9 @@ fn render_status_bar(
     elapsed_ms: u128,
     drop_counters: &DropCountersSnapshot,
     current_focus: Option<&ResolvedFocus>,
+    current_foreground: Option<&ForegroundWindowSnapshot>,
+    focus_switch_count: u64,
+    foreground_include_title: bool,
     area: Rect,
 ) {
     let secs = elapsed_ms / 1000;
@@ -244,42 +254,117 @@ fn render_status_bar(
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" stutter profiler ");
-    let focus_line = focus_status_line(current_focus);
-    let paragraph = Paragraph::new(vec![Line::from(parts), focus_line]).block(block);
+    let foreground_line = foreground_status_line(current_foreground, foreground_include_title);
+    let focus_line = focus_status_line(current_focus, focus_switch_count);
+    let paragraph =
+        Paragraph::new(vec![Line::from(parts), foreground_line, focus_line]).block(block);
     f.render_widget(paragraph, area);
 }
 
-fn focus_status_line(current_focus: Option<&ResolvedFocus>) -> Line<'static> {
+fn foreground_status_line(
+    current_foreground: Option<&ForegroundWindowSnapshot>,
+    include_title: bool,
+) -> Line<'static> {
+    let Some(foreground) = current_foreground else {
+        return Line::from(vec![Span::raw(" foreground: none")]);
+    };
+
+    let source = foreground
+        .source
+        .map(foreground_source_label)
+        .unwrap_or("unknown");
+    let pid = foreground
+        .pid
+        .map(|pid| pid.to_string())
+        .unwrap_or_else(|| "-".to_owned());
+    let class = foreground
+        .class
+        .as_deref()
+        .or(foreground.app_id.as_deref())
+        .unwrap_or("-");
+    let status = foreground_status_label(foreground.status);
+
+    let mut text = format!(
+        " foreground: {source} pid={pid} class={class} conf={:.2}",
+        foreground.confidence
+    );
+
+    if foreground.status != ForegroundProviderStatus::Available {
+        text.push_str(&format!(" status={status}"));
+    }
+
+    if include_title
+        && let Some(title) = foreground.title.as_deref()
+        && !title.trim().is_empty()
+    {
+        text.push_str(&foreground_title_fragment(title));
+    }
+
+    let style = match foreground.status {
+        ForegroundProviderStatus::Available => Style::default().fg(Color::Green),
+        ForegroundProviderStatus::Unavailable | ForegroundProviderStatus::Unsupported => {
+            Style::default().fg(Color::Gray)
+        }
+        ForegroundProviderStatus::Error => Style::default().fg(Color::Yellow),
+    };
+
+    Line::from(vec![Span::styled(text, style)])
+}
+
+fn focus_status_line(
+    current_focus: Option<&ResolvedFocus>,
+    focus_switch_count: u64,
+) -> Line<'static> {
     let Some(focus) = current_focus else {
-        return Line::from(vec![Span::raw(" Focus: none")]);
+        return Line::from(vec![Span::raw(format!(
+            " focus: none switches={focus_switch_count}"
+        ))]);
     };
 
-    let confidence_percent = (focus.group.confidence * 100.0).round() as u32;
-    let roots = if focus.group.root_pids.is_empty() {
-        "-".to_owned()
-    } else {
-        focus
-            .group
-            .root_pids
-            .iter()
-            .map(u32::to_string)
-            .collect::<Vec<_>>()
-            .join(",")
-    };
-
-    let display_name = if focus.group.display_name.is_empty() {
-        format!("{:?}", focus.group.kind)
-    } else {
-        focus.group.display_name.clone()
-    };
+    let roots = format!("{:?}", focus.group.root_pids);
 
     Line::from(vec![Span::styled(
         format!(
-            " Focus: {:?} {} | confidence {}% | roots: {} | situation: {:?}",
-            focus.group.kind, display_name, confidence_percent, roots, focus.situation
+            " focus: {:?} roots={} switches={}",
+            focus.group.kind, roots, focus_switch_count
         ),
         Style::default().fg(Color::Cyan),
     )])
+}
+
+fn foreground_source_label(source: ForegroundSource) -> &'static str {
+    match source {
+        ForegroundSource::Auto => "auto",
+        ForegroundSource::Sway => "sway",
+        ForegroundSource::Hyprland => "hyprland",
+        ForegroundSource::X11 => "x11",
+        ForegroundSource::Unsupported => "unsupported",
+    }
+}
+
+fn foreground_status_label(status: ForegroundProviderStatus) -> &'static str {
+    match status {
+        ForegroundProviderStatus::Available => "available",
+        ForegroundProviderStatus::Unavailable => "unavailable",
+        ForegroundProviderStatus::Error => "error",
+        ForegroundProviderStatus::Unsupported => "unsupported",
+    }
+}
+
+fn foreground_title_fragment(title: &str) -> String {
+    let mut sanitized = title
+        .chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect::<String>();
+
+    let char_count = sanitized.chars().count();
+    if char_count > 48 {
+        sanitized = sanitized.chars().take(48).collect::<String>();
+        sanitized.push('…');
+    }
+
+    let escaped = sanitized.replace('\\', "\\\\").replace('"', "\\\"");
+    format!(" title=\"{escaped}\"")
 }
 
 // ---------------------------------------------------------------------------
@@ -630,6 +715,108 @@ mod tests {
     }
 
     #[test]
+    fn foreground_status_line_formats_active_foreground_without_title_by_default() {
+        let foreground = ForegroundWindowSnapshot {
+            elapsed_ms: 1_000,
+            source: Some(ForegroundSource::Sway),
+            status: ForegroundProviderStatus::Available,
+            pid: Some(12345),
+            app_id: Some("steam_app_379430".to_owned()),
+            class: Some("steam_app_379430".to_owned()),
+            title: Some("Kingdom Come: Deliverance private title".to_owned()),
+            window_id: Some("7".to_owned()),
+            workspace: Some("gaming".to_owned()),
+            confidence: 0.95,
+            stale_ms: None,
+            reason: "focused Sway node from swaymsg get_tree".to_owned(),
+        };
+
+        let line = foreground_status_line(Some(&foreground), false);
+        let rendered = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(
+            rendered,
+            " foreground: sway pid=12345 class=steam_app_379430 conf=0.95"
+        );
+        assert!(!rendered.contains("Kingdom Come"));
+        assert!(!rendered.contains("title="));
+    }
+
+    #[test]
+    fn foreground_status_line_shows_title_only_when_enabled() {
+        let foreground = ForegroundWindowSnapshot {
+            elapsed_ms: 1_000,
+            source: Some(ForegroundSource::X11),
+            status: ForegroundProviderStatus::Available,
+            pid: Some(12345),
+            app_id: Some("steam_app_379430".to_owned()),
+            class: Some("steam_app_379430".to_owned()),
+            title: Some("Kingdom Come: Deliverance".to_owned()),
+            window_id: Some("0x4600007".to_owned()),
+            workspace: None,
+            confidence: 0.90,
+            stale_ms: None,
+            reason: "active X11 window from xprop".to_owned(),
+        };
+
+        let line = foreground_status_line(Some(&foreground), true);
+        let rendered = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(rendered.contains("foreground: x11 pid=12345 class=steam_app_379430 conf=0.90"));
+        assert!(rendered.contains("title=\"Kingdom Come: Deliverance\""));
+    }
+
+    #[test]
+    fn foreground_status_line_formats_missing_foreground() {
+        let line = foreground_status_line(None, false);
+        let rendered = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(rendered, " foreground: none");
+    }
+
+    #[test]
+    fn foreground_status_line_formats_provider_error_status() {
+        let foreground = ForegroundWindowSnapshot {
+            elapsed_ms: 1_000,
+            source: Some(ForegroundSource::Sway),
+            status: ForegroundProviderStatus::Error,
+            pid: None,
+            app_id: None,
+            class: None,
+            title: None,
+            window_id: None,
+            workspace: None,
+            confidence: 0.0,
+            stale_ms: None,
+            reason: "swaymsg failed".to_owned(),
+        };
+
+        let line = foreground_status_line(Some(&foreground), false);
+        let rendered = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(
+            rendered,
+            " foreground: sway pid=- class=- conf=0.00 status=error"
+        );
+    }
+
+    #[test]
     fn focus_status_line_formats_current_focus() {
         let focus = ResolvedFocus {
             group: crate::focus::FocusGroup {
@@ -649,29 +836,28 @@ mod tests {
             situation: crate::autotune::state::SituationKind::CompileLoad,
         };
 
-        let line = focus_status_line(Some(&focus));
+        let line = focus_status_line(Some(&focus), 2);
         let rendered = line
             .spans
             .iter()
             .map(|span| span.content.as_ref())
             .collect::<String>();
 
-        assert!(rendered.contains("Focus: Compile cargo build"));
-        assert!(rendered.contains("confidence 87%"));
-        assert!(rendered.contains("roots: 1234"));
-        assert!(rendered.contains("situation: CompileLoad"));
+        assert!(rendered.contains("focus: Compile"));
+        assert!(rendered.contains("roots=[1234]"));
+        assert!(rendered.contains("switches=2"));
     }
 
     #[test]
     fn focus_status_line_formats_empty_focus() {
-        let line = focus_status_line(None);
+        let line = focus_status_line(None, 0);
         let rendered = line
             .spans
             .iter()
             .map(|span| span.content.as_ref())
             .collect::<String>();
 
-        assert_eq!(rendered, " Focus: none");
+        assert_eq!(rendered, " focus: none switches=0");
     }
 
     #[test]
