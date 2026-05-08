@@ -7,6 +7,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::autotune::state::SituationKind;
+
 const SCHED_FIFO: u32 = 1;
 const SCHED_RR: u32 = 2;
 const SCHED_DEADLINE: u32 = 6;
@@ -208,7 +210,7 @@ pub struct ResolvedFocus {
     pub group: FocusGroup,
     pub selected_at_ms: u64,
     pub last_confirmed_ms: u64,
-    pub situation: crate::autotune::state::SituationKind,
+    pub situation: SituationKind,
 }
 
 #[derive(Debug, Clone)]
@@ -416,18 +418,8 @@ impl FocusResolver {
         }
     }
 
-    fn situation_for_group(group: &FocusGroup) -> crate::autotune::state::SituationKind {
-        match group.kind {
-            FocusGroupKind::Game => crate::autotune::state::SituationKind::GameFocused,
-            FocusGroupKind::Compile => crate::autotune::state::SituationKind::CompileLoad,
-            FocusGroupKind::Desktop => crate::autotune::state::SituationKind::CompositorPressure,
-            FocusGroupKind::Idle => crate::autotune::state::SituationKind::Idle,
-            FocusGroupKind::Browser
-            | FocusGroupKind::Media
-            | FocusGroupKind::Recording
-            | FocusGroupKind::VirtualMachine => crate::autotune::state::SituationKind::CpuPressure,
-            FocusGroupKind::Unknown => crate::autotune::state::SituationKind::Unknown,
-        }
+    fn situation_for_group(group: &FocusGroup) -> SituationKind {
+        crate::focus::situation_for_group(group)
     }
 
     fn limit_group_roots(&self, mut group: FocusGroup) -> FocusGroup {
@@ -496,6 +488,19 @@ impl FocusResolver {
                     .unwrap_or(u32::MAX);
                 right_root.cmp(&left_root)
             })
+    }
+}
+
+pub fn situation_for_group(group: &FocusGroup) -> SituationKind {
+    match group.kind {
+        FocusGroupKind::Game => SituationKind::GameFocused,
+        FocusGroupKind::Browser => SituationKind::BrowserFocused,
+        FocusGroupKind::Compile => SituationKind::CompileLoad,
+        FocusGroupKind::Media => SituationKind::MediaPlayback,
+        FocusGroupKind::Recording => SituationKind::Recording,
+        FocusGroupKind::VirtualMachine => SituationKind::VirtualMachineLoad,
+        FocusGroupKind::Idle => SituationKind::Idle,
+        FocusGroupKind::Desktop | FocusGroupKind::Unknown => SituationKind::Unknown,
     }
 }
 
@@ -2808,6 +2813,63 @@ fn is_realtime_policy(sched_policy: Option<u32>) -> bool {
 mod tests {
     use super::*;
     use crate::process_tree::TaskClass;
+
+    fn situation_mapping_test_group(kind: FocusGroupKind) -> FocusGroup {
+        FocusGroup {
+            kind,
+            root_pids: vec![1],
+            member_pids: vec![1],
+            primary_pid: Some(1),
+            display_name: format!("{kind:?}"),
+            score: 0.75,
+            score_breakdown: FocusScoreBreakdown::default(),
+            confidence: 0.75,
+            priority_band: PriorityBand::Interactive,
+            reasons: vec![format!("situation mapping test {kind:?}")],
+        }
+    }
+
+    #[test]
+    fn maps_focus_groups_to_autotune_situations() {
+        assert_eq!(
+            situation_for_group(&situation_mapping_test_group(FocusGroupKind::Game)),
+            SituationKind::GameFocused
+        );
+        assert_eq!(
+            situation_for_group(&situation_mapping_test_group(FocusGroupKind::Browser)),
+            SituationKind::BrowserFocused
+        );
+        assert_eq!(
+            situation_for_group(&situation_mapping_test_group(FocusGroupKind::Compile)),
+            SituationKind::CompileLoad
+        );
+        assert_eq!(
+            situation_for_group(&situation_mapping_test_group(FocusGroupKind::Media)),
+            SituationKind::MediaPlayback
+        );
+        assert_eq!(
+            situation_for_group(&situation_mapping_test_group(FocusGroupKind::Recording)),
+            SituationKind::Recording
+        );
+        assert_eq!(
+            situation_for_group(&situation_mapping_test_group(
+                FocusGroupKind::VirtualMachine
+            )),
+            SituationKind::VirtualMachineLoad
+        );
+        assert_eq!(
+            situation_for_group(&situation_mapping_test_group(FocusGroupKind::Idle)),
+            SituationKind::Idle
+        );
+        assert_eq!(
+            situation_for_group(&situation_mapping_test_group(FocusGroupKind::Desktop)),
+            SituationKind::Unknown
+        );
+        assert_eq!(
+            situation_for_group(&situation_mapping_test_group(FocusGroupKind::Unknown)),
+            SituationKind::Unknown
+        );
+    }
 
     fn resolver_test_classification(
         class: SystemTaskClass,
