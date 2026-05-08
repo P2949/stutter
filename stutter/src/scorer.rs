@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{metrics::IntervalRecord, process_tree::TaskClass};
+use crate::{autotune::state::SituationKind, metrics::IntervalRecord, process_tree::TaskClass};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct StutterScore {
@@ -28,12 +28,40 @@ pub fn class_contributes_to_score(class: TaskClass) -> bool {
     )
 }
 
-pub fn score_from_interval_records(records: &[IntervalRecord]) -> StutterScore {
+pub fn class_contributes_to_score_for_situation(
+    class: TaskClass,
+    situation: SituationKind,
+) -> bool {
+    match situation {
+        SituationKind::GameFocused
+        | SituationKind::GameCpuSchedulerPressure
+        | SituationKind::GameGpuBound => class_contributes_to_score(class),
+
+        SituationKind::CompositorPressure => matches!(class, TaskClass::Compositor),
+
+        SituationKind::CompileLoad
+        | SituationKind::CompileCpuBound
+        | SituationKind::CompileLinkerPressure
+        | SituationKind::BrowserFocused
+        | SituationKind::BrowserCpuPressure
+        | SituationKind::BrowserGpuVideo
+        | SituationKind::BrowserIoPressure => {
+            !matches!(class, TaskClass::Service | TaskClass::Unknown)
+        }
+
+        _ => class_contributes_to_score(class),
+    }
+}
+
+pub fn score_from_interval_records_for_situation(
+    records: &[IntervalRecord],
+    situation: SituationKind,
+) -> StutterScore {
     let mut score = StutterScore::default();
 
     for record in records
         .iter()
-        .filter(|record| class_contributes_to_score(record.class))
+        .filter(|record| class_contributes_to_score_for_situation(record.class, situation))
     {
         score.over_1ms = score.over_1ms.saturating_add(record.over_1ms);
         score.over_2ms = score.over_2ms.saturating_add(record.over_2ms);
@@ -48,6 +76,10 @@ pub fn score_from_interval_records(records: &[IntervalRecord]) -> StutterScore {
         .saturating_add(score.over_1ms);
 
     score
+}
+
+pub fn score_from_interval_records(records: &[IntervalRecord]) -> StutterScore {
+    score_from_interval_records_for_situation(records, SituationKind::GameFocused)
 }
 
 pub fn score_from_interval_records_and_frames(
@@ -102,6 +134,52 @@ pub fn calculate_frame_metrics(frames: &[crate::recorder::FrameEvent]) -> (f64, 
 mod tests {
     use super::*;
 
+    fn interval_record_for_class(
+        class: TaskClass,
+        over_1ms: u64,
+        over_2ms: u64,
+        over_5ms: u64,
+        max_ns: u64,
+    ) -> IntervalRecord {
+        IntervalRecord {
+            elapsed_ms: 0,
+            task: 1,
+            active: true,
+            class,
+            comm: format!("{class:?}"),
+            process_pid: Some(1),
+            process_comm: format!("{class:?}").into(),
+            samples: 1,
+            stored_samples: 1,
+            truncated_samples: 0,
+            min_ns: 0,
+            avg_ns: 0,
+            p95_ns: 0,
+            p99_ns: 0,
+            max_ns,
+            over_1ms,
+            over_2ms,
+            over_5ms,
+            busiest_cpu: None,
+            busiest_cpu_samples: 0,
+            worst_cpu: None,
+            worst_cpu_max_ns: 0,
+            spikiest_cpu: None,
+            spikiest_cpu_spikes: 0,
+            cpu_psi_some: 0.0,
+            mem_psi_some: 0.0,
+            mem_psi_full: 0.0,
+            io_psi_some: 0.0,
+            io_psi_full: 0.0,
+            major_faults: 0,
+            minor_faults: 0,
+            percentile_scope: "all".to_owned(),
+            histogram: Vec::new(),
+            drop_counters: crate::ebpf_loader::DropCountersSnapshot::default(),
+            cpu_perf: None,
+        }
+    }
+
     #[test]
     fn weights_threshold_counters() {
         let record = IntervalRecord {
@@ -145,6 +223,126 @@ mod tests {
         let score = score_from_interval_records(&[record]);
         assert_eq!(score.total, 143);
         assert_eq!(score.max_latency_ns, 7_000_000);
+    }
+
+    #[test]
+    fn situation_game_scoring_preserves_legacy_classes() {
+        assert!(class_contributes_to_score_for_situation(
+            TaskClass::Game,
+            SituationKind::GameFocused
+        ));
+        assert!(class_contributes_to_score_for_situation(
+            TaskClass::GameHelper,
+            SituationKind::GameFocused
+        ));
+        assert!(class_contributes_to_score_for_situation(
+            TaskClass::WineServer,
+            SituationKind::GameFocused
+        ));
+        assert!(class_contributes_to_score_for_situation(
+            TaskClass::GameScope,
+            SituationKind::GameFocused
+        ));
+        assert!(class_contributes_to_score_for_situation(
+            TaskClass::GameRenderThread,
+            SituationKind::GameFocused
+        ));
+        assert!(class_contributes_to_score_for_situation(
+            TaskClass::GameWorkerThread,
+            SituationKind::GameFocused
+        ));
+        assert!(!class_contributes_to_score_for_situation(
+            TaskClass::Compositor,
+            SituationKind::GameFocused
+        ));
+
+        let records = [
+            interval_record_for_class(TaskClass::Game, 1, 1, 1, 5_000_000),
+            interval_record_for_class(TaskClass::GameRenderThread, 2, 0, 0, 2_000_000),
+            interval_record_for_class(TaskClass::Compositor, 50, 50, 50, 50_000_000),
+        ];
+
+        assert_eq!(
+            score_from_interval_records(&records),
+            score_from_interval_records_for_situation(&records, SituationKind::GameFocused)
+        );
+        assert_eq!(score_from_interval_records(&records).total, 123);
+        assert_eq!(
+            score_from_interval_records_for_situation(&records, SituationKind::GameFocused)
+                .max_latency_ns,
+            5_000_000
+        );
+    }
+
+    #[test]
+    fn situation_compositor_scoring_only_counts_compositor() {
+        let records = [
+            interval_record_for_class(TaskClass::Compositor, 3, 2, 1, 9_000_000),
+            interval_record_for_class(TaskClass::Game, 10, 10, 10, 10_000_000),
+            interval_record_for_class(TaskClass::Service, 20, 20, 20, 20_000_000),
+        ];
+
+        let score =
+            score_from_interval_records_for_situation(&records, SituationKind::CompositorPressure);
+
+        assert_eq!(score.over_1ms, 3);
+        assert_eq!(score.over_2ms, 2);
+        assert_eq!(score.over_5ms, 1);
+        assert_eq!(score.total, 143);
+        assert_eq!(score.max_latency_ns, 9_000_000);
+    }
+
+    #[test]
+    fn situation_compile_and_browser_score_active_targets_except_obvious_services() {
+        let records = [
+            interval_record_for_class(TaskClass::Game, 1, 0, 0, 1_000_000),
+            interval_record_for_class(TaskClass::Compositor, 2, 1, 0, 2_000_000),
+            interval_record_for_class(TaskClass::Helper, 3, 1, 1, 8_000_000),
+            interval_record_for_class(TaskClass::Service, 100, 100, 100, 100_000_000),
+            interval_record_for_class(TaskClass::Unknown, 200, 200, 200, 200_000_000),
+        ];
+
+        let compile_score =
+            score_from_interval_records_for_situation(&records, SituationKind::CompileLoad);
+        let browser_score =
+            score_from_interval_records_for_situation(&records, SituationKind::BrowserFocused);
+
+        assert_eq!(compile_score.over_1ms, 6);
+        assert_eq!(compile_score.over_2ms, 2);
+        assert_eq!(compile_score.over_5ms, 1);
+        assert_eq!(compile_score.total, 146);
+        assert_eq!(compile_score.max_latency_ns, 8_000_000);
+
+        assert_eq!(browser_score, compile_score);
+
+        assert!(!class_contributes_to_score_for_situation(
+            TaskClass::Service,
+            SituationKind::CompileLoad
+        ));
+        assert!(!class_contributes_to_score_for_situation(
+            TaskClass::Unknown,
+            SituationKind::BrowserFocused
+        ));
+        assert!(class_contributes_to_score_for_situation(
+            TaskClass::Helper,
+            SituationKind::CompileLinkerPressure
+        ));
+    }
+
+    #[test]
+    fn situation_fallback_uses_legacy_game_scoring() {
+        let records = [
+            interval_record_for_class(TaskClass::GameScope, 1, 1, 0, 4_000_000),
+            interval_record_for_class(TaskClass::Compositor, 20, 20, 20, 20_000_000),
+        ];
+
+        let unknown_score =
+            score_from_interval_records_for_situation(&records, SituationKind::Unknown);
+        let legacy_score = score_from_interval_records(&records);
+
+        assert_eq!(unknown_score, legacy_score);
+        assert_eq!(unknown_score.total, 21);
+        assert_eq!(unknown_score.max_latency_ns, 4_000_000);
     }
 
     #[test]
