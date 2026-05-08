@@ -85,7 +85,7 @@ pub fn render_metrics(state: &PrometheusState) -> String {
     let event_stream_write_errors = state.event_stream_write_errors.load(Ordering::Relaxed);
     let ebpf_ringbuf_drops = state.ebpf_ringbuf_drops.load(Ordering::Relaxed);
 
-    format!(
+    let mut output = format!(
         concat!(
             "# HELP stutter_start_unix_seconds Unix timestamp when this stutter monitor session started.\n",
             "# TYPE stutter_start_unix_seconds gauge\n",
@@ -120,7 +120,12 @@ pub fn render_metrics(state: &PrometheusState) -> String {
         active_targets = active_targets,
         event_stream_write_errors = event_stream_write_errors,
         ebpf_ringbuf_drops = ebpf_ringbuf_drops,
-    )
+    );
+
+    output.push_str(
+        &crate::autotune::prometheus_metrics::render_default_autotune_prometheus_metrics(),
+    );
+    output
 }
 
 pub async fn spawn_metrics_server(
@@ -225,12 +230,44 @@ mod tests {
             "stutter_active_targets",
             "stutter_event_stream_write_errors_total",
             "stutter_ebpf_drops_total",
+            "stutter_autotune_phase",
+            "stutter_autotune_mode",
+            "stutter_autotune_active_experiment",
+            "stutter_autotune_last_score",
+            "stutter_autotune_candidate_score",
+            "stutter_autotune_rollbacks_total",
+            "stutter_autotune_actions_applied_total",
+            "stutter_autotune_actions_blocked_total",
         ] {
             assert!(
                 output.contains(metric),
                 "missing metric {metric} in output:\n{output}"
             );
         }
+    }
+
+    #[test]
+    fn render_metrics_includes_autotune_metric_help_and_types() {
+        let state = PrometheusState::default();
+
+        let output = render_metrics(&state);
+
+        assert!(output.contains("# HELP stutter_autotune_phase"));
+        assert!(output.contains("# TYPE stutter_autotune_phase gauge"));
+        assert!(output.contains("# HELP stutter_autotune_mode"));
+        assert!(output.contains("# TYPE stutter_autotune_mode gauge"));
+        assert!(output.contains("# HELP stutter_autotune_active_experiment"));
+        assert!(output.contains("# TYPE stutter_autotune_active_experiment gauge"));
+        assert!(output.contains("# HELP stutter_autotune_last_score"));
+        assert!(output.contains("# TYPE stutter_autotune_last_score gauge"));
+        assert!(output.contains("# HELP stutter_autotune_candidate_score"));
+        assert!(output.contains("# TYPE stutter_autotune_candidate_score gauge"));
+        assert!(output.contains("# HELP stutter_autotune_rollbacks_total"));
+        assert!(output.contains("# TYPE stutter_autotune_rollbacks_total counter"));
+        assert!(output.contains("# HELP stutter_autotune_actions_applied_total"));
+        assert!(output.contains("# TYPE stutter_autotune_actions_applied_total counter"));
+        assert!(output.contains("# HELP stutter_autotune_actions_blocked_total"));
+        assert!(output.contains("# TYPE stutter_autotune_actions_blocked_total counter"));
     }
 
     #[test]
