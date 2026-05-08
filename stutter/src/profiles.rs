@@ -276,7 +276,7 @@ fn apply_managed_profile_to_tree_with_cache(
         anyhow::bail!("profile verify failed; restore completed: {err:#}");
     }
 
-    if let Some(cache) = cache.as_deref_mut() {
+    if let Some(cache) = cache {
         for cache_key in &planned.cache_keys {
             cache.known_correct.insert(cache_key.clone());
         }

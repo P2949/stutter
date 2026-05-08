@@ -1,30 +1,40 @@
 #![allow(dead_code)]
 
-use std::{collections::HashMap, path::Path, sync::OnceLock};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
 
-use serde::Deserialize;
+use anyhow::Context;
+use serde::{Deserialize, Serialize};
 
 use crate::process_tree::TaskClass;
 
-const BUILTIN_ANANICY_RULES_JSON: &str =
-    include_str!("../assets/community-rules/ananicy.generated.json");
+pub mod import;
 
-#[derive(Debug, Clone, Deserialize)]
+const BUILTIN_FIXTURE_RULES_JSON: &str =
+    include_str!("../assets/community-rules/test-fixture.generated.json");
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CommunityRulesFile {
     pub schema_version: u32,
     pub source: CommunityRulesSource,
     pub rules: Vec<CommunityRule>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CommunityRulesSource {
     pub name: String,
-    pub repo: String,
-    pub commit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
     pub generated_at: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CommunityRule {
     pub name: String,
     pub normalized_name: String,
@@ -34,8 +44,85 @@ pub struct CommunityRule {
     pub source_path: String,
     #[serde(default)]
     pub context: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    #[serde(default)]
     pub ambiguous: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum CommunityRulesSourceKind {
+    BuiltinFixture,
+    UserData,
+    SystemData,
+    ExplicitPath(PathBuf),
+}
+
+pub fn load_community_rules_file(
+    source: CommunityRulesSourceKind,
+) -> anyhow::Result<CommunityRulesFile> {
+    match source {
+        CommunityRulesSourceKind::BuiltinFixture => parse_community_rules_file(
+            BUILTIN_FIXTURE_RULES_JSON,
+            "embedded community rules test fixture",
+        ),
+        CommunityRulesSourceKind::UserData => {
+            let path = user_data_community_rules_path().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "cannot locate user community rules path because neither XDG_DATA_HOME nor HOME is set"
+                )
+            })?;
+            load_community_rules_file_from_path(&path)
+        }
+        CommunityRulesSourceKind::SystemData => load_community_rules_file_from_path(Path::new(
+            "/usr/share/stutter/community-rules.json",
+        )),
+        CommunityRulesSourceKind::ExplicitPath(path) => load_community_rules_file_from_path(&path),
+    }
+}
+
+pub fn load_community_rules_db(
+    source: CommunityRulesSourceKind,
+) -> anyhow::Result<CommunityRulesDb> {
+    CommunityRulesDb::from_file(load_community_rules_file(source)?)
+}
+
+fn load_community_rules_file_from_path(path: &Path) -> anyhow::Result<CommunityRulesFile> {
+    let data = fs::read_to_string(path)
+        .with_context(|| format!("failed to read community rules file {}", path.display()))?;
+    parse_community_rules_file(&data, &path.display().to_string())
+}
+
+fn parse_community_rules_file(
+    data: &str,
+    source_label: &str,
+) -> anyhow::Result<CommunityRulesFile> {
+    let file: CommunityRulesFile = serde_json::from_str(data)
+        .with_context(|| format!("failed to parse community rules JSON from {source_label}"))?;
+    anyhow::ensure!(
+        matches!(file.schema_version, 1 | 2),
+        "unsupported community rules schema version {}",
+        file.schema_version
+    );
+    Ok(file)
+}
+
+fn user_data_community_rules_path() -> Option<PathBuf> {
+    if let Some(xdg_data_home) = std::env::var_os("XDG_DATA_HOME") {
+        return Some(
+            PathBuf::from(xdg_data_home)
+                .join("stutter")
+                .join("community-rules.json"),
+        );
+    }
+
+    std::env::var_os("HOME").map(|home| {
+        PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("stutter")
+            .join("community-rules.json")
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,16 +185,20 @@ pub fn classify_process_identity(
 
 fn builtin_rules() -> &'static CommunityRulesDb {
     BUILTIN_RULES.get_or_init(|| {
-        CommunityRulesDb::from_json(BUILTIN_ANANICY_RULES_JSON)
-            .expect("embedded community rules JSON must be valid")
+        load_community_rules_db(CommunityRulesSourceKind::BuiltinFixture)
+            .expect("embedded community rules test fixture JSON must be valid")
     })
 }
 
 impl CommunityRulesDb {
     pub fn from_json(data: &str) -> anyhow::Result<Self> {
         let file: CommunityRulesFile = serde_json::from_str(data)?;
+        Self::from_file(file)
+    }
+
+    pub fn from_file(file: CommunityRulesFile) -> anyhow::Result<Self> {
         anyhow::ensure!(
-            file.schema_version == 1,
+            matches!(file.schema_version, 1 | 2),
             "unsupported community rules schema version {}",
             file.schema_version
         );
@@ -163,7 +254,7 @@ impl CommunityRulesDb {
                 let confidence = rule.confidence.min(confidence_cap);
                 let context_label = context_signal.unwrap_or("exact-name");
                 let reason = format!(
-                    "community-rules: matched Ananicy rule '{}' from {}; via {}; context={}",
+                    "community-rules: matched community rule '{}' from {}; via {}; context={}",
                     rule.name,
                     rule.source_path,
                     source.label(),
