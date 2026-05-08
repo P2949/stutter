@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
 pub mod cpu_affinity;
+pub mod nice;
+
 pub mod runner;
 
 use std::path::PathBuf;
@@ -31,6 +33,14 @@ pub struct ActionState {
     pub checked_tasks: usize,
     pub pending_changes: usize,
     pub warnings: Vec<ActionWarning>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskIdentity {
+    pub tid: u32,
+    pub process_pid: Option<u32>,
+    pub comm: Option<String>,
+    pub starttime_ticks: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
