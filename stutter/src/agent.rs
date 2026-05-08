@@ -78,6 +78,9 @@ pub struct AgentState {
     pub active_autotune: Mutex<Option<AutotuneRunHandle>>,
     pub runs_dir: PathBuf,
     pub auth: AgentAuth,
+    pub bind: SocketAddr,
+    #[allow(dead_code)]
+    pub allow_unsafe_bind: bool,
     pub limits: AgentLimits,
 }
 
@@ -144,6 +147,8 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
         active_run: Mutex::new(None),
         active_autotune: Mutex::new(None),
         runs_dir: config.runs_dir,
+        bind: config.bind,
+        allow_unsafe_bind: config.allow_unsafe_bind,
         auth: AgentAuth {
             bearer_token: config.bearer_token,
         },
@@ -208,6 +213,100 @@ fn normalize_bearer_token(raw: String) -> anyhow::Result<Option<String>> {
         anyhow::bail!("bearer token is empty");
     }
     Ok(Some(token))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AutotuneRemoteMode {
+    Observe,
+    Suggest,
+    ApplyLowRisk,
+    ApplyMediumRisk,
+    ApplyHighRisk,
+    Unknown,
+}
+
+impl AutotuneRemoteMode {
+    fn is_apply(self) -> bool {
+        matches!(
+            self,
+            Self::ApplyLowRisk | Self::ApplyMediumRisk | Self::ApplyHighRisk
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AutotuneStartSecurityRejection {
+    status: StatusCode,
+    audit_message: String,
+    response_message: String,
+}
+
+fn parse_autotune_remote_mode(mode: &str) -> AutotuneRemoteMode {
+    match mode {
+        "observe" => AutotuneRemoteMode::Observe,
+        "suggest" => AutotuneRemoteMode::Suggest,
+        "apply-low-risk" => AutotuneRemoteMode::ApplyLowRisk,
+        "apply-medium-risk" => AutotuneRemoteMode::ApplyMediumRisk,
+        "apply-high-risk" => AutotuneRemoteMode::ApplyHighRisk,
+        _ => AutotuneRemoteMode::Unknown,
+    }
+}
+
+fn validate_autotune_start_security(
+    headers: &HeaderMap,
+    state: &AgentState,
+    mode: &str,
+) -> Result<(), AutotuneStartSecurityRejection> {
+    let remote_mode = parse_autotune_remote_mode(mode);
+
+    if remote_mode.is_apply() {
+        if state.auth.bearer_token.is_none() {
+            return Err(AutotuneStartSecurityRejection {
+                status: StatusCode::UNAUTHORIZED,
+                audit_message: format!(
+                    "rejected remote autotune apply mode={mode}: bearer token is required"
+                ),
+                response_message: "remote autotune apply mode requires a configured bearer token"
+                    .to_owned(),
+            });
+        }
+
+        if let Err(status) = authorize(headers, &state.auth) {
+            return Err(AutotuneStartSecurityRejection {
+                status,
+                audit_message: format!(
+                    "rejected remote autotune apply mode={mode}: invalid bearer token"
+                ),
+                response_message: "remote autotune apply mode requires a valid bearer token"
+                    .to_owned(),
+            });
+        }
+
+        if !is_local_bind(&state.bind) {
+            return Err(AutotuneStartSecurityRejection {
+                status: StatusCode::FORBIDDEN,
+                audit_message: format!(
+                    "rejected remote autotune apply mode={mode}: non-loopback bind {} is not allowed",
+                    state.bind
+                ),
+                response_message:
+                    "remote autotune apply mode is only allowed on loopback binds for now"
+                        .to_owned(),
+            });
+        }
+
+        return Ok(());
+    }
+
+    if let Err(status) = authorize(headers, &state.auth) {
+        return Err(AutotuneStartSecurityRejection {
+            status,
+            audit_message: format!("rejected remote autotune mode={mode}: unauthorized"),
+            response_message: "unauthorized".to_owned(),
+        });
+    }
+
+    Ok(())
 }
 
 fn authorize(headers: &HeaderMap, auth: &AgentAuth) -> Result<(), StatusCode> {
@@ -589,12 +688,18 @@ async fn autotune_start_handler(
     headers: HeaderMap,
     Json(request): Json<AutotuneStartRequest>,
 ) -> impl IntoResponse {
-    if let Err(status) = authorize(&headers, &state.auth) {
-        audit_agent_event("remote-autotune-start", false, 0, "unauthorized".to_owned());
-        return status.into_response();
-    }
-
     let mode = request.mode.trim().to_owned();
+
+    if let Err(rejection) = validate_autotune_start_security(&headers, &state, &mode) {
+        audit_agent_event("remote-autotune-start", false, 0, rejection.audit_message);
+        return (
+            rejection.status,
+            Json(ErrorResponse {
+                error: rejection.response_message,
+            }),
+        )
+            .into_response();
+    }
     if mode != "observe" && mode != "suggest" {
         audit_agent_event(
             "remote-autotune-start",
@@ -1035,6 +1140,8 @@ mod tests {
             active_autotune: Mutex::new(None),
             runs_dir: PathBuf::from("/tmp/stutter-agent-test-runs"),
             auth: AgentAuth { bearer_token: None },
+            bind: "127.0.0.1:9899".parse().unwrap(),
+            allow_unsafe_bind: false,
             limits: AgentLimits {
                 max_duration_seconds: DEFAULT_AGENT_MAX_DURATION_SECONDS,
                 max_targets: DEFAULT_AGENT_MAX_TARGETS,
@@ -1111,6 +1218,130 @@ mod tests {
         assert!(!response.features.autotune_apply_low_risk);
     }
 
+    fn autotune_headers(token: Option<&str>) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        if let Some(token) = token {
+            headers.insert(
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {token}").parse().unwrap(),
+            );
+        }
+        headers
+    }
+
+    #[test]
+    fn autotune_observe_mode_follows_existing_auth_policy_on_loopback() {
+        let state = test_agent_state();
+        let headers = HeaderMap::new();
+
+        assert!(validate_autotune_start_security(&headers, &state, "observe").is_ok());
+    }
+
+    #[test]
+    fn autotune_suggest_mode_follows_existing_auth_policy_on_loopback() {
+        let state = test_agent_state();
+        let headers = HeaderMap::new();
+
+        assert!(validate_autotune_start_security(&headers, &state, "suggest").is_ok());
+    }
+
+    #[test]
+    fn autotune_apply_mode_requires_configured_bearer_token() {
+        let state = test_agent_state();
+        let headers = HeaderMap::new();
+
+        let rejection =
+            validate_autotune_start_security(&headers, &state, "apply-low-risk").unwrap_err();
+
+        assert_eq!(rejection.status, StatusCode::UNAUTHORIZED);
+        assert!(rejection.audit_message.contains("bearer token is required"));
+        assert!(
+            rejection
+                .response_message
+                .contains("requires a configured bearer token")
+        );
+    }
+
+    #[test]
+    fn autotune_apply_mode_requires_supplied_bearer_token_when_configured() {
+        let mut state = test_agent_state();
+        state.auth = AgentAuth {
+            bearer_token: Some("secret".to_owned()),
+        };
+        let headers = HeaderMap::new();
+
+        let rejection =
+            validate_autotune_start_security(&headers, &state, "apply-low-risk").unwrap_err();
+
+        assert_eq!(rejection.status, StatusCode::UNAUTHORIZED);
+        assert!(rejection.audit_message.contains("invalid bearer token"));
+        assert!(
+            rejection
+                .response_message
+                .contains("requires a valid bearer token")
+        );
+    }
+
+    #[test]
+    fn autotune_apply_mode_rejects_wrong_bearer_token() {
+        let mut state = test_agent_state();
+        state.auth = AgentAuth {
+            bearer_token: Some("secret".to_owned()),
+        };
+        let headers = autotune_headers(Some("wrong"));
+
+        let rejection =
+            validate_autotune_start_security(&headers, &state, "apply-low-risk").unwrap_err();
+
+        assert_eq!(rejection.status, StatusCode::FORBIDDEN);
+        assert!(rejection.audit_message.contains("invalid bearer token"));
+    }
+
+    #[test]
+    fn autotune_apply_mode_with_valid_token_passes_security_on_loopback() {
+        let mut state = test_agent_state();
+        state.auth = AgentAuth {
+            bearer_token: Some("secret".to_owned()),
+        };
+        let headers = autotune_headers(Some("secret"));
+
+        assert!(validate_autotune_start_security(&headers, &state, "apply-low-risk").is_ok());
+    }
+
+    #[test]
+    fn autotune_apply_mode_rejects_non_loopback_even_with_unsafe_bind() {
+        let mut state = test_agent_state();
+        state.auth = AgentAuth {
+            bearer_token: Some("secret".to_owned()),
+        };
+        state.bind = "0.0.0.0:9899".parse().unwrap();
+        state.allow_unsafe_bind = true;
+        let headers = autotune_headers(Some("secret"));
+
+        let rejection =
+            validate_autotune_start_security(&headers, &state, "apply-low-risk").unwrap_err();
+
+        assert_eq!(rejection.status, StatusCode::FORBIDDEN);
+        assert!(rejection.audit_message.contains("non-loopback bind"));
+        assert!(
+            rejection
+                .response_message
+                .contains("only allowed on loopback binds")
+        );
+    }
+
+    #[test]
+    fn autotune_all_apply_modes_use_strict_security() {
+        let state = test_agent_state();
+        let headers = HeaderMap::new();
+
+        for mode in ["apply-low-risk", "apply-medium-risk", "apply-high-risk"] {
+            let rejection = validate_autotune_start_security(&headers, &state, mode).unwrap_err();
+            assert_eq!(rejection.status, StatusCode::UNAUTHORIZED);
+            assert!(rejection.audit_message.contains("bearer token is required"));
+        }
+    }
+
     #[tokio::test]
     async fn autotune_start_accepts_observe_mode_with_tree_pid() {
         let state = Arc::new(test_agent_state());
@@ -1169,7 +1400,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn autotune_start_rejects_apply_low_risk_mode() {
+    async fn autotune_start_rejects_apply_low_risk_mode_after_valid_local_auth() {
+        let mut state_value = test_agent_state();
+        state_value.auth = AgentAuth {
+            bearer_token: Some("secret".to_owned()),
+        };
+        let state = Arc::new(state_value);
+        let response = autotune_start_handler(
+            State(state.clone()),
+            autotune_headers(Some("secret")),
+            Json(AutotuneStartRequest {
+                mode: "apply-low-risk".to_owned(),
+                watch_process: Some("Game.exe".to_owned()),
+                tree_pid: None,
+                profiles: None,
+                config: None,
+                duration_seconds: Some(30),
+                decision_log: None,
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(state.active_autotune.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn autotune_start_apply_low_risk_without_auth_is_rejected_before_mode_validation() {
         let state = Arc::new(test_agent_state());
         let response = autotune_start_handler(
             State(state.clone()),
@@ -1187,7 +1445,37 @@ mod tests {
         .await
         .into_response();
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(state.active_autotune.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn autotune_start_apply_low_risk_on_non_loopback_is_rejected_even_with_valid_token() {
+        let mut state_value = test_agent_state();
+        state_value.auth = AgentAuth {
+            bearer_token: Some("secret".to_owned()),
+        };
+        state_value.bind = "0.0.0.0:9899".parse().unwrap();
+        state_value.allow_unsafe_bind = true;
+        let state = Arc::new(state_value);
+
+        let response = autotune_start_handler(
+            State(state.clone()),
+            autotune_headers(Some("secret")),
+            Json(AutotuneStartRequest {
+                mode: "apply-low-risk".to_owned(),
+                watch_process: Some("Game.exe".to_owned()),
+                tree_pid: None,
+                profiles: None,
+                config: None,
+                duration_seconds: Some(30),
+                decision_log: None,
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
         assert!(state.active_autotune.lock().await.is_none());
     }
 
@@ -1521,6 +1809,8 @@ mod tests {
             active_autotune: Mutex::new(None),
             runs_dir: PathBuf::from("."),
             auth: AgentAuth { bearer_token: None },
+            bind: "127.0.0.1:9899".parse().unwrap(),
+            allow_unsafe_bind: false,
             limits: AgentLimits {
                 max_duration_seconds: 123,
                 max_targets: 456,
