@@ -14,7 +14,7 @@ use tokio::{
 };
 
 use crate::{
-    cli::{Config, CsvStreamTarget},
+    cli::{Config, CsvStreamTarget, FocusSource, ForegroundSourceArg},
     diagnosis::{LiveDiagnosisEntry, diagnose_cluster},
     ebpf_loader,
     events::AlertPayload,
@@ -149,6 +149,182 @@ fn needs_tree_tick(config: &Config, had_tree_roots: bool) -> bool {
     )
 }
 
+fn foreground_capture_enabled(config: &Config) -> bool {
+    config.foreground_window || (config.auto_focus && config.focus_source != FocusSource::Heuristic)
+}
+
+fn foreground_provider_for_config(
+    config: &Config,
+) -> Box<dyn crate::foreground::ForegroundProvider + Send> {
+    match config.foreground_source {
+        ForegroundSourceArg::Auto => crate::foreground::auto_foreground_provider(),
+        ForegroundSourceArg::Sway => Box::new(crate::foreground::SwayForegroundProvider::new()),
+        ForegroundSourceArg::Hyprland => {
+            Box::new(crate::foreground::UnsupportedForegroundProvider::new(
+                "Hyprland foreground provider is not implemented yet; no safe generic Wayland foreground-window API detected",
+            ))
+        }
+        ForegroundSourceArg::X11 => Box::new(crate::foreground::X11ForegroundProvider::new()),
+    }
+}
+
+fn foreground_resolver_from_config(config: &Config) -> crate::foreground::ForegroundResolver {
+    crate::foreground::ForegroundResolver::new(foreground_provider_for_config(config))
+        .with_include_title(config.foreground_include_title)
+        .with_max_stale_ms(config.foreground_max_stale_ms)
+}
+
+fn foreground_identity_changed(
+    old: Option<&crate::foreground::ForegroundWindowSnapshot>,
+    new: &crate::foreground::ForegroundWindowSnapshot,
+) -> bool {
+    let Some(old) = old else {
+        return true;
+    };
+
+    old.source != new.source
+        || old.status != new.status
+        || old.pid != new.pid
+        || old.app_id.as_deref() != new.app_id.as_deref()
+        || old.class.as_deref() != new.class.as_deref()
+        || old.window_id.as_deref() != new.window_id.as_deref()
+        || old.workspace.as_deref() != new.workspace.as_deref()
+}
+
+#[cfg(test)]
+mod foreground_session_tests {
+    use super::*;
+
+    #[allow(clippy::too_many_arguments)]
+    fn foreground_snapshot(
+        elapsed_ms: u64,
+        status: crate::foreground::ForegroundProviderStatus,
+        pid: Option<u32>,
+        app_id: Option<&str>,
+        class: Option<&str>,
+        window_id: Option<&str>,
+        workspace: Option<&str>,
+        confidence: f32,
+    ) -> crate::foreground::ForegroundWindowSnapshot {
+        crate::foreground::ForegroundWindowSnapshot {
+            elapsed_ms,
+            source: Some(crate::foreground::ForegroundSource::Sway),
+            status,
+            pid,
+            app_id: app_id.map(str::to_owned),
+            class: class.map(str::to_owned),
+            title: None,
+            window_id: window_id.map(str::to_owned),
+            workspace: workspace.map(str::to_owned),
+            confidence,
+            stale_ms: None,
+            reason: "test foreground snapshot".to_owned(),
+        }
+    }
+
+    #[test]
+    fn foreground_identity_records_first_sample() {
+        let snapshot = foreground_snapshot(
+            100,
+            crate::foreground::ForegroundProviderStatus::Available,
+            Some(4242),
+            Some("steam"),
+            Some("Steam"),
+            Some("7"),
+            Some("games"),
+            0.95,
+        );
+
+        assert!(foreground_identity_changed(None, &snapshot));
+    }
+
+    #[test]
+    fn foreground_identity_changes_on_provider_status_transition() {
+        let old = foreground_snapshot(
+            100,
+            crate::foreground::ForegroundProviderStatus::Available,
+            Some(4242),
+            Some("steam"),
+            Some("Steam"),
+            Some("7"),
+            Some("games"),
+            0.95,
+        );
+        let new = foreground_snapshot(
+            200,
+            crate::foreground::ForegroundProviderStatus::Error,
+            Some(4242),
+            Some("steam"),
+            Some("Steam"),
+            Some("7"),
+            Some("games"),
+            0.0,
+        );
+
+        assert!(foreground_identity_changed(Some(&old), &new));
+    }
+
+    #[test]
+    fn foreground_identity_changes_on_window_identity_transition() {
+        let old = foreground_snapshot(
+            100,
+            crate::foreground::ForegroundProviderStatus::Available,
+            Some(4242),
+            Some("steam"),
+            Some("Steam"),
+            Some("7"),
+            Some("games"),
+            0.95,
+        );
+        let new = foreground_snapshot(
+            200,
+            crate::foreground::ForegroundProviderStatus::Available,
+            Some(9000),
+            Some("firefox"),
+            Some("Firefox"),
+            Some("8"),
+            Some("web"),
+            0.95,
+        );
+
+        assert!(foreground_identity_changed(Some(&old), &new));
+    }
+
+    #[test]
+    fn foreground_identity_ignores_elapsed_title_reason_and_confidence_only_changes() {
+        let old = crate::foreground::ForegroundWindowSnapshot {
+            elapsed_ms: 100,
+            source: Some(crate::foreground::ForegroundSource::X11),
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid: Some(4242),
+            app_id: Some("Navigator".to_owned()),
+            class: Some("Firefox".to_owned()),
+            title: Some("old private title".to_owned()),
+            window_id: Some("0x1200007".to_owned()),
+            workspace: None,
+            confidence: 0.90,
+            stale_ms: None,
+            reason: "old reason".to_owned(),
+        };
+        let new = crate::foreground::ForegroundWindowSnapshot {
+            elapsed_ms: 250,
+            source: Some(crate::foreground::ForegroundSource::X11),
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid: Some(4242),
+            app_id: Some("Navigator".to_owned()),
+            class: Some("Firefox".to_owned()),
+            title: Some("new private title".to_owned()),
+            window_id: Some("0x1200007".to_owned()),
+            workspace: None,
+            confidence: 0.50,
+            stale_ms: Some(150),
+            reason: "new reason".to_owned(),
+        };
+
+        assert!(!foreground_identity_changed(Some(&old), &new));
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct TuiRenderSnapshot {
     pub(crate) elapsed_ms: u64,
@@ -178,6 +354,9 @@ pub struct MonitorSession {
     pub focus_resolver: Option<FocusResolver>,
     pub current_focus: Option<ResolvedFocus>,
     pub focus_switch_count: u64,
+    pub foreground_resolver: Option<crate::foreground::ForegroundResolver>,
+    pub current_foreground: Option<crate::foreground::ForegroundWindowSnapshot>,
+    pub foreground_switch_count: u64,
 
     pub started: Instant,
     pub tui_state: crate::tui::TuiState,
@@ -207,6 +386,11 @@ impl MonitorSession {
         let mut focus_resolver = None;
         let mut current_focus = None;
         let focus_switch_count = 0;
+        let foreground_enabled = foreground_capture_enabled(&config);
+        let foreground_resolver =
+            foreground_enabled.then(|| foreground_resolver_from_config(&config));
+        let current_foreground = None;
+        let foreground_switch_count = 0;
 
         if !explicit_target && config.auto_focus {
             let policy = FocusPolicy {
@@ -336,8 +520,7 @@ impl MonitorSession {
             recorder.streams.focus_event_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("focus_events.json"),
             )?);
-
-            if config.foreground_window_config().enabled {
+            if foreground_enabled {
                 recorder.streams.foreground_event_writer = Some(JsonArrayWriter::create(
                     run.run_dir.join("foreground_events.json"),
                 )?);
@@ -499,6 +682,9 @@ impl MonitorSession {
             focus_resolver,
             current_focus,
             focus_switch_count,
+            foreground_resolver,
+            current_foreground,
+            foreground_switch_count,
             started,
             tui_state,
             terminal,
@@ -515,7 +701,7 @@ impl MonitorSession {
         })
     }
 
-    pub async fn emit(&self, event: MonitorEvent) {
+    pub fn emit(&self, event: MonitorEvent) {
         let Some(tx) = &self.event_tx else {
             return;
         };
@@ -545,8 +731,7 @@ impl MonitorSession {
             elapsed_ms,
             active_targets: self.tasks.active_targets.clone(),
             removed_targets,
-        })
-        .await;
+        });
 
         Ok(())
     }
@@ -556,6 +741,17 @@ impl MonitorSession {
             writer.push(&event)?;
             self.recorder.counters.focus_event_count += 1;
         }
+        Ok(())
+    }
+
+    fn write_foreground_event(
+        &mut self,
+        snapshot: &crate::foreground::ForegroundWindowSnapshot,
+    ) -> anyhow::Result<()> {
+        if let Some(event) = snapshot.to_event(self.config.foreground_include_title) {
+            self.recorder.write_foreground_event(event)?;
+        }
+
         Ok(())
     }
 
@@ -608,8 +804,7 @@ impl MonitorSession {
             score: new.group.score,
             situation: new.situation,
             reasons: new.group.reasons.clone(),
-        })
-        .await;
+        });
 
         Ok(())
     }
@@ -653,8 +848,7 @@ impl MonitorSession {
             elapsed_ms,
             old_kind: old.map(|focus| focus.group.kind),
             reason,
-        })
-        .await;
+        });
 
         Ok(())
     }
@@ -696,6 +890,27 @@ impl MonitorSession {
         Ok(())
     }
 
+    async fn handle_foreground_tick(&mut self) -> anyhow::Result<()> {
+        let elapsed_ms = self.started.elapsed().as_millis() as u64;
+        let Some(resolver) = self.foreground_resolver.as_mut() else {
+            return Ok(());
+        };
+
+        let snapshot = resolver.sample(elapsed_ms);
+        let changed = foreground_identity_changed(self.current_foreground.as_ref(), &snapshot);
+
+        if changed {
+            if self.current_foreground.is_some() {
+                self.foreground_switch_count = self.foreground_switch_count.saturating_add(1);
+            }
+            self.write_foreground_event(&snapshot)?;
+        }
+
+        self.current_foreground = Some(snapshot);
+
+        Ok(())
+    }
+
     pub async fn run(
         &mut self,
         mut stop_rx: Option<tokio::sync::oneshot::Receiver<()>>,
@@ -721,6 +936,14 @@ impl MonitorSession {
 
         let mut focus_tick = if self.focus_resolver.is_some() {
             let mut tick = interval(Duration::from_millis(self.config.auto_focus_poll_ms));
+            tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+            Some(tick)
+        } else {
+            None
+        };
+
+        let mut foreground_tick = if self.foreground_resolver.is_some() {
+            let mut tick = interval(Duration::from_millis(self.config.foreground_poll_ms));
             tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
             Some(tick)
         } else {
@@ -851,6 +1074,16 @@ impl MonitorSession {
                     }
                 } => {
                     self.handle_focus_tick().await?;
+                }
+
+                _ = async {
+                    if let Some(tick) = foreground_tick.as_mut() {
+                        tick.tick().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
+                    self.handle_foreground_tick().await?;
                 }
 
                 _ = watch_tick.tick() => {
@@ -1072,8 +1305,7 @@ impl MonitorSession {
                 elapsed_ms,
                 records: records.clone(),
                 drop_counters: drop_counters_snapshot.clone(),
-            })
-            .await;
+            });
 
             if let Some(writer) = self.recorder.streams.interval_writer.as_mut() {
                 for record in &records {
