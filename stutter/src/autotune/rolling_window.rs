@@ -1,9 +1,30 @@
-use std::{collections::VecDeque, time::Duration};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    time::Duration,
+};
 
 use crate::{
+    autotune::quality::{OnlineDataQuality, OnlineDataQualityInput},
     diagnosis::LiveDiagnosisEntry,
     recorder::{FrameEvent, IntervalRecord},
 };
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct WindowScore {
+    pub duration_ms: u64,
+    pub interval_count: usize,
+    pub scored_samples: u64,
+    pub score_total: u64,
+    pub over_1ms: u64,
+    pub over_2ms: u64,
+    pub over_5ms: u64,
+    pub max_latency_ns: u64,
+    pub frame_count: usize,
+    pub frame_p99_ms: f64,
+    pub frame_max_ms: f64,
+    pub data_quality: OnlineDataQuality,
+}
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -150,6 +171,83 @@ impl RollingWindow {
 
     pub fn recent_diagnoses_vec(&self) -> Vec<LiveDiagnosisEntry> {
         self.diagnoses.iter().cloned().collect()
+    }
+
+    pub fn score(&self) -> WindowScore {
+        let interval_count = self.interval_count();
+        let scored_samples = self.scored_samples();
+        let over_1ms = self
+            .intervals
+            .iter()
+            .map(|record| record.over_1ms)
+            .fold(0_u64, u64::saturating_add);
+        let over_2ms = self
+            .intervals
+            .iter()
+            .map(|record| record.over_2ms)
+            .fold(0_u64, u64::saturating_add);
+        let over_5ms = self
+            .intervals
+            .iter()
+            .map(|record| record.over_5ms)
+            .fold(0_u64, u64::saturating_add);
+        let max_latency_ns = self
+            .intervals
+            .iter()
+            .map(|record| record.max_ns)
+            .max()
+            .unwrap_or(0);
+        let score_total = over_5ms
+            .saturating_mul(100)
+            .saturating_add(over_2ms.saturating_mul(20))
+            .saturating_add(over_1ms);
+        let frame_count = self.frame_count();
+        let frame_p99_ms = self.frame_p99_ms();
+        let frame_max_ms = self.frame_max_ms();
+
+        let scored_task_count = self
+            .intervals
+            .iter()
+            .filter(|record| record.samples > 0)
+            .map(|record| record.task)
+            .collect::<BTreeSet<_>>()
+            .len();
+
+        let drop_counter_total = self
+            .intervals
+            .iter()
+            .map(|record| record.drop_counters.total())
+            .fold(0_u64, u64::saturating_add);
+
+        let data_quality = OnlineDataQuality::evaluate(OnlineDataQualityInput {
+            scored_intervals: interval_count,
+            scored_samples,
+            scored_task_count,
+            drop_counter_total,
+            target_identity_shifted: false,
+            target_present: scored_task_count > 0,
+            frame_data_required: false,
+            frame_count,
+            baseline_frame_count: None,
+            candidate_frame_count: None,
+            baseline_scored_identity_counts: &[],
+            candidate_scored_identity_counts: &[],
+        });
+
+        WindowScore {
+            duration_ms: self.duration_ms(),
+            interval_count,
+            scored_samples,
+            score_total,
+            over_1ms,
+            over_2ms,
+            over_5ms,
+            max_latency_ns,
+            frame_count,
+            frame_p99_ms,
+            frame_max_ms,
+            data_quality,
+        }
     }
 }
 
@@ -396,6 +494,117 @@ mod tests {
 
         assert_eq!(window.frame_max_ms(), 33.0);
         assert_eq!(window.frame_p99_ms(), 33.0);
+    }
+
+    #[test]
+    fn window_score_aggregates_latency_frames_and_samples() {
+        let mut window = RollingWindow::new(Duration::from_secs(5));
+        window.push_interval(IntervalRecord {
+            elapsed_ms: 1000,
+            task: 42,
+            samples: 30,
+            over_1ms: 3,
+            over_2ms: 2,
+            over_5ms: 1,
+            max_ns: 6_000_000,
+            ..Default::default()
+        });
+        window.push_interval(IntervalRecord {
+            elapsed_ms: 2000,
+            task: 43,
+            samples: 70,
+            over_1ms: 4,
+            over_2ms: 1,
+            over_5ms: 0,
+            max_ns: 4_000_000,
+            ..Default::default()
+        });
+        window.push_frame(frame(1500, 16.0));
+        window.push_frame(frame(1600, 33.0));
+
+        let score = window.score();
+
+        assert_eq!(score.duration_ms, 5000);
+        assert_eq!(score.interval_count, 2);
+        assert_eq!(score.scored_samples, 100);
+        assert_eq!(score.over_1ms, 7);
+        assert_eq!(score.over_2ms, 3);
+        assert_eq!(score.over_5ms, 1);
+        assert_eq!(score.score_total, 167);
+        assert_eq!(score.max_latency_ns, 6_000_000);
+        assert_eq!(score.frame_count, 2);
+        assert_eq!(score.frame_p99_ms, 33.0);
+        assert_eq!(score.frame_max_ms, 33.0);
+    }
+
+    #[test]
+    fn window_score_quality_is_high_when_online_quality_gates_pass() {
+        let mut window = RollingWindow::new(Duration::from_secs(10));
+
+        for elapsed_ms in [1000, 2000, 3000, 4000, 5000] {
+            window.push_interval(IntervalRecord {
+                elapsed_ms,
+                task: 42,
+                samples: 20,
+                over_1ms: 1,
+                max_ns: 2_000_000,
+                ..Default::default()
+            });
+        }
+
+        let score = window.score();
+
+        assert_eq!(score.interval_count, 5);
+        assert_eq!(score.scored_samples, 100);
+        assert_eq!(score.data_quality, OnlineDataQuality::High);
+    }
+
+    #[test]
+    fn window_score_quality_is_low_for_empty_window() {
+        let window = RollingWindow::new(Duration::from_secs(10));
+
+        let score = window.score();
+
+        assert_eq!(score.interval_count, 0);
+        assert_eq!(score.scored_samples, 0);
+        assert_eq!(score.score_total, 0);
+        assert!(score.data_quality.is_low());
+        assert!(
+            score
+                .data_quality
+                .reasons()
+                .iter()
+                .any(|reason| reason.contains("fewer than min_scored_intervals"))
+        );
+    }
+
+    #[test]
+    fn window_score_quality_is_low_when_drop_counters_are_nonzero() {
+        let mut window = RollingWindow::new(Duration::from_secs(10));
+
+        for elapsed_ms in [1000, 2000, 3000, 4000, 5000] {
+            window.push_interval(IntervalRecord {
+                elapsed_ms,
+                task: 42,
+                samples: 20,
+                drop_counters: crate::ebpf_loader::DropCountersSnapshot {
+                    ringbuf_reserve_failed: if elapsed_ms == 5000 { 1 } else { 0 },
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+        }
+
+        let score = window.score();
+
+        assert!(score.data_quality.is_low());
+        assert!(
+            score
+                .data_quality
+                .reasons()
+                .iter()
+                .any(|reason| reason.contains("drop counters above policy max"))
+        );
     }
 
     #[test]
