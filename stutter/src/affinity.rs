@@ -34,6 +34,7 @@ pub struct RestoreState {
     pub records: Vec<AffinityRecord>,
 }
 
+#[allow(dead_code)]
 pub const RESTORE_SCHEMA_VERSION: u32 = 3;
 
 impl CpuMask {
@@ -332,8 +333,25 @@ fn restore_record_status_at(
     proc_root: &Path,
     record: &AffinityRecord,
 ) -> io::Result<RestoreRecordStatus> {
+    restore_identity_status_at(
+        proc_root,
+        record.tid,
+        record.process_pid,
+        record.process_starttime_ticks,
+        record.task_starttime_ticks,
+    )
+}
+
+pub(crate) fn restore_identity_status_at(
+    proc_root: &Path,
+    tid: u32,
+    process_pid: Option<u32>,
+    process_starttime_ticks: Option<u64>,
+    task_starttime_ticks: Option<u64>,
+) -> io::Result<RestoreRecordStatus> {
     // No identity at all -> legacy restore by numeric TID (back-compat).
-    if !record.has_identity() {
+    if process_pid.is_none() && process_starttime_ticks.is_none() && task_starttime_ticks.is_none()
+    {
         return Ok(RestoreRecordStatus::LegacyUnverified);
     }
 
@@ -341,14 +359,12 @@ fn restore_record_status_at(
     // this as an identity mismatch rather than falling back to a numeric
     // TID restore. This prevents accidental restores when schema v3
     // records include partial identity data.
-    if record.process_pid.is_none()
-        || record.process_starttime_ticks.is_none()
-        || record.task_starttime_ticks.is_none()
+    if process_pid.is_none() || process_starttime_ticks.is_none() || task_starttime_ticks.is_none()
     {
         return Ok(RestoreRecordStatus::IdentityMismatch);
     }
 
-    let process_pid = record.process_pid.unwrap();
+    let process_pid = process_pid.unwrap();
 
     let process_stat_path = proc_root.join(process_pid.to_string()).join("stat");
     let process_starttime = match stat_starttime_at(&process_stat_path) {
@@ -359,20 +375,20 @@ fn restore_record_status_at(
                 err.kind(),
                 format!(
                     "failed to read process identity for TID {} via {}: {err}",
-                    record.tid,
+                    tid,
                     process_stat_path.display()
                 ),
             ));
         }
     };
-    if process_starttime != record.process_starttime_ticks {
+    if process_starttime != process_starttime_ticks {
         return Ok(RestoreRecordStatus::IdentityMismatch);
     }
 
     let task_stat_path = proc_root
         .join(process_pid.to_string())
         .join("task")
-        .join(record.tid.to_string())
+        .join(tid.to_string())
         .join("stat");
     let task_starttime = match stat_starttime_at(&task_stat_path) {
         Ok(starttime) => starttime,
@@ -382,13 +398,13 @@ fn restore_record_status_at(
                 err.kind(),
                 format!(
                     "failed to read task identity for TID {} via {}: {err}",
-                    record.tid,
+                    tid,
                     task_stat_path.display()
                 ),
             ));
         }
     };
-    if task_starttime != record.task_starttime_ticks {
+    if task_starttime != task_starttime_ticks {
         return Ok(RestoreRecordStatus::IdentityMismatch);
     }
 
@@ -396,6 +412,7 @@ fn restore_record_status_at(
 }
 
 impl AffinityRecord {
+    #[allow(dead_code)]
     fn has_identity(&self) -> bool {
         self.process_pid.is_some()
             || self.process_starttime_ticks.is_some()
@@ -419,6 +436,7 @@ pub fn default_restore_path() -> PathBuf {
     base
 }
 
+#[allow(dead_code)]
 pub fn save_restore_state(path: &Path, records: &[AffinityRecord]) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -434,6 +452,7 @@ pub fn save_restore_state(path: &Path, records: &[AffinityRecord]) -> anyhow::Re
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn save_merged_restore_state(
     path: &Path,
     records: &[AffinityRecord],
@@ -482,6 +501,7 @@ pub fn save_merged_restore_state(
     save_restore_state(path, &records)
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct RestoreMergeKey {
     tid: u32,
@@ -490,6 +510,7 @@ struct RestoreMergeKey {
     task_starttime_ticks: Option<u64>,
 }
 
+#[allow(dead_code)]
 fn restore_merge_key(record: &AffinityRecord) -> RestoreMergeKey {
     RestoreMergeKey {
         tid: record.tid,

@@ -31,6 +31,7 @@ impl Default for NicePolicy {
 pub struct NiceAction {
     pub targets: Vec<TaskIdentity>,
     pub nice: i32,
+    pub policy: NicePolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,16 +151,15 @@ impl TuningAction for NiceAction {
     }
 
     fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
-        self.preflight_with_policy(&NicePolicy::default())
+        self.preflight_with_policy(&self.policy)
     }
 
     fn dry_run(&self) -> anyhow::Result<ActionState> {
-        self.dry_run_at(Path::new("/proc"), &NicePolicy::default())
+        self.dry_run_at(Path::new("/proc"), &self.policy)
     }
 
     fn apply(&self) -> anyhow::Result<RollbackToken> {
-        let policy = NicePolicy::default();
-        let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &policy)?;
+        let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &self.policy)?;
         let mut records = Vec::new();
 
         for (snapshot, _) in snapshots {
@@ -180,7 +180,7 @@ impl TuningAction for NiceAction {
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
-        self.verify_at(Path::new("/proc"), &NicePolicy::default())
+        self.verify_at(Path::new("/proc"), &self.policy)
     }
 
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
@@ -293,6 +293,23 @@ fn read_target_snapshot_at(
     })
 }
 
+pub(crate) fn read_task_nice(tid: u32) -> anyhow::Result<i32> {
+    if tid == 0 {
+        anyhow::bail!("target tid must be greater than zero");
+    }
+
+    let stat_path = Path::new("/proc").join(tid.to_string()).join("stat");
+    let stat = fs::read_to_string(&stat_path).with_context(|| {
+        format!(
+            "target task does not exist or stat is unreadable: {}",
+            stat_path.display()
+        )
+    })?;
+    let (nice, _) = parse_stat_nice_and_starttime(&stat)
+        .with_context(|| format!("failed to parse nice from {}", stat_path.display()))?;
+    Ok(nice)
+}
+
 fn identity_warnings(target: &TaskIdentity, snapshot: &NiceTargetSnapshot) -> Vec<ActionWarning> {
     let mut warnings = Vec::new();
 
@@ -341,7 +358,7 @@ fn parse_stat_nice_and_starttime(stat: &str) -> anyhow::Result<(i32, u64)> {
     Ok((nice, starttime_ticks))
 }
 
-fn set_task_nice(tid: u32, nice: i32) -> anyhow::Result<()> {
+pub(crate) fn set_task_nice(tid: u32, nice: i32) -> anyhow::Result<()> {
     let rc =
         unsafe { libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, nice as libc::c_int) };
 
@@ -385,6 +402,7 @@ mod tests {
         NiceAction {
             targets: vec![target(tid, "game-thread", 12345)],
             nice,
+            policy: NicePolicy::default(),
         }
     }
 
@@ -452,6 +470,7 @@ mod tests {
         let action = NiceAction {
             targets: Vec::new(),
             nice: 5,
+            policy: NicePolicy::default(),
         };
 
         let err = action
@@ -547,6 +566,7 @@ mod tests {
         let action = NiceAction {
             targets: vec![target_without_process_pid(42, "old-comm", 12345)],
             nice: 5,
+            policy: NicePolicy::default(),
         };
 
         let warnings = action

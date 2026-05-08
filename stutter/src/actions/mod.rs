@@ -54,6 +54,17 @@ pub struct TaskIdentity {
     pub starttime_ticks: Option<u64>,
 }
 
+impl TaskIdentity {
+    pub fn from_task_info(task: &crate::process_tree::TaskInfo) -> Self {
+        Self {
+            tid: task.tid,
+            process_pid: Some(task.process_pid),
+            comm: Some(task.comm.clone()),
+            starttime_ticks: task.task_starttime_ticks,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NiceRestoreRecord {
     pub tid: u32,

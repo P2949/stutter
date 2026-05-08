@@ -802,7 +802,9 @@ mod tests {
         let profile = Profile {
             name: "game-main".to_owned(),
             rules: vec![ProfileRule {
-                affinity: CpuMask::parse("0").unwrap(),
+                affinity: Some(CpuMask::parse("0").unwrap()),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::Game],
                 match_comm: Vec::new(),
             }],
@@ -904,7 +906,9 @@ mod tests {
         let profile = Profile {
             name: "game-main".to_owned(),
             rules: vec![ProfileRule {
-                affinity: CpuMask::parse("0").unwrap(),
+                affinity: Some(CpuMask::parse("0").unwrap()),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::Game],
                 match_comm: Vec::new(),
             }],
@@ -1367,6 +1371,19 @@ mod tests {
         assert!(record.eligible);
         assert_eq!(record.warnings.len(), 1);
         assert_eq!(record.warnings[0].message, "restore file already exists");
+    }
+
+    #[test]
+    fn apply_low_risk_rejects_medium_risk_profile_action() {
+        let err = ensure_low_risk_action_allowed(
+            "cpu_affinity_profile",
+            &SafetyClass::ReversibleMediumRisk,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("ReversibleLowRisk"));
+        assert!(err.contains("ReversibleMediumRisk"));
     }
 
     #[test]

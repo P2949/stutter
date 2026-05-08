@@ -12,7 +12,7 @@ const IOPRIO_WHO_PROCESS: libc::c_int = 1;
 const IOPRIO_CLASS_SHIFT: i32 = 13;
 const IOPRIO_PRIO_MASK: i32 = (1 << IOPRIO_CLASS_SHIFT) - 1;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum IoPrioClass {
     None,
     Realtime,
@@ -50,7 +50,7 @@ impl IoPrioClass {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IoPrioValue {
     pub class: IoPrioClass,
     pub level: Option<u8>,
@@ -60,6 +60,13 @@ impl IoPrioValue {
     pub fn best_effort(level: u8) -> Self {
         Self {
             class: IoPrioClass::BestEffort,
+            level: Some(level),
+        }
+    }
+
+    pub fn realtime(level: u8) -> Self {
+        Self {
+            class: IoPrioClass::Realtime,
             level: Some(level),
         }
     }
@@ -78,12 +85,12 @@ impl IoPrioValue {
         }
     }
 
-    fn encode(self) -> anyhow::Result<i32> {
+    pub fn encode(self) -> anyhow::Result<i32> {
         validate_ioprio_value(self)?;
         Ok((self.class.linux_class() << IOPRIO_CLASS_SHIFT) | i32::from(self.level.unwrap_or(0)))
     }
 
-    fn decode(encoded: i32) -> anyhow::Result<Self> {
+    pub fn decode(encoded: i32) -> anyhow::Result<Self> {
         if encoded < 0 {
             anyhow::bail!("negative encoded I/O priority {encoded}");
         }
@@ -101,7 +108,7 @@ impl IoPrioValue {
         Ok(value)
     }
 
-    fn label(self) -> String {
+    pub fn label(self) -> String {
         match self.level {
             Some(level) => format!("{}:{level}", self.class.label()),
             None => self.class.label().to_owned(),
@@ -136,6 +143,7 @@ impl Default for IoPrioPolicy {
 pub struct IoPrioAction {
     pub targets: Vec<TaskIdentity>,
     pub ioprio: IoPrioValue,
+    pub policy: IoPrioPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,20 +273,15 @@ impl TuningAction for IoPrioAction {
     }
 
     fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
-        self.preflight_with_policy(&IoPrioPolicy::default())
+        self.preflight_with_policy(&self.policy)
     }
 
     fn dry_run(&self) -> anyhow::Result<ActionState> {
-        self.dry_run_at(Path::new("/proc"), &IoPrioPolicy::default())
+        self.dry_run_at(Path::new("/proc"), &self.policy)
     }
 
     fn apply(&self) -> anyhow::Result<RollbackToken> {
-        let policy = IoPrioPolicy {
-            allow_ioprio_changes: true,
-            require_strong_block_io_evidence: false,
-            ..IoPrioPolicy::default()
-        };
-        let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &policy)?;
+        let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &self.policy)?;
         let requested = self.ioprio.encode()?;
         let mut records = Vec::new();
 
@@ -300,12 +303,7 @@ impl TuningAction for IoPrioAction {
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
-        let policy = IoPrioPolicy {
-            allow_ioprio_changes: true,
-            require_strong_block_io_evidence: false,
-            ..IoPrioPolicy::default()
-        };
-        self.verify_at(Path::new("/proc"), &policy)
+        self.verify_at(Path::new("/proc"), &self.policy)
     }
 
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
@@ -492,7 +490,7 @@ fn parse_stat_starttime(stat: &str) -> anyhow::Result<u64> {
     Ok(starttime_ticks)
 }
 
-fn read_task_ioprio(tid: u32) -> anyhow::Result<i32> {
+pub(crate) fn read_task_ioprio(tid: u32) -> anyhow::Result<i32> {
     let rc = unsafe { libc::syscall(libc::SYS_ioprio_get, IOPRIO_WHO_PROCESS, tid as libc::c_int) };
 
     if rc < 0 {
@@ -503,7 +501,7 @@ fn read_task_ioprio(tid: u32) -> anyhow::Result<i32> {
     Ok(rc as i32)
 }
 
-fn set_task_ioprio(tid: u32, encoded_ioprio: i32) -> anyhow::Result<()> {
+pub(crate) fn set_task_ioprio(tid: u32, encoded_ioprio: i32) -> anyhow::Result<()> {
     IoPrioValue::decode(encoded_ioprio)?;
 
     let rc = unsafe {
@@ -559,6 +557,7 @@ mod tests {
         IoPrioAction {
             targets: vec![target(tid, "storage-worker", 12345)],
             ioprio,
+            policy: permissive_evidence_policy(),
         }
     }
 
@@ -696,6 +695,7 @@ mod tests {
         let action = IoPrioAction {
             targets: Vec::new(),
             ioprio: IoPrioValue::best_effort(6),
+            policy: permissive_evidence_policy(),
         };
 
         let err = action

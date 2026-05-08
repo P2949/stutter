@@ -47,7 +47,9 @@ mod tests {
         Profile {
             name: "test".to_owned(),
             rules: vec![ProfileRule {
-                affinity: CpuMask::parse("0").unwrap(),
+                affinity: Some(CpuMask::parse("0").unwrap()),
+                nice: None,
+                ionice: None,
                 match_class: vec![TaskClass::Game],
                 match_comm: Vec::new(),
             }],

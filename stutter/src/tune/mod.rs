@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 
 use crate::{
-    affinity,
     cli::{self, Config},
     hwmon,
     process_tree::TaskFilters,
@@ -528,11 +527,15 @@ async fn write_tune_summary(
                         unix_nanos: crate::audit::unix_nanos_now(),
                         command: "tune --keep-best".to_owned(),
                         action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
-                        safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+                        safety_class: Some(if profiles::profile_uses_priority_actions(profile) {
+                            crate::actions::SafetyClass::ReversibleMediumRisk
+                        } else {
+                            crate::actions::SafetyClass::ReversibleLowRisk
+                        }),
                         dry_run: false,
                         success: false,
                         affected_tasks: 0,
-                        restore_path: Some(crate::affinity::default_restore_path()),
+                        restore_path: Some(crate::profile_restore::default_restore_path()),
                         message: format!(
                             "failed to apply best tune profile '{}': {err:#}",
                             profile.name
@@ -546,11 +549,15 @@ async fn write_tune_summary(
                 unix_nanos: crate::audit::unix_nanos_now(),
                 command: "tune --keep-best".to_owned(),
                 action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
-                safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+                safety_class: Some(if profiles::profile_uses_priority_actions(&profile) {
+                    crate::actions::SafetyClass::ReversibleMediumRisk
+                } else {
+                    crate::actions::SafetyClass::ReversibleLowRisk
+                }),
                 dry_run: false,
                 success: true,
                 affected_tasks: records.len(),
-                restore_path: Some(crate::affinity::default_restore_path()),
+                restore_path: Some(crate::profile_restore::default_restore_path()),
                 message: "kept best tune profile applied".to_owned(),
             });
         }
@@ -614,7 +621,7 @@ pub async fn measure_tune_candidate(
         .clone();
 
     let cache = profiles::ProfileApplyCache::default();
-    let (initial_records, cache) = match crate::watch::apply_profile_to_tree_cached_blocking(
+    let (initial_apply, cache) = match crate::watch::apply_profile_to_tree_cached_blocking(
         tree_pid,
         profile.clone(),
         force_restore_overwrite,
@@ -634,7 +641,7 @@ pub async fn measure_tune_candidate(
                 dry_run: false,
                 success: false,
                 affected_tasks: 0,
-                restore_path: Some(affinity::default_restore_path()),
+                restore_path: Some(crate::profile_restore::default_restore_path()),
                 message: format!(
                     "failed to apply tune candidate profile '{}': {err:#}",
                     profile.name
@@ -643,20 +650,24 @@ pub async fn measure_tune_candidate(
             return Err(err);
         }
     };
-    let initial_applied_tasks = initial_records.len();
+    let initial_applied_tasks = initial_apply.affected_tasks();
     crate::audit::audit_or_warn(&crate::audit::AuditEvent {
         schema_version: 1,
         unix_nanos: crate::audit::unix_nanos_now(),
         command: "tune candidate".to_owned(),
         action_id: Some(format!("cpu-affinity-profile:{}", profile.name)),
-        safety_class: Some(crate::actions::SafetyClass::ReversibleLowRisk),
+        safety_class: Some(if profiles::profile_uses_priority_actions(&profile) {
+            crate::actions::SafetyClass::ReversibleMediumRisk
+        } else {
+            crate::actions::SafetyClass::ReversibleLowRisk
+        }),
         dry_run: false,
         success: true,
         affected_tasks: initial_applied_tasks,
-        restore_path: Some(affinity::default_restore_path()),
+        restore_path: Some(crate::profile_restore::default_restore_path()),
         message: format!("applied tune candidate profile '{}'", profile.name),
     });
-    let should_force_refresh = force_restore_overwrite && initial_records.is_empty();
+    let should_force_refresh = force_restore_overwrite && initial_apply.affected_tasks() == 0;
 
     let control = TuneControl {
         stop_refresh: Arc::new(AtomicBool::new(false)),
@@ -749,7 +760,7 @@ pub async fn tune_profile_refresh_loop(
             debug!("tune_profile_refresh_cache_invalidated_for_full_verify enforce={enforce}");
         }
 
-        let (records, updated_cache) = crate::watch::apply_profile_to_tree_cached_blocking(
+        let (apply_result, updated_cache) = crate::watch::apply_profile_to_tree_cached_blocking(
             tree_pid,
             profile.clone(),
             should_force,
@@ -759,10 +770,10 @@ pub async fn tune_profile_refresh_loop(
         .await?;
         cache = updated_cache;
 
-        if !records.is_empty() {
+        if apply_result.affected_tasks() > 0 {
             control
                 .applied_tasks
-                .fetch_add(records.len(), Ordering::Relaxed);
+                .fetch_add(apply_result.affected_tasks(), Ordering::Relaxed);
         }
 
         should_force = false;
@@ -1025,28 +1036,29 @@ pub fn tune_scored_record_counts(records: &[IntervalRecord]) -> (usize, u64) {
 }
 
 pub fn restore_tune_on_error() {
-    let path = affinity::default_restore_path();
+    let path = crate::profile_restore::default_restore_path();
     if path.exists()
-        && let Err(err) = affinity::restore_saved(&path)
+        && let Err(err) = crate::profile_restore::restore_saved(&path)
     {
         warn!("tune_restore_after_error_failed err={err:#}");
     }
 }
 
 pub fn restore_tune_after_candidate(profile_name: &str) -> anyhow::Result<()> {
-    let path = affinity::default_restore_path();
+    let path = crate::profile_restore::default_restore_path();
     if !path.exists() {
         return Ok(());
     }
 
-    let summary = affinity::restore_saved(&path)?;
+    let summary = crate::profile_restore::restore_saved(&path)?;
     info!(
-        "tune_candidate_restored profile={} restored={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
+        "tune_candidate_restored profile={} affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={}",
         profile_name,
-        summary.restored,
+        summary.affinity,
+        summary.nice,
+        summary.ionice,
         summary.skipped_dead,
-        summary.skipped_identity_mismatch,
-        summary.legacy_unverified
+        summary.skipped_identity_mismatch
     );
     Ok(())
 }
