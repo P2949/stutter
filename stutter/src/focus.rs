@@ -454,6 +454,121 @@ pub fn priority_band_for_class(class: SystemTaskClass, sched_policy: Option<u32>
     }
 }
 
+pub fn legacy_task_class_for_system_class(
+    class: SystemTaskClass,
+) -> crate::process_tree::TaskClass {
+    use crate::process_tree::TaskClass;
+
+    match class {
+        SystemTaskClass::Game
+        | SystemTaskClass::GameRenderThread
+        | SystemTaskClass::GameWorkerThread => TaskClass::Game,
+
+        SystemTaskClass::WineServer => TaskClass::WineServer,
+        SystemTaskClass::GameScope => TaskClass::GameScope,
+        SystemTaskClass::Compositor => TaskClass::Compositor,
+
+        SystemTaskClass::Service
+        | SystemTaskClass::StorageDaemon
+        | SystemTaskClass::NetworkDaemon
+        | SystemTaskClass::KernelThread
+        | SystemTaskClass::IrqThread => TaskClass::Service,
+
+        _ => TaskClass::Helper,
+    }
+}
+
 fn is_realtime_policy(sched_policy: Option<u32>) -> bool {
     matches!(sched_policy, Some(SCHED_FIFO | SCHED_RR | SCHED_DEADLINE))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::process_tree::TaskClass;
+
+    #[test]
+    fn legacy_task_class_maps_game_related_system_classes_to_game() {
+        assert_eq!(
+            legacy_task_class_for_system_class(SystemTaskClass::Game),
+            TaskClass::Game
+        );
+        assert_eq!(
+            legacy_task_class_for_system_class(SystemTaskClass::GameRenderThread),
+            TaskClass::Game
+        );
+        assert_eq!(
+            legacy_task_class_for_system_class(SystemTaskClass::GameWorkerThread),
+            TaskClass::Game
+        );
+    }
+
+    #[test]
+    fn legacy_task_class_preserves_special_foreground_classes() {
+        assert_eq!(
+            legacy_task_class_for_system_class(SystemTaskClass::WineServer),
+            TaskClass::WineServer
+        );
+        assert_eq!(
+            legacy_task_class_for_system_class(SystemTaskClass::GameScope),
+            TaskClass::GameScope
+        );
+        assert_eq!(
+            legacy_task_class_for_system_class(SystemTaskClass::Compositor),
+            TaskClass::Compositor
+        );
+    }
+
+    #[test]
+    fn legacy_task_class_maps_daemon_and_kernel_classes_to_service() {
+        assert_eq!(
+            legacy_task_class_for_system_class(SystemTaskClass::Service),
+            TaskClass::Service
+        );
+        assert_eq!(
+            legacy_task_class_for_system_class(SystemTaskClass::StorageDaemon),
+            TaskClass::Service
+        );
+        assert_eq!(
+            legacy_task_class_for_system_class(SystemTaskClass::NetworkDaemon),
+            TaskClass::Service
+        );
+        assert_eq!(
+            legacy_task_class_for_system_class(SystemTaskClass::KernelThread),
+            TaskClass::Service
+        );
+        assert_eq!(
+            legacy_task_class_for_system_class(SystemTaskClass::IrqThread),
+            TaskClass::Service
+        );
+    }
+
+    #[test]
+    fn legacy_task_class_maps_all_other_system_classes_to_helper() {
+        let classes = [
+            SystemTaskClass::AudioRealtime,
+            SystemTaskClass::Input,
+            SystemTaskClass::BrowserForeground,
+            SystemTaskClass::BrowserBackground,
+            SystemTaskClass::BrowserRenderer,
+            SystemTaskClass::BrowserGpu,
+            SystemTaskClass::BrowserNetwork,
+            SystemTaskClass::BuildJob,
+            SystemTaskClass::Compiler,
+            SystemTaskClass::Linker,
+            SystemTaskClass::Indexer,
+            SystemTaskClass::PackageManager,
+            SystemTaskClass::Editor,
+            SystemTaskClass::Terminal,
+            SystemTaskClass::Shell,
+            SystemTaskClass::Media,
+            SystemTaskClass::Recorder,
+            SystemTaskClass::VirtualMachine,
+            SystemTaskClass::Unknown,
+        ];
+
+        for class in classes {
+            assert_eq!(legacy_task_class_for_system_class(class), TaskClass::Helper);
+        }
+    }
 }
