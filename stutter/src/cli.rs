@@ -41,6 +41,8 @@ enum Command {
     #[command(name = "inspect-irqs")]
     InspectIrqs(InspectIrqsArgs),
     Autotune(AutotuneArgs),
+    #[command(name = "autotune-status")]
+    AutotuneStatus(AutotuneStatusArgs),
     Agent(AgentArgs),
     #[command(name = "completions")]
     Completions(CompletionsArgs),
@@ -693,6 +695,12 @@ pub struct RecommendArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+pub struct AutotuneStatusArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
 pub struct AuditArgs {
     #[arg(long = "path", value_name = "PATH")]
     pub path: Option<PathBuf>,
@@ -999,6 +1007,9 @@ pub enum AppCommand {
         json: bool,
         filter: Vec<String>,
         top: usize,
+    },
+    AutotuneStatus {
+        json: bool,
     },
     Agent {
         bind: std::net::SocketAddr,
@@ -1362,6 +1373,7 @@ where
                 })
             }
         }
+        Some(Command::AutotuneStatus(args)) => Ok(AppCommand::AutotuneStatus { json: args.json }),
         Some(Command::Audit(args)) => Ok(AppCommand::Audit {
             path: args.path,
             tail: args.tail,

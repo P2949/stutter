@@ -19,6 +19,7 @@ pub mod profiles;
 pub mod quality;
 pub mod replay;
 pub mod state;
+pub mod status;
 
 use std::{
     fs::{self, OpenOptions},
