@@ -59,6 +59,27 @@ pub struct RunsResponse {
     pub runs: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentAutotuneLimits {
+    pub max_active_controllers: usize,
+    pub max_safety_class: String,
+    pub max_candidate_window_seconds: u64,
+    pub max_targets: usize,
+    pub allow_system_wide_actions: bool,
+}
+
+impl Default for AgentAutotuneLimits {
+    fn default() -> Self {
+        Self {
+            max_active_controllers: 1,
+            max_safety_class: "ReversibleLowRisk".to_owned(),
+            max_candidate_window_seconds: 120,
+            max_targets: 1,
+            allow_system_wide_actions: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutotuneStartRequest {
     pub mode: String,
@@ -112,6 +133,7 @@ pub struct AutotuneConfigResponse {
     pub apply_low_risk_remote_enabled: bool,
     pub local_only_by_default: bool,
     pub history_path: String,
+    pub autotune_limits: AgentAutotuneLimits,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
