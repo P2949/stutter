@@ -37,4 +37,13 @@ pub enum SituationKind {
     IrqPressure,
     ThermalOrPowerLimit,
     CompileLoad,
+    BrowserFocused,
+    BrowserCpuPressure,
+    BrowserGpuVideo,
+    BrowserIoPressure,
+    CompileCpuBound,
+    CompileLinkerPressure,
+    MediaPlayback,
+    Recording,
+    VirtualMachineLoad,
 }
