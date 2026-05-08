@@ -146,6 +146,8 @@ pub struct FocusScoreBreakdown {
     pub interactivity_score: f32,
     pub class_priority_score: f32,
     pub stability_score: f32,
+    #[serde(default)]
+    pub foreground_score: f32,
     pub penalty: f32,
 }
 
@@ -274,12 +276,8 @@ impl FocusResolver {
         foreground: Option<&ForegroundWindowSnapshot>,
         source_mode: FocusSource,
     ) -> FocusDecision {
-        let snapshot = focus_snapshot_at(proc_root, &mut self.cache, elapsed_ms, foreground);
-
-        match source_mode {
-            FocusSource::Heuristic | FocusSource::Foreground | FocusSource::Hybrid => {}
-        }
-
+        let mut snapshot = focus_snapshot_at(proc_root, &mut self.cache, elapsed_ms, foreground);
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, source_mode);
         self.decide_from_snapshot(snapshot)
     }
 
@@ -535,6 +533,348 @@ mod foreground_focus_tests {
         }
     }
 
+    fn test_classification(
+        class: SystemTaskClass,
+        priority_band: PriorityBand,
+        confidence: f32,
+    ) -> Classification {
+        Classification {
+            class,
+            priority_band,
+            confidence,
+            reasons: vec![format!("test class {:?}", class)],
+        }
+    }
+
+    fn test_process(pid: u32, ppid: u32, class: SystemTaskClass) -> FocusProcess {
+        FocusProcess {
+            pid,
+            ppid,
+            comm: format!("process-{pid}"),
+            cmdline: format!("process-{pid}"),
+            cgroup_path: None,
+            starttime_ticks: Some(pid as u64 * 10),
+            sched_policy: None,
+            is_foreground_window_process: false,
+            classification: test_classification(class, PriorityBand::Interactive, 0.85),
+            cpu_time_ticks_delta: 10,
+            read_bytes_delta: 0,
+            write_bytes_delta: 0,
+            voluntary_ctxt_switches_delta: 0,
+            nonvoluntary_ctxt_switches_delta: 0,
+        }
+    }
+
+    fn test_group(
+        kind: FocusGroupKind,
+        root_pids: Vec<u32>,
+        member_pids: Vec<u32>,
+        primary_pid: Option<u32>,
+        display_name: &str,
+        score: f32,
+    ) -> FocusGroup {
+        FocusGroup {
+            kind,
+            root_pids,
+            member_pids,
+            primary_pid,
+            display_name: display_name.to_owned(),
+            score,
+            score_breakdown: FocusScoreBreakdown {
+                cpu_score: 0.50,
+                io_score: 0.10,
+                interactivity_score: 0.50,
+                class_priority_score: 0.50,
+                stability_score: 0.50,
+                foreground_score: 0.0,
+                penalty: 0.0,
+            },
+            confidence: 0.80,
+            priority_band: PriorityBand::Interactive,
+            reasons: vec![format!("test group {display_name}")],
+        }
+    }
+
+    fn foreground_scoring_snapshot(
+        foreground: Option<ForegroundWindowSnapshot>,
+        groups: Vec<FocusGroup>,
+    ) -> FocusSnapshot {
+        let mut processes = BTreeMap::new();
+        processes.insert(10, test_process(10, 1, SystemTaskClass::Game));
+        processes.insert(11, test_process(11, 10, SystemTaskClass::GameWorkerThread));
+        processes.insert(20, test_process(20, 1, SystemTaskClass::BrowserForeground));
+        processes.insert(21, test_process(21, 20, SystemTaskClass::BrowserRenderer));
+        processes.insert(30, test_process(30, 1, SystemTaskClass::Compiler));
+
+        let mut children_by_parent = BTreeMap::new();
+        children_by_parent.insert(1, vec![10, 20, 30]);
+        children_by_parent.insert(10, vec![11]);
+        children_by_parent.insert(20, vec![21]);
+
+        FocusSnapshot {
+            elapsed_ms: 1_000,
+            foreground,
+            processes,
+            children_by_parent,
+            groups,
+        }
+    }
+
+    #[test]
+    fn foreground_score_is_full_confidence_for_member_pid() {
+        let foreground = foreground_snapshot(Some(11));
+        let snapshot = foreground_scoring_snapshot(
+            Some(foreground),
+            vec![test_group(
+                FocusGroupKind::Game,
+                vec![10],
+                vec![10, 11],
+                Some(10),
+                "game",
+                0.40,
+            )],
+        );
+
+        let score = foreground_score_for_group(&snapshot.groups[0], &snapshot);
+
+        assert!((score - 0.95).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn foreground_score_is_partial_for_same_process_family() {
+        let foreground = foreground_snapshot(Some(11));
+        let snapshot = foreground_scoring_snapshot(
+            Some(foreground),
+            vec![test_group(
+                FocusGroupKind::Game,
+                vec![10],
+                vec![10],
+                Some(10),
+                "game",
+                0.40,
+            )],
+        );
+
+        let score = foreground_score_for_group(&snapshot.groups[0], &snapshot);
+
+        assert!((score - (0.75 * 0.95)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn foreground_source_keeps_only_foreground_scoring_groups() {
+        let foreground = foreground_snapshot(Some(11));
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(foreground),
+            vec![
+                test_group(
+                    FocusGroupKind::Game,
+                    vec![10],
+                    vec![10, 11],
+                    Some(10),
+                    "game",
+                    0.30,
+                ),
+                test_group(
+                    FocusGroupKind::Browser,
+                    vec![20],
+                    vec![20, 21],
+                    Some(20),
+                    "browser",
+                    0.90,
+                ),
+            ],
+        );
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
+
+        assert_eq!(snapshot.groups.len(), 1);
+        assert_eq!(snapshot.groups[0].display_name, "game");
+        assert!(snapshot.groups[0].score_breakdown.foreground_score > 0.0);
+        assert!(snapshot.groups[0].score > 0.30);
+    }
+
+    #[test]
+    fn foreground_source_falls_back_to_heuristic_when_provider_unavailable() {
+        let mut unavailable = foreground_snapshot(Some(11));
+        unavailable.status = crate::foreground::ForegroundProviderStatus::Unavailable;
+        unavailable.confidence = 0.0;
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(unavailable),
+            vec![
+                test_group(
+                    FocusGroupKind::Game,
+                    vec![10],
+                    vec![10, 11],
+                    Some(10),
+                    "game",
+                    0.30,
+                ),
+                test_group(
+                    FocusGroupKind::Browser,
+                    vec![20],
+                    vec![20, 21],
+                    Some(20),
+                    "browser",
+                    0.90,
+                ),
+            ],
+        );
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
+
+        assert_eq!(snapshot.groups.len(), 2);
+        assert_eq!(snapshot.groups[0].display_name, "game");
+        assert_eq!(snapshot.groups[0].score, 0.30);
+        assert_eq!(snapshot.groups[1].display_name, "browser");
+        assert_eq!(snapshot.groups[1].score, 0.90);
+    }
+
+    #[test]
+    fn hybrid_source_boosts_foreground_group_but_keeps_fallback_groups() {
+        let foreground = foreground_snapshot(Some(11));
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(foreground),
+            vec![
+                test_group(
+                    FocusGroupKind::Game,
+                    vec![10],
+                    vec![10, 11],
+                    Some(10),
+                    "game",
+                    0.30,
+                ),
+                test_group(
+                    FocusGroupKind::Browser,
+                    vec![20],
+                    vec![20, 21],
+                    Some(20),
+                    "browser",
+                    0.90,
+                ),
+            ],
+        );
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Hybrid);
+
+        assert_eq!(snapshot.groups.len(), 2);
+        assert!(
+            snapshot
+                .groups
+                .iter()
+                .any(|group| group.display_name == "game")
+        );
+        assert!(
+            snapshot
+                .groups
+                .iter()
+                .any(|group| group.display_name == "browser")
+        );
+        let game = snapshot
+            .groups
+            .iter()
+            .find(|group| group.display_name == "game")
+            .unwrap();
+        assert!(game.score_breakdown.foreground_score > 0.0);
+        assert!(
+            game.reasons
+                .iter()
+                .any(|reason| reason.contains("foreground-window score"))
+        );
+    }
+
+    #[test]
+    fn hybrid_source_falls_back_to_heuristic_when_foreground_is_stale() {
+        let mut stale = foreground_snapshot(Some(11));
+        stale.stale_ms = Some(1_000);
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(stale),
+            vec![test_group(
+                FocusGroupKind::Browser,
+                vec![20],
+                vec![20, 21],
+                Some(20),
+                "browser",
+                0.90,
+            )],
+        );
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Hybrid);
+
+        assert_eq!(snapshot.groups.len(), 1);
+        assert_eq!(snapshot.groups[0].display_name, "browser");
+        assert_eq!(snapshot.groups[0].score, 0.90);
+        assert_eq!(snapshot.groups[0].score_breakdown.foreground_score, 0.0);
+    }
+
+    #[test]
+    fn heuristic_source_preserves_scores_exactly() {
+        let foreground = foreground_snapshot(Some(11));
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(foreground),
+            vec![
+                test_group(
+                    FocusGroupKind::Game,
+                    vec![10],
+                    vec![10, 11],
+                    Some(10),
+                    "game",
+                    0.30,
+                ),
+                test_group(
+                    FocusGroupKind::Browser,
+                    vec![20],
+                    vec![20, 21],
+                    Some(20),
+                    "browser",
+                    0.90,
+                ),
+            ],
+        );
+        let before = snapshot
+            .groups
+            .iter()
+            .map(|group| {
+                (
+                    group.display_name.clone(),
+                    group.score,
+                    group.score_breakdown.foreground_score,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Heuristic);
+
+        let after = snapshot
+            .groups
+            .iter()
+            .map(|group| {
+                (
+                    group.display_name.clone(),
+                    group.score,
+                    group.score_breakdown.foreground_score,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn foreground_breakdown_deserializes_old_json_with_default_foreground_score() {
+        let json = r#"{
+            "cpu_score": 0.1,
+            "io_score": 0.2,
+            "interactivity_score": 0.3,
+            "class_priority_score": 0.4,
+            "stability_score": 0.5,
+            "penalty": 0.6
+        }"#;
+
+        let breakdown: FocusScoreBreakdown = serde_json::from_str(json).unwrap();
+
+        assert_eq!(breakdown.foreground_score, 0.0);
+    }
+
     #[test]
     fn focus_snapshot_stores_foreground_snapshot() {
         let proc = crate::test_support::FakeProc::new("focus-stores-foreground");
@@ -655,6 +995,154 @@ mod foreground_focus_tests {
             | FocusDecision::NoTarget { .. } => {}
         }
     }
+}
+
+fn apply_foreground_source_mode_to_snapshot(
+    snapshot: &mut FocusSnapshot,
+    source_mode: FocusSource,
+) {
+    if source_mode == FocusSource::Heuristic {
+        return;
+    }
+
+    let foreground_usable = foreground_context_is_usable_for_focus(snapshot);
+
+    if !foreground_usable {
+        return;
+    }
+
+    let mut groups = std::mem::take(&mut snapshot.groups);
+
+    for group in groups.iter_mut() {
+        let foreground_score = foreground_score_for_group(group, snapshot);
+        group.score_breakdown.foreground_score = foreground_score;
+
+        if foreground_score > 0.0 {
+            group.score = foreground_aware_total_score(&group.score_breakdown);
+            if group.confidence < foreground_score {
+                group.confidence = foreground_score;
+            }
+            group
+                .reasons
+                .push(format!("foreground-window score {:.2}", foreground_score));
+        } else if source_mode == FocusSource::Hybrid {
+            group.score = foreground_aware_total_score(&group.score_breakdown);
+        }
+    }
+
+    if source_mode == FocusSource::Foreground {
+        groups.retain(|group| group.score_breakdown.foreground_score > 0.0);
+    }
+
+    groups.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                priority_band_rank(right.priority_band).cmp(&priority_band_rank(left.priority_band))
+            })
+            .then_with(|| left.display_name.cmp(&right.display_name))
+    });
+
+    snapshot.groups = groups;
+}
+
+fn foreground_context_is_usable_for_focus(snapshot: &FocusSnapshot) -> bool {
+    let Some(foreground) = snapshot.foreground.as_ref() else {
+        return false;
+    };
+
+    foreground.status == crate::foreground::ForegroundProviderStatus::Available
+        && foreground.pid.is_some()
+        && foreground.confidence > 0.0
+        && foreground.stale_ms.is_none()
+}
+
+fn foreground_aware_total_score(breakdown: &FocusScoreBreakdown) -> f32 {
+    breakdown.cpu_score * 0.25
+        + breakdown.io_score * 0.10
+        + breakdown.interactivity_score * 0.15
+        + breakdown.class_priority_score * 0.20
+        + breakdown.stability_score * 0.10
+        + breakdown.foreground_score * 0.35
+        - breakdown.penalty
+}
+
+fn foreground_score_for_group(group: &FocusGroup, snapshot: &FocusSnapshot) -> f32 {
+    let Some(fg) = snapshot.foreground.as_ref() else {
+        return 0.0;
+    };
+
+    let Some(pid) = fg.pid else {
+        return 0.0;
+    };
+
+    if group.member_pids.contains(&pid) {
+        return 1.0 * fg.confidence;
+    }
+
+    if group.root_pids.contains(&pid) {
+        return 0.95 * fg.confidence;
+    }
+
+    if group
+        .member_pids
+        .iter()
+        .any(|member| same_process_family(snapshot, *member, pid))
+    {
+        return 0.75 * fg.confidence;
+    }
+
+    0.0
+}
+
+fn same_process_family(snapshot: &FocusSnapshot, left_pid: u32, right_pid: u32) -> bool {
+    if left_pid == right_pid {
+        return true;
+    }
+
+    if is_process_ancestor(snapshot, left_pid, right_pid) {
+        return true;
+    }
+
+    if is_process_ancestor(snapshot, right_pid, left_pid) {
+        return true;
+    }
+
+    let left_parent = snapshot
+        .processes
+        .get(&left_pid)
+        .map(|process| process.ppid);
+    let right_parent = snapshot
+        .processes
+        .get(&right_pid)
+        .map(|process| process.ppid);
+
+    matches!((left_parent, right_parent), (Some(left), Some(right)) if left != 0 && left == right)
+}
+
+fn is_process_ancestor(snapshot: &FocusSnapshot, ancestor_pid: u32, descendant_pid: u32) -> bool {
+    let mut current = descendant_pid;
+    let mut seen = BTreeSet::new();
+
+    while seen.insert(current) {
+        let Some(process) = snapshot.processes.get(&current) else {
+            return false;
+        };
+
+        if process.ppid == ancestor_pid {
+            return true;
+        }
+
+        if process.ppid == 0 || process.ppid == current {
+            return false;
+        }
+
+        current = process.ppid;
+    }
+
+    false
 }
 
 pub fn safety_warnings_for_group(
@@ -2005,6 +2493,7 @@ fn score_focus_group(
         interactivity_score,
         class_priority_score,
         stability_score,
+        foreground_score: 0.0,
         penalty,
     }
 }
