@@ -107,6 +107,8 @@ pub struct ProcInfo {
     pub ppid: u32,
     pub comm: String,
     pub cmdline: String,
+    pub exe_path: String,
+    pub cgroup_path: String,
     pub starttime_ticks: Option<u64>,
     pub exe_dev: Option<u64>,
     pub exe_ino: Option<u64>,
@@ -115,15 +117,39 @@ pub struct ProcInfo {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 pub enum TaskClass {
+    AudioRealtime,
+    Input,
     Game,
     GameHelper,
+    GameRenderThread,
+    GameWorkerThread,
     Launcher,
     WineServer,
     GameScope,
     Compositor,
-    Render,
+    BrowserForeground,
+    BrowserBackground,
+    BrowserRenderer,
+    BrowserGpu,
+    BrowserNetwork,
+    BuildJob,
+    Compiler,
+    Linker,
+    Indexer,
+    PackageManager,
+    Editor,
+    Terminal,
+    Shell,
+    Media,
+    Recorder,
+    VirtualMachine,
+    KernelThread,
+    IrqThread,
     Service,
+    NetworkDaemon,
+    StorageDaemon,
     SteamRuntime,
+    Render,
     Helper,
     #[default]
     Unknown,
@@ -132,35 +158,150 @@ pub enum TaskClass {
 impl TaskClass {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::AudioRealtime => "AudioRealtime",
+            Self::Input => "Input",
             Self::Game => "Game",
             Self::GameHelper => "GameHelper",
+            Self::GameRenderThread => "GameRenderThread",
+            Self::GameWorkerThread => "GameWorkerThread",
             Self::Launcher => "Launcher",
             Self::WineServer => "WineServer",
             Self::GameScope => "GameScope",
             Self::Compositor => "Compositor",
-            Self::Render => "Render",
+            Self::BrowserForeground => "BrowserForeground",
+            Self::BrowserBackground => "BrowserBackground",
+            Self::BrowserRenderer => "BrowserRenderer",
+            Self::BrowserGpu => "BrowserGpu",
+            Self::BrowserNetwork => "BrowserNetwork",
+            Self::BuildJob => "BuildJob",
+            Self::Compiler => "Compiler",
+            Self::Linker => "Linker",
+            Self::Indexer => "Indexer",
+            Self::PackageManager => "PackageManager",
+            Self::Editor => "Editor",
+            Self::Terminal => "Terminal",
+            Self::Shell => "Shell",
+            Self::Media => "Media",
+            Self::Recorder => "Recorder",
+            Self::VirtualMachine => "VirtualMachine",
+            Self::KernelThread => "KernelThread",
+            Self::IrqThread => "IrqThread",
             Self::Service => "Service",
+            Self::NetworkDaemon => "NetworkDaemon",
+            Self::StorageDaemon => "StorageDaemon",
             Self::SteamRuntime => "SteamRuntime",
+            Self::Render => "Render",
             Self::Helper => "Helper",
             Self::Unknown => "Unknown",
         }
     }
 
     pub fn from_str_opt(s: &str) -> Option<Self> {
-        match s.to_ascii_lowercase().as_str() {
+        let normalized = s
+            .chars()
+            .filter(|ch| *ch != '_' && *ch != '-' && !ch.is_whitespace())
+            .collect::<String>()
+            .to_ascii_lowercase();
+
+        match normalized.as_str() {
+            "audiorealtime" => Some(Self::AudioRealtime),
+            "input" => Some(Self::Input),
             "game" => Some(Self::Game),
             "gamehelper" => Some(Self::GameHelper),
+            "gamerenderthread" => Some(Self::GameRenderThread),
+            "gameworkerthread" => Some(Self::GameWorkerThread),
             "launcher" => Some(Self::Launcher),
             "wineserver" => Some(Self::WineServer),
             "gamescope" => Some(Self::GameScope),
             "compositor" => Some(Self::Compositor),
-            "render" => Some(Self::Render),
+            "browserforeground" => Some(Self::BrowserForeground),
+            "browserbackground" => Some(Self::BrowserBackground),
+            "browserrenderer" => Some(Self::BrowserRenderer),
+            "browsergpu" => Some(Self::BrowserGpu),
+            "browsernetwork" => Some(Self::BrowserNetwork),
+            "buildjob" => Some(Self::BuildJob),
+            "compiler" => Some(Self::Compiler),
+            "linker" => Some(Self::Linker),
+            "indexer" => Some(Self::Indexer),
+            "packagemanager" => Some(Self::PackageManager),
+            "editor" => Some(Self::Editor),
+            "terminal" => Some(Self::Terminal),
+            "shell" => Some(Self::Shell),
+            "media" => Some(Self::Media),
+            "recorder" => Some(Self::Recorder),
+            "virtualmachine" => Some(Self::VirtualMachine),
+            "kernelthread" => Some(Self::KernelThread),
+            "irqthread" => Some(Self::IrqThread),
             "service" => Some(Self::Service),
+            "networkdaemon" => Some(Self::NetworkDaemon),
+            "storagedaemon" => Some(Self::StorageDaemon),
             "steamruntime" => Some(Self::SteamRuntime),
+            "render" => Some(Self::Render),
             "helper" => Some(Self::Helper),
             "unknown" => Some(Self::Unknown),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+pub type SystemTaskClass = TaskClass;
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
+pub enum PriorityBand {
+    CriticalRealtime,
+    ForegroundLatency,
+    Interactive,
+    Throughput,
+    Background,
+    #[default]
+    Unknown,
+}
+
+#[cfg(test)]
+pub fn priority_band_for_class(class: SystemTaskClass, sched_policy: Option<u32>) -> PriorityBand {
+    if matches!(sched_policy, Some(1 | 2 | 6)) {
+        match class {
+            SystemTaskClass::AudioRealtime | SystemTaskClass::Input => {
+                return PriorityBand::CriticalRealtime;
+            }
+            _ => {}
+        }
+    }
+
+    match class {
+        SystemTaskClass::AudioRealtime | SystemTaskClass::Input => PriorityBand::CriticalRealtime,
+
+        SystemTaskClass::Game
+        | SystemTaskClass::GameRenderThread
+        | SystemTaskClass::GameWorkerThread
+        | SystemTaskClass::GameScope
+        | SystemTaskClass::WineServer
+        | SystemTaskClass::Compositor
+        | SystemTaskClass::BrowserForeground => PriorityBand::ForegroundLatency,
+
+        SystemTaskClass::Editor
+        | SystemTaskClass::Terminal
+        | SystemTaskClass::Shell
+        | SystemTaskClass::BrowserRenderer
+        | SystemTaskClass::BrowserGpu
+        | SystemTaskClass::BrowserNetwork
+        | SystemTaskClass::Media => PriorityBand::Interactive,
+
+        SystemTaskClass::BuildJob
+        | SystemTaskClass::Compiler
+        | SystemTaskClass::Linker
+        | SystemTaskClass::Recorder
+        | SystemTaskClass::VirtualMachine => PriorityBand::Throughput,
+
+        SystemTaskClass::Indexer
+        | SystemTaskClass::PackageManager
+        | SystemTaskClass::StorageDaemon
+        | SystemTaskClass::NetworkDaemon
+        | SystemTaskClass::Service => PriorityBand::Background,
+
+        _ => PriorityBand::Unknown,
     }
 }
 
@@ -547,6 +688,8 @@ fn read_proc_info_at(proc_root: &Path, pid: u32) -> Option<ProcInfo> {
 
     let stat_path = proc_root.join(pid.to_string()).join("stat");
     let (starttime_ticks, sched_policy) = stat_starttime_and_policy_at(&stat_path);
+    let exe_path = exe_path_at(proc_root, pid).unwrap_or_default();
+    let cgroup_path = read_proc_cgroup_path_at(proc_root, pid);
     let (exe_dev, exe_ino) = exe_metadata_at(proc_root, pid)
         .map(|metadata| (Some(metadata.dev()), Some(metadata.ino())))
         .unwrap_or((None, None));
@@ -556,11 +699,34 @@ fn read_proc_info_at(proc_root: &Path, pid: u32) -> Option<ProcInfo> {
         ppid: ppid?,
         comm: comm?,
         cmdline,
+        exe_path,
+        cgroup_path,
         starttime_ticks,
         exe_dev,
         exe_ino,
         sched_policy,
     })
+}
+
+fn exe_path_at(proc_root: &Path, pid: u32) -> Option<String> {
+    fs::read_link(proc_root.join(pid.to_string()).join("exe"))
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+fn read_proc_cgroup_path_at(proc_root: &Path, pid: u32) -> String {
+    let cgroup_path = proc_root.join(pid.to_string()).join("cgroup");
+    let Ok(contents) = fs::read_to_string(cgroup_path) else {
+        return String::new();
+    };
+
+    contents
+        .lines()
+        .filter_map(|line| line.rsplit_once(':').map(|(_, path)| path.trim()))
+        .filter(|path| !path.is_empty())
+        .max_by_key(|path| path.len())
+        .unwrap_or("")
+        .to_owned()
 }
 
 fn exe_metadata_at(proc_root: &Path, pid: u32) -> Option<fs::Metadata> {
@@ -851,7 +1017,14 @@ pub fn find_auto_target_pids(proc_root: &Path) -> Vec<(u32, TaskClass)> {
                 continue;
             };
 
-            let class = classify_task(&proc_info.comm, &proc_info.comm, &proc_info.cmdline);
+            let class = classify_task_with_context(
+                &proc_info.comm,
+                &proc_info.comm,
+                &proc_info.cmdline,
+                &proc_info.exe_path,
+                &proc_info.cgroup_path,
+                proc_info.sched_policy,
+            );
             match class {
                 TaskClass::GameScope
                 | TaskClass::SteamRuntime
@@ -1039,7 +1212,14 @@ fn task_info_from_parts(
         task_starttime_ticks,
         exe_dev: proc_info.exe_dev,
         exe_ino: proc_info.exe_ino,
-        class: classify_task(comm, &proc_info.comm, &proc_info.cmdline),
+        class: classify_task_with_context(
+            comm,
+            &proc_info.comm,
+            &proc_info.cmdline,
+            &proc_info.exe_path,
+            &proc_info.cgroup_path,
+            sched_policy,
+        ),
         sched_policy,
         from_cgroup: false,
     }
@@ -1102,127 +1282,372 @@ pub fn parse_proc_stat_policy(stat: &str) -> Option<u32> {
 /// 7. Game: Likely game process based on path patterns (steamapps/common, etc).
 /// 8. GameHelper: Any other .exe process not caught by the above.
 pub fn classify_task(comm: &str, process_comm: &str, cmdline: &str) -> TaskClass {
-    let comm = comm.to_ascii_lowercase();
-    let process_comm = process_comm.to_ascii_lowercase();
-    let cmdline = cmdline.to_ascii_lowercase();
+    classify_task_with_context(comm, process_comm, cmdline, "", "", None)
+}
 
-    for rule in CLASSIFICATION_RULES {
-        if rule.matches(&comm, &process_comm, &cmdline) {
-            return rule.class;
+pub fn classify_task_with_context(
+    comm: &str,
+    process_comm: &str,
+    cmdline: &str,
+    exe_path: &str,
+    cgroup_path: &str,
+    sched_policy: Option<u32>,
+) -> TaskClass {
+    let lower_comm = comm.to_ascii_lowercase();
+    let lower_process_comm = process_comm.to_ascii_lowercase();
+    let lower_cmdline = cmdline.to_ascii_lowercase();
+    let lower_exe_path = exe_path.to_ascii_lowercase();
+    let lower_cgroup_path = cgroup_path.to_ascii_lowercase();
+
+    let combined = [
+        lower_comm.as_str(),
+        lower_process_comm.as_str(),
+        lower_cmdline.as_str(),
+        lower_exe_path.as_str(),
+        lower_cgroup_path.as_str(),
+    ]
+    .join(" ");
+
+    // 1. Critical System Threads (Kernel, Input, IRQ)
+    if is_bracketed_kernel_comm(&lower_comm) {
+        return TaskClass::KernelThread;
+    }
+    if is_input_thread(&lower_comm, &combined) {
+        return TaskClass::Input;
+    }
+    if is_irq_thread(&lower_comm, &combined) {
+        return TaskClass::IrqThread;
+    }
+
+    // 2. Audio (Realtime)
+    if is_audio_realtime_comm(&lower_comm)
+        || is_audio_realtime_comm(&lower_process_comm)
+        || contains_any(
+            &combined,
+            &[
+                "pipewire",
+                "wireplumber",
+                "pulseaudio",
+                "jackd",
+                "easyeffects",
+            ],
+        )
+        || (matches!(sched_policy, Some(1 | 2 | 6)) && is_audio_looking_process(&combined))
+    {
+        return TaskClass::AudioRealtime;
+    }
+
+    // 3. Infrastructure (Compositors, WineServer, Steam Services)
+    if lower_comm == "gamescope" || lower_process_comm == "gamescope" {
+        return TaskClass::GameScope;
+    }
+    if lower_comm == "wineserver" || lower_process_comm == "wineserver" {
+        return TaskClass::WineServer;
+    }
+    if contains_any(
+        &lower_comm,
+        &[
+            "sway",
+            "kwin",
+            "mutter",
+            "gnome-shell",
+            "weston",
+            "hyprland",
+        ],
+    ) {
+        return TaskClass::Compositor;
+    }
+    if lower_comm == "steam"
+        || lower_process_comm == "steam"
+        || lower_comm == "steamwebhelper"
+        || lower_process_comm == "steamwebhelper"
+    {
+        return TaskClass::Service;
+    }
+
+    // 4. Specialized Threads in Game/Browser (Must come before generic process match)
+    let is_game = is_game_exe(&lower_exe_path)
+        || is_game_comm(&lower_process_comm)
+        || is_game_cgroup(&lower_cgroup_path);
+
+    if is_game {
+        if is_game_render_comm(&lower_comm) {
+            return TaskClass::GameRenderThread;
         }
+        if lower_comm.contains("worker")
+            || lower_comm.contains("task")
+            || lower_comm.contains("job")
+        {
+            return TaskClass::GameWorkerThread;
+        }
+    }
+
+    if is_browser_process(&lower_comm, &lower_process_comm, &combined) {
+        if contains_any(&combined, &["gpu process", "--type=gpu-process"])
+            || lower_comm.contains("gpu process")
+        {
+            return TaskClass::BrowserGpu;
+        }
+        if contains_any(
+            &combined,
+            &[
+                "utility process",
+                "--type=utility",
+                "network service",
+                "socket process",
+            ],
+        ) {
+            return TaskClass::BrowserNetwork;
+        }
+        if contains_any(
+            &combined,
+            &[
+                "web content",
+                "isolated web co",
+                "rdd process",
+                "--type=renderer",
+                "renderer",
+            ],
+        ) {
+            return TaskClass::BrowserRenderer;
+        }
+        if contains_any(
+            &combined,
+            &[
+                "--background",
+                "background",
+                "crashpad",
+                "updater",
+                "extension process",
+            ],
+        ) {
+            return TaskClass::BrowserBackground;
+        }
+        return TaskClass::BrowserForeground;
+    }
+
+    // 5. Development & System Work
+    if is_indexer_comm(&lower_comm) {
+        return TaskClass::Indexer;
+    }
+    if is_compiler_comm(&lower_comm) {
+        return TaskClass::Compiler;
+    }
+    if is_linker_comm(&lower_comm) {
+        return TaskClass::Linker;
+    }
+    if is_package_manager_comm(&lower_comm) || lower_cmdline.contains(" emerge ") {
+        return TaskClass::PackageManager;
+    }
+    if is_build_job_comm(&lower_comm) {
+        return TaskClass::BuildJob;
+    }
+
+    // 6. Daemons & Services
+    if is_storage_daemon_comm(&lower_comm) {
+        return TaskClass::StorageDaemon;
+    }
+    if is_network_daemon_comm(&lower_comm) {
+        return TaskClass::NetworkDaemon;
+    }
+
+    // 7. Generic Process Fallbacks
+    if is_game {
+        return TaskClass::Game;
+    }
+    if is_steam_runtime_comm(&lower_process_comm) || lower_exe_path.contains("pressure-vessel") {
+        return TaskClass::SteamRuntime;
+    }
+    if is_launcher_comm(&lower_comm) || is_launcher_comm(&lower_process_comm) {
+        return TaskClass::Launcher;
+    }
+    if is_service_looking_process(&lower_process_comm, &lower_cgroup_path)
+        || lower_process_comm.contains("helper")
+    {
+        return TaskClass::Service;
+    }
+
+    // 8. Other App Categories
+    if is_editor_comm(&lower_comm) {
+        return TaskClass::Editor;
+    }
+    if is_terminal_comm(&lower_comm) {
+        return TaskClass::Terminal;
+    }
+    if is_shell_comm(&lower_comm) {
+        return TaskClass::Shell;
+    }
+    if is_media_comm(&lower_comm) {
+        return TaskClass::Media;
+    }
+    if is_recorder_comm(&lower_comm) {
+        return TaskClass::Recorder;
+    }
+    if is_vm_comm(&lower_comm) {
+        return TaskClass::VirtualMachine;
+    }
+
+    if lower_exe_path.ends_with(".exe") {
+        return TaskClass::GameHelper;
     }
 
     TaskClass::Unknown
 }
 
-#[derive(Debug, Clone, Copy)]
-enum ClassificationMatchType {
-    /// Match any of the tokens in any of the fields (comm, process_comm, cmdline).
-    AnyField(&'static [&'static str]),
-    /// Match only if it looks like a game (specific path patterns).
-    LikelyGame,
-    /// Match any .exe process.
-    AnyExe,
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
 }
 
-struct ClassificationRule {
-    class: TaskClass,
-    match_type: ClassificationMatchType,
+fn is_bracketed_kernel_comm(comm: &str) -> bool {
+    comm.starts_with('[') && comm.ends_with(']')
 }
 
-impl ClassificationRule {
-    fn matches(&self, comm: &str, process_comm: &str, cmdline: &str) -> bool {
-        match self.match_type {
-            ClassificationMatchType::AnyField(tokens) => tokens.iter().any(|&token| {
-                comm.contains(token) || process_comm.contains(token) || cmdline.contains(token)
-            }),
-            ClassificationMatchType::LikelyGame => contains_likely_game_cmdline(cmdline),
-            ClassificationMatchType::AnyExe => {
-                comm.contains(".exe") || process_comm.contains(".exe") || cmdline.contains(".exe")
-            }
-        }
-    }
+fn is_irq_thread(comm: &str, combined: &str) -> bool {
+    comm.starts_with("irq/")
+        || comm.starts_with("irq-")
+        || combined.contains(" irq/")
+        || combined.contains(" irq-")
 }
 
-const CLASSIFICATION_RULES: &[ClassificationRule] = &[
-    ClassificationRule {
-        class: TaskClass::GameScope,
-        match_type: ClassificationMatchType::AnyField(&["gamescope"]),
-    },
-    ClassificationRule {
-        class: TaskClass::Compositor,
-        match_type: ClassificationMatchType::AnyField(&[
-            "sway",
-            "kwin",
-            "kwin_wayland",
-            "mutter",
-            "gnome-shell",
-            "steamcompmgr",
-        ]),
-    },
-    ClassificationRule {
-        class: TaskClass::WineServer,
-        match_type: ClassificationMatchType::AnyField(&["wineserver"]),
-    },
-    ClassificationRule {
-        class: TaskClass::SteamRuntime,
-        match_type: ClassificationMatchType::AnyField(&[
-            "pressure-vessel",
-            "pv-",
-            "steam-runtime",
-            "soldier",
-            "sniper",
-            "srt-bwrap",
-            "xalia",
-        ]),
-    },
-    ClassificationRule {
-        class: TaskClass::Launcher,
-        match_type: ClassificationMatchType::AnyField(&[
-            "launcher",
-            "launch",
-            "bootstrapper",
-            "crashhandler",
-            "crashreport",
-            "redlauncher",
-            "bethesdanetlauncher",
-            "ealauncher",
-            "ubisoftconnect",
-            "uplay",
-            "epicgameslauncher",
-        ]),
-    },
-    ClassificationRule {
-        class: TaskClass::Helper,
-        match_type: ClassificationMatchType::AnyField(&[
-            "reaper",
-            "helper",
-            "rundll32",
-            "explorer.exe",
-            "wine-preloader",
-            "services.exe",
-            "winedevice.exe",
-            "svchost.exe",
-            "plugplay.exe",
-            "rpcss.exe",
-            "tabtip.exe",
-            "conhost.exe",
-            "regsvr32.exe",
-            "msiexec.exe",
-            "steam.exe",
-            "steamwebhelper.exe",
-            "steamerrorreporter.exe",
-        ]),
-    },
-    ClassificationRule {
-        class: TaskClass::Game,
-        match_type: ClassificationMatchType::LikelyGame,
-    },
-    ClassificationRule {
-        class: TaskClass::GameHelper,
-        match_type: ClassificationMatchType::AnyExe,
-    },
-];
+fn is_input_thread(comm: &str, combined: &str) -> bool {
+    comm.contains("input") || combined.contains("libinput")
+}
+
+fn is_audio_realtime_comm(comm: &str) -> bool {
+    matches!(
+        comm,
+        "pipewire" | "wireplumber" | "pulseaudio" | "jackd" | "easyeffects"
+    )
+}
+
+fn is_audio_looking_process(combined: &str) -> bool {
+    contains_any(
+        combined,
+        &[
+            "audio",
+            "alsa",
+            "jack",
+            "pipewire",
+            "pulseaudio",
+            "pulse",
+            "easyeffects",
+        ],
+    )
+}
+
+fn is_game_render_comm(comm: &str) -> bool {
+    contains_any(comm, &["render", "rhi", "dxvk", "vulkan", "gpu"])
+}
+
+fn is_game_exe(exe_path: &str) -> bool {
+    exe_path.contains("steamapps/common")
+        || exe_path.contains("/games/")
+        || exe_path.contains(".exe")
+        || exe_path.contains("pressure-vessel")
+}
+
+fn is_game_comm(comm: &str) -> bool {
+    contains_any(comm, &["steam", "proton", "wine"])
+}
+
+fn is_game_cgroup(cgroup: &str) -> bool {
+    cgroup.contains("steam") || cgroup.contains("games")
+}
+
+fn is_browser_process(comm: &str, process_comm: &str, combined: &str) -> bool {
+    let names = ["firefox", "chrome", "chromium", "brave", "browser"];
+    contains_any(comm, &names)
+        || contains_any(process_comm, &names)
+        || contains_any(combined, &["--type=renderer", "--type=gpu-process"])
+}
+
+fn is_compiler_comm(comm: &str) -> bool {
+    contains_any(comm, &["rustc", "gcc", "g++", "clang", "cc1", "cc1plus"])
+}
+
+fn is_linker_comm(comm: &str) -> bool {
+    contains_any(comm, &["ld", "ld.lld", "mold", "gold", "lld"])
+}
+
+fn is_indexer_comm(comm: &str) -> bool {
+    contains_any(comm, &["clangd", "rust-analyzer", "ccls", "indexer"])
+}
+
+fn is_package_manager_comm(comm: &str) -> bool {
+    contains_any(comm, &["emerge", "portage", "pacman", "apt", "dnf"])
+}
+
+fn is_build_job_comm(comm: &str) -> bool {
+    contains_any(comm, &["cargo", "make", "ninja", "cmake", "meson"])
+}
+
+fn is_storage_daemon_comm(comm: &str) -> bool {
+    contains_any(comm, &["udisks", "jbd2", "btrfs", "zfs", "io_uring"])
+}
+
+fn is_network_daemon_comm(comm: &str) -> bool {
+    contains_any(
+        comm,
+        &[
+            "networkmanager",
+            "systemd-network",
+            "dhcpcd",
+            "wpa_supplicant",
+        ],
+    )
+}
+
+fn is_steam_runtime_comm(comm: &str) -> bool {
+    contains_any(comm, &["pressure-vessel", "bwrap"])
+}
+
+fn is_launcher_comm(comm: &str) -> bool {
+    contains_any(
+        comm,
+        &["epicgames", "origin", "uplay", "battle.net", "lutris"],
+    )
+}
+
+fn is_service_looking_process(comm: &str, cgroup: &str) -> bool {
+    comm == "systemd"
+        || cgroup.contains(".service")
+        || cgroup.contains("/system.slice/")
+        || comm.ends_with("d")
+}
+
+fn is_editor_comm(comm: &str) -> bool {
+    contains_any(comm, &["code", "vscodium", "kate", "nvim", "vim", "emacs"])
+}
+
+fn is_terminal_comm(comm: &str) -> bool {
+    contains_any(
+        comm,
+        &[
+            "alacritty",
+            "kitty",
+            "wezterm",
+            "foot",
+            "gnome-terminal",
+            "konsole",
+        ],
+    )
+}
+
+fn is_shell_comm(comm: &str) -> bool {
+    matches!(comm, "bash" | "zsh" | "fish" | "sh")
+}
+
+fn is_media_comm(comm: &str) -> bool {
+    contains_any(comm, &["vlc", "mpv", "spotify"])
+}
+
+fn is_recorder_comm(comm: &str) -> bool {
+    contains_any(comm, &["obs", "gpu-screen-recorder", "recorder"])
+}
+
+fn is_vm_comm(comm: &str) -> bool {
+    contains_any(comm, &["qemu", "virt", "virtualbox", "vmware"])
+}
 
 fn contains_likely_game_cmdline(cmdline: &str) -> bool {
     if !cmdline.contains(".exe") {

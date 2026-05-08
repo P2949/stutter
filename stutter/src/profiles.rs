@@ -598,13 +598,38 @@ fn parse_affinity_value(value: &str) -> anyhow::Result<CpuMask> {
 fn parse_task_class(value: &str) -> anyhow::Result<TaskClass> {
     match value {
         "Game" => Ok(TaskClass::Game),
+        "GameRenderThread" => Ok(TaskClass::GameRenderThread),
+        "GameWorkerThread" => Ok(TaskClass::GameWorkerThread),
         "GameHelper" => Ok(TaskClass::GameHelper),
         "Launcher" => Ok(TaskClass::Launcher),
         "WineServer" => Ok(TaskClass::WineServer),
         "GameScope" => Ok(TaskClass::GameScope),
         "Compositor" => Ok(TaskClass::Compositor),
+        "AudioRealtime" => Ok(TaskClass::AudioRealtime),
+        "Input" => Ok(TaskClass::Input),
+        "BrowserForeground" => Ok(TaskClass::BrowserForeground),
+        "BrowserBackground" => Ok(TaskClass::BrowserBackground),
+        "BrowserRenderer" => Ok(TaskClass::BrowserRenderer),
+        "BrowserGpu" => Ok(TaskClass::BrowserGpu),
+        "BrowserNetwork" => Ok(TaskClass::BrowserNetwork),
+        "Compiler" => Ok(TaskClass::Compiler),
+        "Linker" => Ok(TaskClass::Linker),
+        "Indexer" => Ok(TaskClass::Indexer),
+        "PackageManager" => Ok(TaskClass::PackageManager),
+        "BuildJob" => Ok(TaskClass::BuildJob),
+        "StorageDaemon" => Ok(TaskClass::StorageDaemon),
+        "NetworkDaemon" => Ok(TaskClass::NetworkDaemon),
+        "KernelThread" => Ok(TaskClass::KernelThread),
+        "IrqThread" => Ok(TaskClass::IrqThread),
+        "Editor" => Ok(TaskClass::Editor),
+        "Terminal" => Ok(TaskClass::Terminal),
+        "Shell" => Ok(TaskClass::Shell),
+        "Media" => Ok(TaskClass::Media),
+        "Recorder" => Ok(TaskClass::Recorder),
+        "VirtualMachine" => Ok(TaskClass::VirtualMachine),
         "SteamRuntime" => Ok(TaskClass::SteamRuntime),
         "Helper" => Ok(TaskClass::Helper),
+        "Service" => Ok(TaskClass::Service),
         "Unknown" => Ok(TaskClass::Unknown),
         _ => anyhow::bail!("unknown task class {value}"),
     }
@@ -616,12 +641,12 @@ pub fn generate_topology_template() -> String {
     out.push_str("name = \"baseline-online\"\n\n");
     out.push_str("[[profile.rules]]\n");
     out.push_str("affinity = \"online\"\n");
-    out.push_str("match_class = [\"Game\", \"GameHelper\", \"WineServer\", \"GameScope\", \"Compositor\", \"Launcher\", \"SteamRuntime\", \"Helper\", \"Unknown\"]\n\n");
+    out.push_str("match_class = [\"Game\", \"GameRenderThread\", \"GameWorkerThread\", \"GameHelper\", \"WineServer\", \"GameScope\", \"Compositor\", \"AudioRealtime\", \"Input\", \"BrowserForeground\", \"BrowserBackground\", \"BrowserRenderer\", \"BrowserGpu\", \"BrowserNetwork\", \"Compiler\", \"Linker\", \"Indexer\", \"PackageManager\", \"BuildJob\", \"StorageDaemon\", \"NetworkDaemon\", \"KernelThread\", \"IrqThread\", \"Editor\", \"Terminal\", \"Shell\", \"Media\", \"Recorder\", \"VirtualMachine\", \"SteamRuntime\", \"Helper\", \"Service\", \"Unknown\"]\n\n");
     out.push_str("[[profile]]\n");
     out.push_str("name = \"game-main-suggested\"\n\n");
     out.push_str("[[profile.rules]]\n");
     out.push_str("affinity = \"<edit-me>\"\n");
-    out.push_str("match_class = [\"Game\", \"GameHelper\", \"WineServer\"]\n\n");
+    out.push_str("match_class = [\"Game\", \"GameRenderThread\", \"GameWorkerThread\", \"GameHelper\", \"WineServer\"]\n\n");
     out.push_str("[[profile.rules]]\n");
     out.push_str("affinity = \"<edit-me>\"\n");
     out.push_str("match_class = [\"GameScope\", \"Compositor\"]\n");

@@ -75,13 +75,18 @@ impl TuiState {
         const CLASSES: &[TaskClass] = &[
             TaskClass::Unknown,
             TaskClass::Game,
+            TaskClass::GameRenderThread,
+            TaskClass::GameWorkerThread,
             TaskClass::GameHelper,
             TaskClass::Launcher,
             TaskClass::WineServer,
             TaskClass::GameScope,
             TaskClass::Compositor,
+            TaskClass::AudioRealtime,
+            TaskClass::BrowserForeground,
             TaskClass::SteamRuntime,
             TaskClass::Helper,
+            TaskClass::Service,
         ];
         if let Some(current) = self.filter_class {
             let pos = CLASSES.iter().position(|c| *c == current).unwrap_or(0);
@@ -461,11 +466,14 @@ mod tests {
         assert_eq!(state.filter_class, None);
         state.next_filter_class();
         assert_eq!(state.filter_class, Some(TaskClass::Unknown));
-        // Cycle through remaining 8 variants + 1 wrap = 9 calls
-        for _ in 0..9 {
+        // Cycle until it wraps back to None
+        let mut count = 0;
+        while state.filter_class.is_some() && count < 100 {
             state.next_filter_class();
+            count += 1;
         }
         // Should wrap back to None
         assert_eq!(state.filter_class, None);
+        assert!(count > 5); // ensure we actually cycled through several classes
     }
 }

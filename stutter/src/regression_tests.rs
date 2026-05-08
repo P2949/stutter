@@ -487,7 +487,151 @@ fn classify_task_known_classes() {
     );
     assert_eq!(
         process_tree::classify_task("steamwebhelper", "steamwebhelper", ""),
-        TaskClass::Helper
+        TaskClass::Service
+    );
+}
+
+#[test]
+fn classify_task_v1_rules_and_priority_bands() {
+    assert_eq!(
+        process_tree::classify_task_with_context("pipewire", "pipewire", "", "", "", None),
+        TaskClass::AudioRealtime
+    );
+    assert_eq!(
+        process_tree::priority_band_for_class(TaskClass::AudioRealtime, Some(1)),
+        process_tree::PriorityBand::CriticalRealtime
+    );
+
+    assert_eq!(
+        process_tree::classify_task_with_context(
+            "audio-thread",
+            "game",
+            "audio callback",
+            "",
+            "",
+            Some(2),
+        ),
+        TaskClass::AudioRealtime
+    );
+
+    assert_eq!(
+        process_tree::classify_task_with_context("libinput", "sway", "", "", "", None),
+        TaskClass::Input
+    );
+
+    assert_eq!(
+        process_tree::classify_task_with_context(
+            "RenderThread",
+            "Game.exe",
+            "DXVK render thread",
+            "/home/user/.steam/steamapps/common/Game/Game.exe",
+            "",
+            None,
+        ),
+        TaskClass::GameRenderThread
+    );
+
+    assert_eq!(
+        process_tree::classify_task_with_context(
+            "GameWorker",
+            "Game.exe",
+            "worker thread",
+            "/home/user/.steam/steamapps/common/Game/Game.exe",
+            "",
+            None,
+        ),
+        TaskClass::GameWorkerThread
+    );
+
+    assert_eq!(
+        process_tree::classify_task_with_context(
+            "pressure-vessel",
+            "pressure-vessel",
+            "",
+            "/home/user/.steam/steamapps/common/Game/pressure-vessel",
+            "",
+            None,
+        ),
+        TaskClass::Game
+    );
+
+    assert_eq!(
+        process_tree::classify_task_with_context(
+            "GPU Process",
+            "firefox",
+            "firefox -contentproc --type=gpu-process",
+            "",
+            "",
+            None,
+        ),
+        TaskClass::BrowserGpu
+    );
+
+    assert_eq!(
+        process_tree::classify_task_with_context(
+            "Web Content",
+            "firefox",
+            "firefox isolated web content",
+            "",
+            "",
+            None,
+        ),
+        TaskClass::BrowserRenderer
+    );
+
+    assert_eq!(
+        process_tree::classify_task_with_context("rustc", "rustc", "", "", "", None),
+        TaskClass::Compiler
+    );
+    assert_eq!(
+        process_tree::priority_band_for_class(TaskClass::Compiler, None),
+        process_tree::PriorityBand::Throughput
+    );
+
+    assert_eq!(
+        process_tree::classify_task_with_context("clangd", "clangd", "", "", "", None),
+        TaskClass::Indexer
+    );
+
+    assert_eq!(
+        process_tree::classify_task_with_context("emerge", "emerge", "", "", "", None),
+        TaskClass::PackageManager
+    );
+
+    assert_eq!(
+        process_tree::classify_task_with_context(
+            "[kworker/0:1]",
+            "[kworker/0:1]",
+            "",
+            "",
+            "",
+            None
+        ),
+        TaskClass::KernelThread
+    );
+
+    assert_eq!(
+        process_tree::classify_task_with_context(
+            "irq/123-amdgpu",
+            "irq/123-amdgpu",
+            "",
+            "",
+            "",
+            None
+        ),
+        TaskClass::IrqThread
+    );
+
+    assert_eq!(
+        process_tree::classify_task_with_context(
+            "NetworkManager",
+            "NetworkManager",
+            "",
+            "",
+            "",
+            None
+        ),
+        TaskClass::NetworkDaemon
     );
 }
 

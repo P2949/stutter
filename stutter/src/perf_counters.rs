@@ -557,6 +557,7 @@ fn task_perf_priority(info: &TaskInfo, stats: Option<&TaskStats>) -> u64 {
         TaskClass::SteamRuntime => 100_000,
         TaskClass::Helper => 50_000,
         TaskClass::Unknown => 10_000,
+        _ => 10_000,
     };
 
     let latency_score = stats
