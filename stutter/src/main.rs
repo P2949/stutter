@@ -16,6 +16,7 @@ mod ebpf_loader;
 mod events;
 mod flamegraph;
 mod focus;
+mod foreground;
 mod hwmon;
 mod irq_inspect;
 mod mangohud;
