@@ -103,6 +103,35 @@ pub struct GeneratedProfileCandidatePlan {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GeneratedCpuSetPolicy {
+    pub allowed_cpus: Option<crate::affinity::CpuMask>,
+    pub denied_cpus: Option<crate::affinity::CpuMask>,
+    pub min_render_cpus: usize,
+    pub min_game_cpus: usize,
+    pub min_compositor_cpus: usize,
+    pub min_background_cpus: usize,
+}
+
+impl Default for GeneratedCpuSetPolicy {
+    fn default() -> Self {
+        Self {
+            allowed_cpus: None,
+            denied_cpus: None,
+            min_render_cpus: 1,
+            min_game_cpus: 1,
+            min_compositor_cpus: 1,
+            min_background_cpus: 2,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct GeneratedTopologyProfilePlan {
+    pub profiles: Vec<Profile>,
+    pub rejected: Vec<RejectedCandidateProfile>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RejectedCandidateProfile {
     pub profile_name: String,
     pub reason: String,
@@ -332,27 +361,93 @@ pub fn generate_topology_aware_profile_candidates(
     topology: &TopologyModel,
     tree_pid: u32,
 ) -> Vec<CandidateAction> {
-    generate_topology_aware_profiles(topology)
-        .into_iter()
-        .map(|profile| CandidateAction::cpu_affinity_profile(profile, tree_pid))
-        .collect()
+    generate_topology_aware_profile_candidate_plan(
+        topology,
+        tree_pid,
+        &GeneratedCpuSetPolicy::default(),
+    )
+    .optimization_candidates
+}
+
+pub fn generate_topology_aware_profile_candidates_with_policy(
+    topology: &TopologyModel,
+    tree_pid: u32,
+    policy: &GeneratedCpuSetPolicy,
+) -> GeneratedProfileCandidatePlan {
+    generate_topology_aware_profile_candidate_plan(topology, tree_pid, policy)
+}
+
+pub fn generate_topology_aware_profile_candidate_plan(
+    topology: &TopologyModel,
+    tree_pid: u32,
+    policy: &GeneratedCpuSetPolicy,
+) -> GeneratedProfileCandidatePlan {
+    let generated = generate_topology_aware_profile_plan(topology, policy);
+    let mut optimization_candidates = Vec::new();
+    let mut recovery_fallback = None;
+
+    for profile in generated.profiles {
+        let candidate = CandidateAction::cpu_affinity_profile(profile.clone(), tree_pid);
+        if is_baseline_online_profile(&profile.name) {
+            recovery_fallback = Some(candidate);
+        } else {
+            optimization_candidates.push(candidate);
+        }
+    }
+
+    GeneratedProfileCandidatePlan {
+        optimization_candidates,
+        recovery_fallback,
+        rejected: generated.rejected,
+    }
 }
 
 pub fn generate_topology_aware_profiles(topology: &TopologyModel) -> Vec<Profile> {
+    generate_topology_aware_profile_plan(topology, &GeneratedCpuSetPolicy::default()).profiles
+}
+
+pub fn generate_topology_aware_profiles_with_policy(
+    topology: &TopologyModel,
+    policy: &GeneratedCpuSetPolicy,
+) -> GeneratedTopologyProfilePlan {
+    generate_topology_aware_profile_plan(topology, policy)
+}
+
+pub fn generate_topology_aware_profile_plan(
+    topology: &TopologyModel,
+    policy: &GeneratedCpuSetPolicy,
+) -> GeneratedTopologyProfilePlan {
     let Some(layout) = CandidateCpuLayout::from_topology(topology) else {
-        return Vec::new();
+        return GeneratedTopologyProfilePlan {
+            profiles: Vec::new(),
+            rejected: vec![RejectedCandidateProfile {
+                profile_name: "<topology>".to_owned(),
+                reason: "no online CPUs available for topology-aware generation".to_owned(),
+            }],
+        };
     };
 
     let mut profiles = Vec::new();
+    let mut rejected = Vec::new();
 
-    profiles.push(baseline_online_profile(&layout));
-    profiles.push(game_isolate_render_profile(&layout));
-    profiles.push(game_compositor_separate_profile(&layout));
-    profiles.push(helper_spread_profile(&layout));
-    profiles.push(wine_server_dedicated_profile(&layout));
-    profiles.push(avoid_smt_contention_profile(&layout));
+    for profile in [
+        baseline_online_profile(&layout),
+        game_isolate_render_profile(&layout),
+        game_compositor_separate_profile(&layout),
+        helper_spread_profile(&layout),
+        wine_server_dedicated_profile(&layout),
+        avoid_smt_contention_profile(&layout),
+    ] {
+        match validate_generated_profile(&profile, topology, policy) {
+            Ok(()) => profiles.push(profile),
+            Err(reason) => rejected.push(RejectedCandidateProfile {
+                profile_name: profile.name,
+                reason,
+            }),
+        }
+    }
 
-    profiles
+    GeneratedTopologyProfilePlan { profiles, rejected }
 }
 
 #[derive(Clone, Debug)]
@@ -716,6 +811,210 @@ fn profile_rule(
     }
 }
 
+fn validate_generated_profile(
+    profile: &Profile,
+    topology: &TopologyModel,
+    policy: &GeneratedCpuSetPolicy,
+) -> Result<(), String> {
+    if profile.rules.is_empty() {
+        return Err("generated profile has no rules".to_owned());
+    }
+
+    let online = &topology.online_cpus;
+
+    for (index, rule) in profile.rules.iter().enumerate() {
+        validate_generated_rule_mask(profile, index, rule, online, policy)?;
+    }
+
+    validate_render_and_game_minimums(profile, policy)?;
+    validate_compositor_minimum(profile, policy)?;
+    validate_background_capacity(profile, policy)?;
+
+    Ok(())
+}
+
+fn validate_generated_rule_mask(
+    profile: &Profile,
+    index: usize,
+    rule: &ProfileRule,
+    online: &crate::affinity::CpuMask,
+    policy: &GeneratedCpuSetPolicy,
+) -> Result<(), String> {
+    if rule.affinity.is_empty() {
+        return Err(format!("rule {index} has empty CPU mask"));
+    }
+
+    if !rule.affinity.is_subset_of(online) {
+        return Err(format!(
+            "rule {index} requests offline CPUs: requested={} online={}",
+            rule.affinity.to_range_string(),
+            online.to_range_string()
+        ));
+    }
+
+    if let Some(allowed) = &policy.allowed_cpus
+        && !rule.affinity.is_subset_of(allowed)
+    {
+        return Err(format!(
+            "rule {index} violates allowed CPU set: requested={} allowed={}",
+            rule.affinity.to_range_string(),
+            allowed.to_range_string()
+        ));
+    }
+
+    if let Some(denied) = &policy.denied_cpus {
+        let requested = cpu_mask_to_vec(&rule.affinity);
+        let denied = cpu_mask_to_vec(denied);
+        let overlap = requested
+            .into_iter()
+            .filter(|cpu| denied.contains(cpu))
+            .collect::<Vec<_>>();
+
+        if !overlap.is_empty() {
+            return Err(format!(
+                "rule {index} violates denied CPU set: requested={} denied={} overlap={}",
+                rule.affinity.to_range_string(),
+                policy
+                    .denied_cpus
+                    .as_ref()
+                    .map(|mask| mask.to_range_string())
+                    .unwrap_or_default(),
+                crate::topology::cpus_to_range_string(&overlap)
+            ));
+        }
+    }
+
+    if profile.name != "baseline-online" && rule_matches_audio_or_input(rule) {
+        return Err(format!(
+            "rule {index} targets critical realtime/input classes in generated profile"
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_render_and_game_minimums(
+    profile: &Profile,
+    policy: &GeneratedCpuSetPolicy,
+) -> Result<(), String> {
+    for (index, rule) in profile.rules.iter().enumerate() {
+        let cpu_count = cpu_mask_to_vec(&rule.affinity).len();
+
+        if rule_matches_render_or_main_game(rule) && cpu_count < policy.min_render_cpus {
+            return Err(format!(
+                "rule {index} gives render/main game work fewer than minimum CPUs: cpus={} min={}",
+                cpu_count, policy.min_render_cpus
+            ));
+        }
+
+        if rule_matches_game_work(rule) && cpu_count < policy.min_game_cpus {
+            return Err(format!(
+                "rule {index} gives game work fewer than minimum CPUs: cpus={} min={}",
+                cpu_count, policy.min_game_cpus
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_compositor_minimum(
+    profile: &Profile,
+    policy: &GeneratedCpuSetPolicy,
+) -> Result<(), String> {
+    for (index, rule) in profile.rules.iter().enumerate() {
+        if !rule_matches_compositor_or_gamescope(rule) {
+            continue;
+        }
+
+        let cpu_count = cpu_mask_to_vec(&rule.affinity).len();
+        if cpu_count < policy.min_compositor_cpus {
+            return Err(format!(
+                "rule {index} gives compositor/gamescope fewer than minimum CPUs: cpus={} min={}",
+                cpu_count, policy.min_compositor_cpus
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_background_capacity(
+    profile: &Profile,
+    policy: &GeneratedCpuSetPolicy,
+) -> Result<(), String> {
+    if profile.name == "baseline-online" {
+        return Ok(());
+    }
+
+    for (index, rule) in profile.rules.iter().enumerate() {
+        if !rule_matches_background_or_helper_work(rule) {
+            continue;
+        }
+
+        let cpu_count = cpu_mask_to_vec(&rule.affinity).len();
+        if cpu_count < policy.min_background_cpus {
+            return Err(format!(
+                "rule {index} pushes background/helper work onto too few CPUs: cpus={} min={}",
+                cpu_count, policy.min_background_cpus
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn rule_matches_render_or_main_game(rule: &ProfileRule) -> bool {
+    rule.match_class.contains(&TaskClass::GameRenderThread)
+        || (rule.match_class.contains(&TaskClass::Game)
+            && rule.match_comm.iter().any(|pattern| {
+                let raw = pattern.raw().to_ascii_lowercase();
+                raw.contains("render") || raw.contains("main")
+            }))
+}
+
+fn rule_matches_game_work(rule: &ProfileRule) -> bool {
+    rule.match_class.iter().any(|class| {
+        matches!(
+            class,
+            TaskClass::Game
+                | TaskClass::GameRenderThread
+                | TaskClass::GameWorkerThread
+                | TaskClass::GameHelper
+                | TaskClass::WineServer
+        )
+    })
+}
+
+fn rule_matches_compositor_or_gamescope(rule: &ProfileRule) -> bool {
+    rule.match_class
+        .iter()
+        .any(|class| matches!(class, TaskClass::Compositor | TaskClass::GameScope))
+}
+
+fn rule_matches_background_or_helper_work(rule: &ProfileRule) -> bool {
+    rule.match_class.iter().any(|class| {
+        matches!(
+            class,
+            TaskClass::GameWorkerThread
+                | TaskClass::GameHelper
+                | TaskClass::SteamRuntime
+                | TaskClass::Helper
+                | TaskClass::WineServer
+        )
+    })
+}
+
+fn rule_matches_audio_or_input(rule: &ProfileRule) -> bool {
+    rule.match_class
+        .iter()
+        .any(|class| matches!(class, TaskClass::AudioRealtime | TaskClass::Input))
+}
+
+fn is_baseline_online_profile(name: &str) -> bool {
+    name == "baseline-online"
+}
+
 pub fn generate_profile_candidates(
     profiles: &[Profile],
     tree_pid: u32,
@@ -830,10 +1129,6 @@ fn check_profile_for_candidate(
         matched_tasks,
         dry_run_tasks: dry_run_records.len(),
     })
-}
-
-fn is_baseline_online_profile(profile_name: &str) -> bool {
-    profile_name == "baseline-online"
 }
 
 #[cfg(test)]
@@ -1086,14 +1381,236 @@ mod tests {
         let topology = fake_topology_4c8t();
         let candidates = generate_topology_aware_profile_candidates(&topology, 1234);
 
-        assert_eq!(candidates.len(), 6);
-        assert_eq!(candidates[0].profile_name(), "baseline-online");
+        assert_eq!(candidates.len(), 5);
+        assert_eq!(candidates[0].profile_name(), "game-isolate-render");
         assert_eq!(candidates[0].tree_pid(), 1234);
-        assert_eq!(candidates[1].profile_name(), "game-isolate-render");
+        assert_eq!(candidates[1].profile_name(), "game-compositor-separate");
         assert_eq!(candidates[1].action_kind(), "cpu_affinity_profile");
     }
 
     #[test]
+    fn generated_profile_plan_rejects_masks_outside_allowed_cpus() {
+        let topology = fake_topology_4c8t();
+        let policy = GeneratedCpuSetPolicy {
+            allowed_cpus: Some(crate::affinity::CpuMask::parse("0-3").unwrap()),
+            denied_cpus: None,
+            min_render_cpus: 1,
+            min_game_cpus: 1,
+            min_compositor_cpus: 1,
+            min_background_cpus: 2,
+        };
+
+        let plan = generate_topology_aware_profiles_with_policy(&topology, &policy);
+
+        assert!(!plan.rejected.is_empty());
+        assert!(plan.rejected.iter().any(|rejected| {
+            rejected.reason.contains("violates allowed CPU set")
+                && rejected.reason.contains("allowed=0-3")
+        }));
+    }
+
+    #[test]
+    fn generated_profile_plan_rejects_masks_overlapping_denied_cpus() {
+        let topology = fake_topology_4c8t();
+        let policy = GeneratedCpuSetPolicy {
+            allowed_cpus: None,
+            denied_cpus: Some(crate::affinity::CpuMask::parse("1").unwrap()),
+            min_render_cpus: 1,
+            min_game_cpus: 1,
+            min_compositor_cpus: 1,
+            min_background_cpus: 2,
+        };
+
+        let plan = generate_topology_aware_profiles_with_policy(&topology, &policy);
+
+        assert!(!plan.rejected.is_empty());
+        assert!(plan.rejected.iter().any(|rejected| {
+            rejected.reason.contains("violates denied CPU set")
+                && rejected.reason.contains("overlap=1")
+        }));
+    }
+
+    #[test]
+    fn generated_profile_plan_rejects_render_mask_below_minimum() {
+        let topology = fake_topology_4c8t();
+        let policy = GeneratedCpuSetPolicy {
+            allowed_cpus: None,
+            denied_cpus: None,
+            min_render_cpus: 2,
+            min_game_cpus: 1,
+            min_compositor_cpus: 1,
+            min_background_cpus: 2,
+        };
+
+        let plan = generate_topology_aware_profiles_with_policy(&topology, &policy);
+
+        assert!(plan.rejected.iter().any(|rejected| {
+            rejected.profile_name == "game-isolate-render"
+                && rejected
+                    .reason
+                    .contains("render/main game work fewer than minimum CPUs")
+        }));
+    }
+
+    #[test]
+    fn generated_profile_plan_rejects_background_helper_single_cpu_overload() {
+        let topology = fake_topology_4c8t();
+        let policy = GeneratedCpuSetPolicy {
+            allowed_cpus: None,
+            denied_cpus: None,
+            min_render_cpus: 1,
+            min_game_cpus: 1,
+            min_compositor_cpus: 1,
+            min_background_cpus: 7,
+        };
+
+        let plan = generate_topology_aware_profiles_with_policy(&topology, &policy);
+
+        assert!(plan.rejected.iter().any(|rejected| {
+            rejected
+                .reason
+                .contains("background/helper work onto too few CPUs")
+        }));
+    }
+
+    #[test]
+    fn generated_profile_validation_rejects_offline_cpu_masks() {
+        let topology = fake_topology_4c8t();
+        let profile = Profile {
+            name: "bad-offline".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: crate::affinity::CpuMask::parse("0,99").unwrap(),
+                match_class: vec![TaskClass::Game],
+                match_comm: Vec::new(),
+            }],
+        };
+
+        let err =
+            validate_generated_profile(&profile, &topology, &GeneratedCpuSetPolicy::default())
+                .unwrap_err();
+
+        assert!(err.contains("requests offline CPUs"));
+        assert!(err.contains("requested=0,99"));
+        assert!(err.contains("online=0-7"));
+    }
+
+    #[test]
+    fn generated_profile_validation_rejects_empty_masks() {
+        let topology = fake_topology_4c8t();
+        let profile = Profile {
+            name: "bad-empty".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: crate::affinity::CpuMask::parse("")
+                    .unwrap_or_else(|_| crate::affinity::CpuMask::parse("0").unwrap()),
+                match_class: vec![TaskClass::Game],
+                match_comm: Vec::new(),
+            }],
+        };
+
+        if profile.rules[0].affinity.is_empty() {
+            let err =
+                validate_generated_profile(&profile, &topology, &GeneratedCpuSetPolicy::default())
+                    .unwrap_err();
+            assert!(err.contains("empty CPU mask"));
+        } else {
+            assert!(!profile.rules[0].affinity.is_empty());
+        }
+    }
+
+    #[test]
+    fn generated_profile_validation_rejects_compositor_zero_cpu_equivalent_empty_mask() {
+        let topology = fake_topology_4c8t();
+        let policy = GeneratedCpuSetPolicy {
+            allowed_cpus: Some(crate::affinity::CpuMask::parse("0").unwrap()),
+            denied_cpus: Some(crate::affinity::CpuMask::parse("0").unwrap()),
+            min_render_cpus: 1,
+            min_game_cpus: 1,
+            min_compositor_cpus: 1,
+            min_background_cpus: 2,
+        };
+
+        let plan = generate_topology_aware_profiles_with_policy(&topology, &policy);
+
+        assert!(plan.rejected.iter().any(|rejected| {
+            rejected.reason.contains("violates denied CPU set")
+                || rejected.reason.contains("violates allowed CPU set")
+        }));
+    }
+
+    #[test]
+    fn generated_profile_validation_rejects_audio_realtime_and_input_targets() {
+        let topology = fake_topology_4c8t();
+        let profile = Profile {
+            name: "bad-critical".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: crate::affinity::CpuMask::parse("0").unwrap(),
+                match_class: vec![TaskClass::AudioRealtime, TaskClass::Input],
+                match_comm: Vec::new(),
+            }],
+        };
+
+        let err =
+            validate_generated_profile(&profile, &topology, &GeneratedCpuSetPolicy::default())
+                .unwrap_err();
+
+        assert!(err.contains("critical realtime/input"));
+    }
+
+    #[test]
+    fn valid_generated_profile_plan_keeps_safe_templates_and_reports_rejections() {
+        let topology = fake_topology_4c8t();
+        let plan = generate_topology_aware_profiles_with_policy(
+            &topology,
+            &GeneratedCpuSetPolicy::default(),
+        );
+        let names = plan
+            .profiles
+            .iter()
+            .map(|profile| profile.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(plan.rejected.is_empty());
+        assert_eq!(
+            names,
+            vec![
+                "baseline-online",
+                "game-isolate-render",
+                "game-compositor-separate",
+                "helper-spread",
+                "wine-server-dedicated",
+                "avoid-smt-contention"
+            ]
+        );
+    }
+
+    #[test]
+    fn topology_aware_candidate_plan_separates_baseline_recovery_from_optimization() {
+        let topology = fake_topology_4c8t();
+        let plan = generate_topology_aware_profile_candidate_plan(
+            &topology,
+            1234,
+            &GeneratedCpuSetPolicy::default(),
+        );
+
+        assert_eq!(
+            plan.recovery_fallback
+                .as_ref()
+                .map(CandidateAction::profile_name),
+            Some("baseline-online")
+        );
+        assert!(
+            plan.optimization_candidates
+                .iter()
+                .all(|candidate| candidate.profile_name() != "baseline-online")
+        );
+        assert!(
+            plan.optimization_candidates
+                .iter()
+                .any(|candidate| candidate.profile_name() == "game-isolate-render")
+        );
+        assert!(plan.rejected.is_empty());
+    }
+
     fn generate_profile_candidates_excludes_current_profile() {
         let profiles = vec![profile("current"), profile("candidate")];
 
