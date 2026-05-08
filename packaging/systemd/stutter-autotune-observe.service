@@ -1,0 +1,38 @@
+[Unit]
+Description=stutter autotune observe controller
+Documentation=https://github.com/P2949/stutter
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/stutter/autotune-observe.env
+Environment=STUTTER_AUTOTUNE_MODE=observe
+Environment=STUTTER_AUTOTUNE_PRESET=diagnosis
+Environment=STUTTER_AUTOTUNE_SUMMARY_MS=1000
+ExecStart=/bin/sh -eu -c '\
+mode="${STUTTER_AUTOTUNE_MODE:-observe}"; \
+preset="${STUTTER_AUTOTUNE_PRESET:-diagnosis}"; \
+summary_ms="${STUTTER_AUTOTUNE_SUMMARY_MS:-1000}"; \
+watch_process="${STUTTER_AUTOTUNE_WATCH_PROCESS:-}"; \
+tree_pid="${STUTTER_AUTOTUNE_TREE_PID:-}"; \
+if [ "$mode" != "observe" ]; then \
+  echo "stutter-autotune-observe only supports STUTTER_AUTOTUNE_MODE=observe" >&2; \
+  exit 64; \
+fi; \
+if [ -n "$watch_process" ] && [ -n "$tree_pid" ]; then \
+  echo "set only one of STUTTER_AUTOTUNE_WATCH_PROCESS or STUTTER_AUTOTUNE_TREE_PID" >&2; \
+  exit 64; \
+fi; \
+if [ -n "$watch_process" ]; then \
+  exec /usr/bin/stutter autotune --mode observe --watch-process "$watch_process" --preset "$preset" --summary-ms "$summary_ms"; \
+fi; \
+if [ -n "$tree_pid" ]; then \
+  exec /usr/bin/stutter autotune --mode observe --tree-pid "$tree_pid" --preset "$preset" --summary-ms "$summary_ms"; \
+fi; \
+echo "set STUTTER_AUTOTUNE_WATCH_PROCESS or STUTTER_AUTOTUNE_TREE_PID in /etc/stutter/autotune-observe.env" >&2; \
+exit 64'
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

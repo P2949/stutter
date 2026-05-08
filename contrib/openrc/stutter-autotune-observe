@@ -1,0 +1,45 @@
+#!/sbin/openrc-run
+
+name="stutter autotune observe controller"
+description="Observe-only stutter autotune controller"
+
+command="${STUTTER_AUTOTUNE_BIN:-/usr/bin/stutter}"
+command_background="yes"
+pidfile="${STUTTER_AUTOTUNE_PIDFILE:-/run/stutter-autotune-observe.pid}"
+output_log="${STUTTER_AUTOTUNE_LOG:-/var/log/stutter-autotune-observe.log}"
+error_log="${STUTTER_AUTOTUNE_ERROR_LOG:-/var/log/stutter-autotune-observe.log}"
+
+: "${STUTTER_AUTOTUNE_MODE:=observe}"
+: "${STUTTER_AUTOTUNE_PRESET:=diagnosis}"
+: "${STUTTER_AUTOTUNE_SUMMARY_MS:=1000}"
+
+depend() {
+    need localmount
+    after net
+}
+
+start_pre() {
+    if [ "${STUTTER_AUTOTUNE_MODE}" != "observe" ]; then
+        eerror "stutter-autotune-observe only supports STUTTER_AUTOTUNE_MODE=observe"
+        return 64
+    fi
+
+    if [ -n "${STUTTER_AUTOTUNE_WATCH_PROCESS:-}" ] && [ -n "${STUTTER_AUTOTUNE_TREE_PID:-}" ]; then
+        eerror "set only one of STUTTER_AUTOTUNE_WATCH_PROCESS or STUTTER_AUTOTUNE_TREE_PID"
+        return 64
+    fi
+
+    if [ -z "${STUTTER_AUTOTUNE_WATCH_PROCESS:-}" ] && [ -z "${STUTTER_AUTOTUNE_TREE_PID:-}" ]; then
+        eerror "set STUTTER_AUTOTUNE_WATCH_PROCESS or STUTTER_AUTOTUNE_TREE_PID in /etc/conf.d/stutter-autotune-observe"
+        return 64
+    fi
+
+    if [ -n "${STUTTER_AUTOTUNE_WATCH_PROCESS:-}" ]; then
+        command_args="autotune --mode observe --watch-process ${STUTTER_AUTOTUNE_WATCH_PROCESS} --preset ${STUTTER_AUTOTUNE_PRESET} --summary-ms ${STUTTER_AUTOTUNE_SUMMARY_MS}"
+    else
+        command_args="autotune --mode observe --tree-pid ${STUTTER_AUTOTUNE_TREE_PID} --preset ${STUTTER_AUTOTUNE_PRESET} --summary-ms ${STUTTER_AUTOTUNE_SUMMARY_MS}"
+    fi
+
+    export command_args
+    return 0
+}
