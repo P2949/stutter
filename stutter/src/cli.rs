@@ -274,6 +274,27 @@ pub struct MonitorArgs {
     #[arg(long = "otel-service-name", default_value = "stutter")]
     pub otel_service_name: String,
 
+    #[arg(long = "auto-focus")]
+    auto_focus: bool,
+
+    #[arg(long = "auto-focus-poll-ms", default_value_t = 1000)]
+    auto_focus_poll_ms: u64,
+
+    #[arg(long = "auto-focus-min-confidence", default_value_t = 0.60)]
+    auto_focus_min_confidence: f32,
+
+    #[arg(long = "auto-focus-switch-cooldown-ms", default_value_t = 5000)]
+    auto_focus_switch_cooldown_ms: u64,
+
+    #[arg(long = "auto-focus-switch-margin", default_value_t = 0.20)]
+    auto_focus_switch_margin: f32,
+
+    #[arg(long = "auto-focus-required-polls", default_value_t = 2)]
+    auto_focus_required_polls: u32,
+
+    #[arg(long = "auto-focus-max-roots", default_value_t = 4)]
+    auto_focus_max_roots: usize,
+
     #[arg(long = "remote", value_name = "URL")]
     pub remote: Option<String>,
 }
@@ -452,6 +473,13 @@ impl Default for MonitorArgs {
             wakeup_map_factor: None,
             otlp_endpoint: None,
             otel_service_name: "stutter".to_owned(),
+            auto_focus: false,
+            auto_focus_poll_ms: 1000,
+            auto_focus_min_confidence: 0.60,
+            auto_focus_switch_cooldown_ms: 5000,
+            auto_focus_switch_margin: 0.20,
+            auto_focus_required_polls: 2,
+            auto_focus_max_roots: 4,
             remote: None,
         }
     }
@@ -1046,6 +1074,17 @@ pub enum CsvStreamTarget {
     Stdout,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AutoFocusConfig {
+    pub enabled: bool,
+    pub poll_ms: u64,
+    pub min_confidence: f32,
+    pub switch_cooldown_ms: u64,
+    pub switch_margin: f32,
+    pub required_polls: u32,
+    pub max_roots: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub target_pids: Vec<u32>,
@@ -1074,6 +1113,16 @@ pub struct Config {
     pub mangohud_log_live: bool,
     pub otlp_endpoint: Option<String>,
     pub otel_service_name: String,
+    pub auto_focus: bool,
+    #[allow(dead_code)]
+    pub auto_focus_poll_ms: u64,
+    pub auto_focus_min_confidence: f32,
+    pub auto_focus_switch_cooldown_ms: u64,
+    pub auto_focus_switch_margin: f32,
+    #[allow(dead_code)]
+    pub auto_focus_required_polls: u32,
+    #[allow(dead_code)]
+    pub auto_focus_max_roots: usize,
     pub remote: Option<String>,
 
     pub tui: bool,
@@ -1103,6 +1152,31 @@ pub struct Config {
 impl Config {
     pub fn csv_streams_to_stdout(&self) -> bool {
         matches!(self.csv_stream, Some(CsvStreamTarget::Stdout))
+    }
+
+    pub fn has_explicit_target(&self) -> bool {
+        !self.target_pids.is_empty()
+            || !self.tree_pids.is_empty()
+            || self.watch_process.is_some()
+            || self.cgroupv2.is_some()
+    }
+
+    #[allow(dead_code)]
+    pub fn auto_focus_enabled(&self) -> bool {
+        self.auto_focus && !self.has_explicit_target()
+    }
+
+    #[allow(dead_code)]
+    pub fn auto_focus_config(&self) -> AutoFocusConfig {
+        AutoFocusConfig {
+            enabled: self.auto_focus_enabled(),
+            poll_ms: self.auto_focus_poll_ms,
+            min_confidence: self.auto_focus_min_confidence,
+            switch_cooldown_ms: self.auto_focus_switch_cooldown_ms,
+            switch_margin: self.auto_focus_switch_margin,
+            required_polls: self.auto_focus_required_polls,
+            max_roots: self.auto_focus_max_roots,
+        }
     }
 }
 
@@ -1543,6 +1617,57 @@ where
     }
 }
 
+#[cfg(test)]
+mod auto_focus_cli_tests {
+    use super::*;
+
+    #[test]
+    fn monitor_args_default_contains_auto_focus_defaults() {
+        let args = MonitorArgs::default();
+
+        assert!(!args.auto_focus);
+        assert_eq!(args.auto_focus_poll_ms, 1000);
+        assert_eq!(args.auto_focus_min_confidence, 0.60);
+        assert_eq!(args.auto_focus_switch_cooldown_ms, 5000);
+        assert_eq!(args.auto_focus_switch_margin, 0.20);
+        assert_eq!(args.auto_focus_required_polls, 2);
+        assert_eq!(args.auto_focus_max_roots, 4);
+    }
+
+    #[test]
+    fn monitor_cli_parses_auto_focus_fields() {
+        let cli = Cli::parse_from([
+            "stutter",
+            "monitor",
+            "--auto-focus",
+            "--auto-focus-poll-ms",
+            "250",
+            "--auto-focus-min-confidence",
+            "0.75",
+            "--auto-focus-switch-cooldown-ms",
+            "7500",
+            "--auto-focus-switch-margin",
+            "0.30",
+            "--auto-focus-required-polls",
+            "3",
+            "--auto-focus-max-roots",
+            "2",
+        ]);
+
+        let Command::Monitor(args) = cli.command.unwrap() else {
+            panic!("expected monitor command");
+        };
+
+        assert!(args.auto_focus);
+        assert_eq!(args.auto_focus_poll_ms, 250);
+        assert_eq!(args.auto_focus_min_confidence, 0.75);
+        assert_eq!(args.auto_focus_switch_cooldown_ms, 7500);
+        assert_eq!(args.auto_focus_switch_margin, 0.30);
+        assert_eq!(args.auto_focus_required_polls, 3);
+        assert_eq!(args.auto_focus_max_roots, 2);
+    }
+}
+
 pub fn command() -> clap::Command {
     Cli::command()
 }
@@ -1874,6 +1999,13 @@ fn config_from_monitor_args_with_file(
         wakeup_map_factor: args.wakeup_map_factor,
         otlp_endpoint: args.otlp_endpoint,
         otel_service_name: args.otel_service_name,
+        auto_focus: args.auto_focus,
+        auto_focus_poll_ms: args.auto_focus_poll_ms,
+        auto_focus_min_confidence: args.auto_focus_min_confidence,
+        auto_focus_switch_cooldown_ms: args.auto_focus_switch_cooldown_ms,
+        auto_focus_switch_margin: args.auto_focus_switch_margin,
+        auto_focus_required_polls: args.auto_focus_required_polls,
+        auto_focus_max_roots: args.auto_focus_max_roots,
         remote: args.remote,
     })
 }

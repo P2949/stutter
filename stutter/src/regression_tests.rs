@@ -472,6 +472,63 @@ fn diff_tasks_orders_removed_before_added_by_tid() {
 }
 
 #[test]
+fn config_reports_explicit_targets_for_manual_tree_watch_and_cgroup() {
+    let mut config = test_config(Vec::new(), Vec::new(), None);
+    assert!(!config.has_explicit_target());
+
+    config.target_pids = vec![123];
+    assert!(config.has_explicit_target());
+
+    config.target_pids.clear();
+    config.tree_pids = vec![456];
+    assert!(config.has_explicit_target());
+
+    config.tree_pids.clear();
+    config.watch_process = Some("gamescope".to_owned());
+    assert!(config.has_explicit_target());
+
+    config.watch_process = None;
+    config.cgroupv2 = Some(PathBuf::from("/sys/fs/cgroup/user.slice"));
+    assert!(config.has_explicit_target());
+}
+
+#[test]
+fn config_auto_focus_enabled_ignores_explicit_targets() {
+    let mut config = test_config(Vec::new(), Vec::new(), None);
+    config.auto_focus = true;
+    config.auto_focus_poll_ms = 250;
+    config.auto_focus_min_confidence = 0.75;
+    config.auto_focus_switch_cooldown_ms = 7500;
+    config.auto_focus_switch_margin = 0.30;
+    config.auto_focus_required_polls = 3;
+    config.auto_focus_max_roots = 2;
+
+    assert!(config.auto_focus_enabled());
+
+    let auto_focus = config.auto_focus_config();
+    assert!(auto_focus.enabled);
+    assert_eq!(auto_focus.poll_ms, 250);
+    assert_eq!(auto_focus.min_confidence, 0.75);
+    assert_eq!(auto_focus.switch_cooldown_ms, 7500);
+    assert_eq!(auto_focus.switch_margin, 0.30);
+    assert_eq!(auto_focus.required_polls, 3);
+    assert_eq!(auto_focus.max_roots, 2);
+
+    config.tree_pids = vec![999];
+    assert!(config.auto_focus);
+    assert!(!config.auto_focus_enabled());
+
+    let auto_focus = config.auto_focus_config();
+    assert!(!auto_focus.enabled);
+    assert_eq!(auto_focus.poll_ms, 250);
+    assert_eq!(auto_focus.min_confidence, 0.75);
+    assert_eq!(auto_focus.switch_cooldown_ms, 7500);
+    assert_eq!(auto_focus.switch_margin, 0.30);
+    assert_eq!(auto_focus.required_polls, 3);
+    assert_eq!(auto_focus.max_roots, 2);
+}
+
+#[test]
 fn classify_task_known_classes() {
     assert_eq!(
         process_tree::classify_task("gamescope", "gamescope", ""),
@@ -1639,6 +1696,13 @@ fn test_config(
         wakeup_map_factor: None,
         otlp_endpoint: None,
         otel_service_name: "stutter".to_owned(),
+        auto_focus: false,
+        auto_focus_poll_ms: 1000,
+        auto_focus_min_confidence: 0.60,
+        auto_focus_switch_cooldown_ms: 5000,
+        auto_focus_switch_margin: 0.20,
+        auto_focus_required_polls: 2,
+        auto_focus_max_roots: 4,
         remote: None,
     }
 }
