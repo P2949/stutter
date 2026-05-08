@@ -25,7 +25,7 @@ use crate::{
 };
 
 pub type IntervalRecord = MetricsIntervalRecord;
-pub use crate::scx::ScxEvent;
+pub use crate::{foreground::ForegroundEvent, scx::ScxEvent};
 pub const MAX_SPIKE_EVENTS: usize = 500_000;
 
 #[derive(Default, Debug)]
@@ -50,6 +50,7 @@ pub struct RecordingStreams {
     pub spike_event_writer: Option<JsonArrayWriter>,
     pub frame_event_writer: Option<JsonArrayWriter>,
     pub focus_event_writer: Option<JsonArrayWriter>,
+    pub foreground_event_writer: Option<JsonArrayWriter>,
     pub csv_writer: Option<IntervalCsvWriter>,
     pub stdout_spike_stream: Option<StdoutJsonStream>,
 }
@@ -66,6 +67,7 @@ pub struct RecordingCounters {
     pub interval_record_count: u64,
     pub frame_event_count: u64,
     pub focus_event_count: u64,
+    pub foreground_event_count: u64,
     pub process_scan_budget_exceeded_count: u64,
     pub thread_scan_limited_count: u64,
 
@@ -97,6 +99,7 @@ pub struct LiveRecorder {
     pub streams: RecordingStreams,
     pub counters: RecordingCounters,
     pub exporters: ExporterState,
+    pub last_foreground_event: Option<ForegroundEvent>,
 }
 
 impl std::fmt::Debug for LiveRecorder {
@@ -106,6 +109,7 @@ impl std::fmt::Debug for LiveRecorder {
             .field("buffers", &self.buffers)
             .field("counters", &self.counters)
             .field("exporters", &self.exporters)
+            .field("last_foreground_event", &self.last_foreground_event)
             .finish_non_exhaustive()
     }
 }
@@ -133,6 +137,19 @@ impl LiveRecorder {
 
     pub fn enable_stdout_spike_stream(&mut self) {
         self.streams.stdout_spike_stream = Some(StdoutJsonStream::new());
+    }
+
+    #[allow(dead_code)]
+    pub fn write_foreground_event(&mut self, event: ForegroundEvent) -> anyhow::Result<()> {
+        self.last_foreground_event = Some(event.clone());
+
+        if let Some(writer) = self.streams.foreground_event_writer.as_mut() {
+            writer.push(&event)?;
+            self.counters.foreground_event_count =
+                self.counters.foreground_event_count.saturating_add(1);
+        }
+
+        Ok(())
     }
 }
 
@@ -459,6 +476,16 @@ pub struct SessionMetadataCore {
     #[serde(default)]
     pub focus_event_count: u64,
     #[serde(default)]
+    pub foreground_event_count: u64,
+    #[serde(default)]
+    pub foreground_source: Option<String>,
+    #[serde(default)]
+    pub final_foreground_pid: Option<u32>,
+    #[serde(default)]
+    pub final_foreground_app_id: Option<String>,
+    #[serde(default)]
+    pub final_foreground_class: Option<String>,
+    #[serde(default)]
     pub interval_record_count: u64,
     #[serde(default)]
     pub intervals_dropped: u64,
@@ -600,6 +627,18 @@ pub struct RecordedConfig {
     #[serde(default)]
     pub auto_focus: bool,
     #[serde(default)]
+    pub foreground_window: bool,
+    #[serde(default)]
+    pub focus_source: String,
+    #[serde(default)]
+    pub foreground_source: String,
+    #[serde(default)]
+    pub foreground_poll_ms: u64,
+    #[serde(default)]
+    pub foreground_max_stale_ms: u64,
+    #[serde(default)]
+    pub foreground_include_title: bool,
+    #[serde(default)]
     pub auto_focus_poll_ms: u64,
     #[serde(default)]
     pub auto_focus_min_confidence: f32,
@@ -621,6 +660,36 @@ fn default_recorded_follow_exec() -> bool {
     true
 }
 
+fn focus_source_label(source: crate::cli::FocusSource) -> String {
+    match source {
+        crate::cli::FocusSource::Heuristic => "heuristic",
+        crate::cli::FocusSource::Foreground => "foreground",
+        crate::cli::FocusSource::Hybrid => "hybrid",
+    }
+    .to_owned()
+}
+
+fn foreground_source_arg_label(source: crate::cli::ForegroundSourceArg) -> String {
+    match source {
+        crate::cli::ForegroundSourceArg::Auto => "auto",
+        crate::cli::ForegroundSourceArg::Sway => "sway",
+        crate::cli::ForegroundSourceArg::Hyprland => "hyprland",
+        crate::cli::ForegroundSourceArg::X11 => "x11",
+    }
+    .to_owned()
+}
+
+fn foreground_source_label(source: crate::foreground::ForegroundSource) -> String {
+    match source {
+        crate::foreground::ForegroundSource::Auto => "auto",
+        crate::foreground::ForegroundSource::Sway => "sway",
+        crate::foreground::ForegroundSource::Hyprland => "hyprland",
+        crate::foreground::ForegroundSource::X11 => "x11",
+        crate::foreground::ForegroundSource::Unsupported => "unsupported",
+    }
+    .to_owned()
+}
+
 fn default_recorded_cpu_perf_max_tasks() -> usize {
     128
 }
@@ -628,6 +697,88 @@ fn default_recorded_cpu_perf_max_tasks() -> usize {
 #[cfg(test)]
 mod focus_recording_tests {
     use super::*;
+
+    #[test]
+    fn foreground_event_serializes_expected_fields() {
+        let event = ForegroundEvent {
+            elapsed_ms: 1234,
+            source: crate::foreground::ForegroundSource::Sway,
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid: Some(4242),
+            app_id: Some("steam".to_owned()),
+            class: Some("Steam".to_owned()),
+            title: None,
+            window_id: Some("123".to_owned()),
+            workspace: Some("games".to_owned()),
+            confidence: 0.95,
+            reason: "focused Sway node from swaymsg get_tree".to_owned(),
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+
+        assert!(json.contains("\"elapsed_ms\":1234"));
+        assert!(json.contains("\"source\":\"sway\""));
+        assert!(json.contains("\"status\":\"available\""));
+        assert!(json.contains("\"pid\":4242"));
+        assert!(json.contains("\"app_id\":\"steam\""));
+        assert!(json.contains("\"class\":\"Steam\""));
+        assert!(json.contains("\"title\":null"));
+        assert!(json.contains("\"window_id\":\"123\""));
+        assert!(json.contains("\"workspace\":\"games\""));
+        assert!(json.contains("\"confidence\":0.95"));
+    }
+
+    #[test]
+    fn live_recorder_writes_foreground_event_to_dedicated_stream() {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "stutter-foreground-event-stream-{}-{}",
+            std::process::id(),
+            crate::audit::unix_nanos_now()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("foreground_events.json");
+
+        let mut recorder = LiveRecorder::default();
+        recorder.streams.foreground_event_writer =
+            Some(JsonArrayWriter::create(path.clone()).unwrap());
+
+        let event = ForegroundEvent {
+            elapsed_ms: 42,
+            source: crate::foreground::ForegroundSource::X11,
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid: Some(1000),
+            app_id: Some("Navigator".to_owned()),
+            class: Some("Firefox".to_owned()),
+            title: None,
+            window_id: Some("0x1200007".to_owned()),
+            workspace: None,
+            confidence: 0.90,
+            reason: "active X11 window from xprop".to_owned(),
+        };
+
+        recorder.write_foreground_event(event.clone()).unwrap();
+        recorder
+            .streams
+            .foreground_event_writer
+            .as_mut()
+            .unwrap()
+            .finish()
+            .unwrap();
+
+        assert_eq!(recorder.counters.foreground_event_count, 1);
+        assert_eq!(
+            recorder.last_foreground_event.as_ref().unwrap().pid,
+            Some(1000)
+        );
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"source\":\"x11\""));
+        assert!(text.contains("\"pid\":1000"));
+        assert!(!text.contains("focus"));
+
+        std::fs::remove_dir_all(dir).ok();
+    }
 
     #[test]
     fn focus_event_serializes_expected_fields() {
@@ -662,6 +813,12 @@ mod focus_recording_tests {
         let config = RecordedConfig::default();
 
         assert!(!config.auto_focus);
+        assert!(!config.foreground_window);
+        assert_eq!(config.focus_source, "");
+        assert_eq!(config.foreground_source, "");
+        assert_eq!(config.foreground_poll_ms, 0);
+        assert_eq!(config.foreground_max_stale_ms, 0);
+        assert!(!config.foreground_include_title);
         assert_eq!(config.auto_focus_poll_ms, 0);
         assert_eq!(config.auto_focus_min_confidence, 0.0);
         assert_eq!(config.auto_focus_switch_cooldown_ms, 0);
@@ -678,6 +835,11 @@ mod focus_recording_tests {
         assert_eq!(core.final_focus_kind, None);
         assert_eq!(core.focus_switch_count, 0);
         assert_eq!(core.focus_event_count, 0);
+        assert_eq!(core.foreground_event_count, 0);
+        assert_eq!(core.foreground_source, None);
+        assert_eq!(core.final_foreground_pid, None);
+        assert_eq!(core.final_foreground_app_id, None);
+        assert_eq!(core.final_foreground_class, None);
     }
 }
 
@@ -1042,7 +1204,7 @@ fn default_block_io_correlation_basis_string() -> String {
     default_block_io_correlation_basis().into_owned()
 }
 
-pub const SESSION_SCHEMA_VERSION: u32 = 20;
+pub const SESSION_SCHEMA_VERSION: u32 = 21;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CpuPerfStatus {
@@ -1067,6 +1229,9 @@ pub struct FinalizeRecordingInput<'a> {
     pub focus_mode: Option<String>,
     pub final_focus_kind: Option<String>,
     pub focus_switch_count: u64,
+    #[allow(dead_code)]
+    pub current_focus: Option<crate::focus::ResolvedFocus>,
+    pub final_foreground_event: Option<ForegroundEvent>,
 }
 
 pub fn prepare_recording(config: &Config) -> anyhow::Result<Option<RecordingRun>> {
@@ -1160,6 +1325,8 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         focus_mode,
         final_focus_kind,
         focus_switch_count,
+        current_focus: _,
+        final_foreground_event,
     } = input;
 
     let Some(recording) = recorder.run.as_ref() else {
@@ -1306,6 +1473,17 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         final_focus_kind,
         focus_switch_count,
         focus_event_count: recorder.counters.focus_event_count,
+        foreground_event_count: recorder.counters.foreground_event_count,
+        foreground_source: final_foreground_event
+            .as_ref()
+            .map(|event| foreground_source_label(event.source)),
+        final_foreground_pid: final_foreground_event.as_ref().and_then(|event| event.pid),
+        final_foreground_app_id: final_foreground_event
+            .as_ref()
+            .and_then(|event| event.app_id.clone()),
+        final_foreground_class: final_foreground_event
+            .as_ref()
+            .and_then(|event| event.class.clone()),
         interval_record_count,
         intervals_dropped: recorder.counters.intervals_dropped,
         spike_events_retained_count: if recorder.streams.spike_event_writer.is_some() {
@@ -1508,6 +1686,12 @@ pub fn recorded_config(config: &Config, tree_pids: &[u32]) -> RecordedConfig {
         otlp_endpoint: config.otlp_endpoint.clone(),
         otel_service_name: config.otel_service_name.clone(),
         auto_focus: config.auto_focus,
+        foreground_window: config.foreground_window,
+        focus_source: focus_source_label(config.focus_source),
+        foreground_source: foreground_source_arg_label(config.foreground_source),
+        foreground_poll_ms: config.foreground_poll_ms,
+        foreground_max_stale_ms: config.foreground_max_stale_ms,
+        foreground_include_title: config.foreground_include_title,
         auto_focus_poll_ms: config.auto_focus_poll_ms,
         auto_focus_min_confidence: config.auto_focus_min_confidence,
         auto_focus_switch_cooldown_ms: config.auto_focus_switch_cooldown_ms,

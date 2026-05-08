@@ -1,5 +1,5 @@
 {
-  "schema_version": 20,
+  "schema_version": 21,
   "run_name": "clean_run",
   "started_at": {
     "unix_seconds": 1625097600,
@@ -33,6 +33,15 @@
     100,
     101
   ],
+  "focus_mode": null,
+  "final_focus_kind": null,
+  "focus_switch_count": 0,
+  "focus_event_count": 0,
+  "foreground_event_count": 0,
+  "foreground_source": null,
+  "final_foreground_pid": null,
+  "final_foreground_app_id": null,
+  "final_foreground_class": null,
   "interval_record_count": 2,
   "intervals_dropped": 0,
   "spike_events_retained_count": 0,

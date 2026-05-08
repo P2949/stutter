@@ -7,9 +7,9 @@ use anyhow::{Context, Result};
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::recorder::{
-    BlockIoRecord, CpuFreqRecord, FocusEvent, FrameEvent, GpuSample, IntervalRecord,
-    IrqEventRecord, MetadataFile, MigrationEventRecord, SESSION_SCHEMA_VERSION, ScxEvent,
-    SessionFile, SpikeEvent, TreeEvent,
+    BlockIoRecord, CpuFreqRecord, FocusEvent, ForegroundEvent, FrameEvent, GpuSample,
+    IntervalRecord, IrqEventRecord, MetadataFile, MigrationEventRecord, SESSION_SCHEMA_VERSION,
+    ScxEvent, SessionFile, SpikeEvent, TreeEvent,
 };
 
 #[derive(Debug, Serialize, Default)]
@@ -29,6 +29,7 @@ pub struct RunArtifacts {
     pub block_io_events: Vec<BlockIoRecord>,
     pub scx_events: Vec<ScxEvent>,
     pub focus_events: Vec<FocusEvent>,
+    pub foreground_events: Vec<ForegroundEvent>,
 
     pub validation: RunValidationReport,
 }
@@ -66,6 +67,7 @@ pub struct ArtifactLoadOptions {
     pub load_block_io_events: bool,
     pub load_scx_events: bool,
     pub load_focus_events: bool,
+    pub load_foreground_events: bool,
 }
 
 impl ArtifactLoadOptions {
@@ -81,6 +83,7 @@ impl ArtifactLoadOptions {
         load_block_io_events: false,
         load_scx_events: false,
         load_focus_events: true,
+        load_foreground_events: false,
     };
 
     pub const TUNE: Self = Self {
@@ -95,6 +98,7 @@ impl ArtifactLoadOptions {
         load_block_io_events: false,
         load_scx_events: false,
         load_focus_events: false,
+        load_foreground_events: false,
     };
 
     pub const AUTOTUNE_REPLAY: Self = Self {
@@ -109,6 +113,7 @@ impl ArtifactLoadOptions {
         load_block_io_events: true,
         load_scx_events: true,
         load_focus_events: true,
+        load_foreground_events: true,
     };
 
     #[allow(dead_code)]
@@ -124,6 +129,7 @@ impl ArtifactLoadOptions {
         load_block_io_events: false,
         load_scx_events: false,
         load_focus_events: false,
+        load_foreground_events: false,
     };
 }
 
@@ -156,6 +162,7 @@ pub(crate) const CPU_FREQ_EVENTS_FILE: &str = "cpu_freq_samples.json";
 pub(crate) const BLOCK_IO_EVENTS_FILE: &str = "io_events.json";
 pub(crate) const SCX_EVENTS_FILE: &str = "scx_events.json";
 pub(crate) const FOCUS_EVENTS_FILE: &str = "focus_events.json";
+pub(crate) const FOREGROUND_EVENTS_FILE: &str = "foreground_events.json";
 
 fn load_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let file =
@@ -391,6 +398,12 @@ pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<R
         Vec::new()
     };
 
+    let foreground_events = if options.load_foreground_events {
+        load_optional_json_vec(&run_dir, FOREGROUND_EVENTS_FILE, &mut validation)?
+    } else {
+        Vec::new()
+    };
+
     let mut artifacts = RunArtifacts {
         run_dir,
         session,
@@ -406,6 +419,7 @@ pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<R
         block_io_events,
         scx_events,
         focus_events,
+        foreground_events,
         validation,
     };
 
@@ -460,6 +474,19 @@ fn check_consistency(artifacts: &mut RunArtifacts) {
             "spike count mismatch: session reported {}, found {} in artifact",
             session.core.spike_events_retained_count,
             artifacts.spikes.len()
+        ));
+    }
+
+    // Foreground count consistency
+    if validation
+        .present_files
+        .contains(&FOREGROUND_EVENTS_FILE.to_owned())
+        && artifacts.foreground_events.len() as u64 != session.core.foreground_event_count
+    {
+        validation.warnings.push(format!(
+            "foreground event count mismatch: session reported {}, found {} in artifact",
+            session.core.foreground_event_count,
+            artifacts.foreground_events.len()
         ));
     }
 }
@@ -535,6 +562,20 @@ impl RunArtifacts {
             SCX_EVENTS_FILE,
             validation,
             |r: &ScxEvent| windows.is_in_ms(r.elapsed_ms),
+        )?;
+
+        self.focus_events = load_optional_json_vec_filtered(
+            run_dir,
+            FOCUS_EVENTS_FILE,
+            validation,
+            |r: &FocusEvent| windows.is_in_ms(r.elapsed_ms),
+        )?;
+
+        self.foreground_events = load_optional_json_vec_filtered(
+            run_dir,
+            FOREGROUND_EVENTS_FILE,
+            validation,
+            |r: &ForegroundEvent| windows.is_in_ms(r.elapsed_ms),
         )?;
 
         Ok(())
@@ -638,6 +679,7 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
         (BLOCK_IO_EVENTS_FILE, "BlockIoRecord"),
         (SCX_EVENTS_FILE, "ScxEvent"),
         (FOCUS_EVENTS_FILE, "FocusEvent"),
+        (FOREGROUND_EVENTS_FILE, "ForegroundEvent"),
     ];
 
     for (file_name, type_name) in optional_artifacts {
@@ -655,6 +697,7 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
                 "BlockIoRecord" => validate_ndjson_file::<BlockIoRecord>(&path),
                 "ScxEvent" => validate_ndjson_file::<ScxEvent>(&path),
                 "FocusEvent" => validate_ndjson_file::<FocusEvent>(&path),
+                "ForegroundEvent" => validate_ndjson_file::<ForegroundEvent>(&path),
                 _ => unreachable!(),
             };
 
@@ -1152,5 +1195,60 @@ mod tests {
         };
 
         assert!(filter(&spans));
+    }
+
+    #[test]
+    fn load_run_artifacts_reads_foreground_events_when_requested() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_dir = dir.path();
+        let session_path = run_dir.join(SESSION_FILE);
+
+        let mut session = SessionFile::default();
+        session.core.foreground_event_count = 1;
+        fs::write(&session_path, serde_json::to_string(&session).unwrap()).unwrap();
+
+        let event = ForegroundEvent {
+            elapsed_ms: 100,
+            pid: Some(123),
+            ..Default::default()
+        };
+        let event_path = run_dir.join(FOREGROUND_EVENTS_FILE);
+        let mut file = std::fs::File::create(event_path).unwrap();
+        use std::io::Write;
+        file.write_all(serde_json::to_string(&event).unwrap().as_bytes())
+            .unwrap();
+        file.write_all(b"\n").unwrap();
+
+        let options = ArtifactLoadOptions {
+            load_foreground_events: true,
+            ..ArtifactLoadOptions::VALIDATE_ONLY
+        };
+        let artifacts = load_run_artifacts(&session_path, options).unwrap();
+
+        assert_eq!(artifacts.foreground_events.len(), 1);
+        assert_eq!(artifacts.foreground_events[0].pid, Some(123));
+        assert!(artifacts.validation.is_ok());
+    }
+
+    #[test]
+    fn validate_run_dir_rejects_invalid_foreground_events_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_dir = dir.path();
+        let session_path = run_dir.join(SESSION_FILE);
+
+        let session = SessionFile::default();
+        fs::write(&session_path, serde_json::to_string(&session).unwrap()).unwrap();
+
+        let event_path = run_dir.join(FOREGROUND_EVENTS_FILE);
+        std::fs::write(event_path, "not json").unwrap();
+
+        let report = validate_run_dir(&session_path).unwrap();
+        assert!(!report.is_ok());
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|e| e.contains("foreground_events.json invalid"))
+        );
     }
 }
