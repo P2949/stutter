@@ -3,6 +3,8 @@
 #[cfg(test)]
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use super::candidate::CandidateAction;
 use crate::{actions::RollbackToken, scorer::StutterScore};
 
@@ -19,7 +21,7 @@ impl ExperimentId {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct WindowScore {
     pub started_unix_nanos: u128,
     pub finished_unix_nanos: u128,
