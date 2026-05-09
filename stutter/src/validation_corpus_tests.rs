@@ -881,6 +881,80 @@ fn validation_corpus_real_truncated_low_quality() {
 }
 
 #[test]
+fn validation_corpus_real_foreground_window() {
+    let (analysis, _) = assert_fixture_from_metadata("real_foreground_window");
+
+    assert_eq!(analysis.data_quality.level, DataQualityLevel::High);
+    assert!(analysis.data_quality.validation_errors.is_empty());
+    assert!(analysis.data_quality.validation_warnings.is_empty());
+
+    assert!(
+        analysis.foreground_summary.enabled,
+        "real_foreground_window should report foreground tracking as enabled"
+    );
+    assert!(
+        analysis.foreground_summary.event_count > 0,
+        "real_foreground_window should contain at least one foreground event"
+    );
+    assert!(
+        analysis.foreground_summary.final_pid.is_some()
+            || analysis.foreground_summary.final_app_id.is_some()
+            || analysis.foreground_summary.final_class.is_some(),
+        "real_foreground_window should preserve final foreground pid, app_id, or class"
+    );
+    assert!(
+        analysis.foreground_summary.final_title.is_none()
+            || analysis.foreground_summary.final_title.as_deref() == Some("redacted"),
+        "real_foreground_window title must be null or redacted, got {:?}",
+        analysis.foreground_summary.final_title
+    );
+    assert_eq!(analysis.foreground_summary.final_pid, Some(5701));
+    assert_eq!(
+        analysis.foreground_summary.final_app_id.as_deref(),
+        Some("steam_app_sanitized")
+    );
+    assert_eq!(
+        analysis.foreground_summary.final_class.as_deref(),
+        Some("steam_app_sanitized")
+    );
+
+    assert!(
+        analysis.artifacts_summary.foreground_event_count > 0,
+        "real_foreground_window must contain foreground_events.json artifacts"
+    );
+    assert!(
+        analysis.artifacts_summary.spike_count >= 3,
+        "real_foreground_window must contain a scheduler cluster near the foreground event"
+    );
+
+    let annotated_cluster = analysis.cluster_analysis.clusters.iter().find(|cluster| {
+        cluster.foreground_pid == Some(5701)
+            || cluster.foreground_app_id.as_deref() == Some("steam_app_sanitized")
+            || cluster.foreground_class.as_deref() == Some("steam_app_sanitized")
+    });
+    assert!(
+        annotated_cluster.is_some(),
+        "real_foreground_window expected a cluster annotated with foreground pid/app/class; clusters={:?}",
+        analysis.cluster_analysis.clusters
+    );
+
+    let cluster = annotated_cluster.expect("checked above");
+    assert_eq!(cluster.foreground_pid, Some(5701));
+    assert_eq!(
+        cluster.foreground_app_id.as_deref(),
+        Some("steam_app_sanitized")
+    );
+    assert_eq!(
+        cluster.foreground_class.as_deref(),
+        Some("steam_app_sanitized")
+    );
+    assert!(
+        cluster.foreground_confidence.is_some(),
+        "real_foreground_window annotated cluster should carry foreground confidence"
+    );
+}
+
+#[test]
 fn validation_corpus_game_thread_scheduler_delay() {
     assert_fixture_from_metadata("game_thread_scheduler_delay");
 }
