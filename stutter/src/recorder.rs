@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use stutter_common::SchedulerEvent;
 
 use crate::{
+    artifacts::{ArtifactKind, ArtifactStreamRegistry},
     cli::{Config, RecordingConfig, TARGET_PIDS_MAX},
     ebpf_loader::DropCountersSnapshot,
     metadata::{SystemMetadata, collect_system_metadata},
@@ -40,23 +41,7 @@ pub struct LiveBuffers {
     pub scx_events: Vec<crate::scx::ScxEvent>,
 }
 
-#[derive(Default, Debug)]
-pub struct RecordingStreams {
-    pub interval_writer: Option<JsonArrayWriter>,
-    pub irq_event_writer: Option<JsonArrayWriter>,
-    pub migration_event_writer: Option<JsonArrayWriter>,
-    pub cpu_freq_sample_writer: Option<JsonArrayWriter>,
-    pub gpu_sample_writer: Option<JsonArrayWriter>,
-    pub block_io_event_writer: Option<JsonArrayWriter>,
-    pub scx_event_writer: Option<JsonArrayWriter>,
-    pub runtime_slice_writer: Option<JsonArrayWriter>,
-    pub spike_event_writer: Option<JsonArrayWriter>,
-    pub frame_event_writer: Option<JsonArrayWriter>,
-    pub focus_event_writer: Option<JsonArrayWriter>,
-    pub foreground_event_writer: Option<JsonArrayWriter>,
-    pub csv_writer: Option<IntervalCsvWriter>,
-    pub stdout_spike_stream: Option<StdoutJsonStream>,
-}
+
 
 #[derive(Default, Debug)]
 pub struct RecordingCounters {
@@ -102,7 +87,9 @@ pub struct ExporterState {
 pub struct LiveRecorder {
     pub run: Option<RecordingRun>,
     pub buffers: LiveBuffers,
-    pub streams: RecordingStreams,
+    pub streams: ArtifactStreamRegistry,
+    pub csv_writer: Option<IntervalCsvWriter>,
+    pub stdout_spike_stream: Option<StdoutJsonStream>,
     pub counters: RecordingCounters,
     pub exporters: ExporterState,
     pub last_foreground_event: Option<ForegroundEvent>,
@@ -142,15 +129,15 @@ impl LiveRecorder {
     }
 
     pub fn enable_stdout_spike_stream(&mut self) {
-        self.streams.stdout_spike_stream = Some(StdoutJsonStream::new());
+        self.stdout_spike_stream = Some(StdoutJsonStream::new());
     }
 
     #[allow(dead_code)]
     pub fn write_foreground_event(&mut self, event: ForegroundEvent) -> anyhow::Result<()> {
         self.last_foreground_event = Some(event.clone());
 
-        if let Some(writer) = self.streams.foreground_event_writer.as_mut() {
-            writer.push(&event)?;
+        if self.streams.contains(ArtifactKind::ForegroundEvents) {
+            self.streams.push(ArtifactKind::ForegroundEvents, &event)?;
             self.counters.foreground_event_count =
                 self.counters.foreground_event_count.saturating_add(1);
         }
@@ -179,8 +166,7 @@ pub struct NdjsonWriter {
     path: PathBuf,
 }
 
-/// Backward-compatible alias while call sites migrate to the accurate name.
-pub type JsonArrayWriter = NdjsonWriter;
+
 
 pub enum CsvOutput {
     File(io::BufWriter<fs::File>),
@@ -807,8 +793,10 @@ mod focus_recording_tests {
         let path = dir.join("foreground_events.json");
 
         let mut recorder = LiveRecorder::default();
-        recorder.streams.foreground_event_writer =
-            Some(JsonArrayWriter::create(path.clone()).unwrap());
+        recorder
+            .streams
+            .create_stream(&dir, ArtifactKind::ForegroundEvents)
+            .unwrap();
 
         let event = ForegroundEvent {
             elapsed_ms: 42,
@@ -825,13 +813,7 @@ mod focus_recording_tests {
         };
 
         recorder.write_foreground_event(event.clone()).unwrap();
-        recorder
-            .streams
-            .foreground_event_writer
-            .as_mut()
-            .unwrap()
-            .finish()
-            .unwrap();
+        recorder.streams.finish_all().unwrap();
 
         assert_eq!(recorder.counters.foreground_event_count, 1);
         assert_eq!(
@@ -1564,13 +1546,13 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             .and_then(|event| event.class.clone()),
         interval_record_count,
         intervals_dropped: recorder.counters.intervals_dropped,
-        spike_events_retained_count: if recorder.streams.spike_event_writer.is_some() {
+        spike_events_retained_count: if recorder.streams.contains(ArtifactKind::SpikeEvents) {
             recorder.counters.spike_event_count
         } else {
             spike_events.len() as u64
         },
         spike_events_dropped_count: recorder.counters.spike_events_dropped_count,
-        spike_events_truncated: if recorder.streams.spike_event_writer.is_some() {
+        spike_events_truncated: if recorder.streams.contains(ArtifactKind::SpikeEvents) {
             false
         } else {
             recorder
@@ -1585,7 +1567,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         migration_event_count: Some(recorder.counters.migration_event_count),
         cpu_freq_sample_count: Some(recorder.counters.cpu_freq_sample_count),
         gpu_sample_count,
-        frame_event_count: if recorder.streams.frame_event_writer.is_some() {
+        frame_event_count: if recorder.streams.contains(ArtifactKind::FrameEvents) {
             recorder.counters.frame_event_count
         } else {
             frame_events.len() as u64
@@ -1655,7 +1637,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     )
     .map_err(map_write_err)?;
 
-    if recorder.streams.interval_writer.is_none() {
+    if !recorder.streams.contains(ArtifactKind::Interval) {
         write_json_stream(
             recording.run_dir.join("interval.json"),
             interval_records,
@@ -1671,7 +1653,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         )
         .map_err(map_write_err)?;
     }
-    if recorder.streams.spike_event_writer.is_none() && !spike_events.is_empty() {
+    if !recorder.streams.contains(ArtifactKind::SpikeEvents) && !spike_events.is_empty() {
         write_json_stream(
             recording.run_dir.join("spike_events.json"),
             spike_events,
@@ -1679,7 +1661,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         )
         .map_err(map_write_err)?;
     }
-    if recorder.streams.irq_event_writer.is_none() && !recorder.buffers.irq_events.is_empty() {
+    if !recorder.streams.contains(ArtifactKind::IrqEvents) && !recorder.buffers.irq_events.is_empty() {
         write_json_stream(
             recording.run_dir.join("irq_events.json"),
             &recorder.buffers.irq_events,
@@ -1687,7 +1669,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         )
         .map_err(map_write_err)?;
     }
-    if recorder.streams.gpu_sample_writer.is_none() && !recorder.buffers.gpu_samples.is_empty() {
+    if !recorder.streams.contains(ArtifactKind::GpuSamples) && !recorder.buffers.gpu_samples.is_empty() {
         write_json_stream(
             recording.run_dir.join("gpu_samples.json"),
             &recorder.buffers.gpu_samples,
@@ -1695,7 +1677,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         )
         .map_err(map_write_err)?;
     }
-    if recorder.streams.frame_event_writer.is_none() && !frame_events.is_empty() {
+    if !recorder.streams.contains(ArtifactKind::FrameEvents) && !frame_events.is_empty() {
         write_json_stream(
             recording.run_dir.join("frame_events.json"),
             frame_events,
@@ -1703,7 +1685,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         )
         .map_err(map_write_err)?;
     }
-    if recorder.streams.scx_event_writer.is_none() && !recorder.buffers.scx_events.is_empty() {
+    if !recorder.streams.contains(ArtifactKind::ScxEvents) && !recorder.buffers.scx_events.is_empty() {
         write_json_stream(
             recording.run_dir.join("scx_events.json"),
             &recorder.buffers.scx_events,
@@ -2166,7 +2148,7 @@ fn write_json_stream<T: Serialize>(
     values: &[T],
     sync_tracker: &mut SyncTracker,
 ) -> anyhow::Result<()> {
-    let mut writer = JsonArrayWriter::create(path.clone())?;
+    let mut writer = NdjsonWriter::create(path.clone())?;
     for value in values {
         writer.push(value)?;
     }
@@ -2187,14 +2169,14 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let empty_path = dir.join("empty.json");
         {
-            let mut writer = JsonArrayWriter::create(empty_path.clone()).unwrap();
+            let mut writer = NdjsonWriter::create(empty_path.clone()).unwrap();
             writer.finish().unwrap();
         }
         assert!(fs::read_to_string(&empty_path).unwrap().is_empty());
 
         let single_path = dir.join("single.json");
         {
-            let mut writer = JsonArrayWriter::create(single_path.clone()).unwrap();
+            let mut writer = NdjsonWriter::create(single_path.clone()).unwrap();
             writer.push(&serde_json::json!({"one": true})).unwrap();
             writer.finish().unwrap();
         }
@@ -2208,7 +2190,7 @@ mod tests {
         let path = dir.join("items.json");
 
         {
-            let mut writer = JsonArrayWriter::create(path.clone()).unwrap();
+            let mut writer = NdjsonWriter::create(path.clone()).unwrap();
             writer.push(&serde_json::json!({"a": 1})).unwrap();
             writer.push(&serde_json::json!({"b": 2})).unwrap();
             writer.finish().unwrap();
@@ -2225,7 +2207,7 @@ mod tests {
 
     #[test]
     fn json_array_writer_rejects_path_without_file_name() {
-        let err = JsonArrayWriter::create(PathBuf::from("/")).unwrap_err();
+        let err = NdjsonWriter::create(PathBuf::from("/")).unwrap_err();
         assert!(err.to_string().contains("no file name"));
     }
 

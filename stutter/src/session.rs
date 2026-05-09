@@ -14,6 +14,7 @@ use tokio::{
 };
 
 use crate::{
+    artifacts::{ArtifactKind, ArtifactStreamRegistry},
     cli::{Config, CsvStreamTarget, FocusSource, ForegroundSourceArg},
     diagnosis::{LiveDiagnosisEntry, diagnose_cluster},
     ebpf_loader,
@@ -22,9 +23,7 @@ use crate::{
     hwmon, mangohud,
     metrics::{collect_interval_summaries_labeled, log_drop_counters, print_session_summaries},
     process_tree::{self, find_auto_target_pids},
-    recorder::{
-        self, FinalizeRecordingInput, JsonArrayWriter, LiveRecorder, SpikeEvent, SpikeEventBuffer,
-    },
+    recorder::{self, FinalizeRecordingInput, LiveRecorder, SpikeEvent, SpikeEventBuffer},
     runtime_slices::RuntimeSliceSampler,
     session::{
         event_bus::MonitorEventBus, live_telemetry::LiveTelemetry, probes::ProbeRuntime,
@@ -411,50 +410,32 @@ impl MonitorSession {
                 );
             }
 
-            if config.retain_intervals.is_none() {
-                recorder.streams.interval_writer =
-                    Some(JsonArrayWriter::create(run.run_dir.join("interval.json"))?);
-            }
-            recorder.streams.irq_event_writer = Some(JsonArrayWriter::create(
-                run.run_dir.join("irq_events.json"),
-            )?);
-            recorder.streams.migration_event_writer = Some(JsonArrayWriter::create(
-                run.run_dir.join("migration_events.json"),
-            )?);
-            recorder.streams.cpu_freq_sample_writer = Some(JsonArrayWriter::create(
-                run.run_dir.join("cpu_freq_samples.json"),
-            )?);
-            recorder.streams.gpu_sample_writer = Some(JsonArrayWriter::create(
-                run.run_dir.join("gpu_samples.json"),
-            )?);
-            recorder.streams.block_io_event_writer =
-                Some(JsonArrayWriter::create(run.run_dir.join("io_events.json"))?);
-            recorder.streams.scx_event_writer = Some(JsonArrayWriter::create(
-                run.run_dir.join("scx_events.json"),
-            )?);
+            let registry = &mut recorder.streams;
+            let dir = &run.run_dir;
+
+            registry.create_stream(dir, ArtifactKind::Interval)?;
+            registry.create_stream(dir, ArtifactKind::IrqEvents)?;
+            registry.create_stream(dir, ArtifactKind::MigrationEvents)?;
+            registry.create_stream(dir, ArtifactKind::CpuFreqSamples)?;
+            registry.create_stream(dir, ArtifactKind::GpuSamples)?;
+            registry.create_stream(dir, ArtifactKind::BlockIoEvents)?;
+            registry.create_stream(dir, ArtifactKind::ScxEvents)?;
+
             if config.runtime_slices {
-                recorder.streams.runtime_slice_writer = Some(JsonArrayWriter::create(
-                    run.run_dir.join("runtime_slices.json"),
-                )?);
+                registry.create_stream(dir, ArtifactKind::RuntimeSlices)?;
             }
-            recorder.streams.spike_event_writer = Some(JsonArrayWriter::create(
-                run.run_dir.join("spike_events.json"),
-            )?);
-            recorder.streams.frame_event_writer = Some(JsonArrayWriter::create(
-                run.run_dir.join("frame_events.json"),
-            )?);
-            recorder.streams.focus_event_writer = Some(JsonArrayWriter::create(
-                run.run_dir.join("focus_events.json"),
-            )?);
+
+            registry.create_stream(dir, ArtifactKind::SpikeEvents)?;
+            registry.create_stream(dir, ArtifactKind::FrameEvents)?;
+            registry.create_stream(dir, ArtifactKind::FocusEvents)?;
+
             if foreground_enabled {
-                recorder.streams.foreground_event_writer = Some(JsonArrayWriter::create(
-                    run.run_dir.join("foreground_events.json"),
-                )?);
+                registry.create_stream(dir, ArtifactKind::ForegroundEvents)?;
             }
         }
 
         if let Some(csv_stream) = &config.csv_stream {
-            recorder.streams.csv_writer = Some(match csv_stream {
+            recorder.csv_writer = Some(match csv_stream {
                 CsvStreamTarget::File(path) => {
                     recorder::IntervalCsvWriter::create_file(path.clone())?
                 }
@@ -658,10 +639,9 @@ impl MonitorSession {
     }
 
     fn write_focus_event(&mut self, event: recorder::FocusEvent) -> anyhow::Result<()> {
-        if let Some(writer) = self.recorder.streams.focus_event_writer.as_mut() {
-            writer.push(&event)?;
-            self.recorder.counters.focus_event_count += 1;
-        }
+        crate::events::push_artifact_event(&mut self.recorder, ArtifactKind::FocusEvents, &event, "focus_events", |c| {
+            c.focus_event_count += 1;
+        });
         Ok(())
     }
 
@@ -707,7 +687,7 @@ impl MonitorSession {
         };
         self.write_focus_event(focus_event)?;
 
-        if self.recorder.streams.focus_event_writer.is_some() {
+        if self.recorder.streams.contains(ArtifactKind::FocusEvents) {
             log::debug!(
                 "focus_event_recorded action=changed elapsed_ms={} kind={:?}",
                 elapsed_ms,
@@ -758,7 +738,7 @@ impl MonitorSession {
         };
         self.write_focus_event(focus_event)?;
 
-        if self.recorder.streams.focus_event_writer.is_some() {
+        if self.recorder.streams.contains(ArtifactKind::FocusEvents) {
             log::debug!(
                 "focus_event_recorded action=cleared elapsed_ms={} old_kind={:?}",
                 elapsed_ms,
@@ -945,15 +925,9 @@ impl MonitorSession {
                     }
                 }
                 Some(frame) = frame_rx.recv() => {
-                    if let Some(writer) = self.recorder.streams.frame_event_writer.as_mut() {
-                         crate::events::push_ndjson_event(
-                            writer,
-                            &frame,
-                            &mut self.recorder.counters,
-                            "frame_events",
-                            |c| c.frame_event_count += 1,
-                        );
-                    }
+                    crate::events::push_artifact_event(&mut self.recorder, ArtifactKind::FrameEvents, &frame, "frame_events", |c| {
+                        c.frame_event_count += 1;
+                    });
                     self.recent_telemetry.push_frame(frame);
                 }
                 _ = tokio::signal::ctrl_c() => {
@@ -1237,9 +1211,9 @@ impl MonitorSession {
             })
             .await;
 
-            if let Some(writer) = self.recorder.streams.interval_writer.as_mut() {
+            if self.recorder.streams.contains(ArtifactKind::Interval) {
                 for record in &records {
-                    writer.push(record)?;
+                    let _ = self.recorder.streams.push(ArtifactKind::Interval, record);
                 }
             } else if self.config.retain_intervals.is_some() || self.config.tui {
                 // For TUI sparklines we need interval_records
@@ -1257,7 +1231,7 @@ impl MonitorSession {
                 }
             }
 
-            if let Some(writer) = self.recorder.streams.csv_writer.as_mut() {
+            if let Some(writer) = self.recorder.csv_writer.as_mut() {
                 for record in &records {
                     writer.push(record)?;
                 }
@@ -1287,15 +1261,11 @@ impl MonitorSession {
                     .runtime_slice_skipped_tasks
                     .saturating_add(batch.skipped_tasks as u64);
 
-                if let Some(writer) = self.recorder.streams.runtime_slice_writer.as_mut() {
+                if self.recorder.streams.contains(ArtifactKind::RuntimeSlices) {
                     for record in &batch.records {
-                        crate::events::push_ndjson_event(
-                            writer,
-                            record,
-                            &mut self.recorder.counters,
-                            "runtime_slices",
-                            |c| c.runtime_slice_count += 1,
-                        );
+                        crate::events::push_artifact_event(&mut self.recorder, ArtifactKind::RuntimeSlices, record, "runtime_slices", |c| {
+                            c.runtime_slice_count += 1;
+                        });
                     }
                 } else {
                     self.recorder.counters.runtime_slice_count = self
@@ -1446,14 +1416,10 @@ impl MonitorSession {
             .scx_tracker
             .sample(self.started.elapsed().as_millis() as u64)
         {
-            if let Some(writer) = self.recorder.streams.scx_event_writer.as_mut() {
-                crate::events::push_ndjson_event(
-                    writer,
-                    &event,
-                    &mut self.recorder.counters,
-                    "scx_events",
-                    |c| c.scx_event_count += 1,
-                );
+            if self.recorder.streams.contains(ArtifactKind::ScxEvents) {
+                crate::events::push_artifact_event(&mut self.recorder, ArtifactKind::ScxEvents, &event, "scx_events", |c| {
+                    c.scx_event_count += 1;
+                });
             } else {
                 self.recorder.buffers.scx_events.push(event);
                 self.recorder.counters.scx_event_count += 1;
@@ -1479,15 +1445,9 @@ impl MonitorSession {
             if let Some(sample) = sample_opt {
                 self.recent_telemetry.push_gpu(sample.clone());
 
-                if let Some(writer) = self.recorder.streams.gpu_sample_writer.as_mut() {
-                    crate::events::push_ndjson_event(
-                        writer,
-                        &sample,
-                        &mut self.recorder.counters,
-                        "gpu_samples",
-                        |c| c.gpu_sample_count += 1,
-                    );
-                }
+                crate::events::push_artifact_event(&mut self.recorder, ArtifactKind::GpuSamples, &sample, "gpu_samples", |c| {
+                    c.gpu_sample_count += 1;
+                });
             }
         }
         Ok(())
@@ -1643,7 +1603,7 @@ impl MonitorSession {
             print_session_summaries(&mut self.tasks.stats_by_task);
         }
 
-        if let Some(writer) = self.recorder.streams.csv_writer.as_mut() {
+        if let Some(writer) = self.recorder.csv_writer.as_mut() {
             writer.finish()?;
             if let Some(CsvStreamTarget::File(path)) = &self.config.csv_stream
                 && !self.config.json_stream
@@ -1653,30 +1613,7 @@ impl MonitorSession {
         }
 
         if self.recorder.run.is_some() {
-            if let Some(writer) = self.recorder.streams.interval_writer.as_mut() {
-                writer.finish()?;
-            }
-            if let Some(writer) = self.recorder.streams.irq_event_writer.as_mut() {
-                writer.finish()?;
-            }
-            if let Some(writer) = self.recorder.streams.migration_event_writer.as_mut() {
-                writer.finish()?;
-            }
-            if let Some(writer) = self.recorder.streams.cpu_freq_sample_writer.as_mut() {
-                writer.finish()?;
-            }
-            if let Some(writer) = self.recorder.streams.gpu_sample_writer.as_mut() {
-                writer.finish()?;
-            }
-            if let Some(writer) = self.recorder.streams.block_io_event_writer.as_mut() {
-                writer.finish()?;
-            }
-            if let Some(writer) = self.recorder.streams.scx_event_writer.as_mut() {
-                writer.finish()?;
-            }
-            if let Some(writer) = self.recorder.streams.runtime_slice_writer.as_mut() {
-                writer.finish()?;
-            }
+            self.recorder.streams.finish_all()?;
 
             let frame_events = if !self.config.mangohud_log_live
                 && let Some(path) = &self.config.mangohud_log

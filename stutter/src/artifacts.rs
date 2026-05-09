@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -224,11 +224,12 @@ impl ArtifactStreamRegistry {
         self.streams.contains_key(&kind)
     }
 
-    pub fn push<T: Serialize>(&mut self, kind: ArtifactKind, value: &T) -> anyhow::Result<()> {
+    pub fn push<T: Serialize>(&mut self, kind: ArtifactKind, value: &T) -> anyhow::Result<bool> {
         let Some(writer) = self.streams.get_mut(&kind) else {
-            return Ok(());
+            return Ok(false);
         };
-        writer.push(value)
+        writer.push(value)?;
+        Ok(true)
     }
 
     pub fn finish_all(&mut self) -> anyhow::Result<()> {
