@@ -6,6 +6,7 @@ description = "Synthetic old-schema fixture that should warn without being rejec
 
 [expected]
 primary_cause = "Unknown"
+quality_reasons_contain = ["older than current"]
 accepted_confidence = []
 data_quality = "Medium"
 

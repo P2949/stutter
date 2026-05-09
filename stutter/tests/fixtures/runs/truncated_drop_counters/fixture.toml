@@ -6,6 +6,10 @@ description = "Synthetic low-quality fixture with truncated spike events and non
 
 [expected]
 primary_cause = "Unknown"
+quality_reasons_contain = [
+    "truncated",
+    "drop",
+]
 accepted_confidence = []
 data_quality = "Medium"
 

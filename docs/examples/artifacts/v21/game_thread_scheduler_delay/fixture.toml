@@ -1,8 +1,8 @@
 name = "game_thread_scheduler_delay"
 schema_version = 21
-source = "public-example"
+source = "synthetic-edge-case"
 quality_expectation = "High"
-description = "Small public game-thread scheduler delay example."
+description = "Synthetic edge-case fixture for game main/render thread scheduler delay during a visible frame spike."
 
 [expected]
 primary_cause = "GameThreadSchedulerDelay"

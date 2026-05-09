@@ -66,6 +66,8 @@ struct ExpectedFromToml {
     required_candidate_evidence: Vec<String>,
     #[serde(default)]
     accepted_confidence: Vec<String>,
+    #[serde(default)]
+    quality_reasons_contain: Vec<String>,
     data_quality: String,
     #[serde(default)]
     artifacts: ExpectedArtifactsFromToml,
@@ -223,6 +225,22 @@ fn assert_metadata_header(name: &str, spec: &FixtureExpectationFile) {
     );
 }
 
+fn assert_quality_reasons_contain(analysis: &ReportAnalysisJson, needles: &[String]) {
+    let text = analysis.data_quality.reasons.join("\n")
+        + "\n"
+        + &analysis.data_quality.validation_warnings.join("\n")
+        + "\n"
+        + &analysis.data_quality.validation_errors.join("\n");
+
+    for needle in needles {
+        assert!(
+            text.to_ascii_lowercase()
+                .contains(&needle.to_ascii_lowercase()),
+            "missing quality warning/reason {needle:?}; got:\n{text}"
+        );
+    }
+}
+
 fn assert_data_quality(analysis: &ReportAnalysisJson, spec: &FixtureExpectationFile) {
     let name = spec.name.as_str();
     let expected_quality = parse_data_quality(&spec.expected.data_quality);
@@ -247,6 +265,13 @@ fn assert_data_quality(analysis: &ReportAnalysisJson, spec: &FixtureExpectationF
             "{name} expected no validation warnings: {:?}",
             analysis.data_quality.validation_warnings
         );
+    } else {
+        assert!(
+            !spec.expected.quality_reasons_contain.is_empty(),
+            "{name} expected {:?} data quality but fixture.toml did not declare expected.quality_reasons_contain",
+            expected_quality
+        );
+        assert_quality_reasons_contain(analysis, &spec.expected.quality_reasons_contain);
     }
 }
 
@@ -1167,11 +1192,7 @@ fn validation_corpus_truncated_drop_counters_is_not_high_quality() {
         analysis.data_quality.spike_events_retained_count,
         analysis.artifacts_summary.spike_count
     );
-    let reasons = analysis.data_quality.reasons.join("\n");
-    assert!(
-        reasons.contains("truncated") || reasons.contains("drop"),
-        "expected truncation/drop reason, got: {reasons}"
-    );
+    assert_quality_reasons_contain(&analysis, &["truncated".to_owned(), "drop".to_owned()]);
 }
 
 #[test]
@@ -1226,15 +1247,7 @@ fn validation_corpus_old_schema_warns_without_rejecting() {
         analysis.data_quality.expected_schema_version,
         SESSION_SCHEMA_VERSION
     );
-    assert!(
-        analysis
-            .data_quality
-            .validation_warnings
-            .iter()
-            .any(|warning| warning.contains("older than current")),
-        "warnings: {:?}",
-        analysis.data_quality.validation_warnings
-    );
+    assert_quality_reasons_contain(&analysis, &["older than current".to_owned()]);
     assert!(
         analysis.data_quality.validation_errors.is_empty(),
         "old schema should warn, not error: {:?}",

@@ -52,6 +52,8 @@ struct FixtureExpected {
     required_candidate: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     required_candidate_evidence: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    quality_reasons_contain: Vec<String>,
     accepted_confidence: Vec<String>,
     data_quality: String,
     artifacts: FixtureExpectedArtifacts,
@@ -1389,16 +1391,19 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["GPU busy"],
             exact_artifacts(artifacts),
         ),
-        "truncated_drop_counters" => fixture_metadata(
-            name,
-            "synthetic-contract",
-            "Medium",
-            "Synthetic low-quality fixture with truncated spike events and non-zero drop counters.",
-            "Unknown",
-            &[],
-            "Medium",
-            &[],
-            exact_artifacts(artifacts),
+        "truncated_drop_counters" => with_quality_reasons(
+            fixture_metadata(
+                name,
+                "synthetic-contract",
+                "Medium",
+                "Synthetic low-quality fixture with truncated spike events and non-zero drop counters.",
+                "Unknown",
+                &[],
+                "Medium",
+                &[],
+                exact_artifacts(artifacts),
+            ),
+            &["truncated", "drop"],
         ),
         "reused_tid_no_contamination" => fixture_metadata(
             name,
@@ -1411,16 +1416,19 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &[],
             exact_artifacts(artifacts),
         ),
-        "old_schema_warning" => fixture_metadata(
-            name,
-            "synthetic-contract",
-            "Medium",
-            "Synthetic old-schema fixture that should warn without being rejected.",
-            "Unknown",
-            &[],
-            "Medium",
-            &[],
-            exact_artifacts(artifacts),
+        "old_schema_warning" => with_quality_reasons(
+            fixture_metadata(
+                name,
+                "synthetic-contract",
+                "Medium",
+                "Synthetic old-schema fixture that should warn without being rejected.",
+                "Unknown",
+                &[],
+                "Medium",
+                &[],
+                exact_artifacts(artifacts),
+            ),
+            &["older than current"],
         ),
         "game_thread_scheduler_delay" => fixture_metadata(
             name,
@@ -1471,16 +1479,19 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["block I/O"],
             exact_artifacts(artifacts),
         ),
-        "real_truncated_low_quality" => fixture_metadata(
-            name,
-            "sanitized-real-recording",
-            "Medium",
-            "Sanitized low-quality recording with truncated spike events and nonzero drop counters; quality handling is the regression target, not diagnosis cause detection.",
-            "Unknown",
-            &[],
-            "Medium",
-            &[],
-            exact_artifacts(artifacts),
+        "real_truncated_low_quality" => with_quality_reasons(
+            fixture_metadata(
+                name,
+                "sanitized-real-recording",
+                "Medium",
+                "Sanitized low-quality recording with truncated spike events and nonzero drop counters; quality handling is the regression target, not diagnosis cause detection.",
+                "Unknown",
+                &[],
+                "Medium",
+                &[],
+                exact_artifacts(artifacts),
+            ),
+            &["truncated", "drop"],
         ),
         "real_foreground_window" => fixture_metadata(
             name,
@@ -1548,16 +1559,19 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["game thread", "delayed"],
             exact_artifacts(artifacts),
         ),
-        "low_quality_truncated" => fixture_metadata(
-            name,
-            "public-example",
-            "Medium",
-            "Small public low-quality truncated example.",
-            "Unknown",
-            &[],
-            "Medium",
-            &[],
-            exact_artifacts(artifacts),
+        "low_quality_truncated" => with_quality_reasons(
+            fixture_metadata(
+                name,
+                "public-example",
+                "Medium",
+                "Small public low-quality truncated example.",
+                "Unknown",
+                &[],
+                "Medium",
+                &[],
+                exact_artifacts(artifacts),
+            ),
+            &["truncated", "drop"],
         ),
         "game_scheduler_pressure" => fixture_metadata(
             name,
@@ -1581,16 +1595,19 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["GPU busy"],
             exact_artifacts(artifacts),
         ),
-        "low_quality" => fixture_metadata(
-            name,
-            "autotune-replay",
-            "Medium",
-            "Autotune replay fixture for a low-quality run with dropped or truncated data.",
-            "Unknown",
-            &[],
-            "Medium",
-            &[],
-            exact_artifacts(artifacts),
+        "low_quality" => with_quality_reasons(
+            fixture_metadata(
+                name,
+                "autotune-replay",
+                "Medium",
+                "Autotune replay fixture for a low-quality run with dropped or truncated data.",
+                "Unknown",
+                &[],
+                "Medium",
+                &[],
+                exact_artifacts(artifacts),
+            ),
+            &["truncated", "drop"],
         ),
         "real_clean_baseline" => fixture_metadata(
             name,
@@ -1650,6 +1667,17 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
     }
 }
 
+fn with_quality_reasons(
+    mut metadata: FixtureMetadata,
+    quality_reasons_contain: &[&str],
+) -> FixtureMetadata {
+    metadata.expected.quality_reasons_contain = quality_reasons_contain
+        .iter()
+        .map(|item| (*item).to_owned())
+        .collect();
+    metadata
+}
+
 #[allow(clippy::too_many_arguments)]
 fn fixture_metadata(
     name: &str,
@@ -1672,6 +1700,7 @@ fn fixture_metadata(
             primary_cause: primary_cause.to_owned(),
             required_candidate: None,
             required_candidate_evidence: Vec::new(),
+            quality_reasons_contain: Vec::new(),
             accepted_confidence: accepted_confidence
                 .iter()
                 .map(|item| (*item).to_owned())
