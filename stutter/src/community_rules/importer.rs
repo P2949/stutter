@@ -563,6 +563,30 @@ mod tests {
     }
 
     #[test]
+    fn importer_imports_multi_object_rules_files() {
+        let dir = tempdir().unwrap();
+        write_rule_file(
+            &dir.path()
+                .join("00-default/Games/linux-native/linux_native_m.rules"),
+            r#"
+{"name":"first-game","type":"Game"}
+{"name":"second-game","type":"Game"}
+{"name":"third-game","type":"Game"}
+"#,
+        );
+
+        let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
+
+        assert_eq!(imported.report.scanned_files, 1);
+        assert_eq!(imported.report.parsed_objects, 3);
+        assert_eq!(imported.report.imported_rules, 3);
+        assert_eq!(imported.file.rules.len(), 3);
+        assert_eq!(imported.file.rules[0].normalized_name, "first-game");
+        assert_eq!(imported.file.rules[1].normalized_name, "second-game");
+        assert_eq!(imported.file.rules[2].normalized_name, "third-game");
+    }
+
+    #[test]
     fn importer_ignores_scheduling_policy() {
         let dir = tempdir().unwrap();
         write_rule_file(
@@ -613,6 +637,42 @@ mod tests {
     }
 
     #[test]
+    fn importer_deduplicates_by_normalized_name_and_source_path_only() {
+        let dir = tempdir().unwrap();
+        write_rule_file(
+            &dir.path().join("00-default/Games/a.rules"),
+            r#"
+{"name":"SameGame.exe","type":"Game"}
+{"name":"samegame.exe","type":"Game"}
+"#,
+        );
+        write_rule_file(
+            &dir.path().join("00-default/Games/subdir/a.rules"),
+            r#"
+{"name":"samegame.exe","type":"Game"}
+"#,
+        );
+
+        let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
+
+        assert_eq!(imported.report.scanned_files, 2);
+        assert_eq!(imported.report.parsed_objects, 3);
+        assert_eq!(imported.report.duplicate_rules, 1);
+        assert_eq!(imported.report.imported_rules, 2);
+        assert_eq!(imported.file.rules.len(), 2);
+        assert_eq!(imported.file.rules[0].normalized_name, "samegame.exe");
+        assert_eq!(
+            imported.file.rules[0].source_path,
+            "00-default/Games/a.rules"
+        );
+        assert_eq!(imported.file.rules[1].normalized_name, "samegame.exe");
+        assert_eq!(
+            imported.file.rules[1].source_path,
+            "00-default/Games/subdir/a.rules"
+        );
+    }
+
+    #[test]
     fn importer_marks_ambiguous_exe_names() {
         let dir = tempdir().unwrap();
         write_rule_file(
@@ -647,6 +707,30 @@ mod tests {
     }
 
     #[test]
+    fn importer_marks_ambiguous_names_context_required() {
+        let dir = tempdir().unwrap();
+        write_rule_file(
+            &dir.path()
+                .join("00-default/Games/wine_proton/wine_proton_l.rules"),
+            r#"
+{"name":"launcher.exe","type":"Game"}
+{"name":"game.exe","type":"Game"}
+{"name":"build.exe","type":"Game"}
+"#,
+        );
+
+        let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
+
+        assert_eq!(imported.report.imported_rules, 3);
+        assert_eq!(imported.report.ambiguous_rules, 3);
+        assert_eq!(imported.report.context_required_game_rules, 3);
+        assert!(
+            imported.file.rules.iter().all(|rule| rule.ambiguous
+                && rule.context.contains(&"wine_or_proton_or_steam".to_owned()))
+        );
+    }
+
+    #[test]
     fn importer_preserves_source_metadata() {
         let dir = tempdir().unwrap();
         write_rule_file(
@@ -667,6 +751,70 @@ mod tests {
         );
         assert_eq!(imported.file.source.commit, Some("abc123".to_owned()));
         assert_eq!(imported.file.source.generated_at, "2026-05-09T00:00:00Z");
+    }
+
+    #[test]
+    fn importer_keeps_native_linux_games_without_wine_context_hint() {
+        let dir = tempdir().unwrap();
+        write_rule_file(
+            &dir.path()
+                .join("00-default/Games/linux-native/linux_native_f.rules"),
+            r#"
+{"name":"factorio","type":"Game","title":"Factorio"}
+"#,
+        );
+
+        let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
+
+        assert_eq!(imported.report.imported_rules, 1);
+        assert_eq!(imported.report.context_required_game_rules, 0);
+        assert_eq!(imported.file.rules[0].normalized_name, "factorio");
+        assert_eq!(imported.file.rules[0].stutter_class, "Game");
+        assert!(!imported.file.rules[0].ambiguous);
+        assert_eq!(
+            imported.file.rules[0].context,
+            vec!["linux_native".to_owned()]
+        );
+    }
+
+    #[test]
+    fn importer_maps_clear_non_game_categories_and_paths() {
+        let dir = tempdir().unwrap();
+        write_rule_file(
+            &dir.path().join("00-default/Development/tools.rules"),
+            r#"
+{"name":"rustc","type":"Compiler"}
+{"name":"ld.lld","type":"Linker"}
+"#,
+        );
+        write_rule_file(
+            &dir.path().join("00-default/Desktop/browser-gpu.rules"),
+            r#"
+{"name":"browser-gpu","type":"BrowserGpu"}
+"#,
+        );
+        write_rule_file(
+            &dir.path().join("00-default/System/package-manager.rules"),
+            r#"
+{"name":"emerge","type":"PackageManager"}
+"#,
+        );
+
+        let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
+
+        assert_eq!(imported.report.imported_rules, 4);
+        assert_eq!(imported.report.exact_only_non_game_rules, 4);
+        assert_eq!(imported.report.classes.get("Compiler"), Some(&1));
+        assert_eq!(imported.report.classes.get("Linker"), Some(&1));
+        assert_eq!(imported.report.classes.get("BrowserGpu"), Some(&1));
+        assert_eq!(imported.report.classes.get("PackageManager"), Some(&1));
+        assert!(
+            imported
+                .file
+                .rules
+                .iter()
+                .all(|rule| rule.stutter_class != "Unknown")
+        );
     }
 
     #[test]
@@ -827,6 +975,60 @@ mod tests {
         assert!(python.ambiguous);
         assert!(node.ambiguous);
         assert!(!rustc.ambiguous);
+    }
+
+    #[test]
+    fn importer_combined_risky_fixture_reports_expected_counts() {
+        let dir = tempdir().unwrap();
+        write_rule_file(
+            &dir.path().join("00-default/Mixed/risky.rules"),
+            r#"
+# Kingdom Come: Deliverance https://store.steampowered.com/app/379430/Kingdom_Come_Deliverance/
+{"name":"KingdomCome.exe","type":"Game","nice":-20,"ionice":"realtime","sched":"fifo","cpu_affinity":"0-3","systemd":"high-priority.slice"}
+{"name":"KingdomCome.exe","type":"Game"}
+{"name":"build.exe","type":"Game"}
+{"name":"factorio","type":"Game"}
+{"name":"rustc","type":"Compiler"}
+{"name":"mystery","type":"MysteryCategory"}
+{"type":"Game"}
+"#,
+        );
+
+        let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
+
+        assert_eq!(imported.report.scanned_files, 1);
+        assert_eq!(imported.report.parsed_objects, 7);
+        assert_eq!(imported.report.imported_rules, 4);
+        assert_eq!(imported.report.duplicate_rules, 1);
+        assert_eq!(imported.report.skipped_no_name, 1);
+        assert_eq!(imported.report.skipped_unknown_class, 1);
+        assert_eq!(imported.report.ambiguous_rules, 1);
+        assert_eq!(imported.report.context_required_game_rules, 2);
+        assert_eq!(imported.report.exact_only_non_game_rules, 1);
+        assert_eq!(imported.report.classes.get("Game"), Some(&3));
+        assert_eq!(imported.report.classes.get("Compiler"), Some(&1));
+
+        let serialized = serde_json::to_string(&imported.file).unwrap();
+        assert!(!serialized.contains("nice"));
+        assert!(!serialized.contains("ionice"));
+        assert!(!serialized.contains("SCHED_FIFO"));
+        assert!(!serialized.contains("cpu_affinity"));
+        assert!(!serialized.contains("systemd"));
+
+        let kingdom_come = imported
+            .file
+            .rules
+            .iter()
+            .find(|rule| rule.normalized_name == "kingdomcome.exe")
+            .unwrap();
+        assert_eq!(
+            kingdom_come.title.as_deref(),
+            Some("Kingdom Come: Deliverance")
+        );
+        assert_eq!(
+            kingdom_come.source_url.as_deref(),
+            Some("https://store.steampowered.com/app/379430/Kingdom_Come_Deliverance/")
+        );
     }
 
     #[test]

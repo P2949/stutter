@@ -171,6 +171,63 @@ mod tests {
     }
 
     #[test]
+    fn generated_schema_v2_roundtrips_through_loader() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ananicy.generated.json");
+        fs::write(
+            &path,
+            r#"{
+  "schema_version": 2,
+  "source": {
+    "name": "test",
+    "repo": "https://example.test/repo.git",
+    "commit": "abc123",
+    "generated_at": "2026-05-09T00:00:00Z"
+  },
+  "rules": [
+    {
+      "name": "KingdomCome.exe",
+      "normalized_name": "kingdomcome.exe",
+      "type": "Game",
+      "stutter_class": "Game",
+      "confidence": 0.82,
+      "source_path": "00-default/Games/wine_proton/wine_proton_k.rules",
+      "context": ["wine_or_proton_or_steam"],
+      "title": "Kingdom Come: Deliverance",
+      "source_url": "https://store.steampowered.com/app/379430/Kingdom_Come_Deliverance/",
+      "comment": "Kingdom Come: Deliverance https://store.steampowered.com/app/379430/Kingdom_Come_Deliverance/",
+      "ambiguous": false
+    }
+  ]
+}"#,
+        )
+        .unwrap();
+
+        let file = load_rules_file(&path).unwrap();
+
+        assert_eq!(file.schema_version, 2);
+        assert_eq!(file.rules.len(), 1);
+        assert_eq!(file.rules[0].normalized_name, "kingdomcome.exe");
+        assert_eq!(
+            file.rules[0].title.as_deref(),
+            Some("Kingdom Come: Deliverance")
+        );
+        assert_eq!(
+            file.rules[0].source_url.as_deref(),
+            Some("https://store.steampowered.com/app/379430/Kingdom_Come_Deliverance/")
+        );
+        assert_eq!(
+            file.rules[0].comment.as_deref(),
+            Some(
+                "Kingdom Come: Deliverance https://store.steampowered.com/app/379430/Kingdom_Come_Deliverance/"
+            )
+        );
+
+        let db = CommunityRulesDb::from_file(file).unwrap();
+        assert_eq!(db.rule_count(), 1);
+    }
+
+    #[test]
     fn load_rules_file_rejects_bad_schema() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("bad.generated.json");
