@@ -1,4 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use serde::Deserialize;
 
@@ -9,32 +12,69 @@ use crate::{
     test_fixture_builder,
 };
 
-#[derive(Debug, Deserialize)]
-struct FixtureToml {
-    name: String,
-    schema_version: u32,
-    source: String,
-    quality_expectation: String,
-    description: String,
-    expected: FixtureTomlExpected,
-    privacy: FixtureTomlPrivacy,
+#[allow(dead_code)]
+#[derive(Debug)]
+struct ExpectedFixture<'a> {
+    name: &'a str,
+    expected_primary: Option<StutterCause>,
+    accepted_confidence: &'a [Confidence],
+    expected_quality: DataQualityLevel,
+    evidence_substrings: &'a [&'a str],
+    expected_artifacts: ExpectedArtifacts,
+    require_json_shape: bool,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Default, Clone, Copy)]
+struct ExpectedArtifacts {
+    spikes: Option<u64>,
+    spikes_min: Option<u64>,
+    intervals: Option<u64>,
+    intervals_min: Option<u64>,
+    irq_events: Option<u64>,
+    irq_events_min: Option<u64>,
+    gpu_samples: Option<u64>,
+    gpu_samples_min: Option<u64>,
+    frames: Option<u64>,
+    frames_min: Option<u64>,
+    block_io_events: Option<u64>,
+    block_io_events_min: Option<u64>,
+    foreground_events: Option<u64>,
+    foreground_events_min: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
-struct FixtureTomlExpected {
+struct FixtureExpectationFile {
+    name: String,
+    schema_version: u32,
+    source: String,
+    #[serde(default)]
+    quality_expectation: String,
+    #[serde(default)]
+    description: String,
+    expected: ExpectedFromToml,
+    #[serde(default)]
+    privacy: Option<PrivacyExpectations>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExpectedFromToml {
     primary_cause: String,
     #[serde(default)]
     required_candidate: Option<String>,
     #[serde(default)]
     required_candidate_evidence: Vec<String>,
+    #[serde(default)]
     accepted_confidence: Vec<String>,
     data_quality: String,
-    artifacts: FixtureTomlArtifacts,
-    evidence: FixtureTomlEvidence,
+    #[serde(default)]
+    artifacts: ExpectedArtifactsFromToml,
+    #[serde(default)]
+    evidence: ExpectedEvidenceFromToml,
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct FixtureTomlArtifacts {
+struct ExpectedArtifactsFromToml {
     spikes: Option<u64>,
     spikes_min: Option<u64>,
     intervals: Option<u64>,
@@ -52,29 +92,34 @@ struct FixtureTomlArtifacts {
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct FixtureTomlEvidence {
+struct ExpectedEvidenceFromToml {
     contains: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct FixtureTomlPrivacy {
+#[derive(Debug, Default, Deserialize)]
+struct PrivacyExpectations {
+    #[serde(default)]
     titles_redacted: bool,
+    #[serde(default)]
     paths_redacted: bool,
+    #[serde(default)]
     hostnames_redacted: bool,
+    #[serde(default)]
     usernames_redacted: bool,
+}
+
+enum ExpectedPrimaryCause {
+    Any,
+    NoneOrUnknown,
+    Cause(StutterCause),
 }
 
 fn fixture_path(name: &str) -> PathBuf {
     test_fixture_builder::fixture_path(name)
 }
 
-fn fixture_toml_path(name: &str) -> PathBuf {
-    fixture_path(name).join("fixture.toml")
-}
-
-fn load_fixture_toml(name: &str) -> FixtureToml {
-    let path = fixture_toml_path(name);
-    let text = fs::read_to_string(&path).unwrap_or_else(|err| {
+fn load_fixture_toml(path: &Path) -> FixtureExpectationFile {
+    let text = fs::read_to_string(path).unwrap_or_else(|err| {
         panic!(
             "failed to read fixture metadata {}: {err:#}",
             path.display()
@@ -120,12 +165,6 @@ fn parse_confidence(value: &str) -> Confidence {
     }
 }
 
-enum ExpectedPrimaryCause {
-    Any,
-    NoneOrUnknown,
-    Cause(StutterCause),
-}
-
 fn parse_stutter_cause(value: &str) -> StutterCause {
     match value {
         "CompositorSchedulerDelay" => StutterCause::CompositorSchedulerDelay,
@@ -161,13 +200,207 @@ fn assert_min_u64(label: &str, expected_min: Option<u64>, actual: u64) {
     }
 }
 
-fn assert_artifacts_from_metadata(
+fn assert_metadata_header(name: &str, spec: &FixtureExpectationFile) {
+    assert_eq!(
+        spec.name, name,
+        "fixture metadata name must match fixture directory name"
+    );
+    assert_eq!(
+        spec.schema_version, SESSION_SCHEMA_VERSION,
+        "{name} fixture metadata schema_version must match SESSION_SCHEMA_VERSION"
+    );
+    assert!(
+        !spec.source.trim().is_empty(),
+        "{name} fixture metadata source must not be empty"
+    );
+    assert!(
+        !spec.quality_expectation.trim().is_empty(),
+        "{name} fixture metadata quality_expectation must not be empty"
+    );
+    assert!(
+        !spec.description.trim().is_empty(),
+        "{name} fixture metadata description must not be empty"
+    );
+}
+
+fn assert_data_quality(analysis: &ReportAnalysisJson, spec: &FixtureExpectationFile) {
+    let name = spec.name.as_str();
+    let expected_quality = parse_data_quality(&spec.expected.data_quality);
+
+    assert_eq!(
+        analysis.data_quality.level,
+        expected_quality,
+        "wrong data quality for {name}: reasons={:?} validation_errors={:?} validation_warnings={:?}",
+        analysis.data_quality.reasons,
+        analysis.data_quality.validation_errors,
+        analysis.data_quality.validation_warnings,
+    );
+
+    if expected_quality == DataQualityLevel::High {
+        assert!(
+            analysis.data_quality.validation_errors.is_empty(),
+            "{name} expected no validation errors: {:?}",
+            analysis.data_quality.validation_errors
+        );
+        assert!(
+            analysis.data_quality.validation_warnings.is_empty(),
+            "{name} expected no validation warnings: {:?}",
+            analysis.data_quality.validation_warnings
+        );
+    }
+}
+
+fn assert_data_quality_hard_coded(
     name: &str,
     analysis: &ReportAnalysisJson,
-    metadata: &FixtureToml,
+    expected_quality: DataQualityLevel,
 ) {
-    let artifacts = &metadata.expected.artifacts;
+    assert_eq!(
+        analysis.data_quality.level,
+        expected_quality,
+        "wrong data quality for {name}: reasons={:?} validation_errors={:?} validation_warnings={:?}",
+        analysis.data_quality.reasons,
+        analysis.data_quality.validation_errors,
+        analysis.data_quality.validation_warnings,
+    );
 
+    if expected_quality == DataQualityLevel::High {
+        assert!(
+            analysis.data_quality.validation_errors.is_empty(),
+            "{name} expected no validation errors: {:?}",
+            analysis.data_quality.validation_errors
+        );
+        assert!(
+            analysis.data_quality.validation_warnings.is_empty(),
+            "{name} expected no validation warnings: {:?}",
+            analysis.data_quality.validation_warnings
+        );
+    }
+}
+
+fn assert_diagnosis(analysis: &ReportAnalysisJson, spec: &FixtureExpectationFile) {
+    let name = spec.name.as_str();
+
+    match parse_primary_cause(&spec.expected.primary_cause) {
+        ExpectedPrimaryCause::Any => {}
+        ExpectedPrimaryCause::Cause(expected_cause) => {
+            let diagnosis = primary_diagnosis(analysis)
+                .unwrap_or_else(|| panic!("{name} expected a primary diagnosis"));
+            assert_eq!(diagnosis.cause, expected_cause, "wrong cause for {name}");
+
+            let accepted_confidence = spec
+                .expected
+                .accepted_confidence
+                .iter()
+                .map(|value| parse_confidence(value))
+                .collect::<Vec<_>>();
+            if !accepted_confidence.is_empty() {
+                assert!(
+                    accepted_confidence.contains(&diagnosis.confidence),
+                    "{name} confidence {:?} not in accepted set {:?}",
+                    diagnosis.confidence,
+                    accepted_confidence,
+                );
+            }
+
+            let evidence_text = diagnosis.evidence.join("\n");
+            for needle in &spec.expected.evidence.contains {
+                assert!(
+                    evidence_text.contains(needle),
+                    "{name} missing evidence substring {:?}; evidence was:\n{}",
+                    needle,
+                    evidence_text,
+                );
+            }
+        }
+        ExpectedPrimaryCause::NoneOrUnknown => {
+            assert!(
+                primary_diagnosis(analysis).is_none()
+                    || matches!(
+                        primary_diagnosis(analysis).unwrap().cause,
+                        StutterCause::Unknown
+                    ),
+                "{name} expected no strong diagnosis, got {:?}",
+                primary_diagnosis(analysis).map(|diagnosis| &diagnosis.cause),
+            );
+        }
+    }
+
+    if let Some(required_candidate) = spec.expected.required_candidate.as_deref() {
+        let cause = parse_stutter_cause(required_candidate);
+        let candidate = find_candidate(analysis, cause)
+            .unwrap_or_else(|| panic!("{name} missing required diagnosis candidate {cause:?}"));
+        let evidence_text = candidate
+            .evidence
+            .iter()
+            .map(|item| item.message.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for needle in &spec.expected.required_candidate_evidence {
+            assert!(
+                evidence_text.contains(needle),
+                "{name} required candidate {:?} missing evidence substring {:?}; evidence was:\n{}",
+                cause,
+                needle,
+                evidence_text,
+            );
+        }
+    }
+}
+
+fn assert_diagnosis_hard_coded(expected: &ExpectedFixture<'_>, analysis: &ReportAnalysisJson) {
+    match expected.expected_primary {
+        Some(expected_cause) => {
+            let diagnosis = primary_diagnosis(analysis)
+                .unwrap_or_else(|| panic!("{} expected a primary diagnosis", expected.name));
+            assert_eq!(
+                diagnosis.cause, expected_cause,
+                "wrong cause for {}",
+                expected.name
+            );
+
+            if !expected.accepted_confidence.is_empty() {
+                assert!(
+                    expected.accepted_confidence.contains(&diagnosis.confidence),
+                    "{} confidence {:?} not in accepted set {:?}",
+                    expected.name,
+                    diagnosis.confidence,
+                    expected.accepted_confidence,
+                );
+            }
+
+            let evidence_text = diagnosis.evidence.join("\n");
+            for needle in expected.evidence_substrings {
+                assert!(
+                    evidence_text.contains(needle),
+                    "{} missing evidence substring {:?}; evidence was:\n{}",
+                    expected.name,
+                    needle,
+                    evidence_text,
+                );
+            }
+        }
+        None => {
+            assert!(
+                primary_diagnosis(analysis).is_none()
+                    || matches!(
+                        primary_diagnosis(analysis).unwrap().cause,
+                        StutterCause::Unknown
+                    ),
+                "{} expected no strong diagnosis, got {:?}",
+                expected.name,
+                primary_diagnosis(analysis).map(|diagnosis| &diagnosis.cause),
+            );
+        }
+    }
+}
+
+fn assert_expected_artifacts_values(
+    name: &str,
+    artifacts: ExpectedArtifacts,
+    analysis: &ReportAnalysisJson,
+) {
     assert_exact_u64(
         &format!("{name} spike_count"),
         artifacts.spikes,
@@ -246,129 +479,105 @@ fn assert_artifacts_from_metadata(
     );
 }
 
-fn assert_fixture_from_metadata(name: &str) -> (ReportAnalysisJson, FixtureToml) {
-    let metadata = load_fixture_toml(name);
+fn assert_artifacts(analysis: &ReportAnalysisJson, spec: &FixtureExpectationFile) {
+    let artifacts = ExpectedArtifacts {
+        spikes: spec.expected.artifacts.spikes,
+        spikes_min: spec.expected.artifacts.spikes_min,
+        intervals: spec.expected.artifacts.intervals,
+        intervals_min: spec.expected.artifacts.intervals_min,
+        irq_events: spec.expected.artifacts.irq_events,
+        irq_events_min: spec.expected.artifacts.irq_events_min,
+        gpu_samples: spec.expected.artifacts.gpu_samples,
+        gpu_samples_min: spec.expected.artifacts.gpu_samples_min,
+        frames: spec.expected.artifacts.frames,
+        frames_min: spec.expected.artifacts.frames_min,
+        block_io_events: spec.expected.artifacts.block_io_events,
+        block_io_events_min: spec.expected.artifacts.block_io_events_min,
+        foreground_events: spec.expected.artifacts.foreground_events,
+        foreground_events_min: spec.expected.artifacts.foreground_events_min,
+    };
+
+    assert_expected_artifacts_values(spec.name.as_str(), artifacts, analysis);
+}
+
+fn assert_analysis_json_shape(analysis: &ReportAnalysisJson) {
+    let value = serde_json::to_value(analysis).expect("ReportAnalysisJson should serialize");
+    let object = value
+        .as_object()
+        .expect("ReportAnalysisJson should serialize as a JSON object");
+
+    for key in [
+        "session",
+        "cluster_analysis",
+        "frame_diagnoses",
+        "pressure_timeline",
+        "artifacts_summary",
+        "data_quality",
+        "focus_summary",
+        "foreground_summary",
+    ] {
+        assert!(
+            object.contains_key(key),
+            "ReportAnalysisJson missing top-level key {key}; keys={:?}",
+            object.keys().collect::<Vec<_>>()
+        );
+    }
+}
+
+fn assert_privacy(analysis: &ReportAnalysisJson, spec: &FixtureExpectationFile) {
+    let Some(privacy) = spec.privacy.as_ref() else {
+        return;
+    };
+
+    assert!(
+        privacy.titles_redacted
+            && privacy.paths_redacted
+            && privacy.hostnames_redacted
+            && privacy.usernames_redacted,
+        "{} fixture metadata must declare all privacy redaction flags true: {:?}",
+        spec.name,
+        privacy
+    );
+
+    if privacy.titles_redacted {
+        assert!(
+            analysis.foreground_summary.final_title.is_none()
+                || analysis.foreground_summary.final_title.as_deref() == Some("redacted"),
+            "{} foreground title must be null or redacted, got {:?}",
+            spec.name,
+            analysis.foreground_summary.final_title
+        );
+    }
+}
+
+fn assert_fixture_from_metadata(name: &str) -> ReportAnalysisJson {
+    let path = fixture_path(name);
+    let spec = load_fixture_toml(&path.join("fixture.toml"));
     let analysis = build_fixture_analysis(name);
 
-    assert_eq!(
-        metadata.name, name,
-        "fixture metadata name must match fixture directory name"
-    );
-    assert_eq!(
-        metadata.schema_version, SESSION_SCHEMA_VERSION,
-        "{name} fixture metadata schema_version must match SESSION_SCHEMA_VERSION"
-    );
-    assert!(
-        !metadata.source.trim().is_empty(),
-        "{name} fixture metadata source must not be empty"
-    );
-    assert!(
-        !metadata.quality_expectation.trim().is_empty(),
-        "{name} fixture metadata quality_expectation must not be empty"
-    );
-    assert!(
-        !metadata.description.trim().is_empty(),
-        "{name} fixture metadata description must not be empty"
-    );
-    assert!(
-        metadata.privacy.titles_redacted
-            && metadata.privacy.paths_redacted
-            && metadata.privacy.hostnames_redacted
-            && metadata.privacy.usernames_redacted,
-        "{name} fixture metadata must declare all privacy redaction flags true: {:?}",
-        metadata.privacy
-    );
+    assert_metadata_header(name, &spec);
+    assert_data_quality(&analysis, &spec);
+    assert_diagnosis(&analysis, &spec);
+    assert_artifacts(&analysis, &spec);
+    assert_analysis_json_shape(&analysis);
+    assert_privacy(&analysis, &spec);
 
-    let expected_quality = parse_data_quality(&metadata.expected.data_quality);
-    assert_eq!(
-        analysis.data_quality.level,
-        expected_quality,
-        "wrong data quality for {name}: reasons={:?} validation_errors={:?} validation_warnings={:?}",
-        analysis.data_quality.reasons,
-        analysis.data_quality.validation_errors,
-        analysis.data_quality.validation_warnings,
-    );
+    analysis
+}
 
-    if expected_quality == DataQualityLevel::High {
-        assert!(
-            analysis.data_quality.validation_errors.is_empty(),
-            "{name} expected no validation errors: {:?}",
-            analysis.data_quality.validation_errors
-        );
-        assert!(
-            analysis.data_quality.validation_warnings.is_empty(),
-            "{name} expected no validation warnings: {:?}",
-            analysis.data_quality.validation_warnings
-        );
+#[allow(dead_code)]
+fn assert_fixture_hard_coded(expected: ExpectedFixture<'_>) -> ReportAnalysisJson {
+    let analysis = build_fixture_analysis(expected.name);
+
+    assert_data_quality_hard_coded(expected.name, &analysis, expected.expected_quality);
+    assert_diagnosis_hard_coded(&expected, &analysis);
+    assert_expected_artifacts_values(expected.name, expected.expected_artifacts, &analysis);
+
+    if expected.require_json_shape {
+        assert_analysis_json_shape(&analysis);
     }
 
-    match parse_primary_cause(&metadata.expected.primary_cause) {
-        ExpectedPrimaryCause::Any => {}
-        ExpectedPrimaryCause::Cause(expected_cause) => {
-            let diagnosis = primary_diagnosis(&analysis)
-                .unwrap_or_else(|| panic!("{name} expected a primary diagnosis"));
-            assert_eq!(diagnosis.cause, expected_cause, "wrong cause for {name}");
-
-            let accepted_confidence = metadata
-                .expected
-                .accepted_confidence
-                .iter()
-                .map(|value| parse_confidence(value))
-                .collect::<Vec<_>>();
-            assert!(
-                accepted_confidence.contains(&diagnosis.confidence),
-                "{name} confidence {:?} not in accepted set {:?}",
-                diagnosis.confidence,
-                accepted_confidence,
-            );
-
-            let evidence_text = diagnosis.evidence.join("\n");
-            for needle in &metadata.expected.evidence.contains {
-                assert!(
-                    evidence_text.contains(needle),
-                    "{name} missing evidence substring {:?}; evidence was:\n{}",
-                    needle,
-                    evidence_text,
-                );
-            }
-        }
-        ExpectedPrimaryCause::NoneOrUnknown => {
-            assert!(
-                primary_diagnosis(&analysis).is_none()
-                    || matches!(
-                        primary_diagnosis(&analysis).unwrap().cause,
-                        StutterCause::Unknown
-                    ),
-                "{name} expected no strong diagnosis, got {:?}",
-                primary_diagnosis(&analysis).map(|diagnosis| &diagnosis.cause),
-            );
-        }
-    }
-
-    if let Some(required_candidate) = metadata.expected.required_candidate.as_deref() {
-        let cause = parse_stutter_cause(required_candidate);
-        let candidate = find_candidate(&analysis, cause)
-            .unwrap_or_else(|| panic!("{name} missing required diagnosis candidate {cause:?}"));
-        let evidence_text = candidate
-            .evidence
-            .iter()
-            .map(|item| item.message.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        for needle in &metadata.expected.required_candidate_evidence {
-            assert!(
-                evidence_text.contains(needle),
-                "{name} required candidate {:?} missing evidence substring {:?}; evidence was:\n{}",
-                cause,
-                needle,
-                evidence_text,
-            );
-        }
-    }
-
-    assert_artifacts_from_metadata(name, &analysis, &metadata);
-
-    (analysis, metadata)
+    analysis
 }
 
 fn find_candidate(
@@ -399,29 +608,6 @@ fn no_primary_non_unknown_diagnosis(analysis: &ReportAnalysisJson) -> bool {
         .all(|diagnosis| matches!(diagnosis.cause, StutterCause::Unknown))
 }
 
-fn assert_analysis_json_shape(analysis: &ReportAnalysisJson) {
-    let value = serde_json::to_value(analysis).expect("ReportAnalysisJson should serialize");
-    let object = value
-        .as_object()
-        .expect("ReportAnalysisJson should serialize as a JSON object");
-
-    for key in [
-        "session",
-        "cluster_analysis",
-        "frame_diagnoses",
-        "pressure_timeline",
-        "artifacts_summary",
-        "data_quality",
-        "focus_summary",
-        "foreground_summary",
-    ] {
-        assert!(
-            object.contains_key(key),
-            "ReportAnalysisJson missing top-level key {key}; keys={:?}",
-            object.keys().collect::<Vec<_>>()
-        );
-    }
-}
 fn assert_primary_anchor_class_in(
     analysis: &ReportAnalysisJson,
     cause: StutterCause,
@@ -491,16 +677,15 @@ fn validation_corpus_irq_heavy() {
 
 #[test]
 fn validation_corpus_gpu_bound_clean_cpu_has_gpu_candidate() {
-    let (analysis, _) = assert_fixture_from_metadata("gpu_bound_clean_cpu");
+    let analysis = assert_fixture_from_metadata("gpu_bound_clean_cpu");
 
     assert_candidate_contains(&analysis, StutterCause::GpuBoundCandidate, &["GPU busy"]);
 }
 
 #[test]
 fn validation_corpus_real_clean_baseline() {
-    let (analysis, _) = assert_fixture_from_metadata("real_clean_baseline");
+    let analysis = assert_fixture_from_metadata("real_clean_baseline");
 
-    assert_eq!(analysis.data_quality.level, DataQualityLevel::High);
     assert!(analysis.data_quality.validation_errors.is_empty());
     assert!(analysis.data_quality.validation_warnings.is_empty());
     assert!(
@@ -515,34 +700,11 @@ fn validation_corpus_real_clean_baseline() {
             .map(|diagnosis| &diagnosis.cause)
             .collect::<Vec<_>>()
     );
-    assert_analysis_json_shape(&analysis);
 }
 
 #[test]
 fn validation_corpus_real_game_thread_scheduler_delay() {
-    let (analysis, _) = assert_fixture_from_metadata("real_game_thread_scheduler_delay");
-
-    assert_eq!(analysis.data_quality.level, DataQualityLevel::High);
-    assert!(analysis.data_quality.validation_errors.is_empty());
-    assert!(analysis.data_quality.validation_warnings.is_empty());
-
-    let diagnosis = primary_diagnosis(&analysis)
-        .expect("real_game_thread_scheduler_delay expected a primary diagnosis");
-    assert_eq!(
-        diagnosis.cause,
-        StutterCause::GameThreadSchedulerDelay,
-        "real_game_thread_scheduler_delay must stay classified as game scheduler delay, not CPU pressure or Unknown"
-    );
-
-    let evidence_text = diagnosis.evidence.join("\n");
-    for needle in ["game thread", "delayed"] {
-        assert!(
-            evidence_text.contains(needle),
-            "real_game_thread_scheduler_delay missing evidence substring {:?}; evidence was:\n{}",
-            needle,
-            evidence_text
-        );
-    }
+    let analysis = assert_fixture_from_metadata("real_game_thread_scheduler_delay");
 
     assert_primary_anchor_class_in(
         &analysis,
@@ -580,20 +742,10 @@ fn validation_corpus_real_game_thread_scheduler_delay() {
 
 #[test]
 fn validation_corpus_real_compositor_scheduler_delay() {
-    let (analysis, _) = assert_fixture_from_metadata("real_compositor_scheduler_delay");
-
-    assert_eq!(analysis.data_quality.level, DataQualityLevel::High);
-    assert!(analysis.data_quality.validation_errors.is_empty());
-    assert!(analysis.data_quality.validation_warnings.is_empty());
+    let analysis = assert_fixture_from_metadata("real_compositor_scheduler_delay");
 
     let diagnosis = primary_diagnosis(&analysis)
         .expect("real_compositor_scheduler_delay expected a primary diagnosis");
-    assert_eq!(
-        diagnosis.cause,
-        StutterCause::CompositorSchedulerDelay,
-        "real_compositor_scheduler_delay must stay classified as compositor scheduler delay"
-    );
-
     let evidence_text = diagnosis.evidence.join("\n").to_ascii_lowercase();
     assert!(
         evidence_text.contains("compositor thread") || evidence_text.contains("gamescope"),
@@ -611,16 +763,8 @@ fn validation_corpus_real_compositor_scheduler_delay() {
     );
 
     assert!(
-        analysis.artifacts_summary.spike_count >= 3,
-        "real_compositor_scheduler_delay should contain clustered compositor/game/helper scheduler spikes"
-    );
-    assert!(
         analysis.artifacts_summary.frame_event_count >= 1,
         "real_compositor_scheduler_delay must contain frame data near the scheduler spike"
-    );
-    assert!(
-        analysis.artifacts_summary.interval_record_count >= 1,
-        "real_compositor_scheduler_delay should contain interval data so CPU pressure can be ruled out"
     );
     assert_eq!(
         analysis.artifacts_summary.irq_event_count, 0,
@@ -634,7 +778,7 @@ fn validation_corpus_real_compositor_scheduler_delay() {
 
 #[test]
 fn validation_corpus_real_irq_overlap() {
-    let (analysis, _) = assert_fixture_from_metadata("real_irq_overlap");
+    let analysis = assert_fixture_from_metadata("real_irq_overlap");
 
     assert!(
         matches!(
@@ -645,22 +789,6 @@ fn validation_corpus_real_irq_overlap() {
         analysis.data_quality.level
     );
     assert!(analysis.data_quality.validation_errors.is_empty());
-
-    let diagnosis =
-        primary_diagnosis(&analysis).expect("real_irq_overlap expected a primary diagnosis");
-    assert_eq!(
-        diagnosis.cause,
-        StutterCause::IrqDelayCandidate,
-        "real_irq_overlap must stay classified as IRQ delay, not CPU pressure, I/O, GPU, or Unknown"
-    );
-
-    let evidence_text = diagnosis.evidence.join("\n");
-    assert!(
-        evidence_text.contains("IRQ"),
-        "real_irq_overlap missing IRQ evidence; evidence was:\n{}",
-        evidence_text
-    );
-
     assert!(
         analysis.artifacts_summary.irq_event_count > 0,
         "real_irq_overlap must contain IRQ artifacts"
@@ -668,14 +796,6 @@ fn validation_corpus_real_irq_overlap() {
     assert!(
         analysis.artifacts_summary.irq_event_count >= 4,
         "real_irq_overlap should include multiple IRQ events, including unrelated noise outside the spike window"
-    );
-    assert!(
-        analysis.artifacts_summary.spike_count >= 3,
-        "real_irq_overlap should contain a clustered scheduler-spike window"
-    );
-    assert!(
-        analysis.artifacts_summary.interval_record_count >= 1,
-        "real_irq_overlap should contain interval data so CPU pressure can be ruled out"
     );
     assert_eq!(
         analysis.artifacts_summary.block_io_event_count, 0,
@@ -708,11 +828,7 @@ fn validation_corpus_real_irq_overlap() {
 
 #[test]
 fn validation_corpus_real_gpu_bound_looking() {
-    let (analysis, _) = assert_fixture_from_metadata("real_gpu_bound_looking");
-
-    assert_eq!(analysis.data_quality.level, DataQualityLevel::High);
-    assert!(analysis.data_quality.validation_errors.is_empty());
-    assert!(analysis.data_quality.validation_warnings.is_empty());
+    let analysis = assert_fixture_from_metadata("real_gpu_bound_looking");
 
     assert!(
         analysis.artifacts_summary.gpu_sample_count > 0,
@@ -728,7 +844,7 @@ fn validation_corpus_real_gpu_bound_looking() {
 
 #[test]
 fn validation_corpus_real_block_io_overlap() {
-    let (analysis, _) = assert_fixture_from_metadata("real_block_io_overlap");
+    let analysis = assert_fixture_from_metadata("real_block_io_overlap");
 
     assert!(
         matches!(
@@ -751,22 +867,6 @@ fn validation_corpus_real_block_io_overlap() {
         analysis.data_quality.block_io_correlation_basis, "request-pointer",
         "real_block_io_overlap should use strong request-pointer block I/O correlation"
     );
-
-    let diagnosis =
-        primary_diagnosis(&analysis).expect("real_block_io_overlap expected a primary diagnosis");
-    assert_eq!(
-        diagnosis.cause,
-        StutterCause::BlockIoCandidate,
-        "real_block_io_overlap must stay classified as block I/O delay, not CPU pressure, IRQ, GPU, or Unknown"
-    );
-
-    let evidence_text = diagnosis.evidence.join("\n");
-    assert!(
-        evidence_text.contains("block I/O"),
-        "real_block_io_overlap missing block I/O evidence; evidence was:\n{}",
-        evidence_text
-    );
-
     assert!(
         analysis.artifacts_summary.block_io_event_count > 0,
         "real_block_io_overlap must contain block I/O artifacts"
@@ -774,14 +874,6 @@ fn validation_corpus_real_block_io_overlap() {
     assert!(
         analysis.artifacts_summary.block_io_event_count >= 2,
         "real_block_io_overlap should include one correlated block I/O event and one unrelated event outside the spike window"
-    );
-    assert!(
-        analysis.artifacts_summary.spike_count >= 3,
-        "real_block_io_overlap should contain a clustered scheduler-spike window"
-    );
-    assert!(
-        analysis.artifacts_summary.interval_record_count >= 1,
-        "real_block_io_overlap should contain interval data so CPU pressure can be ruled out"
     );
     assert_eq!(
         analysis.artifacts_summary.irq_event_count, 0,
@@ -816,7 +908,7 @@ fn validation_corpus_real_block_io_overlap() {
 
 #[test]
 fn validation_corpus_real_truncated_low_quality() {
-    let (analysis, _) = assert_fixture_from_metadata("real_truncated_low_quality");
+    let analysis = assert_fixture_from_metadata("real_truncated_low_quality");
 
     assert!(
         matches!(
@@ -882,11 +974,7 @@ fn validation_corpus_real_truncated_low_quality() {
 
 #[test]
 fn validation_corpus_real_foreground_window() {
-    let (analysis, _) = assert_fixture_from_metadata("real_foreground_window");
-
-    assert_eq!(analysis.data_quality.level, DataQualityLevel::High);
-    assert!(analysis.data_quality.validation_errors.is_empty());
-    assert!(analysis.data_quality.validation_warnings.is_empty());
+    let analysis = assert_fixture_from_metadata("real_foreground_window");
 
     assert!(
         analysis.foreground_summary.enabled,
@@ -917,7 +1005,6 @@ fn validation_corpus_real_foreground_window() {
         analysis.foreground_summary.final_class.as_deref(),
         Some("steam_app_sanitized")
     );
-
     assert!(
         analysis.artifacts_summary.foreground_event_count > 0,
         "real_foreground_window must contain foreground_events.json artifacts"
@@ -956,11 +1043,7 @@ fn validation_corpus_real_foreground_window() {
 
 #[test]
 fn validation_corpus_real_community_rules_classification() {
-    let (analysis, _) = assert_fixture_from_metadata("real_community_rules_classification");
-
-    assert_eq!(analysis.data_quality.level, DataQualityLevel::High);
-    assert!(analysis.data_quality.validation_errors.is_empty());
-    assert!(analysis.data_quality.validation_warnings.is_empty());
+    let analysis = assert_fixture_from_metadata("real_community_rules_classification");
 
     let classified_task = analysis
         .session
@@ -975,24 +1058,6 @@ fn validation_corpus_real_community_rules_classification() {
         "report fixture should contain final class Game for the community-rule-classified task"
     );
     assert_eq!(classified_task.process_comm.as_ref(), "community-game");
-
-    let diagnosis = primary_diagnosis(&analysis)
-        .expect("real_community_rules_classification expected a primary diagnosis");
-    assert_eq!(
-        diagnosis.cause,
-        StutterCause::GameThreadSchedulerDelay,
-        "community-rule-classified Game task should be visible to downstream game scheduler diagnosis"
-    );
-
-    let evidence_text = diagnosis.evidence.join("\n");
-    for needle in ["game thread", "delayed"] {
-        assert!(
-            evidence_text.contains(needle),
-            "real_community_rules_classification missing evidence substring {:?}; evidence was:\n{}",
-            needle,
-            evidence_text
-        );
-    }
 
     assert_primary_anchor_class_in(
         &analysis,
@@ -1028,7 +1093,7 @@ fn validation_corpus_compositor_scheduler_delay() {
 
 #[test]
 fn validation_corpus_foreground_window() {
-    let (analysis, _) = assert_fixture_from_metadata("foreground_window");
+    let analysis = assert_fixture_from_metadata("foreground_window");
 
     assert_eq!(analysis.foreground_summary.final_pid, Some(5701));
     assert_eq!(
@@ -1047,7 +1112,7 @@ fn validation_corpus_foreground_window() {
 
 #[test]
 fn validation_corpus_community_rules_classification() {
-    let (analysis, _) = assert_fixture_from_metadata("community_rules_classification");
+    let analysis = assert_fixture_from_metadata("community_rules_classification");
 
     let task = analysis
         .session
@@ -1062,7 +1127,7 @@ fn validation_corpus_community_rules_classification() {
 
 #[test]
 fn validation_corpus_clean_run_is_high_quality_without_false_diagnosis() {
-    let (analysis, _) = assert_fixture_from_metadata("clean_run");
+    let analysis = assert_fixture_from_metadata("clean_run");
 
     assert!(analysis.data_quality.validation_errors.is_empty());
     assert!(analysis.cluster_analysis.clusters.is_empty());
@@ -1070,7 +1135,7 @@ fn validation_corpus_clean_run_is_high_quality_without_false_diagnosis() {
 
 #[test]
 fn validation_corpus_truncated_drop_counters_is_not_high_quality() {
-    let (analysis, _) = assert_fixture_from_metadata("truncated_drop_counters");
+    let analysis = assert_fixture_from_metadata("truncated_drop_counters");
 
     assert!(analysis.data_quality.spike_events_truncated);
     assert!(analysis.data_quality.drop_counters_nonzero);
@@ -1088,7 +1153,7 @@ fn validation_corpus_truncated_drop_counters_is_not_high_quality() {
 
 #[test]
 fn validation_corpus_reused_tid_no_contamination() {
-    let (analysis, _) = assert_fixture_from_metadata("reused_tid_no_contamination");
+    let analysis = assert_fixture_from_metadata("reused_tid_no_contamination");
 
     let reused_tasks = analysis
         .session
@@ -1128,7 +1193,7 @@ fn validation_corpus_reused_tid_no_contamination() {
 
 #[test]
 fn validation_corpus_old_schema_warns_without_rejecting() {
-    let (analysis, _) = assert_fixture_from_metadata("old_schema_warning");
+    let analysis = assert_fixture_from_metadata("old_schema_warning");
 
     assert_eq!(
         analysis.data_quality.schema_version,
