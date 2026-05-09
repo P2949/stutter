@@ -913,6 +913,8 @@ mod community_rules_process_tree_tests {
                 source_path: "test.rules".to_owned(),
                 context: vec!["none".to_owned()],
                 title: Some("Community Rule Test Game".to_owned()),
+                source_url: None,
+                comment: None,
                 ambiguous: false,
             }],
         })
