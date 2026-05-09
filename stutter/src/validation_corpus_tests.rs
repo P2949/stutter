@@ -43,6 +43,8 @@ struct FixtureTomlArtifacts {
     frames_min: Option<u64>,
     block_io_events: Option<u64>,
     block_io_events_min: Option<u64>,
+    foreground_events: Option<u64>,
+    foreground_events_min: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -214,6 +216,17 @@ fn assert_artifacts_from_metadata(
         artifacts.block_io_events_min,
         analysis.artifacts_summary.block_io_event_count,
     );
+
+    assert_exact_u64(
+        &format!("{name} foreground_event_count"),
+        artifacts.foreground_events,
+        analysis.artifacts_summary.foreground_event_count,
+    );
+    assert_min_u64(
+        &format!("{name} foreground_event_count"),
+        artifacts.foreground_events_min,
+        analysis.artifacts_summary.foreground_event_count,
+    );
 }
 
 fn assert_fixture_from_metadata(name: &str) -> (ReportAnalysisJson, FixtureToml) {
@@ -381,30 +394,81 @@ fn validation_corpus_gpu_bound_clean_cpu_has_gpu_candidate() {
 }
 
 #[test]
-fn validation_corpus_real_world_game_scheduler_delay() {
-    assert_fixture_from_metadata("real_world_game_scheduler_delay");
+fn validation_corpus_real_clean_baseline() {
+    let (analysis, _) = assert_fixture_from_metadata("real_clean_baseline");
+
+    assert!(analysis.data_quality.validation_errors.is_empty());
+    assert!(analysis.cluster_analysis.clusters.is_empty());
 }
 
 #[test]
-fn validation_corpus_real_world_compositor_scheduler_delay() {
-    assert_fixture_from_metadata("real_world_compositor_scheduler_delay");
+fn validation_corpus_real_game_thread_scheduler_delay() {
+    assert_fixture_from_metadata("real_game_thread_scheduler_delay");
 }
 
 #[test]
-fn validation_corpus_real_world_irq_overlap() {
-    assert_fixture_from_metadata("real_world_irq_overlap");
+fn validation_corpus_real_compositor_scheduler_delay() {
+    assert_fixture_from_metadata("real_compositor_scheduler_delay");
 }
 
 #[test]
-fn validation_corpus_real_world_block_io_stall() {
-    assert_fixture_from_metadata("real_world_block_io_stall");
+fn validation_corpus_real_irq_overlap() {
+    assert_fixture_from_metadata("real_irq_overlap");
 }
 
 #[test]
-fn validation_corpus_real_world_gpu_bound_clean_cpu() {
-    let (analysis, _) = assert_fixture_from_metadata("real_world_gpu_bound_clean_cpu");
+fn validation_corpus_real_gpu_bound_looking() {
+    let (analysis, _) = assert_fixture_from_metadata("real_gpu_bound_looking");
 
     assert_candidate_contains(&analysis, StutterCause::GpuBoundCandidate, &["GPU busy"]);
+}
+
+#[test]
+fn validation_corpus_real_block_io_overlap() {
+    assert_fixture_from_metadata("real_block_io_overlap");
+}
+
+#[test]
+fn validation_corpus_real_truncated_low_quality() {
+    let (analysis, _) = assert_fixture_from_metadata("real_truncated_low_quality");
+
+    assert!(analysis.data_quality.spike_events_truncated);
+    assert!(analysis.data_quality.drop_counters_nonzero);
+    assert!(analysis.data_quality.spike_events_dropped_count > 0);
+}
+
+#[test]
+fn validation_corpus_real_foreground_window() {
+    let (analysis, _) = assert_fixture_from_metadata("real_foreground_window");
+
+    assert_eq!(analysis.foreground_summary.final_pid, Some(5701));
+    assert_eq!(
+        analysis.foreground_summary.final_app_id.as_deref(),
+        Some("steam_app_sanitized")
+    );
+    assert_eq!(
+        analysis.foreground_summary.final_class.as_deref(),
+        Some("steam_app_sanitized")
+    );
+    assert!(
+        analysis.foreground_summary.final_title.is_none(),
+        "foreground title must stay redacted"
+    );
+}
+
+#[test]
+fn validation_corpus_real_community_rules_classification() {
+    let (analysis, _) = assert_fixture_from_metadata("real_community_rules_classification");
+
+    let task = analysis
+        .session
+        .tasks
+        .iter()
+        .find(|task| task.comm == "community-game")
+        .expect("missing community-classified task");
+
+    assert_eq!(task.class, crate::process_tree::TaskClass::Game);
+    assert_eq!(task.process_comm.as_ref(), "community-game");
 }
 
 #[test]

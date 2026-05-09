@@ -16,6 +16,7 @@ irq_events = 0
 gpu_samples = 0
 frames = 0
 block_io_events = 0
+foreground_events = 0
 
 [expected.evidence]
 contains = []
