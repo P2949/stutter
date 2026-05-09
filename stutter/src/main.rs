@@ -478,6 +478,7 @@ async fn main() -> anyhow::Result<()> {
             render_man_page(output.as_deref())?;
             Ok(())
         }
+        AppCommand::Rules { command } => community_rules::rules_command(command),
         AppCommand::ScenarioCreate {
             name,
             force,
