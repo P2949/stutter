@@ -66,6 +66,10 @@ impl ScanBudget {
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use crate::community_rules::{
+    CommunityProcessIdentity, CommunityRulesDb, classify_process_identity_with_db,
+};
+
 #[derive(Debug, Clone)]
 pub struct ProcessCache {
     pub entries: BTreeMap<u32, CachedProcInfo>,
@@ -398,6 +402,8 @@ pub struct TargetSnapshotInput<'a> {
     pub max_scan_duration: Option<Duration>,
     /// Maximum number of threads to scan per process.
     pub max_threads_per_process: Option<usize>,
+    /// Optional community rules database used only after local classification leaves a task unknown.
+    pub community_rules: Option<&'a CommunityRulesDb>,
 }
 
 impl<'a> Default for TargetSnapshotInput<'a> {
@@ -414,6 +420,7 @@ impl<'a> Default for TargetSnapshotInput<'a> {
             previous_tasks: None,
             max_scan_duration: None,
             max_threads_per_process: None,
+            community_rules: None,
         }
     }
 }
@@ -461,6 +468,11 @@ impl<'a> TargetSnapshotInput<'a> {
 
     pub fn previous_tasks(mut self, tasks: Option<&'a BTreeMap<u32, TaskInfo>>) -> Self {
         self.previous_tasks = tasks;
+        self
+    }
+
+    pub fn community_rules(mut self, community_rules: Option<&'a CommunityRulesDb>) -> Self {
+        self.community_rules = community_rules;
         self
     }
 }
@@ -814,6 +826,133 @@ pub fn task_comm_at(proc_root: &Path, pid: u32, tid: u32) -> Option<String> {
         .filter(|comm| !comm.is_empty())
 }
 
+fn apply_community_rules_to_unknown_task(
+    task: &mut TaskInfo,
+    proc_info: &ProcInfo,
+    db: &CommunityRulesDb,
+) {
+    if task.class != TaskClass::Unknown {
+        return;
+    }
+
+    let identity = CommunityProcessIdentity {
+        thread_comm: task.comm.as_str(),
+        process_comm: proc_info.comm.as_str(),
+        cmdline: proc_info.cmdline.as_str(),
+        exe_path: proc_info.exe_path.as_str(),
+        cgroup_path: proc_info.cgroup_path.as_str(),
+    };
+
+    if let Some(hit) = classify_process_identity_with_db(db, &identity) {
+        log::debug!(
+            "community_rules_classified tid={} pid={} class={} rule={} source={} reason={}",
+            task.tid,
+            task.process_pid,
+            hit.class,
+            hit.rule_name,
+            hit.source_path,
+            hit.reason
+        );
+        task.class = hit.class;
+    }
+}
+
+#[cfg(test)]
+mod community_rules_process_tree_tests {
+    use std::{fs, os::unix::fs::symlink, path::Path};
+
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::community_rules::{CommunityRule, CommunityRulesFile, CommunityRulesSource};
+
+    fn write_fake_proc_task(proc_root: &Path, pid: u32, comm: &str, exe_path: &str) {
+        let proc_dir = proc_root.join(pid.to_string());
+        let task_dir = proc_dir.join("task").join(pid.to_string());
+
+        fs::create_dir_all(&task_dir).unwrap();
+        fs::write(
+            proc_dir.join("status"),
+            format!("Name:\t{comm}\nPPid:\t1\n"),
+        )
+        .unwrap();
+        fs::write(proc_dir.join("cmdline"), format!("{exe_path}\0--test\0")).unwrap();
+        fs::write(
+            proc_dir.join("cgroup"),
+            "0::/user.slice/app-mystery-123.scope\n",
+        )
+        .unwrap();
+        fs::write(task_dir.join("comm"), format!("{comm}\n")).unwrap();
+        fs::write(
+            proc_dir.join("stat"),
+            format!(
+                "{pid} ({comm}) S 1 0 0 0 0 0 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+            ),
+        )
+        .unwrap();
+
+        let _ = fs::remove_file(proc_dir.join("exe"));
+        symlink(exe_path, proc_dir.join("exe")).unwrap();
+    }
+
+    fn community_rules_db_for_exe(name: &str) -> CommunityRulesDb {
+        CommunityRulesDb::from_file(CommunityRulesFile {
+            schema_version: 1,
+            source: CommunityRulesSource {
+                name: "test community rules".to_owned(),
+                repo: None,
+                commit: None,
+                generated_at: "2026-05-09T00:00:00Z".to_owned(),
+            },
+            rules: vec![CommunityRule {
+                name: name.to_owned(),
+                normalized_name: name.to_ascii_lowercase(),
+                r#type: "Game".to_owned(),
+                stutter_class: "Game".to_owned(),
+                confidence: 0.90,
+                source_path: "test.rules".to_owned(),
+                context: vec!["none".to_owned()],
+                title: Some("Community Rule Test Game".to_owned()),
+                ambiguous: false,
+            }],
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn target_snapshot_uses_community_rules_only_for_unknown_tasks() {
+        let dir = tempdir().unwrap();
+        let proc_root = dir.path();
+        let pid = 4242;
+        let manual_pids = vec![pid];
+
+        write_fake_proc_task(proc_root, pid, "mysteryproc", "/tmp/community-game");
+
+        let without_rules = target_snapshot(
+            TargetSnapshotInput::default()
+                .proc_root(proc_root)
+                .manual_pids(&manual_pids),
+        );
+
+        assert_eq!(
+            without_rules.tasks.get(&pid).map(|task| task.class),
+            Some(TaskClass::Unknown)
+        );
+
+        let db = community_rules_db_for_exe("community-game");
+        let input_with_rules = TargetSnapshotInput::default()
+            .proc_root(proc_root)
+            .manual_pids(&manual_pids)
+            .community_rules(Some(&db));
+        let with_rules = target_snapshot(input_with_rules);
+
+        assert_eq!(
+            with_rules.tasks.get(&pid).map(|task| task.class),
+            Some(TaskClass::Game)
+        );
+    }
+}
+
 /// Collect a snapshot of tasks based on the provided input criteria.
 ///
 /// This function scans the process tree and filters tasks according to the [TargetSnapshotInput].
@@ -830,6 +969,7 @@ pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
         previous_tasks,
         max_scan_duration,
         max_threads_per_process,
+        community_rules,
     } = input;
 
     let max_scan_duration =
@@ -953,6 +1093,13 @@ pub fn target_snapshot(input: TargetSnapshotInput) -> TargetSnapshot {
     for task in tasks.values_mut() {
         if cgroup_roots.contains(&task.tid) {
             task.from_cgroup = true;
+        }
+
+        if task.class == TaskClass::Unknown
+            && let Some(db) = community_rules
+            && let Some(proc_info) = processes.get(&task.process_pid)
+        {
+            apply_community_rules_to_unknown_task(task, proc_info, db);
         }
 
         if task.class == TaskClass::Unknown && !requested_roots.contains(&task.process_pid) {
@@ -2049,7 +2196,7 @@ mod tests {
             "KingdomCome",
             "/home/me/.steam/steamapps/compatdata/379430/pfx/drive_c/KingdomCome.exe --windowed",
             "/usr/bin/wine",
-            "/user.slice/app-steam-379430.scope",
+            "/user.slice/app-mystery-379430.scope",
             None,
         );
 
@@ -2077,7 +2224,7 @@ mod tests {
             "build.exe",
             "/home/me/.steam/steamapps/compatdata/123/pfx/drive_c/build.exe",
             "/usr/bin/wine",
-            "/user.slice/app-steam-123.scope",
+            "/user.slice/app-mystery-123.scope",
             None,
         );
 
@@ -2091,7 +2238,7 @@ mod tests {
             "pipewire",
             "/home/me/.steam/steamapps/compatdata/379430/pfx/drive_c/KingdomCome.exe",
             "/home/me/.steam/steamapps/common/KingdomCome/KingdomCome.exe",
-            "/user.slice/app-steam-379430.scope",
+            "/user.slice/app-mystery-379430.scope",
             Some(2),
         );
 
