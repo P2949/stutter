@@ -249,9 +249,6 @@ impl TaskClass {
 }
 
 #[cfg(test)]
-pub type SystemTaskClass = TaskClass;
-
-#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 pub enum PriorityBand {
     CriticalRealtime,
@@ -264,10 +261,10 @@ pub enum PriorityBand {
 }
 
 #[cfg(test)]
-pub fn priority_band_for_class(class: SystemTaskClass, sched_policy: Option<u32>) -> PriorityBand {
+pub fn priority_band_for_class(class: TaskClass, sched_policy: Option<u32>) -> PriorityBand {
     if matches!(sched_policy, Some(1 | 2 | 6)) {
         match class {
-            SystemTaskClass::AudioRealtime | SystemTaskClass::Input => {
+            TaskClass::AudioRealtime | TaskClass::Input => {
                 return PriorityBand::CriticalRealtime;
             }
             _ => {}
@@ -275,35 +272,35 @@ pub fn priority_band_for_class(class: SystemTaskClass, sched_policy: Option<u32>
     }
 
     match class {
-        SystemTaskClass::AudioRealtime | SystemTaskClass::Input => PriorityBand::CriticalRealtime,
+        TaskClass::AudioRealtime | TaskClass::Input => PriorityBand::CriticalRealtime,
 
-        SystemTaskClass::Game
-        | SystemTaskClass::GameRenderThread
-        | SystemTaskClass::GameWorkerThread
-        | SystemTaskClass::GameScope
-        | SystemTaskClass::WineServer
-        | SystemTaskClass::Compositor
-        | SystemTaskClass::BrowserForeground => PriorityBand::ForegroundLatency,
+        TaskClass::Game
+        | TaskClass::GameRenderThread
+        | TaskClass::GameWorkerThread
+        | TaskClass::GameScope
+        | TaskClass::WineServer
+        | TaskClass::Compositor
+        | TaskClass::BrowserForeground => PriorityBand::ForegroundLatency,
 
-        SystemTaskClass::Editor
-        | SystemTaskClass::Terminal
-        | SystemTaskClass::Shell
-        | SystemTaskClass::BrowserRenderer
-        | SystemTaskClass::BrowserGpu
-        | SystemTaskClass::BrowserNetwork
-        | SystemTaskClass::Media => PriorityBand::Interactive,
+        TaskClass::Editor
+        | TaskClass::Terminal
+        | TaskClass::Shell
+        | TaskClass::BrowserRenderer
+        | TaskClass::BrowserGpu
+        | TaskClass::BrowserNetwork
+        | TaskClass::Media => PriorityBand::Interactive,
 
-        SystemTaskClass::BuildJob
-        | SystemTaskClass::Compiler
-        | SystemTaskClass::Linker
-        | SystemTaskClass::Recorder
-        | SystemTaskClass::VirtualMachine => PriorityBand::Throughput,
+        TaskClass::BuildJob
+        | TaskClass::Compiler
+        | TaskClass::Linker
+        | TaskClass::Recorder
+        | TaskClass::VirtualMachine => PriorityBand::Throughput,
 
-        SystemTaskClass::Indexer
-        | SystemTaskClass::PackageManager
-        | SystemTaskClass::StorageDaemon
-        | SystemTaskClass::NetworkDaemon
-        | SystemTaskClass::Service => PriorityBand::Background,
+        TaskClass::Indexer
+        | TaskClass::PackageManager
+        | TaskClass::StorageDaemon
+        | TaskClass::NetworkDaemon
+        | TaskClass::Service => PriorityBand::Background,
 
         _ => PriorityBand::Unknown,
     }

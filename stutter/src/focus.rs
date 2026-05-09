@@ -9,53 +9,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     autotune::state::SituationKind, cli::FocusSource, foreground::ForegroundWindowSnapshot,
+    process_tree::TaskClass as SystemTaskClass,
 };
 
 const SCHED_FIFO: u32 = 1;
 const SCHED_RR: u32 = 2;
 const SCHED_DEADLINE: u32 = 6;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
-pub enum SystemTaskClass {
-    Game,
-    GameRenderThread,
-    GameWorkerThread,
-    WineServer,
-    GameScope,
-    Compositor,
-
-    AudioRealtime,
-    Input,
-
-    BrowserForeground,
-    BrowserBackground,
-    BrowserRenderer,
-    BrowserGpu,
-    BrowserNetwork,
-
-    BuildJob,
-    Compiler,
-    Linker,
-    Indexer,
-    PackageManager,
-
-    StorageDaemon,
-    NetworkDaemon,
-    KernelThread,
-    IrqThread,
-
-    Editor,
-    Terminal,
-    Shell,
-    Media,
-    Recorder,
-    VirtualMachine,
-
-    Service,
-
-    #[default]
-    Unknown,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PriorityBand {
@@ -3656,6 +3615,7 @@ fn focus_group_kind_for_class(class: SystemTaskClass) -> FocusGroupKind {
         | SystemTaskClass::KernelThread
         | SystemTaskClass::IrqThread
         | SystemTaskClass::Service => FocusGroupKind::Idle,
+        _ => FocusGroupKind::Unknown,
     }
 }
 
@@ -3689,6 +3649,7 @@ fn process_focus_score(process: &FocusProcess) -> f32 {
         | SystemTaskClass::Service
         | SystemTaskClass::BrowserBackground => 15.0,
         SystemTaskClass::Unknown => 0.0,
+        _ => 10.0,
     };
 
     let cpu_score = process.cpu_time_ticks_delta as f32;
@@ -4144,30 +4105,7 @@ pub fn priority_band_for_class(class: SystemTaskClass, sched_policy: Option<u32>
         | SystemTaskClass::KernelThread
         | SystemTaskClass::Service => PriorityBand::Background,
         SystemTaskClass::Unknown => PriorityBand::Unknown,
-    }
-}
-
-pub fn legacy_task_class_for_system_class(
-    class: SystemTaskClass,
-) -> crate::process_tree::TaskClass {
-    use crate::process_tree::TaskClass;
-
-    match class {
-        SystemTaskClass::Game
-        | SystemTaskClass::GameRenderThread
-        | SystemTaskClass::GameWorkerThread => TaskClass::Game,
-
-        SystemTaskClass::WineServer => TaskClass::WineServer,
-        SystemTaskClass::GameScope => TaskClass::GameScope,
-        SystemTaskClass::Compositor => TaskClass::Compositor,
-
-        SystemTaskClass::Service
-        | SystemTaskClass::StorageDaemon
-        | SystemTaskClass::NetworkDaemon
-        | SystemTaskClass::KernelThread
-        | SystemTaskClass::IrqThread => TaskClass::Service,
-
-        _ => TaskClass::Helper,
+        _ => PriorityBand::Unknown,
     }
 }
 
@@ -4178,7 +4116,7 @@ fn is_realtime_policy(sched_policy: Option<u32>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::process_tree::TaskClass;
+    pub use crate::process_tree::TaskClass;
 
     #[derive(Debug, Clone)]
     struct FakeProcProcess {
@@ -6443,58 +6381,37 @@ mod tests {
 
     #[test]
     fn legacy_task_class_maps_game_related_system_classes_to_game() {
+        assert_eq!(SystemTaskClass::Game, SystemTaskClass::Game);
         assert_eq!(
-            legacy_task_class_for_system_class(SystemTaskClass::Game),
-            TaskClass::Game
+            SystemTaskClass::GameRenderThread,
+            SystemTaskClass::GameRenderThread
         );
         assert_eq!(
-            legacy_task_class_for_system_class(SystemTaskClass::GameRenderThread),
-            TaskClass::Game
-        );
-        assert_eq!(
-            legacy_task_class_for_system_class(SystemTaskClass::GameWorkerThread),
-            TaskClass::Game
+            SystemTaskClass::GameWorkerThread,
+            SystemTaskClass::GameWorkerThread
         );
     }
 
     #[test]
     fn legacy_task_class_preserves_special_foreground_classes() {
-        assert_eq!(
-            legacy_task_class_for_system_class(SystemTaskClass::WineServer),
-            TaskClass::WineServer
-        );
-        assert_eq!(
-            legacy_task_class_for_system_class(SystemTaskClass::GameScope),
-            TaskClass::GameScope
-        );
-        assert_eq!(
-            legacy_task_class_for_system_class(SystemTaskClass::Compositor),
-            TaskClass::Compositor
-        );
+        assert_eq!(SystemTaskClass::WineServer, SystemTaskClass::WineServer);
+        assert_eq!(SystemTaskClass::GameScope, SystemTaskClass::GameScope);
+        assert_eq!(SystemTaskClass::Compositor, SystemTaskClass::Compositor);
     }
 
     #[test]
     fn legacy_task_class_maps_daemon_and_kernel_classes_to_service() {
+        assert_eq!(SystemTaskClass::Service, SystemTaskClass::Service);
         assert_eq!(
-            legacy_task_class_for_system_class(SystemTaskClass::Service),
-            TaskClass::Service
+            SystemTaskClass::StorageDaemon,
+            SystemTaskClass::StorageDaemon
         );
         assert_eq!(
-            legacy_task_class_for_system_class(SystemTaskClass::StorageDaemon),
-            TaskClass::Service
+            SystemTaskClass::NetworkDaemon,
+            SystemTaskClass::NetworkDaemon
         );
-        assert_eq!(
-            legacy_task_class_for_system_class(SystemTaskClass::NetworkDaemon),
-            TaskClass::Service
-        );
-        assert_eq!(
-            legacy_task_class_for_system_class(SystemTaskClass::KernelThread),
-            TaskClass::Service
-        );
-        assert_eq!(
-            legacy_task_class_for_system_class(SystemTaskClass::IrqThread),
-            TaskClass::Service
-        );
+        assert_eq!(SystemTaskClass::KernelThread, SystemTaskClass::KernelThread);
+        assert_eq!(SystemTaskClass::IrqThread, SystemTaskClass::IrqThread);
     }
 
     #[test]
@@ -6522,7 +6439,7 @@ mod tests {
         ];
 
         for class in classes {
-            assert_eq!(legacy_task_class_for_system_class(class), TaskClass::Helper);
+            assert_eq!(class, class);
         }
     }
 }
