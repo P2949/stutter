@@ -279,6 +279,53 @@ After sanitizing a new fixture, add or regenerate its `fixture.toml` metadata
 contract and add a validation test only when the fixture needs extra
 case-specific assertions beyond the metadata-driven checks.
 
+## Corpus runner commands
+
+Use this command for the normal validation-corpus test pass:
+
+```bash
+cargo test -p stutter validation_corpus
+```
+
+Use this command in CI:
+
+```bash
+cargo test -p stutter validation_corpus
+```
+
+Do not run ignored regeneration tests in CI. Regeneration rewrites committed
+fixture artifacts and is a maintainer operation, not a validation step.
+
+To regenerate the committed validation corpus locally, run:
+
+```bash
+cargo test -p stutter regenerate_validation_corpus -- --ignored
+```
+
+To regenerate the selected public v21 examples locally, run:
+
+```bash
+cargo test -p stutter regenerate_public_examples_v21 -- --ignored
+```
+
+To smoke-check a single fixture through the public CLI, run:
+
+```bash
+cargo run -p stutter -- validate stutter/tests/fixtures/runs/real_clean_baseline
+cargo run -p stutter -- report --analysis-json stutter/tests/fixtures/runs/real_clean_baseline
+```
+
+A typical local corpus maintenance pass is:
+
+```bash
+cargo fmt --all
+cargo test -p stutter regenerate_validation_corpus -- --ignored
+cargo test -p stutter regenerate_public_examples_v21 -- --ignored
+cargo test -p stutter validation_corpus
+cargo run -p stutter -- validate stutter/tests/fixtures/runs/real_clean_baseline
+cargo run -p stutter -- report --analysis-json stutter/tests/fixtures/runs/real_clean_baseline >/dev/null
+```
+
 ## Regenerating committed fixtures
 
 From the repository root, run:
