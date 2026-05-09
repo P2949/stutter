@@ -120,6 +120,15 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "real_world_irq_overlap",
         "real_world_block_io_stall",
         "real_world_gpu_bound_clean_cpu",
+        "real_clean_baseline",
+        "real_game_thread_scheduler_delay",
+        "real_compositor_scheduler_delay",
+        "real_irq_overlap",
+        "real_gpu_bound_looking",
+        "real_block_io_overlap",
+        "real_truncated_low_quality",
+        "real_foreground_window",
+        "real_community_rules_classification",
     ] {
         remove_fixture_dir(root, deprecated)?;
     }
@@ -141,42 +150,21 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
     )?;
     write_fixture(root, "old_schema_warning", old_schema_warning_fixture())?;
 
-    write_fixture(root, "real_clean_baseline", real_clean_baseline_fixture())?;
     write_fixture(
         root,
-        "real_game_thread_scheduler_delay",
-        real_game_thread_scheduler_delay_fixture(),
+        "game_thread_scheduler_delay",
+        game_thread_scheduler_delay_fixture(),
     )?;
     write_fixture(
         root,
-        "real_compositor_scheduler_delay",
-        real_compositor_scheduler_delay_fixture(),
+        "compositor_scheduler_delay",
+        compositor_scheduler_delay_fixture(),
     )?;
-    write_fixture(root, "real_irq_overlap", real_irq_overlap_fixture())?;
+    write_fixture(root, "foreground_window", foreground_window_fixture())?;
     write_fixture(
         root,
-        "real_gpu_bound_looking",
-        real_gpu_bound_looking_fixture(),
-    )?;
-    write_fixture(
-        root,
-        "real_block_io_overlap",
-        real_block_io_overlap_fixture(),
-    )?;
-    write_fixture(
-        root,
-        "real_truncated_low_quality",
-        real_truncated_low_quality_fixture(),
-    )?;
-    write_fixture(
-        root,
-        "real_foreground_window",
-        real_foreground_window_fixture(),
-    )?;
-    write_fixture(
-        root,
-        "real_community_rules_classification",
-        real_community_rules_classification_fixture(),
+        "community_rules_classification",
+        community_rules_classification_fixture(),
     )?;
 
     Ok(())
@@ -198,7 +186,10 @@ pub(crate) fn write_public_examples_v21(root: &Path) -> anyhow::Result<()> {
     write_fixture(
         root,
         "game_thread_scheduler_delay",
-        public_game_thread_scheduler_delay_fixture(),
+        renamed_fixture(
+            "game_thread_scheduler_delay",
+            public_game_thread_scheduler_delay_fixture(),
+        ),
     )?;
     write_fixture(
         root,
@@ -249,8 +240,8 @@ fn public_clean_baseline_fixture() -> (SessionFile, FixtureArtifacts) {
 
 fn public_game_thread_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) {
     renamed_fixture(
-        "game_thread_scheduler_delay",
-        real_game_thread_scheduler_delay_fixture(),
+        "game_thread_scheduler_delay_public",
+        game_thread_scheduler_delay_fixture(),
     )
 }
 
@@ -535,11 +526,7 @@ fn old_schema_warning_fixture() -> (SessionFile, FixtureArtifacts) {
     )
 }
 
-fn real_clean_baseline_fixture() -> (SessionFile, FixtureArtifacts) {
-    renamed_fixture("real_clean_baseline", clean_run_fixture())
-}
-
-fn real_game_thread_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) {
+fn game_thread_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) {
     let spikes = vec![
         spike_event(5101, TaskClass::Game, "Main", 8_500_000, 0),
         spike_event(
@@ -606,7 +593,7 @@ fn real_game_thread_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts)
         },
     ];
 
-    let mut session = base_session("real_game_thread_scheduler_delay");
+    let mut session = base_session("game_thread_scheduler_delay");
     session.config.tree_roots = vec![5100];
     session.config.hwmon = true;
     session.core.mangohud_first_frame_monotonic_ns = Some(0);
@@ -624,7 +611,7 @@ fn real_game_thread_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts)
     )
 }
 
-fn real_compositor_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) {
+fn compositor_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) {
     let spikes = vec![
         spike_event(5201, TaskClass::Compositor, "kwin_wayland", 9_000_000, 0),
         spike_event(5202, TaskClass::Game, "Main", 1_400_000, 250_000),
@@ -685,7 +672,7 @@ fn real_compositor_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) 
         },
     ];
 
-    let mut session = base_session("real_compositor_scheduler_delay");
+    let mut session = base_session("compositor_scheduler_delay");
     session.config.tree_roots = vec![5200];
     session.config.hwmon = true;
     session.core.mangohud_first_frame_monotonic_ns = Some(0);
@@ -703,222 +690,7 @@ fn real_compositor_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) 
     )
 }
 
-fn real_irq_overlap_fixture() -> (SessionFile, FixtureArtifacts) {
-    let spikes = vec![
-        spike_event(5301, TaskClass::Unknown, "game-worker-a", 6_000_000, 0),
-        spike_event(
-            5302,
-            TaskClass::Unknown,
-            "game-worker-b",
-            4_500_000,
-            250_000,
-        ),
-        spike_event(
-            5303,
-            TaskClass::Unknown,
-            "game-worker-c",
-            4_000_000,
-            500_000,
-        ),
-    ];
-    let intervals = vec![
-        interval_record_with_class(
-            100,
-            5301,
-            "game-worker-a",
-            TaskClass::Unknown,
-            4.0,
-            6_000_000,
-        ),
-        interval_record_with_class(
-            100,
-            5302,
-            "game-worker-b",
-            TaskClass::Unknown,
-            3.0,
-            4_500_000,
-        ),
-        interval_record_with_class(
-            100,
-            5303,
-            "game-worker-c",
-            TaskClass::Unknown,
-            2.0,
-            4_000_000,
-        ),
-    ];
-    let irq_events = vec![IrqEventRecord {
-        elapsed_ms: Some(100),
-        irq: 146,
-        cpu: 3,
-        enter_ns: 98_500_000,
-        exit_ns: 104_500_000,
-        duration_ns: 6_000_000,
-    }];
-
-    let mut session = base_session("real_irq_overlap");
-    session.config.tree_roots = vec![5300];
-    session.config.irq_latency = true;
-    session.config.irqs = vec![146];
-    apply_spike_session_fields(&mut session, &spikes);
-    apply_artifact_counts(
-        &mut session,
-        &FixtureArtifacts {
-            spikes,
-            intervals,
-            irq_events,
-            ..Default::default()
-        },
-    )
-}
-
-fn real_gpu_bound_looking_fixture() -> (SessionFile, FixtureArtifacts) {
-    let spikes = vec![
-        spike_event(5501, TaskClass::Unknown, "frame-submit", 1_500_000, 0),
-        spike_event(5502, TaskClass::Unknown, "present-wait", 1_400_000, 250_000),
-        spike_event(
-            5503,
-            TaskClass::Unknown,
-            "render-helper",
-            1_300_000,
-            500_000,
-        ),
-    ];
-    let intervals = vec![
-        interval_record_with_class(
-            100,
-            5501,
-            "frame-submit",
-            TaskClass::Unknown,
-            4.0,
-            1_500_000,
-        ),
-        interval_record_with_class(
-            100,
-            5502,
-            "present-wait",
-            TaskClass::Unknown,
-            3.0,
-            1_400_000,
-        ),
-        interval_record_with_class(
-            100,
-            5503,
-            "render-helper",
-            TaskClass::Unknown,
-            2.0,
-            1_300_000,
-        ),
-    ];
-    let gpu_samples = vec![GpuSample {
-        elapsed_ms: 100,
-        gpu_busy_percent: Some(99),
-        vram_used_bytes: Some(7_200_000_000),
-        vram_total_bytes: Some(8_000_000_000),
-        vram_used_percent: Some(90),
-        gpu_clock_mhz: Some(2550),
-        mem_clock_mhz: Some(9750),
-        temp_millidegrees: Some(71_000),
-        power_microwatts: Some(215_000_000),
-    }];
-    let frame_events = vec![
-        FrameEvent {
-            elapsed_ms: 84,
-            frametime_ms: 16.6,
-        },
-        FrameEvent {
-            elapsed_ms: 100,
-            frametime_ms: 61.0,
-        },
-        FrameEvent {
-            elapsed_ms: 117,
-            frametime_ms: 16.8,
-        },
-        FrameEvent {
-            elapsed_ms: 134,
-            frametime_ms: 16.7,
-        },
-    ];
-
-    let mut session = base_session("real_gpu_bound_looking");
-    session.config.tree_roots = vec![5500];
-    session.config.hwmon = true;
-    session.core.mangohud_first_frame_monotonic_ns = Some(0);
-    session.core.mangohud_first_frame_raw_elapsed_ms = Some(0);
-    apply_spike_session_fields(&mut session, &spikes);
-    apply_artifact_counts(
-        &mut session,
-        &FixtureArtifacts {
-            spikes,
-            intervals,
-            gpu_samples,
-            frame_events,
-            ..Default::default()
-        },
-    )
-}
-
-fn real_block_io_overlap_fixture() -> (SessionFile, FixtureArtifacts) {
-    let spikes = vec![
-        spike_event(5401, TaskClass::Unknown, "asset-stream", 7_000_000, 0),
-        spike_event(5402, TaskClass::Unknown, "shader-cache", 4_800_000, 250_000),
-        spike_event(5403, TaskClass::Unknown, "io-helper", 4_200_000, 500_000),
-    ];
-    let intervals = vec![
-        interval_record_with_class(
-            100,
-            5401,
-            "asset-stream",
-            TaskClass::Unknown,
-            2.0,
-            7_000_000,
-        ),
-        interval_record_with_class(
-            100,
-            5402,
-            "shader-cache",
-            TaskClass::Unknown,
-            1.0,
-            4_800_000,
-        ),
-        interval_record_with_class(100, 5403, "io-helper", TaskClass::Unknown, 1.0, 4_200_000),
-    ];
-    let block_io_events = vec![BlockIoRecord {
-        elapsed_ms: 100,
-        tid: 5401,
-        correlation_basis: Cow::Borrowed("request-pointer"),
-        dev: 259,
-        nr_sector: 128,
-        sector: 8_388_608,
-        duration_ns: 12_000_000,
-        timestamp_ns: 104_000_000,
-        rwbs: "R".to_owned(),
-    }];
-
-    let mut session = base_session("real_block_io_overlap");
-    session.config.tree_roots = vec![5400];
-    session.config.block_io = true;
-    session.core.block_io_correlation_basis = "request-pointer".to_owned();
-    apply_spike_session_fields(&mut session, &spikes);
-    apply_artifact_counts(
-        &mut session,
-        &FixtureArtifacts {
-            spikes,
-            intervals,
-            block_io_events,
-            ..Default::default()
-        },
-    )
-}
-
-fn real_truncated_low_quality_fixture() -> (SessionFile, FixtureArtifacts) {
-    renamed_fixture(
-        "real_truncated_low_quality",
-        truncated_drop_counters_fixture(),
-    )
-}
-
-fn real_foreground_window_fixture() -> (SessionFile, FixtureArtifacts) {
+fn foreground_window_fixture() -> (SessionFile, FixtureArtifacts) {
     let intervals = vec![interval_record_with_class(
         100,
         5701,
@@ -941,7 +713,7 @@ fn real_foreground_window_fixture() -> (SessionFile, FixtureArtifacts) {
         reason: "focused Sway node from sanitized fixture".to_owned(),
     }];
 
-    let mut session = base_session("real_foreground_window");
+    let mut session = base_session("foreground_window");
     session.config.tree_roots = vec![5701];
     session.config.foreground_window = true;
     session.config.foreground_source = "sway".to_owned();
@@ -966,7 +738,7 @@ fn real_foreground_window_fixture() -> (SessionFile, FixtureArtifacts) {
     )
 }
 
-fn real_community_rules_classification_fixture() -> (SessionFile, FixtureArtifacts) {
+fn community_rules_classification_fixture() -> (SessionFile, FixtureArtifacts) {
     let intervals = vec![interval_record_with_class(
         100,
         5801,
@@ -980,7 +752,7 @@ fn real_community_rules_classification_fixture() -> (SessionFile, FixtureArtifac
     task.process_pid = Some(5801);
     task.process_comm = "community-game".into();
 
-    let mut session = base_session("real_community_rules_classification");
+    let mut session = base_session("community_rules_classification");
     session.config.tree_roots = vec![5801];
     session.tasks = vec![task];
     session.core.active_target_pids_count = 1;
@@ -1152,99 +924,44 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &[],
             exact_artifacts(artifacts),
         ),
-        "real_clean_baseline" => fixture_metadata(
+        "game_thread_scheduler_delay" => fixture_metadata(
             name,
-            "sanitized-real-recording",
+            "synthetic-edge-case",
             "High",
-            "Sanitized real baseline-style run with no strong diagnosis.",
-            "Unknown",
-            &[],
-            "High",
-            &[],
-            exact_artifacts(artifacts),
-        ),
-        "real_game_thread_scheduler_delay" => fixture_metadata(
-            name,
-            "sanitized-real-recording",
-            "High",
-            "Game main/render thread had scheduler delay during a visible frame spike.",
+            "Synthetic edge-case fixture for game main/render thread scheduler delay during a visible frame spike.",
             "GameThreadSchedulerDelay",
             &["Medium", "High"],
             "High",
             &["game thread", "delayed"],
             exact_artifacts(artifacts),
         ),
-        "real_compositor_scheduler_delay" => fixture_metadata(
+        "compositor_scheduler_delay" => fixture_metadata(
             name,
-            "sanitized-real-recording",
+            "synthetic-edge-case",
             "High",
-            "Compositor thread had scheduler delay during a visible frame spike.",
+            "Synthetic edge-case fixture for compositor thread scheduler delay during a visible frame spike.",
             "CompositorSchedulerDelay",
             &["Medium", "High"],
             "High",
             &["compositor thread", "delayed"],
             exact_artifacts(artifacts),
         ),
-        "real_irq_overlap" => fixture_metadata(
+        "foreground_window" => fixture_metadata(
             name,
-            "sanitized-real-recording",
+            "synthetic-edge-case",
             "High",
-            "IRQ handler overlapped the scheduler-latency cluster strongly enough to be the primary candidate.",
-            "IrqDelayCandidate",
-            &["Medium", "High"],
-            "High",
-            &["IRQ"],
-            exact_artifacts(artifacts),
-        ),
-        "real_gpu_bound_looking" => fixture_metadata(
-            name,
-            "sanitized-real-recording",
-            "High",
-            "GPU busy was high during a frame spike while CPU pressure stayed clean.",
-            "GpuBoundCandidate",
-            &["Low", "Medium", "High"],
-            "High",
-            &["GPU busy"],
-            exact_artifacts(artifacts),
-        ),
-        "real_block_io_overlap" => fixture_metadata(
-            name,
-            "sanitized-real-recording",
-            "High",
-            "Block I/O request overlapped the scheduler-latency cluster strongly enough to be the primary candidate.",
-            "BlockIoCandidate",
-            &["Medium", "High"],
-            "High",
-            &["block I/O"],
-            exact_artifacts(artifacts),
-        ),
-        "real_truncated_low_quality" => fixture_metadata(
-            name,
-            "sanitized-real-recording",
-            "Medium",
-            "Sanitized real low-quality run with truncated or dropped data.",
-            "Unknown",
-            &[],
-            "Medium",
-            &[],
-            exact_artifacts(artifacts),
-        ),
-        "real_foreground_window" => fixture_metadata(
-            name,
-            "sanitized-real-recording",
-            "High",
-            "Sanitized real foreground-window run that preserves foreground PID/app/class while redacting the title.",
+            "Synthetic edge-case fixture that verifies foreground PID/app/class are preserved while title is redacted.",
             "Unknown",
             &[],
             "High",
             &[],
             exact_artifacts(artifacts),
         ),
-        "real_community_rules_classification" => fixture_metadata(
+        "community_rules_classification" => fixture_metadata(
             name,
-            "sanitized-real-recording",
+            "synthetic-edge-case",
             "High",
-            "Sanitized real classification fixture that preserves a community-classified game task identity.",
+            "Synthetic edge-case fixture that verifies a community-classified game task remains classified as Game.",
             "Unknown",
             &[],
             "High",
@@ -1262,7 +979,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &[],
             exact_artifacts(artifacts),
         ),
-        "game_thread_scheduler_delay" => fixture_metadata(
+        "game_thread_scheduler_delay_public" => fixture_metadata(
             name,
             "public-example",
             "High",
@@ -1321,7 +1038,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             other,
             "synthetic-contract",
             "High",
-            "Generated validation fixture.",
+            "Generated synthetic fixture.",
             "Unknown",
             &[],
             "High",

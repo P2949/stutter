@@ -1,0 +1,28 @@
+name = "foreground_window"
+schema_version = 21
+source = "synthetic-edge-case"
+quality_expectation = "High"
+description = "Synthetic edge-case fixture that verifies foreground PID/app/class are preserved while title is redacted."
+
+[expected]
+primary_cause = "Unknown"
+accepted_confidence = []
+data_quality = "High"
+
+[expected.artifacts]
+spikes = 0
+intervals = 1
+irq_events = 0
+gpu_samples = 0
+frames = 0
+block_io_events = 0
+foreground_events = 1
+
+[expected.evidence]
+contains = []
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true
