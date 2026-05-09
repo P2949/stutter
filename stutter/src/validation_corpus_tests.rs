@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
+
+use serde::Deserialize;
 
 use crate::{
     diagnosis::{Confidence, Diagnosis, DiagnosisCandidate, StutterCause},
@@ -7,27 +9,77 @@ use crate::{
     test_fixture_builder,
 };
 
-struct ExpectedFixture {
-    name: &'static str,
-    expected_primary: Option<StutterCause>,
-    accepted_confidence: &'static [Confidence],
-    expected_quality: DataQualityLevel,
-    evidence_substrings: &'static [&'static str],
-    expected_artifacts: ExpectedArtifacts,
+#[derive(Debug, Deserialize)]
+struct FixtureToml {
+    name: String,
+    schema_version: u32,
+    source: String,
+    quality_expectation: String,
+    description: String,
+    expected: FixtureTomlExpected,
+    privacy: FixtureTomlPrivacy,
 }
 
-#[derive(Default)]
-struct ExpectedArtifacts {
+#[derive(Debug, Deserialize)]
+struct FixtureTomlExpected {
+    primary_cause: String,
+    accepted_confidence: Vec<String>,
+    data_quality: String,
+    artifacts: FixtureTomlArtifacts,
+    evidence: FixtureTomlEvidence,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct FixtureTomlArtifacts {
     spikes: Option<u64>,
+    spikes_min: Option<u64>,
     intervals: Option<u64>,
+    intervals_min: Option<u64>,
     irq_events: Option<u64>,
+    irq_events_min: Option<u64>,
     gpu_samples: Option<u64>,
+    gpu_samples_min: Option<u64>,
     frames: Option<u64>,
+    frames_min: Option<u64>,
     block_io_events: Option<u64>,
+    block_io_events_min: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct FixtureTomlEvidence {
+    contains: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FixtureTomlPrivacy {
+    titles_redacted: bool,
+    paths_redacted: bool,
+    hostnames_redacted: bool,
+    usernames_redacted: bool,
 }
 
 fn fixture_path(name: &str) -> PathBuf {
     test_fixture_builder::fixture_path(name)
+}
+
+fn fixture_toml_path(name: &str) -> PathBuf {
+    fixture_path(name).join("fixture.toml")
+}
+
+fn load_fixture_toml(name: &str) -> FixtureToml {
+    let path = fixture_toml_path(name);
+    let text = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "failed to read fixture metadata {}: {err:#}",
+            path.display()
+        )
+    });
+    toml::from_str(&text).unwrap_or_else(|err| {
+        panic!(
+            "failed to parse fixture metadata {}: {err:#}",
+            path.display()
+        )
+    })
 }
 
 fn build_fixture_analysis(name: &str) -> ReportAnalysisJson {
@@ -44,56 +96,205 @@ fn primary_diagnosis(analysis: &ReportAnalysisJson) -> Option<&Diagnosis> {
         .next()
 }
 
-fn assert_fixture(expected: ExpectedFixture) -> ReportAnalysisJson {
-    let analysis = build_fixture_analysis(expected.name);
+fn parse_data_quality(value: &str) -> DataQualityLevel {
+    match value {
+        "High" => DataQualityLevel::High,
+        "Medium" => DataQualityLevel::Medium,
+        "Low" => DataQualityLevel::Low,
+        other => panic!("unknown data quality level in fixture metadata: {other}"),
+    }
+}
+
+fn parse_confidence(value: &str) -> Confidence {
+    match value {
+        "Low" => Confidence::Low,
+        "Medium" => Confidence::Medium,
+        "High" => Confidence::High,
+        other => panic!("unknown confidence level in fixture metadata: {other}"),
+    }
+}
+
+fn parse_primary_cause(value: &str) -> Option<StutterCause> {
+    match value {
+        "CompositorSchedulerDelay" => Some(StutterCause::CompositorSchedulerDelay),
+        "GameThreadSchedulerDelay" => Some(StutterCause::GameThreadSchedulerDelay),
+        "IrqDelayCandidate" => Some(StutterCause::IrqDelayCandidate),
+        "GpuBoundCandidate" => Some(StutterCause::GpuBoundCandidate),
+        "BlockIoCandidate" => Some(StutterCause::BlockIoCandidate),
+        "CpuPressureCandidate" => Some(StutterCause::CpuPressureCandidate),
+        "Unknown" => None,
+        other => panic!("unknown stutter cause in fixture metadata: {other}"),
+    }
+}
+
+fn assert_exact_u64(label: &str, expected: Option<u64>, actual: u64) {
+    if let Some(expected) = expected {
+        assert_eq!(actual, expected, "{label}");
+    }
+}
+
+fn assert_min_u64(label: &str, expected_min: Option<u64>, actual: u64) {
+    if let Some(expected_min) = expected_min {
+        assert!(
+            actual >= expected_min,
+            "{label}: expected at least {expected_min}, got {actual}"
+        );
+    }
+}
+
+fn assert_artifacts_from_metadata(
+    name: &str,
+    analysis: &ReportAnalysisJson,
+    metadata: &FixtureToml,
+) {
+    let artifacts = &metadata.expected.artifacts;
+
+    assert_exact_u64(
+        &format!("{name} spike_count"),
+        artifacts.spikes,
+        analysis.artifacts_summary.spike_count,
+    );
+    assert_min_u64(
+        &format!("{name} spike_count"),
+        artifacts.spikes_min,
+        analysis.artifacts_summary.spike_count,
+    );
+
+    assert_exact_u64(
+        &format!("{name} interval_record_count"),
+        artifacts.intervals,
+        analysis.artifacts_summary.interval_record_count,
+    );
+    assert_min_u64(
+        &format!("{name} interval_record_count"),
+        artifacts.intervals_min,
+        analysis.artifacts_summary.interval_record_count,
+    );
+
+    assert_exact_u64(
+        &format!("{name} irq_event_count"),
+        artifacts.irq_events,
+        analysis.artifacts_summary.irq_event_count,
+    );
+    assert_min_u64(
+        &format!("{name} irq_event_count"),
+        artifacts.irq_events_min,
+        analysis.artifacts_summary.irq_event_count,
+    );
+
+    assert_exact_u64(
+        &format!("{name} gpu_sample_count"),
+        artifacts.gpu_samples,
+        analysis.artifacts_summary.gpu_sample_count,
+    );
+    assert_min_u64(
+        &format!("{name} gpu_sample_count"),
+        artifacts.gpu_samples_min,
+        analysis.artifacts_summary.gpu_sample_count,
+    );
+
+    assert_exact_u64(
+        &format!("{name} frame_event_count"),
+        artifacts.frames,
+        analysis.artifacts_summary.frame_event_count,
+    );
+    assert_min_u64(
+        &format!("{name} frame_event_count"),
+        artifacts.frames_min,
+        analysis.artifacts_summary.frame_event_count,
+    );
+
+    assert_exact_u64(
+        &format!("{name} block_io_event_count"),
+        artifacts.block_io_events,
+        analysis.artifacts_summary.block_io_event_count,
+    );
+    assert_min_u64(
+        &format!("{name} block_io_event_count"),
+        artifacts.block_io_events_min,
+        analysis.artifacts_summary.block_io_event_count,
+    );
+}
+
+fn assert_fixture_from_metadata(name: &str) -> (ReportAnalysisJson, FixtureToml) {
+    let metadata = load_fixture_toml(name);
+    let analysis = build_fixture_analysis(name);
 
     assert_eq!(
+        metadata.name, name,
+        "fixture metadata name must match fixture directory name"
+    );
+    assert_eq!(
+        metadata.schema_version, SESSION_SCHEMA_VERSION,
+        "{name} fixture metadata schema_version must match SESSION_SCHEMA_VERSION"
+    );
+    assert!(
+        !metadata.source.trim().is_empty(),
+        "{name} fixture metadata source must not be empty"
+    );
+    assert!(
+        !metadata.quality_expectation.trim().is_empty(),
+        "{name} fixture metadata quality_expectation must not be empty"
+    );
+    assert!(
+        !metadata.description.trim().is_empty(),
+        "{name} fixture metadata description must not be empty"
+    );
+    assert!(
+        metadata.privacy.titles_redacted
+            && metadata.privacy.paths_redacted
+            && metadata.privacy.hostnames_redacted
+            && metadata.privacy.usernames_redacted,
+        "{name} fixture metadata must declare all privacy redaction flags true: {:?}",
+        metadata.privacy
+    );
+
+    let expected_quality = parse_data_quality(&metadata.expected.data_quality);
+    assert_eq!(
         analysis.data_quality.level,
-        expected.expected_quality,
-        "wrong data quality for {}: reasons={:?} validation_errors={:?} validation_warnings={:?}",
-        expected.name,
+        expected_quality,
+        "wrong data quality for {name}: reasons={:?} validation_errors={:?} validation_warnings={:?}",
         analysis.data_quality.reasons,
         analysis.data_quality.validation_errors,
         analysis.data_quality.validation_warnings,
     );
 
-    if expected.expected_quality == DataQualityLevel::High {
+    if expected_quality == DataQualityLevel::High {
         assert!(
             analysis.data_quality.validation_errors.is_empty(),
-            "{} expected no validation errors: {:?}",
-            expected.name,
+            "{name} expected no validation errors: {:?}",
             analysis.data_quality.validation_errors
         );
         assert!(
             analysis.data_quality.validation_warnings.is_empty(),
-            "{} expected no validation warnings: {:?}",
-            expected.name,
+            "{name} expected no validation warnings: {:?}",
             analysis.data_quality.validation_warnings
         );
     }
 
-    if let Some(expected_cause) = expected.expected_primary {
+    if let Some(expected_cause) = parse_primary_cause(&metadata.expected.primary_cause) {
         let diagnosis = primary_diagnosis(&analysis)
-            .unwrap_or_else(|| panic!("{} expected a primary diagnosis", expected.name));
-        assert_eq!(
-            diagnosis.cause, expected_cause,
-            "wrong cause for {}",
-            expected.name
-        );
+            .unwrap_or_else(|| panic!("{name} expected a primary diagnosis"));
+        assert_eq!(diagnosis.cause, expected_cause, "wrong cause for {name}");
+
+        let accepted_confidence = metadata
+            .expected
+            .accepted_confidence
+            .iter()
+            .map(|value| parse_confidence(value))
+            .collect::<Vec<_>>();
         assert!(
-            expected.accepted_confidence.contains(&diagnosis.confidence),
-            "{} confidence {:?} not in accepted set {:?}",
-            expected.name,
+            accepted_confidence.contains(&diagnosis.confidence),
+            "{name} confidence {:?} not in accepted set {:?}",
             diagnosis.confidence,
-            expected.accepted_confidence,
+            accepted_confidence,
         );
 
         let evidence_text = diagnosis.evidence.join("\n");
-        for needle in expected.evidence_substrings {
+        for needle in &metadata.expected.evidence.contains {
             assert!(
                 evidence_text.contains(needle),
-                "{} missing evidence substring {:?}; evidence was:\n{}",
-                expected.name,
+                "{name} missing evidence substring {:?}; evidence was:\n{}",
                 needle,
                 evidence_text,
             );
@@ -105,56 +306,14 @@ fn assert_fixture(expected: ExpectedFixture) -> ReportAnalysisJson {
                     primary_diagnosis(&analysis).unwrap().cause,
                     StutterCause::Unknown
                 ),
-            "{} expected no strong diagnosis, got {:?}",
-            expected.name,
+            "{name} expected no strong diagnosis, got {:?}",
             primary_diagnosis(&analysis).map(|diagnosis| &diagnosis.cause),
         );
     }
 
-    if let Some(n) = expected.expected_artifacts.spikes {
-        assert_eq!(
-            analysis.artifacts_summary.spike_count, n,
-            "{} spike_count",
-            expected.name
-        );
-    }
-    if let Some(n) = expected.expected_artifacts.intervals {
-        assert_eq!(
-            analysis.artifacts_summary.interval_record_count, n,
-            "{} interval_record_count",
-            expected.name
-        );
-    }
-    if let Some(n) = expected.expected_artifacts.irq_events {
-        assert_eq!(
-            analysis.artifacts_summary.irq_event_count, n,
-            "{} irq_event_count",
-            expected.name
-        );
-    }
-    if let Some(n) = expected.expected_artifacts.gpu_samples {
-        assert_eq!(
-            analysis.artifacts_summary.gpu_sample_count, n,
-            "{} gpu_sample_count",
-            expected.name
-        );
-    }
-    if let Some(n) = expected.expected_artifacts.frames {
-        assert_eq!(
-            analysis.artifacts_summary.frame_event_count, n,
-            "{} frame_event_count",
-            expected.name
-        );
-    }
-    if let Some(n) = expected.expected_artifacts.block_io_events {
-        assert_eq!(
-            analysis.artifacts_summary.block_io_event_count, n,
-            "{} block_io_event_count",
-            expected.name
-        );
-    }
+    assert_artifacts_from_metadata(name, &analysis, &metadata);
 
-    analysis
+    (analysis, metadata)
 }
 
 fn find_candidate(
@@ -201,181 +360,56 @@ fn assert_candidate_contains(
 
 #[test]
 fn validation_corpus_cpu_pressure() {
-    assert_fixture(ExpectedFixture {
-        name: "cpu_pressure",
-        expected_primary: Some(StutterCause::CpuPressureCandidate),
-        accepted_confidence: &[Confidence::Medium, Confidence::High],
-        expected_quality: DataQualityLevel::High,
-        evidence_substrings: &["high CPU PSI"],
-        expected_artifacts: ExpectedArtifacts {
-            spikes: Some(3),
-            intervals: Some(1),
-            ..Default::default()
-        },
-    });
+    assert_fixture_from_metadata("cpu_pressure");
 }
 
 #[test]
 fn validation_corpus_block_io_stall() {
-    assert_fixture(ExpectedFixture {
-        name: "block_io_stall",
-        expected_primary: Some(StutterCause::BlockIoCandidate),
-        accepted_confidence: &[Confidence::Medium, Confidence::High],
-        expected_quality: DataQualityLevel::High,
-        evidence_substrings: &["block I/O"],
-        expected_artifacts: ExpectedArtifacts {
-            spikes: Some(3),
-            intervals: Some(1),
-            block_io_events: Some(1),
-            ..Default::default()
-        },
-    });
+    assert_fixture_from_metadata("block_io_stall");
 }
 
 #[test]
 fn validation_corpus_irq_heavy() {
-    assert_fixture(ExpectedFixture {
-        name: "irq_heavy",
-        expected_primary: Some(StutterCause::IrqDelayCandidate),
-        accepted_confidence: &[Confidence::Medium, Confidence::High],
-        expected_quality: DataQualityLevel::High,
-        evidence_substrings: &["IRQ"],
-        expected_artifacts: ExpectedArtifacts {
-            spikes: Some(3),
-            intervals: Some(1),
-            irq_events: Some(1),
-            ..Default::default()
-        },
-    });
+    assert_fixture_from_metadata("irq_heavy");
 }
 
 #[test]
 fn validation_corpus_gpu_bound_clean_cpu_has_gpu_candidate() {
-    let analysis = assert_fixture(ExpectedFixture {
-        name: "gpu_bound_clean_cpu",
-        expected_primary: Some(StutterCause::GpuBoundCandidate),
-        accepted_confidence: &[Confidence::Low, Confidence::Medium, Confidence::High],
-        expected_quality: DataQualityLevel::High,
-        evidence_substrings: &["GPU busy"],
-        expected_artifacts: ExpectedArtifacts {
-            spikes: Some(3),
-            intervals: Some(1),
-            gpu_samples: Some(1),
-            frames: Some(3),
-            ..Default::default()
-        },
-    });
+    let (analysis, _) = assert_fixture_from_metadata("gpu_bound_clean_cpu");
 
     assert_candidate_contains(&analysis, StutterCause::GpuBoundCandidate, &["GPU busy"]);
 }
 
 #[test]
 fn validation_corpus_real_world_game_scheduler_delay() {
-    assert_fixture(ExpectedFixture {
-        name: "real_world_game_scheduler_delay",
-        expected_primary: Some(StutterCause::GameThreadSchedulerDelay),
-        accepted_confidence: &[Confidence::Medium, Confidence::High],
-        expected_quality: DataQualityLevel::High,
-        evidence_substrings: &["game thread"],
-        expected_artifacts: ExpectedArtifacts {
-            spikes: Some(3),
-            intervals: Some(3),
-            gpu_samples: Some(1),
-            frames: Some(4),
-            ..Default::default()
-        },
-    });
+    assert_fixture_from_metadata("real_world_game_scheduler_delay");
 }
 
 #[test]
 fn validation_corpus_real_world_compositor_scheduler_delay() {
-    assert_fixture(ExpectedFixture {
-        name: "real_world_compositor_scheduler_delay",
-        expected_primary: Some(StutterCause::CompositorSchedulerDelay),
-        accepted_confidence: &[Confidence::Medium, Confidence::High],
-        expected_quality: DataQualityLevel::High,
-        evidence_substrings: &["compositor thread"],
-        expected_artifacts: ExpectedArtifacts {
-            spikes: Some(3),
-            intervals: Some(3),
-            gpu_samples: Some(1),
-            frames: Some(4),
-            ..Default::default()
-        },
-    });
+    assert_fixture_from_metadata("real_world_compositor_scheduler_delay");
 }
 
 #[test]
 fn validation_corpus_real_world_irq_overlap() {
-    assert_fixture(ExpectedFixture {
-        name: "real_world_irq_overlap",
-        expected_primary: Some(StutterCause::IrqDelayCandidate),
-        accepted_confidence: &[Confidence::Medium, Confidence::High],
-        expected_quality: DataQualityLevel::High,
-        evidence_substrings: &["IRQ"],
-        expected_artifacts: ExpectedArtifacts {
-            spikes: Some(3),
-            intervals: Some(3),
-            irq_events: Some(1),
-            ..Default::default()
-        },
-    });
+    assert_fixture_from_metadata("real_world_irq_overlap");
 }
 
 #[test]
 fn validation_corpus_real_world_block_io_stall() {
-    assert_fixture(ExpectedFixture {
-        name: "real_world_block_io_stall",
-        expected_primary: Some(StutterCause::BlockIoCandidate),
-        accepted_confidence: &[Confidence::Medium, Confidence::High],
-        expected_quality: DataQualityLevel::High,
-        evidence_substrings: &["block I/O"],
-        expected_artifacts: ExpectedArtifacts {
-            spikes: Some(3),
-            intervals: Some(3),
-            block_io_events: Some(1),
-            ..Default::default()
-        },
-    });
+    assert_fixture_from_metadata("real_world_block_io_stall");
 }
 
 #[test]
 fn validation_corpus_real_world_gpu_bound_clean_cpu() {
-    let analysis = assert_fixture(ExpectedFixture {
-        name: "real_world_gpu_bound_clean_cpu",
-        expected_primary: Some(StutterCause::GpuBoundCandidate),
-        accepted_confidence: &[Confidence::Low, Confidence::Medium, Confidence::High],
-        expected_quality: DataQualityLevel::High,
-        evidence_substrings: &["GPU busy"],
-        expected_artifacts: ExpectedArtifacts {
-            spikes: Some(3),
-            intervals: Some(3),
-            gpu_samples: Some(1),
-            frames: Some(4),
-            ..Default::default()
-        },
-    });
+    let (analysis, _) = assert_fixture_from_metadata("real_world_gpu_bound_clean_cpu");
 
     assert_candidate_contains(&analysis, StutterCause::GpuBoundCandidate, &["GPU busy"]);
 }
 
 #[test]
 fn validation_corpus_clean_run_is_high_quality_without_false_diagnosis() {
-    let analysis = assert_fixture(ExpectedFixture {
-        name: "clean_run",
-        expected_primary: None,
-        accepted_confidence: &[],
-        expected_quality: DataQualityLevel::High,
-        evidence_substrings: &[],
-        expected_artifacts: ExpectedArtifacts {
-            spikes: Some(0),
-            intervals: Some(2),
-            irq_events: Some(0),
-            gpu_samples: Some(0),
-            frames: Some(0),
-            block_io_events: Some(0),
-        },
-    });
+    let (analysis, _) = assert_fixture_from_metadata("clean_run");
 
     assert!(analysis.data_quality.validation_errors.is_empty());
     assert!(analysis.cluster_analysis.clusters.is_empty());
@@ -383,18 +417,7 @@ fn validation_corpus_clean_run_is_high_quality_without_false_diagnosis() {
 
 #[test]
 fn validation_corpus_truncated_drop_counters_is_not_high_quality() {
-    let analysis = assert_fixture(ExpectedFixture {
-        name: "truncated_drop_counters",
-        expected_primary: None,
-        accepted_confidence: &[],
-        expected_quality: DataQualityLevel::Medium,
-        evidence_substrings: &[],
-        expected_artifacts: ExpectedArtifacts {
-            spikes: Some(1),
-            intervals: Some(1),
-            ..Default::default()
-        },
-    });
+    let (analysis, _) = assert_fixture_from_metadata("truncated_drop_counters");
 
     assert!(analysis.data_quality.spike_events_truncated);
     assert!(analysis.data_quality.drop_counters_nonzero);
@@ -412,18 +435,7 @@ fn validation_corpus_truncated_drop_counters_is_not_high_quality() {
 
 #[test]
 fn validation_corpus_reused_tid_no_contamination() {
-    let analysis = assert_fixture(ExpectedFixture {
-        name: "reused_tid_no_contamination",
-        expected_primary: None,
-        accepted_confidence: &[],
-        expected_quality: DataQualityLevel::High,
-        evidence_substrings: &[],
-        expected_artifacts: ExpectedArtifacts {
-            spikes: Some(0),
-            intervals: Some(2),
-            ..Default::default()
-        },
-    });
+    let (analysis, _) = assert_fixture_from_metadata("reused_tid_no_contamination");
 
     let reused_tasks = analysis
         .session
@@ -463,12 +475,8 @@ fn validation_corpus_reused_tid_no_contamination() {
 
 #[test]
 fn validation_corpus_old_schema_warns_without_rejecting() {
-    let analysis = build_fixture_analysis("old_schema_warning");
+    let (analysis, _) = assert_fixture_from_metadata("old_schema_warning");
 
-    assert!(matches!(
-        analysis.data_quality.level,
-        DataQualityLevel::Medium | DataQualityLevel::High
-    ));
     assert_eq!(
         analysis.data_quality.schema_version,
         SESSION_SCHEMA_VERSION - 1

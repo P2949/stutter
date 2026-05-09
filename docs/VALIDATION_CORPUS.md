@@ -4,15 +4,11 @@ The validation corpus is the set of committed recording artifacts used to keep
 `stutter report --analysis-json` honest across diagnosis and artifact-schema
 changes.
 
-The corpus has two tiers:
+Each fixture directory must contain a machine-readable metadata contract:
 
-1. **Synthetic contract fixtures** in `stutter/tests/fixtures/runs/`.
-These are intentionally small and deterministic. They protect low-level
-loader, artifact-count, data-quality, schema-warning, and diagnosis contracts.
-2. **Sanitized real-world-shaped fixtures** in `stutter/tests/fixtures/runs/`.
-These are still deterministic and privacy-safe, but they model full recording
-situations more closely: a game main thread delay, a compositor delay, an IRQ
-overlap, a block I/O stall, and a GPU-bound frame spike with clean CPU pressure.
+```text
+stutter/tests/fixtures/runs/<fixture-name>/fixture.toml
+```
 
 Selected public examples are generated under:
 
@@ -20,9 +16,105 @@ Selected public examples are generated under:
 docs/examples/artifacts/v21/
 ```
 
-Those examples are safe to publish because they contain no real command lines,
-window titles, user names, host names, file paths, hardware serial numbers, or
-raw process identities from a user machine.
+Public examples use the same `fixture.toml` contract.
+
+## Fixture tiers
+
+The corpus has two tiers:
+
+1. **Synthetic contract fixtures** in `stutter/tests/fixtures/runs/`.
+   These are intentionally small and deterministic. They protect low-level
+   loader, artifact-count, data-quality, schema-warning, and diagnosis contracts.
+2. **Sanitized real-world-shaped fixtures** in `stutter/tests/fixtures/runs/`.
+   These are still deterministic and privacy-safe, but they model full recording
+   situations more closely: a game main thread delay, a compositor delay, an IRQ
+   overlap, a block I/O stall, and a GPU-bound frame spike with clean CPU
+   pressure.
+
+The public examples are safe to publish because they contain no real command
+lines, window titles, user names, host names, file paths, hardware serial
+numbers, or raw process identities from a user machine.
+
+## `fixture.toml` contract
+
+Every fixture metadata file uses this shape:
+
+```toml
+name = "real_world_game_scheduler_delay"
+schema_version = 21
+source = "sanitized-real-recording"
+quality_expectation = "High"
+description = "Game main/render thread had scheduler delay during a visible frame spike."
+
+[expected]
+primary_cause = "GameThreadSchedulerDelay"
+accepted_confidence = ["Medium", "High"]
+data_quality = "High"
+
+[expected.artifacts]
+spikes = 3
+intervals = 3
+irq_events = 0
+gpu_samples = 1
+frames = 4
+block_io_events = 0
+
+[expected.evidence]
+contains = [
+  "game thread",
+  "delayed",
+]
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true
+```
+
+The validation tests also understand minimum artifact counts. Use these only when
+a fixture is expected to grow without changing the meaning of the case:
+
+```toml
+[expected.artifacts]
+spikes_min = 1
+intervals_min = 1
+gpu_samples_min = 0
+frames_min = 1
+```
+
+Do not set both the exact and `_min` form for the same artifact count in new
+fixtures unless there is a specific reason.
+
+Supported `expected.primary_cause` values are:
+
+```text
+CompositorSchedulerDelay
+GameThreadSchedulerDelay
+IrqDelayCandidate
+GpuBoundCandidate
+BlockIoCandidate
+CpuPressureCandidate
+Unknown
+```
+
+Use `Unknown` when the fixture should produce no strong diagnosis.
+
+Supported `expected.accepted_confidence` values are:
+
+```text
+Low
+Medium
+High
+```
+
+Supported `expected.data_quality` values are:
+
+```text
+High
+Medium
+Low
+```
 
 ## Current synthetic contract fixtures
 
@@ -79,21 +171,23 @@ After regeneration, run:
 cargo test -p stutter validation_corpus_
 ```
 
-Commit the regenerated JSON and NDJSON artifacts together with the Rust changes
-that changed their shape or expected diagnosis.
+Commit regenerated JSON, NDJSON, and `fixture.toml` files together with the Rust
+changes that changed their shape or expected diagnosis.
 
 ## Adding a new corpus case
 
-A new corpus case must follow these rules:
+ A new corpus case must follow these rules:
 
 1. Prefer adding a fixture constructor in `stutter/src/test_fixture_builder.rs`.
-2. Do not hand-edit generated fixture JSON unless the generator cannot represent
-   the case.
-3. Do not add a new diagnosis enum variant just to make a fixture pass.
-4. Add a `validation_corpus_*` test in `stutter/src/validation_corpus_tests.rs`.
-5. Assert the expected `StutterCause`, accepted confidence band, data-quality
-   level, evidence substring, and artifact counts.
-6. Keep public examples sanitized:
+2. Add the fixture to `write_validation_corpus`.
+3. Add a `fixture_metadata_for` entry for the fixture.
+4. Do not hand-edit generated fixture JSON or `fixture.toml` unless the generator
+   cannot represent the case.
+5. Do not add a new diagnosis enum variant just to make a fixture pass.
+6. Add a `validation_corpus_*` test in `stutter/src/validation_corpus_tests.rs`
+   only if the fixture has extra case-specific invariants beyond the generic
+   metadata checks.
+7. Keep public examples sanitized:
 
    * no real user names,
    * no host names,
@@ -109,4 +203,6 @@ The artifact schema is broad: each run may include `session.json`,
 `metadata.json`, `spike_events.json`, `interval.json`, `irq_events.json`,
 `gpu_samples.json`, `frame_correlation.json`, `io_events.json`, and other event
 streams. Generating fixtures through `test_fixture_builder` keeps the schema
-consistent with the Rust types and avoids stale hand-written JSON.
+consistent with the Rust types and avoids stale hand-written JSON. Generating
+`fixture.toml` from the same fixture constructor keeps documentation,
+expectations, privacy assertions, and committed artifacts in sync.

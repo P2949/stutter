@@ -31,6 +31,67 @@ const OPTIONAL_ARTIFACT_FILES: &[&str] = &[
     "scx_events.json",
 ];
 
+#[derive(serde::Serialize)]
+struct FixtureMetadata {
+    name: String,
+    schema_version: u32,
+    source: String,
+    quality_expectation: String,
+    description: String,
+    expected: FixtureExpected,
+    privacy: FixturePrivacy,
+}
+
+#[derive(serde::Serialize)]
+struct FixtureExpected {
+    primary_cause: String,
+    accepted_confidence: Vec<String>,
+    data_quality: String,
+    artifacts: FixtureExpectedArtifacts,
+    evidence: FixtureExpectedEvidence,
+}
+
+#[derive(Default, serde::Serialize)]
+struct FixtureExpectedArtifacts {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    spikes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    spikes_min: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    intervals: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    intervals_min: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    irq_events: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    irq_events_min: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gpu_samples: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gpu_samples_min: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frames: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frames_min: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    block_io_events: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    block_io_events_min: Option<u64>,
+}
+
+#[derive(serde::Serialize)]
+struct FixtureExpectedEvidence {
+    contains: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct FixturePrivacy {
+    titles_redacted: bool,
+    paths_redacted: bool,
+    hostnames_redacted: bool,
+    usernames_redacted: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct FixtureArtifacts {
     pub(crate) spikes: Vec<SpikeEvent>,
@@ -814,6 +875,9 @@ fn write_fixture(
     fs::create_dir_all(&dir)
         .with_context(|| format!("failed to create fixture dir {}", dir.display()))?;
 
+    let fixture_metadata = fixture_metadata_for(name, &artifacts);
+
+    write_toml_pretty(dir.join("fixture.toml"), &fixture_metadata)?;
     write_json_pretty(dir.join("session.json"), &session)?;
     write_json_pretty(
         dir.join("metadata.json"),
@@ -833,6 +897,266 @@ fn write_fixture(
     write_ndjson_values(dir.join("frame_correlation.json"), &artifacts.frame_events)?;
     write_ndjson_values(dir.join("io_events.json"), &artifacts.block_io_events)?;
 
+    Ok(())
+}
+
+fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMetadata {
+    match name {
+        "cpu_pressure" => fixture_metadata(
+            name,
+            "synthetic-contract",
+            "High",
+            "Synthetic CPU pressure fixture with high CPU PSI near a scheduler-latency spike.",
+            "CpuPressureCandidate",
+            &["Medium", "High"],
+            "High",
+            &["high CPU PSI"],
+            exact_artifacts(artifacts),
+        ),
+        "block_io_stall" => fixture_metadata(
+            name,
+            "synthetic-contract",
+            "High",
+            "Synthetic block I/O fixture with a long request overlapping a scheduler-latency spike.",
+            "BlockIoCandidate",
+            &["Medium", "High"],
+            "High",
+            &["block I/O"],
+            exact_artifacts(artifacts),
+        ),
+        "irq_heavy" => fixture_metadata(
+            name,
+            "synthetic-contract",
+            "High",
+            "Synthetic IRQ fixture with a long IRQ handler overlapping scheduler-latency spikes.",
+            "IrqDelayCandidate",
+            &["Medium", "High"],
+            "High",
+            &["IRQ"],
+            exact_artifacts(artifacts),
+        ),
+        "gpu_bound_clean_cpu" => fixture_metadata(
+            name,
+            "synthetic-contract",
+            "High",
+            "Synthetic GPU-bound fixture with high GPU busy and clean CPU pressure.",
+            "GpuBoundCandidate",
+            &["Low", "Medium", "High"],
+            "High",
+            &["GPU busy"],
+            exact_artifacts(artifacts),
+        ),
+        "clean_run" => fixture_metadata(
+            name,
+            "synthetic-contract",
+            "High",
+            "Synthetic clean run fixture that should remain high quality and produce no strong diagnosis.",
+            "Unknown",
+            &[],
+            "High",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+        "truncated_drop_counters" => fixture_metadata(
+            name,
+            "synthetic-contract",
+            "Medium",
+            "Synthetic low-quality fixture with truncated spike events and non-zero drop counters.",
+            "Unknown",
+            &[],
+            "Medium",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+        "reused_tid_no_contamination" => fixture_metadata(
+            name,
+            "synthetic-contract",
+            "High",
+            "Synthetic reused-TID fixture that verifies separate logical tasks are not merged.",
+            "Unknown",
+            &[],
+            "High",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+        "old_schema_warning" => fixture_metadata(
+            name,
+            "synthetic-contract",
+            "Medium",
+            "Synthetic old-schema fixture that should warn without being rejected.",
+            "Unknown",
+            &[],
+            "Medium",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+        "real_world_game_scheduler_delay" => fixture_metadata(
+            name,
+            "sanitized-real-recording",
+            "High",
+            "Game main/render thread had scheduler delay during a visible frame spike.",
+            "GameThreadSchedulerDelay",
+            &["Medium", "High"],
+            "High",
+            &["game thread", "delayed"],
+            exact_artifacts(artifacts),
+        ),
+        "real_world_compositor_scheduler_delay" => fixture_metadata(
+            name,
+            "sanitized-real-recording",
+            "High",
+            "Compositor thread had scheduler delay during a visible frame spike.",
+            "CompositorSchedulerDelay",
+            &["Medium", "High"],
+            "High",
+            &["compositor thread", "delayed"],
+            exact_artifacts(artifacts),
+        ),
+        "real_world_irq_overlap" => fixture_metadata(
+            name,
+            "sanitized-real-recording",
+            "High",
+            "IRQ handler overlapped the scheduler-latency cluster strongly enough to be the primary candidate.",
+            "IrqDelayCandidate",
+            &["Medium", "High"],
+            "High",
+            &["IRQ"],
+            exact_artifacts(artifacts),
+        ),
+        "real_world_block_io_stall" => fixture_metadata(
+            name,
+            "sanitized-real-recording",
+            "High",
+            "Block I/O request overlapped the scheduler-latency cluster strongly enough to be the primary candidate.",
+            "BlockIoCandidate",
+            &["Medium", "High"],
+            "High",
+            &["block I/O"],
+            exact_artifacts(artifacts),
+        ),
+        "real_world_gpu_bound_clean_cpu" => fixture_metadata(
+            name,
+            "sanitized-real-recording",
+            "High",
+            "GPU busy was high during a frame spike while CPU pressure stayed clean.",
+            "GpuBoundCandidate",
+            &["Low", "Medium", "High"],
+            "High",
+            &["GPU busy"],
+            exact_artifacts(artifacts),
+        ),
+        "game_scheduler_pressure" => fixture_metadata(
+            name,
+            "autotune-replay",
+            "High",
+            "Autotune replay fixture with game scheduler pressure.",
+            "GameThreadSchedulerDelay",
+            &["Medium", "High"],
+            "High",
+            &["game thread"],
+            exact_artifacts(artifacts),
+        ),
+        "gpu_bound" => fixture_metadata(
+            name,
+            "autotune-replay",
+            "High",
+            "Autotune replay fixture for a GPU-bound run.",
+            "GpuBoundCandidate",
+            &["Low", "Medium", "High"],
+            "High",
+            &["GPU busy"],
+            exact_artifacts(artifacts),
+        ),
+        "low_quality" => fixture_metadata(
+            name,
+            "autotune-replay",
+            "Medium",
+            "Autotune replay fixture for a low-quality run with dropped or truncated data.",
+            "Unknown",
+            &[],
+            "Medium",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+        other => fixture_metadata(
+            other,
+            "synthetic-contract",
+            "High",
+            "Generated validation fixture.",
+            "Unknown",
+            &[],
+            "High",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fixture_metadata(
+    name: &str,
+    source: &str,
+    quality_expectation: &str,
+    description: &str,
+    primary_cause: &str,
+    accepted_confidence: &[&str],
+    data_quality: &str,
+    evidence_contains: &[&str],
+    artifacts: FixtureExpectedArtifacts,
+) -> FixtureMetadata {
+    FixtureMetadata {
+        name: name.to_owned(),
+        schema_version: SESSION_SCHEMA_VERSION,
+        source: source.to_owned(),
+        quality_expectation: quality_expectation.to_owned(),
+        description: description.to_owned(),
+        expected: FixtureExpected {
+            primary_cause: primary_cause.to_owned(),
+            accepted_confidence: accepted_confidence
+                .iter()
+                .map(|item| (*item).to_owned())
+                .collect(),
+            data_quality: data_quality.to_owned(),
+            artifacts,
+            evidence: FixtureExpectedEvidence {
+                contains: evidence_contains
+                    .iter()
+                    .map(|item| (*item).to_owned())
+                    .collect(),
+            },
+        },
+        privacy: FixturePrivacy {
+            titles_redacted: true,
+            paths_redacted: true,
+            hostnames_redacted: true,
+            usernames_redacted: true,
+        },
+    }
+}
+
+fn exact_artifacts(artifacts: &FixtureArtifacts) -> FixtureExpectedArtifacts {
+    FixtureExpectedArtifacts {
+        spikes: Some(artifacts.spikes.len() as u64),
+        spikes_min: None,
+        intervals: Some(artifacts.intervals.len() as u64),
+        intervals_min: None,
+        irq_events: Some(artifacts.irq_events.len() as u64),
+        irq_events_min: None,
+        gpu_samples: Some(artifacts.gpu_samples.len() as u64),
+        gpu_samples_min: None,
+        frames: Some(artifacts.frame_events.len() as u64),
+        frames_min: None,
+        block_io_events: Some(artifacts.block_io_events.len() as u64),
+        block_io_events_min: None,
+    }
+}
+
+fn write_toml_pretty<T: serde::Serialize>(path: impl AsRef<Path>, value: &T) -> anyhow::Result<()> {
+    let path = path.as_ref();
+    let text = toml::to_string_pretty(value)
+        .with_context(|| format!("failed to serialize TOML fixture {}", path.display()))?;
+    fs::write(path, text)
+        .with_context(|| format!("failed to write TOML fixture {}", path.display()))?;
     Ok(())
 }
 
