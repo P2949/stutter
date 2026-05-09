@@ -537,6 +537,60 @@ fn validation_corpus_real_game_thread_scheduler_delay() {
 }
 
 #[test]
+fn validation_corpus_real_compositor_scheduler_delay() {
+    let (analysis, _) = assert_fixture_from_metadata("real_compositor_scheduler_delay");
+
+    assert_eq!(analysis.data_quality.level, DataQualityLevel::High);
+    assert!(analysis.data_quality.validation_errors.is_empty());
+    assert!(analysis.data_quality.validation_warnings.is_empty());
+
+    let diagnosis = primary_diagnosis(&analysis)
+        .expect("real_compositor_scheduler_delay expected a primary diagnosis");
+    assert_eq!(
+        diagnosis.cause,
+        StutterCause::CompositorSchedulerDelay,
+        "real_compositor_scheduler_delay must stay classified as compositor scheduler delay"
+    );
+
+    let evidence_text = diagnosis.evidence.join("\n").to_ascii_lowercase();
+    assert!(
+        evidence_text.contains("compositor thread") || evidence_text.contains("gamescope"),
+        "real_compositor_scheduler_delay missing compositor/gamescope evidence; evidence was:\n{}",
+        diagnosis.evidence.join("\n")
+    );
+
+    assert_primary_anchor_class_in(
+        &analysis,
+        StutterCause::CompositorSchedulerDelay,
+        &[
+            crate::process_tree::TaskClass::Compositor,
+            crate::process_tree::TaskClass::GameScope,
+        ],
+    );
+
+    assert!(
+        analysis.artifacts_summary.spike_count >= 3,
+        "real_compositor_scheduler_delay should contain clustered compositor/game/helper scheduler spikes"
+    );
+    assert!(
+        analysis.artifacts_summary.frame_event_count >= 1,
+        "real_compositor_scheduler_delay must contain frame data near the scheduler spike"
+    );
+    assert!(
+        analysis.artifacts_summary.interval_record_count >= 1,
+        "real_compositor_scheduler_delay should contain interval data so CPU pressure can be ruled out"
+    );
+    assert_eq!(
+        analysis.artifacts_summary.irq_event_count, 0,
+        "IRQ evidence should not dominate real_compositor_scheduler_delay"
+    );
+    assert_eq!(
+        analysis.artifacts_summary.block_io_event_count, 0,
+        "block I/O evidence should not dominate real_compositor_scheduler_delay"
+    );
+}
+
+#[test]
 fn validation_corpus_game_thread_scheduler_delay() {
     assert_fixture_from_metadata("game_thread_scheduler_delay");
 }
