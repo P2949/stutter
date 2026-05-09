@@ -15,6 +15,11 @@ use serde::{Deserialize, Serialize};
 use crate::{cli::RulesCommand, process_tree::TaskClass};
 
 pub mod import;
+pub mod loader;
+pub mod paths;
+
+pub use loader::{LoadCommunityRulesInput, load_rules_db, load_rules_dir, load_rules_file};
+pub use paths::{default_system_rules_dirs, default_user_rules_dir};
 
 #[cfg(test)]
 const TEST_FIXTURE_RULES_JSON: &str =
@@ -74,7 +79,7 @@ impl Default for CommunityRulesConfig {
         Self {
             enabled: true,
             load_builtin_fixture: cfg!(test),
-            user_rules_dir: default_community_rules_dir(),
+            user_rules_dir: default_user_rules_dir(),
             explicit_rules_files: Vec::new(),
         }
     }
@@ -103,7 +108,7 @@ impl CommunityRulesConfig {
             });
 
             config.user_rules_dir = if wants_user {
-                default_community_rules_dir()
+                default_user_rules_dir()
             } else {
                 None
             };
@@ -127,43 +132,13 @@ pub struct CommunityRulesMetadataFile {
 }
 
 pub fn load_community_rules(config: &CommunityRulesConfig) -> anyhow::Result<CommunityRulesDb> {
-    if !config.enabled {
-        return Ok(CommunityRulesDb::empty());
-    }
-
-    let mut files = Vec::new();
-
-    for path in &config.explicit_rules_files {
-        files.push(load_community_rules_file_from_path(path)?);
-    }
-
-    if let Some(user_rules_dir) = &config.user_rules_dir {
-        files.extend(load_community_rules_files_from_dir(user_rules_dir)?);
-    }
-
-    let system_path = system_community_rules_file();
-    if system_path.exists() {
-        files.push(load_community_rules_file_from_path(&system_path)?);
-    }
-
-    if config.load_builtin_fixture {
-        #[cfg(test)]
-        {
-            files.push(parse_community_rules_file(
-                TEST_FIXTURE_RULES_JSON,
-                "embedded community rules test fixture",
-            )?);
-        }
-
-        #[cfg(not(test))]
-        {
-            log::warn!(
-                "ignoring community_rules load_builtin_fixture=true because the built-in rules fixture is test-only"
-            );
-        }
-    }
-
-    CommunityRulesDb::from_files(files)
+    load_rules_db(LoadCommunityRulesInput {
+        enabled: config.enabled,
+        load_test_fixture: config.load_builtin_fixture,
+        user_rules_dir: config.user_rules_dir.clone(),
+        explicit_rules_files: config.explicit_rules_files.clone(),
+        system_rules_dirs: default_system_rules_dirs(),
+    })
 }
 
 pub fn load_community_rules_file(
@@ -173,10 +148,7 @@ pub fn load_community_rules_file(
         CommunityRulesSourceKind::BuiltinFixture => {
             #[cfg(test)]
             {
-                parse_community_rules_file(
-                    TEST_FIXTURE_RULES_JSON,
-                    "embedded community rules test fixture",
-                )
+                load_rules_file(Path::new("__stutter_test_fixture__"))
             }
 
             #[cfg(not(test))]
@@ -185,20 +157,27 @@ pub fn load_community_rules_file(
             }
         }
         CommunityRulesSourceKind::UserData => {
-            let dir = default_community_rules_dir().ok_or_else(|| {
+            let dir = default_user_rules_dir().ok_or_else(|| {
                 anyhow::anyhow!(
                     "cannot locate user community rules directory because neither XDG_DATA_HOME nor HOME is set"
                 )
             })?;
-            let mut files = load_community_rules_files_from_dir(&dir)?;
+            let mut files = load_rules_dir(&dir)?;
             files.drain(..).next().ok_or_else(|| {
                 anyhow::anyhow!("no user community rules files found in {}", dir.display())
             })
         }
         CommunityRulesSourceKind::SystemData => {
-            load_community_rules_file_from_path(&system_community_rules_file())
+            let mut files = Vec::new();
+            for dir in default_system_rules_dirs() {
+                files.extend(load_rules_dir(&dir)?);
+            }
+            files
+                .drain(..)
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("no system community rules files found"))
         }
-        CommunityRulesSourceKind::ExplicitPath(path) => load_community_rules_file_from_path(&path),
+        CommunityRulesSourceKind::ExplicitPath(path) => load_rules_file(&path),
     }
 }
 
@@ -208,69 +187,8 @@ pub fn load_community_rules_db(
     CommunityRulesDb::from_file(load_community_rules_file(source)?)
 }
 
-fn load_community_rules_files_from_dir(dir: &Path) -> anyhow::Result<Vec<CommunityRulesFile>> {
-    if !dir.exists() {
-        return Ok(Vec::new());
-    }
-
-    let mut paths = imported_rules_files(dir)?;
-    paths.retain(|path| {
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .map(|name| name != "enabled.generated.json")
-            .unwrap_or(false)
-    });
-
-    let mut files = Vec::new();
-    for path in paths {
-        files.push(load_community_rules_file_from_path(&path)?);
-    }
-
-    Ok(files)
-}
-
-fn load_community_rules_file_from_path(path: &Path) -> anyhow::Result<CommunityRulesFile> {
-    let data = fs::read_to_string(path)
-        .with_context(|| format!("failed to read community rules file {}", path.display()))?;
-    parse_community_rules_file(&data, &path.display().to_string())
-}
-
-fn parse_community_rules_file(
-    data: &str,
-    source_label: &str,
-) -> anyhow::Result<CommunityRulesFile> {
-    let file: CommunityRulesFile = serde_json::from_str(data)
-        .with_context(|| format!("failed to parse community rules JSON from {source_label}"))?;
-    anyhow::ensure!(
-        matches!(file.schema_version, 1 | 2),
-        "unsupported community rules schema version {}",
-        file.schema_version
-    );
-    Ok(file)
-}
-
 pub fn default_community_rules_dir() -> Option<PathBuf> {
-    #[allow(clippy::collapsible_if)]
-    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-        if !xdg.trim().is_empty() {
-            return Some(PathBuf::from(xdg).join("stutter").join("community-rules"));
-        }
-    }
-
-    std::env::var("HOME")
-        .ok()
-        .filter(|home| !home.trim().is_empty())
-        .map(|home| {
-            PathBuf::from(home)
-                .join(".local")
-                .join("share")
-                .join("stutter")
-                .join("community-rules")
-        })
-}
-
-fn system_community_rules_file() -> PathBuf {
-    PathBuf::from("/usr/share/stutter/community-rules/community-rules.generated.json")
+    default_user_rules_dir()
 }
 
 pub fn rules_command(command: RulesCommand) -> anyhow::Result<()> {
@@ -649,12 +567,12 @@ impl CommunityRulesDb {
     pub fn from_files(files: Vec<CommunityRulesFile>) -> anyhow::Result<Self> {
         let mut db = Self::empty();
         for file in files {
-            db.extend_file(file)?;
+            db.merge_file(file)?;
         }
         Ok(db)
     }
 
-    fn extend_file(&mut self, file: CommunityRulesFile) -> anyhow::Result<()> {
+    pub fn merge_file(&mut self, file: CommunityRulesFile) -> anyhow::Result<()> {
         anyhow::ensure!(
             matches!(file.schema_version, 1 | 2),
             "unsupported community rules schema version {}",
@@ -683,7 +601,7 @@ impl CommunityRulesDb {
 
     pub fn from_file(file: CommunityRulesFile) -> anyhow::Result<Self> {
         let mut db = Self::empty();
-        db.extend_file(file)?;
+        db.merge_file(file)?;
         Ok(db)
     }
 
