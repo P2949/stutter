@@ -3,7 +3,7 @@
 #[cfg(test)]
 use std::sync::OnceLock;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -201,11 +201,235 @@ pub fn default_community_rules_dir() -> Option<PathBuf> {
 pub fn rules_command(command: RulesCommand) -> anyhow::Result<()> {
     match command {
         RulesCommand::Import(args) => rules_import_command(args),
+        RulesCommand::Check(args) => rules_check_command(args),
         RulesCommand::List(_) => rules_list_command(),
         RulesCommand::Status(_) => rules_status_command(),
         RulesCommand::Enable(args) => rules_enable_command(&args.name),
         RulesCommand::Disable(_) => rules_disable_command(),
         RulesCommand::Remove(args) => rules_remove_command(&args.name, args.dry_run),
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct RulesCheckReport {
+    source_files: usize,
+    json_objects: usize,
+    imported_rules: usize,
+    duplicates: usize,
+    ambiguous_names: usize,
+    context_required_game_rules: usize,
+    exact_only_non_game_rules: usize,
+    skipped_no_name: usize,
+    skipped_bad_name: usize,
+    skipped_unknown_class: usize,
+    unknown_mapped_classes: usize,
+    rules_mapped_to_unknown: usize,
+    classes: BTreeMap<String, usize>,
+    largest_duplicate_groups: Vec<(String, usize)>,
+    warnings: Vec<String>,
+}
+
+fn rules_check_command(args: crate::cli::RulesCheckArgs) -> anyhow::Result<()> {
+    let report = match (args.source, args.generated) {
+        (Some(source), None) => rules_check_source_command(&source)?,
+        (None, Some(generated)) => rules_check_generated_command(&generated)?,
+        _ => anyhow::bail!("rules check requires either --source PATH or --generated PATH"),
+    };
+
+    print_rules_check_report(&report);
+    Ok(())
+}
+
+fn rules_check_source_command(source: &Path) -> anyhow::Result<RulesCheckReport> {
+    let input = ImportInput {
+        source_dir: source.to_path_buf(),
+        source_name: "rules check".to_owned(),
+        source_repo: None,
+        source_commit: None,
+        generated_at: generated_at_now(),
+    };
+
+    let imported = import_ananicy_rules(input)?;
+    let file = imported.file;
+    let import_report = imported.report;
+
+    CommunityRulesDb::from_file(file.clone())?;
+
+    Ok(RulesCheckReport::from_source_import(file, import_report))
+}
+
+fn rules_check_generated_command(generated: &Path) -> anyhow::Result<RulesCheckReport> {
+    let file = load_rules_file(generated)?;
+    CommunityRulesDb::from_file(file.clone())?;
+    Ok(RulesCheckReport::from_generated_file(file))
+}
+
+impl RulesCheckReport {
+    fn from_source_import(file: CommunityRulesFile, import_report: ImportReport) -> Self {
+        let mut report = Self::from_rules_file(&file);
+        report.source_files = import_report.scanned_files;
+        report.json_objects = import_report.parsed_objects;
+        report.imported_rules = import_report.imported_rules;
+        report.skipped_no_name = import_report.skipped_no_name;
+        report.skipped_bad_name = import_report.skipped_bad_name;
+        report.skipped_unknown_class = import_report.skipped_unknown_class;
+        report.duplicates += import_report.duplicate_rules;
+        report.ambiguous_names = import_report.ambiguous_rules;
+        report.context_required_game_rules = import_report.context_required_game_rules;
+        report.exact_only_non_game_rules = import_report.exact_only_non_game_rules;
+
+        for (class, count) in import_report.classes {
+            report.classes.entry(class).or_insert(count);
+        }
+
+        report
+    }
+
+    fn from_generated_file(file: CommunityRulesFile) -> Self {
+        let mut report = Self::from_rules_file(&file);
+        report.source_files = 1;
+        report.json_objects = file.rules.len();
+        report.imported_rules = file.rules.len();
+        report
+    }
+
+    fn from_rules_file(file: &CommunityRulesFile) -> Self {
+        let mut report = Self::default();
+        let mut name_counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut warning_counts: BTreeMap<String, usize> = BTreeMap::new();
+
+        for rule in &file.rules {
+            let normalized_name = if rule.normalized_name.trim().is_empty() {
+                normalize_process_name(&rule.name).unwrap_or_else(|| rule.name.clone())
+            } else {
+                rule.normalized_name.clone()
+            };
+
+            *name_counts.entry(normalized_name.clone()).or_default() += 1;
+            *report
+                .classes
+                .entry(rule.stutter_class.clone())
+                .or_default() += 1;
+
+            let class = TaskClass::from_str_opt(&rule.stutter_class);
+            match class {
+                None => {
+                    report.unknown_mapped_classes += 1;
+                }
+                Some(TaskClass::Unknown) => {
+                    report.rules_mapped_to_unknown += 1;
+                }
+                Some(class) => {
+                    let guarded = is_guarded_community_rule_name(&normalized_name);
+                    let ambiguous = rule.ambiguous || guarded;
+
+                    if ambiguous {
+                        report.ambiguous_names += 1;
+                    }
+
+                    if class == TaskClass::Game && (ambiguous || rule_requires_context(rule)) {
+                        report.context_required_game_rules += 1;
+                        let warning = format!("{normalized_name} requires Steam/Proton context");
+                        *warning_counts.entry(warning).or_default() += 1;
+                    }
+
+                    if exact_only_non_game_check_rule(class, ambiguous) {
+                        report.exact_only_non_game_rules += 1;
+                    }
+
+                    if ambiguous && !matches!(class, TaskClass::Game) {
+                        let warning = format!(
+                            "{normalized_name} is guarded and will not classify as a non-game rule without stronger evidence"
+                        );
+                        *warning_counts.entry(warning).or_default() += 1;
+                    }
+                }
+            }
+        }
+
+        let mut duplicate_groups = name_counts
+            .into_iter()
+            .filter(|(_, count)| *count > 1)
+            .collect::<Vec<_>>();
+        duplicate_groups
+            .sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+
+        report.duplicates = duplicate_groups
+            .iter()
+            .map(|(_, count)| count.saturating_sub(1))
+            .sum();
+        report.largest_duplicate_groups = duplicate_groups.into_iter().take(10).collect();
+        report.warnings = warning_counts.into_keys().take(20).collect();
+        report
+    }
+
+    fn skipped_objects(&self) -> usize {
+        self.skipped_no_name + self.skipped_bad_name + self.skipped_unknown_class
+    }
+
+    fn ok(&self) -> bool {
+        self.unknown_mapped_classes == 0 && self.rules_mapped_to_unknown == 0
+    }
+}
+
+fn exact_only_non_game_check_rule(class: TaskClass, ambiguous: bool) -> bool {
+    !ambiguous
+        && !matches!(
+            class,
+            TaskClass::Unknown
+                | TaskClass::Game
+                | TaskClass::GameScope
+                | TaskClass::WineServer
+                | TaskClass::SteamRuntime
+        )
+}
+
+fn print_rules_check_report(report: &RulesCheckReport) {
+    println!(
+        "rules check: {}",
+        if report.ok() { "ok" } else { "warning" }
+    );
+    println!("source files: {}", report.source_files);
+    println!("json objects: {}", report.json_objects);
+    println!("imported rules: {}", report.imported_rules);
+    println!("objects skipped: {}", report.skipped_objects());
+    println!("duplicates: {}", report.duplicates);
+    println!("ambiguous names: {}", report.ambiguous_names);
+    println!(
+        "context-required game rules: {}",
+        report.context_required_game_rules
+    );
+    println!(
+        "exact-only non-game rules: {}",
+        report.exact_only_non_game_rules
+    );
+    println!("unknown mapped classes: {}", report.unknown_mapped_classes);
+    println!(
+        "rules mapped to Unknown: {}",
+        report.rules_mapped_to_unknown
+    );
+
+    if report.classes.is_empty() {
+        println!("classes: none");
+    } else {
+        println!("classes:");
+        for (class, count) in &report.classes {
+            println!("  {class}: {count}");
+        }
+    }
+
+    if !report.largest_duplicate_groups.is_empty() {
+        println!("largest duplicate groups:");
+        for (name, count) in &report.largest_duplicate_groups {
+            println!("  {name}: {count}");
+        }
+    }
+
+    if !report.warnings.is_empty() {
+        println!("warnings:");
+        for warning in &report.warnings {
+            println!("  {warning}");
+        }
     }
 }
 
@@ -1069,6 +1293,133 @@ mod rules_command_tests {
 ]
 }}"#
         )
+    }
+
+    fn generated_rules_json_for_check() -> String {
+        r#"{
+"schema_version": 2,
+"source": {
+  "name": "test",
+  "repo": null,
+  "commit": null,
+  "generated_at": "2026-05-09T00:00:00Z"
+},
+"rules": [
+  {
+    "name": "build.exe",
+    "normalized_name": "build.exe",
+    "type": "Game",
+    "stutter_class": "Game",
+    "confidence": 0.70,
+    "source_path": "00-default/Games/wine_proton/test.rules",
+    "context": ["wine_or_proton_or_steam"],
+    "title": "Build Game",
+    "source_url": null,
+    "comment": null,
+    "ambiguous": true
+  },
+  {
+    "name": "rustc",
+    "normalized_name": "rustc",
+    "type": "Compiler",
+    "stutter_class": "Compiler",
+    "confidence": 0.80,
+    "source_path": "00-default/Development/compiler.rules",
+    "context": [],
+    "title": null,
+    "source_url": null,
+    "comment": null,
+    "ambiguous": false
+  },
+  {
+    "name": "rustc-copy",
+    "normalized_name": "rustc",
+    "type": "Compiler",
+    "stutter_class": "Compiler",
+    "confidence": 0.80,
+    "source_path": "00-default/Development/compiler-copy.rules",
+    "context": [],
+    "title": null,
+    "source_url": null,
+    "comment": null,
+    "ambiguous": false
+  },
+  {
+    "name": "mystery",
+    "normalized_name": "mystery",
+    "type": "Unknown",
+    "stutter_class": "Unknown",
+    "confidence": 0.50,
+    "source_path": "00-default/Other/unknown.rules",
+    "context": [],
+    "title": null,
+    "source_url": null,
+    "comment": null,
+    "ambiguous": false
+  }
+]
+}"#
+        .to_owned()
+    }
+
+    #[test]
+    fn rules_check_generated_reports_duplicates_ambiguous_and_unknown() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ananicy.generated.json");
+        fs::write(&path, generated_rules_json_for_check()).unwrap();
+
+        let report = rules_check_generated_command(&path).unwrap();
+
+        assert_eq!(report.source_files, 1);
+        assert_eq!(report.json_objects, 4);
+        assert_eq!(report.imported_rules, 4);
+        assert_eq!(report.duplicates, 1);
+        assert_eq!(report.ambiguous_names, 1);
+        assert_eq!(report.context_required_game_rules, 1);
+        assert_eq!(report.exact_only_non_game_rules, 2);
+        assert_eq!(report.rules_mapped_to_unknown, 1);
+        assert_eq!(report.unknown_mapped_classes, 0);
+        assert_eq!(
+            report.largest_duplicate_groups,
+            vec![("rustc".to_owned(), 2)]
+        );
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("build.exe requires Steam/Proton context"))
+        );
+    }
+
+    #[test]
+    fn rules_check_source_reports_import_skips_and_classes() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("source");
+        fs::create_dir_all(source.join("00-default/Mixed")).unwrap();
+        fs::write(
+            source.join("00-default/Mixed/mixed.rules"),
+            r#"
+{"name":"build.exe","type":"Game"}
+{"name":"rustc","type":"Compiler"}
+{"type":"Game"}
+{"name":"mystery","type":"MysteryCategory"}
+"#,
+        )
+        .unwrap();
+
+        let report = rules_check_source_command(&source).unwrap();
+
+        assert_eq!(report.source_files, 1);
+        assert_eq!(report.json_objects, 4);
+        assert_eq!(report.imported_rules, 2);
+        assert_eq!(report.skipped_no_name, 1);
+        assert_eq!(report.skipped_unknown_class, 1);
+        assert_eq!(report.skipped_objects(), 2);
+        assert_eq!(report.ambiguous_names, 1);
+        assert_eq!(report.context_required_game_rules, 1);
+        assert_eq!(report.exact_only_non_game_rules, 1);
+        assert_eq!(report.classes.get("Game"), Some(&1));
+        assert_eq!(report.classes.get("Compiler"), Some(&1));
     }
 
     #[test]

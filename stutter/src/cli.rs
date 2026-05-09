@@ -937,7 +937,22 @@ pub enum RulesCommand {
     Status(RulesStatusArgs),
     Enable(RulesEnableArgs),
     Disable(RulesDisableArgs),
+    Check(RulesCheckArgs),
     Remove(RulesRemoveArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+#[command(group(
+    clap::ArgGroup::new("rules_check_input")
+        .required(true)
+        .args(["source", "generated"])
+))]
+pub struct RulesCheckArgs {
+    #[arg(long = "source", value_name = "PATH", conflicts_with = "generated")]
+    pub source: Option<PathBuf>,
+
+    #[arg(long = "generated", value_name = "PATH", conflicts_with = "source")]
+    pub generated: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -1959,6 +1974,63 @@ mod auto_focus_cli_tests {
 #[cfg(test)]
 mod rules_cli_tests {
     use super::*;
+
+    #[test]
+    fn rules_check_requires_source_or_generated() {
+        let result = Cli::try_parse_from(["stutter", "rules", "check"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rules_check_accepts_source_path() {
+        let cli = Cli::try_parse_from([
+            "stutter",
+            "rules",
+            "check",
+            "--source",
+            "/tmp/ananicy-rules",
+        ])
+        .unwrap();
+
+        let command = cli.command.unwrap();
+        match command {
+            Command::Rules(args) => match args.command {
+                RulesCommand::Check(check) => {
+                    assert_eq!(check.source, Some(PathBuf::from("/tmp/ananicy-rules")));
+                    assert_eq!(check.generated, None);
+                }
+                other => panic!("expected rules check command, got {other:?}"),
+            },
+            other => panic!("expected rules command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rules_check_accepts_generated_path() {
+        let cli = Cli::try_parse_from([
+            "stutter",
+            "rules",
+            "check",
+            "--generated",
+            "/tmp/ananicy.generated.json",
+        ])
+        .unwrap();
+
+        let command = cli.command.unwrap();
+        match command {
+            Command::Rules(args) => match args.command {
+                RulesCommand::Check(check) => {
+                    assert_eq!(check.source, None);
+                    assert_eq!(
+                        check.generated,
+                        Some(PathBuf::from("/tmp/ananicy.generated.json"))
+                    );
+                }
+                other => panic!("expected rules check command, got {other:?}"),
+            },
+            other => panic!("expected rules command, got {other:?}"),
+        }
+    }
 
     #[test]
     fn rules_import_requires_source() {
