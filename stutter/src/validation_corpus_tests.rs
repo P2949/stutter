@@ -348,6 +348,38 @@ fn find_candidate(
         .find(|candidate| candidate.cause == cause)
 }
 
+fn no_primary_non_unknown_diagnosis(analysis: &ReportAnalysisJson) -> bool {
+    analysis
+        .cluster_analysis
+        .clusters
+        .iter()
+        .filter_map(|cluster| cluster.diagnosis.as_ref())
+        .all(|diagnosis| matches!(diagnosis.cause, StutterCause::Unknown))
+}
+
+fn assert_analysis_json_shape(analysis: &ReportAnalysisJson) {
+    let value = serde_json::to_value(analysis).expect("ReportAnalysisJson should serialize");
+    let object = value
+        .as_object()
+        .expect("ReportAnalysisJson should serialize as a JSON object");
+
+    for key in [
+        "session",
+        "cluster_analysis",
+        "frame_diagnoses",
+        "pressure_timeline",
+        "artifacts_summary",
+        "data_quality",
+        "focus_summary",
+        "foreground_summary",
+    ] {
+        assert!(
+            object.contains_key(key),
+            "ReportAnalysisJson missing top-level key {key}; keys={:?}",
+            object.keys().collect::<Vec<_>>()
+        );
+    }
+}
 fn assert_candidate_contains(
     analysis: &ReportAnalysisJson,
     cause: StutterCause,
@@ -391,6 +423,28 @@ fn validation_corpus_gpu_bound_clean_cpu_has_gpu_candidate() {
     let (analysis, _) = assert_fixture_from_metadata("gpu_bound_clean_cpu");
 
     assert_candidate_contains(&analysis, StutterCause::GpuBoundCandidate, &["GPU busy"]);
+}
+
+#[test]
+fn validation_corpus_real_clean_baseline() {
+    let (analysis, _) = assert_fixture_from_metadata("real_clean_baseline");
+
+    assert_eq!(analysis.data_quality.level, DataQualityLevel::High);
+    assert!(analysis.data_quality.validation_errors.is_empty());
+    assert!(analysis.data_quality.validation_warnings.is_empty());
+    assert!(
+        analysis.cluster_analysis.clusters.is_empty()
+            || no_primary_non_unknown_diagnosis(&analysis),
+        "real_clean_baseline must not produce a non-Unknown primary diagnosis: {:?}",
+        analysis
+            .cluster_analysis
+            .clusters
+            .iter()
+            .filter_map(|cluster| cluster.diagnosis.as_ref())
+            .map(|diagnosis| &diagnosis.cause)
+            .collect::<Vec<_>>()
+    );
+    assert_analysis_json_shape(&analysis);
 }
 
 #[test]
