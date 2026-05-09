@@ -50,6 +50,7 @@ mod scx;
 mod session;
 mod session_events;
 mod session_io;
+mod spike;
 mod summary;
 mod target_snapshot;
 mod task_class;

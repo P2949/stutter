@@ -1189,7 +1189,7 @@ impl SpikeEvent {
             switch_ns: event.switch_ns,
             switch_prev_pid: event.switch_prev_pid,
             switch_prev_state: event.switch_prev_state,
-            switch_prev_state_label: crate::report::classify_switch_prev_state(
+            switch_prev_state_label: crate::sched_state::classify_switch_prev_state(
                 event.switch_prev_state,
             )
             .to_owned(),
