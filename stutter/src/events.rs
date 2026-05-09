@@ -108,9 +108,13 @@ pub fn block_io_event_record(
 }
 
 pub fn handle_block_io_record(record: &recorder::BlockIoRecord, recorder: &mut LiveRecorder) {
-    push_artifact_event(recorder, ArtifactKind::BlockIoEvents, record, "io_events", |c| {
-        c.block_io_event_count += 1
-    });
+    push_artifact_event(
+        recorder,
+        ArtifactKind::BlockIoEvents,
+        record,
+        "io_events",
+        |c| c.block_io_event_count += 1,
+    );
 }
 
 pub fn handle_exec_event(item: &[u8], tasks: &mut TaskTracker) {
@@ -153,7 +157,9 @@ pub fn push_artifact_event<T: Serialize, F>(
         Ok(false) => {}
         Err(err) => {
             warn!("ndjson_write_failed stream={stream_name} err={err:#}");
-            recorder.counters.record_stream_write_error(stream_name, err);
+            recorder
+                .counters
+                .record_stream_write_error(stream_name, err);
         }
     }
 }

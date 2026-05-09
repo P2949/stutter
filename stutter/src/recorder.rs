@@ -41,8 +41,6 @@ pub struct LiveBuffers {
     pub scx_events: Vec<crate::scx::ScxEvent>,
 }
 
-
-
 #[derive(Default, Debug)]
 pub struct RecordingCounters {
     pub intervals_dropped: u64,
@@ -165,8 +163,6 @@ pub struct NdjsonWriter {
     finished: bool,
     path: PathBuf,
 }
-
-
 
 pub enum CsvOutput {
     File(io::BufWriter<fs::File>),
@@ -1661,7 +1657,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         )
         .map_err(map_write_err)?;
     }
-    if !recorder.streams.contains(ArtifactKind::IrqEvents) && !recorder.buffers.irq_events.is_empty() {
+    if !recorder.streams.contains(ArtifactKind::IrqEvents)
+        && !recorder.buffers.irq_events.is_empty()
+    {
         write_json_stream(
             recording.run_dir.join("irq_events.json"),
             &recorder.buffers.irq_events,
@@ -1669,7 +1667,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         )
         .map_err(map_write_err)?;
     }
-    if !recorder.streams.contains(ArtifactKind::GpuSamples) && !recorder.buffers.gpu_samples.is_empty() {
+    if !recorder.streams.contains(ArtifactKind::GpuSamples)
+        && !recorder.buffers.gpu_samples.is_empty()
+    {
         write_json_stream(
             recording.run_dir.join("gpu_samples.json"),
             &recorder.buffers.gpu_samples,
@@ -1685,7 +1685,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         )
         .map_err(map_write_err)?;
     }
-    if !recorder.streams.contains(ArtifactKind::ScxEvents) && !recorder.buffers.scx_events.is_empty() {
+    if !recorder.streams.contains(ArtifactKind::ScxEvents)
+        && !recorder.buffers.scx_events.is_empty()
+    {
         write_json_stream(
             recording.run_dir.join("scx_events.json"),
             &recorder.buffers.scx_events,

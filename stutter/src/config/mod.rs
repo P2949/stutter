@@ -2,12 +2,12 @@ pub mod merge;
 pub mod model;
 pub mod recorded;
 
-use crate::cli::{Config, FocusSource, ForegroundSourceArg};
-
 use model::{
     FocusConfig, MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, SafetyConfig,
     TargetConfig, TimingConfig,
 };
+
+use crate::cli::{Config, FocusSource, ForegroundSourceArg};
 
 impl From<&Config> for MonitorConfig {
     fn from(config: &Config) -> Self {
@@ -17,8 +17,18 @@ impl From<&Config> for MonitorConfig {
                 tree_pids: config.tree_pids.clone(),
                 cgroupv2: config.cgroupv2.clone(),
                 exclude_tree_pids: config.exclude_tree_pids.clone(),
-                include_comm: config.task_filters.include_comm.iter().map(|p| p.raw.clone()).collect(),
-                exclude_comm: config.task_filters.exclude_comm.iter().map(|p| p.raw.clone()).collect(),
+                include_comm: config
+                    .task_filters
+                    .include_comm
+                    .iter()
+                    .map(|p| p.raw.clone())
+                    .collect(),
+                exclude_comm: config
+                    .task_filters
+                    .exclude_comm
+                    .iter()
+                    .map(|p| p.raw.clone())
+                    .collect(),
                 watch_process: config.watch_process.clone(),
                 persistent: config.persistent,
                 keep_missing_pid: config.keep_missing_pid,

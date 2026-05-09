@@ -1,4 +1,3 @@
-
 use super::model::MonitorConfig;
 
 pub struct ResolvedTargets {
