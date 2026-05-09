@@ -34,6 +34,20 @@ pub struct CommunityRulesConfigFile {
     pub paths: Option<Vec<PathBuf>>,
 }
 
+pub fn community_rules_config_from_user_config(
+    config: Option<&UserConfigFile>,
+) -> crate::community_rules::CommunityRulesConfig {
+    let Some(config) = config else {
+        return crate::community_rules::CommunityRulesConfig::default();
+    };
+
+    let Some(community_rules) = config.community_rules.clone() else {
+        return crate::community_rules::CommunityRulesConfig::default();
+    };
+
+    crate::community_rules::CommunityRulesConfig::from_config_file(community_rules)
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AgentConfigFile {
     pub autotune_limits: Option<AgentAutotuneLimitsFile>,
@@ -253,6 +267,27 @@ mod tests {
             community_rules.paths.unwrap(),
             vec![PathBuf::from("/tmp/stutter/rules/custom.generated.json")]
         );
+    }
+
+    #[test]
+    fn test_community_rules_config_from_user_config_uses_parsed_section() {
+        let toml = r#"
+            [community_rules]
+            enabled = false
+            sources = []
+            paths = ["/tmp/stutter/rules/custom.generated.json"]
+        "#;
+
+        let user_config = parse_user_config_toml(toml).unwrap();
+        let community_rules = community_rules_config_from_user_config(Some(&user_config));
+
+        assert!(!community_rules.enabled);
+        assert_eq!(
+            community_rules.explicit_rules_files,
+            vec![PathBuf::from("/tmp/stutter/rules/custom.generated.json")]
+        );
+        assert!(community_rules.user_rules_dir.is_none());
+        assert!(!community_rules.load_builtin_fixture);
     }
 
     #[test]

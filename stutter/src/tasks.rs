@@ -18,6 +18,7 @@ pub struct RefreshInput<'a> {
     pub prev_faults_map: Option<&'a mut AyaHashMap<MapData, u32, [u64; 2]>>,
     pub elapsed_ms: u64,
     pub recording_started: Option<Instant>,
+    pub community_rules: Option<&'a crate::community_rules::CommunityRulesDb>,
 }
 
 pub type TaskExeInodesMap = BTreeMap<u32, (Option<u64>, Option<u64>, Option<u64>)>;
@@ -60,7 +61,8 @@ impl TaskTracker {
                 .filters(&input.config.task_filters)
                 .keep_missing_pid(input.config.keep_missing_pid)
                 .cache(&mut self.cache)
-                .previous_tasks(Some(&self.active_targets)),
+                .previous_tasks(Some(&self.active_targets))
+                .community_rules(input.community_rules),
         );
 
         let budget_report = snapshot.budget_report.clone();

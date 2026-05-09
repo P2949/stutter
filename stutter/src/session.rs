@@ -376,6 +376,7 @@ pub struct MonitorSession {
     #[allow(dead_code)]
     pub otel_exporter: Option<crate::otel::OtelExporterHandle>,
     recent_telemetry: LiveTelemetry,
+    community_rules: Option<crate::community_rules::CommunityRulesDb>,
 }
 
 impl MonitorSession {
@@ -394,6 +395,16 @@ impl MonitorSession {
             foreground_enabled.then(|| foreground_resolver_from_config(&config));
         let current_foreground = None;
         let foreground_switch_count = 0;
+
+        let user_config = crate::config_file::load_user_config().ok().flatten();
+        let community_rules = crate::community_rules::load_community_rules(
+            &crate::config_file::community_rules_config_from_user_config(user_config.as_ref()),
+        )
+        .map_err(|err| {
+            log::warn!("failed_to_load_community_rules err={err:#}");
+            err
+        })
+        .ok();
 
         if !explicit_target && config.auto_focus {
             let policy = FocusPolicy {
@@ -682,6 +693,7 @@ impl MonitorSession {
             scx_tracker,
             hwmon_reader,
             watch_process_cache: process_tree::ProcessCache::default(),
+            community_rules,
             focus_resolver,
             current_focus,
             focus_switch_count,
@@ -1638,6 +1650,7 @@ impl MonitorSession {
                 prev_faults_map: self.loaded.prev_faults_map.as_mut(),
                 elapsed_ms: self.started.elapsed().as_millis() as u64,
                 recording_started: self.recorder.run.as_ref().map(|run| run.started_instant),
+                community_rules: self.community_rules.as_ref(),
             })
             .await?;
 
