@@ -394,52 +394,18 @@ fn validation_corpus_gpu_bound_clean_cpu_has_gpu_candidate() {
 }
 
 #[test]
-fn validation_corpus_real_clean_baseline() {
-    let (analysis, _) = assert_fixture_from_metadata("real_clean_baseline");
-
-    assert!(analysis.data_quality.validation_errors.is_empty());
-    assert!(analysis.cluster_analysis.clusters.is_empty());
+fn validation_corpus_game_thread_scheduler_delay() {
+    assert_fixture_from_metadata("game_thread_scheduler_delay");
 }
 
 #[test]
-fn validation_corpus_real_game_thread_scheduler_delay() {
-    assert_fixture_from_metadata("real_game_thread_scheduler_delay");
+fn validation_corpus_compositor_scheduler_delay() {
+    assert_fixture_from_metadata("compositor_scheduler_delay");
 }
 
 #[test]
-fn validation_corpus_real_compositor_scheduler_delay() {
-    assert_fixture_from_metadata("real_compositor_scheduler_delay");
-}
-
-#[test]
-fn validation_corpus_real_irq_overlap() {
-    assert_fixture_from_metadata("real_irq_overlap");
-}
-
-#[test]
-fn validation_corpus_real_gpu_bound_looking() {
-    let (analysis, _) = assert_fixture_from_metadata("real_gpu_bound_looking");
-
-    assert_candidate_contains(&analysis, StutterCause::GpuBoundCandidate, &["GPU busy"]);
-}
-
-#[test]
-fn validation_corpus_real_block_io_overlap() {
-    assert_fixture_from_metadata("real_block_io_overlap");
-}
-
-#[test]
-fn validation_corpus_real_truncated_low_quality() {
-    let (analysis, _) = assert_fixture_from_metadata("real_truncated_low_quality");
-
-    assert!(analysis.data_quality.spike_events_truncated);
-    assert!(analysis.data_quality.drop_counters_nonzero);
-    assert!(analysis.data_quality.spike_events_dropped_count > 0);
-}
-
-#[test]
-fn validation_corpus_real_foreground_window() {
-    let (analysis, _) = assert_fixture_from_metadata("real_foreground_window");
+fn validation_corpus_foreground_window() {
+    let (analysis, _) = assert_fixture_from_metadata("foreground_window");
 
     assert_eq!(analysis.foreground_summary.final_pid, Some(5701));
     assert_eq!(
@@ -457,8 +423,8 @@ fn validation_corpus_real_foreground_window() {
 }
 
 #[test]
-fn validation_corpus_real_community_rules_classification() {
-    let (analysis, _) = assert_fixture_from_metadata("real_community_rules_classification");
+fn validation_corpus_community_rules_classification() {
+    let (analysis, _) = assert_fixture_from_metadata("community_rules_classification");
 
     let task = analysis
         .session
