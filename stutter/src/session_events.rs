@@ -64,7 +64,31 @@ pub enum MonitorEvent {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonitorEventDeliveryClass {
+    Reliable,
+    Conflated,
+    Droppable,
+}
+
 impl MonitorEvent {
+    pub fn delivery_class(&self) -> MonitorEventDeliveryClass {
+        match self {
+            Self::Finished { .. }
+            | Self::DataQualityWarning { .. }
+            | Self::TargetSnapshot { .. }
+            | Self::FocusChanged { .. }
+            | Self::FocusCleared { .. } => MonitorEventDeliveryClass::Reliable,
+            Self::Interval { .. } => MonitorEventDeliveryClass::Conflated,
+            Self::Spike { .. }
+            | Self::Frame { .. }
+            | Self::GpuSample { .. }
+            | Self::IrqEvent { .. }
+            | Self::IoEvent { .. }
+            | Self::LiveDiagnosis { .. } => MonitorEventDeliveryClass::Droppable,
+        }
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             Self::TargetSnapshot { .. } => "target_snapshot",

@@ -38,6 +38,21 @@ use crate::{
     },
 };
 
+#[path = "session/event_bus.rs"]
+pub mod event_bus;
+#[path = "session/live_telemetry.rs"]
+pub mod live_telemetry;
+#[path = "session/outputs.rs"]
+pub mod outputs;
+#[path = "session/probes.rs"]
+pub mod probes;
+#[path = "session/runtime.rs"]
+pub mod runtime;
+#[path = "session/targeting.rs"]
+pub mod targeting;
+#[path = "session/ui.rs"]
+pub mod ui;
+
 const LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS: u64 = 5;
 // Keep this aligned with the report default unless live diagnosis gets
 // its own CLI/config field.
@@ -725,17 +740,34 @@ impl MonitorSession {
         })
     }
 
-    pub fn emit(&self, event: MonitorEvent) {
-        let Some(tx) = &self.event_tx else {
-            return;
-        };
+    pub fn emit(
+        &self,
+        event: MonitorEvent,
+    ) -> impl std::future::Future<Output = ()> + Send + 'static {
+        let tx = self.event_tx.clone();
 
-        let kind = event.kind();
-        if let Err(err) = tx.try_send(event) {
-            warn!(
-                "monitor_event_channel_full dropped_event={} err={}",
-                kind, err
-            );
+        async move {
+            let Some(tx) = tx else {
+                return;
+            };
+
+            match event.delivery_class() {
+                crate::session_events::MonitorEventDeliveryClass::Reliable => {
+                    if let Err(err) = tx.send(event).await {
+                        warn!("monitor_event_channel_closed err={err}");
+                    }
+                }
+                crate::session_events::MonitorEventDeliveryClass::Conflated
+                | crate::session_events::MonitorEventDeliveryClass::Droppable => {
+                    let kind = event.kind();
+                    if let Err(err) = tx.try_send(event) {
+                        warn!(
+                            "monitor_event_channel_full dropped_event={} err={}",
+                            kind, err
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -755,7 +787,8 @@ impl MonitorSession {
             elapsed_ms,
             active_targets: self.tasks.active_targets.clone(),
             removed_targets,
-        });
+        })
+        .await;
 
         Ok(())
     }
@@ -828,7 +861,8 @@ impl MonitorSession {
             score: new.group.score,
             situation: new.situation,
             reasons: new.group.reasons.clone(),
-        });
+        })
+        .await;
 
         Ok(())
     }
@@ -872,7 +906,8 @@ impl MonitorSession {
             elapsed_ms,
             old_kind: old.map(|focus| focus.group.kind),
             reason,
-        });
+        })
+        .await;
 
         Ok(())
     }
@@ -1335,7 +1370,8 @@ impl MonitorSession {
                 elapsed_ms,
                 records: records.clone(),
                 drop_counters: drop_counters_snapshot.clone(),
-            });
+            })
+            .await;
 
             if let Some(writer) = self.recorder.streams.interval_writer.as_mut() {
                 for record in &records {

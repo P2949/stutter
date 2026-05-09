@@ -171,17 +171,16 @@ pub struct RecordingRun {
     pub mangohud_first_frame_raw_elapsed_ms: Option<u64>,
 }
 
-/// A writer for Newline Delimited JSON (NDJSON) streams.
-///
-/// Despite its name, this writes a stream of JSON objects separated by newlines,
-/// not a single JSON array.
 #[derive(Debug)]
-pub struct JsonArrayWriter {
+pub struct NdjsonWriter {
     file: fs::File,
     wrote_any: bool,
     finished: bool,
     path: PathBuf,
 }
+
+/// Backward-compatible alias while call sites migrate to the accurate name.
+pub type JsonArrayWriter = NdjsonWriter;
 
 pub enum CsvOutput {
     File(io::BufWriter<fs::File>),
@@ -269,7 +268,7 @@ impl Drop for IntervalCsvWriter {
     }
 }
 
-impl JsonArrayWriter {
+impl NdjsonWriter {
     pub fn create(path: PathBuf) -> anyhow::Result<Self> {
         if path.file_name().is_none() {
             anyhow::bail!(
@@ -355,11 +354,11 @@ where
     Ok(())
 }
 
-impl Drop for JsonArrayWriter {
+impl Drop for NdjsonWriter {
     fn drop(&mut self) {
         if let Err(err) = self.finish() {
             log::warn!(
-                "json_array_finish_failed path={} err={err:#}",
+                "ndjson_finish_failed path={} err={err:#}",
                 self.path.display()
             );
         }

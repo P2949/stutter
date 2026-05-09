@@ -226,7 +226,7 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
     }
 
     let monitor_config = crate::cli::autotune_monitor_config(&input)?;
-    let (event_tx, mut event_rx) = mpsc::channel::<MonitorEvent>(256);
+    let (event_tx, mut event_rx) = mpsc::channel::<MonitorEvent>(1024);
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
     let duration = input.duration_seconds.map(Duration::from_secs);
     let mut policy = ObservePolicyStub::new(
