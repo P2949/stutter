@@ -59,6 +59,101 @@ pub enum CommunityRulesSourceKind {
     ExplicitPath(PathBuf),
 }
 
+#[derive(Debug, Clone)]
+pub struct CommunityRulesConfig {
+    pub enabled: bool,
+    pub load_builtin_fixture: bool,
+    pub user_rules_dir: Option<PathBuf>,
+    pub explicit_rules_files: Vec<PathBuf>,
+}
+
+impl Default for CommunityRulesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            load_builtin_fixture: cfg!(test),
+            user_rules_dir: default_community_rules_dir(),
+            explicit_rules_files: Vec::new(),
+        }
+    }
+}
+
+impl CommunityRulesConfig {
+    pub fn from_config_file(file: crate::config_file::CommunityRulesConfigFile) -> Self {
+        let mut config = Self::default();
+
+        if let Some(enabled) = file.enabled {
+            config.enabled = enabled;
+        }
+
+        config.explicit_rules_files = file.paths.unwrap_or_default();
+
+        if let Some(sources) = file.sources {
+            let wants_user = sources
+                .iter()
+                .any(|source| source.trim().eq_ignore_ascii_case("user"));
+            let wants_fixture = sources.iter().any(|source| {
+                let source = source.trim();
+                source.eq_ignore_ascii_case("fixture")
+                    || source.eq_ignore_ascii_case("builtin")
+                    || source.eq_ignore_ascii_case("builtin_fixture")
+                    || source.eq_ignore_ascii_case("builtin-fixture")
+            });
+
+            config.user_rules_dir = if wants_user {
+                default_community_rules_dir()
+            } else {
+                None
+            };
+            config.load_builtin_fixture = wants_fixture;
+        }
+
+        config
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CommunityRulesMetadataFile {
+    pub schema_version: u32,
+    pub name: String,
+    pub license: String,
+    pub source_repo: Option<String>,
+    pub source_commit: Option<String>,
+    pub generated_at: String,
+    pub generated_by: String,
+    pub rule_file: String,
+}
+
+pub fn load_community_rules(config: &CommunityRulesConfig) -> anyhow::Result<CommunityRulesDb> {
+    if !config.enabled {
+        return Ok(CommunityRulesDb::empty());
+    }
+
+    let mut files = Vec::new();
+
+    for path in &config.explicit_rules_files {
+        files.push(load_community_rules_file_from_path(path)?);
+    }
+
+    if let Some(user_rules_dir) = &config.user_rules_dir {
+        files.extend(load_community_rules_files_from_dir(user_rules_dir)?);
+    }
+
+    let system_path = system_community_rules_file();
+    if system_path.exists() {
+        files.push(load_community_rules_file_from_path(&system_path)?);
+    }
+
+    if config.load_builtin_fixture {
+        files.push(parse_community_rules_file(
+            BUILTIN_FIXTURE_RULES_JSON,
+            "embedded community rules test fixture",
+        )?);
+    }
+
+    CommunityRulesDb::from_files(files)
+}
+
 pub fn load_community_rules_file(
     source: CommunityRulesSourceKind,
 ) -> anyhow::Result<CommunityRulesFile> {
@@ -68,12 +163,19 @@ pub fn load_community_rules_file(
             "embedded community rules test fixture",
         ),
         CommunityRulesSourceKind::UserData => {
-            let path = active_rules_path()?;
-            load_community_rules_file_from_path(&path)
+            let dir = default_community_rules_dir().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "cannot locate user community rules directory because neither XDG_DATA_HOME nor HOME is set"
+                )
+            })?;
+            let mut files = load_community_rules_files_from_dir(&dir)?;
+            files.drain(..).next().ok_or_else(|| {
+                anyhow::anyhow!("no user community rules files found in {}", dir.display())
+            })
         }
-        CommunityRulesSourceKind::SystemData => load_community_rules_file_from_path(Path::new(
-            "/usr/share/stutter/community-rules.json",
-        )),
+        CommunityRulesSourceKind::SystemData => {
+            load_community_rules_file_from_path(&system_community_rules_file())
+        }
         CommunityRulesSourceKind::ExplicitPath(path) => load_community_rules_file_from_path(&path),
     }
 }
@@ -82,6 +184,27 @@ pub fn load_community_rules_db(
     source: CommunityRulesSourceKind,
 ) -> anyhow::Result<CommunityRulesDb> {
     CommunityRulesDb::from_file(load_community_rules_file(source)?)
+}
+
+fn load_community_rules_files_from_dir(dir: &Path) -> anyhow::Result<Vec<CommunityRulesFile>> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut paths = imported_rules_files(dir)?;
+    paths.retain(|path| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name != "enabled.generated.json")
+            .unwrap_or(false)
+    });
+
+    let mut files = Vec::new();
+    for path in paths {
+        files.push(load_community_rules_file_from_path(&path)?);
+    }
+
+    Ok(files)
 }
 
 fn load_community_rules_file_from_path(path: &Path) -> anyhow::Result<CommunityRulesFile> {
@@ -104,8 +227,28 @@ fn parse_community_rules_file(
     Ok(file)
 }
 
-fn user_data_community_rules_path() -> Option<PathBuf> {
-    active_rules_path().ok()
+pub fn default_community_rules_dir() -> Option<PathBuf> {
+    #[allow(clippy::collapsible_if)]
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        if !xdg.trim().is_empty() {
+            return Some(PathBuf::from(xdg).join("stutter").join("community-rules"));
+        }
+    }
+
+    std::env::var("HOME")
+        .ok()
+        .filter(|home| !home.trim().is_empty())
+        .map(|home| {
+            PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join("stutter")
+                .join("community-rules")
+        })
+}
+
+fn system_community_rules_file() -> PathBuf {
+    PathBuf::from("/usr/share/stutter/community-rules/community-rules.generated.json")
 }
 
 pub fn rules_command(command: RulesCommand) -> anyhow::Result<()> {
@@ -127,13 +270,30 @@ fn rules_import_command(args: crate::cli::RulesImportArgs) -> anyhow::Result<()>
         source_name: args.name.clone(),
         source_repo: args.source_repo.clone(),
         source_commit: args.source_commit.clone(),
-        generated_at,
+        generated_at: generated_at.clone(),
     };
 
     let imported = import::import_ananicy_rules(input)?;
     let out_path = match args.out.clone() {
         Some(path) => path,
         None => default_imported_rules_path(&args.name)?,
+    };
+    let metadata_path = metadata_path_for_rules_path(&out_path, &args.name);
+    let rule_file_name = out_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("ananicy.generated.json")
+        .to_owned();
+
+    let metadata = CommunityRulesMetadataFile {
+        schema_version: 1,
+        name: args.name.clone(),
+        license: args.license.clone(),
+        source_repo: args.source_repo.clone(),
+        source_commit: args.source_commit.clone(),
+        generated_at,
+        generated_by: "stutter rules import".to_owned(),
+        rule_file: rule_file_name,
     };
 
     if args.dry_run {
@@ -143,6 +303,7 @@ fn rules_import_command(args: crate::cli::RulesImportArgs) -> anyhow::Result<()>
             source_display
         );
         println!("dry-run: would write {}", out_path.display());
+        println!("dry-run: would write {}", metadata_path.display());
         println!("license: {}", args.license);
         println!(
             "note: imported rules are user-installed data and are not part of the stutter binary"
@@ -164,12 +325,22 @@ fn rules_import_command(args: crate::cli::RulesImportArgs) -> anyhow::Result<()>
     fs::write(&out_path, json)
         .with_context(|| format!("failed to write imported rules to {}", out_path.display()))?;
 
+    let metadata_json = serde_json::to_string_pretty(&metadata)
+        .with_context(|| "failed to serialize imported community rules metadata")?;
+    fs::write(&metadata_path, metadata_json).with_context(|| {
+        format!(
+            "failed to write imported rules metadata to {}",
+            metadata_path.display()
+        )
+    })?;
+
     println!(
         "imported {} reduced rules from {}",
         imported.rules.len(),
         imported.source.name
     );
     println!("wrote {}", out_path.display());
+    println!("wrote {}", metadata_path.display());
     println!("license: {}", args.license);
     println!("note: imported rules are user-installed data and are not part of the stutter binary");
     Ok(())
@@ -289,27 +460,30 @@ fn rules_remove_command(name: &str, dry_run: bool) -> anyhow::Result<()> {
 }
 
 fn default_rules_dir() -> anyhow::Result<PathBuf> {
-    if let Some(xdg_data_home) = std::env::var_os("XDG_DATA_HOME") {
-        return Ok(PathBuf::from(xdg_data_home)
-            .join("stutter")
-            .join("community-rules"));
-    }
-
-    if let Some(home) = std::env::var_os("HOME") {
-        return Ok(PathBuf::from(home)
-            .join(".local")
-            .join("share")
-            .join("stutter")
-            .join("community-rules"));
-    }
-
-    anyhow::bail!(
-        "cannot determine community rules directory because neither XDG_DATA_HOME nor HOME is set"
-    )
+    default_community_rules_dir().ok_or_else(|| {
+        anyhow::anyhow!(
+            "cannot determine community rules directory because neither XDG_DATA_HOME nor HOME is set"
+        )
+    })
 }
 
 fn default_imported_rules_path(name: &str) -> anyhow::Result<PathBuf> {
     Ok(default_rules_dir()?.join(format!("{}.generated.json", sanitize_rules_name(name))))
+}
+
+fn default_imported_metadata_path(name: &str) -> anyhow::Result<PathBuf> {
+    Ok(default_rules_dir()?.join(format!("{}.metadata.json", sanitize_rules_name(name))))
+}
+
+fn metadata_path_for_rules_path(rules_path: &Path, name: &str) -> PathBuf {
+    rules_path
+        .parent()
+        .map(|parent| parent.join(format!("{}.metadata.json", sanitize_rules_name(name))))
+        .unwrap_or_else(|| {
+            default_imported_metadata_path(name).unwrap_or_else(|_| {
+                PathBuf::from(format!("{}.metadata.json", sanitize_rules_name(name)))
+            })
+        })
 }
 
 fn active_rules_path() -> anyhow::Result<PathBuf> {
@@ -414,48 +588,96 @@ pub struct CommunityRulesDb {
     rules_by_name: HashMap<String, Vec<CommunityRule>>,
 }
 
-static BUILTIN_RULES: OnceLock<CommunityRulesDb> = OnceLock::new();
+static RUNTIME_RULES: OnceLock<CommunityRulesDb> = OnceLock::new();
 
 pub fn classify_process_identity(
     identity: &CommunityProcessIdentity<'_>,
 ) -> Option<CommunityRuleHit> {
-    builtin_rules().classify(identity, true)
+    runtime_rules().classify(identity, true)
 }
 
-fn builtin_rules() -> &'static CommunityRulesDb {
-    BUILTIN_RULES.get_or_init(|| {
-        load_community_rules_db(CommunityRulesSourceKind::BuiltinFixture)
-            .expect("embedded community rules test fixture JSON must be valid")
+fn runtime_rules() -> &'static CommunityRulesDb {
+    RUNTIME_RULES.get_or_init(|| {
+        load_community_rules(&runtime_community_rules_config())
+            .expect("runtime community rules configuration must load")
     })
 }
 
+#[cfg(test)]
+fn runtime_community_rules_config() -> CommunityRulesConfig {
+    CommunityRulesConfig {
+        enabled: true,
+        load_builtin_fixture: true,
+        user_rules_dir: None,
+        explicit_rules_files: Vec::new(),
+    }
+}
+
+#[cfg(not(test))]
+fn runtime_community_rules_config() -> CommunityRulesConfig {
+    match crate::config_file::load_user_config() {
+        Ok(Some(config)) => config
+            .community_rules
+            .map(CommunityRulesConfig::from_config_file)
+            .unwrap_or_default(),
+        Ok(None) => CommunityRulesConfig::default(),
+        Err(err) => {
+            log::warn!("failed to load community rules config: {err:#}");
+            CommunityRulesConfig::default()
+        }
+    }
+}
+
 impl CommunityRulesDb {
-    pub fn from_json(data: &str) -> anyhow::Result<Self> {
-        let file: CommunityRulesFile = serde_json::from_str(data)?;
-        Self::from_file(file)
+    pub fn empty() -> Self {
+        Self {
+            rules_by_name: HashMap::new(),
+        }
     }
 
-    pub fn from_file(file: CommunityRulesFile) -> anyhow::Result<Self> {
+    pub fn rule_count(&self) -> usize {
+        self.rules_by_name.values().map(Vec::len).sum()
+    }
+
+    pub fn from_files(files: Vec<CommunityRulesFile>) -> anyhow::Result<Self> {
+        let mut db = Self::empty();
+        for file in files {
+            db.extend_file(file)?;
+        }
+        Ok(db)
+    }
+
+    fn extend_file(&mut self, file: CommunityRulesFile) -> anyhow::Result<()> {
         anyhow::ensure!(
             matches!(file.schema_version, 1 | 2),
             "unsupported community rules schema version {}",
             file.schema_version
         );
 
-        let mut rules_by_name: HashMap<String, Vec<CommunityRule>> = HashMap::new();
         for mut rule in file.rules {
             if rule.normalized_name.trim().is_empty() {
                 rule.normalized_name =
                     normalize_process_name(&rule.name).unwrap_or_else(|| rule.name.clone());
             }
 
-            rules_by_name
+            self.rules_by_name
                 .entry(rule.normalized_name.clone())
                 .or_default()
                 .push(rule);
         }
 
-        Ok(Self { rules_by_name })
+        Ok(())
+    }
+
+    pub fn from_json(data: &str) -> anyhow::Result<Self> {
+        let file: CommunityRulesFile = serde_json::from_str(data)?;
+        Self::from_file(file)
+    }
+
+    pub fn from_file(file: CommunityRulesFile) -> anyhow::Result<Self> {
+        let mut db = Self::empty();
+        db.extend_file(file)?;
+        Ok(db)
     }
 
     pub fn classify(
@@ -654,11 +876,76 @@ mod rules_command_tests {
 
     use super::*;
 
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, old }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let old = std::env::var(key).ok();
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(old) = &self.old {
+                unsafe {
+                    std::env::set_var(self.key, old);
+                }
+            } else {
+                unsafe {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+    }
+
+    fn test_rules_json(name: &str) -> String {
+        format!(
+            r#"{{
+"schema_version": 1,
+"source": {{
+"name": "test",
+"repo": "https://example.test/repo.git",
+"commit": "abc123",
+"generated_at": "2026-05-09T00:00:00Z"
+}},
+"rules": [
+{{
+"name": "{name}",
+"normalized_name": "{name}",
+"type": "Game",
+"stutter_class": "Game",
+"confidence": 0.82,
+"source_path": "00-default/Games/test.rules",
+"context": ["wine_or_proton_or_steam"],
+"title": null,
+"ambiguous": false
+}}
+]
+}}"#
+        )
+    }
+
     #[test]
     fn rules_import_dry_run_does_not_write() {
         let dir = tempdir().unwrap();
         let source = dir.path().join("source");
         let out = dir.path().join("out").join("ananicy.generated.json");
+        let metadata = dir.path().join("out").join("ananicy.metadata.json");
         fs::create_dir_all(source.join("00-default/Games")).unwrap();
         fs::write(
             source.join("00-default/Games/example.rules"),
@@ -678,6 +965,149 @@ mod rules_command_tests {
         .unwrap();
 
         assert!(!out.exists());
+        assert!(!metadata.exists());
+    }
+
+    #[test]
+    fn rules_import_writes_metadata_next_to_output_file() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("source");
+        let out = dir.path().join("out").join("ananicy.generated.json");
+        let metadata = dir.path().join("out").join("ananicy.metadata.json");
+        fs::create_dir_all(source.join("00-default/Games")).unwrap();
+        fs::write(
+            source.join("00-default/Games/example.rules"),
+            r#"{"name":"example-game.exe","type":"Game","nice":-20}"#,
+        )
+        .unwrap();
+
+        rules_import_command(crate::cli::RulesImportArgs {
+            source,
+            name: "ananicy".to_owned(),
+            license: "GPL-3.0-only".to_owned(),
+            source_repo: Some("https://github.com/CachyOS/ananicy-rules".to_owned()),
+            source_commit: Some("abc123".to_owned()),
+            out: Some(out.clone()),
+            dry_run: false,
+        })
+        .unwrap();
+
+        assert!(out.exists());
+        assert!(metadata.exists());
+
+        let metadata: CommunityRulesMetadataFile =
+            serde_json::from_str(&fs::read_to_string(metadata).unwrap()).unwrap();
+        assert_eq!(metadata.schema_version, 1);
+        assert_eq!(metadata.name, "ananicy");
+        assert_eq!(metadata.license, "GPL-3.0-only");
+        assert_eq!(
+            metadata.source_repo.as_deref(),
+            Some("https://github.com/CachyOS/ananicy-rules")
+        );
+        assert_eq!(metadata.source_commit.as_deref(), Some("abc123"));
+        assert_eq!(metadata.generated_by, "stutter rules import");
+        assert_eq!(metadata.rule_file, "ananicy.generated.json");
+    }
+
+    #[test]
+    fn default_community_rules_dir_uses_xdg_data_home() {
+        let dir = tempdir().unwrap();
+        let _xdg = EnvGuard::set("XDG_DATA_HOME", dir.path().to_str().unwrap());
+        let _home = EnvGuard::set("HOME", "/tmp/ignored-home");
+
+        assert_eq!(
+            default_community_rules_dir().unwrap(),
+            dir.path().join("stutter").join("community-rules")
+        );
+    }
+
+    #[test]
+    fn default_community_rules_dir_falls_back_to_home() {
+        let dir = tempdir().unwrap();
+        let _xdg = EnvGuard::unset("XDG_DATA_HOME");
+        let _home = EnvGuard::set("HOME", dir.path().to_str().unwrap());
+
+        assert_eq!(
+            default_community_rules_dir().unwrap(),
+            dir.path()
+                .join(".local")
+                .join("share")
+                .join("stutter")
+                .join("community-rules")
+        );
+    }
+
+    #[test]
+    fn load_user_rules_ignores_missing_directory() {
+        let dir = tempdir().unwrap();
+        let config = CommunityRulesConfig {
+            enabled: true,
+            load_builtin_fixture: false,
+            user_rules_dir: Some(dir.path().join("missing")),
+            explicit_rules_files: Vec::new(),
+        };
+
+        let db = load_community_rules(&config).unwrap();
+        assert_eq!(db.rule_count(), 0);
+    }
+
+    #[test]
+    fn load_user_rules_rejects_bad_schema() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("bad.generated.json"),
+            r#"{
+"schema_version": 999,
+"source": {
+"name": "bad",
+"repo": "https://example.test/repo.git",
+"commit": "bad",
+"generated_at": "2026-05-09T00:00:00Z"
+},
+"rules": []
+}"#,
+        )
+        .unwrap();
+
+        let config = CommunityRulesConfig {
+            enabled: true,
+            load_builtin_fixture: false,
+            user_rules_dir: Some(dir.path().to_path_buf()),
+            explicit_rules_files: Vec::new(),
+        };
+
+        let err = load_community_rules(&config).unwrap_err().to_string();
+        assert!(err.contains("unsupported community rules schema version 999"));
+    }
+
+    #[test]
+    fn load_user_rules_combines_multiple_json_files() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("one.generated.json"),
+            test_rules_json("one-game.exe"),
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("two.generated.json"),
+            test_rules_json("two-game.exe"),
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("one.metadata.json"),
+            r#"{"schema_version":1,"name":"one","license":"GPL-3.0-only","source_repo":null,"source_commit":null,"generated_at":"2026-05-09T00:00:00Z","generated_by":"stutter rules import","rule_file":"one.generated.json"}"#,
+        )
+        .unwrap();
+
+        let config = CommunityRulesConfig {
+            enabled: true,
+            load_builtin_fixture: false,
+            user_rules_dir: Some(dir.path().to_path_buf()),
+            explicit_rules_files: Vec::new(),
+        };
+
+        let db = load_community_rules(&config).unwrap();
+        assert_eq!(db.rule_count(), 2);
     }
 }
 
