@@ -16,6 +16,7 @@ use tokio::{
 use crate::{
     artifacts::{ArtifactKind, ArtifactStreamRegistry},
     cli::{Config, CsvStreamTarget, FocusSource, ForegroundSourceArg},
+    config::merge::{CliOverrides, ConfigSources, DefaultConfig, merge_config_sources},
     diagnosis::{LiveDiagnosisEntry, diagnose_cluster},
     ebpf_loader,
     events::AlertPayload,
@@ -302,7 +303,28 @@ impl MonitorSession {
         let current_foreground = None;
         let foreground_switch_count = 0;
 
-        let user_config = crate::config_file::load_user_config().ok().flatten();
+        let user_config = crate::config_file::load_user_config()?;
+        let resolved_monitor_config = merge_config_sources(ConfigSources {
+            defaults: DefaultConfig::default(),
+            user_file: user_config.clone(),
+            preset: None,
+            cli: CliOverrides {
+                config: crate::config::model::MonitorConfig::from(&config),
+            },
+        });
+
+        log::debug!(
+            "monitor_config_resolved summary_period_ms={} spike_threshold_ns={} max_tasks={} hwmon={} cpu_freq={} foreground_window={} focus_source={} foreground_source={}",
+            resolved_monitor_config.timing.summary_period_ms,
+            resolved_monitor_config.timing.spike_threshold_ns,
+            resolved_monitor_config.target.max_tasks,
+            resolved_monitor_config.probes.hwmon,
+            resolved_monitor_config.probes.cpu_freq,
+            resolved_monitor_config.focus.foreground_window,
+            resolved_monitor_config.focus.focus_source,
+            resolved_monitor_config.focus.foreground_source,
+        );
+
         let community_rules = crate::community_rules::load_community_rules(
             &crate::config_file::community_rules_config_from_user_config(user_config.as_ref()),
         )
