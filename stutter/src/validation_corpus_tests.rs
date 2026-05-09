@@ -815,6 +815,72 @@ fn validation_corpus_real_block_io_overlap() {
 }
 
 #[test]
+fn validation_corpus_real_truncated_low_quality() {
+    let (analysis, _) = assert_fixture_from_metadata("real_truncated_low_quality");
+
+    assert!(
+        matches!(
+            analysis.data_quality.level,
+            DataQualityLevel::Medium | DataQualityLevel::Low
+        ),
+        "real_truncated_low_quality data quality should be Medium or Low, got {:?}",
+        analysis.data_quality.level
+    );
+
+    let has_low_quality_signal = analysis.data_quality.spike_events_truncated
+        || analysis.data_quality.event_stream_write_errors > 0
+        || analysis.data_quality.drop_counters_nonzero;
+    assert!(
+        has_low_quality_signal,
+        "real_truncated_low_quality must expose truncation, event stream write errors, or nonzero drop counters"
+    );
+
+    let quality_text = analysis
+        .data_quality
+        .reasons
+        .iter()
+        .chain(analysis.data_quality.validation_warnings.iter())
+        .chain(analysis.data_quality.validation_errors.iter())
+        .map(|message| message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase();
+
+    assert!(
+        quality_text.contains("truncated")
+            || quality_text.contains("drop")
+            || quality_text.contains("write error"),
+        "real_truncated_low_quality quality reasons/warnings/errors must mention truncated, drop, or write error; text was:\n{}",
+        quality_text
+    );
+
+    assert!(
+        primary_diagnosis(&analysis).is_none() || no_primary_non_unknown_diagnosis(&analysis),
+        "real_truncated_low_quality must not assert a strong non-Unknown diagnosis: {:?}",
+        analysis
+            .cluster_analysis
+            .clusters
+            .iter()
+            .filter_map(|cluster| cluster.diagnosis.as_ref())
+            .map(|diagnosis| &diagnosis.cause)
+            .collect::<Vec<_>>()
+    );
+
+    assert!(
+        analysis.data_quality.spike_events_truncated,
+        "real_truncated_low_quality should exercise spike_events_truncated"
+    );
+    assert!(
+        analysis.data_quality.spike_events_dropped_count > 0,
+        "real_truncated_low_quality should exercise spike_events_dropped_count"
+    );
+    assert!(
+        analysis.data_quality.drop_counters_nonzero,
+        "real_truncated_low_quality should exercise drop_counters_nonzero"
+    );
+}
+
+#[test]
 fn validation_corpus_game_thread_scheduler_delay() {
     assert_fixture_from_metadata("game_thread_scheduler_delay");
 }
