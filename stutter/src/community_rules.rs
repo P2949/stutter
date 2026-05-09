@@ -19,7 +19,7 @@ pub mod importer;
 pub mod loader;
 pub mod paths;
 
-pub use importer::{ImportInput, import_ananicy_rules};
+pub use importer::{ImportInput, ImportReport, import_ananicy_rules};
 pub use loader::{LoadCommunityRulesInput, load_rules_db, load_rules_dir, load_rules_file};
 pub use paths::{default_system_rules_dirs, default_user_rules_dir};
 
@@ -216,6 +216,8 @@ fn rules_import_command(args: crate::cli::RulesImportArgs) -> anyhow::Result<()>
     };
 
     let imported = import_ananicy_rules(input)?;
+    let report = imported.report;
+    let imported = imported.file;
     let out_path = match args.out.clone() {
         Some(path) => path,
         None => default_imported_rules_path(&args.name)?,
@@ -239,11 +241,8 @@ fn rules_import_command(args: crate::cli::RulesImportArgs) -> anyhow::Result<()>
     };
 
     if args.dry_run {
-        println!(
-            "dry-run: would import {} reduced rules from {}",
-            imported.rules.len(),
-            source_display
-        );
+        println!("dry-run: analyzed Ananicy-compatible rules from {source_display}");
+        print_import_report(&report);
         println!("dry-run: would write {}", out_path.display());
         println!("dry-run: would write {}", metadata_path.display());
         println!("license: {}", args.license);
@@ -278,14 +277,34 @@ fn rules_import_command(args: crate::cli::RulesImportArgs) -> anyhow::Result<()>
 
     println!(
         "imported {} reduced rules from {}",
-        imported.rules.len(),
-        imported.source.name
+        report.imported_rules, imported.source.name
     );
     println!("wrote {}", out_path.display());
     println!("wrote {}", metadata_path.display());
     println!("license: {}", args.license);
     println!("note: imported rules are user-installed data and are not part of the stutter binary");
     Ok(())
+}
+
+fn print_import_report(report: &ImportReport) {
+    println!("import report:");
+    println!("  scanned_files: {}", report.scanned_files);
+    println!("  parsed_objects: {}", report.parsed_objects);
+    println!("  imported_rules: {}", report.imported_rules);
+    println!("  skipped_no_name: {}", report.skipped_no_name);
+    println!("  skipped_bad_name: {}", report.skipped_bad_name);
+    println!("  skipped_unknown_class: {}", report.skipped_unknown_class);
+    println!("  duplicate_rules: {}", report.duplicate_rules);
+    println!("  ambiguous_rules: {}", report.ambiguous_rules);
+
+    if report.classes.is_empty() {
+        println!("  classes: none");
+    } else {
+        println!("  classes:");
+        for (class, count) in &report.classes {
+            println!("    {class}: {count}");
+        }
+    }
 }
 
 fn rules_list_command() -> anyhow::Result<()> {
