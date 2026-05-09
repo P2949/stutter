@@ -45,8 +45,8 @@ pub fn import_ananicy_rules(input: ImportInput) -> anyhow::Result<CommunityRules
                 continue;
             };
 
-            let identity_key = (rule.normalized_name.clone(), rule.source_path.clone());
-            if seen.insert(identity_key) {
+            let key = (rule.normalized_name.clone(), rule.source_path.clone());
+            if seen.insert(key) {
                 rules.push(rule);
             }
         }
@@ -465,10 +465,10 @@ mod tests {
         assert_eq!(imported.schema_version, 1);
         assert_eq!(imported.source.name, "test ananicy import");
         assert_eq!(
-            imported.source.repo.as_deref(),
-            Some("https://example.test/ananicy-rules.git")
+            imported.source.repo,
+            Some("https://example.test/ananicy-rules.git".to_owned())
         );
-        assert_eq!(imported.source.commit.as_deref(), Some("abc123"));
+        assert_eq!(imported.source.commit, Some("abc123".to_owned()));
         assert_eq!(imported.source.generated_at, "2026-05-09T00:00:00Z");
     }
 

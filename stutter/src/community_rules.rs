@@ -5,12 +5,13 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::OnceLock,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::process_tree::TaskClass;
+use crate::{cli::RulesCommand, process_tree::TaskClass};
 
 pub mod import;
 
@@ -67,11 +68,7 @@ pub fn load_community_rules_file(
             "embedded community rules test fixture",
         ),
         CommunityRulesSourceKind::UserData => {
-            let path = user_data_community_rules_path().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "cannot locate user community rules path because neither XDG_DATA_HOME nor HOME is set"
-                )
-            })?;
+            let path = active_rules_path()?;
             load_community_rules_file_from_path(&path)
         }
         CommunityRulesSourceKind::SystemData => load_community_rules_file_from_path(Path::new(
@@ -108,21 +105,263 @@ fn parse_community_rules_file(
 }
 
 fn user_data_community_rules_path() -> Option<PathBuf> {
-    if let Some(xdg_data_home) = std::env::var_os("XDG_DATA_HOME") {
-        return Some(
-            PathBuf::from(xdg_data_home)
-                .join("stutter")
-                .join("community-rules.json"),
+    active_rules_path().ok()
+}
+
+pub fn rules_command(command: RulesCommand) -> anyhow::Result<()> {
+    match command {
+        RulesCommand::Import(args) => rules_import_command(args),
+        RulesCommand::List(_) => rules_list_command(),
+        RulesCommand::Status(_) => rules_status_command(),
+        RulesCommand::Enable(args) => rules_enable_command(&args.name),
+        RulesCommand::Disable(_) => rules_disable_command(),
+        RulesCommand::Remove(args) => rules_remove_command(&args.name, args.dry_run),
+    }
+}
+
+fn rules_import_command(args: crate::cli::RulesImportArgs) -> anyhow::Result<()> {
+    let generated_at = generated_at_now();
+    let source_display = args.source.display().to_string();
+    let input = import::ImportInput {
+        source_dir: args.source.clone(),
+        source_name: args.name.clone(),
+        source_repo: args.source_repo.clone(),
+        source_commit: args.source_commit.clone(),
+        generated_at,
+    };
+
+    let imported = import::import_ananicy_rules(input)?;
+    let out_path = match args.out.clone() {
+        Some(path) => path,
+        None => default_imported_rules_path(&args.name)?,
+    };
+
+    if args.dry_run {
+        println!(
+            "dry-run: would import {} reduced rules from {}",
+            imported.rules.len(),
+            source_display
+        );
+        println!("dry-run: would write {}", out_path.display());
+        println!("license: {}", args.license);
+        println!(
+            "note: imported rules are user-installed data and are not part of the stutter binary"
+        );
+        return Ok(());
+    }
+
+    if let Some(parent) = out_path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create rules output directory {}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let json = serde_json::to_string_pretty(&imported)
+        .with_context(|| "failed to serialize imported community rules")?;
+    fs::write(&out_path, json)
+        .with_context(|| format!("failed to write imported rules to {}", out_path.display()))?;
+
+    println!(
+        "imported {} reduced rules from {}",
+        imported.rules.len(),
+        imported.source.name
+    );
+    println!("wrote {}", out_path.display());
+    println!("license: {}", args.license);
+    println!("note: imported rules are user-installed data and are not part of the stutter binary");
+    Ok(())
+}
+
+fn rules_list_command() -> anyhow::Result<()> {
+    let dir = default_rules_dir()?;
+    if !dir.exists() {
+        println!(
+            "no imported community rules directory found at {}",
+            dir.display()
+        );
+        return Ok(());
+    }
+
+    let files = imported_rules_files(&dir)?;
+    if files.is_empty() {
+        println!(
+            "no imported community rules files found at {}",
+            dir.display()
+        );
+        return Ok(());
+    }
+
+    let active_path = active_rules_path()?;
+    for file in files {
+        let active_marker = if file == active_path { " enabled" } else { "" };
+        println!("{}{}", file.display(), active_marker);
+    }
+
+    Ok(())
+}
+
+fn rules_status_command() -> anyhow::Result<()> {
+    let dir = default_rules_dir()?;
+    let active = active_rules_path()?;
+
+    println!("rules directory: {}", dir.display());
+    if active.exists() {
+        println!("enabled rules: {}", active.display());
+    } else {
+        println!("enabled rules: none");
+    }
+
+    let files = if dir.exists() {
+        imported_rules_files(&dir)?
+    } else {
+        Vec::new()
+    };
+    println!("imported rules files: {}", files.len());
+
+    Ok(())
+}
+
+fn rules_enable_command(name: &str) -> anyhow::Result<()> {
+    let source = default_imported_rules_path(name)?;
+    anyhow::ensure!(
+        source.exists(),
+        "cannot enable rules named '{}': {} does not exist; run `stutter rules import --source PATH --name {}` first",
+        name,
+        source.display(),
+        name
+    );
+
+    let active = active_rules_path()?;
+    if let Some(parent) = active.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create rules directory {}", parent.display()))?;
+    }
+
+    fs::copy(&source, &active).with_context(|| {
+        format!(
+            "failed to enable community rules by copying {} to {}",
+            source.display(),
+            active.display()
+        )
+    })?;
+
+    println!("enabled community rules {}", source.display());
+    println!("active rules file: {}", active.display());
+    Ok(())
+}
+
+fn rules_disable_command() -> anyhow::Result<()> {
+    let active = active_rules_path()?;
+    if active.exists() {
+        fs::remove_file(&active)
+            .with_context(|| format!("failed to remove active rules file {}", active.display()))?;
+        println!("disabled community rules");
+    } else {
+        println!("community rules are already disabled");
+    }
+
+    Ok(())
+}
+
+fn rules_remove_command(name: &str, dry_run: bool) -> anyhow::Result<()> {
+    let path = default_imported_rules_path(name)?;
+
+    if dry_run {
+        println!("dry-run: would remove {}", path.display());
+        return Ok(());
+    }
+
+    if path.exists() {
+        fs::remove_file(&path)
+            .with_context(|| format!("failed to remove imported rules file {}", path.display()))?;
+        println!("removed {}", path.display());
+    } else {
+        println!(
+            "no imported community rules file found at {}",
+            path.display()
         );
     }
 
-    std::env::var_os("HOME").map(|home| {
-        PathBuf::from(home)
+    Ok(())
+}
+
+fn default_rules_dir() -> anyhow::Result<PathBuf> {
+    if let Some(xdg_data_home) = std::env::var_os("XDG_DATA_HOME") {
+        return Ok(PathBuf::from(xdg_data_home)
+            .join("stutter")
+            .join("community-rules"));
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        return Ok(PathBuf::from(home)
             .join(".local")
             .join("share")
             .join("stutter")
-            .join("community-rules.json")
-    })
+            .join("community-rules"));
+    }
+
+    anyhow::bail!(
+        "cannot determine community rules directory because neither XDG_DATA_HOME nor HOME is set"
+    )
+}
+
+fn default_imported_rules_path(name: &str) -> anyhow::Result<PathBuf> {
+    Ok(default_rules_dir()?.join(format!("{}.generated.json", sanitize_rules_name(name))))
+}
+
+fn active_rules_path() -> anyhow::Result<PathBuf> {
+    Ok(default_rules_dir()?.join("enabled.generated.json"))
+}
+
+fn imported_rules_files(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+
+    for entry in fs::read_dir(dir)
+        .with_context(|| format!("failed to read community rules directory {}", dir.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("failed to read entry under {}", dir.display()))?;
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if file_name.ends_with(".generated.json") {
+            files.push(path);
+        }
+    }
+
+    files.sort();
+    Ok(files)
+}
+
+fn sanitize_rules_name(name: &str) -> String {
+    let sanitized = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+
+    if sanitized.is_empty() {
+        "ananicy".to_owned()
+    } else {
+        sanitized
+    }
+}
+
+fn generated_at_now() -> String {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    format!("unix-seconds:{seconds}")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -404,6 +643,41 @@ fn game_context_signal(identity: &CommunityProcessIdentity<'_>) -> Option<&'stat
         Some("wine")
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod rules_command_tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[test]
+    fn rules_import_dry_run_does_not_write() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("source");
+        let out = dir.path().join("out").join("ananicy.generated.json");
+        fs::create_dir_all(source.join("00-default/Games")).unwrap();
+        fs::write(
+            source.join("00-default/Games/example.rules"),
+            r#"{"name":"example-game.exe","type":"Game","nice":-20}"#,
+        )
+        .unwrap();
+
+        rules_import_command(crate::cli::RulesImportArgs {
+            source,
+            name: "ananicy".to_owned(),
+            license: "GPL-3.0-only".to_owned(),
+            source_repo: Some("https://example.test/ananicy-rules.git".to_owned()),
+            source_commit: Some("abc123".to_owned()),
+            out: Some(out.clone()),
+            dry_run: true,
+        })
+        .unwrap();
+
+        assert!(!out.exists());
     }
 }
 

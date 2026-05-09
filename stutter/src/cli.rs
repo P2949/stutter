@@ -49,6 +49,7 @@ enum Command {
     #[command(name = "man")]
     Man(ManArgs),
     Probes(ProbesArgs),
+    Rules(RulesArgs),
     Scenario(ScenarioArgs),
 }
 
@@ -924,6 +925,70 @@ pub struct InspectIrqsArgs {
     pub top: usize,
 }
 #[derive(Args, Debug, Clone)]
+pub struct RulesArgs {
+    #[command(subcommand)]
+    pub command: RulesCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum RulesCommand {
+    Import(RulesImportArgs),
+    List(RulesListArgs),
+    Status(RulesStatusArgs),
+    Enable(RulesEnableArgs),
+    Disable(RulesDisableArgs),
+    Remove(RulesRemoveArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RulesImportArgs {
+    #[arg(long = "source", value_name = "PATH")]
+    pub source: PathBuf,
+
+    #[arg(long = "name", default_value = "ananicy")]
+    pub name: String,
+
+    #[arg(long = "license", default_value = "GPL-3.0-only")]
+    pub license: String,
+
+    #[arg(long = "source-repo")]
+    pub source_repo: Option<String>,
+
+    #[arg(long = "source-commit")]
+    pub source_commit: Option<String>,
+
+    #[arg(long = "out", value_name = "PATH")]
+    pub out: Option<PathBuf>,
+
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RulesListArgs {}
+
+#[derive(Args, Debug, Clone)]
+pub struct RulesStatusArgs {}
+
+#[derive(Args, Debug, Clone)]
+pub struct RulesEnableArgs {
+    #[arg(long = "name", default_value = "ananicy")]
+    pub name: String,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RulesDisableArgs {}
+
+#[derive(Args, Debug, Clone)]
+pub struct RulesRemoveArgs {
+    #[arg(long = "name", default_value = "ananicy")]
+    pub name: String,
+
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
 pub struct ScenarioArgs {
     #[command(subcommand)]
     pub command: ScenarioCommand,
@@ -1094,6 +1159,9 @@ pub enum AppCommand {
     },
     Probes {
         json: bool,
+    },
+    Rules {
+        command: RulesCommand,
     },
     ScenarioCreate {
         name: String,
@@ -1774,6 +1842,9 @@ where
             output: args.output,
         }),
         Some(Command::Probes(args)) => Ok(AppCommand::Probes { json: args.json }),
+        Some(Command::Rules(args)) => Ok(AppCommand::Rules {
+            command: args.command,
+        }),
         Some(Command::Scenario(args)) => match args.command {
             ScenarioCommand::Create(args) => {
                 if args.name.trim().is_empty() {
@@ -1882,6 +1953,96 @@ mod auto_focus_cli_tests {
         assert_eq!(args.auto_focus_switch_margin, 0.30);
         assert_eq!(args.auto_focus_required_polls, 3);
         assert_eq!(args.auto_focus_max_roots, 2);
+    }
+}
+
+#[cfg(test)]
+mod rules_cli_tests {
+    use super::*;
+
+    #[test]
+    fn rules_import_requires_source() {
+        let result = Cli::try_parse_from(["stutter", "rules", "import"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rules_import_accepts_out_path() {
+        let cli = Cli::try_parse_from([
+            "stutter",
+            "rules",
+            "import",
+            "--source",
+            "/tmp/ananicy-rules",
+            "--out",
+            "/tmp/ananicy.generated.json",
+        ])
+        .unwrap();
+
+        let command = cli.command.unwrap();
+        match command {
+            Command::Rules(args) => match args.command {
+                RulesCommand::Import(import) => {
+                    assert_eq!(import.source, PathBuf::from("/tmp/ananicy-rules"));
+                    assert_eq!(
+                        import.out,
+                        Some(PathBuf::from("/tmp/ananicy.generated.json"))
+                    );
+                }
+                other => panic!("expected rules import command, got {other:?}"),
+            },
+            other => panic!("expected rules command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rules_import_default_name_is_ananicy() {
+        let cli = Cli::try_parse_from([
+            "stutter",
+            "rules",
+            "import",
+            "--source",
+            "/tmp/ananicy-rules",
+        ])
+        .unwrap();
+
+        let command = cli.command.unwrap();
+        match command {
+            Command::Rules(args) => match args.command {
+                RulesCommand::Import(import) => {
+                    assert_eq!(import.name, "ananicy");
+                    assert_eq!(import.license, "GPL-3.0-only");
+                    assert!(!import.dry_run);
+                }
+                other => panic!("expected rules import command, got {other:?}"),
+            },
+            other => panic!("expected rules command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rules_import_dry_run_does_not_write() {
+        let cli = Cli::try_parse_from([
+            "stutter",
+            "rules",
+            "import",
+            "--source",
+            "/tmp/ananicy-rules",
+            "--dry-run",
+        ])
+        .unwrap();
+
+        let command = cli.command.unwrap();
+        match command {
+            Command::Rules(args) => match args.command {
+                RulesCommand::Import(import) => {
+                    assert!(import.dry_run);
+                    assert_eq!(import.out, None);
+                }
+                other => panic!("expected rules import command, got {other:?}"),
+            },
+            other => panic!("expected rules command, got {other:?}"),
+        }
     }
 }
 
