@@ -626,17 +626,12 @@ impl CommunityRulesDb {
                 let Some(class) = TaskClass::from_str_opt(&rule.stutter_class) else {
                     continue;
                 };
-                if class != TaskClass::Game {
-                    continue;
-                }
 
-                let context_signal = game_context_signal(identity);
-                if strict_context && rule_requires_context(rule) && context_signal.is_none() {
+                let Some(context_label) =
+                    classification_context_label(class, rule, identity, source, strict_context)
+                else {
                     continue;
-                }
-                if rule.ambiguous && context_signal.is_none() {
-                    continue;
-                }
+                };
 
                 let confidence_cap = if rule.ambiguous {
                     source.confidence_cap().min(0.70)
@@ -644,7 +639,6 @@ impl CommunityRulesDb {
                     source.confidence_cap()
                 };
                 let confidence = rule.confidence.min(confidence_cap);
-                let context_label = context_signal.unwrap_or("exact-name");
                 let reason = format!(
                     "community-rules: matched community rule '{}' from {}; via {}; context={}",
                     rule.name,
@@ -748,6 +742,69 @@ fn first_cmdline_arg(cmdline: &str) -> Option<&str> {
         .find(|arg| !arg.trim().is_empty())
 }
 
+fn classification_context_label(
+    class: TaskClass,
+    rule: &CommunityRule,
+    identity: &CommunityProcessIdentity<'_>,
+    source: CommunityRuleIdentitySource,
+    strict_context: bool,
+) -> Option<&'static str> {
+    match class {
+        TaskClass::Unknown => None,
+        TaskClass::Game => game_rule_context_label(rule, identity, strict_context),
+        TaskClass::GameScope | TaskClass::WineServer | TaskClass::SteamRuntime => {
+            gaming_runtime_rule_context_label(identity, strict_context)
+        }
+        _ => non_game_rule_context_label(rule, source),
+    }
+}
+
+fn game_rule_context_label(
+    rule: &CommunityRule,
+    identity: &CommunityProcessIdentity<'_>,
+    strict_context: bool,
+) -> Option<&'static str> {
+    let context_signal = game_context_signal(identity);
+
+    if strict_context && rule_requires_context(rule) && context_signal.is_none() {
+        return None;
+    }
+
+    if rule.ambiguous && context_signal.is_none() {
+        return None;
+    }
+
+    Some(context_signal.unwrap_or("exact-name"))
+}
+
+fn gaming_runtime_rule_context_label(
+    identity: &CommunityProcessIdentity<'_>,
+    strict_context: bool,
+) -> Option<&'static str> {
+    let context_signal = gaming_runtime_context_signal(identity);
+
+    if strict_context && context_signal.is_none() {
+        return None;
+    }
+
+    Some(context_signal.unwrap_or("exact-name"))
+}
+
+fn non_game_rule_context_label(
+    rule: &CommunityRule,
+    source: CommunityRuleIdentitySource,
+) -> Option<&'static str> {
+    if rule.ambiguous {
+        return None;
+    }
+
+    match source {
+        CommunityRuleIdentitySource::ExeBasename => Some("exact-exe"),
+        CommunityRuleIdentitySource::CmdlineBasename => Some("exact-cmdline"),
+        CommunityRuleIdentitySource::ProcessComm | CommunityRuleIdentitySource::ThreadComm => None,
+    }
+}
+
 fn rule_requires_context(rule: &CommunityRule) -> bool {
     rule.ambiguous
         || rule
@@ -758,6 +815,32 @@ fn rule_requires_context(rule: &CommunityRule) -> bool {
             .source_path
             .to_ascii_lowercase()
             .contains("wine_proton")
+}
+
+fn gaming_runtime_context_signal(identity: &CommunityProcessIdentity<'_>) -> Option<&'static str> {
+    if let Some(signal) = game_context_signal(identity) {
+        return Some(signal);
+    }
+
+    let combined = [
+        identity.cmdline,
+        identity.exe_path,
+        identity.cgroup_path,
+        identity.process_comm,
+        identity.thread_comm,
+    ]
+    .join(" ")
+    .to_ascii_lowercase();
+
+    if combined.contains("steam-runtime") {
+        Some("steam-runtime")
+    } else if combined.contains("steamrt") {
+        Some("steamrt")
+    } else if combined.contains("steam-runtime-tools") {
+        Some("steam-runtime-tools")
+    } else {
+        None
+    }
 }
 
 fn game_context_signal(identity: &CommunityProcessIdentity<'_>) -> Option<&'static str> {
@@ -1114,6 +1197,147 @@ mod tests {
             "/tmp/build.exe",
             "/user.slice/app-builder.scope",
         ));
+
+        assert!(hit.is_none());
+    }
+
+    fn rules_db_with_rules(rules: Vec<CommunityRule>) -> CommunityRulesDb {
+        CommunityRulesDb::from_file(CommunityRulesFile {
+            schema_version: 1,
+            source: CommunityRulesSource {
+                name: "test community rules".to_owned(),
+                repo: None,
+                commit: None,
+                generated_at: "2026-05-09T00:00:00Z".to_owned(),
+            },
+            rules,
+        })
+        .unwrap()
+    }
+
+    fn rule(name: &str, stutter_class: &str) -> CommunityRule {
+        CommunityRule {
+            name: name.to_owned(),
+            normalized_name: normalize_process_name(name).unwrap(),
+            r#type: stutter_class.to_owned(),
+            stutter_class: stutter_class.to_owned(),
+            confidence: 0.90,
+            source_path: "test.rules".to_owned(),
+            context: Vec::new(),
+            title: None,
+            source_url: None,
+            comment: None,
+            ambiguous: false,
+        }
+    }
+
+    #[test]
+    fn non_game_rule_can_classify_from_exe_basename() {
+        let db = rules_db_with_rules(vec![rule("rustc", "Compiler")]);
+
+        let hit = db
+            .classify(
+                &identity(
+                    "rustc",
+                    "rustc",
+                    "rustc --crate-name stutter",
+                    "/usr/bin/rustc",
+                    "/user.slice/build.scope",
+                ),
+                true,
+            )
+            .unwrap();
+
+        assert_eq!(hit.class, TaskClass::Compiler);
+        assert!(hit.reason.contains("context=exact-exe"));
+    }
+
+    #[test]
+    fn non_game_rule_does_not_classify_from_comm_only() {
+        let db = rules_db_with_rules(vec![rule("rustc", "Compiler")]);
+
+        let hit = db.classify(
+            &identity(
+                "rustc",
+                "rustc",
+                "",
+                "",
+                "/user.slice/build.scope",
+            ),
+            true,
+        );
+
+        assert!(hit.is_none());
+    }
+
+    #[test]
+    fn unknown_class_rule_is_skipped() {
+        let db = rules_db_with_rules(vec![rule("mystery", "Unknown")]);
+
+        let hit = db.classify(
+            &identity(
+                "mystery",
+                "mystery",
+                "mystery",
+                "/usr/bin/mystery",
+                "/user.slice/mystery.scope",
+            ),
+            true,
+        );
+
+        assert!(hit.is_none());
+    }
+
+    #[test]
+    fn gaming_runtime_rule_requires_runtime_context_when_strict() {
+        let db = rules_db_with_rules(vec![rule("pv-adverb", "SteamRuntime")]);
+
+        let without_context = db.classify(
+            &identity(
+                "pv-adverb",
+                "pv-adverb",
+                "/usr/lib/pressure-vessel/pv-adverb",
+                "/usr/lib/pressure-vessel/pv-adverb",
+                "/user.slice/app-steam-123.scope",
+            ),
+            true,
+        );
+
+        assert_eq!(
+            without_context.map(|hit| hit.class),
+            Some(TaskClass::SteamRuntime)
+        );
+
+        let no_runtime_context = db.classify(
+            &identity(
+                "pv-adverb",
+                "pv-adverb",
+                "/tmp/pv-adverb",
+                "/tmp/pv-adverb",
+                "/user.slice/plain.scope",
+            ),
+            true,
+        );
+
+        assert!(no_runtime_context.is_none());
+    }
+
+    #[test]
+    fn game_rule_still_requires_context_when_rule_requires_context() {
+        let mut game_rule = rule("SomeGame.exe", "Game");
+        game_rule.context = vec!["wine_or_proton_or_steam".to_owned()];
+        let db = rules_db_with_rules(vec![game_rule]);
+
+        let hit = db.classify(
+            &identity(
+                "SomeGame.exe",
+                "SomeGame.exe",
+                "/tmp/SomeGame.exe",
+                "/tmp/SomeGame.exe",
+                "/user.slice/plain.scope",
+            ),
+            true,
+        );
 
         assert!(hit.is_none());
     }
