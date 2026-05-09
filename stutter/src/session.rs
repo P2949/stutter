@@ -22,15 +22,13 @@ use crate::{
     hwmon, mangohud,
     metrics::{collect_interval_summaries_labeled, log_drop_counters, print_session_summaries},
     process_tree::{self, find_auto_target_pids},
-    psi,
     recorder::{
-        self, FinalizeRecordingInput, JsonArrayWriter, LiveRecorder, SpikeEvent,
-        SpikeEventBuffer,
+        self, FinalizeRecordingInput, JsonArrayWriter, LiveRecorder, SpikeEvent, SpikeEventBuffer,
     },
     runtime_slices::RuntimeSliceSampler,
-    scx,
     session::{
-        event_bus::MonitorEventBus, live_telemetry::LiveTelemetry, ui::TuiRenderSnapshot,
+        event_bus::MonitorEventBus, live_telemetry::LiveTelemetry, probes::ProbeRuntime,
+        ui::TuiRenderSnapshot,
     },
     session_events::MonitorEvent,
     tasks::TaskTracker,
@@ -259,11 +257,10 @@ pub struct MonitorSession {
     pub tree_root_starttimes: BTreeMap<u32, Option<u64>>,
     pub recorder: LiveRecorder,
     pub tasks: TaskTracker,
-    pub loaded: ebpf_loader::LoadedEbpf,
+    pub probes: ProbeRuntime,
 
     pub cpu_to_pkg: BTreeMap<u32, String>,
-    pub psi_reader: psi::PsiReader,
-    pub scx_tracker: scx::ScxTracker,
+
     pub hwmon_reader: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
     pub watch_process_cache: process_tree::ProcessCache,
     pub focus_resolver: Option<FocusResolver>,
@@ -278,11 +275,8 @@ pub struct MonitorSession {
     pub terminal: Option<ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>>,
     pub had_tree_roots: bool,
     pub interval_label: &'static str,
-    pub block_io_correlation_basis: String,
     pub alert_sender: Option<tokio::sync::mpsc::Sender<AlertPayload>>,
     pub event_bus: MonitorEventBus,
-    pub cpu_perf_sampler: Option<crate::perf_counters::CpuPerfSampler>,
-    pub runtime_slice_sampler: Option<RuntimeSliceSampler>,
     pub prometheus_state: Option<Arc<crate::prometheus::PrometheusState>>,
     #[allow(dead_code)]
     pub prometheus_task: Option<tokio::task::JoinHandle<()>>,
@@ -475,9 +469,6 @@ impl MonitorSession {
             .map(|c| (c.cpu, c.physical_package_id.clone().unwrap_or_default()))
             .collect();
 
-        let psi_reader = psi::PsiReader::new();
-        let mut scx_tracker = scx::ScxTracker::default();
-
         let hwmon_reader = if !config.hwmon {
             None
         } else if let Some(shared) = shared_hwmon {
@@ -496,7 +487,6 @@ impl MonitorSession {
         }
 
         let started = Instant::now();
-        scx_tracker.sample(0);
 
         let tui_state = crate::tui::TuiState::default();
         let terminal = if config.tui {
@@ -567,6 +557,13 @@ impl MonitorSession {
         };
         let runtime_slice_sampler = config.runtime_slices.then(RuntimeSliceSampler::new);
 
+        let probes = ProbeRuntime::new(
+            loaded,
+            block_io_correlation_basis,
+            cpu_perf_sampler,
+            runtime_slice_sampler,
+        );
+
         let mut otel_exporter = None;
         if let Some(endpoint) = config.otlp_endpoint.as_ref() {
             let started_at = recorder
@@ -606,10 +603,8 @@ impl MonitorSession {
             tree_root_starttimes,
             recorder,
             tasks: TaskTracker::default(),
-            loaded,
+            probes,
             cpu_to_pkg,
-            psi_reader,
-            scx_tracker,
             hwmon_reader,
             watch_process_cache: process_tree::ProcessCache::default(),
             community_rules,
@@ -624,11 +619,8 @@ impl MonitorSession {
             terminal,
             had_tree_roots,
             interval_label,
-            block_io_correlation_basis,
             alert_sender,
             event_bus: MonitorEventBus::new(event_tx),
-            cpu_perf_sampler,
-            runtime_slice_sampler,
             prometheus_state,
             prometheus_task,
             otel_exporter,
@@ -1057,7 +1049,7 @@ impl MonitorSession {
     }
 
     async fn drain_bpf_events(&mut self) -> anyhow::Result<()> {
-        let mut guard = self.loaded.events.readable_mut().await?;
+        let mut guard = self.probes.loaded.events.readable_mut().await?;
         let recording_monotonic_start_ns = self
             .recorder
             .run
@@ -1068,7 +1060,7 @@ impl MonitorSession {
         let mut pending_irqs = Vec::new();
         let mut pending_ios = Vec::new();
 
-        let current_scx = scx_snapshot(&self.scx_tracker);
+        let current_scx = scx_snapshot(&self.probes.scx_tracker);
 
         while let Some(item) = guard.get_inner_mut().next() {
             if item.len() < std::mem::size_of::<u32>() {
@@ -1159,7 +1151,7 @@ impl MonitorSession {
                     {
                         let record = crate::events::block_io_event_record(
                             &event,
-                            self.loaded.block_io_correlation_basis.as_str(),
+                            self.probes.loaded.block_io_correlation_basis.as_str(),
                             self.started,
                         );
 
@@ -1216,7 +1208,7 @@ impl MonitorSession {
     pub async fn handle_summary_tick(&mut self) -> anyhow::Result<()> {
         if !self.tui_state.paused {
             let elapsed_ms = self.started.elapsed().as_millis() as u64;
-            if let Some(sampler) = self.cpu_perf_sampler.as_mut() {
+            if let Some(sampler) = self.probes.cpu_perf_sampler.as_mut() {
                 let deltas = sampler.sample_interval();
                 for (tid, delta) in deltas {
                     if let Some(stats) = self.tasks.stats_by_task.get_mut(&tid) {
@@ -1225,14 +1217,14 @@ impl MonitorSession {
                 }
             }
 
-            let drop_counters_snapshot = self.loaded.snapshot_drop_counters();
-            let psi_snapshot = self.psi_reader.read().ok();
+            let drop_counters_snapshot = self.probes.loaded.snapshot_drop_counters();
+            let psi_snapshot = self.probes.psi_reader.read().ok();
             let records = collect_interval_summaries_labeled(
                 self.interval_label,
                 &mut self.tasks.stats_by_task,
                 elapsed_ms,
                 &drop_counters_snapshot,
-                self.loaded.prev_faults_map.as_ref(),
+                self.probes.loaded.prev_faults_map.as_ref(),
                 psi_snapshot.as_ref(),
                 &mut self.tasks.prev_faults_snapshot,
             );
@@ -1271,7 +1263,7 @@ impl MonitorSession {
                 }
             }
 
-            if let Some(sampler) = self.runtime_slice_sampler.as_mut() {
+            if let Some(sampler) = self.probes.runtime_slice_sampler.as_mut() {
                 let tasks = self
                     .tasks
                     .active_targets
@@ -1327,7 +1319,7 @@ impl MonitorSession {
 
         if let Some(term) = self.terminal.as_mut() {
             let elapsed_ms = self.started.elapsed().as_millis() as u64;
-            let drop_counters_snapshot = self.loaded.snapshot_drop_counters();
+            let drop_counters_snapshot = self.probes.loaded.snapshot_drop_counters();
 
             let snapshot = TuiRenderSnapshot {
                 elapsed_ms,
@@ -1450,6 +1442,7 @@ impl MonitorSession {
 
     pub fn handle_scx_tick(&mut self) {
         if let Some(event) = self
+            .probes
             .scx_tracker
             .sample(self.started.elapsed().as_millis() as u64)
         {
@@ -1606,8 +1599,8 @@ impl MonitorSession {
                 config: &self.config,
                 tree_pids: &self.tree_pids,
                 tree_events: &mut self.recorder.buffers.tree_events,
-                target_pid_map: &mut self.loaded.target_pid_map,
-                prev_faults_map: self.loaded.prev_faults_map.as_mut(),
+                target_pid_map: &mut self.probes.loaded.target_pid_map,
+                prev_faults_map: self.probes.loaded.prev_faults_map.as_mut(),
                 elapsed_ms: self.started.elapsed().as_millis() as u64,
                 recording_started: self.recorder.run.as_ref().map(|run| run.started_instant),
                 community_rules: self.community_rules.as_ref(),
@@ -1621,7 +1614,7 @@ impl MonitorSession {
         self.recorder.counters.thread_scan_limited_count +=
             budget_report.processes_thread_limited as u64;
 
-        if let Some(sampler) = self.cpu_perf_sampler.as_mut() {
+        if let Some(sampler) = self.probes.cpu_perf_sampler.as_mut() {
             sampler.sync_targets(&self.tasks.active_targets, &self.tasks.stats_by_task);
         }
 
@@ -1633,7 +1626,7 @@ impl MonitorSession {
             let _ = crate::tui::restore_terminal(term);
         }
 
-        let drop_counters = self.loaded.snapshot_drop_counters();
+        let drop_counters = self.probes.loaded.snapshot_drop_counters();
         log_drop_counters(&drop_counters);
 
         if let Some(dropped) = self.recorder.exporters.otel_spans_dropped.as_ref() {
@@ -1729,7 +1722,7 @@ impl MonitorSession {
                 stop_reason: &stop_reason,
                 tasks: &self.tasks,
                 frame_events: &frame_events,
-                block_io_correlation_basis: &self.block_io_correlation_basis,
+                block_io_correlation_basis: &self.probes.block_io_correlation_basis,
                 focus_mode: if self.config.auto_focus {
                     Some("auto".to_owned())
                 } else if self.config.has_explicit_target() {
@@ -1745,7 +1738,7 @@ impl MonitorSession {
                 current_focus: self.current_focus.clone(),
                 final_foreground_event: self.recorder.last_foreground_event.clone(),
                 drop_counters,
-                cpu_perf_status: self.cpu_perf_sampler.as_ref().map(|sampler| {
+                cpu_perf_status: self.probes.cpu_perf_sampler.as_ref().map(|sampler| {
                     recorder::CpuPerfStatus {
                         sample_count: sampler.total_samples(),
                         active_counter_tasks: sampler.active_counter_tasks() as u64,
