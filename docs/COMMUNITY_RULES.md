@@ -117,17 +117,48 @@ data.
 
 ## System and package-provided rules
 
-Separate GPL packages may provide pre-generated rule files. Package managers or
-distribution packages should install those files under a system data directory,
-for example:
+User-driven imports are the default path, but distributions may provide optional
+pre-generated community-rule packages.
+
+Package-provided generated files should use the same system data layout that the
+runtime loader already searches:
 
 ```text
-/usr/share/stutter/community-rules/vendor.generated.json
-/usr/share/stutter/community-rules/vendor.metadata.json
+/usr/share/stutter/community-rules/ananicy.generated.json
+/usr/share/stutter/community-rules/ananicy.metadata.json
 ```
 
-Such packages should clearly carry their own license metadata and should not make
-the core `stutter` binary embed or vendor the full GPL rules database.
+Local administrator overrides may also be installed under:
+
+```text
+/usr/local/share/stutter/community-rules/ananicy.generated.json
+/usr/local/share/stutter/community-rules/ananicy.metadata.json
+```
+
+The generated rule file must be the reduced `stutter` community-rules schema. The
+metadata file should identify the source project, license, source repository,
+source commit, generation timestamp, and generated rule filename.
+
+A clean Gentoo split would be:
+
+```text
+app-admin/stutter
+  MIT/Apache core binary
+  importer code
+  runtime loader
+  no full GPL Ananicy database embedded
+
+app-admin/stutter-community-rules-ananicy
+  GPL package
+  optional runtime companion for app-admin/stutter
+  installs /usr/share/stutter/community-rules/ananicy.generated.json
+  installs /usr/share/stutter/community-rules/ananicy.metadata.json
+```
+
+This gives users a one-command install path while preserving the licensing
+boundary: core `stutter` does not embed or vendor the full GPL rules database,
+and the optional community-rules package carries the GPL data and its license
+metadata separately.
 
 ## Classification hints only
 
