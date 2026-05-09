@@ -32,6 +32,7 @@ const OPTIONAL_ARTIFACT_FILES: &[&str] = &[
     "scx_events.json",
     "focus_events.json",
     "foreground_events.json",
+    "runtime_slices.json",
 ];
 
 #[derive(serde::Serialize)]
