@@ -24,11 +24,14 @@ use crate::{
     process_tree::{self, find_auto_target_pids},
     psi,
     recorder::{
-        self, FinalizeRecordingInput, JsonArrayWriter, LiveRecorder, SpikeEvent, SpikeEventBuffer,
+        self, FinalizeRecordingInput, JsonArrayWriter, LiveRecorder, SpikeEvent,
+        SpikeEventBuffer,
     },
     runtime_slices::RuntimeSliceSampler,
     scx,
-    session::{live_telemetry::LiveTelemetry, ui::TuiRenderSnapshot},
+    session::{
+        event_bus::MonitorEventBus, live_telemetry::LiveTelemetry, ui::TuiRenderSnapshot,
+    },
     session_events::MonitorEvent,
     tasks::TaskTracker,
     watch::{
@@ -277,7 +280,7 @@ pub struct MonitorSession {
     pub interval_label: &'static str,
     pub block_io_correlation_basis: String,
     pub alert_sender: Option<tokio::sync::mpsc::Sender<AlertPayload>>,
-    pub event_tx: Option<tokio::sync::mpsc::Sender<MonitorEvent>>,
+    pub event_bus: MonitorEventBus,
     pub cpu_perf_sampler: Option<crate::perf_counters::CpuPerfSampler>,
     pub runtime_slice_sampler: Option<RuntimeSliceSampler>,
     pub prometheus_state: Option<Arc<crate::prometheus::PrometheusState>>,
@@ -623,7 +626,7 @@ impl MonitorSession {
             interval_label,
             block_io_correlation_basis,
             alert_sender,
-            event_tx,
+            event_bus: MonitorEventBus::new(event_tx),
             cpu_perf_sampler,
             runtime_slice_sampler,
             prometheus_state,
@@ -634,34 +637,10 @@ impl MonitorSession {
     }
 
     pub fn emit(
-        &self,
+        &mut self,
         event: MonitorEvent,
-    ) -> impl std::future::Future<Output = ()> + Send + 'static {
-        let tx = self.event_tx.clone();
-
-        async move {
-            let Some(tx) = tx else {
-                return;
-            };
-
-            match event.delivery_class() {
-                crate::session_events::MonitorEventDeliveryClass::Reliable => {
-                    if let Err(err) = tx.send(event).await {
-                        warn!("monitor_event_channel_closed err={err}");
-                    }
-                }
-                crate::session_events::MonitorEventDeliveryClass::Conflated
-                | crate::session_events::MonitorEventDeliveryClass::Droppable => {
-                    let kind = event.kind();
-                    if let Err(err) = tx.try_send(event) {
-                        warn!(
-                            "monitor_event_channel_full dropped_event={} err={}",
-                            kind, err
-                        );
-                    }
-                }
-            }
-        }
+    ) -> impl std::future::Future<Output = ()> + Send + '_ {
+        self.event_bus.emit(event)
     }
 
     async fn refresh_tasks_and_emit_snapshot(&mut self) -> anyhow::Result<()> {
