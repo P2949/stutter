@@ -285,6 +285,40 @@ mod tests {
     }
 
     #[test]
+    fn load_rules_db_loads_package_style_system_rules_and_ignores_metadata() {
+        let dir = tempdir().unwrap();
+        let system_dir = dir
+            .path()
+            .join("usr")
+            .join("share")
+            .join("stutter")
+            .join("community-rules");
+        fs::create_dir_all(&system_dir).unwrap();
+
+        fs::write(
+            system_dir.join("ananicy.generated.json"),
+            test_rules_json("system-packaged-game.exe"),
+        )
+        .unwrap();
+        fs::write(
+            system_dir.join("ananicy.metadata.json"),
+            r#"{"schema_version":1,"name":"ananicy","license":"GPL-3.0-only","source_repo":"https://github.com/CachyOS/ananicy-rules","source_commit":"abc123","generated_at":"2026-05-09T00:00:00Z","generated_by":"stutter rules import","rule_file":"ananicy.generated.json"}"#,
+        )
+        .unwrap();
+
+        let db = load_rules_db(LoadCommunityRulesInput {
+            enabled: true,
+            load_test_fixture: false,
+            user_rules_dir: None,
+            explicit_rules_files: Vec::new(),
+            system_rules_dirs: vec![system_dir],
+        })
+        .unwrap();
+
+        assert_eq!(db.rule_count(), 1);
+    }
+
+    #[test]
     fn load_rules_db_prioritizes_explicit_then_user_then_system_then_fixture() {
         let dir = tempdir().unwrap();
         let explicit = dir.path().join("explicit.generated.json");
