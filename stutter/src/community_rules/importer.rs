@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -7,7 +7,10 @@ use std::{
 use anyhow::Context;
 use serde_json::{Map, Value};
 
-use super::{CommunityRule, CommunityRulesFile, CommunityRulesSource, normalize_process_name};
+use super::{
+    CommunityRule, CommunityRulesFile, CommunityRulesSource, is_guarded_community_rule_name,
+    normalize_process_name,
+};
 use crate::process_tree::TaskClass;
 
 #[derive(Debug, Clone)]
@@ -17,6 +20,27 @@ pub struct ImportInput {
     pub source_repo: Option<String>,
     pub source_commit: Option<String>,
     pub generated_at: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ImportReport {
+    pub scanned_files: usize,
+    pub parsed_objects: usize,
+    pub imported_rules: usize,
+    pub skipped_no_name: usize,
+    pub skipped_bad_name: usize,
+    pub skipped_unknown_class: usize,
+    pub duplicate_rules: usize,
+    pub ambiguous_rules: usize,
+    pub context_required_game_rules: usize,
+    pub exact_only_non_game_rules: usize,
+    pub classes: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportedCommunityRules {
+    pub file: CommunityRulesFile,
+    pub report: ImportReport,
 }
 
 #[derive(Debug, Clone)]
@@ -32,7 +56,14 @@ struct RuleCommentEvidence {
     comment: Option<String>,
 }
 
-pub fn import_ananicy_rules(input: ImportInput) -> anyhow::Result<CommunityRulesFile> {
+enum RuleImportDecision {
+    Import(Box<CommunityRule>),
+    SkipNoName,
+    SkipBadName,
+    SkipUnknownClass,
+}
+
+pub fn import_ananicy_rules(input: ImportInput) -> anyhow::Result<ImportedCommunityRules> {
     anyhow::ensure!(
         input.source_dir.is_dir(),
         "Ananicy rules source_dir is not a directory: {}",
@@ -45,6 +76,10 @@ pub fn import_ananicy_rules(input: ImportInput) -> anyhow::Result<CommunityRules
 
     let mut rules = Vec::new();
     let mut seen = HashSet::new();
+    let mut report = ImportReport {
+        scanned_files: rule_files.len(),
+        ..ImportReport::default()
+    };
 
     for path in rule_files {
         let source_path = relative_source_path(&input.source_dir, &path);
@@ -54,26 +89,66 @@ pub fn import_ananicy_rules(input: ImportInput) -> anyhow::Result<CommunityRules
             .with_context(|| format!("failed to parse JSON objects in {}", path.display()))?;
 
         for object in objects {
-            let Some(rule) = community_rule_from_json_object(&object, &source_path)? else {
-                continue;
+            report.parsed_objects += 1;
+
+            let rule = match community_rule_from_json_object(&object, &source_path) {
+                RuleImportDecision::Import(rule) => *rule,
+                RuleImportDecision::SkipNoName => {
+                    report.skipped_no_name += 1;
+                    continue;
+                }
+                RuleImportDecision::SkipBadName => {
+                    report.skipped_bad_name += 1;
+                    continue;
+                }
+                RuleImportDecision::SkipUnknownClass => {
+                    report.skipped_unknown_class += 1;
+                    continue;
+                }
             };
 
             let key = (rule.normalized_name.clone(), rule.source_path.clone());
-            if seen.insert(key) {
-                rules.push(rule);
+            if !seen.insert(key) {
+                report.duplicate_rules += 1;
+                continue;
             }
+
+            let class = TaskClass::from_str_opt(&rule.stutter_class).unwrap_or(TaskClass::Unknown);
+
+            if rule.ambiguous {
+                report.ambiguous_rules += 1;
+            }
+
+            if class == TaskClass::Game && rule_requires_game_context_at_import(&rule) {
+                report.context_required_game_rules += 1;
+            }
+
+            if exact_only_non_game_rule_at_import(class, &rule) {
+                report.exact_only_non_game_rules += 1;
+            }
+
+            *report
+                .classes
+                .entry(rule.stutter_class.clone())
+                .or_default() += 1;
+            rules.push(rule);
         }
     }
 
-    Ok(CommunityRulesFile {
-        schema_version: 2,
-        source: CommunityRulesSource {
-            name: input.source_name,
-            repo: input.source_repo,
-            commit: input.source_commit,
-            generated_at: input.generated_at,
+    report.imported_rules = rules.len();
+
+    Ok(ImportedCommunityRules {
+        file: CommunityRulesFile {
+            schema_version: 2,
+            source: CommunityRulesSource {
+                name: input.source_name,
+                repo: input.source_repo,
+                commit: input.source_commit,
+                generated_at: input.generated_at,
+            },
+            rules,
         },
-        rules,
+        report,
     })
 }
 
@@ -199,29 +274,32 @@ fn comment_from_trimmed_line(trimmed: &str) -> Option<String> {
 fn community_rule_from_json_object(
     parsed: &ParsedRuleObject,
     source_path: &str,
-) -> anyhow::Result<Option<CommunityRule>> {
+) -> RuleImportDecision {
     let Some(object) = parsed.value.as_object() else {
-        return Ok(None);
+        return RuleImportDecision::SkipNoName;
     };
 
     let Some(name) = string_field(object, &["name", "comm", "process", "exe"]) else {
-        return Ok(None);
+        return RuleImportDecision::SkipNoName;
     };
 
     let Some(normalized_name) = normalize_process_name(name) else {
-        return Ok(None);
+        return RuleImportDecision::SkipBadName;
     };
 
     let source_type = string_field(object, &["type", "category"])
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| broad_type_from_path(source_path).to_owned());
 
-    let stutter_class = map_ananicy_category_to_task_class(&source_type, source_path);
-    let ambiguous = is_ambiguous_rule_name(&normalized_name);
+    let Some(stutter_class) = map_ananicy_category_to_task_class(&source_type, source_path) else {
+        return RuleImportDecision::SkipUnknownClass;
+    };
+
+    let ambiguous = is_import_ambiguous_rule_name(&normalized_name);
     let context = context_hints_for_rule(&normalized_name, source_path);
     let evidence = comment_evidence(object, &parsed.preceding_comments);
 
-    Ok(Some(CommunityRule {
+    RuleImportDecision::Import(Box::new(CommunityRule {
         name: name.to_owned(),
         normalized_name,
         r#type: source_type,
@@ -347,10 +425,10 @@ fn broad_type_from_path(source_path: &str) -> &'static str {
     }
 }
 
-fn map_ananicy_category_to_task_class(category: &str, source_path: &str) -> TaskClass {
+fn map_ananicy_category_to_task_class(category: &str, source_path: &str) -> Option<TaskClass> {
     let combined = format!("{category} {source_path}").to_ascii_lowercase();
 
-    if combined.contains("gamescope") {
+    let class = if combined.contains("gamescope") {
         TaskClass::GameScope
     } else if combined.contains("wine") && combined.contains("server") {
         TaskClass::WineServer
@@ -398,8 +476,10 @@ fn map_ananicy_category_to_task_class(category: &str, source_path: &str) -> Task
     } else if combined.contains("service") || combined.contains("daemon") {
         TaskClass::Service
     } else {
-        TaskClass::Unknown
-    }
+        return None;
+    };
+
+    Some(class)
 }
 
 fn context_hints_for_rule(normalized_name: &str, source_path: &str) -> Vec<String> {
@@ -422,32 +502,31 @@ fn context_hints_for_rule(normalized_name: &str, source_path: &str) -> Vec<Strin
     context
 }
 
-fn is_ambiguous_rule_name(normalized_name: &str) -> bool {
-    const AMBIGUOUS_EXE_NAMES: &[&str] = &[
-        "build.exe",
-        "launcher.exe",
-        "game.exe",
-        "start.exe",
-        "setup.exe",
-        "client.exe",
-        "server.exe",
-        "main.exe",
-        "run.exe",
-        "app.exe",
-    ];
+fn is_import_ambiguous_rule_name(normalized_name: &str) -> bool {
+    is_guarded_community_rule_name(normalized_name)
+}
 
-    if AMBIGUOUS_EXE_NAMES.contains(&normalized_name) {
-        return true;
-    }
+fn rule_requires_game_context_at_import(rule: &CommunityRule) -> bool {
+    rule.ambiguous
+        || rule
+            .context
+            .iter()
+            .any(|context| context == "wine_or_proton_or_steam")
+        || rule
+            .source_path
+            .to_ascii_lowercase()
+            .contains("wine_proton")
+}
 
-    let stem = normalized_name
-        .strip_suffix(".exe")
-        .unwrap_or(normalized_name);
-
-    stem.len() <= 3
-        || matches!(
-            stem,
-            "app" | "run" | "main" | "start" | "setup" | "client" | "server"
+fn exact_only_non_game_rule_at_import(class: TaskClass, rule: &CommunityRule) -> bool {
+    !rule.ambiguous
+        && !matches!(
+            class,
+            TaskClass::Unknown
+                | TaskClass::Game
+                | TaskClass::GameScope
+                | TaskClass::WineServer
+                | TaskClass::SteamRuntime
         )
 }
 
@@ -456,8 +535,6 @@ fn imported_confidence(class: TaskClass, ambiguous: bool) -> f32 {
         0.70
     } else if class == TaskClass::Game {
         0.82
-    } else if class == TaskClass::Unknown {
-        0.50
     } else {
         0.68
     }
@@ -496,9 +573,9 @@ mod tests {
         );
 
         let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
-        assert_eq!(imported.rules.len(), 1);
+        assert_eq!(imported.file.rules.len(), 1);
 
-        let serialized = serde_json::to_string(&imported).unwrap();
+        let serialized = serde_json::to_string(&imported.file).unwrap();
         assert!(!serialized.contains("nice"));
         assert!(!serialized.contains("ionice"));
         assert!(!serialized.contains("SCHED_FIFO"));
@@ -525,12 +602,12 @@ mod tests {
 
         let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
 
-        assert_eq!(imported.rules.len(), 1);
-        assert_eq!(imported.rules[0].name, r#"C:\Games\KINGDOMCOME.EXE"#);
-        assert_eq!(imported.rules[0].normalized_name, "kingdomcome.exe");
-        assert_eq!(imported.rules[0].stutter_class, "Game");
+        assert_eq!(imported.file.rules.len(), 1);
+        assert_eq!(imported.file.rules[0].name, r#"C:\Games\KINGDOMCOME.EXE"#);
+        assert_eq!(imported.file.rules[0].normalized_name, "kingdomcome.exe");
+        assert_eq!(imported.file.rules[0].stutter_class, "Game");
         assert_eq!(
-            imported.rules[0].source_path,
+            imported.file.rules[0].source_path,
             "00-default/Games/wine_proton/wine_proton_k.rules"
         );
     }
@@ -550,11 +627,13 @@ mod tests {
         let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
 
         let build = imported
+            .file
             .rules
             .iter()
             .find(|rule| rule.normalized_name == "build.exe")
             .unwrap();
         let specific = imported
+            .file
             .rules
             .iter()
             .find(|rule| rule.normalized_name == "specificgame.exe")
@@ -563,6 +642,8 @@ mod tests {
         assert!(build.ambiguous);
         assert!(!specific.ambiguous);
         assert!(build.confidence <= 0.70);
+        assert_eq!(imported.report.ambiguous_rules, 1);
+        assert_eq!(imported.report.context_required_game_rules, 2);
     }
 
     #[test]
@@ -578,14 +659,14 @@ mod tests {
 
         let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
 
-        assert_eq!(imported.schema_version, 2);
-        assert_eq!(imported.source.name, "test ananicy import");
+        assert_eq!(imported.file.schema_version, 2);
+        assert_eq!(imported.file.source.name, "test ananicy import");
         assert_eq!(
-            imported.source.repo,
+            imported.file.source.repo,
             Some("https://example.test/ananicy-rules.git".to_owned())
         );
-        assert_eq!(imported.source.commit, Some("abc123".to_owned()));
-        assert_eq!(imported.source.generated_at, "2026-05-09T00:00:00Z");
+        assert_eq!(imported.file.source.commit, Some("abc123".to_owned()));
+        assert_eq!(imported.file.source.generated_at, "2026-05-09T00:00:00Z");
     }
 
     #[test]
@@ -600,7 +681,7 @@ mod tests {
         );
 
         let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
-        let serialized = serde_json::to_string(&imported).unwrap();
+        let serialized = serde_json::to_string(&imported.file).unwrap();
         let db = CommunityRulesDb::from_json(&serialized).unwrap();
 
         let hit = db
@@ -631,19 +712,21 @@ mod tests {
 {"name":"KingdomCome.exe","type":"Game"}
 "#,
         );
+
         let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
-        assert_eq!(imported.schema_version, 2);
-        assert_eq!(imported.rules.len(), 1);
+
+        assert_eq!(imported.file.schema_version, 2);
+        assert_eq!(imported.file.rules.len(), 1);
         assert_eq!(
-            imported.rules[0].title.as_deref(),
+            imported.file.rules[0].title.as_deref(),
             Some("Kingdom Come: Deliverance")
         );
         assert_eq!(
-            imported.rules[0].source_url.as_deref(),
+            imported.file.rules[0].source_url.as_deref(),
             Some("https://store.steampowered.com/app/379430/Kingdom_Come_Deliverance/")
         );
         assert_eq!(
-            imported.rules[0].comment.as_deref(),
+            imported.file.rules[0].comment.as_deref(),
             Some(
                 "Kingdom Come: Deliverance https://store.steampowered.com/app/379430/Kingdom_Come_Deliverance/"
             )
@@ -661,15 +744,17 @@ mod tests {
 {"name":"json-title-game.exe","type":"Game","title":"JSON Title","source_url":"https://example.test/json"}
 "#,
         );
+
         let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
-        assert_eq!(imported.rules.len(), 1);
-        assert_eq!(imported.rules[0].title.as_deref(), Some("JSON Title"));
+
+        assert_eq!(imported.file.rules.len(), 1);
+        assert_eq!(imported.file.rules[0].title.as_deref(), Some("JSON Title"));
         assert_eq!(
-            imported.rules[0].source_url.as_deref(),
+            imported.file.rules[0].source_url.as_deref(),
             Some("https://example.test/json")
         );
         assert_eq!(
-            imported.rules[0].comment.as_deref(),
+            imported.file.rules[0].comment.as_deref(),
             Some("Comment Title https://example.test/comment")
         );
     }
@@ -689,9 +774,76 @@ mod tests {
 
         let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
 
-        assert_eq!(imported.rules.len(), 1);
-        assert_eq!(imported.rules[0].title, None);
-        assert_eq!(imported.rules[0].source_url, None);
-        assert_eq!(imported.rules[0].comment, None);
+        assert_eq!(imported.file.rules.len(), 1);
+        assert_eq!(imported.file.rules[0].title, None);
+        assert_eq!(imported.file.rules[0].source_url, None);
+        assert_eq!(imported.file.rules[0].comment, None);
+    }
+
+    #[test]
+    fn importer_report_counts_denylisted_ambiguous_context_and_exact_only_rules() {
+        let dir = tempdir().unwrap();
+        write_rule_file(
+            &dir.path().join("00-default/Mixed/mixed.rules"),
+            r#"
+{"name":"python","type":"Compiler"}
+{"name":"build.exe","type":"Game"}
+{"name":"rustc","type":"Compiler"}
+{"name":"node","type":"BrowserRenderer"}
+"#,
+        );
+
+        let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
+
+        assert_eq!(imported.report.scanned_files, 1);
+        assert_eq!(imported.report.parsed_objects, 4);
+        assert_eq!(imported.report.imported_rules, 4);
+        assert_eq!(imported.report.ambiguous_rules, 3);
+        assert_eq!(imported.report.context_required_game_rules, 1);
+        assert_eq!(imported.report.exact_only_non_game_rules, 1);
+        assert_eq!(imported.report.classes.get("Game"), Some(&1));
+        assert_eq!(imported.report.classes.get("Compiler"), Some(&2));
+        assert_eq!(imported.report.classes.get("BrowserRenderer"), Some(&1));
+
+        let python = imported
+            .file
+            .rules
+            .iter()
+            .find(|rule| rule.normalized_name == "python")
+            .unwrap();
+        let node = imported
+            .file
+            .rules
+            .iter()
+            .find(|rule| rule.normalized_name == "node")
+            .unwrap();
+        let rustc = imported
+            .file
+            .rules
+            .iter()
+            .find(|rule| rule.normalized_name == "rustc")
+            .unwrap();
+
+        assert!(python.ambiguous);
+        assert!(node.ambiguous);
+        assert!(!rustc.ambiguous);
+    }
+
+    #[test]
+    fn importer_skips_unknown_class_rules_instead_of_importing_unknown() {
+        let dir = tempdir().unwrap();
+        write_rule_file(
+            &dir.path().join("00-default/Other/unknown.rules"),
+            r#"
+{"name":"mystery-process","type":"MysteryCategory"}
+"#,
+        );
+
+        let imported = import_ananicy_rules(import_input(dir.path())).unwrap();
+
+        assert_eq!(imported.report.parsed_objects, 1);
+        assert_eq!(imported.report.skipped_unknown_class, 1);
+        assert_eq!(imported.report.imported_rules, 0);
+        assert!(imported.file.rules.is_empty());
     }
 }

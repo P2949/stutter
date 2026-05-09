@@ -1,2 +1,4 @@
 #[allow(unused_imports)]
-pub use super::importer::{ImportInput, import_ananicy_rules};
+pub use super::importer::{
+    ImportInput, ImportReport, ImportedCommunityRules, import_ananicy_rules,
+};
