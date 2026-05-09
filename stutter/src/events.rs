@@ -11,19 +11,22 @@ use stutter_common::{
 };
 
 use crate::{
+    artifacts::ArtifactKind,
     cli::Config,
     metrics::{self, format_latency, print_event},
     process_tree::{self, TaskClass},
-    recorder::{self, IrqEventRecord, JsonArrayWriter, LiveRecorder, RecordingCounters},
+    recorder::{self, IrqEventRecord, LiveRecorder, RecordingCounters},
     tasks::{TaskTracker, should_replace_unknown_comm},
 };
 
 pub fn handle_irq_record(record: &IrqEventRecord, recorder: &mut LiveRecorder) {
-    if let Some(writer) = recorder.streams.irq_event_writer.as_mut() {
-        push_ndjson_event(writer, record, &mut recorder.counters, "irq_events", |c| {
-            c.irq_event_count += 1
-        });
-    }
+    push_artifact_event(
+        recorder,
+        ArtifactKind::IrqEvents,
+        record,
+        "irq_events",
+        |c| c.irq_event_count += 1,
+    );
     log_irq_record(record);
 }
 
@@ -48,42 +51,38 @@ pub fn handle_migration_event(
         }
     }
 
-    if let Some(writer) = recorder.streams.migration_event_writer.as_mut() {
-        let record = recorder::MigrationEventRecord {
-            elapsed_ms,
-            tid: event.tid,
-            from_cpu: event.from_cpu,
-            to_cpu: event.to_cpu,
-            timestamp_ns: event.timestamp_ns,
-        };
-        push_ndjson_event(
-            writer,
-            &record,
-            &mut recorder.counters,
-            "migration_events",
-            |c| c.migration_event_count += 1,
-        );
-    }
+    let record = recorder::MigrationEventRecord {
+        elapsed_ms,
+        tid: event.tid,
+        from_cpu: event.from_cpu,
+        to_cpu: event.to_cpu,
+        timestamp_ns: event.timestamp_ns,
+    };
+    push_artifact_event(
+        recorder,
+        ArtifactKind::MigrationEvents,
+        &record,
+        "migration_events",
+        |c| c.migration_event_count += 1,
+    );
 }
 
 pub fn handle_cpu_freq_event(event: &CpuFreqEvent, recorder: &mut LiveRecorder, started: Instant) {
     let elapsed_ms = started.elapsed().as_millis() as u64;
 
-    if let Some(writer) = recorder.streams.cpu_freq_sample_writer.as_mut() {
-        let record = recorder::CpuFreqRecord {
-            elapsed_ms,
-            cpu: event.cpu,
-            freq_khz: event.state,
-            timestamp_ns: event.timestamp_ns,
-        };
-        push_ndjson_event(
-            writer,
-            &record,
-            &mut recorder.counters,
-            "cpu_freq_samples",
-            |c| c.cpu_freq_sample_count += 1,
-        );
-    }
+    let record = recorder::CpuFreqRecord {
+        elapsed_ms,
+        cpu: event.cpu,
+        freq_khz: event.state,
+        timestamp_ns: event.timestamp_ns,
+    };
+    push_artifact_event(
+        recorder,
+        ArtifactKind::CpuFreqSamples,
+        &record,
+        "cpu_freq_samples",
+        |c| c.cpu_freq_sample_count += 1,
+    );
 }
 
 pub fn block_io_event_record(
@@ -109,11 +108,9 @@ pub fn block_io_event_record(
 }
 
 pub fn handle_block_io_record(record: &recorder::BlockIoRecord, recorder: &mut LiveRecorder) {
-    if let Some(writer) = recorder.streams.block_io_event_writer.as_mut() {
-        push_ndjson_event(writer, record, &mut recorder.counters, "io_events", |c| {
-            c.block_io_event_count += 1
-        });
-    }
+    push_artifact_event(recorder, ArtifactKind::BlockIoEvents, record, "io_events", |c| {
+        c.block_io_event_count += 1
+    });
 }
 
 pub fn handle_exec_event(item: &[u8], tasks: &mut TaskTracker) {
@@ -141,21 +138,22 @@ pub fn handle_exec_event(item: &[u8], tasks: &mut TaskTracker) {
     }
 }
 
-/// Pushes an event to an NDJSON stream.
-pub fn push_ndjson_event<T: Serialize, F>(
-    writer: &mut JsonArrayWriter,
+/// Pushes an event to an NDJSON stream via the registry.
+pub fn push_artifact_event<T: Serialize, F>(
+    recorder: &mut LiveRecorder,
+    kind: ArtifactKind,
     value: &T,
-    counters: &mut RecordingCounters,
     stream_name: &str,
     mut success_fn: F,
 ) where
     F: FnMut(&mut RecordingCounters),
 {
-    match writer.push(value) {
-        Ok(()) => success_fn(counters),
+    match recorder.streams.push(kind, value) {
+        Ok(true) => success_fn(&mut recorder.counters),
+        Ok(false) => {}
         Err(err) => {
             warn!("ndjson_write_failed stream={stream_name} err={err:#}");
-            counters.record_stream_write_error(stream_name, err);
+            recorder.counters.record_stream_write_error(stream_name, err);
         }
     }
 }
@@ -275,11 +273,11 @@ pub fn handle_event(
             state.inc_spikes(1);
         }
 
-        if let Some(writer) = recorder.streams.spike_event_writer.as_mut() {
-            push_ndjson_event(
-                writer,
+        if recorder.streams.contains(ArtifactKind::SpikeEvents) {
+            push_artifact_event(
+                recorder,
+                ArtifactKind::SpikeEvents,
                 &spike_event,
-                &mut recorder.counters,
                 "spike_events",
                 |c| c.spike_event_count += 1,
             );
@@ -287,7 +285,7 @@ pub fn handle_event(
             recorder.push_spike_event_to_buffer(spike_event.clone());
         }
 
-        if let Some(stream) = recorder.streams.stdout_spike_stream.as_mut()
+        if let Some(stream) = recorder.stdout_spike_stream.as_mut()
             && let Err(err) = stream.push(&spike_event)
         {
             warn!("json_stream_write_failed err={err:#}");

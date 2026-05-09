@@ -10,6 +10,7 @@ use std::{
 use stutter_common::{EVENT_RUNNABLE_LATENCY, SchedulerEvent};
 
 use crate::{
+    artifacts::ArtifactKind,
     cli::{Config, RecordingConfig},
     ebpf_loader::DropCountersSnapshot,
     events::{self, AlertPayload},
@@ -2273,24 +2274,26 @@ fn spike_event_stream_writes_ndjson() {
     let spike_path = dir.join("spike_events.json");
 
     let mut recorder = recorder::LiveRecorder::default();
-    recorder.streams.spike_event_writer =
-        Some(recorder::JsonArrayWriter::create(spike_path.clone()).unwrap());
+    recorder
+        .streams
+        .create_stream(&dir, ArtifactKind::SpikeEvents)
+        .unwrap();
 
     let spike1 = spike_event(1, 1000);
     let spike2 = spike_event(2, 2000);
 
-    events::push_ndjson_event(
-        recorder.streams.spike_event_writer.as_mut().unwrap(),
+    events::push_artifact_event(
+        &mut recorder,
+        ArtifactKind::SpikeEvents,
         &spike1,
-        &mut recorder.counters,
         "buffers.spike_events",
         |c| c.spike_event_count += 1,
     );
 
-    events::push_ndjson_event(
-        recorder.streams.spike_event_writer.as_mut().unwrap(),
+    events::push_artifact_event(
+        &mut recorder,
+        ArtifactKind::SpikeEvents,
         &spike2,
-        &mut recorder.counters,
         "buffers.spike_events",
         |c| c.spike_event_count += 1,
     );
