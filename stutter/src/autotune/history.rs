@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::{
     fs::{self, OpenOptions},
     io::{BufRead, Write},

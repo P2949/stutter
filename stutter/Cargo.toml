@@ -48,6 +48,7 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 futures-util = "0.3.32"
  
 [features]
+autotune-controller = []
 otel = [
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",

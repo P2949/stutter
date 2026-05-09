@@ -1,37 +1,47 @@
 pub mod apply_low_risk;
-pub mod comparison;
-pub mod context_segment;
-pub mod kept;
-pub mod measurement;
-pub mod resolution;
-pub mod rolling_window;
-pub mod shutdown;
-pub mod startup_recovery;
-
-pub mod washout;
-
 pub mod baseline;
 pub mod candidate;
-pub mod candidate_memory;
-pub mod controller;
+pub mod comparison;
 pub mod controller_journal;
-pub mod decision;
-pub mod decision_log;
 pub mod emergency_restore;
 pub mod experiment;
 pub mod generate_profiles;
 pub mod history;
-
 pub mod history_replay;
 pub mod human_output;
-pub mod observation;
+pub mod kept;
+pub mod measurement;
 pub mod profiles;
-pub mod prometheus_metrics;
-pub mod quality;
 pub mod replay;
-pub mod report_overlay;
-pub mod state;
+pub mod resolution;
+pub mod shutdown;
 pub mod status;
+pub mod washout;
+
+#[cfg(feature = "autotune-controller")]
+pub mod candidate_memory;
+#[cfg(feature = "autotune-controller")]
+pub mod context_segment;
+#[cfg(feature = "autotune-controller")]
+pub mod controller;
+#[cfg(feature = "autotune-controller")]
+pub mod decision;
+#[cfg(feature = "autotune-controller")]
+pub mod decision_log;
+#[cfg(feature = "autotune-controller")]
+pub mod observation;
+#[cfg(feature = "autotune-controller")]
+pub mod prometheus_metrics;
+#[cfg(feature = "autotune-controller")]
+pub mod quality;
+#[cfg(feature = "autotune-controller")]
+pub mod report_overlay;
+#[cfg(feature = "autotune-controller")]
+pub mod rolling_window;
+#[cfg(feature = "autotune-controller")]
+pub mod startup_recovery;
+pub mod state;
+#[cfg(feature = "autotune-controller")]
 pub mod tui_panel;
 
 use std::{
