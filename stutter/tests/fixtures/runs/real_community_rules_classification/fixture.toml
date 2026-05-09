@@ -1,0 +1,34 @@
+name = "real_community_rules_classification"
+schema_version = 21
+source = "sanitized-real-recording"
+quality_expectation = "High"
+description = "Sanitized community-rules classification fixture where an originally unknown game process is represented in the final artifact stream as TaskClass::Game."
+
+[expected]
+primary_cause = "GameThreadSchedulerDelay"
+accepted_confidence = [
+    "Medium",
+    "High",
+]
+data_quality = "High"
+
+[expected.artifacts]
+spikes = 3
+intervals = 3
+irq_events = 0
+gpu_samples = 0
+frames = 3
+block_io_events = 0
+foreground_events = 0
+
+[expected.evidence]
+contains = [
+    "game thread",
+    "delayed",
+]
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true
