@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![cfg(feature = "autotune-controller")]
 
 use serde::{Deserialize, Serialize};
 

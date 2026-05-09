@@ -85,6 +85,7 @@ pub fn render_metrics(state: &PrometheusState) -> String {
     let event_stream_write_errors = state.event_stream_write_errors.load(Ordering::Relaxed);
     let ebpf_ringbuf_drops = state.ebpf_ringbuf_drops.load(Ordering::Relaxed);
 
+    #[allow(unused_mut)]
     let mut output = format!(
         concat!(
             "# HELP stutter_start_unix_seconds Unix timestamp when this stutter monitor session started.\n",
@@ -122,6 +123,7 @@ pub fn render_metrics(state: &PrometheusState) -> String {
         ebpf_ringbuf_drops = ebpf_ringbuf_drops,
     );
 
+    #[cfg(feature = "autotune-controller")]
     output.push_str(
         &crate::autotune::prometheus_metrics::render_default_autotune_prometheus_metrics(),
     );
@@ -222,7 +224,7 @@ mod tests {
 
         let output = render_metrics(&state);
 
-        for metric in [
+        let mut metrics = vec![
             "stutter_spikes_total",
             "stutter_samples_total",
             "stutter_max_latency_ns",
@@ -230,6 +232,9 @@ mod tests {
             "stutter_active_targets",
             "stutter_event_stream_write_errors_total",
             "stutter_ebpf_drops_total",
+        ];
+        #[cfg(feature = "autotune-controller")]
+        metrics.extend([
             "stutter_autotune_phase",
             "stutter_autotune_mode",
             "stutter_autotune_active_experiment",
@@ -238,7 +243,9 @@ mod tests {
             "stutter_autotune_rollbacks_total",
             "stutter_autotune_actions_applied_total",
             "stutter_autotune_actions_blocked_total",
-        ] {
+        ]);
+
+        for metric in metrics {
             assert!(
                 output.contains(metric),
                 "missing metric {metric} in output:\n{output}"
@@ -247,6 +254,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "autotune-controller")]
     fn render_metrics_includes_autotune_metric_help_and_types() {
         let state = PrometheusState::default();
 

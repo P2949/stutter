@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::{collections::BTreeSet, path::Path};
 
 use crate::{

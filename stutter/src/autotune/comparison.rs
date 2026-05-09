@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::experiment::WindowScore;
 
 #[derive(Clone, Debug, PartialEq)]

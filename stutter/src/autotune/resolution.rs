@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::{
     comparison::ExperimentResult,
     experiment::{ActiveExperiment, ExperimentId, ExperimentPhase},
