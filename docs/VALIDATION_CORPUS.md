@@ -51,6 +51,7 @@ description = "Game main/render thread had scheduler delay during a visible fram
 [expected]
 primary_cause = "GameThreadSchedulerDelay"
 accepted_confidence = ["Medium", "High"]
+quality_reasons_contain = []
 data_quality = "High"
 
 [expected.artifacts]
@@ -102,6 +103,30 @@ data_quality = "High"
 
 Use this for GPU-bound-looking captures where scheduler evidence may be stronger
 than GPU evidence, but the report must still surface the GPU-bound candidate.
+
+For any fixture with `expected.data_quality = "Medium"` or
+`expected.data_quality = "Low"`, `expected.quality_reasons_contain` must list
+the user-facing quality explanation substrings that must appear in
+`data_quality.reasons`, `data_quality.validation_warnings`, or
+`data_quality.validation_errors`.
+
+Examples:
+
+```toml id="9gsc4w"
+[expected]
+primary_cause = "Unknown"
+accepted_confidence = []
+quality_reasons_contain = ["truncated", "drop"]
+data_quality = "Medium"
+```
+
+```toml id="949zdp"
+[expected]
+primary_cause = "Unknown"
+accepted_confidence = []
+quality_reasons_contain = ["older than current"]
+data_quality = "Medium"
+```
 
 Supported `expected.primary_cause` values are:
 

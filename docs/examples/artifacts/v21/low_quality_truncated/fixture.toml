@@ -6,6 +6,10 @@ description = "Small public low-quality truncated example."
 
 [expected]
 primary_cause = "Unknown"
+quality_reasons_contain = [
+    "truncated",
+    "drop",
+]
 accepted_confidence = []
 data_quality = "Medium"
 
