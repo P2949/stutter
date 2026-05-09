@@ -3,27 +3,9 @@ use std::path::PathBuf;
 use crate::autotune;
 
 pub fn run_generate_profiles_command(
-    watch_process: Option<String>,
-    out: PathBuf,
-    allow_cpus: Option<String>,
-    deny_cpus: Option<String>,
-    min_render_cpus: usize,
-    min_game_cpus: usize,
-    min_compositor_cpus: usize,
-    min_background_cpus: usize,
+    input: crate::autotune::generate_profiles::GenerateProfilesCommandInput,
 ) -> anyhow::Result<()> {
-    autotune::generate_profiles::generate_profiles_command(
-        autotune::generate_profiles::GenerateProfilesCommandInput {
-            watch_process,
-            out,
-            allow_cpus,
-            deny_cpus,
-            min_render_cpus,
-            min_game_cpus,
-            min_compositor_cpus,
-            min_background_cpus,
-        },
-    )
+    crate::autotune::generate_profiles::generate_profiles_command(input)
 }
 
 pub async fn run_autotune_command(input: autotune::AutotuneCommandInput) -> anyhow::Result<()> {

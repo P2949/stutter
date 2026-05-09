@@ -40,18 +40,18 @@ pub enum ArtifactEncoding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactCounter {
-    IntervalRecordCount,
-    SpikeEventsRetainedCount,
-    IrqEventCount,
-    GpuSampleCount,
-    FrameEventCount,
-    BlockIoEventCount,
-    RuntimeSliceCount,
-    FocusEventCount,
-    ForegroundEventCount,
-    MigrationEventCount,
-    CpuFreqSampleCount,
-    ScxEventCount,
+    IntervalRecord,
+    SpikeEventsRetained,
+    IrqEvent,
+    GpuSample,
+    FrameEvent,
+    BlockIoEvent,
+    RuntimeSlice,
+    FocusEvent,
+    ForegroundEvent,
+    MigrationEvent,
+    CpuFreqSample,
+    ScxEvent,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -87,7 +87,7 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         encoding: ArtifactEncoding::Ndjson,
         required: false,
         legacy_aliases: &[],
-        counter_field: Some(ArtifactCounter::IntervalRecordCount),
+        counter_field: Some(ArtifactCounter::IntervalRecord),
     },
     ArtifactSpec {
         kind: ArtifactKind::SpikeEvents,
@@ -95,7 +95,7 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         encoding: ArtifactEncoding::Ndjson,
         required: false,
         legacy_aliases: &[],
-        counter_field: Some(ArtifactCounter::SpikeEventsRetainedCount),
+        counter_field: Some(ArtifactCounter::SpikeEventsRetained),
     },
     ArtifactSpec {
         kind: ArtifactKind::TreeEvents,
@@ -111,7 +111,7 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         encoding: ArtifactEncoding::Ndjson,
         required: false,
         legacy_aliases: &[],
-        counter_field: Some(ArtifactCounter::IrqEventCount),
+        counter_field: Some(ArtifactCounter::IrqEvent),
     },
     ArtifactSpec {
         kind: ArtifactKind::GpuSamples,
@@ -119,7 +119,7 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         encoding: ArtifactEncoding::Ndjson,
         required: false,
         legacy_aliases: &[],
-        counter_field: Some(ArtifactCounter::GpuSampleCount),
+        counter_field: Some(ArtifactCounter::GpuSample),
     },
     ArtifactSpec {
         kind: ArtifactKind::FrameEvents,
@@ -127,7 +127,7 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         encoding: ArtifactEncoding::Ndjson,
         required: false,
         legacy_aliases: &["frame_correlation.json"],
-        counter_field: Some(ArtifactCounter::FrameEventCount),
+        counter_field: Some(ArtifactCounter::FrameEvent),
     },
     ArtifactSpec {
         kind: ArtifactKind::FrameCorrelation,
@@ -135,7 +135,7 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         encoding: ArtifactEncoding::Ndjson,
         required: false,
         legacy_aliases: &[],
-        counter_field: Some(ArtifactCounter::FrameEventCount),
+        counter_field: Some(ArtifactCounter::FrameEvent),
     },
     ArtifactSpec {
         kind: ArtifactKind::MigrationEvents,
@@ -143,7 +143,7 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         encoding: ArtifactEncoding::Ndjson,
         required: false,
         legacy_aliases: &[],
-        counter_field: Some(ArtifactCounter::MigrationEventCount),
+        counter_field: Some(ArtifactCounter::MigrationEvent),
     },
     ArtifactSpec {
         kind: ArtifactKind::CpuFreqSamples,
@@ -151,7 +151,7 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         encoding: ArtifactEncoding::Ndjson,
         required: false,
         legacy_aliases: &[],
-        counter_field: Some(ArtifactCounter::CpuFreqSampleCount),
+        counter_field: Some(ArtifactCounter::CpuFreqSample),
     },
     ArtifactSpec {
         kind: ArtifactKind::BlockIoEvents,
@@ -159,7 +159,7 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         encoding: ArtifactEncoding::Ndjson,
         required: false,
         legacy_aliases: &[],
-        counter_field: Some(ArtifactCounter::BlockIoEventCount),
+        counter_field: Some(ArtifactCounter::BlockIoEvent),
     },
     ArtifactSpec {
         kind: ArtifactKind::ScxEvents,
@@ -167,7 +167,7 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         encoding: ArtifactEncoding::Ndjson,
         required: false,
         legacy_aliases: &[],
-        counter_field: Some(ArtifactCounter::ScxEventCount),
+        counter_field: Some(ArtifactCounter::ScxEvent),
     },
     ArtifactSpec {
         kind: ArtifactKind::RuntimeSlices,
@@ -175,7 +175,7 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         encoding: ArtifactEncoding::Ndjson,
         required: false,
         legacy_aliases: &[],
-        counter_field: Some(ArtifactCounter::RuntimeSliceCount),
+        counter_field: Some(ArtifactCounter::RuntimeSlice),
     },
     ArtifactSpec {
         kind: ArtifactKind::FocusEvents,
@@ -183,7 +183,7 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         encoding: ArtifactEncoding::Ndjson,
         required: false,
         legacy_aliases: &[],
-        counter_field: Some(ArtifactCounter::FocusEventCount),
+        counter_field: Some(ArtifactCounter::FocusEvent),
     },
     ArtifactSpec {
         kind: ArtifactKind::ForegroundEvents,
@@ -191,7 +191,7 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         encoding: ArtifactEncoding::Ndjson,
         required: false,
         legacy_aliases: &[],
-        counter_field: Some(ArtifactCounter::ForegroundEventCount),
+        counter_field: Some(ArtifactCounter::ForegroundEvent),
     },
 ];
 
