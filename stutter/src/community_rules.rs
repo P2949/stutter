@@ -19,7 +19,8 @@ pub mod importer;
 pub mod loader;
 pub mod paths;
 
-pub use importer::{ImportInput, ImportReport, import_ananicy_rules};
+#[allow(unused_imports)]
+pub use importer::{ImportInput, ImportReport, ImportedCommunityRules, import_ananicy_rules};
 pub use loader::{LoadCommunityRulesInput, load_rules_db, load_rules_dir, load_rules_file};
 pub use paths::{default_system_rules_dirs, default_user_rules_dir};
 
