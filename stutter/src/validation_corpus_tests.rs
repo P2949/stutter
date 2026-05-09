@@ -714,6 +714,27 @@ fn validation_corpus_cpu_pressure() {
 }
 
 #[test]
+fn pressure_timeline_marks_near_spike_windows() {
+    let analysis = build_fixture_analysis("cpu_pressure");
+    assert!(analysis.pressure_timeline.sample_count > 0);
+    assert!(
+        analysis
+            .pressure_timeline
+            .windows
+            .iter()
+            .any(|window| window.near_spike),
+        "pressure timeline should mark at least one window near a spike"
+    );
+}
+
+#[test]
+fn pressure_timeline_reports_coverage() {
+    let analysis = build_fixture_analysis("cpu_pressure");
+    assert!(analysis.pressure_timeline.coverage.interval_records_loaded > 0);
+    assert!(analysis.pressure_timeline.coverage.has_cpu_psi);
+}
+
+#[test]
 fn validation_corpus_block_io_stall() {
     assert_fixture_from_metadata("block_io_stall");
 }
