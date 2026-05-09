@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 
 use super::model::MonitorConfig;
 
@@ -34,6 +33,8 @@ pub fn recorded_config_from_final_config(
         otel_service_name: config.outputs.otel_service_name.clone(),
         auto_focus: config.focus.auto_focus,
         foreground_window: config.focus.foreground_window,
+        focus_source: config.focus.focus_source.clone(),
+        foreground_source: config.focus.foreground_source.clone(),
         foreground_poll_ms: config.focus.foreground_poll_ms,
         foreground_max_stale_ms: config.focus.foreground_max_stale_ms,
         foreground_include_title: config.focus.foreground_include_title,
