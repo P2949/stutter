@@ -139,6 +139,70 @@ Low
 | `real_world_block_io_stall`             | `BlockIoCandidate`         |
 | `real_world_gpu_bound_clean_cpu`        | `GpuBoundCandidate`        |
 
+## Sanitizing real recordings
+
+Do not hand-edit large real recording JSON files when creating new validation
+fixtures. Use the sanitizer script first:
+
+```bash id="epkvab"
+scripts/sanitize-run-artifact.py \
+--input /path/to/real/run \
+--output stutter/tests/fixtures/runs/game_thread_scheduler_delay \
+--name game_thread_scheduler_delay
+```
+
+The sanitizer copies the recognized `stutter` artifact files:
+
+```text id="iro2w1"
+session.json
+metadata.json
+interval.json
+spike_events.json
+tree_events.json
+irq_events.json
+gpu_samples.json
+frame_correlation.json
+frame_events.json
+migration_events.json
+cpu_freq_samples.json
+io_events.json
+scx_events.json
+focus_events.json
+foreground_events.json
+```
+
+It redacts private strings such as user names, home paths, host names, command
+line paths, executable paths, Steam library paths, cgroup user slices, window
+titles, and X11/Wayland window identifiers. It preserves the semantic fields
+needed by diagnosis: `TaskClass`, timing fields, latency fields, elapsed times,
+CPU PSI values, IRQ timestamps/durations, block I/O timestamps/durations, GPU
+busy percentages, frame times, and foreground PID/app/class.
+
+By default, the sanitizer verifies the output with:
+
+```bash id="eerng8"
+cargo run -p stutter -- validate stutter/tests/fixtures/runs/<fixture>
+cargo run -p stutter -- report --analysis-json stutter/tests/fixtures/runs/<fixture>
+```
+
+Use `--no-verify` only when sanitizing on a machine that cannot build or run the
+Rust project. A fixture submitted to the repository must still pass both commands
+before it is committed.
+
+If the output directory already exists, pass `--force` to replace it:
+
+```bash id="uwv6oj"
+scripts/sanitize-run-artifact.py \
+  --input /path/to/real/run \
+  --output stutter/tests/fixtures/runs/game_thread_scheduler_delay \
+  --name game_thread_scheduler_delay \
+  --force
+```
+
+After sanitizing a new fixture, add or regenerate its `fixture.toml` metadata
+contract and add a validation test only when the fixture needs extra
+case-specific assertions beyond the metadata-driven checks.
+
 ## Regenerating committed fixtures
 
 From the repository root, run:
