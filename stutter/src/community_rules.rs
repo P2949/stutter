@@ -1657,6 +1657,111 @@ mod tests {
     }
 
     #[test]
+    fn build_exe_game_rule_does_not_classify_outside_game_context() {
+        let db = rules_db_with_rules(vec![rule("build.exe", "Game")]);
+
+        let hit = db.classify(
+            &identity(
+                "build.exe",
+                "build.exe",
+                "/tmp/build.exe --project",
+                "/tmp/build.exe",
+                "/user.slice/build-tool.scope",
+            ),
+            true,
+        );
+
+        assert!(hit.is_none());
+    }
+
+    #[test]
+    fn build_exe_game_rule_classifies_inside_compatdata_context() {
+        let db = rules_db_with_rules(vec![rule("build.exe", "Game")]);
+
+        let hit = db
+            .classify(
+                &identity(
+                    "build.exe",
+                    "build.exe",
+                    "/mnt/games/compatdata/123/pfx/drive_c/build.exe",
+                    "/usr/bin/wine",
+                    "/user.slice/app-steam-123.scope",
+                ),
+                true,
+            )
+            .unwrap();
+
+        assert_eq!(hit.class, TaskClass::Game);
+        assert!(hit.reason.contains("context=compatdata"));
+        assert_eq!(hit.confidence, 0.70);
+    }
+
+    #[test]
+    fn build_exe_game_rule_classifies_inside_steamapps_context() {
+        let db = rules_db_with_rules(vec![rule("build.exe", "Game")]);
+
+        let hit = db
+            .classify(
+                &identity(
+                    "build.exe",
+                    "build.exe",
+                    "/home/me/.steam/steamapps/common/TestGame/build.exe",
+                    "/home/me/.steam/steamapps/common/TestGame/build.exe",
+                    "/user.slice/app-steam-456.scope",
+                ),
+                true,
+            )
+            .unwrap();
+
+        assert_eq!(hit.class, TaskClass::Game);
+        assert!(hit.reason.contains("context=steamapps"));
+        assert_eq!(hit.confidence, 0.70);
+    }
+
+    #[test]
+    fn native_linux_game_rule_classifies_without_wine_context() {
+        let db = rules_db_with_rules(vec![rule("factorio", "Game")]);
+
+        let hit = db
+            .classify(
+                &identity(
+                    "factorio",
+                    "factorio",
+                    "/home/me/games/factorio/bin/x64/factorio",
+                    "/home/me/games/factorio/bin/x64/factorio",
+                    "/user.slice/factorio.scope",
+                ),
+                true,
+            )
+            .unwrap();
+
+        assert_eq!(hit.class, TaskClass::Game);
+        assert!(hit.reason.contains("context=exact-name"));
+    }
+
+    #[test]
+    fn clear_non_game_rule_classifies_from_exe_path() {
+        let db = rules_db_with_rules(vec![rule("rustc", "Compiler")]);
+
+        let hit = db
+            .classify(
+                &identity(
+                    "rustc",
+                    "rustc",
+                    "rustc --crate-name stutter",
+                    "/usr/bin/rustc",
+                    "/user.slice/build.scope",
+                ),
+                true,
+            )
+            .unwrap();
+
+        assert_eq!(hit.class, TaskClass::Compiler);
+        assert!(hit.reason.contains("context=exact-exe"));
+        assert_eq!(hit.confidence, 0.80);
+    }
+
+    #[test]
     fn ambiguous_rule_without_context_does_not_match() {
         let hit = classify_process_identity(&identity(
             "build.exe",
