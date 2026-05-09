@@ -1,0 +1,27 @@
+name = "reused_tid_no_contamination"
+schema_version = 21
+source = "synthetic-contract"
+quality_expectation = "High"
+description = "Synthetic reused-TID fixture that verifies separate logical tasks are not merged."
+
+[expected]
+primary_cause = "Unknown"
+accepted_confidence = []
+data_quality = "High"
+
+[expected.artifacts]
+spikes = 0
+intervals = 2
+irq_events = 0
+gpu_samples = 0
+frames = 0
+block_io_events = 0
+
+[expected.evidence]
+contains = []
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true
