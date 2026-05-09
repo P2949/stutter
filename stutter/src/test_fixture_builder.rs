@@ -124,7 +124,6 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "real_world_irq_overlap",
         "real_world_block_io_stall",
         "real_world_gpu_bound_clean_cpu",
-        "real_block_io_overlap",
         "real_truncated_low_quality",
         "real_foreground_window",
         "real_community_rules_classification",
@@ -181,6 +180,11 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         root,
         "real_gpu_bound_looking",
         real_gpu_bound_looking_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_block_io_overlap",
+        real_block_io_overlap_fixture(),
     )?;
 
     Ok(())
@@ -478,6 +482,72 @@ fn real_gpu_bound_looking_fixture() -> (SessionFile, FixtureArtifacts) {
             intervals,
             gpu_samples,
             frame_events,
+            ..Default::default()
+        },
+    )
+}
+
+fn real_block_io_overlap_fixture() -> (SessionFile, FixtureArtifacts) {
+    let spikes = vec![
+        spike_event(5401, TaskClass::Unknown, "asset-stream", 7_000_000, 0),
+        spike_event(5402, TaskClass::Unknown, "shader-cache", 4_800_000, 250_000),
+        spike_event(5403, TaskClass::Unknown, "io-helper", 4_200_000, 500_000),
+    ];
+    let intervals = vec![
+        interval_record_with_class(
+            100,
+            5401,
+            "asset-stream",
+            TaskClass::Unknown,
+            2.0,
+            7_000_000,
+        ),
+        interval_record_with_class(
+            100,
+            5402,
+            "shader-cache",
+            TaskClass::Unknown,
+            1.0,
+            4_800_000,
+        ),
+        interval_record_with_class(100, 5403, "io-helper", TaskClass::Unknown, 1.0, 4_200_000),
+    ];
+    let block_io_events = vec![
+        BlockIoRecord {
+            elapsed_ms: 43,
+            tid: 5402,
+            correlation_basis: Cow::Borrowed("request-pointer"),
+            dev: 259,
+            nr_sector: 64,
+            sector: 4_194_304,
+            duration_ns: 2_000_000,
+            timestamp_ns: 43_000_000,
+            rwbs: "R".to_owned(),
+        },
+        BlockIoRecord {
+            elapsed_ms: 100,
+            tid: 5401,
+            correlation_basis: Cow::Borrowed("request-pointer"),
+            dev: 259,
+            nr_sector: 128,
+            sector: 8_388_608,
+            duration_ns: 12_000_000,
+            timestamp_ns: 102_000_000,
+            rwbs: "R".to_owned(),
+        },
+    ];
+
+    let mut session = base_session("real_block_io_overlap");
+    session.config.tree_roots = vec![5400];
+    session.config.block_io = true;
+    session.core.block_io_correlation_basis = "request-pointer".to_owned();
+    apply_spike_session_fields(&mut session, &spikes);
+    apply_artifact_counts(
+        &mut session,
+        &FixtureArtifacts {
+            spikes,
+            intervals,
+            block_io_events,
             ..Default::default()
         },
     )
@@ -1200,6 +1270,17 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             metadata.expected.required_candidate_evidence = vec!["GPU busy".to_owned()];
             metadata
         }
+        "real_block_io_overlap" => fixture_metadata(
+            name,
+            "sanitized-real-recording",
+            "High",
+            "Block I/O request overlapped the scheduler-latency cluster while unrelated block I/O occurred outside the correlation window.",
+            "BlockIoCandidate",
+            &["Medium", "High"],
+            "High",
+            &["block I/O"],
+            exact_artifacts(artifacts),
+        ),
         "foreground_window" => fixture_metadata(
             name,
             "synthetic-edge-case",
