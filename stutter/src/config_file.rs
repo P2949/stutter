@@ -22,6 +22,7 @@ pub struct UserConfigFile {
     pub foreground_poll_ms: Option<u64>,
     pub foreground_max_stale_ms: Option<u64>,
     pub foreground_include_title: Option<bool>,
+    #[allow(dead_code)]
     pub community_rules: Option<CommunityRulesConfigFile>,
     pub agent: Option<AgentConfigFile>,
 }

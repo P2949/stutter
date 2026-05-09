@@ -3735,6 +3735,37 @@ fn priority_band_rank(priority_band: PriorityBand) -> u8 {
     }
 }
 
+#[cfg(test)]
+fn try_community_rules_classification(
+    reasons: &mut Vec<String>,
+    identity: &ProcessIdentity<'_>,
+    cgroup_path: &str,
+) -> Option<(SystemTaskClass, f32)> {
+    if let Some(hit) = crate::community_rules::classify_process_identity(
+        &crate::community_rules::CommunityProcessIdentity {
+            thread_comm: identity.comm,
+            process_comm: identity.comm,
+            cmdline: identity.cmdline,
+            exe_path: identity.exe_path.unwrap_or_default(),
+            cgroup_path,
+        },
+    ) && let Some(class) = system_class_for_community_task_class(hit.class)
+    {
+        reasons.push(hit.reason);
+        return Some((class, hit.confidence));
+    }
+    None
+}
+
+#[cfg(not(test))]
+fn try_community_rules_classification(
+    _reasons: &mut Vec<String>,
+    _identity: &ProcessIdentity<'_>,
+    _cgroup_path: &str,
+) -> Option<(SystemTaskClass, f32)> {
+    None
+}
+
 pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
     let comm = identity.comm.to_ascii_lowercase();
     let cmdline = identity.cmdline.to_ascii_lowercase();
@@ -3930,19 +3961,9 @@ pub fn classify_process(identity: &ProcessIdentity<'_>) -> Classification {
     } else if identity.pid != 1
         && !cgroup_path.contains(".service")
         && !cgroup_path.contains("/system.slice/")
-        && let Some(hit) = crate::community_rules::classify_process_identity(
-            &crate::community_rules::CommunityProcessIdentity {
-                thread_comm: identity.comm,
-                process_comm: identity.comm,
-                cmdline: identity.cmdline,
-                exe_path: identity.exe_path.unwrap_or_default(),
-                cgroup_path: identity.cgroup_path.unwrap_or_default(),
-            },
-        )
-        && let Some(class) = system_class_for_community_task_class(hit.class)
+        && let Some(res) = try_community_rules_classification(&mut reasons, identity, &cgroup_path)
     {
-        reasons.push(hit.reason);
-        (class, hit.confidence)
+        res
     } else if cgroup_path.contains("steam")
         || cgroup_path.contains("games")
         || cmdline.contains("steamapps")

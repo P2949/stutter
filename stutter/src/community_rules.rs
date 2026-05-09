@@ -1,10 +1,11 @@
 #![allow(dead_code)]
 
+#[cfg(test)]
+use std::sync::OnceLock;
 use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
-    sync::OnceLock,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -15,8 +16,9 @@ use crate::{cli::RulesCommand, process_tree::TaskClass};
 
 pub mod import;
 
-const BUILTIN_FIXTURE_RULES_JSON: &str =
-    include_str!("../assets/community-rules/test-fixture.generated.json");
+#[cfg(test)]
+const TEST_FIXTURE_RULES_JSON: &str =
+    include_str!("../assets/community-rules/ananicy.fixture.generated.json");
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CommunityRulesFile {
@@ -145,10 +147,20 @@ pub fn load_community_rules(config: &CommunityRulesConfig) -> anyhow::Result<Com
     }
 
     if config.load_builtin_fixture {
-        files.push(parse_community_rules_file(
-            BUILTIN_FIXTURE_RULES_JSON,
-            "embedded community rules test fixture",
-        )?);
+        #[cfg(test)]
+        {
+            files.push(parse_community_rules_file(
+                TEST_FIXTURE_RULES_JSON,
+                "embedded community rules test fixture",
+            )?);
+        }
+
+        #[cfg(not(test))]
+        {
+            log::warn!(
+                "ignoring community_rules load_builtin_fixture=true because the built-in rules fixture is test-only"
+            );
+        }
     }
 
     CommunityRulesDb::from_files(files)
@@ -158,10 +170,20 @@ pub fn load_community_rules_file(
     source: CommunityRulesSourceKind,
 ) -> anyhow::Result<CommunityRulesFile> {
     match source {
-        CommunityRulesSourceKind::BuiltinFixture => parse_community_rules_file(
-            BUILTIN_FIXTURE_RULES_JSON,
-            "embedded community rules test fixture",
-        ),
+        CommunityRulesSourceKind::BuiltinFixture => {
+            #[cfg(test)]
+            {
+                parse_community_rules_file(
+                    TEST_FIXTURE_RULES_JSON,
+                    "embedded community rules test fixture",
+                )
+            }
+
+            #[cfg(not(test))]
+            {
+                anyhow::bail!("built-in community rules fixture is only available in tests")
+            }
+        }
         CommunityRulesSourceKind::UserData => {
             let dir = default_community_rules_dir().ok_or_else(|| {
                 anyhow::anyhow!(
@@ -588,44 +610,29 @@ pub struct CommunityRulesDb {
     rules_by_name: HashMap<String, Vec<CommunityRule>>,
 }
 
-static RUNTIME_RULES: OnceLock<CommunityRulesDb> = OnceLock::new();
-
-pub fn classify_process_identity(
+pub fn classify_process_identity_with_db(
+    db: &CommunityRulesDb,
     identity: &CommunityProcessIdentity<'_>,
 ) -> Option<CommunityRuleHit> {
-    runtime_rules().classify(identity, true)
-}
-
-fn runtime_rules() -> &'static CommunityRulesDb {
-    RUNTIME_RULES.get_or_init(|| {
-        load_community_rules(&runtime_community_rules_config())
-            .expect("runtime community rules configuration must load")
-    })
+    db.classify(identity, true)
 }
 
 #[cfg(test)]
-fn runtime_community_rules_config() -> CommunityRulesConfig {
-    CommunityRulesConfig {
-        enabled: true,
-        load_builtin_fixture: true,
-        user_rules_dir: None,
-        explicit_rules_files: Vec::new(),
-    }
+static TEST_FIXTURE_RULES: OnceLock<CommunityRulesDb> = OnceLock::new();
+
+#[cfg(test)]
+pub fn classify_process_identity(
+    identity: &CommunityProcessIdentity<'_>,
+) -> Option<CommunityRuleHit> {
+    test_fixture_rules().classify(identity, true)
 }
 
-#[cfg(not(test))]
-fn runtime_community_rules_config() -> CommunityRulesConfig {
-    match crate::config_file::load_user_config() {
-        Ok(Some(config)) => config
-            .community_rules
-            .map(CommunityRulesConfig::from_config_file)
-            .unwrap_or_default(),
-        Ok(None) => CommunityRulesConfig::default(),
-        Err(err) => {
-            log::warn!("failed to load community rules config: {err:#}");
-            CommunityRulesConfig::default()
-        }
-    }
+#[cfg(test)]
+fn test_fixture_rules() -> &'static CommunityRulesDb {
+    TEST_FIXTURE_RULES.get_or_init(|| {
+        load_community_rules_db(CommunityRulesSourceKind::BuiltinFixture)
+            .expect("embedded community rules test fixture JSON must be valid")
+    })
 }
 
 impl CommunityRulesDb {

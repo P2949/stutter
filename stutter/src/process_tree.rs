@@ -1452,6 +1452,7 @@ pub fn classify_task_with_context(
     }
 
     // 7. Community app-name hints, then generic process fallbacks.
+    #[cfg(test)]
     if !is_service_looking_process(&lower_process_comm, &lower_cgroup_path)
         && let Some(hit) = crate::community_rules::classify_process_identity(
             &crate::community_rules::CommunityProcessIdentity {
