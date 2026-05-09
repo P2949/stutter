@@ -22,7 +22,15 @@ pub struct UserConfigFile {
     pub foreground_poll_ms: Option<u64>,
     pub foreground_max_stale_ms: Option<u64>,
     pub foreground_include_title: Option<bool>,
+    pub community_rules: Option<CommunityRulesConfigFile>,
     pub agent: Option<AgentConfigFile>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CommunityRulesConfigFile {
+    pub enabled: Option<bool>,
+    pub sources: Option<Vec<String>>,
+    pub paths: Option<Vec<PathBuf>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -224,6 +232,26 @@ mod tests {
         assert_eq!(config.foreground_poll_ms, Some(750));
         assert_eq!(config.foreground_max_stale_ms, Some(3000));
         assert_eq!(config.foreground_include_title, Some(true));
+    }
+
+    #[test]
+    fn test_parse_community_rules_config_fields() {
+        let toml = r#"
+            [community_rules]
+            enabled = true
+            sources = ["user"]
+            paths = ["/tmp/stutter/rules/custom.generated.json"]
+        "#;
+
+        let config = parse_user_config_toml(toml).unwrap();
+        let community_rules = config.community_rules.unwrap();
+
+        assert_eq!(community_rules.enabled, Some(true));
+        assert_eq!(community_rules.sources.unwrap(), vec!["user"]);
+        assert_eq!(
+            community_rules.paths.unwrap(),
+            vec![PathBuf::from("/tmp/stutter/rules/custom.generated.json")]
+        );
     }
 
     #[test]
