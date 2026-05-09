@@ -88,6 +88,21 @@ frames_min = 1
 Do not set both the exact and `_min` form for the same artifact count in new
 fixtures unless there is a specific reason.
 
+For fixtures where the primary diagnosis may legitimately vary but a candidate
+must be present, set:
+
+```toml id="bl79bi"
+[expected]
+primary_cause = "Any"
+required_candidate = "GpuBoundCandidate"
+required_candidate_evidence = ["GPU busy"]
+accepted_confidence = []
+data_quality = "High"
+```
+
+Use this for GPU-bound-looking captures where scheduler evidence may be stronger
+than GPU evidence, but the report must still surface the GPU-bound candidate.
+
 Supported `expected.primary_cause` values are:
 
 ```text
@@ -98,6 +113,7 @@ GpuBoundCandidate
 BlockIoCandidate
 CpuPressureCandidate
 Unknown
+Any
 ```
 
 Use `Unknown` when the fixture should produce no strong diagnosis.
