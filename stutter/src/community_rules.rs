@@ -497,7 +497,8 @@ impl CommunityRuleIdentitySource {
         match self {
             Self::ExeBasename => 0.90,
             Self::CmdlineBasename => 0.88,
-            Self::ProcessComm | Self::ThreadComm => 0.75,
+            Self::ProcessComm => 0.75,
+            Self::ThreadComm => 0.65,
         }
     }
 
@@ -633,11 +634,7 @@ impl CommunityRulesDb {
                     continue;
                 };
 
-                let confidence_cap = if rule.ambiguous {
-                    source.confidence_cap().min(0.70)
-                } else {
-                    source.confidence_cap()
-                };
+                let confidence_cap = confidence_cap_for_rule(class, rule, source);
                 let confidence = rule.confidence.min(confidence_cap);
                 let reason = format!(
                     "community-rules: matched community rule '{}' from {}; via {}; context={}",
@@ -803,6 +800,52 @@ fn non_game_rule_context_label(
         CommunityRuleIdentitySource::CmdlineBasename => Some("exact-cmdline"),
         CommunityRuleIdentitySource::ProcessComm | CommunityRuleIdentitySource::ThreadComm => None,
     }
+}
+
+fn confidence_cap_for_rule(
+    class: TaskClass,
+    rule: &CommunityRule,
+    source: CommunityRuleIdentitySource,
+) -> f32 {
+    let mut cap = source.confidence_cap();
+
+    if rule.ambiguous {
+        cap = cap.min(0.70);
+    }
+
+    match class {
+        TaskClass::Unknown => 0.0,
+        TaskClass::Game => cap,
+        TaskClass::GameScope | TaskClass::WineServer | TaskClass::SteamRuntime => cap,
+        TaskClass::Service | TaskClass::NetworkDaemon | TaskClass::StorageDaemon => {
+            if service_rule_source_path_is_specific(rule) {
+                cap.min(0.80)
+            } else {
+                cap.min(0.60)
+            }
+        }
+        _ => cap.min(0.80),
+    }
+}
+
+fn service_rule_source_path_is_specific(rule: &CommunityRule) -> bool {
+    let source_path = rule.source_path.to_ascii_lowercase();
+
+    if source_path.contains("systemd")
+        || source_path.contains("dbus")
+        || source_path.contains("network")
+        || source_path.contains("storage")
+        || source_path.contains("daemon")
+        || source_path.contains("service")
+    {
+        return true;
+    }
+
+    source_path
+        .split('/')
+        .filter(|component| !component.trim().is_empty())
+        .count()
+        >= 3
 }
 
 fn rule_requires_context(rule: &CommunityRule) -> bool {
@@ -1253,17 +1296,138 @@ mod tests {
     }
 
     #[test]
+    fn thread_comm_match_is_capped_lower_than_process_comm_match() {
+        let db = rules_db_with_rules(vec![rule("worker-thread", "Game")]);
+
+        let thread_hit = db
+            .classify(
+                &identity(
+                    "worker-thread",
+                    "parent-process",
+                    "",
+                    "",
+                    "/user.slice/build.scope",
+                ),
+                false,
+            )
+            .unwrap();
+
+        assert_eq!(thread_hit.class, TaskClass::Game);
+        assert_eq!(thread_hit.confidence, 0.65);
+
+        let process_hit = db
+            .classify(
+                &identity(
+                    "other-thread",
+                    "worker-thread",
+                    "",
+                    "",
+                    "/user.slice/build.scope",
+                ),
+                false,
+            )
+            .unwrap();
+
+        assert_eq!(process_hit.class, TaskClass::Game);
+        assert_eq!(process_hit.confidence, 0.75);
+    }
+
+    #[test]
+    fn non_game_exact_match_is_capped_at_point_eight() {
+        let db = rules_db_with_rules(vec![rule("rustc", "Compiler")]);
+
+        let hit = db
+            .classify(
+                &identity(
+                    "rustc",
+                    "rustc",
+                    "rustc --crate-name stutter",
+                    "/usr/bin/rustc",
+                    "/user.slice/build.scope",
+                ),
+                true,
+            )
+            .unwrap();
+
+        assert_eq!(hit.class, TaskClass::Compiler);
+        assert_eq!(hit.confidence, 0.80);
+    }
+
+    #[test]
+    fn generic_service_rule_is_capped_at_point_six() {
+        let mut service_rule = rule("helperd", "Service");
+        service_rule.source_path = "misc.rules".to_owned();
+        let db = rules_db_with_rules(vec![service_rule]);
+
+        let hit = db
+            .classify(
+                &identity(
+                    "helperd",
+                    "helperd",
+                    "helperd",
+                    "/usr/bin/helperd",
+                    "/system.slice/helperd.service",
+                ),
+                true,
+            )
+            .unwrap();
+
+        assert_eq!(hit.class, TaskClass::Service);
+        assert_eq!(hit.confidence, 0.60);
+    }
+
+    #[test]
+    fn specific_service_rule_can_use_non_game_exact_cap() {
+        let mut service_rule = rule("NetworkManager", "NetworkDaemon");
+        service_rule.source_path = "00-default/Services/network/networkmanager.rules".to_owned();
+        let db = rules_db_with_rules(vec![service_rule]);
+
+        let hit = db
+            .classify(
+                &identity(
+                    "NetworkManager",
+                    "NetworkManager",
+                    "NetworkManager --no-daemon",
+                    "/usr/bin/NetworkManager",
+                    "/system.slice/NetworkManager.service",
+                ),
+                true,
+            )
+            .unwrap();
+
+        assert_eq!(hit.class, TaskClass::NetworkDaemon);
+        assert_eq!(hit.confidence, 0.80);
+    }
+
+    #[test]
+    fn ambiguous_game_rule_still_caps_at_point_seven_with_context() {
+        let mut game_rule = rule("build.exe", "Game");
+        game_rule.ambiguous = true;
+        let db = rules_db_with_rules(vec![game_rule]);
+
+        let hit = db
+            .classify(
+                &identity(
+                    "build.exe",
+                    "build.exe",
+                    "/home/me/.steam/steamapps/compatdata/123/pfx/drive_c/build.exe",
+                    "/usr/bin/wine",
+                    "/user.slice/app-steam-123.scope",
+                ),
+                true,
+            )
+            .unwrap();
+
+        assert_eq!(hit.class, TaskClass::Game);
+        assert_eq!(hit.confidence, 0.70);
+    }
+
+    #[test]
     fn non_game_rule_does_not_classify_from_comm_only() {
         let db = rules_db_with_rules(vec![rule("rustc", "Compiler")]);
 
         let hit = db.classify(
-            &identity(
-                "rustc",
-                "rustc",
-                "",
-                "",
-                "/user.slice/build.scope",
-            ),
+            &identity("rustc", "rustc", "", "", "/user.slice/build.scope"),
             true,
         );
 
