@@ -1630,23 +1630,7 @@ fn escape_json_for_script_tag(s: &str) -> String {
         .replace("</", "<\\/")
 }
 
-// sched_switch.prev_state values are Linux task-state bits and can vary across
-// kernels. These labels are conservative. prev_state describes the task switched
-// out, not the task switched in.
-pub fn classify_switch_prev_state(prev_state: i64) -> &'static str {
-    const TASK_INTERRUPTIBLE: i64 = 1;
-    const TASK_UNINTERRUPTIBLE: i64 = 2;
-
-    if prev_state == 0 {
-        "preempted_or_runnable"
-    } else if prev_state & TASK_INTERRUPTIBLE != 0 {
-        "voluntary_sleep_interruptible"
-    } else if prev_state & TASK_UNINTERRUPTIBLE != 0 {
-        "voluntary_sleep_uninterruptible"
-    } else {
-        "other_sleep"
-    }
-}
+pub use crate::sched_state::classify_switch_prev_state;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_report(
@@ -4753,37 +4737,28 @@ mod tests {
     }
 
     #[test]
-    fn classify_switch_prev_state_zero_is_preempted_or_runnable() {
-        assert_eq!(classify_switch_prev_state(0), "preempted_or_runnable");
+    fn classify_switch_prev_state_zero_is_running() {
+        assert_eq!(classify_switch_prev_state(0), "running");
     }
 
     #[test]
     fn classify_switch_prev_state_interruptible() {
-        assert_eq!(
-            classify_switch_prev_state(1),
-            "voluntary_sleep_interruptible"
-        );
+        assert_eq!(classify_switch_prev_state(1), "interruptible_sleep");
     }
 
     #[test]
     fn classify_switch_prev_state_uninterruptible() {
-        assert_eq!(
-            classify_switch_prev_state(2),
-            "voluntary_sleep_uninterruptible"
-        );
+        assert_eq!(classify_switch_prev_state(2), "uninterruptible_sleep");
     }
 
     #[test]
     fn classify_switch_prev_state_other_sleep() {
-        assert_eq!(classify_switch_prev_state(8), "other_sleep");
+        assert_eq!(classify_switch_prev_state(8), "traced");
     }
 
     #[test]
     fn classify_switch_prev_state_interruptible_wins_when_multiple_bits_set() {
-        assert_eq!(
-            classify_switch_prev_state(3),
-            "voluntary_sleep_interruptible"
-        );
+        assert_eq!(classify_switch_prev_state(3), "interruptible_sleep");
     }
 
     #[test]

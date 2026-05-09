@@ -23,6 +23,119 @@ pub struct RefreshInput<'a> {
 
 pub type TaskExeInodesMap = BTreeMap<u32, (Option<u64>, Option<u64>, Option<u64>)>;
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default)]
+pub struct TargetRefreshPlan {
+    pub additions: Vec<TaskInfo>,
+    pub removals: Vec<TaskInfo>,
+    pub replacements: Vec<TaskReplacement>,
+    pub validation: TargetRefreshValidation,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default)]
+pub struct TargetRefreshValidation {
+    pub desired_task_count: usize,
+    pub max_tasks: usize,
+    pub target_pids_max: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct TaskReplacement {
+    pub tid: u32,
+    pub old: TaskInfo,
+    pub new: TaskInfo,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetMapOperation {
+    Insert { tid: u32 },
+    Remove { tid: u32 },
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default)]
+pub struct TargetRefreshOutcome {
+    pub plan: TargetRefreshPlan,
+    pub tree_events: Vec<TreeEvent>,
+    pub budget_report: crate::process_tree::ScanBudgetReport,
+}
+
+#[allow(dead_code)]
+pub struct TargetMapApplier;
+
+#[allow(dead_code)]
+impl TargetMapApplier {
+    pub fn apply(
+        target_pid_map: &mut dyn TaskMap,
+        operations: &[TargetMapOperation],
+    ) -> anyhow::Result<()> {
+        for operation in operations {
+            match *operation {
+                TargetMapOperation::Insert { tid } => target_pid_map.insert(tid, 1, 0)?,
+                TargetMapOperation::Remove { tid } => target_pid_map.remove(&tid)?,
+            }
+        }
+        Ok(())
+    }
+}
+
+#[allow(dead_code)]
+pub struct TreeEventBuilder;
+
+#[allow(dead_code)]
+impl TreeEventBuilder {
+    pub fn events_for_plan(plan: &TargetRefreshPlan, elapsed_ms: u64) -> Vec<TreeEvent> {
+        let mut events = Vec::new();
+
+        for replacement in &plan.replacements {
+            events.push(TreeEvent {
+                elapsed_ms,
+                action: "replaced".to_owned(),
+                tid: replacement.tid,
+                process_pid: replacement.new.process_pid,
+                process_ppid: replacement.new.process_ppid,
+                comm: replacement.new.comm.clone(),
+                process_comm: replacement.new.process_comm.clone(),
+                class: replacement.new.class,
+                from_cgroup: replacement.new.from_cgroup,
+            });
+        }
+
+        for task in &plan.additions {
+            events.push(TreeEvent {
+                elapsed_ms,
+                action: target_event_action(task.from_cgroup, "added").to_owned(),
+                tid: task.tid,
+                process_pid: task.process_pid,
+                process_ppid: task.process_ppid,
+                comm: task.comm.clone(),
+                process_comm: task.process_comm.clone(),
+                class: task.class,
+                from_cgroup: task.from_cgroup,
+            });
+        }
+
+        for task in &plan.removals {
+            events.push(TreeEvent {
+                elapsed_ms,
+                action: target_event_action(task.from_cgroup, "removed").to_owned(),
+                tid: task.tid,
+                process_pid: task.process_pid,
+                process_ppid: task.process_ppid,
+                comm: task.comm.clone(),
+                process_comm: task.process_comm.clone(),
+                class: task.class,
+                from_cgroup: task.from_cgroup,
+            });
+        }
+
+        events
+    }
+}
+
 #[derive(Default)]
 pub struct TaskTracker {
     pub active_targets: BTreeMap<u32, TaskInfo>,

@@ -11,6 +11,18 @@ Raw artifact files are documented for debugging, testing, benchmarking, and
 offline automation, but consumers should prefer `report --analysis-json` unless
 they specifically need raw event streams.
 
+## Canonical Artifact Registry
+
+The canonical artifact list is `stutter/src/artifacts.rs`.
+
+Any patch that adds, renames, or removes a run artifact must update
+`ArtifactKind`, `ArtifactSpec`, session writing, session loading, validation,
+report data-quality behavior, and probe registry references in the same change.
+
+`frame_events.json` is the canonical frame event stream.
+`frame_correlation.json` remains a legacy alias for compatibility with older
+recordings.
+
 ## Run Directory Layout
 
 A typical run directory contains:

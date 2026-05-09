@@ -127,6 +127,81 @@ pub struct ActionOutcome {
     pub finished_unix_nanos: u128,
 }
 
+pub struct RollbackRegistry {
+    handlers: Vec<Box<dyn RollbackHandler>>,
+}
+
+impl RollbackRegistry {
+    pub fn new() -> Self {
+        Self {
+            handlers: Vec::new(),
+        }
+    }
+
+    pub fn register<H>(&mut self, handler: H)
+    where
+        H: RollbackHandler + 'static,
+    {
+        self.handlers.push(Box::new(handler));
+    }
+
+    pub fn handlers(&self) -> &[Box<dyn RollbackHandler>] {
+        &self.handlers
+    }
+}
+
+impl Default for RollbackRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub trait RollbackHandler {
+    fn id(&self) -> &'static str;
+    fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>>;
+    fn dry_run(&self, candidate: &RollbackCandidate) -> anyhow::Result<RollbackPreview>;
+    fn restore(&self, candidate: RollbackCandidate) -> anyhow::Result<RollbackResult>;
+}
+
+#[derive(Debug, Clone)]
+pub struct RollbackCandidate {
+    pub handler_id: &'static str,
+    pub restore_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct RollbackPreview {
+    pub handler_id: &'static str,
+    pub restore_path: PathBuf,
+    pub affected_tasks: usize,
+    pub message: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RollbackResult {
+    pub handler_id: &'static str,
+    pub restore_path: PathBuf,
+    pub restored: usize,
+    pub skipped_dead: usize,
+    pub skipped_identity_mismatch: usize,
+    pub legacy_unverified: usize,
+    pub errors: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RestoreAllInput {
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RestoreAllSummary {
+    pub restored_total: usize,
+    pub skipped_dead: usize,
+    pub skipped_identity_mismatch: usize,
+    pub legacy_unverified: usize,
+    pub errors: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind")]
 pub enum RollbackToken {

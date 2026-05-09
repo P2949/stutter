@@ -125,6 +125,49 @@ pub fn resolve_cgroup_id_best_effort(_path: &Path) -> anyhow::Result<u64> {
     anyhow::bail!("native cgroup filtering is only supported on Unix/Linux");
 }
 
+#[allow(dead_code)]
+pub struct ProbeAttachPlan {
+    pub probes: Vec<crate::probe_registry::ProbeKey>,
+}
+
+#[allow(dead_code)]
+impl ProbeAttachPlan {
+    pub fn from_config(config: &crate::cli::Config) -> Self {
+        let mut probes = vec![
+            crate::probe_registry::ProbeKey::SchedulerRunnableLatency,
+            crate::probe_registry::ProbeKey::CpuFreq,
+            crate::probe_registry::ProbeKey::PsiTimeline,
+        ];
+
+        if config.irq_latency {
+            probes.push(crate::probe_registry::ProbeKey::IrqLatency);
+        }
+        if config.hwmon {
+            probes.push(crate::probe_registry::ProbeKey::GpuHwmon);
+        }
+        if config.block_io {
+            probes.push(crate::probe_registry::ProbeKey::BlockIo);
+        }
+        if config.faults || config.stat_wait {
+            probes.push(crate::probe_registry::ProbeKey::Faults);
+        }
+        if config.cpu_perf {
+            probes.push(crate::probe_registry::ProbeKey::CpuPerf);
+        }
+        if config.runtime_slices {
+            probes.push(crate::probe_registry::ProbeKey::RuntimeSlices);
+        }
+        if config.foreground_window {
+            probes.push(crate::probe_registry::ProbeKey::ForegroundWindow);
+        }
+        if config.mangohud_log.is_some() {
+            probes.push(crate::probe_registry::ProbeKey::FrameLog);
+        }
+
+        Self { probes }
+    }
+}
+
 pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf> {
     raise_memlock_limit();
     let map_sizing = map_sizing_for_config(config);
