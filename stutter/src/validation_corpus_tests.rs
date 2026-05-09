@@ -591,6 +591,80 @@ fn validation_corpus_real_compositor_scheduler_delay() {
 }
 
 #[test]
+fn validation_corpus_real_irq_overlap() {
+    let (analysis, _) = assert_fixture_from_metadata("real_irq_overlap");
+
+    assert!(
+        matches!(
+            analysis.data_quality.level,
+            DataQualityLevel::High | DataQualityLevel::Medium
+        ),
+        "real_irq_overlap data quality should be High or Medium, got {:?}",
+        analysis.data_quality.level
+    );
+    assert!(analysis.data_quality.validation_errors.is_empty());
+
+    let diagnosis =
+        primary_diagnosis(&analysis).expect("real_irq_overlap expected a primary diagnosis");
+    assert_eq!(
+        diagnosis.cause,
+        StutterCause::IrqDelayCandidate,
+        "real_irq_overlap must stay classified as IRQ delay, not CPU pressure, I/O, GPU, or Unknown"
+    );
+
+    let evidence_text = diagnosis.evidence.join("\n");
+    assert!(
+        evidence_text.contains("IRQ"),
+        "real_irq_overlap missing IRQ evidence; evidence was:\n{}",
+        evidence_text
+    );
+
+    assert!(
+        analysis.artifacts_summary.irq_event_count > 0,
+        "real_irq_overlap must contain IRQ artifacts"
+    );
+    assert!(
+        analysis.artifacts_summary.irq_event_count >= 4,
+        "real_irq_overlap should include multiple IRQ events, including unrelated noise outside the spike window"
+    );
+    assert!(
+        analysis.artifacts_summary.spike_count >= 3,
+        "real_irq_overlap should contain a clustered scheduler-spike window"
+    );
+    assert!(
+        analysis.artifacts_summary.interval_record_count >= 1,
+        "real_irq_overlap should contain interval data so CPU pressure can be ruled out"
+    );
+    assert_eq!(
+        analysis.artifacts_summary.block_io_event_count, 0,
+        "block I/O evidence should not dominate real_irq_overlap"
+    );
+    assert_eq!(
+        analysis.artifacts_summary.gpu_sample_count, 0,
+        "GPU evidence should not dominate real_irq_overlap"
+    );
+
+    let candidate = find_candidate(&analysis, StutterCause::IrqDelayCandidate)
+        .expect("real_irq_overlap missing IRQ diagnosis candidate");
+    let candidate_evidence = candidate
+        .evidence
+        .iter()
+        .map(|item| item.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        candidate_evidence.contains("IRQ"),
+        "real_irq_overlap IRQ candidate evidence did not mention IRQ; evidence was:\n{}",
+        candidate_evidence
+    );
+    assert!(
+        !candidate_evidence.contains("147") && !candidate_evidence.contains("148"),
+        "real_irq_overlap IRQ candidate evidence should stay focused on the correlated IRQ window and not report unrelated IRQ 147/148 noise; evidence was:\n{}",
+        candidate_evidence
+    );
+}
+
+#[test]
 fn validation_corpus_game_thread_scheduler_delay() {
     assert_fixture_from_metadata("game_thread_scheduler_delay");
 }
