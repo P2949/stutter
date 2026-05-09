@@ -20,16 +20,17 @@ Public examples use the same `fixture.toml` contract.
 
 ## Fixture tiers
 
-The corpus has two tiers:
+The corpus has two tiers under `stutter/tests/fixtures/runs/`:
 
-1. **Synthetic contract fixtures** in `stutter/tests/fixtures/runs/`.
+1. **Minimal synthetic fixtures**.
    These are intentionally small and deterministic. They protect low-level
    loader, artifact-count, data-quality, schema-warning, and diagnosis contracts.
-2. **Sanitized real-world-shaped fixtures** in `stutter/tests/fixtures/runs/`.
-   These are still deterministic and privacy-safe, but they model full recording
-   situations more closely: a game main thread delay, a compositor delay, an IRQ
-   overlap, a block I/O stall, and a GPU-bound frame spike with clean CPU
-   pressure.
+2. **Validation corpus fixtures** with `real_` prefixes.
+   These are sanitized real recordings or real-recording-shaped fixtures. They
+   model full recording situations more closely: clean baselines, game main
+   thread delay, compositor delay, IRQ overlap, block I/O overlap, GPU-bound
+   looking frame spikes, truncated low-quality data, foreground-window tracking,
+   and community-rules classification.
 
 The public examples are safe to publish because they contain no real command
 lines, window titles, user names, host names, file paths, hardware serial
@@ -129,15 +130,19 @@ Low
 | `reused_tid_no_contamination` | Ensures reused TIDs remain separate logical tasks.                          |
 | `old_schema_warning`          | Ensures old schema versions warn instead of hard failing.                   |
 
-## Current sanitized real-world-shaped fixtures
+## Current validation corpus fixtures
 
-| Fixture                                 | Expected primary cause     |
-| --------------------------------------- | -------------------------- |
-| `real_world_game_scheduler_delay`       | `GameThreadSchedulerDelay` |
-| `real_world_compositor_scheduler_delay` | `CompositorSchedulerDelay` |
-| `real_world_irq_overlap`                | `IrqDelayCandidate`        |
-| `real_world_block_io_stall`             | `BlockIoCandidate`         |
-| `real_world_gpu_bound_clean_cpu`        | `GpuBoundCandidate`        |
+| Fixture                               | Expected primary cause     |
+| ------------------------------------- | -------------------------- |
+| `real_clean_baseline`                 | `Unknown`                  |
+| `real_game_thread_scheduler_delay`    | `GameThreadSchedulerDelay` |
+| `real_compositor_scheduler_delay`     | `CompositorSchedulerDelay` |
+| `real_irq_overlap`                    | `IrqDelayCandidate`        |
+| `real_gpu_bound_looking`              | `GpuBoundCandidate`        |
+| `real_block_io_overlap`               | `BlockIoCandidate`         |
+| `real_truncated_low_quality`          | `Unknown`                  |
+| `real_foreground_window`              | `Unknown`                  |
+| `real_community_rules_classification` | `Unknown`                  |
 
 ## Sanitizing real recordings
 
@@ -227,7 +232,14 @@ This regenerates selected public examples under:
 
 ```text
 docs/examples/artifacts/v21/
+  clean_baseline/
+  game_thread_scheduler_delay/
+  low_quality_truncated/
+  README.md
 ```
+
+Only small representative examples belong under `docs/examples/artifacts/v21/`.
+The larger regression corpus belongs under `stutter/tests/fixtures/runs/`.
 
 After regeneration, run:
 
