@@ -120,7 +120,6 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "real_world_irq_overlap",
         "real_world_block_io_stall",
         "real_world_gpu_bound_clean_cpu",
-        "real_clean_baseline",
         "real_game_thread_scheduler_delay",
         "real_compositor_scheduler_delay",
         "real_irq_overlap",
@@ -166,6 +165,7 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "community_rules_classification",
         community_rules_classification_fixture(),
     )?;
+    write_fixture(root, "real_clean_baseline", real_clean_baseline_fixture())?;
 
     Ok(())
 }
@@ -243,6 +243,10 @@ fn public_game_thread_scheduler_delay_fixture() -> (SessionFile, FixtureArtifact
         "game_thread_scheduler_delay_public",
         game_thread_scheduler_delay_fixture(),
     )
+}
+
+fn real_clean_baseline_fixture() -> (SessionFile, FixtureArtifacts) {
+    renamed_fixture("real_clean_baseline", clean_run_fixture())
 }
 
 fn public_low_quality_truncated_fixture() -> (SessionFile, FixtureArtifacts) {
