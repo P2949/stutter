@@ -120,7 +120,6 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "real_world_irq_overlap",
         "real_world_block_io_stall",
         "real_world_gpu_bound_clean_cpu",
-        "real_irq_overlap",
         "real_gpu_bound_looking",
         "real_block_io_overlap",
         "real_truncated_low_quality",
@@ -174,6 +173,7 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "real_compositor_scheduler_delay",
         real_compositor_scheduler_delay_fixture(),
     )?;
+    write_fixture(root, "real_irq_overlap", real_irq_overlap_fixture())?;
 
     Ok(())
 }
@@ -267,6 +267,101 @@ fn real_compositor_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) 
     renamed_fixture(
         "real_compositor_scheduler_delay",
         compositor_scheduler_delay_fixture(),
+    )
+}
+
+fn real_irq_overlap_fixture() -> (SessionFile, FixtureArtifacts) {
+    let spikes = vec![
+        spike_event(5301, TaskClass::Unknown, "game-worker-a", 6_000_000, 0),
+        spike_event(
+            5302,
+            TaskClass::Unknown,
+            "game-worker-b",
+            4_500_000,
+            250_000,
+        ),
+        spike_event(
+            5303,
+            TaskClass::Unknown,
+            "game-worker-c",
+            4_000_000,
+            500_000,
+        ),
+    ];
+    let intervals = vec![
+        interval_record_with_class(
+            100,
+            5301,
+            "game-worker-a",
+            TaskClass::Unknown,
+            4.0,
+            6_000_000,
+        ),
+        interval_record_with_class(
+            100,
+            5302,
+            "game-worker-b",
+            TaskClass::Unknown,
+            3.0,
+            4_500_000,
+        ),
+        interval_record_with_class(
+            100,
+            5303,
+            "game-worker-c",
+            TaskClass::Unknown,
+            2.0,
+            4_000_000,
+        ),
+    ];
+    let irq_events = vec![
+        IrqEventRecord {
+            elapsed_ms: Some(42),
+            irq: 147,
+            cpu: 1,
+            enter_ns: 42_000_000,
+            exit_ns: 43_000_000,
+            duration_ns: 1_000_000,
+        },
+        IrqEventRecord {
+            elapsed_ms: Some(100),
+            irq: 146,
+            cpu: 3,
+            enter_ns: 98_500_000,
+            exit_ns: 104_500_000,
+            duration_ns: 6_000_000,
+        },
+        IrqEventRecord {
+            elapsed_ms: Some(101),
+            irq: 146,
+            cpu: 3,
+            enter_ns: 100_500_000,
+            exit_ns: 103_000_000,
+            duration_ns: 2_500_000,
+        },
+        IrqEventRecord {
+            elapsed_ms: Some(178),
+            irq: 148,
+            cpu: 6,
+            enter_ns: 178_000_000,
+            exit_ns: 179_250_000,
+            duration_ns: 1_250_000,
+        },
+    ];
+
+    let mut session = base_session("real_irq_overlap");
+    session.config.tree_roots = vec![5300];
+    session.config.irq_latency = true;
+    session.config.irqs = vec![146, 147, 148];
+    apply_spike_session_fields(&mut session, &spikes);
+    apply_artifact_counts(
+        &mut session,
+        &FixtureArtifacts {
+            spikes,
+            intervals,
+            irq_events,
+            ..Default::default()
+        },
     )
 }
 
@@ -1090,6 +1185,17 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["Medium", "High"],
             "High",
             &["game thread", "delayed"],
+            exact_artifacts(artifacts),
+        ),
+        "real_irq_overlap" => fixture_metadata(
+            name,
+            "sanitized-real-recording",
+            "High",
+            "IRQ handler activity overlapped the scheduler-latency cluster while unrelated IRQ noise occurred outside the correlation window.",
+            "IrqDelayCandidate",
+            &["Medium", "High"],
+            "High",
+            &["IRQ"],
             exact_artifacts(artifacts),
         ),
         other => fixture_metadata(

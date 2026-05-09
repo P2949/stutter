@@ -1,0 +1,4 @@
+{"elapsed_ms":42,"irq":147,"cpu":1,"enter_ns":42000000,"exit_ns":43000000,"duration_ns":1000000}
+{"elapsed_ms":100,"irq":146,"cpu":3,"enter_ns":98500000,"exit_ns":104500000,"duration_ns":6000000}
+{"elapsed_ms":101,"irq":146,"cpu":3,"enter_ns":100500000,"exit_ns":103000000,"duration_ns":2500000}
+{"elapsed_ms":178,"irq":148,"cpu":6,"enter_ns":178000000,"exit_ns":179250000,"duration_ns":1250000}
