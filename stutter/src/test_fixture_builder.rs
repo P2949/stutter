@@ -124,7 +124,6 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "real_world_irq_overlap",
         "real_world_block_io_stall",
         "real_world_gpu_bound_clean_cpu",
-        "real_foreground_window",
         "real_community_rules_classification",
     ] {
         remove_fixture_dir(root, deprecated)?;
@@ -189,6 +188,11 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         root,
         "real_truncated_low_quality",
         real_truncated_low_quality_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_foreground_window",
+        real_foreground_window_fixture(),
     )?;
 
     Ok(())
@@ -561,6 +565,80 @@ fn real_truncated_low_quality_fixture() -> (SessionFile, FixtureArtifacts) {
     renamed_fixture(
         "real_truncated_low_quality",
         truncated_drop_counters_fixture(),
+    )
+}
+
+fn real_foreground_window_fixture() -> (SessionFile, FixtureArtifacts) {
+    let spikes = vec![
+        spike_event(5701, TaskClass::Game, "Main", 4_500_000, 0),
+        spike_event(
+            5702,
+            TaskClass::GameHelper,
+            "RenderThread",
+            3_200_000,
+            250_000,
+        ),
+        spike_event(
+            5703,
+            TaskClass::Helper,
+            "present-helper",
+            2_400_000,
+            500_000,
+        ),
+    ];
+    let intervals = vec![
+        interval_record_with_class(100, 5701, "Main", TaskClass::Game, 2.0, 4_500_000),
+        interval_record_with_class(
+            100,
+            5702,
+            "RenderThread",
+            TaskClass::GameHelper,
+            2.0,
+            3_200_000,
+        ),
+        interval_record_with_class(
+            100,
+            5703,
+            "present-helper",
+            TaskClass::Helper,
+            1.0,
+            2_400_000,
+        ),
+    ];
+    let foreground_events = vec![ForegroundEvent {
+        elapsed_ms: 100,
+        source: crate::foreground::ForegroundSource::Sway,
+        status: crate::foreground::ForegroundProviderStatus::Available,
+        pid: Some(5701),
+        app_id: Some("steam_app_sanitized".to_owned()),
+        class: Some("steam_app_sanitized".to_owned()),
+        title: None,
+        window_id: Some("0xSANITIZED".to_owned()),
+        workspace: Some("gaming".to_owned()),
+        confidence: 0.96,
+        reason: "focused Sway node from sanitized real foreground fixture".to_owned(),
+    }];
+
+    let mut session = base_session("real_foreground_window");
+    session.config.tree_roots = vec![5701];
+    session.config.foreground_window = true;
+    session.config.foreground_source = "sway".to_owned();
+    session.config.foreground_poll_ms = 1_000;
+    session.config.foreground_max_stale_ms = 2_500;
+    session.config.foreground_include_title = false;
+    session.core.foreground_source = Some("sway".to_owned());
+    session.core.final_foreground_pid = Some(5701);
+    session.core.final_foreground_app_id = Some("steam_app_sanitized".to_owned());
+    session.core.final_foreground_class = Some("steam_app_sanitized".to_owned());
+    apply_spike_session_fields(&mut session, &spikes);
+    apply_artifact_counts(
+        &mut session,
+        &FixtureArtifacts {
+            spikes,
+            intervals,
+            foreground_events,
+            ..Default::default()
+        },
     )
 }
 
@@ -1300,6 +1378,17 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             "Unknown",
             &[],
             "Medium",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+        "real_foreground_window" => fixture_metadata(
+            name,
+            "sanitized-real-recording",
+            "High",
+            "Sanitized foreground-window recording with a scheduler cluster near a foreground event; title is redacted while PID/app/class remain available.",
+            "Any",
+            &[],
+            "High",
             &[],
             exact_artifacts(artifacts),
         ),

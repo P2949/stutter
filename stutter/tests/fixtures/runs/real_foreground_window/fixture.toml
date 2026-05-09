@@ -1,0 +1,28 @@
+name = "real_foreground_window"
+schema_version = 21
+source = "sanitized-real-recording"
+quality_expectation = "High"
+description = "Sanitized foreground-window recording with a scheduler cluster near a foreground event; title is redacted while PID/app/class remain available."
+
+[expected]
+primary_cause = "Any"
+accepted_confidence = []
+data_quality = "High"
+
+[expected.artifacts]
+spikes = 3
+intervals = 3
+irq_events = 0
+gpu_samples = 0
+frames = 0
+block_io_events = 0
+foreground_events = 1
+
+[expected.evidence]
+contains = []
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true
