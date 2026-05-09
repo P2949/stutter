@@ -535,6 +535,7 @@ fn assert_analysis_json_shape(analysis: &ReportAnalysisJson) {
         "session",
         "cluster_analysis",
         "frame_diagnoses",
+        "frame_pacing",
         "pressure_timeline",
         "artifacts_summary",
         "data_quality",
@@ -568,6 +569,34 @@ fn assert_analysis_json_shape(analysis: &ReportAnalysisJson) {
             data_quality.contains_key(key),
             "missing data_quality key {key}; keys={:?}",
             data_quality.keys().collect::<Vec<_>>()
+        );
+    }
+
+    let pressure = object["pressure_timeline"]
+        .as_object()
+        .expect("analysis-json pressure_timeline should serialize as an object");
+    for key in [
+        "sample_count",
+        "windows",
+        "peak_windows",
+        "pressure_notes",
+        "coverage",
+    ] {
+        assert!(
+            pressure.contains_key(key),
+            "missing pressure_timeline key {key}; keys={:?}",
+            pressure.keys().collect::<Vec<_>>()
+        );
+    }
+
+    let frame_pacing = object["frame_pacing"]
+        .as_object()
+        .expect("analysis-json frame_pacing should serialize as an object");
+    for key in ["frame_count", "outlier_count", "outliers", "notes"] {
+        assert!(
+            frame_pacing.contains_key(key),
+            "missing frame_pacing key {key}; keys={:?}",
+            frame_pacing.keys().collect::<Vec<_>>()
         );
     }
 }
@@ -732,6 +761,70 @@ fn pressure_timeline_reports_coverage() {
     let analysis = build_fixture_analysis("cpu_pressure");
     assert!(analysis.pressure_timeline.coverage.interval_records_loaded > 0);
     assert!(analysis.pressure_timeline.coverage.has_cpu_psi);
+}
+
+#[test]
+fn frame_pacing_summary_finds_outliers() {
+    let analysis = build_fixture_analysis("real_gpu_bound_looking");
+    assert!(analysis.frame_pacing.frame_count > 0);
+    assert!(analysis.frame_pacing.outlier_count > 0);
+}
+
+#[test]
+fn frame_pacing_summary_links_outliers_to_clusters() {
+    let analysis = build_fixture_analysis("real_compositor_scheduler_delay");
+    assert!(
+        analysis
+            .frame_pacing
+            .outliers
+            .iter()
+            .any(|outlier| matches!(
+                outlier.nearest_cluster_anchor_class,
+                Some(crate::process_tree::TaskClass::Compositor)
+                    | Some(crate::process_tree::TaskClass::GameScope)
+            )),
+        "expected at least one frame outlier near a compositor/gamescope scheduler cluster"
+    );
+}
+
+#[test]
+fn cluster_diagnosis_explanation_contains_primary_evidence() {
+    let analysis = build_fixture_analysis("real_game_thread_scheduler_delay");
+    let cluster = analysis
+        .cluster_analysis
+        .clusters
+        .iter()
+        .find(|cluster| cluster.diagnosis.is_some())
+        .expect("expected diagnosed cluster");
+
+    let explanation = cluster
+        .diagnosis_explanation
+        .as_ref()
+        .expect("expected diagnosis explanation");
+
+    assert!(explanation.primary_cause.is_some());
+    assert!(!explanation.evidence_items.is_empty());
+}
+
+#[test]
+fn html_report_contains_new_report_views() {
+    let path = fixture_path("real_gpu_bound_looking");
+    let analysis = report::build_report_analysis(&path, 10, 5, None)
+        .expect("analysis should build for HTML smoke test");
+    let artifacts = crate::session_io::load_run_artifacts(
+        &path,
+        crate::session_io::ArtifactLoadOptions::REPORT,
+    )
+    .expect("artifacts should load for HTML smoke test");
+    let model =
+        report::build_html_report_model(&analysis.session, &artifacts, &analysis, 10, None, None)
+            .expect("HTML report model should build");
+    let html = report::render_html_report(&model).expect("HTML report should render");
+
+    assert!(html.contains("Pressure Timeline"));
+    assert!(html.contains("Frame Pacing"));
+    assert!(html.contains("Why this diagnosis was chosen"));
+    assert!(html.contains("Evidence missing"));
 }
 
 #[test]

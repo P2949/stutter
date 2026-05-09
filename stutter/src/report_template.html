@@ -32,6 +32,12 @@ summary { cursor: pointer; font-weight: 600; color: #111827; }
 .wake-graph-table .count-cell { text-align: right; font-weight: 500; }
 .wake-graph-table .latency-cell { text-align: right; color: #4b5563; }
 .wake-graph-badge { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.8rem; }
+.cluster-summary-line { font-weight: 600; margin-bottom: 6px; }
+.detail-stack details { margin-top: 8px; }
+.compact-table { margin-top: 8px; font-size: 0.85rem; box-shadow: none !important; border: 1px solid #e5e7eb; }
+.compact-table th { background: #f9fafb; padding: 6px 10px; }
+.compact-table td { padding: 5px 10px; }
+.pill { display: inline-block; padding: 2px 6px; border-radius: 4px; background: #f3f4f6; color: #374151; font-size: 0.8rem; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -111,6 +117,17 @@ summary { cursor: pointer; font-weight: 600; color: #111827; }
   <div id="pressure-timeline-notes"></div>
   <div class="chart-container"><canvas id="pressure-timeline"></canvas></div>
   <div id="pressure-peak-table"></div>
+</section>
+
+<section id="frame-pacing-section">
+  <h2>Frame Pacing</h2>
+  <p class="muted">
+    Derived from MangoHud frame events plus existing scheduler clusters/task classes.
+  </p>
+  <div class="summary-cards" id="frame-pacing-summary"></div>
+  <div id="frame-pacing-notes"></div>
+  <div class="chart-container"><canvas id="frame-pacing-chart"></canvas></div>
+  <div id="frame-outliers-table"></div>
 </section>
 
 <section id="cluster-analysis-section">
@@ -199,6 +216,45 @@ document.addEventListener('DOMContentLoaded', () => {
         return String(key)
             .replaceAll('_', ' ')
             .replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function formatNumber(value, digits = 2) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) {
+            return '—';
+        }
+
+        return Number(value).toFixed(digits);
+    }
+
+    function formatRatio(value) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) {
+            return '—';
+        }
+
+        return `${Number(value).toFixed(2)}x`;
+    }
+
+    function formatSignedMs(value) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) {
+            return '—';
+        }
+
+        const number = Number(value);
+        const sign = number > 0 ? '+' : '';
+        return `${sign}${number.toFixed(0)} ms`;
+    }
+
+    function formatForeground(appId, className) {
+        return appId || className || '—';
+    }
+
+    function renderMiniList(items, emptyText) {
+        const rows = Array.isArray(items) ? items : [];
+        if (rows.length === 0) {
+            return `<p class="muted">${escapeHtml(emptyText)}</p>`;
+        }
+
+        return `<ul>${rows.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
     }
 
     function renderSummaryCards(model) {
@@ -327,6 +383,266 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
+    function renderPressureTimeline(model) {
+        const section = document.getElementById('pressure-timeline-section');
+        const notesEl = document.getElementById('pressure-timeline-notes');
+        const peaksEl = document.getElementById('pressure-peak-table');
+        const canvas = document.getElementById('pressure-timeline');
+
+        const pressure = model.pressure_timeline || {};
+        const windows = pressure.windows || [];
+
+        if (!Array.isArray(windows) || windows.length === 0) {
+            if (section) section.style.display = 'none';
+            return;
+        }
+
+        if (!section || !notesEl || !peaksEl) {
+            return;
+        }
+
+        const notes = Array.isArray(pressure.pressure_notes) ? pressure.pressure_notes : [];
+        notesEl.innerHTML = notes.length
+            ? `<ul>${notes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>`
+            : `<p class="muted">No major pressure notes detected.</p>`;
+
+        if (typeof Chart !== 'undefined' && canvas) {
+            new Chart(canvas, {
+                type: 'line',
+                data: {
+                    datasets: [
+                        {
+                            label: 'CPU PSI some %',
+                            data: windows.map(w => ({ x: w.elapsed_ms, y: w.cpu_some })),
+                            pointRadius: 0,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Memory PSI some %',
+                            data: windows
+                                .filter(w => w.mem_some !== null && w.mem_some !== undefined)
+                                .map(w => ({ x: w.elapsed_ms, y: w.mem_some })),
+                            pointRadius: 0,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'I/O PSI some %',
+                            data: windows
+                                .filter(w => w.io_some !== null && w.io_some !== undefined)
+                                .map(w => ({ x: w.elapsed_ms, y: w.io_some })),
+                            pointRadius: 0,
+                            tension: 0.1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    parsing: false,
+                    scales: {
+                        x: { title: { display: true, text: 'Time since session start (ms)' } },
+                        y: { min: 0, max: 100, title: { display: true, text: 'PSI %' } }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => `${ctx.dataset.label}: ${Number(ctx.raw.y).toFixed(2)}%`
+                            }
+                        },
+                        zoom: {
+                            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
+                            pan: { enabled: true, mode: 'x' }
+                        }
+                    }
+                }
+            });
+        }
+
+        const peaks = Array.isArray(pressure.peak_windows) ? pressure.peak_windows : [];
+        peaksEl.innerHTML = peaks.length
+            ? `<table>
+                 <thead>
+                   <tr><th>Time</th><th>Pressure</th><th>Value</th><th>Near spike</th></tr>
+                 </thead>
+                 <tbody>
+                   ${peaks.map(p => `
+                     <tr>
+                       <td>${escapeHtml(formatMs(p.elapsed_ms))}</td>
+                       <td>${escapeHtml(p.pressure_kind)}</td>
+                       <td>${escapeHtml(Number(p.value).toFixed(2) + '%')}</td>
+                       <td>${escapeHtml(p.near_spike ? 'yes' : 'no')}</td>
+                     </tr>
+                   `).join('')}
+                 </tbody>
+               </table>`
+            : `<p class="muted">No pressure peaks above display thresholds.</p>`;
+    }
+
+    function renderFramePacing(model) {
+        const section = document.getElementById('frame-pacing-section');
+        const summaryEl = document.getElementById('frame-pacing-summary');
+        const notesEl = document.getElementById('frame-pacing-notes');
+        const outliersEl = document.getElementById('frame-outliers-table');
+        const canvas = document.getElementById('frame-pacing-chart');
+        const pacing = model.frame_pacing || {};
+        const chartArtifacts = model.chart_artifacts || {};
+        const frameEvents = Array.isArray(chartArtifacts.frame_events) ? chartArtifacts.frame_events : [];
+
+        if (!section || !summaryEl || !notesEl || !outliersEl) return;
+
+        if (!pacing.frame_count && frameEvents.length === 0) {
+            section.style.display = 'none';
+            return;
+        }
+
+        const cards = [
+            ['Frames', pacing.frame_count ?? frameEvents.length],
+            ['Median', formatMs(pacing.median_frametime_ms)],
+            ['P95', formatMs(pacing.p95_frametime_ms)],
+            ['P99', formatMs(pacing.p99_frametime_ms)],
+            ['Max', formatMs(pacing.max_frametime_ms)],
+            ['Outliers', pacing.outlier_count ?? 0],
+            ['Compositor-linked', pacing.compositor_cluster_count ?? 0],
+            ['Game-linked', pacing.game_cluster_count ?? 0],
+        ];
+
+        summaryEl.innerHTML = cards.map(([label, value]) => `
+            <div class="summary-card">
+              <div class="summary-card-label">${escapeHtml(label)}</div>
+              <div class="summary-card-value">${escapeHtml(value)}</div>
+            </div>
+        `).join('');
+
+        notesEl.innerHTML = renderMiniList(pacing.notes, 'No frame-pacing notes recorded.');
+
+        const outliers = Array.isArray(pacing.outliers) ? pacing.outliers : [];
+        if (typeof Chart !== 'undefined' && canvas && frameEvents.length > 0) {
+            new Chart(canvas, {
+                type: 'line',
+                data: {
+                    datasets: [
+                        {
+                            label: 'Frametime ms',
+                            data: frameEvents.map(frame => ({ x: frame.elapsed_ms, y: frame.frametime_ms })),
+                            pointRadius: 1,
+                            tension: 0.1,
+                        },
+                        {
+                            label: 'Outliers',
+                            data: outliers.map(frame => ({ x: frame.elapsed_ms, y: frame.frametime_ms })),
+                            type: 'scatter',
+                            pointRadius: 5,
+                            pointBackgroundColor: '#dc2626',
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    parsing: false,
+                    scales: {
+                        x: { title: { display: true, text: 'Time since session start (ms)' } },
+                        y: { min: 0, title: { display: true, text: 'Frametime (ms)' } }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => `${ctx.dataset.label}: ${Number(ctx.raw.y).toFixed(2)} ms`
+                            }
+                        },
+                        zoom: {
+                            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
+                            pan: { enabled: true, mode: 'x' }
+                        }
+                    }
+                }
+            });
+        }
+
+        outliersEl.innerHTML = outliers.length
+            ? `<table>
+                 <thead>
+                   <tr>
+                     <th>Time</th>
+                     <th>Frametime</th>
+                     <th>Median ratio</th>
+                     <th>Nearest scheduler cluster</th>
+                     <th>Linked candidate</th>
+                     <th>Anchor</th>
+                     <th>Foreground</th>
+                   </tr>
+                 </thead>
+                 <tbody>
+                   ${outliers.map(outlier => `
+                     <tr>
+                       <td>${escapeHtml(formatMs(outlier.elapsed_ms))}</td>
+                       <td>${escapeHtml(formatMs(outlier.frametime_ms))}</td>
+                       <td>${escapeHtml(formatRatio(outlier.over_median_ratio))}</td>
+                       <td>${escapeHtml(formatSignedMs(outlier.nearest_cluster_delta_ms))}</td>
+                       <td>${escapeHtml(outlier.nearest_cluster_cause || '—')}</td>
+                       <td>${escapeHtml(`${outlier.nearest_cluster_anchor_comm || '—'} / ${outlier.nearest_cluster_anchor_class || '—'}`)}</td>
+                       <td>${escapeHtml(formatForeground(outlier.foreground_app_id, outlier.foreground_class))}</td>
+                     </tr>
+                   `).join('')}
+                 </tbody>
+               </table>`
+            : `<p class="muted">No frame outliers above the display threshold.</p>`;
+    }
+
+    function renderDiagnosisDetails(explanation, diagnosis) {
+        const primary = diagnosis.primary || {};
+        const evidenceItems = Array.isArray(explanation && explanation.evidence_items)
+            ? explanation.evidence_items
+            : (Array.isArray(primary.evidence) ? primary.evidence : []);
+        const missing = Array.isArray(explanation && explanation.missing_evidence)
+            ? explanation.missing_evidence
+            : (Array.isArray(diagnosis.missing_evidence) ? diagnosis.missing_evidence : []);
+        const competing = Array.isArray(explanation && explanation.competing_candidates)
+            ? explanation.competing_candidates
+            : (Array.isArray(diagnosis.candidates) ? diagnosis.candidates.slice(primary.cause ? 1 : 0) : []);
+        const primaryCause = (explanation && explanation.primary_cause) || primary.cause || diagnosis.cause || '—';
+        const primaryConfidence = (explanation && explanation.primary_confidence) || primary.confidence || diagnosis.confidence || '—';
+        const primaryScore = (explanation && explanation.primary_score !== undefined)
+            ? explanation.primary_score
+            : primary.score;
+
+        return `
+            <div class="detail-stack">
+              <details>
+                <summary>Why this diagnosis was chosen</summary>
+                <p class="muted">
+                  primary=${escapeHtml(primaryCause)}
+                  confidence=${escapeHtml(primaryConfidence)}
+                  score=${escapeHtml(formatNumber(primaryScore))}
+                </p>
+                ${evidenceItems.length ? `
+                  <ul>
+                    ${evidenceItems.map(item => `
+                      <li>${escapeHtml(item.message || item)} <span class="muted">${escapeHtml(item.kind ? `(${item.kind}, strength ${formatNumber(item.strength)})` : '')}</span></li>
+                    `).join('')}
+                  </ul>
+                ` : '<p class="muted">No primary evidence items recorded.</p>'}
+              </details>
+
+              <details>
+                <summary>Evidence missing / not strong enough</summary>
+                ${renderMiniList(missing, 'none recorded')}
+              </details>
+
+              <details>
+                <summary>Competing candidates</summary>
+                ${competing.length ? `
+                  <ul>
+                    ${competing.map(candidate => `
+                      <li>${escapeHtml(candidate.cause || '—')} confidence=${escapeHtml(candidate.confidence || '—')} score=${escapeHtml(formatNumber(candidate.score))} evidence=${escapeHtml(candidate.evidence_count ?? (candidate.evidence || []).length ?? 0)}</li>
+                    `).join('')}
+                  </ul>
+                ` : '<p class="muted">No competing candidates recorded.</p>'}
+              </details>
+            </div>
+        `;
+    }
+
     function renderClusterAnalysis(model) {
         const container = document.getElementById('cluster-analysis-table');
         if (!container) return;
@@ -343,19 +659,29 @@ document.addEventListener('DOMContentLoaded', () => {
             <table>
               <thead>
                 <tr>
-                  <th>Start</th>
-                  <th>End</th>
-                  <th>Spikes</th>
-                  <th>Primary cause</th>
-                  <th>Summary</th>
+                  <th>Cluster</th>
+                  <th>Foreground</th>
+                  <th>Diagnosis</th>
+                  <th>Evidence</th>
                 </tr>
               </thead>
               <tbody>
                 ${clusters.map(cluster => {
                     const diagnosis = cluster.diagnosis || {};
+                    const explanation = cluster.diagnosis_explanation || null;
                     const primary = diagnosis.primary || {};
-                    const cause = primary.cause || diagnosis.cause || cluster.primary_cause || cluster.anchor_kind || '—';
-                    const summary = diagnosis.summary || cluster.summary || cluster.anchor_comm || '—';
+                    const cause = (explanation && explanation.primary_cause) || primary.cause || diagnosis.cause || cluster.primary_cause || cluster.anchor_kind || '—';
+                    const confidence = (explanation && explanation.primary_confidence) || primary.confidence || diagnosis.confidence || '—';
+                    const score = (explanation && explanation.primary_score !== undefined) ? explanation.primary_score : primary.score;
+                    const durationMs = nsToMs((cluster.max_switch_ns || 0) - (cluster.min_switch_ns || 0));
+                    const maxLatencyMs = nsToMs(cluster.max_latency_ns);
+                    const points = Array.isArray(cluster.points) ? cluster.points : [];
+                    const foreground = formatForeground(cluster.foreground_app_id, cluster.foreground_class);
+                    const foregroundConfidence = cluster.foreground_confidence === null || cluster.foreground_confidence === undefined
+                        ? 'unknown'
+                        : Number(cluster.foreground_confidence).toFixed(2);
+                    const anchor = `${cluster.anchor_comm || '—'} / ${cluster.anchor_class || '—'}`;
+                    const topLine = `${formatMs(nsToMs(cluster.min_switch_ns))}–${formatMs(nsToMs(cluster.max_switch_ns))} | ${points.length} spikes | ${cluster.distinct_tasks ?? '—'} tasks | max ${formatMs(maxLatencyMs)} | anchor ${anchor}`;
 
                     let wakeHtml = '';
                     if (cluster.wake_graph && cluster.wake_graph.length > 0) {
@@ -386,13 +712,59 @@ document.addEventListener('DOMContentLoaded', () => {
                         `;
                     }
 
+                    const pointsHtml = points.length ? `
+                        <details style="margin-top: 8px;">
+                          <summary>Spike points (${points.length})</summary>
+                          <table class="compact-table">
+                            <thead>
+                              <tr>
+                                <th>Task</th>
+                                <th>Comm</th>
+                                <th>Class</th>
+                                <th>CPU</th>
+                                <th>Latency</th>
+                                <th>Wake target CPU</th>
+                                <th>Runnable depth</th>
+                                <th>Waker</th>
+                                <th>Tags</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              ${points.map(point => `
+                                <tr>
+                                  <td>${escapeHtml(point.task ?? '—')}</td>
+                                  <td>${escapeHtml(point.comm || '—')}</td>
+                                  <td>${escapeHtml(point.class || '—')}</td>
+                                  <td>${escapeHtml(point.cpu ?? '—')}</td>
+                                  <td>${escapeHtml(formatMs(nsToMs(point.latency_ns)))}</td>
+                                  <td>${escapeHtml(point.wakeup_target_cpu ?? '—')}</td>
+                                  <td>${escapeHtml(point.observed_runnable_depth ?? '—')}</td>
+                                  <td>${escapeHtml(`${point.waker_comm || '—'} [${point.waker_tid ?? '—'}]`)}</td>
+                                  <td>${escapeHtml(Array.isArray(point.cause_tags) ? point.cause_tags.join(', ') : '—')}</td>
+                                </tr>
+                              `).join('')}
+                            </tbody>
+                          </table>
+                        </details>
+                    ` : '';
+
                     return `
                       <tr>
-                        <td>${escapeHtml(formatMs(nsToMs(cluster.min_switch_ns)))}</td>
-                        <td>${escapeHtml(formatMs(nsToMs(cluster.max_switch_ns)))}</td>
-                        <td>${escapeHtml(cluster.count ?? cluster.spike_count ?? (cluster.points || []).length ?? '—')}</td>
-                        <td>${escapeHtml(cause)}</td>
-                        <td>${escapeHtml(summary)}${wakeHtml}</td>
+                        <td>
+                          <div class="cluster-summary-line">${escapeHtml(topLine)}</div>
+                          <div class="muted">Duration ${escapeHtml(formatMs(durationMs))}; switch_ns ${escapeHtml(cluster.min_switch_ns ?? '—')}..${escapeHtml(cluster.max_switch_ns ?? '—')}</div>
+                          ${pointsHtml}
+                          ${wakeHtml}
+                        </td>
+                        <td>
+                          <span class="pill">${escapeHtml(foreground)}</span>
+                          <div class="muted">confidence=${escapeHtml(foregroundConfidence)}</div>
+                        </td>
+                        <td>
+                          <strong>${escapeHtml(cause)}</strong>
+                          <div class="muted">confidence=${escapeHtml(confidence)} score=${escapeHtml(formatNumber(score))}</div>
+                        </td>
+                        <td>${renderDiagnosisDetails(explanation, diagnosis)}</td>
                       </tr>
                     `;
                 }).join('')}
@@ -406,6 +778,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!container) return;
 
         const rows = model.frame_diagnoses || [];
+        const pacing = model.frame_pacing || {};
+        const outliers = Array.isArray(pacing.outliers) ? pacing.outliers : [];
+        const outlierByTime = new Map(outliers.map(outlier => [outlier.elapsed_ms, outlier]));
 
         if (!Array.isArray(rows) || rows.length === 0) {
             container.innerHTML = '<p>No frame diagnoses available.</p>';
@@ -418,8 +793,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 <tr>
                   <th>Time</th>
                   <th>Frame time</th>
-                  <th>Diagnosis</th>
-                  <th>Evidence</th>
+                  <th>Median ratio</th>
+                  <th>Nearest scheduler cluster</th>
+                  <th>Primary candidate</th>
+                  <th>Confidence</th>
+                  <th>Missing evidence</th>
+                  <th>Foreground</th>
                 </tr>
               </thead>
               <tbody>
@@ -427,13 +806,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     const diagnosis = row.diagnosis || {};
                     const primary = diagnosis.primary || {};
                     const cause = primary.cause || diagnosis.cause || row.primary_cause || '—';
-                    const evidence = diagnosis.evidence || primary.evidence || diagnosis.summary || row.evidence || row.cause_tags || [];
+                    const outlier = outlierByTime.get(row.frame_elapsed_ms ?? row.elapsed_ms ?? row.time_ms) || {};
+                    const missing = Array.isArray(diagnosis.missing_evidence) ? diagnosis.missing_evidence.length : 0;
                     return `
                       <tr>
                         <td>${escapeHtml(formatMs(row.frame_elapsed_ms ?? row.elapsed_ms ?? row.time_ms))}</td>
                         <td>${escapeHtml(formatMs(row.frametime_ms ?? row.frame_time_ms))}</td>
+                        <td>${escapeHtml(formatRatio(outlier.over_median_ratio))}</td>
+                        <td>${escapeHtml(formatSignedMs(outlier.nearest_cluster_delta_ms))}</td>
                         <td>${escapeHtml(cause)}</td>
-                        <td>${escapeHtml(formatEvidence(evidence))}</td>
+                        <td>${escapeHtml(primary.confidence || diagnosis.confidence || '—')}</td>
+                        <td>${escapeHtml(missing)}</td>
+                        <td>${escapeHtml(formatForeground(outlier.foreground_app_id, outlier.foreground_class))}</td>
                       </tr>
                     `;
                 }).join('')}
@@ -495,6 +879,8 @@ document.addEventListener('DOMContentLoaded', () => {
     renderDataQuality(reportModel);
     renderTaskTable('top-tasks-by-max', reportModel.top_tasks_by_max || []);
     renderTaskTable('top-tasks-by-p99', reportModel.top_tasks_by_p99 || []);
+    renderPressureTimeline(reportModel);
+    renderFramePacing(reportModel);
     renderClusterAnalysis(reportModel);
     renderFrameDiagnoses(reportModel);
     renderArtifacts(reportModel);

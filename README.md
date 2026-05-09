@@ -570,6 +570,13 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- report \
   ~/.local/state/stutter/runs/<run-dir>
 ```
 
+HTML reports include:
+
+- PSI pressure timeline derived from interval data.
+- Frame-pacing/outlier view derived from MangoHud frame events.
+- Spike cluster explanations with chosen evidence, competing candidates, and missing evidence.
+- Foreground-window context near clusters when foreground collection was enabled.
+
 ## Tune and recommend profiles
 
 Tune benchmarks a TOML affinity profile set and writes both machine-readable and human-readable recommendation artifacts:

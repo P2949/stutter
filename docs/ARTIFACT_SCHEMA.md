@@ -454,6 +454,7 @@ interface. It includes:
 - `session`
 - `cluster_analysis`
 - `frame_diagnoses`
+- `frame_pacing`
 - `pressure_timeline`
 - `artifacts_summary`
 - `data_quality`
@@ -484,6 +485,34 @@ Fields:
   I/O pressure values.
 - `windows[].near_spike`: true when the interval lies within the configured
   cluster window around a scheduler spike cluster.
+- `peak_windows[]`: highest pressure windows across CPU, memory, and I/O PSI
+  streams for display.
+- `pressure_notes[]`: conservative display-only notes about high pressure or
+  missing PSI coverage.
+- `coverage`: interval/PSI coverage flags, including whether any loaded
+  pressure window was near a spike cluster.
+
+### `frame_pacing`
+
+`frame_pacing` is derived from `frame_events.json` / `frame_correlation.json`,
+spike clusters, foreground events, and task classes. It is not a raw artifact
+and does not require a new probe.
+
+Fields:
+
+- `frame_count`: number of frame events loaded.
+- `median_frametime_ms`: median frame time, or `null` when unavailable.
+- `p95_frametime_ms`: p95 frame time, or `null` when unavailable.
+- `p99_frametime_ms`: p99 frame time, or `null` when unavailable.
+- `max_frametime_ms`: maximum frame time, or `null` when unavailable.
+- `outlier_count`: number of frame events above the display outlier threshold.
+- `outliers[]`: frame outliers linked to the nearest scheduler cluster and
+  foreground context when available.
+- `compositor_cluster_count`: scheduler clusters anchored on compositor or
+  gamescope tasks.
+- `game_cluster_count`: scheduler clusters anchored on game-related tasks.
+- `notes[]`: display-only notes for missing frame events or notable cluster
+  context.
 
 ## Validation Command
 
