@@ -518,8 +518,31 @@ fn assert_analysis_json_shape(analysis: &ReportAnalysisJson) {
     ] {
         assert!(
             object.contains_key(key),
-            "ReportAnalysisJson missing top-level key {key}; keys={:?}",
+            "missing analysis-json key {key}; keys={:?}",
             object.keys().collect::<Vec<_>>()
+        );
+    }
+
+    let data_quality = object["data_quality"]
+        .as_object()
+        .expect("analysis-json data_quality should serialize as a JSON object");
+
+    for key in [
+        "level",
+        "reasons",
+        "missing_optional_files",
+        "validation_errors",
+        "validation_warnings",
+        "schema_version",
+        "expected_schema_version",
+        "event_stream_write_errors",
+        "spike_events_truncated",
+        "drop_counters_nonzero",
+    ] {
+        assert!(
+            data_quality.contains_key(key),
+            "missing data_quality key {key}; keys={:?}",
+            data_quality.keys().collect::<Vec<_>>()
         );
     }
 }
