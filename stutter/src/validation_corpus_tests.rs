@@ -955,6 +955,68 @@ fn validation_corpus_real_foreground_window() {
 }
 
 #[test]
+fn validation_corpus_real_community_rules_classification() {
+    let (analysis, _) = assert_fixture_from_metadata("real_community_rules_classification");
+
+    assert_eq!(analysis.data_quality.level, DataQualityLevel::High);
+    assert!(analysis.data_quality.validation_errors.is_empty());
+    assert!(analysis.data_quality.validation_warnings.is_empty());
+
+    let classified_task = analysis
+        .session
+        .tasks
+        .iter()
+        .find(|task| task.comm == "community-game")
+        .expect("missing community-rule-classified game task");
+
+    assert_eq!(
+        classified_task.class,
+        crate::process_tree::TaskClass::Game,
+        "report fixture should contain final class Game for the community-rule-classified task"
+    );
+    assert_eq!(classified_task.process_comm.as_ref(), "community-game");
+
+    let diagnosis = primary_diagnosis(&analysis)
+        .expect("real_community_rules_classification expected a primary diagnosis");
+    assert_eq!(
+        diagnosis.cause,
+        StutterCause::GameThreadSchedulerDelay,
+        "community-rule-classified Game task should be visible to downstream game scheduler diagnosis"
+    );
+
+    let evidence_text = diagnosis.evidence.join("\n");
+    for needle in ["game thread", "delayed"] {
+        assert!(
+            evidence_text.contains(needle),
+            "real_community_rules_classification missing evidence substring {:?}; evidence was:\n{}",
+            needle,
+            evidence_text
+        );
+    }
+
+    assert_primary_anchor_class_in(
+        &analysis,
+        StutterCause::GameThreadSchedulerDelay,
+        &[
+            crate::process_tree::TaskClass::Game,
+            crate::process_tree::TaskClass::GameRenderThread,
+            crate::process_tree::TaskClass::GameWorkerThread,
+            crate::process_tree::TaskClass::GameHelper,
+            crate::process_tree::TaskClass::WineServer,
+        ],
+    );
+
+    assert!(
+        analysis.artifacts_summary.spike_count >= 3,
+        "real_community_rules_classification should contain clustered game-relevant spikes"
+    );
+    assert!(
+        analysis.artifacts_summary.frame_event_count > 0,
+        "real_community_rules_classification should include frame context for downstream diagnosis"
+    );
+}
+
+#[test]
 fn validation_corpus_game_thread_scheduler_delay() {
     assert_fixture_from_metadata("game_thread_scheduler_delay");
 }

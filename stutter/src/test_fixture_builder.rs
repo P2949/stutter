@@ -124,7 +124,6 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "real_world_irq_overlap",
         "real_world_block_io_stall",
         "real_world_gpu_bound_clean_cpu",
-        "real_community_rules_classification",
     ] {
         remove_fixture_dir(root, deprecated)?;
     }
@@ -193,6 +192,11 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         root,
         "real_foreground_window",
         real_foreground_window_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_community_rules_classification",
+        real_community_rules_classification_fixture(),
     )?;
 
     Ok(())
@@ -637,6 +641,103 @@ fn real_foreground_window_fixture() -> (SessionFile, FixtureArtifacts) {
             spikes,
             intervals,
             foreground_events,
+            ..Default::default()
+        },
+    )
+}
+
+fn real_community_rules_classification_fixture() -> (SessionFile, FixtureArtifacts) {
+    let spikes = vec![
+        spike_event(5801, TaskClass::Game, "community-game", 6_500_000, 0),
+        spike_event(
+            5802,
+            TaskClass::GameWorkerThread,
+            "community-worker",
+            3_100_000,
+            250_000,
+        ),
+        spike_event(
+            5803,
+            TaskClass::GameHelper,
+            "community-helper",
+            2_600_000,
+            500_000,
+        ),
+    ];
+    let intervals = vec![
+        interval_record_with_class(100, 5801, "community-game", TaskClass::Game, 3.0, 6_500_000),
+        interval_record_with_class(
+            100,
+            5802,
+            "community-worker",
+            TaskClass::GameWorkerThread,
+            2.0,
+            3_100_000,
+        ),
+        interval_record_with_class(
+            100,
+            5803,
+            "community-helper",
+            TaskClass::GameHelper,
+            1.0,
+            2_600_000,
+        ),
+    ];
+    let frame_events = vec![
+        FrameEvent {
+            elapsed_ms: 84,
+            frametime_ms: 16.6,
+        },
+        FrameEvent {
+            elapsed_ms: 100,
+            frametime_ms: 46.0,
+        },
+        FrameEvent {
+            elapsed_ms: 117,
+            frametime_ms: 16.7,
+        },
+    ];
+
+    let mut classified_task =
+        task_for_fixture(5801, TaskClass::Game, "community-game", 12, 6_500_000);
+    classified_task.process_pid = Some(5801);
+    classified_task.process_comm = "community-game".into();
+
+    let mut worker_task = task_for_fixture(
+        5802,
+        TaskClass::GameWorkerThread,
+        "community-worker",
+        10,
+        3_100_000,
+    );
+    worker_task.process_pid = Some(5801);
+    worker_task.process_comm = "community-game".into();
+
+    let mut helper_task = task_for_fixture(
+        5803,
+        TaskClass::GameHelper,
+        "community-helper",
+        8,
+        2_600_000,
+    );
+    helper_task.process_pid = Some(5801);
+    helper_task.process_comm = "community-game".into();
+
+    let mut session = base_session("real_community_rules_classification");
+    session.config.tree_roots = vec![5801];
+    session.config.hwmon = false;
+    session.core.mangohud_first_frame_monotonic_ns = Some(0);
+    session.core.mangohud_first_frame_raw_elapsed_ms = Some(0);
+    session.tasks = vec![classified_task, worker_task, helper_task];
+    session.core.active_target_pids_count = 1;
+    session.core.active_expanded_tasks = vec![5801, 5802, 5803];
+    apply_spike_session_fields(&mut session, &spikes);
+    apply_artifact_counts(
+        &mut session,
+        &FixtureArtifacts {
+            spikes,
+            intervals,
+            frame_events,
             ..Default::default()
         },
     )
@@ -1390,6 +1491,17 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &[],
             "High",
             &[],
+            exact_artifacts(artifacts),
+        ),
+        "real_community_rules_classification" => fixture_metadata(
+            name,
+            "sanitized-real-recording",
+            "High",
+            "Sanitized community-rules classification fixture where an originally unknown game process is represented in the final artifact stream as TaskClass::Game.",
+            "GameThreadSchedulerDelay",
+            &["Medium", "High"],
+            "High",
+            &["game thread", "delayed"],
             exact_artifacts(artifacts),
         ),
         "foreground_window" => fixture_metadata(

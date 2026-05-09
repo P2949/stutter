@@ -922,6 +922,63 @@ mod community_rules_process_tree_tests {
     }
 
     #[test]
+    fn validation_corpus_community_rules_classifies_unknown_game() {
+        let dir = tempdir().unwrap();
+        let proc_root = dir.path();
+        let unknown_pid = 6101;
+        let already_classified_pid = 6102;
+        let manual_pids = vec![unknown_pid, already_classified_pid];
+
+        write_fake_proc_task(proc_root, unknown_pid, "mysteryproc", "/tmp/community-game");
+        write_fake_proc_task(
+            proc_root,
+            already_classified_pid,
+            "wineserver",
+            "/tmp/community-game",
+        );
+
+        let without_rules = target_snapshot(
+            TargetSnapshotInput::default()
+                .proc_root(proc_root)
+                .manual_pids(&manual_pids),
+        );
+
+        assert_eq!(
+            without_rules.tasks.get(&unknown_pid).map(|task| task.class),
+            Some(TaskClass::Unknown)
+        );
+        assert_eq!(
+            without_rules
+                .tasks
+                .get(&already_classified_pid)
+                .map(|task| task.class),
+            Some(TaskClass::WineServer)
+        );
+
+        let db = community_rules_db_for_exe("community-game");
+        let with_rules = target_snapshot(
+            TargetSnapshotInput::default()
+                .proc_root(proc_root)
+                .manual_pids(&manual_pids)
+                .community_rules(Some(&db)),
+        );
+
+        assert_eq!(
+            with_rules.tasks.get(&unknown_pid).map(|task| task.class),
+            Some(TaskClass::Game),
+            "community rules should classify locally-Unknown task as Game"
+        );
+        assert_eq!(
+            with_rules
+                .tasks
+                .get(&already_classified_pid)
+                .map(|task| task.class),
+            Some(TaskClass::WineServer),
+            "community rules must not overwrite tasks already classified by local rules"
+        );
+    }
+
+    #[test]
     fn target_snapshot_uses_community_rules_only_for_unknown_tasks() {
         let dir = tempdir().unwrap();
         let proc_root = dir.path();
