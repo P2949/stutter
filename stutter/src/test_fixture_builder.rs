@@ -120,7 +120,6 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "real_world_irq_overlap",
         "real_world_block_io_stall",
         "real_world_gpu_bound_clean_cpu",
-        "real_game_thread_scheduler_delay",
         "real_compositor_scheduler_delay",
         "real_irq_overlap",
         "real_gpu_bound_looking",
@@ -166,6 +165,11 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         community_rules_classification_fixture(),
     )?;
     write_fixture(root, "real_clean_baseline", real_clean_baseline_fixture())?;
+    write_fixture(
+        root,
+        "real_game_thread_scheduler_delay",
+        real_game_thread_scheduler_delay_fixture(),
+    )?;
 
     Ok(())
 }
@@ -247,6 +251,13 @@ fn public_game_thread_scheduler_delay_fixture() -> (SessionFile, FixtureArtifact
 
 fn real_clean_baseline_fixture() -> (SessionFile, FixtureArtifacts) {
     renamed_fixture("real_clean_baseline", clean_run_fixture())
+}
+
+fn real_game_thread_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) {
+    renamed_fixture(
+        "real_game_thread_scheduler_delay",
+        game_thread_scheduler_delay_fixture(),
+    )
 }
 
 fn public_low_quality_truncated_fixture() -> (SessionFile, FixtureArtifacts) {
@@ -1036,6 +1047,28 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &[],
             "Medium",
             &[],
+            exact_artifacts(artifacts),
+        ),
+        "real_clean_baseline" => fixture_metadata(
+            name,
+            "validation-corpus",
+            "High",
+            "Real clean baseline example.",
+            "Unknown",
+            &[],
+            "High",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+        "real_game_thread_scheduler_delay" => fixture_metadata(
+            name,
+            "validation-corpus",
+            "High",
+            "Real game-thread scheduler delay example.",
+            "GameThreadSchedulerDelay",
+            &["Medium", "High"],
+            "High",
+            &["game thread", "delayed"],
             exact_artifacts(artifacts),
         ),
         other => fixture_metadata(
