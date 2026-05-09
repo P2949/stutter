@@ -120,7 +120,6 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "real_world_irq_overlap",
         "real_world_block_io_stall",
         "real_world_gpu_bound_clean_cpu",
-        "real_compositor_scheduler_delay",
         "real_irq_overlap",
         "real_gpu_bound_looking",
         "real_block_io_overlap",
@@ -169,6 +168,11 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         root,
         "real_game_thread_scheduler_delay",
         real_game_thread_scheduler_delay_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_compositor_scheduler_delay",
+        real_compositor_scheduler_delay_fixture(),
     )?;
 
     Ok(())
@@ -257,6 +261,12 @@ fn real_game_thread_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts)
     renamed_fixture(
         "real_game_thread_scheduler_delay",
         game_thread_scheduler_delay_fixture(),
+    )
+}
+fn real_compositor_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) {
+    renamed_fixture(
+        "real_compositor_scheduler_delay",
+        compositor_scheduler_delay_fixture(),
     )
 }
 
@@ -1058,6 +1068,17 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &[],
             "High",
             &[],
+            exact_artifacts(artifacts),
+        ),
+        "real_compositor_scheduler_delay" => fixture_metadata(
+            name,
+            "sanitized-real-recording",
+            "High",
+            "Compositor or gamescope thread had scheduler delay during a visible frame spike.",
+            "CompositorSchedulerDelay",
+            &["Medium", "High"],
+            "High",
+            &["compositor thread"],
             exact_artifacts(artifacts),
         ),
         "real_game_thread_scheduler_delay" => fixture_metadata(
