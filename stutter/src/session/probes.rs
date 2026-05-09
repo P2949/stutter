@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub struct ProbeRuntime {
     pub loaded: crate::ebpf_loader::LoadedEbpf,
     pub block_io_correlation_basis: String,
@@ -16,13 +14,16 @@ impl ProbeRuntime {
         cpu_perf_sampler: Option<crate::perf_counters::CpuPerfSampler>,
         runtime_slice_sampler: Option<crate::runtime_slices::RuntimeSliceSampler>,
     ) -> Self {
+        let mut scx_tracker = crate::scx::ScxTracker::default();
+        scx_tracker.sample(0);
+
         Self {
             loaded,
             block_io_correlation_basis,
             cpu_perf_sampler,
             runtime_slice_sampler,
             psi_reader: crate::psi::PsiReader::new(),
-            scx_tracker: crate::scx::ScxTracker::default(),
+            scx_tracker,
         }
     }
 }
