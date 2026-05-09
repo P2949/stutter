@@ -19,7 +19,7 @@ pub mod importer;
 pub mod loader;
 pub mod paths;
 
-pub use importer::{ImportInput, import_ananicy_rules};
+pub use importer::{ImportInput, ImportReport, import_ananicy_rules};
 pub use loader::{LoadCommunityRulesInput, load_rules_db, load_rules_dir, load_rules_file};
 pub use paths::{default_system_rules_dirs, default_user_rules_dir};
 
@@ -220,6 +220,8 @@ fn rules_import_command(args: crate::cli::RulesImportArgs) -> anyhow::Result<()>
     };
 
     let imported = import_ananicy_rules(input)?;
+    let report = imported.report;
+    let imported = imported.file;
     let out_path = match args.out.clone() {
         Some(path) => path,
         None => default_imported_rules_path(&args.name)?,
@@ -243,11 +245,8 @@ fn rules_import_command(args: crate::cli::RulesImportArgs) -> anyhow::Result<()>
     };
 
     if args.dry_run {
-        println!(
-            "dry-run: would import {} reduced rules from {}",
-            imported.rules.len(),
-            source_display
-        );
+        println!("dry-run: analyzed Ananicy-compatible rules from {source_display}");
+        print_import_report(&report);
         println!("dry-run: would write {}", out_path.display());
         println!("dry-run: would write {}", metadata_path.display());
         println!("license: {}", args.license);
@@ -282,14 +281,42 @@ fn rules_import_command(args: crate::cli::RulesImportArgs) -> anyhow::Result<()>
 
     println!(
         "imported {} reduced rules from {}",
-        imported.rules.len(),
-        imported.source.name
+        report.imported_rules, imported.source.name
     );
     println!("wrote {}", out_path.display());
     println!("wrote {}", metadata_path.display());
     println!("license: {}", args.license);
     println!("note: imported rules are user-installed data and are not part of the stutter binary");
     Ok(())
+}
+
+fn print_import_report(report: &ImportReport) {
+    println!("import report:");
+    println!("  scanned_files: {}", report.scanned_files);
+    println!("  parsed_objects: {}", report.parsed_objects);
+    println!("  imported_rules: {}", report.imported_rules);
+    println!("  skipped_no_name: {}", report.skipped_no_name);
+    println!("  skipped_bad_name: {}", report.skipped_bad_name);
+    println!("  skipped_unknown_class: {}", report.skipped_unknown_class);
+    println!("  duplicate_rules: {}", report.duplicate_rules);
+    println!("  ambiguous_rules: {}", report.ambiguous_rules);
+    println!(
+        "  context_required_game_rules: {}",
+        report.context_required_game_rules
+    );
+    println!(
+        "  exact_only_non_game_rules: {}",
+        report.exact_only_non_game_rules
+    );
+
+    if report.classes.is_empty() {
+        println!("  classes: none");
+    } else {
+        println!("  classes:");
+        for (class, count) in &report.classes {
+            println!("    {class}: {count}");
+        }
+    }
 }
 
 fn rules_list_command() -> anyhow::Result<()> {
@@ -552,6 +579,48 @@ pub fn classify_process_identity(
     test_fixture_rules().classify(identity, true)
 }
 
+pub fn is_guarded_community_rule_name(normalized_name: &str) -> bool {
+    const GUARDED_NAMES: &[&str] = &[
+        "python",
+        "python3",
+        "java",
+        "node",
+        "wine",
+        "bash",
+        "sh",
+        "zsh",
+        "steam",
+        "steamwebhelper",
+        "electron",
+        "chrome",
+        "firefox",
+        "setup.exe",
+        "launcher.exe",
+        "client.exe",
+        "server.exe",
+        "main.exe",
+        "build.exe",
+        "run.exe",
+        "app.exe",
+        "game.exe",
+        "start.exe",
+    ];
+
+    if GUARDED_NAMES.contains(&normalized_name) {
+        return true;
+    }
+
+    let stem = normalized_name
+        .strip_suffix(".exe")
+        .unwrap_or(normalized_name);
+
+    stem.len() <= 3
+        || matches!(
+            stem,
+            "app" | "run" | "main" | "start" | "setup" | "client" | "server"
+        )
+}
+
 #[cfg(test)]
 fn test_fixture_rules() -> &'static CommunityRulesDb {
     TEST_FIXTURE_RULES.get_or_init(|| {
@@ -590,6 +659,10 @@ impl CommunityRulesDb {
             if rule.normalized_name.trim().is_empty() {
                 rule.normalized_name =
                     normalize_process_name(&rule.name).unwrap_or_else(|| rule.name.clone());
+            }
+
+            if is_guarded_community_rule_name(&rule.normalized_name) {
+                rule.ambiguous = true;
             }
 
             self.rules_by_name
@@ -1499,6 +1572,46 @@ mod tests {
                 "/tmp/SomeGame.exe",
                 "/tmp/SomeGame.exe",
                 "/user.slice/plain.scope",
+            ),
+            true,
+        );
+
+        assert!(hit.is_none());
+    }
+
+    #[test]
+    fn merge_file_forces_guarded_non_game_name_to_ambiguous() {
+        let db = CommunityRulesDb::from_file(CommunityRulesFile {
+            schema_version: 2,
+            source: CommunityRulesSource {
+                name: "test guarded rules".to_owned(),
+                repo: None,
+                commit: None,
+                generated_at: "2026-05-09T00:00:00Z".to_owned(),
+            },
+            rules: vec![CommunityRule {
+                name: "python".to_owned(),
+                normalized_name: "python".to_owned(),
+                r#type: "Compiler".to_owned(),
+                stutter_class: "Compiler".to_owned(),
+                confidence: 0.90,
+                source_path: "test.rules".to_owned(),
+                context: Vec::new(),
+                title: None,
+                source_url: None,
+                comment: None,
+                ambiguous: false,
+            }],
+        })
+        .unwrap();
+
+        let hit = db.classify(
+            &identity(
+                "python",
+                "python",
+                "python build.py",
+                "/usr/bin/python",
+                "/user.slice/build.scope",
             ),
             true,
         );
