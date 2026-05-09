@@ -483,6 +483,8 @@ pub fn build_report_analysis(
     Ok(build_report_analysis_with_artifacts(path, top, cluster_window_ms, filter_class)?.analysis)
 }
 
+// Keep near-term report improvements view-only: derive new report fields from
+// existing RunArtifacts/session data. Do not require new live probes here.
 fn build_report_analysis_with_artifacts(
     path: &Path,
     top: usize,
