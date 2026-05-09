@@ -28,13 +28,13 @@ Before a probe is accepted, it must have:
 | Probe | Diagnostic question | CLI / artifact contract | Admission status |
 | --- | --- | --- | --- |
 | Foreground window context | Which application/window was foreground near scheduler or frame spikes? | `--foreground-window` and `--focus-source foreground`/`hybrid`; writes optional `foreground_events.json`; titles are redacted unless `--foreground-include-title` is set. | Implemented; documented in `docs/ARTIFACT_SCHEMA.md`, reported through `foreground_summary`, validated as optional NDJSON, and exposed in `stutter probes`. |
+| Per-thread CPU runtime slices | Was the task ready but delayed, or running but consuming too much CPU time? | `--runtime-slices`; writes optional `runtime_slices.json`; diagnosis preset enables it; missing schedstat falls back to `/proc/<tid>/stat` runtime-only records. | Implemented; documented in `docs/ARTIFACT_SCHEMA.md`, validated as optional NDJSON, bounded by `--runtime-slices-max-tasks`, and exposed in `report --analysis-json` as supporting context. |
 
 ## Probe Candidates
 
 | Candidate | Diagnostic question | Existing foundation | Admission status |
 | --- | --- | --- | --- |
 | GPU scheduler / DRM fence latency correlation | Was frame stutter caused by GPU queue/fence delay rather than CPU runnable delay? | MangoHud frames + GPU hwmon exist, but DRM fence telemetry not yet present. | Later; needs kernel/driver-specific design and fixtures. |
-| Per-thread CPU runtime slices | Was the task ready but delayed, or running but consuming too much CPU time? | Scheduler runnable latency exists; interval task summaries exist. | Good first targeted probe if implemented through low-risk procfs/task CPU deltas or sched runtime tracepoint. |
 | Pressure-stall timeline overlay | Did CPU/memory/I/O pressure line up with spikes? | `psi.rs` already reads PSI; interval records already carry some PSI. | Prefer report/view improvement before new probe. |
 | Perf counter presets | Was the workload low IPC/cache-miss bound? | `perf_counters.rs` already exists and is optional. | Prefer preset UX/docs before new counters. |
 | Compositor/frame-pacing views | Did gamescope/sway/KDE frame pacing correlate with spikes? | MangoHud parsing and task classes already exist. | Prefer report/view improvement before new probes. |
@@ -47,6 +47,19 @@ Before a probe is accepted, it must have:
 - How does it align with MangoHud frames?
 - What is the fallback when DRM tracepoints are unavailable?
 - What are false-positive tests?
+
+## DRM Fence Latency Admission Gate
+
+Do not implement or enable this probe until:
+
+- diagnosis fixture corpus includes true/false positives for GPU-bound cases
+- `report --analysis-json` exposes threshold docs
+- rejected-primary explanations exist
+- low-quality data caps confidence
+- runtime slices are implemented or explicitly ruled out for CPU-vs-GPU separation
+- MangoHud/frame alignment tests exist
+- vendor tracepoint compatibility matrix is documented
+- fallback behavior is documented
 
 ## Perf Counter Presets
 

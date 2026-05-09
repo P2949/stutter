@@ -36,6 +36,7 @@ mod recommend;
 mod recorder;
 mod remote;
 mod report;
+mod runtime_slices;
 mod scenario;
 mod scorer;
 mod scx;

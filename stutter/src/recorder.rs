@@ -18,13 +18,15 @@ use crate::{
     metadata::{SystemMetadata, collect_system_metadata},
     metrics::{
         CpuLine, CpuPerfRecord, CpuSnapshot, IntervalRecord as MetricsIntervalRecord,
-        LatencyHistogramBucket, SpikeRecord, TaskStats,
+        LatencyHistogramBucket, RuntimeSliceRecord as MetricsRuntimeSliceRecord, SpikeRecord,
+        TaskStats,
     },
     process_tree::TaskClass,
     prometheus::PrometheusState,
 };
 
 pub type IntervalRecord = MetricsIntervalRecord;
+pub type RuntimeSliceRecord = MetricsRuntimeSliceRecord;
 pub use crate::{foreground::ForegroundEvent, scx::ScxEvent};
 pub const MAX_SPIKE_EVENTS: usize = 500_000;
 
@@ -47,6 +49,7 @@ pub struct RecordingStreams {
     pub gpu_sample_writer: Option<JsonArrayWriter>,
     pub block_io_event_writer: Option<JsonArrayWriter>,
     pub scx_event_writer: Option<JsonArrayWriter>,
+    pub runtime_slice_writer: Option<JsonArrayWriter>,
     pub spike_event_writer: Option<JsonArrayWriter>,
     pub frame_event_writer: Option<JsonArrayWriter>,
     pub focus_event_writer: Option<JsonArrayWriter>,
@@ -64,6 +67,9 @@ pub struct RecordingCounters {
     pub cpu_freq_sample_count: u64,
     pub gpu_sample_count: u64,
     pub block_io_event_count: u64,
+    pub runtime_slice_count: u64,
+    pub runtime_slice_read_errors: u64,
+    pub runtime_slice_skipped_tasks: u64,
     pub interval_record_count: u64,
     pub frame_event_count: u64,
     pub focus_event_count: u64,
@@ -510,6 +516,14 @@ pub struct SessionMetadataCore {
     #[serde(default)]
     pub block_io_event_count: u64,
     #[serde(default)]
+    pub runtime_slice_count: u64,
+    #[serde(default)]
+    pub runtime_slice_read_errors: u64,
+    #[serde(default)]
+    pub runtime_slice_skipped_tasks: u64,
+    #[serde(default)]
+    pub runtime_slice_source: Option<String>,
+    #[serde(default)]
     pub event_stream_write_errors: u64,
     #[serde(default)]
     pub alert_events_dropped_count: u64,
@@ -620,6 +634,10 @@ pub struct RecordedConfig {
     pub block_io: bool,
     #[serde(default)]
     pub stat_wait: bool,
+    #[serde(default)]
+    pub runtime_slices: bool,
+    #[serde(default)]
+    pub runtime_slices_max_tasks: usize,
     #[serde(default)]
     pub otlp_endpoint: Option<String>,
     #[serde(default)]
@@ -1574,6 +1592,14 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
             frame_events.len() as u64
         },
         block_io_event_count: recorder.counters.block_io_event_count,
+        runtime_slice_count: recorder.counters.runtime_slice_count,
+        runtime_slice_read_errors: recorder.counters.runtime_slice_read_errors,
+        runtime_slice_skipped_tasks: recorder.counters.runtime_slice_skipped_tasks,
+        runtime_slice_source: if recorder.counters.runtime_slice_count > 0 {
+            Some("procfs".to_owned())
+        } else {
+            None
+        },
         event_stream_write_errors: recorder.counters.event_stream_write_errors,
         alert_events_dropped_count: recorder.counters.alert_events_dropped_count,
         alert_channel_closed_count: recorder.counters.alert_channel_closed_count,
@@ -1744,6 +1770,8 @@ pub fn recorded_config(config: &Config, tree_pids: &[u32]) -> RecordedConfig {
         cpu_perf_cache_refs: config.cpu_perf_cache_refs,
         block_io: config.block_io,
         stat_wait: config.stat_wait,
+        runtime_slices: config.runtime_slices,
+        runtime_slices_max_tasks: config.runtime_slices_max_tasks,
         otlp_endpoint: config.otlp_endpoint.clone(),
         otel_service_name: config.otel_service_name.clone(),
         auto_focus: config.auto_focus,

@@ -254,6 +254,72 @@ pub struct IntervalRecord {
     pub cpu_perf: Option<CpuPerfRecord>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeSliceSource {
+    #[default]
+    ProcSchedstat,
+    ProcStatFallback,
+}
+
+impl RuntimeSliceSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RuntimeSliceSource::ProcSchedstat => "proc_schedstat",
+            RuntimeSliceSource::ProcStatFallback => "proc_stat_fallback",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct RuntimeSliceRecord {
+    #[serde(default)]
+    pub elapsed_ms: u64,
+
+    #[serde(default)]
+    pub task: u32,
+    #[serde(default)]
+    pub process_pid: Option<u32>,
+    #[serde(default)]
+    pub class: TaskClass,
+    #[serde(default)]
+    pub comm: String,
+    #[serde(default)]
+    pub process_comm: std::sync::Arc<str>,
+
+    #[serde(default)]
+    pub source: RuntimeSliceSource,
+
+    #[serde(default)]
+    pub interval_ms: u64,
+
+    #[serde(default)]
+    pub runtime_delta_ns: u64,
+    #[serde(default)]
+    pub runqueue_wait_delta_ns: Option<u64>,
+    #[serde(default)]
+    pub timeslices_delta: Option<u64>,
+
+    #[serde(default)]
+    pub user_runtime_delta_ns: Option<u64>,
+    #[serde(default)]
+    pub system_runtime_delta_ns: Option<u64>,
+
+    #[serde(default)]
+    pub runtime_ratio: Option<f64>,
+    #[serde(default)]
+    pub wait_ratio: Option<f64>,
+    #[serde(default)]
+    pub avg_runtime_per_slice_ns: Option<u64>,
+    #[serde(default)]
+    pub avg_wait_per_slice_ns: Option<u64>,
+
+    #[serde(default)]
+    pub valid: bool,
+    #[serde(default)]
+    pub unavailable_reason: Option<String>,
+}
+
 impl LatencyHistogram {
     pub fn new() -> Self {
         Self {

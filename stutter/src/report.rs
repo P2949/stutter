@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     diagnosis::{
-        ClusterAnchorKind, Diagnosis, FrameDiagnosis, diagnose_cluster, select_anchor_for_diagnosis,
+        ClusterAnchorKind, Diagnosis, DiagnosisThresholdDoc, FrameDiagnosis, diagnose_cluster,
+        select_anchor_for_diagnosis,
     },
     metrics::format_latency,
     process_tree::TaskClass,
@@ -136,10 +137,37 @@ pub struct ArtifactsSummary {
     pub migration_event_count: u64,
     pub cpu_freq_sample_count: u64,
     pub block_io_event_count: u64,
+    pub runtime_slice_count: u64,
     pub interval_record_count: u64,
     pub scx_event_count: u64,
     pub focus_event_count: u64,
     pub foreground_event_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct RuntimeSliceAnalysisSummary {
+    pub available: bool,
+    pub sample_count: usize,
+    pub missing_reason: Option<String>,
+    pub data_quality_notes: Vec<String>,
+    pub source_counts: BTreeMap<String, usize>,
+    pub high_runtime_threads: Vec<RuntimeThreadSummary>,
+    pub high_wait_threads: Vec<RuntimeThreadSummary>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeThreadSummary {
+    pub task: u32,
+    pub process_pid: Option<u32>,
+    pub class: TaskClass,
+    pub comm: String,
+    pub process_comm: String,
+    pub max_runtime_ratio: f64,
+    pub max_wait_ratio: Option<f64>,
+    pub max_runtime_delta_ns: u64,
+    pub max_runqueue_wait_delta_ns: Option<u64>,
+    pub elapsed_ms: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -336,6 +364,8 @@ pub struct ReportAnalysisJson {
     pub frame_diagnoses: Vec<FrameDiagnosis>,
     pub frame_pacing: FramePacingSummary,
     pub pressure_timeline: PressureTimelineSummary,
+    pub runtime_slices: RuntimeSliceAnalysisSummary,
+    pub diagnosis_thresholds: Vec<DiagnosisThresholdDoc>,
     pub artifacts_summary: ArtifactsSummary,
     pub data_quality: DataQualitySummary,
     pub focus_summary: FocusReportSummary,
@@ -480,6 +510,7 @@ pub struct HtmlReportModel {
     pub frame_diagnoses: Vec<FrameDiagnosis>,
     pub frame_pacing: FramePacingSummary,
     pub pressure_timeline: PressureTimelineSummary,
+    pub runtime_slices: RuntimeSliceAnalysisSummary,
     pub artifacts_summary: ArtifactsSummary,
     pub focus_summary: FocusReportSummary,
     pub foreground_summary: ForegroundReportSummary,
@@ -548,6 +579,7 @@ fn artifacts_summary_from_session(session: &SessionFile) -> ArtifactsSummary {
         migration_event_count: session.core.migration_event_count.unwrap_or(0),
         cpu_freq_sample_count: session.core.cpu_freq_sample_count.unwrap_or(0),
         block_io_event_count: session.core.block_io_event_count,
+        runtime_slice_count: session.core.runtime_slice_count,
         interval_record_count: session.core.interval_record_count,
         scx_event_count: session.core.scx_event_count,
         focus_event_count: session.core.focus_event_count,
@@ -658,9 +690,11 @@ fn build_report_analysis_with_artifacts(
         &cluster_analysis.clusters,
         cluster_window_ms,
     );
+    let runtime_slices = runtime_slice_analysis_summary(&session, &artifacts);
 
     let focus_summary = focus_report_summary(&session, &artifacts.focus_events);
     let foreground_summary = foreground_report_summary(&session, &artifacts.foreground_events);
+    let diagnosis_thresholds = crate::diagnosis::DiagnosisConfig::default().threshold_table();
 
     Ok(ReportBuildResult {
         analysis: ReportAnalysisJson {
@@ -669,6 +703,8 @@ fn build_report_analysis_with_artifacts(
             frame_diagnoses,
             frame_pacing,
             pressure_timeline,
+            runtime_slices,
+            diagnosis_thresholds,
             artifacts_summary,
             data_quality,
             focus_summary,
@@ -1365,6 +1401,7 @@ pub fn build_html_report_model(
         frame_diagnoses: analysis.frame_diagnoses.clone(),
         frame_pacing: analysis.frame_pacing.clone(),
         pressure_timeline: analysis.pressure_timeline.clone(),
+        runtime_slices: analysis.runtime_slices.clone(),
         artifacts_summary: analysis.artifacts_summary.clone(),
         focus_summary: analysis.focus_summary.clone(),
         foreground_summary: analysis.foreground_summary.clone(),
@@ -1820,6 +1857,9 @@ pub(crate) fn render_report(
         pushln(&mut output, "");
     }
 
+    let runtime_slice_summary = runtime_slice_analysis_summary(session, artifacts);
+    output.push_str(&render_runtime_slice_summary(&runtime_slice_summary, top));
+
     if session.core.spike_events_truncated {
         pushln(&mut output, "spike event warning");
         pushln(&mut output, "-------------------");
@@ -1844,6 +1884,7 @@ pub(crate) fn render_report(
         || session.core.gpu_sample_count > 0
         || session.core.frame_event_count > 0
         || session.core.block_io_event_count > 0
+        || session.core.runtime_slice_count > 0
         || session.core.migration_event_count.unwrap_or(0) > 0
         || session.core.cpu_freq_sample_count.unwrap_or(0) > 0
     {
@@ -1898,6 +1939,10 @@ pub(crate) fn render_report(
                     " correlated"
                 },
             ),
+        );
+        pushln(
+            &mut output,
+            format!("runtime_slices: {}", session.core.runtime_slice_count),
         );
         pushln(&mut output, "");
 
@@ -2148,6 +2193,220 @@ fn render_pressure_timeline_summary(summary: &PressureTimelineSummary) -> String
     );
 
     output
+}
+
+fn runtime_slice_analysis_summary(
+    session: &SessionFile,
+    artifacts: &session_io::RunArtifacts,
+) -> RuntimeSliceAnalysisSummary {
+    let mut summary = RuntimeSliceAnalysisSummary {
+        sample_count: artifacts.runtime_slices.len(),
+        available: !artifacts.runtime_slices.is_empty(),
+        ..Default::default()
+    };
+
+    if !session.config.runtime_slices && session.core.runtime_slice_count == 0 {
+        summary.missing_reason = Some("runtime-slice collection was not enabled".to_owned());
+    } else if session.config.runtime_slices && session.core.runtime_slice_count == 0 {
+        summary.missing_reason = Some("no runtime slice samples were recorded".to_owned());
+    } else if artifacts
+        .validation
+        .missing_optional_files
+        .iter()
+        .any(|file| file == session_io::RUNTIME_SLICES_FILE)
+    {
+        summary.missing_reason = Some("runtime_slices.json is missing".to_owned());
+    } else if session.core.runtime_slice_count > 0 && artifacts.runtime_slices.is_empty() {
+        summary.missing_reason =
+            Some("runtime slices exist, but none overlapped report correlation windows".to_owned());
+    }
+
+    if session.core.runtime_slice_read_errors > 0 {
+        summary.data_quality_notes.push(format!(
+            "runtime slice sampler had {} read errors",
+            session.core.runtime_slice_read_errors
+        ));
+    }
+    if session.core.runtime_slice_skipped_tasks > 0 {
+        summary.data_quality_notes.push(format!(
+            "runtime slice sampler skipped {} tasks due to runtime_slices_max_tasks",
+            session.core.runtime_slice_skipped_tasks
+        ));
+    }
+    if artifacts.runtime_slices.iter().any(|record| {
+        matches!(
+            record.source,
+            crate::metrics::RuntimeSliceSource::ProcStatFallback
+        )
+    }) {
+        summary.data_quality_notes.push(
+            "some runtime slices used /proc stat fallback without runqueue wait data".to_owned(),
+        );
+    }
+    if summary.available {
+        summary.notes.push(
+            "runtime slice context is supporting evidence, not a primary diagnosis by itself"
+                .to_owned(),
+        );
+    }
+
+    for record in artifacts
+        .runtime_slices
+        .iter()
+        .filter(|record| record.valid)
+    {
+        *summary
+            .source_counts
+            .entry(record.source.as_str().to_owned())
+            .or_insert(0) += 1;
+    }
+
+    summary.high_runtime_threads = top_runtime_threads(&artifacts.runtime_slices, true);
+    summary.high_wait_threads = top_runtime_threads(&artifacts.runtime_slices, false);
+    summary
+}
+
+fn top_runtime_threads(
+    records: &[crate::metrics::RuntimeSliceRecord],
+    by_runtime: bool,
+) -> Vec<RuntimeThreadSummary> {
+    let mut best_by_task: BTreeMap<u32, RuntimeThreadSummary> = BTreeMap::new();
+
+    for record in records.iter().filter(|record| record.valid) {
+        let score = if by_runtime {
+            record.runtime_ratio.unwrap_or(0.0)
+        } else {
+            record.wait_ratio.unwrap_or(0.0)
+        };
+
+        if score <= 0.0 {
+            continue;
+        }
+
+        let candidate = RuntimeThreadSummary {
+            task: record.task,
+            process_pid: record.process_pid,
+            class: record.class,
+            comm: record.comm.clone(),
+            process_comm: record.process_comm.to_string(),
+            max_runtime_ratio: record.runtime_ratio.unwrap_or(0.0),
+            max_wait_ratio: record.wait_ratio,
+            max_runtime_delta_ns: record.runtime_delta_ns,
+            max_runqueue_wait_delta_ns: record.runqueue_wait_delta_ns,
+            elapsed_ms: record.elapsed_ms,
+        };
+
+        match best_by_task.get(&record.task) {
+            Some(existing) => {
+                let existing_score = if by_runtime {
+                    existing.max_runtime_ratio
+                } else {
+                    existing.max_wait_ratio.unwrap_or(0.0)
+                };
+                if score > existing_score {
+                    best_by_task.insert(record.task, candidate);
+                }
+            }
+            None => {
+                best_by_task.insert(record.task, candidate);
+            }
+        }
+    }
+
+    let mut rows = best_by_task.into_values().collect::<Vec<_>>();
+    rows.sort_by(|a, b| {
+        let left = if by_runtime {
+            a.max_runtime_ratio
+        } else {
+            a.max_wait_ratio.unwrap_or(0.0)
+        };
+        let right = if by_runtime {
+            b.max_runtime_ratio
+        } else {
+            b.max_wait_ratio.unwrap_or(0.0)
+        };
+        right
+            .partial_cmp(&left)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.task.cmp(&b.task))
+    });
+    rows.truncate(10);
+    rows
+}
+
+fn render_runtime_slice_summary(summary: &RuntimeSliceAnalysisSummary, top: usize) -> String {
+    let mut output = String::new();
+
+    if !summary.available && summary.missing_reason.is_none() {
+        return output;
+    }
+
+    pushln(&mut output, "Runtime slices:");
+    pushln(&mut output, format!("  samples: {}", summary.sample_count));
+    if !summary.source_counts.is_empty() {
+        let sources = summary
+            .source_counts
+            .iter()
+            .map(|(source, count)| format!("{source}={count}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        pushln(&mut output, format!("  source: {sources}"));
+    }
+    if let Some(reason) = &summary.missing_reason {
+        pushln(&mut output, format!("  missing: {reason}"));
+    }
+    for note in &summary.data_quality_notes {
+        pushln(&mut output, format!("  note: {note}"));
+    }
+    if summary.available {
+        pushln(
+            &mut output,
+            "  context: supporting evidence only; not a primary diagnosis by itself",
+        );
+    }
+
+    if !summary.high_runtime_threads.is_empty() {
+        pushln(&mut output, "  top CPU-consuming threads near spikes:");
+        for thread in summary.high_runtime_threads.iter().take(top) {
+            pushln(
+                &mut output,
+                format!(
+                    "    task={} comm={} process={} runtime={:.1}% wait={}",
+                    thread.task,
+                    thread.comm,
+                    thread.process_comm,
+                    thread.max_runtime_ratio * 100.0,
+                    format_optional_ratio(thread.max_wait_ratio),
+                ),
+            );
+        }
+    }
+
+    if !summary.high_wait_threads.is_empty() {
+        pushln(&mut output, "  top runqueue-waiting threads near spikes:");
+        for thread in summary.high_wait_threads.iter().take(top) {
+            pushln(
+                &mut output,
+                format!(
+                    "    task={} comm={} process={} runtime={:.1}% wait={}",
+                    thread.task,
+                    thread.comm,
+                    thread.process_comm,
+                    thread.max_runtime_ratio * 100.0,
+                    format_optional_ratio(thread.max_wait_ratio),
+                ),
+            );
+        }
+    }
+
+    pushln(&mut output, "");
+    output
+}
+
+fn format_optional_ratio(value: Option<f64>) -> String {
+    value
+        .map(|ratio| format!("{:.1}%", ratio * 100.0))
+        .unwrap_or_else(|| "-".to_owned())
 }
 
 fn format_pressure_option(value: Option<f64>) -> String {
@@ -3596,6 +3855,22 @@ fn render_diagnosis_detail_lines(diagnosis: &Diagnosis, indent: &str) -> String 
         }
     }
 
+    if !diagnosis.candidate_rejections.is_empty() {
+        pushln(&mut output, format!("{indent}why not primary:"));
+        for rejection in diagnosis.candidate_rejections.iter().take(3) {
+            pushln(
+                &mut output,
+                format!(
+                    "{indent}  - {:?} score={:.2} confidence={:?}",
+                    rejection.cause, rejection.score, rejection.confidence
+                ),
+            );
+            for reason in rejection.reasons.iter().take(3) {
+                pushln(&mut output, format!("{indent}    - {reason}"));
+            }
+        }
+    }
+
     pushln(&mut output, format!("{indent}diagnosis candidates:"));
     for candidate in diagnosis.candidates.iter().take(3) {
         pushln(
@@ -4896,6 +5171,8 @@ mod tests {
                 &[],
                 5,
             ),
+            runtime_slices: RuntimeSliceAnalysisSummary::default(),
+            diagnosis_thresholds: crate::diagnosis::DiagnosisConfig::default().threshold_table(),
             artifacts_summary: artifacts_summary_from_session(&session),
             data_quality: data_quality_summary(&session, &validation),
             focus_summary: FocusReportSummary::default(),
@@ -4906,6 +5183,41 @@ mod tests {
 
         assert!(value.get("pressure_timeline").is_some());
         assert_eq!(value["pressure_timeline"]["sample_count"].as_u64(), Some(1));
+    }
+
+    #[test]
+    fn runtime_slice_summary_reports_sources_and_top_threads() {
+        let mut session = minimal_session_for_report_test();
+        session.config.runtime_slices = true;
+        session.core.runtime_slice_count = 1;
+        let artifacts = session_io::RunArtifacts {
+            session: session.clone(),
+            runtime_slices: vec![crate::metrics::RuntimeSliceRecord {
+                elapsed_ms: 1000,
+                task: 42,
+                process_pid: Some(40),
+                class: TaskClass::Game,
+                comm: "RenderThread".to_owned(),
+                process_comm: "Game.exe".into(),
+                source: crate::metrics::RuntimeSliceSource::ProcSchedstat,
+                interval_ms: 1000,
+                runtime_delta_ns: 850_000_000,
+                runqueue_wait_delta_ns: Some(75_000_000),
+                timeslices_delta: Some(12),
+                runtime_ratio: Some(0.85),
+                wait_ratio: Some(0.075),
+                valid: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let summary = runtime_slice_analysis_summary(&session, &artifacts);
+
+        assert!(summary.available);
+        assert_eq!(summary.sample_count, 1);
+        assert_eq!(summary.source_counts.get("proc_schedstat"), Some(&1));
+        assert_eq!(summary.high_runtime_threads[0].task, 42);
     }
 
     fn test_html_report_model() -> HtmlReportModel {
@@ -4943,6 +5255,8 @@ mod tests {
             frame_diagnoses: vec![],
             frame_pacing: FramePacingSummary::default(),
             pressure_timeline: PressureTimelineSummary::default(),
+            runtime_slices: RuntimeSliceAnalysisSummary::default(),
+            diagnosis_thresholds: crate::diagnosis::DiagnosisConfig::default().threshold_table(),
             artifacts_summary: artifacts_summary_from_session(&session),
             data_quality: data_quality_summary(&session, &validation),
             focus_summary: FocusReportSummary::default(),

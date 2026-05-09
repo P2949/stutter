@@ -35,6 +35,9 @@ pub struct DiagnosisConfig {
     pub min_primary_evidence_items: usize,
     pub min_scheduler_latency_for_primary_ns: u64,
     pub min_non_scheduler_score_for_primary: f32,
+    pub runtime_high_ratio: f64,
+    pub runtime_wait_high_ratio: f64,
+    pub runtime_min_samples_for_primary_support: usize,
 }
 
 impl Default for DiagnosisConfig {
@@ -55,6 +58,9 @@ impl Default for DiagnosisConfig {
             min_primary_evidence_items: 1,
             min_scheduler_latency_for_primary_ns: SCHED_DELAY_SIGNIFICANT_NS,
             min_non_scheduler_score_for_primary: 0.40,
+            runtime_high_ratio: 0.80,
+            runtime_wait_high_ratio: 0.50,
+            runtime_min_samples_for_primary_support: 3,
         }
     }
 }
@@ -162,6 +168,24 @@ impl DiagnosisConfig {
                 unit: "score",
                 description: "Minimum normalized score required before a non-scheduler candidate can be primary.",
             },
+            DiagnosisThresholdDoc {
+                key: "runtime_high_ratio",
+                value: self.runtime_high_ratio,
+                unit: "ratio",
+                description: "Runtime-slice CPU time ratio considered high supporting evidence near a spike.",
+            },
+            DiagnosisThresholdDoc {
+                key: "runtime_wait_high_ratio",
+                value: self.runtime_wait_high_ratio,
+                unit: "ratio",
+                description: "Runtime-slice runqueue wait ratio considered high supporting evidence near a spike.",
+            },
+            DiagnosisThresholdDoc {
+                key: "runtime_min_samples_for_primary_support",
+                value: self.runtime_min_samples_for_primary_support as f64,
+                unit: "samples",
+                description: "Minimum runtime-slice samples required before runtime evidence may strengthen primary support.",
+            },
         ]
     }
 }
@@ -174,6 +198,8 @@ pub enum StutterCause {
     GpuBoundCandidate,
     BlockIoCandidate,
     CpuPressureCandidate,
+    CpuMonopolizationCandidate,
+    RuntimeWaitCandidate,
     Unknown,
 }
 
@@ -186,7 +212,9 @@ impl StutterCause {
             StutterCause::GpuBoundCandidate => 4,
             StutterCause::BlockIoCandidate => 5,
             StutterCause::CpuPressureCandidate => 6,
-            StutterCause::Unknown => 7,
+            StutterCause::CpuMonopolizationCandidate => 7,
+            StutterCause::RuntimeWaitCandidate => 8,
+            StutterCause::Unknown => 9,
         }
     }
 }
@@ -244,6 +272,9 @@ pub enum EvidenceKind {
     Migration,
     PageFaults,
     CpuPerf,
+    RuntimeSlice,
+    RuntimeCpuUse,
+    RuntimeRunqueueWait,
     Unknown,
 }
 
@@ -263,6 +294,14 @@ pub struct DiagnosisCandidate {
     pub score: f32,
     pub confidence: Confidence,
     pub evidence: Vec<EvidenceItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CandidateRejection {
+    pub cause: StutterCause,
+    pub score: f32,
+    pub confidence: Confidence,
+    pub reasons: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -291,6 +330,8 @@ pub struct Diagnosis {
     pub missing_evidence: Vec<String>,
     pub primary: Option<DiagnosisCandidate>,
     pub candidates: Vec<DiagnosisCandidate>,
+    #[serde(default)]
+    pub candidate_rejections: Vec<CandidateRejection>,
     pub summary: String,
 }
 
@@ -602,6 +643,7 @@ fn unknown_diagnosis_with_candidates(
         missing_evidence,
         primary: None,
         candidates,
+        candidate_rejections: Vec::new(),
         summary,
     }
 }
@@ -621,6 +663,7 @@ fn finalize_diagnosis(
             missing_evidence,
             primary: None,
             candidates: Vec::new(),
+            candidate_rejections: Vec::new(),
             summary: "insufficient evidence: no candidate reached diagnosis thresholds".to_owned(),
         };
     }
@@ -630,9 +673,10 @@ fn finalize_diagnosis(
 
     let primary = candidates[0].clone();
     if candidate_is_sufficient_primary(&primary, config).is_err() {
+        let candidate_rejections = candidate_rejections(&candidates, config);
         let missing_evidence =
             missing_evidence_for_context(&candidates, Some(&primary), config, &context);
-        return unknown_diagnosis_with_candidates(
+        let mut diagnosis = unknown_diagnosis_with_candidates(
             candidates,
             missing_evidence,
             format!(
@@ -640,6 +684,8 @@ fn finalize_diagnosis(
                 primary.cause, primary.confidence, primary.score
             ),
         );
+        diagnosis.candidate_rejections = candidate_rejections;
+        return diagnosis;
     }
 
     let secondary_causes = candidates
@@ -658,6 +704,7 @@ fn finalize_diagnosis(
         "primary={:?} confidence={:?} score={:.2}",
         primary.cause, primary.confidence, primary.score
     );
+    let candidate_rejections = candidate_rejections(&candidates, config);
 
     Diagnosis {
         cause: primary.cause,
@@ -667,8 +714,27 @@ fn finalize_diagnosis(
         missing_evidence,
         primary: Some(primary),
         candidates,
+        candidate_rejections,
         summary,
     }
+}
+
+fn candidate_rejections(
+    candidates: &[DiagnosisCandidate],
+    config: DiagnosisConfig,
+) -> Vec<CandidateRejection> {
+    candidates
+        .iter()
+        .filter_map(|candidate| {
+            let reasons = primary_rejection_reasons(candidate, config);
+            (!reasons.is_empty()).then_some(CandidateRejection {
+                cause: candidate.cause,
+                score: candidate.score,
+                confidence: candidate.confidence,
+                reasons,
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn select_anchor_for_diagnosis(
@@ -854,6 +920,21 @@ pub fn diagnose_cluster_with_config(
             })
             .cloned()
             .collect()
+    } else {
+        Vec::new()
+    };
+
+    let runtime_slices = if let Some((min, max)) = cluster_elapsed_range {
+        artifacts
+            .runtime_slices
+            .iter()
+            .filter(|r| {
+                r.valid
+                    && r.elapsed_ms >= min.saturating_sub(1000)
+                    && r.elapsed_ms <= max.saturating_add(1000)
+            })
+            .cloned()
+            .collect::<Vec<_>>()
     } else {
         Vec::new()
     };
@@ -1056,7 +1137,16 @@ pub fn diagnose_cluster_with_config(
         );
         push_page_fault_evidence(&mut candidates, cause, &interval_records, config);
         push_cpu_perf_evidence(&mut candidates, cause, &interval_records, cluster, config);
+        push_runtime_slice_supporting_evidence(
+            &mut candidates,
+            cause,
+            &runtime_slices,
+            cluster,
+            config,
+        );
     }
+
+    push_runtime_slice_context_candidates(&mut candidates, &runtime_slices, cluster, config);
 
     finalize_diagnosis(candidates, config, context)
 }
@@ -1308,6 +1398,152 @@ fn push_cpu_perf_evidence(
     );
 }
 
+fn push_runtime_slice_supporting_evidence(
+    candidates: &mut [DiagnosisCandidate],
+    cause: StutterCause,
+    runtime_slices: &[crate::metrics::RuntimeSliceRecord],
+    cluster: &SpikeCluster,
+    config: DiagnosisConfig,
+) {
+    let anchor = select_anchor(cluster);
+    let Some(anchor_record) = runtime_slices
+        .iter()
+        .filter(|record| record.task == anchor.task)
+        .max_by(|a, b| {
+            a.wait_ratio
+                .unwrap_or(0.0)
+                .partial_cmp(&b.wait_ratio.unwrap_or(0.0))
+                .unwrap_or(Ordering::Equal)
+        })
+    else {
+        return;
+    };
+
+    if let Some(wait_ratio) = anchor_record.wait_ratio
+        && wait_ratio >= config.runtime_wait_high_ratio
+    {
+        push_supporting_evidence(
+            candidates,
+            cause,
+            EvidenceItem {
+                kind: EvidenceKind::RuntimeRunqueueWait,
+                strength: 0.35,
+                message: format!(
+                    "runtime slice context: anchor task={} waited on runqueue for {:.1}% of sample interval",
+                    anchor_record.task,
+                    wait_ratio * 100.0
+                ),
+                timestamp_ms: Some(anchor_record.elapsed_ms),
+                start_ns: None,
+                end_ns: None,
+            },
+        );
+    }
+
+    if let Some(runtime_ratio) = anchor_record.runtime_ratio
+        && runtime_ratio >= config.runtime_high_ratio
+    {
+        push_supporting_evidence(
+            candidates,
+            cause,
+            EvidenceItem {
+                kind: EvidenceKind::RuntimeCpuUse,
+                strength: 0.20,
+                message: format!(
+                    "runtime slice context: anchor task={} was running for {:.1}% of sample interval; this weakens a pure waiting-only explanation",
+                    anchor_record.task,
+                    runtime_ratio * 100.0
+                ),
+                timestamp_ms: Some(anchor_record.elapsed_ms),
+                start_ns: None,
+                end_ns: None,
+            },
+        );
+    }
+}
+
+fn push_runtime_slice_context_candidates(
+    candidates: &mut Vec<DiagnosisCandidate>,
+    runtime_slices: &[crate::metrics::RuntimeSliceRecord],
+    cluster: &SpikeCluster,
+    config: DiagnosisConfig,
+) {
+    let cluster_tasks = cluster
+        .points
+        .iter()
+        .map(|point| point.task)
+        .collect::<std::collections::BTreeSet<_>>();
+
+    let high_background_runtime = runtime_slices
+        .iter()
+        .filter(|record| !cluster_tasks.contains(&record.task))
+        .filter(|record| record.runtime_ratio.unwrap_or(0.0) >= config.runtime_high_ratio)
+        .max_by(|a, b| {
+            a.runtime_ratio
+                .unwrap_or(0.0)
+                .partial_cmp(&b.runtime_ratio.unwrap_or(0.0))
+                .unwrap_or(Ordering::Equal)
+        });
+
+    if let Some(record) = high_background_runtime {
+        let score = (record.runtime_ratio.unwrap_or(0.0) as f32).min(0.35);
+        push_candidate(
+            candidates,
+            StutterCause::CpuMonopolizationCandidate,
+            score,
+            EvidenceItem {
+                kind: EvidenceKind::RuntimeCpuUse,
+                strength: score,
+                message: format!(
+                    "runtime slice context: non-anchor task={} comm='{}' consumed {:.1}% CPU time near spike",
+                    record.task,
+                    record.comm,
+                    record.runtime_ratio.unwrap_or(0.0) * 100.0
+                ),
+                timestamp_ms: Some(record.elapsed_ms),
+                start_ns: None,
+                end_ns: None,
+            },
+        );
+    }
+
+    let high_wait = runtime_slices
+        .iter()
+        .filter(|record| record.wait_ratio.unwrap_or(0.0) >= config.runtime_wait_high_ratio)
+        .max_by(|a, b| {
+            a.wait_ratio
+                .unwrap_or(0.0)
+                .partial_cmp(&b.wait_ratio.unwrap_or(0.0))
+                .unwrap_or(Ordering::Equal)
+        });
+
+    if let Some(record) = high_wait
+        && !candidates
+            .iter()
+            .any(|candidate| is_scheduler_cause(candidate.cause))
+    {
+        let score = (record.wait_ratio.unwrap_or(0.0) as f32).min(0.35);
+        push_candidate(
+            candidates,
+            StutterCause::RuntimeWaitCandidate,
+            score,
+            EvidenceItem {
+                kind: EvidenceKind::RuntimeRunqueueWait,
+                strength: score,
+                message: format!(
+                    "runtime slice context: task={} comm='{}' waited on runqueue for {:.1}% of sample interval",
+                    record.task,
+                    record.comm,
+                    record.wait_ratio.unwrap_or(0.0) * 100.0
+                ),
+                timestamp_ms: Some(record.elapsed_ms),
+                start_ns: None,
+                end_ns: None,
+            },
+        );
+    }
+}
+
 fn cpu_perf_evidence_score(record: &IntervalRecord, config: DiagnosisConfig) -> f64 {
     let Some(perf) = &record.cpu_perf else {
         return 0.0;
@@ -1502,6 +1738,9 @@ mod tests {
             "min_primary_evidence_items",
             "min_scheduler_latency_for_primary_ns",
             "min_non_scheduler_score_for_primary",
+            "runtime_high_ratio",
+            "runtime_wait_high_ratio",
+            "runtime_min_samples_for_primary_support",
         ];
 
         assert_eq!(
@@ -1560,6 +1799,17 @@ mod tests {
         assert!(d.primary.is_none());
         assert!(candidate_index(&d, StutterCause::GameThreadSchedulerDelay).is_some());
         assert_missing_contains(&d, "confidence below");
+        assert!(
+            d.candidate_rejections.iter().any(|rejection| {
+                rejection.cause == StutterCause::GameThreadSchedulerDelay
+                    && rejection
+                        .reasons
+                        .iter()
+                        .any(|reason| reason.contains("confidence below"))
+            }),
+            "expected rejected primary explanation, got {:?}",
+            d.candidate_rejections
+        );
     }
 
     #[test]

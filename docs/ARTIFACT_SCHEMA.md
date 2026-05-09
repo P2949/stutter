@@ -30,6 +30,7 @@ A typical run directory contains:
   cpu_freq_samples.json
   io_events.json
   scx_events.json
+  runtime_slices.json
   focus_events.json
   foreground_events.json
 ```
@@ -55,6 +56,7 @@ Optional streams:
 - `cpu_freq_samples.json`
 - `io_events.json`
 - `scx_events.json`
+- `runtime_slices.json`
 - `focus_events.json`
 - `foreground_events.json`
 
@@ -135,6 +137,10 @@ Key fields:
 - `cpu_perf_read_errors`
 - `cpu_perf_skipped_tasks`
 - `cpu_perf_last_error`
+- `runtime_slice_count`
+- `runtime_slice_read_errors`
+- `runtime_slice_skipped_tasks`
+- `runtime_slice_source`
 - `focus_event_count`
 - `foreground_event_count`
 - `foreground_source`
@@ -149,6 +155,7 @@ Consistency rules:
 - `spike_events_retained_count` should match `spike_events.json` when present.
 - `gpu_sample_count` should match `gpu_samples.json` when present.
 - `block_io_event_count` should match `io_events.json` when present.
+- `runtime_slice_count` should match `runtime_slices.json` when present.
 - `frame_event_count` should match `frame_correlation.json` or
   `frame_events.json` when present.
 - `foreground_event_count` should match `foreground_events.json` when present.
@@ -347,6 +354,57 @@ Consistency rules:
   confidence cautiously.
 - The number of records should match `session.json` field
   `block_io_event_count`.
+
+### `runtime_slices.json`
+
+Purpose:
+
+- Per-thread CPU runtime/wait deltas sampled from procfs.
+- Adds context for whether a target was runnable-but-waiting or actually
+  consuming CPU time near a spike.
+- Used as supporting diagnosis evidence only.
+
+Format: NDJSON.
+
+Status: Optional stream. Written when `--runtime-slices` is enabled, including
+through the `diagnosis` preset unless disabled with `--no-runtime-slices`.
+
+Version behavior:
+
+- Missing file is tolerated and should lower confidence rather than prove
+  anything.
+- Invalid present file is an error.
+
+Important fields:
+
+- `elapsed_ms`
+- `task`
+- `process_pid`
+- `class`
+- `comm`
+- `process_comm`
+- `source`: `proc_schedstat` or `proc_stat_fallback`
+- `interval_ms`
+- `runtime_delta_ns`
+- `runqueue_wait_delta_ns`
+- `timeslices_delta`
+- `user_runtime_delta_ns`
+- `system_runtime_delta_ns`
+- `runtime_ratio`
+- `wait_ratio`
+- `avg_runtime_per_slice_ns`
+- `avg_wait_per_slice_ns`
+- `valid`
+- `unavailable_reason`
+
+Notes:
+
+- `/proc/<pid>/task/<tid>/schedstat` provides runtime, runqueue wait time, and
+  timeslice count in nanoseconds/counts.
+- If schedstat is unavailable, `/proc/<pid>/task/<tid>/stat` is used as a
+  runtime-only fallback. Fallback records do not include runqueue wait data.
+- First samples establish a baseline and are not emitted as fake zero-delta
+  records.
 
 ### `frame_events.json` and `frame_correlation.json`
 

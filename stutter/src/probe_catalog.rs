@@ -173,19 +173,19 @@ pub const PROBE_CATALOG: &[ProbeCatalogEntry] = &[
         default_enabled: false,
         overhead: ProbeOverhead::High,
         requires_privilege_or_kernel_support: true,
-        validation_contract: "not implemented; must add schema/docs/fixtures before enabling",
+        validation_contract: "not implemented; blocked until diagnosis fixtures, false-positive tests, process/thread attribution design, and MangoHud alignment tests exist",
     },
     ProbeCatalogEntry {
         key: "per_thread_runtime_slices",
         title: "Per-thread CPU runtime slices",
-        status: ProbeStatus::Planned,
+        status: ProbeStatus::Implemented,
         answers_question: "Was the task ready but delayed, or running but consuming too much CPU time?",
-        cli_flag: None,
-        artifact_files: &[],
+        cli_flag: Some("--runtime-slices"),
+        artifact_files: &["runtime_slices.json"],
         default_enabled: false,
         overhead: ProbeOverhead::Medium,
         requires_privilege_or_kernel_support: false,
-        validation_contract: "not implemented; must add schema/docs/fixtures before enabling",
+        validation_contract: "runtime_slices.json is optional NDJSON; missing schedstat falls back to proc stat or reports unavailable; analysis never treats missing runtime data as proof.",
     },
     ProbeCatalogEntry {
         key: "perf_counter_presets",
@@ -371,5 +371,30 @@ mod tests {
         let rendered = render_probe_catalog(PROBE_CATALOG);
         assert!(rendered.contains("foreground_window"));
         assert!(rendered.contains("--foreground-window / --focus-source foreground"));
+    }
+
+    #[test]
+    fn drm_fence_latency_remains_planned_and_default_off() {
+        let entry = PROBE_CATALOG
+            .iter()
+            .find(|entry| entry.key == "drm_fence_latency")
+            .expect("drm_fence_latency probe catalog entry must exist");
+
+        assert_eq!(entry.status, ProbeStatus::Planned);
+        assert!(!entry.default_enabled);
+        assert_eq!(entry.overhead, ProbeOverhead::High);
+    }
+
+    #[test]
+    fn per_thread_runtime_slices_is_implemented_but_default_off() {
+        let entry = PROBE_CATALOG
+            .iter()
+            .find(|entry| entry.key == "per_thread_runtime_slices")
+            .expect("per_thread_runtime_slices probe catalog entry must exist");
+
+        assert_eq!(entry.status, ProbeStatus::Implemented);
+        assert_eq!(entry.cli_flag, Some("--runtime-slices"));
+        assert_eq!(entry.artifact_files, &["runtime_slices.json"]);
+        assert!(!entry.default_enabled);
     }
 }

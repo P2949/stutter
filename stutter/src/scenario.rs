@@ -329,6 +329,7 @@ pub fn prepare_scenario_run(input: ScenarioRunInput) -> Result<PreparedScenarioR
     let faults = merge_opt_bool(preset_defaults.faults, scenario.faults);
     let stat_wait = merge_opt_bool(preset_defaults.stat_wait, scenario.stat_wait);
     let block_io = merge_opt_bool(preset_defaults.block_io, scenario.block_io);
+    let runtime_slices = preset_defaults.runtime_slices.unwrap_or(false);
     let irq_latency = scenario.irq_latency;
 
     let mut config = Config {
@@ -404,6 +405,8 @@ pub fn prepare_scenario_run(input: ScenarioRunInput) -> Result<PreparedScenarioR
         cpu_perf_cache_refs: false,
         block_io,
         stat_wait,
+        runtime_slices,
+        runtime_slices_max_tasks: 256,
         json_stream: false,
         metrics_port: None,
         ringbuf_size_kb: None,

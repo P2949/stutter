@@ -8,8 +8,8 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::recorder::{
     BlockIoRecord, CpuFreqRecord, FocusEvent, ForegroundEvent, FrameEvent, GpuSample,
-    IntervalRecord, IrqEventRecord, MetadataFile, MigrationEventRecord, SESSION_SCHEMA_VERSION,
-    ScxEvent, SessionFile, SpikeEvent, TreeEvent,
+    IntervalRecord, IrqEventRecord, MetadataFile, MigrationEventRecord, RuntimeSliceRecord,
+    SESSION_SCHEMA_VERSION, ScxEvent, SessionFile, SpikeEvent, TreeEvent,
 };
 
 #[derive(Debug, Serialize, Default)]
@@ -28,6 +28,7 @@ pub struct RunArtifacts {
     pub cpu_freq_events: Vec<CpuFreqRecord>,
     pub block_io_events: Vec<BlockIoRecord>,
     pub scx_events: Vec<ScxEvent>,
+    pub runtime_slices: Vec<RuntimeSliceRecord>,
     pub focus_events: Vec<FocusEvent>,
     pub foreground_events: Vec<ForegroundEvent>,
 
@@ -66,6 +67,7 @@ pub struct ArtifactLoadOptions {
     pub load_cpu_freq_events: bool,
     pub load_block_io_events: bool,
     pub load_scx_events: bool,
+    pub load_runtime_slices: bool,
     pub load_focus_events: bool,
     pub load_foreground_events: bool,
 }
@@ -82,6 +84,7 @@ impl ArtifactLoadOptions {
         load_cpu_freq_events: false,
         load_block_io_events: false,
         load_scx_events: false,
+        load_runtime_slices: false,
         load_focus_events: true,
         load_foreground_events: true,
     };
@@ -97,6 +100,7 @@ impl ArtifactLoadOptions {
         load_cpu_freq_events: false,
         load_block_io_events: false,
         load_scx_events: false,
+        load_runtime_slices: false,
         load_focus_events: false,
         load_foreground_events: false,
     };
@@ -112,6 +116,7 @@ impl ArtifactLoadOptions {
         load_cpu_freq_events: true,
         load_block_io_events: true,
         load_scx_events: true,
+        load_runtime_slices: true,
         load_focus_events: true,
         load_foreground_events: true,
     };
@@ -128,6 +133,7 @@ impl ArtifactLoadOptions {
         load_cpu_freq_events: false,
         load_block_io_events: false,
         load_scx_events: false,
+        load_runtime_slices: false,
         load_focus_events: false,
         load_foreground_events: false,
     };
@@ -161,6 +167,7 @@ pub(crate) const MIGRATION_EVENTS_FILE: &str = "migration_events.json";
 pub(crate) const CPU_FREQ_EVENTS_FILE: &str = "cpu_freq_samples.json";
 pub(crate) const BLOCK_IO_EVENTS_FILE: &str = "io_events.json";
 pub(crate) const SCX_EVENTS_FILE: &str = "scx_events.json";
+pub(crate) const RUNTIME_SLICES_FILE: &str = "runtime_slices.json";
 pub(crate) const FOCUS_EVENTS_FILE: &str = "focus_events.json";
 pub(crate) const FOREGROUND_EVENTS_FILE: &str = "foreground_events.json";
 
@@ -398,6 +405,12 @@ pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<R
         Vec::new()
     };
 
+    let runtime_slices = if options.load_runtime_slices {
+        load_optional_json_vec(&run_dir, RUNTIME_SLICES_FILE, &mut validation)?
+    } else {
+        Vec::new()
+    };
+
     let focus_events = if options.load_focus_events {
         load_optional_json_vec(&run_dir, FOCUS_EVENTS_FILE, &mut validation)?
     } else {
@@ -424,6 +437,7 @@ pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<R
         cpu_freq_events,
         block_io_events,
         scx_events,
+        runtime_slices,
         focus_events,
         foreground_events,
         validation,
@@ -449,6 +463,7 @@ fn expected_artifact_count_for_file(session: &SessionFile, file_name: &str) -> O
         GPU_SAMPLES_FILE => Some(session.core.gpu_sample_count),
         FRAME_EVENTS_FILE | FRAME_EVENTS_STREAM_FILE => Some(session.core.frame_event_count),
         BLOCK_IO_EVENTS_FILE => Some(session.core.block_io_event_count),
+        RUNTIME_SLICES_FILE => Some(session.core.runtime_slice_count),
         FOCUS_EVENTS_FILE => Some(session.core.focus_event_count),
         FOREGROUND_EVENTS_FILE => Some(session.core.foreground_event_count),
         _ => None,
@@ -463,6 +478,7 @@ fn artifact_count_label(file_name: &str) -> &'static str {
         GPU_SAMPLES_FILE => "GPU sample",
         FRAME_EVENTS_FILE | FRAME_EVENTS_STREAM_FILE => "frame event",
         BLOCK_IO_EVENTS_FILE => "block I/O event",
+        RUNTIME_SLICES_FILE => "runtime slice",
         FOCUS_EVENTS_FILE => "focus event",
         FOREGROUND_EVENTS_FILE => "foreground event",
         _ => "artifact",
@@ -591,6 +607,12 @@ fn check_consistency(artifacts: &mut RunArtifacts) {
     check_present_loaded_artifact_count(
         validation,
         session,
+        RUNTIME_SLICES_FILE,
+        artifacts.runtime_slices.len(),
+    );
+    check_present_loaded_artifact_count(
+        validation,
+        session,
         FOCUS_EVENTS_FILE,
         artifacts.focus_events.len(),
     );
@@ -673,6 +695,13 @@ impl RunArtifacts {
             SCX_EVENTS_FILE,
             validation,
             |r: &ScxEvent| windows.is_in_ms(r.elapsed_ms),
+        )?;
+
+        self.runtime_slices = load_optional_json_vec_filtered(
+            run_dir,
+            RUNTIME_SLICES_FILE,
+            validation,
+            |r: &RuntimeSliceRecord| windows.is_in_ms(r.elapsed_ms),
         )?;
 
         self.focus_events = load_optional_json_vec_filtered(
@@ -789,6 +818,7 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
         (CPU_FREQ_EVENTS_FILE, "CpuFreqRecord"),
         (BLOCK_IO_EVENTS_FILE, "BlockIoRecord"),
         (SCX_EVENTS_FILE, "ScxEvent"),
+        (RUNTIME_SLICES_FILE, "RuntimeSliceRecord"),
         (FOCUS_EVENTS_FILE, "FocusEvent"),
         (FOREGROUND_EVENTS_FILE, "ForegroundEvent"),
     ];
@@ -807,6 +837,7 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
                 "CpuFreqRecord" => count_ndjson_file::<CpuFreqRecord>(&path),
                 "BlockIoRecord" => count_ndjson_file::<BlockIoRecord>(&path),
                 "ScxEvent" => count_ndjson_file::<ScxEvent>(&path),
+                "RuntimeSliceRecord" => count_ndjson_file::<RuntimeSliceRecord>(&path),
                 "FocusEvent" => count_ndjson_file::<FocusEvent>(&path),
                 "ForegroundEvent" => count_ndjson_file::<ForegroundEvent>(&path),
                 _ => unreachable!(),
@@ -1080,6 +1111,7 @@ mod tests {
         session.core.gpu_sample_count = 1;
         session.core.frame_event_count = 1;
         session.core.block_io_event_count = 1;
+        session.core.runtime_slice_count = 1;
         session.core.focus_event_count = 1;
         session.core.foreground_event_count = 1;
         session
@@ -1094,6 +1126,7 @@ mod tests {
             "GPU sample count mismatch",
             "frame event count mismatch",
             "block I/O event count mismatch",
+            "runtime slice count mismatch",
             "focus event count mismatch",
             "foreground event count mismatch",
         ] {
@@ -1118,6 +1151,7 @@ mod tests {
                 GPU_SAMPLES_FILE,
                 FRAME_EVENTS_FILE,
                 BLOCK_IO_EVENTS_FILE,
+                RUNTIME_SLICES_FILE,
                 FOCUS_EVENTS_FILE,
                 FOREGROUND_EVENTS_FILE,
             ],
@@ -1145,6 +1179,7 @@ mod tests {
                 GPU_SAMPLES_FILE,
                 FRAME_EVENTS_FILE,
                 BLOCK_IO_EVENTS_FILE,
+                RUNTIME_SLICES_FILE,
                 FOCUS_EVENTS_FILE,
                 FOREGROUND_EVENTS_FILE,
             ],
@@ -1273,6 +1308,63 @@ mod tests {
 
         assert_eq!(artifacts.intervals.len(), 1);
         assert!(artifacts.intervals[0].cpu_perf.is_none());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn validate_accepts_runtime_slices_json() {
+        let dir = temp_dir("runtime-slices-valid");
+        let mut session = minimal_session();
+        session.core.runtime_slice_count = 1;
+        write_session(&dir, &session);
+        let record = RuntimeSliceRecord {
+            elapsed_ms: 1000,
+            task: 42,
+            process_pid: Some(40),
+            class: crate::process_tree::TaskClass::Game,
+            comm: "GameThread".to_owned(),
+            process_comm: "Game.exe".into(),
+            source: crate::metrics::RuntimeSliceSource::ProcSchedstat,
+            interval_ms: 1000,
+            runtime_delta_ns: 800_000_000,
+            runqueue_wait_delta_ns: Some(20_000_000),
+            timeslices_delta: Some(8),
+            runtime_ratio: Some(0.8),
+            wait_ratio: Some(0.02),
+            valid: true,
+            ..Default::default()
+        };
+        fs::write(
+            dir.join(RUNTIME_SLICES_FILE),
+            format!("{}\n", serde_json::to_string(&record).unwrap()),
+        )
+        .unwrap();
+
+        let report = validate_run_dir(&dir).unwrap();
+
+        assert!(report.errors.is_empty());
+        assert!(
+            report
+                .present_files
+                .contains(&RUNTIME_SLICES_FILE.to_owned())
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn validate_rejects_malformed_runtime_slices_json() {
+        let dir = temp_dir("runtime-slices-invalid");
+        write_minimal_session(&dir);
+        fs::write(dir.join(RUNTIME_SLICES_FILE), "not json").unwrap();
+
+        let report = validate_run_dir(&dir).unwrap();
+
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|error| error.contains("runtime_slices.json invalid"))
+        );
         std::fs::remove_dir_all(dir).ok();
     }
 
