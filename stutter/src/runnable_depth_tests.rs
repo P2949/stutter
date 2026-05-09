@@ -2,8 +2,8 @@ use crate::{
     diagnosis::{self, DiagnosisConfig, EvidenceKind, StutterCause},
     process_tree::TaskClass,
     recorder::{RecordedSpike, SpikeEvent},
-    report::{SpikeCluster, SpikePoint},
     session_io::RunArtifacts,
+    spike::{SpikeCluster, SpikePoint},
 };
 
 #[test]

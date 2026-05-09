@@ -9,8 +9,8 @@ use crate::{
         BlockIoRecord, CpuFreqRecord, GpuSample, IntervalRecord, IrqEventRecord,
         MigrationEventRecord,
     },
-    report::{SpikeCluster, SpikePoint},
     session_io::RunArtifacts,
+    spike::{SpikeCluster, SpikePoint},
 };
 
 const IRQ_SIGNIFICANT_NS: u64 = 250_000; // start conservative
@@ -1590,7 +1590,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::{process_tree::TaskClass, report::SpikePoint};
+    use crate::{process_tree::TaskClass, spike::SpikePoint};
 
     fn spike_point(task: u32, class: TaskClass, comm: &str, latency_ns: u64) -> SpikePoint {
         let switch_ns = 100_000_000 + u64::from(task);

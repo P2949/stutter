@@ -14,7 +14,7 @@ use tokio::{
 };
 
 use crate::{
-    artifacts::{ArtifactKind, ArtifactStreamRegistry},
+    artifacts::ArtifactKind,
     cli::{Config, CsvStreamTarget, FocusSource, ForegroundSourceArg},
     config::merge::{CliOverrides, ConfigSources, DefaultConfig, merge_config_sources},
     diagnosis::{LiveDiagnosisEntry, diagnose_cluster},
@@ -1523,7 +1523,7 @@ impl MonitorSession {
 
         let mut points = Vec::new();
         for s in &recent_spikes {
-            points.push(crate::report::SpikePoint {
+            points.push(crate::spike::SpikePoint {
                 task: s.task,
                 class: s.class,
                 process_pid: s.process_pid,
@@ -1551,7 +1551,7 @@ impl MonitorSession {
         let max_switch_ns = points.iter().map(|p| p.switch_ns).max().unwrap_or(0);
         let max_latency_ns = points.iter().map(|p| p.latency_ns).max().unwrap_or(0);
 
-        let mut cluster = crate::report::SpikeCluster {
+        let mut cluster = crate::spike::SpikeCluster {
             points,
             distinct_tasks,
             min_switch_ns,
