@@ -91,6 +91,7 @@ pub(crate) struct SpikeCluster {
     pub(crate) max_switch_ns: u64,
     pub(crate) max_latency_ns: u64,
     pub(crate) diagnosis: Option<Diagnosis>,
+    pub(crate) diagnosis_explanation: Option<DiagnosisExplanation>,
     pub(crate) anchor_task: Option<u32>,
     pub(crate) anchor_class: Option<TaskClass>,
     pub(crate) anchor_comm: Option<String>,
@@ -333,6 +334,7 @@ pub struct ReportAnalysisJson {
     pub session: SessionFile,
     pub cluster_analysis: SpikeClusterAnalysis,
     pub frame_diagnoses: Vec<FrameDiagnosis>,
+    pub frame_pacing: FramePacingSummary,
     pub pressure_timeline: PressureTimelineSummary,
     pub artifacts_summary: ArtifactsSummary,
     pub data_quality: DataQualitySummary,
@@ -391,6 +393,61 @@ pub struct PressureWindow {
     pub near_spike: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct FramePacingSummary {
+    pub frame_count: usize,
+    pub median_frametime_ms: Option<f64>,
+    pub p95_frametime_ms: Option<f64>,
+    pub p99_frametime_ms: Option<f64>,
+    pub max_frametime_ms: Option<f64>,
+    pub outlier_count: usize,
+    pub outliers: Vec<FrameOutlierView>,
+    pub compositor_cluster_count: usize,
+    pub game_cluster_count: usize,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FrameOutlierView {
+    pub elapsed_ms: u64,
+    pub frametime_ms: f64,
+    pub over_median_ratio: Option<f64>,
+    pub nearest_cluster_delta_ms: Option<i64>,
+    pub nearest_cluster_cause: Option<String>,
+    pub nearest_cluster_anchor_class: Option<TaskClass>,
+    pub nearest_cluster_anchor_comm: Option<String>,
+    pub foreground_pid: Option<u32>,
+    pub foreground_app_id: Option<String>,
+    pub foreground_class: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiagnosisExplanation {
+    pub primary_cause: Option<String>,
+    pub primary_score: Option<f32>,
+    pub primary_confidence: Option<String>,
+    pub reason: String,
+    pub evidence_items: Vec<DiagnosisEvidenceView>,
+    pub competing_candidates: Vec<DiagnosisCandidateView>,
+    pub missing_evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiagnosisEvidenceView {
+    pub kind: String,
+    pub strength: f32,
+    pub message: String,
+    pub timestamp_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiagnosisCandidateView {
+    pub cause: String,
+    pub score: f32,
+    pub confidence: String,
+    pub evidence_count: usize,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TaskHtmlRow {
     pub task: u32,
@@ -412,6 +469,7 @@ pub struct TaskHtmlRow {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct HtmlChartArtifacts {
     pub gpu_samples: Vec<GpuSample>,
+    pub frame_events: Vec<FrameEvent>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -420,6 +478,7 @@ pub struct HtmlReportModel {
     pub data_quality: DataQualitySummary,
     pub cluster_analysis: SpikeClusterAnalysis,
     pub frame_diagnoses: Vec<FrameDiagnosis>,
+    pub frame_pacing: FramePacingSummary,
     pub pressure_timeline: PressureTimelineSummary,
     pub artifacts_summary: ArtifactsSummary,
     pub focus_summary: FocusReportSummary,
@@ -585,6 +644,12 @@ fn build_report_analysis_with_artifacts(
         &artifacts,
         cluster_window_ns,
     );
+    let frame_pacing = build_frame_pacing_summary(
+        &artifacts.frame_events,
+        &cluster_analysis.clusters,
+        &artifacts.foreground_events,
+        session.config.foreground_max_stale_ms.max(2_500),
+    );
 
     let data_quality = data_quality_summary(&session, &artifacts.validation);
     let artifacts_summary = artifacts_summary_from_session(&session);
@@ -602,6 +667,7 @@ fn build_report_analysis_with_artifacts(
             session,
             cluster_analysis,
             frame_diagnoses,
+            frame_pacing,
             pressure_timeline,
             artifacts_summary,
             data_quality,
@@ -1297,6 +1363,7 @@ pub fn build_html_report_model(
         data_quality: analysis.data_quality.clone(),
         cluster_analysis: analysis.cluster_analysis.clone(),
         frame_diagnoses: analysis.frame_diagnoses.clone(),
+        frame_pacing: analysis.frame_pacing.clone(),
         pressure_timeline: analysis.pressure_timeline.clone(),
         artifacts_summary: analysis.artifacts_summary.clone(),
         focus_summary: analysis.focus_summary.clone(),
@@ -1308,6 +1375,7 @@ pub fn build_html_report_model(
         spike_events,
         chart_artifacts: HtmlChartArtifacts {
             gpu_samples: artifacts.gpu_samples.clone(),
+            frame_events: artifacts.frame_events.clone(),
         },
         legacy_text_report,
     })
@@ -2833,6 +2901,7 @@ fn cluster_from_points(mut points: Vec<SpikePoint>, distinct_tasks: usize) -> Sp
         max_switch_ns,
         max_latency_ns,
         diagnosis: None,
+        diagnosis_explanation: None,
         anchor_task: None,
         anchor_class: None,
         anchor_comm: None,
@@ -2896,12 +2965,54 @@ fn perform_diagnosis(
 ) {
     for cluster in clusters {
         let diagnosis = diagnose_cluster(cluster, artifacts, cluster_window_ns);
+        let diagnosis_explanation = explain_diagnosis(&diagnosis);
         let anchor = select_anchor_for_diagnosis(cluster, &diagnosis);
         cluster.anchor_task = Some(anchor.task);
         cluster.anchor_class = Some(anchor.class);
         cluster.anchor_comm = Some(anchor.comm);
         cluster.anchor_kind = Some(anchor.kind);
+        cluster.diagnosis_explanation = Some(diagnosis_explanation);
         cluster.diagnosis = Some(diagnosis);
+    }
+}
+
+fn explain_diagnosis(diagnosis: &Diagnosis) -> DiagnosisExplanation {
+    let primary = diagnosis.primary.as_ref();
+    let evidence_items = primary
+        .map(|primary| {
+            primary
+                .evidence
+                .iter()
+                .map(|evidence| DiagnosisEvidenceView {
+                    kind: format!("{:?}", evidence.kind),
+                    strength: evidence.strength,
+                    message: evidence.message.clone(),
+                    timestamp_ms: evidence.timestamp_ms,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let competing_candidates = diagnosis
+        .candidates
+        .iter()
+        .skip(usize::from(primary.is_some()))
+        .map(|candidate| DiagnosisCandidateView {
+            cause: format!("{:?}", candidate.cause),
+            score: candidate.score,
+            confidence: format!("{:?}", candidate.confidence),
+            evidence_count: candidate.evidence.len(),
+        })
+        .collect();
+
+    DiagnosisExplanation {
+        primary_cause: primary.map(|primary| format!("{:?}", primary.cause)),
+        primary_score: primary.map(|primary| primary.score),
+        primary_confidence: primary.map(|primary| format!("{:?}", primary.confidence)),
+        reason: diagnosis.summary.clone(),
+        evidence_items,
+        competing_candidates,
+        missing_evidence: diagnosis.missing_evidence.clone(),
     }
 }
 
@@ -2925,11 +3036,22 @@ fn foreground_for_cluster<'a>(
     foreground_events: &'a [ForegroundEvent],
     max_stale_ms: u64,
 ) -> Option<&'a ForegroundEvent> {
-    let cluster_ms = cluster_elapsed_ms(cluster)?;
+    foreground_for_elapsed_ms(
+        cluster_elapsed_ms(cluster)?,
+        foreground_events,
+        max_stale_ms,
+    )
+}
+
+fn foreground_for_elapsed_ms(
+    elapsed_ms: u64,
+    foreground_events: &[ForegroundEvent],
+    max_stale_ms: u64,
+) -> Option<&ForegroundEvent> {
     foreground_events
         .iter()
-        .filter(|event| event.elapsed_ms <= cluster_ms)
-        .filter(|event| cluster_ms.saturating_sub(event.elapsed_ms) <= max_stale_ms)
+        .filter(|event| event.elapsed_ms <= elapsed_ms)
+        .filter(|event| elapsed_ms.saturating_sub(event.elapsed_ms) <= max_stale_ms)
         .max_by_key(|event| event.elapsed_ms)
 }
 
@@ -3434,31 +3556,62 @@ fn render_diagnosis_detail_lines(diagnosis: &Diagnosis, indent: &str) -> String 
         );
     }
 
-    for candidate in diagnosis.candidates.iter().take(3) {
+    pushln(
+        &mut output,
+        format!("{indent}why this diagnosis was chosen:"),
+    );
+    if let Some(primary) = &diagnosis.primary {
         pushln(
             &mut output,
             format!(
-                "{indent}diagnosis_candidate cause={:?} confidence={:?} score={:.2}",
-                candidate.cause, candidate.confidence, candidate.score
+                "{indent}  - primary={:?} confidence={:?} score={:.2}",
+                primary.cause, primary.confidence, primary.score
             ),
         );
-
-        for evidence in candidate.evidence.iter().take(6) {
+        for evidence in primary.evidence.iter().take(6) {
             pushln(
                 &mut output,
                 format!(
-                    "{indent}  evidence kind={:?} strength={:.2} msg={}",
+                    "{indent}  - evidence kind={:?} strength={:.2} msg={}",
                     evidence.kind, evidence.strength, evidence.message
                 ),
             );
         }
-    }
-
-    for missing in diagnosis.missing_evidence.iter().take(6) {
+    } else {
         pushln(
             &mut output,
-            format!("{indent}diagnosis_missing_evidence msg={missing}"),
+            format!("{indent}  - no primary candidate met the reporting threshold"),
         );
+    }
+
+    pushln(
+        &mut output,
+        format!("{indent}evidence missing / not strong enough:"),
+    );
+    if diagnosis.missing_evidence.is_empty() {
+        pushln(&mut output, format!("{indent}  - none recorded"));
+    } else {
+        for missing in diagnosis.missing_evidence.iter().take(6) {
+            pushln(&mut output, format!("{indent}  - {missing}"));
+        }
+    }
+
+    pushln(&mut output, format!("{indent}diagnosis candidates:"));
+    for candidate in diagnosis.candidates.iter().take(3) {
+        pushln(
+            &mut output,
+            format!(
+                "{indent}  - diagnosis_candidate cause={:?} confidence={:?} score={:.2} evidence_items={}",
+                candidate.cause,
+                candidate.confidence,
+                candidate.score,
+                candidate.evidence.len()
+            ),
+        );
+    }
+
+    if diagnosis.candidates.is_empty() {
+        pushln(&mut output, format!("{indent}  - none recorded"));
     }
 
     output.trim_end().to_owned()
@@ -3605,6 +3758,185 @@ fn identify_frame_spikes(frames: &[FrameEvent], median: f64) -> Vec<FrameEvent> 
         .collect()
 }
 
+fn build_frame_pacing_summary(
+    frame_events: &[FrameEvent],
+    clusters: &[SpikeCluster],
+    foreground_events: &[ForegroundEvent],
+    max_foreground_stale_ms: u64,
+) -> FramePacingSummary {
+    let mut frametimes = frame_events
+        .iter()
+        .filter_map(|frame| frame.frametime_ms.is_finite().then_some(frame.frametime_ms))
+        .collect::<Vec<_>>();
+
+    if frametimes.is_empty() {
+        return FramePacingSummary {
+            frame_count: frame_events.len(),
+            notes: vec![
+                "No frame events loaded; pass --mangohud-log to enable frame-pacing views."
+                    .to_owned(),
+            ],
+            ..Default::default()
+        };
+    }
+
+    let median = median_f64(&mut frametimes);
+    let p95 = percentile_f64(&mut frametimes.clone(), 0.95);
+    let p99 = percentile_f64(&mut frametimes.clone(), 0.99);
+    let max = frametimes.iter().copied().fold(0.0_f64, f64::max);
+
+    let compositor_cluster_count = clusters
+        .iter()
+        .filter(|cluster| {
+            cluster
+                .anchor_class
+                .is_some_and(is_compositor_frame_pacing_class)
+        })
+        .count();
+    let game_cluster_count = clusters
+        .iter()
+        .filter(|cluster| cluster.anchor_class.is_some_and(is_game_frame_pacing_class))
+        .count();
+
+    let mut outliers = Vec::new();
+    let mut outlier_count = 0;
+    let mut sorted_frames = frame_events
+        .iter()
+        .filter(|frame| frame.frametime_ms.is_finite())
+        .collect::<Vec<_>>();
+    sorted_frames.sort_by_key(|frame| frame.elapsed_ms);
+
+    for frame in sorted_frames {
+        let over_median_ratio = (median > 0.0).then_some(frame.frametime_ms / median);
+        let is_outlier =
+            over_median_ratio.is_some_and(|ratio| ratio >= 2.0) || frame.frametime_ms >= 33.3;
+
+        if !is_outlier {
+            continue;
+        }
+
+        outlier_count += 1;
+
+        let nearest_cluster = nearest_cluster_for_elapsed(frame.elapsed_ms, clusters);
+        let foreground =
+            foreground_for_elapsed_ms(frame.elapsed_ms, foreground_events, max_foreground_stale_ms);
+
+        outliers.push(FrameOutlierView {
+            elapsed_ms: frame.elapsed_ms,
+            frametime_ms: frame.frametime_ms,
+            over_median_ratio,
+            nearest_cluster_delta_ms: nearest_cluster
+                .as_ref()
+                .map(|(_, elapsed_ms)| signed_ms_delta(*elapsed_ms, frame.elapsed_ms)),
+            nearest_cluster_cause: nearest_cluster
+                .as_ref()
+                .and_then(|(cluster, _)| cluster.diagnosis.as_ref())
+                .and_then(diagnosis_cause_label),
+            nearest_cluster_anchor_class: nearest_cluster
+                .as_ref()
+                .and_then(|(cluster, _)| cluster.anchor_class),
+            nearest_cluster_anchor_comm: nearest_cluster
+                .as_ref()
+                .and_then(|(cluster, _)| cluster.anchor_comm.clone()),
+            foreground_pid: foreground.and_then(|event| event.pid),
+            foreground_app_id: foreground.and_then(|event| event.app_id.clone()),
+            foreground_class: foreground.and_then(|event| event.class.clone()),
+        });
+    }
+
+    let mut notes = Vec::new();
+    if outlier_count == 0 {
+        notes.push("No frame-pacing outliers crossed the display threshold.".to_owned());
+    }
+    if compositor_cluster_count > 0 {
+        notes.push(format!(
+            "{compositor_cluster_count} scheduler cluster(s) were anchored on compositor/gamescope tasks."
+        ));
+    }
+    if game_cluster_count > 0 {
+        notes.push(format!(
+            "{game_cluster_count} scheduler cluster(s) were anchored on game tasks."
+        ));
+    }
+
+    FramePacingSummary {
+        frame_count: frame_events.len(),
+        median_frametime_ms: Some(median),
+        p95_frametime_ms: Some(p95),
+        p99_frametime_ms: Some(p99),
+        max_frametime_ms: Some(max),
+        outlier_count,
+        outliers,
+        compositor_cluster_count,
+        game_cluster_count,
+        notes,
+    }
+}
+
+fn median_f64(values: &mut [f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    values.sort_by(|a, b| a.total_cmp(b));
+    let mid = values.len() / 2;
+    if values.len().is_multiple_of(2) {
+        (values[mid - 1] + values[mid]) / 2.0
+    } else {
+        values[mid]
+    }
+}
+
+fn nearest_cluster_for_elapsed(
+    elapsed_ms: u64,
+    clusters: &[SpikeCluster],
+) -> Option<(&SpikeCluster, u64)> {
+    clusters
+        .iter()
+        .filter_map(|cluster| {
+            cluster_elapsed(cluster).map(|cluster_elapsed_ms| {
+                (
+                    cluster,
+                    cluster_elapsed_ms,
+                    cluster_elapsed_ms.abs_diff(elapsed_ms),
+                )
+            })
+        })
+        .min_by_key(|(_, _, delta)| *delta)
+        .map(|(cluster, cluster_elapsed_ms, _)| (cluster, cluster_elapsed_ms))
+}
+
+fn signed_ms_delta(cluster_elapsed_ms: u64, frame_elapsed_ms: u64) -> i64 {
+    if cluster_elapsed_ms >= frame_elapsed_ms {
+        (cluster_elapsed_ms - frame_elapsed_ms) as i64
+    } else {
+        -((frame_elapsed_ms - cluster_elapsed_ms) as i64)
+    }
+}
+
+fn diagnosis_cause_label(diagnosis: &Diagnosis) -> Option<String> {
+    diagnosis
+        .primary
+        .as_ref()
+        .map(|primary| format!("{:?}", primary.cause))
+        .or_else(|| Some(format!("{:?}", diagnosis.cause)))
+}
+
+fn is_compositor_frame_pacing_class(class: TaskClass) -> bool {
+    matches!(class, TaskClass::Compositor | TaskClass::GameScope)
+}
+
+fn is_game_frame_pacing_class(class: TaskClass) -> bool {
+    matches!(
+        class,
+        TaskClass::Game
+            | TaskClass::GameRenderThread
+            | TaskClass::GameWorkerThread
+            | TaskClass::GameHelper
+            | TaskClass::WineServer
+    )
+}
+
 fn perform_frame_diagnosis(
     session: &SessionFile,
     frame_spikes: &[FrameEvent],
@@ -3742,6 +4074,7 @@ mod tests {
             max_switch_ns: 0,
             max_latency_ns: 0,
             diagnosis: None,
+            diagnosis_explanation: None,
             anchor_task: None,
             anchor_class: None,
             anchor_comm: None,
@@ -4557,6 +4890,7 @@ mod tests {
                 clusters: vec![],
             },
             frame_diagnoses: vec![],
+            frame_pacing: FramePacingSummary::default(),
             pressure_timeline: build_pressure_timeline(
                 &[pressure_interval(100, 10.0, 0.0, 0.0, 0.0, 0.0)],
                 &[],
@@ -4607,6 +4941,7 @@ mod tests {
                 clusters: vec![],
             },
             frame_diagnoses: vec![],
+            frame_pacing: FramePacingSummary::default(),
             pressure_timeline: PressureTimelineSummary::default(),
             artifacts_summary: artifacts_summary_from_session(&session),
             data_quality: data_quality_summary(&session, &validation),
@@ -4635,7 +4970,11 @@ mod tests {
         assert!(html.contains(r#"id="data-quality-section""#));
         assert!(html.contains(r#"id="top-tasks-section""#));
         assert!(html.contains(r#"id="spike-charts-section""#));
+        assert!(html.contains(r#"id="pressure-timeline-section""#));
+        assert!(html.contains(r#"id="frame-pacing-section""#));
         assert!(html.contains(r#"id="cluster-analysis-section""#));
+        assert!(html.contains("Why this diagnosis was chosen"));
+        assert!(html.contains("Evidence missing / not strong enough"));
         assert!(html.contains(r#"id="frame-diagnoses-section""#));
         assert!(html.contains(r#"id="artifacts-section""#));
         assert!(html.contains(r#"id="data-report-model""#));
@@ -4712,6 +5051,50 @@ mod tests {
         let spikes = identify_frame_spikes(&frames_with_long, 0.0);
         assert_eq!(spikes.len(), 1);
         assert_eq!(spikes[0].frametime_ms, 33.4);
+    }
+
+    #[test]
+    fn frame_pacing_summary_finds_outliers_and_links_clusters() {
+        let mut cluster = cluster_from_points(
+            vec![SpikePoint {
+                elapsed_ms: Some(100),
+                ..spike_point_for_report_test(1, TaskClass::Compositor, "kwin_wayland", 6_000_000)
+            }],
+            1,
+        );
+        cluster.anchor_class = Some(TaskClass::Compositor);
+        cluster.anchor_comm = Some("kwin_wayland".to_owned());
+        cluster.diagnosis = Some(diagnose_cluster(
+            &cluster,
+            &session_io::RunArtifacts::default(),
+            0,
+        ));
+
+        let frames = vec![
+            FrameEvent {
+                elapsed_ms: 84,
+                frametime_ms: 16.6,
+            },
+            FrameEvent {
+                elapsed_ms: 100,
+                frametime_ms: 48.5,
+            },
+            FrameEvent {
+                elapsed_ms: 117,
+                frametime_ms: 16.7,
+            },
+        ];
+
+        let summary = build_frame_pacing_summary(&frames, &[cluster], &[], 2_500);
+
+        assert_eq!(summary.frame_count, 3);
+        assert_eq!(summary.outlier_count, 1);
+        assert_eq!(summary.compositor_cluster_count, 1);
+        assert!(summary.outliers[0].nearest_cluster_delta_ms.is_some());
+        assert_eq!(
+            summary.outliers[0].nearest_cluster_anchor_class,
+            Some(TaskClass::Compositor)
+        );
     }
 
     #[test]
