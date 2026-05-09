@@ -124,7 +124,6 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "real_world_irq_overlap",
         "real_world_block_io_stall",
         "real_world_gpu_bound_clean_cpu",
-        "real_truncated_low_quality",
         "real_foreground_window",
         "real_community_rules_classification",
     ] {
@@ -185,6 +184,11 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         root,
         "real_block_io_overlap",
         real_block_io_overlap_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_truncated_low_quality",
+        real_truncated_low_quality_fixture(),
     )?;
 
     Ok(())
@@ -550,6 +554,13 @@ fn real_block_io_overlap_fixture() -> (SessionFile, FixtureArtifacts) {
             block_io_events,
             ..Default::default()
         },
+    )
+}
+
+fn real_truncated_low_quality_fixture() -> (SessionFile, FixtureArtifacts) {
+    renamed_fixture(
+        "real_truncated_low_quality",
+        truncated_drop_counters_fixture(),
     )
 }
 
@@ -1279,6 +1290,17 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["Medium", "High"],
             "High",
             &["block I/O"],
+            exact_artifacts(artifacts),
+        ),
+        "real_truncated_low_quality" => fixture_metadata(
+            name,
+            "sanitized-real-recording",
+            "Medium",
+            "Sanitized low-quality recording with truncated spike events and nonzero drop counters; quality handling is the regression target, not diagnosis cause detection.",
+            "Unknown",
+            &[],
+            "Medium",
+            &[],
             exact_artifacts(artifacts),
         ),
         "foreground_window" => fixture_metadata(
