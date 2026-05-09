@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 #[derive(Clone)]
 pub(crate) struct TuiRenderSnapshot {
     pub(crate) elapsed_ms: u64,
