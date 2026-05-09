@@ -15,9 +15,11 @@ use serde::{Deserialize, Serialize};
 use crate::{cli::RulesCommand, process_tree::TaskClass};
 
 pub mod import;
+pub mod importer;
 pub mod loader;
 pub mod paths;
 
+pub use importer::{ImportInput, import_ananicy_rules};
 pub use loader::{LoadCommunityRulesInput, load_rules_db, load_rules_dir, load_rules_file};
 pub use paths::{default_system_rules_dirs, default_user_rules_dir};
 
@@ -205,7 +207,7 @@ pub fn rules_command(command: RulesCommand) -> anyhow::Result<()> {
 fn rules_import_command(args: crate::cli::RulesImportArgs) -> anyhow::Result<()> {
     let generated_at = generated_at_now();
     let source_display = args.source.display().to_string();
-    let input = import::ImportInput {
+    let input = ImportInput {
         source_dir: args.source.clone(),
         source_name: args.name.clone(),
         source_repo: args.source_repo.clone(),
@@ -213,7 +215,7 @@ fn rules_import_command(args: crate::cli::RulesImportArgs) -> anyhow::Result<()>
         generated_at: generated_at.clone(),
     };
 
-    let imported = import::import_ananicy_rules(input)?;
+    let imported = import_ananicy_rules(input)?;
     let out_path = match args.out.clone() {
         Some(path) => path,
         None => default_imported_rules_path(&args.name)?,
