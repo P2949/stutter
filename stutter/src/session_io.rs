@@ -189,17 +189,23 @@ fn load_ndjson_file_filtered<T: DeserializeOwned, F: Fn(&T) -> bool>(
     Ok(results)
 }
 
-#[allow(dead_code)]
-fn validate_ndjson_file<T: DeserializeOwned>(path: &Path) -> Result<()> {
+fn count_ndjson_file<T: DeserializeOwned>(path: &Path) -> Result<usize> {
     let file =
         fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let reader = std::io::BufReader::new(file);
     let deserializer = serde_json::Deserializer::from_reader(reader);
     let iter = deserializer.into_iter::<T>();
+    let mut count = 0usize;
     for item in iter {
         item.with_context(|| format!("failed to parse {}", path.display()))?;
+        count += 1;
     }
-    Ok(())
+    Ok(count)
+}
+
+#[allow(dead_code)]
+fn validate_ndjson_file<T: DeserializeOwned>(path: &Path) -> Result<()> {
+    count_ndjson_file::<T>(path).map(|_| ())
 }
 
 fn load_ndjson_file<T: DeserializeOwned>(path: &Path) -> Result<Vec<T>> {
@@ -428,11 +434,101 @@ pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<R
     Ok(artifacts)
 }
 
+fn validation_has_present_file(validation: &RunValidationReport, file_name: &str) -> bool {
+    validation
+        .present_files
+        .iter()
+        .any(|file| file == file_name)
+}
+
+fn expected_artifact_count_for_file(session: &SessionFile, file_name: &str) -> Option<u64> {
+    match file_name {
+        INTERVALS_FILE => Some(session.core.interval_record_count),
+        SPIKES_FILE => Some(session.core.spike_events_retained_count),
+        IRQ_EVENTS_FILE => Some(session.core.irq_event_count),
+        GPU_SAMPLES_FILE => Some(session.core.gpu_sample_count),
+        FRAME_EVENTS_FILE | FRAME_EVENTS_STREAM_FILE => Some(session.core.frame_event_count),
+        BLOCK_IO_EVENTS_FILE => Some(session.core.block_io_event_count),
+        FOCUS_EVENTS_FILE => Some(session.core.focus_event_count),
+        FOREGROUND_EVENTS_FILE => Some(session.core.foreground_event_count),
+        _ => None,
+    }
+}
+
+fn artifact_count_label(file_name: &str) -> &'static str {
+    match file_name {
+        INTERVALS_FILE => "interval record",
+        SPIKES_FILE => "spike event",
+        IRQ_EVENTS_FILE => "IRQ event",
+        GPU_SAMPLES_FILE => "GPU sample",
+        FRAME_EVENTS_FILE | FRAME_EVENTS_STREAM_FILE => "frame event",
+        BLOCK_IO_EVENTS_FILE => "block I/O event",
+        FOCUS_EVENTS_FILE => "focus event",
+        FOREGROUND_EVENTS_FILE => "foreground event",
+        _ => "artifact",
+    }
+}
+
+fn push_artifact_count_mismatch_warning(
+    validation: &mut RunValidationReport,
+    file_name: &str,
+    expected_count: u64,
+    actual_count: usize,
+) {
+    if actual_count as u64 != expected_count {
+        validation.warnings.push(format!(
+            "{} count mismatch: session reported {}, found {} in {}",
+            artifact_count_label(file_name),
+            expected_count,
+            actual_count,
+            file_name
+        ));
+    }
+}
+
+fn warn_if_artifact_count_mismatch(
+    validation: &mut RunValidationReport,
+    session: &SessionFile,
+    file_name: &str,
+    actual_count: usize,
+) {
+    if let Some(expected_count) = expected_artifact_count_for_file(session, file_name) {
+        push_artifact_count_mismatch_warning(validation, file_name, expected_count, actual_count);
+    }
+}
+
+fn check_present_loaded_artifact_count(
+    validation: &mut RunValidationReport,
+    session: &SessionFile,
+    file_name: &str,
+    actual_count: usize,
+) {
+    if validation_has_present_file(validation, file_name) {
+        warn_if_artifact_count_mismatch(validation, session, file_name, actual_count);
+    }
+}
+
+fn check_present_loaded_frame_count(
+    validation: &mut RunValidationReport,
+    session: &SessionFile,
+    actual_count: usize,
+) {
+    if validation_has_present_file(validation, FRAME_EVENTS_FILE) {
+        warn_if_artifact_count_mismatch(validation, session, FRAME_EVENTS_FILE, actual_count);
+    } else if validation_has_present_file(validation, FRAME_EVENTS_STREAM_FILE) {
+        warn_if_artifact_count_mismatch(
+            validation,
+            session,
+            FRAME_EVENTS_STREAM_FILE,
+            actual_count,
+        );
+    }
+}
+
 fn check_consistency(artifacts: &mut RunArtifacts) {
     let session = &artifacts.session;
     let validation = &mut artifacts.validation;
 
-    // Schema validation
     if session.core.schema_version < SESSION_SCHEMA_VERSION {
         validation.warnings.push(format!(
             "session schema version {} is older than current {}",
@@ -466,29 +562,44 @@ fn check_consistency(artifacts: &mut RunArtifacts) {
         }
     }
 
-    // Spike count consistency
-    if validation.present_files.contains(&SPIKES_FILE.to_owned())
-        && artifacts.spikes.len() as u64 != session.core.spike_events_retained_count
-    {
-        validation.warnings.push(format!(
-            "spike count mismatch: session reported {}, found {} in artifact",
-            session.core.spike_events_retained_count,
-            artifacts.spikes.len()
-        ));
-    }
-
-    // Foreground count consistency
-    if validation
-        .present_files
-        .contains(&FOREGROUND_EVENTS_FILE.to_owned())
-        && artifacts.foreground_events.len() as u64 != session.core.foreground_event_count
-    {
-        validation.warnings.push(format!(
-            "foreground event count mismatch: session reported {}, found {} in artifact",
-            session.core.foreground_event_count,
-            artifacts.foreground_events.len()
-        ));
-    }
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        INTERVALS_FILE,
+        artifacts.intervals.len(),
+    );
+    check_present_loaded_artifact_count(validation, session, SPIKES_FILE, artifacts.spikes.len());
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        IRQ_EVENTS_FILE,
+        artifacts.irq_events.len(),
+    );
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        GPU_SAMPLES_FILE,
+        artifacts.gpu_samples.len(),
+    );
+    check_present_loaded_frame_count(validation, session, artifacts.frame_events.len());
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        BLOCK_IO_EVENTS_FILE,
+        artifacts.block_io_events.len(),
+    );
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        FOCUS_EVENTS_FILE,
+        artifacts.focus_events.len(),
+    );
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        FOREGROUND_EVENTS_FILE,
+        artifacts.foreground_events.len(),
+    );
 }
 
 impl RunArtifacts {
@@ -686,24 +797,25 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
         let path = report.run_dir.join(file_name);
         if path.exists() {
             let res = match type_name {
-                "IntervalRecord" => validate_ndjson_file::<IntervalRecord>(&path),
-                "SpikeEvent" => validate_ndjson_file::<SpikeEvent>(&path),
-                "TreeEvent" => validate_ndjson_file::<TreeEvent>(&path),
-                "IrqEventRecord" => validate_ndjson_file::<IrqEventRecord>(&path),
-                "GpuSample" => validate_ndjson_file::<GpuSample>(&path),
-                "FrameEvent" => validate_ndjson_file::<FrameEvent>(&path),
-                "MigrationEventRecord" => validate_ndjson_file::<MigrationEventRecord>(&path),
-                "CpuFreqRecord" => validate_ndjson_file::<CpuFreqRecord>(&path),
-                "BlockIoRecord" => validate_ndjson_file::<BlockIoRecord>(&path),
-                "ScxEvent" => validate_ndjson_file::<ScxEvent>(&path),
-                "FocusEvent" => validate_ndjson_file::<FocusEvent>(&path),
-                "ForegroundEvent" => validate_ndjson_file::<ForegroundEvent>(&path),
+                "IntervalRecord" => count_ndjson_file::<IntervalRecord>(&path),
+                "SpikeEvent" => count_ndjson_file::<SpikeEvent>(&path),
+                "TreeEvent" => count_ndjson_file::<TreeEvent>(&path),
+                "IrqEventRecord" => count_ndjson_file::<IrqEventRecord>(&path),
+                "GpuSample" => count_ndjson_file::<GpuSample>(&path),
+                "FrameEvent" => count_ndjson_file::<FrameEvent>(&path),
+                "MigrationEventRecord" => count_ndjson_file::<MigrationEventRecord>(&path),
+                "CpuFreqRecord" => count_ndjson_file::<CpuFreqRecord>(&path),
+                "BlockIoRecord" => count_ndjson_file::<BlockIoRecord>(&path),
+                "ScxEvent" => count_ndjson_file::<ScxEvent>(&path),
+                "FocusEvent" => count_ndjson_file::<FocusEvent>(&path),
+                "ForegroundEvent" => count_ndjson_file::<ForegroundEvent>(&path),
                 _ => unreachable!(),
             };
 
             match res {
-                Ok(_) => {
+                Ok(count) => {
                     report.present_files.push(file_name.to_owned());
+                    warn_if_artifact_count_mismatch(&mut report, &session, file_name, count);
                 }
                 Err(e) => {
                     report.errors.push(format!("{file_name} invalid: {e:#}"));
@@ -712,11 +824,17 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
         } else {
             let frame_stream_path = report.run_dir.join(FRAME_EVENTS_STREAM_FILE);
             if file_name == FRAME_EVENTS_FILE && frame_stream_path.exists() {
-                match validate_ndjson_file::<FrameEvent>(&frame_stream_path) {
-                    Ok(_) => {
+                match count_ndjson_file::<FrameEvent>(&frame_stream_path) {
+                    Ok(count) => {
                         report
                             .present_files
                             .push(FRAME_EVENTS_STREAM_FILE.to_owned());
+                        warn_if_artifact_count_mismatch(
+                            &mut report,
+                            &session,
+                            FRAME_EVENTS_STREAM_FILE,
+                            count,
+                        );
                     }
                     Err(e) => {
                         report
@@ -736,11 +854,17 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
             .present_files
             .contains(&FRAME_EVENTS_STREAM_FILE.to_owned())
     {
-        match validate_ndjson_file::<FrameEvent>(&frame_stream_path) {
-            Ok(_) => {
+        match count_ndjson_file::<FrameEvent>(&frame_stream_path) {
+            Ok(count) => {
                 report
                     .present_files
                     .push(FRAME_EVENTS_STREAM_FILE.to_owned());
+                warn_if_artifact_count_mismatch(
+                    &mut report,
+                    &session,
+                    FRAME_EVENTS_STREAM_FILE,
+                    count,
+                );
             }
             Err(e) => {
                 report
@@ -940,6 +1064,98 @@ mod tests {
 
     fn write_minimal_session(dir: &Path) {
         write_session(dir, &minimal_session());
+    }
+
+    fn write_empty_ndjson_files(dir: &Path, files: &[&str]) {
+        for file_name in files {
+            fs::write(dir.join(file_name), "").unwrap();
+        }
+    }
+
+    fn session_with_expected_artifact_counts() -> SessionFile {
+        let mut session = minimal_session();
+        session.core.interval_record_count = 1;
+        session.core.spike_events_retained_count = 1;
+        session.core.irq_event_count = 1;
+        session.core.gpu_sample_count = 1;
+        session.core.frame_event_count = 1;
+        session.core.block_io_event_count = 1;
+        session.core.focus_event_count = 1;
+        session.core.foreground_event_count = 1;
+        session
+    }
+
+    fn assert_count_mismatch_warnings(warnings: &[String]) {
+        let text = warnings.join("\n");
+        for needle in [
+            "interval record count mismatch",
+            "spike event count mismatch",
+            "IRQ event count mismatch",
+            "GPU sample count mismatch",
+            "frame event count mismatch",
+            "block I/O event count mismatch",
+            "focus event count mismatch",
+            "foreground event count mismatch",
+        ] {
+            assert!(
+                text.contains(needle),
+                "missing count mismatch warning {needle:?}; warnings were:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn load_run_artifacts_warns_for_present_optional_count_mismatches() {
+        let dir = temp_dir("loaded-count-mismatches");
+        let session = session_with_expected_artifact_counts();
+        write_session(&dir, &session);
+        write_empty_ndjson_files(
+            &dir,
+            &[
+                INTERVALS_FILE,
+                SPIKES_FILE,
+                IRQ_EVENTS_FILE,
+                GPU_SAMPLES_FILE,
+                FRAME_EVENTS_FILE,
+                BLOCK_IO_EVENTS_FILE,
+                FOCUS_EVENTS_FILE,
+                FOREGROUND_EVENTS_FILE,
+            ],
+        );
+
+        let artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::AUTOTUNE_REPLAY).unwrap();
+
+        assert!(artifacts.validation.errors.is_empty());
+        assert_count_mismatch_warnings(&artifacts.validation.warnings);
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn validate_run_dir_warns_for_present_optional_count_mismatches() {
+        let dir = temp_dir("validate-count-mismatches");
+        let session = session_with_expected_artifact_counts();
+        write_session(&dir, &session);
+        write_empty_ndjson_files(
+            &dir,
+            &[
+                INTERVALS_FILE,
+                SPIKES_FILE,
+                IRQ_EVENTS_FILE,
+                GPU_SAMPLES_FILE,
+                FRAME_EVENTS_FILE,
+                BLOCK_IO_EVENTS_FILE,
+                FOCUS_EVENTS_FILE,
+                FOREGROUND_EVENTS_FILE,
+            ],
+        );
+
+        let report = validate_run_dir(&dir).unwrap();
+
+        assert!(report.errors.is_empty());
+        assert_count_mismatch_warnings(&report.warnings);
+
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]
