@@ -118,7 +118,11 @@ fn merge_target_config(
             override_config.watch_process,
             default.watch_process,
         ),
-        persistent: override_field(base.persistent, override_config.persistent, default.persistent),
+        persistent: override_field(
+            base.persistent,
+            override_config.persistent,
+            default.persistent,
+        ),
         keep_missing_pid: override_field(
             base.keep_missing_pid,
             override_config.keep_missing_pid,

@@ -661,9 +661,15 @@ impl MonitorSession {
     }
 
     fn write_focus_event(&mut self, event: recorder::FocusEvent) -> anyhow::Result<()> {
-        crate::events::push_artifact_event(&mut self.recorder, ArtifactKind::FocusEvents, &event, "focus_events", |c| {
-            c.focus_event_count += 1;
-        });
+        crate::events::push_artifact_event(
+            &mut self.recorder,
+            ArtifactKind::FocusEvents,
+            &event,
+            "focus_events",
+            |c| {
+                c.focus_event_count += 1;
+            },
+        );
         Ok(())
     }
 
@@ -1285,9 +1291,15 @@ impl MonitorSession {
 
                 if self.recorder.streams.contains(ArtifactKind::RuntimeSlices) {
                     for record in &batch.records {
-                        crate::events::push_artifact_event(&mut self.recorder, ArtifactKind::RuntimeSlices, record, "runtime_slices", |c| {
-                            c.runtime_slice_count += 1;
-                        });
+                        crate::events::push_artifact_event(
+                            &mut self.recorder,
+                            ArtifactKind::RuntimeSlices,
+                            record,
+                            "runtime_slices",
+                            |c| {
+                                c.runtime_slice_count += 1;
+                            },
+                        );
                     }
                 } else {
                     self.recorder.counters.runtime_slice_count = self
@@ -1439,9 +1451,15 @@ impl MonitorSession {
             .sample(self.started.elapsed().as_millis() as u64)
         {
             if self.recorder.streams.contains(ArtifactKind::ScxEvents) {
-                crate::events::push_artifact_event(&mut self.recorder, ArtifactKind::ScxEvents, &event, "scx_events", |c| {
-                    c.scx_event_count += 1;
-                });
+                crate::events::push_artifact_event(
+                    &mut self.recorder,
+                    ArtifactKind::ScxEvents,
+                    &event,
+                    "scx_events",
+                    |c| {
+                        c.scx_event_count += 1;
+                    },
+                );
             } else {
                 self.recorder.buffers.scx_events.push(event);
                 self.recorder.counters.scx_event_count += 1;
@@ -1467,9 +1485,15 @@ impl MonitorSession {
             if let Some(sample) = sample_opt {
                 self.recent_telemetry.push_gpu(sample.clone());
 
-                crate::events::push_artifact_event(&mut self.recorder, ArtifactKind::GpuSamples, &sample, "gpu_samples", |c| {
-                    c.gpu_sample_count += 1;
-                });
+                crate::events::push_artifact_event(
+                    &mut self.recorder,
+                    ArtifactKind::GpuSamples,
+                    &sample,
+                    "gpu_samples",
+                    |c| {
+                        c.gpu_sample_count += 1;
+                    },
+                );
             }
         }
         Ok(())
