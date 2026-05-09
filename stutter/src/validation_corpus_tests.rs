@@ -270,6 +270,96 @@ fn validation_corpus_gpu_bound_clean_cpu_has_gpu_candidate() {
 }
 
 #[test]
+fn validation_corpus_real_world_game_scheduler_delay() {
+    assert_fixture(ExpectedFixture {
+        name: "real_world_game_scheduler_delay",
+        expected_primary: Some(StutterCause::GameThreadSchedulerDelay),
+        accepted_confidence: &[Confidence::Medium, Confidence::High],
+        expected_quality: DataQualityLevel::High,
+        evidence_substrings: &["game thread"],
+        expected_artifacts: ExpectedArtifacts {
+            spikes: Some(3),
+            intervals: Some(3),
+            gpu_samples: Some(1),
+            frames: Some(4),
+            ..Default::default()
+        },
+    });
+}
+
+#[test]
+fn validation_corpus_real_world_compositor_scheduler_delay() {
+    assert_fixture(ExpectedFixture {
+        name: "real_world_compositor_scheduler_delay",
+        expected_primary: Some(StutterCause::CompositorSchedulerDelay),
+        accepted_confidence: &[Confidence::Medium, Confidence::High],
+        expected_quality: DataQualityLevel::High,
+        evidence_substrings: &["compositor thread"],
+        expected_artifacts: ExpectedArtifacts {
+            spikes: Some(3),
+            intervals: Some(3),
+            gpu_samples: Some(1),
+            frames: Some(4),
+            ..Default::default()
+        },
+    });
+}
+
+#[test]
+fn validation_corpus_real_world_irq_overlap() {
+    assert_fixture(ExpectedFixture {
+        name: "real_world_irq_overlap",
+        expected_primary: Some(StutterCause::IrqDelayCandidate),
+        accepted_confidence: &[Confidence::Medium, Confidence::High],
+        expected_quality: DataQualityLevel::High,
+        evidence_substrings: &["IRQ"],
+        expected_artifacts: ExpectedArtifacts {
+            spikes: Some(3),
+            intervals: Some(3),
+            irq_events: Some(1),
+            ..Default::default()
+        },
+    });
+}
+
+#[test]
+fn validation_corpus_real_world_block_io_stall() {
+    assert_fixture(ExpectedFixture {
+        name: "real_world_block_io_stall",
+        expected_primary: Some(StutterCause::BlockIoCandidate),
+        accepted_confidence: &[Confidence::Medium, Confidence::High],
+        expected_quality: DataQualityLevel::High,
+        evidence_substrings: &["block I/O"],
+        expected_artifacts: ExpectedArtifacts {
+            spikes: Some(3),
+            intervals: Some(3),
+            block_io_events: Some(1),
+            ..Default::default()
+        },
+    });
+}
+
+#[test]
+fn validation_corpus_real_world_gpu_bound_clean_cpu() {
+    let analysis = assert_fixture(ExpectedFixture {
+        name: "real_world_gpu_bound_clean_cpu",
+        expected_primary: Some(StutterCause::GpuBoundCandidate),
+        accepted_confidence: &[Confidence::Low, Confidence::Medium, Confidence::High],
+        expected_quality: DataQualityLevel::High,
+        evidence_substrings: &["GPU busy"],
+        expected_artifacts: ExpectedArtifacts {
+            spikes: Some(3),
+            intervals: Some(3),
+            gpu_samples: Some(1),
+            frames: Some(4),
+            ..Default::default()
+        },
+    });
+
+    assert_candidate_contains(&analysis, StutterCause::GpuBoundCandidate, &["GPU busy"]);
+}
+
+#[test]
 fn validation_corpus_clean_run_is_high_quality_without_false_diagnosis() {
     let analysis = assert_fixture(ExpectedFixture {
         name: "clean_run",
@@ -401,6 +491,23 @@ fn validation_corpus_old_schema_warns_without_rejecting() {
         "old schema should warn, not error: {:?}",
         analysis.data_quality.validation_errors
     );
+}
+
+#[test]
+#[ignore]
+fn regenerate_public_examples_v21() {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .expect("stutter crate manifest should have a workspace parent");
+    let root = workspace_root
+        .join("docs")
+        .join("examples")
+        .join("artifacts")
+        .join("v21");
+
+    test_fixture_builder::write_public_examples_v21(&root)
+        .unwrap_or_else(|err| panic!("failed to regenerate public v21 examples: {err:#}"));
 }
 
 #[test]

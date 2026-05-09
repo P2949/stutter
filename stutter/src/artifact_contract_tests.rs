@@ -47,6 +47,10 @@ fn assert_object_has_keys(value: &Value, keys: &[&str]) {
 }
 
 fn non_empty_line_count(path: impl AsRef<Path>) -> u64 {
+    let path = path.as_ref();
+    if !path.exists() {
+        return 0;
+    }
     fs::read_to_string(path)
         .unwrap()
         .lines()
@@ -219,51 +223,91 @@ fn present_invalid_ndjson_errors() {
 
 #[test]
 fn docs_example_artifacts_validate() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("docs")
         .join("examples")
         .join("artifacts")
         .join(format!("v{}", SESSION_SCHEMA_VERSION));
 
-    let validation = session_io::validate_run_dir(&path).unwrap();
-    assert!(validation.errors.is_empty(), "{:?}", validation.errors);
+    let mut validated_any = false;
+    for entry in fs::read_dir(&root).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
 
-    let analysis = report::build_report_analysis(&path, 10, 5, None).unwrap();
+        let validation = session_io::validate_run_dir(&path).unwrap();
+        assert!(
+            validation.errors.is_empty(),
+            "{} errors: {:?}",
+            path.display(),
+            validation.errors
+        );
+
+        let analysis = report::build_report_analysis(&path, 10, 5, None).unwrap();
+        assert!(
+            analysis.data_quality.validation_errors.is_empty(),
+            "{} validation errors: {:?}",
+            path.display(),
+            analysis.data_quality.validation_errors
+        );
+        serde_json::to_value(&analysis).unwrap();
+
+        let session = session_io::load_session(&path).unwrap();
+        assert_eq!(
+            session.core.interval_record_count,
+            non_empty_line_count(path.join(session_io::INTERVALS_FILE)),
+            "{} interval count mismatch",
+            path.display()
+        );
+        assert_eq!(
+            session.core.spike_events_retained_count,
+            non_empty_line_count(path.join(session_io::SPIKES_FILE)),
+            "{} spike count mismatch",
+            path.display()
+        );
+        assert_eq!(
+            session.core.gpu_sample_count,
+            non_empty_line_count(path.join(session_io::GPU_SAMPLES_FILE)),
+            "{} gpu sample count mismatch",
+            path.display()
+        );
+        assert_eq!(
+            session.core.block_io_event_count,
+            non_empty_line_count(path.join(session_io::BLOCK_IO_EVENTS_FILE)),
+            "{} block io count mismatch",
+            path.display()
+        );
+        let frame_count = if path.join(session_io::FRAME_EVENTS_FILE).exists() {
+            non_empty_line_count(path.join(session_io::FRAME_EVENTS_FILE))
+        } else {
+            non_empty_line_count(path.join(session_io::FRAME_EVENTS_STREAM_FILE))
+        };
+        assert_eq!(
+            session.core.frame_event_count,
+            frame_count,
+            "{} frame count mismatch",
+            path.display()
+        );
+
+        let metadata = read_json(path.join(session_io::METADATA_FILE));
+        assert_eq!(
+            metadata
+                .get("spike_events_retained_count")
+                .and_then(Value::as_u64),
+            Some(session.core.spike_events_retained_count),
+            "{} metadata spike count mismatch",
+            path.display()
+        );
+
+        validated_any = true;
+    }
+
     assert!(
-        analysis.data_quality.validation_errors.is_empty(),
-        "{:?}",
-        analysis.data_quality.validation_errors
-    );
-    serde_json::to_value(&analysis).unwrap();
-
-    let session = session_io::load_session(&path).unwrap();
-    assert_eq!(
-        session.core.interval_record_count,
-        non_empty_line_count(path.join(session_io::INTERVALS_FILE))
-    );
-    assert_eq!(
-        session.core.spike_events_retained_count,
-        non_empty_line_count(path.join(session_io::SPIKES_FILE))
-    );
-    assert_eq!(
-        session.core.gpu_sample_count,
-        non_empty_line_count(path.join(session_io::GPU_SAMPLES_FILE))
-    );
-    assert_eq!(
-        session.core.block_io_event_count,
-        non_empty_line_count(path.join(session_io::BLOCK_IO_EVENTS_FILE))
-    );
-    assert_eq!(
-        session.core.frame_event_count,
-        non_empty_line_count(path.join(session_io::FRAME_EVENTS_STREAM_FILE))
-    );
-
-    let metadata = read_json(path.join(session_io::METADATA_FILE));
-    assert_eq!(
-        metadata
-            .get("spike_events_retained_count")
-            .and_then(Value::as_u64),
-        Some(session.core.spike_events_retained_count)
+        validated_any,
+        "no public examples found in {}",
+        root.display()
     );
 }
