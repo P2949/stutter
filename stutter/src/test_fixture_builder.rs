@@ -62,6 +62,55 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
     )?;
     write_fixture(root, "old_schema_warning", old_schema_warning_fixture())?;
 
+    write_fixture(
+        root,
+        "real_world_game_scheduler_delay",
+        real_world_game_scheduler_delay_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_world_compositor_scheduler_delay",
+        real_world_compositor_scheduler_delay_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_world_irq_overlap",
+        real_world_irq_overlap_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_world_block_io_stall",
+        real_world_block_io_stall_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_world_gpu_bound_clean_cpu",
+        real_world_gpu_bound_clean_cpu_fixture(),
+    )?;
+
+    Ok(())
+}
+
+pub(crate) fn write_public_examples_v21(root: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(root)
+        .with_context(|| format!("failed to create public example root {}", root.display()))?;
+
+    write_fixture(
+        root,
+        "real_world_game_scheduler_delay",
+        real_world_game_scheduler_delay_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_world_compositor_scheduler_delay",
+        real_world_compositor_scheduler_delay_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "real_world_gpu_bound_clean_cpu",
+        real_world_gpu_bound_clean_cpu_fixture(),
+    )?;
+
     Ok(())
 }
 
@@ -352,6 +401,378 @@ fn old_schema_warning_fixture() -> (SessionFile, FixtureArtifacts) {
         &mut session,
         &FixtureArtifacts {
             intervals,
+            ..Default::default()
+        },
+    )
+}
+
+fn real_world_game_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) {
+    let spikes = vec![
+        spike_event(5101, TaskClass::Game, "Main", 8_500_000, 0),
+        spike_event(
+            5102,
+            TaskClass::GameHelper,
+            "RenderThread",
+            3_200_000,
+            250_000,
+        ),
+        spike_event(
+            5103,
+            TaskClass::WineServer,
+            "wineserver",
+            2_900_000,
+            500_000,
+        ),
+    ];
+    let intervals = vec![
+        interval_record_with_class(100, 5101, "Main", TaskClass::Game, 4.0, 8_500_000),
+        interval_record_with_class(
+            100,
+            5102,
+            "RenderThread",
+            TaskClass::GameHelper,
+            3.0,
+            3_200_000,
+        ),
+        interval_record_with_class(
+            100,
+            5103,
+            "wineserver",
+            TaskClass::WineServer,
+            2.0,
+            2_900_000,
+        ),
+    ];
+    let gpu_samples = vec![GpuSample {
+        elapsed_ms: 100,
+        gpu_busy_percent: Some(52),
+        vram_used_bytes: Some(3_000_000_000),
+        vram_total_bytes: Some(8_000_000_000),
+        vram_used_percent: Some(37),
+        gpu_clock_mhz: Some(1450),
+        mem_clock_mhz: Some(7000),
+        temp_millidegrees: Some(57_000),
+        power_microwatts: Some(78_000_000),
+    }];
+    let frame_events = vec![
+        FrameEvent {
+            elapsed_ms: 84,
+            frametime_ms: 16.6,
+        },
+        FrameEvent {
+            elapsed_ms: 100,
+            frametime_ms: 54.0,
+        },
+        FrameEvent {
+            elapsed_ms: 117,
+            frametime_ms: 16.7,
+        },
+        FrameEvent {
+            elapsed_ms: 134,
+            frametime_ms: 16.6,
+        },
+    ];
+
+    let mut session = base_session("real_world_game_scheduler_delay");
+    session.config.tree_roots = vec![5100];
+    session.config.hwmon = true;
+    session.core.mangohud_first_frame_monotonic_ns = Some(0);
+    session.core.mangohud_first_frame_raw_elapsed_ms = Some(0);
+    apply_spike_session_fields(&mut session, &spikes);
+    apply_artifact_counts(
+        &mut session,
+        &FixtureArtifacts {
+            spikes,
+            intervals,
+            gpu_samples,
+            frame_events,
+            ..Default::default()
+        },
+    )
+}
+
+fn real_world_compositor_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) {
+    let spikes = vec![
+        spike_event(5201, TaskClass::Compositor, "kwin_wayland", 9_000_000, 0),
+        spike_event(5202, TaskClass::Game, "Main", 1_400_000, 250_000),
+        spike_event(
+            5203,
+            TaskClass::Helper,
+            "present-worker",
+            1_200_000,
+            500_000,
+        ),
+    ];
+    let intervals = vec![
+        interval_record_with_class(
+            100,
+            5201,
+            "kwin_wayland",
+            TaskClass::Compositor,
+            5.0,
+            9_000_000,
+        ),
+        interval_record_with_class(100, 5202, "Main", TaskClass::Game, 2.0, 1_400_000),
+        interval_record_with_class(
+            100,
+            5203,
+            "present-worker",
+            TaskClass::Helper,
+            1.0,
+            1_200_000,
+        ),
+    ];
+    let gpu_samples = vec![GpuSample {
+        elapsed_ms: 100,
+        gpu_busy_percent: Some(41),
+        vram_used_bytes: Some(2_500_000_000),
+        vram_total_bytes: Some(8_000_000_000),
+        vram_used_percent: Some(31),
+        gpu_clock_mhz: Some(1100),
+        mem_clock_mhz: Some(6500),
+        temp_millidegrees: Some(54_000),
+        power_microwatts: Some(62_000_000),
+    }];
+    let frame_events = vec![
+        FrameEvent {
+            elapsed_ms: 84,
+            frametime_ms: 16.6,
+        },
+        FrameEvent {
+            elapsed_ms: 100,
+            frametime_ms: 48.5,
+        },
+        FrameEvent {
+            elapsed_ms: 117,
+            frametime_ms: 16.7,
+        },
+        FrameEvent {
+            elapsed_ms: 134,
+            frametime_ms: 16.6,
+        },
+    ];
+
+    let mut session = base_session("real_world_compositor_scheduler_delay");
+    session.config.tree_roots = vec![5200];
+    session.config.hwmon = true;
+    session.core.mangohud_first_frame_monotonic_ns = Some(0);
+    session.core.mangohud_first_frame_raw_elapsed_ms = Some(0);
+    apply_spike_session_fields(&mut session, &spikes);
+    apply_artifact_counts(
+        &mut session,
+        &FixtureArtifacts {
+            spikes,
+            intervals,
+            gpu_samples,
+            frame_events,
+            ..Default::default()
+        },
+    )
+}
+
+fn real_world_irq_overlap_fixture() -> (SessionFile, FixtureArtifacts) {
+    let spikes = vec![
+        spike_event(5301, TaskClass::Unknown, "game-worker-a", 6_000_000, 0),
+        spike_event(
+            5302,
+            TaskClass::Unknown,
+            "game-worker-b",
+            4_500_000,
+            250_000,
+        ),
+        spike_event(
+            5303,
+            TaskClass::Unknown,
+            "game-worker-c",
+            4_000_000,
+            500_000,
+        ),
+    ];
+    let intervals = vec![
+        interval_record_with_class(
+            100,
+            5301,
+            "game-worker-a",
+            TaskClass::Unknown,
+            4.0,
+            6_000_000,
+        ),
+        interval_record_with_class(
+            100,
+            5302,
+            "game-worker-b",
+            TaskClass::Unknown,
+            3.0,
+            4_500_000,
+        ),
+        interval_record_with_class(
+            100,
+            5303,
+            "game-worker-c",
+            TaskClass::Unknown,
+            2.0,
+            4_000_000,
+        ),
+    ];
+    let irq_events = vec![IrqEventRecord {
+        elapsed_ms: Some(100),
+        irq: 146,
+        cpu: 3,
+        enter_ns: 98_500_000,
+        exit_ns: 104_500_000,
+        duration_ns: 6_000_000,
+    }];
+
+    let mut session = base_session("real_world_irq_overlap");
+    session.config.tree_roots = vec![5300];
+    session.config.irq_latency = true;
+    session.config.irqs = vec![146];
+    apply_spike_session_fields(&mut session, &spikes);
+    apply_artifact_counts(
+        &mut session,
+        &FixtureArtifacts {
+            spikes,
+            intervals,
+            irq_events,
+            ..Default::default()
+        },
+    )
+}
+
+fn real_world_block_io_stall_fixture() -> (SessionFile, FixtureArtifacts) {
+    let spikes = vec![
+        spike_event(5401, TaskClass::Unknown, "asset-stream", 7_000_000, 0),
+        spike_event(5402, TaskClass::Unknown, "shader-cache", 4_800_000, 250_000),
+        spike_event(5403, TaskClass::Unknown, "io-helper", 4_200_000, 500_000),
+    ];
+    let intervals = vec![
+        interval_record_with_class(
+            100,
+            5401,
+            "asset-stream",
+            TaskClass::Unknown,
+            2.0,
+            7_000_000,
+        ),
+        interval_record_with_class(
+            100,
+            5402,
+            "shader-cache",
+            TaskClass::Unknown,
+            1.0,
+            4_800_000,
+        ),
+        interval_record_with_class(100, 5403, "io-helper", TaskClass::Unknown, 1.0, 4_200_000),
+    ];
+    let block_io_events = vec![BlockIoRecord {
+        elapsed_ms: 100,
+        tid: 5401,
+        correlation_basis: Cow::Borrowed("request-pointer"),
+        dev: 259,
+        nr_sector: 128,
+        sector: 8_388_608,
+        duration_ns: 12_000_000,
+        timestamp_ns: 104_000_000,
+        rwbs: "R".to_owned(),
+    }];
+
+    let mut session = base_session("real_world_block_io_stall");
+    session.config.tree_roots = vec![5400];
+    session.config.block_io = true;
+    session.core.block_io_correlation_basis = "request-pointer".to_owned();
+    apply_spike_session_fields(&mut session, &spikes);
+    apply_artifact_counts(
+        &mut session,
+        &FixtureArtifacts {
+            spikes,
+            intervals,
+            block_io_events,
+            ..Default::default()
+        },
+    )
+}
+
+fn real_world_gpu_bound_clean_cpu_fixture() -> (SessionFile, FixtureArtifacts) {
+    let spikes = vec![
+        spike_event(5501, TaskClass::Unknown, "frame-submit", 1_500_000, 0),
+        spike_event(5502, TaskClass::Unknown, "present-wait", 1_400_000, 250_000),
+        spike_event(
+            5503,
+            TaskClass::Unknown,
+            "render-helper",
+            1_300_000,
+            500_000,
+        ),
+    ];
+    let intervals = vec![
+        interval_record_with_class(
+            100,
+            5501,
+            "frame-submit",
+            TaskClass::Unknown,
+            4.0,
+            1_500_000,
+        ),
+        interval_record_with_class(
+            100,
+            5502,
+            "present-wait",
+            TaskClass::Unknown,
+            3.0,
+            1_400_000,
+        ),
+        interval_record_with_class(
+            100,
+            5503,
+            "render-helper",
+            TaskClass::Unknown,
+            2.0,
+            1_300_000,
+        ),
+    ];
+    let gpu_samples = vec![GpuSample {
+        elapsed_ms: 100,
+        gpu_busy_percent: Some(99),
+        vram_used_bytes: Some(7_200_000_000),
+        vram_total_bytes: Some(8_000_000_000),
+        vram_used_percent: Some(90),
+        gpu_clock_mhz: Some(2550),
+        mem_clock_mhz: Some(9750),
+        temp_millidegrees: Some(71_000),
+        power_microwatts: Some(215_000_000),
+    }];
+    let frame_events = vec![
+        FrameEvent {
+            elapsed_ms: 84,
+            frametime_ms: 16.6,
+        },
+        FrameEvent {
+            elapsed_ms: 100,
+            frametime_ms: 61.0,
+        },
+        FrameEvent {
+            elapsed_ms: 117,
+            frametime_ms: 16.8,
+        },
+        FrameEvent {
+            elapsed_ms: 134,
+            frametime_ms: 16.7,
+        },
+    ];
+
+    let mut session = base_session("real_world_gpu_bound_clean_cpu");
+    session.config.tree_roots = vec![5500];
+    session.config.hwmon = true;
+    session.core.mangohud_first_frame_monotonic_ns = Some(0);
+    session.core.mangohud_first_frame_raw_elapsed_ms = Some(0);
+    apply_spike_session_fields(&mut session, &spikes);
+    apply_artifact_counts(
+        &mut session,
+        &FixtureArtifacts {
+            spikes,
+            intervals,
+            gpu_samples,
+            frame_events,
             ..Default::default()
         },
     )
