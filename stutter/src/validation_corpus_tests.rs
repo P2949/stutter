@@ -380,6 +380,35 @@ fn assert_analysis_json_shape(analysis: &ReportAnalysisJson) {
         );
     }
 }
+fn assert_primary_anchor_class_in(
+    analysis: &ReportAnalysisJson,
+    cause: StutterCause,
+    allowed_classes: &[crate::process_tree::TaskClass],
+) {
+    let cluster = analysis
+        .cluster_analysis
+        .clusters
+        .iter()
+        .find(|cluster| {
+            cluster
+                .diagnosis
+                .as_ref()
+                .is_some_and(|diagnosis| diagnosis.cause == cause)
+        })
+        .unwrap_or_else(|| panic!("missing primary diagnosis cluster for {cause:?}"));
+
+    let anchor_class = cluster
+        .anchor_class
+        .unwrap_or_else(|| panic!("missing anchor_class for primary diagnosis {cause:?}"));
+
+    assert!(
+        allowed_classes.contains(&anchor_class),
+        "primary diagnosis {cause:?} had anchor_class {:?}, expected one of {:?}",
+        anchor_class,
+        allowed_classes
+    );
+}
+
 fn assert_candidate_contains(
     analysis: &ReportAnalysisJson,
     cause: StutterCause,
@@ -445,6 +474,66 @@ fn validation_corpus_real_clean_baseline() {
             .collect::<Vec<_>>()
     );
     assert_analysis_json_shape(&analysis);
+}
+
+#[test]
+fn validation_corpus_real_game_thread_scheduler_delay() {
+    let (analysis, _) = assert_fixture_from_metadata("real_game_thread_scheduler_delay");
+
+    assert_eq!(analysis.data_quality.level, DataQualityLevel::High);
+    assert!(analysis.data_quality.validation_errors.is_empty());
+    assert!(analysis.data_quality.validation_warnings.is_empty());
+
+    let diagnosis = primary_diagnosis(&analysis)
+        .expect("real_game_thread_scheduler_delay expected a primary diagnosis");
+    assert_eq!(
+        diagnosis.cause,
+        StutterCause::GameThreadSchedulerDelay,
+        "real_game_thread_scheduler_delay must stay classified as game scheduler delay, not CPU pressure or Unknown"
+    );
+
+    let evidence_text = diagnosis.evidence.join("\n");
+    for needle in ["game thread", "delayed"] {
+        assert!(
+            evidence_text.contains(needle),
+            "real_game_thread_scheduler_delay missing evidence substring {:?}; evidence was:\n{}",
+            needle,
+            evidence_text
+        );
+    }
+
+    assert_primary_anchor_class_in(
+        &analysis,
+        StutterCause::GameThreadSchedulerDelay,
+        &[
+            crate::process_tree::TaskClass::Game,
+            crate::process_tree::TaskClass::GameRenderThread,
+            crate::process_tree::TaskClass::GameWorkerThread,
+            crate::process_tree::TaskClass::GameHelper,
+            crate::process_tree::TaskClass::WineServer,
+        ],
+    );
+
+    assert!(
+        analysis.artifacts_summary.spike_count >= 3,
+        "real_game_thread_scheduler_delay should contain clustered game/render/main-thread spikes"
+    );
+    assert!(
+        analysis.artifacts_summary.frame_event_count >= 1,
+        "real_game_thread_scheduler_delay should contain frame-correlation data near the scheduler spike"
+    );
+    assert!(
+        analysis.artifacts_summary.interval_record_count >= 1,
+        "real_game_thread_scheduler_delay should contain interval data so CPU pressure can be ruled out"
+    );
+    assert_eq!(
+        analysis.artifacts_summary.irq_event_count, 0,
+        "IRQ evidence should not dominate real_game_thread_scheduler_delay"
+    );
+    assert_eq!(
+        analysis.artifacts_summary.block_io_event_count, 0,
+        "block I/O evidence should not dominate real_game_thread_scheduler_delay"
+    );
 }
 
 #[test]
