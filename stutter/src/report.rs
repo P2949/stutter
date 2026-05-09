@@ -343,6 +343,35 @@ pub struct PressureTimelineSummary {
     pub max_io_some: Option<f64>,
     pub max_io_full: Option<f64>,
     pub windows: Vec<PressureWindow>,
+    pub peak_windows: Vec<PressurePeakWindow>,
+    pub pressure_notes: Vec<String>,
+    pub coverage: PressureTimelineCoverage,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct PressureTimelineCoverage {
+    pub interval_records_loaded: usize,
+    pub has_cpu_psi: bool,
+    pub has_mem_psi: bool,
+    pub has_io_psi: bool,
+    pub has_near_spike_windows: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PressurePeakWindow {
+    pub elapsed_ms: u64,
+    pub pressure_kind: PressureKind,
+    pub value: f64,
+    pub near_spike: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum PressureKind {
+    CpuSome,
+    MemSome,
+    MemFull,
+    IoSome,
+    IoFull,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2247,22 +2276,31 @@ pub(crate) fn build_pressure_timeline(
         .collect::<Vec<_>>();
     windows.sort_by_key(|window| window.elapsed_ms);
 
+    let max_cpu_some = max_pressure_value(intervals.iter().map(|interval| interval.cpu_psi_some));
+    let max_mem_some = Some(max_pressure_value(
+        intervals.iter().map(|interval| interval.mem_psi_some),
+    ));
+    let max_mem_full = Some(max_pressure_value(
+        intervals.iter().map(|interval| interval.mem_psi_full),
+    ));
+    let max_io_some = Some(max_pressure_value(
+        intervals.iter().map(|interval| interval.io_psi_some),
+    ));
+    let max_io_full = Some(max_pressure_value(
+        intervals.iter().map(|interval| interval.io_psi_full),
+    ));
+
     PressureTimelineSummary {
         sample_count: windows.len(),
-        max_cpu_some: max_pressure_value(intervals.iter().map(|interval| interval.cpu_psi_some)),
-        max_mem_some: Some(max_pressure_value(
-            intervals.iter().map(|interval| interval.mem_psi_some),
-        )),
-        max_mem_full: Some(max_pressure_value(
-            intervals.iter().map(|interval| interval.mem_psi_full),
-        )),
-        max_io_some: Some(max_pressure_value(
-            intervals.iter().map(|interval| interval.io_psi_some),
-        )),
-        max_io_full: Some(max_pressure_value(
-            intervals.iter().map(|interval| interval.io_psi_full),
-        )),
+        max_cpu_some,
+        max_mem_some,
+        max_mem_full,
+        max_io_some,
+        max_io_full,
         windows,
+        peak_windows: Vec::new(),
+        pressure_notes: Vec::new(),
+        coverage: PressureTimelineCoverage::default(),
     }
 }
 
