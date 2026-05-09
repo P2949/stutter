@@ -48,6 +48,7 @@ pub struct PresetDefaults {
     pub faults: Option<bool>,
     pub stat_wait: Option<bool>,
     pub block_io: Option<bool>,
+    pub runtime_slices: Option<bool>,
     pub irq_latency: Option<bool>,
 }
 
@@ -60,6 +61,7 @@ impl Preset {
                 faults: Some(true),
                 stat_wait: Some(true),
                 block_io: None,
+                runtime_slices: Some(false),
                 irq_latency: None,
             },
             Preset::Recording => PresetDefaults {
@@ -68,6 +70,7 @@ impl Preset {
                 faults: Some(true),
                 stat_wait: Some(true),
                 block_io: Some(true),
+                runtime_slices: Some(false),
                 irq_latency: None,
             },
             Preset::Diagnosis => PresetDefaults {
@@ -76,6 +79,7 @@ impl Preset {
                 faults: Some(true),
                 stat_wait: Some(true),
                 block_io: Some(true),
+                runtime_slices: Some(true),
                 irq_latency: None,
             },
             Preset::Lightweight => PresetDefaults {
@@ -84,6 +88,7 @@ impl Preset {
                 faults: Some(false),
                 stat_wait: Some(false),
                 block_io: Some(false),
+                runtime_slices: Some(false),
                 irq_latency: Some(false),
             },
         }

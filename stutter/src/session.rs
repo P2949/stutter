@@ -27,6 +27,7 @@ use crate::{
         self, BlockIoRecord, FinalizeRecordingInput, FrameEvent, GpuSample, IrqEventRecord,
         JsonArrayWriter, LiveRecorder, SpikeEvent, SpikeEventBuffer,
     },
+    runtime_slices::RuntimeSliceSampler,
     scx,
     session_events::MonitorEvent,
     tasks::TaskTracker,
@@ -370,6 +371,7 @@ pub struct MonitorSession {
     pub alert_sender: Option<tokio::sync::mpsc::Sender<AlertPayload>>,
     pub event_tx: Option<tokio::sync::mpsc::Sender<MonitorEvent>>,
     pub cpu_perf_sampler: Option<crate::perf_counters::CpuPerfSampler>,
+    pub runtime_slice_sampler: Option<RuntimeSliceSampler>,
     pub prometheus_state: Option<Arc<crate::prometheus::PrometheusState>>,
     #[allow(dead_code)]
     pub prometheus_task: Option<tokio::task::JoinHandle<()>>,
@@ -525,6 +527,11 @@ impl MonitorSession {
             recorder.streams.scx_event_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("scx_events.json"),
             )?);
+            if config.runtime_slices {
+                recorder.streams.runtime_slice_writer = Some(JsonArrayWriter::create(
+                    run.run_dir.join("runtime_slices.json"),
+                )?);
+            }
             recorder.streams.spike_event_writer = Some(JsonArrayWriter::create(
                 run.run_dir.join("spike_events.json"),
             )?);
@@ -647,6 +654,7 @@ impl MonitorSession {
         } else {
             None
         };
+        let runtime_slice_sampler = config.runtime_slices.then(RuntimeSliceSampler::new);
 
         let mut otel_exporter = None;
         if let Some(endpoint) = config.otlp_endpoint.as_ref() {
@@ -709,6 +717,7 @@ impl MonitorSession {
             alert_sender,
             event_tx,
             cpu_perf_sampler,
+            runtime_slice_sampler,
             prometheus_state,
             prometheus_task,
             otel_exporter,
@@ -1354,6 +1363,49 @@ impl MonitorSession {
                 }
             }
 
+            if let Some(sampler) = self.runtime_slice_sampler.as_mut() {
+                let tasks = self
+                    .tasks
+                    .active_targets
+                    .values()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let batch = sampler.collect(
+                    &tasks,
+                    elapsed_ms,
+                    self.config.summary_period_ms,
+                    self.config.runtime_slices_max_tasks,
+                );
+                self.recorder.counters.runtime_slice_read_errors = self
+                    .recorder
+                    .counters
+                    .runtime_slice_read_errors
+                    .saturating_add(batch.read_errors);
+                self.recorder.counters.runtime_slice_skipped_tasks = self
+                    .recorder
+                    .counters
+                    .runtime_slice_skipped_tasks
+                    .saturating_add(batch.skipped_tasks as u64);
+
+                if let Some(writer) = self.recorder.streams.runtime_slice_writer.as_mut() {
+                    for record in &batch.records {
+                        crate::events::push_ndjson_event(
+                            writer,
+                            record,
+                            &mut self.recorder.counters,
+                            "runtime_slices",
+                            |c| c.runtime_slice_count += 1,
+                        );
+                    }
+                } else {
+                    self.recorder.counters.runtime_slice_count = self
+                        .recorder
+                        .counters
+                        .runtime_slice_count
+                        .saturating_add(batch.records.len() as u64);
+                }
+            }
+
             if let Some(state) = self.prometheus_state.as_ref() {
                 let max_p99 = records.iter().map(|r| r.p99_ns).max().unwrap_or(0);
                 state.set_latest_p99_ns(max_p99);
@@ -1719,6 +1771,9 @@ impl MonitorSession {
                 writer.finish()?;
             }
             if let Some(writer) = self.recorder.streams.scx_event_writer.as_mut() {
+                writer.finish()?;
+            }
+            if let Some(writer) = self.recorder.streams.runtime_slice_writer.as_mut() {
                 writer.finish()?;
             }
 

@@ -22,6 +22,10 @@ pub struct RemoteMonitorRequest {
     pub faults: bool,
     pub stat_wait: bool,
     pub block_io: bool,
+    #[serde(default)]
+    pub runtime_slices: bool,
+    #[serde(default)]
+    pub runtime_slices_max_tasks: Option<usize>,
 
     pub irq_latency: bool,
     pub irqs: Vec<u32>,
@@ -230,6 +234,8 @@ pub fn request_from_monitor_config(config: &Config) -> anyhow::Result<RemoteMoni
         faults: config.faults,
         stat_wait: config.stat_wait,
         block_io: config.block_io,
+        runtime_slices: config.runtime_slices,
+        runtime_slices_max_tasks: Some(config.runtime_slices_max_tasks),
         irq_latency: config.irq_latency,
         irqs: config.irqs.clone(),
         foreground_window: config.foreground_window,
@@ -338,6 +344,8 @@ mod tests {
             faults: true,
             stat_wait: true,
             block_io: false,
+            runtime_slices: true,
+            runtime_slices_max_tasks: Some(64),
             irq_latency: false,
             irqs: vec![],
             foreground_window: true,
@@ -356,6 +364,8 @@ mod tests {
         assert_eq!(decoded.target_pids, vec![1234]);
         assert_eq!(decoded.duration_seconds, Some(5));
         assert!(decoded.hwmon);
+        assert!(decoded.runtime_slices);
+        assert_eq!(decoded.runtime_slices_max_tasks, Some(64));
         assert!(decoded.foreground_window);
         assert_eq!(decoded.focus_source.as_deref(), Some("hybrid"));
         assert_eq!(decoded.foreground_source.as_deref(), Some("sway"));
@@ -389,6 +399,8 @@ mod tests {
         let decoded: RemoteMonitorRequest = serde_json::from_str(json).unwrap();
 
         assert!(!decoded.foreground_window);
+        assert!(!decoded.runtime_slices);
+        assert_eq!(decoded.runtime_slices_max_tasks, None);
         assert_eq!(decoded.focus_source, None);
         assert_eq!(decoded.foreground_source, None);
         assert_eq!(decoded.foreground_poll_ms, None);

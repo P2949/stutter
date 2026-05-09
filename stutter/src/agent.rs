@@ -48,6 +48,7 @@ pub(crate) const AGENT_ARTIFACT_ALLOWLIST: &[&str] = &[
     "cpu_freq_samples.json",
     "io_events.json",
     "scx_events.json",
+    "runtime_slices.json",
     "foreground_events.json",
 ];
 
@@ -571,7 +572,7 @@ async fn start_record_handler(
         true,
         target_count,
         format!(
-            "run_id={} duration={} targets={} hwmon={} cpu_freq={} faults={} stat_wait={} block_io={} irq_latency={} foreground_window={} focus_source={:?} foreground_source={:?} foreground_include_title={}",
+            "run_id={} duration={} targets={} hwmon={} cpu_freq={} faults={} stat_wait={} block_io={} runtime_slices={} irq_latency={} foreground_window={} focus_source={:?} foreground_source={:?} foreground_include_title={}",
             run_id,
             request
                 .duration_seconds
@@ -582,6 +583,7 @@ async fn start_record_handler(
             request.faults,
             request.stat_wait,
             request.block_io,
+            request.runtime_slices,
             request.irq_latency,
             request.foreground_window,
             request.focus_source,
@@ -1240,6 +1242,9 @@ fn validate_remote_request_limits(
     if request.summary_ms == Some(0) {
         anyhow::bail!("summary_ms must be greater than zero");
     }
+    if request.runtime_slices_max_tasks == Some(0) {
+        anyhow::bail!("runtime_slices_max_tasks must be greater than zero");
+    }
 
     if request.spike_us == Some(0) {
         anyhow::bail!("spike_us must be greater than zero");
@@ -1342,6 +1347,8 @@ fn config_from_remote_request(
         cpu_perf_cache_refs: false,
         block_io: request.block_io,
         stat_wait: request.stat_wait,
+        runtime_slices: request.runtime_slices,
+        runtime_slices_max_tasks: request.runtime_slices_max_tasks.unwrap_or(256),
         json_stream: false,
         metrics_port: None,
         ringbuf_size_kb: None,
@@ -1400,6 +1407,8 @@ mod tests {
             faults: false,
             stat_wait: false,
             block_io: false,
+            runtime_slices: false,
+            runtime_slices_max_tasks: None,
             irq_latency: false,
             irqs: Vec::new(),
             foreground_window: false,

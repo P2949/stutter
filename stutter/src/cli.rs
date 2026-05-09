@@ -248,6 +248,26 @@ pub struct MonitorArgs {
     no_stat_wait: bool,
 
     #[arg(
+        long = "runtime-slices",
+        conflicts_with = "no_runtime_slices",
+        help = "Collect per-thread CPU runtime/wait slices from procfs schedstat"
+    )]
+    runtime_slices: bool,
+
+    #[arg(
+        long = "no-runtime-slices",
+        help = "Disable per-thread runtime-slice collection"
+    )]
+    no_runtime_slices: bool,
+
+    #[arg(
+        long = "runtime-slices-max-tasks",
+        default_value_t = 256,
+        value_name = "N"
+    )]
+    runtime_slices_max_tasks: usize,
+
+    #[arg(
         long = "json-stream",
         help = "Emit scheduler spike events to stdout as newline-delimited JSON"
     )]
@@ -556,6 +576,9 @@ impl Default for MonitorArgs {
             no_block_io: false,
             stat_wait: false,
             no_stat_wait: false,
+            runtime_slices: false,
+            no_runtime_slices: false,
+            runtime_slices_max_tasks: 256,
             json_stream: false,
             metrics_port: None,
             preset: None,
@@ -1407,6 +1430,8 @@ pub struct Config {
     pub cpu_perf_cache_refs: bool,
     pub block_io: bool,
     pub stat_wait: bool,
+    pub runtime_slices: bool,
+    pub runtime_slices_max_tasks: usize,
     pub json_stream: bool,
     pub metrics_port: Option<u16>,
     pub ringbuf_size_kb: Option<u32>,
@@ -2225,6 +2250,13 @@ fn config_from_monitor_args_with_file(
         args.block_io,
         args.no_block_io,
     );
+    let runtime_slices = merge_bool(
+        false,
+        None,
+        preset_defaults.runtime_slices,
+        args.runtime_slices,
+        args.no_runtime_slices,
+    );
 
     // Re-evaluating irq_latency based on prompt: "Do not auto-enable all IRQ monitoring... Presets do not modify IRQ latency. Document that users should pass --irq-latency --irq N explicitly."
     // But "lightweight" should disable it.
@@ -2324,6 +2356,9 @@ fn config_from_monitor_args_with_file(
     }
     if args.cpu_perf_max_tasks == 0 {
         anyhow::bail!("--cpu-perf-max-tasks must be greater than zero");
+    }
+    if args.runtime_slices_max_tasks == 0 {
+        anyhow::bail!("--runtime-slices-max-tasks must be greater than zero");
     }
 
     args.target_pids.sort_unstable();
@@ -2471,6 +2506,8 @@ fn config_from_monitor_args_with_file(
         cpu_perf_cache_refs: args.cpu_perf_cache_refs,
         block_io,
         stat_wait,
+        runtime_slices,
+        runtime_slices_max_tasks: args.runtime_slices_max_tasks,
         json_stream: args.json_stream,
         metrics_port: args.metrics_port,
         ringbuf_size_kb: args.ringbuf_size_kb,
@@ -3951,6 +3988,7 @@ mod tests {
         assert!(config.faults);
         assert!(config.stat_wait);
         assert!(config.block_io);
+        assert!(config.runtime_slices);
         assert!(!config.irq_latency);
     }
 
@@ -3986,6 +4024,7 @@ mod tests {
         assert!(!config.faults);
         assert!(!config.stat_wait);
         assert!(!config.block_io);
+        assert!(!config.runtime_slices);
     }
 
     #[test]
