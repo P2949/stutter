@@ -1,0 +1,30 @@
+name = "real_gpu_bound_looking"
+schema_version = 21
+source = "sanitized-real-recording"
+quality_expectation = "High"
+description = "GPU busy was high during a visible frame spike; scheduler evidence may also exist, so GPU-bound is required as a candidate rather than always primary."
+
+[expected]
+primary_cause = "Any"
+required_candidate = "GpuBoundCandidate"
+required_candidate_evidence = ["GPU busy"]
+accepted_confidence = []
+data_quality = "High"
+
+[expected.artifacts]
+spikes = 3
+intervals = 3
+irq_events = 0
+gpu_samples = 3
+frames = 4
+block_io_events = 0
+foreground_events = 0
+
+[expected.evidence]
+contains = []
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true

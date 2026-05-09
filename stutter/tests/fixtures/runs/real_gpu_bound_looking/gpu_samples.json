@@ -1,0 +1,3 @@
+{"elapsed_ms":84,"gpu_busy_percent":96,"vram_used_bytes":7000000000,"vram_total_bytes":8000000000,"vram_used_percent":87,"gpu_clock_mhz":2520,"mem_clock_mhz":9700,"temp_millidegrees":70000,"power_microwatts":205000000}
+{"elapsed_ms":100,"gpu_busy_percent":99,"vram_used_bytes":7200000000,"vram_total_bytes":8000000000,"vram_used_percent":90,"gpu_clock_mhz":2550,"mem_clock_mhz":9750,"temp_millidegrees":71000,"power_microwatts":215000000}
+{"elapsed_ms":117,"gpu_busy_percent":98,"vram_used_bytes":7250000000,"vram_total_bytes":8000000000,"vram_used_percent":91,"gpu_clock_mhz":2530,"mem_clock_mhz":9750,"temp_millidegrees":72000,"power_microwatts":218000000}

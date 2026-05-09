@@ -48,6 +48,10 @@ struct FixtureMetadata {
 #[derive(serde::Serialize)]
 struct FixtureExpected {
     primary_cause: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    required_candidate: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    required_candidate_evidence: Vec<String>,
     accepted_confidence: Vec<String>,
     data_quality: String,
     artifacts: FixtureExpectedArtifacts,
@@ -120,7 +124,6 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "real_world_irq_overlap",
         "real_world_block_io_stall",
         "real_world_gpu_bound_clean_cpu",
-        "real_gpu_bound_looking",
         "real_block_io_overlap",
         "real_truncated_low_quality",
         "real_foreground_window",
@@ -174,6 +177,11 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         real_compositor_scheduler_delay_fixture(),
     )?;
     write_fixture(root, "real_irq_overlap", real_irq_overlap_fixture())?;
+    write_fixture(
+        root,
+        "real_gpu_bound_looking",
+        real_gpu_bound_looking_fixture(),
+    )?;
 
     Ok(())
 }
@@ -360,6 +368,116 @@ fn real_irq_overlap_fixture() -> (SessionFile, FixtureArtifacts) {
             spikes,
             intervals,
             irq_events,
+            ..Default::default()
+        },
+    )
+}
+
+fn real_gpu_bound_looking_fixture() -> (SessionFile, FixtureArtifacts) {
+    let spikes = vec![
+        spike_event(5501, TaskClass::Unknown, "frame-submit", 2_000_000, 0),
+        spike_event(5502, TaskClass::Unknown, "present-wait", 1_800_000, 250_000),
+        spike_event(
+            5503,
+            TaskClass::Unknown,
+            "render-helper",
+            1_600_000,
+            500_000,
+        ),
+    ];
+    let intervals = vec![
+        interval_record_with_class(
+            100,
+            5501,
+            "frame-submit",
+            TaskClass::Unknown,
+            4.0,
+            2_000_000,
+        ),
+        interval_record_with_class(
+            100,
+            5502,
+            "present-wait",
+            TaskClass::Unknown,
+            3.0,
+            1_800_000,
+        ),
+        interval_record_with_class(
+            100,
+            5503,
+            "render-helper",
+            TaskClass::Unknown,
+            2.0,
+            1_600_000,
+        ),
+    ];
+    let gpu_samples = vec![
+        GpuSample {
+            elapsed_ms: 84,
+            gpu_busy_percent: Some(96),
+            vram_used_bytes: Some(7_000_000_000),
+            vram_total_bytes: Some(8_000_000_000),
+            vram_used_percent: Some(87),
+            gpu_clock_mhz: Some(2520),
+            mem_clock_mhz: Some(9700),
+            temp_millidegrees: Some(70_000),
+            power_microwatts: Some(205_000_000),
+        },
+        GpuSample {
+            elapsed_ms: 100,
+            gpu_busy_percent: Some(99),
+            vram_used_bytes: Some(7_200_000_000),
+            vram_total_bytes: Some(8_000_000_000),
+            vram_used_percent: Some(90),
+            gpu_clock_mhz: Some(2550),
+            mem_clock_mhz: Some(9750),
+            temp_millidegrees: Some(71_000),
+            power_microwatts: Some(215_000_000),
+        },
+        GpuSample {
+            elapsed_ms: 117,
+            gpu_busy_percent: Some(98),
+            vram_used_bytes: Some(7_250_000_000),
+            vram_total_bytes: Some(8_000_000_000),
+            vram_used_percent: Some(91),
+            gpu_clock_mhz: Some(2530),
+            mem_clock_mhz: Some(9750),
+            temp_millidegrees: Some(72_000),
+            power_microwatts: Some(218_000_000),
+        },
+    ];
+    let frame_events = vec![
+        FrameEvent {
+            elapsed_ms: 84,
+            frametime_ms: 16.6,
+        },
+        FrameEvent {
+            elapsed_ms: 100,
+            frametime_ms: 61.0,
+        },
+        FrameEvent {
+            elapsed_ms: 117,
+            frametime_ms: 16.8,
+        },
+        FrameEvent {
+            elapsed_ms: 134,
+            frametime_ms: 16.7,
+        },
+    ];
+
+    let mut session = base_session("real_gpu_bound_looking");
+    session.config.tree_roots = vec![5500];
+    session.config.hwmon = true;
+    session.core.mangohud_first_frame_monotonic_ns = Some(0);
+    session.core.mangohud_first_frame_raw_elapsed_ms = Some(0);
+    apply_spike_session_fields(&mut session, &spikes);
+    apply_artifact_counts(
+        &mut session,
+        &FixtureArtifacts {
+            spikes,
+            intervals,
+            gpu_samples,
+            frame_events,
             ..Default::default()
         },
     )
@@ -1066,6 +1184,22 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["compositor thread", "delayed"],
             exact_artifacts(artifacts),
         ),
+        "real_gpu_bound_looking" => {
+            let mut metadata = fixture_metadata(
+                name,
+                "sanitized-real-recording",
+                "High",
+                "GPU busy was high during a visible frame spike; scheduler evidence may also exist, so GPU-bound is required as a candidate rather than always primary.",
+                "Any",
+                &[],
+                "High",
+                &[],
+                exact_artifacts(artifacts),
+            );
+            metadata.expected.required_candidate = Some("GpuBoundCandidate".to_owned());
+            metadata.expected.required_candidate_evidence = vec!["GPU busy".to_owned()];
+            metadata
+        }
         "foreground_window" => fixture_metadata(
             name,
             "synthetic-edge-case",
@@ -1232,6 +1366,8 @@ fn fixture_metadata(
         description: description.to_owned(),
         expected: FixtureExpected {
             primary_cause: primary_cause.to_owned(),
+            required_candidate: None,
+            required_candidate_evidence: Vec::new(),
             accepted_confidence: accepted_confidence
                 .iter()
                 .map(|item| (*item).to_owned())

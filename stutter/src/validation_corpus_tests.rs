@@ -23,6 +23,10 @@ struct FixtureToml {
 #[derive(Debug, Deserialize)]
 struct FixtureTomlExpected {
     primary_cause: String,
+    #[serde(default)]
+    required_candidate: Option<String>,
+    #[serde(default)]
+    required_candidate_evidence: Vec<String>,
     accepted_confidence: Vec<String>,
     data_quality: String,
     artifacts: FixtureTomlArtifacts,
@@ -116,16 +120,29 @@ fn parse_confidence(value: &str) -> Confidence {
     }
 }
 
-fn parse_primary_cause(value: &str) -> Option<StutterCause> {
+enum ExpectedPrimaryCause {
+    Any,
+    NoneOrUnknown,
+    Cause(StutterCause),
+}
+
+fn parse_stutter_cause(value: &str) -> StutterCause {
     match value {
-        "CompositorSchedulerDelay" => Some(StutterCause::CompositorSchedulerDelay),
-        "GameThreadSchedulerDelay" => Some(StutterCause::GameThreadSchedulerDelay),
-        "IrqDelayCandidate" => Some(StutterCause::IrqDelayCandidate),
-        "GpuBoundCandidate" => Some(StutterCause::GpuBoundCandidate),
-        "BlockIoCandidate" => Some(StutterCause::BlockIoCandidate),
-        "CpuPressureCandidate" => Some(StutterCause::CpuPressureCandidate),
-        "Unknown" => None,
+        "CompositorSchedulerDelay" => StutterCause::CompositorSchedulerDelay,
+        "GameThreadSchedulerDelay" => StutterCause::GameThreadSchedulerDelay,
+        "IrqDelayCandidate" => StutterCause::IrqDelayCandidate,
+        "GpuBoundCandidate" => StutterCause::GpuBoundCandidate,
+        "BlockIoCandidate" => StutterCause::BlockIoCandidate,
+        "CpuPressureCandidate" => StutterCause::CpuPressureCandidate,
         other => panic!("unknown stutter cause in fixture metadata: {other}"),
+    }
+}
+
+fn parse_primary_cause(value: &str) -> ExpectedPrimaryCause {
+    match value {
+        "Any" => ExpectedPrimaryCause::Any,
+        "Unknown" => ExpectedPrimaryCause::NoneOrUnknown,
+        other => ExpectedPrimaryCause::Cause(parse_stutter_cause(other)),
     }
 }
 
@@ -285,43 +302,68 @@ fn assert_fixture_from_metadata(name: &str) -> (ReportAnalysisJson, FixtureToml)
         );
     }
 
-    if let Some(expected_cause) = parse_primary_cause(&metadata.expected.primary_cause) {
-        let diagnosis = primary_diagnosis(&analysis)
-            .unwrap_or_else(|| panic!("{name} expected a primary diagnosis"));
-        assert_eq!(diagnosis.cause, expected_cause, "wrong cause for {name}");
+    match parse_primary_cause(&metadata.expected.primary_cause) {
+        ExpectedPrimaryCause::Any => {}
+        ExpectedPrimaryCause::Cause(expected_cause) => {
+            let diagnosis = primary_diagnosis(&analysis)
+                .unwrap_or_else(|| panic!("{name} expected a primary diagnosis"));
+            assert_eq!(diagnosis.cause, expected_cause, "wrong cause for {name}");
 
-        let accepted_confidence = metadata
-            .expected
-            .accepted_confidence
+            let accepted_confidence = metadata
+                .expected
+                .accepted_confidence
+                .iter()
+                .map(|value| parse_confidence(value))
+                .collect::<Vec<_>>();
+            assert!(
+                accepted_confidence.contains(&diagnosis.confidence),
+                "{name} confidence {:?} not in accepted set {:?}",
+                diagnosis.confidence,
+                accepted_confidence,
+            );
+
+            let evidence_text = diagnosis.evidence.join("\n");
+            for needle in &metadata.expected.evidence.contains {
+                assert!(
+                    evidence_text.contains(needle),
+                    "{name} missing evidence substring {:?}; evidence was:\n{}",
+                    needle,
+                    evidence_text,
+                );
+            }
+        }
+        ExpectedPrimaryCause::NoneOrUnknown => {
+            assert!(
+                primary_diagnosis(&analysis).is_none()
+                    || matches!(
+                        primary_diagnosis(&analysis).unwrap().cause,
+                        StutterCause::Unknown
+                    ),
+                "{name} expected no strong diagnosis, got {:?}",
+                primary_diagnosis(&analysis).map(|diagnosis| &diagnosis.cause),
+            );
+        }
+    }
+
+    if let Some(required_candidate) = metadata.expected.required_candidate.as_deref() {
+        let cause = parse_stutter_cause(required_candidate);
+        let candidate = find_candidate(&analysis, cause)
+            .unwrap_or_else(|| panic!("{name} missing required diagnosis candidate {cause:?}"));
+        let evidence_text = candidate
+            .evidence
             .iter()
-            .map(|value| parse_confidence(value))
-            .collect::<Vec<_>>();
-        assert!(
-            accepted_confidence.contains(&diagnosis.confidence),
-            "{name} confidence {:?} not in accepted set {:?}",
-            diagnosis.confidence,
-            accepted_confidence,
-        );
-
-        let evidence_text = diagnosis.evidence.join("\n");
-        for needle in &metadata.expected.evidence.contains {
+            .map(|item| item.message.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for needle in &metadata.expected.required_candidate_evidence {
             assert!(
                 evidence_text.contains(needle),
-                "{name} missing evidence substring {:?}; evidence was:\n{}",
+                "{name} required candidate {:?} missing evidence substring {:?}; evidence was:\n{}",
+                cause,
                 needle,
                 evidence_text,
             );
         }
-    } else {
-        assert!(
-            primary_diagnosis(&analysis).is_none()
-                || matches!(
-                    primary_diagnosis(&analysis).unwrap().cause,
-                    StutterCause::Unknown
-                ),
-            "{name} expected no strong diagnosis, got {:?}",
-            primary_diagnosis(&analysis).map(|diagnosis| &diagnosis.cause),
-        );
     }
 
     assert_artifacts_from_metadata(name, &analysis, &metadata);
@@ -662,6 +704,26 @@ fn validation_corpus_real_irq_overlap() {
         "real_irq_overlap IRQ candidate evidence should stay focused on the correlated IRQ window and not report unrelated IRQ 147/148 noise; evidence was:\n{}",
         candidate_evidence
     );
+}
+
+#[test]
+fn validation_corpus_real_gpu_bound_looking() {
+    let (analysis, _) = assert_fixture_from_metadata("real_gpu_bound_looking");
+
+    assert_eq!(analysis.data_quality.level, DataQualityLevel::High);
+    assert!(analysis.data_quality.validation_errors.is_empty());
+    assert!(analysis.data_quality.validation_warnings.is_empty());
+
+    assert!(
+        analysis.artifacts_summary.gpu_sample_count > 0,
+        "real_gpu_bound_looking must contain GPU samples"
+    );
+    assert!(
+        analysis.artifacts_summary.frame_event_count > 0,
+        "real_gpu_bound_looking must contain frame events"
+    );
+
+    assert_candidate_contains(&analysis, StutterCause::GpuBoundCandidate, &["GPU busy"]);
 }
 
 #[test]
