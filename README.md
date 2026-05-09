@@ -324,6 +324,24 @@ Privacy:
 - Do not enable title capture on shared recordings unless tab and terminal
   titles are safe to expose.
 
+## Community rules
+
+`stutter` can import Ananicy-compatible community rules as process
+classification hints. The core package does not ship the full GPL Ananicy rules
+database; users may import a local checkout into their own XDG data directory.
+
+```bash
+stutter rules import --source /path/to/ananicy-rules
+stutter rules status
+```
+
+Imported rules are used as identity/classification hints only. They do not copy
+Ananicy scheduling policy such as nice values, ionice values, scheduler classes,
+CPU affinity, or systemd policy.
+
+See [docs/COMMUNITY_RULES.md](docs/COMMUNITY_RULES.md) for the full licensing,
+storage, packaging, and runtime-loading details.
+
 ## Inspect a tree before tracing
 
 ```bash
