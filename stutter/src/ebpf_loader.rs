@@ -19,7 +19,9 @@ use stutter_common::{
 };
 use tokio::io::unix::AsyncFd;
 
-use crate::cli::TARGET_PIDS_MAX;
+use crate::{
+    cli::TARGET_PIDS_MAX, probe_activation::ProbeActivationPlan, probe_registry::ProbeKey,
+};
 
 const DEFAULT_AVAILABLE_MEMORY_BYTES: u64 = 1 << 30;
 const AVAILABLE_MEMORY_BUDGET_DIVISOR: u64 = 64;
@@ -43,6 +45,7 @@ pub struct LoadedEbpf {
     pub target_cgroup_map: Option<AyaHashMap<MapData, u64, u8>>,
     pub prev_faults_map: Option<AyaHashMap<MapData, u32, [u64; 2]>>, // (tid) -> (maj, min)
     pub block_io_correlation_basis: BlockIoCorrelationBasis,
+    pub activation_plan: ProbeActivationPlan,
     drop_counters: PerCpuArray<MapData, u64>,
 }
 
@@ -125,49 +128,6 @@ pub fn resolve_cgroup_id_best_effort(_path: &Path) -> anyhow::Result<u64> {
     anyhow::bail!("native cgroup filtering is only supported on Unix/Linux");
 }
 
-#[allow(dead_code)]
-pub struct ProbeAttachPlan {
-    pub probes: Vec<crate::probe_registry::ProbeKey>,
-}
-
-#[allow(dead_code)]
-impl ProbeAttachPlan {
-    pub fn from_config(config: &crate::cli::Config) -> Self {
-        let mut probes = vec![
-            crate::probe_registry::ProbeKey::SchedulerRunnableLatency,
-            crate::probe_registry::ProbeKey::CpuFreq,
-            crate::probe_registry::ProbeKey::PsiTimeline,
-        ];
-
-        if config.irq_latency {
-            probes.push(crate::probe_registry::ProbeKey::IrqLatency);
-        }
-        if config.hwmon {
-            probes.push(crate::probe_registry::ProbeKey::GpuHwmon);
-        }
-        if config.block_io {
-            probes.push(crate::probe_registry::ProbeKey::BlockIo);
-        }
-        if config.faults || config.stat_wait {
-            probes.push(crate::probe_registry::ProbeKey::Faults);
-        }
-        if config.cpu_perf {
-            probes.push(crate::probe_registry::ProbeKey::CpuPerf);
-        }
-        if config.runtime_slices {
-            probes.push(crate::probe_registry::ProbeKey::RuntimeSlices);
-        }
-        if config.foreground_window {
-            probes.push(crate::probe_registry::ProbeKey::ForegroundWindow);
-        }
-        if config.mangohud_log.is_some() {
-            probes.push(crate::probe_registry::ProbeKey::FrameLog);
-        }
-
-        Self { probes }
-    }
-}
-
 pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf> {
     raise_memlock_limit();
     let map_sizing = map_sizing_for_config(config);
@@ -211,16 +171,26 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
     let object = ebpf_object_bytes()?;
     let mut ebpf = loader.load(object.as_ref()).context("eBPF load failed")?;
 
+    let mut activation_plan = ProbeActivationPlan::from_config(config, &tracepoints)?;
+    for warning in &activation_plan.warnings {
+        log::warn!(
+            "probe_activation_warning key={:?} message={}",
+            warning.key,
+            warning.message
+        );
+    }
+
     attach_tracepoint(&mut ebpf, "sched_wakeup", "sched", "sched_wakeup")
         .context("eBPF load failed: attach sched_wakeup")?;
-    if tracepoints.sched_wakeup_new {
-        attach_tracepoint(&mut ebpf, "sched_wakeup_new", "sched", "sched_wakeup_new")
-            .context("eBPF load failed: attach sched_wakeup_new")?;
-    }
     attach_tracepoint(&mut ebpf, "sched_switch", "sched", "sched_switch")
         .context("eBPF load failed: attach sched_switch")?;
 
-    if tracepoints.sched_process_exit {
+    if activation_plan.should_attach_program("sched_wakeup_new") {
+        attach_tracepoint(&mut ebpf, "sched_wakeup_new", "sched", "sched_wakeup_new")
+            .context("eBPF load failed: attach sched_wakeup_new")?;
+    }
+
+    if activation_plan.should_attach_program("sched_process_exit") {
         attach_tracepoint(
             &mut ebpf,
             "sched_process_exit",
@@ -228,13 +198,9 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
             "sched_process_exit",
         )
         .context("eBPF load failed: attach sched_process_exit")?;
-    } else {
-        log::warn!(
-            "sched_process_exit tracepoint unavailable; stale wakeup/fault cleanup on task exit is disabled"
-        );
     }
 
-    if tracepoints.sched_migrate_task {
+    if activation_plan.should_attach_program("sched_migrate_task") {
         attach_tracepoint(
             &mut ebpf,
             "sched_migrate_task",
@@ -243,27 +209,68 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         )
         .context("eBPF load failed: attach sched_migrate_task")?;
     }
-    if tracepoints.cpu_frequency && config.cpu_freq {
-        attach_tracepoint(&mut ebpf, "cpu_frequency", "power", "cpu_frequency")
-            .context("eBPF load failed: attach cpu_frequency")?;
-    }
-    if tracepoints.sched_stat_wait && config.stat_wait {
-        attach_tracepoint(&mut ebpf, "sched_stat_wait", "sched", "sched_stat_wait")
-            .context("eBPF load failed: attach sched_stat_wait")?;
+
+    if activation_plan.should_attach_program("cpu_frequency") {
+        if let Err(err) = attach_tracepoint(&mut ebpf, "cpu_frequency", "power", "cpu_frequency") {
+            activation_plan.push_attach_warning(ProbeKey::CpuFreq, "cpu_frequency", &err);
+            log::warn!(
+                "optional_probe_attach_failed key={:?} program=cpu_frequency err={err:#}",
+                ProbeKey::CpuFreq
+            );
+        }
     }
 
-    if tracepoints.irq_handler && config.irq_latency {
-        attach_tracepoint(&mut ebpf, "irq_handler_entry", "irq", "irq_handler_entry")
-            .context("eBPF load failed: attach irq_handler_entry")?;
-        attach_tracepoint(&mut ebpf, "irq_handler_exit", "irq", "irq_handler_exit")
-            .context("eBPF load failed: attach irq_handler_exit")?;
+    if activation_plan.should_attach_stat_wait() {
+        if let Err(err) =
+            attach_tracepoint(&mut ebpf, "sched_stat_wait", "sched", "sched_stat_wait")
+        {
+            activation_plan.push_attach_warning(ProbeKey::Faults, "sched_stat_wait", &err);
+            log::warn!(
+                "optional_probe_attach_failed key={:?} program=sched_stat_wait err={err:#}",
+                ProbeKey::Faults
+            );
+        }
     }
 
-    if tracepoints.block_rq && config.block_io {
-        attach_tracepoint(&mut ebpf, "block_rq_issue", "block", "block_rq_issue")
-            .context("eBPF load failed: attach block_rq_issue")?;
-        attach_tracepoint(&mut ebpf, "block_rq_complete", "block", "block_rq_complete")
-            .context("eBPF load failed: attach block_rq_complete")?;
+    if activation_plan.has_probe(ProbeKey::IrqLatency) {
+        if let Err(err) =
+            attach_tracepoint(&mut ebpf, "irq_handler_entry", "irq", "irq_handler_entry")
+        {
+            activation_plan.push_attach_warning(ProbeKey::IrqLatency, "irq_handler_entry", &err);
+            log::warn!(
+                "optional_probe_attach_failed key={:?} program=irq_handler_entry err={err:#}",
+                ProbeKey::IrqLatency
+            );
+        }
+        if let Err(err) =
+            attach_tracepoint(&mut ebpf, "irq_handler_exit", "irq", "irq_handler_exit")
+        {
+            activation_plan.push_attach_warning(ProbeKey::IrqLatency, "irq_handler_exit", &err);
+            log::warn!(
+                "optional_probe_attach_failed key={:?} program=irq_handler_exit err={err:#}",
+                ProbeKey::IrqLatency
+            );
+        }
+    }
+
+    if activation_plan.has_probe(ProbeKey::BlockIo) {
+        if let Err(err) = attach_tracepoint(&mut ebpf, "block_rq_issue", "block", "block_rq_issue")
+        {
+            activation_plan.push_attach_warning(ProbeKey::BlockIo, "block_rq_issue", &err);
+            log::warn!(
+                "optional_probe_attach_failed key={:?} program=block_rq_issue err={err:#}",
+                ProbeKey::BlockIo
+            );
+        }
+        if let Err(err) =
+            attach_tracepoint(&mut ebpf, "block_rq_complete", "block", "block_rq_complete")
+        {
+            activation_plan.push_attach_warning(ProbeKey::BlockIo, "block_rq_complete", &err);
+            log::warn!(
+                "optional_probe_attach_failed key={:?} program=block_rq_complete err={err:#}",
+                ProbeKey::BlockIo
+            );
+        }
 
         if let Some(offset) = tracepoints.block_rq_key_offset {
             log::info!("Block I/O correlation using request pointer identity at offset {offset}");
@@ -280,17 +287,26 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         }
     }
 
-    if config.follow_exec && tracepoints.sched_process_exec {
-        attach_tracepoint(
+    if activation_plan.should_attach_follow_exec() {
+        if let Err(err) = attach_tracepoint(
             &mut ebpf,
             "sched_process_exec",
             "sched",
             "sched_process_exec",
-        )
-        .context("eBPF load failed: attach sched_process_exec")?;
+        ) {
+            activation_plan.push_attach_warning(
+                ProbeKey::SchedulerRunnableLatency,
+                "sched_process_exec",
+                &err,
+            );
+            log::warn!(
+                "optional_probe_attach_failed key={:?} program=sched_process_exec err={err:#}",
+                ProbeKey::SchedulerRunnableLatency
+            );
+        }
     }
 
-    if config.faults {
+    if activation_plan.should_attach_fault_perf() {
         // Fault perf events are optional correlation probes. If perf_event_open
         // is blocked by policy or capabilities, log a warning and continue rather
         // than aborting the whole profiler startup.
@@ -433,6 +449,7 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         target_cgroup_map,
         prev_faults_map,
         block_io_correlation_basis,
+        activation_plan,
         drop_counters,
     })
 }
@@ -682,22 +699,22 @@ fn format_optional_bytes(value: Option<u64>) -> String {
         .unwrap_or_else(|| "unknown_or_unlimited".to_owned())
 }
 
-#[derive(Debug)]
-struct TracepointAvailability {
-    sched_wakeup_new: bool,
-    sched_migrate_task: bool,
-    cpu_frequency: bool,
-    sched_stat_wait: bool,
-    irq_handler: bool,
-    block_rq: bool,
-    block_rq_has_rwbs: bool,
-    block_rq_key_offset: Option<u32>,
-    block_rq_issue_nr_sector_offset: Option<u32>,
-    block_rq_issue_rwbs_offset: Option<u32>,
-    block_rq_complete_nr_sector_offset: Option<u32>,
-    block_rq_complete_rwbs_offset: Option<u32>,
-    sched_process_exit: bool,
-    sched_process_exec: bool,
+#[derive(Debug, Clone)]
+pub struct TracepointAvailability {
+    pub sched_wakeup_new: bool,
+    pub sched_migrate_task: bool,
+    pub cpu_frequency: bool,
+    pub sched_stat_wait: bool,
+    pub irq_handler: bool,
+    pub block_rq: bool,
+    pub block_rq_has_rwbs: bool,
+    pub block_rq_key_offset: Option<u32>,
+    pub block_rq_issue_nr_sector_offset: Option<u32>,
+    pub block_rq_issue_rwbs_offset: Option<u32>,
+    pub block_rq_complete_nr_sector_offset: Option<u32>,
+    pub block_rq_complete_rwbs_offset: Option<u32>,
+    pub sched_process_exit: bool,
+    pub sched_process_exec: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

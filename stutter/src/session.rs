@@ -427,12 +427,7 @@ impl MonitorSession {
             let registry = &mut recorder.streams;
             let dir = &run.run_dir;
 
-            for kind in crate::artifacts::ArtifactSelection::recording(
-                config.runtime_slices,
-                foreground_enabled,
-            )
-            .iter()
-            {
+            for kind in loaded.activation_plan.required_stream_artifacts() {
                 registry.create_stream(dir, kind)?;
             }
         }
@@ -540,7 +535,7 @@ impl MonitorSession {
         };
         let runtime_slice_sampler = config.runtime_slices.then(RuntimeSliceSampler::new);
 
-        let probes = ProbeRuntime::from_config_parts(
+        let probes = ProbeRuntime::new(
             loaded,
             block_io_correlation_basis,
             cpu_perf_sampler,
