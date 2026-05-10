@@ -1007,39 +1007,39 @@ impl AutotuneRuntime {
             AutotuneDecision::KeepCurrent { .. }
                 | AutotuneDecision::Revert { .. }
                 | AutotuneDecision::EnterCooldown { .. }
-        ) {
-            if let Some(context) = context {
-                let cooldown = self.lifecycle_history_event(
-                    observation,
-                    context,
-                    ControllerPhase::Cooldown,
-                    "cooldown_entered",
-                    true,
-                    context.rollback_performed,
-                    reason,
-                );
-                append_autotune_history_event(path, &cooldown)?;
-            }
+        ) && let Some(context) = context
+        {
+            let cooldown = self.lifecycle_history_event(
+                observation,
+                context,
+                ControllerPhase::Cooldown,
+                "cooldown_entered",
+                true,
+                context.rollback_performed,
+                reason,
+            );
+            append_autotune_history_event(path, &cooldown)?;
         }
 
-        if matches!(decision, AutotuneDecision::Fault { .. }) {
-            if let Some(context) = context {
-                let faulted = self.lifecycle_history_event(
-                    observation,
-                    context,
-                    ControllerPhase::Faulted,
-                    "faulted",
-                    false,
-                    context.rollback_performed,
-                    reason,
-                );
-                append_autotune_history_event(path, &faulted)?;
-            }
+        if matches!(decision, AutotuneDecision::Fault { .. })
+            && let Some(context) = context
+        {
+            let faulted = self.lifecycle_history_event(
+                observation,
+                context,
+                ControllerPhase::Faulted,
+                "faulted",
+                false,
+                context.rollback_performed,
+                reason,
+            );
+            append_autotune_history_event(path, &faulted)?;
         }
 
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn lifecycle_history_event(
         &self,
         observation: &AutotuneObservation,
@@ -1449,14 +1449,16 @@ mod tests {
     #[test]
     fn interval_event_updates_window_and_emits_noop_decision() {
         let mut runtime = runtime();
-        let mut record = IntervalRecord::default();
-        record.elapsed_ms = 1_000;
-        record.task = 42;
-        record.samples = 100;
-        record.over_1ms = 3;
-        record.over_2ms = 2;
-        record.over_5ms = 1;
-        record.max_ns = 7_000_000;
+        let record = IntervalRecord {
+            elapsed_ms: 1_000,
+            task: 42,
+            samples: 100,
+            over_1ms: 3,
+            over_2ms: 2,
+            over_5ms: 1,
+            max_ns: 7_000_000,
+            ..IntervalRecord::default()
+        };
 
         let emitted = runtime
             .on_event(MonitorEvent::Interval {
