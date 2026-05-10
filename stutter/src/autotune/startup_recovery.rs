@@ -293,6 +293,8 @@ fn write_startup_recovery_audit_event(
         success,
         affected_tasks,
         restore_path: rollback_token.restore_path().cloned(),
+        action_phase: None,
+        error_category: None,
         message,
     };
 

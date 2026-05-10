@@ -196,7 +196,6 @@ impl ObservePolicyStub {
 }
 
 pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()> {
-    #[cfg(not(feature = "autotune-controller"))]
     if input.mode == "apply-low-risk" {
         if input.auto_focus {
             anyhow::bail!(
@@ -207,7 +206,10 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
         if input.tree_pid.is_none() && input.watch_process.is_none() {
             anyhow::bail!("apply-low-risk requires --tree-pid or --watch-process");
         }
+    }
 
+    #[cfg(not(feature = "autotune-controller"))]
+    if input.mode == "apply-low-risk" {
         let outcome = apply_low_risk::apply_low_risk_command(&input).await?;
         println!(
             "autotune apply-low-risk candidate={} action_kind={} affected_tasks={} safety_class={:?} rollback_performed={}",
@@ -320,7 +322,7 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
             println!("autotune runtime finished reason=\"{}\"", exit.reason);
         }
 
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(feature = "autotune-controller"))]
