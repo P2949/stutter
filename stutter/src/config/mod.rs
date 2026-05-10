@@ -1,6 +1,5 @@
 pub mod merge;
 pub mod model;
-pub mod recorded;
 
 use model::{
     FocusConfig, MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, SafetyConfig,
