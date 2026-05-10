@@ -29,6 +29,7 @@ use crate::{
         outputs::OutputRuntime,
         probes::ProbeRuntime,
         runtime::MonitorRuntime,
+        sinks::{MonitorEventSink, RecorderSink},
         targeting::TargetController,
         ui::{TuiRenderSnapshot, TuiRuntime},
     },
@@ -50,8 +51,11 @@ pub mod outputs;
 pub mod probes;
 #[path = "session/runtime.rs"]
 pub mod runtime;
+#[path = "session/sinks.rs"]
+pub mod sinks;
 #[path = "session/targeting.rs"]
 pub mod targeting;
+
 #[path = "session/ui.rs"]
 pub mod ui;
 
@@ -655,31 +659,19 @@ impl MonitorSession {
         Ok(())
     }
 
-    fn write_focus_event(&mut self, event: recorder::FocusEvent) -> anyhow::Result<()> {
-        crate::events::push_artifact_event(
-            &mut self.runtime.outputs.recorder,
-            ArtifactKind::FocusEvents,
-            &event,
-            "focus_events",
-            |c| {
-                c.focus_event_count += 1;
-            },
-        );
-        Ok(())
+    fn dispatch_recorder_event(&mut self, event: &MonitorEvent) -> anyhow::Result<()> {
+        RecorderSink::new(&mut self.runtime.outputs.recorder)
+            .on_event(event)
+            .map_err(|err| anyhow::anyhow!(err))
     }
 
-    fn write_foreground_event(
-        &mut self,
+    fn foreground_event_for_snapshot(
+        &self,
         snapshot: &crate::foreground::ForegroundWindowSnapshot,
-    ) -> anyhow::Result<()> {
-        if let Some(event) = snapshot.to_event(self.config.foreground_include_title) {
-            self.runtime
-                .outputs
-                .recorder
-                .write_foreground_event(event)?;
-        }
-
-        Ok(())
+    ) -> Option<MonitorEvent> {
+        snapshot
+            .to_event(self.config.foreground_include_title)
+            .map(MonitorEvent::from)
     }
 
     async fn emit_focus_changed(
@@ -699,35 +691,7 @@ impl MonitorSession {
             new.situation
         );
 
-        let focus_event = recorder::FocusEvent {
-            elapsed_ms,
-            action: "changed".to_owned(),
-            old_kind: old.map(|focus| format!("{:?}", focus.group.kind)),
-            kind: Some(format!("{:?}", new.group.kind)),
-            root_pids: new.group.root_pids.clone(),
-            member_pids: new.group.member_pids.clone(),
-            confidence: new.group.confidence,
-            score: new.group.score,
-            situation: Some(new.situation),
-            reasons: new.group.reasons.clone(),
-        };
-        self.write_focus_event(focus_event)?;
-
-        if self
-            .runtime
-            .outputs
-            .recorder
-            .streams
-            .contains(ArtifactKind::FocusEvents)
-        {
-            log::debug!(
-                "focus_event_recorded action=changed elapsed_ms={} kind={:?}",
-                elapsed_ms,
-                new.group.kind
-            );
-        }
-
-        self.emit(MonitorEvent::FocusChanged {
+        let event = MonitorEvent::FocusChanged {
             elapsed_ms,
             old_kind: old.map(|focus| focus.group.kind),
             new_kind: new.group.kind,
@@ -737,8 +701,10 @@ impl MonitorSession {
             score: new.group.score,
             situation: new.situation,
             reasons: new.group.reasons.clone(),
-        })
-        .await;
+        };
+
+        self.dispatch_recorder_event(&event)?;
+        self.emit(event).await;
 
         Ok(())
     }
@@ -756,40 +722,14 @@ impl MonitorSession {
             reason
         );
 
-        let focus_event = recorder::FocusEvent {
-            elapsed_ms,
-            action: "cleared".to_owned(),
-            old_kind: old.map(|focus| format!("{:?}", focus.group.kind)),
-            kind: None,
-            root_pids: Vec::new(),
-            member_pids: Vec::new(),
-            confidence: 0.0,
-            score: 0.0,
-            situation: None,
-            reasons: vec![reason.clone()],
-        };
-        self.write_focus_event(focus_event)?;
-
-        if self
-            .runtime
-            .outputs
-            .recorder
-            .streams
-            .contains(ArtifactKind::FocusEvents)
-        {
-            log::debug!(
-                "focus_event_recorded action=cleared elapsed_ms={} old_kind={:?}",
-                elapsed_ms,
-                old.map(|focus| focus.group.kind)
-            );
-        }
-
-        self.emit(MonitorEvent::FocusCleared {
+        let event = MonitorEvent::FocusCleared {
             elapsed_ms,
             old_kind: old.map(|focus| focus.group.kind),
             reason,
-        })
-        .await;
+        };
+
+        self.dispatch_recorder_event(&event)?;
+        self.emit(event).await;
 
         Ok(())
     }
@@ -850,7 +790,10 @@ impl MonitorSession {
             if self.current_foreground.is_some() {
                 self.foreground_switch_count = self.foreground_switch_count.saturating_add(1);
             }
-            self.write_foreground_event(&snapshot)?;
+            if let Some(event) = self.foreground_event_for_snapshot(&snapshot) {
+                self.dispatch_recorder_event(&event)?;
+                self.emit(event).await;
+            }
         }
 
         self.current_foreground = Some(snapshot);

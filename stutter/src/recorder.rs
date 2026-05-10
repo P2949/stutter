@@ -132,15 +132,15 @@ impl LiveRecorder {
 
     #[allow(dead_code)]
     pub fn write_foreground_event(&mut self, event: ForegroundEvent) -> anyhow::Result<()> {
-        self.last_foreground_event = Some(event.clone());
+        use crate::session::sinks::{MonitorEventSink, RecorderSink};
 
-        if self.streams.contains(ArtifactKind::ForegroundEvents) {
-            self.streams.push(ArtifactKind::ForegroundEvents, &event)?;
-            self.counters.foreground_event_count =
-                self.counters.foreground_event_count.saturating_add(1);
-        }
+        let event = crate::session_events::MonitorEvent::ForegroundEvent {
+            event: Box::new(event),
+        };
 
-        Ok(())
+        RecorderSink::new(self)
+            .on_event(&event)
+            .map_err(|err| anyhow::anyhow!(err))
     }
 }
 
