@@ -1,11 +1,54 @@
 [Unit]
-Description=stutter autotune low-risk controller template
+Description=stutter autotune low-risk controller
 Documentation=https://github.com/P2949/stutter
 After=network.target
 
 [Service]
-Type=oneshot
-ExecStart=/bin/sh -eu -c 'echo "stutter-autotune-low-risk.service is intentionally disabled: live daemon apply-low-risk is blocked until observe/suggest runtime history, status, and rollback behavior are proven stable. Use stutter autotune --mode suggest or stutter autotune --mode observe --auto-focus first." >&2; exit 64'
+Type=simple
+EnvironmentFile=-/etc/stutter/autotune-low-risk.env
+Environment=STUTTER_AUTOTUNE_MODE=apply-low-risk
+Environment=STUTTER_AUTOTUNE_PRESET=diagnosis
+Environment=STUTTER_AUTOTUNE_SUMMARY_MS=1000
+Environment=STUTTER_AUTOTUNE_FOCUS_SOURCE=hybrid
+Environment=STUTTER_AUTOTUNE_CANDIDATE_SECONDS=30
+ExecStart=/bin/sh -eu -c '\
+mode="${STUTTER_AUTOTUNE_MODE:-apply-low-risk}"; \
+preset="${STUTTER_AUTOTUNE_PRESET:-diagnosis}"; \
+summary_ms="${STUTTER_AUTOTUNE_SUMMARY_MS:-1000}"; \
+focus_source="${STUTTER_AUTOTUNE_FOCUS_SOURCE:-hybrid}"; \
+candidate_seconds="${STUTTER_AUTOTUNE_CANDIDATE_SECONDS:-30}"; \
+profiles="${STUTTER_AUTOTUNE_PROFILES:-}"; \
+watch_process="${STUTTER_AUTOTUNE_WATCH_PROCESS:-}"; \
+tree_pid="${STUTTER_AUTOTUNE_TREE_PID:-}"; \
+if [ "$mode" != "apply-low-risk" ]; then \
+  echo "stutter-autotune-low-risk only supports STUTTER_AUTOTUNE_MODE=apply-low-risk" >&2; \
+  exit 64; \
+fi; \
+if [ -n "$watch_process" ] && [ -n "$tree_pid" ]; then \
+  echo "set only one of STUTTER_AUTOTUNE_WATCH_PROCESS or STUTTER_AUTOTUNE_TREE_PID" >&2; \
+  exit 64; \
+fi; \
+if [ -n "$watch_process" ]; then \
+  if [ -n "$profiles" ]; then \
+    exec /usr/bin/stutter autotune --mode apply-low-risk --watch-process "$watch_process" --profiles "$profiles" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds" --foreground-window --focus-source "$focus_source"; \
+  fi; \
+  exec /usr/bin/stutter autotune --mode apply-low-risk --watch-process "$watch_process" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds" --foreground-window --focus-source "$focus_source"; \
+fi; \
+if [ -n "$tree_pid" ]; then \
+  if [ -n "$profiles" ]; then \
+    exec /usr/bin/stutter autotune --mode apply-low-risk --tree-pid "$tree_pid" --profiles "$profiles" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds" --foreground-window --focus-source "$focus_source"; \
+  fi; \
+  exec /usr/bin/stutter autotune --mode apply-low-risk --tree-pid "$tree_pid" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds" --foreground-window --focus-source "$focus_source"; \
+fi; \
+if [ -n "$profiles" ]; then \
+  exec /usr/bin/stutter autotune --mode apply-low-risk --auto-focus --profiles "$profiles" --focus-source "$focus_source" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds"; \
+fi; \
+exec /usr/bin/stutter autotune --mode apply-low-risk --auto-focus --focus-source "$focus_source" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds"'
+ExecStop=/usr/bin/stutter autotune restore
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillMode=control-group
 
 [Install]
 WantedBy=multi-user.target
