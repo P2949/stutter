@@ -1,44 +1,30 @@
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
-use crate::{scenario, session::run_monitor};
+use crate::{commands::input, scenario, session::run_monitor};
 
-pub fn run_create_command(
-    name: String,
-    force: bool,
-    watch_process: Option<String>,
-    duration: u64,
-    preset: String,
-    mangohud_log: Option<PathBuf>,
-    notes: Option<String>,
-) -> anyhow::Result<()> {
+pub fn run_create_command(input: input::ScenarioCreateCommandInput) -> anyhow::Result<()> {
     let path = scenario::create_scenario(scenario::ScenarioCreateInput {
-        name: name.clone(),
-        force,
-        watch_process,
-        duration,
-        preset,
-        mangohud_log,
-        notes,
+        name: input.name.clone(),
+        force: input.force,
+        watch_process: input.watch_process,
+        duration: input.duration,
+        preset: input.preset,
+        mangohud_log: input.mangohud_log,
+        notes: input.notes,
     })?;
-    println!("created scenario {} at {}", name, path.display());
+    println!("created scenario {} at {}", input.name, path.display());
     println!("edit notes/expected_classes before running if needed");
     Ok(())
 }
 
-pub async fn run_scenario_command(
-    name: String,
-    role: String,
-    dry_run: bool,
-    out_dir: Option<PathBuf>,
-    mangohud_log_override: Option<PathBuf>,
-) -> anyhow::Result<()> {
-    let role = scenario::ScenarioRole::parse(&role)?;
+pub async fn run_scenario_command(input: input::ScenarioRunCommandInput) -> anyhow::Result<()> {
+    let role = scenario::ScenarioRole::parse(&input.role)?;
     let prepared = scenario::prepare_scenario_run(scenario::ScenarioRunInput {
-        name,
+        name: input.name,
         role,
-        dry_run,
-        out_dir,
-        mangohud_log_override,
+        dry_run: input.dry_run,
+        out_dir: input.out_dir,
+        mangohud_log_override: input.mangohud_log_override,
     })?;
 
     if prepared.dry_run {
@@ -60,30 +46,23 @@ pub async fn run_scenario_command(
     }
 }
 
-pub fn run_compare_command(
-    name: String,
-    baseline: Option<PathBuf>,
-    current: Option<PathBuf>,
-    top: usize,
-    json_summary: bool,
-    validate: bool,
-) -> anyhow::Result<()> {
+pub fn run_compare_command(input: input::ScenarioCompareCommandInput) -> anyhow::Result<()> {
     scenario::compare_scenario(scenario::ScenarioCompareInput {
-        name,
-        baseline,
-        current,
-        top,
-        json_summary,
-        validate,
+        name: input.name,
+        baseline: input.baseline,
+        current: input.current,
+        top: input.top,
+        json_summary: input.json_summary,
+        validate: input.validate,
     })
 }
 
-pub fn run_path_command(name: String) -> anyhow::Result<()> {
-    let path = scenario::scenario_path(&name)?;
+pub fn run_path_command(input: input::ScenarioPathCommandInput) -> anyhow::Result<()> {
+    let path = scenario::scenario_path(&input.name)?;
     println!("{}", path.display());
     Ok(())
 }
 
-pub fn run_list_command() -> anyhow::Result<()> {
+pub fn run_list_command(_input: input::ScenarioListCommandInput) -> anyhow::Result<()> {
     scenario::list_scenarios()
 }

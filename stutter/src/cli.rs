@@ -6,6 +6,18 @@ use serde::{Deserialize, Serialize};
 pub const TARGET_PIDS_MAX: usize = 1024;
 
 use crate::{
+    commands::input::{
+        AdvisorCommandInput, AgentCommandInput, ApplyProfileCommandInput, AuditCommandInput,
+        AutotuneCommandInput as AutotuneCommandDto, AutotuneGenerateProfilesCommandInput,
+        AutotuneReplayCommandInput, AutotuneReplayHistoryCommandInput, AutotuneRestoreCommandInput,
+        AutotuneStatusCommandInput, BenchCommandInput, CheckCommandInput, CompletionsCommandInput,
+        DoctorCommandInput, InspectIrqsCommandInput, InspectTreeCommandInput, ManCommandInput,
+        MonitorCommandInput, ProbesCommandInput, ProfileTemplateCommandInput,
+        RecommendCommandInput, ReportCommandInput, RestoreCommandInput, RulesCommandInput,
+        ScenarioCompareCommandInput, ScenarioCreateCommandInput, ScenarioListCommandInput,
+        ScenarioPathCommandInput, ScenarioRunCommandInput, SummaryCommandInput, TuneCommandInput,
+        ValidateCommandInput,
+    },
     config::layer::MonitorConfigLayer,
     process_tree::{CompiledPattern, TaskClass, TaskFilters},
 };
@@ -1253,185 +1265,38 @@ pub struct ScenarioPathArgs {
 
 #[derive(Debug)]
 pub enum AppCommand {
-    Monitor(Arc<Config>),
-    Bench {
-        config: Arc<Config>,
-        role: String,
-        run_name: String,
-    },
-    Restore {
-        dry_run: bool,
-    },
-    ApplyProfile {
-        tree_pid: u32,
-        profile: PathBuf,
-        force: bool,
-        dry_run: bool,
-        allow_medium_risk: bool,
-        watch: bool,
-        keep_applied: bool,
-        refresh_ms: u64,
-        enforce: bool,
-    },
-    InspectTree {
-        tree_pid: u32,
-    },
-    Report {
-        path: Option<PathBuf>,
-        json: bool,
-        analysis_json: bool,
-        json_summary: bool,
-        html: Option<PathBuf>,
-        top: usize,
-        cluster_window_ms: u64,
-        batch: Option<PathBuf>,
-        diff: Option<PathBuf>,
-        filter_class: Option<TaskClass>,
-        flamegraph: Option<PathBuf>,
-    },
-    Summary {
-        path: PathBuf,
-        json: bool,
-        top: usize,
-        filter_class: Option<TaskClass>,
-    },
-    Validate {
-        path: PathBuf,
-        json: bool,
-        strict: bool,
-    },
-    Tune {
-        tree_pid: u32,
-        profiles: PathBuf,
-        epoch_seconds: u64,
-        warmup_seconds: u64,
-        runs: u32,
-        keep_best: bool,
-        baseline_profile: Option<String>,
-        out_dir: Option<PathBuf>,
-        mangohud_log: Option<PathBuf>,
-        enforce: bool,
-        hwmon: bool,
-    },
-    Recommend {
-        baseline: PathBuf,
-        tune: PathBuf,
-        json: bool,
-        markdown: Option<PathBuf>,
-    },
-    Check {
-        baseline: PathBuf,
-        current: PathBuf,
-        max_regression_p99_ms: Option<f64>,
-        max_max_regression_ms: Option<f64>,
-        json: bool,
-        top: usize,
-        filter_class: Option<TaskClass>,
-    },
-    Autotune {
-        input: crate::autotune::AutotuneCommandInput,
-    },
-    Audit {
-        path: Option<PathBuf>,
-        tail: usize,
-        json: bool,
-    },
-    AutotuneReplay {
-        run: PathBuf,
-        config: Option<PathBuf>,
-    },
-    Probes {
-        json: bool,
-    },
-    Rules {
-        command: RulesCommand,
-    },
-    ScenarioCreate {
-        name: String,
-        force: bool,
-        watch_process: Option<String>,
-        duration: u64,
-        preset: String,
-        mangohud_log: Option<PathBuf>,
-        notes: Option<String>,
-    },
-    ScenarioRun {
-        name: String,
-        role: String,
-        dry_run: bool,
-        out_dir: Option<PathBuf>,
-        mangohud_log_override: Option<PathBuf>,
-    },
-    ScenarioCompare {
-        name: String,
-        baseline: Option<PathBuf>,
-        current: Option<PathBuf>,
-        top: usize,
-        json_summary: bool,
-        validate: bool,
-    },
-    ScenarioPath {
-        name: String,
-    },
-    ScenarioList,
-    Advisor {
-        run: Option<PathBuf>,
-        profiles: Option<PathBuf>,
-        json: bool,
-        watch_runs: bool,
-        runs_dir: Option<PathBuf>,
-        poll_seconds: u64,
-        once: bool,
-    },
-    Doctor {
-        input: crate::doctor::DoctorInput,
-    },
-    ProfileTemplate {
-        topology: bool,
-    },
-    InspectIrqs {
-        json: bool,
-        filter: Vec<String>,
-        top: usize,
-    },
-    AutotuneGenerateProfiles {
-        watch_process: Option<String>,
-        out: PathBuf,
-        allow_cpus: Option<String>,
-        deny_cpus: Option<String>,
-        min_render_cpus: usize,
-        min_game_cpus: usize,
-        min_compositor_cpus: usize,
-        min_background_cpus: usize,
-    },
-    AutotuneStatus {
-        json: bool,
-    },
-    Agent {
-        bind: std::net::SocketAddr,
-        runs_dir: Option<std::path::PathBuf>,
-        allow_unsafe_bind: bool,
-        bearer_token_env: String,
-        bearer_token_file: Option<std::path::PathBuf>,
-        max_duration_seconds: u64,
-        max_targets: usize,
-        max_concurrent_recordings: usize,
-    },
-    Completions {
-        shell: clap_complete::Shell,
-    },
-    AutotuneReplayHistory {
-        history: PathBuf,
-    },
-    AutotuneRestore {
-        journal: Option<PathBuf>,
-        audit: Option<PathBuf>,
-        history: Option<PathBuf>,
-        dry_run: bool,
-    },
-    Man {
-        output: Option<PathBuf>,
-    },
+    Monitor(MonitorCommandInput),
+    Bench(BenchCommandInput),
+    Restore(RestoreCommandInput),
+    ApplyProfile(ApplyProfileCommandInput),
+    InspectTree(InspectTreeCommandInput),
+    Summary(SummaryCommandInput),
+    Validate(ValidateCommandInput),
+    Report(ReportCommandInput),
+    Tune(TuneCommandInput),
+    Recommend(RecommendCommandInput),
+    Check(CheckCommandInput),
+    AutotuneGenerateProfiles(AutotuneGenerateProfilesCommandInput),
+    Autotune(AutotuneCommandDto),
+    AutotuneStatus(AutotuneStatusCommandInput),
+    AutotuneReplayHistory(AutotuneReplayHistoryCommandInput),
+    AutotuneRestore(AutotuneRestoreCommandInput),
+    Audit(AuditCommandInput),
+    AutotuneReplay(AutotuneReplayCommandInput),
+    Advisor(AdvisorCommandInput),
+    Doctor(DoctorCommandInput),
+    Probes(ProbesCommandInput),
+    ProfileTemplate(ProfileTemplateCommandInput),
+    InspectIrqs(InspectIrqsCommandInput),
+    Agent(AgentCommandInput),
+    Completions(CompletionsCommandInput),
+    Man(ManCommandInput),
+    Rules(RulesCommandInput),
+    ScenarioCreate(ScenarioCreateCommandInput),
+    ScenarioRun(ScenarioRunCommandInput),
+    ScenarioCompare(ScenarioCompareCommandInput),
+    ScenarioPath(ScenarioPathCommandInput),
+    ScenarioList(ScenarioListCommandInput),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
@@ -1714,9 +1579,9 @@ where
     let cli = Cli::try_parse_from(args)?;
 
     match cli.command {
-        Some(Command::Monitor(args)) => Ok(AppCommand::Monitor(Arc::new(
-            config_from_monitor_args(args, false, None)?,
-        ))),
+        Some(Command::Monitor(args)) => Ok(AppCommand::Monitor(MonitorCommandInput {
+            config: Arc::new(config_from_monitor_args(args, false, None)?),
+        })),
         Some(Command::Record(args)) => {
             if matches!(args.duration, Some(0)) {
                 anyhow::bail!("--duration must be greater than zero");
@@ -1729,11 +1594,9 @@ where
             }
 
             let max_duration = args.duration.map(Duration::from_secs);
-            Ok(AppCommand::Monitor(Arc::new(config_from_monitor_args(
-                args.monitor,
-                true,
-                max_duration,
-            )?)))
+            Ok(AppCommand::Monitor(MonitorCommandInput {
+                config: Arc::new(config_from_monitor_args(args.monitor, true, max_duration)?),
+            }))
         }
         Some(Command::Bench(mut args)) => {
             if args.duration == 0 {
@@ -1751,23 +1614,24 @@ where
 
             let run_name = format!("bench-{}-{}", args.role, args.scenario);
             args.monitor.run_name = Some(run_name.clone());
-            Ok(AppCommand::Bench {
-                config: Arc::new(config_from_monitor_args(
-                    args.monitor,
-                    true,
-                    Some(Duration::from_secs(args.duration)),
-                )?),
+            let config = Arc::new(config_from_monitor_args(
+                args.monitor,
+                true,
+                Some(Duration::from_secs(args.duration)),
+            )?);
+            Ok(AppCommand::Bench(BenchCommandInput {
+                config,
                 role: args.role,
                 run_name,
-            })
+            }))
         }
         Some(Command::InspectTree(args)) => {
             if args.tree_pid == 0 {
                 anyhow::bail!("--tree-pid must be greater than zero");
             }
-            Ok(AppCommand::InspectTree {
+            Ok(AppCommand::InspectTree(InspectTreeCommandInput {
                 tree_pid: args.tree_pid,
-            })
+            }))
         }
         Some(Command::Report(args)) => {
             if args.top == 0 {
@@ -1779,15 +1643,7 @@ where
             if args.batch.is_none() && args.path.is_none() {
                 anyhow::bail!("report requires PATH unless --batch is set");
             }
-            let filter_class = if let Some(class_str) = &args.filter_class {
-                Some(
-                    TaskClass::from_str_opt(class_str)
-                        .ok_or_else(|| anyhow::anyhow!("unknown task class: {class_str}"))?,
-                )
-            } else {
-                None
-            };
-            Ok(AppCommand::Report {
+            Ok(AppCommand::Report(ReportCommandInput {
                 path: args.path,
                 json: args.json,
                 analysis_json: args.analysis_json,
@@ -1797,37 +1653,29 @@ where
                 cluster_window_ms: args.cluster_window_ms,
                 batch: args.batch,
                 diff: args.diff,
-                filter_class,
+                filter_class: parse_optional_task_class(args.filter_class.as_deref())?,
                 flamegraph: args.flamegraph,
-            })
+            }))
         }
         Some(Command::Summary(args)) => {
             if args.top == 0 {
                 anyhow::bail!("--top must be greater than zero");
             }
-            let filter_class = if let Some(class_str) = &args.filter_class {
-                Some(
-                    TaskClass::from_str_opt(class_str)
-                        .ok_or_else(|| anyhow::anyhow!("unknown task class: {class_str}"))?,
-                )
-            } else {
-                None
-            };
-            Ok(AppCommand::Summary {
+            Ok(AppCommand::Summary(SummaryCommandInput {
                 path: args.path,
                 json: args.json,
                 top: args.top,
-                filter_class,
-            })
+                filter_class: parse_optional_task_class(args.filter_class.as_deref())?,
+            }))
         }
-        Some(Command::Validate(args)) => Ok(AppCommand::Validate {
+        Some(Command::Validate(args)) => Ok(AppCommand::Validate(ValidateCommandInput {
             path: args.path,
             json: args.json,
             strict: args.strict,
-        }),
-        Some(Command::Restore(args)) => Ok(AppCommand::Restore {
+        })),
+        Some(Command::Restore(args)) => Ok(AppCommand::Restore(RestoreCommandInput {
             dry_run: args.dry_run,
-        }),
+        })),
         Some(Command::ApplyProfile(args)) => {
             if args.tree_pid == 0 {
                 anyhow::bail!("--tree-pid must be greater than zero");
@@ -1838,7 +1686,7 @@ where
             if args.keep_applied && !args.watch {
                 anyhow::bail!("--keep-applied requires --watch");
             }
-            Ok(AppCommand::ApplyProfile {
+            Ok(AppCommand::ApplyProfile(ApplyProfileCommandInput {
                 tree_pid: args.tree_pid,
                 profile: args.profile,
                 force: args.force,
@@ -1848,7 +1696,7 @@ where
                 keep_applied: args.keep_applied,
                 refresh_ms: args.refresh_ms,
                 enforce: args.enforce,
-            })
+            }))
         }
         Some(Command::Tune(args)) => {
             if args.tree_pid == 0 {
@@ -1863,7 +1711,7 @@ where
             if args.runs == 0 {
                 anyhow::bail!("--runs must be greater than zero");
             }
-            Ok(AppCommand::Tune {
+            Ok(AppCommand::Tune(TuneCommandInput {
                 tree_pid: args.tree_pid,
                 profiles: args.profiles,
                 epoch_seconds: args.epoch_seconds,
@@ -1875,14 +1723,14 @@ where
                 mangohud_log: args.mangohud_log,
                 enforce: args.enforce,
                 hwmon: args.hwmon,
-            })
+            }))
         }
-        Some(Command::Recommend(args)) => Ok(AppCommand::Recommend {
+        Some(Command::Recommend(args)) => Ok(AppCommand::Recommend(RecommendCommandInput {
             baseline: args.baseline,
             tune: args.tune,
             json: args.json,
             markdown: args.markdown,
-        }),
+        })),
         Some(Command::Check(args)) => {
             if args.max_regression_p99_ms.is_none() && args.max_max_regression_ms.is_none() {
                 anyhow::bail!(
@@ -1902,54 +1750,52 @@ where
             if args.top == 0 {
                 anyhow::bail!("--top must be greater than zero");
             }
-            let filter_class = if let Some(class_str) = &args.filter_class {
-                Some(
-                    TaskClass::from_str_opt(class_str)
-                        .ok_or_else(|| anyhow::anyhow!("unknown task class: {class_str}"))?,
-                )
-            } else {
-                None
-            };
-            Ok(AppCommand::Check {
+            Ok(AppCommand::Check(CheckCommandInput {
                 baseline: args.baseline,
                 current: args.current,
                 max_regression_p99_ms: args.max_regression_p99_ms,
                 max_max_regression_ms: args.max_max_regression_ms,
                 json: args.json,
                 top: args.top,
-                filter_class,
-            })
+                filter_class: parse_optional_task_class(args.filter_class.as_deref())?,
+            }))
         }
         Some(Command::Autotune(args)) => {
             if let Some(cmd) = args.command {
                 match cmd {
                     AutotuneCommand::GenerateProfiles(args) => {
-                        Ok(AppCommand::AutotuneGenerateProfiles {
-                            watch_process: args.watch_process,
-                            out: args.out,
-                            allow_cpus: args.allow_cpus,
-                            deny_cpus: args.deny_cpus,
-                            min_render_cpus: args.min_render_cpus,
-                            min_game_cpus: args.min_game_cpus,
-                            min_compositor_cpus: args.min_compositor_cpus,
-                            min_background_cpus: args.min_background_cpus,
-                        })
+                        Ok(AppCommand::AutotuneGenerateProfiles(
+                            AutotuneGenerateProfilesCommandInput {
+                                watch_process: args.watch_process,
+                                out: args.out,
+                                allow_cpus: args.allow_cpus,
+                                deny_cpus: args.deny_cpus,
+                                min_render_cpus: args.min_render_cpus,
+                                min_game_cpus: args.min_game_cpus,
+                                min_compositor_cpus: args.min_compositor_cpus,
+                                min_background_cpus: args.min_background_cpus,
+                            },
+                        ))
                     }
-                    AutotuneCommand::Replay(replay) => Ok(AppCommand::AutotuneReplay {
-                        run: replay.run,
-                        config: replay.config,
-                    }),
-                    AutotuneCommand::ReplayHistory(replay_args) => {
-                        Ok(AppCommand::AutotuneReplayHistory {
+                    AutotuneCommand::Replay(replay) => {
+                        Ok(AppCommand::AutotuneReplay(AutotuneReplayCommandInput {
+                            run: replay.run,
+                            config: replay.config,
+                        }))
+                    }
+                    AutotuneCommand::ReplayHistory(replay_args) => Ok(
+                        AppCommand::AutotuneReplayHistory(AutotuneReplayHistoryCommandInput {
                             history: replay_args.history,
-                        })
+                        }),
+                    ),
+                    AutotuneCommand::Restore(args) => {
+                        Ok(AppCommand::AutotuneRestore(AutotuneRestoreCommandInput {
+                            journal: args.journal,
+                            audit: args.audit,
+                            history: args.history,
+                            dry_run: args.dry_run,
+                        }))
                     }
-                    AutotuneCommand::Restore(args) => Ok(AppCommand::AutotuneRestore {
-                        journal: args.journal,
-                        audit: args.audit,
-                        history: args.history,
-                        dry_run: args.dry_run,
-                    }),
                 }
             } else {
                 if args.allow_system_wide_actions {
@@ -1959,7 +1805,7 @@ where
                 }
 
                 validate_autotune_mode(&args.mode)?;
-                Ok(AppCommand::Autotune {
+                Ok(AppCommand::Autotune(AutotuneCommandDto {
                     input: crate::autotune::AutotuneCommandInput {
                         config: args.config,
                         watch_process: args.watch_process,
@@ -1980,15 +1826,19 @@ where
                         foreground_max_stale_ms: args.foreground_max_stale_ms,
                         allow_system_wide_actions: args.allow_system_wide_actions,
                     },
-                })
+                }))
             }
         }
-        Some(Command::AutotuneStatus(args)) => Ok(AppCommand::AutotuneStatus { json: args.json }),
-        Some(Command::Audit(args)) => Ok(AppCommand::Audit {
+        Some(Command::AutotuneStatus(args)) => {
+            Ok(AppCommand::AutotuneStatus(AutotuneStatusCommandInput {
+                json: args.json,
+            }))
+        }
+        Some(Command::Audit(args)) => Ok(AppCommand::Audit(AuditCommandInput {
             path: args.path,
             tail: args.tail,
             json: args.json,
-        }),
+        })),
         Some(Command::Advisor(args)) => {
             if args.watch_runs && args.run.is_some() {
                 anyhow::bail!("--watch-runs conflicts with --run");
@@ -1999,7 +1849,7 @@ where
             if args.poll_seconds == 0 {
                 anyhow::bail!("--poll-seconds must be greater than zero");
             }
-            Ok(AppCommand::Advisor {
+            Ok(AppCommand::Advisor(AdvisorCommandInput {
                 run: args.run,
                 profiles: args.profiles,
                 json: args.json,
@@ -2007,9 +1857,9 @@ where
                 runs_dir: args.runs_dir,
                 poll_seconds: args.poll_seconds,
                 once: args.once,
-            })
+            }))
         }
-        Some(Command::Doctor(args)) => Ok(AppCommand::Doctor {
+        Some(Command::Doctor(args)) => Ok(AppCommand::Doctor(DoctorCommandInput {
             input: crate::doctor::DoctorInput {
                 json: args.json,
                 hwmon: args.hwmon,
@@ -2023,25 +1873,25 @@ where
                 cpu_perf: args.cpu_perf,
                 mangohud_log: args.mangohud_log,
             },
-        }),
-        Some(Command::ProfileTemplate(args)) => Ok(AppCommand::ProfileTemplate {
-            topology: args.topology,
-        }),
+        })),
+        Some(Command::ProfileTemplate(args)) => {
+            Ok(AppCommand::ProfileTemplate(ProfileTemplateCommandInput {
+                topology: args.topology,
+            }))
+        }
         Some(Command::InspectIrqs(args)) => {
             if args.top == 0 {
                 anyhow::bail!("--top must be greater than zero");
             }
-            Ok(AppCommand::InspectIrqs {
+            Ok(AppCommand::InspectIrqs(InspectIrqsCommandInput {
                 json: args.json,
                 filter: args.filter.clone(),
                 top: args.top,
-            })
+            }))
         }
-        None => Ok(AppCommand::Monitor(Arc::new(config_from_monitor_args(
-            cli.legacy_monitor,
-            false,
-            None,
-        )?))),
+        None => Ok(AppCommand::Monitor(MonitorCommandInput {
+            config: Arc::new(config_from_monitor_args(cli.legacy_monitor, false, None)?),
+        })),
         Some(Command::Agent(args)) => {
             if args.max_duration_seconds == 0 {
                 anyhow::bail!("--max-duration-seconds must be greater than zero");
@@ -2061,7 +1911,7 @@ where
             } else {
                 args.bind
             };
-            Ok(AppCommand::Agent {
+            Ok(AppCommand::Agent(AgentCommandInput {
                 bind,
                 runs_dir: args.runs_dir,
                 allow_unsafe_bind: args.allow_unsafe_bind,
@@ -2070,16 +1920,20 @@ where
                 max_duration_seconds: args.max_duration_seconds,
                 max_targets: args.max_targets,
                 max_concurrent_recordings: args.max_concurrent_recordings,
-            })
+            }))
         }
-        Some(Command::Completions(args)) => Ok(AppCommand::Completions { shell: args.shell }),
-        Some(Command::Man(args)) => Ok(AppCommand::Man {
+        Some(Command::Completions(args)) => Ok(AppCommand::Completions(CompletionsCommandInput {
+            shell: args.shell,
+        })),
+        Some(Command::Man(args)) => Ok(AppCommand::Man(ManCommandInput {
             output: args.output,
-        }),
-        Some(Command::Probes(args)) => Ok(AppCommand::Probes { json: args.json }),
-        Some(Command::Rules(args)) => Ok(AppCommand::Rules {
+        })),
+        Some(Command::Probes(args)) => {
+            Ok(AppCommand::Probes(ProbesCommandInput { json: args.json }))
+        }
+        Some(Command::Rules(args)) => Ok(AppCommand::Rules(RulesCommandInput {
             command: args.command,
-        }),
+        })),
         Some(Command::Scenario(args)) => match args.command {
             ScenarioCommand::Create(args) => {
                 if args.name.trim().is_empty() {
@@ -2088,7 +1942,7 @@ where
                 if args.duration == 0 {
                     anyhow::bail!("scenario duration must be greater than zero");
                 }
-                Ok(AppCommand::ScenarioCreate {
+                Ok(AppCommand::ScenarioCreate(ScenarioCreateCommandInput {
                     name: args.name,
                     force: args.force,
                     watch_process: args.watch_process,
@@ -2096,7 +1950,7 @@ where
                     preset: args.preset,
                     mangohud_log: args.mangohud_log,
                     notes: args.notes,
-                })
+                }))
             }
             ScenarioCommand::Run(args) => {
                 if args.name.trim().is_empty() {
@@ -2105,13 +1959,13 @@ where
                 if !matches!(args.role.as_str(), "baseline" | "current") {
                     anyhow::bail!("--role must be baseline or current");
                 }
-                Ok(AppCommand::ScenarioRun {
+                Ok(AppCommand::ScenarioRun(ScenarioRunCommandInput {
                     name: args.name,
                     role: args.role,
                     dry_run: args.dry_run,
                     out_dir: args.out_dir,
                     mangohud_log_override: args.mangohud_log_override,
-                })
+                }))
             }
             ScenarioCommand::Compare(args) => {
                 if args.name.trim().is_empty() {
@@ -2120,22 +1974,24 @@ where
                 if args.top == 0 {
                     anyhow::bail!("--top must be greater than zero");
                 }
-                Ok(AppCommand::ScenarioCompare {
+                Ok(AppCommand::ScenarioCompare(ScenarioCompareCommandInput {
                     name: args.name,
                     baseline: args.baseline,
                     current: args.current,
                     top: args.top,
                     json_summary: args.json_summary,
                     validate: args.validate,
-                })
+                }))
             }
             ScenarioCommand::Path(args) => {
                 if args.name.trim().is_empty() {
                     anyhow::bail!("scenario name must not be empty");
                 }
-                Ok(AppCommand::ScenarioPath { name: args.name })
+                Ok(AppCommand::ScenarioPath(ScenarioPathCommandInput {
+                    name: args.name,
+                }))
             }
-            ScenarioCommand::List => Ok(AppCommand::ScenarioList),
+            ScenarioCommand::List => Ok(AppCommand::ScenarioList(ScenarioListCommandInput)),
         },
     }
 }
@@ -2791,7 +2647,7 @@ fn parse_monitor_config_for_phase15<const N: usize>(
 ) -> anyhow::Result<Arc<Config>> {
     let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
     match parse_app_command_from(args.iter().map(OsString::from))? {
-        AppCommand::Monitor(config) => Ok(config),
+        AppCommand::Monitor(input) => Ok(input.config.clone()),
         other => anyhow::bail!("expected AppCommand::Monitor, got {other:?}"),
     }
 }
@@ -2876,14 +2732,14 @@ mod tests {
         args: [&str; N],
     ) -> anyhow::Result<Arc<Config>> {
         match parse_app_command_from_inner(args.iter().map(OsString::from))? {
-            AppCommand::Monitor(config) => Ok(config),
+            AppCommand::Monitor(input) => Ok(input.config.clone()),
             other => anyhow::bail!("expected AppCommand::Monitor, got {other:?}"),
         }
     }
 
     fn parse_monitor_config_from<const N: usize>(args: [&str; N]) -> anyhow::Result<Arc<Config>> {
         match parse_app_command_from(args.iter().map(OsString::from))? {
-            AppCommand::Monitor(config) => Ok(config),
+            AppCommand::Monitor(input) => Ok(input.config.clone()),
             other => anyhow::bail!("expected AppCommand::Monitor, got {other:?}"),
         }
     }
@@ -2951,19 +2807,13 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Report {
-            top,
-            html,
-            cluster_window_ms,
-            ..
-        } = command
-        else {
+        let AppCommand::Report(input) = command else {
             panic!("expected report command");
         };
 
-        assert_eq!(top, 25);
-        assert_eq!(html, Some(PathBuf::from("/tmp/report.html")));
-        assert_eq!(cluster_window_ms, 5);
+        assert_eq!(input.top, 25);
+        assert_eq!(input.html, Some(PathBuf::from("/tmp/report.html")));
+        assert_eq!(input.cluster_window_ms, 5);
     }
     #[test]
     fn report_flag_conflicts() {
@@ -3000,20 +2850,14 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Summary {
-            path,
-            json,
-            top,
-            filter_class,
-        } = command
-        else {
+        let AppCommand::Summary(input) = command else {
             panic!("expected summary command");
         };
 
-        assert_eq!(path, PathBuf::from("/tmp/run"));
-        assert!(json);
-        assert_eq!(top, 3);
-        assert_eq!(filter_class, Some(TaskClass::Game));
+        assert_eq!(input.path, PathBuf::from("/tmp/run"));
+        assert!(input.json);
+        assert_eq!(input.top, 3);
+        assert_eq!(input.filter_class, Some(TaskClass::Game));
     }
 
     #[test]
@@ -3025,13 +2869,13 @@ mod tests {
     fn validate_accepts_path() {
         let command = parse_app_command_from(["stutter", "validate", "/tmp/run"]).unwrap();
 
-        let AppCommand::Validate { path, json, strict } = command else {
+        let AppCommand::Validate(input) = command else {
             panic!("expected validate command");
         };
 
-        assert_eq!(path, PathBuf::from("/tmp/run"));
-        assert!(!json);
-        assert!(!strict);
+        assert_eq!(input.path, PathBuf::from("/tmp/run"));
+        assert!(!input.json);
+        assert!(!input.strict);
     }
 
     #[test]
@@ -3039,13 +2883,13 @@ mod tests {
         let command =
             parse_app_command_from(["stutter", "validate", "--json", "/tmp/run"]).unwrap();
 
-        let AppCommand::Validate { path, json, strict } = command else {
+        let AppCommand::Validate(input) = command else {
             panic!("expected validate command");
         };
 
-        assert_eq!(path, PathBuf::from("/tmp/run"));
-        assert!(json);
-        assert!(!strict);
+        assert_eq!(input.path, PathBuf::from("/tmp/run"));
+        assert!(input.json);
+        assert!(!input.strict);
     }
 
     #[test]
@@ -3053,13 +2897,13 @@ mod tests {
         let command =
             parse_app_command_from(["stutter", "validate", "--strict", "/tmp/run"]).unwrap();
 
-        let AppCommand::Validate { path, json, strict } = command else {
+        let AppCommand::Validate(input) = command else {
             panic!("expected validate command");
         };
 
-        assert_eq!(path, PathBuf::from("/tmp/run"));
-        assert!(!json);
-        assert!(strict);
+        assert_eq!(input.path, PathBuf::from("/tmp/run"));
+        assert!(!input.json);
+        assert!(input.strict);
     }
 
     #[test]
@@ -3075,21 +2919,14 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Report {
-            batch,
-            json_summary,
-            top,
-            path,
-            ..
-        } = command
-        else {
+        let AppCommand::Report(input) = command else {
             panic!("expected report command");
         };
 
-        assert_eq!(batch, Some(PathBuf::from("/tmp/runs")));
-        assert!(json_summary);
-        assert_eq!(top, 4);
-        assert_eq!(path, None);
+        assert_eq!(input.batch, Some(PathBuf::from("/tmp/runs")));
+        assert!(input.json_summary);
+        assert_eq!(input.top, 4);
+        assert_eq!(input.path, None);
     }
 
     #[test]
@@ -3106,16 +2943,16 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
 
         assert_eq!(
-            config.task_filters.include_comm,
+            input.config.task_filters.include_comm,
             vec![CompiledPattern::new("RenderThread".to_owned()).unwrap()]
         );
         assert_eq!(
-            config.task_filters.exclude_comm,
+            input.config.task_filters.exclude_comm,
             vec![CompiledPattern::new("steamwebhelper".to_owned()).unwrap()]
         );
     }
@@ -3136,12 +2973,12 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
 
-        assert_eq!(config.tree_pids, vec![42]);
-        assert_eq!(config.exclude_tree_pids, vec![7, 100]);
+        assert_eq!(input.config.tree_pids, vec![42]);
+        assert_eq!(input.config.exclude_tree_pids, vec![7, 100]);
     }
 
     #[test]
@@ -3158,13 +2995,13 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
 
-        assert_eq!(config.alert_threshold_ns, Some(250_000_000));
+        assert_eq!(input.config.alert_threshold_ns, Some(250_000_000));
         assert_eq!(
-            config.alert_webhook_url.as_deref(),
+            input.config.alert_webhook_url.as_deref(),
             Some("https://example.invalid/stutter")
         );
     }
@@ -3183,12 +3020,12 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
 
-        assert_eq!(config.epoch_period_ms, Some(5_000));
-        assert_eq!(config.summary_period_ms, 5_000);
+        assert_eq!(input.config.epoch_period_ms, Some(5_000));
+        assert_eq!(input.config.summary_period_ms, 5_000);
     }
 
     #[test]
@@ -3203,13 +3040,13 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
 
-        assert_eq!(config.watch_process.as_deref(), Some("KingdomCome"));
+        assert_eq!(input.config.watch_process.as_deref(), Some("KingdomCome"));
         assert_eq!(
-            config.csv_stream,
+            input.config.csv_stream,
             Some(CsvStreamTarget::File(PathBuf::from("/tmp/stutter.csv")))
         );
     }
@@ -3218,18 +3055,18 @@ mod tests {
     fn follow_exec_defaults_on_and_can_be_disabled() {
         let default_command =
             parse_app_command_from(["stutter", "monitor", "--pid", "42"]).unwrap();
-        let AppCommand::Monitor(default_config) = default_command else {
+        let AppCommand::Monitor(default_input) = default_command else {
             panic!("expected monitor command");
         };
-        assert!(default_config.follow_exec);
+        assert!(default_input.config.follow_exec);
 
         let disabled_command =
             parse_app_command_from(["stutter", "monitor", "--pid", "42", "--no-follow-exec"])
                 .unwrap();
-        let AppCommand::Monitor(disabled_config) = disabled_command else {
+        let AppCommand::Monitor(disabled_input) = disabled_command else {
             panic!("expected monitor command");
         };
-        assert!(!disabled_config.follow_exec);
+        assert!(!disabled_input.config.follow_exec);
     }
 
     #[test]
@@ -3256,15 +3093,15 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
 
         assert_eq!(
-            config.cgroupv2.as_deref(),
+            input.config.cgroupv2.as_deref(),
             Some(std::path::Path::new("/sys/fs/cgroup/test.slice"))
         );
-        assert!(config.native_cgroup_filter);
+        assert!(input.config.native_cgroup_filter);
     }
 
     #[test]
@@ -3277,11 +3114,11 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
 
-        assert!(!config.native_cgroup_filter);
+        assert!(!input.config.native_cgroup_filter);
     }
 
     #[test]
@@ -3320,14 +3157,14 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
 
-        assert!(config.cpu_perf);
-        assert!(config.cpu_perf_kernel);
-        assert_eq!(config.cpu_perf_max_tasks, 16);
-        assert!(!config.cpu_perf_cache_refs);
+        assert!(input.config.cpu_perf);
+        assert!(input.config.cpu_perf_kernel);
+        assert_eq!(input.config.cpu_perf_max_tasks, 16);
+        assert!(!input.config.cpu_perf_cache_refs);
     }
 
     #[test]
@@ -3342,13 +3179,13 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
 
-        assert!(config.cpu_perf);
-        assert!(config.cpu_perf_cache_refs);
-        assert!(config.recording.is_some());
+        assert!(input.config.cpu_perf);
+        assert!(input.config.cpu_perf_cache_refs);
+        assert!(input.config.recording.is_some());
     }
 
     #[test]
@@ -3390,26 +3227,17 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Check {
-            baseline,
-            current,
-            max_regression_p99_ms,
-            max_max_regression_ms,
-            json,
-            top,
-            filter_class,
-        } = command
-        else {
+        let AppCommand::Check(input) = command else {
             panic!("expected check command");
         };
 
-        assert_eq!(baseline, PathBuf::from("/tmp/base"));
-        assert_eq!(current, PathBuf::from("/tmp/current"));
-        assert_eq!(max_regression_p99_ms, Some(0.5));
-        assert_eq!(max_max_regression_ms, Some(2.0));
-        assert!(json);
-        assert_eq!(top, 5);
-        assert_eq!(filter_class, Some(TaskClass::Game));
+        assert_eq!(input.baseline, PathBuf::from("/tmp/base"));
+        assert_eq!(input.current, PathBuf::from("/tmp/current"));
+        assert_eq!(input.max_regression_p99_ms, Some(0.5));
+        assert_eq!(input.max_max_regression_ms, Some(2.0));
+        assert!(input.json);
+        assert_eq!(input.top, 5);
+        assert_eq!(input.filter_class, Some(TaskClass::Game));
     }
 
     #[test]
@@ -3433,7 +3261,7 @@ mod tests {
     #[test]
     fn parses_restore_and_apply_profile_commands() {
         let restore = parse_app_command_from(["stutter", "restore"]).unwrap();
-        assert!(matches!(restore, AppCommand::Restore { dry_run: false }));
+        assert!(matches!(restore, AppCommand::Restore(input) if !input.dry_run));
 
         let apply = parse_app_command_from([
             "stutter",
@@ -3445,30 +3273,19 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::ApplyProfile {
-            tree_pid,
-            profile,
-            force,
-            dry_run,
-            allow_medium_risk,
-            watch,
-            keep_applied,
-            refresh_ms,
-            enforce,
-        } = apply
-        else {
+        let AppCommand::ApplyProfile(input) = apply else {
             panic!("expected apply profile command");
         };
 
-        assert_eq!(tree_pid, 42);
-        assert_eq!(profile, PathBuf::from("/tmp/profile.toml"));
-        assert!(!force);
-        assert!(!dry_run);
-        assert!(!allow_medium_risk);
-        assert!(!watch);
-        assert!(!keep_applied);
-        assert_eq!(refresh_ms, 1_000);
-        assert!(!enforce);
+        assert_eq!(input.tree_pid, 42);
+        assert_eq!(input.profile, PathBuf::from("/tmp/profile.toml"));
+        assert!(!input.force);
+        assert!(!input.dry_run);
+        assert!(!input.allow_medium_risk);
+        assert!(!input.watch);
+        assert!(!input.keep_applied);
+        assert_eq!(input.refresh_ms, 1_000);
+        assert!(!input.enforce);
     }
 
     #[test]
@@ -3489,24 +3306,15 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::ApplyProfile {
-            force,
-            allow_medium_risk,
-            dry_run: _,
-            watch,
-            keep_applied,
-            refresh_ms,
-            ..
-        } = command
-        else {
+        let AppCommand::ApplyProfile(input) = command else {
             panic!("expected apply profile command");
         };
 
-        assert!(force);
-        assert!(allow_medium_risk);
-        assert!(watch);
-        assert!(keep_applied);
-        assert_eq!(refresh_ms, 250);
+        assert!(input.force);
+        assert!(input.allow_medium_risk);
+        assert!(input.watch);
+        assert!(input.keep_applied);
+        assert_eq!(input.refresh_ms, 250);
     }
 
     #[test]
@@ -3524,19 +3332,19 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
 
-        assert!(config.keep_missing_pid);
-        assert_eq!(config.watch_poll_ms, 500);
-        assert_eq!(config.watch_timeout, Some(Duration::from_secs(3)));
+        assert!(input.config.keep_missing_pid);
+        assert_eq!(input.config.watch_poll_ms, 500);
+        assert_eq!(input.config.watch_timeout, Some(Duration::from_secs(3)));
     }
 
     #[test]
     fn parses_restore_dry_run() {
         let command = parse_app_command_from(["stutter", "restore", "--dry-run"]).unwrap();
-        assert!(matches!(command, AppCommand::Restore { dry_run: true }));
+        assert!(matches!(command, AppCommand::Restore(input) if input.dry_run));
     }
 
     #[test]
@@ -3560,20 +3368,23 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
 
-        assert!(config.irq_latency);
-        assert_eq!(config.irqs, vec![137]);
-        assert!(config.hwmon);
-        assert_eq!(config.hwmon_drm_card.as_deref(), Some("card1"));
+        assert!(input.config.irq_latency);
+        assert_eq!(input.config.irqs, vec![137]);
+        assert!(input.config.hwmon);
+        assert_eq!(input.config.hwmon_drm_card.as_deref(), Some("card1"));
         assert_eq!(
-            config.hwmon_render_node,
+            input.config.hwmon_render_node,
             Some(PathBuf::from("/dev/dri/renderD129"))
         );
-        assert_eq!(config.mangohud_log, Some(PathBuf::from("/tmp/mango.csv")));
-        assert!(config.tui);
+        assert_eq!(
+            input.config.mangohud_log,
+            Some(PathBuf::from("/tmp/mango.csv"))
+        );
+        assert!(input.config.tui);
     }
 
     #[test]
@@ -3595,34 +3406,24 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Tune {
-            tree_pid,
-            profiles,
-            epoch_seconds,
-            warmup_seconds,
-            runs,
-            keep_best,
-            baseline_profile,
-            out_dir,
-            mangohud_log,
-            enforce,
-            hwmon,
-        } = command
-        else {
+        let AppCommand::Tune(input) = command else {
             panic!("expected tune command");
         };
 
-        assert_eq!(tree_pid, 42);
-        assert_eq!(profiles, PathBuf::from("/tmp/profiles.toml"));
-        assert_eq!(epoch_seconds, 60);
-        assert_eq!(warmup_seconds, 10);
-        assert_eq!(runs, 3);
-        assert!(keep_best);
-        assert_eq!(baseline_profile, None);
-        assert_eq!(out_dir, None);
-        assert_eq!(mangohud_log, Some(PathBuf::from("/tmp/tune-mango.csv")));
-        assert!(!enforce);
-        assert!(!hwmon);
+        assert_eq!(input.tree_pid, 42);
+        assert_eq!(input.profiles, PathBuf::from("/tmp/profiles.toml"));
+        assert_eq!(input.epoch_seconds, 60);
+        assert_eq!(input.warmup_seconds, 10);
+        assert_eq!(input.runs, 3);
+        assert!(input.keep_best);
+        assert_eq!(input.baseline_profile, None);
+        assert_eq!(input.out_dir, None);
+        assert_eq!(
+            input.mangohud_log,
+            Some(PathBuf::from("/tmp/tune-mango.csv"))
+        );
+        assert!(!input.enforce);
+        assert!(!input.hwmon);
     }
 
     #[test]
@@ -3642,24 +3443,19 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Bench {
-            config,
-            role,
-            run_name,
-        } = command
-        else {
+        let AppCommand::Bench(input) = command else {
             panic!("expected bench command");
         };
 
-        assert_eq!(role, "baseline");
-        assert_eq!(run_name, "bench-baseline-route-a");
-        assert_eq!(config.max_duration, Some(Duration::from_secs(180)));
+        assert_eq!(input.role, "baseline");
+        assert_eq!(input.run_name, "bench-baseline-route-a");
+        assert_eq!(input.config.max_duration, Some(Duration::from_secs(180)));
         assert_eq!(
-            config.recording.as_ref().unwrap().run_name.as_deref(),
+            input.config.recording.as_ref().unwrap().run_name.as_deref(),
             Some("bench-baseline-route-a")
         );
-        assert_eq!(config.watch_process.as_deref(), Some("Game.exe"));
-        assert!(config.persistent);
+        assert_eq!(input.config.watch_process.as_deref(), Some("Game.exe"));
+        assert!(input.config.persistent);
     }
 
     #[test]
@@ -3717,48 +3513,51 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Bench { config, .. } = command else {
+        let AppCommand::Bench(input) = command else {
             panic!("expected bench command");
         };
 
-        assert_eq!(config.watch_process.as_deref(), Some("Game.exe"));
-        assert!(config.hwmon);
-        assert_eq!(config.mangohud_log, Some(PathBuf::from("/tmp/mango.csv")));
+        assert_eq!(input.config.watch_process.as_deref(), Some("Game.exe"));
+        assert!(input.config.hwmon);
+        assert_eq!(
+            input.config.mangohud_log,
+            Some(PathBuf::from("/tmp/mango.csv"))
+        );
     }
 
     #[test]
     fn parses_doctor_command() {
         let command = parse_app_command_from(["stutter", "doctor"]).unwrap();
 
-        let AppCommand::Doctor { input } = command else {
+        let AppCommand::Doctor(input) = command else {
             panic!("expected doctor command");
         };
 
-        assert!(!input.json);
-        assert!(!input.hwmon);
-        assert!(!input.irq_latency);
+        assert!(!input.input.json);
+        assert!(!input.input.hwmon);
+        assert!(!input.input.irq_latency);
     }
 
     #[test]
     fn probes_command_parses() {
         let command = parse_app_command_from(["stutter", "probes"]).unwrap();
 
-        let AppCommand::Probes { json } = command else {
+        let AppCommand::Probes(input) = command else {
             panic!("expected probes command");
         };
 
-        assert!(!json);
+        assert!(!input.json);
     }
 
     #[test]
     fn probes_json_parses() {
         let command = parse_app_command_from(["stutter", "probes", "--json"]).unwrap();
 
-        let AppCommand::Probes { json } = command else {
+        let AppCommand::Probes(input) = command else {
             panic!("expected probes command");
         };
 
-        assert!(json);
+        assert!(input.json);
     }
 
     #[test]
@@ -3774,13 +3573,13 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Audit { path, tail, json } = command else {
+        let AppCommand::Audit(input) = command else {
             panic!("expected audit command");
         };
 
-        assert_eq!(path, Some(PathBuf::from("/tmp/actions.jsonl")));
-        assert_eq!(tail, 50);
-        assert!(json);
+        assert_eq!(input.path, Some(PathBuf::from("/tmp/actions.jsonl")));
+        assert_eq!(input.tail, 50);
+        assert!(input.json);
     }
 
     #[test]
@@ -3796,21 +3595,14 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Advisor {
-            run,
-            profiles,
-            json,
-            watch_runs,
-            ..
-        } = command
-        else {
+        let AppCommand::Advisor(input) = command else {
             panic!("expected advisor command");
         };
 
-        assert_eq!(run, Some(PathBuf::from("/tmp/run")));
-        assert_eq!(profiles, Some(PathBuf::from("profiles.toml")));
-        assert!(json);
-        assert!(!watch_runs);
+        assert_eq!(input.run, Some(PathBuf::from("/tmp/run")));
+        assert_eq!(input.profiles, Some(PathBuf::from("profiles.toml")));
+        assert!(input.json);
+        assert!(!input.watch_runs);
     }
 
     #[test]
@@ -3827,23 +3619,15 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Advisor {
-            run,
-            watch_runs,
-            runs_dir,
-            poll_seconds,
-            once,
-            ..
-        } = command
-        else {
+        let AppCommand::Advisor(input) = command else {
             panic!("expected advisor command");
         };
 
-        assert_eq!(run, None);
-        assert!(watch_runs);
-        assert_eq!(runs_dir, Some(PathBuf::from("/tmp/runs")));
-        assert_eq!(poll_seconds, 1);
-        assert!(once);
+        assert_eq!(input.run, None);
+        assert!(input.watch_runs);
+        assert_eq!(input.runs_dir, Some(PathBuf::from("/tmp/runs")));
+        assert_eq!(input.poll_seconds, 1);
+        assert!(input.once);
     }
 
     #[test]
@@ -3870,25 +3654,25 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Doctor { input } = command else {
+        let AppCommand::Doctor(input) = command else {
             panic!("expected doctor command");
         };
 
-        assert!(input.json);
-        assert!(input.hwmon);
-        assert_eq!(input.hwmon_root, Some(PathBuf::from("/tmp/fake")));
+        assert!(input.input.json);
+        assert!(input.input.hwmon);
+        assert_eq!(input.input.hwmon_root, Some(PathBuf::from("/tmp/fake")));
     }
 
     #[test]
     fn parses_doctor_irq_latency_without_irq() {
         let command = parse_app_command_from(["stutter", "doctor", "--irq-latency"]).unwrap();
 
-        let AppCommand::Doctor { input } = command else {
+        let AppCommand::Doctor(input) = command else {
             panic!("expected doctor command");
         };
 
-        assert!(input.irq_latency);
-        assert!(input.irqs.is_empty());
+        assert!(input.input.irq_latency);
+        assert!(input.input.irqs.is_empty());
     }
 
     #[test]
@@ -3991,26 +3775,17 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Check {
-            baseline,
-            current,
-            max_regression_p99_ms,
-            max_max_regression_ms,
-            json,
-            top,
-            filter_class,
-        } = command
-        else {
+        let AppCommand::Check(input) = command else {
             panic!("expected check command");
         };
 
-        assert_eq!(baseline, PathBuf::from("run1/"));
-        assert_eq!(current, PathBuf::from("run2/"));
-        assert_eq!(max_regression_p99_ms, Some(2.5));
-        assert_eq!(max_max_regression_ms, None);
-        assert!(!json);
-        assert_eq!(top, 10);
-        assert_eq!(filter_class, None);
+        assert_eq!(input.baseline, PathBuf::from("run1/"));
+        assert_eq!(input.current, PathBuf::from("run2/"));
+        assert_eq!(input.max_regression_p99_ms, Some(2.5));
+        assert_eq!(input.max_max_regression_ms, None);
+        assert!(!input.json);
+        assert_eq!(input.top, 10);
+        assert_eq!(input.filter_class, None);
     }
 
     #[test]
@@ -4048,61 +3823,61 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
 
-        assert!(config.faults);
-        assert!(config.block_io);
-        assert!(config.stat_wait);
+        assert!(input.config.faults);
+        assert!(input.config.block_io);
+        assert!(input.config.stat_wait);
     }
 
     #[test]
     fn record_enables_cpu_freq_by_default_but_can_be_disabled() {
         let command = parse_app_command_from(["stutter", "record", "--pid", "42"]).unwrap();
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
-        assert!(config.cpu_freq);
+        assert!(input.config.cpu_freq);
 
         let command =
             parse_app_command_from(["stutter", "record", "--pid", "42", "--no-cpu-freq"]).unwrap();
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
-        assert!(!config.cpu_freq);
+        assert!(!input.config.cpu_freq);
     }
 
     #[test]
     fn monitor_disables_cpu_freq_by_default_but_can_be_enabled() {
         let command = parse_app_command_from(["stutter", "monitor", "--pid", "42"]).unwrap();
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
-        assert!(!config.cpu_freq);
+        assert!(!input.config.cpu_freq);
 
         let command =
             parse_app_command_from(["stutter", "monitor", "--pid", "42", "--cpu-freq"]).unwrap();
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
-        assert!(config.cpu_freq);
+        assert!(input.config.cpu_freq);
     }
 
     #[test]
     fn monitor_json_stream_flag_sets_config() {
         let command =
             parse_app_command_from(["stutter", "monitor", "--pid", "42", "--json-stream"]).unwrap();
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
-        assert!(config.json_stream);
+        assert!(input.config.json_stream);
 
         let command = parse_app_command_from(["stutter", "monitor", "--pid", "42"]).unwrap();
-        let AppCommand::Monitor(config) = command else {
+        let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
-        assert!(!config.json_stream);
+        assert!(!input.config.json_stream);
     }
 
     #[test]
@@ -4284,13 +4059,10 @@ mod tests {
     #[test]
     fn agent_accepts_allow_unsafe_bind() {
         let command = parse_app_command_from(["stutter", "agent", "--allow-unsafe-bind"]).unwrap();
-        let AppCommand::Agent {
-            allow_unsafe_bind, ..
-        } = command
-        else {
+        let AppCommand::Agent(input) = command else {
             panic!("expected agent command");
         };
-        assert!(allow_unsafe_bind);
+        assert!(input.allow_unsafe_bind);
     }
 
     #[test]
@@ -4298,26 +4070,20 @@ mod tests {
         let command =
             parse_app_command_from(["stutter", "agent", "--bearer-token-file", "/tmp/token"])
                 .unwrap();
-        let AppCommand::Agent {
-            bearer_token_file, ..
-        } = command
-        else {
+        let AppCommand::Agent(input) = command else {
             panic!("expected agent command");
         };
-        assert_eq!(bearer_token_file, Some(PathBuf::from("/tmp/token")));
+        assert_eq!(input.bearer_token_file, Some(PathBuf::from("/tmp/token")));
     }
 
     #[test]
     fn agent_accepts_bearer_token_env() {
         let command =
             parse_app_command_from(["stutter", "agent", "--bearer-token-env", "MY_TOKEN"]).unwrap();
-        let AppCommand::Agent {
-            bearer_token_env, ..
-        } = command
-        else {
+        let AppCommand::Agent(input) = command else {
             panic!("expected agent command");
         };
-        assert_eq!(bearer_token_env, "MY_TOKEN");
+        assert_eq!(input.bearer_token_env, "MY_TOKEN");
     }
 
     #[test]
@@ -4356,19 +4122,13 @@ mod tests {
         ])
         .unwrap();
 
-        let AppCommand::ScenarioCreate {
-            name,
-            duration,
-            watch_process,
-            ..
-        } = command
-        else {
+        let AppCommand::ScenarioCreate(input) = command else {
             panic!("expected ScenarioCreate command");
         };
 
-        assert_eq!(name, "kcd-route");
-        assert_eq!(duration, 60);
-        assert_eq!(watch_process, Some("KingdomCome.exe".to_owned()));
+        assert_eq!(input.name, "kcd-route");
+        assert_eq!(input.duration, 60);
+        assert_eq!(input.watch_process, Some("KingdomCome.exe".to_owned()));
     }
 
     #[test]
@@ -4390,11 +4150,11 @@ mod tests {
             "baseline",
         ])
         .unwrap();
-        let AppCommand::ScenarioRun { name, role, .. } = command else {
+        let AppCommand::ScenarioRun(input) = command else {
             panic!("expected ScenarioRun command");
         };
-        assert_eq!(name, "kcd-route");
-        assert_eq!(role, "baseline");
+        assert_eq!(input.name, "kcd-route");
+        assert_eq!(input.role, "baseline");
     }
 
     #[test]
@@ -4408,10 +4168,10 @@ mod tests {
             "current",
         ])
         .unwrap();
-        let AppCommand::ScenarioRun { role, .. } = command else {
+        let AppCommand::ScenarioRun(input) = command else {
             panic!("expected ScenarioRun command");
         };
-        assert_eq!(role, "current");
+        assert_eq!(input.role, "current");
     }
 
     #[test]
@@ -4427,11 +4187,11 @@ mod tests {
         let command =
             parse_app_command_from(["stutter", "scenario", "compare", "kcd-route", "--top", "5"])
                 .unwrap();
-        let AppCommand::ScenarioCompare { name, top, .. } = command else {
+        let AppCommand::ScenarioCompare(input) = command else {
             panic!("expected ScenarioCompare command");
         };
-        assert_eq!(name, "kcd-route");
-        assert_eq!(top, 5);
+        assert_eq!(input.name, "kcd-route");
+        assert_eq!(input.top, 5);
     }
 
     #[test]
@@ -4445,10 +4205,10 @@ mod tests {
     #[test]
     fn scenario_path_parses() {
         let command = parse_app_command_from(["stutter", "scenario", "path", "kcd-route"]).unwrap();
-        let AppCommand::ScenarioPath { name } = command else {
+        let AppCommand::ScenarioPath(input) = command else {
             panic!("expected ScenarioPath command");
         };
-        assert_eq!(name, "kcd-route");
+        assert_eq!(input.name, "kcd-route");
     }
 
     #[test]
@@ -4765,4 +4525,12 @@ foreground_include_title = true
         assert_eq!(config.foreground_poll_ms, 1000);
         assert_eq!(config.foreground_max_stale_ms, 500);
     }
+}
+
+fn parse_optional_task_class(value: Option<&str>) -> anyhow::Result<Option<TaskClass>> {
+    value
+        .map(|s| {
+            TaskClass::from_str_opt(s).ok_or_else(|| anyhow::anyhow!("unknown task class: {s}"))
+        })
+        .transpose()
 }
