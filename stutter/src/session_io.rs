@@ -6,10 +6,17 @@ use std::{
 use anyhow::{Context, Result};
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::recorder::{
-    BlockIoRecord, CpuFreqRecord, FocusEvent, ForegroundEvent, FrameEvent, GpuSample,
-    IntervalRecord, IrqEventRecord, MetadataFile, MigrationEventRecord, RuntimeSliceRecord,
-    SESSION_SCHEMA_VERSION, ScxEvent, SessionFile, SpikeEvent, TreeEvent,
+use crate::{
+    artifacts::{
+        ArtifactCounter, ArtifactEncoding, ArtifactKind, ArtifactSelection, artifact_counter_label,
+        artifact_file_name, artifact_kinds, artifact_path, artifact_primary_and_alias_paths,
+        artifact_spec,
+    },
+    recorder::{
+        BlockIoRecord, CpuFreqRecord, FocusEvent, ForegroundEvent, FrameEvent, GpuSample,
+        IntervalRecord, IrqEventRecord, MetadataFile, MigrationEventRecord, RuntimeSliceRecord,
+        SESSION_SCHEMA_VERSION, ScxEvent, SessionFile, SpikeEvent, TreeEvent,
+    },
 };
 
 #[derive(Debug, Serialize, Default)]
@@ -51,92 +58,8 @@ impl CorrelationWindows {
     pub fn is_in_ns(&self, ns: u64) -> bool {
         self.windows_ns
             .iter()
-            .any(|(min, max)| ns >= *min && ns <= *max)
+            .any(|(start, end)| ns >= *start && ns <= *end)
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ArtifactLoadOptions {
-    pub load_intervals: bool,
-    pub load_spikes: bool,
-    pub load_tree_events: bool,
-    pub load_irq_events: bool,
-    pub load_gpu_samples: bool,
-    pub load_frame_events: bool,
-    pub load_migration_events: bool,
-    pub load_cpu_freq_events: bool,
-    pub load_block_io_events: bool,
-    pub load_scx_events: bool,
-    pub load_runtime_slices: bool,
-    pub load_focus_events: bool,
-    pub load_foreground_events: bool,
-}
-
-impl ArtifactLoadOptions {
-    pub const REPORT: Self = Self {
-        load_intervals: false,
-        load_spikes: true,
-        load_tree_events: false,
-        load_irq_events: false,
-        load_gpu_samples: false,
-        load_frame_events: true,
-        load_migration_events: false,
-        load_cpu_freq_events: false,
-        load_block_io_events: false,
-        load_scx_events: false,
-        load_runtime_slices: false,
-        load_focus_events: true,
-        load_foreground_events: true,
-    };
-
-    pub const TUNE: Self = Self {
-        load_intervals: true,
-        load_spikes: false,
-        load_tree_events: false,
-        load_irq_events: false,
-        load_gpu_samples: false,
-        load_frame_events: true,
-        load_migration_events: false,
-        load_cpu_freq_events: false,
-        load_block_io_events: false,
-        load_scx_events: false,
-        load_runtime_slices: false,
-        load_focus_events: false,
-        load_foreground_events: false,
-    };
-
-    pub const AUTOTUNE_REPLAY: Self = Self {
-        load_intervals: true,
-        load_spikes: true,
-        load_tree_events: true,
-        load_irq_events: true,
-        load_gpu_samples: true,
-        load_frame_events: true,
-        load_migration_events: true,
-        load_cpu_freq_events: true,
-        load_block_io_events: true,
-        load_scx_events: true,
-        load_runtime_slices: true,
-        load_focus_events: true,
-        load_foreground_events: true,
-    };
-
-    #[allow(dead_code)]
-    pub const VALIDATE_ONLY: Self = Self {
-        load_intervals: false,
-        load_spikes: false,
-        load_tree_events: false,
-        load_irq_events: false,
-        load_gpu_samples: false,
-        load_frame_events: false,
-        load_migration_events: false,
-        load_cpu_freq_events: false,
-        load_block_io_events: false,
-        load_scx_events: false,
-        load_runtime_slices: false,
-        load_focus_events: false,
-        load_foreground_events: false,
-    };
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
@@ -153,23 +76,6 @@ impl RunValidationReport {
         self.errors.is_empty()
     }
 }
-
-pub(crate) const SESSION_FILE: &str = "session.json";
-pub(crate) const METADATA_FILE: &str = "metadata.json";
-pub(crate) const INTERVALS_FILE: &str = "interval.json";
-pub(crate) const SPIKES_FILE: &str = "spike_events.json";
-pub(crate) const TREE_EVENTS_FILE: &str = "tree_events.json";
-pub(crate) const IRQ_EVENTS_FILE: &str = "irq_events.json";
-pub(crate) const GPU_SAMPLES_FILE: &str = "gpu_samples.json";
-pub(crate) const FRAME_EVENTS_FILE: &str = "frame_correlation.json";
-pub(crate) const FRAME_EVENTS_STREAM_FILE: &str = "frame_events.json";
-pub(crate) const MIGRATION_EVENTS_FILE: &str = "migration_events.json";
-pub(crate) const CPU_FREQ_EVENTS_FILE: &str = "cpu_freq_samples.json";
-pub(crate) const BLOCK_IO_EVENTS_FILE: &str = "io_events.json";
-pub(crate) const SCX_EVENTS_FILE: &str = "scx_events.json";
-pub(crate) const RUNTIME_SLICES_FILE: &str = "runtime_slices.json";
-pub(crate) const FOCUS_EVENTS_FILE: &str = "focus_events.json";
-pub(crate) const FOREGROUND_EVENTS_FILE: &str = "foreground_events.json";
 
 fn load_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let file =
@@ -210,31 +116,6 @@ fn count_ndjson_file<T: DeserializeOwned>(path: &Path) -> Result<usize> {
     Ok(count)
 }
 
-#[allow(dead_code)]
-fn validate_ndjson_file<T: DeserializeOwned>(path: &Path) -> Result<()> {
-    count_ndjson_file::<T>(path).map(|_| ())
-}
-
-fn load_ndjson_file<T: DeserializeOwned>(path: &Path) -> Result<Vec<T>> {
-    load_ndjson_file_filtered(path, |_| true)
-}
-
-fn session_path_for(path: &Path) -> PathBuf {
-    if path.is_dir() {
-        path.join(SESSION_FILE)
-    } else {
-        path.to_path_buf()
-    }
-}
-
-fn metadata_path_for(path: &Path) -> PathBuf {
-    if path.is_dir() {
-        path.join(METADATA_FILE)
-    } else {
-        path.to_path_buf()
-    }
-}
-
 fn run_dir_for(path: &Path) -> PathBuf {
     if path.is_dir() {
         path.to_path_buf()
@@ -245,78 +126,203 @@ fn run_dir_for(path: &Path) -> PathBuf {
     }
 }
 
-fn json_path_for(run_dir: &Path, file_name: &str) -> PathBuf {
-    run_dir.join(file_name)
+fn artifact_input_path(path: &Path, kind: ArtifactKind) -> PathBuf {
+    if path.is_dir() {
+        artifact_path(path, kind)
+    } else {
+        path.to_path_buf()
+    }
 }
 
-fn load_optional_json_vec<T: DeserializeOwned>(
-    run_dir: &Path,
-    file_name: &str,
-    validation: &mut RunValidationReport,
-) -> Result<Vec<T>> {
-    let path = json_path_for(run_dir, file_name);
+fn push_unique_string(values: &mut Vec<String>, value: impl Into<String>) {
+    let value = value.into();
+    if !values.contains(&value) {
+        values.push(value);
+    }
+}
 
-    if !path.exists() {
-        if !validation
-            .missing_optional_files
-            .contains(&file_name.to_owned())
-        {
-            validation.missing_optional_files.push(file_name.to_owned());
+fn file_name_for_path(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+pub struct ArtifactLoader<'a> {
+    run_dir: &'a Path,
+    validation: &'a mut RunValidationReport,
+}
+
+impl<'a> ArtifactLoader<'a> {
+    pub fn new(run_dir: &'a Path, validation: &'a mut RunValidationReport) -> Self {
+        Self {
+            run_dir,
+            validation,
         }
-        return Ok(Vec::new());
     }
 
-    if !validation.present_files.contains(&file_name.to_owned()) {
-        validation.present_files.push(file_name.to_owned());
+    pub fn load_required_json<T: DeserializeOwned>(&mut self, kind: ArtifactKind) -> Result<T> {
+        let spec = artifact_spec(kind);
+        if spec.encoding != ArtifactEncoding::JsonObject {
+            anyhow::bail!("artifact {:?} is not a JSON object", kind);
+        }
+
+        let path = artifact_path(self.run_dir, kind);
+        if !path.exists() {
+            anyhow::bail!(
+                "missing mandatory {} (searched {})",
+                artifact_file_name(kind),
+                path.display()
+            );
+        }
+
+        push_unique_string(&mut self.validation.present_files, artifact_file_name(kind));
+        load_json_file(&path)
     }
-    load_ndjson_file(&path)
+
+    pub fn load_optional_json<T: DeserializeOwned>(
+        &mut self,
+        kind: ArtifactKind,
+    ) -> Result<Option<T>> {
+        let spec = artifact_spec(kind);
+        if spec.encoding != ArtifactEncoding::JsonObject {
+            anyhow::bail!("artifact {:?} is not a JSON object", kind);
+        }
+
+        let path = artifact_path(self.run_dir, kind);
+        if !path.exists() {
+            push_unique_string(
+                &mut self.validation.missing_optional_files,
+                artifact_file_name(kind),
+            );
+            return Ok(None);
+        }
+
+        push_unique_string(&mut self.validation.present_files, artifact_file_name(kind));
+        load_json_file(&path).map(Some)
+    }
+
+    pub fn load_optional_ndjson<T: DeserializeOwned>(
+        &mut self,
+        kind: ArtifactKind,
+    ) -> Result<Vec<T>> {
+        self.load_optional_ndjson_filtered(kind, |_| true)
+    }
+
+    pub fn load_optional_ndjson_with_aliases<T: DeserializeOwned>(
+        &mut self,
+        kind: ArtifactKind,
+    ) -> Result<Vec<T>> {
+        self.load_optional_ndjson_filtered_with_aliases(kind, |_| true)
+    }
+
+    pub fn load_optional_ndjson_filtered<T: DeserializeOwned, F: Fn(&T) -> bool>(
+        &mut self,
+        kind: ArtifactKind,
+        filter: F,
+    ) -> Result<Vec<T>> {
+        let spec = artifact_spec(kind);
+        if spec.encoding != ArtifactEncoding::Ndjson {
+            anyhow::bail!("artifact {:?} is not an NDJSON stream", kind);
+        }
+
+        let file_name = artifact_file_name(kind);
+        let path = artifact_path(self.run_dir, kind);
+        if !path.exists() {
+            push_unique_string(&mut self.validation.missing_optional_files, file_name);
+            return Ok(Vec::new());
+        }
+
+        push_unique_string(&mut self.validation.present_files, file_name);
+        load_ndjson_file_filtered(&path, filter)
+    }
+
+    pub fn load_optional_ndjson_filtered_with_aliases<T: DeserializeOwned, F: Fn(&T) -> bool>(
+        &mut self,
+        kind: ArtifactKind,
+        filter: F,
+    ) -> Result<Vec<T>> {
+        let spec = artifact_spec(kind);
+        if spec.encoding != ArtifactEncoding::Ndjson {
+            anyhow::bail!("artifact {:?} is not an NDJSON stream", kind);
+        }
+
+        for path in artifact_primary_and_alias_paths(self.run_dir, kind) {
+            if path.exists() {
+                let file_name = file_name_for_path(&path);
+                push_unique_string(&mut self.validation.present_files, file_name);
+                self.validation
+                    .missing_optional_files
+                    .retain(|missing| missing != artifact_file_name(kind));
+                return load_ndjson_file_filtered(&path, filter);
+            }
+        }
+
+        push_unique_string(
+            &mut self.validation.missing_optional_files,
+            artifact_file_name(kind),
+        );
+        Ok(Vec::new())
+    }
 }
 
 pub fn load_session(path: &Path) -> Result<SessionFile> {
-    let session_path = session_path_for(path);
+    let session_path = artifact_input_path(path, ArtifactKind::Session);
     load_json_file(&session_path)
 }
 
 pub fn load_metadata(path: &Path) -> Result<Option<MetadataFile>> {
-    let metadata_path = metadata_path_for(path);
+    let metadata_path = artifact_input_path(path, ArtifactKind::Metadata);
     if !metadata_path.exists() {
         return Ok(None);
     }
     load_json_file(&metadata_path).map(Some)
 }
 
-pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<RunArtifacts> {
+pub fn load_run_artifacts(path: &Path, selection: ArtifactSelection) -> Result<RunArtifacts> {
     let run_dir = run_dir_for(path);
-    let session = load_session(path)?;
-    let metadata = load_metadata(&run_dir)?;
-
     let mut validation = RunValidationReport {
         run_dir: run_dir.clone(),
         ..Default::default()
     };
 
-    validation.present_files.push(SESSION_FILE.to_owned());
+    let session = load_session(path)?;
+    push_unique_string(
+        &mut validation.present_files,
+        artifact_file_name(ArtifactKind::Session),
+    );
+
+    let metadata = load_metadata(&run_dir)?;
     if metadata.is_some() {
-        validation.present_files.push(METADATA_FILE.to_owned());
+        push_unique_string(
+            &mut validation.present_files,
+            artifact_file_name(ArtifactKind::Metadata),
+        );
     } else {
-        validation
-            .missing_optional_files
-            .push(METADATA_FILE.to_owned());
+        push_unique_string(
+            &mut validation.missing_optional_files,
+            artifact_file_name(ArtifactKind::Metadata),
+        );
     }
 
-    let intervals = if options.load_intervals {
-        load_optional_json_vec(&run_dir, INTERVALS_FILE, &mut validation)?
+    let mut loader = ArtifactLoader::new(&run_dir, &mut validation);
+
+    let intervals = if selection.contains(ArtifactKind::Interval) {
+        loader.load_optional_ndjson(ArtifactKind::Interval)?
     } else {
         Vec::new()
     };
 
-    let mut spikes = if options.load_spikes {
-        load_optional_json_vec(&run_dir, SPIKES_FILE, &mut validation)?
+    let mut spikes = if selection.contains(ArtifactKind::SpikeEvents) {
+        loader.load_optional_ndjson(ArtifactKind::SpikeEvents)?
     } else {
         Vec::new()
     };
 
-    if options.load_spikes && spikes.is_empty() && !session.top_spikes.is_empty() {
+    if selection.contains(ArtifactKind::SpikeEvents)
+        && spikes.is_empty()
+        && !session.top_spikes.is_empty()
+    {
         spikes = session
             .top_spikes
             .iter()
@@ -339,86 +345,68 @@ pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<R
             .collect();
     }
 
-    let tree_events = if options.load_tree_events {
-        load_optional_json_vec(&run_dir, TREE_EVENTS_FILE, &mut validation)?
+    let tree_events = if selection.contains(ArtifactKind::TreeEvents) {
+        loader.load_optional_ndjson(ArtifactKind::TreeEvents)?
     } else {
         Vec::new()
     };
 
-    let irq_events = if options.load_irq_events {
-        load_optional_json_vec(&run_dir, IRQ_EVENTS_FILE, &mut validation)?
+    let irq_events = if selection.contains(ArtifactKind::IrqEvents) {
+        loader.load_optional_ndjson(ArtifactKind::IrqEvents)?
     } else {
         Vec::new()
     };
 
-    let gpu_samples = if options.load_gpu_samples {
-        load_optional_json_vec(&run_dir, GPU_SAMPLES_FILE, &mut validation)?
+    let gpu_samples = if selection.contains(ArtifactKind::GpuSamples) {
+        loader.load_optional_ndjson(ArtifactKind::GpuSamples)?
     } else {
         Vec::new()
     };
 
-    let frame_events = if options.load_frame_events {
-        let mut events = load_optional_json_vec(&run_dir, FRAME_EVENTS_FILE, &mut validation)?;
-        if events.is_empty() {
-            let stream_path = json_path_for(&run_dir, FRAME_EVENTS_STREAM_FILE);
-            if stream_path.exists() {
-                events = load_ndjson_file(&stream_path)?;
-                if !validation
-                    .present_files
-                    .contains(&FRAME_EVENTS_STREAM_FILE.to_owned())
-                {
-                    validation
-                        .present_files
-                        .push(FRAME_EVENTS_STREAM_FILE.to_owned());
-                }
-                validation
-                    .missing_optional_files
-                    .retain(|f| f != FRAME_EVENTS_FILE);
-            }
-        }
-        events
+    let frame_events = if selection.contains(ArtifactKind::FrameEvents) {
+        loader.load_optional_ndjson_with_aliases(ArtifactKind::FrameEvents)?
     } else {
         Vec::new()
     };
 
-    let migration_events = if options.load_migration_events {
-        load_optional_json_vec(&run_dir, MIGRATION_EVENTS_FILE, &mut validation)?
+    let migration_events = if selection.contains(ArtifactKind::MigrationEvents) {
+        loader.load_optional_ndjson(ArtifactKind::MigrationEvents)?
     } else {
         Vec::new()
     };
 
-    let cpu_freq_events = if options.load_cpu_freq_events {
-        load_optional_json_vec(&run_dir, CPU_FREQ_EVENTS_FILE, &mut validation)?
+    let cpu_freq_events = if selection.contains(ArtifactKind::CpuFreqSamples) {
+        loader.load_optional_ndjson(ArtifactKind::CpuFreqSamples)?
     } else {
         Vec::new()
     };
 
-    let block_io_events = if options.load_block_io_events {
-        load_optional_json_vec(&run_dir, BLOCK_IO_EVENTS_FILE, &mut validation)?
+    let block_io_events = if selection.contains(ArtifactKind::BlockIoEvents) {
+        loader.load_optional_ndjson(ArtifactKind::BlockIoEvents)?
     } else {
         Vec::new()
     };
 
-    let scx_events = if options.load_scx_events {
-        load_optional_json_vec(&run_dir, SCX_EVENTS_FILE, &mut validation)?
+    let scx_events = if selection.contains(ArtifactKind::ScxEvents) {
+        loader.load_optional_ndjson(ArtifactKind::ScxEvents)?
     } else {
         Vec::new()
     };
 
-    let runtime_slices = if options.load_runtime_slices {
-        load_optional_json_vec(&run_dir, RUNTIME_SLICES_FILE, &mut validation)?
+    let runtime_slices = if selection.contains(ArtifactKind::RuntimeSlices) {
+        loader.load_optional_ndjson(ArtifactKind::RuntimeSlices)?
     } else {
         Vec::new()
     };
 
-    let focus_events = if options.load_focus_events {
-        load_optional_json_vec(&run_dir, FOCUS_EVENTS_FILE, &mut validation)?
+    let focus_events = if selection.contains(ArtifactKind::FocusEvents) {
+        loader.load_optional_ndjson(ArtifactKind::FocusEvents)?
     } else {
         Vec::new()
     };
 
-    let foreground_events = if options.load_foreground_events {
-        load_optional_json_vec(&run_dir, FOREGROUND_EVENTS_FILE, &mut validation)?
+    let foreground_events = if selection.contains(ArtifactKind::ForegroundEvents) {
+        loader.load_optional_ndjson(ArtifactKind::ForegroundEvents)?
     } else {
         Vec::new()
     };
@@ -448,53 +436,64 @@ pub fn load_run_artifacts(path: &Path, options: ArtifactLoadOptions) -> Result<R
     Ok(artifacts)
 }
 
-fn validation_has_present_file(validation: &RunValidationReport, file_name: &str) -> bool {
+fn validation_has_present_kind(validation: &RunValidationReport, kind: ArtifactKind) -> bool {
+    let spec = artifact_spec(kind);
     validation
         .present_files
         .iter()
-        .any(|file| file == file_name)
+        .any(|file| file == spec.file_name || spec.legacy_aliases.iter().any(|alias| file == alias))
 }
 
-fn expected_artifact_count_for_file(session: &SessionFile, file_name: &str) -> Option<u64> {
-    match file_name {
-        INTERVALS_FILE => Some(session.core.interval_record_count),
-        SPIKES_FILE => Some(session.core.spike_events_retained_count),
-        IRQ_EVENTS_FILE => Some(session.core.irq_event_count),
-        GPU_SAMPLES_FILE => Some(session.core.gpu_sample_count),
-        FRAME_EVENTS_FILE | FRAME_EVENTS_STREAM_FILE => Some(session.core.frame_event_count),
-        BLOCK_IO_EVENTS_FILE => Some(session.core.block_io_event_count),
-        RUNTIME_SLICES_FILE => Some(session.core.runtime_slice_count),
-        FOCUS_EVENTS_FILE => Some(session.core.focus_event_count),
-        FOREGROUND_EVENTS_FILE => Some(session.core.foreground_event_count),
-        _ => None,
+fn expected_artifact_count_for_counter(
+    session: &SessionFile,
+    counter: ArtifactCounter,
+) -> Option<u64> {
+    match counter {
+        ArtifactCounter::IntervalRecord => Some(session.core.interval_record_count),
+        ArtifactCounter::SpikeEventsRetained => Some(session.core.spike_events_retained_count),
+        ArtifactCounter::IrqEvent => Some(session.core.irq_event_count),
+        ArtifactCounter::GpuSample => Some(session.core.gpu_sample_count),
+        ArtifactCounter::FrameEvent => Some(session.core.frame_event_count),
+        ArtifactCounter::BlockIoEvent => Some(session.core.block_io_event_count),
+        ArtifactCounter::RuntimeSlice => Some(session.core.runtime_slice_count),
+        ArtifactCounter::FocusEvent => Some(session.core.focus_event_count),
+        ArtifactCounter::ForegroundEvent => Some(session.core.foreground_event_count),
+        ArtifactCounter::MigrationEvent => session.core.migration_event_count,
+        ArtifactCounter::CpuFreqSample => session.core.cpu_freq_sample_count,
+        ArtifactCounter::ScxEvent => Some(session.core.scx_event_count),
     }
 }
 
-fn artifact_count_label(file_name: &str) -> &'static str {
-    match file_name {
-        INTERVALS_FILE => "interval record",
-        SPIKES_FILE => "spike event",
-        IRQ_EVENTS_FILE => "IRQ event",
-        GPU_SAMPLES_FILE => "GPU sample",
-        FRAME_EVENTS_FILE | FRAME_EVENTS_STREAM_FILE => "frame event",
-        BLOCK_IO_EVENTS_FILE => "block I/O event",
-        RUNTIME_SLICES_FILE => "runtime slice",
-        FOCUS_EVENTS_FILE => "focus event",
-        FOREGROUND_EVENTS_FILE => "foreground event",
-        _ => "artifact",
+fn present_name_for_kind(validation: &RunValidationReport, kind: ArtifactKind) -> &'static str {
+    let spec = artifact_spec(kind);
+    for file in &validation.present_files {
+        if file == spec.file_name {
+            return spec.file_name;
+        }
+        for alias in spec.legacy_aliases {
+            if file == alias {
+                return alias;
+            }
+        }
     }
+    spec.file_name
 }
 
 fn push_artifact_count_mismatch_warning(
     validation: &mut RunValidationReport,
-    file_name: &str,
+    kind: ArtifactKind,
     expected_count: u64,
     actual_count: usize,
 ) {
+    let Some(counter) = artifact_spec(kind).counter_field else {
+        return;
+    };
+
+    let file_name = present_name_for_kind(validation, kind);
     if actual_count as u64 != expected_count {
         validation.warnings.push(format!(
             "{} count mismatch: session reported {}, found {} in {}",
-            artifact_count_label(file_name),
+            artifact_counter_label(counter),
             expected_count,
             actual_count,
             file_name
@@ -505,39 +504,25 @@ fn push_artifact_count_mismatch_warning(
 fn warn_if_artifact_count_mismatch(
     validation: &mut RunValidationReport,
     session: &SessionFile,
-    file_name: &str,
+    kind: ArtifactKind,
     actual_count: usize,
 ) {
-    if let Some(expected_count) = expected_artifact_count_for_file(session, file_name) {
-        push_artifact_count_mismatch_warning(validation, file_name, expected_count, actual_count);
+    let Some(counter) = artifact_spec(kind).counter_field else {
+        return;
+    };
+    if let Some(expected_count) = expected_artifact_count_for_counter(session, counter) {
+        push_artifact_count_mismatch_warning(validation, kind, expected_count, actual_count);
     }
 }
 
 fn check_present_loaded_artifact_count(
     validation: &mut RunValidationReport,
     session: &SessionFile,
-    file_name: &str,
+    kind: ArtifactKind,
     actual_count: usize,
 ) {
-    if validation_has_present_file(validation, file_name) {
-        warn_if_artifact_count_mismatch(validation, session, file_name, actual_count);
-    }
-}
-
-fn check_present_loaded_frame_count(
-    validation: &mut RunValidationReport,
-    session: &SessionFile,
-    actual_count: usize,
-) {
-    if validation_has_present_file(validation, FRAME_EVENTS_FILE) {
-        warn_if_artifact_count_mismatch(validation, session, FRAME_EVENTS_FILE, actual_count);
-    } else if validation_has_present_file(validation, FRAME_EVENTS_STREAM_FILE) {
-        warn_if_artifact_count_mismatch(
-            validation,
-            session,
-            FRAME_EVENTS_STREAM_FILE,
-            actual_count,
-        );
+    if validation_has_present_kind(validation, kind) {
+        warn_if_artifact_count_mismatch(validation, session, kind, actual_count);
     }
 }
 
@@ -581,45 +566,73 @@ fn check_consistency(artifacts: &mut RunArtifacts) {
     check_present_loaded_artifact_count(
         validation,
         session,
-        INTERVALS_FILE,
+        ArtifactKind::Interval,
         artifacts.intervals.len(),
     );
-    check_present_loaded_artifact_count(validation, session, SPIKES_FILE, artifacts.spikes.len());
     check_present_loaded_artifact_count(
         validation,
         session,
-        IRQ_EVENTS_FILE,
+        ArtifactKind::SpikeEvents,
+        artifacts.spikes.len(),
+    );
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        ArtifactKind::IrqEvents,
         artifacts.irq_events.len(),
     );
     check_present_loaded_artifact_count(
         validation,
         session,
-        GPU_SAMPLES_FILE,
+        ArtifactKind::GpuSamples,
         artifacts.gpu_samples.len(),
     );
-    check_present_loaded_frame_count(validation, session, artifacts.frame_events.len());
     check_present_loaded_artifact_count(
         validation,
         session,
-        BLOCK_IO_EVENTS_FILE,
+        ArtifactKind::FrameEvents,
+        artifacts.frame_events.len(),
+    );
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        ArtifactKind::MigrationEvents,
+        artifacts.migration_events.len(),
+    );
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        ArtifactKind::CpuFreqSamples,
+        artifacts.cpu_freq_events.len(),
+    );
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        ArtifactKind::BlockIoEvents,
         artifacts.block_io_events.len(),
     );
     check_present_loaded_artifact_count(
         validation,
         session,
-        RUNTIME_SLICES_FILE,
+        ArtifactKind::ScxEvents,
+        artifacts.scx_events.len(),
+    );
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        ArtifactKind::RuntimeSlices,
         artifacts.runtime_slices.len(),
     );
     check_present_loaded_artifact_count(
         validation,
         session,
-        FOCUS_EVENTS_FILE,
+        ArtifactKind::FocusEvents,
         artifacts.focus_events.len(),
     );
     check_present_loaded_artifact_count(
         validation,
         session,
-        FOREGROUND_EVENTS_FILE,
+        ArtifactKind::ForegroundEvents,
         artifacts.foreground_events.len(),
     );
 }
@@ -632,20 +645,17 @@ impl RunArtifacts {
 
         let run_dir = &self.run_dir;
         let validation = &mut self.validation;
+        let mut loader = ArtifactLoader::new(run_dir, validation);
 
-        self.intervals = load_optional_json_vec_filtered(
-            run_dir,
-            INTERVALS_FILE,
-            validation,
-            |r: &IntervalRecord| windows.is_in_ms(r.elapsed_ms),
-        )?;
+        self.intervals = loader
+            .load_optional_ndjson_filtered(ArtifactKind::Interval, |r: &IntervalRecord| {
+                windows.is_in_ms(r.elapsed_ms)
+            })?;
 
-        self.tree_events = load_optional_json_vec(run_dir, TREE_EVENTS_FILE, validation)?;
+        self.tree_events = loader.load_optional_ndjson(ArtifactKind::TreeEvents)?;
 
-        self.irq_events = load_optional_json_vec_filtered(
-            run_dir,
-            IRQ_EVENTS_FILE,
-            validation,
+        self.irq_events = loader.load_optional_ndjson_filtered(
+            ArtifactKind::IrqEvents,
             |r: &IrqEventRecord| {
                 windows
                     .windows_ns
@@ -654,31 +664,23 @@ impl RunArtifacts {
             },
         )?;
 
-        self.gpu_samples = load_optional_json_vec_filtered(
-            run_dir,
-            GPU_SAMPLES_FILE,
-            validation,
-            |r: &GpuSample| windows.is_in_ms(r.elapsed_ms),
-        )?;
+        self.gpu_samples = loader
+            .load_optional_ndjson_filtered(ArtifactKind::GpuSamples, |r: &GpuSample| {
+                windows.is_in_ms(r.elapsed_ms)
+            })?;
 
-        self.migration_events = load_optional_json_vec_filtered(
-            run_dir,
-            MIGRATION_EVENTS_FILE,
-            validation,
+        self.migration_events = loader.load_optional_ndjson_filtered(
+            ArtifactKind::MigrationEvents,
             |r: &MigrationEventRecord| windows.is_in_ns(r.timestamp_ns),
         )?;
 
-        self.cpu_freq_events = load_optional_json_vec_filtered(
-            run_dir,
-            CPU_FREQ_EVENTS_FILE,
-            validation,
-            |r: &CpuFreqRecord| windows.is_in_ns(r.timestamp_ns),
-        )?;
+        self.cpu_freq_events = loader
+            .load_optional_ndjson_filtered(ArtifactKind::CpuFreqSamples, |r: &CpuFreqRecord| {
+                windows.is_in_ns(r.timestamp_ns)
+            })?;
 
-        self.block_io_events = load_optional_json_vec_filtered(
-            run_dir,
-            BLOCK_IO_EVENTS_FILE,
-            validation,
+        self.block_io_events = loader.load_optional_ndjson_filtered(
+            ArtifactKind::BlockIoEvents,
             |r: &BlockIoRecord| {
                 let start_ns = r.timestamp_ns.saturating_sub(r.duration_ns);
                 let end_ns = r.timestamp_ns;
@@ -690,31 +692,23 @@ impl RunArtifacts {
             },
         )?;
 
-        self.scx_events = load_optional_json_vec_filtered(
-            run_dir,
-            SCX_EVENTS_FILE,
-            validation,
-            |r: &ScxEvent| windows.is_in_ms(r.elapsed_ms),
-        )?;
+        self.scx_events = loader
+            .load_optional_ndjson_filtered(ArtifactKind::ScxEvents, |r: &ScxEvent| {
+                windows.is_in_ms(r.elapsed_ms)
+            })?;
 
-        self.runtime_slices = load_optional_json_vec_filtered(
-            run_dir,
-            RUNTIME_SLICES_FILE,
-            validation,
+        self.runtime_slices = loader.load_optional_ndjson_filtered(
+            ArtifactKind::RuntimeSlices,
             |r: &RuntimeSliceRecord| windows.is_in_ms(r.elapsed_ms),
         )?;
 
-        self.focus_events = load_optional_json_vec_filtered(
-            run_dir,
-            FOCUS_EVENTS_FILE,
-            validation,
-            |r: &FocusEvent| windows.is_in_ms(r.elapsed_ms),
-        )?;
+        self.focus_events = loader
+            .load_optional_ndjson_filtered(ArtifactKind::FocusEvents, |r: &FocusEvent| {
+                windows.is_in_ms(r.elapsed_ms)
+            })?;
 
-        self.foreground_events = load_optional_json_vec_filtered(
-            run_dir,
-            FOREGROUND_EVENTS_FILE,
-            validation,
+        self.foreground_events = loader.load_optional_ndjson_filtered(
+            ArtifactKind::ForegroundEvents,
             |r: &ForegroundEvent| windows.is_in_ms(r.elapsed_ms),
         )?;
 
@@ -722,33 +716,8 @@ impl RunArtifacts {
     }
 }
 
-fn load_optional_json_vec_filtered<T: DeserializeOwned, F: Fn(&T) -> bool>(
-    run_dir: &Path,
-    file_name: &str,
-    validation: &mut RunValidationReport,
-    filter: F,
-) -> Result<Vec<T>> {
-    let path = json_path_for(run_dir, file_name);
-
-    if !path.exists() {
-        if !validation
-            .missing_optional_files
-            .contains(&file_name.to_owned())
-        {
-            validation.missing_optional_files.push(file_name.to_owned());
-        }
-        return Ok(Vec::new());
-    }
-
-    if !validation.present_files.contains(&file_name.to_owned()) {
-        validation.present_files.push(file_name.to_owned());
-    }
-    load_ndjson_file_filtered(&path, filter)
-}
-
-#[allow(dead_code)]
 pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
-    let _options = ArtifactLoadOptions::VALIDATE_ONLY;
+    let _selection = ArtifactSelection::validate_only();
     let run_dir = run_dir_for(path);
 
     let mut report = RunValidationReport {
@@ -756,154 +725,9 @@ pub fn validate_run_dir(path: &Path) -> Result<RunValidationReport> {
         ..Default::default()
     };
 
-    let metadata_path = run_dir.join(METADATA_FILE);
-    if metadata_path.exists() {
-        match load_json_file::<MetadataFile>(&metadata_path) {
-            Ok(metadata) => {
-                report.present_files.push(METADATA_FILE.to_owned());
-                if metadata.core.schema_version < SESSION_SCHEMA_VERSION {
-                    report.warnings.push(format!(
-                        "metadata schema version {} is older than current {}",
-                        metadata.core.schema_version, SESSION_SCHEMA_VERSION
-                    ));
-                } else if metadata.core.schema_version > SESSION_SCHEMA_VERSION {
-                    report.errors.push(format!(
-                        "metadata schema version {} is newer than current {}",
-                        metadata.core.schema_version, SESSION_SCHEMA_VERSION
-                    ));
-                }
-            }
-            Err(e) => {
-                report
-                    .errors
-                    .push(format!("{METADATA_FILE} invalid: {e:#}"));
-            }
-        }
-    } else {
-        report.missing_optional_files.push(METADATA_FILE.to_owned());
-    }
-
-    let session_path = session_path_for(path);
-    if !session_path.exists() {
-        report.errors.push(format!(
-            "missing mandatory {SESSION_FILE} (searched {})",
-            session_path.display()
-        ));
-        return Ok(report);
-    }
-
-    let session = load_session(path)?;
-    report.present_files.push(SESSION_FILE.to_owned());
-
-    if session.core.schema_version < SESSION_SCHEMA_VERSION {
-        report.warnings.push(format!(
-            "session schema version {} is older than current {}",
-            session.core.schema_version, SESSION_SCHEMA_VERSION
-        ));
-    } else if session.core.schema_version > SESSION_SCHEMA_VERSION {
-        report.errors.push(format!(
-            "session schema version {} is newer than current {}",
-            session.core.schema_version, SESSION_SCHEMA_VERSION
-        ));
-    }
-
-    let optional_artifacts = [
-        (INTERVALS_FILE, "IntervalRecord"),
-        (SPIKES_FILE, "SpikeEvent"),
-        (TREE_EVENTS_FILE, "TreeEvent"),
-        (IRQ_EVENTS_FILE, "IrqEventRecord"),
-        (GPU_SAMPLES_FILE, "GpuSample"),
-        (FRAME_EVENTS_FILE, "FrameEvent"),
-        (MIGRATION_EVENTS_FILE, "MigrationEventRecord"),
-        (CPU_FREQ_EVENTS_FILE, "CpuFreqRecord"),
-        (BLOCK_IO_EVENTS_FILE, "BlockIoRecord"),
-        (SCX_EVENTS_FILE, "ScxEvent"),
-        (RUNTIME_SLICES_FILE, "RuntimeSliceRecord"),
-        (FOCUS_EVENTS_FILE, "FocusEvent"),
-        (FOREGROUND_EVENTS_FILE, "ForegroundEvent"),
-    ];
-
-    for (file_name, type_name) in optional_artifacts {
-        let path = report.run_dir.join(file_name);
-        if path.exists() {
-            let res = match type_name {
-                "IntervalRecord" => count_ndjson_file::<IntervalRecord>(&path),
-                "SpikeEvent" => count_ndjson_file::<SpikeEvent>(&path),
-                "TreeEvent" => count_ndjson_file::<TreeEvent>(&path),
-                "IrqEventRecord" => count_ndjson_file::<IrqEventRecord>(&path),
-                "GpuSample" => count_ndjson_file::<GpuSample>(&path),
-                "FrameEvent" => count_ndjson_file::<FrameEvent>(&path),
-                "MigrationEventRecord" => count_ndjson_file::<MigrationEventRecord>(&path),
-                "CpuFreqRecord" => count_ndjson_file::<CpuFreqRecord>(&path),
-                "BlockIoRecord" => count_ndjson_file::<BlockIoRecord>(&path),
-                "ScxEvent" => count_ndjson_file::<ScxEvent>(&path),
-                "RuntimeSliceRecord" => count_ndjson_file::<RuntimeSliceRecord>(&path),
-                "FocusEvent" => count_ndjson_file::<FocusEvent>(&path),
-                "ForegroundEvent" => count_ndjson_file::<ForegroundEvent>(&path),
-                _ => unreachable!(),
-            };
-
-            match res {
-                Ok(count) => {
-                    report.present_files.push(file_name.to_owned());
-                    warn_if_artifact_count_mismatch(&mut report, &session, file_name, count);
-                }
-                Err(e) => {
-                    report.errors.push(format!("{file_name} invalid: {e:#}"));
-                }
-            }
-        } else {
-            let frame_stream_path = report.run_dir.join(FRAME_EVENTS_STREAM_FILE);
-            if file_name == FRAME_EVENTS_FILE && frame_stream_path.exists() {
-                match count_ndjson_file::<FrameEvent>(&frame_stream_path) {
-                    Ok(count) => {
-                        report
-                            .present_files
-                            .push(FRAME_EVENTS_STREAM_FILE.to_owned());
-                        warn_if_artifact_count_mismatch(
-                            &mut report,
-                            &session,
-                            FRAME_EVENTS_STREAM_FILE,
-                            count,
-                        );
-                    }
-                    Err(e) => {
-                        report
-                            .errors
-                            .push(format!("{FRAME_EVENTS_STREAM_FILE} invalid: {e:#}"));
-                    }
-                }
-            } else {
-                report.missing_optional_files.push(file_name.to_owned());
-            }
-        }
-    }
-
-    let frame_stream_path = report.run_dir.join(FRAME_EVENTS_STREAM_FILE);
-    if frame_stream_path.exists()
-        && !report
-            .present_files
-            .contains(&FRAME_EVENTS_STREAM_FILE.to_owned())
-    {
-        match count_ndjson_file::<FrameEvent>(&frame_stream_path) {
-            Ok(count) => {
-                report
-                    .present_files
-                    .push(FRAME_EVENTS_STREAM_FILE.to_owned());
-                warn_if_artifact_count_mismatch(
-                    &mut report,
-                    &session,
-                    FRAME_EVENTS_STREAM_FILE,
-                    count,
-                );
-            }
-            Err(e) => {
-                report
-                    .errors
-                    .push(format!("{FRAME_EVENTS_STREAM_FILE} invalid: {e:#}"));
-            }
-        }
-    }
+    validate_metadata_file(&mut report);
+    let session = validate_session_file(path, &mut report)?;
+    validate_optional_artifacts(&mut report, &session);
 
     Ok(report)
 }
@@ -916,11 +740,20 @@ pub fn validate_run_dir_shallow(path: &Path) -> Result<RunValidationReport> {
         ..Default::default()
     };
 
-    let metadata_path = run_dir.join(METADATA_FILE);
-    if metadata_path.exists() {
-        match load_json_file::<MetadataFile>(&metadata_path) {
+    validate_metadata_file(&mut report);
+    let _session = validate_session_file(path, &mut report)?;
+
+    Ok(report)
+}
+
+fn validate_metadata_file(report: &mut RunValidationReport) {
+    let path = artifact_path(&report.run_dir, ArtifactKind::Metadata);
+    let file_name = artifact_file_name(ArtifactKind::Metadata);
+
+    if path.exists() {
+        match load_json_file::<MetadataFile>(&path) {
             Ok(metadata) => {
-                report.present_files.push(METADATA_FILE.to_owned());
+                push_unique_string(&mut report.present_files, file_name);
                 if metadata.core.schema_version < SESSION_SCHEMA_VERSION {
                     report.warnings.push(format!(
                         "metadata schema version {} is older than current {}",
@@ -934,26 +767,28 @@ pub fn validate_run_dir_shallow(path: &Path) -> Result<RunValidationReport> {
                 }
             }
             Err(e) => {
-                report
-                    .errors
-                    .push(format!("{METADATA_FILE} invalid: {e:#}"));
+                report.errors.push(format!("{file_name} invalid: {e:#}"));
             }
         }
     } else {
-        report.missing_optional_files.push(METADATA_FILE.to_owned());
+        push_unique_string(&mut report.missing_optional_files, file_name);
     }
+}
 
-    let session_path = session_path_for(path);
+fn validate_session_file(path: &Path, report: &mut RunValidationReport) -> Result<SessionFile> {
+    let session_path = artifact_input_path(path, ArtifactKind::Session);
+    let file_name = artifact_file_name(ArtifactKind::Session);
+
     if !session_path.exists() {
         report.errors.push(format!(
-            "missing mandatory {SESSION_FILE} (searched {})",
+            "missing mandatory {file_name} (searched {})",
             session_path.display()
         ));
-        return Ok(report);
+        return Ok(SessionFile::default());
     }
 
     let session = load_session(path)?;
-    report.present_files.push(SESSION_FILE.to_owned());
+    push_unique_string(&mut report.present_files, file_name);
 
     if session.core.schema_version < SESSION_SCHEMA_VERSION {
         report.warnings.push(format!(
@@ -967,635 +802,73 @@ pub fn validate_run_dir_shallow(path: &Path) -> Result<RunValidationReport> {
         ));
     }
 
-    Ok(report)
+    Ok(session)
 }
 
-#[cfg(test)]
-mod tests {
-    use std::fs;
+fn validate_optional_artifacts(report: &mut RunValidationReport, session: &SessionFile) {
+    for kind in artifact_kinds() {
+        if matches!(
+            kind,
+            ArtifactKind::Session | ArtifactKind::Metadata | ArtifactKind::FrameCorrelation
+        ) {
+            continue;
+        }
 
-    use super::*;
-    use crate::{
-        ebpf_loader::DropCountersSnapshot,
-        metadata::SystemMetadata,
-        recorder::{RecordedConfig, RecordedTime},
-    };
+        if artifact_spec(kind).encoding != ArtifactEncoding::Ndjson {
+            continue;
+        }
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!(
-            "stutter-test-{name}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+        match count_optional_artifact(report, kind) {
+            Ok(Some(count)) => warn_if_artifact_count_mismatch(report, session, kind, count),
+            Ok(None) => {}
+            Err(err) => {
+                report
+                    .errors
+                    .push(format!("{} invalid: {err:#}", artifact_file_name(kind)));
+            }
+        }
     }
+}
 
-    fn minimal_session() -> SessionFile {
-        SessionFile {
-            core: crate::recorder::SessionMetadataCore {
-                schema_version: SESSION_SCHEMA_VERSION,
-                run_name: Some("test".into()),
-                started_at: RecordedTime::default(),
-                ended_at: RecordedTime::default(),
-                monotonic_start_ns: Some(0),
-                monotonic_end_ns: Some(1_000_000_000),
-                duration_ms: 1000,
-                mangohud_start_offset: None,
-                mangohud_first_frame_monotonic_ns: None,
-                mangohud_first_frame_raw_elapsed_ms: None,
-                metadata: SystemMetadata::default(),
-                target_pids_max: 1024,
-                active_target_pids_count: 0,
-                active_expanded_tasks: vec![],
-                interval_record_count: 0,
-                intervals_dropped: 0,
-                spike_events_retained_count: 0,
-                spike_events_dropped_count: 0,
-                spike_events_truncated: false,
-                scx_event_count: 0,
-                irq_event_count: 0,
-                migration_event_count: None,
-                cpu_freq_sample_count: None,
-                gpu_sample_count: 0,
-                frame_event_count: 0,
-                block_io_event_count: 0,
-                event_stream_write_errors: 0,
-                alert_events_dropped_count: 0,
-                alert_channel_closed_count: 0,
-                first_event_stream_write_error: None,
-                block_io_correlation_basis: "dev+sector".into(),
-                drop_counters: DropCountersSnapshot::default(),
-                cpu_perf_sample_count: 0,
-                cpu_perf_open_errors: 0,
-                cpu_perf_read_errors: 0,
-                cpu_perf_skipped_tasks: 0,
-                cpu_perf_last_error: None,
-                ..Default::default()
-            },
-            stop_reason: "test".into(),
-            config: RecordedConfig {
-                manual_pids: vec![],
-                tree_roots: vec![],
-                cgroupv2: None,
-                exclude_tree_pids: vec![],
-                include_comm: vec![],
-                exclude_comm: vec![],
-                watch_process: None,
-                persistent: false,
-                keep_missing_pid: false,
-                watch_poll_ms: 100,
-                watch_timeout_ms: None,
-                csv_stream: None,
-                irq_latency: false,
-                irqs: vec![],
-                hwmon: false,
-                hwmon_root: None,
-                hwmon_drm_card: None,
-                hwmon_render_node: None,
-                mangohud_log: None,
-                mangohud_log_live: false,
-                tui: false,
-                summary_period_ms: 1000,
-                epoch_period_ms: None,
-                retain_intervals: None,
-                max_tasks: 1024,
-                spike_threshold_ns: 1_000_000,
-                alert_threshold_ns: None,
-                alert_webhook_url: None,
-                follow_exec: true,
-                verbose: false,
-                faults: false,
-                cpu_perf: false,
-                cpu_perf_kernel: false,
-                cpu_perf_max_tasks: 128,
-                cpu_perf_cache_refs: false,
-                block_io: false,
-                stat_wait: false,
-                otlp_endpoint: None,
-                otel_service_name: "stutter".to_owned(),
-                ..Default::default()
-            },
-            tasks: vec![],
-            top_spikes: vec![],
+fn count_optional_artifact(
+    report: &mut RunValidationReport,
+    kind: ArtifactKind,
+) -> Result<Option<usize>> {
+    for path in artifact_primary_and_alias_paths(&report.run_dir, kind) {
+        if path.exists() {
+            let file_name = file_name_for_path(&path);
+            let count = count_artifact_kind(kind, &path)?;
+            push_unique_string(&mut report.present_files, file_name);
+            report
+                .missing_optional_files
+                .retain(|missing| missing != artifact_file_name(kind));
+            return Ok(Some(count));
         }
     }
 
-    fn write_session(dir: &Path, session: &SessionFile) {
-        fs::write(
-            dir.join(SESSION_FILE),
-            serde_json::to_string(session).unwrap(),
-        )
-        .unwrap();
-    }
+    push_unique_string(&mut report.missing_optional_files, artifact_file_name(kind));
+    Ok(None)
+}
 
-    fn write_minimal_session(dir: &Path) {
-        write_session(dir, &minimal_session());
-    }
-
-    fn write_empty_ndjson_files(dir: &Path, files: &[&str]) {
-        for file_name in files {
-            fs::write(dir.join(file_name), "").unwrap();
+fn count_artifact_kind(kind: ArtifactKind, path: &Path) -> Result<usize> {
+    match kind {
+        ArtifactKind::Interval => count_ndjson_file::<IntervalRecord>(path),
+        ArtifactKind::SpikeEvents => count_ndjson_file::<SpikeEvent>(path),
+        ArtifactKind::TreeEvents => count_ndjson_file::<TreeEvent>(path),
+        ArtifactKind::IrqEvents => count_ndjson_file::<IrqEventRecord>(path),
+        ArtifactKind::GpuSamples => count_ndjson_file::<GpuSample>(path),
+        ArtifactKind::FrameEvents | ArtifactKind::FrameCorrelation => {
+            count_ndjson_file::<FrameEvent>(path)
         }
-    }
-
-    fn session_with_expected_artifact_counts() -> SessionFile {
-        let mut session = minimal_session();
-        session.core.interval_record_count = 1;
-        session.core.spike_events_retained_count = 1;
-        session.core.irq_event_count = 1;
-        session.core.gpu_sample_count = 1;
-        session.core.frame_event_count = 1;
-        session.core.block_io_event_count = 1;
-        session.core.runtime_slice_count = 1;
-        session.core.focus_event_count = 1;
-        session.core.foreground_event_count = 1;
-        session
-    }
-
-    fn assert_count_mismatch_warnings(warnings: &[String]) {
-        let text = warnings.join("\n");
-        for needle in [
-            "interval record count mismatch",
-            "spike event count mismatch",
-            "IRQ event count mismatch",
-            "GPU sample count mismatch",
-            "frame event count mismatch",
-            "block I/O event count mismatch",
-            "runtime slice count mismatch",
-            "focus event count mismatch",
-            "foreground event count mismatch",
-        ] {
-            assert!(
-                text.contains(needle),
-                "missing count mismatch warning {needle:?}; warnings were:\n{text}"
-            );
+        ArtifactKind::MigrationEvents => count_ndjson_file::<MigrationEventRecord>(path),
+        ArtifactKind::CpuFreqSamples => count_ndjson_file::<CpuFreqRecord>(path),
+        ArtifactKind::BlockIoEvents => count_ndjson_file::<BlockIoRecord>(path),
+        ArtifactKind::ScxEvents => count_ndjson_file::<ScxEvent>(path),
+        ArtifactKind::RuntimeSlices => count_ndjson_file::<RuntimeSliceRecord>(path),
+        ArtifactKind::FocusEvents => count_ndjson_file::<FocusEvent>(path),
+        ArtifactKind::ForegroundEvents => count_ndjson_file::<ForegroundEvent>(path),
+        ArtifactKind::Session | ArtifactKind::Metadata => {
+            anyhow::bail!("artifact {:?} is not an NDJSON stream", kind)
         }
-    }
-
-    #[test]
-    fn load_run_artifacts_warns_for_present_optional_count_mismatches() {
-        let dir = temp_dir("loaded-count-mismatches");
-        let session = session_with_expected_artifact_counts();
-        write_session(&dir, &session);
-        write_empty_ndjson_files(
-            &dir,
-            &[
-                INTERVALS_FILE,
-                SPIKES_FILE,
-                IRQ_EVENTS_FILE,
-                GPU_SAMPLES_FILE,
-                FRAME_EVENTS_FILE,
-                BLOCK_IO_EVENTS_FILE,
-                RUNTIME_SLICES_FILE,
-                FOCUS_EVENTS_FILE,
-                FOREGROUND_EVENTS_FILE,
-            ],
-        );
-
-        let artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::AUTOTUNE_REPLAY).unwrap();
-
-        assert!(artifacts.validation.errors.is_empty());
-        assert_count_mismatch_warnings(&artifacts.validation.warnings);
-
-        fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn validate_run_dir_warns_for_present_optional_count_mismatches() {
-        let dir = temp_dir("validate-count-mismatches");
-        let session = session_with_expected_artifact_counts();
-        write_session(&dir, &session);
-        write_empty_ndjson_files(
-            &dir,
-            &[
-                INTERVALS_FILE,
-                SPIKES_FILE,
-                IRQ_EVENTS_FILE,
-                GPU_SAMPLES_FILE,
-                FRAME_EVENTS_FILE,
-                BLOCK_IO_EVENTS_FILE,
-                RUNTIME_SLICES_FILE,
-                FOCUS_EVENTS_FILE,
-                FOREGROUND_EVENTS_FILE,
-            ],
-        );
-
-        let report = validate_run_dir(&dir).unwrap();
-
-        assert!(report.errors.is_empty());
-        assert_count_mismatch_warnings(&report.warnings);
-
-        fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn load_metadata_missing_is_ok() {
-        let dir = temp_dir("missing-metadata");
-        let result = load_metadata(&dir).unwrap();
-        assert!(result.is_none());
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn validate_run_dir_reports_missing_session() {
-        let dir = temp_dir("missing-session");
-        let report = validate_run_dir(&dir).unwrap();
-        assert!(!report.is_ok());
-        assert!(
-            report.errors[0]
-                .to_lowercase()
-                .contains("missing mandatory session.json")
-        );
-        assert!(
-            report
-                .missing_optional_files
-                .contains(&METADATA_FILE.to_owned())
-        );
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn load_run_artifacts_missing_optional_files_warns() {
-        let dir = temp_dir("missing-optional");
-        write_minimal_session(&dir);
-        let artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::TUNE).unwrap();
-        assert!(
-            artifacts
-                .validation
-                .missing_optional_files
-                .contains(&INTERVALS_FILE.to_owned())
-        );
-        assert!(artifacts.intervals.is_empty());
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn load_run_artifacts_fails_on_invalid_present_optional_json() {
-        let dir = temp_dir("invalid-optional");
-        write_minimal_session(&dir);
-        fs::write(dir.join(INTERVALS_FILE), "invalid json").unwrap();
-        let result = load_run_artifacts(&dir, ArtifactLoadOptions::TUNE);
-        assert!(result.is_err());
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn load_session_accepts_run_dir() {
-        let dir = temp_dir("session-run-dir");
-        write_minimal_session(&dir);
-        let result = load_session(&dir);
-        assert!(result.is_ok());
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn validate_run_dir_warns_on_missing_optional_artifacts() {
-        let dir = temp_dir("missing-optional-artifacts");
-        write_minimal_session(&dir);
-        let report = validate_run_dir(&dir).unwrap();
-        assert!(report.is_ok());
-        assert!(
-            report
-                .missing_optional_files
-                .contains(&INTERVALS_FILE.to_owned())
-        );
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn test_validate_run_dir_ndjson() {
-        let dir = temp_dir("validate-ndjson");
-        write_minimal_session(&dir);
-
-        let interval_path = dir.join(INTERVALS_FILE);
-        let record = IntervalRecord {
-            elapsed_ms: 100,
-            samples: 1,
-            ..Default::default()
-        };
-        let line1 = serde_json::to_string(&record).unwrap();
-        let line2 = serde_json::to_string(&record).unwrap();
-        fs::write(&interval_path, format!("{}\n{}\n", line1, line2)).unwrap();
-
-        let report = validate_run_dir(&dir).unwrap();
-        assert!(report.is_ok());
-        assert!(report.present_files.contains(&INTERVALS_FILE.to_owned()));
-
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn old_interval_without_cpu_perf_deserializes() {
-        let dir = temp_dir("old-interval-no-cpu-perf");
-        write_minimal_session(&dir);
-        let record = IntervalRecord {
-            elapsed_ms: 100,
-            task: 1,
-            active: true,
-            samples: 1,
-            ..Default::default()
-        };
-        let line = serde_json::to_string(&record).unwrap();
-        assert!(!line.contains("cpu_perf"));
-        fs::write(dir.join(INTERVALS_FILE), format!("{line}\n")).unwrap();
-
-        let artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::TUNE).unwrap();
-
-        assert_eq!(artifacts.intervals.len(), 1);
-        assert!(artifacts.intervals[0].cpu_perf.is_none());
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn validate_accepts_runtime_slices_json() {
-        let dir = temp_dir("runtime-slices-valid");
-        let mut session = minimal_session();
-        session.core.runtime_slice_count = 1;
-        write_session(&dir, &session);
-        let record = RuntimeSliceRecord {
-            elapsed_ms: 1000,
-            task: 42,
-            process_pid: Some(40),
-            class: crate::process_tree::TaskClass::Game,
-            comm: "GameThread".to_owned(),
-            process_comm: "Game.exe".into(),
-            source: crate::metrics::RuntimeSliceSource::ProcSchedstat,
-            interval_ms: 1000,
-            runtime_delta_ns: 800_000_000,
-            runqueue_wait_delta_ns: Some(20_000_000),
-            timeslices_delta: Some(8),
-            runtime_ratio: Some(0.8),
-            wait_ratio: Some(0.02),
-            valid: true,
-            ..Default::default()
-        };
-        fs::write(
-            dir.join(RUNTIME_SLICES_FILE),
-            format!("{}\n", serde_json::to_string(&record).unwrap()),
-        )
-        .unwrap();
-
-        let report = validate_run_dir(&dir).unwrap();
-
-        assert!(report.errors.is_empty());
-        assert!(
-            report
-                .present_files
-                .contains(&RUNTIME_SLICES_FILE.to_owned())
-        );
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn validate_rejects_malformed_runtime_slices_json() {
-        let dir = temp_dir("runtime-slices-invalid");
-        write_minimal_session(&dir);
-        fs::write(dir.join(RUNTIME_SLICES_FILE), "not json").unwrap();
-
-        let report = validate_run_dir(&dir).unwrap();
-
-        assert!(
-            report
-                .errors
-                .iter()
-                .any(|error| error.contains("runtime_slices.json invalid"))
-        );
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn test_artifact_load_options_validate_only() {
-        let dir = temp_dir("validate-only");
-        write_minimal_session(&dir);
-        let artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::VALIDATE_ONLY).unwrap();
-        assert!(artifacts.intervals.is_empty());
-        assert!(artifacts.spikes.is_empty());
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn test_load_run_artifacts_accepts_direct_session_json_path() {
-        let dir = temp_dir("direct-session-path");
-        write_minimal_session(&dir);
-        let session_path = dir.join("session.json");
-        let result = load_run_artifacts(&session_path, ArtifactLoadOptions::REPORT);
-        assert!(result.is_ok());
-        let artifacts = result.unwrap();
-        assert!(artifacts.metadata.is_none());
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn test_validate_run_dir_accepts_direct_session_json_path() {
-        let dir = temp_dir("validate-direct-session");
-        write_minimal_session(&dir);
-        let session_path = dir.join("session.json");
-        let report = validate_run_dir(&session_path).unwrap();
-        assert!(report.is_ok());
-        assert!(report.present_files.contains(&SESSION_FILE.to_owned()));
-        assert!(
-            report
-                .missing_optional_files
-                .contains(&METADATA_FILE.to_owned())
-        );
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn test_tune_load_does_not_warn_about_unloaded_spike_events() {
-        let dir = temp_dir("tune-no-spike-warn");
-        let mut session = minimal_session();
-        session.core.spike_events_retained_count = 10;
-        write_session(&dir, &session);
-
-        let artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::TUNE).unwrap();
-        // Should not have "spike count mismatch" warning because spikes weren't loaded
-        for warning in &artifacts.validation.warnings {
-            assert!(!warning.contains("spike count mismatch"));
-        }
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn load_correlations_empty_windows_does_not_load_existing_heavy_artifacts() {
-        let dir = temp_dir("empty-windows");
-        write_minimal_session(&dir);
-        // Mock some data in IRQ events file
-        let irq_path = dir.join(IRQ_EVENTS_FILE);
-        fs::write(irq_path, "{\"irq\":1}\n").unwrap();
-
-        let mut artifacts = load_run_artifacts(&dir, ArtifactLoadOptions::REPORT).unwrap();
-        assert!(artifacts.irq_events.is_empty());
-
-        let empty_windows = CorrelationWindows::default();
-        artifacts.load_correlations(empty_windows).unwrap();
-        assert!(artifacts.irq_events.is_empty());
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn irq_filter_does_not_include_events_between_separate_windows() {
-        let windows = CorrelationWindows {
-            windows_ns: vec![(100, 200), (400, 500)],
-            ..Default::default()
-        };
-
-        let in_1 = IrqEventRecord {
-            enter_ns: 120,
-            exit_ns: 150,
-            ..Default::default()
-        };
-        let in_2 = IrqEventRecord {
-            enter_ns: 420,
-            exit_ns: 450,
-            ..Default::default()
-        };
-        let between = IrqEventRecord {
-            enter_ns: 250,
-            exit_ns: 350,
-            ..Default::default()
-        };
-        let spans_gap = IrqEventRecord {
-            enter_ns: 150,
-            exit_ns: 450,
-            ..Default::default()
-        };
-
-        let filter = |r: &IrqEventRecord| {
-            windows
-                .windows_ns
-                .iter()
-                .any(|(start, end)| r.exit_ns >= *start && r.enter_ns <= *end)
-        };
-
-        assert!(filter(&in_1));
-        assert!(filter(&in_2));
-        assert!(!filter(&between));
-        assert!(filter(&spans_gap));
-    }
-
-    #[test]
-    fn block_io_filter_keeps_event_spanning_window() {
-        let windows = CorrelationWindows {
-            windows_ns: vec![(1000, 2000)],
-            ..Default::default()
-        };
-
-        // Event from 500 to 2500 (duration 2000, ends at 2500)
-        let spans = BlockIoRecord {
-            timestamp_ns: 2500,
-            duration_ns: 2000,
-            ..Default::default()
-        };
-
-        let filter = |r: &BlockIoRecord| {
-            let start_ns = r.timestamp_ns.saturating_sub(r.duration_ns);
-            let end_ns = r.timestamp_ns;
-            windows
-                .windows_ns
-                .iter()
-                .any(|(start, end)| end_ns >= *start && start_ns <= *end)
-        };
-
-        assert!(filter(&spans));
-    }
-
-    #[test]
-    fn validate_run_dir_accepts_missing_foreground_events_when_not_requested() {
-        let dir = temp_dir("missing-foreground-events-not-requested");
-        write_minimal_session(&dir);
-
-        let report = validate_run_dir(&dir).unwrap();
-
-        assert!(
-            report
-                .errors
-                .iter()
-                .all(|error| !error.contains("foreground_events.json")),
-            "errors={:?}",
-            report.errors
-        );
-
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn validate_run_dir_errors_on_invalid_present_foreground_events() {
-        let dir = temp_dir("invalid-present-foreground-events");
-        write_minimal_session(&dir);
-        std::fs::write(dir.join(FOREGROUND_EVENTS_FILE), "not valid json\n").unwrap();
-
-        let report = validate_run_dir(&dir).unwrap();
-
-        assert!(
-            report
-                .errors
-                .iter()
-                .any(|error| error.contains("foreground_events.json invalid")),
-            "errors={:?}",
-            report.errors
-        );
-
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn load_run_artifacts_reads_foreground_events_when_requested() {
-        let dir = tempfile::tempdir().unwrap();
-        let run_dir = dir.path();
-        let session_path = run_dir.join(SESSION_FILE);
-
-        let mut session = SessionFile::default();
-        session.core.foreground_event_count = 1;
-        fs::write(&session_path, serde_json::to_string(&session).unwrap()).unwrap();
-
-        let event = ForegroundEvent {
-            elapsed_ms: 100,
-            pid: Some(123),
-            ..Default::default()
-        };
-        let event_path = run_dir.join(FOREGROUND_EVENTS_FILE);
-        let mut file = std::fs::File::create(event_path).unwrap();
-        use std::io::Write;
-        file.write_all(serde_json::to_string(&event).unwrap().as_bytes())
-            .unwrap();
-        file.write_all(b"\n").unwrap();
-
-        let options = ArtifactLoadOptions {
-            load_foreground_events: true,
-            ..ArtifactLoadOptions::VALIDATE_ONLY
-        };
-        let artifacts = load_run_artifacts(&session_path, options).unwrap();
-
-        assert_eq!(artifacts.foreground_events.len(), 1);
-        assert_eq!(artifacts.foreground_events[0].pid, Some(123));
-        assert!(artifacts.validation.is_ok());
-    }
-
-    #[test]
-    fn validate_run_dir_rejects_invalid_foreground_events_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let run_dir = dir.path();
-        let session_path = run_dir.join(SESSION_FILE);
-
-        let session = SessionFile::default();
-        fs::write(&session_path, serde_json::to_string(&session).unwrap()).unwrap();
-
-        let event_path = run_dir.join(FOREGROUND_EVENTS_FILE);
-        std::fs::write(event_path, "not json").unwrap();
-
-        let report = validate_run_dir(&session_path).unwrap();
-        assert!(!report.is_ok());
-        assert!(
-            report
-                .errors
-                .iter()
-                .any(|e| e.contains("foreground_events.json invalid"))
-        );
     }
 }

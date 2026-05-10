@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 
 use crate::{
+    artifacts::ArtifactSelection,
     cli::{self, Config},
     hwmon,
     process_tree::TaskFilters,
@@ -720,8 +721,7 @@ pub async fn measure_tune_candidate(
 
     monitor_result?;
 
-    let artifacts =
-        session_io::load_run_artifacts(&run_dir, session_io::ArtifactLoadOptions::TUNE)?;
+    let artifacts = session_io::load_run_artifacts(&run_dir, ArtifactSelection::tune())?;
     let mut interval_records = artifacts.intervals;
     retain_after_warmup(&mut interval_records, warmup_seconds, |r| r.elapsed_ms);
 

@@ -427,24 +427,13 @@ impl MonitorSession {
             let registry = &mut recorder.streams;
             let dir = &run.run_dir;
 
-            registry.create_stream(dir, ArtifactKind::Interval)?;
-            registry.create_stream(dir, ArtifactKind::IrqEvents)?;
-            registry.create_stream(dir, ArtifactKind::MigrationEvents)?;
-            registry.create_stream(dir, ArtifactKind::CpuFreqSamples)?;
-            registry.create_stream(dir, ArtifactKind::GpuSamples)?;
-            registry.create_stream(dir, ArtifactKind::BlockIoEvents)?;
-            registry.create_stream(dir, ArtifactKind::ScxEvents)?;
-
-            if config.runtime_slices {
-                registry.create_stream(dir, ArtifactKind::RuntimeSlices)?;
-            }
-
-            registry.create_stream(dir, ArtifactKind::SpikeEvents)?;
-            registry.create_stream(dir, ArtifactKind::FrameEvents)?;
-            registry.create_stream(dir, ArtifactKind::FocusEvents)?;
-
-            if foreground_enabled {
-                registry.create_stream(dir, ArtifactKind::ForegroundEvents)?;
+            for kind in crate::artifacts::ArtifactSelection::recording(
+                config.runtime_slices,
+                foreground_enabled,
+            )
+            .iter()
+            {
+                registry.create_stream(dir, kind)?;
             }
         }
 

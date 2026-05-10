@@ -4,11 +4,12 @@ use anyhow::Context;
 use serde::Serialize;
 
 use crate::{
+    artifacts::ArtifactSelection,
     ebpf_loader::DropCountersSnapshot,
     process_tree::{TaskClass, TaskInfo},
     recorder::SessionTask,
     session_events::MonitorEvent,
-    session_io::{self, ArtifactLoadOptions},
+    session_io,
 };
 
 pub struct AutotuneReplayInput {
@@ -137,7 +138,7 @@ pub fn replay_autotune_events(input: AutotuneReplayInput) -> anyhow::Result<Auto
     }
 
     let artifacts =
-        session_io::load_run_artifacts(&input.run_dir, ArtifactLoadOptions::AUTOTUNE_REPLAY)
+        session_io::load_run_artifacts(&input.run_dir, ArtifactSelection::autotune_replay())
             .with_context(|| {
                 format!(
                     "failed to load run artifacts from {}",

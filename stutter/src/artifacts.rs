@@ -121,10 +121,10 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
     },
     ArtifactSpec {
         kind: ArtifactKind::FrameEvents,
-        file_name: "frame_events.json",
+        file_name: "frame_correlation.json",
         encoding: ArtifactEncoding::Ndjson,
         required: false,
-        legacy_aliases: &["frame_correlation.json"],
+        legacy_aliases: &["frame_events.json"],
         counter_field: Some(ArtifactCounter::FrameEvent),
     },
     ArtifactSpec {
@@ -263,4 +263,129 @@ pub fn optional_artifact_kinds() -> BTreeSet<ArtifactKind> {
 
 pub fn artifact_path(run_dir: &Path, kind: ArtifactKind) -> PathBuf {
     run_dir.join(artifact_file_name(kind))
+}
+
+pub fn artifact_alias_paths(run_dir: &Path, kind: ArtifactKind) -> Vec<PathBuf> {
+    artifact_spec(kind)
+        .legacy_aliases
+        .iter()
+        .map(|alias| run_dir.join(alias))
+        .collect()
+}
+
+pub fn artifact_primary_and_alias_paths(run_dir: &Path, kind: ArtifactKind) -> Vec<PathBuf> {
+    let mut paths = vec![artifact_path(run_dir, kind)];
+    paths.extend(artifact_alias_paths(run_dir, kind));
+    paths
+}
+
+pub fn artifact_counter_label(counter: ArtifactCounter) -> &'static str {
+    match counter {
+        ArtifactCounter::IntervalRecord => "interval record",
+        ArtifactCounter::SpikeEventsRetained => "spike event",
+        ArtifactCounter::IrqEvent => "IRQ event",
+        ArtifactCounter::GpuSample => "GPU sample",
+        ArtifactCounter::FrameEvent => "frame event",
+        ArtifactCounter::BlockIoEvent => "block I/O event",
+        ArtifactCounter::RuntimeSlice => "runtime slice",
+        ArtifactCounter::FocusEvent => "focus event",
+        ArtifactCounter::ForegroundEvent => "foreground event",
+        ArtifactCounter::MigrationEvent => "migration event",
+        ArtifactCounter::CpuFreqSample => "CPU frequency sample",
+        ArtifactCounter::ScxEvent => "SCX event",
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ArtifactSelection {
+    kinds: BTreeSet<ArtifactKind>,
+}
+
+impl ArtifactSelection {
+    pub fn new(kinds: impl IntoIterator<Item = ArtifactKind>) -> Self {
+        Self {
+            kinds: kinds.into_iter().collect(),
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            kinds: BTreeSet::new(),
+        }
+    }
+
+    pub fn report() -> Self {
+        Self::new([
+            ArtifactKind::SpikeEvents,
+            ArtifactKind::FrameEvents,
+            ArtifactKind::FocusEvents,
+            ArtifactKind::ForegroundEvents,
+        ])
+    }
+
+    pub fn tune() -> Self {
+        Self::new([ArtifactKind::Interval, ArtifactKind::FrameEvents])
+    }
+
+    pub fn autotune_replay() -> Self {
+        Self::new(
+            artifact_kinds()
+                .filter(|kind| {
+                    !matches!(
+                        kind,
+                        ArtifactKind::Session
+                            | ArtifactKind::Metadata
+                            | ArtifactKind::FrameCorrelation
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    pub fn validate_only() -> Self {
+        Self::empty()
+    }
+
+    pub fn recording(runtime_slices: bool, foreground_events: bool) -> Self {
+        let mut kinds = BTreeSet::from([
+            ArtifactKind::Interval,
+            ArtifactKind::IrqEvents,
+            ArtifactKind::MigrationEvents,
+            ArtifactKind::CpuFreqSamples,
+            ArtifactKind::GpuSamples,
+            ArtifactKind::BlockIoEvents,
+            ArtifactKind::ScxEvents,
+            ArtifactKind::SpikeEvents,
+            ArtifactKind::FrameEvents,
+            ArtifactKind::FocusEvents,
+        ]);
+
+        if runtime_slices {
+            kinds.insert(ArtifactKind::RuntimeSlices);
+        }
+
+        if foreground_events {
+            kinds.insert(ArtifactKind::ForegroundEvents);
+        }
+
+        Self { kinds }
+    }
+
+    pub fn contains(&self, kind: ArtifactKind) -> bool {
+        self.kinds.contains(&kind)
+    }
+
+    pub fn insert(&mut self, kind: ArtifactKind) {
+        self.kinds.insert(kind);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = ArtifactKind> + '_ {
+        self.kinds.iter().copied()
+    }
+}
+
+impl Default for ArtifactSelection {
+    fn default() -> Self {
+        Self::empty()
+    }
 }

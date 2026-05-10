@@ -7,8 +7,8 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    scorer,
-    session_io::{self, ArtifactLoadOptions},
+    artifacts::ArtifactSelection,
+    scorer, session_io,
     tune::{
         self, RankingConfidence, TuneSummary,
         recommendation::{TuneRecommendationVerdict, render_tune_recommendation_markdown},
@@ -84,7 +84,7 @@ pub fn build_baseline_tune_recommendation(
     )
     .with_context(|| format!("failed to parse {}", summary_path.display()))?;
 
-    let baseline = session_io::load_run_artifacts(baseline_run, ArtifactLoadOptions::TUNE)
+    let baseline = session_io::load_run_artifacts(baseline_run, ArtifactSelection::tune())
         .with_context(|| format!("failed to load baseline run {}", baseline_run.display()))?;
     let baseline_score =
         scorer::score_from_interval_records_and_frames(&baseline.intervals, &baseline.frame_events);

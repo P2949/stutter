@@ -1,5 +1,8 @@
 use super::*;
-use crate::sched_state::classify_switch_prev_state;
+use crate::{
+    artifacts::{ArtifactKind, ArtifactSelection, artifact_file_name},
+    sched_state::classify_switch_prev_state,
+};
 
 pub fn build_report_analysis(
     path: &Path,
@@ -19,7 +22,7 @@ pub(crate) fn build_report_analysis_with_artifacts(
     let validation = session_io::validate_run_dir_shallow(path)?;
     log_run_validation(path, &validation);
 
-    let mut artifacts = session_io::load_run_artifacts(path, ArtifactLoadOptions::REPORT)?;
+    let mut artifacts = session_io::load_run_artifacts(path, ArtifactSelection::report())?;
     let session = artifacts.session.clone();
 
     let median_frametime = calculate_median_frametime(&artifacts.frame_events);
@@ -430,7 +433,7 @@ pub(crate) fn runtime_slice_analysis_summary(
         .validation
         .missing_optional_files
         .iter()
-        .any(|file| file == session_io::RUNTIME_SLICES_FILE)
+        .any(|file| file == artifact_file_name(ArtifactKind::RuntimeSlices))
     {
         summary.missing_reason = Some("runtime_slices.json is missing".to_owned());
     } else if session.core.runtime_slice_count > 0 && artifacts.runtime_slices.is_empty() {
@@ -602,8 +605,8 @@ pub(crate) fn data_quality_summary(
         .missing_optional_files
         .iter()
         .filter(|f| {
-            *f != crate::session_io::FOCUS_EVENTS_FILE
-                && *f != crate::session_io::FOREGROUND_EVENTS_FILE
+            *f != artifact_file_name(ArtifactKind::FocusEvents)
+                && *f != artifact_file_name(ArtifactKind::ForegroundEvents)
         })
         .collect::<Vec<_>>();
 

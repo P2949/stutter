@@ -6,6 +6,7 @@ use std::{
 use serde_json::Value;
 
 use crate::{
+    artifacts::{ArtifactKind, ArtifactSelection, artifact_file_name},
     recorder::{MetadataFile, SESSION_SCHEMA_VERSION},
     report, session_io, test_fixture_builder, validate,
 };
@@ -149,12 +150,18 @@ fn newer_session_schema_errors() {
 
     let mut session = session_io::load_session(&dir).unwrap();
     session.core.schema_version = SESSION_SCHEMA_VERSION + 1;
-    write_json_pretty(dir.join(session_io::SESSION_FILE), &session);
+    write_json_pretty(
+        dir.join(artifact_file_name(ArtifactKind::Session)),
+        &session,
+    );
 
     let metadata = MetadataFile {
         core: session.core.clone(),
     };
-    write_json_pretty(dir.join(session_io::METADATA_FILE), &metadata);
+    write_json_pretty(
+        dir.join(artifact_file_name(ArtifactKind::Metadata)),
+        &metadata,
+    );
 
     let validation = session_io::validate_run_dir(&dir).unwrap();
     assert!(
@@ -185,10 +192,12 @@ fn metadata_session_count_mismatch_warns() {
             core
         },
     };
-    write_json_pretty(dir.join(session_io::METADATA_FILE), &metadata);
+    write_json_pretty(
+        dir.join(artifact_file_name(ArtifactKind::Metadata)),
+        &metadata,
+    );
 
-    let artifacts =
-        session_io::load_run_artifacts(&dir, session_io::ArtifactLoadOptions::REPORT).unwrap();
+    let artifacts = session_io::load_run_artifacts(&dir, ArtifactSelection::report()).unwrap();
     assert!(
         artifacts
             .validation
@@ -206,7 +215,11 @@ fn metadata_session_count_mismatch_warns() {
 fn present_invalid_ndjson_errors() {
     let root = write_corpus("invalid-ndjson");
     let dir = root.join("clean_run");
-    fs::write(dir.join(session_io::INTERVALS_FILE), "invalid json\n").unwrap();
+    fs::write(
+        dir.join(artifact_file_name(ArtifactKind::Interval)),
+        "invalid json\n",
+    )
+    .unwrap();
 
     let validation = session_io::validate_run_dir(&dir).unwrap();
     assert!(
@@ -258,32 +271,32 @@ fn docs_example_artifacts_validate() {
         let session = session_io::load_session(&path).unwrap();
         assert_eq!(
             session.core.interval_record_count,
-            non_empty_line_count(path.join(session_io::INTERVALS_FILE)),
+            non_empty_line_count(path.join(artifact_file_name(ArtifactKind::Interval))),
             "{} interval count mismatch",
             path.display()
         );
         assert_eq!(
             session.core.spike_events_retained_count,
-            non_empty_line_count(path.join(session_io::SPIKES_FILE)),
+            non_empty_line_count(path.join(artifact_file_name(ArtifactKind::SpikeEvents))),
             "{} spike count mismatch",
             path.display()
         );
         assert_eq!(
             session.core.gpu_sample_count,
-            non_empty_line_count(path.join(session_io::GPU_SAMPLES_FILE)),
+            non_empty_line_count(path.join(artifact_file_name(ArtifactKind::GpuSamples))),
             "{} gpu sample count mismatch",
             path.display()
         );
         assert_eq!(
             session.core.block_io_event_count,
-            non_empty_line_count(path.join(session_io::BLOCK_IO_EVENTS_FILE)),
+            non_empty_line_count(path.join(artifact_file_name(ArtifactKind::BlockIoEvents))),
             "{} block io count mismatch",
             path.display()
         );
-        let frame_count = if path.join(session_io::FRAME_EVENTS_FILE).exists() {
-            non_empty_line_count(path.join(session_io::FRAME_EVENTS_FILE))
+        let frame_count = if path.join("frame_correlation.json").exists() {
+            non_empty_line_count(path.join("frame_correlation.json"))
         } else {
-            non_empty_line_count(path.join(session_io::FRAME_EVENTS_STREAM_FILE))
+            non_empty_line_count(path.join("frame_events.json"))
         };
         assert_eq!(
             session.core.frame_event_count,
@@ -292,7 +305,7 @@ fn docs_example_artifacts_validate() {
             path.display()
         );
 
-        let metadata = read_json(path.join(session_io::METADATA_FILE));
+        let metadata = read_json(path.join(artifact_file_name(ArtifactKind::Metadata)));
         assert_eq!(
             metadata
                 .get("spike_events_retained_count")

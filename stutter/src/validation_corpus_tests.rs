@@ -6,6 +6,7 @@ use std::{
 use serde::Deserialize;
 
 use crate::{
+    artifacts::ArtifactSelection,
     diagnosis::{Confidence, Diagnosis, DiagnosisCandidate, StutterCause},
     recorder::SESSION_SCHEMA_VERSION,
     report::{self, DataQualityLevel, ReportAnalysisJson},
@@ -811,11 +812,8 @@ fn html_report_contains_new_report_views() {
     let path = fixture_path("real_gpu_bound_looking");
     let analysis = report::build_report_analysis(&path, 10, 5, None)
         .expect("analysis should build for HTML smoke test");
-    let artifacts = crate::session_io::load_run_artifacts(
-        &path,
-        crate::session_io::ArtifactLoadOptions::REPORT,
-    )
-    .expect("artifacts should load for HTML smoke test");
+    let artifacts = crate::session_io::load_run_artifacts(&path, ArtifactSelection::report())
+        .expect("artifacts should load for HTML smoke test");
     let model =
         report::build_html_report_model(&analysis.session, &artifacts, &analysis, 10, None, None)
             .expect("HTML report model should build");
