@@ -7,7 +7,6 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use tokio::signal;
 
-#[cfg(feature = "autotune-controller")]
 use super::decision_log::{
     AutotuneDecisionLabel, AutotuneModeLabel, ControllerPhaseLabel, DecisionJsonlEntry,
     OnlineDataQualityLabel, SituationKindLabel, append_decision_jsonl,
@@ -459,42 +458,35 @@ fn write_exit_decision_event(
         return;
     };
 
-    #[cfg(feature = "autotune-controller")]
-    {
-        let decision = if summary.failed_actions > 0 {
-            AutotuneDecisionLabel::Fault
-        } else if summary.rolled_back_actions > 0 {
-            AutotuneDecisionLabel::Revert
+    let decision = if summary.failed_actions > 0 {
+        AutotuneDecisionLabel::Fault
+    } else if summary.rolled_back_actions > 0 {
+        AutotuneDecisionLabel::Revert
+    } else {
+        AutotuneDecisionLabel::Noop
+    };
+
+    let entry = DecisionJsonlEntry::new(
+        if summary.failed_actions > 0 {
+            ControllerPhaseLabel::Faulted
         } else {
-            AutotuneDecisionLabel::Noop
-        };
+            ControllerPhaseLabel::Cooldown
+        },
+        AutotuneModeLabel::ApplyLowRisk,
+        false,
+        SituationKindLabel::Unknown,
+        0,
+        if summary.failed_actions > 0 {
+            OnlineDataQualityLabel::Low
+        } else {
+            OnlineDataQualityLabel::High
+        },
+        decision,
+        reason.to_owned(),
+    );
 
-        let entry = DecisionJsonlEntry::new(
-            if summary.failed_actions > 0 {
-                ControllerPhaseLabel::Faulted
-            } else {
-                ControllerPhaseLabel::Cooldown
-            },
-            AutotuneModeLabel::ApplyLowRisk,
-            false,
-            SituationKindLabel::Unknown,
-            0,
-            if summary.failed_actions > 0 {
-                OnlineDataQualityLabel::Low
-            } else {
-                OnlineDataQualityLabel::High
-            },
-            decision,
-            reason.to_owned(),
-        );
-
-        if let Err(err) = append_decision_jsonl(path, &entry) {
-            log::warn!("autotune_exit_decision_log_write_failed err={err:#}");
-        }
-    }
-    #[cfg(not(feature = "autotune-controller"))]
-    {
-        let _ = (path, summary, reason);
+    if let Err(err) = append_decision_jsonl(path, &entry) {
+        log::warn!("autotune_exit_decision_log_write_failed err={err:#}");
     }
 }
 

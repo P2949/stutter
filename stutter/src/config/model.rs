@@ -1,6 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct MonitorConfig {
     pub target: TargetConfig,
     pub timing: TimingConfig,
@@ -9,20 +9,6 @@ pub struct MonitorConfig {
     pub outputs: OutputConfig,
     pub focus: FocusConfig,
     pub safety: SafetyConfig,
-}
-
-impl Default for MonitorConfig {
-    fn default() -> Self {
-        Self {
-            target: TargetConfig::default(),
-            timing: TimingConfig::default(),
-            probes: ProbeConfig::default(),
-            recording: RecordingConfig::default(),
-            outputs: OutputConfig::default(),
-            focus: FocusConfig::default(),
-            safety: SafetyConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -75,7 +61,7 @@ impl Default for TimingConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ProbeConfig {
     pub irq_latency: bool,
     pub irqs: Vec<u32>,
@@ -86,22 +72,6 @@ pub struct ProbeConfig {
     pub block_io: bool,
     pub stat_wait: bool,
     pub runtime_slices: bool,
-}
-
-impl Default for ProbeConfig {
-    fn default() -> Self {
-        Self {
-            irq_latency: false,
-            irqs: Vec::new(),
-            hwmon: false,
-            cpu_freq: false,
-            faults: false,
-            cpu_perf: false,
-            block_io: false,
-            stat_wait: false,
-            runtime_slices: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

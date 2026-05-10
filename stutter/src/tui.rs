@@ -16,11 +16,8 @@ use ratatui::{
     widgets::{BarChart, Block, Borders, Cell, Paragraph, Row, Sparkline, Table, Wrap},
 };
 
-#[cfg(feature = "autotune-controller")]
-use crate::autotune::tui_panel::{
-    AutotuneTuiPanelSnapshot, load_default_autotune_tui_panel_snapshot,
-};
 use crate::{
+    autotune::tui_panel::{AutotuneTuiPanelSnapshot, load_default_autotune_tui_panel_snapshot},
     diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
     focus::ResolvedFocus,
@@ -184,15 +181,8 @@ pub fn render_tui(
         .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(chunks[3]);
 
-    #[cfg(feature = "autotune-controller")]
-    {
-        let autotune_snapshot = load_default_autotune_tui_panel_snapshot();
-        render_autotune_panel(f, Some(&autotune_snapshot), lower[0]);
-    }
-    #[cfg(not(feature = "autotune-controller"))]
-    {
-        render_autotune_panel(f, None, lower[0]);
-    }
+    let autotune_snapshot = load_default_autotune_tui_panel_snapshot();
+    render_autotune_panel(f, Some(&autotune_snapshot), lower[0]);
     render_diagnoses(f, recent_diagnoses, lower[1]);
 }
 
@@ -541,7 +531,6 @@ fn render_cpu_heat(f: &mut Frame, stats_by_task: &BTreeMap<u32, TaskStats>, area
 // Autotune panel
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "autotune-controller")]
 fn render_autotune_panel(f: &mut Frame, snapshot: Option<&AutotuneTuiPanelSnapshot>, area: Rect) {
     let block = Block::default().borders(Borders::ALL).title(" Autotune ");
     let paragraph = Paragraph::new(autotune_panel_lines(snapshot))
@@ -551,17 +540,6 @@ fn render_autotune_panel(f: &mut Frame, snapshot: Option<&AutotuneTuiPanelSnapsh
     f.render_widget(paragraph, area);
 }
 
-#[cfg(not(feature = "autotune-controller"))]
-fn render_autotune_panel(f: &mut Frame, _snapshot: Option<()>, area: Rect) {
-    let block = Block::default().borders(Borders::ALL).title(" Autotune ");
-    let paragraph = Paragraph::new(autotune_panel_lines(None))
-        .block(block)
-        .wrap(Wrap { trim: true });
-
-    f.render_widget(paragraph, area);
-}
-
-#[cfg(feature = "autotune-controller")]
 fn autotune_panel_lines(snapshot: Option<&AutotuneTuiPanelSnapshot>) -> Vec<Line<'static>> {
     let Some(snapshot) = snapshot else {
         return vec![Line::from(vec![Span::raw(" no autotune status")])];
@@ -621,12 +599,6 @@ fn autotune_panel_lines(snapshot: Option<&AutotuneTuiPanelSnapshot>) -> Vec<Line
     lines
 }
 
-#[cfg(not(feature = "autotune-controller"))]
-fn autotune_panel_lines(_snapshot: Option<()>) -> Vec<Line<'static>> {
-    vec![Line::from(vec![Span::raw(" no autotune status")])]
-}
-
-#[cfg(feature = "autotune-controller")]
 fn label_value_line(label: &str, value: &str, value_style: Style) -> Line<'static> {
     Line::from(vec![
         Span::raw(format!(" {label}: ")),
@@ -634,14 +606,12 @@ fn label_value_line(label: &str, value: &str, value_style: Style) -> Line<'stati
     ])
 }
 
-#[cfg(feature = "autotune-controller")]
 fn format_optional_u64(value: Option<u64>) -> String {
     value
         .map(|value| value.to_string())
         .unwrap_or_else(|| "unknown".to_owned())
 }
 
-#[cfg(feature = "autotune-controller")]
 fn format_decision_in(value: Option<u64>) -> String {
     value
         .map(|seconds| format!("{seconds}s"))

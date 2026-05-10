@@ -95,6 +95,12 @@ impl PsiReader {
     }
 }
 
+impl Default for PsiReader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 struct PsiLine {
     avg10: f64,
     total: u64,

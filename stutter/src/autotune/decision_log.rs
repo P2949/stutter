@@ -1,5 +1,3 @@
-#![cfg(feature = "autotune-controller")]
-
 use std::{
     fs::{self, OpenOptions},
     io::{BufRead, Write},
