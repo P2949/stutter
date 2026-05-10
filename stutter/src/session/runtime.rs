@@ -15,6 +15,16 @@ impl MonitorRuntime {
         targeting: crate::session::targeting::TargetController,
         bus: crate::session::event_bus::MonitorEventBus,
     ) -> Self {
+        Self::from_config_parts(probes, outputs, ui, targeting, bus)
+    }
+
+    pub fn from_config_parts(
+        probes: crate::session::probes::ProbeRuntime,
+        outputs: crate::session::outputs::OutputRuntime,
+        ui: crate::session::ui::TuiRuntime,
+        targeting: crate::session::targeting::TargetController,
+        bus: crate::session::event_bus::MonitorEventBus,
+    ) -> Self {
         Self {
             probes,
             outputs,

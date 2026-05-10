@@ -26,4 +26,18 @@ impl ProbeRuntime {
             scx_tracker,
         }
     }
+
+    pub fn from_config_parts(
+        loaded: crate::ebpf_loader::LoadedEbpf,
+        block_io_correlation_basis: String,
+        cpu_perf_sampler: Option<crate::perf_counters::CpuPerfSampler>,
+        runtime_slice_sampler: Option<crate::runtime_slices::RuntimeSliceSampler>,
+    ) -> Self {
+        Self::new(
+            loaded,
+            block_io_correlation_basis,
+            cpu_perf_sampler,
+            runtime_slice_sampler,
+        )
+    }
 }
