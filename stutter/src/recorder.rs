@@ -1607,6 +1607,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     let session = SessionFile {
         core: core.clone(),
         stop_reason: stop_reason.to_owned(),
+        // TODO: replace with config::model::MonitorConfig → RecordedConfig conversion once MonitorConfig is the canonical config type.
         config: recorded_config(config, tree_pids),
         tasks,
         top_spikes,
