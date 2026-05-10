@@ -501,6 +501,8 @@ fn audit_agent_event(
         success,
         affected_tasks,
         restore_path: None,
+        action_phase: None,
+        error_category: None,
         message,
     });
 }

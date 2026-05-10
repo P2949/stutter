@@ -272,7 +272,7 @@ pub struct MonitorSession {
     pub started: Instant,
     pub had_tree_roots: bool,
     pub interval_label: &'static str,
-    community_rules: Option<crate::community_rules::CommunityRulesDb>,
+    community_rules: crate::community_rules::CommunityRulesStatus,
 }
 
 impl MonitorSession {
@@ -321,14 +321,24 @@ impl MonitorSession {
             );
         }
 
-        let community_rules = crate::community_rules::load_community_rules(
-            &crate::config_file::community_rules_config_from_user_config(user_config.as_ref()),
-        )
-        .map_err(|err| {
-            log::warn!("failed_to_load_community_rules err={err:#}");
-            err
-        })
-        .ok();
+        let community_rules_config =
+            crate::config_file::community_rules_config_from_user_config(user_config.as_ref());
+        let community_rules =
+            crate::community_rules::load_community_rules_status(&community_rules_config);
+        match &community_rules {
+            crate::community_rules::CommunityRulesStatus::Loaded { db } => {
+                log::info!(
+                    "community_rules_status status=loaded rules={}",
+                    db.rule_count()
+                );
+            }
+            crate::community_rules::CommunityRulesStatus::Disabled => {
+                log::info!("community_rules_status status=disabled");
+            }
+            crate::community_rules::CommunityRulesStatus::Failed { error } => {
+                log::warn!("community_rules_status status=failed err={error}");
+            }
+        }
 
         if !explicit_target && config.auto_focus {
             let policy = FocusPolicy {
@@ -1675,7 +1685,7 @@ impl MonitorSession {
                     .run
                     .as_ref()
                     .map(|run| run.started_instant),
-                community_rules: self.community_rules.as_ref(),
+                community_rules: self.community_rules.as_db(),
             })
             .await?;
 

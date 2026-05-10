@@ -352,6 +352,8 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         success: true,
         affected_tasks: apply_result.affected_tasks(),
         restore_path: Some(crate::profile_restore::default_restore_path()),
+        action_phase: None,
+        error_category: None,
         message: format!(
             "initial profile application completed affinity={} nice={} ionice={}",
             apply_result.affinity_records.len(),
@@ -490,6 +492,8 @@ pub fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
                 success: true,
                 affected_tasks: summary.restored_total(),
                 restore_path: Some(path.clone()),
+                action_phase: None,
+                error_category: None,
                 message: format!(
                     "watch restore completed affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={}",
                     summary.affinity,
@@ -519,6 +523,8 @@ pub fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
                 success: false,
                 affected_tasks: 0,
                 restore_path: Some(path.clone()),
+                action_phase: None,
+                error_category: None,
                 message: format!("restore failed: {err:#}"),
             });
             return Err(err);

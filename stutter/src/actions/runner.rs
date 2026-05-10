@@ -1,9 +1,7 @@
 use std::path::Path;
 
-use anyhow::Context;
-
 use crate::{
-    actions::{ActionOutcome, ActionState, RollbackToken, TuningAction},
+    actions::{ActionError, ActionOutcome, ActionState, RollbackToken, TuningAction},
     audit::{AuditEvent, append_audit_event_to_path, unix_nanos_now},
 };
 
@@ -18,7 +16,7 @@ pub fn run_audited_action<A: TuningAction>(
     command: &str,
     action: &A,
     dry_run: bool,
-) -> anyhow::Result<AuditedActionResult> {
+) -> Result<AuditedActionResult, ActionError> {
     run_audited_action_with_audit_path(
         command,
         action,
@@ -32,7 +30,7 @@ pub fn run_audited_action_with_audit_path<A: TuningAction>(
     action: &A,
     dry_run: bool,
     audit_path: &Path,
-) -> anyhow::Result<AuditedActionResult> {
+) -> Result<AuditedActionResult, ActionError> {
     let started_unix_nanos = unix_nanos_now();
     let action_id = action.id();
     let safety_class = action.safety_class();
@@ -47,16 +45,22 @@ pub fn run_audited_action_with_audit_path<A: TuningAction>(
         success: false,
         affected_tasks: 0,
         restore_path: None,
+        action_phase: None,
+        error_category: None,
         message: String::new(),
     };
 
-    let result = (|| -> anyhow::Result<AuditedActionResult> {
-        let preflight_warnings = action.preflight().context("preflight failed")?;
+    let result = (|| -> Result<AuditedActionResult, ActionError> {
+        audit_event.action_phase = Some(crate::actions::ActionPhase::Preflight);
+        let preflight_warnings = action.preflight().map_err(ActionError::preflight)?;
 
         if dry_run {
-            let state = action.dry_run().context("dry run failed")?;
+            audit_event.action_phase = Some(crate::actions::ActionPhase::DryRun);
+            let state = action.dry_run().map_err(ActionError::dry_run)?;
             audit_event.success = true;
             audit_event.affected_tasks = state.affected_tasks;
+            audit_event.action_phase = None;
+            audit_event.error_category = None;
             audit_event.message = "dry run successful".to_owned();
 
             let finished_unix_nanos = unix_nanos_now();
@@ -77,26 +81,31 @@ pub fn run_audited_action_with_audit_path<A: TuningAction>(
                 outcome,
             })
         } else {
-            let rollback = action.apply().context("apply failed")?;
+            audit_event.action_phase = Some(crate::actions::ActionPhase::Apply);
+            let rollback = action.apply().map_err(ActionError::apply)?;
             audit_event.affected_tasks = rollback.affected_tasks();
             audit_event.restore_path = rollback.restore_path().cloned();
 
+            audit_event.action_phase = Some(crate::actions::ActionPhase::Verify);
             let state = match action.verify() {
                 Ok(state) => state,
-                Err(verify_err) => match action.rollback(&rollback) {
-                    Ok(()) => {
-                        anyhow::bail!("verify failed; rollback completed: {verify_err:#}");
+                Err(verify_err) => {
+                    audit_event.action_phase = Some(crate::actions::ActionPhase::Rollback);
+                    match action.rollback(&rollback) {
+                        Ok(()) => {
+                            return Err(ActionError::verify_rollback_completed(verify_err));
+                        }
+                        Err(rollback_err) => {
+                            return Err(ActionError::emergency_rollback(verify_err, rollback_err));
+                        }
                     }
-                    Err(rollback_err) => {
-                        anyhow::bail!(
-                            "verify failed; emergency rollback failed: verify error: {verify_err:#}; rollback error: {rollback_err:#}"
-                        );
-                    }
-                },
+                }
             };
 
             audit_event.affected_tasks = state.affected_tasks;
             audit_event.success = true;
+            audit_event.action_phase = None;
+            audit_event.error_category = None;
             audit_event.message = "action applied and verified".to_owned();
 
             let finished_unix_nanos = unix_nanos_now();
@@ -121,7 +130,9 @@ pub fn run_audited_action_with_audit_path<A: TuningAction>(
 
     if let Err(ref err) = result {
         audit_event.success = false;
-        audit_event.message = format!("{err:#}");
+        audit_event.action_phase = Some(err.phase());
+        audit_event.error_category = Some(err.category().to_owned());
+        audit_event.message = err.human_message();
     }
 
     if let Err(audit_err) = append_audit_event_to_path(audit_path, &audit_event) {
@@ -499,6 +510,14 @@ mod tests {
         assert!(!events[0].dry_run);
         assert!(events[0].message.contains("preflight failed"));
         assert!(events[0].message.contains("preflight intentional failure"));
+        assert_eq!(
+            events[0].action_phase,
+            Some(crate::actions::ActionPhase::Preflight)
+        );
+        assert_eq!(
+            events[0].error_category.as_deref(),
+            Some("preflight_failure")
+        );
         fs::remove_dir_all(dir).ok();
     }
 
@@ -615,6 +634,14 @@ mod tests {
         assert!(events[0].message.contains("emergency rollback failed"));
         assert!(events[0].message.contains("verify intentional failure"));
         assert!(events[0].message.contains("rollback intentional failure"));
+        assert_eq!(
+            events[0].action_phase,
+            Some(crate::actions::ActionPhase::EmergencyRollback)
+        );
+        assert_eq!(
+            events[0].error_category.as_deref(),
+            Some("emergency_rollback_failure")
+        );
         fs::remove_dir_all(dir).ok();
     }
 }

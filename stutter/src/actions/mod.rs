@@ -20,6 +20,159 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionPhase {
+    Preflight,
+    DryRun,
+    Apply,
+    Verify,
+    Rollback,
+    EmergencyRollback,
+}
+
+impl ActionPhase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Preflight => "preflight",
+            Self::DryRun => "dry_run",
+            Self::Apply => "apply",
+            Self::Verify => "verify",
+            Self::Rollback => "rollback",
+            Self::EmergencyRollback => "emergency_rollback",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ActionError {
+    PreflightFailure {
+        message: String,
+    },
+    DryRunFailure {
+        message: String,
+    },
+    ApplyFailure {
+        message: String,
+    },
+    VerifyFailure {
+        message: String,
+    },
+    VerifyFailureRollbackCompleted {
+        verify_error: String,
+    },
+    RollbackFailure {
+        message: String,
+    },
+    EmergencyRollbackFailure {
+        verify_error: String,
+        rollback_error: String,
+    },
+}
+
+impl ActionError {
+    pub fn preflight(error: impl std::fmt::Display) -> Self {
+        Self::PreflightFailure {
+            message: error.to_string(),
+        }
+    }
+
+    pub fn dry_run(error: impl std::fmt::Display) -> Self {
+        Self::DryRunFailure {
+            message: error.to_string(),
+        }
+    }
+
+    pub fn apply(error: impl std::fmt::Display) -> Self {
+        Self::ApplyFailure {
+            message: error.to_string(),
+        }
+    }
+
+    pub fn verify(error: impl std::fmt::Display) -> Self {
+        Self::VerifyFailure {
+            message: error.to_string(),
+        }
+    }
+
+    pub fn verify_rollback_completed(verify_error: impl std::fmt::Display) -> Self {
+        Self::VerifyFailureRollbackCompleted {
+            verify_error: verify_error.to_string(),
+        }
+    }
+
+    pub fn rollback(error: impl std::fmt::Display) -> Self {
+        Self::RollbackFailure {
+            message: error.to_string(),
+        }
+    }
+
+    pub fn emergency_rollback(
+        verify_error: impl std::fmt::Display,
+        rollback_error: impl std::fmt::Display,
+    ) -> Self {
+        Self::EmergencyRollbackFailure {
+            verify_error: verify_error.to_string(),
+            rollback_error: rollback_error.to_string(),
+        }
+    }
+
+    pub fn phase(&self) -> ActionPhase {
+        match self {
+            Self::PreflightFailure { .. } => ActionPhase::Preflight,
+            Self::DryRunFailure { .. } => ActionPhase::DryRun,
+            Self::ApplyFailure { .. } => ActionPhase::Apply,
+            Self::VerifyFailure { .. } | Self::VerifyFailureRollbackCompleted { .. } => {
+                ActionPhase::Verify
+            }
+            Self::RollbackFailure { .. } => ActionPhase::Rollback,
+            Self::EmergencyRollbackFailure { .. } => ActionPhase::EmergencyRollback,
+        }
+    }
+
+    pub fn category(&self) -> &'static str {
+        match self {
+            Self::PreflightFailure { .. } => "preflight_failure",
+            Self::DryRunFailure { .. } => "dry_run_failure",
+            Self::ApplyFailure { .. } => "apply_failure",
+            Self::VerifyFailure { .. } => "verify_failure",
+            Self::VerifyFailureRollbackCompleted { .. } => "verify_failure_rollback_completed",
+            Self::RollbackFailure { .. } => "rollback_failure",
+            Self::EmergencyRollbackFailure { .. } => "emergency_rollback_failure",
+        }
+    }
+
+    pub fn human_message(&self) -> String {
+        match self {
+            Self::PreflightFailure { message } => format!("preflight failed: {message}"),
+            Self::DryRunFailure { message } => format!("dry run failed: {message}"),
+            Self::ApplyFailure { message } => format!("apply failed: {message}"),
+            Self::VerifyFailure { message } => format!("verify failed: {message}"),
+            Self::VerifyFailureRollbackCompleted { verify_error } => {
+                format!("verify failed; rollback completed: {verify_error}")
+            }
+            Self::RollbackFailure { message } => format!("rollback failed: {message}"),
+            Self::EmergencyRollbackFailure {
+                verify_error,
+                rollback_error,
+            } => format!(
+                "verify failed; emergency rollback failed: verify error: {verify_error}; rollback error: {rollback_error}"
+            ),
+        }
+    }
+}
+
+impl std::fmt::Display for ActionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.human_message())
+    }
+}
+
+impl std::error::Error for ActionError {}
+
+pub type ActionResult<T> = anyhow::Result<T>;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum SafetyClass {
     #[default]
@@ -277,9 +430,9 @@ pub trait TuningAction {
     fn id(&self) -> ActionId;
     fn describe(&self) -> String;
     fn safety_class(&self) -> SafetyClass;
-    fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>>;
-    fn dry_run(&self) -> anyhow::Result<ActionState>;
-    fn apply(&self) -> anyhow::Result<RollbackToken>;
-    fn verify(&self) -> anyhow::Result<ActionState>;
-    fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()>;
+    fn preflight(&self) -> ActionResult<Vec<ActionWarning>>;
+    fn dry_run(&self) -> ActionResult<ActionState>;
+    fn apply(&self) -> ActionResult<RollbackToken>;
+    fn verify(&self) -> ActionResult<ActionState>;
+    fn rollback(&self, token: &RollbackToken) -> ActionResult<()>;
 }

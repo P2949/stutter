@@ -26,6 +26,10 @@ pub struct AuditEvent {
     pub success: bool,
     pub affected_tasks: usize,
     pub restore_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_phase: Option<crate::actions::ActionPhase>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_category: Option<String>,
     pub message: String,
 }
 
@@ -42,6 +46,8 @@ impl AuditEvent {
             success: true,
             affected_tasks: 0,
             restore_path: None,
+            action_phase: None,
+            error_category: None,
             message: message.into(),
         }
     }
@@ -122,13 +128,18 @@ pub fn render_audit_events(events: &[AuditEvent]) -> String {
     let mut out = String::new();
     for event in events {
         out.push_str(&format!(
-            "time={} command={} success={} dry_run={} affected_tasks={} action={} message={}\n",
+            "time={} command={} success={} dry_run={} affected_tasks={} action={} phase={} category={} message={}\n",
             event.unix_nanos,
             event.command,
             event.success,
             event.dry_run,
             event.affected_tasks,
             event.action_id.as_deref().unwrap_or("-"),
+            event
+                .action_phase
+                .map(crate::actions::ActionPhase::as_str)
+                .unwrap_or("-"),
+            event.error_category.as_deref().unwrap_or("-"),
             event.message
         ));
     }

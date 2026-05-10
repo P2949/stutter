@@ -38,6 +38,8 @@ fn restore_profile_state(affinity_path: PathBuf, profile_path: PathBuf) -> anyho
                     success: false,
                     affected_tasks: 0,
                     restore_path: Some(affinity_path.clone()),
+                    action_phase: None,
+                    error_category: None,
                     message: format!("restore failed: {err:#}"),
                 });
                 return Err(err);
@@ -68,6 +70,8 @@ fn restore_profile_state(affinity_path: PathBuf, profile_path: PathBuf) -> anyho
                     success: false,
                     affected_tasks: 0,
                     restore_path: Some(profile_path.clone()),
+                    action_phase: None,
+                    error_category: None,
                     message: format!("restore failed: {err:#}"),
                 });
                 return Err(err);
@@ -86,6 +90,8 @@ fn restore_profile_state(affinity_path: PathBuf, profile_path: PathBuf) -> anyho
             success: true,
             affected_tasks: summary.restored_total(),
             restore_path: Some(profile_path.clone()),
+            action_phase: None,
+            error_category: None,
             message: format!(
                 "affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={}",
                 summary.affinity,
