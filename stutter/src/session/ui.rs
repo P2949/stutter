@@ -25,4 +25,14 @@ impl TuiRuntime {
             terminal: None,
         }
     }
+
+    pub fn from_parts(
+        tui_state: crate::tui::TuiState,
+        terminal: Option<ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>>,
+    ) -> Self {
+        Self {
+            tui_state,
+            terminal,
+        }
+    }
 }
