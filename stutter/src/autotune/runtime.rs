@@ -187,6 +187,41 @@ impl OnlineAutotuneController {
 }
 
 #[derive(Clone, Debug)]
+struct RuntimeHistoryContext {
+    experiment_id: String,
+    action_id: String,
+    candidate_name: String,
+    action_kind: String,
+    score_before: Option<WindowScore>,
+    score_after: Option<WindowScore>,
+    rollback_performed: bool,
+    rollback_policy: String,
+    cooldown_until_unix_nanos: Option<u128>,
+    manual_restore_command: Option<String>,
+}
+
+impl RuntimeHistoryContext {
+    fn rollback_policy_with_metadata(&self) -> String {
+        let mut parts = vec![self.rollback_policy.clone()];
+
+        if let Some(cooldown_until_unix_nanos) = self.cooldown_until_unix_nanos {
+            parts.push(format!(
+                "cooldown_until_unix_nanos={cooldown_until_unix_nanos}"
+            ));
+        }
+
+        if let Some(manual_restore_command) = self.manual_restore_command.as_deref() {
+            parts.push(format!(
+                "manual_restore_command={}",
+                manual_restore_command.replace(' ', "_")
+            ));
+        }
+
+        parts.join(";")
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct LiveLowRiskExperiment {
     pub experiment_id: ExperimentId,
     pub candidate: CandidateAction,
@@ -234,6 +269,7 @@ pub struct AutotuneRuntime {
     live_low_risk_experiment: Option<LiveLowRiskExperiment>,
     last_observation: AutotuneObservation,
     last_decision: Option<AutotuneDecisionStreamEntry>,
+    pending_history_context: Option<RuntimeHistoryContext>,
 }
 
 impl AutotuneRuntime {
@@ -249,6 +285,7 @@ impl AutotuneRuntime {
             live_low_risk_experiment: None,
             last_observation: AutotuneObservation::default(),
             last_decision: None,
+            pending_history_context: None,
             config,
         }
     }
@@ -536,8 +573,11 @@ impl AutotuneRuntime {
             }
             AutotuneDecision::EnterCooldown { duration, .. } => {
                 self.controller.state.phase = ControllerPhase::Cooldown;
-                self.controller.state.cooldown_until_unix_nanos =
-                    Some(observation.now_unix_nanos.saturating_add(duration.as_nanos()));
+                self.controller.state.cooldown_until_unix_nanos = Some(
+                    observation
+                        .now_unix_nanos
+                        .saturating_add(duration.as_nanos()),
+                );
             }
             AutotuneDecision::Fault { .. } => {
                 if self.live_low_risk_experiment.is_some() {
@@ -597,9 +637,12 @@ impl AutotuneRuntime {
             observation,
             None,
             Some(
-                observation
-                    .now_unix_nanos
-                    .saturating_add(self.controller.policy.minimum_time_between_same_action.as_nanos()),
+                observation.now_unix_nanos.saturating_add(
+                    self.controller
+                        .policy
+                        .minimum_time_between_same_action
+                        .as_nanos(),
+                ),
             ),
         );
 
@@ -613,7 +656,7 @@ impl AutotuneRuntime {
         self.live_low_risk_experiment = Some(LiveLowRiskExperiment {
             experiment_id,
             candidate,
-            baseline_score,
+            baseline_score: baseline_score.clone(),
             applied_unix_nanos: observation.now_unix_nanos,
             measure_until_unix_nanos: observation.now_unix_nanos.saturating_add(
                 Duration::from_secs(self.config.candidate_window_seconds).as_nanos(),
@@ -622,6 +665,27 @@ impl AutotuneRuntime {
         });
 
         self.controller.window.clear();
+
+        self.pending_history_context = Some(RuntimeHistoryContext {
+            experiment_id: self
+                .live_low_risk_experiment
+                .as_ref()
+                .map(|experiment| experiment.experiment_id.as_str().to_owned())
+                .unwrap_or_else(|| "unknown-experiment".to_owned()),
+            action_id: action_id.clone(),
+            candidate_name: self
+                .live_low_risk_experiment
+                .as_ref()
+                .map(|experiment| experiment.candidate.profile_name().to_owned())
+                .unwrap_or_else(|| "unknown-candidate".to_owned()),
+            action_kind: "cpu_affinity_profile".to_owned(),
+            score_before: Some(baseline_score.clone()),
+            score_after: None,
+            rollback_performed: false,
+            rollback_policy: "rollback-on-restore".to_owned(),
+            cooldown_until_unix_nanos: None,
+            manual_restore_command: Some("stutter autotune restore".to_owned()),
+        });
 
         log::info!("autotune_live_low_risk_started reason={reason}");
 
@@ -678,6 +742,23 @@ impl AutotuneRuntime {
                     ),
                 );
 
+                let cooldown_until_unix_nanos = observation
+                    .now_unix_nanos
+                    .saturating_add(self.controller.policy.cooldown_after_keep.as_nanos());
+
+                self.pending_history_context = Some(RuntimeHistoryContext {
+                    experiment_id: experiment.experiment_id.as_str().to_owned(),
+                    action_id: experiment.action_id(),
+                    candidate_name: experiment.candidate.profile_name().to_owned(),
+                    action_kind: experiment.candidate.action_kind().to_owned(),
+                    score_before: Some(experiment.baseline_score.clone()),
+                    score_after: Some(candidate_score.clone()),
+                    rollback_performed: false,
+                    rollback_policy: "rollback-on-restore".to_owned(),
+                    cooldown_until_unix_nanos: Some(cooldown_until_unix_nanos),
+                    manual_restore_command: Some("stutter autotune restore".to_owned()),
+                });
+
                 self.controller
                     .state
                     .enter_cooldown_after_keep(&self.controller.policy, observation.now_unix_nanos);
@@ -716,10 +797,27 @@ impl AutotuneRuntime {
             Some(experiment.baseline_score.score.total),
             Some(self.last_observation.score.total),
             Some(reason.to_owned()),
-            Some(now_unix_nanos.saturating_add(
-                self.controller.policy.cooldown_after_revert.as_nanos(),
-            )),
+            Some(
+                now_unix_nanos
+                    .saturating_add(self.controller.policy.cooldown_after_revert.as_nanos()),
+            ),
         );
+
+        let cooldown_until_unix_nanos =
+            now_unix_nanos.saturating_add(self.controller.policy.cooldown_after_revert.as_nanos());
+
+        self.pending_history_context = Some(RuntimeHistoryContext {
+            experiment_id: experiment.experiment_id.as_str().to_owned(),
+            action_id: experiment.action_id(),
+            candidate_name: experiment.candidate.profile_name().to_owned(),
+            action_kind: experiment.candidate.action_kind().to_owned(),
+            score_before: Some(experiment.baseline_score.clone()),
+            score_after: Some(window_score_from_observation(&self.last_observation)),
+            rollback_performed: true,
+            rollback_policy: "rollback-performed".to_owned(),
+            cooldown_until_unix_nanos: Some(cooldown_until_unix_nanos),
+            manual_restore_command: Some("stutter autotune restore".to_owned()),
+        });
 
         self.controller
             .state
@@ -769,12 +867,12 @@ impl AutotuneRuntime {
     }
 
     fn append_history(
-        &self,
+        &mut self,
         observation: &AutotuneObservation,
         decision: &AutotuneDecision,
         reason: &str,
     ) -> anyhow::Result<()> {
-        let Some(path) = &self.config.history_log else {
+        let Some(path) = self.config.history_log.clone() else {
             return Ok(());
         };
 
@@ -787,21 +885,25 @@ impl AutotuneRuntime {
             score: observation.score.clone(),
         };
 
-        let target = observation.target_root_pid.map(|root_pid| TargetIdentity {
-            root_pid,
-            process_comm: self
-                .target_state
-                .target_comm
-                .clone()
-                .or_else(|| self.config.watch_process.clone())
-                .unwrap_or_else(|| "unknown".to_owned()),
-            process_starttime_ticks: None,
-            exe_dev: None,
-            exe_ino: None,
-            active_task_count: observation.active_target_count,
-        });
+        let target = self.target_identity_from_observation(observation);
+        let context = self.pending_history_context.take();
 
-        let history = AutotuneHistoryEvent::new(
+        let candidate_name = context
+            .as_ref()
+            .map(|context| context.candidate_name.clone())
+            .or_else(|| decision_candidate_name(decision));
+
+        let action_kind = context
+            .as_ref()
+            .map(|context| context.action_kind.clone())
+            .or_else(|| decision_action_kind(decision));
+
+        let rollback_policy = context
+            .as_ref()
+            .map(RuntimeHistoryContext::rollback_policy_with_metadata)
+            .unwrap_or_else(|| rollback_policy_for_decision(decision).to_owned());
+
+        let mut history = AutotuneHistoryEvent::new(
             self.config.controller_id.clone(),
             history_phase(self.controller.state.phase),
             history_mode(self.config.mode),
@@ -824,19 +926,159 @@ impl AutotuneRuntime {
             },
             AutotuneDecisionSummary {
                 decision: decision_label(decision),
-                candidate_name: decision_candidate_name(decision),
-                action_kind: decision_action_kind(decision),
-                eligible: matches!(decision, AutotuneDecision::Suggest { .. }),
-                rollback_policy: "none".to_owned(),
+                candidate_name,
+                action_kind,
+                eligible: decision_is_eligible(decision),
+                rollback_policy,
+            },
+            reason.to_owned(),
+        );
+
+        if let Some(context) = context.as_ref() {
+            history = history
+                .with_experiment_id(context.experiment_id.clone())
+                .with_action_id(context.action_id.clone())
+                .with_scores(context.score_before.clone(), context.score_after.clone())
+                .with_rollback_performed(context.rollback_performed);
+        } else {
+            history = history.with_scores(None, Some(score));
+        }
+
+        append_autotune_history_event(&path, &history)?;
+
+        self.append_followup_history_events(
+            &path,
+            observation,
+            decision,
+            reason,
+            context.as_ref(),
+        )?;
+
+        Ok(())
+    }
+
+    fn target_identity_from_observation(
+        &self,
+        observation: &AutotuneObservation,
+    ) -> Option<TargetIdentity> {
+        observation.target_root_pid.map(|root_pid| TargetIdentity {
+            root_pid,
+            process_comm: self
+                .target_state
+                .target_comm
+                .clone()
+                .or_else(|| self.config.watch_process.clone())
+                .unwrap_or_else(|| "unknown".to_owned()),
+            process_starttime_ticks: None,
+            exe_dev: None,
+            exe_ino: None,
+            active_task_count: observation.active_target_count,
+        })
+    }
+
+    fn append_followup_history_events(
+        &self,
+        path: &std::path::Path,
+        observation: &AutotuneObservation,
+        decision: &AutotuneDecision,
+        reason: &str,
+        context: Option<&RuntimeHistoryContext>,
+    ) -> anyhow::Result<()> {
+        if let (AutotuneDecision::StartExperiment { .. }, Some(context)) = (decision, context) {
+            let applied = self.lifecycle_history_event(
+                observation,
+                context,
+                ControllerPhase::Measuring,
+                "candidate_applied",
+                true,
+                false,
+                "candidate was applied and rollback token was written to controller journal",
+            );
+            append_autotune_history_event(path, &applied)?;
+        }
+
+        if matches!(
+            decision,
+            AutotuneDecision::KeepCurrent { .. }
+                | AutotuneDecision::Revert { .. }
+                | AutotuneDecision::EnterCooldown { .. }
+        ) {
+            if let Some(context) = context {
+                let cooldown = self.lifecycle_history_event(
+                    observation,
+                    context,
+                    ControllerPhase::Cooldown,
+                    "cooldown_entered",
+                    true,
+                    context.rollback_performed,
+                    reason,
+                );
+                append_autotune_history_event(path, &cooldown)?;
+            }
+        }
+
+        if matches!(decision, AutotuneDecision::Fault { .. }) {
+            if let Some(context) = context {
+                let faulted = self.lifecycle_history_event(
+                    observation,
+                    context,
+                    ControllerPhase::Faulted,
+                    "faulted",
+                    false,
+                    context.rollback_performed,
+                    reason,
+                );
+                append_autotune_history_event(path, &faulted)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn lifecycle_history_event(
+        &self,
+        observation: &AutotuneObservation,
+        context: &RuntimeHistoryContext,
+        phase: ControllerPhase,
+        decision: &str,
+        eligible: bool,
+        rollback_performed: bool,
+        reason: &str,
+    ) -> AutotuneHistoryEvent {
+        AutotuneHistoryEvent::new(
+            self.config.controller_id.clone(),
+            history_phase(phase),
+            history_mode(self.config.mode),
+            self.target_identity_from_observation(observation),
+            history_situation(observation.primary_situation),
+            ObservationSummary {
+                target_present: observation.target_present,
+                active_target_count: observation.active_target_count,
+                scored_task_count: observation.scored_task_count,
+                interval_count: observation.interval_count,
+                scored_samples: observation.scored_samples,
+                score_total: observation.score.total,
+                over_1ms: observation.score.over_1ms,
+                over_2ms: observation.score.over_2ms,
+                over_5ms: observation.score.over_5ms,
+                frame_p99_ms: observation.frame_p99_ms,
+                frame_max_ms: observation.frame_max_ms,
+                drop_counter_total: observation.drop_counter_total,
+                data_quality: data_quality_label(&observation.data_quality),
+            },
+            AutotuneDecisionSummary {
+                decision: decision.to_owned(),
+                candidate_name: Some(context.candidate_name.clone()),
+                action_kind: Some(context.action_kind.clone()),
+                eligible,
+                rollback_policy: context.rollback_policy_with_metadata(),
             },
             reason.to_owned(),
         )
-        .with_scores(None, Some(score))
-        .with_rollback_performed(false);
-
-        append_autotune_history_event(path, &history)?;
-
-        Ok(())
+        .with_experiment_id(context.experiment_id.clone())
+        .with_action_id(context.action_id.clone())
+        .with_scores(context.score_before.clone(), context.score_after.clone())
+        .with_rollback_performed(rollback_performed)
     }
 }
 
@@ -930,7 +1172,8 @@ fn select_best_candidate_for_situation(
                 return None;
             }
 
-            let rank = candidate_situation_rank(candidate.profile_name(), observation.primary_situation)?;
+            let rank =
+                candidate_situation_rank(candidate.profile_name(), observation.primary_situation)?;
             Some((rank, candidate.clone()))
         })
         .collect::<Vec<_>>();
@@ -1057,9 +1300,31 @@ fn decision_reason(decision: &AutotuneDecision) -> String {
     }
 }
 
+fn rollback_policy_for_decision(decision: &AutotuneDecision) -> &'static str {
+    match decision {
+        AutotuneDecision::StartExperiment { .. }
+        | AutotuneDecision::KeepCurrent { .. }
+        | AutotuneDecision::Revert { .. } => "rollback-on-restore",
+        AutotuneDecision::Suggest { .. }
+        | AutotuneDecision::Noop { .. }
+        | AutotuneDecision::EnterCooldown { .. }
+        | AutotuneDecision::Fault { .. } => "none",
+    }
+}
+
+fn decision_is_eligible(decision: &AutotuneDecision) -> bool {
+    matches!(
+        decision,
+        AutotuneDecision::Suggest { .. }
+            | AutotuneDecision::StartExperiment { .. }
+            | AutotuneDecision::KeepCurrent { .. }
+            | AutotuneDecision::Revert { .. }
+    )
+}
+
 fn decision_label(decision: &AutotuneDecision) -> String {
     match decision {
-        AutotuneDecision::Noop { .. } => "noop".to_owned(),
+        AutotuneDecision::Noop { .. } => "observed".to_owned(),
         AutotuneDecision::Suggest { .. } => "suggested".to_owned(),
         AutotuneDecision::StartExperiment { .. } => "candidate_started".to_owned(),
         AutotuneDecision::KeepCurrent { .. } => "candidate_kept".to_owned(),
@@ -1197,7 +1462,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(emitted.decision, "noop");
+        assert_eq!(emitted.decision, "observed");
         assert_eq!(emitted.score_total, 143);
         assert_eq!(runtime.observation().score.total, 143);
         assert_eq!(runtime.observation().scored_task_count, 1);
@@ -1242,7 +1507,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(emitted.decision, "noop");
+        assert_eq!(emitted.decision, "observed");
         assert!(emitted.data_quality.starts_with("Low"));
     }
 

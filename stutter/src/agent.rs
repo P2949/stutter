@@ -933,8 +933,7 @@ async fn autotune_start_handler(
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
-                error:
-                "unsupported remote autotune mode; use observe, suggest, or apply-low-risk"
+                error: "unsupported remote autotune mode; use observe, suggest, or apply-low-risk"
                     .to_owned(),
             }),
         )
@@ -1873,6 +1872,7 @@ mod tests {
             mangohud_log: None,
             auto_focus: false,
             focus_source: None,
+            foreground_window: false,
             foreground_source: None,
             foreground_poll_ms: None,
             foreground_max_stale_ms: None,
@@ -1898,6 +1898,7 @@ mod tests {
             mangohud_log: None,
             auto_focus: false,
             focus_source: None,
+            foreground_window: false,
             foreground_source: None,
             foreground_poll_ms: None,
             foreground_max_stale_ms: None,
@@ -1927,6 +1928,7 @@ mod tests {
             mangohud_log: None,
             auto_focus: false,
             focus_source: None,
+            foreground_window: false,
             foreground_source: None,
             foreground_poll_ms: None,
             foreground_max_stale_ms: None,
@@ -1957,6 +1959,7 @@ mod tests {
             mangohud_log: None,
             auto_focus: false,
             focus_source: None,
+            foreground_window: false,
             foreground_source: None,
             foreground_poll_ms: None,
             foreground_max_stale_ms: None,
@@ -1987,6 +1990,7 @@ mod tests {
             mangohud_log: None,
             auto_focus: false,
             focus_source: None,
+            foreground_window: false,
             foreground_source: None,
             foreground_poll_ms: None,
             foreground_max_stale_ms: None,
@@ -2131,6 +2135,7 @@ mod tests {
                 mangohud_log: None,
                 auto_focus: false,
                 focus_source: None,
+                foreground_window: false,
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
@@ -2167,6 +2172,7 @@ mod tests {
                 mangohud_log: None,
                 auto_focus: false,
                 focus_source: None,
+                foreground_window: false,
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
@@ -2187,7 +2193,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn autotune_start_rejects_apply_low_risk_mode_after_valid_local_auth() {
+    async fn autotune_start_allows_apply_low_risk_mode_with_valid_auth() {
         let mut state_value = test_agent_state();
         state_value.auth = AgentAuth {
             bearer_token: Some("secret".to_owned()),
@@ -2210,6 +2216,7 @@ mod tests {
                 mangohud_log: None,
                 auto_focus: false,
                 focus_source: None,
+                foreground_window: false,
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
@@ -2218,8 +2225,8 @@ mod tests {
         .await
         .into_response();
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert!(state.active_autotune.lock().await.is_none());
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(state.active_autotune.lock().await.is_some());
     }
 
     #[tokio::test]
@@ -2242,6 +2249,7 @@ mod tests {
                 mangohud_log: None,
                 auto_focus: false,
                 focus_source: None,
+                foreground_window: false,
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
@@ -2280,6 +2288,7 @@ mod tests {
                 mangohud_log: None,
                 auto_focus: false,
                 focus_source: None,
+                foreground_window: false,
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
@@ -2312,6 +2321,7 @@ mod tests {
                 mangohud_log: None,
                 auto_focus: false,
                 focus_source: None,
+                foreground_window: false,
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
@@ -2344,6 +2354,7 @@ mod tests {
                 mangohud_log: None,
                 auto_focus: false,
                 focus_source: None,
+                foreground_window: false,
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
@@ -2376,6 +2387,7 @@ mod tests {
                 mangohud_log: None,
                 auto_focus: false,
                 focus_source: None,
+                foreground_window: false,
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,

@@ -247,7 +247,7 @@ fn restore_applied_journal_record(
             write_emergency_restore_history_event(
                 history_path,
                 ControllerPhase::Cooldown,
-                "EmergencyRestore",
+                "restored",
                 experiment_id,
                 action_id,
                 true,
@@ -1042,7 +1042,7 @@ mod tests {
             crate::autotune::history::read_autotune_history_events(&history_path).unwrap();
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].phase, ControllerPhase::Cooldown);
-        assert_eq!(history[0].decision.decision, "EmergencyRestore");
+        assert_eq!(history[0].decision.decision, "restored");
         assert!(history[0].rollback_performed);
 
         fs::remove_dir_all(dir).ok();
