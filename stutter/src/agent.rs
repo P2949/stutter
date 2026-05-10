@@ -79,7 +79,7 @@ pub struct AgentAuth {
 
 pub struct AgentState {
     pub active_run: Mutex<Option<RunHandle>>,
-    pub active_autotune: Mutex<Option<AutotuneRunHandle>>,
+    pub active_autotune: Mutex<Option<AutotuneControllerHandle>>,
     pub runs_dir: PathBuf,
     pub auth: AgentAuth,
     pub bind: SocketAddr,
@@ -87,8 +87,19 @@ pub struct AgentState {
     pub autotune_limits: AgentAutotuneLimits,
 }
 
+#[cfg(feature = "autotune-controller")]
+pub struct AutotuneControllerHandle {
+    pub mode: String,
+    pub watch_process: Option<String>,
+    pub tree_pid: Option<u32>,
+    pub started_unix_nanos: u128,
+    pub stop_tx: oneshot::Sender<()>,
+    pub join: JoinHandle<anyhow::Result<crate::autotune::runtime::AutotuneControllerExit>>,
+}
+
+#[cfg(not(feature = "autotune-controller"))]
 #[derive(Clone, Debug)]
-pub struct AutotuneRunHandle {
+pub struct AutotuneControllerHandle {
     pub mode: String,
     pub watch_process: Option<String>,
     pub tree_pid: Option<u32>,
@@ -305,6 +316,25 @@ struct AutotuneStartSecurityRejection {
     response_message: String,
 }
 
+fn parse_focus_source_or_hybrid(value: Option<&str>) -> crate::cli::FocusSource {
+    match value {
+        Some("heuristic") => crate::cli::FocusSource::Heuristic,
+        Some("foreground") => crate::cli::FocusSource::Foreground,
+        Some("hybrid") | None => crate::cli::FocusSource::Hybrid,
+        Some(_) => crate::cli::FocusSource::Hybrid,
+    }
+}
+
+fn parse_foreground_source_or_auto(value: Option<&str>) -> crate::cli::ForegroundSourceArg {
+    match value {
+        Some("sway") => crate::cli::ForegroundSourceArg::Sway,
+        Some("hyprland") => crate::cli::ForegroundSourceArg::Hyprland,
+        Some("x11") => crate::cli::ForegroundSourceArg::X11,
+        Some("auto") | None => crate::cli::ForegroundSourceArg::Auto,
+        Some(_) => crate::cli::ForegroundSourceArg::Auto,
+    }
+}
+
 fn parse_autotune_remote_mode(mode: &str) -> AutotuneRemoteMode {
     match mode {
         "observe" => AutotuneRemoteMode::Observe,
@@ -337,8 +367,8 @@ fn validate_autotune_start_limits(
     let requested_target_count =
         usize::from(request.watch_process.is_some()) + usize::from(request.tree_pid.is_some());
 
-    if requested_target_count == 0 {
-        anyhow::bail!("autotune start requires watch_process or tree_pid");
+    if requested_target_count == 0 && !request.auto_focus {
+        anyhow::bail!("autotune start requires watch_process, tree_pid, or auto_focus");
     }
 
     if requested_target_count > limits.max_targets {
@@ -793,6 +823,11 @@ async fn autotune_status_handler(
     }
 
     let active = state.active_autotune.lock().await;
+    let disk_status = crate::autotune::status::load_autotune_status(
+        &crate::autotune::history::default_autotune_history_path(),
+    )
+    .ok();
+
     let response = match active.as_ref() {
         Some(handle) => AutotuneStatusResponse {
             active: true,
@@ -800,7 +835,36 @@ async fn autotune_status_handler(
             watch_process: handle.watch_process.clone(),
             tree_pid: handle.tree_pid,
             started_unix_nanos: Some(handle.started_unix_nanos),
-            message: "autotune observe/suggest session active".to_owned(),
+            focus_group: disk_status
+                .as_ref()
+                .and_then(|status| status.focus_group.clone()),
+            target_root: handle.tree_pid.or_else(|| {
+                disk_status
+                    .as_ref()
+                    .and_then(|status| status.target.as_ref().map(|target| target.pid))
+            }),
+            current_score: disk_status.as_ref().and_then(|status| status.current_score),
+            active_profile: disk_status
+                .as_ref()
+                .and_then(|status| status.active_profile.clone()),
+            last_decision: disk_status
+                .as_ref()
+                .map(|status| status.last_decision.clone()),
+            rollback_available: disk_status
+                .as_ref()
+                .map(|status| status.rollback_available)
+                .unwrap_or(false),
+            cooldown_remaining_seconds: disk_status
+                .as_ref()
+                .and_then(|status| status.cooldown_remaining_seconds),
+            data_quality: disk_status
+                .as_ref()
+                .and_then(|status| status.data_quality.clone()),
+            last_fault: disk_status
+                .as_ref()
+                .and_then(|status| status.last_fault.clone()),
+            manual_restore_command: Some("stutter autotune restore".to_owned()),
+            message: "autotune observe/suggest controller active".to_owned(),
         },
         None => AutotuneStatusResponse {
             active: false,
@@ -808,6 +872,33 @@ async fn autotune_status_handler(
             watch_process: None,
             tree_pid: None,
             started_unix_nanos: None,
+            focus_group: disk_status
+                .as_ref()
+                .and_then(|status| status.focus_group.clone()),
+            target_root: disk_status
+                .as_ref()
+                .and_then(|status| status.target.as_ref().map(|target| target.pid)),
+            current_score: disk_status.as_ref().and_then(|status| status.current_score),
+            active_profile: disk_status
+                .as_ref()
+                .and_then(|status| status.active_profile.clone()),
+            last_decision: disk_status
+                .as_ref()
+                .map(|status| status.last_decision.clone()),
+            rollback_available: disk_status
+                .as_ref()
+                .map(|status| status.rollback_available)
+                .unwrap_or(false),
+            cooldown_remaining_seconds: disk_status
+                .as_ref()
+                .and_then(|status| status.cooldown_remaining_seconds),
+            data_quality: disk_status
+                .as_ref()
+                .and_then(|status| status.data_quality.clone()),
+            last_fault: disk_status
+                .as_ref()
+                .and_then(|status| status.last_fault.clone()),
+            manual_restore_command: Some("stutter autotune restore".to_owned()),
             message: "no autotune session active".to_owned(),
         },
     };
@@ -842,8 +933,9 @@ async fn autotune_start_handler(
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
-                error: "remote autotune apply mode is not implemented; use mode observe or suggest"
-                    .to_owned(),
+                error:
+                    "remote autotune apply mode remains intentionally disabled; use mode observe or suggest"
+                        .to_owned(),
             }),
         )
             .into_response();
@@ -860,22 +952,6 @@ async fn autotune_start_handler(
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
                 error: format!("autotune limit rejected: {err}"),
-            }),
-        )
-            .into_response();
-    }
-
-    if state.autotune_limits.max_active_controllers != 1 {
-        audit_agent_event(
-            "remote-autotune-start",
-            false,
-            0,
-            "limit_rejected reason=max_active_controllers must be 1".to_owned(),
-        );
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "remote autotune supports exactly one active controller".to_owned(),
             }),
         )
             .into_response();
@@ -898,27 +974,117 @@ async fn autotune_start_handler(
             .into_response();
     }
 
-    *active = Some(AutotuneRunHandle {
-        mode: mode.clone(),
+    let input = crate::autotune::AutotuneCommandInput {
+        config: request.config.as_deref().map(PathBuf::from),
         watch_process: request.watch_process.clone(),
         tree_pid: request.tree_pid,
-        started_unix_nanos: crate::audit::unix_nanos_now(),
-    });
+        profiles: request.profiles.as_deref().map(PathBuf::from),
+        mode: mode.clone(),
+        decision_log: request.decision_log.as_deref().map(PathBuf::from),
+        duration_seconds: request.duration_seconds,
+        summary_ms: request.summary_ms.unwrap_or(1_000),
+        preset: request
+            .preset
+            .clone()
+            .unwrap_or_else(|| "diagnosis".to_owned()),
+        hwmon: request.hwmon,
+        mangohud_log: request.mangohud_log.as_deref().map(PathBuf::from),
+        auto_focus: request.auto_focus,
+        focus_source: parse_focus_source_or_hybrid(request.focus_source.as_deref()),
+        foreground_window: false,
+        foreground_source: parse_foreground_source_or_auto(request.foreground_source.as_deref()),
+        foreground_poll_ms: request.foreground_poll_ms.unwrap_or(1_000),
+        foreground_max_stale_ms: request.foreground_max_stale_ms.unwrap_or(2_500),
+        allow_system_wide_actions: false,
+    };
+
+    let monitor_config = match crate::cli::autotune_monitor_config(&input) {
+        Ok(config) => config,
+        Err(err) => {
+            audit_agent_event(
+                "remote-autotune-start",
+                false,
+                0,
+                format!("config_error reason={err:#}"),
+            );
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: format!("invalid autotune configuration: {err}"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let started_unix_nanos = crate::audit::unix_nanos_now();
+
+    #[cfg(feature = "autotune-controller")]
+    let handle = {
+        let runtime_config = match mode.as_str() {
+            "observe" => crate::autotune::runtime::AutotuneRuntimeConfig::observe(
+                input.decision_log.clone(),
+                input.tree_pid,
+                input.watch_process.clone(),
+            ),
+            "suggest" => crate::autotune::runtime::AutotuneRuntimeConfig::suggest(
+                input.decision_log.clone(),
+                input.tree_pid,
+                input.watch_process.clone(),
+            ),
+            _ => unreachable!("mode was validated above"),
+        };
+
+        let (stop_tx, stop_rx) = oneshot::channel();
+        let duration = input.duration_seconds.map(std::time::Duration::from_secs);
+        let join = tokio::spawn(async move {
+            crate::autotune::runtime::run_autotune_controller_session(
+                monitor_config,
+                runtime_config,
+                Some(stop_rx),
+                duration,
+            )
+            .await
+        });
+
+        AutotuneControllerHandle {
+            mode: mode.clone(),
+            watch_process: request.watch_process.clone(),
+            tree_pid: request.tree_pid,
+            started_unix_nanos,
+            stop_tx,
+            join,
+        }
+    };
+
+    #[cfg(not(feature = "autotune-controller"))]
+    let handle = {
+        let _ = monitor_config;
+        AutotuneControllerHandle {
+            mode: mode.clone(),
+            watch_process: request.watch_process.clone(),
+            tree_pid: request.tree_pid,
+            started_unix_nanos,
+        }
+    };
+
+    *active = Some(handle);
 
     audit_agent_event(
         "remote-autotune-start",
         true,
         0,
         format!(
-            "mode={} watch_process={:?} tree_pid={:?}",
-            mode, request.watch_process, request.tree_pid
+            "mode={} watch_process={:?} tree_pid={:?} auto_focus={}",
+            mode, request.watch_process, request.tree_pid, request.auto_focus
         ),
     );
 
     Json(AutotuneStartResponse {
         status: "started".to_owned(),
         mode,
-        message: "remote autotune observe/suggest session started; apply is not enabled".to_owned(),
+        message: "remote autotune observe/suggest controller started; apply modes remain disabled"
+            .to_owned(),
     })
     .into_response()
 }
@@ -931,29 +1097,96 @@ async fn autotune_stop_handler(
         return status.into_response();
     }
 
-    let mut active = state.active_autotune.lock().await;
-    let existed = active.take().is_some();
+    let handle = {
+        let mut active = state.active_autotune.lock().await;
+        active.take()
+    };
 
-    audit_agent_event(
-        "remote-autotune-stop",
-        true,
-        0,
-        format!("active_before_stop={existed}"),
-    );
+    let Some(handle) = handle else {
+        audit_agent_event(
+            "remote-autotune-stop",
+            true,
+            0,
+            "active_before_stop=false".to_owned(),
+        );
 
-    Json(AutotuneStopResponse {
-        status: if existed {
-            "stopped".to_owned()
-        } else {
-            "no_active_session".to_owned()
-        },
-        message: if existed {
-            "remote autotune session stopped".to_owned()
-        } else {
-            "no remote autotune session was active".to_owned()
-        },
-    })
-    .into_response()
+        return Json(AutotuneStopResponse {
+            status: "no_active_session".to_owned(),
+            message: "no remote autotune session was active".to_owned(),
+        })
+        .into_response();
+    };
+
+    #[cfg(feature = "autotune-controller")]
+    {
+        let _ = handle.stop_tx.send(());
+
+        match handle.join.await {
+            Ok(Ok(exit)) => {
+                audit_agent_event(
+                    "remote-autotune-stop",
+                    true,
+                    0,
+                    format!("active_before_stop=true reason={}", exit.reason),
+                );
+
+                Json(AutotuneStopResponse {
+                    status: "stopped".to_owned(),
+                    message: format!("remote autotune session stopped: {}", exit.reason),
+                })
+                .into_response()
+            }
+            Ok(Err(err)) => {
+                audit_agent_event(
+                    "remote-autotune-stop",
+                    false,
+                    0,
+                    format!("active_before_stop=true error={err:#}"),
+                );
+
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("autotune controller failed: {err:#}"),
+                    }),
+                )
+                    .into_response()
+            }
+            Err(err) => {
+                audit_agent_event(
+                    "remote-autotune-stop",
+                    false,
+                    0,
+                    format!("active_before_stop=true join_error={err}"),
+                );
+
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("autotune controller task join failed: {err}"),
+                    }),
+                )
+                    .into_response()
+            }
+        }
+    }
+
+    #[cfg(not(feature = "autotune-controller"))]
+    {
+        let _ = handle;
+        audit_agent_event(
+            "remote-autotune-stop",
+            true,
+            0,
+            "active_before_stop=true".to_owned(),
+        );
+
+        Json(AutotuneStopResponse {
+            status: "stopped".to_owned(),
+            message: "remote autotune session stopped".to_owned(),
+        })
+        .into_response()
+    }
 }
 
 async fn autotune_restore_handler(
@@ -1049,6 +1282,10 @@ async fn autotune_config_handler(
             .display()
             .to_string(),
         autotune_limits: state.autotune_limits.clone(),
+        daemon_scope: "focused".to_owned(),
+        allow_system_wide_actions: false,
+        minimum_focus_confidence: 0.70,
+        required_stable_focus_polls: 3,
     })
     .into_response()
 }
@@ -1536,6 +1773,39 @@ mod tests {
         headers
     }
 
+    fn test_autotune_handle() -> AutotuneControllerHandle {
+        #[cfg(feature = "autotune-controller")]
+        {
+            let (stop_tx, stop_rx) = oneshot::channel();
+            let join = tokio::spawn(async move {
+                let _ = stop_rx.await;
+                Ok(crate::autotune::runtime::AutotuneControllerExit {
+                    reason: "test stop".to_owned(),
+                    last_decision: None,
+                })
+            });
+
+            AutotuneControllerHandle {
+                mode: "observe".to_owned(),
+                watch_process: Some("Game.exe".to_owned()),
+                tree_pid: None,
+                started_unix_nanos: crate::audit::unix_nanos_now(),
+                stop_tx,
+                join,
+            }
+        }
+
+        #[cfg(not(feature = "autotune-controller"))]
+        {
+            AutotuneControllerHandle {
+                mode: "observe".to_owned(),
+                watch_process: Some("Game.exe".to_owned()),
+                tree_pid: None,
+                started_unix_nanos: crate::audit::unix_nanos_now(),
+            }
+        }
+    }
+
     #[test]
     fn default_agent_autotune_limits_match_policy() {
         let limits = AgentAutotuneLimits::default();
@@ -1558,6 +1828,15 @@ mod tests {
             config: None,
             duration_seconds: Some(120),
             decision_log: None,
+            summary_ms: None,
+            preset: None,
+            hwmon: false,
+            mangohud_log: None,
+            auto_focus: false,
+            focus_source: None,
+            foreground_source: None,
+            foreground_poll_ms: None,
+            foreground_max_stale_ms: None,
         };
 
         validate_autotune_start_limits(&request, &state).unwrap();
@@ -1574,6 +1853,15 @@ mod tests {
             config: None,
             duration_seconds: Some(30),
             decision_log: None,
+            summary_ms: None,
+            preset: None,
+            hwmon: false,
+            mangohud_log: None,
+            auto_focus: false,
+            focus_source: None,
+            foreground_source: None,
+            foreground_poll_ms: None,
+            foreground_max_stale_ms: None,
         };
 
         let err = validate_autotune_start_limits(&request, &state)
@@ -1594,6 +1882,15 @@ mod tests {
             config: None,
             duration_seconds: Some(121),
             decision_log: None,
+            summary_ms: None,
+            preset: None,
+            hwmon: false,
+            mangohud_log: None,
+            auto_focus: false,
+            focus_source: None,
+            foreground_source: None,
+            foreground_poll_ms: None,
+            foreground_max_stale_ms: None,
         };
 
         let err = validate_autotune_start_limits(&request, &state)
@@ -1615,6 +1912,15 @@ mod tests {
             config: None,
             duration_seconds: Some(30),
             decision_log: None,
+            summary_ms: None,
+            preset: None,
+            hwmon: false,
+            mangohud_log: None,
+            auto_focus: false,
+            focus_source: None,
+            foreground_source: None,
+            foreground_poll_ms: None,
+            foreground_max_stale_ms: None,
         };
 
         let err = validate_autotune_start_limits(&request, &state)
@@ -1636,6 +1942,15 @@ mod tests {
             config: None,
             duration_seconds: Some(30),
             decision_log: None,
+            summary_ms: None,
+            preset: None,
+            hwmon: false,
+            mangohud_log: None,
+            auto_focus: false,
+            focus_source: None,
+            foreground_source: None,
+            foreground_poll_ms: None,
+            foreground_max_stale_ms: None,
         };
 
         let err = validate_autotune_start_limits(&request, &state)
@@ -1771,6 +2086,15 @@ mod tests {
                 config: None,
                 duration_seconds: Some(30),
                 decision_log: None,
+                summary_ms: None,
+                preset: None,
+                hwmon: false,
+                mangohud_log: None,
+                auto_focus: false,
+                focus_source: None,
+                foreground_source: None,
+                foreground_poll_ms: None,
+                foreground_max_stale_ms: None,
             }),
         )
         .await
@@ -1798,6 +2122,15 @@ mod tests {
                 config: None,
                 duration_seconds: Some(30),
                 decision_log: None,
+                summary_ms: None,
+                preset: None,
+                hwmon: false,
+                mangohud_log: None,
+                auto_focus: false,
+                focus_source: None,
+                foreground_source: None,
+                foreground_poll_ms: None,
+                foreground_max_stale_ms: None,
             }),
         )
         .await
@@ -1832,6 +2165,15 @@ mod tests {
                 config: None,
                 duration_seconds: Some(30),
                 decision_log: None,
+                summary_ms: None,
+                preset: None,
+                hwmon: false,
+                mangohud_log: None,
+                auto_focus: false,
+                focus_source: None,
+                foreground_source: None,
+                foreground_poll_ms: None,
+                foreground_max_stale_ms: None,
             }),
         )
         .await
@@ -1855,6 +2197,15 @@ mod tests {
                 config: None,
                 duration_seconds: Some(30),
                 decision_log: None,
+                summary_ms: None,
+                preset: None,
+                hwmon: false,
+                mangohud_log: None,
+                auto_focus: false,
+                focus_source: None,
+                foreground_source: None,
+                foreground_poll_ms: None,
+                foreground_max_stale_ms: None,
             }),
         )
         .await
@@ -1884,6 +2235,15 @@ mod tests {
                 config: None,
                 duration_seconds: Some(30),
                 decision_log: None,
+                summary_ms: None,
+                preset: None,
+                hwmon: false,
+                mangohud_log: None,
+                auto_focus: false,
+                focus_source: None,
+                foreground_source: None,
+                foreground_poll_ms: None,
+                foreground_max_stale_ms: None,
             }),
         )
         .await
@@ -1907,6 +2267,15 @@ mod tests {
                 config: None,
                 duration_seconds: Some(121),
                 decision_log: None,
+                summary_ms: None,
+                preset: None,
+                hwmon: false,
+                mangohud_log: None,
+                auto_focus: false,
+                focus_source: None,
+                foreground_source: None,
+                foreground_poll_ms: None,
+                foreground_max_stale_ms: None,
             }),
         )
         .await
@@ -1930,6 +2299,15 @@ mod tests {
                 config: None,
                 duration_seconds: Some(30),
                 decision_log: None,
+                summary_ms: None,
+                preset: None,
+                hwmon: false,
+                mangohud_log: None,
+                auto_focus: false,
+                focus_source: None,
+                foreground_source: None,
+                foreground_poll_ms: None,
+                foreground_max_stale_ms: None,
             }),
         )
         .await
@@ -1953,6 +2331,15 @@ mod tests {
                 config: None,
                 duration_seconds: Some(30),
                 decision_log: None,
+                summary_ms: None,
+                preset: None,
+                hwmon: false,
+                mangohud_log: None,
+                auto_focus: false,
+                focus_source: None,
+                foreground_source: None,
+                foreground_poll_ms: None,
+                foreground_max_stale_ms: None,
             }),
         )
         .await
@@ -1965,12 +2352,7 @@ mod tests {
     #[tokio::test]
     async fn autotune_stop_clears_active_session() {
         let state = Arc::new(test_agent_state());
-        *state.active_autotune.lock().await = Some(AutotuneRunHandle {
-            mode: "observe".to_owned(),
-            watch_process: Some("Game.exe".to_owned()),
-            tree_pid: None,
-            started_unix_nanos: crate::audit::unix_nanos_now(),
-        });
+        *state.active_autotune.lock().await = Some(test_autotune_handle());
 
         let response = autotune_stop_handler(State(state.clone()), HeaderMap::new())
             .await
@@ -2003,6 +2385,10 @@ mod tests {
                 .display()
                 .to_string(),
             autotune_limits: state.autotune_limits.clone(),
+            daemon_scope: "focused".to_owned(),
+            allow_system_wide_actions: false,
+            minimum_focus_confidence: 0.70,
+            required_stable_focus_polls: 3,
         };
 
         assert_eq!(response.autotune_limits, AgentAutotuneLimits::default());

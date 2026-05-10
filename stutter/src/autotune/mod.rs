@@ -38,6 +38,8 @@ pub mod report_overlay;
 #[cfg(feature = "autotune-controller")]
 pub mod rolling_window;
 #[cfg(feature = "autotune-controller")]
+pub mod runtime;
+#[cfg(feature = "autotune-controller")]
 pub mod startup_recovery;
 pub mod state;
 pub mod tui_panel;
@@ -51,6 +53,7 @@ use std::{
 };
 
 use serde::Serialize;
+#[cfg(not(feature = "autotune-controller"))]
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
@@ -76,6 +79,13 @@ pub struct AutotuneCommandInput {
     pub preset: String,
     pub hwmon: bool,
     pub mangohud_log: Option<PathBuf>,
+    pub auto_focus: bool,
+    pub focus_source: crate::cli::FocusSource,
+    pub foreground_window: bool,
+    pub foreground_source: crate::cli::ForegroundSourceArg,
+    pub foreground_poll_ms: u64,
+    pub foreground_max_stale_ms: u64,
+    pub allow_system_wide_actions: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -88,6 +98,7 @@ pub struct AutotuneDecisionLogEntry {
     pub interval_records: usize,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 struct ObservePolicyStub {
     mode: String,
@@ -97,6 +108,7 @@ struct ObservePolicyStub {
     interval_records: usize,
 }
 
+#[allow(dead_code)]
 impl ObservePolicyStub {
     fn new(mode: String, watch_process: Option<String>, decision_log: Option<PathBuf>) -> Self {
         Self {
@@ -234,38 +246,84 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
     }
 
     let monitor_config = crate::cli::autotune_monitor_config(&input)?;
-    let (event_tx, mut event_rx) = mpsc::channel::<MonitorEvent>(1024);
-    let (stop_tx, stop_rx) = oneshot::channel::<()>();
-    let duration = input.duration_seconds.map(Duration::from_secs);
-    let mut policy = ObservePolicyStub::new(
-        input.mode.clone(),
-        input.watch_process.clone(),
-        input.decision_log.clone(),
-    );
 
-    let monitor_task = tokio::spawn(async move {
-        crate::session::run_monitor(monitor_config, None, Some(event_tx), Some(stop_rx)).await
-    });
+    #[cfg(feature = "autotune-controller")]
+    {
+        let runtime_config = match input.mode.as_str() {
+            "observe" => runtime::AutotuneRuntimeConfig::observe(
+                input.decision_log.clone(),
+                input.tree_pid,
+                input.watch_process.clone(),
+            ),
+            "suggest" => runtime::AutotuneRuntimeConfig::suggest(
+                input.decision_log.clone(),
+                input.tree_pid,
+                input.watch_process.clone(),
+            ),
+            other => {
+                anyhow::bail!(
+                    "mode '{}' is not supported by the live autotune runtime",
+                    other
+                )
+            }
+        };
 
-    let timeout_task = duration.map(|duration| {
-        tokio::spawn(async move {
-            tokio::time::sleep(duration).await;
-            let _ = stop_tx.send(());
-        })
-    });
+        let duration = input.duration_seconds.map(Duration::from_secs);
+        let exit = runtime::run_autotune_controller_session(
+            monitor_config,
+            runtime_config,
+            None,
+            duration,
+        )
+        .await?;
 
-    while let Some(event) = event_rx.recv().await {
-        policy.on_event(event)?;
+        if let Some(last_decision) = exit.last_decision {
+            println!(
+                "autotune runtime finished reason=\"{}\" last_decision={} score_total={}",
+                exit.reason, last_decision.decision, last_decision.score_total
+            );
+        } else {
+            println!("autotune runtime finished reason=\"{}\"", exit.reason);
+        }
+
+        return Ok(());
     }
 
-    if let Some(timeout_task) = timeout_task {
-        let _ = timeout_task.await;
+    #[cfg(not(feature = "autotune-controller"))]
+    {
+        let (event_tx, mut event_rx) = mpsc::channel::<MonitorEvent>(1024);
+        let (stop_tx, stop_rx) = oneshot::channel::<()>();
+        let duration = input.duration_seconds.map(Duration::from_secs);
+        let mut policy = ObservePolicyStub::new(
+            input.mode.clone(),
+            input.watch_process.clone(),
+            input.decision_log.clone(),
+        );
+
+        let monitor_task = tokio::spawn(async move {
+            crate::session::run_monitor(monitor_config, None, Some(event_tx), Some(stop_rx)).await
+        });
+
+        let timeout_task = duration.map(|duration| {
+            tokio::spawn(async move {
+                tokio::time::sleep(duration).await;
+                let _ = stop_tx.send(());
+            })
+        });
+
+        while let Some(event) = event_rx.recv().await {
+            policy.on_event(event)?;
+        }
+
+        if let Some(timeout_task) = timeout_task {
+            let _ = timeout_task.await;
+        }
+
+        let monitor_result = monitor_task.await?;
+        monitor_result?;
+
+        Ok(())
     }
-
-    let monitor_result = monitor_task.await?;
-    monitor_result?;
-
-    Ok(())
 }
 
 #[allow(dead_code)]
@@ -316,6 +374,13 @@ mod tests {
             preset: "diagnosis".to_owned(),
             hwmon: false,
             mangohud_log: None,
+            auto_focus: false,
+            focus_source: crate::cli::FocusSource::Hybrid,
+            foreground_window: false,
+            foreground_source: crate::cli::ForegroundSourceArg::Auto,
+            foreground_poll_ms: 1000,
+            foreground_max_stale_ms: 2500,
+            allow_system_wide_actions: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();
@@ -339,6 +404,13 @@ mod tests {
             preset: "diagnosis".to_owned(),
             hwmon: false,
             mangohud_log: None,
+            auto_focus: false,
+            focus_source: crate::cli::FocusSource::Hybrid,
+            foreground_window: false,
+            foreground_source: crate::cli::ForegroundSourceArg::Auto,
+            foreground_poll_ms: 1000,
+            foreground_max_stale_ms: 2500,
+            allow_system_wide_actions: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();

@@ -18,10 +18,16 @@ pub struct AutotuneStatus {
     pub phase: String,
     pub mode: String,
     pub target: Option<StatusTarget>,
+    pub focus_group: Option<String>,
+    pub current_score: Option<u64>,
     pub active_profile: Option<String>,
     pub last_decision: String,
     pub rollback_available: bool,
     pub last_rollback_path: Option<String>,
+    pub cooldown_remaining_seconds: Option<u64>,
+    pub data_quality: Option<String>,
+    pub last_fault: Option<String>,
+    pub manual_restore_command: String,
     pub history_path: PathBuf,
 }
 
@@ -63,10 +69,16 @@ pub fn status_from_history_events(
             phase: "Disabled".to_owned(),
             mode: "Observe".to_owned(),
             target: None,
+            focus_group: None,
+            current_score: None,
             active_profile: None,
             last_decision: "no autotune history found".to_owned(),
             rollback_available: false,
             last_rollback_path: None,
+            cooldown_remaining_seconds: None,
+            data_quality: None,
+            last_fault: None,
+            manual_restore_command: "stutter autotune restore".to_owned(),
             history_path,
         };
     };
@@ -75,10 +87,16 @@ pub fn status_from_history_events(
         phase: format_phase(last.phase),
         mode: format_mode(last.mode),
         target: last.target.as_ref().map(status_target_from_identity),
+        focus_group: Some(format!("{:?}", last.situation)),
+        current_score: Some(last.observation_summary.score_total),
         active_profile: active_profile_from_events(events),
         last_decision: format_last_decision(last),
         rollback_available: rollback_available_from_events(events),
         last_rollback_path: last_rollback_path_from_events(events),
+        cooldown_remaining_seconds: None,
+        data_quality: Some(last.observation_summary.data_quality.clone()),
+        last_fault: last_fault_from_events(events),
+        manual_restore_command: "stutter autotune restore".to_owned(),
         history_path,
     }
 }
@@ -90,10 +108,15 @@ pub fn render_autotune_status_text(status: &AutotuneStatus) -> String {
     };
 
     format!(
-        "phase: {}\nmode: {}\ntarget: {}\nactive_profile: {}\nlast_decision: {}\nrollback_available: {}\nlast_rollback_path: {}\n",
+        "phase: {}\nmode: {}\ntarget: {}\nfocus_group: {}\ncurrent_score: {}\nactive_profile: {}\nlast_decision: {}\nrollback_available: {}\nlast_rollback_path: {}\ncooldown_remaining_seconds: {}\ndata_quality: {}\nlast_fault: {}\nmanual_restore_command: {}\n",
         status.phase,
         status.mode,
         target,
+        status.focus_group.as_deref().unwrap_or("none"),
+        status
+            .current_score
+            .map(|score| score.to_string())
+            .unwrap_or_else(|| "none".to_owned()),
         status.active_profile.as_deref().unwrap_or("none"),
         status.last_decision,
         if status.rollback_available {
@@ -101,7 +124,14 @@ pub fn render_autotune_status_text(status: &AutotuneStatus) -> String {
         } else {
             "no"
         },
-        status.last_rollback_path.as_deref().unwrap_or("none")
+        status.last_rollback_path.as_deref().unwrap_or("none"),
+        status
+            .cooldown_remaining_seconds
+            .map(|seconds| seconds.to_string())
+            .unwrap_or_else(|| "none".to_owned()),
+        status.data_quality.as_deref().unwrap_or("none"),
+        status.last_fault.as_deref().unwrap_or("none"),
+        status.manual_restore_command
     )
 }
 
@@ -150,6 +180,16 @@ fn last_rollback_path_from_events(events: &[AutotuneHistoryEvent]) -> Option<Str
 
         if event.decision.rollback_policy.contains("rollback") {
             return Some(default_restore_path_display());
+        }
+    }
+
+    None
+}
+
+fn last_fault_from_events(events: &[AutotuneHistoryEvent]) -> Option<String> {
+    for event in events.iter().rev() {
+        if matches!(event.phase, ControllerPhase::Faulted) {
+            return Some(event.reason.clone());
         }
     }
 

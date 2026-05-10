@@ -15,6 +15,7 @@ use crate::{
 pub struct WindowScore {
     pub duration_ms: u64,
     pub interval_count: usize,
+    pub scored_task_count: usize,
     pub scored_samples: u64,
     pub score_total: u64,
     pub over_1ms: u64,
@@ -238,6 +239,7 @@ impl RollingWindow {
         WindowScore {
             duration_ms: self.duration_ms(),
             interval_count,
+            scored_task_count,
             scored_samples,
             score_total,
             over_1ms,

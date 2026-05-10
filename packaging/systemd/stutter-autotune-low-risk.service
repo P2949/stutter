@@ -1,0 +1,11 @@
+[Unit]
+Description=stutter autotune low-risk controller template
+Documentation=https://github.com/P2949/stutter
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -eu -c 'echo "stutter-autotune-low-risk.service is intentionally disabled: live daemon apply-low-risk is blocked until observe/suggest runtime history, status, and rollback behavior are proven stable. Use stutter autotune --mode suggest or stutter autotune --mode observe --auto-focus first." >&2; exit 64'
+
+[Install]
+WantedBy=multi-user.target

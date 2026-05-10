@@ -388,6 +388,46 @@ pub struct AutotuneArgs {
 
     #[arg(long = "mangohud-log")]
     pub mangohud_log: Option<PathBuf>,
+
+    #[arg(
+        long = "auto-focus",
+        help = "Allow autotune observe/suggest to classify the whole system and follow the selected focus group"
+    )]
+    pub auto_focus: bool,
+
+    #[arg(
+        long = "focus-source",
+        value_enum,
+        default_value_t = FocusSource::Hybrid,
+        help = "Autotune focus source: heuristic, foreground, or hybrid"
+    )]
+    pub focus_source: FocusSource,
+
+    #[arg(
+        long = "foreground-window",
+        help = "Collect foreground-window context for autotune focus classification"
+    )]
+    pub foreground_window: bool,
+
+    #[arg(
+        long = "foreground-source",
+        value_enum,
+        default_value_t = ForegroundSourceArg::Auto,
+        help = "Foreground-window provider for autotune focus: auto, sway, hyprland, x11"
+    )]
+    pub foreground_source: ForegroundSourceArg,
+
+    #[arg(long = "foreground-poll-ms", default_value_t = 1000)]
+    pub foreground_poll_ms: u64,
+
+    #[arg(long = "foreground-max-stale-ms", default_value_t = 2500)]
+    pub foreground_max_stale_ms: u64,
+
+    #[arg(
+        long = "allow-system-wide-actions",
+        help = "Reserved for future use; currently rejected so autotune cannot mutate arbitrary system processes"
+    )]
+    pub allow_system_wide_actions: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -1504,20 +1544,55 @@ fn validate_autotune_mode(mode: &str) -> anyhow::Result<()> {
 pub fn autotune_monitor_config(
     input: &crate::autotune::AutotuneCommandInput,
 ) -> anyhow::Result<Arc<Config>> {
-    let monitor = MonitorArgs {
+    if input.allow_system_wide_actions {
+        anyhow::bail!(
+            "autotune system-wide actions are intentionally disabled; use observe/suggest focus mode"
+        );
+    }
+
+    let has_target = input.tree_pid.is_some() || input.watch_process.is_some();
+    if !has_target && !input.auto_focus {
+        anyhow::bail!("autotune requires --tree-pid, --watch-process, or --auto-focus");
+    }
+
+    let mut monitor = MonitorArgs {
         watch_process: input.watch_process.clone(),
         tree_pids: input.tree_pid.map_or(Vec::new(), |pid| vec![pid]),
+        persistent: input.watch_process.is_some(),
         summary_period_ms: Some(input.summary_ms),
         preset: Some(input.preset.clone()),
         hwmon: input.hwmon,
         no_hwmon: !input.hwmon,
         mangohud_log: input.mangohud_log.clone(),
-        no_record: input.decision_log.is_none(),
+        no_record: true,
         run_name: Some("autotune-observe".to_owned()),
+        auto_focus: input.auto_focus,
+        focus_source: input.focus_source,
+        foreground_window: input.foreground_window
+            || input.auto_focus
+            || matches!(
+                input.focus_source,
+                FocusSource::Foreground | FocusSource::Hybrid
+            ),
+        foreground_source: input.foreground_source,
+        foreground_poll_ms: input.foreground_poll_ms,
+        foreground_max_stale_ms: input.foreground_max_stale_ms,
+        foreground_include_title: false,
+        auto_focus_min_confidence: 0.70,
+        auto_focus_required_polls: 3,
+        auto_focus_switch_cooldown_ms: 5_000,
+        auto_focus_switch_margin: 0.20,
+        auto_focus_max_roots: 1,
         ..Default::default()
     };
 
-    Ok(Arc::new(config_from_monitor_args(monitor, false, None)?))
+    monitor.no_record = true;
+
+    Ok(Arc::new(config_from_monitor_args(
+        monitor,
+        false,
+        input.duration_seconds.map(Duration::from_secs),
+    )?))
 }
 
 pub fn parse_app_command() -> anyhow::Result<AppCommand> {
@@ -1770,6 +1845,12 @@ where
                     }),
                 }
             } else {
+                if args.allow_system_wide_actions {
+                    anyhow::bail!(
+                        "--allow-system-wide-actions is reserved for future use and is intentionally rejected"
+                    );
+                }
+
                 validate_autotune_mode(&args.mode)?;
                 Ok(AppCommand::Autotune {
                     input: crate::autotune::AutotuneCommandInput {
@@ -1784,6 +1865,13 @@ where
                         preset: args.preset,
                         hwmon: args.hwmon,
                         mangohud_log: args.mangohud_log,
+                        auto_focus: args.auto_focus,
+                        focus_source: args.focus_source,
+                        foreground_window: args.foreground_window,
+                        foreground_source: args.foreground_source,
+                        foreground_poll_ms: args.foreground_poll_ms,
+                        foreground_max_stale_ms: args.foreground_max_stale_ms,
+                        allow_system_wide_actions: args.allow_system_wide_actions,
                     },
                 })
             }
