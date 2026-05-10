@@ -119,6 +119,11 @@ impl ReplayPolicyEngine for ObserveOnlyReplayPolicy {
             MonitorEvent::Finished { .. } => {
                 self.report.finished_events += 1;
             }
+            MonitorEvent::Alert { .. }
+            | MonitorEvent::MigrationEvent { .. }
+            | MonitorEvent::CpuFreqSample { .. }
+            | MonitorEvent::ForegroundEvent { .. }
+            | MonitorEvent::SchedulerSample { .. } => {}
         }
         Ok(())
     }

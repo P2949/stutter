@@ -15,7 +15,7 @@ pub const DROP_BLOCK_START_INSERT_FAILED: u32 = 3;
 pub const DROP_COUNTERS_MAX: u32 = 4;
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct SchedulerEvent {
     pub kind: u32,
 
@@ -72,7 +72,7 @@ impl SchedulerEvent {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct IrqEvent {
     pub kind: u32,
     pub irq: u32,
@@ -86,7 +86,7 @@ pub struct IrqEvent {
 unsafe impl aya::Pod for IrqEvent {}
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct MigrationEvent {
     pub kind: u32,
     pub tid: u32,
@@ -99,7 +99,7 @@ pub struct MigrationEvent {
 unsafe impl aya::Pod for MigrationEvent {}
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct CpuFreqEvent {
     pub kind: u32,
     pub cpu: u32,
@@ -112,7 +112,7 @@ pub struct CpuFreqEvent {
 unsafe impl aya::Pod for CpuFreqEvent {}
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct StatWaitEvent {
     pub kind: u32,
     pub tid: u32,
@@ -123,7 +123,7 @@ pub struct StatWaitEvent {
 unsafe impl aya::Pod for StatWaitEvent {}
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct BlockIoEvent {
     pub kind: u32,
     pub tid: u32,
@@ -139,7 +139,7 @@ pub struct BlockIoEvent {
 unsafe impl aya::Pod for BlockIoEvent {}
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ExecEvent {
     pub kind: u32,
     pub pid: u32,

@@ -6,27 +6,30 @@ use std::{
 use log::{debug, info, warn};
 use serde::Serialize;
 use stutter_common::{
-    BlockIoEvent, CpuFreqEvent, EVENT_RUNNABLE_LATENCY, ExecEvent, IrqEvent, MigrationEvent,
-    SchedulerEvent,
+    BlockIoEvent, CpuFreqEvent, ExecEvent, IrqEvent, MigrationEvent, SchedulerEvent,
 };
 
 use crate::{
     artifacts::ArtifactKind,
     cli::Config,
-    metrics::{self, format_latency, print_event},
+    metrics::{self, format_latency},
     process_tree::{self, TaskClass},
     recorder::{self, IrqEventRecord, LiveRecorder, RecordingCounters},
-    tasks::{TaskTracker, should_replace_unknown_comm},
+    session::sinks::{MonitorEventSink, MonitorOutputSinks, RecorderSink},
+    session_events::MonitorEvent,
+    tasks::TaskTracker,
 };
 
+pub mod decode;
+pub mod interpret;
+
 pub fn handle_irq_record(record: &IrqEventRecord, recorder: &mut LiveRecorder) {
-    push_artifact_event(
-        recorder,
-        ArtifactKind::IrqEvents,
-        record,
-        "irq_events",
-        |c| c.irq_event_count += 1,
-    );
+    let event = MonitorEvent::IrqEvent {
+        event: Box::new(record.clone()),
+    };
+    if let Err(err) = RecorderSink::new(recorder).on_event(&event) {
+        warn!("monitor_event_sink_failed err={err}");
+    }
     log_irq_record(record);
 }
 
@@ -58,13 +61,13 @@ pub fn handle_migration_event(
         to_cpu: event.to_cpu,
         timestamp_ns: event.timestamp_ns,
     };
-    push_artifact_event(
-        recorder,
-        ArtifactKind::MigrationEvents,
-        &record,
-        "migration_events",
-        |c| c.migration_event_count += 1,
-    );
+
+    let event = MonitorEvent::MigrationEvent {
+        event: Box::new(record),
+    };
+    if let Err(err) = RecorderSink::new(recorder).on_event(&event) {
+        warn!("monitor_event_sink_failed err={err}");
+    }
 }
 
 pub fn handle_cpu_freq_event(event: &CpuFreqEvent, recorder: &mut LiveRecorder, started: Instant) {
@@ -76,13 +79,13 @@ pub fn handle_cpu_freq_event(event: &CpuFreqEvent, recorder: &mut LiveRecorder, 
         freq_khz: event.state,
         timestamp_ns: event.timestamp_ns,
     };
-    push_artifact_event(
-        recorder,
-        ArtifactKind::CpuFreqSamples,
-        &record,
-        "cpu_freq_samples",
-        |c| c.cpu_freq_sample_count += 1,
-    );
+
+    let event = MonitorEvent::CpuFreqSample {
+        event: Box::new(record),
+    };
+    if let Err(err) = RecorderSink::new(recorder).on_event(&event) {
+        warn!("monitor_event_sink_failed err={err}");
+    }
 }
 
 pub fn block_io_event_record(
@@ -108,13 +111,12 @@ pub fn block_io_event_record(
 }
 
 pub fn handle_block_io_record(record: &recorder::BlockIoRecord, recorder: &mut LiveRecorder) {
-    push_artifact_event(
-        recorder,
-        ArtifactKind::BlockIoEvents,
-        record,
-        "io_events",
-        |c| c.block_io_event_count += 1,
-    );
+    let event = MonitorEvent::IoEvent {
+        event: Box::new(record.clone()),
+    };
+    if let Err(err) = RecorderSink::new(recorder).on_event(&event) {
+        warn!("monitor_event_sink_failed err={err}");
+    }
 }
 
 pub fn handle_exec_event(item: &[u8], tasks: &mut TaskTracker) {
@@ -177,177 +179,25 @@ pub fn handle_event(
     scx_state: Option<&str>,
     scx_enable_seq: Option<&str>,
 ) -> Option<recorder::SpikeEvent> {
-    debug_assert_eq!(event.kind, EVENT_RUNNABLE_LATENCY);
-
-    let comm = metrics::comm_to_string(&event.comm);
-    let elapsed_ms = started.elapsed().as_millis() as u64;
-
-    let task_info = tasks
-        .active_targets
-        .get(&event.tid)
-        .or_else(|| tasks.known_targets.get(&event.tid));
-
-    let waker_comm = tasks
-        .stats_by_task
-        .get(&event.waker_tid)
-        .map(|stats| stats.comm.clone())
-        .or_else(|| {
-            tasks
-                .active_targets
-                .get(&event.waker_tid)
-                .map(|target| target.comm.clone())
-        })
-        .or_else(|| tasks.cache.comm_for_tid(event.waker_tid))
-        .unwrap_or_default();
-
-    let stats = tasks
-        .stats_by_task
-        .entry(event.tid)
-        .or_insert_with(|| metrics::TaskStats::new(event.tid, comm.clone(), elapsed_ms));
-
-    if should_replace_unknown_comm(&stats.comm, &comm) {
-        stats.comm = comm.clone();
-    }
-
-    if let Some(task_info) = task_info {
-        stats.apply_task_info(task_info);
-        stats.active = tasks.active_targets.contains_key(&event.tid);
-    } else if config.cgroupv2.is_some() {
-        stats.active = true;
-    }
-
-    let precomputed_fault_deltas = (
-        event.maj_flt.saturating_sub(stats.last_spike_major_faults),
-        event.min_flt.saturating_sub(stats.last_spike_minor_faults),
-    );
-
-    let spike_cause_tags_and_primary = if event.latency_ns >= config.spike_threshold_ns {
-        let cause_tags = immediate_cause_tags(event, stats, precomputed_fault_deltas);
-        let primary_cause = primary_from_tags(&cause_tags);
-        Some((cause_tags, primary_cause))
-    } else {
-        None
-    };
-
-    let record_diagnostics =
-        spike_cause_tags_and_primary
-            .as_ref()
-            .map(
-                |(cause_tags, primary_cause)| metrics::SpikeRecordDiagnostics {
-                    scx_ops: scx_ops.map(str::to_owned),
-                    scx_state: scx_state.map(str::to_owned),
-                    scx_enable_seq: scx_enable_seq.map(str::to_owned),
-                    cause_tags: cause_tags.clone(),
-                    primary_cause: primary_cause.clone(),
-                },
-            );
-
-    let fault_deltas = stats.record(
+    let update = interpret::interpret_scheduler_event(
         event,
-        config.spike_threshold_ns,
-        elapsed_ms,
-        record_diagnostics,
+        config,
+        started,
+        tasks,
+        monotonic_start_ns,
+        scx_ops,
+        scx_state,
+        scx_enable_seq,
     );
 
-    if let Some(state) = recorder.exporters.prometheus_state.as_ref() {
-        state.inc_samples(1);
-        state.observe_latency_ns(event.latency_ns);
-    }
-
-    let mut spike_ret = None;
-    if event.latency_ns >= config.spike_threshold_ns {
-        let (cause_tags, primary_cause) = spike_cause_tags_and_primary
-            .expect("spike cause tags must be computed for spike events");
-
-        let spike_event = recorder::SpikeEvent::from_task_stats(
-            monotonic_start_ns,
-            stats,
-            event,
-            fault_deltas,
-            recorder::SpikeDiagnosticContext {
-                scx_ops: scx_ops.map(str::to_owned),
-                scx_state: scx_state.map(str::to_owned),
-                scx_enable_seq: scx_enable_seq.map(str::to_owned),
-                cause_tags,
-                primary_cause,
-                waker_tid: event.waker_tid,
-                waker_comm,
-            },
-        );
-
-        if let Some(state) = recorder.exporters.prometheus_state.as_ref() {
-            state.inc_spikes(1);
-        }
-
-        if recorder.streams.contains(ArtifactKind::SpikeEvents) {
-            push_artifact_event(
-                recorder,
-                ArtifactKind::SpikeEvents,
-                &spike_event,
-                "spike_events",
-                |c| c.spike_event_count += 1,
-            );
-        } else {
-            recorder.push_spike_event_to_buffer(spike_event.clone());
-        }
-
-        if let Some(stream) = recorder.stdout_spike_stream.as_mut()
-            && let Err(err) = stream.push(&spike_event)
-        {
-            warn!("json_stream_write_failed err={err:#}");
-            recorder.counters.stdout_spike_stream_errors += 1;
-        }
-
-        if let Some(tx) = recorder.exporters.otel_spike_tx.as_ref() {
-            let item = crate::otel::OtelSpike::from(&spike_event);
-            #[allow(clippy::collapsible_if)]
-            if let Err(_err) = tx.try_send(item) {
-                if let Some(dropped) = recorder.exporters.otel_spans_dropped.as_ref() {
-                    dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-            }
-        }
-
-        if !config.json_stream {
-            if config.verbose {
-                print_event(event, &comm, "sample");
-            } else {
-                print_event(event, &comm, "spike");
-            }
-        }
-
-        spike_ret = Some(spike_event);
-    } else if config.verbose && !config.json_stream {
-        print_event(event, &comm, "sample");
-    }
-
-    if let Some(threshold) = config.alert_threshold_ns
-        && event.latency_ns >= threshold
-        && let Some(sender) = alert_sender
-    {
-        let alert_payload = AlertPayload::from_task_stats(
-            stats,
-            event,
-            elapsed_ms,
-            scx_ops,
-            scx_state,
-            scx_enable_seq,
-        );
-        if let Err(err) = sender.try_send(alert_payload) {
-            match err {
-                tokio::sync::mpsc::error::TrySendError::Full(_) => {
-                    warn!("alert_channel_full_dropping_alert");
-                    recorder.counters.alert_events_dropped_count += 1;
-                }
-                tokio::sync::mpsc::error::TrySendError::Closed(_) => {
-                    warn!("alert_channel_closed");
-                    recorder.counters.alert_channel_closed_count += 1;
-                }
-            }
+    let mut sinks = MonitorOutputSinks::new(config, recorder, alert_sender);
+    for event in &update.events {
+        if let Err(err) = sinks.dispatch(event) {
+            warn!("monitor_event_sink_failed err={err}");
         }
     }
 
-    spike_ret
+    update.spike_event
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]

@@ -360,7 +360,12 @@ impl AutotuneRuntime {
             MonitorEvent::Finished { reason } => {
                 return self.evaluate_and_emit(Some(&reason));
             }
-            MonitorEvent::Spike { .. }
+            MonitorEvent::Alert { .. }
+            | MonitorEvent::MigrationEvent { .. }
+            | MonitorEvent::CpuFreqSample { .. }
+            | MonitorEvent::ForegroundEvent { .. }
+            | MonitorEvent::SchedulerSample { .. }
+            | MonitorEvent::Spike { .. }
             | MonitorEvent::GpuSample { .. }
             | MonitorEvent::IrqEvent { .. }
             | MonitorEvent::IoEvent { .. } => {}
