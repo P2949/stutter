@@ -269,4 +269,17 @@ mod tests {
         assert_eq!(entry.artifact_files, &["runtime_slices.json"]);
         assert!(!entry.default_enabled);
     }
+
+    #[test]
+    fn catalog_entries_are_direct_views_of_registry_specs() {
+        let entries = probe_catalog_entries();
+        assert_eq!(entries.len(), PROBE_REGISTRY.len());
+
+        for (entry, spec) in entries.iter().zip(PROBE_REGISTRY.iter()) {
+            assert_eq!(entry.key, spec.catalog_key);
+            assert_eq!(entry.title, spec.title);
+            assert_eq!(entry.status, spec.status);
+            assert_eq!(entry.default_enabled, spec.default_enabled);
+        }
+    }
 }

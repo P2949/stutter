@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use serde::Serialize;
 
 use crate::{
@@ -92,6 +90,8 @@ pub const PROBE_REGISTRY: &[ProbeSpec] = &[
             ArtifactKind::Session,
             ArtifactKind::SpikeEvents,
             ArtifactKind::Interval,
+            ArtifactKind::TreeEvents,
+            ArtifactKind::MigrationEvents,
         ],
         default_enabled: true,
         overhead: ProbeOverhead::Medium,
@@ -106,6 +106,15 @@ pub const PROBE_REGISTRY: &[ProbeSpec] = &[
             EbpfProgramSpec {
                 name: "sched_switch",
             },
+            EbpfProgramSpec {
+                name: "sched_process_exit",
+            },
+            EbpfProgramSpec {
+                name: "sched_migrate_task",
+            },
+            EbpfProgramSpec {
+                name: "sched_process_exec",
+            },
         ],
         tracepoints: &[
             TracepointSpec {
@@ -119,6 +128,18 @@ pub const PROBE_REGISTRY: &[ProbeSpec] = &[
             TracepointSpec {
                 category: "sched",
                 name: "sched_switch",
+            },
+            TracepointSpec {
+                category: "sched",
+                name: "sched_process_exit",
+            },
+            TracepointSpec {
+                category: "sched",
+                name: "sched_migrate_task",
+            },
+            TracepointSpec {
+                category: "sched",
+                name: "sched_process_exec",
             },
         ],
         perf_events: &[],
@@ -295,10 +316,34 @@ pub const PROBE_REGISTRY: &[ProbeSpec] = &[
         artifacts: &[ArtifactKind::Interval],
         default_enabled: false,
         overhead: ProbeOverhead::Low,
-        required_capabilities: &[ProbeCapability::Procfs],
-        ebpf_programs: &[],
-        tracepoints: &[],
-        perf_events: &[],
+        required_capabilities: &[
+            ProbeCapability::Procfs,
+            ProbeCapability::PerfEvent,
+            ProbeCapability::Tracepoint,
+        ],
+        ebpf_programs: &[
+            EbpfProgramSpec {
+                name: "major_fault",
+            },
+            EbpfProgramSpec {
+                name: "minor_fault",
+            },
+            EbpfProgramSpec {
+                name: "sched_stat_wait",
+            },
+        ],
+        tracepoints: &[TracepointSpec {
+            category: "sched",
+            name: "sched_stat_wait",
+        }],
+        perf_events: &[
+            PerfEventSpec {
+                name: "major_fault",
+            },
+            PerfEventSpec {
+                name: "minor_fault",
+            },
+        ],
         data_quality_rules: &[DataQualityRule {
             key: "fault_stat_wait_defaults",
             description: "fault and stat-wait deltas default to zero when unavailable",
@@ -445,6 +490,13 @@ pub const PROBE_REGISTRY: &[ProbeSpec] = &[
         validation_contract: "not implemented; must add schema/docs/fixtures before enabling",
     },
 ];
+
+pub fn probe_spec(key: ProbeKey) -> &'static ProbeSpec {
+    PROBE_REGISTRY
+        .iter()
+        .find(|spec| spec.key == key)
+        .expect("ProbeKey must have a ProbeSpec")
+}
 
 pub fn implemented_probe_specs() -> impl Iterator<Item = &'static ProbeSpec> {
     PROBE_REGISTRY

@@ -26,6 +26,7 @@ pub mod metrics;
 pub mod otel;
 pub mod perf_counters;
 pub mod presets;
+pub mod probe_activation;
 pub mod probe_catalog;
 pub mod probe_registry;
 pub mod process_tree;

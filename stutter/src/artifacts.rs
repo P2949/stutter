@@ -249,6 +249,10 @@ pub fn artifact_file_name(kind: ArtifactKind) -> &'static str {
     artifact_spec(kind).file_name
 }
 
+pub fn artifact_is_ndjson_stream(kind: ArtifactKind) -> bool {
+    artifact_spec(kind).encoding == ArtifactEncoding::Ndjson
+}
+
 pub fn artifact_kinds() -> impl Iterator<Item = ArtifactKind> {
     ARTIFACT_SPECS.iter().map(|spec| spec.kind)
 }
