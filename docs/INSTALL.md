@@ -113,10 +113,24 @@ Set at most one of `STUTTER_AUTOTUNE_WATCH_PROCESS` and
 `STUTTER_AUTOTUNE_TREE_PID`. If neither is set, the service uses focus-aware
 whole-system observation.
 
-`packaging/systemd/stutter-autotune-low-risk.service` is intentionally a
-disabled template that exits with an explanation. Continuous daemon-side
-`apply-low-risk` remains blocked until the observe/suggest runtime has stable
-audit history, status, rollback recovery, and replay behavior.
+`packaging/systemd/stutter-autotune-low-risk.service` is an opt-in system
+service for continuous low-risk CPU-affinity experiments. It uses the same
+focused target policy as observe mode, only permits `ReversibleLowRisk`
+CPU-affinity profile candidates, writes controller history/audit/journal
+state, and runs `stutter autotune restore` on service stop.
+
+Optional environment overrides for
+`/etc/stutter/autotune-low-risk.env`:
+
+```text
+STUTTER_AUTOTUNE_WATCH_PROCESS=Game.exe
+STUTTER_AUTOTUNE_TREE_PID=1234
+STUTTER_AUTOTUNE_PROFILES=/etc/stutter/profiles.toml
+STUTTER_AUTOTUNE_PRESET=diagnosis
+STUTTER_AUTOTUNE_SUMMARY_MS=1000
+STUTTER_AUTOTUNE_FOCUS_SOURCE=hybrid
+STUTTER_AUTOTUNE_CANDIDATE_SECONDS=30
+```
 
 ## Advisor Service
 

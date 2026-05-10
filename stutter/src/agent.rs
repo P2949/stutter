@@ -864,7 +864,7 @@ async fn autotune_status_handler(
                 .as_ref()
                 .and_then(|status| status.last_fault.clone()),
             manual_restore_command: Some("stutter autotune restore".to_owned()),
-            message: "autotune observe/suggest controller active".to_owned(),
+            message: format!("autotune {} controller active", handle.mode),
         },
         None => AutotuneStatusResponse {
             active: false,
