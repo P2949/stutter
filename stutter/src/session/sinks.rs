@@ -89,7 +89,7 @@ impl<'a> MonitorOutputSinks<'a> {
             sink.on_event(event)?;
         }
         {
-            let mut sink = TuiSink::default();
+            let mut sink = TuiSink;
             sink.on_event(event)?;
         }
         Ok(())
@@ -113,68 +113,6 @@ pub struct RecorderSink<'a> {
 impl<'a> RecorderSink<'a> {
     pub fn new(recorder: &'a mut LiveRecorder) -> Self {
         Self { recorder }
-    }
-
-    fn write_focus_changed(
-        &mut self,
-        elapsed_ms: u64,
-        old_kind: Option<crate::focus::FocusGroupKind>,
-        new_kind: crate::focus::FocusGroupKind,
-        root_pids: &[u32],
-        member_pids: &[u32],
-        confidence: f32,
-        score: f32,
-        situation: crate::autotune::state::SituationKind,
-        reasons: &[String],
-    ) {
-        let event = recorder::FocusEvent {
-            elapsed_ms,
-            action: "changed".to_owned(),
-            old_kind: old_kind.map(|kind| format!("{kind:?}")),
-            kind: Some(format!("{new_kind:?}")),
-            root_pids: root_pids.to_vec(),
-            member_pids: member_pids.to_vec(),
-            confidence,
-            score,
-            situation: Some(situation),
-            reasons: reasons.to_vec(),
-        };
-
-        push_artifact_event(
-            self.recorder,
-            ArtifactKind::FocusEvents,
-            &event,
-            "focus_events",
-            |c| c.focus_event_count += 1,
-        );
-    }
-
-    fn write_focus_cleared(
-        &mut self,
-        elapsed_ms: u64,
-        old_kind: Option<crate::focus::FocusGroupKind>,
-        reason: &str,
-    ) {
-        let event = recorder::FocusEvent {
-            elapsed_ms,
-            action: "cleared".to_owned(),
-            old_kind: old_kind.map(|kind| format!("{kind:?}")),
-            kind: None,
-            root_pids: Vec::new(),
-            member_pids: Vec::new(),
-            confidence: 0.0,
-            score: 0.0,
-            situation: None,
-            reasons: vec![reason.to_owned()],
-        };
-
-        push_artifact_event(
-            self.recorder,
-            ArtifactKind::FocusEvents,
-            &event,
-            "focus_events",
-            |c| c.focus_event_count += 1,
-        );
     }
 }
 
@@ -268,22 +206,52 @@ impl MonitorEventSink for RecorderSink<'_> {
                 score,
                 situation,
                 reasons,
-            } => self.write_focus_changed(
-                *elapsed_ms,
-                *old_kind,
-                *new_kind,
-                root_pids,
-                member_pids,
-                *confidence,
-                *score,
-                *situation,
-                reasons,
-            ),
+            } => {
+                let event = recorder::FocusEvent {
+                    elapsed_ms: *elapsed_ms,
+                    action: "changed".to_owned(),
+                    old_kind: old_kind.map(|kind| format!("{kind:?}")),
+                    kind: Some(format!("{new_kind:?}")),
+                    root_pids: root_pids.to_vec(),
+                    member_pids: member_pids.to_vec(),
+                    confidence: *confidence,
+                    score: *score,
+                    situation: Some(*situation),
+                    reasons: reasons.to_vec(),
+                };
+                push_artifact_event(
+                    self.recorder,
+                    ArtifactKind::FocusEvents,
+                    &event,
+                    "focus_events",
+                    |c| c.focus_event_count += 1,
+                );
+            }
             MonitorEvent::FocusCleared {
                 elapsed_ms,
                 old_kind,
                 reason,
-            } => self.write_focus_cleared(*elapsed_ms, *old_kind, reason),
+            } => {
+                let event = recorder::FocusEvent {
+                    elapsed_ms: *elapsed_ms,
+                    action: "cleared".to_owned(),
+                    old_kind: old_kind.map(|kind| format!("{kind:?}")),
+                    kind: None,
+                    root_pids: Vec::new(),
+                    member_pids: Vec::new(),
+                    confidence: 0.0,
+                    score: 0.0,
+                    situation: None,
+                    reasons: vec![reason.clone()],
+                };
+                push_artifact_event(
+                    self.recorder,
+                    ArtifactKind::FocusEvents,
+                    &event,
+                    "focus_events",
+                    |c| c.focus_event_count += 1,
+                );
+            }
             _ => {}
         }
         Ok(())
@@ -366,12 +334,11 @@ impl<'a> StdoutSink<'a> {
 impl MonitorEventSink for StdoutSink<'_> {
     fn on_event(&mut self, event: &MonitorEvent) -> Result<(), SinkError> {
         match event {
-            MonitorEvent::SchedulerSample { event, comm, label } => {
+            MonitorEvent::SchedulerSample { event, comm, label }
                 if !self.config.json_stream
-                    && (*label == "spike" || (self.config.verbose && *label == "sample"))
-                {
-                    print_event(event.as_ref(), comm, label);
-                }
+                    && (*label == "spike" || (self.config.verbose && *label == "sample")) =>
+            {
+                print_event(event.as_ref(), comm, label);
             }
             MonitorEvent::Spike { event } => {
                 if let Some(stream) = self.recorder.stdout_spike_stream.as_mut()

@@ -210,26 +210,25 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         .context("eBPF load failed: attach sched_migrate_task")?;
     }
 
-    if activation_plan.should_attach_program("cpu_frequency") {
-        if let Err(err) = attach_tracepoint(&mut ebpf, "cpu_frequency", "power", "cpu_frequency") {
-            activation_plan.push_attach_warning(ProbeKey::CpuFreq, "cpu_frequency", &err);
-            log::warn!(
-                "optional_probe_attach_failed key={:?} program=cpu_frequency err={err:#}",
-                ProbeKey::CpuFreq
-            );
-        }
+    if activation_plan.should_attach_program("cpu_frequency")
+        && let Err(err) = attach_tracepoint(&mut ebpf, "cpu_frequency", "power", "cpu_frequency")
+    {
+        activation_plan.push_attach_warning(ProbeKey::CpuFreq, "cpu_frequency", &err);
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program=cpu_frequency err={err:#}",
+            ProbeKey::CpuFreq
+        );
     }
 
-    if activation_plan.should_attach_stat_wait() {
-        if let Err(err) =
+    if activation_plan.should_attach_stat_wait()
+        && let Err(err) =
             attach_tracepoint(&mut ebpf, "sched_stat_wait", "sched", "sched_stat_wait")
-        {
-            activation_plan.push_attach_warning(ProbeKey::Faults, "sched_stat_wait", &err);
-            log::warn!(
-                "optional_probe_attach_failed key={:?} program=sched_stat_wait err={err:#}",
-                ProbeKey::Faults
-            );
-        }
+    {
+        activation_plan.push_attach_warning(ProbeKey::Faults, "sched_stat_wait", &err);
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program=sched_stat_wait err={err:#}",
+            ProbeKey::Faults
+        );
     }
 
     if activation_plan.has_probe(ProbeKey::IrqLatency) {
@@ -287,23 +286,23 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         }
     }
 
-    if activation_plan.should_attach_follow_exec() {
-        if let Err(err) = attach_tracepoint(
+    if activation_plan.should_attach_follow_exec()
+        && let Err(err) = attach_tracepoint(
             &mut ebpf,
             "sched_process_exec",
             "sched",
             "sched_process_exec",
-        ) {
-            activation_plan.push_attach_warning(
-                ProbeKey::SchedulerRunnableLatency,
-                "sched_process_exec",
-                &err,
-            );
-            log::warn!(
-                "optional_probe_attach_failed key={:?} program=sched_process_exec err={err:#}",
-                ProbeKey::SchedulerRunnableLatency
-            );
-        }
+        )
+    {
+        activation_plan.push_attach_warning(
+            ProbeKey::SchedulerRunnableLatency,
+            "sched_process_exec",
+            &err,
+        );
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program=sched_process_exec err={err:#}",
+            ProbeKey::SchedulerRunnableLatency
+        );
     }
 
     if activation_plan.should_attach_fault_perf() {

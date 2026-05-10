@@ -196,6 +196,30 @@ impl ObservePolicyStub {
 }
 
 pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()> {
+    #[cfg(not(feature = "autotune-controller"))]
+    if input.mode == "apply-low-risk" {
+        if input.auto_focus {
+            anyhow::bail!(
+                "apply-low-risk does not support --auto-focus yet; pass --tree-pid or --watch-process"
+            );
+        }
+
+        if input.tree_pid.is_none() && input.watch_process.is_none() {
+            anyhow::bail!("apply-low-risk requires --tree-pid or --watch-process");
+        }
+
+        let outcome = apply_low_risk::apply_low_risk_command(&input).await?;
+        println!(
+            "autotune apply-low-risk candidate={} action_kind={} affected_tasks={} safety_class={:?} rollback_performed={}",
+            outcome.candidate_name,
+            outcome.action_kind,
+            outcome.affected_tasks,
+            outcome.safety_class,
+            outcome.rollback_performed
+        );
+        return Ok(());
+    }
+
     if input.mode == "suggest"
         && let (Some(profiles_path), Some(tree_pid)) = (input.profiles.as_deref(), input.tree_pid)
     {
@@ -394,9 +418,36 @@ mod tests {
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();
+        assert_eq!(err, "apply-low-risk requires --tree-pid or --watch-process");
+    }
+
+    #[tokio::test]
+    async fn apply_low_risk_rejects_auto_focus_selector() {
+        let input = AutotuneCommandInput {
+            config: None,
+            watch_process: None,
+            tree_pid: None,
+            profiles: None,
+            mode: "apply-low-risk".to_owned(),
+            decision_log: None,
+            duration_seconds: Some(1),
+            summary_ms: 1000,
+            preset: "diagnosis".to_owned(),
+            hwmon: false,
+            mangohud_log: None,
+            auto_focus: true,
+            focus_source: crate::cli::FocusSource::Hybrid,
+            foreground_window: false,
+            foreground_source: crate::cli::ForegroundSourceArg::Auto,
+            foreground_poll_ms: 1000,
+            foreground_max_stale_ms: 2500,
+            allow_system_wide_actions: false,
+        };
+
+        let err = autotune_command(input).await.unwrap_err().to_string();
         assert_eq!(
             err,
-            "autotune requires --tree-pid, --watch-process, or --auto-focus"
+            "apply-low-risk does not support --auto-focus yet; pass --tree-pid or --watch-process"
         );
     }
 
