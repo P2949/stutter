@@ -179,9 +179,16 @@ pub fn handle_event(
     scx_state: Option<&str>,
     scx_enable_seq: Option<&str>,
 ) -> Option<recorder::SpikeEvent> {
+    let spike_config = interpret::SpikeConfig {
+        spike_threshold_ns: config.spike_threshold_ns,
+        alert_threshold_ns: config.alert_threshold_ns,
+        verbose: config.verbose,
+        cgroupv2_active: config.cgroupv2.is_some(),
+    };
+
     let update = interpret::interpret_scheduler_event(
         event,
-        config,
+        &spike_config,
         started,
         tasks,
         monotonic_start_ns,
