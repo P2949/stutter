@@ -697,6 +697,32 @@ fn try_irq_handler_exit(ctx: TracePointContext) -> Result<u32, u32> {
     Ok(0)
 }
 
+#[inline(always)]
+fn block_rq_fallback_key(
+    ctx: &TracePointContext,
+    sector: u64,
+    dev: u32,
+    nr_sector_offset: u32,
+    rwbs_offset: u32,
+) -> u64 {
+    // Use a 64-bit mixed key of (sector, dev, nr_sector, rwbs) to minimize
+    // collisions during the fallback correlation mode.
+    let mut h = sector.wrapping_mul(11400714819323198485u64)
+        ^ ((dev as u64).wrapping_mul(14029467366897019727u64));
+
+    if nr_sector_offset != 0 {
+        let nr_sector: u32 = unsafe { ctx.read_at(nr_sector_offset as usize).unwrap_or(0) };
+        h ^= (nr_sector as u64).wrapping_mul(11500714819323198485u64);
+    }
+
+    if rwbs_offset != 0 {
+        let rwbs: u64 = unsafe { ctx.read_at(rwbs_offset as usize).unwrap_or(0) };
+        h ^= rwbs.wrapping_mul(11600714819323198485u64);
+    }
+
+    h
+}
+
 #[tracepoint]
 pub fn block_rq_issue(ctx: TracePointContext) -> u32 {
     match try_block_rq_issue(ctx) {
@@ -723,25 +749,12 @@ fn try_block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
                 .unwrap_or(0)
         }
     } else {
-        // Use a 64-bit mixed key of (sector, dev, nr_sector, rwbs) to minimize
-        // collisions during the fallback correlation mode.
-        let mut h = sector.wrapping_mul(11400714819323198485u64)
-            ^ ((dev as u64).wrapping_mul(14029467366897019727u64));
-
         let nr_sector_offset =
             unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_ISSUE_NR_SECTOR_OFFSET) };
-        if nr_sector_offset != 0 {
-            let nr_sector: u32 = unsafe { ctx.read_at(nr_sector_offset as usize).unwrap_or(0) };
-            h ^= (nr_sector as u64).wrapping_mul(11500714819323198485u64);
-        }
-
         let rwbs_offset =
             unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_ISSUE_RWBS_OFFSET) };
-        if rwbs_offset != 0 {
-            let rwbs: u64 = unsafe { ctx.read_at(rwbs_offset as usize).unwrap_or(0) };
-            h ^= rwbs.wrapping_mul(11600714819323198485u64);
-        }
-        h
+
+        block_rq_fallback_key(&ctx, sector, dev, nr_sector_offset, rwbs_offset)
     };
 
     if key != 0 && BLOCK_START.insert(key, IoStart { ts, tid }, 0).is_err() {
@@ -770,23 +783,12 @@ fn try_block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
                 .unwrap_or(0)
         }
     } else {
-        let mut h = sector.wrapping_mul(11400714819323198485u64)
-            ^ ((dev as u64).wrapping_mul(14029467366897019727u64));
-
         let nr_sector_offset =
             unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET) };
-        if nr_sector_offset != 0 {
-            let nr_sector_val: u32 = unsafe { ctx.read_at(nr_sector_offset as usize).unwrap_or(0) };
-            h ^= (nr_sector_val as u64).wrapping_mul(11500714819323198485u64);
-        }
-
         let rwbs_offset =
             unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_COMPLETE_RWBS_OFFSET) };
-        if rwbs_offset != 0 {
-            let rwbs_val: u64 = unsafe { ctx.read_at(rwbs_offset as usize).unwrap_or(0) };
-            h ^= rwbs_val.wrapping_mul(11600714819323198485u64);
-        }
-        h
+
+        block_rq_fallback_key(&ctx, sector, dev, nr_sector_offset, rwbs_offset)
     };
 
     let start = match if key != 0 {
