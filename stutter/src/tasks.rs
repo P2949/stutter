@@ -462,6 +462,8 @@ mod tests {
     async fn test_refresh_exceeds_max_tasks() {
         let mut tracker = TaskTracker::default();
         let config = Config {
+            monitor_config_layer: None,
+            preset: None,
             target_pids: Vec::new(),
             tree_pids: Vec::new(),
             summary_period_ms: 1000,

@@ -337,6 +337,8 @@ async fn collect_tune_results(
                 coverage,
             } = match measure_tune_candidate(
                 Arc::new(Config {
+                    monitor_config_layer: None,
+                    preset: None,
                     target_pids: Vec::new(),
                     tree_pids: vec![tree_pid],
                     summary_period_ms: 1_000,

@@ -16,7 +16,6 @@ use tokio::{
 use crate::{
     artifacts::ArtifactKind,
     cli::{Config, CsvStreamTarget, FocusSource, ForegroundSourceArg},
-    config::merge::{CliOverrides, ConfigSources, DefaultConfig, merge_config_sources},
     diagnosis::{LiveDiagnosisEntry, diagnose_cluster},
     ebpf_loader,
     events::AlertPayload,
@@ -304,26 +303,33 @@ impl MonitorSession {
         let foreground_switch_count = 0;
 
         let user_config = crate::config_file::load_user_config()?;
-        let resolved_monitor_config = merge_config_sources(ConfigSources {
-            defaults: DefaultConfig::default(),
-            user_file: user_config.clone(),
-            preset: None,
-            cli: CliOverrides {
-                config: crate::config::model::MonitorConfig::from(&config),
-            },
-        });
 
-        log::debug!(
-            "monitor_config_resolved summary_period_ms={} spike_threshold_ns={} max_tasks={} hwmon={} cpu_freq={} foreground_window={} focus_source={} foreground_source={}",
-            resolved_monitor_config.timing.summary_period_ms,
-            resolved_monitor_config.timing.spike_threshold_ns,
-            resolved_monitor_config.target.max_tasks,
-            resolved_monitor_config.probes.hwmon,
-            resolved_monitor_config.probes.cpu_freq,
-            resolved_monitor_config.focus.foreground_window,
-            resolved_monitor_config.focus.focus_source,
-            resolved_monitor_config.focus.foreground_source,
-        );
+        if let Some(layer) = &config.monitor_config_layer {
+            log::info!(
+                "monitor_session_config_resolved source=presence_aware summary_period_ms={} spike_threshold_ns={} max_tasks={} hwmon={} cpu_freq={} foreground_window={} focus_source={:?} foreground_source={:?}",
+                config.summary_period_ms,
+                config.spike_threshold_ns,
+                config.max_tasks,
+                config.hwmon,
+                config.cpu_freq,
+                config.foreground_window,
+                config.focus_source,
+                config.foreground_source,
+            );
+            log::debug!("monitor_config_layer: {:?}", layer);
+        } else {
+            log::info!(
+                "monitor_session_config_legacy source=legacy_cloned summary_period_ms={} spike_threshold_ns={} max_tasks={} hwmon={} cpu_freq={} foreground_window={} focus_source={:?} foreground_source={:?}",
+                config.summary_period_ms,
+                config.spike_threshold_ns,
+                config.max_tasks,
+                config.hwmon,
+                config.cpu_freq,
+                config.foreground_window,
+                config.focus_source,
+                config.foreground_source,
+            );
+        }
 
         let community_rules = crate::community_rules::load_community_rules(
             &crate::config_file::community_rules_config_from_user_config(user_config.as_ref()),
@@ -1748,6 +1754,7 @@ pub async fn run_monitor(
     stop_rx: Option<tokio::sync::oneshot::Receiver<()>>,
 ) -> anyhow::Result<String> {
     let config = config.into();
+    let config = crate::config::effective::resolve_arc_monitor_config(config)?;
     let mut session = MonitorSession::new((*config).clone(), shared_hwmon, event_tx).await?;
     let stop_reason = session.run(stop_rx).await?;
     session.finalize(stop_reason)

@@ -1571,6 +1571,8 @@ fn config_from_remote_request(
     }
 
     let mut config = Config {
+        monitor_config_layer: None,
+        preset: None,
         target_pids: request.target_pids.clone(),
         tree_pids: request.tree_pids.clone(),
         exclude_tree_pids: request.exclude_tree_pids.clone(),

@@ -52,6 +52,12 @@ pub struct PresetDefaults {
     pub irq_latency: Option<bool>,
 }
 
+impl PresetDefaults {
+    pub fn into_monitor_config_layer(self) -> crate::config::layer::MonitorConfigLayer {
+        crate::config::layer::MonitorConfigLayer::from_preset_defaults(self)
+    }
+}
+
 impl Preset {
     pub fn defaults(self) -> PresetDefaults {
         match self {

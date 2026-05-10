@@ -1,5 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
+use crate::cli::{FocusSource, ForegroundSourceArg};
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MonitorConfig {
     pub target: TargetConfig,
@@ -103,16 +105,16 @@ impl Default for OutputConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FocusConfig {
     pub auto_focus: bool,
-    pub focus_source: String,
+    pub focus_source: FocusSource,
     pub foreground_window: bool,
-    pub foreground_source: String,
+    pub foreground_source: ForegroundSourceArg,
     pub foreground_poll_ms: u64,
     pub foreground_max_stale_ms: u64,
     pub foreground_include_title: bool,
     pub auto_focus_poll_ms: u64,
-    pub auto_focus_min_confidence: String,
+    pub auto_focus_min_confidence: f32,
     pub auto_focus_switch_cooldown_ms: u64,
-    pub auto_focus_switch_margin: String,
+    pub auto_focus_switch_margin: f32,
     pub auto_focus_required_polls: u32,
     pub auto_focus_max_roots: usize,
 }
@@ -121,16 +123,16 @@ impl Default for FocusConfig {
     fn default() -> Self {
         Self {
             auto_focus: false,
-            focus_source: "heuristic".to_owned(),
+            focus_source: FocusSource::Heuristic,
             foreground_window: false,
-            foreground_source: "auto".to_owned(),
+            foreground_source: ForegroundSourceArg::Auto,
             foreground_poll_ms: 1_000,
             foreground_max_stale_ms: 2_500,
             foreground_include_title: false,
             auto_focus_poll_ms: 1_000,
-            auto_focus_min_confidence: "0.60".to_owned(),
+            auto_focus_min_confidence: 0.60,
             auto_focus_switch_cooldown_ms: 5_000,
-            auto_focus_switch_margin: "0.20".to_owned(),
+            auto_focus_switch_margin: 0.20,
             auto_focus_required_polls: 2,
             auto_focus_max_roots: 4,
         }

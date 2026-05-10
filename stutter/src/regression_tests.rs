@@ -1674,6 +1674,8 @@ fn test_config(
     max_duration: Option<Duration>,
 ) -> Config {
     Config {
+        monitor_config_layer: None,
+        preset: None,
         target_pids,
         tree_pids,
         summary_period_ms: 1_000,

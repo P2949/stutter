@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 
 pub const TARGET_PIDS_MAX: usize = 1024;
 
-use crate::process_tree::{CompiledPattern, TaskClass, TaskFilters};
+use crate::{
+    config::layer::MonitorConfigLayer,
+    process_tree::{CompiledPattern, TaskClass, TaskFilters},
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -562,6 +565,108 @@ pub struct AgentArgs {
         value_name = "N"
     )]
     pub max_concurrent_recordings: usize,
+}
+
+fn monitor_args_layer(args: &MonitorArgs) -> MonitorConfigLayer {
+    MonitorConfigLayer {
+        target_pids: (!args.target_pids.is_empty()).then(|| args.target_pids.clone()),
+        tree_pids: (!args.tree_pids.is_empty()).then(|| args.tree_pids.clone()),
+        exclude_tree_pids: (!args.exclude_tree_pids.is_empty())
+            .then(|| args.exclude_tree_pids.clone()),
+        summary_period_ms: args.summary_period_ms,
+        epoch_period_ms: args.epoch_period_ms.map(Some),
+        spike_threshold_ns: args
+            .spike_threshold_us
+            .map(|value| value.saturating_mul(1_000)),
+        include_comm: (!args.include_comm.is_empty()).then(|| args.include_comm.clone()),
+        exclude_comm: (!args.exclude_comm.is_empty()).then(|| args.exclude_comm.clone()),
+        keep_missing_pid: args.keep_missing_pid.then_some(true),
+        watch_process: args.watch_process.clone().map(Some),
+        persistent: args.persistent.then_some(true),
+        max_tasks: args.max_tasks,
+        irq_latency: args.irq_latency.then_some(true),
+        irqs: (!args.irqs.is_empty()).then(|| args.irqs.clone()),
+        hwmon: if args.no_hwmon {
+            Some(false)
+        } else if args.hwmon {
+            Some(true)
+        } else {
+            None
+        },
+        cpu_freq: if args.no_cpu_freq {
+            Some(false)
+        } else if args.cpu_freq {
+            Some(true)
+        } else {
+            None
+        },
+        cgroupv2: args.cgroupv2.clone().map(Some),
+        native_cgroup_filter: args.native_cgroup_filter.then_some(true),
+        follow_exec: if args.no_follow_exec {
+            Some(false)
+        } else if args.follow_exec {
+            Some(true)
+        } else {
+            None
+        },
+        faults: if args.no_faults {
+            Some(false)
+        } else if args.faults {
+            Some(true)
+        } else {
+            None
+        },
+        cpu_perf: args.cpu_perf.then_some(true),
+        block_io: if args.no_block_io {
+            Some(false)
+        } else if args.block_io {
+            Some(true)
+        } else {
+            None
+        },
+        stat_wait: if args.no_stat_wait {
+            Some(false)
+        } else if args.stat_wait {
+            Some(true)
+        } else {
+            None
+        },
+        runtime_slices: if args.no_runtime_slices {
+            Some(false)
+        } else if args.runtime_slices {
+            Some(true)
+        } else {
+            None
+        },
+        json_stream: args.json_stream.then_some(true),
+        metrics_port: args.metrics_port.map(Some),
+        otlp_endpoint: args.otlp_endpoint.clone().map(Some),
+        otel_service_name: (args.otel_service_name != "stutter")
+            .then(|| args.otel_service_name.clone()),
+        auto_focus: args.auto_focus.then_some(true),
+        focus_source: (args.focus_source != FocusSource::Heuristic).then_some(args.focus_source),
+        foreground_window: args.foreground_window.then_some(true),
+        foreground_source: (args.foreground_source != ForegroundSourceArg::Auto)
+            .then_some(args.foreground_source),
+        foreground_poll_ms: (args.foreground_poll_ms != 1_000).then_some(args.foreground_poll_ms),
+        foreground_max_stale_ms: (args.foreground_max_stale_ms != 2_500)
+            .then_some(args.foreground_max_stale_ms),
+        foreground_include_title: args.foreground_include_title.then_some(true),
+        auto_focus_poll_ms: (args.auto_focus_poll_ms != 1_000).then_some(args.auto_focus_poll_ms),
+        auto_focus_min_confidence: (args.auto_focus_min_confidence != 0.60)
+            .then_some(args.auto_focus_min_confidence),
+        auto_focus_switch_cooldown_ms: (args.auto_focus_switch_cooldown_ms != 5_000)
+            .then_some(args.auto_focus_switch_cooldown_ms),
+        auto_focus_switch_margin: (args.auto_focus_switch_margin != 0.20)
+            .then_some(args.auto_focus_switch_margin),
+        auto_focus_required_polls: (args.auto_focus_required_polls != 2)
+            .then_some(args.auto_focus_required_polls),
+        auto_focus_max_roots: (args.auto_focus_max_roots != 4).then_some(args.auto_focus_max_roots),
+        retain_intervals: args.retain_intervals.map(Some),
+        run_name: args.run_name.clone().map(Some),
+        output_dir: args.out_dir.clone().map(Some),
+        ..MonitorConfigLayer::default()
+    }
 }
 
 impl Default for MonitorArgs {
@@ -1403,6 +1508,8 @@ pub struct ForegroundWindowConfig {
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub monitor_config_layer: Option<MonitorConfigLayer>,
+    pub preset: Option<String>,
     pub target_pids: Vec<u32>,
     pub tree_pids: Vec<u32>,
     pub summary_period_ms: u64,
@@ -2503,14 +2610,17 @@ fn config_from_monitor_args_with_file(
         })
         .transpose()?;
     let alert_webhook_url = if alert_threshold_ns.is_some() {
-        args.alert_webhook_url.or_else(|| {
+        args.alert_webhook_url.clone().or_else(|| {
             std::env::var("STUTTER_ALERT_WEBHOOK_URL")
                 .ok()
                 .filter(|url| !url.is_empty())
         })
     } else {
-        args.alert_webhook_url
+        args.alert_webhook_url.clone()
     };
+
+    let monitor_config_layer = Some(monitor_args_layer(&args));
+    let preset = args.preset.clone();
 
     let recording = if args.no_record {
         None
@@ -2531,6 +2641,8 @@ fn config_from_monitor_args_with_file(
     }
 
     Ok(Config {
+        monitor_config_layer,
+        preset,
         target_pids: args.target_pids,
         tree_pids: args.tree_pids,
         summary_period_ms,

@@ -1,12 +1,15 @@
+pub mod effective;
+pub mod layer;
 pub mod merge;
 pub mod model;
+pub mod source;
 
 use model::{
     FocusConfig, MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, SafetyConfig,
     TargetConfig, TimingConfig,
 };
 
-use crate::cli::{Config, FocusSource, ForegroundSourceArg};
+use crate::cli::Config;
 
 impl From<&Config> for MonitorConfig {
     fn from(config: &Config) -> Self {
@@ -63,16 +66,16 @@ impl From<&Config> for MonitorConfig {
             },
             focus: FocusConfig {
                 auto_focus: config.auto_focus,
-                focus_source: focus_source_label(config.focus_source),
+                focus_source: config.focus_source,
                 foreground_window: config.foreground_window,
-                foreground_source: foreground_source_label(config.foreground_source),
+                foreground_source: config.foreground_source,
                 foreground_poll_ms: config.foreground_poll_ms,
                 foreground_max_stale_ms: config.foreground_max_stale_ms,
                 foreground_include_title: config.foreground_include_title,
                 auto_focus_poll_ms: config.auto_focus_poll_ms,
-                auto_focus_min_confidence: format!("{:.2}", config.auto_focus_min_confidence),
+                auto_focus_min_confidence: config.auto_focus_min_confidence,
                 auto_focus_switch_cooldown_ms: config.auto_focus_switch_cooldown_ms,
-                auto_focus_switch_margin: format!("{:.2}", config.auto_focus_switch_margin),
+                auto_focus_switch_margin: config.auto_focus_switch_margin,
                 auto_focus_required_polls: config.auto_focus_required_polls,
                 auto_focus_max_roots: config.auto_focus_max_roots,
             },
@@ -82,23 +85,4 @@ impl From<&Config> for MonitorConfig {
             },
         }
     }
-}
-
-fn focus_source_label(source: FocusSource) -> String {
-    match source {
-        FocusSource::Heuristic => "heuristic",
-        FocusSource::Foreground => "foreground",
-        FocusSource::Hybrid => "hybrid",
-    }
-    .to_owned()
-}
-
-fn foreground_source_label(source: ForegroundSourceArg) -> String {
-    match source {
-        ForegroundSourceArg::Auto => "auto",
-        ForegroundSourceArg::Sway => "sway",
-        ForegroundSourceArg::Hyprland => "hyprland",
-        ForegroundSourceArg::X11 => "x11",
-    }
-    .to_owned()
 }
