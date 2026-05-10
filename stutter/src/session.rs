@@ -121,6 +121,14 @@ fn foreground_identity_changed(
         || old.workspace.as_deref() != new.workspace.as_deref()
 }
 
+async fn optional_tick(tick: Option<&mut tokio::time::Interval>) {
+    if let Some(tick) = tick {
+        tick.tick().await;
+    } else {
+        futures_util::future::pending::<()>().await;
+    }
+}
+
 #[cfg(test)]
 mod foreground_session_tests {
     use super::*;
@@ -948,35 +956,17 @@ impl MonitorSession {
                     }
                 }
 
-                _ = async {
-                    if let Some(tick) = tree_tick.as_mut() {
-                        tick.tick().await;
-                    } else {
-                        std::future::pending::<()>().await;
-                    }
-                } => {
+                _ = optional_tick(tree_tick.as_mut()) => {
                     if let Some(reason) = self.handle_tree_tick().await? {
                         return Ok(reason);
                     }
                 }
 
-                _ = async {
-                    if let Some(tick) = focus_tick.as_mut() {
-                        tick.tick().await;
-                    } else {
-                        std::future::pending::<()>().await;
-                    }
-                } => {
+                _ = optional_tick(focus_tick.as_mut()) => {
                     self.handle_focus_tick().await?;
                 }
 
-                _ = async {
-                    if let Some(tick) = foreground_tick.as_mut() {
-                        tick.tick().await;
-                    } else {
-                        std::future::pending::<()>().await;
-                    }
-                } => {
+                _ = optional_tick(foreground_tick.as_mut()) => {
                     self.handle_foreground_tick().await?;
                 }
 
