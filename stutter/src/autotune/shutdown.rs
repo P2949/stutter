@@ -440,6 +440,8 @@ fn build_exit_audit_event(
         success,
         affected_tasks,
         restore_path: action.rollback.restore_path().cloned(),
+        action_phase: None,
+        error_category: None,
         message: format!(
             "{} shutdown_reason={} keep_on_exit={}",
             message,

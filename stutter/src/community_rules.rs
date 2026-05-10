@@ -138,6 +138,43 @@ pub struct CommunityRulesMetadataFile {
     pub rule_file: String,
 }
 
+#[derive(Debug, Clone)]
+pub enum CommunityRulesStatus {
+    Loaded { db: CommunityRulesDb },
+    Disabled,
+    Failed { error: String },
+}
+
+impl CommunityRulesStatus {
+    pub fn as_db(&self) -> Option<&CommunityRulesDb> {
+        match self {
+            Self::Loaded { db } => Some(db),
+            Self::Disabled | Self::Failed { .. } => None,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Loaded { .. } => "loaded",
+            Self::Disabled => "disabled",
+            Self::Failed { .. } => "failed",
+        }
+    }
+}
+
+pub fn load_community_rules_status(config: &CommunityRulesConfig) -> CommunityRulesStatus {
+    if !config.enabled {
+        return CommunityRulesStatus::Disabled;
+    }
+
+    match load_community_rules(config) {
+        Ok(db) => CommunityRulesStatus::Loaded { db },
+        Err(error) => CommunityRulesStatus::Failed {
+            error: format!("{error:#}"),
+        },
+    }
+}
+
 pub fn load_community_rules(config: &CommunityRulesConfig) -> anyhow::Result<CommunityRulesDb> {
     load_rules_db(LoadCommunityRulesInput {
         enabled: config.enabled,
