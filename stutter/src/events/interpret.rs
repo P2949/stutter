@@ -3,7 +3,6 @@ use std::time::Instant;
 use stutter_common::{EVENT_RUNNABLE_LATENCY, SchedulerEvent};
 
 use crate::{
-    cli::Config,
     events::{AlertPayload, immediate_cause_tags, primary_from_tags},
     metrics::{self},
     recorder,
@@ -17,10 +16,18 @@ pub struct SchedulerSampleUpdate {
     pub spike_event: Option<recorder::SpikeEvent>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpikeConfig {
+    pub spike_threshold_ns: u64,
+    pub alert_threshold_ns: Option<u64>,
+    pub verbose: bool,
+    pub cgroupv2_active: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn interpret_scheduler_event(
     event: &SchedulerEvent,
-    config: &Config,
+    config: &SpikeConfig,
     started: Instant,
     tasks: &mut TaskTracker,
     monotonic_start_ns: Option<u64>,
@@ -66,7 +73,7 @@ pub fn interpret_scheduler_event(
     if let Some(task_info) = task_info.as_ref() {
         stats.apply_task_info(task_info);
         stats.active = active;
-    } else if config.cgroupv2.is_some() {
+    } else if config.cgroupv2_active {
         stats.active = true;
     }
 
@@ -171,75 +178,12 @@ pub fn interpret_scheduler_event(
 mod tests {
     use super::*;
 
-    fn config() -> Config {
-        Config {
-            monitor_config_layer: None,
-            preset: None,
-            target_pids: Vec::new(),
-            tree_pids: Vec::new(),
-            summary_period_ms: 1000,
-            epoch_period_ms: None,
+    fn config() -> SpikeConfig {
+        SpikeConfig {
             spike_threshold_ns: 1_000_000,
             alert_threshold_ns: None,
-            alert_webhook_url: None,
             verbose: false,
-            task_filters: crate::process_tree::TaskFilters {
-                include_comm: Vec::new(),
-                exclude_comm: Vec::new(),
-            },
-            keep_missing_pid: false,
-            watch_process: None,
-            persistent: false,
-            watch_poll_ms: 1000,
-            watch_timeout: None,
-            max_tasks: 1024,
-            csv_stream: None,
-            irq_latency: false,
-            irqs: Vec::new(),
-            hwmon: false,
-            hwmon_root: None,
-            hwmon_drm_card: None,
-            hwmon_render_node: None,
-            mangohud_log: None,
-            tui: false,
-            retain_intervals: None,
-            recording: None,
-            max_duration: None,
-            cpu_freq: true,
-            cgroupv2: None,
-            native_cgroup_filter: false,
-            follow_exec: true,
-            exclude_tree_pids: Vec::new(),
-            faults: false,
-            cpu_perf: false,
-            cpu_perf_kernel: false,
-            cpu_perf_max_tasks: 128,
-            cpu_perf_cache_refs: false,
-            block_io: false,
-            stat_wait: false,
-            runtime_slices: false,
-            runtime_slices_max_tasks: 256,
-            json_stream: false,
-            mangohud_log_live: false,
-            metrics_port: None,
-            ringbuf_size_kb: None,
-            wakeup_map_factor: None,
-            otlp_endpoint: None,
-            otel_service_name: "stutter".to_owned(),
-            auto_focus: false,
-            focus_source: crate::cli::FocusSource::Heuristic,
-            foreground_window: false,
-            foreground_source: crate::cli::ForegroundSourceArg::Auto,
-            foreground_poll_ms: 1000,
-            foreground_max_stale_ms: 2500,
-            foreground_include_title: false,
-            auto_focus_poll_ms: 1000,
-            auto_focus_min_confidence: 0.60,
-            auto_focus_switch_cooldown_ms: 5000,
-            auto_focus_switch_margin: 0.20,
-            auto_focus_required_polls: 2,
-            auto_focus_max_roots: 4,
-            remote: None,
+            cgroupv2_active: false,
         }
     }
 
