@@ -18,7 +18,7 @@ use crate::{
         FocusEvent, ForegroundEvent, FrameEvent, GpuSample, IntervalRecord, RecordedSpike,
         SESSION_SCHEMA_VERSION, SessionFile, SessionTask, SpikeEvent,
     },
-    session_io::{self, ArtifactLoadOptions},
+    session_io::{self},
     spike::{
         DiagnosisCandidateView, DiagnosisEvidenceView, DiagnosisExplanation, SpikeCluster,
         SpikePoint, WakeGraphEdge,

@@ -10,7 +10,7 @@ use std::{
 use stutter_common::{EVENT_RUNNABLE_LATENCY, SchedulerEvent};
 
 use crate::{
-    artifacts::ArtifactKind,
+    artifacts::{ArtifactKind, ArtifactSelection},
     cli::{Config, RecordingConfig},
     ebpf_loader::DropCountersSnapshot,
     events::{self, AlertPayload},
@@ -882,8 +882,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     .unwrap();
 
     let artifacts =
-        crate::session_io::load_run_artifacts(&dir, crate::session_io::ArtifactLoadOptions::REPORT)
-            .unwrap();
+        crate::session_io::load_run_artifacts(&dir, ArtifactSelection::report()).unwrap();
     let session = artifacts.session;
     let metadata = artifacts.metadata.unwrap();
     let recordedspike_events = artifacts.spikes;
@@ -2341,8 +2340,7 @@ fn load_run_artifacts_loads_streamed_spikes() {
     drop(file);
 
     let artifacts =
-        crate::session_io::load_run_artifacts(&dir, crate::session_io::ArtifactLoadOptions::REPORT)
-            .unwrap();
+        crate::session_io::load_run_artifacts(&dir, ArtifactSelection::report()).unwrap();
 
     assert_eq!(artifacts.spikes.len(), 2);
     assert_eq!(artifacts.spikes[0].task, spike1.task);
@@ -2375,8 +2373,7 @@ fn load_run_artifacts_falls_back_to_top_spikes() {
     // No spike_events.json
 
     let artifacts =
-        crate::session_io::load_run_artifacts(&dir, crate::session_io::ArtifactLoadOptions::REPORT)
-            .unwrap();
+        crate::session_io::load_run_artifacts(&dir, ArtifactSelection::report()).unwrap();
 
     assert_eq!(artifacts.spikes.len(), 1);
     assert_eq!(artifacts.spikes[0].task, spike1.task);
