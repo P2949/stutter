@@ -178,12 +178,16 @@ impl FocusResolver {
         if !self.confirm_pending_winner(&candidate, snapshot.elapsed_ms) {
             return FocusDecision::NoTarget {
                 reason: format!(
-                    "waiting for stable winner poll {}/{}",
+                    "waiting for stable winner poll {}/{} first_seen_ms={}",
                     self.pending
                         .as_ref()
                         .map(|pending| pending.polls)
                         .unwrap_or(0),
-                    self.policy.required_winner_polls.max(1)
+                    self.policy.required_winner_polls.max(1),
+                    self.pending
+                        .as_ref()
+                        .map(|pending| pending.first_seen_ms)
+                        .unwrap_or(snapshot.elapsed_ms)
                 ),
             };
         }

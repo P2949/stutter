@@ -224,7 +224,7 @@ mod tests {
 
         let output = render_metrics(&state);
 
-        let mut metrics = vec![
+        let metrics = [
             "stutter_spikes_total",
             "stutter_samples_total",
             "stutter_max_latency_ns",
@@ -233,8 +233,16 @@ mod tests {
             "stutter_event_stream_write_errors_total",
             "stutter_ebpf_drops_total",
         ];
+
+        for metric in metrics {
+            assert!(
+                output.contains(metric),
+                "missing metric {metric} in output:\n{output}"
+            );
+        }
+
         #[cfg(feature = "autotune-controller")]
-        metrics.extend([
+        for metric in [
             "stutter_autotune_phase",
             "stutter_autotune_mode",
             "stutter_autotune_active_experiment",
@@ -243,9 +251,7 @@ mod tests {
             "stutter_autotune_rollbacks_total",
             "stutter_autotune_actions_applied_total",
             "stutter_autotune_actions_blocked_total",
-        ]);
-
-        for metric in metrics {
+        ] {
             assert!(
                 output.contains(metric),
                 "missing metric {metric} in output:\n{output}"

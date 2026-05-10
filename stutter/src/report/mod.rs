@@ -379,7 +379,7 @@ impl PartialOrd for SpikeClusterCandidate {
     }
 }
 
-struct ReportBuildResult {
+pub(crate) struct ReportBuildResult {
     analysis: ReportAnalysisJson,
     artifacts: session_io::RunArtifacts,
 }
@@ -397,7 +397,7 @@ pub enum RegressionMetric {
 
 // compare_cluster_candidates removed as it's replaced by Ord implementation
 
-struct CorrelationCtx<'a> {
+pub(crate) struct CorrelationCtx<'a> {
     output: &'a mut String,
     clusters: &'a [SpikeCluster],
     top: usize,

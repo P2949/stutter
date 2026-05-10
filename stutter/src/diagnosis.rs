@@ -831,7 +831,7 @@ pub(crate) fn select_anchor(cluster: &SpikeCluster) -> ClusterAnchor {
     }
 }
 
-pub fn diagnose_cluster(
+pub(crate) fn diagnose_cluster(
     cluster: &SpikeCluster,
     artifacts: &RunArtifacts,
     window_ns: u64,
@@ -839,7 +839,7 @@ pub fn diagnose_cluster(
     diagnose_cluster_with_config(cluster, artifacts, window_ns, DiagnosisConfig::default())
 }
 
-pub fn diagnose_cluster_with_config(
+pub(crate) fn diagnose_cluster_with_config(
     cluster: &SpikeCluster,
     artifacts: &RunArtifacts,
     window_ns: u64,

@@ -26,7 +26,6 @@ pub mod context_segment;
 pub mod controller;
 #[cfg(feature = "autotune-controller")]
 pub mod decision;
-#[cfg(feature = "autotune-controller")]
 pub mod decision_log;
 #[cfg(feature = "autotune-controller")]
 pub mod observation;
@@ -41,7 +40,6 @@ pub mod rolling_window;
 #[cfg(feature = "autotune-controller")]
 pub mod startup_recovery;
 pub mod state;
-#[cfg(feature = "autotune-controller")]
 pub mod tui_panel;
 
 use std::{

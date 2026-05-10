@@ -20,7 +20,7 @@ pub mod snapshot;
 pub use classify::*;
 pub use groups::*;
 pub use resolve::*;
-pub use score::*;
+pub(crate) use score::*;
 pub use snapshot::*;
 
 const SCHED_FIFO: u32 = 1;
@@ -1637,6 +1637,7 @@ fn try_community_rules_classification(
     None
 }
 
+#[cfg(test)]
 fn system_class_for_community_task_class(
     class: crate::process_tree::TaskClass,
 ) -> Option<SystemTaskClass> {
@@ -1649,7 +1650,6 @@ fn system_class_for_community_task_class(
 #[cfg(test)]
 mod tests {
     use super::*;
-    pub use crate::process_tree::TaskClass;
 
     #[derive(Debug, Clone)]
     struct FakeProcProcess {
@@ -3707,6 +3707,10 @@ mod tests {
 
     #[test]
     fn audio_realtime_priority_band() {
+        let fake_process =
+            FakeProcProcess::new(1400, 1, "pipewire", "pipewire").with_sched_policy(SCHED_FIFO);
+        assert_eq!(fake_process.sched_policy, Some(SCHED_FIFO));
+
         let classification = classify_process(&ProcessIdentity {
             pid: 1400,
             ppid: 1,

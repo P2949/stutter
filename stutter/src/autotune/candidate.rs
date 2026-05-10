@@ -1646,6 +1646,7 @@ mod tests {
         assert!(plan.rejected.is_empty());
     }
 
+    #[test]
     fn generate_profile_candidates_excludes_current_profile() {
         let profiles = vec![profile("current"), profile("candidate")];
 

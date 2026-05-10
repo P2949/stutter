@@ -1,5 +1,3 @@
-#![cfg(feature = "autotune-controller")]
-
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
