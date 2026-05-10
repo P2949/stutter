@@ -48,10 +48,31 @@ pub trait MonitorEventSink {
     fn on_event(&mut self, event: &MonitorEvent) -> Result<(), SinkError>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonitorOutputSinkKind {
+    Recorder,
+    Prometheus,
+    Otel,
+    Stdout,
+    Alert,
+    Tui,
+}
+
+pub fn default_output_sink_registry() -> Vec<MonitorOutputSinkKind> {
+    vec![
+        MonitorOutputSinkKind::Recorder,
+        MonitorOutputSinkKind::Prometheus,
+        MonitorOutputSinkKind::Otel,
+        MonitorOutputSinkKind::Stdout,
+        MonitorOutputSinkKind::Alert,
+    ]
+}
+
 pub struct MonitorOutputSinks<'a> {
     pub config: &'a Config,
     pub recorder: &'a mut LiveRecorder,
     pub alert_sender: Option<&'a mpsc::Sender<AlertPayload>>,
+    pub sinks: Vec<MonitorOutputSinkKind>,
 }
 
 impl<'a> MonitorOutputSinks<'a> {
@@ -60,39 +81,53 @@ impl<'a> MonitorOutputSinks<'a> {
         recorder: &'a mut LiveRecorder,
         alert_sender: Option<&'a mpsc::Sender<AlertPayload>>,
     ) -> Self {
+        Self::with_sinks(
+            config,
+            recorder,
+            alert_sender,
+            default_output_sink_registry(),
+        )
+    }
+
+    pub fn with_sinks(
+        config: &'a Config,
+        recorder: &'a mut LiveRecorder,
+        alert_sender: Option<&'a mpsc::Sender<AlertPayload>>,
+        sinks: Vec<MonitorOutputSinkKind>,
+    ) -> Self {
         Self {
             config,
             recorder,
             alert_sender,
+            sinks,
         }
     }
 
     pub fn dispatch(&mut self, event: &MonitorEvent) -> Result<(), SinkError> {
-        {
-            let mut sink = RecorderSink::new(self.recorder);
-            sink.on_event(event)?;
-        }
-        {
-            let mut sink = PrometheusSink::new(self.recorder);
-            sink.on_event(event)?;
-        }
-        {
-            let mut sink = OtelSink::new(self.recorder);
-            sink.on_event(event)?;
-        }
-        {
-            let mut sink = StdoutSink::new(self.config, self.recorder);
-            sink.on_event(event)?;
-        }
-        {
-            let mut sink = AlertSink::new(self.recorder, self.alert_sender);
-            sink.on_event(event)?;
-        }
-        {
-            let mut sink = TuiSink;
-            sink.on_event(event)?;
+        let sinks = self.sinks.clone();
+        for sink in sinks {
+            self.dispatch_sink(sink, event)?;
         }
         Ok(())
+    }
+
+    fn dispatch_sink(
+        &mut self,
+        sink: MonitorOutputSinkKind,
+        event: &MonitorEvent,
+    ) -> Result<(), SinkError> {
+        match sink {
+            MonitorOutputSinkKind::Recorder => RecorderSink::new(self.recorder).on_event(event),
+            MonitorOutputSinkKind::Prometheus => PrometheusSink::new(self.recorder).on_event(event),
+            MonitorOutputSinkKind::Otel => OtelSink::new(self.recorder).on_event(event),
+            MonitorOutputSinkKind::Stdout => {
+                StdoutSink::new(self.config, self.recorder).on_event(event)
+            }
+            MonitorOutputSinkKind::Alert => {
+                AlertSink::new(self.recorder, self.alert_sender).on_event(event)
+            }
+            MonitorOutputSinkKind::Tui => TuiSink.on_event(event),
+        }
     }
 
     pub fn dispatch_all<'b>(
