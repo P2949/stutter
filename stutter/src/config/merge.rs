@@ -1,8 +1,5 @@
-use super::{
-    effective::{self, ConfigError},
-    layer::MonitorConfigLayer,
-    model::MonitorConfig,
-};
+use super::{effective, layer::MonitorConfigLayer, model::MonitorConfig};
+use crate::error::ConfigError;
 
 #[derive(Debug, Clone, Default)]
 pub struct DefaultConfig {
