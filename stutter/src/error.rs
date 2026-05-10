@@ -1,89 +1,86 @@
-use std::{error::Error, fmt};
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum StutterError {
-    Config(ConfigError),
-    Target(TargetError),
-    Ebpf(EbpfError),
-    Probe(ProbeError),
-    Recording(RecordingError),
-    Artifact(ArtifactError),
-    Report(ReportError),
-    Action(crate::actions::ActionError),
-    Remote(RemoteError),
+    #[error("config error: {0}")]
+    Config(#[from] ConfigError),
+    #[error("target error: {0}")]
+    Target(#[from] TargetError),
+    #[error("eBPF error: {0}")]
+    Ebpf(#[from] EbpfError),
+    #[error("probe error: {0}")]
+    Probe(#[from] ProbeError),
+    #[error("recording error: {0}")]
+    Recording(#[from] RecordingError),
+    #[error("artifact error: {0}")]
+    Artifact(#[from] ArtifactError),
+    #[error("report error: {0}")]
+    Report(#[from] ReportError),
+    #[error("action error: {0}")]
+    Action(#[from] crate::actions::ActionError),
+    #[error("remote error: {0}")]
+    Remote(#[from] RemoteError),
 }
 
-impl fmt::Display for StutterError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Config(error) => write!(f, "config error: {error}"),
-            Self::Target(error) => write!(f, "target error: {error}"),
-            Self::Ebpf(error) => write!(f, "eBPF error: {error}"),
-            Self::Probe(error) => write!(f, "probe error: {error}"),
-            Self::Recording(error) => write!(f, "recording error: {error}"),
-            Self::Artifact(error) => write!(f, "artifact error: {error}"),
-            Self::Report(error) => write!(f, "report error: {error}"),
-            Self::Action(error) => write!(f, "action error: {error}"),
-            Self::Remote(error) => write!(f, "remote error: {error}"),
-        }
-    }
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("failed to load user config: {0:#}")]
+    UserConfig(#[source] anyhow::Error),
+    #[error("failed to resolve monitor preset: {0:#}")]
+    InvalidPreset(#[source] anyhow::Error),
+    #[error("failed to convert user config to monitor layer: {0:#}")]
+    InvalidUserLayer(#[source] anyhow::Error),
 }
 
-impl Error for StutterError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Action(error) => Some(error),
-            Self::Config(_)
-            | Self::Target(_)
-            | Self::Ebpf(_)
-            | Self::Probe(_)
-            | Self::Recording(_)
-            | Self::Artifact(_)
-            | Self::Report(_)
-            | Self::Remote(_) => None,
-        }
-    }
+#[derive(Debug, Error)]
+pub enum TargetError {
+    #[error(transparent)]
+    Source(#[from] anyhow::Error),
 }
 
-impl From<crate::actions::ActionError> for StutterError {
-    fn from(error: crate::actions::ActionError) -> Self {
-        Self::Action(error)
-    }
+#[derive(Debug, Error)]
+pub enum EbpfError {
+    #[error(transparent)]
+    Source(#[from] anyhow::Error),
 }
 
-macro_rules! simple_error_type {
-    ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq)]
-        pub struct $name {
-            pub message: String,
-        }
-
-        impl $name {
-            pub fn new(message: impl Into<String>) -> Self {
-                Self {
-                    message: message.into(),
-                }
-            }
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str(&self.message)
-            }
-        }
-
-        impl Error for $name {}
-    };
+#[derive(Debug, Error)]
+pub enum ProbeError {
+    #[error(transparent)]
+    Source(#[from] anyhow::Error),
 }
 
-simple_error_type!(ConfigError);
-simple_error_type!(TargetError);
-simple_error_type!(EbpfError);
-simple_error_type!(ProbeError);
-simple_error_type!(RecordingError);
-simple_error_type!(ArtifactError);
-simple_error_type!(ReportError);
-simple_error_type!(RemoteError);
+#[derive(Debug, Error)]
+pub enum RecordingError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Source(#[from] anyhow::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum ArtifactError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Source(#[from] anyhow::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum ReportError {
+    #[error(transparent)]
+    Source(#[from] anyhow::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum RemoteError {
+    #[error(transparent)]
+    Request(#[from] reqwest::Error),
+    #[error(transparent)]
+    Source(#[from] anyhow::Error),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeWarning {

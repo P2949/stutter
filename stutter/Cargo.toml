@@ -20,6 +20,7 @@ log = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 inferno = "0.12"
+thiserror = { workspace = true }
 opentelemetry = { version = "0.24", optional = true }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"], optional = true }
 opentelemetry-otlp = { version = "0.17", features = ["grpc-tonic"], optional = true }

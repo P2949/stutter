@@ -2660,6 +2660,7 @@ dependencies = [
  "stutter-common",
  "stutter-ebpf",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "toml",
  "url",

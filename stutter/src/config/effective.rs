@@ -1,5 +1,3 @@
-use std::fmt;
-
 use crate::{
     cli::Config,
     config::{
@@ -9,29 +7,9 @@ use crate::{
             TargetConfig, TimingConfig,
         },
     },
+    error::ConfigError,
     presets::Preset,
 };
-
-#[derive(Debug)]
-pub enum ConfigError {
-    UserConfig(anyhow::Error),
-    InvalidPreset(anyhow::Error),
-    InvalidUserLayer(anyhow::Error),
-}
-
-impl fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UserConfig(err) => write!(f, "failed to load user config: {err:#}"),
-            Self::InvalidPreset(err) => write!(f, "failed to resolve monitor preset: {err:#}"),
-            Self::InvalidUserLayer(err) => {
-                write!(f, "failed to convert user config to monitor layer: {err:#}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectiveMonitorConfig {
