@@ -923,7 +923,7 @@ async fn autotune_start_handler(
         )
             .into_response();
     }
-    if mode != "observe" && mode != "suggest" {
+    if mode != "observe" && mode != "suggest" && mode != "apply-low-risk" {
         audit_agent_event(
             "remote-autotune-start",
             false,
@@ -934,8 +934,8 @@ async fn autotune_start_handler(
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
                 error:
-                    "remote autotune apply mode remains intentionally disabled; use mode observe or suggest"
-                        .to_owned(),
+                "unsupported remote autotune mode; use observe, suggest, or apply-low-risk"
+                    .to_owned(),
             }),
         )
             .into_response();
@@ -1021,22 +1021,57 @@ async fn autotune_start_handler(
 
     #[cfg(feature = "autotune-controller")]
     let handle = {
+        let profile_list = match input.profiles.as_deref() {
+            Some(path) => match crate::profiles::load_profiles(path) {
+                Ok(profiles) => profiles,
+                Err(err) => {
+                    audit_agent_event(
+                        "remote-autotune-start",
+                        false,
+                        0,
+                        format!("profile_load_error reason={err:#}"),
+                    );
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(ErrorResponse {
+                            error: format!("failed to load profiles: {err:#}"),
+                        }),
+                    )
+                        .into_response();
+                }
+            },
+            None => Vec::new(),
+        };
+
         let runtime_config = match mode.as_str() {
             "observe" => crate::autotune::runtime::AutotuneRuntimeConfig::observe(
                 input.decision_log.clone(),
                 input.tree_pid,
                 input.watch_process.clone(),
-            ),
+            )
+            .with_profiles(profile_list),
             "suggest" => crate::autotune::runtime::AutotuneRuntimeConfig::suggest(
                 input.decision_log.clone(),
                 input.tree_pid,
                 input.watch_process.clone(),
-            ),
+            )
+            .with_profiles(profile_list),
+            "apply-low-risk" => crate::autotune::runtime::AutotuneRuntimeConfig::apply_low_risk(
+                input.decision_log.clone(),
+                input.tree_pid,
+                input.watch_process.clone(),
+            )
+            .with_profiles(profile_list)
+            .with_candidate_window_seconds(input.duration_seconds.unwrap_or(30)),
             _ => unreachable!("mode was validated above"),
         };
 
         let (stop_tx, stop_rx) = oneshot::channel();
-        let duration = input.duration_seconds.map(std::time::Duration::from_secs);
+        let duration = if mode == "apply-low-risk" {
+            None
+        } else {
+            input.duration_seconds.map(std::time::Duration::from_secs)
+        };
         let join = tokio::spawn(async move {
             crate::autotune::runtime::run_autotune_controller_session(
                 monitor_config,
@@ -1275,8 +1310,12 @@ async fn autotune_config_handler(
 
     Json(AutotuneConfigResponse {
         default_mode: "observe".to_owned(),
-        supported_modes: vec!["observe".to_owned(), "suggest".to_owned()],
-        apply_low_risk_remote_enabled: false,
+        supported_modes: vec![
+            "observe".to_owned(),
+            "suggest".to_owned(),
+            "apply-low-risk".to_owned(),
+        ],
+        apply_low_risk_remote_enabled: true,
         local_only_by_default: true,
         history_path: crate::autotune::history::default_autotune_history_path()
             .display()

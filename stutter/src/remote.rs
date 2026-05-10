@@ -119,6 +119,8 @@ pub struct AutotuneStartRequest {
     #[serde(default)]
     pub focus_source: Option<String>,
     #[serde(default)]
+    pub foreground_window: bool,
+    #[serde(default)]
     pub foreground_source: Option<String>,
     #[serde(default)]
     pub foreground_poll_ms: Option<u64>,

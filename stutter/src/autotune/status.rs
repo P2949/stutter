@@ -21,6 +21,7 @@ pub struct AutotuneStatus {
     pub focus_group: Option<String>,
     pub current_score: Option<u64>,
     pub active_profile: Option<String>,
+    pub active_candidate: Option<String>,
     pub last_decision: String,
     pub rollback_available: bool,
     pub last_rollback_path: Option<String>,
@@ -72,6 +73,7 @@ pub fn status_from_history_events(
             focus_group: None,
             current_score: None,
             active_profile: None,
+            active_candidate: None,
             last_decision: "no autotune history found".to_owned(),
             rollback_available: false,
             last_rollback_path: None,
@@ -90,6 +92,7 @@ pub fn status_from_history_events(
         focus_group: Some(format!("{:?}", last.situation)),
         current_score: Some(last.observation_summary.score_total),
         active_profile: active_profile_from_events(events),
+        active_candidate: active_candidate_from_events(events),
         last_decision: format_last_decision(last),
         rollback_available: rollback_available_from_events(events),
         last_rollback_path: last_rollback_path_from_events(events),
@@ -108,7 +111,7 @@ pub fn render_autotune_status_text(status: &AutotuneStatus) -> String {
     };
 
     format!(
-        "phase: {}\nmode: {}\ntarget: {}\nfocus_group: {}\ncurrent_score: {}\nactive_profile: {}\nlast_decision: {}\nrollback_available: {}\nlast_rollback_path: {}\ncooldown_remaining_seconds: {}\ndata_quality: {}\nlast_fault: {}\nmanual_restore_command: {}\n",
+        "phase: {}\nmode: {}\ntarget: {}\nfocus_group: {}\ncurrent_score: {}\nactive_profile: {}\nactive_candidate: {}\nlast_decision: {}\nrollback_available: {}\nlast_rollback_path: {}\ncooldown_remaining_seconds: {}\ndata_quality: {}\nlast_fault: {}\nmanual_restore_command: {}\n",
         status.phase,
         status.mode,
         target,
@@ -118,6 +121,7 @@ pub fn render_autotune_status_text(status: &AutotuneStatus) -> String {
             .map(|score| score.to_string())
             .unwrap_or_else(|| "none".to_owned()),
         status.active_profile.as_deref().unwrap_or("none"),
+        status.active_candidate.as_deref().unwrap_or("none"),
         status.last_decision,
         if status.rollback_available {
             "yes"
@@ -145,12 +149,36 @@ fn status_target_from_identity(target: &TargetIdentity) -> StatusTarget {
 fn active_profile_from_events(events: &[AutotuneHistoryEvent]) -> Option<String> {
     for event in events.iter().rev() {
         let decision = event.decision.decision.as_str();
-        if matches!(decision, "KeepCurrent" | "Kept" | "Keep" | "Improved")
-            && let Some(candidate_name) = event.decision.candidate_name.as_ref()
+        if matches!(
+            decision,
+            "KeepCurrent" | "Kept" | "Keep" | "Improved" | "Improvement" | "candidate_kept"
+        ) && let Some(candidate_name) = event.decision.candidate_name.as_ref()
         {
             return Some(candidate_name.clone());
         }
         if event.rollback_performed {
+            return None;
+        }
+    }
+
+    None
+}
+
+fn active_candidate_from_events(events: &[AutotuneHistoryEvent]) -> Option<String> {
+    for event in events.iter().rev() {
+        if matches!(event.phase, ControllerPhase::Measuring)
+            && let Some(candidate_name) = event.decision.candidate_name.as_ref()
+        {
+            return Some(candidate_name.clone());
+        }
+
+        if event.decision.decision == "candidate_started"
+            && let Some(candidate_name) = event.decision.candidate_name.as_ref()
+        {
+            return Some(candidate_name.clone());
+        }
+
+        if matches!(event.phase, ControllerPhase::Cooldown) || event.rollback_performed {
             return None;
         }
     }

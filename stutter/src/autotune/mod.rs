@@ -228,15 +228,7 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
     }
 
     match input.mode.as_str() {
-        "observe" | "suggest" => {}
-        "apply-low-risk" => {
-            let outcome = apply_low_risk::apply_low_risk_command(&input).await?;
-            println!(
-                "apply-low-risk complete: candidate={} affected_tasks={} safety={:?}",
-                outcome.candidate_name, outcome.affected_tasks, outcome.safety_class
-            );
-            return Ok(());
-        }
+        "observe" | "suggest" | "apply-low-risk" => {}
         _ => {
             anyhow::bail!(
                 "mode '{}' is not supported; use --mode observe, --mode suggest, or --mode apply-low-risk",
@@ -249,17 +241,31 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
 
     #[cfg(feature = "autotune-controller")]
     {
+        let profile_list = loaded_profiles
+            .as_ref()
+            .map(|loaded| loaded.profiles.clone())
+            .unwrap_or_default();
+
         let runtime_config = match input.mode.as_str() {
             "observe" => runtime::AutotuneRuntimeConfig::observe(
                 input.decision_log.clone(),
                 input.tree_pid,
                 input.watch_process.clone(),
-            ),
+            )
+            .with_profiles(profile_list),
             "suggest" => runtime::AutotuneRuntimeConfig::suggest(
                 input.decision_log.clone(),
                 input.tree_pid,
                 input.watch_process.clone(),
-            ),
+            )
+            .with_profiles(profile_list),
+            "apply-low-risk" => runtime::AutotuneRuntimeConfig::apply_low_risk(
+                input.decision_log.clone(),
+                input.tree_pid,
+                input.watch_process.clone(),
+            )
+            .with_profiles(profile_list)
+            .with_candidate_window_seconds(input.duration_seconds.unwrap_or(30)),
             other => {
                 anyhow::bail!(
                     "mode '{}' is not supported by the live autotune runtime",
@@ -268,7 +274,11 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
             }
         };
 
-        let duration = input.duration_seconds.map(Duration::from_secs);
+        let duration = if input.mode == "apply-low-risk" {
+            None
+        } else {
+            input.duration_seconds.map(Duration::from_secs)
+        };
         let exit = runtime::run_autotune_controller_session(
             monitor_config,
             runtime_config,

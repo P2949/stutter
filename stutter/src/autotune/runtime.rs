@@ -12,16 +12,32 @@ use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
+    actions::{RollbackToken, SafetyClass, TuningAction},
     autotune::{
-        candidate::CandidateAction,
-        controller::{ControllerPolicy, ControllerRuntimeState, decide_autotune_transition},
+        apply_low_risk::{action_from_candidate, apply_candidate_with_audit},
+        candidate::{
+            CandidateAction, CandidateDryRunRecord, dry_run_candidates,
+            generate_profile_candidates, generate_topology_aware_profile_candidates,
+        },
+        candidate_memory::CandidateMemoryResult,
+        comparison::{ExperimentDataQuality, ExperimentResult, compare_experiment},
+        controller::{
+            ActiveExperiment as ControllerActiveExperiment, ControllerPolicy,
+            ControllerRuntimeState, decide_autotune_transition,
+        },
+        controller_journal::{
+            default_controller_journal_path, write_controller_journal_applied,
+            write_controller_journal_applying, write_controller_journal_clean,
+        },
         decision::AutotuneDecision,
+        experiment::{ExperimentId, WindowScore},
         history::{
             AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneMode as HistoryAutotuneMode,
             ControllerPhase as HistoryControllerPhase, ObservationSummary,
             SituationKind as HistorySituationKind, TargetIdentity, append_autotune_history_event,
             default_autotune_history_path,
         },
+        kept::{ActiveProfileState, KeptCandidateState},
         observation::AutotuneObservation,
         quality::OnlineDataQuality,
         rolling_window::{RollingWindow, WindowScore as RuntimeWindowScore},
@@ -32,8 +48,10 @@ use crate::{
     ebpf_loader::DropCountersSnapshot,
     focus::FocusGroupKind,
     process_tree::TaskInfo,
+    profiles::Profile,
     scorer::StutterScore,
     session_events::MonitorEvent,
+    topology::TopologyModel,
 };
 
 pub const DEFAULT_RUNTIME_WINDOW_SECONDS: u64 = 30;
@@ -46,8 +64,10 @@ pub struct AutotuneRuntimeConfig {
     pub decision_log: Option<PathBuf>,
     pub history_log: Option<PathBuf>,
     pub window_seconds: u64,
+    pub candidate_window_seconds: u64,
     pub tree_pid: Option<u32>,
     pub watch_process: Option<String>,
+    pub profiles: Vec<Profile>,
     pub allow_system_wide_actions: bool,
 }
 
@@ -63,8 +83,10 @@ impl AutotuneRuntimeConfig {
             decision_log,
             history_log: Some(default_autotune_history_path()),
             window_seconds: DEFAULT_RUNTIME_WINDOW_SECONDS,
+            candidate_window_seconds: DEFAULT_RUNTIME_WINDOW_SECONDS,
             tree_pid,
             watch_process,
+            profiles: Vec::new(),
             allow_system_wide_actions: false,
         }
     }
@@ -80,10 +102,41 @@ impl AutotuneRuntimeConfig {
             decision_log,
             history_log: Some(default_autotune_history_path()),
             window_seconds: DEFAULT_RUNTIME_WINDOW_SECONDS,
+            candidate_window_seconds: DEFAULT_RUNTIME_WINDOW_SECONDS,
             tree_pid,
             watch_process,
+            profiles: Vec::new(),
             allow_system_wide_actions: false,
         }
+    }
+
+    pub fn apply_low_risk(
+        decision_log: Option<PathBuf>,
+        tree_pid: Option<u32>,
+        watch_process: Option<String>,
+    ) -> Self {
+        Self {
+            mode: AutotuneMode::ApplyLowRisk,
+            controller_id: "local-autotune".to_owned(),
+            decision_log,
+            history_log: Some(default_autotune_history_path()),
+            window_seconds: DEFAULT_RUNTIME_WINDOW_SECONDS,
+            candidate_window_seconds: DEFAULT_RUNTIME_WINDOW_SECONDS,
+            tree_pid,
+            watch_process,
+            profiles: Vec::new(),
+            allow_system_wide_actions: false,
+        }
+    }
+
+    pub fn with_profiles(mut self, profiles: Vec<Profile>) -> Self {
+        self.profiles = profiles;
+        self
+    }
+
+    pub fn with_candidate_window_seconds(mut self, seconds: u64) -> Self {
+        self.candidate_window_seconds = seconds.max(1);
+        self
     }
 }
 
@@ -115,6 +168,45 @@ pub struct RuntimeFocusState {
 }
 
 #[derive(Clone, Debug)]
+pub struct OnlineAutotuneController {
+    pub policy: ControllerPolicy,
+    pub state: ControllerRuntimeState,
+    pub window: RollingWindow,
+    pub active_profile_state: ActiveProfileState,
+}
+
+impl OnlineAutotuneController {
+    pub fn new(mode: AutotuneMode, window_seconds: u64) -> Self {
+        Self {
+            policy: ControllerPolicy::for_mode(mode),
+            state: ControllerRuntimeState::default(),
+            window: RollingWindow::new(Duration::from_secs(window_seconds)),
+            active_profile_state: ActiveProfileState::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LiveLowRiskExperiment {
+    pub experiment_id: ExperimentId,
+    pub candidate: CandidateAction,
+    pub baseline_score: WindowScore,
+    pub applied_unix_nanos: u128,
+    pub measure_until_unix_nanos: u128,
+    pub rollback: RollbackToken,
+}
+
+impl LiveLowRiskExperiment {
+    pub fn candidate_name(&self) -> &str {
+        self.candidate.profile_name()
+    }
+
+    pub fn action_id(&self) -> String {
+        self.candidate.action_id().0
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct RuntimeTargetState {
     pub root_pid: Option<u32>,
     pub active_targets: usize,
@@ -134,13 +226,12 @@ impl RuntimeTargetState {
 #[derive(Debug)]
 pub struct AutotuneRuntime {
     config: AutotuneRuntimeConfig,
-    policy: ControllerPolicy,
-    state: ControllerRuntimeState,
-    window: RollingWindow,
+    controller: OnlineAutotuneController,
     latest_focus: Option<RuntimeFocusState>,
     target_state: RuntimeTargetState,
     latest_drop_counters: DropCountersSnapshot,
     recent_diagnoses: VecDeque<LiveDiagnosisEntry>,
+    live_low_risk_experiment: Option<LiveLowRiskExperiment>,
     last_observation: AutotuneObservation,
     last_decision: Option<AutotuneDecisionStreamEntry>,
 }
@@ -148,14 +239,14 @@ pub struct AutotuneRuntime {
 impl AutotuneRuntime {
     pub fn new(config: AutotuneRuntimeConfig) -> Self {
         let mode = config.mode;
+        let window_seconds = config.window_seconds;
         Self {
             target_state: RuntimeTargetState::new(config.tree_pid),
-            policy: ControllerPolicy::for_mode(mode),
-            state: ControllerRuntimeState::default(),
-            window: RollingWindow::new(Duration::from_secs(config.window_seconds)),
+            controller: OnlineAutotuneController::new(mode, window_seconds),
             latest_focus: None,
             latest_drop_counters: DropCountersSnapshot::default(),
             recent_diagnoses: VecDeque::new(),
+            live_low_risk_experiment: None,
             last_observation: AutotuneObservation::default(),
             last_decision: None,
             config,
@@ -176,11 +267,11 @@ impl AutotuneRuntime {
                 ..
             } => {
                 self.latest_drop_counters = drop_counters;
-                self.window.push_intervals(records);
+                self.controller.window.push_intervals(records);
                 return self.evaluate_and_emit(None);
             }
             MonitorEvent::Frame { event } => {
-                self.window.push_frame(*event);
+                self.controller.window.push_frame(*event);
             }
             MonitorEvent::LiveDiagnosis { entry } => {
                 self.push_diagnosis(*entry);
@@ -195,7 +286,13 @@ impl AutotuneRuntime {
                 reasons,
                 ..
             } => {
-                self.window.clear();
+                self.controller.window.clear();
+                if self.live_low_risk_experiment.is_some() {
+                    self.rollback_live_experiment(
+                        crate::audit::unix_nanos_now(),
+                        "focus changed during active low-risk experiment",
+                    )?;
+                }
                 self.latest_focus = Some(RuntimeFocusState {
                     kind: new_kind,
                     root_pids: root_pids.clone(),
@@ -209,7 +306,13 @@ impl AutotuneRuntime {
                 return self.evaluate_and_emit(Some("focus changed; measurement window reset"));
             }
             MonitorEvent::FocusCleared { reason, .. } => {
-                self.window.clear();
+                self.controller.window.clear();
+                if self.live_low_risk_experiment.is_some() {
+                    self.rollback_live_experiment(
+                        crate::audit::unix_nanos_now(),
+                        "focus cleared during active low-risk experiment",
+                    )?;
+                }
                 self.latest_focus = None;
                 self.target_state.root_pid = self.config.tree_pid;
                 return self.evaluate_and_emit(Some(&reason));
@@ -267,7 +370,7 @@ impl AutotuneRuntime {
     }
 
     fn push_diagnosis(&mut self, diagnosis: LiveDiagnosisEntry) {
-        self.window.push_diagnosis(diagnosis.clone());
+        self.controller.window.push_diagnosis(diagnosis.clone());
         self.recent_diagnoses.push_back(diagnosis);
         while self.recent_diagnoses.len() > DEFAULT_RECENT_DIAGNOSIS_LIMIT {
             self.recent_diagnoses.pop_front();
@@ -281,12 +384,38 @@ impl AutotuneRuntime {
         let observation = self.build_observation();
         self.last_observation = observation.clone();
 
-        let candidate = self.select_candidate_for_observation(&observation);
-        let decision =
-            decide_autotune_transition(&self.policy, &self.state, &observation, candidate);
+        let decision = if let Some(experiment) = &self.live_low_risk_experiment {
+            if observation.now_unix_nanos < experiment.measure_until_unix_nanos {
+                AutotuneDecision::Noop {
+                    reason: format!(
+                        "candidate '{}' measurement window is still collecting",
+                        experiment.candidate_name()
+                    ),
+                }
+            } else {
+                decide_autotune_transition(
+                    &self.controller.policy,
+                    &self.controller.state,
+                    &observation,
+                    None,
+                )
+            }
+        } else {
+            let candidate = self.select_candidate_for_observation(&observation);
+            decide_autotune_transition(
+                &self.controller.policy,
+                &self.controller.state,
+                &observation,
+                candidate,
+            )
+        };
+
         let reason = forced_reason
             .map(str::to_owned)
             .unwrap_or_else(|| decision_reason(&decision));
+
+        self.apply_decision_side_effects(&observation, &decision, &reason)?;
+
         let stream_entry = self.stream_entry_from_decision(&observation, &decision, reason.clone());
 
         self.append_decision_log(&stream_entry)?;
@@ -300,7 +429,7 @@ impl AutotuneRuntime {
     }
 
     fn build_observation(&self) -> AutotuneObservation {
-        let window_score = self.window.score();
+        let window_score = self.controller.window.score();
         let focus = self.latest_focus.as_ref();
         let focus_kind = focus.map(|focus| focus.kind);
         let focus_confidence = focus.map(|focus| focus.confidence).unwrap_or(0.0);
@@ -314,7 +443,7 @@ impl AutotuneRuntime {
 
         AutotuneObservation {
             now_unix_nanos: crate::audit::unix_nanos_now(),
-            elapsed_ms: self.window.latest_elapsed_ms().unwrap_or(0),
+            elapsed_ms: self.controller.window.latest_elapsed_ms().unwrap_or(0),
             target_present: self.target_present(&window_score),
             target_root_pid: self
                 .target_state
@@ -347,7 +476,7 @@ impl AutotuneRuntime {
         &self,
         observation: &AutotuneObservation,
     ) -> Option<CandidateAction> {
-        if self.config.mode != AutotuneMode::Suggest {
+        if matches!(self.config.mode, AutotuneMode::Observe) {
             return None;
         }
 
@@ -358,11 +487,245 @@ impl AutotuneRuntime {
         if observation.data_quality.blocks_action()
             || observation.focus_is_idle_or_unknown()
             || observation.focus_has_critical_realtime_warning()
+            || observation.focus_confidence < 0.70
         {
             return None;
         }
 
-        None
+        let tree_pid = observation.target_root_pid.or(self.config.tree_pid)?;
+
+        let candidates = self.candidates_for_tree(tree_pid);
+        let records = dry_run_candidates(&candidates);
+
+        select_best_candidate_for_situation(
+            &candidates,
+            &records,
+            observation,
+            self.controller.policy.max_safety_class.clone(),
+            &self.controller.state,
+        )
+    }
+
+    fn candidates_for_tree(&self, tree_pid: u32) -> Vec<CandidateAction> {
+        if !self.config.profiles.is_empty() {
+            return generate_profile_candidates(&self.config.profiles, tree_pid, None);
+        }
+
+        let Ok(topology) = TopologyModel::read() else {
+            return Vec::new();
+        };
+
+        generate_topology_aware_profile_candidates(&topology, tree_pid)
+    }
+
+    fn apply_decision_side_effects(
+        &mut self,
+        observation: &AutotuneObservation,
+        decision: &AutotuneDecision,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        match decision {
+            AutotuneDecision::StartExperiment { candidate, .. } => {
+                self.start_low_risk_experiment(observation, candidate.clone(), reason)?;
+            }
+            AutotuneDecision::KeepCurrent { .. } => {
+                self.keep_live_experiment(observation, reason)?;
+            }
+            AutotuneDecision::Revert { .. } => {
+                self.rollback_live_experiment(observation.now_unix_nanos, reason)?;
+            }
+            AutotuneDecision::EnterCooldown { duration, .. } => {
+                self.controller.state.phase = ControllerPhase::Cooldown;
+                self.controller.state.cooldown_until_unix_nanos =
+                    Some(observation.now_unix_nanos.saturating_add(duration.as_nanos()));
+            }
+            AutotuneDecision::Fault { .. } => {
+                if self.live_low_risk_experiment.is_some() {
+                    self.rollback_live_experiment(observation.now_unix_nanos, reason)?;
+                }
+                self.controller.state.enter_cooldown_after_fault(
+                    &self.controller.policy,
+                    observation.now_unix_nanos,
+                );
+            }
+            AutotuneDecision::Noop { .. } | AutotuneDecision::Suggest { .. } => {}
+        }
+
+        Ok(())
+    }
+
+    fn start_low_risk_experiment(
+        &mut self,
+        observation: &AutotuneObservation,
+        candidate: CandidateAction,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        if self.config.mode != AutotuneMode::ApplyLowRisk {
+            return Ok(());
+        }
+
+        if candidate.safety_class() != SafetyClass::ReversibleLowRisk {
+            anyhow::bail!(
+                "live apply-low-risk rejected non-low-risk candidate {} safety={:?}",
+                candidate.profile_name(),
+                candidate.safety_class()
+            );
+        }
+
+        let baseline_score = window_score_from_observation(observation);
+        validate_window_score_for_apply("baseline", &baseline_score)?;
+
+        let experiment_id = ExperimentId::new(format!(
+            "live-low-risk:{}:{}",
+            candidate.profile_name(),
+            observation.now_unix_nanos
+        ));
+        let action_id = candidate.action_id().0;
+        let journal_path = default_controller_journal_path();
+
+        write_controller_journal_applying(&journal_path, experiment_id.as_str(), &action_id)?;
+        let applied = apply_candidate_with_audit(candidate.clone())?;
+        write_controller_journal_applied(
+            &journal_path,
+            experiment_id.as_str(),
+            &action_id,
+            applied.rollback.clone(),
+        )?;
+
+        self.controller.state.record_candidate_attempt(
+            &candidate,
+            observation,
+            None,
+            Some(
+                observation
+                    .now_unix_nanos
+                    .saturating_add(self.controller.policy.minimum_time_between_same_action.as_nanos()),
+            ),
+        );
+
+        self.controller.state.phase = ControllerPhase::Measuring;
+        self.controller.state.active_experiment = Some(ControllerActiveExperiment {
+            experiment_id: experiment_id.clone(),
+            candidate: candidate.clone(),
+            baseline_score_total: baseline_score.score.total,
+        });
+
+        self.live_low_risk_experiment = Some(LiveLowRiskExperiment {
+            experiment_id,
+            candidate,
+            baseline_score,
+            applied_unix_nanos: observation.now_unix_nanos,
+            measure_until_unix_nanos: observation.now_unix_nanos.saturating_add(
+                Duration::from_secs(self.config.candidate_window_seconds).as_nanos(),
+            ),
+            rollback: applied.rollback,
+        });
+
+        self.controller.window.clear();
+
+        log::info!("autotune_live_low_risk_started reason={reason}");
+
+        Ok(())
+    }
+
+    fn keep_live_experiment(
+        &mut self,
+        observation: &AutotuneObservation,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        let Some(experiment) = self.live_low_risk_experiment.take() else {
+            return Ok(());
+        };
+
+        let candidate_score = window_score_from_observation(observation);
+        validate_window_score_for_apply("candidate", &candidate_score)?;
+
+        let result = compare_experiment(crate::autotune::comparison::ExperimentComparisonInput {
+            baseline: &experiment.baseline_score,
+            candidate: &candidate_score,
+            data_quality: experiment_data_quality(&observation.data_quality),
+            target_disappeared: !observation.target_present,
+        });
+
+        match result {
+            ExperimentResult::Improved { .. } => {
+                let kept = KeptCandidateState::new(
+                    experiment.experiment_id.clone(),
+                    experiment.candidate.clone(),
+                    experiment.baseline_score.clone(),
+                    candidate_score.clone(),
+                    experiment.rollback.clone(),
+                    observation.now_unix_nanos,
+                    reason.to_owned(),
+                );
+
+                self.controller
+                    .active_profile_state
+                    .record_kept_candidate(kept, result.clone());
+
+                self.controller.state.record_candidate_result(
+                    &experiment.candidate,
+                    observation,
+                    None,
+                    CandidateMemoryResult::Kept,
+                    Some(experiment.baseline_score.score.total),
+                    Some(candidate_score.score.total),
+                    None,
+                    Some(
+                        observation
+                            .now_unix_nanos
+                            .saturating_add(self.controller.policy.cooldown_after_keep.as_nanos()),
+                    ),
+                );
+
+                self.controller
+                    .state
+                    .enter_cooldown_after_keep(&self.controller.policy, observation.now_unix_nanos);
+            }
+            other => {
+                self.live_low_risk_experiment = Some(experiment);
+                self.rollback_live_experiment(
+                    observation.now_unix_nanos,
+                    &format!("candidate was not improved at keep point: {other:?}"),
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn rollback_live_experiment(
+        &mut self,
+        now_unix_nanos: u128,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        let Some(experiment) = self.live_low_risk_experiment.take() else {
+            return Ok(());
+        };
+
+        let (_, action) = action_from_candidate(experiment.candidate.clone())?;
+        action.rollback(&experiment.rollback)?;
+
+        write_controller_journal_clean(&default_controller_journal_path())?;
+
+        self.controller.state.record_candidate_result(
+            &experiment.candidate,
+            &self.last_observation,
+            None,
+            CandidateMemoryResult::Reverted,
+            Some(experiment.baseline_score.score.total),
+            Some(self.last_observation.score.total),
+            Some(reason.to_owned()),
+            Some(now_unix_nanos.saturating_add(
+                self.controller.policy.cooldown_after_revert.as_nanos(),
+            )),
+        );
+
+        self.controller
+            .state
+            .enter_cooldown_after_revert(&self.controller.policy, now_unix_nanos);
+
+        Ok(())
     }
 
     fn stream_entry_from_decision(
@@ -373,7 +736,7 @@ impl AutotuneRuntime {
     ) -> AutotuneDecisionStreamEntry {
         AutotuneDecisionStreamEntry {
             unix_nanos: observation.now_unix_nanos,
-            phase: format!("{:?}", self.state.phase),
+            phase: format!("{:?}", self.controller.state.phase),
             mode: format!("{:?}", self.config.mode),
             focus_kind: observation.focus_kind.map(|kind| format!("{kind:?}")),
             focus_confidence: observation.focus_confidence,
@@ -440,7 +803,7 @@ impl AutotuneRuntime {
 
         let history = AutotuneHistoryEvent::new(
             self.config.controller_id.clone(),
-            history_phase(self.state.phase),
+            history_phase(self.controller.state.phase),
             history_mode(self.config.mode),
             target,
             history_situation(observation.primary_situation),
@@ -541,6 +904,132 @@ pub async fn run_autotune_controller_session(
     })
 }
 
+fn select_best_candidate_for_situation(
+    candidates: &[CandidateAction],
+    records: &[CandidateDryRunRecord],
+    observation: &AutotuneObservation,
+    max_safety_class: SafetyClass,
+    state: &ControllerRuntimeState,
+) -> Option<CandidateAction> {
+    let mut ranked = candidates
+        .iter()
+        .filter_map(|candidate| {
+            let record = records
+                .iter()
+                .find(|record| record.candidate_name == candidate.profile_name())?;
+
+            if !record.eligible || record.safety_class > max_safety_class {
+                return None;
+            }
+
+            if state
+                .candidate_memory
+                .cooldown_remaining_for_action(&candidate.action_id(), observation.now_unix_nanos)
+                .is_some()
+            {
+                return None;
+            }
+
+            let rank = candidate_situation_rank(candidate.profile_name(), observation.primary_situation)?;
+            Some((rank, candidate.clone()))
+        })
+        .collect::<Vec<_>>();
+
+    ranked.sort_by_key(|(rank, candidate)| (*rank, candidate.profile_name().to_owned()));
+    ranked.into_iter().map(|(_, candidate)| candidate).next()
+}
+
+fn candidate_situation_rank(profile_name: &str, situation: SituationKind) -> Option<u8> {
+    let name = profile_name.to_ascii_lowercase();
+
+    match situation {
+        SituationKind::GameCpuSchedulerPressure | SituationKind::GameFocused => {
+            if name.contains("game-isolate-render") {
+                Some(0)
+            } else if name.contains("avoid-smt-contention") {
+                Some(1)
+            } else if name.contains("wine-server-dedicated") {
+                Some(2)
+            } else if name.contains("helper-spread") {
+                Some(3)
+            } else if name.contains("game") || name.contains("wine") || name.contains("helper") {
+                Some(10)
+            } else {
+                None
+            }
+        }
+        SituationKind::CompositorPressure => {
+            if name.contains("game-compositor-separate") {
+                Some(0)
+            } else if name.contains("compositor") {
+                Some(1)
+            } else {
+                None
+            }
+        }
+        SituationKind::CpuPressure => {
+            if name.contains("avoid-smt-contention") {
+                Some(0)
+            } else if name.contains("helper-spread") {
+                Some(1)
+            } else {
+                None
+            }
+        }
+        SituationKind::GameGpuBound
+        | SituationKind::ThermalOrPowerLimit
+        | SituationKind::IoPressure
+        | SituationKind::IrqPressure
+        | SituationKind::Idle
+        | SituationKind::Unknown => None,
+        SituationKind::CompileLoad
+        | SituationKind::CompileCpuBound
+        | SituationKind::CompileLinkerPressure
+        | SituationKind::BrowserFocused
+        | SituationKind::BrowserCpuPressure
+        | SituationKind::BrowserGpuVideo
+        | SituationKind::BrowserIoPressure
+        | SituationKind::MediaPlayback
+        | SituationKind::Recording
+        | SituationKind::VirtualMachineLoad => None,
+    }
+}
+
+fn window_score_from_observation(observation: &AutotuneObservation) -> WindowScore {
+    WindowScore {
+        started_unix_nanos: observation.now_unix_nanos,
+        finished_unix_nanos: observation.now_unix_nanos,
+        interval_count: observation.interval_count,
+        scored_samples: observation.scored_samples,
+        scored_task_count: observation.scored_task_count,
+        score: observation.score.clone(),
+    }
+}
+
+fn validate_window_score_for_apply(label: &str, score: &WindowScore) -> anyhow::Result<()> {
+    if score.interval_count == 0 {
+        anyhow::bail!("{label} window has zero intervals");
+    }
+
+    if score.scored_samples == 0 {
+        anyhow::bail!("{label} window has zero scored samples");
+    }
+
+    if score.scored_task_count == 0 {
+        anyhow::bail!("{label} window has zero scored tasks");
+    }
+
+    Ok(())
+}
+
+fn experiment_data_quality(quality: &OnlineDataQuality) -> ExperimentDataQuality {
+    match quality {
+        OnlineDataQuality::High => ExperimentDataQuality::High,
+        OnlineDataQuality::Medium { .. } => ExperimentDataQuality::Medium,
+        OnlineDataQuality::Low { .. } => ExperimentDataQuality::Low,
+    }
+}
+
 fn stutter_score_from_runtime_window_score(score: &RuntimeWindowScore) -> StutterScore {
     StutterScore {
         total: score.score_total,
@@ -571,16 +1060,12 @@ fn decision_reason(decision: &AutotuneDecision) -> String {
 fn decision_label(decision: &AutotuneDecision) -> String {
     match decision {
         AutotuneDecision::Noop { .. } => "noop".to_owned(),
-        AutotuneDecision::Suggest { .. } => "suggest".to_owned(),
-        AutotuneDecision::StartExperiment { .. } => {
-            "start_experiment_blocked_in_observe_runtime".to_owned()
-        }
-        AutotuneDecision::KeepCurrent { .. } => {
-            "keep_current_blocked_in_observe_runtime".to_owned()
-        }
-        AutotuneDecision::Revert { .. } => "revert_blocked_in_observe_runtime".to_owned(),
-        AutotuneDecision::EnterCooldown { .. } => "cooldown".to_owned(),
-        AutotuneDecision::Fault { .. } => "fault".to_owned(),
+        AutotuneDecision::Suggest { .. } => "suggested".to_owned(),
+        AutotuneDecision::StartExperiment { .. } => "candidate_started".to_owned(),
+        AutotuneDecision::KeepCurrent { .. } => "candidate_kept".to_owned(),
+        AutotuneDecision::Revert { .. } => "candidate_reverted".to_owned(),
+        AutotuneDecision::EnterCooldown { .. } => "cooldown_entered".to_owned(),
+        AutotuneDecision::Fault { .. } => "faulted".to_owned(),
     }
 }
 
