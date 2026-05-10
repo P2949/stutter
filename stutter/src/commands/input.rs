@@ -1,0 +1,253 @@
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+
+use crate::{
+    autotune,
+    cli::{Config, RulesCommand},
+    doctor::DoctorInput,
+    process_tree::TaskClass,
+};
+
+#[derive(Debug)]
+pub struct MonitorCommandInput {
+    pub config: Arc<Config>,
+}
+
+#[derive(Debug)]
+pub struct BenchCommandInput {
+    pub config: Arc<Config>,
+    pub role: String,
+    pub run_name: String,
+}
+
+#[derive(Debug)]
+pub struct RestoreCommandInput {
+    pub dry_run: bool,
+}
+
+#[derive(Debug)]
+pub struct ApplyProfileCommandInput {
+    pub tree_pid: u32,
+    pub profile: PathBuf,
+    pub force: bool,
+    pub dry_run: bool,
+    pub allow_medium_risk: bool,
+    pub watch: bool,
+    pub keep_applied: bool,
+    pub refresh_ms: u64,
+    pub enforce: bool,
+}
+
+#[derive(Debug)]
+pub struct InspectTreeCommandInput {
+    pub tree_pid: u32,
+}
+
+#[derive(Debug)]
+pub struct SummaryCommandInput {
+    pub path: PathBuf,
+    pub json: bool,
+    pub top: usize,
+    pub filter_class: Option<TaskClass>,
+}
+
+#[derive(Debug)]
+pub struct ValidateCommandInput {
+    pub path: PathBuf,
+    pub json: bool,
+    pub strict: bool,
+}
+
+#[derive(Debug)]
+pub struct ReportCommandInput {
+    pub path: Option<PathBuf>,
+    pub json: bool,
+    pub analysis_json: bool,
+    pub json_summary: bool,
+    pub html: Option<PathBuf>,
+    pub top: usize,
+    pub cluster_window_ms: u64,
+    pub batch: Option<PathBuf>,
+    pub diff: Option<PathBuf>,
+    pub filter_class: Option<TaskClass>,
+    pub flamegraph: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct TuneCommandInput {
+    pub tree_pid: u32,
+    pub profiles: PathBuf,
+    pub epoch_seconds: u64,
+    pub warmup_seconds: u64,
+    pub runs: u32,
+    pub keep_best: bool,
+    pub baseline_profile: Option<String>,
+    pub out_dir: Option<PathBuf>,
+    pub mangohud_log: Option<PathBuf>,
+    pub enforce: bool,
+    pub hwmon: bool,
+}
+
+#[derive(Debug)]
+pub struct RecommendCommandInput {
+    pub baseline: PathBuf,
+    pub tune: PathBuf,
+    pub json: bool,
+    pub markdown: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct CheckCommandInput {
+    pub baseline: PathBuf,
+    pub current: PathBuf,
+    pub max_regression_p99_ms: Option<f64>,
+    pub max_max_regression_ms: Option<f64>,
+    pub json: bool,
+    pub top: usize,
+    pub filter_class: Option<TaskClass>,
+}
+
+#[derive(Debug)]
+pub struct AutotuneGenerateProfilesCommandInput {
+    pub watch_process: Option<String>,
+    pub out: PathBuf,
+    pub allow_cpus: Option<String>,
+    pub deny_cpus: Option<String>,
+    pub min_render_cpus: usize,
+    pub min_game_cpus: usize,
+    pub min_compositor_cpus: usize,
+    pub min_background_cpus: usize,
+}
+
+#[derive(Debug)]
+pub struct AutotuneCommandInput {
+    pub input: autotune::AutotuneCommandInput,
+}
+
+#[derive(Debug)]
+pub struct AutotuneStatusCommandInput {
+    pub json: bool,
+}
+
+#[derive(Debug)]
+pub struct AutotuneReplayHistoryCommandInput {
+    pub history: PathBuf,
+}
+
+#[derive(Debug)]
+pub struct AutotuneRestoreCommandInput {
+    pub journal: Option<PathBuf>,
+    pub audit: Option<PathBuf>,
+    pub history: Option<PathBuf>,
+    pub dry_run: bool,
+}
+
+#[derive(Debug)]
+pub struct AutotuneReplayCommandInput {
+    pub run: PathBuf,
+    pub config: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct AuditCommandInput {
+    pub path: Option<PathBuf>,
+    pub tail: usize,
+    pub json: bool,
+}
+
+#[derive(Debug)]
+pub struct AdvisorCommandInput {
+    pub run: Option<PathBuf>,
+    pub profiles: Option<PathBuf>,
+    pub json: bool,
+    pub watch_runs: bool,
+    pub runs_dir: Option<PathBuf>,
+    pub poll_seconds: u64,
+    pub once: bool,
+}
+
+#[derive(Debug)]
+pub struct DoctorCommandInput {
+    pub input: DoctorInput,
+}
+
+#[derive(Debug)]
+pub struct ProbesCommandInput {
+    pub json: bool,
+}
+
+#[derive(Debug)]
+pub struct ProfileTemplateCommandInput {
+    pub topology: bool,
+}
+
+#[derive(Debug)]
+pub struct InspectIrqsCommandInput {
+    pub json: bool,
+    pub filter: Vec<String>,
+    pub top: usize,
+}
+
+#[derive(Debug)]
+pub struct AgentCommandInput {
+    pub bind: SocketAddr,
+    pub runs_dir: Option<PathBuf>,
+    pub allow_unsafe_bind: bool,
+    pub bearer_token_env: String,
+    pub bearer_token_file: Option<PathBuf>,
+    pub max_duration_seconds: u64,
+    pub max_targets: usize,
+    pub max_concurrent_recordings: usize,
+}
+
+#[derive(Debug)]
+pub struct CompletionsCommandInput {
+    pub shell: clap_complete::Shell,
+}
+
+#[derive(Debug)]
+pub struct ManCommandInput {
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct RulesCommandInput {
+    pub command: RulesCommand,
+}
+
+#[derive(Debug)]
+pub struct ScenarioCreateCommandInput {
+    pub name: String,
+    pub force: bool,
+    pub watch_process: Option<String>,
+    pub duration: u64,
+    pub preset: String,
+    pub mangohud_log: Option<PathBuf>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct ScenarioRunCommandInput {
+    pub name: String,
+    pub role: String,
+    pub dry_run: bool,
+    pub out_dir: Option<PathBuf>,
+    pub mangohud_log_override: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct ScenarioCompareCommandInput {
+    pub name: String,
+    pub baseline: Option<PathBuf>,
+    pub current: Option<PathBuf>,
+    pub top: usize,
+    pub json_summary: bool,
+    pub validate: bool,
+}
+
+#[derive(Debug)]
+pub struct ScenarioPathCommandInput {
+    pub name: String,
+}
+
+#[derive(Debug)]
+pub struct ScenarioListCommandInput;
