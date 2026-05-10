@@ -396,7 +396,7 @@ mod tests {
         let err = autotune_command(input).await.unwrap_err().to_string();
         assert_eq!(
             err,
-            "apply-low-risk requires exactly one target selector; pass --tree-pid or --watch-process"
+            "autotune requires --tree-pid, --watch-process, or --auto-focus"
         );
     }
 

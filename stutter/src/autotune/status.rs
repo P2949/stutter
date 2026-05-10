@@ -96,7 +96,7 @@ pub fn status_from_history_events(
         last_decision: format_last_decision(last),
         rollback_available: rollback_available_from_events(events),
         last_rollback_path: last_rollback_path_from_events(events),
-        cooldown_remaining_seconds: None,
+        cooldown_remaining_seconds: cooldown_remaining_seconds_from_events(events),
         data_quality: Some(last.observation_summary.data_quality.clone()),
         last_fault: last_fault_from_events(events),
         manual_restore_command: "stutter autotune restore".to_owned(),
@@ -139,6 +139,43 @@ pub fn render_autotune_status_text(status: &AutotuneStatus) -> String {
     )
 }
 
+fn cooldown_remaining_seconds_from_events(events: &[AutotuneHistoryEvent]) -> Option<u64> {
+    let now = crate::audit::unix_nanos_now();
+
+    for event in events.iter().rev() {
+        let Some(cooldown_until) =
+            cooldown_until_unix_nanos_from_policy(&event.decision.rollback_policy)
+        else {
+            continue;
+        };
+
+        if now >= cooldown_until {
+            return Some(0);
+        }
+
+        let remaining_nanos = cooldown_until.saturating_sub(now);
+        let remaining_seconds = remaining_nanos.div_ceil(1_000_000_000);
+        return Some(remaining_seconds.min(u64::MAX as u128) as u64);
+    }
+
+    None
+}
+
+fn cooldown_until_unix_nanos_from_policy(policy: &str) -> Option<u128> {
+    for part in policy.split(';') {
+        let trimmed = part.trim();
+        let Some(value) = trimmed.strip_prefix("cooldown_until_unix_nanos=") else {
+            continue;
+        };
+
+        if let Ok(parsed) = value.parse::<u128>() {
+            return Some(parsed);
+        }
+    }
+
+    None
+}
+
 fn status_target_from_identity(target: &TargetIdentity) -> StatusTarget {
     StatusTarget {
         comm: target.process_comm.clone(),
@@ -148,16 +185,16 @@ fn status_target_from_identity(target: &TargetIdentity) -> StatusTarget {
 
 fn active_profile_from_events(events: &[AutotuneHistoryEvent]) -> Option<String> {
     for event in events.iter().rev() {
-        let decision = event.decision.decision.as_str();
-        if matches!(
-            decision,
-            "KeepCurrent" | "Kept" | "Keep" | "Improved" | "Improvement" | "candidate_kept"
-        ) && let Some(candidate_name) = event.decision.candidate_name.as_ref()
+        let decision = normalized_decision(&event.decision.decision);
+
+        if event.rollback_performed || decision == "candidate_reverted" || decision == "restored" {
+            return None;
+        }
+
+        if decision == "candidate_kept"
+            && let Some(candidate_name) = event.decision.candidate_name.as_ref()
         {
             return Some(candidate_name.clone());
-        }
-        if event.rollback_performed {
-            return None;
         }
     }
 
@@ -166,20 +203,22 @@ fn active_profile_from_events(events: &[AutotuneHistoryEvent]) -> Option<String>
 
 fn active_candidate_from_events(events: &[AutotuneHistoryEvent]) -> Option<String> {
     for event in events.iter().rev() {
-        if matches!(event.phase, ControllerPhase::Measuring)
-            && let Some(candidate_name) = event.decision.candidate_name.as_ref()
-        {
-            return Some(candidate_name.clone());
-        }
+        let decision = normalized_decision(&event.decision.decision);
 
-        if event.decision.decision == "candidate_started"
-            && let Some(candidate_name) = event.decision.candidate_name.as_ref()
+        if matches!(
+            decision.as_str(),
+            "candidate_reverted" | "candidate_kept" | "restored" | "cooldown_entered"
+        ) || event.rollback_performed
         {
-            return Some(candidate_name.clone());
-        }
-
-        if matches!(event.phase, ControllerPhase::Cooldown) || event.rollback_performed {
             return None;
+        }
+
+        if matches!(
+            decision.as_str(),
+            "candidate_started" | "candidate_applied" | "suggested"
+        ) && let Some(candidate_name) = event.decision.candidate_name.as_ref()
+        {
+            return Some(candidate_name.clone());
         }
     }
 
@@ -188,11 +227,19 @@ fn active_candidate_from_events(events: &[AutotuneHistoryEvent]) -> Option<Strin
 
 fn rollback_available_from_events(events: &[AutotuneHistoryEvent]) -> bool {
     for event in events.iter().rev() {
-        if event.rollback_performed {
+        let decision = normalized_decision(&event.decision.decision);
+
+        if event.rollback_performed || decision == "candidate_reverted" || decision == "restored" {
             return false;
         }
 
-        if event.action_id.is_some() && event.decision.rollback_policy.contains("rollback") {
+        if event.action_id.is_some()
+            && matches!(
+                decision.as_str(),
+                "candidate_applied" | "candidate_kept" | "cooldown_entered"
+            )
+            && event.decision.rollback_policy.contains("rollback")
+        {
             return true;
         }
     }
@@ -202,7 +249,9 @@ fn rollback_available_from_events(events: &[AutotuneHistoryEvent]) -> bool {
 
 fn last_rollback_path_from_events(events: &[AutotuneHistoryEvent]) -> Option<String> {
     for event in events.iter().rev() {
-        if event.rollback_performed {
+        let decision = normalized_decision(&event.decision.decision);
+
+        if event.rollback_performed || decision == "candidate_reverted" || decision == "restored" {
             return None;
         }
 
@@ -216,7 +265,13 @@ fn last_rollback_path_from_events(events: &[AutotuneHistoryEvent]) -> Option<Str
 
 fn last_fault_from_events(events: &[AutotuneHistoryEvent]) -> Option<String> {
     for event in events.iter().rev() {
-        if matches!(event.phase, ControllerPhase::Faulted) {
+        let decision = normalized_decision(&event.decision.decision);
+
+        if decision == "restored" {
+            return None;
+        }
+
+        if matches!(event.phase, ControllerPhase::Faulted) || decision == "faulted" {
             return Some(event.reason.clone());
         }
     }
@@ -237,28 +292,44 @@ fn default_restore_path_display() -> String {
 }
 
 fn format_last_decision(event: &AutotuneHistoryEvent) -> String {
+    let decision = normalized_decision(&event.decision.decision);
+
     if let Some(improvement) = improvement_percent(event)
-        && is_keep_decision(&event.decision.decision)
+        && decision == "candidate_kept"
     {
-        return format!("kept candidate, improvement={:.1}%", improvement);
+        return format!("candidate_kept, improvement={:.1}%", improvement);
     }
 
     if event.rollback_performed {
-        return format!(
-            "{}, rollback performed",
-            humanize_decision(&event.decision.decision)
-        );
+        return format!("{decision}, rollback performed");
     }
 
     if !event.reason.trim().is_empty() {
-        return event.reason.clone();
+        return format!("{decision}: {}", event.reason);
     }
 
-    humanize_decision(&event.decision.decision)
+    decision
 }
 
-fn is_keep_decision(decision: &str) -> bool {
-    matches!(decision, "KeepCurrent" | "Kept" | "Keep" | "Improved")
+fn normalized_decision(decision: &str) -> String {
+    match decision {
+        "Noop" | "noop" | "observed" => "observed".to_owned(),
+        "Suggest" | "suggest" | "suggested" => "suggested".to_owned(),
+        "StartExperiment" | "candidate_started" => "candidate_started".to_owned(),
+        "candidate_applied" => "candidate_applied".to_owned(),
+        "KeepCurrent" | "Kept" | "Keep" | "Improved" | "candidate_kept" => {
+            "candidate_kept".to_owned()
+        }
+        "Revert" | "Reverted" | "candidate_reverted" => "candidate_reverted".to_owned(),
+        "EnterCooldown" | "Cooldown" | "cooldown" | "cooldown_entered" => {
+            "cooldown_entered".to_owned()
+        }
+        "Fault" | "Faulted" | "EmergencyRestoreFault" | "CrashRecoveryFault" | "faulted" => {
+            "faulted".to_owned()
+        }
+        "EmergencyRestore" | "CrashRecoveryRollback" | "restored" => "restored".to_owned(),
+        other => humanize_decision(other).replace(' ', "_"),
+    }
 }
 
 fn improvement_percent(event: &AutotuneHistoryEvent) -> Option<f64> {
@@ -401,7 +472,7 @@ mod tests {
             status.active_profile.as_deref(),
             Some("game-main-suggested")
         );
-        assert_eq!(status.last_decision, "kept candidate, improvement=18.2%");
+        assert_eq!(status.last_decision, "candidate_kept, improvement=18.2%");
         assert!(status.rollback_available);
         assert!(status.last_rollback_path.is_some());
 
@@ -410,7 +481,7 @@ mod tests {
         assert!(rendered.contains("mode: ApplyLowRisk"));
         assert!(rendered.contains("target: KingdomCome.exe pid=1234"));
         assert!(rendered.contains("active_profile: game-main-suggested"));
-        assert!(rendered.contains("last_decision: kept candidate, improvement=18.2%"));
+        assert!(rendered.contains("last_decision: candidate_kept, improvement=18.2%"));
         assert!(rendered.contains("rollback_available: yes"));
         assert!(rendered.contains("last_rollback_path: "));
     }
@@ -457,7 +528,70 @@ mod tests {
         assert_eq!(status.active_profile, None);
         assert!(!status.rollback_available);
         assert_eq!(status.last_rollback_path, None);
-        assert_eq!(status.last_decision, "revert, rollback performed");
+        assert_eq!(
+            status.last_decision,
+            "candidate_reverted, rollback performed"
+        );
+    }
+
+    #[test]
+    fn status_reports_cooldown_remaining_from_history_policy_metadata() {
+        let mut event = kept_event();
+        event.decision.decision = "cooldown_entered".to_owned();
+        event.decision.rollback_policy = format!(
+            "rollback-on-restore;cooldown_until_unix_nanos={};manual_restore_command=stutter_autotune_restore",
+            crate::audit::unix_nanos_now().saturating_add(60_000_000_000)
+        );
+
+        let status = status_from_history_events(PathBuf::from("/tmp/history.jsonl"), &[event]);
+
+        assert!(status.cooldown_remaining_seconds.unwrap_or(0) > 0);
+        assert!(status.cooldown_remaining_seconds.unwrap_or(0) <= 60);
+    }
+
+    #[test]
+    fn restored_event_clears_rollback_active_profile_and_last_fault() {
+        let mut faulted = kept_event();
+        faulted.unix_nanos = 2;
+        faulted.phase = ControllerPhase::Faulted;
+        faulted.decision.decision = "faulted".to_owned();
+        faulted.reason = "rollback failed".to_owned();
+
+        let mut restored = kept_event();
+        restored.unix_nanos = 3;
+        restored.decision.decision = "restored".to_owned();
+        restored.rollback_performed = true;
+        restored.reason = "manual restore succeeded".to_owned();
+
+        let status = status_from_history_events(
+            PathBuf::from("/tmp/history.jsonl"),
+            &[kept_event(), faulted, restored],
+        );
+
+        assert_eq!(status.active_profile, None);
+        assert_eq!(status.active_candidate, None);
+        assert!(!status.rollback_available);
+        assert_eq!(status.last_rollback_path, None);
+        assert_eq!(status.last_fault, None);
+        assert_eq!(status.last_decision, "restored, rollback performed");
+    }
+
+    #[test]
+    fn candidate_applied_event_sets_active_candidate_and_rollback_available() {
+        let mut event = kept_event();
+        event.phase = ControllerPhase::Measuring;
+        event.decision.decision = "candidate_applied".to_owned();
+        event.decision.rollback_policy =
+            "rollback-on-restore;manual_restore_command=stutter_autotune_restore".to_owned();
+
+        let status = status_from_history_events(PathBuf::from("/tmp/history.jsonl"), &[event]);
+
+        assert_eq!(
+            status.active_candidate.as_deref(),
+            Some("game-main-suggested")
+        );
+        assert!(status.rollback_available);
+        assert!(status.last_rollback_path.is_some());
     }
 
     #[test]
