@@ -75,6 +75,30 @@ follows the selected focus group, writes decision/history/status output, and
 does not apply affinity, nice, ionice, scheduler-class, cgroup, IRQ, GPU, or
 system-wide changes.
 
+The autotune controller history and status UX is intentionally explicit. The
+JSONL history at `~/.local/state/stutter/autotune/history.jsonl` records these
+lifecycle decisions:
+
+```text
+observed
+suggested
+candidate_started
+candidate_applied
+candidate_kept
+candidate_reverted
+cooldown_entered
+faulted
+restored
+```
+
+`stutter autotune-status --json` and `stutter autotune-status` report the
+current controller phase, mode, focus group, target root, current score,
+active profile, active candidate, last decision, rollback availability,
+cooldown remaining, data quality, last fault, and manual restore command.
+`stutter autotune restore --dry-run` previews the active rollback path, and
+`stutter autotune restore` writes a normalized `restored` history event after
+successful emergency restore.
+
 Optional environment overrides for `/etc/stutter/autotune-observe.env`:
 
 ```text
