@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::remote::AgentAutotuneLimits;
+use crate::{
+    cli::{FocusSource, ForegroundSourceArg},
+    remote::AgentAutotuneLimits,
+};
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct UserConfigFile {
@@ -173,6 +176,31 @@ pub fn load_user_config() -> Result<Option<UserConfigFile>> {
     Ok(Some(config))
 }
 
+pub fn parse_focus_source_value(value: &str) -> Result<FocusSource> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "heuristic" => Ok(FocusSource::Heuristic),
+        "foreground" => Ok(FocusSource::Foreground),
+        "hybrid" => Ok(FocusSource::Hybrid),
+        other => anyhow::bail!(
+            "invalid focus_source {:?}; valid values are heuristic, foreground, hybrid",
+            other
+        ),
+    }
+}
+
+pub fn parse_foreground_source_value(value: &str) -> Result<ForegroundSourceArg> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(ForegroundSourceArg::Auto),
+        "sway" => Ok(ForegroundSourceArg::Sway),
+        "hyprland" => Ok(ForegroundSourceArg::Hyprland),
+        "x11" => Ok(ForegroundSourceArg::X11),
+        other => anyhow::bail!(
+            "invalid foreground_source {:?}; valid values are auto, sway, hyprland, x11",
+            other
+        ),
+    }
+}
+
 pub fn parse_user_config_toml(contents: &str) -> Result<UserConfigFile> {
     Ok(toml::from_str::<UserConfigFile>(contents)?)
 }
@@ -226,6 +254,44 @@ mod tests {
         assert_eq!(config.hwmon, Some(true));
         assert_eq!(config.cpu_freq, Some(true));
         assert_eq!(config.include_comm.unwrap(), vec!["Game", "Render"]);
+    }
+
+    #[test]
+    fn test_parse_focus_source_value() {
+        assert_eq!(
+            parse_focus_source_value("heuristic").unwrap(),
+            FocusSource::Heuristic
+        );
+        assert_eq!(
+            parse_focus_source_value("foreground").unwrap(),
+            FocusSource::Foreground
+        );
+        assert_eq!(
+            parse_focus_source_value("hybrid").unwrap(),
+            FocusSource::Hybrid
+        );
+        assert!(parse_focus_source_value("invalid").is_err());
+    }
+
+    #[test]
+    fn test_parse_foreground_source_value() {
+        assert_eq!(
+            parse_foreground_source_value("auto").unwrap(),
+            ForegroundSourceArg::Auto
+        );
+        assert_eq!(
+            parse_foreground_source_value("sway").unwrap(),
+            ForegroundSourceArg::Sway
+        );
+        assert_eq!(
+            parse_foreground_source_value("hyprland").unwrap(),
+            ForegroundSourceArg::Hyprland
+        );
+        assert_eq!(
+            parse_foreground_source_value("x11").unwrap(),
+            ForegroundSourceArg::X11
+        );
+        assert!(parse_foreground_source_value("invalid").is_err());
     }
 
     #[test]

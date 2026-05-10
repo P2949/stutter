@@ -333,6 +333,8 @@ pub fn prepare_scenario_run(input: ScenarioRunInput) -> Result<PreparedScenarioR
     let irq_latency = scenario.irq_latency;
 
     let mut config = Config {
+        monitor_config_layer: None,
+        preset: Some(scenario.preset.clone()),
         target_pids: scenario.pid.clone(),
         tree_pids: scenario.tree_pid.map(|p| vec![p]).unwrap_or_default(),
         summary_period_ms: scenario.summary_ms.unwrap_or(1000),
