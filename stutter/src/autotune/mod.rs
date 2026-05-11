@@ -262,7 +262,7 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
         "observe" | "suggest" | "apply-low-risk" => {}
         _ => {
             anyhow::bail!(
-                "mode '{}' is not supported; use --mode observe, --mode suggest, or --mode apply-low-risk",
+                "mode '{}' is not supported; use --mode observe, --mode suggest, or --mode apply-low-risk. apply-low-risk currently applies CPU-affinity candidates only",
                 input.mode
             )
         }
@@ -305,7 +305,7 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
             .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
             other => {
                 anyhow::bail!(
-                    "mode '{}' is not supported by the live autotune runtime",
+                    "mode '{}' is not supported by the live autotune runtime; apply-low-risk currently applies CPU-affinity candidates only",
                     other
                 )
             }

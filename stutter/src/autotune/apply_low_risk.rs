@@ -73,7 +73,7 @@ impl CpuAffinityCandidateExecutor {
             }),
             #[cfg(test)]
             CandidateAction::Fake { .. } => {
-                anyhow::bail!("apply-low-risk only supports CPU affinity profile actions")
+                anyhow::bail!("apply-low-risk currently supports CPU-affinity profile actions only")
             }
         }
     }
@@ -222,7 +222,7 @@ pub fn action_from_candidate(
         )),
         #[cfg(test)]
         CandidateAction::Fake { .. } => {
-            anyhow::bail!("apply-low-risk only supports CPU affinity profile actions")
+            anyhow::bail!("apply-low-risk currently supports CPU-affinity profile actions only")
         }
     }
 }
@@ -378,14 +378,14 @@ pub fn ensure_low_risk_action_allowed(
 ) -> anyhow::Result<()> {
     if action_kind != "cpu_affinity_profile" {
         anyhow::bail!(
-            "apply-low-risk only supports CPU affinity profile actions; blocked action_kind={}",
+            "apply-low-risk currently supports CPU-affinity profile actions only; blocked action_kind={}",
             action_kind
         );
     }
 
     if *safety_class != SafetyClass::ReversibleLowRisk {
         anyhow::bail!(
-            "apply-low-risk only supports ReversibleLowRisk actions; blocked safety_class={:?}",
+            "apply-low-risk currently supports ReversibleLowRisk CPU-affinity profile actions only; blocked safety_class={:?}",
             safety_class
         );
     }
@@ -1308,7 +1308,9 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("only supports ReversibleLowRisk"));
+        assert!(
+            err.contains("currently supports ReversibleLowRisk CPU-affinity profile actions only")
+        );
         assert_eq!(executor.dry_run_calls, 0);
         assert_eq!(executor.apply_calls, 0);
         assert_eq!(executor.rollback_calls, 0);
@@ -1324,7 +1326,7 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("only supports CPU affinity profile actions"));
+        assert!(err.contains("currently supports CPU-affinity profile actions only"));
         assert_eq!(executor.dry_run_calls, 0);
         assert_eq!(executor.apply_calls, 0);
         assert_eq!(executor.rollback_calls, 0);

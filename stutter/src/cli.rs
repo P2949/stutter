@@ -433,7 +433,11 @@ pub struct AutotuneArgs {
     #[arg(long = "profiles", value_name = "FILE")]
     pub profiles: Option<PathBuf>,
 
-    #[arg(long = "mode", default_value = "observe")]
+    #[arg(
+        long = "mode",
+        default_value = "observe",
+        help = "Autotune mode: observe, suggest, or apply-low-risk. apply-low-risk currently applies CPU-affinity candidates only."
+    )]
     pub mode: String,
 
     #[arg(long = "decision-log", value_name = "PATH")]
