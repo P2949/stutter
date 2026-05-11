@@ -6,6 +6,7 @@ use super::{
     candidate_memory::{
         CandidateContextHashInput, CandidateMemory, CandidateMemoryRecord, CandidateMemoryResult,
     },
+    comparison::DEFAULT_SCORE_COMPARISON_CONFIG,
     decision::{AutotuneDecision, CandidateAction, ExperimentId},
     observation::AutotuneObservation,
     quality::OnlineDataQuality,
@@ -38,8 +39,8 @@ impl ControllerPolicy {
         Self {
             mode,
             max_safety_class,
-            min_improvement_percent: 12.5,
-            max_regression_percent: 7.5,
+            min_improvement_percent: DEFAULT_SCORE_COMPARISON_CONFIG.min_improvement_percent,
+            max_regression_percent: DEFAULT_SCORE_COMPARISON_CONFIG.max_regression_percent,
             cooldown_after_keep: Duration::from_secs(60),
             cooldown_after_revert: Duration::from_secs(120),
             cooldown_after_fault: Duration::from_secs(300),
@@ -557,6 +558,18 @@ mod tests {
             cooldown_until_unix_nanos: None,
             candidate_memory: CandidateMemory::default(),
         }
+    }
+
+    #[test]
+    fn controller_policy_uses_shared_score_comparison_thresholds() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let config = crate::autotune::comparison::DEFAULT_SCORE_COMPARISON_CONFIG;
+
+        assert_eq!(
+            policy.min_improvement_percent,
+            config.min_improvement_percent
+        );
+        assert_eq!(policy.max_regression_percent, config.max_regression_percent);
     }
 
     #[test]
