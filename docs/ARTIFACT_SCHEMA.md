@@ -293,6 +293,12 @@ Important fields:
 - `cause_tags`
 - `primary_cause`
 
+Notes:
+
+- `target_pending_wakeups` and `observed_runnable_depth` are monitored-target
+  diagnostic approximations. They are not literal kernel runqueue depth and
+  must not be interpreted as `rq->nr_running`.
+
 Consistency rules:
 
 - The number of records should match `session.json` field
