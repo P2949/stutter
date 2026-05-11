@@ -197,6 +197,10 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
     if activation_plan.should_attach_program("sched_wakeup_new") {
         attach_tracepoint(&mut ebpf, "sched_wakeup_new", "sched", "sched_wakeup_new")
             .context("eBPF load failed: attach sched_wakeup_new")?;
+    } else {
+        log::warn!(
+            "optional_tracepoint_unavailable tracepoint=sched_wakeup_new coverage=reduced_new_task_wakeups message=\"sched_wakeup remains attached, but wakeups for newly created tasks may have reduced coverage\""
+        );
     }
 
     if activation_plan.should_attach_program("sched_process_exit") {
@@ -1548,6 +1552,7 @@ pub struct TracepointPreflightReport {
     pub sched_wakeup: String,
     pub sched_switch: String,
     pub sched_wakeup_new: String,
+    pub sched_wakeup_new_coverage: String,
     pub sched_migrate_task: String,
     pub cpu_frequency: String,
     pub sched_stat_wait: String,
@@ -1642,6 +1647,9 @@ pub fn tracepoint_preflight(
     let (block_rq, block_io_correlation_basis) =
         block_tracepoint_preflight(events_root, wants_block_io, &mut warnings);
 
+    let sched_wakeup_new_coverage =
+        sched_wakeup_new_coverage_status(&sched_wakeup_new, &mut warnings);
+
     if wants_follow_exec {
         let exec_path = events_root.join("sched/sched_process_exec/format");
         if !exec_path.exists() {
@@ -1656,6 +1664,7 @@ pub fn tracepoint_preflight(
         sched_wakeup,
         sched_switch,
         sched_wakeup_new,
+        sched_wakeup_new_coverage,
         sched_migrate_task,
         cpu_frequency,
         sched_stat_wait,
@@ -1710,6 +1719,61 @@ fn optional_tracepoint_status(
             }
             "mismatch".to_owned()
         }
+    }
+}
+
+fn sched_wakeup_new_coverage_status(
+    sched_wakeup_new_status: &str,
+    warnings: &mut Vec<String>,
+) -> String {
+    match sched_wakeup_new_status {
+        "ok" => "full".to_owned(),
+        "not_requested" => "not_requested".to_owned(),
+        _ => {
+            warnings.push(
+                "optional sched_wakeup_new tracepoint unavailable; sched_wakeup remains required and usable, but wakeups for newly created tasks may have reduced coverage"
+                    .to_owned(),
+            );
+            "reduced-new-task-wakeup-coverage".to_owned()
+        }
+    }
+}
+
+#[cfg(test)]
+mod sched_wakeup_new_coverage_tests {
+    use super::*;
+
+    #[test]
+    fn coverage_is_full_when_sched_wakeup_new_is_available() {
+        let mut warnings = Vec::new();
+
+        let coverage = sched_wakeup_new_coverage_status("ok", &mut warnings);
+
+        assert_eq!(coverage, "full");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn coverage_warns_without_claiming_scheduler_wakeup_is_broken_when_missing() {
+        let mut warnings = Vec::new();
+
+        let coverage = sched_wakeup_new_coverage_status("missing", &mut warnings);
+
+        assert_eq!(coverage, "reduced-new-task-wakeup-coverage");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("sched_wakeup_new"));
+        assert!(warnings[0].contains("sched_wakeup remains required and usable"));
+        assert!(warnings[0].contains("newly created tasks"));
+    }
+
+    #[test]
+    fn coverage_is_not_requested_when_optional_tracepoint_is_not_requested() {
+        let mut warnings = Vec::new();
+
+        let coverage = sched_wakeup_new_coverage_status("not_requested", &mut warnings);
+
+        assert_eq!(coverage, "not_requested");
+        assert!(warnings.is_empty());
     }
 }
 

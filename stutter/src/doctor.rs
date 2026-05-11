@@ -319,6 +319,10 @@ fn tracepoint_check(input: &DoctorInput) -> DoctorCheck {
     details.insert("sched_wakeup".to_owned(), report.sched_wakeup);
     details.insert("sched_switch".to_owned(), report.sched_switch);
     details.insert("sched_wakeup_new".to_owned(), report.sched_wakeup_new);
+    details.insert(
+        "sched_wakeup_new_coverage".to_owned(),
+        report.sched_wakeup_new_coverage,
+    );
     details.insert("sched_migrate_task".to_owned(), report.sched_migrate_task);
     details.insert("cpu_frequency".to_owned(), report.cpu_frequency);
     details.insert("sched_stat_wait".to_owned(), report.sched_stat_wait);
@@ -799,6 +803,37 @@ mod tests {
                 .checks
                 .iter()
                 .any(|c| c.name == "ebpf_runtime_permissions")
+        );
+    }
+
+    #[test]
+    fn doctor_tracepoint_check_reports_sched_wakeup_new_coverage() {
+        let input = DoctorInput {
+            json: false,
+            hwmon: false,
+            hwmon_root: None,
+            hwmon_drm_card: None,
+            hwmon_render_node: None,
+            irq_latency: false,
+            irqs: Vec::new(),
+            block_io: false,
+            faults: false,
+            cpu_perf: false,
+            mangohud_log: None,
+        };
+
+        let report = build_doctor_report(&input);
+        let tracepoint_check = report
+            .checks
+            .iter()
+            .find(|check| check.name == "tracepoint_formats")
+            .expect("tracepoint_formats check should be present");
+
+        assert!(tracepoint_check.details.contains_key("sched_wakeup_new"));
+        assert!(
+            tracepoint_check
+                .details
+                .contains_key("sched_wakeup_new_coverage")
         );
     }
 
