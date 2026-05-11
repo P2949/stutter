@@ -133,8 +133,9 @@ pub fn resolve_cgroup_id_best_effort(_path: &Path) -> anyhow::Result<u64> {
 }
 
 pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf> {
-    raise_memlock_limit();
-    let map_sizing = map_sizing_for_config(config);
+    let memlock_report = raise_memlock_limit();
+    log_memlock_policy_report(&memlock_report);
+    let map_sizing = map_sizing_for_config_after_memlock(config, &memlock_report);
     log::info!(
         "ebpf_map_sizing locked_memory_limit={} available_memory={} events_ringbuf_bytes={} wakeup_data_entries={}",
         format_optional_bytes(map_sizing.locked_memory_limit_bytes),
@@ -528,6 +529,15 @@ pub(crate) struct EbpfMapSizing {
     available_memory_bytes: Option<u64>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MemlockPolicyReport {
+    pub before_limit_bytes: Option<u64>,
+    pub after_limit_bytes: Option<u64>,
+    pub raise_attempted: bool,
+    pub raise_succeeded: bool,
+    pub raise_error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct EbpfMapSizingReport {
     pub locked_memory_limit_bytes: Option<u64>,
@@ -562,8 +572,30 @@ fn wakeup_data_entries_floor_for_max_tasks(max_tasks: usize) -> u32 {
         .min(MAX_WAKEUP_DATA_ENTRIES)
 }
 
+#[allow(dead_code)]
 pub(crate) fn map_sizing_for_config(config: &crate::cli::Config) -> EbpfMapSizing {
-    let mut sizing = dynamic_map_sizing();
+    map_sizing_for_config_from_memory(config, current_memory_snapshot())
+}
+
+fn map_sizing_for_config_after_memlock(
+    config: &crate::cli::Config,
+    memlock_report: &MemlockPolicyReport,
+) -> EbpfMapSizing {
+    map_sizing_for_config_from_memory(
+        config,
+        MemorySnapshot {
+            locked_memory_limit_bytes: memlock_report.after_limit_bytes,
+            available_memory_bytes: available_memory_bytes(),
+            page_size: system_page_size(),
+        },
+    )
+}
+
+fn map_sizing_for_config_from_memory(
+    config: &crate::cli::Config,
+    snapshot: MemorySnapshot,
+) -> EbpfMapSizing {
+    let mut sizing = map_sizing_from_memory(snapshot);
 
     if let Some(kb) = config.ringbuf_size_kb {
         let bytes = u64::from(kb).saturating_mul(1024);
@@ -599,12 +631,15 @@ pub fn ebpf_map_sizing_report() -> EbpfMapSizingReport {
 }
 
 fn dynamic_map_sizing() -> EbpfMapSizing {
-    let snapshot = MemorySnapshot {
+    map_sizing_from_memory(current_memory_snapshot())
+}
+
+fn current_memory_snapshot() -> MemorySnapshot {
+    MemorySnapshot {
         locked_memory_limit_bytes: locked_memory_limit_bytes(),
         available_memory_bytes: available_memory_bytes(),
         page_size: system_page_size(),
-    };
-    map_sizing_from_memory(snapshot)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -676,15 +711,106 @@ fn round_up_to_multiple(value: u64, multiple: u64) -> u64 {
 }
 
 fn locked_memory_limit_bytes() -> Option<u64> {
+    read_memlock_rlimit()
+        .ok()
+        .and_then(|rlim| memlock_limit_bytes_from_rlim(rlim.rlim_cur))
+}
+
+fn memlock_limit_bytes_from_rlim(value: libc::rlim_t) -> Option<u64> {
+    if value == libc::RLIM_INFINITY {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn read_memlock_rlimit() -> std::io::Result<libc::rlimit> {
     let mut rlim = libc::rlimit {
         rlim_cur: 0,
         rlim_max: 0,
     };
+
     let ret = unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut rlim) };
-    if ret != 0 || rlim.rlim_cur == libc::RLIM_INFINITY {
+    if ret == 0 {
+        Ok(rlim)
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+fn raise_memlock_limit() -> MemlockPolicyReport {
+    let before = match read_memlock_rlimit() {
+        Ok(rlim) => rlim,
+        Err(err) => {
+            return MemlockPolicyReport {
+                before_limit_bytes: None,
+                after_limit_bytes: locked_memory_limit_bytes(),
+                raise_attempted: false,
+                raise_succeeded: false,
+                raise_error: Some(format!("failed to read RLIMIT_MEMLOCK before raise: {err}")),
+            };
+        }
+    };
+
+    let before_limit_bytes = memlock_limit_bytes_from_rlim(before.rlim_cur);
+    if before.rlim_cur == libc::RLIM_INFINITY {
+        return MemlockPolicyReport {
+            before_limit_bytes,
+            after_limit_bytes: before_limit_bytes,
+            raise_attempted: false,
+            raise_succeeded: false,
+            raise_error: None,
+        };
+    }
+
+    // Existing policy: try to make memlock unlimited for eBPF loading. If this
+    // fails, continue startup and size maps from the effective post-attempt
+    // limit so low-memlock systems remain conservative instead of aborting here.
+    let unlimited = libc::rlimit {
+        rlim_cur: libc::RLIM_INFINITY,
+        rlim_max: libc::RLIM_INFINITY,
+    };
+    let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &unlimited) };
+    let raise_succeeded = ret == 0;
+    let raise_error = if raise_succeeded {
         None
     } else {
-        Some(rlim.rlim_cur)
+        Some(format!(
+            "failed to raise RLIMIT_MEMLOCK to unlimited: {}",
+            std::io::Error::last_os_error()
+        ))
+    };
+
+    MemlockPolicyReport {
+        before_limit_bytes,
+        after_limit_bytes: locked_memory_limit_bytes(),
+        raise_attempted: true,
+        raise_succeeded,
+        raise_error,
+    }
+}
+
+fn log_memlock_policy_report(report: &MemlockPolicyReport) {
+    let raise_error = report.raise_error.as_deref().unwrap_or("none");
+
+    if report.raise_error.is_some() {
+        log::warn!(
+            "memlock_policy before_limit={} after_limit={} raise_attempted={} raise_succeeded={} raise_error={}",
+            format_optional_bytes(report.before_limit_bytes),
+            format_optional_bytes(report.after_limit_bytes),
+            report.raise_attempted,
+            report.raise_succeeded,
+            raise_error,
+        );
+    } else {
+        log::info!(
+            "memlock_policy before_limit={} after_limit={} raise_attempted={} raise_succeeded={} raise_error={}",
+            format_optional_bytes(report.before_limit_bytes),
+            format_optional_bytes(report.after_limit_bytes),
+            report.raise_attempted,
+            report.raise_succeeded,
+            raise_error,
+        );
     }
 }
 
@@ -765,6 +891,65 @@ mod map_sizing_tests {
         assert_eq!(sizing.wakeup_data_entries, 196_608);
         assert_eq!(sizing.locked_memory_limit_bytes, None);
         assert_eq!(sizing.available_memory_bytes, None);
+    }
+
+    #[test]
+    fn memlock_limit_bytes_treats_rlim_infinity_as_unknown_or_unlimited() {
+        assert_eq!(memlock_limit_bytes_from_rlim(libc::RLIM_INFINITY), None);
+    }
+
+    #[test]
+    fn map_sizing_after_failed_memlock_raise_uses_after_limit() {
+        let report = MemlockPolicyReport {
+            before_limit_bytes: Some(128 * 1024),
+            after_limit_bytes: Some(128 * 1024),
+            raise_attempted: true,
+            raise_succeeded: false,
+            raise_error: Some("operation not permitted".to_owned()),
+        };
+
+        let sizing =
+            map_sizing_from_memory(memory_snapshot(report.after_limit_bytes, Some(1 << 30)));
+
+        assert_eq!(sizing.events_ringbuf_bytes, MIN_EVENTS_RINGBUF_BYTES);
+        assert_eq!(sizing.wakeup_data_entries, MIN_WAKEUP_DATA_ENTRIES);
+        assert_eq!(sizing.locked_memory_limit_bytes, Some(128 * 1024));
+    }
+
+    #[test]
+    fn map_sizing_after_unlimited_memlock_uses_available_memory_budget() {
+        let report = MemlockPolicyReport {
+            before_limit_bytes: None,
+            after_limit_bytes: None,
+            raise_attempted: false,
+            raise_succeeded: false,
+            raise_error: None,
+        };
+
+        let sizing =
+            map_sizing_from_memory(memory_snapshot(report.after_limit_bytes, Some(1 << 30)));
+
+        assert_eq!(sizing.events_ringbuf_bytes, 4 * 1024 * 1024);
+        assert_eq!(sizing.wakeup_data_entries, 196_608);
+        assert_eq!(sizing.locked_memory_limit_bytes, None);
+    }
+
+    #[test]
+    fn map_sizing_after_unknown_memlock_uses_available_memory_budget() {
+        let report = MemlockPolicyReport {
+            before_limit_bytes: None,
+            after_limit_bytes: None,
+            raise_attempted: false,
+            raise_succeeded: false,
+            raise_error: Some("failed to read RLIMIT_MEMLOCK before raise".to_owned()),
+        };
+
+        let sizing =
+            map_sizing_from_memory(memory_snapshot(report.after_limit_bytes, Some(1 << 30)));
+
+        assert_eq!(sizing.events_ringbuf_bytes, 4 * 1024 * 1024);
+        assert_eq!(sizing.wakeup_data_entries, 196_608);
+        assert_eq!(sizing.locked_memory_limit_bytes, None);
     }
 
     #[test]
@@ -1807,18 +1992,6 @@ fn tracepoint_layout_hint(tracepoint_name: &str, field_name: &str) -> &'static s
         " Hint: `sched_switch` layout differs from stutter's eBPF read offsets. A common cause is a different `prev_state` field type/size, which shifts later fields such as `next_comm`, `next_pid`, and `next_prio`. stutter rejects this layout to avoid reading the wrong tracepoint bytes."
     } else {
         " Hint: the running kernel tracepoint format does not match stutter's compiled eBPF read offsets. stutter rejects this layout to avoid mis-decoding tracepoint data."
-    }
-}
-
-fn raise_memlock_limit() {
-    let rlim = libc::rlimit {
-        rlim_cur: libc::RLIM_INFINITY,
-        rlim_max: libc::RLIM_INFINITY,
-    };
-
-    let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlim) };
-    if ret != 0 {
-        eprintln!("warning: failed to raise RLIMIT_MEMLOCK");
     }
 }
 
