@@ -664,6 +664,8 @@ Live `stutter autotune --mode` currently supports `observe`, `suggest`, and `app
 
 Remote autotune uses the same mode labels, but remote apply support is bounded by the agent's configured limits. High-risk remote support is never enabled by default.
 
+`suggest` mode does not apply candidate changes. Candidate suggestion text always includes a dry-run command, `required_mode`, `required_safety_class`, and `rollback=stutter restore`. A manual apply command is shown only when the central CLI daemon policy would allow that candidate; high-risk candidates do not get direct apply commands.
+
 ## Doctor / preflight
 
 Run `stutter doctor` before recording to check whether tracing is likely to work and which optional telemetry may be missing or degraded. The doctor command does not attach eBPF programs or perf probes by default, so it is a preflight check rather than a guarantee that a future recording will succeed.
