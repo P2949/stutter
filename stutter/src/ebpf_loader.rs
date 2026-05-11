@@ -66,6 +66,29 @@ impl BlockIoCorrelationBasis {
             Self::RequestPointer => "request-pointer",
         }
     }
+
+    pub fn confidence(self) -> &'static str {
+        match self {
+            Self::RequestPointer => "high",
+            Self::DevSector => "medium",
+        }
+    }
+
+    pub fn warning(self) -> Option<&'static str> {
+        match self {
+            Self::RequestPointer => None,
+            Self::DevSector => Some(
+                "Block I/O correlation is approximate (dev+sector fallback); concurrent same-sector requests may collide.",
+            ),
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "request-pointer" => Self::RequestPointer,
+            _ => Self::DevSector,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

@@ -330,8 +330,16 @@ fn tracepoint_check(input: &DoctorInput) -> DoctorCheck {
     details.insert("block_rq".to_owned(), report.block_rq);
     details.insert(
         "block_io_correlation_basis".to_owned(),
-        report.block_io_correlation_basis,
+        report.block_io_correlation_basis.clone(),
     );
+    if !report.block_io_correlation_basis.is_empty() {
+        details.insert(
+            "block_io_correlation_confidence".to_owned(),
+            ebpf_loader::BlockIoCorrelationBasis::from_str(&report.block_io_correlation_basis)
+                .confidence()
+                .to_owned(),
+        );
+    }
     for (idx, warning) in report.warnings.iter().enumerate() {
         details.insert(format!("warning_{idx}"), warning.clone());
     }

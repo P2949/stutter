@@ -412,6 +412,8 @@ impl MonitorSession {
         let mut loaded = ebpf_loader::load_and_attach(&config)?;
         configure_target_irqs(&mut loaded, &config)?;
         let block_io_correlation_basis = loaded.block_io_correlation_basis.as_str().to_owned();
+        let block_io_correlation_confidence =
+            loaded.block_io_correlation_basis.confidence().to_owned();
 
         let mut recorder = LiveRecorder {
             run: recording,
@@ -560,6 +562,7 @@ impl MonitorSession {
         let probes = ProbeRuntime::new(
             loaded,
             block_io_correlation_basis,
+            block_io_correlation_confidence,
             cpu_perf_sampler,
             runtime_slice_sampler,
         );
@@ -1790,7 +1793,12 @@ impl MonitorSession {
                 stop_reason: &stop_reason,
                 tasks: &self.runtime.targeting.tasks,
                 frame_events: &frame_events,
-                block_io_correlation_basis: &self.runtime.probes.block_io_correlation_basis,
+                block_io_correlation_basis: self.runtime.probes.block_io_correlation_basis.clone(),
+                block_io_correlation_confidence: self
+                    .runtime
+                    .probes
+                    .block_io_correlation_confidence
+                    .clone(),
                 focus_mode: if self.config.auto_focus {
                     Some("auto".to_owned())
                 } else if self.config.has_explicit_target() {

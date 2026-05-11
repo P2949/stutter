@@ -574,6 +574,24 @@ pub(crate) fn block_io_correlation_basis(session: &SessionFile) -> &str {
     }
 }
 
+pub(crate) fn block_io_correlation_confidence(session: &SessionFile) -> &str {
+    if session.core.block_io_correlation_confidence.is_empty() {
+        crate::ebpf_loader::BlockIoCorrelationBasis::from_str(block_io_correlation_basis(session))
+            .confidence()
+    } else {
+        &session.core.block_io_correlation_confidence
+    }
+}
+
+pub(crate) fn block_io_correlation_warning(session: &SessionFile) -> Option<String> {
+    match block_io_correlation_basis(session) {
+        "dev+sector" => crate::ebpf_loader::BlockIoCorrelationBasis::DevSector
+            .warning()
+            .map(str::to_owned),
+        _ => None,
+    }
+}
+
 pub(crate) fn data_quality_summary(
     session: &SessionFile,
     validation: &crate::session_io::RunValidationReport,
@@ -660,9 +678,15 @@ pub(crate) fn data_quality_summary(
     }
 
     let block_io_correlation_basis = block_io_correlation_basis(session).to_owned();
+    let block_io_correlation_confidence = block_io_correlation_confidence(session).to_owned();
+    let block_io_correlation_warning = block_io_correlation_warning(session);
     if session.core.block_io_event_count > 0 && block_io_correlation_basis == "dev+sector" {
         level = downgrade_quality(level, DataQualityLevel::Medium);
-        reasons.push("block I/O correlation is approximate dev+sector matching".to_owned());
+        if let Some(warning) = &block_io_correlation_warning {
+            reasons.push(warning.clone());
+        } else {
+            reasons.push("block I/O correlation is approximate dev+sector matching".to_owned());
+        }
     }
 
     let frame_timestamp_alignment = if session.core.frame_event_count == 0 {
@@ -727,6 +751,8 @@ pub(crate) fn data_quality_summary(
         drop_counters_nonzero,
         percentile_scope_counts,
         block_io_correlation_basis,
+        block_io_correlation_confidence,
+        block_io_correlation_warning,
         frame_timestamp_alignment,
         cpu_perf_requested,
         cpu_perf_open_errors: session.core.cpu_perf_open_errors,

@@ -131,6 +131,8 @@ pub struct DataQualitySummary {
     pub drop_counters_nonzero: bool,
     pub percentile_scope_counts: BTreeMap<String, u64>,
     pub block_io_correlation_basis: String,
+    pub block_io_correlation_confidence: String,
+    pub block_io_correlation_warning: Option<String>,
     pub frame_timestamp_alignment: String,
     pub cpu_perf_requested: bool,
     pub cpu_perf_open_errors: u64,
@@ -882,7 +884,7 @@ mod tests {
                 waker_tid: 201,
                 waker_comm: "waker1".to_owned(),
                 latency_ns: 1000,
-                ..Default::default()
+                ..SpikePoint::default()
             },
             SpikePoint {
                 task: 101,
@@ -890,7 +892,7 @@ mod tests {
                 waker_tid: 201,
                 waker_comm: "waker1".to_owned(),
                 latency_ns: 2000,
-                ..Default::default()
+                ..SpikePoint::default()
             },
             SpikePoint {
                 task: 102,
@@ -898,7 +900,7 @@ mod tests {
                 waker_tid: 201,
                 waker_comm: "waker1".to_owned(),
                 latency_ns: 500,
-                ..Default::default()
+                ..SpikePoint::default()
             },
             SpikePoint {
                 task: 101,
@@ -906,7 +908,7 @@ mod tests {
                 waker_tid: 202,
                 waker_comm: "waker2".to_owned(),
                 latency_ns: 5000,
-                ..Default::default()
+                ..SpikePoint::default()
             },
         ];
 
