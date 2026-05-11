@@ -254,6 +254,16 @@ pub fn validate_apply_profile_risk(
     Ok(())
 }
 
+pub fn validate_apply_profile_mode(dry_run: bool, watch: bool) -> anyhow::Result<()> {
+    if dry_run && watch {
+        anyhow::bail!(
+            "apply-profile --dry-run cannot be combined with --watch; run a one-shot dry-run without --watch"
+        );
+    }
+
+    Ok(())
+}
+
 pub struct ApplyProfileCommandInput {
     pub tree_pid: u32,
     pub profile_path: PathBuf,
@@ -280,35 +290,38 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
     } = input;
     let profile = crate::profiles::load_first_profile(&profile_path)?;
     validate_apply_profile_risk(&profile, dry_run, allow_medium_risk)?;
+    validate_apply_profile_mode(dry_run, watch)?;
     let mut cache = crate::profiles::ProfileApplyCache::default();
 
     if !watch {
-        let dry_run_summary = if dry_run {
-            Some(crate::profiles::profile_apply_summary_for_tree(
-                tree_pid, &profile,
-            )?)
-        } else {
-            None
-        };
+        if dry_run {
+            let (apply_result, _) =
+                apply_profile_to_tree_cached_blocking(tree_pid, profile, force, true, cache)
+                    .await?;
+
+            print_profile_dry_run_result(&apply_result);
+            println!(
+                "apply-profile dry-run did not change live affinity, nice, ionice, audit state, or restore state"
+            );
+            println!("apply-profile is one-shot; use --watch to keep applying to new threads");
+            return Ok(());
+        }
+
         let action = crate::actions::cpu_affinity::CpuAffinityProfileAction {
             tree_pid,
             profile,
             force_restore_overwrite: force,
         };
         let result = tokio::task::spawn_blocking(move || {
-            crate::actions::runner::run_audited_action("apply-profile", &action, dry_run)
+            crate::actions::runner::run_audited_action("apply-profile", &action, false)
         })
         .await
         .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))??;
 
-        if let Some(summary) = dry_run_summary {
-            print_profile_dry_run_summary(&summary);
-        } else {
-            println!(
-                "applied profile to {} task(s); restore with: stutter restore",
-                result.state.affected_tasks
-            );
-        }
+        println!(
+            "applied profile to {} task(s); restore with: stutter restore",
+            result.state.affected_tasks
+        );
         println!("apply-profile is one-shot; use --watch to keep applying to new threads");
         return Ok(());
     }
@@ -464,13 +477,60 @@ pub async fn apply_profile_to_tree_cached_blocking(
     .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))?
 }
 
-fn print_profile_dry_run_summary(summary: &crate::profiles::ProfileApplySummary) {
+fn print_profile_dry_run_result(result: &crate::profiles::ProfileApplyResult) {
     println!("profile dry-run:");
-    println!("  checked_tasks={}", summary.checked_tasks);
-    println!("  pending_affinity={}", summary.pending_affinity);
-    println!("  pending_nice={}", summary.pending_nice);
-    println!("  pending_ionice={}", summary.pending_ionice);
-    println!("  total_pending_tasks={}", summary.pending_changes);
+    println!("  checked_tasks={}", result.summary.checked_tasks);
+    println!("  pending_affinity={}", result.summary.pending_affinity);
+    println!("  pending_nice={}", result.summary.pending_nice);
+    println!("  pending_ionice={}", result.summary.pending_ionice);
+    println!("  total_pending_tasks={}", result.summary.pending_changes);
+
+    if result.affinity_records.is_empty() {
+        println!("  affinity_changes=[]");
+    } else {
+        println!("  affinity_changes:");
+        for record in &result.affinity_records {
+            println!(
+                "    tid={} process_pid={:?} original_mask={} proposed_mask={}",
+                record.tid,
+                record.process_pid,
+                record.original_mask.to_range_string(),
+                record.applied_mask.to_range_string()
+            );
+        }
+    }
+
+    if result.nice_records.is_empty() {
+        println!("  nice_changes=[]");
+    } else {
+        println!("  nice_changes:");
+        for record in &result.nice_records {
+            println!(
+                "    tid={} process_pid={:?} comm={} original_nice={} proposed_nice={}",
+                record.tid,
+                record.process_pid,
+                record.comm.as_deref().unwrap_or("<unknown>"),
+                record.original_nice,
+                record.applied_nice
+            );
+        }
+    }
+
+    if result.ionice_records.is_empty() {
+        println!("  ionice_changes=[]");
+    } else {
+        println!("  ionice_changes:");
+        for record in &result.ionice_records {
+            println!(
+                "    tid={} process_pid={:?} comm={} original_ioprio={} proposed_ioprio={}",
+                record.tid,
+                record.process_pid,
+                record.comm.as_deref().unwrap_or("<unknown>"),
+                record.original_ioprio,
+                record.applied_ioprio
+            );
+        }
+    }
 }
 
 pub fn restore_profile_watch_on_exit() -> anyhow::Result<()> {
@@ -582,6 +642,26 @@ mod tests {
         };
 
         validate_apply_profile_risk(&profile, false, false).unwrap();
+    }
+
+    #[test]
+    fn apply_profile_mode_allows_one_shot_dry_run() {
+        validate_apply_profile_mode(true, false).unwrap();
+    }
+
+    #[test]
+    fn apply_profile_mode_rejects_dry_run_watch() {
+        let err = validate_apply_profile_mode(true, true).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("apply-profile --dry-run cannot be combined with --watch")
+        );
+    }
+
+    #[test]
+    fn apply_profile_mode_allows_real_watch() {
+        validate_apply_profile_mode(false, true).unwrap();
     }
 
     fn priority_profile() -> Profile {
