@@ -41,14 +41,16 @@ pub struct ScoreComparisonConfig {
     pub max_over_5ms_regression: u64,
 }
 
+pub(crate) const DEFAULT_SCORE_COMPARISON_CONFIG: ScoreComparisonConfig = ScoreComparisonConfig {
+    min_improvement_percent: 12.5,
+    max_regression_percent: 7.5,
+    max_frame_p99_regression_ms: 2.0,
+    max_over_5ms_regression: 0,
+};
+
 impl Default for ScoreComparisonConfig {
     fn default() -> Self {
-        Self {
-            min_improvement_percent: 12.5,
-            max_regression_percent: 7.5,
-            max_frame_p99_regression_ms: 2.0,
-            max_over_5ms_regression: 0,
-        }
+        DEFAULT_SCORE_COMPARISON_CONFIG
     }
 }
 
@@ -71,10 +73,13 @@ pub struct ExperimentComparisonPolicy {
 impl Default for ExperimentComparisonPolicy {
     fn default() -> Self {
         Self {
-            min_improvement_ratio: 0.875,
-            max_regression_ratio: 1.075,
+            min_improvement_ratio: 1.0
+                - (DEFAULT_SCORE_COMPARISON_CONFIG.min_improvement_percent / 100.0),
+            max_regression_ratio: 1.0
+                + (DEFAULT_SCORE_COMPARISON_CONFIG.max_regression_percent / 100.0),
             improved_frame_p99_slack_ms: 1.0,
-            regressed_frame_p99_slack_ms: 2.0,
+            regressed_frame_p99_slack_ms: DEFAULT_SCORE_COMPARISON_CONFIG
+                .max_frame_p99_regression_ms,
         }
     }
 }
@@ -85,7 +90,7 @@ impl ExperimentComparisonPolicy {
             min_improvement_percent: ratio_to_improvement_percent(self.min_improvement_ratio),
             max_regression_percent: ratio_to_regression_percent(self.max_regression_ratio),
             max_frame_p99_regression_ms: self.regressed_frame_p99_slack_ms,
-            max_over_5ms_regression: 0,
+            max_over_5ms_regression: DEFAULT_SCORE_COMPARISON_CONFIG.max_over_5ms_regression,
         }
     }
 }
@@ -502,6 +507,12 @@ mod tests {
     fn score_comparison_config_default_matches_existing_conservative_policy() {
         let config = ScoreComparisonConfig::default();
         let policy_config = ExperimentComparisonPolicy::default().as_score_comparison_config();
+
+        assert_eq!(config, DEFAULT_SCORE_COMPARISON_CONFIG);
+        assert_eq!(config.min_improvement_percent, 12.5);
+        assert_eq!(config.max_regression_percent, 7.5);
+        assert_eq!(config.max_frame_p99_regression_ms, 2.0);
+        assert_eq!(config.max_over_5ms_regression, 0);
 
         assert!(
             (config.min_improvement_percent - policy_config.min_improvement_percent).abs() < 1e-9
