@@ -21,7 +21,8 @@ use tokio::{
 
 use crate::{
     actions::SafetyClass,
-    cli::{Config, FocusSource, ForegroundSourceArg},
+    cli::Config,
+    config::{FocusSource, ForegroundSource},
     daemon_policy::{ActionSource, DaemonMode, DaemonPolicy},
     remote::{
         AgentAutotuneLimits, AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
@@ -359,22 +360,22 @@ fn daemon_policy_for_remote_mode(mode: DaemonMode, limits: &AgentAutotuneLimits)
     policy
 }
 
-fn parse_focus_source_or_hybrid(value: Option<&str>) -> crate::cli::FocusSource {
+fn parse_focus_source_or_hybrid(value: Option<&str>) -> FocusSource {
     match value {
-        Some("heuristic") => crate::cli::FocusSource::Heuristic,
-        Some("foreground") => crate::cli::FocusSource::Foreground,
-        Some("hybrid") | None => crate::cli::FocusSource::Hybrid,
-        Some(_) => crate::cli::FocusSource::Hybrid,
+        Some("heuristic") => FocusSource::Heuristic,
+        Some("foreground") => FocusSource::Foreground,
+        Some("hybrid") | None => FocusSource::Hybrid,
+        Some(_) => FocusSource::Hybrid,
     }
 }
 
-fn parse_foreground_source_or_auto(value: Option<&str>) -> crate::cli::ForegroundSourceArg {
+fn parse_foreground_source_or_auto(value: Option<&str>) -> ForegroundSource {
     match value {
-        Some("sway") => crate::cli::ForegroundSourceArg::Sway,
-        Some("hyprland") => crate::cli::ForegroundSourceArg::Hyprland,
-        Some("x11") => crate::cli::ForegroundSourceArg::X11,
-        Some("auto") | None => crate::cli::ForegroundSourceArg::Auto,
-        Some(_) => crate::cli::ForegroundSourceArg::Auto,
+        Some("sway") => ForegroundSource::Sway,
+        Some("hyprland") => ForegroundSource::Hyprland,
+        Some("x11") => ForegroundSource::X11,
+        Some("auto") | None => ForegroundSource::Auto,
+        Some(_) => ForegroundSource::Auto,
     }
 }
 
@@ -1508,12 +1509,12 @@ fn parse_remote_focus_source(value: Option<&str>) -> anyhow::Result<FocusSource>
     }
 }
 
-fn parse_remote_foreground_source(value: Option<&str>) -> anyhow::Result<ForegroundSourceArg> {
+fn parse_remote_foreground_source(value: Option<&str>) -> anyhow::Result<ForegroundSource> {
     match value.unwrap_or("auto").trim().to_ascii_lowercase().as_str() {
-        "auto" => Ok(ForegroundSourceArg::Auto),
-        "sway" => Ok(ForegroundSourceArg::Sway),
-        "hyprland" => Ok(ForegroundSourceArg::Hyprland),
-        "x11" => Ok(ForegroundSourceArg::X11),
+        "auto" => Ok(ForegroundSource::Auto),
+        "sway" => Ok(ForegroundSource::Sway),
+        "hyprland" => Ok(ForegroundSource::Hyprland),
+        "x11" => Ok(ForegroundSource::X11),
         other => {
             anyhow::bail!("foreground_source must be auto, sway, hyprland, or x11, got {other:?}")
         }
@@ -1719,9 +1720,9 @@ fn config_from_remote_request(
         otlp_endpoint: None,
         otel_service_name: "stutter".to_owned(),
         auto_focus: false,
-        focus_source: crate::cli::FocusSource::Heuristic,
+        focus_source: FocusSource::Heuristic,
         foreground_window: false,
-        foreground_source: crate::cli::ForegroundSourceArg::Auto,
+        foreground_source: ForegroundSource::Auto,
         foreground_poll_ms: 1000,
         foreground_max_stale_ms: 2500,
         foreground_include_title: false,
@@ -2745,7 +2746,7 @@ mod tests {
 
         assert!(config.foreground_window);
         assert_eq!(config.focus_source, FocusSource::Hybrid);
-        assert_eq!(config.foreground_source, ForegroundSourceArg::Sway);
+        assert_eq!(config.foreground_source, ForegroundSource::Sway);
         assert_eq!(config.foreground_poll_ms, 750);
         assert_eq!(config.foreground_max_stale_ms, 3000);
         assert!(!config.foreground_include_title);

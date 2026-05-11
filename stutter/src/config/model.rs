@@ -1,6 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-use crate::cli::{FocusSource, ForegroundSourceArg};
+use crate::config::{FocusSource, ForegroundSource, TARGET_PIDS_MAX};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MonitorConfig {
@@ -39,7 +39,7 @@ impl Default for TargetConfig {
             watch_process: None,
             persistent: false,
             keep_missing_pid: false,
-            max_tasks: crate::cli::TARGET_PIDS_MAX,
+            max_tasks: TARGET_PIDS_MAX,
         }
     }
 }
@@ -107,7 +107,7 @@ pub struct FocusConfig {
     pub auto_focus: bool,
     pub focus_source: FocusSource,
     pub foreground_window: bool,
-    pub foreground_source: ForegroundSourceArg,
+    pub foreground_source: ForegroundSource,
     pub foreground_poll_ms: u64,
     pub foreground_max_stale_ms: u64,
     pub foreground_include_title: bool,
@@ -125,7 +125,7 @@ impl Default for FocusConfig {
             auto_focus: false,
             focus_source: FocusSource::Heuristic,
             foreground_window: false,
-            foreground_source: ForegroundSourceArg::Auto,
+            foreground_source: ForegroundSource::Auto,
             foreground_poll_ms: 1_000,
             foreground_max_stale_ms: 2_500,
             foreground_include_title: false,

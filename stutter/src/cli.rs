@@ -3,8 +3,6 @@ use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
-pub const TARGET_PIDS_MAX: usize = 1024;
-
 use crate::{
     commands::input::{
         AdvisorCommandInput, AgentCommandInput, ApplyProfileCommandInput, AuditCommandInput,
@@ -18,7 +16,7 @@ use crate::{
         ScenarioPathCommandInput, ScenarioRunCommandInput, SummaryCommandInput, TuneCommandInput,
         ValidateCommandInput,
     },
-    config::layer::MonitorConfigLayer,
+    config::{FocusSource, ForegroundSource, TARGET_PIDS_MAX, layer::MonitorConfigLayer},
     process_tree::{CompiledPattern, TaskClass, TaskFilters},
 };
 
@@ -380,10 +378,10 @@ pub struct MonitorArgs {
     #[arg(
         long = "foreground-source",
         value_enum,
-        default_value_t = ForegroundSourceArg::Auto,
+        default_value_t = ForegroundSource::Auto,
         help = "Foreground-window provider: auto, sway, hyprland, x11"
     )]
-    foreground_source: ForegroundSourceArg,
+    foreground_source: ForegroundSource,
 
     #[arg(long = "foreground-poll-ms", default_value_t = 1000)]
     foreground_poll_ms: u64,
@@ -500,10 +498,10 @@ pub struct AutotuneArgs {
     #[arg(
         long = "foreground-source",
         value_enum,
-        default_value_t = ForegroundSourceArg::Auto,
+        default_value_t = ForegroundSource::Auto,
         help = "Foreground-window provider for autotune focus: auto, sway, hyprland, x11"
     )]
-    pub foreground_source: ForegroundSourceArg,
+    pub foreground_source: ForegroundSource,
 
     #[arg(long = "foreground-poll-ms", default_value_t = 1000)]
     pub foreground_poll_ms: u64,
@@ -731,7 +729,7 @@ fn monitor_args_layer(args: &MonitorArgs) -> MonitorConfigLayer {
         auto_focus: args.auto_focus.then_some(true),
         focus_source: (args.focus_source != FocusSource::Heuristic).then_some(args.focus_source),
         foreground_window: args.foreground_window.then_some(true),
-        foreground_source: (args.foreground_source != ForegroundSourceArg::Auto)
+        foreground_source: (args.foreground_source != ForegroundSource::Auto)
             .then_some(args.foreground_source),
         foreground_poll_ms: (args.foreground_poll_ms != 1_000).then_some(args.foreground_poll_ms),
         foreground_max_stale_ms: (args.foreground_max_stale_ms != 2_500)
@@ -819,7 +817,7 @@ impl Default for MonitorArgs {
             auto_focus: false,
             focus_source: FocusSource::Heuristic,
             foreground_window: false,
-            foreground_source: ForegroundSourceArg::Auto,
+            foreground_source: ForegroundSource::Auto,
             foreground_poll_ms: 1000,
             foreground_max_stale_ms: 2500,
             foreground_include_title: false,
@@ -1372,23 +1370,6 @@ pub enum AppCommand {
     ScenarioList(ScenarioListCommandInput),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FocusSource {
-    Heuristic,
-    Foreground,
-    Hybrid,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ForegroundSourceArg {
-    Auto,
-    Sway,
-    Hyprland,
-    X11,
-}
-
 impl FocusSource {
     fn parse_config_value(value: &str) -> anyhow::Result<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
@@ -1402,7 +1383,7 @@ impl FocusSource {
     }
 }
 
-impl ForegroundSourceArg {
+impl ForegroundSource {
     fn parse_config_value(value: &str) -> anyhow::Result<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "auto" => Ok(Self::Auto),
@@ -1438,7 +1419,7 @@ pub struct AutoFocusConfig {
 #[allow(dead_code)]
 pub struct ForegroundWindowConfig {
     pub enabled: bool,
-    pub source: ForegroundSourceArg,
+    pub source: ForegroundSource,
     pub poll_ms: u64,
     pub max_stale_ms: u64,
     pub include_title: bool,
@@ -1479,7 +1460,7 @@ pub struct Config {
     #[allow(dead_code)]
     pub foreground_window: bool,
     #[allow(dead_code)]
-    pub foreground_source: ForegroundSourceArg,
+    pub foreground_source: ForegroundSource,
     #[allow(dead_code)]
     pub foreground_poll_ms: u64,
     #[allow(dead_code)]
@@ -2407,7 +2388,7 @@ fn config_from_monitor_args_with_file(
     }
 
     if let Some(foreground_source) = file_config.foreground_source.as_deref() {
-        args.foreground_source = ForegroundSourceArg::parse_config_value(foreground_source)?;
+        args.foreground_source = ForegroundSource::parse_config_value(foreground_source)?;
     }
 
     if let Some(foreground_poll_ms) = file_config.foreground_poll_ms {
@@ -2745,7 +2726,7 @@ fn cli_accepts_auto_focus_foreground_source() {
     assert!(config.auto_focus);
     assert_eq!(config.focus_source, FocusSource::Foreground);
     assert!(config.foreground_window);
-    assert_eq!(config.foreground_source, ForegroundSourceArg::Sway);
+    assert_eq!(config.foreground_source, ForegroundSource::Sway);
 }
 
 #[cfg(test)]
@@ -4295,14 +4276,14 @@ mod tests {
         assert_eq!(config.focus_source, FocusSource::Heuristic);
         assert!(!config.foreground_window);
         assert!(!config.foreground_window_config().enabled);
-        assert_eq!(config.foreground_source, ForegroundSourceArg::Auto);
+        assert_eq!(config.foreground_source, ForegroundSource::Auto);
         assert_eq!(config.foreground_poll_ms, 1000);
         assert_eq!(config.foreground_max_stale_ms, 2500);
         assert!(!config.foreground_include_title);
 
         let foreground = config.foreground_window_config();
         assert!(!foreground.enabled);
-        assert_eq!(foreground.source, ForegroundSourceArg::Auto);
+        assert_eq!(foreground.source, ForegroundSource::Auto);
         assert_eq!(foreground.poll_ms, 1000);
         assert_eq!(foreground.max_stale_ms, 2500);
         assert!(!foreground.include_title);
@@ -4332,13 +4313,13 @@ mod tests {
         assert!(!config.auto_focus);
         assert_eq!(config.focus_source, FocusSource::Heuristic);
         assert!(config.foreground_window);
-        assert_eq!(config.foreground_source, ForegroundSourceArg::Sway);
+        assert_eq!(config.foreground_source, ForegroundSource::Sway);
         assert_eq!(config.foreground_poll_ms, 750);
         assert_eq!(config.foreground_max_stale_ms, 3000);
 
         let foreground = config.foreground_window_config();
         assert!(foreground.enabled);
-        assert_eq!(foreground.source, ForegroundSourceArg::Sway);
+        assert_eq!(foreground.source, ForegroundSource::Sway);
         assert_eq!(foreground.poll_ms, 750);
         assert_eq!(foreground.max_stale_ms, 3000);
         assert!(!foreground.include_title);
@@ -4360,7 +4341,7 @@ mod tests {
         assert!(config.auto_focus);
         assert_eq!(config.focus_source, FocusSource::Foreground);
         assert!(config.foreground_window);
-        assert_eq!(config.foreground_source, ForegroundSourceArg::Sway);
+        assert_eq!(config.foreground_source, ForegroundSource::Sway);
     }
 
     #[test]
@@ -4418,7 +4399,7 @@ mod tests {
             config.foreground_window,
             "non-heuristic focus_source must normalize foreground_window to true"
         );
-        assert_eq!(config.foreground_source, ForegroundSourceArg::X11);
+        assert_eq!(config.foreground_source, ForegroundSource::X11);
         assert!(config.foreground_include_title);
 
         let auto_focus = config.auto_focus_config();
@@ -4427,7 +4408,7 @@ mod tests {
 
         let foreground = config.foreground_window_config();
         assert!(foreground.enabled);
-        assert_eq!(foreground.source, ForegroundSourceArg::X11);
+        assert_eq!(foreground.source, ForegroundSource::X11);
         assert!(foreground.include_title);
     }
 
@@ -4455,7 +4436,7 @@ mod tests {
 
         let foreground = config.foreground_window_config();
         assert!(foreground.enabled);
-        assert_eq!(foreground.source, ForegroundSourceArg::Auto);
+        assert_eq!(foreground.source, ForegroundSource::Auto);
     }
 
     struct EnvGuard {
@@ -4518,14 +4499,14 @@ foreground_include_title = true
 
         assert_eq!(config.focus_source, FocusSource::Foreground);
         assert!(config.foreground_window);
-        assert_eq!(config.foreground_source, ForegroundSourceArg::Sway);
+        assert_eq!(config.foreground_source, ForegroundSource::Sway);
         assert_eq!(config.foreground_poll_ms, 750);
         assert_eq!(config.foreground_max_stale_ms, 3000);
         assert!(config.foreground_include_title);
 
         let foreground = config.foreground_window_config();
         assert!(foreground.enabled);
-        assert_eq!(foreground.source, ForegroundSourceArg::Sway);
+        assert_eq!(foreground.source, ForegroundSource::Sway);
         assert_eq!(foreground.poll_ms, 750);
         assert_eq!(foreground.max_stale_ms, 3000);
         assert!(foreground.include_title);

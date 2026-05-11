@@ -3,11 +3,13 @@ pub mod layer;
 pub mod merge;
 pub mod model;
 pub mod source;
+pub mod types;
 
 use model::{
     FocusConfig, MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, SafetyConfig,
     TargetConfig, TimingConfig,
 };
+pub use types::{FocusSource, ForegroundSource, TARGET_PIDS_MAX};
 
 use crate::cli::Config;
 

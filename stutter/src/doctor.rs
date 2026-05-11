@@ -852,7 +852,7 @@ mod tests {
         assert_eq!(check.name, "ebpf_map_sizing");
         assert_eq!(
             check.details.get("target_pids_max"),
-            Some(&crate::cli::TARGET_PIDS_MAX.to_string())
+            Some(&crate::config::TARGET_PIDS_MAX.to_string())
         );
         assert!(check.details.contains_key("wakeup_data_entries"));
     }

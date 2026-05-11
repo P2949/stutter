@@ -1,8 +1,8 @@
 use std::{path::PathBuf, time::Duration};
 
 use crate::{
-    cli::{Config, FocusSource, ForegroundSourceArg},
-    config::model::MonitorConfig,
+    cli::Config,
+    config::{FocusSource, ForegroundSource, TARGET_PIDS_MAX, model::MonitorConfig},
     config_file::UserConfigFile,
     presets::PresetDefaults,
 };
@@ -47,7 +47,7 @@ pub struct MonitorConfigLayer {
     pub auto_focus: Option<bool>,
     pub focus_source: Option<FocusSource>,
     pub foreground_window: Option<bool>,
-    pub foreground_source: Option<ForegroundSourceArg>,
+    pub foreground_source: Option<ForegroundSource>,
     pub foreground_poll_ms: Option<u64>,
     pub foreground_max_stale_ms: Option<u64>,
     pub foreground_include_title: Option<bool>,
@@ -192,8 +192,7 @@ impl MonitorConfigLayer {
             watch_process: config.watch_process.clone().map(Some),
             persistent: config.persistent.then_some(true),
             keep_missing_pid: config.keep_missing_pid.then_some(true),
-            max_tasks: (config.max_tasks != crate::cli::TARGET_PIDS_MAX)
-                .then_some(config.max_tasks),
+            max_tasks: (config.max_tasks != TARGET_PIDS_MAX).then_some(config.max_tasks),
 
             summary_period_ms: (config.summary_period_ms != 1_000)
                 .then_some(config.summary_period_ms),
@@ -232,7 +231,7 @@ impl MonitorConfigLayer {
             focus_source: (config.focus_source != FocusSource::Heuristic)
                 .then_some(config.focus_source),
             foreground_window: config.foreground_window.then_some(true),
-            foreground_source: (config.foreground_source != ForegroundSourceArg::Auto)
+            foreground_source: (config.foreground_source != ForegroundSource::Auto)
                 .then_some(config.foreground_source),
             foreground_poll_ms: (config.foreground_poll_ms != 1_000)
                 .then_some(config.foreground_poll_ms),

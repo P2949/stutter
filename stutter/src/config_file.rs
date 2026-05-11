@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::{
-    cli::{FocusSource, ForegroundSourceArg},
+    config::{FocusSource, ForegroundSource},
     remote::AgentAutotuneLimits,
 };
 
@@ -199,12 +199,12 @@ pub fn parse_focus_source_value(value: &str) -> Result<FocusSource> {
     }
 }
 
-pub fn parse_foreground_source_value(value: &str) -> Result<ForegroundSourceArg> {
+pub fn parse_foreground_source_value(value: &str) -> Result<ForegroundSource> {
     match value.trim().to_ascii_lowercase().as_str() {
-        "auto" => Ok(ForegroundSourceArg::Auto),
-        "sway" => Ok(ForegroundSourceArg::Sway),
-        "hyprland" => Ok(ForegroundSourceArg::Hyprland),
-        "x11" => Ok(ForegroundSourceArg::X11),
+        "auto" => Ok(ForegroundSource::Auto),
+        "sway" => Ok(ForegroundSource::Sway),
+        "hyprland" => Ok(ForegroundSource::Hyprland),
+        "x11" => Ok(ForegroundSource::X11),
         other => anyhow::bail!(
             "invalid foreground_source {:?}; valid values are auto, sway, hyprland, x11",
             other
@@ -288,19 +288,19 @@ mod tests {
     fn test_parse_foreground_source_value() {
         assert_eq!(
             parse_foreground_source_value("auto").unwrap(),
-            ForegroundSourceArg::Auto
+            ForegroundSource::Auto
         );
         assert_eq!(
             parse_foreground_source_value("sway").unwrap(),
-            ForegroundSourceArg::Sway
+            ForegroundSource::Sway
         );
         assert_eq!(
             parse_foreground_source_value("hyprland").unwrap(),
-            ForegroundSourceArg::Hyprland
+            ForegroundSource::Hyprland
         );
         assert_eq!(
             parse_foreground_source_value("x11").unwrap(),
-            ForegroundSourceArg::X11
+            ForegroundSource::X11
         );
         assert!(parse_foreground_source_value("invalid").is_err());
     }
