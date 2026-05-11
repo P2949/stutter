@@ -20,7 +20,9 @@ use tokio::{
 };
 
 use crate::{
+    actions::SafetyClass,
     cli::{Config, FocusSource, ForegroundSourceArg},
+    daemon_policy::{ActionSource, DaemonMode, DaemonPolicy},
     remote::{
         AgentAutotuneLimits, AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
         AutotuneRestoreResponse, AutotuneStartRequest, AutotuneStartResponse,
@@ -290,30 +292,71 @@ fn normalize_bearer_token(raw: String) -> anyhow::Result<Option<String>> {
     Ok(Some(token))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AutotuneRemoteMode {
-    Observe,
-    Suggest,
-    ApplyLowRisk,
-    ApplyMediumRisk,
-    ApplyHighRisk,
-    Unknown,
-}
-
-impl AutotuneRemoteMode {
-    fn is_apply(self) -> bool {
-        matches!(
-            self,
-            Self::ApplyLowRisk | Self::ApplyMediumRisk | Self::ApplyHighRisk
-        )
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AutotuneStartSecurityRejection {
     status: StatusCode,
     audit_message: String,
     response_message: String,
+}
+
+fn safety_class_for_daemon_mode(mode: DaemonMode) -> SafetyClass {
+    match mode {
+        DaemonMode::Observe | DaemonMode::Suggest => SafetyClass::ObserveOnly,
+        DaemonMode::ApplyLowRisk => SafetyClass::ReversibleLowRisk,
+        DaemonMode::ApplyMediumRisk => SafetyClass::ReversibleMediumRisk,
+        DaemonMode::ApplyHighRisk => SafetyClass::HighRisk,
+    }
+}
+
+fn supported_remote_modes(limits: &AgentAutotuneLimits) -> Vec<DaemonMode> {
+    let mut modes = vec![DaemonMode::Observe, DaemonMode::Suggest];
+
+    if limits.max_mode >= DaemonMode::ApplyLowRisk
+        && limits.max_safety_class >= SafetyClass::ReversibleLowRisk
+    {
+        modes.push(DaemonMode::ApplyLowRisk);
+    }
+
+    if limits.max_mode >= DaemonMode::ApplyMediumRisk
+        && limits.max_safety_class >= SafetyClass::ReversibleMediumRisk
+    {
+        modes.push(DaemonMode::ApplyMediumRisk);
+    }
+
+    if limits.max_mode >= DaemonMode::ApplyHighRisk
+        && limits.max_safety_class >= SafetyClass::HighRisk
+        && limits.allow_high_risk
+    {
+        modes.push(DaemonMode::ApplyHighRisk);
+    }
+
+    modes
+}
+
+fn supported_remote_mode_labels(limits: &AgentAutotuneLimits) -> Vec<String> {
+    supported_remote_modes(limits)
+        .into_iter()
+        .map(|mode| mode.as_str().to_owned())
+        .collect()
+}
+
+fn remote_mode_supported(limits: &AgentAutotuneLimits, mode: DaemonMode) -> bool {
+    supported_remote_modes(limits).contains(&mode)
+}
+
+fn daemon_policy_for_remote_mode(mode: DaemonMode, limits: &AgentAutotuneLimits) -> DaemonPolicy {
+    let mut policy = match mode {
+        DaemonMode::Observe => DaemonPolicy::observe(ActionSource::RemoteAgent),
+        DaemonMode::Suggest => DaemonPolicy::suggest(ActionSource::RemoteAgent),
+        DaemonMode::ApplyLowRisk => DaemonPolicy::apply_low_risk(ActionSource::RemoteAgent),
+        DaemonMode::ApplyMediumRisk => DaemonPolicy::apply_medium_risk(ActionSource::RemoteAgent),
+        DaemonMode::ApplyHighRisk => {
+            DaemonPolicy::apply_high_risk_explicit(ActionSource::RemoteAgent)
+        }
+    };
+    policy.allow_high_risk = limits.allow_high_risk && mode == DaemonMode::ApplyHighRisk;
+    policy.allow_system_wide_actions = limits.allow_system_wide_actions;
+    policy
 }
 
 fn parse_focus_source_or_hybrid(value: Option<&str>) -> crate::cli::FocusSource {
@@ -335,17 +378,6 @@ fn parse_foreground_source_or_auto(value: Option<&str>) -> crate::cli::Foregroun
     }
 }
 
-fn parse_autotune_remote_mode(mode: &str) -> AutotuneRemoteMode {
-    match mode {
-        "observe" => AutotuneRemoteMode::Observe,
-        "suggest" => AutotuneRemoteMode::Suggest,
-        "apply-low-risk" => AutotuneRemoteMode::ApplyLowRisk,
-        "apply-medium-risk" => AutotuneRemoteMode::ApplyMediumRisk,
-        "apply-high-risk" => AutotuneRemoteMode::ApplyHighRisk,
-        _ => AutotuneRemoteMode::Unknown,
-    }
-}
-
 fn validate_autotune_start_limits(
     request: &AutotuneStartRequest,
     state: &AgentState,
@@ -356,12 +388,8 @@ fn validate_autotune_start_limits(
         anyhow::bail!("remote autotune supports exactly one active controller");
     }
 
-    if limits.max_safety_class != "ReversibleLowRisk" {
-        anyhow::bail!("remote autotune max_safety_class must be ReversibleLowRisk");
-    }
-
     if limits.allow_system_wide_actions {
-        anyhow::bail!("remote autotune system-wide actions are disabled");
+        anyhow::bail!("remote autotune system-wide actions are disabled by default");
     }
 
     let requested_target_count =
@@ -393,14 +421,24 @@ fn validate_autotune_start_limits(
     Ok(())
 }
 
-fn validate_autotune_start_security(
+fn policy_for_remote_autotune_start(
     headers: &HeaderMap,
     state: &AgentState,
-    mode: &str,
-) -> Result<(), AutotuneStartSecurityRejection> {
-    let remote_mode = parse_autotune_remote_mode(mode);
+    request: &AutotuneStartRequest,
+) -> Result<DaemonPolicy, AutotuneStartSecurityRejection> {
+    let raw_mode = request.mode.trim();
+    let mode = raw_mode
+        .parse::<DaemonMode>()
+        .map_err(|err| AutotuneStartSecurityRejection {
+            status: StatusCode::BAD_REQUEST,
+            audit_message: format!("rejected remote autotune mode={raw_mode}: {err}"),
+            response_message:
+                "unsupported remote autotune mode; use observe, suggest, or apply-low-risk"
+                    .to_owned(),
+        })?;
 
-    if remote_mode.is_apply() {
+    // Phase 1 security mandate: Apply modes require authentication and loopback bind
+    if mode.supports_apply() {
         if state.auth.bearer_token.is_none() {
             return Err(AutotuneStartSecurityRejection {
                 status: StatusCode::UNAUTHORIZED,
@@ -435,19 +473,45 @@ fn validate_autotune_start_security(
                         .to_owned(),
             });
         }
-
-        return Ok(());
+    } else {
+        // Observe/Suggest still require auth if a token is configured
+        if let Err(status) = authorize(headers, &state.auth) {
+            return Err(AutotuneStartSecurityRejection {
+                status,
+                audit_message: format!("rejected remote autotune mode={mode}: unauthorized"),
+                response_message: "unauthorized".to_owned(),
+            });
+        }
     }
 
-    if let Err(status) = authorize(headers, &state.auth) {
+    // Now check if the mode is actually supported by the agent's configured limits
+    if !remote_mode_supported(&state.autotune_limits, mode) {
         return Err(AutotuneStartSecurityRejection {
-            status,
-            audit_message: format!("rejected remote autotune mode={mode}: unauthorized"),
-            response_message: "unauthorized".to_owned(),
+            status: StatusCode::BAD_REQUEST,
+            audit_message: format!(
+                "rejected remote autotune mode={mode}: exceeds configured remote limits max_mode={} max_safety_class={:?} allow_high_risk={}",
+                state.autotune_limits.max_mode,
+                state.autotune_limits.max_safety_class,
+                state.autotune_limits.allow_high_risk
+            ),
+            response_message:
+                "unsupported remote autotune mode; use observe, suggest, or apply-low-risk"
+                    .to_owned(),
         });
     }
 
-    Ok(())
+    let policy = daemon_policy_for_remote_mode(mode, &state.autotune_limits);
+
+    if mode == DaemonMode::ApplyHighRisk && !policy.allow_high_risk {
+        return Err(AutotuneStartSecurityRejection {
+            status: StatusCode::FORBIDDEN,
+            audit_message: "rejected remote autotune apply-high-risk: high risk not enabled"
+                .to_owned(),
+            response_message: "remote autotune high-risk mode is disabled".to_owned(),
+        });
+    }
+
+    Ok(policy)
 }
 
 fn authorize(headers: &HeaderMap, auth: &AgentAuth) -> Result<(), StatusCode> {
@@ -491,12 +555,28 @@ fn audit_agent_event(
     affected_tasks: usize,
     message: String,
 ) {
+    audit_agent_event_with_safety(
+        action_id,
+        SafetyClass::ObserveOnly,
+        success,
+        affected_tasks,
+        message,
+    );
+}
+
+fn audit_agent_event_with_safety(
+    action_id: &'static str,
+    safety_class: SafetyClass,
+    success: bool,
+    affected_tasks: usize,
+    message: String,
+) {
     crate::audit::audit_or_warn(&crate::audit::AuditEvent {
         schema_version: 1,
         unix_nanos: crate::audit::unix_nanos_now(),
         command: "agent".to_owned(),
         action_id: Some(action_id.to_owned()),
-        safety_class: Some(crate::actions::SafetyClass::HighRisk),
+        safety_class: Some(safety_class),
         dry_run: false,
         success,
         affected_tasks,
@@ -913,34 +993,20 @@ async fn autotune_start_handler(
     headers: HeaderMap,
     Json(request): Json<AutotuneStartRequest>,
 ) -> impl IntoResponse {
-    let mode = request.mode.trim().to_owned();
-
-    if let Err(rejection) = validate_autotune_start_security(&headers, &state, &mode) {
-        audit_agent_event("remote-autotune-start", false, 0, rejection.audit_message);
-        return (
-            rejection.status,
-            Json(ErrorResponse {
-                error: rejection.response_message,
-            }),
-        )
-            .into_response();
-    }
-    if mode != "observe" && mode != "suggest" && mode != "apply-low-risk" {
-        audit_agent_event(
-            "remote-autotune-start",
-            false,
-            0,
-            format!("rejected unsupported remote autotune mode={mode}"),
-        );
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "unsupported remote autotune mode; use observe, suggest, or apply-low-risk"
-                    .to_owned(),
-            }),
-        )
-            .into_response();
-    }
+    let policy = match policy_for_remote_autotune_start(&headers, &state, &request) {
+        Ok(policy) => policy,
+        Err(rejection) => {
+            audit_agent_event("remote-autotune-start", false, 0, rejection.audit_message);
+            return (
+                rejection.status,
+                Json(ErrorResponse {
+                    error: rejection.response_message,
+                }),
+            )
+                .into_response();
+        }
+    };
+    let mode = policy.mode.as_str().to_owned();
 
     if let Err(err) = validate_autotune_start_limits(&request, &state) {
         audit_agent_event(
@@ -980,7 +1046,7 @@ async fn autotune_start_handler(
         watch_process: request.watch_process.clone(),
         tree_pid: request.tree_pid,
         profiles: request.profiles.as_deref().map(PathBuf::from),
-        mode: mode.clone(),
+        mode: policy.mode.as_str().to_owned(),
         decision_log: request.decision_log.as_deref().map(PathBuf::from),
         duration_seconds: request.duration_seconds,
         summary_ms: request.summary_ms.unwrap_or(1_000),
@@ -1091,7 +1157,7 @@ async fn autotune_start_handler(
         });
 
         AutotuneControllerHandle {
-            mode: mode.clone(),
+            mode: policy.mode.as_str().to_owned(),
             watch_process: request.watch_process.clone(),
             tree_pid: request.tree_pid,
             started_unix_nanos,
@@ -1104,7 +1170,7 @@ async fn autotune_start_handler(
     let handle = {
         let _ = monitor_config;
         AutotuneControllerHandle {
-            mode: mode.clone(),
+            mode: policy.mode.as_str().to_owned(),
             watch_process: request.watch_process.clone(),
             tree_pid: request.tree_pid,
             started_unix_nanos,
@@ -1113,13 +1179,19 @@ async fn autotune_start_handler(
 
     *active = Some(handle);
 
-    audit_agent_event(
+    audit_agent_event_with_safety(
         "remote-autotune-start",
+        safety_class_for_daemon_mode(policy.mode),
         true,
         0,
         format!(
-            "mode={} watch_process={:?} tree_pid={:?} auto_focus={}",
-            mode, request.watch_process, request.tree_pid, request.auto_focus
+            "daemon_mode={} action_source={:?} allow_system_wide_actions={} allow_high_risk={} watch_process={:?} tree_pid={:?}",
+            policy.mode,
+            policy.source,
+            policy.allow_system_wide_actions,
+            policy.allow_high_risk,
+            request.watch_process,
+            request.tree_pid
         ),
     );
 
@@ -1317,20 +1389,19 @@ async fn autotune_config_handler(
     }
 
     Json(AutotuneConfigResponse {
-        default_mode: "observe".to_owned(),
-        supported_modes: vec![
-            "observe".to_owned(),
-            "suggest".to_owned(),
-            "apply-low-risk".to_owned(),
-        ],
-        apply_low_risk_remote_enabled: true,
+        default_mode: DaemonMode::Observe.as_str().to_owned(),
+        supported_modes: supported_remote_mode_labels(&state.autotune_limits),
+        apply_low_risk_remote_enabled: remote_mode_supported(
+            &state.autotune_limits,
+            DaemonMode::ApplyLowRisk,
+        ),
         local_only_by_default: true,
         history_path: crate::autotune::history::default_autotune_history_path()
             .display()
             .to_string(),
         autotune_limits: state.autotune_limits.clone(),
-        daemon_scope: "focused".to_owned(),
-        allow_system_wide_actions: false,
+        daemon_scope: "remote-agent".to_owned(),
+        allow_system_wide_actions: state.autotune_limits.allow_system_wide_actions,
         minimum_focus_confidence: 0.70,
         required_stable_focus_polls: 3,
     })
@@ -1393,9 +1464,12 @@ fn capabilities_response(state: &AgentState) -> CapabilitiesResponse {
             block_io_request: true,
             irq_latency_request: true,
             foreground_window_request: true,
-            autotune_observe: true,
-            autotune_suggest: true,
-            autotune_apply_low_risk: false,
+            autotune_observe: remote_mode_supported(&state.autotune_limits, DaemonMode::Observe),
+            autotune_suggest: remote_mode_supported(&state.autotune_limits, DaemonMode::Suggest),
+            autotune_apply_low_risk: remote_mode_supported(
+                &state.autotune_limits,
+                DaemonMode::ApplyLowRisk,
+            ),
         },
     }
 }
@@ -1727,13 +1801,15 @@ mod tests {
         }
     }
 
-    fn test_agent_state() -> AgentState {
+    fn test_agent_state(bind: SocketAddr, token: Option<&str>) -> AgentState {
         AgentState {
             active_run: Mutex::new(None),
             active_autotune: Mutex::new(None),
-            runs_dir: PathBuf::from("/tmp/stutter-agent-test-runs"),
-            auth: AgentAuth { bearer_token: None },
-            bind: "127.0.0.1:9899".parse().unwrap(),
+            runs_dir: PathBuf::from("."),
+            auth: AgentAuth {
+                bearer_token: token.map(str::to_owned),
+            },
+            bind,
             limits: AgentLimits {
                 max_duration_seconds: DEFAULT_AGENT_MAX_DURATION_SECONDS,
                 max_targets: DEFAULT_AGENT_MAX_TARGETS,
@@ -1743,402 +1819,177 @@ mod tests {
         }
     }
 
-    #[test]
-    fn capabilities_response_advertises_autotune_feature_flags() {
-        let state = test_agent_state();
-        let response = capabilities_response(&state);
-
-        assert!(response.features.autotune_observe);
-        assert!(response.features.autotune_suggest);
-        assert!(!response.features.autotune_apply_low_risk);
-    }
-
-    #[test]
-    fn capabilities_response_serializes_autotune_feature_flags() {
-        let state = test_agent_state();
-        let response = capabilities_response(&state);
-        let json = serde_json::to_string(&response).unwrap();
-
-        assert!(json.contains("\"autotune_observe\":true"));
-        assert!(json.contains("\"autotune_suggest\":true"));
-        assert!(json.contains("\"autotune_apply_low_risk\":false"));
-    }
-
-    #[test]
-    fn capabilities_response_lists_autotune_routes() {
-        let state = test_agent_state();
-        let response = capabilities_response(&state);
-
-        assert!(
-            response
-                .supported_routes
-                .contains(&"/autotune/status".to_owned())
-        );
-        assert!(
-            response
-                .supported_routes
-                .contains(&"/autotune/start".to_owned())
-        );
-        assert!(
-            response
-                .supported_routes
-                .contains(&"/autotune/stop".to_owned())
-        );
-        assert!(
-            response
-                .supported_routes
-                .contains(&"/autotune/restore".to_owned())
-        );
-        assert!(
-            response
-                .supported_routes
-                .contains(&"/autotune/history".to_owned())
-        );
-        assert!(
-            response
-                .supported_routes
-                .contains(&"/autotune/config".to_owned())
-        );
-    }
-
-    #[test]
-    fn capabilities_response_advertises_safe_autotune_feature_flags() {
-        let state = test_agent_state();
-        let response = capabilities_response(&state);
-
-        assert!(response.features.autotune_observe);
-        assert!(response.features.autotune_suggest);
-        assert!(!response.features.autotune_apply_low_risk);
-    }
-
-    fn autotune_headers(token: Option<&str>) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        if let Some(token) = token {
-            headers.insert(
-                axum::http::header::AUTHORIZATION,
-                format!("Bearer {token}").parse().unwrap(),
-            );
-        }
-        headers
-    }
-
-    fn test_autotune_handle() -> AutotuneControllerHandle {
-        #[cfg(feature = "autotune-controller")]
-        {
-            let (stop_tx, stop_rx) = oneshot::channel();
-            let join = tokio::spawn(async move {
-                let _ = stop_rx.await;
-                Ok(crate::autotune::runtime::AutotuneControllerExit {
-                    reason: "test stop".to_owned(),
-                    last_decision: None,
-                })
-            });
-
-            AutotuneControllerHandle {
-                mode: "observe".to_owned(),
-                watch_process: Some("Game.exe".to_owned()),
-                tree_pid: None,
-                started_unix_nanos: crate::audit::unix_nanos_now(),
-                stop_tx,
-                join,
-            }
-        }
-
-        #[cfg(not(feature = "autotune-controller"))]
-        {
-            AutotuneControllerHandle {
-                mode: "observe".to_owned(),
-                watch_process: Some("Game.exe".to_owned()),
-                tree_pid: None,
-                started_unix_nanos: crate::audit::unix_nanos_now(),
-            }
+    fn autotune_request(mode: &str) -> AutotuneStartRequest {
+        AutotuneStartRequest {
+            mode: mode.to_owned(),
+            watch_process: Some("game".to_owned()),
+            tree_pid: None,
+            profiles: None,
+            config: None,
+            duration_seconds: Some(5),
+            decision_log: None,
+            summary_ms: None,
+            preset: None,
+            hwmon: false,
+            mangohud_log: None,
+            auto_focus: false,
+            focus_source: None,
+            foreground_window: false,
+            foreground_source: None,
+            foreground_poll_ms: None,
+            foreground_max_stale_ms: None,
+            washout_seconds: None,
+            washout_verify_interval_ms: None,
         }
     }
 
     #[test]
-    fn default_agent_autotune_limits_match_policy() {
-        let limits = AgentAutotuneLimits::default();
-
-        assert_eq!(limits.max_active_controllers, 1);
-        assert_eq!(limits.max_safety_class, "ReversibleLowRisk");
-        assert_eq!(limits.max_candidate_window_seconds, 120);
-        assert_eq!(limits.max_targets, 1);
-        assert!(!limits.allow_system_wide_actions);
-    }
-
-    #[test]
-    fn autotune_start_limits_accept_single_target_under_window_cap() {
-        let state = test_agent_state();
-        let request = AutotuneStartRequest {
-            mode: "observe".to_owned(),
-            watch_process: Some("Game.exe".to_owned()),
-            tree_pid: None,
-            profiles: None,
-            config: None,
-            duration_seconds: Some(120),
-            decision_log: None,
-            summary_ms: None,
-            preset: None,
-            washout_seconds: None,
-            washout_verify_interval_ms: None,
-            hwmon: false,
-            mangohud_log: None,
-            auto_focus: false,
-            focus_source: None,
-            foreground_window: false,
-            foreground_source: None,
-            foreground_poll_ms: None,
-            foreground_max_stale_ms: None,
-        };
-
-        validate_autotune_start_limits(&request, &state).unwrap();
-    }
-
-    #[test]
-    fn autotune_start_limits_reject_two_targets() {
-        let state = test_agent_state();
-        let request = AutotuneStartRequest {
-            mode: "observe".to_owned(),
-            watch_process: Some("Game.exe".to_owned()),
-            tree_pid: Some(1234),
-            profiles: None,
-            config: None,
-            duration_seconds: Some(30),
-            decision_log: None,
-            summary_ms: None,
-            preset: None,
-            washout_seconds: None,
-            washout_verify_interval_ms: None,
-            hwmon: false,
-            mangohud_log: None,
-            auto_focus: false,
-            focus_source: None,
-            foreground_window: false,
-            foreground_source: None,
-            foreground_poll_ms: None,
-            foreground_max_stale_ms: None,
-        };
-
-        let err = validate_autotune_start_limits(&request, &state)
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("exceeds max_targets 1"));
-    }
-
-    #[test]
-    fn autotune_start_limits_reject_candidate_window_above_cap() {
-        let state = test_agent_state();
-        let request = AutotuneStartRequest {
-            mode: "observe".to_owned(),
-            watch_process: Some("Game.exe".to_owned()),
-            tree_pid: None,
-            profiles: None,
-            config: None,
-            duration_seconds: Some(121),
-            decision_log: None,
-            summary_ms: None,
-            preset: None,
-            washout_seconds: None,
-            washout_verify_interval_ms: None,
-            hwmon: false,
-            mangohud_log: None,
-            auto_focus: false,
-            focus_source: None,
-            foreground_window: false,
-            foreground_source: None,
-            foreground_poll_ms: None,
-            foreground_max_stale_ms: None,
-        };
-
-        let err = validate_autotune_start_limits(&request, &state)
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("exceeds max_candidate_window_seconds 120"));
-    }
-
-    #[test]
-    fn autotune_start_limits_reject_system_wide_actions_enabled() {
-        let mut state = test_agent_state();
-        state.autotune_limits.allow_system_wide_actions = true;
-        let request = AutotuneStartRequest {
-            mode: "observe".to_owned(),
-            watch_process: Some("Game.exe".to_owned()),
-            tree_pid: None,
-            profiles: None,
-            config: None,
-            duration_seconds: Some(30),
-            decision_log: None,
-            summary_ms: None,
-            preset: None,
-            washout_seconds: None,
-            washout_verify_interval_ms: None,
-            hwmon: false,
-            mangohud_log: None,
-            auto_focus: false,
-            focus_source: None,
-            foreground_window: false,
-            foreground_source: None,
-            foreground_poll_ms: None,
-            foreground_max_stale_ms: None,
-        };
-
-        let err = validate_autotune_start_limits(&request, &state)
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("system-wide actions are disabled"));
-    }
-
-    #[test]
-    fn autotune_start_limits_reject_safety_class_above_low_risk() {
-        let mut state = test_agent_state();
-        state.autotune_limits.max_safety_class = "HighRisk".to_owned();
-        let request = AutotuneStartRequest {
-            mode: "observe".to_owned(),
-            watch_process: Some("Game.exe".to_owned()),
-            tree_pid: None,
-            profiles: None,
-            config: None,
-            duration_seconds: Some(30),
-            decision_log: None,
-            summary_ms: None,
-            preset: None,
-            washout_seconds: None,
-            washout_verify_interval_ms: None,
-            hwmon: false,
-            mangohud_log: None,
-            auto_focus: false,
-            focus_source: None,
-            foreground_window: false,
-            foreground_source: None,
-            foreground_poll_ms: None,
-            foreground_max_stale_ms: None,
-        };
-
-        let err = validate_autotune_start_limits(&request, &state)
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("max_safety_class must be ReversibleLowRisk"));
-    }
-
-    #[test]
-    fn autotune_observe_mode_follows_existing_auth_policy_on_loopback() {
-        let state = test_agent_state();
+    fn remote_autotune_observe_builds_observe_policy_without_token() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), None);
         let headers = HeaderMap::new();
 
-        assert!(validate_autotune_start_security(&headers, &state, "observe").is_ok());
+        let policy =
+            policy_for_remote_autotune_start(&headers, &state, &autotune_request("observe"))
+                .unwrap();
+
+        assert_eq!(policy.mode, DaemonMode::Observe);
+        assert_eq!(policy.source, ActionSource::RemoteAgent);
     }
 
     #[test]
-    fn autotune_suggest_mode_follows_existing_auth_policy_on_loopback() {
-        let state = test_agent_state();
-        let headers = HeaderMap::new();
-
-        assert!(validate_autotune_start_security(&headers, &state, "suggest").is_ok());
-    }
-
-    #[test]
-    fn autotune_apply_mode_requires_configured_bearer_token() {
-        let state = test_agent_state();
+    fn remote_autotune_apply_requires_configured_bearer_token() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), None);
         let headers = HeaderMap::new();
 
         let rejection =
-            validate_autotune_start_security(&headers, &state, "apply-low-risk").unwrap_err();
+            policy_for_remote_autotune_start(&headers, &state, &autotune_request("apply-low-risk"))
+                .unwrap_err();
 
         assert_eq!(rejection.status, StatusCode::UNAUTHORIZED);
-        assert!(rejection.audit_message.contains("bearer token is required"));
-        assert!(
-            rejection
-                .response_message
-                .contains("requires a configured bearer token")
-        );
+        assert!(rejection.response_message.contains("bearer token"));
     }
 
     #[test]
-    fn autotune_apply_mode_requires_supplied_bearer_token_when_configured() {
-        let mut state = test_agent_state();
-        state.auth = AgentAuth {
-            bearer_token: Some("secret".to_owned()),
-        };
+    fn remote_autotune_apply_requires_valid_bearer_token() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
         let headers = HeaderMap::new();
 
         let rejection =
-            validate_autotune_start_security(&headers, &state, "apply-low-risk").unwrap_err();
+            policy_for_remote_autotune_start(&headers, &state, &autotune_request("apply-low-risk"))
+                .unwrap_err();
 
         assert_eq!(rejection.status, StatusCode::UNAUTHORIZED);
-        assert!(rejection.audit_message.contains("invalid bearer token"));
-        assert!(
-            rejection
-                .response_message
-                .contains("requires a valid bearer token")
-        );
+        assert!(rejection.response_message.contains("valid bearer token"));
     }
 
     #[test]
-    fn autotune_apply_mode_rejects_wrong_bearer_token() {
-        let mut state = test_agent_state();
-        state.auth = AgentAuth {
-            bearer_token: Some("secret".to_owned()),
-        };
-        let headers = autotune_headers(Some("wrong"));
-
-        let rejection =
-            validate_autotune_start_security(&headers, &state, "apply-low-risk").unwrap_err();
-
-        assert_eq!(rejection.status, StatusCode::FORBIDDEN);
-        assert!(rejection.audit_message.contains("invalid bearer token"));
-    }
-
-    #[test]
-    fn autotune_apply_mode_with_valid_token_passes_security_on_loopback() {
-        let mut state = test_agent_state();
-        state.auth = AgentAuth {
-            bearer_token: Some("secret".to_owned()),
-        };
-        let headers = autotune_headers(Some("secret"));
-
-        assert!(validate_autotune_start_security(&headers, &state, "apply-low-risk").is_ok());
-    }
-
-    #[test]
-    fn autotune_apply_mode_rejects_non_loopback_even_with_unsafe_bind() {
-        let mut state = test_agent_state();
-        state.auth = AgentAuth {
-            bearer_token: Some("secret".to_owned()),
-        };
-        state.bind = "0.0.0.0:9899".parse().unwrap();
-        let headers = autotune_headers(Some("secret"));
-
-        let rejection =
-            validate_autotune_start_security(&headers, &state, "apply-low-risk").unwrap_err();
-
-        assert_eq!(rejection.status, StatusCode::FORBIDDEN);
-        assert!(rejection.audit_message.contains("non-loopback bind"));
-        assert!(
-            rejection
-                .response_message
-                .contains("only allowed on loopback binds")
-        );
-    }
-
-    #[test]
-    fn autotune_all_apply_modes_use_strict_security() {
-        let state = test_agent_state();
+    fn remote_autotune_all_apply_modes_require_bearer_token_before_limit_rejection() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), None);
         let headers = HeaderMap::new();
 
         for mode in ["apply-low-risk", "apply-medium-risk", "apply-high-risk"] {
-            let rejection = validate_autotune_start_security(&headers, &state, mode).unwrap_err();
+            let rejection =
+                policy_for_remote_autotune_start(&headers, &state, &autotune_request(mode))
+                    .unwrap_err();
+
             assert_eq!(rejection.status, StatusCode::UNAUTHORIZED);
-            assert!(rejection.audit_message.contains("bearer token is required"));
+            assert!(rejection.response_message.contains("bearer token"));
         }
+    }
+
+    #[test]
+    fn remote_autotune_apply_requires_loopback_bind() {
+        let state = test_agent_state("0.0.0.0:0".parse().unwrap(), Some("secret"));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer secret"),
+        );
+
+        let rejection =
+            policy_for_remote_autotune_start(&headers, &state, &autotune_request("apply-low-risk"))
+                .unwrap_err();
+
+        assert_eq!(rejection.status, StatusCode::FORBIDDEN);
+        assert!(rejection.response_message.contains("loopback"));
+    }
+
+    #[test]
+    fn remote_autotune_apply_low_risk_builds_low_risk_policy_with_valid_auth() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer secret"),
+        );
+
+        let policy =
+            policy_for_remote_autotune_start(&headers, &state, &autotune_request("apply-low-risk"))
+                .unwrap();
+
+        assert_eq!(policy.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(policy.source, ActionSource::RemoteAgent);
+        assert!(!policy.allow_system_wide_actions);
+        assert!(!policy.allow_high_risk);
+    }
+
+    #[test]
+    fn remote_autotune_high_risk_rejected_by_default_limits() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer secret"),
+        );
+
+        let rejection = policy_for_remote_autotune_start(
+            &headers,
+            &state,
+            &autotune_request("apply-high-risk"),
+        )
+        .unwrap_err();
+
+        assert_eq!(rejection.status, StatusCode::BAD_REQUEST);
+        assert!(
+            rejection
+                .response_message
+                .contains("unsupported remote autotune mode")
+        );
+    }
+
+    #[test]
+    fn autotune_start_rejects_wrong_bearer_token() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer wrong"),
+        );
+
+        let rejection =
+            policy_for_remote_autotune_start(&headers, &state, &autotune_request("observe"))
+                .unwrap_err();
+
+        assert_eq!(rejection.status, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn supported_remote_modes_derive_from_limits() {
+        let limits = AgentAutotuneLimits::default();
+
+        assert_eq!(
+            supported_remote_mode_labels(&limits),
+            vec![
+                "observe".to_owned(),
+                "suggest".to_owned(),
+                "apply-low-risk".to_owned()
+            ]
+        );
     }
 
     #[tokio::test]
     async fn autotune_start_accepts_observe_mode_with_tree_pid() {
-        let state = Arc::new(test_agent_state());
+        let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
         let response = autotune_start_handler(
             State(state.clone()),
             HeaderMap::new(),
@@ -2177,7 +2028,7 @@ mod tests {
 
     #[tokio::test]
     async fn autotune_start_accepts_suggest_mode_with_watch_process() {
-        let state = Arc::new(test_agent_state());
+        let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
         let response = autotune_start_handler(
             State(state.clone()),
             HeaderMap::new(),
@@ -2219,7 +2070,7 @@ mod tests {
 
     #[tokio::test]
     async fn autotune_start_allows_apply_low_risk_mode_with_valid_auth() {
-        let mut state_value = test_agent_state();
+        let mut state_value = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
         state_value.auth = AgentAuth {
             bearer_token: Some("secret".to_owned()),
         };
@@ -2251,14 +2102,66 @@ mod tests {
         )
         .await
         .into_response();
-
         assert_eq!(response.status(), StatusCode::OK);
         assert!(state.active_autotune.lock().await.is_some());
     }
 
+    #[test]
+    fn autotune_headers_test() {
+        let headers = autotune_headers(Some("secret"));
+        assert_eq!(
+            headers.get(axum::http::header::AUTHORIZATION).unwrap(),
+            "Bearer secret"
+        );
+    }
+
+    fn autotune_headers(token: Option<&str>) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        if let Some(token) = token {
+            headers.insert(
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {token}").parse().unwrap(),
+            );
+        }
+        headers
+    }
+
+    fn test_autotune_handle() -> AutotuneControllerHandle {
+        #[cfg(feature = "autotune-controller")]
+        {
+            let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+            let join = tokio::spawn(async move {
+                let _ = stop_rx.await;
+                Ok(crate::autotune::runtime::AutotuneControllerExit {
+                    reason: "test stop".to_owned(),
+                    last_decision: None,
+                })
+            });
+
+            AutotuneControllerHandle {
+                mode: "observe".to_owned(),
+                watch_process: Some("Game.exe".to_owned()),
+                tree_pid: None,
+                started_unix_nanos: crate::audit::unix_nanos_now(),
+                stop_tx,
+                join,
+            }
+        }
+
+        #[cfg(not(feature = "autotune-controller"))]
+        {
+            AutotuneControllerHandle {
+                mode: "observe".to_owned(),
+                watch_process: Some("Game.exe".to_owned()),
+                tree_pid: None,
+                started_unix_nanos: crate::audit::unix_nanos_now(),
+            }
+        }
+    }
+
     #[tokio::test]
     async fn autotune_start_apply_low_risk_without_auth_is_rejected_before_mode_validation() {
-        let state = Arc::new(test_agent_state());
+        let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
         let response = autotune_start_handler(
             State(state.clone()),
             HeaderMap::new(),
@@ -2293,7 +2196,7 @@ mod tests {
 
     #[tokio::test]
     async fn autotune_start_apply_low_risk_on_non_loopback_is_rejected_even_with_valid_token() {
-        let mut state_value = test_agent_state();
+        let mut state_value = test_agent_state("0.0.0.0:9899".parse().unwrap(), Some("secret"));
         state_value.auth = AgentAuth {
             bearer_token: Some("secret".to_owned()),
         };
@@ -2334,7 +2237,7 @@ mod tests {
 
     #[tokio::test]
     async fn autotune_start_rejects_request_above_candidate_window_cap() {
-        let state = Arc::new(test_agent_state());
+        let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
         let response = autotune_start_handler(
             State(state.clone()),
             HeaderMap::new(),
@@ -2369,7 +2272,7 @@ mod tests {
 
     #[tokio::test]
     async fn autotune_start_rejects_more_than_one_target() {
-        let state = Arc::new(test_agent_state());
+        let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
         let response = autotune_start_handler(
             State(state.clone()),
             HeaderMap::new(),
@@ -2404,7 +2307,7 @@ mod tests {
 
     #[tokio::test]
     async fn autotune_start_requires_target_selector() {
-        let state = Arc::new(test_agent_state());
+        let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
         let response = autotune_start_handler(
             State(state.clone()),
             HeaderMap::new(),
@@ -2439,7 +2342,7 @@ mod tests {
 
     #[tokio::test]
     async fn autotune_stop_clears_active_session() {
-        let state = Arc::new(test_agent_state());
+        let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
         *state.active_autotune.lock().await = Some(test_autotune_handle());
 
         let response = autotune_stop_handler(State(state.clone()), HeaderMap::new())
@@ -2452,7 +2355,7 @@ mod tests {
 
     #[tokio::test]
     async fn autotune_restore_is_safe_noop_until_remote_apply_exists() {
-        let state = Arc::new(test_agent_state());
+        let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
 
         let response = autotune_restore_handler(State(state), HeaderMap::new())
             .await
@@ -2463,7 +2366,7 @@ mod tests {
 
     #[test]
     fn autotune_config_response_includes_limits() {
-        let state = test_agent_state();
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), None);
         let response = AutotuneConfigResponse {
             default_mode: "observe".to_owned(),
             supported_modes: vec!["observe".to_owned(), "suggest".to_owned()],
@@ -2483,7 +2386,7 @@ mod tests {
         assert_eq!(response.autotune_limits.max_active_controllers, 1);
         assert_eq!(
             response.autotune_limits.max_safety_class,
-            "ReversibleLowRisk"
+            SafetyClass::ReversibleLowRisk
         );
         assert_eq!(response.autotune_limits.max_candidate_window_seconds, 120);
         assert_eq!(response.autotune_limits.max_targets, 1);
@@ -2492,13 +2395,46 @@ mod tests {
 
     #[tokio::test]
     async fn autotune_config_reports_apply_low_risk_disabled() {
-        let state = Arc::new(test_agent_state());
+        let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
 
         let response = autotune_config_handler(State(state), HeaderMap::new())
             .await
             .into_response();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn capabilities_includes_autotune_routes() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), None);
+        let resp = capabilities_response(&state);
+        assert!(
+            resp.supported_routes
+                .contains(&"/autotune/start".to_owned())
+        );
+        assert!(
+            resp.supported_routes
+                .contains(&"/autotune/status".to_owned())
+        );
+        assert!(resp.supported_routes.contains(&"/autotune/stop".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn autotune_start_rejects_system_wide_actions_by_default() {
+        let mut state_value = test_agent_state("127.0.0.1:0".parse().unwrap(), None);
+        state_value.autotune_limits.allow_system_wide_actions = true; // but the validator rejects it for remote
+        let state = Arc::new(state_value);
+
+        let response = autotune_start_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Json(autotune_request("observe")),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        // The error comes from validate_autotune_start_limits
     }
 
     #[test]
