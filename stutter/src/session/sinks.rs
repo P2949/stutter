@@ -5,7 +5,6 @@ use tokio::sync::mpsc;
 use crate::{
     alert::AlertPayload,
     artifacts::ArtifactKind,
-    cli::Config,
     events::push_artifact_event,
     metrics::print_event,
     recorder::{self, LiveRecorder},
@@ -69,8 +68,14 @@ pub fn default_output_sink_registry() -> Vec<MonitorOutputSinkKind> {
     ]
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MonitorOutputConfig {
+    pub json_stream: bool,
+    pub verbose: bool,
+}
+
 pub struct MonitorOutputSinks<'a> {
-    pub config: &'a Config,
+    pub output: MonitorOutputConfig,
     pub recorder: &'a mut LiveRecorder,
     pub alert_sender: Option<&'a mpsc::Sender<AlertPayload>>,
     pub sinks: Vec<MonitorOutputSinkKind>,
@@ -78,12 +83,12 @@ pub struct MonitorOutputSinks<'a> {
 
 impl<'a> MonitorOutputSinks<'a> {
     pub fn new(
-        config: &'a Config,
+        output: MonitorOutputConfig,
         recorder: &'a mut LiveRecorder,
         alert_sender: Option<&'a mpsc::Sender<AlertPayload>>,
     ) -> Self {
         Self::with_sinks(
-            config,
+            output,
             recorder,
             alert_sender,
             default_output_sink_registry(),
@@ -91,13 +96,13 @@ impl<'a> MonitorOutputSinks<'a> {
     }
 
     pub fn with_sinks(
-        config: &'a Config,
+        output: MonitorOutputConfig,
         recorder: &'a mut LiveRecorder,
         alert_sender: Option<&'a mpsc::Sender<AlertPayload>>,
         sinks: Vec<MonitorOutputSinkKind>,
     ) -> Self {
         Self {
-            config,
+            output,
             recorder,
             alert_sender,
             sinks,
@@ -122,7 +127,7 @@ impl<'a> MonitorOutputSinks<'a> {
             MonitorOutputSinkKind::Prometheus => PrometheusSink::new(self.recorder).on_event(event),
             MonitorOutputSinkKind::Otel => OtelSink::new(self.recorder).on_event(event),
             MonitorOutputSinkKind::Stdout => {
-                StdoutSink::new(self.config, self.recorder).on_event(event)
+                StdoutSink::new(self.output, self.recorder).on_event(event)
             }
             MonitorOutputSinkKind::Alert => {
                 AlertSink::new(self.recorder, self.alert_sender).on_event(event)
@@ -357,13 +362,13 @@ impl MonitorEventSink for OtelSink<'_> {
 }
 
 pub struct StdoutSink<'a> {
-    config: &'a Config,
+    output: MonitorOutputConfig,
     recorder: &'a mut LiveRecorder,
 }
 
 impl<'a> StdoutSink<'a> {
-    pub fn new(config: &'a Config, recorder: &'a mut LiveRecorder) -> Self {
-        Self { config, recorder }
+    pub fn new(output: MonitorOutputConfig, recorder: &'a mut LiveRecorder) -> Self {
+        Self { output, recorder }
     }
 }
 
@@ -371,8 +376,8 @@ impl MonitorEventSink for StdoutSink<'_> {
     fn on_event(&mut self, event: &MonitorEvent) -> Result<(), SinkError> {
         match event {
             MonitorEvent::SchedulerSample { event, comm, label }
-                if !self.config.json_stream
-                    && (*label == "spike" || (self.config.verbose && *label == "sample")) =>
+                if !self.output.json_stream
+                    && (*label == "spike" || (self.output.verbose && *label == "sample")) =>
             {
                 print_event(event.as_ref(), comm, label);
             }

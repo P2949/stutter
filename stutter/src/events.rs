@@ -8,11 +8,10 @@ use stutter_common::{
 
 use crate::{
     artifacts::ArtifactKind,
-    cli::Config,
     metrics::{self, format_latency},
     process_tree,
     recorder::{self, IrqEventRecord, LiveRecorder, RecordingCounters},
-    session::sinks::{MonitorEventSink, MonitorOutputSinks, RecorderSink},
+    session::sinks::{MonitorEventSink, MonitorOutputConfig, MonitorOutputSinks, RecorderSink},
     session_events::MonitorEvent,
     tasks::TaskTracker,
 };
@@ -165,10 +164,33 @@ pub fn push_artifact_event<T: Serialize, F>(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventRuntimeConfig {
+    pub spike: interpret::SpikeConfig,
+    pub output: MonitorOutputConfig,
+}
+
+impl EventRuntimeConfig {
+    pub fn from_legacy_config(config: &crate::cli::Config) -> Self {
+        Self {
+            spike: interpret::SpikeConfig {
+                spike_threshold_ns: config.spike_threshold_ns,
+                alert_threshold_ns: config.alert_threshold_ns,
+                verbose: config.verbose,
+                cgroupv2_active: config.cgroupv2.is_some(),
+            },
+            output: MonitorOutputConfig {
+                json_stream: config.json_stream,
+                verbose: config.verbose,
+            },
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn handle_event(
     event: &SchedulerEvent,
-    config: &Config,
+    config: &crate::cli::Config,
     started: Instant,
     tasks: &mut TaskTracker,
     monotonic_start_ns: Option<u64>,
@@ -178,16 +200,37 @@ pub fn handle_event(
     scx_state: Option<&str>,
     scx_enable_seq: Option<&str>,
 ) -> Option<recorder::SpikeEvent> {
-    let spike_config = interpret::SpikeConfig {
-        spike_threshold_ns: config.spike_threshold_ns,
-        alert_threshold_ns: config.alert_threshold_ns,
-        verbose: config.verbose,
-        cgroupv2_active: config.cgroupv2.is_some(),
-    };
+    let runtime_config = EventRuntimeConfig::from_legacy_config(config);
+    handle_event_with_runtime_config(
+        event,
+        &runtime_config,
+        started,
+        tasks,
+        monotonic_start_ns,
+        recorder,
+        alert_sender,
+        scx_ops,
+        scx_state,
+        scx_enable_seq,
+    )
+}
 
+#[allow(clippy::too_many_arguments)]
+pub fn handle_event_with_runtime_config(
+    event: &SchedulerEvent,
+    config: &EventRuntimeConfig,
+    started: Instant,
+    tasks: &mut TaskTracker,
+    monotonic_start_ns: Option<u64>,
+    recorder: &mut LiveRecorder,
+    alert_sender: Option<&tokio::sync::mpsc::Sender<AlertPayload>>,
+    scx_ops: Option<&str>,
+    scx_state: Option<&str>,
+    scx_enable_seq: Option<&str>,
+) -> Option<recorder::SpikeEvent> {
     let update = interpret::interpret_scheduler_event(
         event,
-        &spike_config,
+        &config.spike,
         started,
         tasks,
         monotonic_start_ns,
@@ -196,7 +239,7 @@ pub fn handle_event(
         scx_enable_seq,
     );
 
-    let mut sinks = MonitorOutputSinks::new(config, recorder, alert_sender);
+    let mut sinks = MonitorOutputSinks::new(config.output, recorder, alert_sender);
     for event in &update.events {
         if let Err(err) = sinks.dispatch(event) {
             warn!("monitor_event_sink_failed err={err}");

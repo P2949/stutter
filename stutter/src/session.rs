@@ -104,6 +104,10 @@ fn foreground_resolver_from_config(config: &Config) -> crate::foreground::Foregr
         .with_max_stale_ms(config.foreground_max_stale_ms)
 }
 
+fn event_runtime_config_from_config(config: &Config) -> crate::events::EventRuntimeConfig {
+    crate::events::EventRuntimeConfig::from_legacy_config(config)
+}
+
 fn foreground_identity_changed(
     old: Option<&crate::foreground::ForegroundWindowSnapshot>,
     new: &crate::foreground::ForegroundWindowSnapshot,
@@ -1034,9 +1038,9 @@ impl MonitorSession {
                     if let Some(event) =
                         crate::events::read_event_unaligned::<stutter_common::SchedulerEvent>(&item)
                     {
-                        let spike = crate::events::handle_event(
+                        let spike = crate::events::handle_event_with_runtime_config(
                             &event,
-                            &self.config,
+                            &event_runtime_config_from_config(&self.config),
                             self.started,
                             &mut self.runtime.targeting.tasks,
                             recording_monotonic_start_ns,
