@@ -674,12 +674,12 @@ impl MonitorSession {
             })
             .collect::<Vec<_>>();
 
-        self.emit(MonitorEvent::TargetSnapshot {
+        self.dispatch_monitor_event(MonitorEvent::TargetSnapshot {
             elapsed_ms,
             active_targets: self.runtime.targeting.tasks.active_targets.clone(),
             removed_targets,
         })
-        .await;
+        .await?;
 
         Ok(())
     }
@@ -688,6 +688,12 @@ impl MonitorSession {
         RecorderSink::new(&mut self.runtime.outputs.recorder)
             .on_event(event)
             .map_err(|err| anyhow::anyhow!(err))
+    }
+
+    async fn dispatch_monitor_event(&mut self, event: MonitorEvent) -> anyhow::Result<()> {
+        self.dispatch_recorder_event(&event)?;
+        self.emit(event).await;
+        Ok(())
     }
 
     fn foreground_event_for_snapshot(
@@ -728,8 +734,7 @@ impl MonitorSession {
             reasons: new.group.reasons.clone(),
         };
 
-        self.dispatch_recorder_event(&event)?;
-        self.emit(event).await;
+        self.dispatch_monitor_event(event).await?;
 
         Ok(())
     }
@@ -753,8 +758,7 @@ impl MonitorSession {
             reason,
         };
 
-        self.dispatch_recorder_event(&event)?;
-        self.emit(event).await;
+        self.dispatch_monitor_event(event).await?;
 
         Ok(())
     }
@@ -816,8 +820,7 @@ impl MonitorSession {
                 self.foreground_switch_count = self.foreground_switch_count.saturating_add(1);
             }
             if let Some(event) = self.foreground_event_for_snapshot(&snapshot) {
-                self.dispatch_recorder_event(&event)?;
-                self.emit(event).await;
+                self.dispatch_monitor_event(event).await?;
             }
         }
 
