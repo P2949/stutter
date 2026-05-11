@@ -1604,8 +1604,8 @@ mod tests {
             default_policy.max_drop_counter_total
         );
         assert_eq!(
-            config.online_data_quality_policy.require_frame_data,
-            default_policy.require_frame_data
+            config.online_data_quality_policy.frame_data_policy,
+            default_policy.frame_data_policy
         );
     }
 

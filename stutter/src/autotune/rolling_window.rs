@@ -235,7 +235,7 @@ impl RollingWindow {
             drop_counter_total,
             target_identity_shifted: false,
             target_present: scored_task_count > 0,
-            frame_data_required: quality_policy.require_frame_data,
+            frame_data_required: false,
             frame_count,
             baseline_frame_count: None,
             candidate_frame_count: None,
@@ -607,7 +607,7 @@ mod tests {
         }
 
         let quality_policy = OnlineDataQualityPolicy {
-            require_frame_data: true,
+            frame_data_policy: crate::autotune::quality::FrameDataPolicy::Required,
             ..OnlineDataQualityPolicy::default()
         };
         let score = window.score_with_quality_policy(&quality_policy);

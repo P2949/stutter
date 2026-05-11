@@ -9,11 +9,28 @@ use crate::tune::comparability::{
 pub const DEFAULT_MIN_SCORED_INTERVALS: usize = 5;
 pub const DEFAULT_MIN_SCORED_SAMPLES: u64 = 100;
 pub const DEFAULT_MAX_DROP_COUNTER_TOTAL: u64 = 0;
-pub(crate) const DEFAULT_REQUIRE_FRAME_DATA: bool = false;
+pub(crate) const DEFAULT_FRAME_DATA_POLICY: FrameDataPolicy = FrameDataPolicy::Advisory;
 pub const LOW_IDENTITY_OVERLAP_RATIO: f64 = 0.75;
 pub const MEDIUM_IDENTITY_OVERLAP_RATIO: f64 = 0.90;
 pub const LOW_FRAME_COUNT_RATIO: f64 = 1.50;
 pub const MEDIUM_FRAME_COUNT_RATIO: f64 = 1.20;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FrameDataPolicy {
+    Ignore,
+    #[default]
+    Advisory,
+    Required,
+}
+
+impl FrameDataPolicy {
+    pub fn requires_frames(self) -> bool {
+        matches!(self, Self::Required)
+    }
+    pub fn checks_frame_count_mismatch(self) -> bool {
+        !matches!(self, Self::Ignore)
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum OnlineDataQuality {
@@ -64,7 +81,7 @@ pub struct OnlineDataQualityPolicy {
     pub min_scored_intervals: usize,
     pub min_scored_samples: u64,
     pub max_drop_counter_total: u64,
-    pub require_frame_data: bool,
+    pub frame_data_policy: FrameDataPolicy,
     pub low_identity_overlap_ratio: f64,
     pub medium_identity_overlap_ratio: f64,
     pub low_frame_count_ratio: f64,
@@ -77,7 +94,7 @@ impl Default for OnlineDataQualityPolicy {
             min_scored_intervals: DEFAULT_MIN_SCORED_INTERVALS,
             min_scored_samples: DEFAULT_MIN_SCORED_SAMPLES,
             max_drop_counter_total: DEFAULT_MAX_DROP_COUNTER_TOTAL,
-            require_frame_data: DEFAULT_REQUIRE_FRAME_DATA,
+            frame_data_policy: DEFAULT_FRAME_DATA_POLICY,
             low_identity_overlap_ratio: LOW_IDENTITY_OVERLAP_RATIO,
             medium_identity_overlap_ratio: MEDIUM_IDENTITY_OVERLAP_RATIO,
             low_frame_count_ratio: LOW_FRAME_COUNT_RATIO,
@@ -145,7 +162,8 @@ impl<'a> OnlineDataQualityInput<'a> {
             low_reasons.push("target disappeared".to_owned());
         }
 
-        let frame_data_required = policy.require_frame_data || self.frame_data_required;
+        let frame_data_required =
+            policy.frame_data_policy.requires_frames() || self.frame_data_required;
         if frame_data_required && self.frame_count == 0 {
             low_reasons.push(
                 "frame data mismatch when frame-based scoring is required: no frame data"
@@ -153,18 +171,20 @@ impl<'a> OnlineDataQualityInput<'a> {
             );
         }
 
-        if let Some(reason) = frame_count_low_reason(
-            self.baseline_frame_count,
-            self.candidate_frame_count,
-            policy.low_frame_count_ratio,
-        ) {
-            low_reasons.push(reason);
-        } else if let Some(reason) = frame_count_medium_reason(
-            self.baseline_frame_count,
-            self.candidate_frame_count,
-            policy.medium_frame_count_ratio,
-        ) {
-            medium_reasons.push(reason);
+        if policy.frame_data_policy.checks_frame_count_mismatch() {
+            if let Some(reason) = frame_count_low_reason(
+                self.baseline_frame_count,
+                self.candidate_frame_count,
+                policy.low_frame_count_ratio,
+            ) {
+                low_reasons.push(reason);
+            } else if let Some(reason) = frame_count_medium_reason(
+                self.baseline_frame_count,
+                self.candidate_frame_count,
+                policy.medium_frame_count_ratio,
+            ) {
+                medium_reasons.push(reason);
+            }
         }
 
         if let Some(overlap_ratio) = scored_identity_overlap_ratio(
@@ -337,14 +357,15 @@ mod tests {
         let policy = OnlineDataQualityPolicy::default();
         let input = high_input();
 
-        assert_eq!(policy.require_frame_data, DEFAULT_REQUIRE_FRAME_DATA);
+        assert_eq!(policy.frame_data_policy, DEFAULT_FRAME_DATA_POLICY);
+        assert_eq!(policy.frame_data_policy, FrameDataPolicy::Advisory);
         assert_eq!(input.evaluate_with_policy(&policy), OnlineDataQuality::High);
     }
 
     #[test]
     fn policy_required_frame_data_without_frames_is_low_quality() {
         let policy = OnlineDataQualityPolicy {
-            require_frame_data: true,
+            frame_data_policy: FrameDataPolicy::Required,
             ..OnlineDataQualityPolicy::default()
         };
         let input = high_input();
@@ -360,6 +381,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn ignore_frame_data_policy_skips_frame_count_mismatch() {
+        let mut input = high_input();
+        input.frame_count = 100;
+        input.baseline_frame_count = Some(100);
+        input.candidate_frame_count = Some(0);
+        let policy = OnlineDataQualityPolicy {
+            frame_data_policy: FrameDataPolicy::Ignore,
+            ..OnlineDataQualityPolicy::default()
+        };
+        assert_eq!(input.evaluate_with_policy(&policy), OnlineDataQuality::High);
+    }
     #[test]
     fn low_when_scored_intervals_are_below_policy_minimum() {
         let mut input = high_input();
