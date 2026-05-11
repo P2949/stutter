@@ -39,7 +39,7 @@ use crate::{
         },
         kept::{ActiveProfileState, KeptCandidateState},
         observation::AutotuneObservation,
-        quality::OnlineDataQuality,
+        quality::{OnlineDataQuality, OnlineDataQualityPolicy},
         rolling_window::{RollingWindow, WindowScore as RuntimeWindowScore},
         state::{AutotuneMode, ControllerPhase, SituationKind},
     },
@@ -69,6 +69,7 @@ pub struct AutotuneRuntimeConfig {
     pub watch_process: Option<String>,
     pub profiles: Vec<Profile>,
     pub allow_system_wide_actions: bool,
+    pub online_data_quality_policy: OnlineDataQualityPolicy,
 }
 
 impl AutotuneRuntimeConfig {
@@ -88,6 +89,7 @@ impl AutotuneRuntimeConfig {
             watch_process,
             profiles: Vec::new(),
             allow_system_wide_actions: false,
+            online_data_quality_policy: OnlineDataQualityPolicy::default(),
         }
     }
 
@@ -107,6 +109,7 @@ impl AutotuneRuntimeConfig {
             watch_process,
             profiles: Vec::new(),
             allow_system_wide_actions: false,
+            online_data_quality_policy: OnlineDataQualityPolicy::default(),
         }
     }
 
@@ -126,6 +129,7 @@ impl AutotuneRuntimeConfig {
             watch_process,
             profiles: Vec::new(),
             allow_system_wide_actions: false,
+            online_data_quality_policy: OnlineDataQualityPolicy::default(),
         }
     }
 
@@ -136,6 +140,11 @@ impl AutotuneRuntimeConfig {
 
     pub fn with_candidate_window_seconds(mut self, seconds: u64) -> Self {
         self.candidate_window_seconds = seconds.max(1);
+        self
+    }
+
+    pub fn with_online_data_quality_policy(mut self, policy: OnlineDataQualityPolicy) -> Self {
+        self.online_data_quality_policy = policy;
         self
     }
 }
@@ -471,7 +480,10 @@ impl AutotuneRuntime {
     }
 
     fn build_observation(&self) -> AutotuneObservation {
-        let window_score = self.controller.window.score();
+        let window_score = self
+            .controller
+            .window
+            .score_with_quality_policy(&self.config.online_data_quality_policy);
         let focus = self.latest_focus.as_ref();
         let focus_kind = focus.map(|focus| focus.kind);
         let focus_confidence = focus.map(|focus| focus.confidence).unwrap_or(0.0);
@@ -1505,6 +1517,66 @@ mod tests {
         let candidate = runtime.select_candidate_for_observation(&observation);
 
         assert!(candidate.is_none());
+    }
+
+    #[test]
+    fn runtime_observation_uses_configured_online_data_quality_policy() {
+        let mut runtime = AutotuneRuntime::new(
+            AutotuneRuntimeConfig::observe(None, Some(1234), None).with_online_data_quality_policy(
+                OnlineDataQualityPolicy {
+                    min_scored_samples: 200,
+                    ..OnlineDataQualityPolicy::default()
+                },
+            ),
+        );
+
+        for elapsed_ms in [1000, 2000, 3000, 4000, 5000] {
+            runtime
+                .controller
+                .window
+                .push_interval(crate::recorder::IntervalRecord {
+                    elapsed_ms,
+                    task: 42,
+                    samples: 20,
+                    over_1ms: 1,
+                    max_ns: 2_000_000,
+                    ..Default::default()
+                });
+        }
+
+        let observation = runtime.build_observation();
+
+        assert_eq!(observation.scored_samples, 100);
+        assert!(observation.data_quality.is_low());
+        assert!(
+            observation
+                .data_quality
+                .reasons()
+                .iter()
+                .any(|reason| reason.contains("fewer than min_scored_samples"))
+        );
+    }
+
+    #[test]
+    fn runtime_config_defaults_to_default_online_data_quality_policy() {
+        let config = AutotuneRuntimeConfig::observe(None, Some(1234), None);
+
+        assert_eq!(
+            config.online_data_quality_policy.min_scored_intervals,
+            OnlineDataQualityPolicy::default().min_scored_intervals
+        );
+        assert_eq!(
+            config.online_data_quality_policy.min_scored_samples,
+            OnlineDataQualityPolicy::default().min_scored_samples
+        );
+        assert_eq!(
+            config.online_data_quality_policy.max_drop_counter_total,
+            OnlineDataQualityPolicy::default().max_drop_counter_total
+        );
+        assert_eq!(
+            config.online_data_quality_policy.require_frame_data,
+            OnlineDataQualityPolicy::default().require_frame_data
+        );
     }
 
     #[test]
