@@ -828,6 +828,53 @@ pub async fn tune_profile_refresh_loop(input: TuneProfileRefreshInput) -> anyhow
     }
 }
 
+#[cfg(test)]
+mod keep_best_policy_tests {
+    use crate::{
+        actions::cpu_affinity::CpuAffinityProfileAction,
+        daemon_policy::{ActionSource, DaemonMode, PolicyIntent, PolicyRejection},
+        process_tree::TaskClass,
+        profiles::{Profile, ProfileRule},
+    };
+
+    #[test]
+    fn tune_keep_best_uses_policy_and_rejects_medium_risk_without_medium_mode() {
+        let profile = Profile {
+            name: "medium-priority".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: None,
+                nice: Some(10),
+                ionice: None,
+                match_class: vec![TaskClass::Indexer],
+                match_comm: Vec::new(),
+            }],
+        };
+        let action = CpuAffinityProfileAction {
+            tree_pid: 1234,
+            profile,
+            force_restore_overwrite: false,
+        };
+        let descriptor = action.descriptor_with_persistent_effect(true);
+
+        let low_policy = crate::watch::profile_apply_policy(false, false, true, ActionSource::Tune);
+        assert!(matches!(
+            low_policy.check_action(PolicyIntent::Apply, &descriptor),
+            Err(PolicyRejection::SafetyClassTooHigh {
+                mode: DaemonMode::ApplyLowRisk,
+                ..
+            })
+        ));
+
+        let medium_policy =
+            crate::watch::profile_apply_policy(false, true, true, ActionSource::Tune);
+        assert!(
+            medium_policy
+                .check_action(PolicyIntent::Apply, &descriptor)
+                .is_ok()
+        );
+    }
+}
+
 pub fn tune_run_dir(tune_output_dir: &Path, profile_name: &str, iteration: u32) -> PathBuf {
     tune_output_dir.join(format!(
         "iter-{iteration:03}-{}",

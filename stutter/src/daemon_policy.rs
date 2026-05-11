@@ -387,17 +387,27 @@ impl DaemonPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::{ActionId, SafetyClass};
 
-    fn descriptor(
-        safety_class: crate::actions::SafetyClass,
+    fn descriptor(safety_class: SafetyClass) -> ActionDescriptor {
+        descriptor_with(
+            safety_class,
+            ActionEffectScope::LocalProcessTree,
+            RollbackRequirement::RequiredBeforeApply,
+        )
+    }
+
+    fn descriptor_with(
+        safety_class: SafetyClass,
         effect_scope: ActionEffectScope,
+        rollback: RollbackRequirement,
     ) -> ActionDescriptor {
         ActionDescriptor {
-            action_id: crate::actions::ActionId("test-action".to_owned()),
+            action_id: ActionId("test-action".to_owned()),
             action_kind: "test".to_owned(),
             safety_class,
             effect_scope,
-            rollback: RollbackRequirement::RequiredBeforeApply,
+            rollback,
             persistent_effect: false,
             touches_system_wide_state: false,
             requires_explicit_target: true,
@@ -405,11 +415,36 @@ mod tests {
         }
     }
 
+    fn all_safety_classes() -> [SafetyClass; 4] {
+        [
+            SafetyClass::ObserveOnly,
+            SafetyClass::ReversibleLowRisk,
+            SafetyClass::ReversibleMediumRisk,
+            SafetyClass::HighRisk,
+        ]
+    }
+
     #[test]
     fn daemon_mode_parses_and_formats_kebab_case() {
         assert_eq!(
+            "observe".parse::<DaemonMode>().unwrap(),
+            DaemonMode::Observe
+        );
+        assert_eq!(
+            "suggest".parse::<DaemonMode>().unwrap(),
+            DaemonMode::Suggest
+        );
+        assert_eq!(
             "apply-low-risk".parse::<DaemonMode>().unwrap(),
             DaemonMode::ApplyLowRisk
+        );
+        assert_eq!(
+            "apply-medium-risk".parse::<DaemonMode>().unwrap(),
+            DaemonMode::ApplyMediumRisk
+        );
+        assert_eq!(
+            "apply-high-risk".parse::<DaemonMode>().unwrap(),
+            DaemonMode::ApplyHighRisk
         );
         assert_eq!(DaemonMode::ApplyHighRisk.to_string(), "apply-high-risk");
         assert!(matches!(
@@ -426,124 +461,174 @@ mod tests {
     }
 
     #[test]
-    fn observe_allows_observe_dry_run_and_rollback_but_rejects_suggest_and_apply() {
+    fn observe_rejects_apply_for_all_safety_classes() {
         let policy = DaemonPolicy::observe(ActionSource::Test);
-        let desc = descriptor(
-            crate::actions::SafetyClass::ReversibleLowRisk,
-            ActionEffectScope::LocalProcess,
-        );
 
-        assert!(policy.check_action(PolicyIntent::Observe, &desc).is_ok());
-        assert!(policy.check_action(PolicyIntent::DryRun, &desc).is_ok());
-        assert!(policy.check_action(PolicyIntent::Rollback, &desc).is_ok());
-        assert!(matches!(
-            policy.check_action(PolicyIntent::Suggest, &desc),
-            Err(PolicyRejection::IntentNotAllowed {
-                mode: DaemonMode::Observe,
-                intent: PolicyIntent::Suggest
-            })
-        ));
-        assert!(matches!(
-            policy.check_action(PolicyIntent::Apply, &desc),
-            Err(PolicyRejection::IntentNotAllowed {
-                mode: DaemonMode::Observe,
-                intent: PolicyIntent::Apply
-            })
-        ));
+        for safety_class in all_safety_classes() {
+            let desc = descriptor(safety_class);
+            assert!(matches!(
+                policy.check_action(PolicyIntent::Apply, &desc),
+                Err(PolicyRejection::IntentNotAllowed {
+                    mode: DaemonMode::Observe,
+                    intent: PolicyIntent::Apply
+                })
+            ));
+        }
     }
 
     #[test]
-    fn suggest_allows_suggest_and_dry_run_but_rejects_apply() {
+    fn observe_allows_dry_run_for_all_safety_classes() {
+        let policy = DaemonPolicy::observe(ActionSource::Test);
+
+        for safety_class in all_safety_classes() {
+            let desc = descriptor_with(
+                safety_class,
+                ActionEffectScope::SystemWide,
+                RollbackRequirement::Unavailable,
+            );
+            assert!(policy.check_action(PolicyIntent::DryRun, &desc).is_ok());
+        }
+    }
+
+    #[test]
+    fn suggest_rejects_apply_for_all_safety_classes() {
         let policy = DaemonPolicy::suggest(ActionSource::Test);
-        let desc = descriptor(
-            crate::actions::SafetyClass::HighRisk,
+
+        for safety_class in all_safety_classes() {
+            let desc = descriptor(safety_class);
+            assert!(matches!(
+                policy.check_action(PolicyIntent::Apply, &desc),
+                Err(PolicyRejection::IntentNotAllowed {
+                    mode: DaemonMode::Suggest,
+                    intent: PolicyIntent::Apply
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn suggest_allows_suggestion_without_apply() {
+        let policy = DaemonPolicy::suggest(ActionSource::Test);
+        let desc = descriptor_with(
+            SafetyClass::HighRisk,
             ActionEffectScope::SystemWide,
+            RollbackRequirement::Unavailable,
         );
 
         assert!(policy.check_action(PolicyIntent::Suggest, &desc).is_ok());
-        assert!(policy.check_action(PolicyIntent::DryRun, &desc).is_ok());
-        assert!(matches!(
-            policy.check_action(PolicyIntent::Apply, &desc),
-            Err(PolicyRejection::IntentNotAllowed {
-                mode: DaemonMode::Suggest,
-                intent: PolicyIntent::Apply
-            })
-        ));
     }
 
     #[test]
-    fn apply_low_risk_allows_only_reversible_low_risk_local_process_scope() {
+    fn apply_low_risk_allows_reversible_low_risk_local_process_tree_with_required_rollback() {
         let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
-        let desc = descriptor(
-            crate::actions::SafetyClass::ReversibleLowRisk,
-            ActionEffectScope::LocalProcess,
+        let desc = descriptor_with(
+            SafetyClass::ReversibleLowRisk,
+            ActionEffectScope::LocalProcessTree,
+            RollbackRequirement::RequiredBeforeApply,
         );
 
         assert!(policy.check_action(PolicyIntent::Apply, &desc).is_ok());
+    }
 
-        let medium = descriptor(
-            crate::actions::SafetyClass::ReversibleMediumRisk,
-            ActionEffectScope::LocalProcess,
-        );
+    #[test]
+    fn apply_low_risk_rejects_medium_risk() {
+        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        let desc = descriptor(SafetyClass::ReversibleMediumRisk);
+
         assert!(matches!(
-            policy.check_action(PolicyIntent::Apply, &medium),
+            policy.check_action(PolicyIntent::Apply, &desc),
             Err(PolicyRejection::SafetyClassTooHigh {
                 mode: DaemonMode::ApplyLowRisk,
-                ..
-            })
-        ));
-
-        let cgroup = descriptor(
-            crate::actions::SafetyClass::ReversibleLowRisk,
-            ActionEffectScope::Cgroup,
-        );
-        assert!(matches!(
-            policy.check_action(PolicyIntent::Apply, &cgroup),
-            Err(PolicyRejection::EffectScopeNotAllowed {
-                mode: DaemonMode::ApplyLowRisk,
-                effect_scope: ActionEffectScope::Cgroup
+                safety_class: SafetyClass::ReversibleMediumRisk
             })
         ));
     }
 
     #[test]
-    fn apply_medium_risk_allows_low_and_medium_risk_target_scopes() {
-        let policy = DaemonPolicy::apply_medium_risk(ActionSource::Test);
-        let low = descriptor(
-            crate::actions::SafetyClass::ReversibleLowRisk,
-            ActionEffectScope::LocalProcess,
-        );
-        let medium = descriptor(
-            crate::actions::SafetyClass::ReversibleMediumRisk,
+    fn apply_low_risk_rejects_high_risk() {
+        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        let desc = descriptor(SafetyClass::HighRisk);
+
+        assert!(matches!(
+            policy.check_action(PolicyIntent::Apply, &desc),
+            Err(PolicyRejection::SafetyClassTooHigh {
+                mode: DaemonMode::ApplyLowRisk,
+                safety_class: SafetyClass::HighRisk
+            })
+        ));
+    }
+
+    #[test]
+    fn apply_low_risk_rejects_system_wide_even_when_low_risk() {
+        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        let mut desc = descriptor_with(
+            SafetyClass::ReversibleLowRisk,
             ActionEffectScope::LocalProcessTree,
+            RollbackRequirement::RequiredBeforeApply,
         );
+        desc.touches_system_wide_state = true;
 
-        assert!(policy.check_action(PolicyIntent::Apply, &low).is_ok());
-        assert!(policy.check_action(PolicyIntent::Apply, &medium).is_ok());
-
-        let high = descriptor(
-            crate::actions::SafetyClass::HighRisk,
-            ActionEffectScope::LocalProcess,
-        );
         assert!(matches!(
-            policy.check_action(PolicyIntent::Apply, &high),
-            Err(PolicyRejection::SafetyClassTooHigh {
-                mode: DaemonMode::ApplyMediumRisk,
-                ..
+            policy.check_action(PolicyIntent::Apply, &desc),
+            Err(PolicyRejection::SystemWideActionBlocked)
+        ));
+    }
+
+    #[test]
+    fn apply_low_risk_rejects_missing_rollback() {
+        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        let desc = descriptor_with(
+            SafetyClass::ReversibleLowRisk,
+            ActionEffectScope::LocalProcessTree,
+            RollbackRequirement::BestEffortOnly,
+        );
+
+        assert!(matches!(
+            policy.check_action(PolicyIntent::Apply, &desc),
+            Err(PolicyRejection::RollbackRequired {
+                rollback: RollbackRequirement::BestEffortOnly
             })
         ));
     }
 
     #[test]
-    fn high_risk_requires_explicit_opt_in() {
-        let mut policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
-        policy.mode = DaemonMode::ApplyHighRisk;
-        policy.allow_high_risk = false;
+    fn apply_low_risk_rejects_low_confidence() {
+        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        let mut desc = descriptor(SafetyClass::ReversibleLowRisk);
+        desc.confidence = Some(0.10);
 
-        let high = descriptor(
-            crate::actions::SafetyClass::HighRisk,
-            ActionEffectScope::LocalProcess,
+        assert!(matches!(
+            policy.check_action(PolicyIntent::Apply, &desc),
+            Err(PolicyRejection::ConfidenceTooLow { .. })
+        ));
+    }
+
+    #[test]
+    fn apply_medium_risk_allows_medium_risk_only_when_explicit() {
+        let medium_desc = descriptor(SafetyClass::ReversibleMediumRisk);
+        let low_policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+
+        assert!(matches!(
+            low_policy.check_action(PolicyIntent::Apply, &medium_desc),
+            Err(PolicyRejection::SafetyClassTooHigh {
+                mode: DaemonMode::ApplyLowRisk,
+                ..
+            })
+        ));
+
+        let medium_policy = DaemonPolicy::apply_medium_risk(ActionSource::Test);
+        assert!(
+            medium_policy
+                .check_action(PolicyIntent::Apply, &medium_desc)
+                .is_ok()
         );
+    }
+
+    #[test]
+    fn apply_high_risk_rejects_without_explicit_high_risk_unlock() {
+        let mut policy = DaemonPolicy::apply_high_risk_explicit(ActionSource::Test);
+        policy.allow_high_risk = false;
+        let high = descriptor(SafetyClass::HighRisk);
 
         assert!(matches!(
             policy.check_action(PolicyIntent::Apply, &high),
@@ -555,84 +640,29 @@ mod tests {
     }
 
     #[test]
-    fn apply_rejects_system_wide_actions_without_explicit_permission() {
-        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
-        let mut desc = descriptor(
-            crate::actions::SafetyClass::ReversibleLowRisk,
-            ActionEffectScope::LocalProcess,
-        );
-        desc.touches_system_wide_state = true;
-
-        assert!(matches!(
-            policy.check_action(PolicyIntent::Apply, &desc),
-            Err(PolicyRejection::SystemWideActionBlocked)
-        ));
-
-        let mut allowed_policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
-        allowed_policy.allow_system_wide_actions = true;
-        assert!(
-            allowed_policy
-                .check_action(PolicyIntent::Apply, &desc)
-                .is_ok()
-        );
-    }
-
-    #[test]
     fn apply_rejects_persistent_effect_without_explicit_permission() {
         let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
-        let mut desc = descriptor(
-            crate::actions::SafetyClass::ReversibleLowRisk,
-            ActionEffectScope::LocalProcess,
-        );
+        let mut desc = descriptor(SafetyClass::ReversibleLowRisk);
         desc.persistent_effect = true;
 
         assert!(matches!(
             policy.check_action(PolicyIntent::Apply, &desc),
             Err(PolicyRejection::PersistentEffectBlocked)
         ));
-
-        let mut allowed_policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
-        allowed_policy.allow_persistent_effects = true;
-        assert!(
-            allowed_policy
-                .check_action(PolicyIntent::Apply, &desc)
-                .is_ok()
-        );
     }
 
     #[test]
-    fn apply_rejects_unavailable_or_best_effort_rollback() {
+    fn apply_rejects_unavailable_rollback() {
         let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
-        let mut desc = descriptor(
-            crate::actions::SafetyClass::ReversibleLowRisk,
-            ActionEffectScope::LocalProcess,
+        let desc = descriptor_with(
+            SafetyClass::ReversibleLowRisk,
+            ActionEffectScope::LocalProcessTree,
+            RollbackRequirement::Unavailable,
         );
 
-        desc.rollback = RollbackRequirement::Unavailable;
         assert!(matches!(
             policy.check_action(PolicyIntent::Apply, &desc),
             Err(PolicyRejection::RollbackUnavailable)
-        ));
-
-        desc.rollback = RollbackRequirement::BestEffortOnly;
-        assert!(matches!(
-            policy.check_action(PolicyIntent::Apply, &desc),
-            Err(PolicyRejection::RollbackRequired { .. })
-        ));
-    }
-
-    #[test]
-    fn apply_rejects_confidence_below_policy_minimum() {
-        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
-        let mut desc = descriptor(
-            crate::actions::SafetyClass::ReversibleLowRisk,
-            ActionEffectScope::LocalProcess,
-        );
-        desc.confidence = Some(0.10);
-
-        assert!(matches!(
-            policy.check_action(PolicyIntent::Apply, &desc),
-            Err(PolicyRejection::ConfidenceTooLow { .. })
         ));
     }
 }

@@ -12,6 +12,7 @@ use std::{
 };
 
 use super::{ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction};
+use crate::daemon_policy::{ActionDescriptor, ActionEffectScope, RollbackRequirement};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FakeActionSwitches {
@@ -27,6 +28,12 @@ pub struct FakeAction {
     action_id: ActionId,
     description: String,
     safety_class: SafetyClass,
+    effect_scope: ActionEffectScope,
+    rollback: RollbackRequirement,
+    persistent_effect: bool,
+    touches_system_wide_state: bool,
+    requires_explicit_target: bool,
+    confidence: Option<f32>,
     affected_tasks: usize,
     switches: FakeActionSwitches,
     slow_apply_duration: Duration,
@@ -53,6 +60,12 @@ impl FakeAction {
             action_id: ActionId("fake-action".to_owned()),
             description: "fake action".to_owned(),
             safety_class: SafetyClass::ReversibleLowRisk,
+            effect_scope: ActionEffectScope::LocalProcessTree,
+            rollback: RollbackRequirement::RequiredBeforeApply,
+            persistent_effect: false,
+            touches_system_wide_state: false,
+            requires_explicit_target: true,
+            confidence: None,
             affected_tasks: 5,
             switches: FakeActionSwitches::default(),
             slow_apply_duration: Duration::from_millis(25),
@@ -103,6 +116,36 @@ impl FakeAction {
 
     pub fn with_safety_class(mut self, safety_class: SafetyClass) -> Self {
         self.safety_class = safety_class;
+        self
+    }
+
+    pub fn with_effect_scope(mut self, effect_scope: ActionEffectScope) -> Self {
+        self.effect_scope = effect_scope;
+        self
+    }
+
+    pub fn with_rollback(mut self, rollback: RollbackRequirement) -> Self {
+        self.rollback = rollback;
+        self
+    }
+
+    pub fn with_persistent_effect(mut self, persistent_effect: bool) -> Self {
+        self.persistent_effect = persistent_effect;
+        self
+    }
+
+    pub fn with_system_wide_state(mut self) -> Self {
+        self.touches_system_wide_state = true;
+        self
+    }
+
+    pub fn with_requires_explicit_target(mut self, requires_explicit_target: bool) -> Self {
+        self.requires_explicit_target = requires_explicit_target;
+        self
+    }
+
+    pub fn with_confidence(mut self, confidence: Option<f32>) -> Self {
+        self.confidence = confidence;
         self
     }
 
@@ -162,6 +205,20 @@ impl TuningAction for FakeAction {
 
     fn safety_class(&self) -> SafetyClass {
         self.safety_class.clone()
+    }
+
+    fn descriptor(&self) -> ActionDescriptor {
+        ActionDescriptor {
+            action_id: self.id(),
+            action_kind: self.action_id.0.clone(),
+            safety_class: self.safety_class.clone(),
+            effect_scope: self.effect_scope,
+            rollback: self.rollback,
+            persistent_effect: self.persistent_effect,
+            touches_system_wide_state: self.touches_system_wide_state,
+            requires_explicit_target: self.requires_explicit_target,
+            confidence: self.confidence,
+        }
     }
 
     fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {

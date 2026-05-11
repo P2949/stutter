@@ -65,25 +65,13 @@ impl ActionRunPolicy {
     }
 }
 
-#[cfg(test)]
-impl From<bool> for ActionRunPolicy {
-    fn from(dry_run: bool) -> Self {
-        Self::for_action(
-            &crate::actions::fake_action::FakeAction::new(),
-            dry_run,
-            ActionSource::Test,
-        )
-    }
-}
-
-pub fn run_audited_action<A, P>(
+pub fn run_audited_action<A>(
     command: &str,
     action: &A,
-    run_policy: P,
+    run_policy: ActionRunPolicy,
 ) -> Result<AuditedActionResult, ActionError>
 where
     A: TuningAction,
-    P: Into<ActionRunPolicy>,
 {
     run_audited_action_with_audit_path(
         command,
@@ -93,17 +81,15 @@ where
     )
 }
 
-pub fn run_audited_action_with_audit_path<A, P>(
+pub fn run_audited_action_with_audit_path<A>(
     command: &str,
     action: &A,
-    run_policy: P,
+    run_policy: ActionRunPolicy,
     audit_path: &Path,
 ) -> Result<AuditedActionResult, ActionError>
 where
     A: TuningAction,
-    P: Into<ActionRunPolicy>,
 {
-    let run_policy = run_policy.into();
     let dry_run = run_policy.dry_run;
     let started_unix_nanos = unix_nanos_now();
     let descriptor = action.descriptor();
@@ -233,7 +219,7 @@ mod tests {
     use std::{
         cell::{Cell, RefCell},
         fs,
-        path::PathBuf,
+        path::{Path, PathBuf},
     };
 
     use super::*;
@@ -387,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn policy_rejection_blocks_apply_before_mutation() {
+    fn runner_policy_rejection_happens_before_apply() {
         let dir = temp_dir("policy-rejection");
         let audit_path = dir.join("audit.jsonl");
         let action = FakeAction::new().with_safety_class(SafetyClass::ReversibleMediumRisk);
@@ -634,6 +620,51 @@ mod tests {
         assert_eq!(events[0].message, "dry run successful");
 
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn runner_dry_run_in_observe_never_calls_apply() {
+        let dir = temp_dir("observe-dry-run");
+        let audit_path = dir.join("audit.jsonl");
+        let action = FakeAction::new().with_affected_tasks(11);
+        let run_policy = ActionRunPolicy {
+            policy: DaemonPolicy::observe(ActionSource::Test),
+            dry_run: true,
+        };
+
+        let result =
+            run_audited_action_with_audit_path("fake-controller", &action, run_policy, &audit_path)
+                .unwrap();
+
+        assert_eq!(action.events(), vec!["preflight", "dry_run"]);
+        assert!(!action.applied());
+        assert!(!action.rolled_back());
+        assert_eq!(result.state.affected_tasks, 11);
+        assert_eq!(result.rollback, None);
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].success);
+        assert!(events[0].dry_run);
+        assert_eq!(events[0].message, "dry run successful");
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn action_runner_signature_prevents_apply_without_policy() {
+        let _runner: fn(
+            &str,
+            &FakeAction,
+            ActionRunPolicy,
+        ) -> Result<AuditedActionResult, ActionError> = run_audited_action::<FakeAction>;
+        let _runner_with_audit_path: fn(
+            &str,
+            &FakeAction,
+            ActionRunPolicy,
+            &Path,
+        ) -> Result<AuditedActionResult, ActionError> =
+            run_audited_action_with_audit_path::<FakeAction>;
     }
 
     #[test]
