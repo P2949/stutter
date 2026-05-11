@@ -10,10 +10,11 @@ use std::{
 use stutter_common::{EVENT_RUNNABLE_LATENCY, SchedulerEvent};
 
 use crate::{
+    alert::AlertPayload,
     artifacts::{ArtifactKind, ArtifactSelection},
     cli::{Config, RecordingConfig},
     ebpf_loader::DropCountersSnapshot,
-    events::{self, AlertPayload},
+    events,
     metadata::SystemMetadata,
     metrics,
     process_tree::{self, TargetDiffAction, TaskClass, TaskInfo},

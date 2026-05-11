@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod agent;
+pub mod alert;
 pub mod artifacts;
 pub mod autotune;
 pub mod config;
