@@ -24,7 +24,7 @@ use crate::{
 
 #[derive(Parser, Debug)]
 #[command(
-    version,
+    version = crate::metadata::build_version(),
     about = "Profile scheduler runnable latency for selected tasks"
 )]
 struct Cli {
@@ -33,6 +33,20 @@ struct Cli {
 
     #[command(flatten)]
     legacy_monitor: MonitorArgs,
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    #[test]
+    fn clap_version_uses_build_version_metadata() {
+        assert_eq!(
+            Cli::command().get_version(),
+            Some(crate::metadata::build_version())
+        );
+        assert_eq!(crate::metadata::build_git_rev(), env!("STUTTER_GIT_REV"));
+    }
 }
 
 #[derive(Subcommand, Debug)]

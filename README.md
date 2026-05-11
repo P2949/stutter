@@ -50,6 +50,14 @@ cargo build
 cargo clippy --all-targets -- -D warnings
 ```
 
+Check the build identity reported by the binary:
+
+```bash
+cargo run -- --version
+```
+
+The version output includes the Cargo package version and the Git revision when the repository metadata is available. Builds from source archives without `.git` report `git unknown`.
+
 ## Install
 
 For a local technical-user install:
