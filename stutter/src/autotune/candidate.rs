@@ -5,6 +5,10 @@ use crate::{
         ActionState, ActionWarning, SafetyClass, TuningAction,
         cpu_affinity::CpuAffinityProfileAction,
     },
+    daemon_policy::{
+        ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicy, PolicyIntent,
+        RollbackRequirement,
+    },
     process_tree::{CompiledPattern, TaskClass},
     profiles::{Profile, ProfileRule},
     topology::{CoreInfo, TopologyModel, cpu_mask_to_vec, cpus_to_mask, sorted_unique},
@@ -164,7 +168,10 @@ pub struct CandidateSuggestion {
     pub affected_tasks: usize,
     pub safety: SafetyClass,
     pub reason: String,
-    pub apply_command: String,
+    pub dry_run_command: String,
+    pub manual_apply_command: Option<String>,
+    pub required_mode: DaemonMode,
+    pub required_safety_class: SafetyClass,
 }
 
 pub fn suggestion_from_dry_run_record(
@@ -185,6 +192,11 @@ pub fn suggestion_from_dry_run_record(
     let profile_arg = profile_path
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "<generated-or-existing-profile>".to_owned());
+    let required_mode = required_mode_for_safety_class(&record.safety_class);
+    let descriptor = suggestion_action_descriptor(record, required_mode);
+    let dry_run_command = apply_profile_command(tree_pid, &profile_arg, true, false);
+    let manual_apply_command =
+        manual_apply_command_if_policy_allows(tree_pid, &profile_arg, required_mode, &descriptor);
 
     Some(CandidateSuggestion {
         candidate: record.candidate_name.clone(),
@@ -192,11 +204,84 @@ pub fn suggestion_from_dry_run_record(
         affected_tasks: record.affected_tasks,
         safety: record.safety_class.clone(),
         reason: reason.into(),
-        apply_command: format!(
-            "stutter apply-profile --tree-pid {} --profile {}",
-            tree_pid, profile_arg
-        ),
+        dry_run_command,
+        manual_apply_command,
+        required_mode,
+        required_safety_class: record.safety_class.clone(),
     })
+}
+
+fn required_mode_for_safety_class(safety_class: &SafetyClass) -> DaemonMode {
+    match safety_class {
+        SafetyClass::ObserveOnly | SafetyClass::ReversibleLowRisk => DaemonMode::ApplyLowRisk,
+        SafetyClass::ReversibleMediumRisk => DaemonMode::ApplyMediumRisk,
+        SafetyClass::HighRisk => DaemonMode::ApplyHighRisk,
+    }
+}
+
+fn suggestion_action_descriptor(
+    record: &CandidateDryRunRecord,
+    required_mode: DaemonMode,
+) -> ActionDescriptor {
+    ActionDescriptor {
+        action_id: crate::actions::ActionId(format!(
+            "cpu-affinity-profile:{}",
+            record.candidate_name
+        )),
+        action_kind: "cpu_affinity_profile".to_owned(),
+        safety_class: record.safety_class.clone(),
+        effect_scope: ActionEffectScope::LocalProcessTree,
+        rollback: RollbackRequirement::RequiredBeforeApply,
+        persistent_effect: false,
+        touches_system_wide_state: false,
+        requires_explicit_target: required_mode.supports_apply(),
+        confidence: None,
+    }
+}
+
+fn policy_for_required_mode(required_mode: DaemonMode) -> Option<DaemonPolicy> {
+    match required_mode {
+        DaemonMode::ApplyLowRisk => Some(DaemonPolicy::apply_low_risk(ActionSource::Cli)),
+        DaemonMode::ApplyMediumRisk => Some(DaemonPolicy::apply_medium_risk(ActionSource::Cli)),
+        DaemonMode::Observe | DaemonMode::Suggest | DaemonMode::ApplyHighRisk => None,
+    }
+}
+
+fn manual_apply_command_if_policy_allows(
+    tree_pid: u32,
+    profile_arg: &str,
+    required_mode: DaemonMode,
+    descriptor: &ActionDescriptor,
+) -> Option<String> {
+    let policy = policy_for_required_mode(required_mode)?;
+    policy.check_action(PolicyIntent::Apply, descriptor).ok()?;
+
+    Some(apply_profile_command(
+        tree_pid,
+        profile_arg,
+        false,
+        required_mode == DaemonMode::ApplyMediumRisk,
+    ))
+}
+
+fn apply_profile_command(
+    tree_pid: u32,
+    profile_arg: &str,
+    dry_run: bool,
+    allow_medium_risk: bool,
+) -> String {
+    let mut command =
+        format!("stutter apply-profile --tree-pid {tree_pid} --profile {profile_arg}");
+
+    if dry_run {
+        command.push_str(" --dry-run");
+    }
+
+    if allow_medium_risk {
+        command.push_str(" --allow-medium-risk");
+    }
+
+    command
 }
 
 pub fn suggestions_from_dry_run_records(
@@ -222,13 +307,16 @@ pub fn suggestions_from_dry_run_records(
 
 pub fn render_candidate_suggestion(suggestion: &CandidateSuggestion) -> String {
     format!(
-        "autotune suggestion:\n  candidate={}\n  action={}\n  affected_tasks={}\n  safety={:?}\n  reason=\"{}\"\n  apply_command=\"{}\"",
+        "autotune suggestion:\n  candidate={}\n  action={}\n  affected_tasks={}\n  safety={:?}\n  reason=\"{}\"\n  note=\"suggest mode did not apply this change\"\n  required_mode={}\n  required_safety_class={:?}\n  rollback=\"stutter restore\"\n  dry_run_command=\"{}\"\n  manual_apply_command={}",
         shell_safe_value(&suggestion.candidate),
         shell_safe_value(&suggestion.action),
         suggestion.affected_tasks,
         suggestion.safety,
         escape_quoted_value(&suggestion.reason),
-        escape_quoted_value(&suggestion.apply_command)
+        suggestion.required_mode,
+        suggestion.required_safety_class,
+        escape_quoted_value(&suggestion.dry_run_command),
+        render_optional_command(&suggestion.manual_apply_command)
     )
 }
 
@@ -243,6 +331,13 @@ pub fn render_candidate_suggestions(suggestions: &[CandidateSuggestion]) -> Stri
 pub fn print_candidate_suggestions(suggestions: &[CandidateSuggestion]) {
     for suggestion in suggestions {
         println!("{}", render_candidate_suggestion(suggestion));
+    }
+}
+
+fn render_optional_command(command: &Option<String>) -> String {
+    match command {
+        Some(command) => format!("\"{}\"", escape_quoted_value(command)),
+        None => "none".to_owned(),
     }
 }
 
@@ -1799,10 +1894,17 @@ mod tests {
 
         let rendered = render_candidate_suggestion(&suggestion);
 
-        assert_eq!(
-            rendered,
-            "autotune suggestion:\n  candidate=game-main-suggested\n  action=cpu-affinity-profile\n  affected_tasks=31\n  safety=ReversibleLowRisk\n  reason=\"scheduler pressure detected on Game/WineServer classes\"\n  apply_command=\"stutter apply-profile --tree-pid 1234 --profile <generated-or-existing-profile>\""
+        assert!(rendered.contains("candidate=game-main-suggested"));
+        assert!(rendered.contains("action=cpu-affinity-profile"));
+        assert!(rendered.contains("affected_tasks=31"));
+        assert!(rendered.contains("safety=ReversibleLowRisk"));
+        assert!(
+            rendered.contains("reason=\"scheduler pressure detected on Game/WineServer classes\"")
         );
+        assert!(rendered.contains("note=\"suggest mode did not apply this change\""));
+        assert!(rendered.contains("required_mode=apply-low-risk"));
+        assert!(rendered.contains("dry_run_command=\"stutter apply-profile --tree-pid 1234 --profile <generated-or-existing-profile> --dry-run\""));
+        assert!(rendered.contains("manual_apply_command=\"stutter apply-profile --tree-pid 1234 --profile <generated-or-existing-profile>\""));
     }
 
     #[test]
@@ -1826,8 +1928,12 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            suggestion.apply_command,
-            "stutter apply-profile --tree-pid 1234 --profile /tmp/profiles.toml"
+            suggestion.dry_run_command,
+            "stutter apply-profile --tree-pid 1234 --profile /tmp/profiles.toml --dry-run"
+        );
+        assert_eq!(
+            suggestion.manual_apply_command.as_deref(),
+            Some("stutter apply-profile --tree-pid 1234 --profile /tmp/profiles.toml")
         );
     }
 
@@ -1854,24 +1960,30 @@ mod tests {
     }
 
     #[test]
-    fn render_candidate_suggestion_escapes_reason_and_apply_command() {
+    fn render_candidate_suggestion_escapes_reason_and_commands() {
         let suggestion = CandidateSuggestion {
             candidate: "candidate with space".to_owned(),
             action: "cpu-affinity-profile".to_owned(),
             affected_tasks: 31,
             safety: SafetyClass::ReversibleLowRisk,
             reason: "scheduler \"pressure\"\nnext".to_owned(),
-            apply_command:
+            dry_run_command:
+                "stutter apply-profile --tree-pid 1234 --profile /tmp/profile \"quoted\".toml --dry-run"
+                    .to_owned(),
+            manual_apply_command: Some(
                 "stutter apply-profile --tree-pid 1234 --profile /tmp/profile \"quoted\".toml"
                     .to_owned(),
+            ),
+            required_mode: DaemonMode::ApplyLowRisk,
+            required_safety_class: SafetyClass::ReversibleLowRisk,
         };
 
         let rendered = render_candidate_suggestion(&suggestion);
 
-        assert_eq!(
-            rendered,
-            "autotune suggestion:\n  candidate=\"candidate with space\"\n  action=cpu-affinity-profile\n  affected_tasks=31\n  safety=ReversibleLowRisk\n  reason=\"scheduler \\\"pressure\\\"\\nnext\"\n  apply_command=\"stutter apply-profile --tree-pid 1234 --profile /tmp/profile \\\"quoted\\\".toml\""
-        );
+        assert!(rendered.contains("candidate=\"candidate with space\""));
+        assert!(rendered.contains("reason=\"scheduler \\\"pressure\\\"\\nnext\""));
+        assert!(rendered.contains("dry_run_command=\"stutter apply-profile --tree-pid 1234 --profile /tmp/profile \\\"quoted\\\".toml --dry-run\""));
+        assert!(rendered.contains("manual_apply_command=\"stutter apply-profile --tree-pid 1234 --profile /tmp/profile \\\"quoted\\\".toml\""));
     }
 
     fn eligible_record(name: &str, affected_tasks: usize) -> CandidateDryRunRecord {
@@ -1920,10 +2032,9 @@ mod tests {
         assert_eq!(suggestions.len(), 1);
 
         let rendered = render_candidate_suggestion(&suggestions[0]);
-        assert_eq!(
-            rendered,
-            "autotune suggestion:\n  candidate=game-main-suggested\n  action=cpu-affinity-profile\n  affected_tasks=31\n  safety=ReversibleLowRisk\n  reason=\"scheduler pressure detected on Game/WineServer classes\"\n  apply_command=\"stutter apply-profile --tree-pid 1234 --profile <generated-or-existing-profile>\""
-        );
+        assert!(rendered.contains("candidate=game-main-suggested"));
+        assert!(rendered.contains("note=\"suggest mode did not apply this change\""));
+        assert!(rendered.contains("dry_run_command=\"stutter apply-profile --tree-pid 1234 --profile <generated-or-existing-profile> --dry-run\""));
     }
 
     #[test]
@@ -2093,5 +2204,108 @@ mod tests {
         );
 
         assert_eq!(candidate.safety_class(), SafetyClass::ReversibleMediumRisk);
+    }
+
+    fn dry_run_record(safety_class: SafetyClass) -> CandidateDryRunRecord {
+        CandidateDryRunRecord {
+            candidate_name: "game-main".to_owned(),
+            affected_tasks: 4,
+            warnings: Vec::new(),
+            safety_class,
+            eligible: true,
+            reason: None,
+        }
+    }
+
+    #[test]
+    fn low_risk_suggestion_renders_policy_aware_commands() {
+        let suggestion = suggestion_from_dry_run_record(
+            &dry_run_record(SafetyClass::ReversibleLowRisk),
+            1234,
+            Some(Path::new("profiles.toml")),
+            SafetyClass::ReversibleLowRisk,
+            "scheduler pressure detected",
+        )
+        .unwrap();
+
+        assert_eq!(suggestion.required_mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(
+            suggestion.required_safety_class,
+            SafetyClass::ReversibleLowRisk
+        );
+        assert_eq!(
+            suggestion.dry_run_command,
+            "stutter apply-profile --tree-pid 1234 --profile profiles.toml --dry-run"
+        );
+        assert_eq!(
+            suggestion.manual_apply_command.as_deref(),
+            Some("stutter apply-profile --tree-pid 1234 --profile profiles.toml")
+        );
+
+        let rendered = render_candidate_suggestion(&suggestion);
+        assert!(rendered.contains("suggest mode did not apply this change"));
+        assert!(rendered.contains("required_mode=apply-low-risk"));
+        assert!(rendered.contains("required_safety_class=ReversibleLowRisk"));
+        assert!(rendered.contains("rollback=\"stutter restore\""));
+        assert!(rendered.contains(
+            "dry_run_command=\"stutter apply-profile --tree-pid 1234 --profile profiles.toml --dry-run\""
+        ));
+        assert!(rendered.contains(
+            "manual_apply_command=\"stutter apply-profile --tree-pid 1234 --profile profiles.toml\""
+        ));
+    }
+
+    #[test]
+    fn medium_risk_suggestion_requires_medium_mode_and_flag() {
+        let suggestion = suggestion_from_dry_run_record(
+            &dry_run_record(SafetyClass::ReversibleMediumRisk),
+            1234,
+            Some(Path::new("profiles.toml")),
+            SafetyClass::ReversibleMediumRisk,
+            "priority profile may help",
+        )
+        .unwrap();
+
+        assert_eq!(suggestion.required_mode, DaemonMode::ApplyMediumRisk);
+        assert_eq!(
+            suggestion.required_safety_class,
+            SafetyClass::ReversibleMediumRisk
+        );
+        assert_eq!(
+            suggestion.manual_apply_command.as_deref(),
+            Some(
+                "stutter apply-profile --tree-pid 1234 --profile profiles.toml --allow-medium-risk"
+            )
+        );
+
+        let rendered = render_candidate_suggestion(&suggestion);
+        assert!(rendered.contains("required_mode=apply-medium-risk"));
+        assert!(rendered.contains("required_safety_class=ReversibleMediumRisk"));
+        assert!(rendered.contains("--allow-medium-risk"));
+    }
+
+    #[test]
+    fn high_risk_suggestion_suppresses_manual_apply_command() {
+        let suggestion = suggestion_from_dry_run_record(
+            &dry_run_record(SafetyClass::HighRisk),
+            1234,
+            Some(Path::new("profiles.toml")),
+            SafetyClass::HighRisk,
+            "high risk candidate",
+        )
+        .unwrap();
+
+        assert_eq!(suggestion.required_mode, DaemonMode::ApplyHighRisk);
+        assert_eq!(suggestion.required_safety_class, SafetyClass::HighRisk);
+        assert_eq!(
+            suggestion.dry_run_command,
+            "stutter apply-profile --tree-pid 1234 --profile profiles.toml --dry-run"
+        );
+        assert_eq!(suggestion.manual_apply_command, None);
+
+        let rendered = render_candidate_suggestion(&suggestion);
+        assert!(rendered.contains("required_mode=apply-high-risk"));
+        assert!(rendered.contains("manual_apply_command=none"));
+        assert!(!rendered.contains("manual_apply_command=\"stutter apply-profile"));
     }
 }

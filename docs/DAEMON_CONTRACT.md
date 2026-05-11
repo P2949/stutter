@@ -9,10 +9,24 @@ The source of truth for policy enforcement is `DaemonMode`, `DaemonPolicy`, `Act
 | Mode | Contract |
 | --- | --- |
 | `observe` | Never changes system state. Permits monitoring, reports, dry-run/preflight checks, verify steps, and rollback operations. It does not emit suggestions as controller decisions and it does not apply actions. |
-| `suggest` | Proposes changes and may emit candidate actions. It never applies changes. |
+| `suggest` | Proposes changes and may emit candidate actions. It never applies changes. Suggestion output must state that suggest mode did not apply the change and must separate dry-run commands from policy-gated manual apply commands. |
 | `apply-low-risk` | Applies only `SafetyClass::ReversibleLowRisk` actions whose `ActionEffectScope` is `LocalProcess` or `LocalProcessTree`, with rollback available before apply. This is the default apply ceiling. The currently implemented low-risk apply family is CPU-affinity candidates for explicit target process trees. |
 | `apply-medium-risk` | Opt-in policy mode for reversible but more invasive local/process-scoped changes. It allows at most `SafetyClass::ReversibleMediumRisk` and still requires explicit target scope, rollback before apply, sufficient confidence, and non-persistent/non-system-wide defaults. |
 | `apply-high-risk` | Never default. High-risk actions require explicit high-risk unlock through `DaemonPolicy::allow_high_risk`. Remote high-risk support is not available by default and must not be exposed as a default remote mode. |
+
+## Suggestion output contract
+
+Candidate suggestions are non-mutating.
+
+Suggestion output must include:
+
+- `suggest mode did not apply this change`;
+- `required_mode`;
+- `required_safety_class`;
+- `rollback=stutter restore`;
+- a dry-run command.
+
+A manual apply command may be printed only when a `DaemonPolicy` for `ActionSource::Cli` would allow the candidate descriptor. High-risk candidates must not print direct manual apply commands until high-risk CLI unlock and documentation exist.
 
 ## Free performance invariants
 
