@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    autotune::quality::{OnlineDataQuality, OnlineDataQualityInput},
+    autotune::quality::{OnlineDataQuality, OnlineDataQualityInput, OnlineDataQualityPolicy},
     diagnosis::LiveDiagnosisEntry,
     recorder::{FrameEvent, IntervalRecord},
 };
@@ -176,6 +176,13 @@ impl RollingWindow {
     }
 
     pub fn score(&self) -> WindowScore {
+        self.score_with_quality_policy(&OnlineDataQualityPolicy::default())
+    }
+
+    pub(crate) fn score_with_quality_policy(
+        &self,
+        quality_policy: &OnlineDataQualityPolicy,
+    ) -> WindowScore {
         let interval_count = self.interval_count();
         let scored_samples = self.scored_samples();
         let over_1ms = self
@@ -221,20 +228,21 @@ impl RollingWindow {
             .map(|record| record.drop_counters.total())
             .fold(0_u64, u64::saturating_add);
 
-        let data_quality = OnlineDataQuality::evaluate(OnlineDataQualityInput {
+        let data_quality = OnlineDataQualityInput {
             scored_intervals: interval_count,
             scored_samples,
             scored_task_count,
             drop_counter_total,
             target_identity_shifted: false,
             target_present: scored_task_count > 0,
-            frame_data_required: false,
+            frame_data_required: quality_policy.require_frame_data,
             frame_count,
             baseline_frame_count: None,
             candidate_frame_count: None,
             baseline_scored_identity_counts: &[],
             candidate_scored_identity_counts: &[],
-        });
+        }
+        .evaluate_with_policy(quality_policy);
 
         WindowScore {
             duration_ms: self.duration_ms(),
@@ -560,6 +568,59 @@ mod tests {
         assert_eq!(score.interval_count, 5);
         assert_eq!(score.scored_samples, 100);
         assert_eq!(score.data_quality, OnlineDataQuality::High);
+    }
+
+    #[test]
+    fn window_score_default_quality_policy_does_not_require_frames() {
+        let mut window = RollingWindow::new(Duration::from_secs(10));
+
+        for elapsed_ms in [1000, 2000, 3000, 4000, 5000] {
+            window.push_interval(IntervalRecord {
+                elapsed_ms,
+                task: 42,
+                samples: 20,
+                over_1ms: 1,
+                max_ns: 2_000_000,
+                ..Default::default()
+            });
+        }
+
+        let score = window.score();
+
+        assert_eq!(score.frame_count, 0);
+        assert_eq!(score.data_quality, OnlineDataQuality::High);
+    }
+
+    #[test]
+    fn window_score_quality_is_low_when_policy_requires_frames_and_none_exist() {
+        let mut window = RollingWindow::new(Duration::from_secs(10));
+
+        for elapsed_ms in [1000, 2000, 3000, 4000, 5000] {
+            window.push_interval(IntervalRecord {
+                elapsed_ms,
+                task: 42,
+                samples: 20,
+                over_1ms: 1,
+                max_ns: 2_000_000,
+                ..Default::default()
+            });
+        }
+
+        let quality_policy = OnlineDataQualityPolicy {
+            require_frame_data: true,
+            ..OnlineDataQualityPolicy::default()
+        };
+        let score = window.score_with_quality_policy(&quality_policy);
+
+        assert_eq!(score.frame_count, 0);
+        assert!(score.data_quality.is_low());
+        assert!(
+            score
+                .data_quality
+                .reasons()
+                .iter()
+                .any(|reason| reason.contains("no frame data"))
+        );
     }
 
     #[test]

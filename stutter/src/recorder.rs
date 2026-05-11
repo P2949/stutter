@@ -839,6 +839,54 @@ mod focus_recording_tests {
         assert_eq!(core.final_foreground_app_id, None);
         assert_eq!(core.final_foreground_class, None);
     }
+
+    #[test]
+    fn session_artifact_serializes_block_io_correlation_basis() {
+        let session = SessionFile {
+            core: SessionMetadataCore {
+                block_io_correlation_basis:
+                    crate::ebpf_loader::BlockIoCorrelationBasis::RequestPointer
+                        .as_str()
+                        .to_owned(),
+                ..SessionMetadataCore::default()
+            },
+            ..SessionFile::default()
+        };
+
+        let value = serde_json::to_value(&session).unwrap();
+
+        assert_eq!(
+            value
+                .get("block_io_correlation_basis")
+                .and_then(serde_json::Value::as_str),
+            Some("request-pointer")
+        );
+    }
+
+    #[test]
+    fn session_metadata_defaults_block_io_correlation_basis_for_old_sessions() {
+        let json = serde_json::json!({
+            "schema_version": 0,
+            "run_name": null,
+            "started_at": RecordedTime::default(),
+            "ended_at": RecordedTime::default(),
+            "monotonic_start_ns": null,
+            "monotonic_end_ns": null,
+            "duration_ms": 0,
+            "metadata": SystemMetadata::default(),
+            "target_pids_max": 0,
+            "active_target_pids_count": 0,
+            "active_expanded_tasks": [],
+            "stop_reason": "",
+            "config": RecordedConfig::default(),
+            "tasks": [],
+            "top_spikes": []
+        });
+
+        let session: SessionFile = serde_json::from_value(json).unwrap();
+
+        assert_eq!(session.core.block_io_correlation_basis, "dev+sector");
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
