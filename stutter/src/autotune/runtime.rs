@@ -529,7 +529,7 @@ impl AutotuneRuntime {
         if observation.data_quality.blocks_action()
             || observation.focus_is_idle_or_unknown()
             || observation.focus_has_critical_realtime_warning()
-            || observation.focus_confidence < 0.70
+            || observation.focus_confidence < self.controller.policy.min_focus_confidence
         {
             return None;
         }
@@ -1444,6 +1444,67 @@ mod tests {
         assert_eq!(observation.target_root_pid, None);
         assert_eq!(observation.score.total, 0);
         assert!(observation.data_quality.blocks_action());
+    }
+
+    fn low_risk_profile() -> crate::profiles::Profile {
+        crate::profiles::Profile {
+            name: "game-low-risk".to_owned(),
+            rules: vec![crate::profiles::ProfileRule {
+                affinity: Some(crate::affinity::CpuMask::parse("0").unwrap()),
+                nice: None,
+                ionice: None,
+                match_class: vec![crate::process_tree::TaskClass::Game],
+                match_comm: Vec::new(),
+            }],
+        }
+    }
+
+    fn high_quality_game_observation_with_focus_confidence(
+        focus_confidence: f32,
+    ) -> AutotuneObservation {
+        AutotuneObservation {
+            now_unix_nanos: 1_000_000_000,
+            elapsed_ms: 30_000,
+            target_present: true,
+            target_root_pid: Some(1234),
+            active_target_count: 1,
+            scored_task_count: 1,
+            interval_count: 5,
+            scored_samples: 100,
+            score: StutterScore {
+                total: 100,
+                over_1ms: 10,
+                over_2ms: 5,
+                over_5ms: 1,
+                ..StutterScore::default()
+            },
+            data_quality: OnlineDataQuality::High,
+            primary_situation: SituationKind::GameCpuSchedulerPressure,
+            focus_kind: Some(FocusGroupKind::Game),
+            focus_confidence,
+            focus_roots: vec![1234],
+            focus_reasons: vec!["game focus selected".to_owned()],
+            recent_diagnoses: Vec::new(),
+            frame_count: 100,
+            frame_p99_ms: 12.0,
+            frame_max_ms: 20.0,
+            drop_counter_total: 0,
+        }
+    }
+
+    #[test]
+    fn candidate_selection_blocks_focus_confidence_below_policy_threshold() {
+        let runtime = AutotuneRuntime::new(
+            AutotuneRuntimeConfig::apply_low_risk(None, Some(1234), None)
+                .with_profiles(vec![low_risk_profile()]),
+        );
+        let observation = high_quality_game_observation_with_focus_confidence(
+            runtime.controller.policy.min_focus_confidence - 0.01,
+        );
+
+        let candidate = runtime.select_candidate_for_observation(&observation);
+
+        assert!(candidate.is_none());
     }
 
     #[test]

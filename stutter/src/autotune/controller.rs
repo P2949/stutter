@@ -14,12 +14,15 @@ use super::{
 };
 use crate::{actions::SafetyClass, focus::FocusGroupKind, process_tree::TaskClass};
 
+pub(crate) const DEFAULT_MIN_FOCUS_CONFIDENCE: f32 = 0.70;
+
 #[derive(Clone, Debug)]
 pub struct ControllerPolicy {
     pub mode: AutotuneMode,
     pub max_safety_class: SafetyClass,
     pub min_improvement_percent: f64,
     pub max_regression_percent: f64,
+    pub min_focus_confidence: f32,
     pub cooldown_after_keep: Duration,
     pub cooldown_after_revert: Duration,
     pub cooldown_after_fault: Duration,
@@ -41,6 +44,7 @@ impl ControllerPolicy {
             max_safety_class,
             min_improvement_percent: DEFAULT_SCORE_COMPARISON_CONFIG.min_improvement_percent,
             max_regression_percent: DEFAULT_SCORE_COMPARISON_CONFIG.max_regression_percent,
+            min_focus_confidence: DEFAULT_MIN_FOCUS_CONFIDENCE,
             cooldown_after_keep: Duration::from_secs(60),
             cooldown_after_revert: Duration::from_secs(120),
             cooldown_after_fault: Duration::from_secs(300),
@@ -570,6 +574,14 @@ mod tests {
             config.min_improvement_percent
         );
         assert_eq!(policy.max_regression_percent, config.max_regression_percent);
+    }
+
+    #[test]
+    fn controller_policy_uses_named_focus_confidence_threshold() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+
+        assert_eq!(DEFAULT_MIN_FOCUS_CONFIDENCE, 0.70);
+        assert_eq!(policy.min_focus_confidence, DEFAULT_MIN_FOCUS_CONFIDENCE);
     }
 
     #[test]
