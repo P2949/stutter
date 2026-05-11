@@ -697,7 +697,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_profile_policy_rejects_priority_profile_without_medium_flag() {
+    fn watch_apply_profile_uses_policy_for_medium_risk_profiles() {
         let profile = priority_profile();
 
         let err = validate_apply_profile_policy(
@@ -712,6 +712,21 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("rejected by daemon policy"));
+        assert!(
+            err.to_string()
+                .contains("safety class ReversibleMediumRisk")
+        );
+
+        validate_apply_profile_policy(
+            &profile,
+            1234,
+            false,
+            false,
+            true,
+            false,
+            crate::daemon_policy::ActionSource::Test,
+        )
+        .unwrap();
     }
 
     #[test]

@@ -781,6 +781,25 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn autotune_apply_low_risk_cannot_apply_medium_candidate() {
+        let mut executor = FakeExecutor::low_risk();
+        executor.safety_class = SafetyClass::ReversibleMediumRisk;
+
+        let err = run_apply_low_risk_with_executor(&mut executor, Duration::ZERO)
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("apply-low-risk currently supports")
+        );
+        assert!(err.to_string().contains("ReversibleLowRisk"));
+        assert_eq!(executor.dry_run_calls, 0);
+        assert_eq!(executor.apply_calls, 0);
+        assert_eq!(executor.rollback_calls, 0);
+    }
+
     #[test]
     fn low_risk_resolution_keeps_improved_candidate_as_current_profile() {
         use crate::{
