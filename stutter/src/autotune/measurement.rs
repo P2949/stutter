@@ -469,6 +469,7 @@ mod tests {
         let mut state = CandidateMeasurementWindowState::new(config());
         let drop_counters = DropCountersSnapshot {
             wakeup_data_insert_failed: 1,
+            wakeup_data_stale_entries: 0,
             ringbuf_reserve_failed: 0,
             irq_start_times_insert_failed: 0,
             block_start_insert_failed: 0,
