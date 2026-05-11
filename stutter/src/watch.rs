@@ -240,18 +240,53 @@ pub fn force_for_watch_apply(initial: bool, user_force: bool) -> bool {
     initial && user_force
 }
 
-pub fn validate_apply_profile_risk(
-    profile: &crate::profiles::Profile,
+pub fn profile_apply_policy(
     dry_run: bool,
     allow_medium_risk: bool,
-) -> anyhow::Result<()> {
-    if !dry_run && crate::profiles::profile_uses_priority_actions(profile) && !allow_medium_risk {
-        anyhow::bail!(
-            "profile '{}' contains nice or ionice actions; rerun with --allow-medium-risk to apply it",
+    allow_persistent_effects: bool,
+    source: crate::daemon_policy::ActionSource,
+) -> crate::daemon_policy::DaemonPolicy {
+    let mut policy = if dry_run {
+        crate::daemon_policy::DaemonPolicy::observe(source)
+    } else if allow_medium_risk {
+        crate::daemon_policy::DaemonPolicy::apply_medium_risk(source)
+    } else {
+        crate::daemon_policy::DaemonPolicy::apply_low_risk(source)
+    };
+    policy.allow_persistent_effects = allow_persistent_effects;
+    policy
+}
+
+pub fn validate_apply_profile_policy(
+    profile: &crate::profiles::Profile,
+    tree_pid: u32,
+    force: bool,
+    dry_run: bool,
+    allow_medium_risk: bool,
+    persistent_effect: bool,
+    source: crate::daemon_policy::ActionSource,
+) -> anyhow::Result<crate::daemon_policy::DaemonPolicy> {
+    let policy = profile_apply_policy(dry_run, allow_medium_risk, persistent_effect, source);
+    let action = crate::actions::cpu_affinity::CpuAffinityProfileAction {
+        tree_pid,
+        profile: profile.clone(),
+        force_restore_overwrite: force,
+    };
+    let descriptor = action.descriptor_with_persistent_effect(persistent_effect);
+    let intent = if dry_run {
+        crate::daemon_policy::PolicyIntent::DryRun
+    } else {
+        crate::daemon_policy::PolicyIntent::Apply
+    };
+
+    policy.check_action(intent, &descriptor).map_err(|err| {
+        anyhow::anyhow!(
+            "profile '{}' rejected by daemon policy: {err}",
             profile.name
-        );
-    }
-    Ok(())
+        )
+    })?;
+
+    Ok(policy)
 }
 
 pub fn validate_apply_profile_mode(dry_run: bool, watch: bool) -> anyhow::Result<()> {
@@ -289,15 +324,31 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         enforce,
     } = input;
     let profile = crate::profiles::load_first_profile(&profile_path)?;
-    validate_apply_profile_risk(&profile, dry_run, allow_medium_risk)?;
     validate_apply_profile_mode(dry_run, watch)?;
+    let persistent_effect = watch && keep_applied;
+    let policy = validate_apply_profile_policy(
+        &profile,
+        tree_pid,
+        force,
+        dry_run,
+        allow_medium_risk,
+        persistent_effect,
+        crate::daemon_policy::ActionSource::Cli,
+    )?;
     let mut cache = crate::profiles::ProfileApplyCache::default();
 
     if !watch {
         if dry_run {
-            let (apply_result, _) =
-                apply_profile_to_tree_cached_blocking(tree_pid, profile, force, true, cache)
-                    .await?;
+            let (apply_result, _) = apply_profile_to_tree_cached_blocking(
+                tree_pid,
+                profile,
+                force,
+                true,
+                cache,
+                policy.clone(),
+                false,
+            )
+            .await?;
 
             print_profile_dry_run_result(&apply_result);
             println!(
@@ -313,11 +364,10 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
             force_restore_overwrite: force,
         };
         let result = tokio::task::spawn_blocking(move || {
-            let run_policy = crate::actions::runner::ActionRunPolicy::for_action(
-                &action,
-                false,
-                crate::daemon_policy::ActionSource::ApplyProfileWatch,
-            );
+            let run_policy = crate::actions::runner::ActionRunPolicy {
+                policy,
+                dry_run: false,
+            };
             crate::actions::runner::run_audited_action("apply-profile", &action, run_policy)
         })
         .await
@@ -337,6 +387,8 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         force_for_watch_apply(true, force),
         dry_run,
         cache,
+        policy.clone(),
+        persistent_effect,
     )
     .await
     {
@@ -409,6 +461,8 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
                     force_for_watch_apply(false, force),
                     dry_run,
                     cache,
+                    policy.clone(),
+                    persistent_effect,
                 )
                 .await;
 
@@ -447,6 +501,8 @@ pub async fn apply_profile_to_tree_blocking(
     force: bool,
     dry_run: bool,
     _enforce: bool,
+    policy: crate::daemon_policy::DaemonPolicy,
+    persistent_effect: bool,
 ) -> anyhow::Result<Vec<crate::affinity::AffinityRecord>> {
     tokio::task::spawn_blocking(move || {
         // Enforce is handled by the caller clearing the cache in watch mode.
@@ -456,7 +512,10 @@ pub async fn apply_profile_to_tree_blocking(
             profile,
             force_restore_overwrite: force,
         };
-        action.apply_records(dry_run)
+        let cache = crate::profiles::ProfileApplyCache::default();
+        action
+            .apply_cached_with_policy(&policy, dry_run, cache, persistent_effect)
+            .map(|(result, _cache)| result.affinity_records)
     })
     .await
     .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))?
@@ -467,16 +526,20 @@ pub async fn apply_profile_to_tree_cached_blocking(
     profile: crate::profiles::Profile,
     force: bool,
     dry_run: bool,
-    mut cache: crate::profiles::ProfileApplyCache,
+    cache: crate::profiles::ProfileApplyCache,
+    policy: crate::daemon_policy::DaemonPolicy,
+    persistent_effect: bool,
 ) -> anyhow::Result<(
     crate::profiles::ProfileApplyResult,
     crate::profiles::ProfileApplyCache,
 )> {
     tokio::task::spawn_blocking(move || {
-        crate::profiles::apply_managed_profile_to_tree_cached(
-            tree_pid, &profile, force, dry_run, &mut cache,
-        )
-        .map(|result| (result, cache))
+        let action = crate::actions::cpu_affinity::CpuAffinityProfileAction {
+            tree_pid,
+            profile,
+            force_restore_overwrite: force,
+        };
+        action.apply_cached_with_policy(&policy, dry_run, cache, persistent_effect)
     })
     .await
     .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))?
@@ -618,23 +681,41 @@ mod tests {
     }
 
     #[test]
-    fn apply_profile_risk_allows_dry_run_without_medium_flag() {
+    fn apply_profile_policy_allows_dry_run_without_medium_flag() {
         let profile = priority_profile();
 
-        validate_apply_profile_risk(&profile, true, false).unwrap();
+        validate_apply_profile_policy(
+            &profile,
+            1234,
+            false,
+            true,
+            false,
+            false,
+            crate::daemon_policy::ActionSource::Test,
+        )
+        .unwrap();
     }
 
     #[test]
-    fn apply_profile_risk_rejects_priority_profile_without_medium_flag() {
+    fn apply_profile_policy_rejects_priority_profile_without_medium_flag() {
         let profile = priority_profile();
 
-        let err = validate_apply_profile_risk(&profile, false, false).unwrap_err();
+        let err = validate_apply_profile_policy(
+            &profile,
+            1234,
+            false,
+            false,
+            false,
+            false,
+            crate::daemon_policy::ActionSource::Test,
+        )
+        .unwrap_err();
 
-        assert!(err.to_string().contains("--allow-medium-risk"));
+        assert!(err.to_string().contains("rejected by daemon policy"));
     }
 
     #[test]
-    fn apply_profile_risk_allows_affinity_only_profile_without_medium_flag() {
+    fn apply_profile_policy_allows_affinity_only_profile_without_medium_flag() {
         let profile = Profile {
             name: "affinity".to_owned(),
             rules: vec![ProfileRule {
@@ -646,7 +727,60 @@ mod tests {
             }],
         };
 
-        validate_apply_profile_risk(&profile, false, false).unwrap();
+        validate_apply_profile_policy(
+            &profile,
+            1234,
+            false,
+            false,
+            false,
+            false,
+            crate::daemon_policy::ActionSource::Test,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn apply_profile_policy_allows_persistent_effect_only_when_requested() {
+        let profile = Profile {
+            name: "affinity".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: Some(CpuMask::parse("0").unwrap()),
+                nice: None,
+                ionice: None,
+                match_class: vec![TaskClass::Game],
+                match_comm: Vec::new(),
+            }],
+        };
+
+        let action = crate::actions::cpu_affinity::CpuAffinityProfileAction {
+            tree_pid: 1234,
+            profile: profile.clone(),
+            force_restore_overwrite: false,
+        };
+        let desc = action.descriptor_with_persistent_effect(true);
+
+        // Case 1: Persistent effect requested but policy does not allow it
+        let policy = profile_apply_policy(
+            false,
+            false,
+            false, // allow_persistent_effects = false
+            crate::daemon_policy::ActionSource::Test,
+        );
+        let err = policy
+            .check_action(crate::daemon_policy::PolicyIntent::Apply, &desc)
+            .unwrap_err();
+        assert!(err.to_string().contains("persistent effect"));
+
+        // Case 2: Persistent effect requested and policy allows it
+        let policy = profile_apply_policy(
+            false,
+            false,
+            true, // allow_persistent_effects = true
+            crate::daemon_policy::ActionSource::Test,
+        );
+        policy
+            .check_action(crate::daemon_policy::PolicyIntent::Apply, &desc)
+            .unwrap();
     }
 
     #[test]

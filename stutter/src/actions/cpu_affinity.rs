@@ -11,17 +11,53 @@ pub struct CpuAffinityProfileAction {
 }
 
 impl CpuAffinityProfileAction {
-    pub fn apply_records(
+    pub fn descriptor_with_persistent_effect(
         &self,
+        persistent_effect: bool,
+    ) -> crate::daemon_policy::ActionDescriptor {
+        crate::daemon_policy::ActionDescriptor {
+            action_id: self.id(),
+            action_kind: "cpu_affinity_profile".to_owned(),
+            safety_class: self.safety_class(),
+            effect_scope: crate::daemon_policy::ActionEffectScope::LocalProcessTree,
+            rollback: crate::daemon_policy::RollbackRequirement::RequiredBeforeApply,
+            persistent_effect,
+            touches_system_wide_state: false,
+            requires_explicit_target: true,
+            confidence: None,
+        }
+    }
+
+    pub fn apply_cached_with_policy(
+        &self,
+        policy: &crate::daemon_policy::DaemonPolicy,
         dry_run: bool,
-    ) -> anyhow::Result<Vec<crate::affinity::AffinityRecord>> {
+        cache: crate::profiles::ProfileApplyCache,
+        persistent_effect: bool,
+    ) -> anyhow::Result<(
+        crate::profiles::ProfileApplyResult,
+        crate::profiles::ProfileApplyCache,
+    )> {
         self.preflight()?;
-        crate::profiles::apply_profile_to_tree(
+        let descriptor = self.descriptor_with_persistent_effect(persistent_effect);
+        let intent = if dry_run {
+            crate::daemon_policy::PolicyIntent::DryRun
+        } else {
+            crate::daemon_policy::PolicyIntent::Apply
+        };
+        policy
+            .check_action(intent, &descriptor)
+            .map_err(|err| anyhow::anyhow!("policy rejected: {err}"))?;
+
+        let mut cache = cache;
+        crate::profiles::apply_managed_profile_to_tree_cached(
             self.tree_pid,
             &self.profile,
             self.force_restore_overwrite,
             dry_run,
+            &mut cache,
         )
+        .map(|result| (result, cache))
     }
 
     fn preflight_for_restore_path(
@@ -68,17 +104,7 @@ impl TuningAction for CpuAffinityProfileAction {
     }
 
     fn descriptor(&self) -> crate::daemon_policy::ActionDescriptor {
-        crate::daemon_policy::ActionDescriptor {
-            action_id: self.id(),
-            action_kind: "cpu_affinity_profile".to_owned(),
-            safety_class: self.safety_class(),
-            effect_scope: crate::daemon_policy::ActionEffectScope::LocalProcessTree,
-            rollback: crate::daemon_policy::RollbackRequirement::RequiredBeforeApply,
-            persistent_effect: false,
-            touches_system_wide_state: false,
-            requires_explicit_target: true,
-            confidence: None,
-        }
+        self.descriptor_with_persistent_effect(false)
     }
 
     fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
@@ -231,5 +257,13 @@ mod tests {
             action().id(),
             ActionId("cpu-affinity-profile:test-profile".to_owned())
         );
+    }
+
+    #[test]
+    fn descriptor_can_mark_persistent_effect() {
+        let descriptor = action().descriptor_with_persistent_effect(true);
+
+        assert!(descriptor.persistent_effect);
+        assert_eq!(descriptor.action_kind, "cpu_affinity_profile");
     }
 }
