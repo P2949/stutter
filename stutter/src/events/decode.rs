@@ -27,6 +27,14 @@ pub fn decode_ebpf_event(kind: u32, bytes: &[u8]) -> DecodedEbpfEvent {
     }
 }
 
+pub fn read_event_unaligned<T: aya::Pod + Copy>(data: &[u8]) -> Option<T> {
+    if data.len() < std::mem::size_of::<T>() {
+        return None;
+    }
+
+    Some(unsafe { (data.as_ptr() as *const T).read_unaligned() })
+}
+
 fn decode_or_short<T>(
     bytes: &[u8],
     kind: u32,
@@ -35,7 +43,7 @@ fn decode_or_short<T>(
 where
     T: aya::Pod + Copy,
 {
-    match super::read_event_unaligned::<T>(bytes) {
+    match read_event_unaligned::<T>(bytes) {
         Some(event) => constructor(event),
         None => DecodedEbpfEvent::Short {
             kind,
@@ -47,6 +55,42 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_unaligned_event_decoding() {
+        let event = SchedulerEvent {
+            kind: EVENT_RUNNABLE_LATENCY,
+            tid: 123,
+            cpu: 1,
+            wakeup_target_cpu: 1,
+            prio: 120,
+            waker_tid: 0,
+            target_pending_wakeups: 0,
+            observed_runnable_depth: 0,
+            maj_flt: 0,
+            min_flt: 0,
+            wakeup_ns: 2000,
+            switch_ns: 3000,
+            latency_ns: 1000,
+            comm: [0; 16],
+            switch_prev_pid: 0,
+            switch_prev_state: 0,
+        };
+
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                &event as *const SchedulerEvent as *const u8,
+                std::mem::size_of::<SchedulerEvent>(),
+            )
+        };
+
+        let mut misaligned = vec![0u8];
+        misaligned.extend_from_slice(bytes);
+
+        let decoded = read_event_unaligned::<SchedulerEvent>(&misaligned[1..]).unwrap();
+        assert_eq!(decoded.kind, EVENT_RUNNABLE_LATENCY);
+        assert_eq!(decoded.tid, 123);
+    }
 
     #[test]
     fn short_scheduler_event_reports_short() {

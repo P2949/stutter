@@ -1038,8 +1038,9 @@ impl MonitorSession {
             let kind = unsafe { (item.as_ptr() as *const u32).read_unaligned() };
             match kind {
                 stutter_common::EVENT_RUNNABLE_LATENCY => {
-                    if let Some(event) =
-                        crate::events::read_event_unaligned::<stutter_common::SchedulerEvent>(&item)
+                    if let Some(event) = crate::events::decode::read_event_unaligned::<
+                        stutter_common::SchedulerEvent,
+                    >(&item)
                     {
                         let spike = crate::events::handle_event_with_runtime_config(
                             &event,
@@ -1061,8 +1062,9 @@ impl MonitorSession {
                     }
                 }
                 stutter_common::EVENT_IRQ_LATENCY => {
-                    if let Some(event) =
-                        crate::events::read_event_unaligned::<stutter_common::IrqEvent>(&item)
+                    if let Some(event) = crate::events::decode::read_event_unaligned::<
+                        stutter_common::IrqEvent,
+                    >(&item)
                     {
                         let record =
                             crate::events::irq_event_record(recording_monotonic_start_ns, &event);
@@ -1076,8 +1078,9 @@ impl MonitorSession {
                     }
                 }
                 stutter_common::EVENT_MIGRATION => {
-                    if let Some(event) =
-                        crate::events::read_event_unaligned::<stutter_common::MigrationEvent>(&item)
+                    if let Some(event) = crate::events::decode::read_event_unaligned::<
+                        stutter_common::MigrationEvent,
+                    >(&item)
                     {
                         crate::events::handle_migration_event(
                             &event,
@@ -1091,8 +1094,9 @@ impl MonitorSession {
                     }
                 }
                 stutter_common::EVENT_CPU_FREQ => {
-                    if let Some(event) =
-                        crate::events::read_event_unaligned::<stutter_common::CpuFreqEvent>(&item)
+                    if let Some(event) = crate::events::decode::read_event_unaligned::<
+                        stutter_common::CpuFreqEvent,
+                    >(&item)
                     {
                         crate::events::handle_cpu_freq_event(
                             &event,
@@ -1104,8 +1108,9 @@ impl MonitorSession {
                     }
                 }
                 stutter_common::EVENT_STAT_WAIT => {
-                    if let Some(event) =
-                        crate::events::read_event_unaligned::<stutter_common::StatWaitEvent>(&item)
+                    if let Some(event) = crate::events::decode::read_event_unaligned::<
+                        stutter_common::StatWaitEvent,
+                    >(&item)
                     {
                         if let Some(stats) = self
                             .runtime
@@ -1122,8 +1127,9 @@ impl MonitorSession {
                     }
                 }
                 stutter_common::EVENT_BLOCK_IO => {
-                    if let Some(event) =
-                        crate::events::read_event_unaligned::<stutter_common::BlockIoEvent>(&item)
+                    if let Some(event) = crate::events::decode::read_event_unaligned::<
+                        stutter_common::BlockIoEvent,
+                    >(&item)
                     {
                         let record = crate::events::block_io_event_record(
                             &event,
