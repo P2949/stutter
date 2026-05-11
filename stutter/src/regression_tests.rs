@@ -872,7 +872,8 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         stop_reason: "test",
         tasks: &task_tracker,
         frame_events: &[],
-        block_io_correlation_basis: "dev+sector",
+        block_io_correlation_basis: "dev+sector".to_owned(),
+        block_io_correlation_confidence: "medium".to_owned(),
         drop_counters,
         cpu_perf_status: None,
         focus_mode: None,
@@ -1333,7 +1334,8 @@ fn report_reads_recorded_session_and_spike_events() {
         stop_reason: "test",
         tasks: &task_tracker,
         frame_events: &[],
-        block_io_correlation_basis: "dev+sector",
+        block_io_correlation_basis: "dev+sector".to_owned(),
+        block_io_correlation_confidence: "medium".to_owned(),
         drop_counters: DropCountersSnapshot::default(),
         cpu_perf_status: None,
         focus_mode: None,
@@ -1408,7 +1410,8 @@ fn report_cluster_output_caps_inline_points() {
         stop_reason: "test",
         tasks: &task_tracker,
         frame_events: &[],
-        block_io_correlation_basis: "dev+sector",
+        block_io_correlation_basis: "dev+sector".to_owned(),
+        block_io_correlation_confidence: "medium".to_owned(),
         drop_counters: DropCountersSnapshot::default(),
         cpu_perf_status: None,
         focus_mode: None,
@@ -1556,7 +1559,7 @@ fn report_uses_run_level_block_io_correlation_basis() {
         None,
     );
 
-    assert!(output.contains("io_events: 1 (request-pointer correlated)"));
+    assert!(output.contains("io_events: 1 (request-pointer correlated (confidence: high))"));
     assert!(!output.contains("block i/o correlation warning"));
 
     session.core.block_io_correlation_basis = "dev+sector".to_owned();
@@ -1572,7 +1575,9 @@ fn report_uses_run_level_block_io_correlation_basis() {
         5,
         None,
     );
-    assert!(output.contains("io_events: 1 (dev+sector correlated (advisory, approximate))"));
+    assert!(output.contains(
+        "io_events: 1 (dev+sector correlated (advisory, approximate, confidence: medium))"
+    ));
     assert!(output.contains("block i/o correlation warning"));
 
     fs::remove_dir_all(dir).ok();

@@ -607,8 +607,8 @@ pub(crate) fn render_report(
     pushln(
         &mut output,
         format!(
-            "block_io_correlation_basis: {}",
-            data_quality.block_io_correlation_basis
+            "block_io_correlation_basis: {} (confidence: {})",
+            data_quality.block_io_correlation_basis, data_quality.block_io_correlation_confidence
         ),
     );
     pushln(
@@ -744,9 +744,15 @@ pub(crate) fn render_report(
                 session.core.block_io_event_count,
                 block_io_correlation_basis(session),
                 if block_io_correlation_basis(session) == "dev+sector" {
-                    " correlated (advisory, approximate)"
+                    format!(
+                        " correlated (advisory, approximate, confidence: {})",
+                        block_io_correlation_confidence(session)
+                    )
                 } else {
-                    " correlated"
+                    format!(
+                        " correlated (confidence: {})",
+                        block_io_correlation_confidence(session)
+                    )
                 },
             ),
         );
@@ -761,18 +767,22 @@ pub(crate) fn render_report(
         {
             pushln(&mut output, "block i/o correlation warning");
             pushln(&mut output, "----------------------------");
-            pushln(
-                &mut output,
-                "note: Block I/O correlation uses dev+sector hashing. Attribution to specific",
-            );
-            pushln(
-                &mut output,
-                "      tasks is best-effort and may collide if multiple concurrent requests",
-            );
-            pushln(
-                &mut output,
-                "      target the same device and sector. Exact attribution is not guaranteed.",
-            );
+            if let Some(warning) = block_io_correlation_warning(session) {
+                pushln(&mut output, format!("note: {warning}"));
+            } else {
+                pushln(
+                    &mut output,
+                    "note: Block I/O correlation uses dev+sector hashing. Attribution to specific",
+                );
+                pushln(
+                    &mut output,
+                    "      tasks is best-effort and may collide if multiple concurrent requests",
+                );
+                pushln(
+                    &mut output,
+                    "      target the same device and sector. Exact attribution is not guaranteed.",
+                );
+            }
             pushln(&mut output, "");
         }
     }

@@ -456,6 +456,8 @@ pub struct SessionMetadataCore {
     pub first_event_stream_write_error: Option<String>,
     #[serde(default = "default_block_io_correlation_basis_string")]
     pub block_io_correlation_basis: String,
+    #[serde(default = "default_block_io_correlation_confidence_string")]
+    pub block_io_correlation_confidence: String,
     #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
     #[serde(default)]
@@ -848,18 +850,28 @@ mod focus_recording_tests {
                     crate::ebpf_loader::BlockIoCorrelationBasis::RequestPointer
                         .as_str()
                         .to_owned(),
+                block_io_correlation_confidence:
+                    crate::ebpf_loader::BlockIoCorrelationBasis::RequestPointer
+                        .confidence()
+                        .to_owned(),
                 ..SessionMetadataCore::default()
             },
             ..SessionFile::default()
         };
 
-        let value = serde_json::to_value(&session).unwrap();
+        let value = serde_json::to_value(&session.core).unwrap();
 
         assert_eq!(
             value
                 .get("block_io_correlation_basis")
                 .and_then(serde_json::Value::as_str),
             Some("request-pointer")
+        );
+        assert_eq!(
+            value
+                .get("block_io_correlation_confidence")
+                .and_then(serde_json::Value::as_str),
+            Some("high")
         );
     }
 
@@ -1250,6 +1262,12 @@ fn default_block_io_correlation_basis_string() -> String {
     default_block_io_correlation_basis().into_owned()
 }
 
+fn default_block_io_correlation_confidence_string() -> String {
+    crate::ebpf_loader::BlockIoCorrelationBasis::DevSector
+        .confidence()
+        .to_owned()
+}
+
 pub const SESSION_SCHEMA_VERSION: u32 = 21;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -1269,7 +1287,8 @@ pub struct FinalizeRecordingInput<'a> {
     pub stop_reason: &'a str,
     pub tasks: &'a crate::tasks::TaskTracker,
     pub frame_events: &'a [FrameEvent],
-    pub block_io_correlation_basis: &'a str,
+    pub block_io_correlation_basis: String,
+    pub block_io_correlation_confidence: String,
     pub drop_counters: crate::ebpf_loader::DropCountersSnapshot,
     pub cpu_perf_status: Option<CpuPerfStatus>,
     pub focus_mode: Option<String>,
@@ -1366,6 +1385,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         tasks: task_tracker,
         frame_events,
         block_io_correlation_basis,
+        block_io_correlation_confidence,
         drop_counters,
         cpu_perf_status,
         focus_mode,
@@ -1571,7 +1591,8 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         alert_events_dropped_count: recorder.counters.alert_events_dropped_count,
         alert_channel_closed_count: recorder.counters.alert_channel_closed_count,
         first_event_stream_write_error: recorder.counters.first_event_stream_write_error.clone(),
-        block_io_correlation_basis: block_io_correlation_basis.to_owned(),
+        block_io_correlation_basis: block_io_correlation_basis.clone(),
+        block_io_correlation_confidence: block_io_correlation_confidence.clone(),
         drop_counters: drop_counters.clone(),
         cpu_perf_sample_count: cpu_perf_status
             .as_ref()
