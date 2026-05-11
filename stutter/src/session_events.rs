@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use stutter_common::SchedulerEvent;
 
 use crate::{
+    alert::AlertPayload,
     diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
-    events::AlertPayload,
     focus::FocusGroupKind,
     process_tree::TaskInfo,
     recorder::{

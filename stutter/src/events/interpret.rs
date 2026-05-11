@@ -3,7 +3,8 @@ use std::time::Instant;
 use stutter_common::{EVENT_RUNNABLE_LATENCY, SchedulerEvent};
 
 use crate::{
-    events::{AlertPayload, immediate_cause_tags, primary_from_tags},
+    alert::AlertPayload,
+    events::{immediate_cause_tags, primary_from_tags},
     metrics::{self},
     recorder,
     session_events::MonitorEvent,

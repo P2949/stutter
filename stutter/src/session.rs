@@ -515,13 +515,13 @@ impl MonitorSession {
             });
             tokio::spawn(async move {
                 while let Some(payload) = rx.recv().await {
-                    if let Err(err) = crate::events::send_desktop_alert(&payload).await {
+                    if let Err(err) = crate::alert::send_desktop_alert(&payload).await {
                         warn!("desktop_alert_failed err={err}");
                     }
                     if let Some(url) = &webhook_url {
                         match &webhook_client {
                             Some(Ok(client)) => {
-                                if let Err(err) = crate::events::send_webhook_alert_with_client(
+                                if let Err(err) = crate::alert::send_webhook_alert_with_client(
                                     client, url, &payload,
                                 )
                                 .await

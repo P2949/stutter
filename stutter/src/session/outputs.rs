@@ -3,7 +3,7 @@ pub struct OutputRuntime {
     pub prometheus_state: Option<std::sync::Arc<crate::prometheus::PrometheusState>>,
     pub prometheus_task: Option<tokio::task::JoinHandle<()>>,
     pub otel_exporter: Option<crate::otel::OtelExporterHandle>,
-    pub alert_sender: Option<tokio::sync::mpsc::Sender<crate::events::AlertPayload>>,
+    pub alert_sender: Option<tokio::sync::mpsc::Sender<crate::alert::AlertPayload>>,
 }
 
 impl OutputRuntime {
@@ -22,7 +22,7 @@ impl OutputRuntime {
         prometheus_state: Option<std::sync::Arc<crate::prometheus::PrometheusState>>,
         prometheus_task: Option<tokio::task::JoinHandle<()>>,
         otel_exporter: Option<crate::otel::OtelExporterHandle>,
-        alert_sender: Option<tokio::sync::mpsc::Sender<crate::events::AlertPayload>>,
+        alert_sender: Option<tokio::sync::mpsc::Sender<crate::alert::AlertPayload>>,
     ) -> Self {
         Self {
             recorder,
