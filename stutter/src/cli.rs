@@ -66,6 +66,22 @@ mod version_tests {
 
         assert_eq!(args.washout_seconds, 30);
         assert_eq!(args.washout_verify_interval_ms, 2_000);
+        assert_eq!(
+            args.min_focus_confidence,
+            crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE
+        );
+    }
+
+    #[test]
+    fn autotune_cli_parses_min_focus_confidence() {
+        let cli =
+            Cli::try_parse_from(["stutter", "autotune", "--min-focus-confidence", "0.42"]).unwrap();
+
+        let Some(Command::Autotune(args)) = cli.command else {
+            panic!("expected autotune command");
+        };
+
+        assert_eq!(args.min_focus_confidence, 0.42);
     }
 }
 
@@ -455,6 +471,13 @@ pub struct AutotuneArgs {
         help = "Allow autotune observe/suggest to classify the whole system and follow the selected focus group"
     )]
     pub auto_focus: bool,
+
+    #[arg(
+        long = "min-focus-confidence",
+        default_value_t = crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
+        help = "Minimum focus confidence required before live autotune can suggest or apply candidates"
+    )]
+    pub min_focus_confidence: f32,
 
     #[arg(
         long = "focus-source",
@@ -1867,6 +1890,7 @@ where
                         hwmon: args.hwmon,
                         mangohud_log: args.mangohud_log,
                         auto_focus: args.auto_focus,
+                        min_focus_confidence: args.min_focus_confidence,
                         focus_source: args.focus_source,
                         foreground_window: args.foreground_window,
                         foreground_source: args.foreground_source,

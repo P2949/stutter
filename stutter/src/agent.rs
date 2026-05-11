@@ -991,6 +991,7 @@ async fn autotune_start_handler(
         hwmon: request.hwmon,
         mangohud_log: request.mangohud_log.as_deref().map(PathBuf::from),
         auto_focus: request.auto_focus,
+        min_focus_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
         focus_source: parse_focus_source_or_hybrid(request.focus_source.as_deref()),
         foreground_window: false,
         foreground_source: parse_foreground_source_or_auto(request.foreground_source.as_deref()),
