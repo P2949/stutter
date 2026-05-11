@@ -5,6 +5,8 @@ use crate::{
     process_tree::{TargetSnapshot, TargetSnapshotInput, TaskClass, TaskInfo, target_snapshot},
 };
 
+pub(crate) const DEFAULT_WASHOUT_SECONDS: u64 = 10;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WashoutWindowConfig {
     pub washout_seconds: u64,
@@ -14,7 +16,7 @@ pub struct WashoutWindowConfig {
 impl Default for WashoutWindowConfig {
     fn default() -> Self {
         Self {
-            washout_seconds: 10,
+            washout_seconds: DEFAULT_WASHOUT_SECONDS,
             verify_interval_ms: 1_000,
         }
     }
@@ -27,6 +29,11 @@ impl WashoutWindowConfig {
 
     pub fn verify_interval(&self) -> Duration {
         Duration::from_millis(self.verify_interval_ms)
+    }
+
+    pub fn with_washout_seconds(mut self, seconds: u64) -> Self {
+        self.washout_seconds = seconds;
+        self
     }
 
     pub fn washout_ms(&self) -> u64 {
@@ -340,8 +347,19 @@ mod tests {
     fn defaults_use_ten_second_washout() {
         let config = WashoutWindowConfig::default();
 
-        assert_eq!(config.washout_seconds, 10);
+        assert_eq!(DEFAULT_WASHOUT_SECONDS, 10);
+        assert_eq!(config.washout_seconds, DEFAULT_WASHOUT_SECONDS);
         assert_eq!(config.washout_ms(), 10_000);
+        assert_eq!(config.verify_interval_ms, 1_000);
+    }
+
+    #[test]
+    fn washout_seconds_can_be_overridden_internally() {
+        let config = WashoutWindowConfig::default().with_washout_seconds(25);
+
+        assert_eq!(config.washout_seconds, 25);
+        assert_eq!(config.washout_duration(), Duration::from_secs(25));
+        assert_eq!(config.washout_ms(), 25_000);
         assert_eq!(config.verify_interval_ms, 1_000);
     }
 
