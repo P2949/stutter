@@ -844,6 +844,462 @@ pub struct TracepointAvailability {
     pub sched_process_exec: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TracepointField {
+    name: String,
+    offset: u32,
+    size: u32,
+    signed: bool,
+    declaration: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TracepointFormat {
+    path: PathBuf,
+    fields: BTreeMap<String, TracepointField>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct BlockIoTracepointOffsets {
+    block_rq: bool,
+    block_rq_has_rwbs: bool,
+    block_rq_key_offset: Option<u32>,
+    block_rq_issue_nr_sector_offset: Option<u32>,
+    block_rq_issue_rwbs_offset: Option<u32>,
+    block_rq_complete_nr_sector_offset: Option<u32>,
+    block_rq_complete_rwbs_offset: Option<u32>,
+}
+
+fn validate_block_io_tracepoint_offsets(events_root: &Path) -> BlockIoTracepointOffsets {
+    let issue_path = events_root.join("block/block_rq_issue/format");
+    let complete_path = events_root.join("block/block_rq_complete/format");
+
+    let issue = match parse_tracepoint_format_at(&issue_path) {
+        Ok(format) => format,
+        Err(err) => {
+            log::warn!(
+                "block_io_tracepoint_format_unavailable tracepoint=block_rq_issue path={} err={err:#}",
+                issue_path.display()
+            );
+            return BlockIoTracepointOffsets::default();
+        }
+    };
+
+    let complete = match parse_tracepoint_format_at(&complete_path) {
+        Ok(format) => format,
+        Err(err) => {
+            log::warn!(
+                "block_io_tracepoint_format_unavailable tracepoint=block_rq_complete path={} err={err:#}",
+                complete_path.display()
+            );
+            return BlockIoTracepointOffsets::default();
+        }
+    };
+
+    let issue_has_required_metadata = tracepoint_field_has_offset_and_size(&issue, "dev", 8, 4)
+        && tracepoint_field_has_offset_and_size(&issue, "sector", 16, 8);
+    let complete_has_required_metadata =
+        tracepoint_field_has_offset_and_size(&complete, "dev", 8, 4)
+            && tracepoint_field_has_offset_and_size(&complete, "sector", 16, 8);
+
+    if !issue_has_required_metadata || !complete_has_required_metadata {
+        log::warn!(
+            "block_io_required_metadata_invalid issue_ok={} complete_ok={} fallback=disabled",
+            issue_has_required_metadata,
+            complete_has_required_metadata
+        );
+        return BlockIoTracepointOffsets::default();
+    }
+
+    let issue_rq_offset = validated_request_pointer_offset(&issue);
+    let complete_rq_offset = validated_request_pointer_offset(&complete);
+
+    let block_rq_key_offset = match (issue_rq_offset, complete_rq_offset) {
+        (Some(issue_offset), Some(complete_offset)) if issue_offset == complete_offset => {
+            Some(issue_offset)
+        }
+        (Some(issue_offset), Some(complete_offset)) => {
+            log::warn!(
+                "block_io_request_pointer_offset_mismatch issue_offset={} complete_offset={} fallback=dev_sector",
+                issue_offset,
+                complete_offset
+            );
+            None
+        }
+        _ => None,
+    };
+
+    let block_rq_issue_nr_sector_offset =
+        validated_tracepoint_field_offset(&issue, "nr_sector", 4, "u32 nr_sector");
+    let block_rq_complete_nr_sector_offset =
+        validated_tracepoint_field_offset(&complete, "nr_sector", 4, "u32 nr_sector");
+
+    let block_rq_issue_rwbs_offset =
+        validated_tracepoint_field_offset(&issue, "rwbs", 8, "u64 rwbs bytes");
+    let block_rq_complete_rwbs_offset =
+        validated_tracepoint_field_offset(&complete, "rwbs", 8, "u64 rwbs bytes");
+
+    BlockIoTracepointOffsets {
+        block_rq: true,
+        block_rq_has_rwbs: block_rq_issue_rwbs_offset.is_some()
+            && block_rq_complete_rwbs_offset.is_some(),
+        block_rq_key_offset,
+        block_rq_issue_nr_sector_offset,
+        block_rq_issue_rwbs_offset,
+        block_rq_complete_nr_sector_offset,
+        block_rq_complete_rwbs_offset,
+    }
+}
+
+fn tracepoint_field_has_offset_and_size(
+    format: &TracepointFormat,
+    field_name: &str,
+    expected_offset: u32,
+    min_size: u32,
+) -> bool {
+    let Some(field) = format.fields.get(field_name) else {
+        log::warn!(
+            "tracepoint_required_field_missing path={} field={} expected_offset={} required_size={}",
+            format.path.display(),
+            field_name,
+            expected_offset,
+            min_size
+        );
+        return false;
+    };
+
+    if field.offset != expected_offset || field.size < min_size {
+        log::warn!(
+            "tracepoint_required_field_invalid path={} field={} offset={} expected_offset={} size={} required_size={}",
+            format.path.display(),
+            field.name,
+            field.offset,
+            expected_offset,
+            field.size,
+            min_size
+        );
+        return false;
+    }
+
+    true
+}
+
+fn validated_request_pointer_offset(format: &TracepointFormat) -> Option<u32> {
+    for field_name in ["rq", "req", "request"] {
+        if let Some(offset) =
+            validated_tracepoint_field_offset(format, field_name, 8, "u64 request pointer")
+        {
+            return Some(offset);
+        }
+    }
+
+    None
+}
+
+fn validated_tracepoint_field_offset(
+    format: &TracepointFormat,
+    field_name: &str,
+    min_size: u32,
+    read_type: &str,
+) -> Option<u32> {
+    let Some(field) = format.fields.get(field_name) else {
+        log::warn!(
+            "tracepoint_field_missing path={} field={} read_type={}",
+            format.path.display(),
+            field_name,
+            read_type
+        );
+        return None;
+    };
+
+    if field.size < min_size {
+        log::warn!(
+            "tracepoint_field_too_small path={} field={} offset={} size={} required_size={} read_type={}",
+            format.path.display(),
+            field.name,
+            field.offset,
+            field.size,
+            min_size,
+            read_type
+        );
+        return None;
+    }
+
+    Some(field.offset)
+}
+
+fn parse_tracepoint_format_at(path: &Path) -> anyhow::Result<TracepointFormat> {
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("failed to read tracepoint format {}", path.display()))?;
+    Ok(parse_tracepoint_format(path.to_path_buf(), &contents))
+}
+
+fn parse_tracepoint_format(path: PathBuf, contents: &str) -> TracepointFormat {
+    let fields = contents
+        .lines()
+        .filter_map(parse_tracepoint_field_line)
+        .map(|field| (field.name.clone(), field))
+        .collect();
+
+    TracepointFormat { path, fields }
+}
+
+fn parse_tracepoint_field_line(line: &str) -> Option<TracepointField> {
+    let mut name = None;
+    let mut offset = None;
+    let mut size = None;
+    let mut signed = None;
+
+    for part in line.split(';') {
+        let part = part.trim();
+        if let Some(declaration) = part.strip_prefix("field:") {
+            name = parse_tracepoint_field_name(declaration);
+        } else if let Some(value) = part.strip_prefix("offset:") {
+            offset = value.trim().parse::<u32>().ok();
+        } else if let Some(value) = part.strip_prefix("size:") {
+            size = value.trim().parse::<u32>().ok();
+        } else if let Some(value) = part.strip_prefix("signed:") {
+            signed = Some(value.trim() != "0");
+        }
+    }
+
+    Some(TracepointField {
+        name: name?,
+        offset: offset?,
+        size: size?,
+        signed: signed.unwrap_or(false),
+        declaration: line.trim().to_owned(),
+    })
+}
+
+fn parse_tracepoint_field_name(declaration: &str) -> Option<String> {
+    let token = declaration.split_whitespace().last()?;
+    let token = token.trim_start_matches('*');
+    let token = token.split('[').next().unwrap_or(token);
+    let token = token.trim();
+
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_owned())
+    }
+}
+
+#[cfg(test)]
+mod block_io_tracepoint_validation_tests {
+    use super::*;
+
+    fn write_block_format(events_root: &Path, tracepoint: &str, contents: &str) {
+        let dir = events_root.join("block").join(tracepoint);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("format"), contents).unwrap();
+    }
+
+    fn block_rq_format(
+        rq: Option<(u32, u32)>,
+        nr_sector: Option<(u32, u32)>,
+        rwbs: Option<(u32, u32)>,
+    ) -> String {
+        let mut format = String::from(
+            "name: block_rq\nID: 1\nformat:\n\
+             \tfield:unsigned short common_type;\toffset:0;\tsize:2;\tsigned:0;\n\
+             \tfield:dev_t dev;\toffset:8;\tsize:4;\tsigned:0;\n\
+             \tfield:sector_t sector;\toffset:16;\tsize:8;\tsigned:0;\n",
+        );
+
+        if let Some((offset, size)) = rq {
+            format.push_str(&format!(
+                "\tfield:void *rq;\toffset:{offset};\tsize:{size};\tsigned:0;\n"
+            ));
+        }
+
+        if let Some((offset, size)) = nr_sector {
+            format.push_str(&format!(
+                "\tfield:unsigned int nr_sector;\toffset:{offset};\tsize:{size};\tsigned:0;\n"
+            ));
+        }
+
+        if let Some((offset, size)) = rwbs {
+            format.push_str(&format!(
+                "\tfield:char rwbs[8];\toffset:{offset};\tsize:{size};\tsigned:0;\n"
+            ));
+        }
+
+        format
+    }
+
+    #[test]
+    fn block_io_request_pointer_available_and_valid() {
+        let temp = tempfile::tempdir().unwrap();
+        let events_root = temp.path();
+
+        let format = block_rq_format(Some((40, 8)), Some((48, 4)), Some((56, 8)));
+        write_block_format(events_root, "block_rq_issue", &format);
+        write_block_format(events_root, "block_rq_complete", &format);
+
+        let offsets = validate_block_io_tracepoint_offsets(events_root);
+
+        assert!(offsets.block_rq);
+        assert!(offsets.block_rq_has_rwbs);
+        assert_eq!(offsets.block_rq_key_offset, Some(40));
+        assert_eq!(offsets.block_rq_issue_nr_sector_offset, Some(48));
+        assert_eq!(offsets.block_rq_complete_nr_sector_offset, Some(48));
+        assert_eq!(offsets.block_rq_issue_rwbs_offset, Some(56));
+        assert_eq!(offsets.block_rq_complete_rwbs_offset, Some(56));
+    }
+
+    #[test]
+    fn block_io_request_pointer_absent_falls_back_to_dev_sector() {
+        let temp = tempfile::tempdir().unwrap();
+        let events_root = temp.path();
+
+        let format = block_rq_format(None, Some((48, 4)), Some((56, 8)));
+        write_block_format(events_root, "block_rq_issue", &format);
+        write_block_format(events_root, "block_rq_complete", &format);
+
+        let offsets = validate_block_io_tracepoint_offsets(events_root);
+
+        assert!(offsets.block_rq);
+        assert!(offsets.block_rq_has_rwbs);
+        assert_eq!(offsets.block_rq_key_offset, None);
+        assert_eq!(offsets.block_rq_issue_nr_sector_offset, Some(48));
+        assert_eq!(offsets.block_rq_complete_nr_sector_offset, Some(48));
+    }
+
+    #[test]
+    fn block_io_rwbs_absent_keeps_rwbs_globals_unset() {
+        let temp = tempfile::tempdir().unwrap();
+        let events_root = temp.path();
+
+        let format = block_rq_format(Some((40, 8)), Some((48, 4)), None);
+        write_block_format(events_root, "block_rq_issue", &format);
+        write_block_format(events_root, "block_rq_complete", &format);
+
+        let offsets = validate_block_io_tracepoint_offsets(events_root);
+
+        assert!(offsets.block_rq);
+        assert!(!offsets.block_rq_has_rwbs);
+        assert_eq!(offsets.block_rq_key_offset, Some(40));
+        assert_eq!(offsets.block_rq_issue_rwbs_offset, None);
+        assert_eq!(offsets.block_rq_complete_rwbs_offset, None);
+    }
+
+    #[test]
+    fn block_io_malformed_small_field_sizes_are_not_used() {
+        let temp = tempfile::tempdir().unwrap();
+        let events_root = temp.path();
+
+        let format = block_rq_format(Some((40, 4)), Some((48, 2)), Some((56, 4)));
+        write_block_format(events_root, "block_rq_issue", &format);
+        write_block_format(events_root, "block_rq_complete", &format);
+
+        let offsets = validate_block_io_tracepoint_offsets(events_root);
+
+        assert!(offsets.block_rq);
+        assert!(!offsets.block_rq_has_rwbs);
+        assert_eq!(offsets.block_rq_key_offset, None);
+        assert_eq!(offsets.block_rq_issue_nr_sector_offset, None);
+        assert_eq!(offsets.block_rq_complete_nr_sector_offset, None);
+        assert_eq!(offsets.block_rq_issue_rwbs_offset, None);
+        assert_eq!(offsets.block_rq_complete_rwbs_offset, None);
+    }
+
+    #[test]
+    fn block_io_invalid_dev_sector_metadata_disables_block_rq() {
+        let temp = tempfile::tempdir().unwrap();
+        let events_root = temp.path();
+
+        let bad_format = "name: block_rq\nID: 1\nformat:\n\
+            \tfield:dev_t dev;\toffset:12;\tsize:4;\tsigned:0;\n\
+            \tfield:sector_t sector;\toffset:16;\tsize:8;\tsigned:0;\n\
+            \tfield:void *rq;\toffset:40;\tsize:8;\tsigned:0;\n\
+            \tfield:unsigned int nr_sector;\toffset:48;\tsize:4;\tsigned:0;\n\
+            \tfield:char rwbs[8];\toffset:56;\tsize:8;\tsigned:0;\n";
+
+        write_block_format(events_root, "block_rq_issue", bad_format);
+        write_block_format(events_root, "block_rq_complete", bad_format);
+
+        let offsets = validate_block_io_tracepoint_offsets(events_root);
+
+        assert!(!offsets.block_rq);
+        assert_eq!(offsets.block_rq_key_offset, None);
+        assert_eq!(offsets.block_rq_issue_nr_sector_offset, None);
+        assert_eq!(offsets.block_rq_complete_nr_sector_offset, None);
+        assert_eq!(offsets.block_rq_issue_rwbs_offset, None);
+        assert_eq!(offsets.block_rq_complete_rwbs_offset, None);
+    }
+
+    #[test]
+    fn block_io_request_pointer_accepts_legacy_req_field_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let events_root = temp.path();
+
+        let format = "name: block_rq\nID: 1\nformat:\n\
+            \tfield:dev_t dev;\toffset:8;\tsize:4;\tsigned:0;\n\
+            \tfield:sector_t sector;\toffset:16;\tsize:8;\tsigned:0;\n\
+            \tfield:void *req;\toffset:40;\tsize:8;\tsigned:0;\n\
+            \tfield:unsigned int nr_sector;\toffset:48;\tsize:4;\tsigned:0;\n\
+            \tfield:char rwbs[8];\toffset:56;\tsize:8;\tsigned:0;\n";
+
+        write_block_format(events_root, "block_rq_issue", format);
+        write_block_format(events_root, "block_rq_complete", format);
+
+        let offsets = validate_block_io_tracepoint_offsets(events_root);
+
+        assert!(offsets.block_rq);
+        assert_eq!(offsets.block_rq_key_offset, Some(40));
+    }
+
+    #[test]
+    fn block_io_issue_complete_request_pointer_mismatch_uses_fallback() {
+        let temp = tempfile::tempdir().unwrap();
+        let events_root = temp.path();
+
+        let issue_format = block_rq_format(Some((40, 8)), Some((48, 4)), Some((56, 8)));
+        let complete_format = block_rq_format(Some((44, 8)), Some((48, 4)), Some((56, 8)));
+        write_block_format(events_root, "block_rq_issue", &issue_format);
+        write_block_format(events_root, "block_rq_complete", &complete_format);
+
+        let offsets = validate_block_io_tracepoint_offsets(events_root);
+
+        assert!(offsets.block_rq);
+        assert!(offsets.block_rq_has_rwbs);
+        assert_eq!(offsets.block_rq_key_offset, None);
+        assert_eq!(offsets.block_rq_issue_nr_sector_offset, Some(48));
+        assert_eq!(offsets.block_rq_complete_nr_sector_offset, Some(48));
+    }
+
+    #[test]
+    fn parse_tracepoint_format_extracts_field_size_offset_and_signed_flag() {
+        let format = parse_tracepoint_format(
+            PathBuf::from("/tmp/format"),
+            "\tfield:int pid;\toffset:24;\tsize:4;\tsigned:1;\n\
+             \tfield:char rwbs[8];\toffset:32;\tsize:8;\tsigned:0;\n",
+        );
+
+        assert_eq!(
+            format.fields.get("pid"),
+            Some(&TracepointField {
+                name: "pid".to_owned(),
+                offset: 24,
+                size: 4,
+                signed: true,
+                declaration: "field:int pid;\toffset:24;\tsize:4;\tsigned:1;".to_owned(),
+            })
+        );
+        assert_eq!(
+            format.fields.get("rwbs"),
+            Some(&TracepointField {
+                name: "rwbs".to_owned(),
+                offset: 32,
+                size: 8,
+                signed: false,
+                declaration: "field:char rwbs[8];\toffset:32;\tsize:8;\tsigned:0;".to_owned(),
+            })
+        );
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TracepointPreflightReport {
     pub sched_wakeup: String,
@@ -1019,49 +1475,63 @@ fn block_tracepoint_preflight(
     wants_block_io: bool,
     warnings: &mut Vec<String>,
 ) -> (String, String) {
-    if !wants_block_io {
-        return ("not_requested".to_owned(), "not_requested".to_owned());
-    }
-
-    let issue = events_root.join("block/block_rq_issue/format");
-    let complete = events_root.join("block/block_rq_complete/format");
-    if !issue.exists() || !complete.exists() {
-        warnings.push("block I/O tracepoint formats are missing".to_owned());
-        return ("missing".to_owned(), "unavailable".to_owned());
-    }
-
-    let issue_ok = validate_tracepoint_format_at_named(
-        &issue,
-        "block_rq_issue",
-        &[("dev", 8), ("sector", 16)],
-    )
-    .is_ok();
-    let complete_ok = validate_tracepoint_format_at_named(
-        &complete,
-        "block_rq_complete",
-        &[("dev", 8), ("sector", 16)],
-    )
-    .is_ok();
-    if !issue_ok || !complete_ok {
-        warnings.push("block I/O tracepoint layouts differ from expected fields".to_owned());
-        return ("mismatch".to_owned(), "unavailable".to_owned());
-    }
-
-    let issue_fmt = fs::read_to_string(&issue).unwrap_or_default();
-    let complete_fmt = fs::read_to_string(&complete).unwrap_or_default();
-    let issue_offsets = parse_tracepoint_offsets(&issue_fmt);
-    let complete_offsets = parse_tracepoint_offsets(&complete_fmt);
-    let basis = if matching_request_key_offset(&issue_offsets, &complete_offsets).is_some() {
-        "request-pointer"
+    let (block_rq, block_io_correlation_basis) = if !wants_block_io {
+        ("not_requested".to_owned(), "not_requested".to_owned())
     } else {
-        warnings.push(
-            "block I/O request-pointer key unavailable; dev+sector correlation is approximate"
-                .to_owned(),
-        );
-        "dev+sector"
+        let offsets = validate_block_io_tracepoint_offsets(events_root);
+        if offsets.block_rq {
+            let basis = if offsets.block_rq_key_offset.is_some() {
+                "request-pointer"
+            } else {
+                warnings.push(
+                    "block I/O request-pointer key unavailable; dev+sector correlation is approximate"
+                        .to_owned(),
+                );
+                "dev+sector"
+            };
+            ("ok".to_owned(), basis.to_owned())
+        } else {
+            // Error/warning already logged by validate_block_io_tracepoint_offsets
+            ("missing".to_owned(), "unavailable".to_owned())
+        }
     };
 
-    ("ok".to_owned(), basis.to_owned())
+    (block_rq, block_io_correlation_basis)
+}
+
+#[cfg(test)]
+fn parse_tracepoint_offsets(format_content: &str) -> BTreeMap<String, TracepointField> {
+    parse_tracepoint_format(PathBuf::from("tracepoint"), format_content).fields
+}
+
+#[cfg(test)]
+fn find_request_key_offset(offsets: &BTreeMap<String, TracepointField>) -> Option<u32> {
+    for name in ["rq", "req", "request"] {
+        if let Some(field) = offsets.get(name)
+            && field.offset >= 8
+            && field.offset % 8 == 0
+            && field.size == 8
+        {
+            return Some(field.offset);
+        }
+    }
+
+    None
+}
+
+#[cfg(test)]
+fn matching_request_key_offset(
+    issue_offsets: &BTreeMap<String, TracepointField>,
+    complete_offsets: &BTreeMap<String, TracepointField>,
+) -> Option<u32> {
+    let issue_key_offset = find_request_key_offset(issue_offsets);
+    let complete_key_offset = find_request_key_offset(complete_offsets);
+
+    if issue_key_offset == complete_key_offset {
+        issue_key_offset
+    } else {
+        None
+    }
 }
 
 fn validate_tracepoint_formats(
@@ -1136,80 +1606,19 @@ fn validate_tracepoint_formats(
         log::warn!("IRQ tracepoint formats missing; continuing without IRQ latency probe");
     }
 
-    let block_rq_issue = events_root.join("block/block_rq_issue/format");
-    let block_rq_complete = events_root.join("block/block_rq_complete/format");
-    let mut block_rq = false;
-    let mut block_rq_has_rwbs = false;
-    let mut block_rq_key_offset = None;
-    let mut block_rq_issue_nr_sector_offset = None;
-    let mut block_rq_issue_rwbs_offset = None;
-    let mut block_rq_complete_nr_sector_offset = None;
-    let mut block_rq_complete_rwbs_offset = None;
+    let block_io = if config.block_io {
+        validate_block_io_tracepoint_offsets(events_root)
+    } else {
+        BlockIoTracepointOffsets::default()
+    };
 
-    if config.block_io && block_rq_issue.exists() && block_rq_complete.exists() {
-        let issue_ok = validate_tracepoint_format_at_named(
-            &block_rq_issue,
-            "block_rq_issue",
-            &[("dev", 8), ("sector", 16)],
-        )
-        .is_ok();
-        let complete_ok = validate_tracepoint_format_at_named(
-            &block_rq_complete,
-            "block_rq_complete",
-            &[("dev", 8), ("sector", 16), ("nr_sector", 24)],
-        )
-        .is_ok();
-
-        if issue_ok && complete_ok {
-            let complete_fmt = fs::read_to_string(&block_rq_complete)
-                .with_context(|| format!("failed to read {}", block_rq_complete.display()))?;
-            let complete_offsets = parse_tracepoint_offsets(&complete_fmt);
-
-            let issue_fmt = fs::read_to_string(&block_rq_issue)
-                .with_context(|| format!("failed to read {}", block_rq_issue.display()))?;
-            let issue_offsets = parse_tracepoint_offsets(&issue_fmt);
-
-            block_rq = true;
-            block_rq_key_offset = matching_request_key_offset(&issue_offsets, &complete_offsets);
-
-            let use_nr_sector = issue_offsets.contains_key("nr_sector")
-                && complete_offsets.contains_key("nr_sector");
-            let use_rwbs =
-                issue_offsets.contains_key("rwbs") && complete_offsets.contains_key("rwbs");
-
-            if use_nr_sector {
-                block_rq_issue_nr_sector_offset =
-                    issue_offsets.get("nr_sector").map(|f| f.offset as u32);
-                block_rq_complete_nr_sector_offset =
-                    complete_offsets.get("nr_sector").map(|f| f.offset as u32);
-            }
-            if use_rwbs {
-                block_rq_issue_rwbs_offset = issue_offsets.get("rwbs").map(|f| f.offset as u32);
-                block_rq_complete_rwbs_offset =
-                    complete_offsets.get("rwbs").map(|f| f.offset as u32);
-            }
-
-            block_rq_has_rwbs = block_rq_complete_rwbs_offset.is_some();
-
-            if block_rq_key_offset.is_none() && config.block_io {
-                let issue_key_offset = find_request_key_offset(&issue_offsets);
-                let complete_key_offset = find_request_key_offset(&complete_offsets);
-                log::warn!(
-                    "request pointer key unavailable or mismatched between block_rq_issue ({issue_key_offset:?}) and block_rq_complete ({complete_key_offset:?}); falling back to metadata hashing"
-                );
-
-                if !use_nr_sector || !use_rwbs {
-                    log::warn!(
-                        "Block I/O correlation fallback is approximate: nr_sector available on both? {use_nr_sector}, rwbs available on both? {use_rwbs}. Missing fields will be excluded from the correlation hash."
-                    );
-                }
-            }
-        } else if config.block_io {
-            log::warn!(
-                "block I/O tracepoint missing required fields or layout mismatch; continuing without block I/O correlation"
-            );
-        }
-    }
+    let block_rq = block_io.block_rq;
+    let block_rq_has_rwbs = block_io.block_rq_has_rwbs;
+    let block_rq_key_offset = block_io.block_rq_key_offset;
+    let block_rq_issue_nr_sector_offset = block_io.block_rq_issue_nr_sector_offset;
+    let block_rq_issue_rwbs_offset = block_io.block_rq_issue_rwbs_offset;
+    let block_rq_complete_nr_sector_offset = block_io.block_rq_complete_nr_sector_offset;
+    let block_rq_complete_rwbs_offset = block_io.block_rq_complete_rwbs_offset;
 
     let sched_process_exit = validate_optional_tracepoint_format_at(
         &events_root.join("sched/sched_process_exit/format"),
@@ -1308,109 +1717,13 @@ fn require_tracepoint_field(format_path: &Path, field_name: &str) -> anyhow::Res
     })
 }
 
-fn parse_tracepoint_field_offset(format: &str, field_name: &str) -> anyhow::Result<u32> {
-    let offsets = parse_tracepoint_offsets(format);
-    offsets
+fn parse_tracepoint_field_offset(format_content: &str, field_name: &str) -> anyhow::Result<u32> {
+    let format = parse_tracepoint_format(PathBuf::from("tracepoint"), format_content);
+    format
+        .fields
         .get(field_name)
-        .map(|f| f.offset as u32)
+        .map(|f| f.offset)
         .ok_or_else(|| anyhow::anyhow!("missing tracepoint field {:?}", field_name))
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TracepointField {
-    name: String,
-    offset: usize,
-    size: Option<usize>,
-    signed: Option<i32>,
-    declaration: String,
-}
-
-fn parse_tracepoint_offsets(format: &str) -> BTreeMap<String, TracepointField> {
-    parse_tracepoint_fields(format)
-}
-
-fn parse_tracepoint_fields(format: &str) -> BTreeMap<String, TracepointField> {
-    let mut fields = BTreeMap::new();
-
-    for line in format.lines() {
-        let trimmed = line.trim();
-        if !trimmed.starts_with("field:") {
-            continue;
-        }
-
-        let name = parse_tracepoint_field_name(trimmed);
-        let offset = parse_tracepoint_field_usize_property(trimmed, "offset:");
-        let size = parse_tracepoint_field_usize_property(trimmed, "size:");
-        let signed = parse_tracepoint_field_i32_property(trimmed, "signed:");
-
-        if let (Some(name), Some(offset)) = (name, offset) {
-            fields.insert(
-                name.clone(),
-                TracepointField {
-                    name,
-                    offset,
-                    size,
-                    signed,
-                    declaration: trimmed.to_owned(),
-                },
-            );
-        }
-    }
-
-    fields
-}
-
-fn parse_tracepoint_field_name(line: &str) -> Option<String> {
-    let field_part = line.strip_prefix("field:")?.split(';').next()?.trim();
-    let raw_name = field_part.split_whitespace().last()?;
-    let raw_name = raw_name.trim_start_matches('*');
-    let name = raw_name.split('[').next()?.trim();
-
-    if name.is_empty() {
-        None
-    } else {
-        Some(name.to_owned())
-    }
-}
-
-fn parse_tracepoint_field_usize_property(line: &str, key: &str) -> Option<usize> {
-    line.split(';')
-        .find_map(|part| part.trim().strip_prefix(key))
-        .and_then(|value| value.trim().parse::<usize>().ok())
-}
-
-fn parse_tracepoint_field_i32_property(line: &str, key: &str) -> Option<i32> {
-    line.split(';')
-        .find_map(|part| part.trim().strip_prefix(key))
-        .and_then(|value| value.trim().parse::<i32>().ok())
-}
-
-fn find_request_key_offset(offsets: &BTreeMap<String, TracepointField>) -> Option<u32> {
-    for name in ["rq", "req", "request"] {
-        if let Some(field) = offsets.get(name)
-            && field.offset >= 8
-            && field.offset % 8 == 0
-            && field.size == Some(8)
-        {
-            return Some(field.offset as u32);
-        }
-    }
-
-    None
-}
-
-fn matching_request_key_offset(
-    issue_offsets: &BTreeMap<String, TracepointField>,
-    complete_offsets: &BTreeMap<String, TracepointField>,
-) -> Option<u32> {
-    let issue_key_offset = find_request_key_offset(issue_offsets);
-    let complete_key_offset = find_request_key_offset(complete_offsets);
-
-    if issue_key_offset == complete_key_offset {
-        issue_key_offset
-    } else {
-        None
-    }
 }
 
 #[cfg(test)]
@@ -1423,21 +1736,22 @@ fn validate_tracepoint_format(
 
 fn validate_tracepoint_format_named(
     tracepoint_name: &str,
-    format: &str,
+    format_content: &str,
     expected_offsets: &[(&str, usize)],
 ) -> anyhow::Result<()> {
-    let fields = parse_tracepoint_fields(format);
+    let format = parse_tracepoint_format(PathBuf::from(tracepoint_name), format_content);
+    let fields = &format.fields;
 
     for &(field_name, expected_offset) in expected_offsets {
         let Some(field) = fields.get(field_name) else {
             return Err(tracepoint_missing_field_error(
                 tracepoint_name,
                 field_name,
-                &fields,
+                fields,
             ));
         };
 
-        if field.offset != expected_offset {
+        if field.offset as usize != expected_offset {
             return Err(tracepoint_offset_mismatch_error(
                 tracepoint_name,
                 field_name,
@@ -1579,22 +1893,22 @@ field:int next_prio; offset:60; size:4; signed:1;
         assert_eq!(offsets.get("next_comm").map(|f| f.offset), Some(40));
         assert_eq!(offsets.get("next_pid").map(|f| f.offset), Some(56));
         assert_eq!(offsets.get("next_prio").map(|f| f.offset), Some(60));
-        assert_eq!(offsets.get("next_comm").and_then(|f| f.size), Some(16));
-        assert_eq!(offsets.get("next_pid").and_then(|f| f.size), Some(4));
-        assert_eq!(offsets.get("next_prio").and_then(|f| f.size), Some(4));
+        assert_eq!(offsets.get("next_comm").map(|f| f.size), Some(16));
+        assert_eq!(offsets.get("next_pid").map(|f| f.size), Some(4));
+        assert_eq!(offsets.get("next_prio").map(|f| f.size), Some(4));
     }
 
     #[test]
     fn parse_tracepoint_fields_preserves_original_declaration() {
         let format = "    field:char next_comm[16]; offset:40; size:16; signed:1;\n";
 
-        let fields = parse_tracepoint_fields(format);
+        let fields = parse_tracepoint_offsets(format);
         let field = fields.get("next_comm").unwrap();
 
         assert_eq!(field.name, "next_comm");
         assert_eq!(field.offset, 40);
-        assert_eq!(field.size, Some(16));
-        assert_eq!(field.signed, Some(1));
+        assert_eq!(field.size, 16);
+        assert!(field.signed);
         assert_eq!(
             field.declaration,
             "field:char next_comm[16]; offset:40; size:16; signed:1;",
