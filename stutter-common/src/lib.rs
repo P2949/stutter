@@ -12,7 +12,8 @@ pub const DROP_WAKEUP_DATA_INSERT_FAILED: u32 = 0;
 pub const DROP_RINGBUF_RESERVE_FAILED: u32 = 1;
 pub const DROP_IRQ_START_TIMES_INSERT_FAILED: u32 = 2;
 pub const DROP_BLOCK_START_INSERT_FAILED: u32 = 3;
-pub const DROP_COUNTERS_MAX: u32 = 4;
+pub const DROP_WAKEUP_DATA_STALE_ENTRY: u32 = 4;
+pub const DROP_COUNTERS_MAX: u32 = 5;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

@@ -13,9 +13,9 @@ use aya_ebpf::{
 use stutter_common::{
     BlockIoEvent, CpuFreqEvent, DROP_BLOCK_START_INSERT_FAILED, DROP_COUNTERS_MAX,
     DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
-    DROP_WAKEUP_DATA_INSERT_FAILED, EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_EXEC, EVENT_IRQ_LATENCY,
-    EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent, MigrationEvent,
-    SchedulerEvent, StatWaitEvent,
+    DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_STALE_ENTRY, EVENT_BLOCK_IO, EVENT_CPU_FREQ,
+    EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT,
+    ExecEvent, IrqEvent, MigrationEvent, SchedulerEvent, StatWaitEvent,
 };
 
 #[unsafe(no_mangle)]
@@ -454,6 +454,14 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
         Some(d) => *d,
         None => return Ok(0),
     };
+
+    if !is_target_pid(pid) {
+        increment_drop_counter(DROP_WAKEUP_DATA_STALE_ENTRY);
+        let _ = WAKEUP_DATA.remove(pid);
+        decrement_target_pending(wakeup_data.target_cpu);
+        remove_runnable_task_if_present(pid);
+        return Ok(0);
+    }
 
     let _ = WAKEUP_DATA.remove(pid);
 

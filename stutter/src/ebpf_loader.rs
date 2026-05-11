@@ -15,7 +15,7 @@ use aya::{
 use serde::{Deserialize, Serialize};
 use stutter_common::{
     DROP_BLOCK_START_INSERT_FAILED, DROP_IRQ_START_TIMES_INSERT_FAILED,
-    DROP_RINGBUF_RESERVE_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED,
+    DROP_RINGBUF_RESERVE_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_STALE_ENTRY,
 };
 use tokio::io::unix::AsyncFd;
 
@@ -75,6 +75,8 @@ pub struct DropCountersSnapshot {
         alias = "wakeup_data_insert_failed"
     )]
     pub wakeup_data_insert_failed: u64,
+    #[serde(default)]
+    pub wakeup_data_stale_entries: u64,
     pub ringbuf_reserve_failed: u64,
     #[serde(default)]
     pub irq_start_times_insert_failed: u64,
@@ -85,6 +87,7 @@ pub struct DropCountersSnapshot {
 impl DropCountersSnapshot {
     pub fn total(&self) -> u64 {
         self.wakeup_data_insert_failed
+            .saturating_add(self.wakeup_data_stale_entries)
             .saturating_add(self.ringbuf_reserve_failed)
             .saturating_add(self.irq_start_times_insert_failed)
             .saturating_add(self.block_start_insert_failed)
@@ -92,6 +95,7 @@ impl DropCountersSnapshot {
 
     pub fn total_excluding_block_io(&self) -> u64 {
         self.wakeup_data_insert_failed
+            .saturating_add(self.wakeup_data_stale_entries)
             .saturating_add(self.ringbuf_reserve_failed)
             .saturating_add(self.irq_start_times_insert_failed)
     }
@@ -103,6 +107,10 @@ impl LoadedEbpf {
             wakeup_data_insert_failed: drop_counter_value(
                 &self.drop_counters,
                 DROP_WAKEUP_DATA_INSERT_FAILED,
+            ),
+            wakeup_data_stale_entries: drop_counter_value(
+                &self.drop_counters,
+                DROP_WAKEUP_DATA_STALE_ENTRY,
             ),
             ringbuf_reserve_failed: drop_counter_value(
                 &self.drop_counters,
@@ -931,6 +939,7 @@ mod map_sizing_tests {
     fn drop_counter_serializes_wakeup_failures_as_lost_wakeup_timestamps() {
         let snapshot = DropCountersSnapshot {
             wakeup_data_insert_failed: 7,
+            wakeup_data_stale_entries: 0,
             ringbuf_reserve_failed: 0,
             irq_start_times_insert_failed: 0,
             block_start_insert_failed: 0,
@@ -958,6 +967,41 @@ mod map_sizing_tests {
         .unwrap();
 
         assert_eq!(snapshot.wakeup_data_insert_failed, 9);
+        assert_eq!(snapshot.wakeup_data_stale_entries, 0);
+    }
+
+    #[test]
+    fn drop_counter_serializes_stale_wakeup_entries() {
+        let snapshot = DropCountersSnapshot {
+            wakeup_data_insert_failed: 0,
+            wakeup_data_stale_entries: 11,
+            ringbuf_reserve_failed: 0,
+            irq_start_times_insert_failed: 0,
+            block_start_insert_failed: 0,
+        };
+
+        let value = serde_json::to_value(&snapshot).unwrap();
+
+        assert_eq!(
+            value
+                .get("wakeup_data_stale_entries")
+                .and_then(serde_json::Value::as_u64),
+            Some(11)
+        );
+    }
+
+    #[test]
+    fn drop_counter_totals_include_stale_wakeup_entries() {
+        let snapshot = DropCountersSnapshot {
+            wakeup_data_insert_failed: 1,
+            wakeup_data_stale_entries: 2,
+            ringbuf_reserve_failed: 4,
+            irq_start_times_insert_failed: 8,
+            block_start_insert_failed: 16,
+        };
+
+        assert_eq!(snapshot.total(), 31);
+        assert_eq!(snapshot.total_excluding_block_io(), 15);
     }
 
     #[test]

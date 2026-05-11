@@ -959,6 +959,7 @@ fn truncated_drop_counters_fixture() -> (SessionFile, FixtureArtifacts) {
     session.core.spike_events_dropped_count = 7;
     session.core.drop_counters = DropCountersSnapshot {
         wakeup_data_insert_failed: 2,
+        wakeup_data_stale_entries: 0,
         ringbuf_reserve_failed: 1,
         irq_start_times_insert_failed: 0,
         block_start_insert_failed: 0,
