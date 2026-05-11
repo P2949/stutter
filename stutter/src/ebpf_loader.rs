@@ -70,6 +70,10 @@ impl BlockIoCorrelationBasis {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DropCountersSnapshot {
+    #[serde(
+        rename = "lost_wakeup_timestamp_inserts",
+        alias = "wakeup_data_insert_failed"
+    )]
     pub wakeup_data_insert_failed: u64,
     pub ringbuf_reserve_failed: u64,
     #[serde(default)]
@@ -543,6 +547,7 @@ pub struct EbpfMapSizingReport {
     pub locked_memory_limit_bytes: Option<u64>,
     pub available_memory_bytes: Option<u64>,
     pub events_ringbuf_bytes: u32,
+    pub target_pids_max: usize,
     pub wakeup_data_entries: u32,
     pub wakeup_data_map_entry_budget_bytes: u64,
     pub min_wakeup_data_entries: u32,
@@ -623,6 +628,7 @@ pub fn ebpf_map_sizing_report() -> EbpfMapSizingReport {
         locked_memory_limit_bytes: sizing.locked_memory_limit_bytes,
         available_memory_bytes: sizing.available_memory_bytes,
         events_ringbuf_bytes: sizing.events_ringbuf_bytes,
+        target_pids_max: TARGET_PIDS_MAX,
         wakeup_data_entries: sizing.wakeup_data_entries,
         wakeup_data_map_entry_budget_bytes: WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES,
         min_wakeup_data_entries: MIN_WAKEUP_DATA_ENTRIES,
@@ -896,6 +902,58 @@ mod map_sizing_tests {
     #[test]
     fn memlock_limit_bytes_treats_rlim_infinity_as_unknown_or_unlimited() {
         assert_eq!(memlock_limit_bytes_from_rlim(libc::RLIM_INFINITY), None);
+    }
+
+    #[test]
+    fn map_sizing_report_includes_target_and_wakeup_capacities() {
+        let report = ebpf_map_sizing_report();
+        let value = serde_json::to_value(&report).unwrap();
+
+        assert_eq!(
+            value
+                .get("target_pids_max")
+                .and_then(serde_json::Value::as_u64),
+            Some(TARGET_PIDS_MAX as u64)
+        );
+        assert!(
+            value
+                .get("wakeup_data_entries")
+                .and_then(serde_json::Value::as_u64)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn drop_counter_serializes_wakeup_failures_as_lost_wakeup_timestamps() {
+        let snapshot = DropCountersSnapshot {
+            wakeup_data_insert_failed: 7,
+            ringbuf_reserve_failed: 0,
+            irq_start_times_insert_failed: 0,
+            block_start_insert_failed: 0,
+        };
+
+        let value = serde_json::to_value(&snapshot).unwrap();
+
+        assert_eq!(
+            value
+                .get("lost_wakeup_timestamp_inserts")
+                .and_then(serde_json::Value::as_u64),
+            Some(7)
+        );
+        assert!(value.get("wakeup_data_insert_failed").is_none());
+    }
+
+    #[test]
+    fn drop_counter_reads_legacy_wakeup_data_insert_failed_name() {
+        let snapshot: DropCountersSnapshot = serde_json::from_value(serde_json::json!({
+            "wakeup_data_insert_failed": 9,
+            "ringbuf_reserve_failed": 0,
+            "irq_start_times_insert_failed": 0,
+            "block_start_insert_failed": 0
+        }))
+        .unwrap();
+
+        assert_eq!(snapshot.wakeup_data_insert_failed, 9);
     }
 
     #[test]

@@ -241,6 +241,10 @@ fn ebpf_map_sizing_check() -> DoctorCheck {
         sizing.events_ringbuf_bytes.to_string(),
     );
     details.insert(
+        "target_pids_max".to_owned(),
+        sizing.target_pids_max.to_string(),
+    );
+    details.insert(
         "wakeup_data_entries".to_owned(),
         sizing.wakeup_data_entries.to_string(),
     );
@@ -796,6 +800,18 @@ mod tests {
                 .iter()
                 .any(|c| c.name == "ebpf_runtime_permissions")
         );
+    }
+
+    #[test]
+    fn ebpf_map_sizing_check_reports_target_and_wakeup_capacities() {
+        let check = ebpf_map_sizing_check();
+
+        assert_eq!(check.name, "ebpf_map_sizing");
+        assert_eq!(
+            check.details.get("target_pids_max"),
+            Some(&crate::cli::TARGET_PIDS_MAX.to_string())
+        );
+        assert!(check.details.contains_key("wakeup_data_entries"));
     }
 
     #[test]
