@@ -59,7 +59,9 @@ pub struct AgentConfigFile {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AgentAutotuneLimitsFile {
     pub max_active_controllers: Option<usize>,
+    pub max_mode: Option<String>,
     pub max_safety_class: Option<String>,
+    pub allow_high_risk: Option<bool>,
     pub max_candidate_window_seconds: Option<u64>,
     pub max_targets: Option<usize>,
     pub allow_system_wide_actions: Option<bool>,
@@ -69,11 +71,26 @@ impl AgentAutotuneLimitsFile {
     pub fn into_limits(self) -> Result<AgentAutotuneLimits> {
         let defaults = AgentAutotuneLimits::default();
 
+        let max_safety_class =
+            crate::remote::parse_legacy_safety_class(self.max_safety_class.as_deref())
+                .map_err(|err| anyhow::anyhow!(err))
+                .context("invalid agent.autotune_limits.max_safety_class")?;
+
+        let max_mode = if let Some(raw) = self.max_mode.as_deref() {
+            raw.parse().context("invalid max_mode")?
+        } else if self.max_safety_class.is_some() {
+            crate::remote::mode_for_safety_class(max_safety_class.clone())
+        } else {
+            defaults.max_mode
+        };
+
         let limits = AgentAutotuneLimits {
             max_active_controllers: self
                 .max_active_controllers
                 .unwrap_or(defaults.max_active_controllers),
-            max_safety_class: self.max_safety_class.unwrap_or(defaults.max_safety_class),
+            max_mode,
+            max_safety_class,
+            allow_high_risk: self.allow_high_risk.unwrap_or(defaults.allow_high_risk),
             max_candidate_window_seconds: self
                 .max_candidate_window_seconds
                 .unwrap_or(defaults.max_candidate_window_seconds),
@@ -99,17 +116,11 @@ pub fn validate_agent_autotune_limits(limits: &AgentAutotuneLimits) -> Result<()
         );
     }
 
-    if limits.max_safety_class != "ObserveOnly"
-        && limits.max_safety_class != "ReversibleLowRisk"
-        && limits.max_safety_class != "ReversibleMediumRisk"
-        && limits.max_safety_class != "HighRisk"
-    {
-        anyhow::bail!(
-            "agent.autotune_limits.max_safety_class must be ObserveOnly, ReversibleLowRisk, ReversibleMediumRisk, or HighRisk"
-        );
+    if limits.max_mode > crate::daemon_policy::DaemonMode::ApplyLowRisk {
+        anyhow::bail!("remote autotune currently supports max_mode = apply-low-risk only");
     }
 
-    if limits.max_safety_class != "ReversibleLowRisk" {
+    if limits.max_safety_class > crate::actions::SafetyClass::ReversibleLowRisk {
         anyhow::bail!(
             "remote autotune currently supports max_safety_class = ReversibleLowRisk only"
         );
@@ -371,7 +382,14 @@ mod tests {
         let limits = agent_autotune_limits_from_user_config(Some(&config)).unwrap();
 
         assert_eq!(limits.max_active_controllers, 1);
-        assert_eq!(limits.max_safety_class, "ReversibleLowRisk");
+        assert_eq!(
+            limits.max_mode,
+            crate::daemon_policy::DaemonMode::ApplyLowRisk
+        );
+        assert_eq!(
+            limits.max_safety_class,
+            crate::actions::SafetyClass::ReversibleLowRisk
+        );
         assert_eq!(limits.max_candidate_window_seconds, 120);
         assert_eq!(limits.max_targets, 1);
         assert!(!limits.allow_system_wide_actions);
@@ -446,7 +464,36 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("ReversibleLowRisk only"));
+        assert!(err.contains("apply-low-risk only") || err.contains("ReversibleLowRisk only"));
+    }
+
+    #[test]
+    fn test_agent_autotune_limits_reject_high_mode_ceiling() {
+        let toml = r#"
+            [agent.autotune_limits]
+            max_mode = "apply-medium-risk"
+        "#;
+
+        let config = parse_user_config_toml(toml).unwrap();
+        let err = agent_autotune_limits_from_user_config(Some(&config))
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("apply-low-risk only"));
+    }
+
+    #[test]
+    fn test_agent_autotune_limits_reject_invalid_safety_class() {
+        let toml = r#"
+            [agent.autotune_limits]
+            max_safety_class = "Invalid"
+        "#;
+
+        let config = parse_user_config_toml(toml).unwrap();
+        let err = agent_autotune_limits_from_user_config(Some(&config)).unwrap_err();
+
+        let err_str = err.to_string();
+        assert!(err_str.contains("max_safety_class"));
     }
 
     #[test]
