@@ -9,6 +9,7 @@ use crate::tune::comparability::{
 pub const DEFAULT_MIN_SCORED_INTERVALS: usize = 5;
 pub const DEFAULT_MIN_SCORED_SAMPLES: u64 = 100;
 pub const DEFAULT_MAX_DROP_COUNTER_TOTAL: u64 = 0;
+pub(crate) const DEFAULT_REQUIRE_FRAME_DATA: bool = false;
 pub const LOW_IDENTITY_OVERLAP_RATIO: f64 = 0.75;
 pub const MEDIUM_IDENTITY_OVERLAP_RATIO: f64 = 0.90;
 pub const LOW_FRAME_COUNT_RATIO: f64 = 1.50;
@@ -76,7 +77,7 @@ impl Default for OnlineDataQualityPolicy {
             min_scored_intervals: DEFAULT_MIN_SCORED_INTERVALS,
             min_scored_samples: DEFAULT_MIN_SCORED_SAMPLES,
             max_drop_counter_total: DEFAULT_MAX_DROP_COUNTER_TOTAL,
-            require_frame_data: false,
+            require_frame_data: DEFAULT_REQUIRE_FRAME_DATA,
             low_identity_overlap_ratio: LOW_IDENTITY_OVERLAP_RATIO,
             medium_identity_overlap_ratio: MEDIUM_IDENTITY_OVERLAP_RATIO,
             low_frame_count_ratio: LOW_FRAME_COUNT_RATIO,
@@ -329,6 +330,34 @@ mod tests {
 
         assert_eq!(quality, OnlineDataQuality::High);
         assert!(!quality.blocks_action());
+    }
+
+    #[test]
+    fn default_policy_does_not_require_frame_data() {
+        let policy = OnlineDataQualityPolicy::default();
+        let input = high_input();
+
+        assert_eq!(policy.require_frame_data, DEFAULT_REQUIRE_FRAME_DATA);
+        assert_eq!(input.evaluate_with_policy(&policy), OnlineDataQuality::High);
+    }
+
+    #[test]
+    fn policy_required_frame_data_without_frames_is_low_quality() {
+        let policy = OnlineDataQualityPolicy {
+            require_frame_data: true,
+            ..OnlineDataQualityPolicy::default()
+        };
+        let input = high_input();
+
+        let quality = input.evaluate_with_policy(&policy);
+
+        assert!(quality.is_low());
+        assert!(
+            quality
+                .reasons()
+                .iter()
+                .any(|reason| reason.contains("no frame data"))
+        );
     }
 
     #[test]
