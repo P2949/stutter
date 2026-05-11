@@ -11,17 +11,38 @@ use crate::{
     autotune::state::SituationKind, cli::FocusSource, foreground::ForegroundWindowSnapshot,
 };
 
-pub mod classify;
-pub mod groups;
-pub mod resolve;
-pub mod score;
-pub mod snapshot;
+pub(crate) mod classify;
+pub(crate) mod groups;
+pub(crate) mod resolve;
+pub(crate) mod score;
+pub(crate) mod snapshot;
 
-pub use classify::*;
-pub use groups::*;
-pub use resolve::*;
-pub(crate) use score::*;
-pub use snapshot::*;
+pub use classify::{
+    Classification, PriorityBand, ProcessIdentity, ThreadIdentity, classify_process,
+    classify_thread, priority_band_for_class,
+};
+pub use groups::{
+    FocusGroup, FocusGroupKind, FocusScoreBreakdown, SafetyWarning, safety_warnings_for_group,
+    situation_for_group,
+};
+pub(crate) use groups::{
+    apply_foreground_source_mode_to_snapshot, foreground_process_is_safe_auto_target,
+    make_focus_group,
+};
+#[cfg(test)]
+pub(crate) use groups::{build_focus_groups, foreground_score_for_group};
+pub use resolve::{FocusDecision, FocusPolicy, FocusResolver, ResolvedFocus};
+#[cfg(test)]
+pub(crate) use score::focus_group_kind_for_class;
+pub(crate) use score::{
+    focus_group_contains_pid, priority_band_rank, process_focus_score, total_cpu_ticks,
+};
+#[cfg(test)]
+pub(crate) use snapshot::counter_deltas;
+pub use snapshot::{
+    FocusCache, FocusCounters, FocusProcess, FocusSnapshot, build_focus_snapshot_from_processes,
+    focus_snapshot_at,
+};
 
 const SCHED_FIFO: u32 = 1;
 const SCHED_RR: u32 = 2;
