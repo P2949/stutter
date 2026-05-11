@@ -436,7 +436,7 @@ pub struct AutotuneArgs {
     #[arg(
         long = "mode",
         default_value = "observe",
-        help = "Autotune mode: observe, suggest, or apply-low-risk. apply-low-risk currently applies CPU-affinity candidates only."
+        help = "Autotune mode: observe, suggest, apply-low-risk, apply-medium-risk, or apply-high-risk. Live autotune currently supports observe, suggest, and apply-low-risk only; apply-low-risk applies CPU-affinity candidates only."
     )]
     pub mode: String,
 

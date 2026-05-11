@@ -190,7 +190,7 @@ This is not a CPU stack flamegraph. Stutter does not collect stack traces for th
 5. Apply only if the recommendation is stable enough to trust.
 6. Restore if needed.
 
-Check your CPU topology (e.g. `lscpu -e`) before editing profiles to use explicit masks. See [docs/SAFETY.md](docs/SAFETY.md) for more details.
+Check your CPU topology (e.g. `lscpu -e`) before editing profiles to use explicit masks. See [docs/SAFETY.md](docs/SAFETY.md) for operational safety details and [docs/DAEMON_CONTRACT.md](docs/DAEMON_CONTRACT.md) for daemon modes, default denials, rollback expectations, and developer policy rules.
 
 Example:
 
@@ -643,6 +643,26 @@ stutter advisor --watch-runs
 ```
 
 Advisor output is deliberately cautious: it reports candidates and suggested experiments, not confirmed root causes, and it does not auto-apply any tuning.
+
+## Daemon and autotune modes
+
+The daemon policy mode labels are:
+
+```text
+observe
+suggest
+apply-low-risk
+apply-medium-risk
+apply-high-risk
+```
+
+Their contract is documented in [docs/DAEMON_CONTRACT.md](docs/DAEMON_CONTRACT.md).
+
+Live `stutter autotune --mode` currently supports `observe`, `suggest`, and `apply-low-risk`. The central `DaemonMode` type also defines `apply-medium-risk` and `apply-high-risk` as policy labels, but the live autotune command rejects those modes until their apply paths are implemented and explicitly unlocked.
+
+`apply-low-risk` is the default apply ceiling and currently applies CPU-affinity candidates only for explicit target process trees. It is not a system-wide auto-tuner.
+
+Remote autotune uses the same mode labels, but remote apply support is bounded by the agent's configured limits. High-risk remote support is never enabled by default.
 
 ## Doctor / preflight
 
