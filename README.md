@@ -17,20 +17,26 @@ Was this task ready to run but delayed before getting CPU time?
 ## Requirements
 
 * Linux with eBPF support
-* Rust stable + nightly
-* `rust-src` for nightly
+* Rust via `rustup`
 * `bpf-linker`
 * privileges to load eBPF programs
+
+The repository pins its expected Rust toolchain in `rust-toolchain.toml`:
+
+```toml
+[toolchain]
+channel = "nightly"
+components = ["rust-src", "rustfmt", "clippy"]
+```
 
 Install basics:
 
 ```bash
-rustup toolchain install stable
-rustup toolchain install nightly --component rust-src
+rustup show
 cargo install bpf-linker
 ```
 
-On this project, use the explicit toolchain environment if Gentoo/system Rust interferes:
+`rustup` will use the repository-pinned nightly toolchain when commands are run from this checkout. If a system Rust setup interferes, use an explicit override:
 
 ```bash
 RUSTUP_TOOLCHAIN=nightly cargo build
@@ -39,9 +45,9 @@ RUSTUP_TOOLCHAIN=nightly cargo build
 ## Build
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo fmt
-RUSTUP_TOOLCHAIN=nightly cargo build
-RUSTUP_TOOLCHAIN=nightly cargo clippy --all-targets -- -D warnings
+cargo fmt
+cargo build
+cargo clippy --all-targets -- -D warnings
 ```
 
 ## Install
@@ -206,7 +212,7 @@ stutter recommend \
 Loading eBPF programs usually requires root or suitable capabilities. Prefer building as your normal user and running the already-built binary with privileges:
 
 ```bash
-RUSTUP_TOOLCHAIN=nightly cargo build
+cargo build
 
 doas target/debug/stutter record \
   --pid "$(pgrep -n sway)" \
