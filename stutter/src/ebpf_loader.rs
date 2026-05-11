@@ -27,7 +27,11 @@ const DEFAULT_AVAILABLE_MEMORY_BYTES: u64 = 1 << 30;
 const AVAILABLE_MEMORY_BUDGET_DIVISOR: u64 = 64;
 const MEMLOCK_BUDGET_NUMERATOR: u64 = 3;
 const MEMLOCK_BUDGET_DENOMINATOR: u64 = 4;
-const WAKEUP_DATA_ENTRY_ESTIMATED_BYTES: u64 = 64;
+// Conservative userspace budgeting estimate for one WAKEUP_DATA kernel hash-map
+// entry. This is not the raw eBPF-private WakeupData struct size; it reserves
+// room for kernel map metadata, alignment, hash storage overhead, and safety
+// margin when splitting the available map-memory budget.
+const WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES: u64 = 64;
 const MIN_WAKEUP_DATA_ENTRIES: u32 = 4_096;
 const MAX_WAKEUP_DATA_ENTRIES: u32 = 1_048_576;
 const MIN_EVENTS_RINGBUF_BYTES: u32 = 64 * 1024;
@@ -530,6 +534,32 @@ pub struct EbpfMapSizingReport {
     pub available_memory_bytes: Option<u64>,
     pub events_ringbuf_bytes: u32,
     pub wakeup_data_entries: u32,
+    pub wakeup_data_map_entry_budget_bytes: u64,
+    pub min_wakeup_data_entries: u32,
+    pub max_wakeup_data_entries: u32,
+}
+
+fn wakeup_data_entries_for_config(
+    computed_entries: u32,
+    max_tasks: usize,
+    wakeup_map_factor: Option<u32>,
+) -> u32 {
+    if let Some(factor) = wakeup_map_factor {
+        return u32::try_from(max_tasks)
+            .unwrap_or(u32::MAX)
+            .saturating_mul(factor)
+            .clamp(MIN_WAKEUP_DATA_ENTRIES, MAX_WAKEUP_DATA_ENTRIES);
+    }
+
+    computed_entries
+        .max(wakeup_data_entries_floor_for_max_tasks(max_tasks))
+        .clamp(MIN_WAKEUP_DATA_ENTRIES, MAX_WAKEUP_DATA_ENTRIES)
+}
+
+fn wakeup_data_entries_floor_for_max_tasks(max_tasks: usize) -> u32 {
+    u32::try_from(max_tasks)
+        .unwrap_or(u32::MAX)
+        .min(MAX_WAKEUP_DATA_ENTRIES)
 }
 
 pub(crate) fn map_sizing_for_config(config: &crate::cli::Config) -> EbpfMapSizing {
@@ -546,12 +576,11 @@ pub(crate) fn map_sizing_for_config(config: &crate::cli::Config) -> EbpfMapSizin
         sizing.events_ringbuf_bytes = rounded as u32;
     }
 
-    if let Some(factor) = config.wakeup_map_factor {
-        sizing.wakeup_data_entries = u32::try_from(config.max_tasks)
-            .unwrap_or(u32::MAX)
-            .saturating_mul(factor)
-            .clamp(MIN_WAKEUP_DATA_ENTRIES, MAX_WAKEUP_DATA_ENTRIES);
-    }
+    sizing.wakeup_data_entries = wakeup_data_entries_for_config(
+        sizing.wakeup_data_entries,
+        config.max_tasks,
+        config.wakeup_map_factor,
+    );
 
     sizing
 }
@@ -563,6 +592,9 @@ pub fn ebpf_map_sizing_report() -> EbpfMapSizingReport {
         available_memory_bytes: sizing.available_memory_bytes,
         events_ringbuf_bytes: sizing.events_ringbuf_bytes,
         wakeup_data_entries: sizing.wakeup_data_entries,
+        wakeup_data_map_entry_budget_bytes: WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES,
+        min_wakeup_data_entries: MIN_WAKEUP_DATA_ENTRIES,
+        max_wakeup_data_entries: MAX_WAKEUP_DATA_ENTRIES,
     }
 }
 
@@ -600,7 +632,7 @@ fn map_sizing_from_memory(snapshot: MemorySnapshot) -> EbpfMapSizing {
         ring_buffer_size_from_budget(events_budget, min_events, max_events, page_size);
     let wakeup_budget = budget.saturating_sub(u64::from(events_ringbuf_bytes));
     let wakeup_data_entries = wakeup_budget
-        .checked_div(WAKEUP_DATA_ENTRY_ESTIMATED_BYTES)
+        .checked_div(WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES)
         .unwrap_or(0)
         .clamp(
             u64::from(MIN_WAKEUP_DATA_ENTRIES),
@@ -696,6 +728,102 @@ fn format_optional_bytes(value: Option<u64>) -> String {
     value
         .map(|bytes| bytes.to_string())
         .unwrap_or_else(|| "unknown_or_unlimited".to_owned())
+}
+
+#[cfg(test)]
+mod map_sizing_tests {
+    use super::*;
+
+    const TEST_PAGE_SIZE: u64 = 4096;
+
+    fn memory_snapshot(
+        locked_memory_limit_bytes: Option<u64>,
+        available_memory_bytes: Option<u64>,
+    ) -> MemorySnapshot {
+        MemorySnapshot {
+            locked_memory_limit_bytes,
+            available_memory_bytes,
+            page_size: TEST_PAGE_SIZE,
+        }
+    }
+
+    #[test]
+    fn low_memlock_budget_clamps_wakeup_entries_to_minimum() {
+        let sizing = map_sizing_from_memory(memory_snapshot(Some(128 * 1024), Some(1 << 30)));
+
+        assert_eq!(sizing.events_ringbuf_bytes, MIN_EVENTS_RINGBUF_BYTES);
+        assert_eq!(sizing.wakeup_data_entries, MIN_WAKEUP_DATA_ENTRIES);
+        assert_eq!(sizing.locked_memory_limit_bytes, Some(128 * 1024));
+        assert_eq!(sizing.available_memory_bytes, Some(1 << 30));
+    }
+
+    #[test]
+    fn unknown_or_unlimited_memory_uses_default_available_memory_budget() {
+        let sizing = map_sizing_from_memory(memory_snapshot(None, None));
+
+        assert_eq!(sizing.events_ringbuf_bytes, 4 * 1024 * 1024);
+        assert_eq!(sizing.wakeup_data_entries, 196_608);
+        assert_eq!(sizing.locked_memory_limit_bytes, None);
+        assert_eq!(sizing.available_memory_bytes, None);
+    }
+
+    #[test]
+    fn very_high_available_memory_clamps_wakeup_entries_to_maximum() {
+        let sizing = map_sizing_from_memory(memory_snapshot(None, Some(1u64 << 40)));
+
+        assert_eq!(sizing.events_ringbuf_bytes, MAX_EVENTS_RINGBUF_BYTES);
+        assert_eq!(sizing.wakeup_data_entries, MAX_WAKEUP_DATA_ENTRIES);
+    }
+
+    #[test]
+    fn explicit_wakeup_map_factor_uses_max_tasks_times_factor() {
+        let entries = wakeup_data_entries_for_config(MIN_WAKEUP_DATA_ENTRIES, 10_000, Some(4));
+
+        assert_eq!(entries, 40_000);
+    }
+
+    #[test]
+    fn explicit_wakeup_map_factor_is_clamped_to_minimum() {
+        let entries = wakeup_data_entries_for_config(1, 1, Some(0));
+
+        assert_eq!(entries, MIN_WAKEUP_DATA_ENTRIES);
+    }
+
+    #[test]
+    fn explicit_wakeup_map_factor_is_clamped_to_maximum() {
+        let entries = wakeup_data_entries_for_config(
+            MIN_WAKEUP_DATA_ENTRIES,
+            MAX_WAKEUP_DATA_ENTRIES as usize,
+            Some(2),
+        );
+
+        assert_eq!(entries, MAX_WAKEUP_DATA_ENTRIES);
+    }
+
+    #[test]
+    fn automatic_sizing_uses_at_least_configured_max_tasks() {
+        let entries = wakeup_data_entries_for_config(MIN_WAKEUP_DATA_ENTRIES, 200_000, None);
+
+        assert_eq!(entries, 200_000);
+    }
+
+    #[test]
+    fn automatic_sizing_clamps_configured_max_tasks_to_maximum() {
+        let entries = wakeup_data_entries_for_config(
+            MIN_WAKEUP_DATA_ENTRIES,
+            (MAX_WAKEUP_DATA_ENTRIES as usize).saturating_add(1),
+            None,
+        );
+
+        assert_eq!(entries, MAX_WAKEUP_DATA_ENTRIES);
+    }
+
+    #[test]
+    fn automatic_sizing_still_clamps_tiny_results_to_minimum() {
+        let entries = wakeup_data_entries_for_config(1, 1, None);
+
+        assert_eq!(entries, MIN_WAKEUP_DATA_ENTRIES);
+    }
 }
 
 #[derive(Debug, Clone)]
