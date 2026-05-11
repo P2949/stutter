@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::process_tree::TaskClass as SystemTaskClass;
 use crate::{
-    autotune::state::SituationKind, cli::FocusSource, foreground::ForegroundWindowSnapshot,
+    autotune::state::SituationKind, config::FocusSource, foreground::ForegroundWindowSnapshot,
 };
 
 pub(crate) mod classify;

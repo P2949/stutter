@@ -15,7 +15,8 @@ use tokio::{
 
 use crate::{
     artifacts::ArtifactKind,
-    cli::{Config, CsvStreamTarget, FocusSource, ForegroundSourceArg},
+    cli::{Config, CsvStreamTarget},
+    config::{FocusSource, ForegroundSource},
     diagnosis::{LiveDiagnosisEntry, diagnose_cluster},
     ebpf_loader,
     focus::{FocusDecision, FocusPolicy, FocusResolver, ResolvedFocus},
@@ -87,14 +88,14 @@ fn foreground_provider_for_config(
     config: &Config,
 ) -> Box<dyn crate::foreground::ForegroundProvider + Send> {
     match config.foreground_source {
-        ForegroundSourceArg::Auto => crate::foreground::auto_foreground_provider(),
-        ForegroundSourceArg::Sway => Box::new(crate::foreground::SwayForegroundProvider::new()),
-        ForegroundSourceArg::Hyprland => {
+        ForegroundSource::Auto => crate::foreground::auto_foreground_provider(),
+        ForegroundSource::Sway => Box::new(crate::foreground::SwayForegroundProvider::new()),
+        ForegroundSource::Hyprland => {
             Box::new(crate::foreground::UnsupportedForegroundProvider::new(
                 "Hyprland foreground provider is not implemented yet; no safe generic Wayland foreground-window API detected",
             ))
         }
-        ForegroundSourceArg::X11 => Box::new(crate::foreground::X11ForegroundProvider::new()),
+        ForegroundSource::X11 => Box::new(crate::foreground::X11ForegroundProvider::new()),
     }
 }
 

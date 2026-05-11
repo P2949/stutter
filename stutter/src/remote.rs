@@ -2,7 +2,12 @@ use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::{actions::SafetyClass, cli::Config, daemon_policy::DaemonMode};
+use crate::{
+    actions::SafetyClass,
+    cli::Config,
+    config::{FocusSource, ForegroundSource},
+    daemon_policy::DaemonMode,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteMonitorRequest {
@@ -312,21 +317,21 @@ pub struct AgentFeatureFlags {
     pub autotune_apply_low_risk: bool,
 }
 
-fn focus_source_label(source: crate::cli::FocusSource) -> String {
+fn focus_source_label(source: FocusSource) -> String {
     match source {
-        crate::cli::FocusSource::Heuristic => "heuristic",
-        crate::cli::FocusSource::Foreground => "foreground",
-        crate::cli::FocusSource::Hybrid => "hybrid",
+        FocusSource::Heuristic => "heuristic",
+        FocusSource::Foreground => "foreground",
+        FocusSource::Hybrid => "hybrid",
     }
     .to_owned()
 }
 
-fn foreground_source_label(source: crate::cli::ForegroundSourceArg) -> String {
+fn foreground_source_label(source: ForegroundSource) -> String {
     match source {
-        crate::cli::ForegroundSourceArg::Auto => "auto",
-        crate::cli::ForegroundSourceArg::Sway => "sway",
-        crate::cli::ForegroundSourceArg::Hyprland => "hyprland",
-        crate::cli::ForegroundSourceArg::X11 => "x11",
+        ForegroundSource::Auto => "auto",
+        ForegroundSource::Sway => "sway",
+        ForegroundSource::Hyprland => "hyprland",
+        ForegroundSource::X11 => "x11",
     }
     .to_owned()
 }

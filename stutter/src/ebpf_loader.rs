@@ -20,7 +20,7 @@ use stutter_common::{
 use tokio::io::unix::AsyncFd;
 
 use crate::{
-    cli::TARGET_PIDS_MAX, probe_activation::ProbeActivationPlan, probe_registry::ProbeKey,
+    config::TARGET_PIDS_MAX, probe_activation::ProbeActivationPlan, probe_registry::ProbeKey,
 };
 
 const DEFAULT_AVAILABLE_MEMORY_BYTES: u64 = 1 << 30;
@@ -438,7 +438,7 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         // TARGET_PIDS because bpf_get_current_cgroup_id() reports the
         // waker/current task, not the wakee pid in sched_wakeup. Use a filtered
         // snapshot to ensure that we respect user-provided filters and do not
-        // exceed crate::cli::TARGET_PIDS_MAX due to unrelated tasks in the same
+        // exceed crate::config::TARGET_PIDS_MAX due to unrelated tasks in the same
         // cgroup.
         let mut cache = crate::process_tree::ProcessCache::default();
         let snapshot = crate::process_tree::target_snapshot(
@@ -455,7 +455,7 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
             anyhow::bail!(
                 "cgroup target prepopulation failed: {} tasks in cgroup match filters, but target_pids_max is {}",
                 pids.len(),
-                crate::cli::TARGET_PIDS_MAX
+                crate::config::TARGET_PIDS_MAX
             );
         }
 
@@ -479,7 +479,7 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
             anyhow::bail!(
                 "cgroup target prepopulation failed: {} tasks failed to insert (target_pids_max={}); use narrower filters or a smaller cgroup",
                 failed_inserts,
-                crate::cli::TARGET_PIDS_MAX
+                crate::config::TARGET_PIDS_MAX
             );
         }
     }

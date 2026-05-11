@@ -4,7 +4,8 @@ use serde::Serialize;
 
 use crate::{
     artifacts::{ArtifactKind, artifact_is_ndjson_stream},
-    cli::{Config, FocusSource},
+    cli::Config,
+    config::FocusSource,
     ebpf_loader::TracepointAvailability,
     probe_catalog::ProbeStatus,
     probe_registry::{
@@ -310,7 +311,7 @@ pub fn registry_spec_for_key(key: ProbeKey) -> &'static ProbeSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::{CsvStreamTarget, ForegroundSourceArg};
+    use crate::{cli::CsvStreamTarget, config::ForegroundSource};
 
     fn config() -> Config {
         Config {
@@ -370,7 +371,7 @@ mod tests {
             auto_focus: false,
             focus_source: FocusSource::Heuristic,
             foreground_window: false,
-            foreground_source: ForegroundSourceArg::Auto,
+            foreground_source: ForegroundSource::Auto,
             foreground_poll_ms: 1000,
             foreground_max_stale_ms: 2500,
             foreground_include_title: false,

@@ -325,7 +325,7 @@ fn apply_safety_layer(config: &mut SafetyConfig, layer: &MonitorConfigLayer) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::{FocusSource, ForegroundSourceArg};
+    use crate::config::{FocusSource, ForegroundSource};
 
     #[test]
     fn cli_false_override_replaces_user_true() {
@@ -353,14 +353,14 @@ mod tests {
         let user = MonitorConfigLayer {
             summary_period_ms: Some(250),
             focus_source: Some(FocusSource::Hybrid),
-            foreground_source: Some(ForegroundSourceArg::Sway),
+            foreground_source: Some(ForegroundSource::Sway),
             auto_focus_min_confidence: Some(0.80),
             ..Default::default()
         };
         let cli = MonitorConfigLayer {
             summary_period_ms: Some(1_000),
             focus_source: Some(FocusSource::Heuristic),
-            foreground_source: Some(ForegroundSourceArg::Auto),
+            foreground_source: Some(ForegroundSource::Auto),
             auto_focus_min_confidence: Some(0.60),
             ..Default::default()
         };
@@ -373,7 +373,7 @@ mod tests {
         assert_eq!(effective.config.focus.focus_source, FocusSource::Heuristic);
         assert_eq!(
             effective.config.focus.foreground_source,
-            ForegroundSourceArg::Auto
+            ForegroundSource::Auto
         );
         assert_eq!(effective.config.focus.auto_focus_min_confidence, 0.60);
     }

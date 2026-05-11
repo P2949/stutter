@@ -97,14 +97,14 @@ pub fn merge_monitor_config(base: MonitorConfig, override_config: MonitorConfig)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::{FocusSource, ForegroundSourceArg};
+    use crate::config::{FocusSource, ForegroundSource};
 
     #[test]
     fn merge_monitor_config_uses_override_even_when_override_equals_builtin_default() {
         let mut base = MonitorConfig::default();
         base.timing.summary_period_ms = 333;
         base.focus.focus_source = FocusSource::Hybrid;
-        base.focus.foreground_source = ForegroundSourceArg::Sway;
+        base.focus.foreground_source = ForegroundSource::Sway;
         base.focus.auto_focus_min_confidence = 0.75;
 
         let override_config = MonitorConfig::default();
@@ -112,7 +112,7 @@ mod tests {
 
         assert_eq!(merged.timing.summary_period_ms, 1_000);
         assert_eq!(merged.focus.focus_source, FocusSource::Heuristic);
-        assert_eq!(merged.focus.foreground_source, ForegroundSourceArg::Auto);
+        assert_eq!(merged.focus.foreground_source, ForegroundSource::Auto);
         assert_eq!(merged.focus.auto_focus_min_confidence, 0.60);
     }
 
@@ -159,7 +159,7 @@ mod tests {
         assert_eq!(merged.recording.retain_intervals, Some(12));
         assert!(merged.focus.foreground_window);
         assert_eq!(merged.focus.focus_source, FocusSource::Hybrid);
-        assert_eq!(merged.focus.foreground_source, ForegroundSourceArg::Sway);
+        assert_eq!(merged.focus.foreground_source, ForegroundSource::Sway);
         assert_eq!(merged.focus.foreground_poll_ms, 444);
         assert_eq!(merged.focus.foreground_max_stale_ms, 555);
         assert!(!merged.focus.foreground_include_title);

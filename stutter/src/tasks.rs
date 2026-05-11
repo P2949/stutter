@@ -213,11 +213,11 @@ impl TaskTracker {
             );
         }
 
-        if snapshot.tasks.len() > crate::cli::TARGET_PIDS_MAX {
+        if snapshot.tasks.len() > crate::config::TARGET_PIDS_MAX {
             anyhow::bail!(
                 "too many target tasks after expansion: got {}, but TARGET_PIDS supports at most {}",
                 snapshot.tasks.len(),
-                crate::cli::TARGET_PIDS_MAX
+                crate::config::TARGET_PIDS_MAX
             );
         }
 
@@ -516,9 +516,9 @@ mod tests {
             otlp_endpoint: None,
             otel_service_name: "stutter".to_owned(),
             auto_focus: false,
-            focus_source: crate::cli::FocusSource::Heuristic,
+            focus_source: crate::config::FocusSource::Heuristic,
             foreground_window: false,
-            foreground_source: crate::cli::ForegroundSourceArg::Auto,
+            foreground_source: crate::config::ForegroundSource::Auto,
             foreground_poll_ms: 1000,
             foreground_max_stale_ms: 2500,
             foreground_include_title: false,
