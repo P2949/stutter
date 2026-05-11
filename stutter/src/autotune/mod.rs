@@ -20,52 +20,24 @@ pub mod washout;
 
 pub const DEFAULT_MIN_FOCUS_CONFIDENCE: f32 = 0.70;
 
-#[cfg(feature = "autotune-controller")]
 pub mod candidate_memory;
-#[cfg(feature = "autotune-controller")]
 pub mod context_segment;
-#[cfg(feature = "autotune-controller")]
 pub mod controller;
-#[cfg(feature = "autotune-controller")]
 pub mod decision;
 pub mod decision_log;
-#[cfg(feature = "autotune-controller")]
 pub mod observation;
-#[cfg(feature = "autotune-controller")]
 pub mod prometheus_metrics;
-#[cfg(feature = "autotune-controller")]
 pub mod quality;
-#[cfg(feature = "autotune-controller")]
 pub mod report_overlay;
-#[cfg(feature = "autotune-controller")]
 pub mod rolling_window;
-#[cfg(feature = "autotune-controller")]
 pub mod runtime;
-#[cfg(feature = "autotune-controller")]
 pub mod startup_recovery;
 pub mod state;
 pub mod tui_panel;
 
-use std::{
-    fs::{self, OpenOptions},
-    io::Write,
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
-};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use serde::Serialize;
-#[cfg(not(feature = "autotune-controller"))]
-use tokio::sync::{mpsc, oneshot};
-
-use crate::{
-    autotune::human_output::{
-        HumanAutotuneMode, HumanControllerPhase, HumanDecisionKind, HumanDecisionWindow,
-        HumanSituationKind, print_human_decision_window,
-    },
-    cli::Config,
-    session_events::MonitorEvent,
-};
+use crate::cli::Config;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -93,114 +65,58 @@ pub struct AutotuneCommandInput {
     pub allow_system_wide_actions: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct AutotuneDecisionLogEntry {
-    pub unix_nanos: u128,
-    pub mode: String,
-    pub event_kind: String,
-    pub decision: String,
-    pub reason: String,
-    pub interval_records: usize,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Default)]
-struct ObservePolicyStub {
-    mode: String,
-    watch_process: Option<String>,
-    decision_log: Option<PathBuf>,
-    interval_events: usize,
-    interval_records: usize,
-}
-
-#[allow(dead_code)]
-impl ObservePolicyStub {
-    fn new(mode: String, watch_process: Option<String>, decision_log: Option<PathBuf>) -> Self {
-        Self {
-            mode,
-            watch_process,
-            decision_log,
-            interval_events: 0,
-            interval_records: 0,
+fn runtime_config_for_command(
+    input: &AutotuneCommandInput,
+    profiles: Vec<crate::profiles::Profile>,
+) -> anyhow::Result<runtime::AutotuneRuntimeConfig> {
+    let config = match input.mode.as_str() {
+        "observe" => runtime::AutotuneRuntimeConfig::observe(
+            input.decision_log.clone(),
+            input.tree_pid,
+            input.watch_process.clone(),
+        )
+        .with_profiles(profiles)
+        .with_min_focus_confidence(input.min_focus_confidence)
+        .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
+        "suggest" => runtime::AutotuneRuntimeConfig::suggest(
+            input.decision_log.clone(),
+            input.tree_pid,
+            input.watch_process.clone(),
+        )
+        .with_profiles(profiles)
+        .with_min_focus_confidence(input.min_focus_confidence)
+        .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
+        "apply-low-risk" => runtime::AutotuneRuntimeConfig::apply_low_risk(
+            input.decision_log.clone(),
+            input.tree_pid,
+            input.watch_process.clone(),
+        )
+        .with_profiles(profiles)
+        .with_min_focus_confidence(input.min_focus_confidence)
+        .with_candidate_window_seconds(input.duration_seconds.unwrap_or(30))
+        .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
+        other => {
+            anyhow::bail!(
+                "mode '{}' is not supported by the live autotune runtime; apply-low-risk currently applies CPU-affinity candidates only",
+                other
+            )
         }
-    }
+    };
 
-    fn on_event(&mut self, event: MonitorEvent) -> anyhow::Result<()> {
-        match event {
-            MonitorEvent::Interval { records, .. } => {
-                self.interval_events += 1;
-                self.interval_records += records.len();
-                self.write_decision(
-                    "interval",
-                    "noop",
-                    "observe/suggest mode does not apply actions",
-                    records.len(),
-                )?;
-            }
-            MonitorEvent::DataQualityWarning { message } => {
-                self.write_decision("data_quality_warning", "noop", &message, 0)?;
-            }
-            MonitorEvent::Finished { reason } => {
-                self.write_decision("finished", "noop", &reason, 0)?;
-            }
-            other => {
-                self.write_decision(other.kind(), "noop", "event observed; no action applied", 0)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn write_decision(
-        &self,
-        event_kind: &str,
-        decision_str: &str,
-        reason: &str,
-        interval_records: usize,
-    ) -> anyhow::Result<()> {
-        let entry = AutotuneDecisionLogEntry {
-            unix_nanos: crate::audit::unix_nanos_now(),
-            mode: self.mode.clone(),
-            event_kind: event_kind.to_owned(),
-            decision: decision_str.to_owned(),
-            reason: reason.to_owned(),
-            interval_records,
-        };
-
-        if let Some(path) = &self.decision_log {
-            if let Some(parent) = path.parent()
-                && !parent.as_os_str().is_empty()
-            {
-                fs::create_dir_all(parent)?;
-            }
-
-            let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-            serde_json::to_writer(&mut file, &entry)?;
-            file.write_all(b"\n")?;
-        }
-
-        let window = HumanDecisionWindow {
-            phase: HumanControllerPhase::Observing,
-            mode: match self.mode.as_str() {
-                "observe" => HumanAutotuneMode::Observe,
-                "suggest" => HumanAutotuneMode::Suggest,
-                _ => HumanAutotuneMode::Observe,
-            },
-            target: self.watch_process.clone().unwrap_or_else(|| "-".to_owned()),
-            score_total: 0,
-            situation: HumanSituationKind::Unknown,
-            decision: match decision_str {
-                "noop" => HumanDecisionKind::Noop,
-                _ => HumanDecisionKind::Noop,
-            },
-            reason: reason.to_owned(),
-        };
-        print_human_decision_window(&window);
-
-        Ok(())
-    }
+    Ok(config)
 }
 
 pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()> {
+    match input.mode.as_str() {
+        "observe" | "suggest" | "apply-low-risk" => {}
+        _ => {
+            anyhow::bail!(
+                "mode '{}' is not supported; use --mode observe, --mode suggest, or --mode apply-low-risk. apply-low-risk currently applies CPU-affinity candidates only",
+                input.mode
+            )
+        }
+    }
+
     if input.mode == "apply-low-risk" {
         if input.auto_focus {
             anyhow::bail!(
@@ -211,20 +127,6 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
         if input.tree_pid.is_none() && input.watch_process.is_none() {
             anyhow::bail!("apply-low-risk requires --tree-pid or --watch-process");
         }
-    }
-
-    #[cfg(not(feature = "autotune-controller"))]
-    if input.mode == "apply-low-risk" {
-        let outcome = apply_low_risk::apply_low_risk_command(&input).await?;
-        println!(
-            "autotune apply-low-risk candidate={} action_kind={} affected_tasks={} safety_class={:?} rollback_performed={}",
-            outcome.candidate_name,
-            outcome.action_kind,
-            outcome.affected_tasks,
-            outcome.safety_class,
-            outcome.rollback_performed
-        );
-        return Ok(());
     }
 
     if input.mode == "suggest"
@@ -258,119 +160,34 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
         );
     }
 
-    match input.mode.as_str() {
-        "observe" | "suggest" | "apply-low-risk" => {}
-        _ => {
-            anyhow::bail!(
-                "mode '{}' is not supported; use --mode observe, --mode suggest, or --mode apply-low-risk. apply-low-risk currently applies CPU-affinity candidates only",
-                input.mode
-            )
-        }
-    }
-
     let monitor_config = crate::cli::autotune_monitor_config(&input)?;
 
-    #[cfg(feature = "autotune-controller")]
-    {
-        let profile_list = loaded_profiles
-            .as_ref()
-            .map(|loaded| loaded.profiles.clone())
-            .unwrap_or_default();
+    let profile_list = loaded_profiles
+        .as_ref()
+        .map(|loaded| loaded.profiles.clone())
+        .unwrap_or_default();
 
-        let runtime_config = match input.mode.as_str() {
-            "observe" => runtime::AutotuneRuntimeConfig::observe(
-                input.decision_log.clone(),
-                input.tree_pid,
-                input.watch_process.clone(),
-            )
-            .with_profiles(profile_list)
-            .with_min_focus_confidence(input.min_focus_confidence)
-            .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
-            "suggest" => runtime::AutotuneRuntimeConfig::suggest(
-                input.decision_log.clone(),
-                input.tree_pid,
-                input.watch_process.clone(),
-            )
-            .with_profiles(profile_list)
-            .with_min_focus_confidence(input.min_focus_confidence)
-            .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
-            "apply-low-risk" => runtime::AutotuneRuntimeConfig::apply_low_risk(
-                input.decision_log.clone(),
-                input.tree_pid,
-                input.watch_process.clone(),
-            )
-            .with_profiles(profile_list)
-            .with_min_focus_confidence(input.min_focus_confidence)
-            .with_candidate_window_seconds(input.duration_seconds.unwrap_or(30))
-            .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
-            other => {
-                anyhow::bail!(
-                    "mode '{}' is not supported by the live autotune runtime; apply-low-risk currently applies CPU-affinity candidates only",
-                    other
-                )
-            }
-        };
+    let runtime_config = runtime_config_for_command(&input, profile_list)?;
 
-        let duration = if input.mode == "apply-low-risk" {
-            None
-        } else {
-            input.duration_seconds.map(Duration::from_secs)
-        };
-        let exit = runtime::run_autotune_controller_session(
-            monitor_config,
-            runtime_config,
-            None,
-            duration,
-        )
-        .await?;
+    let duration = if input.mode == "apply-low-risk" {
+        None
+    } else {
+        input.duration_seconds.map(Duration::from_secs)
+    };
+    let exit =
+        runtime::run_autotune_controller_session(monitor_config, runtime_config, None, duration)
+            .await?;
 
-        if let Some(last_decision) = exit.last_decision {
-            println!(
-                "autotune runtime finished reason=\"{}\" last_decision={} score_total={}",
-                exit.reason, last_decision.decision, last_decision.score_total
-            );
-        } else {
-            println!("autotune runtime finished reason=\"{}\"", exit.reason);
-        }
-
-        Ok(())
-    }
-
-    #[cfg(not(feature = "autotune-controller"))]
-    {
-        let (event_tx, mut event_rx) = mpsc::channel::<MonitorEvent>(1024);
-        let (stop_tx, stop_rx) = oneshot::channel::<()>();
-        let duration = input.duration_seconds.map(Duration::from_secs);
-        let mut policy = ObservePolicyStub::new(
-            input.mode.clone(),
-            input.watch_process.clone(),
-            input.decision_log.clone(),
+    if let Some(last_decision) = exit.last_decision {
+        println!(
+            "autotune runtime finished reason=\"{}\" last_decision={} score_total={}",
+            exit.reason, last_decision.decision, last_decision.score_total
         );
-
-        let monitor_task = tokio::spawn(async move {
-            crate::session::run_monitor(monitor_config, None, Some(event_tx), Some(stop_rx)).await
-        });
-
-        let timeout_task = duration.map(|duration| {
-            tokio::spawn(async move {
-                tokio::time::sleep(duration).await;
-                let _ = stop_tx.send(());
-            })
-        });
-
-        while let Some(event) = event_rx.recv().await {
-            policy.on_event(event)?;
-        }
-
-        if let Some(timeout_task) = timeout_task {
-            let _ = timeout_task.await;
-        }
-
-        let monitor_result = monitor_task.await?;
-        monitor_result?;
-
-        Ok(())
+    } else {
+        println!("autotune runtime finished reason=\"{}\"", exit.reason);
     }
+
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -382,29 +199,38 @@ pub fn make_monitor_config_for_tests(config: Arc<Config>) -> Arc<Config> {
 mod tests {
     use super::*;
 
+    fn base_autotune_input(mode: &str) -> AutotuneCommandInput {
+        AutotuneCommandInput {
+            config: None,
+            watch_process: None,
+            tree_pid: Some(1234),
+            profiles: None,
+            mode: mode.to_owned(),
+            decision_log: None,
+            duration_seconds: Some(1),
+            washout_seconds: washout::DEFAULT_WASHOUT_SECONDS,
+            washout_verify_interval_ms: washout::DEFAULT_WASHOUT_VERIFY_INTERVAL_MS,
+            summary_ms: 1000,
+            preset: "diagnosis".to_owned(),
+            hwmon: false,
+            mangohud_log: None,
+            auto_focus: false,
+            min_focus_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
+            focus_source: crate::cli::FocusSource::Hybrid,
+            foreground_window: false,
+            foreground_source: crate::cli::ForegroundSourceArg::Auto,
+            foreground_poll_ms: 1000,
+            foreground_max_stale_ms: 2500,
+            allow_system_wide_actions: false,
+        }
+    }
+
     #[test]
-    fn observe_policy_writes_decision_jsonl() {
-        let mut path = std::env::temp_dir();
-        path.push(format!(
-            "stutter-autotune-decision-test-{}-{}.jsonl",
-            std::process::id(),
-            crate::audit::unix_nanos_now()
-        ));
-
-        let mut policy = ObservePolicyStub::new("observe".to_owned(), None, Some(path.clone()));
-        policy
-            .on_event(MonitorEvent::DataQualityWarning {
-                message: "test warning".to_owned(),
-            })
-            .unwrap();
-
-        let text = fs::read_to_string(&path).unwrap();
-        assert!(text.contains("\"mode\":\"observe\""));
-        assert!(text.contains("\"event_kind\":\"data_quality_warning\""));
-        assert!(text.contains("\"decision\":\"noop\""));
-        assert!(text.contains("test warning"));
-
-        fs::remove_file(path).ok();
+    fn runtime_config_builder_accepts_all_controller_modes() {
+        for mode in ["observe", "suggest", "apply-low-risk"] {
+            let input = base_autotune_input(mode);
+            runtime_config_for_command(&input, Vec::new()).unwrap();
+        }
     }
 
     #[tokio::test]
