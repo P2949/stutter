@@ -538,8 +538,8 @@ pub(crate) fn render_report(
         format!(
             "csv_stream: {}",
             match &session.config.csv_stream {
-                Some(crate::cli::CsvStreamTarget::File(path)) => path.display().to_string(),
-                Some(crate::cli::CsvStreamTarget::Stdout) => "stdout".to_owned(),
+                Some(crate::config::CsvStreamTarget::File(path)) => path.display().to_string(),
+                Some(crate::config::CsvStreamTarget::Stdout) => "stdout".to_owned(),
                 None => "-".to_owned(),
             }
         ),

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
@@ -18,4 +20,10 @@ pub enum ForegroundSource {
     Sway,
     Hyprland,
     X11,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CsvStreamTarget {
+    File(PathBuf),
+    Stdout,
 }

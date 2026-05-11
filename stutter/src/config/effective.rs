@@ -128,6 +128,38 @@ pub fn resolve_arc_monitor_config(
     resolved.auto_focus_required_polls = effective.focus.auto_focus_required_polls;
     resolved.auto_focus_max_roots = effective.focus.auto_focus_max_roots;
 
+    resolved.watch_poll_ms = effective.watch.poll_ms;
+    resolved.watch_timeout = effective.watch.timeout;
+
+    resolved.alert_threshold_ns = effective.alerts.threshold_ns;
+    resolved.alert_webhook_url = effective.alerts.webhook_url.clone();
+
+    resolved.csv_stream = effective.streams.csv.clone();
+    resolved.verbose = effective.streams.verbose;
+
+    resolved.hwmon = effective.hwmon.enabled;
+    resolved.hwmon_root = effective.hwmon.root.clone();
+    resolved.hwmon_drm_card = effective.hwmon.drm_card.clone();
+    resolved.hwmon_render_node = effective.hwmon.render_node.clone();
+
+    resolved.mangohud_log = effective.mangohud.log.clone();
+    resolved.mangohud_log_live = effective.mangohud.log_live;
+
+    resolved.tui = effective.ui.tui;
+
+    resolved.cpu_perf = effective.cpu_perf.enabled;
+    resolved.cpu_perf_kernel = effective.cpu_perf.include_kernel;
+    resolved.cpu_perf_max_tasks = effective.cpu_perf.max_tasks;
+    resolved.cpu_perf_cache_refs = effective.cpu_perf.collect_cache_refs;
+
+    resolved.runtime_slices = effective.runtime_slices.enabled;
+    resolved.runtime_slices_max_tasks = effective.runtime_slices.max_tasks;
+
+    resolved.ringbuf_size_kb = effective.ebpf_sizing.ringbuf_size_kb;
+    resolved.wakeup_map_factor = effective.ebpf_sizing.wakeup_map_factor;
+
+    resolved.remote = effective.remote.endpoint.clone();
+
     resolved.follow_exec = effective.safety.follow_exec;
     resolved.native_cgroup_filter = effective.safety.native_cgroup_filter;
     resolved.task_filters = crate::process_tree::TaskFilters {
@@ -164,6 +196,16 @@ pub fn apply_layer(config: &mut MonitorConfig, layer: MonitorConfigLayer) {
     apply_output_layer(&mut config.outputs, &layer);
     apply_focus_layer(&mut config.focus, &layer);
     apply_safety_layer(&mut config.safety, &layer);
+    apply_watch_layer(&mut config.watch, &layer);
+    apply_alert_layer(&mut config.alerts, &layer);
+    apply_stream_layer(&mut config.streams, &layer);
+    apply_hwmon_layer(&mut config.hwmon, &layer);
+    apply_mangohud_layer(&mut config.mangohud, &layer);
+    apply_cpu_perf_layer(&mut config.cpu_perf, &layer);
+    apply_runtime_slices_layer(&mut config.runtime_slices, &layer);
+    apply_ebpf_sizing_layer(&mut config.ebpf_sizing, &layer);
+    apply_ui_layer(&mut config.ui, &layer);
+    apply_remote_layer(&mut config.remote, &layer);
 }
 
 fn apply_target_layer(config: &mut TargetConfig, layer: &MonitorConfigLayer) {
@@ -319,6 +361,117 @@ fn apply_safety_layer(config: &mut SafetyConfig, layer: &MonitorConfigLayer) {
     }
     if let Some(value) = layer.native_cgroup_filter {
         config.native_cgroup_filter = value;
+    }
+}
+
+fn apply_watch_layer(config: &mut crate::config::model::WatchConfig, layer: &MonitorConfigLayer) {
+    if let Some(value) = layer.watch_poll_ms {
+        config.poll_ms = value;
+    }
+    if let Some(value) = layer.watch_timeout {
+        config.timeout = value;
+    }
+}
+
+fn apply_alert_layer(config: &mut crate::config::model::AlertConfig, layer: &MonitorConfigLayer) {
+    if let Some(value) = layer.alert_threshold_ns {
+        config.threshold_ns = value;
+    }
+    if let Some(value) = &layer.alert_webhook_url {
+        config.webhook_url = value.clone();
+    }
+}
+
+fn apply_stream_layer(config: &mut crate::config::model::StreamConfig, layer: &MonitorConfigLayer) {
+    if let Some(value) = &layer.csv_stream {
+        config.csv = value.clone();
+    }
+    if let Some(value) = layer.json_stream {
+        config.json_stream = value;
+    }
+    if let Some(value) = layer.verbose {
+        config.verbose = value;
+    }
+}
+
+fn apply_hwmon_layer(config: &mut crate::config::model::HwmonConfig, layer: &MonitorConfigLayer) {
+    if let Some(value) = layer.hwmon {
+        config.enabled = value;
+    }
+    if let Some(value) = &layer.hwmon_root {
+        config.root = value.clone();
+    }
+    if let Some(value) = &layer.hwmon_drm_card {
+        config.drm_card = value.clone();
+    }
+    if let Some(value) = &layer.hwmon_render_node {
+        config.render_node = value.clone();
+    }
+}
+
+fn apply_mangohud_layer(
+    config: &mut crate::config::model::MangoHudConfig,
+    layer: &MonitorConfigLayer,
+) {
+    if let Some(value) = &layer.mangohud_log {
+        config.log = value.clone();
+    }
+    if let Some(value) = layer.mangohud_log_live {
+        config.log_live = value;
+    }
+}
+
+fn apply_cpu_perf_layer(
+    config: &mut crate::config::model::CpuPerfConfig,
+    layer: &MonitorConfigLayer,
+) {
+    if let Some(value) = layer.cpu_perf {
+        config.enabled = value;
+    }
+    if let Some(value) = layer.cpu_perf_kernel {
+        config.include_kernel = value;
+    }
+    if let Some(value) = layer.cpu_perf_max_tasks {
+        config.max_tasks = value;
+    }
+    if let Some(value) = layer.cpu_perf_cache_refs {
+        config.collect_cache_refs = value;
+    }
+}
+
+fn apply_runtime_slices_layer(
+    config: &mut crate::config::model::RuntimeSlicesConfig,
+    layer: &MonitorConfigLayer,
+) {
+    if let Some(value) = layer.runtime_slices {
+        config.enabled = value;
+    }
+    if let Some(value) = layer.runtime_slices_max_tasks {
+        config.max_tasks = value;
+    }
+}
+
+fn apply_ebpf_sizing_layer(
+    config: &mut crate::config::model::EbpfSizingConfig,
+    layer: &MonitorConfigLayer,
+) {
+    if let Some(value) = layer.ringbuf_size_kb {
+        config.ringbuf_size_kb = value;
+    }
+    if let Some(value) = layer.wakeup_map_factor {
+        config.wakeup_map_factor = value;
+    }
+}
+
+fn apply_ui_layer(config: &mut crate::config::model::UiConfig, layer: &MonitorConfigLayer) {
+    if let Some(value) = layer.tui {
+        config.tui = value;
+    }
+}
+
+fn apply_remote_layer(config: &mut crate::config::model::RemoteConfig, layer: &MonitorConfigLayer) {
+    if let Some(value) = &layer.remote {
+        config.endpoint = value.clone();
     }
 }
 

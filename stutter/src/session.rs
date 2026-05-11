@@ -15,8 +15,8 @@ use tokio::{
 
 use crate::{
     artifacts::ArtifactKind,
-    cli::{Config, CsvStreamTarget},
-    config::{FocusSource, ForegroundSource},
+    cli::Config,
+    config::{CsvStreamTarget, FocusSource, ForegroundSource},
     diagnosis::{LiveDiagnosisEntry, diagnose_cluster},
     ebpf_loader,
     focus::{FocusDecision, FocusPolicy, FocusResolver, ResolvedFocus},

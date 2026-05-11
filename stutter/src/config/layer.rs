@@ -2,7 +2,9 @@ use std::{path::PathBuf, time::Duration};
 
 use crate::{
     cli::Config,
-    config::{FocusSource, ForegroundSource, TARGET_PIDS_MAX, model::MonitorConfig},
+    config::{
+        CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX, model::MonitorConfig,
+    },
     config_file::UserConfigFile,
     presets::PresetDefaults,
 };
@@ -60,6 +62,35 @@ pub struct MonitorConfigLayer {
 
     pub follow_exec: Option<bool>,
     pub native_cgroup_filter: Option<bool>,
+
+    pub watch_poll_ms: Option<u64>,
+    pub watch_timeout: Option<Option<Duration>>,
+
+    pub alert_threshold_ns: Option<Option<u64>>,
+    pub alert_webhook_url: Option<Option<String>>,
+
+    pub csv_stream: Option<Option<CsvStreamTarget>>,
+    pub verbose: Option<bool>,
+
+    pub hwmon_root: Option<Option<PathBuf>>,
+    pub hwmon_drm_card: Option<Option<String>>,
+    pub hwmon_render_node: Option<Option<PathBuf>>,
+
+    pub mangohud_log: Option<Option<PathBuf>>,
+    pub mangohud_log_live: Option<bool>,
+
+    pub tui: Option<bool>,
+
+    pub cpu_perf_kernel: Option<bool>,
+    pub cpu_perf_max_tasks: Option<usize>,
+    pub cpu_perf_cache_refs: Option<bool>,
+
+    pub runtime_slices_max_tasks: Option<usize>,
+
+    pub ringbuf_size_kb: Option<Option<u32>>,
+    pub wakeup_map_factor: Option<Option<u32>>,
+
+    pub remote: Option<Option<String>>,
 }
 
 impl MonitorConfigLayer {
@@ -116,6 +147,35 @@ impl MonitorConfigLayer {
 
             follow_exec: Some(config.safety.follow_exec),
             native_cgroup_filter: Some(config.safety.native_cgroup_filter),
+
+            watch_poll_ms: Some(config.watch.poll_ms),
+            watch_timeout: Some(config.watch.timeout),
+
+            alert_threshold_ns: Some(config.alerts.threshold_ns),
+            alert_webhook_url: Some(config.alerts.webhook_url),
+
+            csv_stream: Some(config.streams.csv),
+            verbose: Some(config.streams.verbose),
+
+            hwmon_root: Some(config.hwmon.root),
+            hwmon_drm_card: Some(config.hwmon.drm_card),
+            hwmon_render_node: Some(config.hwmon.render_node),
+
+            mangohud_log: Some(config.mangohud.log),
+            mangohud_log_live: Some(config.mangohud.log_live),
+
+            tui: Some(config.ui.tui),
+
+            cpu_perf_kernel: Some(config.cpu_perf.include_kernel),
+            cpu_perf_max_tasks: Some(config.cpu_perf.max_tasks),
+            cpu_perf_cache_refs: Some(config.cpu_perf.collect_cache_refs),
+
+            runtime_slices_max_tasks: Some(config.runtime_slices.max_tasks),
+
+            ringbuf_size_kb: Some(config.ebpf_sizing.ringbuf_size_kb),
+            wakeup_map_factor: Some(config.ebpf_sizing.wakeup_map_factor),
+
+            remote: Some(config.remote.endpoint),
         }
     }
 
@@ -253,6 +313,37 @@ impl MonitorConfigLayer {
 
             follow_exec: (!config.follow_exec).then_some(false),
             native_cgroup_filter: config.native_cgroup_filter.then_some(true),
+
+            watch_poll_ms: (config.watch_poll_ms != 2_000).then_some(config.watch_poll_ms),
+            watch_timeout: config.watch_timeout.map(Some),
+
+            alert_threshold_ns: config.alert_threshold_ns.map(Some),
+            alert_webhook_url: config.alert_webhook_url.clone().map(Some),
+
+            csv_stream: config.csv_stream.clone().map(Some),
+            verbose: config.verbose.then_some(true),
+
+            hwmon_root: config.hwmon_root.clone().map(Some),
+            hwmon_drm_card: config.hwmon_drm_card.clone().map(Some),
+            hwmon_render_node: config.hwmon_render_node.clone().map(Some),
+
+            mangohud_log: config.mangohud_log.clone().map(Some),
+            mangohud_log_live: config.mangohud_log_live.then_some(true),
+
+            tui: config.tui.then_some(true),
+
+            cpu_perf_kernel: config.cpu_perf_kernel.then_some(true),
+            cpu_perf_max_tasks: (config.cpu_perf_max_tasks != 128)
+                .then_some(config.cpu_perf_max_tasks),
+            cpu_perf_cache_refs: config.cpu_perf_cache_refs.then_some(true),
+
+            runtime_slices_max_tasks: (config.runtime_slices_max_tasks != 256)
+                .then_some(config.runtime_slices_max_tasks),
+
+            ringbuf_size_kb: config.ringbuf_size_kb.map(Some),
+            wakeup_map_factor: config.wakeup_map_factor.map(Some),
+
+            remote: config.remote.clone().map(Some),
         }
     }
 }

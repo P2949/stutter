@@ -1,7 +1,6 @@
 use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand};
-use serde::{Deserialize, Serialize};
 
 use crate::{
     commands::input::{
@@ -16,7 +15,9 @@ use crate::{
         ScenarioPathCommandInput, ScenarioRunCommandInput, SummaryCommandInput, TuneCommandInput,
         ValidateCommandInput,
     },
-    config::{FocusSource, ForegroundSource, TARGET_PIDS_MAX, layer::MonitorConfigLayer},
+    config::{
+        CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX, layer::MonitorConfigLayer,
+    },
     process_tree::{CompiledPattern, TaskClass, TaskFilters},
 };
 
@@ -661,12 +662,29 @@ fn monitor_args_layer(args: &MonitorArgs) -> MonitorConfigLayer {
         spike_threshold_ns: args
             .spike_threshold_us
             .map(|value| value.saturating_mul(1_000)),
+        alert_threshold_ns: args
+            .alert_threshold_ms
+            .map(|value| Some(value.saturating_mul(1_000_000))),
+        alert_webhook_url: args.alert_webhook_url.clone().map(Some),
+        verbose: args.verbose.then_some(true),
+        watch_poll_ms: (args.watch_poll_ms != 2_000).then_some(args.watch_poll_ms),
+        watch_timeout: args
+            .watch_timeout_seconds
+            .map(|seconds| Some(Duration::from_secs(seconds))),
         include_comm: (!args.include_comm.is_empty()).then(|| args.include_comm.clone()),
         exclude_comm: (!args.exclude_comm.is_empty()).then(|| args.exclude_comm.clone()),
         keep_missing_pid: args.keep_missing_pid.then_some(true),
         watch_process: args.watch_process.clone().map(Some),
         persistent: args.persistent.then_some(true),
         max_tasks: args.max_tasks,
+        csv_stream: match (&args.csv_path, &args.stream_csv) {
+            (Some(path), None) => Some(Some(CsvStreamTarget::File(path.clone()))),
+            (None, Some(value)) if value == "-" => Some(Some(CsvStreamTarget::Stdout)),
+            (None, Some(value)) if value.trim().is_empty() => None,
+            (None, Some(value)) => Some(Some(CsvStreamTarget::File(PathBuf::from(value)))),
+            (None, None) => None,
+            (Some(_), Some(_)) => None,
+        },
         irq_latency: args.irq_latency.then_some(true),
         irqs: (!args.irqs.is_empty()).then(|| args.irqs.clone()),
         hwmon: if args.no_hwmon {
@@ -676,6 +694,9 @@ fn monitor_args_layer(args: &MonitorArgs) -> MonitorConfigLayer {
         } else {
             None
         },
+        hwmon_root: args.hwmon_root.clone().map(Some),
+        hwmon_drm_card: args.hwmon_drm_card.clone().map(Some),
+        hwmon_render_node: args.hwmon_render_node.clone().map(Some),
         cpu_freq: if args.no_cpu_freq {
             Some(false)
         } else if args.cpu_freq {
@@ -700,6 +721,9 @@ fn monitor_args_layer(args: &MonitorArgs) -> MonitorConfigLayer {
             None
         },
         cpu_perf: args.cpu_perf.then_some(true),
+        cpu_perf_kernel: args.cpu_perf_kernel.then_some(true),
+        cpu_perf_max_tasks: (args.cpu_perf_max_tasks != 128).then_some(args.cpu_perf_max_tasks),
+        cpu_perf_cache_refs: args.cpu_perf_cache_refs.then_some(true),
         block_io: if args.no_block_io {
             Some(false)
         } else if args.block_io {
@@ -721,8 +745,15 @@ fn monitor_args_layer(args: &MonitorArgs) -> MonitorConfigLayer {
         } else {
             None
         },
+        runtime_slices_max_tasks: (args.runtime_slices_max_tasks != 256)
+            .then_some(args.runtime_slices_max_tasks),
+        mangohud_log: args.mangohud_log.clone().map(Some),
+        mangohud_log_live: args.mangohud_log_live.then_some(true),
+        tui: args.tui.then_some(true),
         json_stream: args.json_stream.then_some(true),
         metrics_port: args.metrics_port.map(Some),
+        ringbuf_size_kb: args.ringbuf_size_kb.map(Some),
+        wakeup_map_factor: args.wakeup_map_factor.map(Some),
         otlp_endpoint: args.otlp_endpoint.clone().map(Some),
         otel_service_name: (args.otel_service_name != "stutter")
             .then(|| args.otel_service_name.clone()),
@@ -748,6 +779,7 @@ fn monitor_args_layer(args: &MonitorArgs) -> MonitorConfigLayer {
         retain_intervals: args.retain_intervals.map(Some),
         run_name: args.run_name.clone().map(Some),
         output_dir: args.out_dir.clone().map(Some),
+        remote: args.remote.clone().map(Some),
         ..MonitorConfigLayer::default()
     }
 }
@@ -1395,12 +1427,6 @@ impl ForegroundSource {
             ),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CsvStreamTarget {
-    File(PathBuf),
-    Stdout,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
