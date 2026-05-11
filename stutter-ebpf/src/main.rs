@@ -33,13 +33,32 @@ static mut BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET: u32 = 0;
 #[unsafe(no_mangle)]
 static mut BLOCK_RQ_COMPLETE_RWBS_OFFSET: u32 = 0;
 
+const TARGET_PIDS_MAP_MAX_ENTRIES: u32 = 1_024;
+const WAKEUP_DATA_MAP_MAX_ENTRIES: u32 = 131_072;
+const RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES: u32 = 65_536;
+const PREV_FAULTS_MAP_MAX_ENTRIES: u32 = 131_072;
+
+const _: () = assert!(WAKEUP_DATA_MAP_MAX_ENTRIES >= TARGET_PIDS_MAP_MAX_ENTRIES * 128);
+const _: () = assert!(PREV_FAULTS_MAP_MAX_ENTRIES >= TARGET_PIDS_MAP_MAX_ENTRIES * 128);
+const _: () = assert!(RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES >= TARGET_PIDS_MAP_MAX_ENTRIES * 64);
+
+// Capacity model:
+// TARGET_PIDS is the primary target gatekeeper. The state maps below are
+// intentionally much larger than TARGET_PIDS so wakeup timestamps,
+// runnable-task CPU state, and fault counters do not become the first
+// bottleneck under normal monitored-task churn.
+// Do not reduce WAKEUP_DATA, RUNNABLE_TASK_CPU, or PREV_FAULTS toward
+// TARGET_PIDS without updating these capacity invariants and the userspace
+// diagnostics that report target and wakeup-map capacity.
+
 #[map]
 // Userspace overrides this before loading the BPF object based on the current
 // memlock limit and available memory. The value here is only a safe fallback.
 static EVENTS: RingBuf = RingBuf::with_byte_size(256 * 1024, 0);
 
 #[map]
-static TARGET_PIDS: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(1024, 0);
+static TARGET_PIDS: HashMap<u32, u8> =
+    HashMap::<u32, u8>::with_max_entries(TARGET_PIDS_MAP_MAX_ENTRIES, 0);
 
 #[map]
 static TARGET_CGROUP_IDS: HashMap<u64, u8> = HashMap::<u64, u8>::with_max_entries(64, 0);
@@ -57,7 +76,7 @@ struct WakeupData {
 
 #[map]
 static WAKEUP_DATA: HashMap<u32, WakeupData> =
-    HashMap::<u32, WakeupData>::with_max_entries(131_072, 0);
+    HashMap::<u32, WakeupData>::with_max_entries(WAKEUP_DATA_MAP_MAX_ENTRIES, 0);
 
 #[map]
 static IRQ_START_TIMES: HashMap<u64, u64> = HashMap::<u64, u64>::with_max_entries(1024, 0);
@@ -77,7 +96,8 @@ static CPU_RUNNABLE_DEPTH: Array<u32> = Array::<u32>::with_max_entries(1024, 0);
 // Per-target-TID mapping to the CPU where the monitored task was last counted
 // as runnable. Used to move monitored runnable counts during migration and
 // avoid double-counting duplicate wakeups.
-static RUNNABLE_TASK_CPU: LruHashMap<u32, u32> = LruHashMap::<u32, u32>::with_max_entries(65536, 0);
+static RUNNABLE_TASK_CPU: LruHashMap<u32, u32> =
+    LruHashMap::<u32, u32>::with_max_entries(RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES, 0);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -95,7 +115,7 @@ struct IoStart {
 
 #[map]
 static PREV_FAULTS: HashMap<u32, FaultCounters> =
-    HashMap::<u32, FaultCounters>::with_max_entries(131_072, 0);
+    HashMap::<u32, FaultCounters>::with_max_entries(PREV_FAULTS_MAP_MAX_ENTRIES, 0);
 
 #[map]
 static BLOCK_START: LruHashMap<u64, IoStart> =
