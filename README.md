@@ -654,7 +654,18 @@ RUSTUP_TOOLCHAIN=nightly cargo run -- apply-profile \
   --profile profile.toml
 ```
 
-By default this is one-shot. Use `--watch` to keep applying the profile to new threads:
+Preview the planned changes without changing live affinity, nice, ionice, audit state, or restore state:
+
+```bash
+RUSTUP_TOOLCHAIN=nightly cargo run -- apply-profile \
+  --dry-run \
+  --tree-pid <root-pid> \
+  --profile profile.toml
+```
+
+`apply-profile --dry-run` is one-shot only. It cannot be combined with `--watch`.
+
+By default real application is one-shot. Use `--watch` to keep applying the profile to new threads:
 
 ```bash
 RUSTUP_TOOLCHAIN=nightly cargo run -- apply-profile \
