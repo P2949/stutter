@@ -1,6 +1,8 @@
 # Safety
 
-`stutter` is designed to keep observation, recommendation, and system changes separate.
+`stutter` is designed to keep observation, recommendation, and system changes separate. The daemon policy contract in [docs/DAEMON_CONTRACT.md](DAEMON_CONTRACT.md) is the source of truth for mode labels, default denials, rollback requirements, and developer rules.
+
+System-changing daemon actions are enforced through `DaemonPolicy::check_action` and `ActionDescriptor`; they are not controlled only by comments, help text, or convention.
 
 ## eBPF Privilege Boundary
 
@@ -8,15 +10,21 @@ Recording and live tracing require privileges on most systems because `stutter` 
 
 Use `sudo` or `doas` only for commands that actually need live tracing.
 
-## CPU Affinity Restore File
+## Restore Files
 
-CPU-affinity profile application records original task masks before changing them. The default restore file is:
+Managed profile application records original task state before changing affinity, nice, or ionice values. The current managed profile restore file is:
 
 ```text
-~/.local/state/stutter/affinity_restore.json
+~/.local/state/stutter/last_profile_restore.json
 ```
 
-Restore saved affinity with:
+Legacy CPU-affinity-only restore state may also use:
+
+```text
+~/.local/state/stutter/last_affinity_restore.json
+```
+
+Restore saved profile state with:
 
 ```bash
 stutter restore
@@ -28,7 +36,7 @@ Inspect what would be restored:
 stutter restore --dry-run
 ```
 
-`apply-profile --force` can replace an existing restore file. Without `--force`, new restore records are merged while preserving the earliest known original mask for each task identity.
+`apply-profile --force` can replace an existing restore file. Without `--force`, new restore records are merged while preserving the earliest known original mask or priority for each task identity.
 
 ## Action Audit Log
 
@@ -52,13 +60,13 @@ Audit entries include command name, action id, safety class, dry-run status, suc
 
 `stutter` deliberately does not auto-apply broad system tuning. Recommendations are candidates and suggested experiments, not proof. A stable recommendation can justify a manual test; it should not be treated as a permanent machine policy without validation.
 
-Before wider tunables are added, they should have:
+Before wider tunables are added, every new system-changing action must expose an `ActionDescriptor`, every apply path must call `DaemonPolicy::check_action`, and the action must have:
 
 - explicit safety class
 - preflight checks
 - dry-run behavior
 - apply and verify steps
-- rollback path
+- rollback path available before apply
 - durable audit event
 
 ## Checking CPU Topology
