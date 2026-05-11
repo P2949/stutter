@@ -118,7 +118,7 @@ pub fn handle_block_io_record(record: &recorder::BlockIoRecord, recorder: &mut L
 }
 
 pub fn handle_exec_event(item: &[u8], tasks: &mut TaskTracker) {
-    let Some(event) = read_event_unaligned::<ExecEvent>(item) else {
+    let Some(event) = decode::read_event_unaligned::<ExecEvent>(item) else {
         warn!("short_exec_event len={}", item.len());
         return;
     };
@@ -280,14 +280,6 @@ pub fn log_irq_event(event: &IrqEvent) {
     );
 }
 
-pub fn read_event_unaligned<T: aya::Pod + Copy>(data: &[u8]) -> Option<T> {
-    if data.len() < std::mem::size_of::<T>() {
-        return None;
-    }
-
-    Some(unsafe { (data.as_ptr() as *const T).read_unaligned() })
-}
-
 const IMMEDIATE_CAUSE_TAG_PRIORITY: &[&str] = &[
     "major_page_fault",
     "minor_page_fault",
@@ -413,43 +405,6 @@ mod tests {
         let record = irq_event_record(None, &event);
 
         assert_eq!(record.elapsed_ms, None);
-    }
-
-    #[test]
-    fn test_unaligned_event_decoding() {
-        let event = SchedulerEvent {
-            kind: EVENT_RUNNABLE_LATENCY,
-            tid: 123,
-            cpu: 1,
-            wakeup_target_cpu: 1,
-            prio: 120,
-            waker_tid: 0,
-            target_pending_wakeups: 0,
-            observed_runnable_depth: 0,
-            maj_flt: 0,
-            min_flt: 0,
-            wakeup_ns: 2000,
-            switch_ns: 3000,
-            latency_ns: 1000,
-            comm: [0; 16],
-            switch_prev_pid: 0,
-            switch_prev_state: 0,
-        };
-
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                &event as *const SchedulerEvent as *const u8,
-                std::mem::size_of::<SchedulerEvent>(),
-            )
-        };
-
-        // Build a deliberately misaligned buffer
-        let mut misaligned = vec![0u8];
-        misaligned.extend_from_slice(bytes);
-
-        let decoded = read_event_unaligned::<SchedulerEvent>(&misaligned[1..]).unwrap();
-        assert_eq!(decoded.kind, EVENT_RUNNABLE_LATENCY);
-        assert_eq!(decoded.tid, 123);
     }
 
     #[test]
