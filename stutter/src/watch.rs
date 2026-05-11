@@ -313,7 +313,12 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
             force_restore_overwrite: force,
         };
         let result = tokio::task::spawn_blocking(move || {
-            crate::actions::runner::run_audited_action("apply-profile", &action, false)
+            let run_policy = crate::actions::runner::ActionRunPolicy::for_action(
+                &action,
+                false,
+                crate::daemon_policy::ActionSource::ApplyProfileWatch,
+            );
+            crate::actions::runner::run_audited_action("apply-profile", &action, run_policy)
         })
         .await
         .map_err(|err| anyhow::anyhow!("profile apply worker failed: {err}"))??;

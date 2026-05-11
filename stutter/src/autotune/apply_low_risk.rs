@@ -12,7 +12,10 @@ use crate::{
     actions::{
         ActionState, RollbackToken, SafetyClass, TuningAction,
         cpu_affinity::CpuAffinityProfileAction,
-        runner::{AuditedActionResult, run_audited_action, run_audited_action_with_audit_path},
+        runner::{
+            ActionRunPolicy, AuditedActionResult, run_audited_action,
+            run_audited_action_with_audit_path,
+        },
     },
     autotune::{
         candidate::{
@@ -258,9 +261,11 @@ pub fn apply_cpu_affinity_candidate_with_audit(
 ) -> anyhow::Result<AuditedCandidateApplyOutcome> {
     ensure_low_risk_action_allowed("cpu_affinity_profile", &action.safety_class())?;
 
+    let run_policy =
+        ActionRunPolicy::apply_low_risk(crate::daemon_policy::ActionSource::AutotuneRuntime, false);
     let AuditedActionResult {
         state, rollback, ..
-    } = run_audited_action("autotune candidate", action, false).with_context(|| {
+    } = run_audited_action("autotune candidate", action, run_policy).with_context(|| {
         format!(
             "audited apply failed for autotune candidate '{}'",
             candidate_name
@@ -291,9 +296,11 @@ pub fn apply_cpu_affinity_candidate_with_audit_path_for_tests(
 ) -> anyhow::Result<AuditedCandidateApplyOutcome> {
     ensure_low_risk_action_allowed("cpu_affinity_profile", &action.safety_class())?;
 
+    let run_policy =
+        ActionRunPolicy::apply_low_risk(crate::daemon_policy::ActionSource::Test, false);
     let AuditedActionResult {
         state, rollback, ..
-    } = run_audited_action_with_audit_path("autotune candidate", action, false, audit_path)
+    } = run_audited_action_with_audit_path("autotune candidate", action, run_policy, audit_path)
         .with_context(|| {
             format!(
                 "audited apply failed for autotune candidate '{}'",
@@ -1194,6 +1201,12 @@ mod tests {
         assert_eq!(actions[0].rollback.affected_tasks(), 31);
     }
 
+    fn apply_policy() -> ActionRunPolicy {
+        ActionRunPolicy::apply_low_risk(crate::daemon_policy::ActionSource::Test, false)
+    }
+
+
+
     #[test]
     fn audited_runner_logs_success_for_autotune_candidate() {
         let dir = temp_dir("audited-success");
@@ -1206,9 +1219,13 @@ mod tests {
             affected_tasks: 31,
         };
 
-        let result =
-            run_audited_action_with_audit_path("autotune candidate", &action, false, &audit_path)
-                .unwrap();
+        let result = run_audited_action_with_audit_path(
+            "autotune candidate",
+            &action,
+            apply_policy(),
+            &audit_path,
+        )
+        .unwrap();
 
         assert_eq!(result.state.affected_tasks, 31);
         assert!(result.rollback.is_some());
@@ -1238,8 +1255,12 @@ mod tests {
             affected_tasks: 31,
         };
 
-        let result =
-            run_audited_action_with_audit_path("autotune candidate", &action, false, &audit_path);
+        let result = run_audited_action_with_audit_path(
+            "autotune candidate",
+            &action,
+            apply_policy(),
+            &audit_path,
+        );
 
         assert!(result.is_err());
 
@@ -1265,8 +1286,12 @@ mod tests {
             affected_tasks: 31,
         };
 
-        let result =
-            run_audited_action_with_audit_path("autotune candidate", &action, false, &audit_path);
+        let result = run_audited_action_with_audit_path(
+            "autotune candidate",
+            &action,
+            apply_policy(),
+            &audit_path,
+        );
 
         assert!(result.is_err());
 
