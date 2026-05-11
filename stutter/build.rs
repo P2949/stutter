@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf};
+use std::{env, path::PathBuf, process::Command};
 
 use anyhow::{Context as _, anyhow};
 use aya_build::Toolchain;
@@ -6,6 +6,7 @@ use aya_build::Toolchain;
 fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-env-changed=STUTTER_USE_PREBUILT_BPF");
     println!("cargo:rerun-if-env-changed=STUTTER_BPF_OBJECT");
+    emit_build_metadata();
 
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let out_object = out_dir.join("stutter");
@@ -60,6 +61,54 @@ fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
     aya_build::build_ebpf([ebpf_package], Toolchain::default())
+}
+
+fn emit_build_metadata() {
+    println!("cargo:rerun-if-env-changed=STUTTER_GIT_REV");
+    emit_git_rerun_hints();
+
+    let git_rev = env::var("STUTTER_GIT_REV")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .or_else(detect_git_revision)
+        .unwrap_or_else(|| "unknown".to_owned());
+
+    let package_version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "unknown".to_owned());
+
+    println!("cargo:rustc-env=STUTTER_GIT_REV={git_rev}");
+    println!("cargo:rustc-env=STUTTER_BUILD_VERSION={package_version} (git {git_rev})");
+}
+
+fn emit_git_rerun_hints() {
+    let git_dir = PathBuf::from("..").join(".git");
+    let head_path = git_dir.join("HEAD");
+    println!("cargo:rerun-if-changed={}", head_path.display());
+
+    let Ok(head) = std::fs::read_to_string(&head_path) else {
+        return;
+    };
+
+    if let Some(reference) = head.strip_prefix("ref: ") {
+        let ref_path = git_dir.join(reference.trim());
+        println!("cargo:rerun-if-changed={}", ref_path.display());
+    }
+}
+
+fn detect_git_revision() -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 fn ensure_cargo_bin_on_path() {

@@ -22,6 +22,15 @@ pub struct CpuTopology {
     pub physical_package_id: Option<String>,
 }
 
+#[allow(dead_code)]
+pub fn build_git_rev() -> &'static str {
+    option_env!("STUTTER_GIT_REV").unwrap_or("unknown")
+}
+
+pub fn build_version() -> &'static str {
+    option_env!("STUTTER_BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
 pub fn collect_system_metadata() -> SystemMetadata {
     SystemMetadata {
         kernel_osrelease: read_trimmed("/proc/sys/kernel/osrelease"),
