@@ -661,9 +661,14 @@ pub async fn apply_low_risk_command(
         )
     })?;
 
-    run_washout_for_action(&action, action.tree_pid, WashoutWindowConfig::default())
-        .await
-        .with_context(|| format!("washout failed for autotune candidate '{}'", candidate_name))?;
+    run_washout_for_action(
+        &action,
+        action.tree_pid,
+        WashoutWindowConfig::default()
+            .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
+    )
+    .await
+    .with_context(|| format!("washout failed for autotune candidate '{}'", candidate_name))?;
 
     if !plan.duration.is_zero() {
         tokio::time::sleep(plan.duration).await;

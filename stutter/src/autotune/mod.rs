@@ -75,6 +75,8 @@ pub struct AutotuneCommandInput {
     pub mode: String,
     pub decision_log: Option<PathBuf>,
     pub duration_seconds: Option<u64>,
+    pub washout_seconds: u64,
+    pub washout_verify_interval_ms: u64,
     pub summary_ms: u64,
     pub preset: String,
     pub hwmon: bool,
@@ -278,20 +280,23 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
                 input.tree_pid,
                 input.watch_process.clone(),
             )
-            .with_profiles(profile_list),
+            .with_profiles(profile_list)
+            .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
             "suggest" => runtime::AutotuneRuntimeConfig::suggest(
                 input.decision_log.clone(),
                 input.tree_pid,
                 input.watch_process.clone(),
             )
-            .with_profiles(profile_list),
+            .with_profiles(profile_list)
+            .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
             "apply-low-risk" => runtime::AutotuneRuntimeConfig::apply_low_risk(
                 input.decision_log.clone(),
                 input.tree_pid,
                 input.watch_process.clone(),
             )
             .with_profiles(profile_list)
-            .with_candidate_window_seconds(input.duration_seconds.unwrap_or(30)),
+            .with_candidate_window_seconds(input.duration_seconds.unwrap_or(30))
+            .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
             other => {
                 anyhow::bail!(
                     "mode '{}' is not supported by the live autotune runtime",
@@ -406,6 +411,8 @@ mod tests {
             mode: "apply-low-risk".to_owned(),
             decision_log: None,
             duration_seconds: Some(1),
+            washout_seconds: washout::DEFAULT_WASHOUT_SECONDS,
+            washout_verify_interval_ms: washout::DEFAULT_WASHOUT_VERIFY_INTERVAL_MS,
             summary_ms: 1000,
             preset: "diagnosis".to_owned(),
             hwmon: false,
@@ -433,6 +440,8 @@ mod tests {
             mode: "apply-low-risk".to_owned(),
             decision_log: None,
             duration_seconds: Some(1),
+            washout_seconds: washout::DEFAULT_WASHOUT_SECONDS,
+            washout_verify_interval_ms: washout::DEFAULT_WASHOUT_VERIFY_INTERVAL_MS,
             summary_ms: 1000,
             preset: "diagnosis".to_owned(),
             hwmon: false,
@@ -463,6 +472,8 @@ mod tests {
             mode: "unknown-mode".to_owned(),
             decision_log: None,
             duration_seconds: Some(1),
+            washout_seconds: washout::DEFAULT_WASHOUT_SECONDS,
+            washout_verify_interval_ms: washout::DEFAULT_WASHOUT_VERIFY_INTERVAL_MS,
             summary_ms: 1000,
             preset: "diagnosis".to_owned(),
             hwmon: false,

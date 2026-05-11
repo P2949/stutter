@@ -6,6 +6,11 @@ use crate::{
 };
 
 pub(crate) const DEFAULT_WASHOUT_SECONDS: u64 = 10;
+pub(crate) const DEFAULT_WASHOUT_VERIFY_INTERVAL_MS: u64 = 1_000;
+pub(crate) const MIN_WASHOUT_SECONDS: u64 = 1;
+pub(crate) const MAX_WASHOUT_SECONDS: u64 = 60;
+pub(crate) const MIN_WASHOUT_VERIFY_INTERVAL_MS: u64 = 100;
+pub(crate) const MAX_WASHOUT_VERIFY_INTERVAL_MS: u64 = 5_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WashoutWindowConfig {
@@ -17,7 +22,7 @@ impl Default for WashoutWindowConfig {
     fn default() -> Self {
         Self {
             washout_seconds: DEFAULT_WASHOUT_SECONDS,
-            verify_interval_ms: 1_000,
+            verify_interval_ms: DEFAULT_WASHOUT_VERIFY_INTERVAL_MS,
         }
     }
 }
@@ -33,6 +38,15 @@ impl WashoutWindowConfig {
 
     pub fn with_washout_seconds(mut self, seconds: u64) -> Self {
         self.washout_seconds = seconds;
+        self
+    }
+
+    pub fn with_washout(mut self, seconds: u64, verify_interval_ms: u64) -> Self {
+        self.washout_seconds = seconds.clamp(MIN_WASHOUT_SECONDS, MAX_WASHOUT_SECONDS);
+        self.verify_interval_ms = verify_interval_ms.clamp(
+            MIN_WASHOUT_VERIFY_INTERVAL_MS,
+            MAX_WASHOUT_VERIFY_INTERVAL_MS,
+        );
         self
     }
 
@@ -361,6 +375,27 @@ mod tests {
         assert_eq!(config.washout_duration(), Duration::from_secs(25));
         assert_eq!(config.washout_ms(), 25_000);
         assert_eq!(config.verify_interval_ms, 1_000);
+    }
+
+    #[test]
+    fn washout_config_can_override_seconds_and_verify_interval() {
+        let config = WashoutWindowConfig::default().with_washout(30, 2_000);
+
+        assert_eq!(config.washout_seconds, 30);
+        assert_eq!(config.verify_interval_ms, 2_000);
+        assert_eq!(config.washout_duration(), Duration::from_secs(30));
+        assert_eq!(config.verify_interval(), Duration::from_millis(2_000));
+    }
+
+    #[test]
+    fn washout_config_clamps_out_of_range_values() {
+        let low = WashoutWindowConfig::default().with_washout(0, 50);
+        assert_eq!(low.washout_seconds, MIN_WASHOUT_SECONDS);
+        assert_eq!(low.verify_interval_ms, MIN_WASHOUT_VERIFY_INTERVAL_MS);
+
+        let high = WashoutWindowConfig::default().with_washout(600, 50_000);
+        assert_eq!(high.washout_seconds, MAX_WASHOUT_SECONDS);
+        assert_eq!(high.verify_interval_ms, MAX_WASHOUT_VERIFY_INTERVAL_MS);
     }
 
     #[test]

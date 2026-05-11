@@ -42,6 +42,7 @@ use crate::{
         quality::{OnlineDataQuality, OnlineDataQualityPolicy},
         rolling_window::{RollingWindow, WindowScore as RuntimeWindowScore},
         state::{AutotuneMode, ControllerPhase, SituationKind},
+        washout::WashoutWindowConfig,
     },
     cli::Config,
     diagnosis::LiveDiagnosisEntry,
@@ -70,6 +71,7 @@ pub struct AutotuneRuntimeConfig {
     pub profiles: Vec<Profile>,
     pub allow_system_wide_actions: bool,
     pub online_data_quality_policy: OnlineDataQualityPolicy,
+    pub washout: WashoutWindowConfig,
 }
 
 impl AutotuneRuntimeConfig {
@@ -90,6 +92,7 @@ impl AutotuneRuntimeConfig {
             profiles: Vec::new(),
             allow_system_wide_actions: false,
             online_data_quality_policy: OnlineDataQualityPolicy::default(),
+            washout: WashoutWindowConfig::default(),
         }
     }
 
@@ -110,6 +113,7 @@ impl AutotuneRuntimeConfig {
             profiles: Vec::new(),
             allow_system_wide_actions: false,
             online_data_quality_policy: OnlineDataQualityPolicy::default(),
+            washout: WashoutWindowConfig::default(),
         }
     }
 
@@ -130,6 +134,7 @@ impl AutotuneRuntimeConfig {
             profiles: Vec::new(),
             allow_system_wide_actions: false,
             online_data_quality_policy: OnlineDataQualityPolicy::default(),
+            washout: WashoutWindowConfig::default(),
         }
     }
 
@@ -145,6 +150,11 @@ impl AutotuneRuntimeConfig {
 
     pub fn with_online_data_quality_policy(mut self, policy: OnlineDataQualityPolicy) -> Self {
         self.online_data_quality_policy = policy;
+        self
+    }
+
+    pub fn with_washout(mut self, seconds: u64, verify_interval_ms: u64) -> Self {
+        self.washout = WashoutWindowConfig::default().with_washout(seconds, verify_interval_ms);
         self
     }
 }
@@ -236,6 +246,7 @@ pub struct LiveLowRiskExperiment {
     pub candidate: CandidateAction,
     pub baseline_score: WindowScore,
     pub applied_unix_nanos: u128,
+    pub washout_until_unix_nanos: u128,
     pub measure_until_unix_nanos: u128,
     pub rollback: RollbackToken,
 }
@@ -436,7 +447,14 @@ impl AutotuneRuntime {
         self.last_observation = observation.clone();
 
         let decision = if let Some(experiment) = &self.live_low_risk_experiment {
-            if observation.now_unix_nanos < experiment.measure_until_unix_nanos {
+            if observation.now_unix_nanos < experiment.washout_until_unix_nanos {
+                AutotuneDecision::Noop {
+                    reason: format!(
+                        "candidate '{}' washout window is still stabilizing",
+                        experiment.candidate_name()
+                    ),
+                }
+            } else if observation.now_unix_nanos < experiment.measure_until_unix_nanos {
                 AutotuneDecision::Noop {
                     reason: format!(
                         "candidate '{}' measurement window is still collecting",
@@ -611,6 +629,15 @@ impl AutotuneRuntime {
         Ok(())
     }
 
+    fn experiment_deadlines_from_now(&self, applied_unix_nanos: u128) -> (u128, u128) {
+        let washout_until_unix_nanos =
+            applied_unix_nanos.saturating_add(self.config.washout.washout_duration().as_nanos());
+        let measure_until_unix_nanos = washout_until_unix_nanos
+            .saturating_add(Duration::from_secs(self.config.candidate_window_seconds).as_nanos());
+
+        (washout_until_unix_nanos, measure_until_unix_nanos)
+    }
+
     fn start_low_risk_experiment(
         &mut self,
         observation: &AutotuneObservation,
@@ -670,14 +697,16 @@ impl AutotuneRuntime {
             baseline_score_total: baseline_score.score.total,
         });
 
+        let (washout_until_unix_nanos, measure_until_unix_nanos) =
+            self.experiment_deadlines_from_now(observation.now_unix_nanos);
+
         self.live_low_risk_experiment = Some(LiveLowRiskExperiment {
             experiment_id,
             candidate,
             baseline_score: baseline_score.clone(),
             applied_unix_nanos: observation.now_unix_nanos,
-            measure_until_unix_nanos: observation.now_unix_nanos.saturating_add(
-                Duration::from_secs(self.config.candidate_window_seconds).as_nanos(),
-            ),
+            washout_until_unix_nanos,
+            measure_until_unix_nanos,
             rollback: applied.rollback,
         });
 
@@ -1560,23 +1589,77 @@ mod tests {
     #[test]
     fn runtime_config_defaults_to_default_online_data_quality_policy() {
         let config = AutotuneRuntimeConfig::observe(None, Some(1234), None);
+        let default_policy = OnlineDataQualityPolicy::default();
 
         assert_eq!(
             config.online_data_quality_policy.min_scored_intervals,
-            OnlineDataQualityPolicy::default().min_scored_intervals
+            default_policy.min_scored_intervals
         );
         assert_eq!(
             config.online_data_quality_policy.min_scored_samples,
-            OnlineDataQualityPolicy::default().min_scored_samples
+            default_policy.min_scored_samples
         );
         assert_eq!(
             config.online_data_quality_policy.max_drop_counter_total,
-            OnlineDataQualityPolicy::default().max_drop_counter_total
+            default_policy.max_drop_counter_total
         );
         assert_eq!(
             config.online_data_quality_policy.require_frame_data,
-            OnlineDataQualityPolicy::default().require_frame_data
+            default_policy.require_frame_data
         );
+    }
+
+    #[test]
+    fn runtime_config_defaults_and_overrides_washout_policy() {
+        let default_config = AutotuneRuntimeConfig::observe(None, Some(1234), None);
+
+        assert_eq!(
+            default_config.washout.washout_seconds,
+            crate::autotune::washout::DEFAULT_WASHOUT_SECONDS
+        );
+        assert_eq!(
+            default_config.washout.verify_interval_ms,
+            crate::autotune::washout::DEFAULT_WASHOUT_VERIFY_INTERVAL_MS
+        );
+
+        let custom_config =
+            AutotuneRuntimeConfig::observe(None, Some(1234), None).with_washout(30, 2_000);
+
+        assert_eq!(custom_config.washout.washout_seconds, 30);
+        assert_eq!(custom_config.washout.verify_interval_ms, 2_000);
+
+        let clamped_config =
+            AutotuneRuntimeConfig::observe(None, Some(1234), None).with_washout(0, 50);
+
+        assert_eq!(
+            clamped_config.washout.washout_seconds,
+            crate::autotune::washout::MIN_WASHOUT_SECONDS
+        );
+        assert_eq!(
+            clamped_config.washout.verify_interval_ms,
+            crate::autotune::washout::MIN_WASHOUT_VERIFY_INTERVAL_MS
+        );
+    }
+
+    #[test]
+    fn runtime_washout_policy_delays_live_measurement_deadline() {
+        let runtime = AutotuneRuntime::new(
+            AutotuneRuntimeConfig::observe(None, Some(1234), None)
+                .with_candidate_window_seconds(30)
+                .with_washout(20, 2_000),
+        );
+        let applied_unix_nanos = 1_000_000_000_u128;
+
+        let (washout_until_unix_nanos, measure_until_unix_nanos) =
+            runtime.experiment_deadlines_from_now(applied_unix_nanos);
+
+        let expected_washout_until =
+            applied_unix_nanos.saturating_add(Duration::from_secs(20).as_nanos());
+        let expected_measure_until =
+            expected_washout_until.saturating_add(Duration::from_secs(30).as_nanos());
+
+        assert_eq!(washout_until_unix_nanos, expected_washout_until);
+        assert_eq!(measure_until_unix_nanos, expected_measure_until);
     }
 
     #[test]
