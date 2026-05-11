@@ -14,7 +14,7 @@ use super::{
 };
 use crate::{actions::SafetyClass, focus::FocusGroupKind, process_tree::TaskClass};
 
-pub(crate) const DEFAULT_MIN_FOCUS_CONFIDENCE: f32 = 0.70;
+pub(crate) const DEFAULT_MIN_FOCUS_CONFIDENCE: f32 = super::DEFAULT_MIN_FOCUS_CONFIDENCE;
 
 #[derive(Clone, Debug)]
 pub struct ControllerPolicy {

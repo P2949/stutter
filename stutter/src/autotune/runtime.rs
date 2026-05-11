@@ -70,6 +70,7 @@ pub struct AutotuneRuntimeConfig {
     pub watch_process: Option<String>,
     pub profiles: Vec<Profile>,
     pub allow_system_wide_actions: bool,
+    pub min_focus_confidence: f32,
     pub online_data_quality_policy: OnlineDataQualityPolicy,
     pub washout: WashoutWindowConfig,
 }
@@ -91,6 +92,7 @@ impl AutotuneRuntimeConfig {
             watch_process,
             profiles: Vec::new(),
             allow_system_wide_actions: false,
+            min_focus_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
             online_data_quality_policy: OnlineDataQualityPolicy::default(),
             washout: WashoutWindowConfig::default(),
         }
@@ -112,6 +114,7 @@ impl AutotuneRuntimeConfig {
             watch_process,
             profiles: Vec::new(),
             allow_system_wide_actions: false,
+            min_focus_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
             online_data_quality_policy: OnlineDataQualityPolicy::default(),
             washout: WashoutWindowConfig::default(),
         }
@@ -133,6 +136,7 @@ impl AutotuneRuntimeConfig {
             watch_process,
             profiles: Vec::new(),
             allow_system_wide_actions: false,
+            min_focus_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
             online_data_quality_policy: OnlineDataQualityPolicy::default(),
             washout: WashoutWindowConfig::default(),
         }
@@ -150,6 +154,11 @@ impl AutotuneRuntimeConfig {
 
     pub fn with_online_data_quality_policy(mut self, policy: OnlineDataQualityPolicy) -> Self {
         self.online_data_quality_policy = policy;
+        self
+    }
+
+    pub fn with_min_focus_confidence(mut self, value: f32) -> Self {
+        self.min_focus_confidence = value.clamp(0.0, 1.0);
         self
     }
 
@@ -296,9 +305,12 @@ impl AutotuneRuntime {
     pub fn new(config: AutotuneRuntimeConfig) -> Self {
         let mode = config.mode;
         let window_seconds = config.window_seconds;
+        let mut controller = OnlineAutotuneController::new(mode, window_seconds);
+        controller.policy.min_focus_confidence = config.min_focus_confidence;
+
         Self {
             target_state: RuntimeTargetState::new(config.tree_pid),
-            controller: OnlineAutotuneController::new(mode, window_seconds),
+            controller,
             latest_focus: None,
             latest_drop_counters: DropCountersSnapshot::default(),
             recent_diagnoses: VecDeque::new(),
@@ -1639,6 +1651,40 @@ mod tests {
             clamped_config.washout.verify_interval_ms,
             crate::autotune::washout::MIN_WASHOUT_VERIFY_INTERVAL_MS
         );
+    }
+
+    #[test]
+    fn runtime_config_default_min_focus_confidence_matches_controller_default() {
+        let config = AutotuneRuntimeConfig::suggest(None, None, None);
+        let runtime = AutotuneRuntime::new(config.clone());
+
+        assert_eq!(
+            config.min_focus_confidence,
+            crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE
+        );
+        assert_eq!(
+            runtime.controller.policy.min_focus_confidence,
+            crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE
+        );
+    }
+
+    #[test]
+    fn runtime_config_custom_min_focus_confidence_updates_controller_policy() {
+        let config =
+            AutotuneRuntimeConfig::suggest(None, None, None).with_min_focus_confidence(0.42);
+        let runtime = AutotuneRuntime::new(config.clone());
+
+        assert_eq!(config.min_focus_confidence, 0.42);
+        assert_eq!(runtime.controller.policy.min_focus_confidence, 0.42);
+    }
+
+    #[test]
+    fn runtime_config_min_focus_confidence_is_clamped() {
+        let low = AutotuneRuntimeConfig::suggest(None, None, None).with_min_focus_confidence(-1.0);
+        let high = AutotuneRuntimeConfig::suggest(None, None, None).with_min_focus_confidence(2.0);
+
+        assert_eq!(low.min_focus_confidence, 0.0);
+        assert_eq!(high.min_focus_confidence, 1.0);
     }
 
     #[test]

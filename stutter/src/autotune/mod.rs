@@ -18,6 +18,8 @@ pub mod shutdown;
 pub mod status;
 pub mod washout;
 
+pub const DEFAULT_MIN_FOCUS_CONFIDENCE: f32 = 0.70;
+
 #[cfg(feature = "autotune-controller")]
 pub mod candidate_memory;
 #[cfg(feature = "autotune-controller")]
@@ -82,6 +84,7 @@ pub struct AutotuneCommandInput {
     pub hwmon: bool,
     pub mangohud_log: Option<PathBuf>,
     pub auto_focus: bool,
+    pub min_focus_confidence: f32,
     pub focus_source: crate::cli::FocusSource,
     pub foreground_window: bool,
     pub foreground_source: crate::cli::ForegroundSourceArg,
@@ -281,6 +284,7 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
                 input.watch_process.clone(),
             )
             .with_profiles(profile_list)
+            .with_min_focus_confidence(input.min_focus_confidence)
             .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
             "suggest" => runtime::AutotuneRuntimeConfig::suggest(
                 input.decision_log.clone(),
@@ -288,6 +292,7 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
                 input.watch_process.clone(),
             )
             .with_profiles(profile_list)
+            .with_min_focus_confidence(input.min_focus_confidence)
             .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
             "apply-low-risk" => runtime::AutotuneRuntimeConfig::apply_low_risk(
                 input.decision_log.clone(),
@@ -295,6 +300,7 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
                 input.watch_process.clone(),
             )
             .with_profiles(profile_list)
+            .with_min_focus_confidence(input.min_focus_confidence)
             .with_candidate_window_seconds(input.duration_seconds.unwrap_or(30))
             .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
             other => {
@@ -418,6 +424,7 @@ mod tests {
             hwmon: false,
             mangohud_log: None,
             auto_focus: false,
+            min_focus_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
             focus_source: crate::cli::FocusSource::Hybrid,
             foreground_window: false,
             foreground_source: crate::cli::ForegroundSourceArg::Auto,
@@ -447,6 +454,7 @@ mod tests {
             hwmon: false,
             mangohud_log: None,
             auto_focus: true,
+            min_focus_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
             focus_source: crate::cli::FocusSource::Hybrid,
             foreground_window: false,
             foreground_source: crate::cli::ForegroundSourceArg::Auto,
@@ -479,6 +487,7 @@ mod tests {
             hwmon: false,
             mangohud_log: None,
             auto_focus: false,
+            min_focus_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
             focus_source: crate::cli::FocusSource::Hybrid,
             foreground_window: false,
             foreground_source: crate::cli::ForegroundSourceArg::Auto,
