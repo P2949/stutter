@@ -119,6 +119,7 @@ pub struct DaemonPolicy {
     pub source: ActionSource,
     pub allow_system_wide_actions: bool,
     pub allow_high_risk: bool,
+    pub allow_persistent_effects: bool,
     pub min_confidence: f32,
 }
 
@@ -154,6 +155,7 @@ pub enum PolicyRejection {
     },
     RollbackUnavailable,
     SystemWideActionBlocked,
+    PersistentEffectBlocked,
     ExplicitTargetRequired,
     HighRiskRequiresExplicitOptIn,
     ConfidenceTooLow {
@@ -195,6 +197,9 @@ impl fmt::Display for PolicyRejection {
             Self::SystemWideActionBlocked => {
                 f.write_str("system-wide action is blocked by daemon policy")
             }
+            Self::PersistentEffectBlocked => {
+                f.write_str("persistent effect is blocked by daemon policy")
+            }
             Self::ExplicitTargetRequired => f.write_str("apply requires an explicit target scope"),
             Self::HighRiskRequiresExplicitOptIn => {
                 f.write_str("high-risk apply requires explicit high-risk opt-in")
@@ -221,6 +226,7 @@ impl DaemonPolicy {
             source,
             allow_system_wide_actions: false,
             allow_high_risk: false,
+            allow_persistent_effects: false,
             min_confidence: 0.0,
         }
     }
@@ -231,6 +237,7 @@ impl DaemonPolicy {
             source,
             allow_system_wide_actions: false,
             allow_high_risk: false,
+            allow_persistent_effects: false,
             min_confidence: 0.0,
         }
     }
@@ -241,6 +248,7 @@ impl DaemonPolicy {
             source,
             allow_system_wide_actions: false,
             allow_high_risk: false,
+            allow_persistent_effects: false,
             min_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
         }
     }
@@ -251,6 +259,7 @@ impl DaemonPolicy {
             source,
             allow_system_wide_actions: false,
             allow_high_risk: false,
+            allow_persistent_effects: false,
             min_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
         }
     }
@@ -261,6 +270,7 @@ impl DaemonPolicy {
             source,
             allow_system_wide_actions: false,
             allow_high_risk: true,
+            allow_persistent_effects: false,
             min_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
         }
     }
@@ -337,6 +347,10 @@ impl DaemonPolicy {
 
         if descriptor.touches_system_wide_state && !self.allow_system_wide_actions {
             return Err(PolicyRejection::SystemWideActionBlocked);
+        }
+
+        if descriptor.persistent_effect && !self.allow_persistent_effects {
+            return Err(PolicyRejection::PersistentEffectBlocked);
         }
 
         match descriptor.rollback {
@@ -556,6 +570,29 @@ mod tests {
 
         let mut allowed_policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
         allowed_policy.allow_system_wide_actions = true;
+        assert!(
+            allowed_policy
+                .check_action(PolicyIntent::Apply, &desc)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn apply_rejects_persistent_effect_without_explicit_permission() {
+        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        let mut desc = descriptor(
+            crate::actions::SafetyClass::ReversibleLowRisk,
+            ActionEffectScope::LocalProcess,
+        );
+        desc.persistent_effect = true;
+
+        assert!(matches!(
+            policy.check_action(PolicyIntent::Apply, &desc),
+            Err(PolicyRejection::PersistentEffectBlocked)
+        ));
+
+        let mut allowed_policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        allowed_policy.allow_persistent_effects = true;
         assert!(
             allowed_policy
                 .check_action(PolicyIntent::Apply, &desc)

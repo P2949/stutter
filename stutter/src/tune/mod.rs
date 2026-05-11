@@ -125,6 +125,18 @@ pub struct TuneControl {
     pub applied_tasks: Arc<AtomicUsize>,
 }
 
+pub struct TuneProfileRefreshInput {
+    pub tree_pid: u32,
+    pub profile: profiles::Profile,
+    pub cache: profiles::ProfileApplyCache,
+    pub force_restore_overwrite: bool,
+    pub refresh_ms: u64,
+    pub control: TuneControl,
+    pub policy: crate::daemon_policy::DaemonPolicy,
+    pub persistent_effect: bool,
+    pub enforce: bool,
+}
+
 pub struct TuneMeasureResult {
     pub applied_tasks: usize,
     pub run_dir: PathBuf,
@@ -516,12 +528,20 @@ async fn write_tune_summary(
             .iter()
             .find(|profile| profile.name == summary.best_profile)
         {
+            let keep_best_policy = crate::watch::profile_apply_policy(
+                false,
+                profiles::profile_uses_priority_actions(profile),
+                true,
+                crate::daemon_policy::ActionSource::Tune,
+            );
             let records = match crate::watch::apply_profile_to_tree_blocking(
                 summary.tree_pid,
                 profile.clone(),
                 false,
                 false,
                 enforce,
+                keep_best_policy,
+                true,
             )
             .await
             {
@@ -630,12 +650,20 @@ pub async fn measure_tune_candidate(
         .clone();
 
     let cache = profiles::ProfileApplyCache::default();
+    let tune_candidate_policy = crate::watch::profile_apply_policy(
+        false,
+        profiles::profile_uses_priority_actions(&profile),
+        false,
+        crate::daemon_policy::ActionSource::Tune,
+    );
     let (initial_apply, cache) = match crate::watch::apply_profile_to_tree_cached_blocking(
         tree_pid,
         profile.clone(),
         force_restore_overwrite,
         false,
         cache,
+        tune_candidate_policy.clone(),
+        false,
     )
     .await
     {
@@ -689,15 +717,17 @@ pub async fn measure_tune_candidate(
     let stop_refresh = control.stop_refresh.clone();
     let refreshed_applied_tasks = control.applied_tasks.clone();
 
-    let mut profile_refresh = tokio::spawn(tune_profile_refresh_loop(
+    let mut profile_refresh = tokio::spawn(tune_profile_refresh_loop(TuneProfileRefreshInput {
         tree_pid,
         profile,
         cache,
-        should_force_refresh,
-        TUNE_PROFILE_REFRESH_MS,
+        force_restore_overwrite: should_force_refresh,
+        refresh_ms: TUNE_PROFILE_REFRESH_MS,
         control,
+        policy: tune_candidate_policy,
+        persistent_effect: false,
         enforce,
-    ));
+    }));
 
     let mut profile_refresh_finished = false;
     let monitor_result = tokio::select! {
@@ -747,15 +777,18 @@ pub async fn measure_tune_candidate(
     })
 }
 
-pub async fn tune_profile_refresh_loop(
-    tree_pid: u32,
-    profile: profiles::Profile,
-    mut cache: profiles::ProfileApplyCache,
-    force_restore_overwrite: bool,
-    refresh_ms: u64,
-    control: TuneControl,
-    enforce: bool,
-) -> anyhow::Result<()> {
+pub async fn tune_profile_refresh_loop(input: TuneProfileRefreshInput) -> anyhow::Result<()> {
+    let TuneProfileRefreshInput {
+        tree_pid,
+        profile,
+        mut cache,
+        force_restore_overwrite,
+        refresh_ms,
+        control,
+        policy,
+        persistent_effect,
+        enforce,
+    } = input;
     let mut should_force = force_restore_overwrite;
     let refresh_interval = Duration::from_millis(refresh_ms);
     let verify_interval = Duration::from_millis(crate::watch::PROFILE_WATCH_VERIFY_MS);
@@ -778,6 +811,8 @@ pub async fn tune_profile_refresh_loop(
             should_force,
             false,
             cache,
+            policy.clone(),
+            persistent_effect,
         )
         .await?;
         cache = updated_cache;
