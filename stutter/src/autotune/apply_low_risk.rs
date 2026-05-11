@@ -1205,8 +1205,6 @@ mod tests {
         ActionRunPolicy::apply_low_risk(crate::daemon_policy::ActionSource::Test, false)
     }
 
-
-
     #[test]
     fn audited_runner_logs_success_for_autotune_candidate() {
         let dir = temp_dir("audited-success");
