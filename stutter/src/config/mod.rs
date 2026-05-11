@@ -6,10 +6,11 @@ pub mod source;
 pub mod types;
 
 use model::{
-    FocusConfig, MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, SafetyConfig,
-    TargetConfig, TimingConfig,
+    AlertConfig, CpuPerfConfig, EbpfSizingConfig, FocusConfig, HwmonConfig, MangoHudConfig,
+    MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, RemoteConfig, RuntimeSlicesConfig,
+    SafetyConfig, StreamConfig, TargetConfig, TimingConfig, UiConfig, WatchConfig,
 };
-pub use types::{FocusSource, ForegroundSource, TARGET_PIDS_MAX};
+pub use types::{CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX};
 
 use crate::cli::Config;
 
@@ -84,6 +85,47 @@ impl From<&Config> for MonitorConfig {
             safety: SafetyConfig {
                 follow_exec: config.follow_exec,
                 native_cgroup_filter: config.native_cgroup_filter,
+            },
+            watch: WatchConfig {
+                poll_ms: config.watch_poll_ms,
+                timeout: config.watch_timeout,
+            },
+            alerts: AlertConfig {
+                threshold_ns: config.alert_threshold_ns,
+                webhook_url: config.alert_webhook_url.clone(),
+            },
+            streams: StreamConfig {
+                csv: config.csv_stream.clone(),
+                json_stream: config.json_stream,
+                verbose: config.verbose,
+            },
+            hwmon: HwmonConfig {
+                enabled: config.hwmon,
+                root: config.hwmon_root.clone(),
+                drm_card: config.hwmon_drm_card.clone(),
+                render_node: config.hwmon_render_node.clone(),
+            },
+            mangohud: MangoHudConfig {
+                log: config.mangohud_log.clone(),
+                log_live: config.mangohud_log_live,
+            },
+            cpu_perf: CpuPerfConfig {
+                enabled: config.cpu_perf,
+                include_kernel: config.cpu_perf_kernel,
+                max_tasks: config.cpu_perf_max_tasks,
+                collect_cache_refs: config.cpu_perf_cache_refs,
+            },
+            runtime_slices: RuntimeSlicesConfig {
+                enabled: config.runtime_slices,
+                max_tasks: config.runtime_slices_max_tasks,
+            },
+            ebpf_sizing: EbpfSizingConfig {
+                ringbuf_size_kb: config.ringbuf_size_kb,
+                wakeup_map_factor: config.wakeup_map_factor,
+            },
+            ui: UiConfig { tui: config.tui },
+            remote: RemoteConfig {
+                endpoint: config.remote.clone(),
             },
         }
     }

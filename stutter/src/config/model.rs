@@ -1,6 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-use crate::config::{FocusSource, ForegroundSource, TARGET_PIDS_MAX};
+use crate::config::{CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MonitorConfig {
@@ -11,6 +11,16 @@ pub struct MonitorConfig {
     pub outputs: OutputConfig,
     pub focus: FocusConfig,
     pub safety: SafetyConfig,
+    pub watch: WatchConfig,
+    pub alerts: AlertConfig,
+    pub streams: StreamConfig,
+    pub hwmon: HwmonConfig,
+    pub mangohud: MangoHudConfig,
+    pub cpu_perf: CpuPerfConfig,
+    pub runtime_slices: RuntimeSlicesConfig,
+    pub ebpf_sizing: EbpfSizingConfig,
+    pub ui: UiConfig,
+    pub remote: RemoteConfig,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -137,6 +147,98 @@ impl Default for FocusConfig {
             auto_focus_max_roots: 4,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WatchConfig {
+    pub poll_ms: u64,
+    pub timeout: Option<Duration>,
+}
+
+impl Default for WatchConfig {
+    fn default() -> Self {
+        Self {
+            poll_ms: 2_000,
+            timeout: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AlertConfig {
+    pub threshold_ns: Option<u64>,
+    pub webhook_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct StreamConfig {
+    pub csv: Option<CsvStreamTarget>,
+    pub json_stream: bool,
+    pub verbose: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct HwmonConfig {
+    pub enabled: bool,
+    pub root: Option<PathBuf>,
+    pub drm_card: Option<String>,
+    pub render_node: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MangoHudConfig {
+    pub log: Option<PathBuf>,
+    pub log_live: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CpuPerfConfig {
+    pub enabled: bool,
+    pub include_kernel: bool,
+    pub max_tasks: usize,
+    pub collect_cache_refs: bool,
+}
+
+impl Default for CpuPerfConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            include_kernel: false,
+            max_tasks: 128,
+            collect_cache_refs: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeSlicesConfig {
+    pub enabled: bool,
+    pub max_tasks: usize,
+}
+
+impl Default for RuntimeSlicesConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_tasks: 256,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EbpfSizingConfig {
+    pub ringbuf_size_kb: Option<u32>,
+    pub wakeup_map_factor: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct UiConfig {
+    pub tui: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RemoteConfig {
+    pub endpoint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

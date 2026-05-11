@@ -311,7 +311,7 @@ pub fn registry_spec_for_key(key: ProbeKey) -> &'static ProbeSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{cli::CsvStreamTarget, config::ForegroundSource};
+    use crate::config::{CsvStreamTarget, ForegroundSource};
 
     fn config() -> Config {
         Config {

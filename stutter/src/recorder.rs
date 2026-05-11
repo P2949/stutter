@@ -401,7 +401,7 @@ pub struct RecordedConfig {
     #[serde(default)]
     pub watch_timeout_ms: Option<u64>,
     #[serde(default)]
-    pub csv_stream: Option<crate::cli::CsvStreamTarget>,
+    pub csv_stream: Option<crate::config::CsvStreamTarget>,
     #[serde(default)]
     pub irq_latency: bool,
     #[serde(default)]
