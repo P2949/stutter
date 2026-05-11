@@ -126,6 +126,10 @@ pub struct AutotuneStartRequest {
     pub foreground_poll_ms: Option<u64>,
     #[serde(default)]
     pub foreground_max_stale_ms: Option<u64>,
+    #[serde(default)]
+    pub washout_seconds: Option<u64>,
+    #[serde(default)]
+    pub washout_verify_interval_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

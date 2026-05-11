@@ -47,6 +47,26 @@ mod version_tests {
         );
         assert_eq!(crate::metadata::build_git_rev(), env!("STUTTER_GIT_REV"));
     }
+
+    #[test]
+    fn autotune_cli_parses_washout_flags() {
+        let cli = Cli::try_parse_from([
+            "stutter",
+            "autotune",
+            "--washout-seconds",
+            "30",
+            "--washout-verify-interval-ms",
+            "2000",
+        ])
+        .unwrap();
+
+        let Some(Command::Autotune(args)) = cli.command else {
+            panic!("expected autotune command");
+        };
+
+        assert_eq!(args.washout_seconds, 30);
+        assert_eq!(args.washout_verify_interval_ms, 2_000);
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -405,6 +425,18 @@ pub struct AutotuneArgs {
 
     #[arg(long = "duration-seconds")]
     pub duration_seconds: Option<u64>,
+
+    #[arg(
+        long = "washout-seconds",
+        default_value_t = crate::autotune::washout::DEFAULT_WASHOUT_SECONDS
+    )]
+    pub washout_seconds: u64,
+
+    #[arg(
+        long = "washout-verify-interval-ms",
+        default_value_t = crate::autotune::washout::DEFAULT_WASHOUT_VERIFY_INTERVAL_MS
+    )]
+    pub washout_verify_interval_ms: u64,
 
     #[arg(long = "summary-ms", default_value_t = 1000)]
     pub summary_ms: u64,
@@ -1828,6 +1860,8 @@ where
                         mode: args.mode,
                         decision_log: args.decision_log,
                         duration_seconds: args.duration_seconds,
+                        washout_seconds: args.washout_seconds,
+                        washout_verify_interval_ms: args.washout_verify_interval_ms,
                         summary_ms: args.summary_ms,
                         preset: args.preset,
                         hwmon: args.hwmon,

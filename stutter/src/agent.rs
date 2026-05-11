@@ -996,6 +996,12 @@ async fn autotune_start_handler(
         foreground_source: parse_foreground_source_or_auto(request.foreground_source.as_deref()),
         foreground_poll_ms: request.foreground_poll_ms.unwrap_or(1_000),
         foreground_max_stale_ms: request.foreground_max_stale_ms.unwrap_or(2_500),
+        washout_seconds: request
+            .washout_seconds
+            .unwrap_or(crate::autotune::washout::DEFAULT_WASHOUT_SECONDS),
+        washout_verify_interval_ms: request
+            .washout_verify_interval_ms
+            .unwrap_or(crate::autotune::washout::DEFAULT_WASHOUT_VERIFY_INTERVAL_MS),
         allow_system_wide_actions: false,
     };
 
@@ -1872,6 +1878,8 @@ mod tests {
             decision_log: None,
             summary_ms: None,
             preset: None,
+            washout_seconds: None,
+            washout_verify_interval_ms: None,
             hwmon: false,
             mangohud_log: None,
             auto_focus: false,
@@ -1898,6 +1906,8 @@ mod tests {
             decision_log: None,
             summary_ms: None,
             preset: None,
+            washout_seconds: None,
+            washout_verify_interval_ms: None,
             hwmon: false,
             mangohud_log: None,
             auto_focus: false,
@@ -1928,6 +1938,8 @@ mod tests {
             decision_log: None,
             summary_ms: None,
             preset: None,
+            washout_seconds: None,
+            washout_verify_interval_ms: None,
             hwmon: false,
             mangohud_log: None,
             auto_focus: false,
@@ -1959,6 +1971,8 @@ mod tests {
             decision_log: None,
             summary_ms: None,
             preset: None,
+            washout_seconds: None,
+            washout_verify_interval_ms: None,
             hwmon: false,
             mangohud_log: None,
             auto_focus: false,
@@ -1990,6 +2004,8 @@ mod tests {
             decision_log: None,
             summary_ms: None,
             preset: None,
+            washout_seconds: None,
+            washout_verify_interval_ms: None,
             hwmon: false,
             mangohud_log: None,
             auto_focus: false,
@@ -2143,6 +2159,8 @@ mod tests {
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
+                washout_seconds: None,
+                washout_verify_interval_ms: None,
             }),
         )
         .await
@@ -2180,6 +2198,8 @@ mod tests {
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
+                washout_seconds: None,
+                washout_verify_interval_ms: None,
             }),
         )
         .await
@@ -2224,6 +2244,8 @@ mod tests {
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
+                washout_seconds: None,
+                washout_verify_interval_ms: None,
             }),
         )
         .await
@@ -2257,6 +2279,8 @@ mod tests {
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
+                washout_seconds: None,
+                washout_verify_interval_ms: None,
             }),
         )
         .await
@@ -2296,6 +2320,8 @@ mod tests {
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
+                washout_seconds: None,
+                washout_verify_interval_ms: None,
             }),
         )
         .await
@@ -2329,6 +2355,8 @@ mod tests {
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
+                washout_seconds: None,
+                washout_verify_interval_ms: None,
             }),
         )
         .await
@@ -2362,6 +2390,8 @@ mod tests {
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
+                washout_seconds: None,
+                washout_verify_interval_ms: None,
             }),
         )
         .await
@@ -2395,6 +2425,8 @@ mod tests {
                 foreground_source: None,
                 foreground_poll_ms: None,
                 foreground_max_stale_ms: None,
+                washout_seconds: None,
+                washout_verify_interval_ms: None,
             }),
         )
         .await
