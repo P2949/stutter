@@ -67,6 +67,20 @@ impl TuningAction for CpuAffinityProfileAction {
         }
     }
 
+    fn descriptor(&self) -> crate::daemon_policy::ActionDescriptor {
+        crate::daemon_policy::ActionDescriptor {
+            action_id: self.id(),
+            action_kind: "cpu_affinity_profile".to_owned(),
+            safety_class: self.safety_class(),
+            effect_scope: crate::daemon_policy::ActionEffectScope::LocalProcessTree,
+            rollback: crate::daemon_policy::RollbackRequirement::RequiredBeforeApply,
+            persistent_effect: false,
+            touches_system_wide_state: false,
+            requires_explicit_target: true,
+            confidence: None,
+        }
+    }
+
     fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
         self.preflight_for_restore_path(&crate::profile_restore::default_restore_path())
     }

@@ -1,8 +1,9 @@
 use std::path::Path;
 
 use crate::{
-    actions::{ActionError, ActionOutcome, ActionState, RollbackToken, TuningAction},
+    actions::{ActionError, ActionOutcome, ActionState, RollbackToken, SafetyClass, TuningAction},
     audit::{AuditEvent, append_audit_event_to_path, unix_nanos_now},
+    daemon_policy::{ActionSource, DaemonPolicy, PolicyIntent},
 };
 
 #[derive(Debug)]
@@ -12,28 +13,102 @@ pub struct AuditedActionResult {
     pub outcome: ActionOutcome,
 }
 
-pub fn run_audited_action<A: TuningAction>(
+#[derive(Clone, Debug)]
+pub struct ActionRunPolicy {
+    pub policy: DaemonPolicy,
+    pub dry_run: bool,
+}
+
+impl ActionRunPolicy {
+    pub fn dry_run(source: ActionSource) -> Self {
+        Self {
+            policy: DaemonPolicy::suggest(source),
+            dry_run: true,
+        }
+    }
+
+    pub fn apply_low_risk(source: ActionSource, dry_run: bool) -> Self {
+        Self {
+            policy: DaemonPolicy::apply_low_risk(source),
+            dry_run,
+        }
+    }
+
+    pub fn apply_medium_risk(source: ActionSource, dry_run: bool) -> Self {
+        Self {
+            policy: DaemonPolicy::apply_medium_risk(source),
+            dry_run,
+        }
+    }
+
+    pub fn for_action<A: TuningAction>(action: &A, dry_run: bool, source: ActionSource) -> Self {
+        if dry_run {
+            return Self::dry_run(source);
+        }
+
+        match action.safety_class() {
+            SafetyClass::ObserveOnly | SafetyClass::ReversibleLowRisk => {
+                Self::apply_low_risk(source, false)
+            }
+            SafetyClass::ReversibleMediumRisk | SafetyClass::HighRisk => {
+                Self::apply_medium_risk(source, false)
+            }
+        }
+    }
+
+    fn policy_intent(&self) -> PolicyIntent {
+        if self.dry_run {
+            PolicyIntent::DryRun
+        } else {
+            PolicyIntent::Apply
+        }
+    }
+}
+
+#[cfg(test)]
+impl From<bool> for ActionRunPolicy {
+    fn from(dry_run: bool) -> Self {
+        Self::for_action(
+            &crate::actions::fake_action::FakeAction::new(),
+            dry_run,
+            ActionSource::Test,
+        )
+    }
+}
+
+pub fn run_audited_action<A, P>(
     command: &str,
     action: &A,
-    dry_run: bool,
-) -> Result<AuditedActionResult, ActionError> {
+    run_policy: P,
+) -> Result<AuditedActionResult, ActionError>
+where
+    A: TuningAction,
+    P: Into<ActionRunPolicy>,
+{
     run_audited_action_with_audit_path(
         command,
         action,
-        dry_run,
+        run_policy,
         &crate::audit::default_audit_log_path(),
     )
 }
 
-pub fn run_audited_action_with_audit_path<A: TuningAction>(
+pub fn run_audited_action_with_audit_path<A, P>(
     command: &str,
     action: &A,
-    dry_run: bool,
+    run_policy: P,
     audit_path: &Path,
-) -> Result<AuditedActionResult, ActionError> {
+) -> Result<AuditedActionResult, ActionError>
+where
+    A: TuningAction,
+    P: Into<ActionRunPolicy>,
+{
+    let run_policy = run_policy.into();
+    let dry_run = run_policy.dry_run;
     let started_unix_nanos = unix_nanos_now();
-    let action_id = action.id();
-    let safety_class = action.safety_class();
+    let descriptor = action.descriptor();
+    let action_id = descriptor.action_id.clone();
+    let safety_class = descriptor.safety_class.clone();
 
     let mut audit_event = AuditEvent {
         schema_version: 1,
@@ -56,6 +131,10 @@ pub fn run_audited_action_with_audit_path<A: TuningAction>(
 
         if dry_run {
             audit_event.action_phase = Some(crate::actions::ActionPhase::DryRun);
+            run_policy
+                .policy
+                .check_action(PolicyIntent::DryRun, &descriptor)
+                .map_err(ActionError::policy_rejected)?;
             let state = action.dry_run().map_err(ActionError::dry_run)?;
             audit_event.success = true;
             audit_event.affected_tasks = state.affected_tasks;
@@ -82,6 +161,10 @@ pub fn run_audited_action_with_audit_path<A: TuningAction>(
             })
         } else {
             audit_event.action_phase = Some(crate::actions::ActionPhase::Apply);
+            run_policy
+                .policy
+                .check_action(PolicyIntent::Apply, &descriptor)
+                .map_err(ActionError::policy_rejected)?;
             let rollback = action.apply().map_err(ActionError::apply)?;
             audit_event.affected_tasks = rollback.affected_tasks();
             audit_event.restore_path = rollback.restore_path().cloned();
@@ -284,6 +367,14 @@ mod tests {
         }
     }
 
+    fn apply_policy() -> ActionRunPolicy {
+        ActionRunPolicy::apply_low_risk(ActionSource::Test, false)
+    }
+
+    fn dry_run_policy() -> ActionRunPolicy {
+        ActionRunPolicy::dry_run(ActionSource::Test)
+    }
+
     fn temp_dir(name: &str) -> PathBuf {
         let mut dir = std::env::temp_dir();
         dir.push(format!(
@@ -296,13 +387,48 @@ mod tests {
     }
 
     #[test]
+    fn policy_rejection_blocks_apply_before_mutation() {
+        let dir = temp_dir("policy-rejection");
+        let audit_path = dir.join("audit.jsonl");
+        let action = FakeAction::new().with_safety_class(SafetyClass::ReversibleMediumRisk);
+
+        let result = run_audited_action_with_audit_path(
+            "fake-controller",
+            &action,
+            ActionRunPolicy::apply_low_risk(ActionSource::Test, false),
+            &audit_path,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(action.events(), vec!["preflight"]);
+        assert!(!action.applied());
+        assert!(!action.rolled_back());
+
+        let err = result.unwrap_err();
+        assert!(matches!(err, ActionError::PolicyRejected { .. }));
+        assert!(err.to_string().contains("policy rejected"));
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(!events[0].success);
+        assert_eq!(events[0].error_category.as_deref(), Some("policy_rejected"));
+        assert!(events[0].message.contains("policy rejected"));
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn fake_action_preflight_failure_blocks_apply_and_verify() {
         let dir = temp_dir("fake-preflight-failure");
         let audit_path = dir.join("audit.jsonl");
         let action = FakeAction::new().with_fail_preflight();
 
-        let result =
-            run_audited_action_with_audit_path("fake-controller", &action, false, &audit_path);
+        let result = run_audited_action_with_audit_path(
+            "fake-controller",
+            &action,
+            apply_policy(),
+            &audit_path,
+        );
 
         assert!(result.is_err());
         assert_eq!(action.events(), vec!["preflight"]);
@@ -329,8 +455,12 @@ mod tests {
         let audit_path = dir.join("audit.jsonl");
         let action = FakeAction::new().with_fail_apply();
 
-        let result =
-            run_audited_action_with_audit_path("fake-controller", &action, false, &audit_path);
+        let result = run_audited_action_with_audit_path(
+            "fake-controller",
+            &action,
+            apply_policy(),
+            &audit_path,
+        );
 
         assert!(result.is_err());
         assert_eq!(action.events(), vec!["preflight", "apply"]);
@@ -356,8 +486,12 @@ mod tests {
         let audit_path = dir.join("audit.jsonl");
         let action = FakeAction::new().with_fail_verify();
 
-        let result =
-            run_audited_action_with_audit_path("fake-controller", &action, false, &audit_path);
+        let result = run_audited_action_with_audit_path(
+            "fake-controller",
+            &action,
+            apply_policy(),
+            &audit_path,
+        );
 
         assert!(result.is_err());
         assert_eq!(
@@ -392,8 +526,12 @@ mod tests {
         let audit_path = dir.join("audit.jsonl");
         let action = FakeAction::new().with_fail_verify().with_fail_rollback();
 
-        let result =
-            run_audited_action_with_audit_path("fake-controller", &action, false, &audit_path);
+        let result = run_audited_action_with_audit_path(
+            "fake-controller",
+            &action,
+            apply_policy(),
+            &audit_path,
+        );
 
         assert!(result.is_err());
         assert_eq!(
@@ -432,9 +570,13 @@ mod tests {
             .with_affected_tasks(9);
         let started = std::time::Instant::now();
 
-        let result =
-            run_audited_action_with_audit_path("fake-controller", &action, false, &audit_path)
-                .unwrap();
+        let result = run_audited_action_with_audit_path(
+            "fake-controller",
+            &action,
+            apply_policy(),
+            &audit_path,
+        )
+        .unwrap();
 
         assert!(
             started.elapsed() >= std::time::Duration::from_millis(20),
@@ -470,9 +612,13 @@ mod tests {
         let audit_path = dir.join("audit.jsonl");
         let action = FakeAction::new().with_affected_tasks(7);
 
-        let result =
-            run_audited_action_with_audit_path("fake-controller", &action, true, &audit_path)
-                .unwrap();
+        let result = run_audited_action_with_audit_path(
+            "fake-controller",
+            &action,
+            dry_run_policy(),
+            &audit_path,
+        )
+        .unwrap();
 
         assert_eq!(action.events(), vec!["preflight", "dry_run"]);
         assert!(!action.applied());
@@ -497,7 +643,8 @@ mod tests {
         let log = TestActionLog::default();
         let action = TestAction::new(&log).with_preflight_failure();
 
-        let result = run_audited_action_with_audit_path("test-cmd", &action, false, &audit_path);
+        let result =
+            run_audited_action_with_audit_path("test-cmd", &action, apply_policy(), &audit_path);
         assert!(result.is_err());
 
         assert_eq!(*log.events.borrow(), vec!["preflight"]);
@@ -529,7 +676,8 @@ mod tests {
         let action = TestAction::new(&log).with_affected_tasks(5);
 
         let result =
-            run_audited_action_with_audit_path("test-cmd", &action, true, &audit_path).unwrap();
+            run_audited_action_with_audit_path("test-cmd", &action, dry_run_policy(), &audit_path)
+                .unwrap();
 
         assert_eq!(result.state.affected_tasks, 5);
         assert!(result.rollback.is_none());
@@ -553,7 +701,8 @@ mod tests {
         let log = TestActionLog::default();
         let action = TestAction::new(&log).with_apply_failure();
 
-        let result = run_audited_action_with_audit_path("test-cmd", &action, false, &audit_path);
+        let result =
+            run_audited_action_with_audit_path("test-cmd", &action, apply_policy(), &audit_path);
         assert!(result.is_err());
 
         assert_eq!(*log.events.borrow(), vec!["preflight", "apply"]);
@@ -576,7 +725,8 @@ mod tests {
         let log = TestActionLog::default();
         let action = TestAction::new(&log).with_verify_failure();
 
-        let result = run_audited_action_with_audit_path("test-cmd", &action, false, &audit_path);
+        let result =
+            run_audited_action_with_audit_path("test-cmd", &action, apply_policy(), &audit_path);
         assert!(result.is_err());
 
         assert_eq!(
@@ -610,7 +760,8 @@ mod tests {
             .with_verify_failure()
             .with_rollback_failure();
 
-        let result = run_audited_action_with_audit_path("test-cmd", &action, false, &audit_path);
+        let result =
+            run_audited_action_with_audit_path("test-cmd", &action, apply_policy(), &audit_path);
         assert!(result.is_err());
 
         assert_eq!(

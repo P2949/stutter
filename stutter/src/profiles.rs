@@ -12,7 +12,7 @@ use crate::{
         TaskIdentity, TuningAction,
         ioprio::{IoPrioAction, IoPrioPolicy, IoPrioValue},
         nice::{NiceAction, NicePolicy},
-        runner::run_audited_action,
+        runner::{ActionRunPolicy, run_audited_action},
     },
     affinity::{self, AffinityRecord, CpuMask},
     process_tree::{self, CompiledPattern, TaskClass, TaskInfo},
@@ -640,7 +640,12 @@ fn apply_profile_plan(
             nice: *nice,
             policy: NicePolicy::default(),
         };
-        run_audited_action("apply-profile nice", &action, false)
+        let run_policy = ActionRunPolicy::for_action(
+            &action,
+            false,
+            crate::daemon_policy::ActionSource::ApplyProfileWatch,
+        );
+        run_audited_action("apply-profile nice", &action, run_policy)
             .with_context(|| format!("failed to apply profile nice={nice}"))?;
     }
 
@@ -650,7 +655,12 @@ fn apply_profile_plan(
             ioprio: *ioprio,
             policy: profile_ioprio_policy(),
         };
-        run_audited_action("apply-profile ionice", &action, false)
+        let run_policy = ActionRunPolicy::for_action(
+            &action,
+            false,
+            crate::daemon_policy::ActionSource::ApplyProfileWatch,
+        );
+        run_audited_action("apply-profile ionice", &action, run_policy)
             .with_context(|| format!("failed to apply profile I/O priority={}", ioprio.label()))?;
     }
 

@@ -69,6 +69,9 @@ pub enum ActionError {
         verify_error: String,
         rollback_error: String,
     },
+    PolicyRejected {
+        message: String,
+    },
 }
 
 impl ActionError {
@@ -118,6 +121,12 @@ impl ActionError {
         }
     }
 
+    pub fn policy_rejected(error: impl std::fmt::Display) -> Self {
+        Self::PolicyRejected {
+            message: error.to_string(),
+        }
+    }
+
     pub fn phase(&self) -> ActionPhase {
         match self {
             Self::PreflightFailure { .. } => ActionPhase::Preflight,
@@ -128,6 +137,7 @@ impl ActionError {
             }
             Self::RollbackFailure { .. } => ActionPhase::Rollback,
             Self::EmergencyRollbackFailure { .. } => ActionPhase::EmergencyRollback,
+            Self::PolicyRejected { .. } => ActionPhase::Preflight,
         }
     }
 
@@ -140,6 +150,7 @@ impl ActionError {
             Self::VerifyFailureRollbackCompleted { .. } => "verify_failure_rollback_completed",
             Self::RollbackFailure { .. } => "rollback_failure",
             Self::EmergencyRollbackFailure { .. } => "emergency_rollback_failure",
+            Self::PolicyRejected { .. } => "policy_rejected",
         }
     }
 
@@ -159,6 +170,7 @@ impl ActionError {
             } => format!(
                 "verify failed; emergency rollback failed: verify error: {verify_error}; rollback error: {rollback_error}"
             ),
+            Self::PolicyRejected { message } => format!("policy rejected: {message}"),
         }
     }
 }
@@ -430,6 +442,22 @@ pub trait TuningAction {
     fn id(&self) -> ActionId;
     fn describe(&self) -> String;
     fn safety_class(&self) -> SafetyClass;
+
+    fn descriptor(&self) -> crate::daemon_policy::ActionDescriptor {
+        let action_id = self.id();
+        crate::daemon_policy::ActionDescriptor {
+            action_kind: action_id.0.clone(),
+            action_id,
+            safety_class: self.safety_class(),
+            effect_scope: crate::daemon_policy::ActionEffectScope::LocalProcessTree,
+            rollback: crate::daemon_policy::RollbackRequirement::RequiredBeforeApply,
+            persistent_effect: false,
+            touches_system_wide_state: false,
+            requires_explicit_target: true,
+            confidence: None,
+        }
+    }
+
     fn preflight(&self) -> ActionResult<Vec<ActionWarning>>;
     fn dry_run(&self) -> ActionResult<ActionState>;
     fn apply(&self) -> ActionResult<RollbackToken>;
