@@ -37,7 +37,7 @@ pub mod tui_panel;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use crate::cli::Config;
+use crate::{cli::Config, daemon_policy::DaemonMode};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -65,12 +65,37 @@ pub struct AutotuneCommandInput {
     pub allow_system_wide_actions: bool,
 }
 
+fn unsupported_live_autotune_mode_error(mode: impl std::fmt::Display) -> anyhow::Error {
+    anyhow::anyhow!(
+        "mode '{}' is not supported; use --mode observe, --mode suggest, or --mode apply-low-risk. apply-low-risk currently applies CPU-affinity candidates only",
+        mode
+    )
+}
+
+fn ensure_supported_live_autotune_mode(mode: DaemonMode) -> anyhow::Result<()> {
+    match mode {
+        DaemonMode::Observe | DaemonMode::Suggest | DaemonMode::ApplyLowRisk => Ok(()),
+        DaemonMode::ApplyMediumRisk | DaemonMode::ApplyHighRisk => {
+            Err(unsupported_live_autotune_mode_error(mode))
+        }
+    }
+}
+
+fn parse_supported_live_autotune_mode(raw_mode: &str) -> anyhow::Result<DaemonMode> {
+    let mode = raw_mode
+        .parse::<DaemonMode>()
+        .map_err(|_| unsupported_live_autotune_mode_error(raw_mode))?;
+    ensure_supported_live_autotune_mode(mode)?;
+    Ok(mode)
+}
+
 fn runtime_config_for_command(
     input: &AutotuneCommandInput,
+    mode: DaemonMode,
     profiles: Vec<crate::profiles::Profile>,
 ) -> anyhow::Result<runtime::AutotuneRuntimeConfig> {
-    let config = match input.mode.as_str() {
-        "observe" => runtime::AutotuneRuntimeConfig::observe(
+    let config = match mode {
+        DaemonMode::Observe => runtime::AutotuneRuntimeConfig::observe(
             input.decision_log.clone(),
             input.tree_pid,
             input.watch_process.clone(),
@@ -78,7 +103,7 @@ fn runtime_config_for_command(
         .with_profiles(profiles)
         .with_min_focus_confidence(input.min_focus_confidence)
         .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
-        "suggest" => runtime::AutotuneRuntimeConfig::suggest(
+        DaemonMode::Suggest => runtime::AutotuneRuntimeConfig::suggest(
             input.decision_log.clone(),
             input.tree_pid,
             input.watch_process.clone(),
@@ -86,7 +111,7 @@ fn runtime_config_for_command(
         .with_profiles(profiles)
         .with_min_focus_confidence(input.min_focus_confidence)
         .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
-        "apply-low-risk" => runtime::AutotuneRuntimeConfig::apply_low_risk(
+        DaemonMode::ApplyLowRisk => runtime::AutotuneRuntimeConfig::apply_low_risk(
             input.decision_log.clone(),
             input.tree_pid,
             input.watch_process.clone(),
@@ -95,11 +120,8 @@ fn runtime_config_for_command(
         .with_min_focus_confidence(input.min_focus_confidence)
         .with_candidate_window_seconds(input.duration_seconds.unwrap_or(30))
         .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
-        other => {
-            anyhow::bail!(
-                "mode '{}' is not supported by the live autotune runtime; apply-low-risk currently applies CPU-affinity candidates only",
-                other
-            )
+        DaemonMode::ApplyMediumRisk | DaemonMode::ApplyHighRisk => {
+            return Err(unsupported_live_autotune_mode_error(mode));
         }
     };
 
@@ -107,17 +129,9 @@ fn runtime_config_for_command(
 }
 
 pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()> {
-    match input.mode.as_str() {
-        "observe" | "suggest" | "apply-low-risk" => {}
-        _ => {
-            anyhow::bail!(
-                "mode '{}' is not supported; use --mode observe, --mode suggest, or --mode apply-low-risk. apply-low-risk currently applies CPU-affinity candidates only",
-                input.mode
-            )
-        }
-    }
+    let mode = parse_supported_live_autotune_mode(&input.mode)?;
 
-    if input.mode == "apply-low-risk" {
+    if mode == DaemonMode::ApplyLowRisk {
         if input.auto_focus {
             anyhow::bail!(
                 "apply-low-risk does not support --auto-focus yet; pass --tree-pid or --watch-process"
@@ -129,7 +143,7 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
         }
     }
 
-    if input.mode == "suggest"
+    if mode == DaemonMode::Suggest
         && let (Some(profiles_path), Some(tree_pid)) = (input.profiles.as_deref(), input.tree_pid)
     {
         let loaded_profiles = profiles::load_autotune_profiles(profiles_path)?;
@@ -167,9 +181,9 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
         .map(|loaded| loaded.profiles.clone())
         .unwrap_or_default();
 
-    let runtime_config = runtime_config_for_command(&input, profile_list)?;
+    let runtime_config = runtime_config_for_command(&input, mode, profile_list)?;
 
-    let duration = if input.mode == "apply-low-risk" {
+    let duration = if mode == DaemonMode::ApplyLowRisk {
         None
     } else {
         input.duration_seconds.map(Duration::from_secs)
@@ -227,9 +241,24 @@ mod tests {
 
     #[test]
     fn runtime_config_builder_accepts_all_controller_modes() {
-        for mode in ["observe", "suggest", "apply-low-risk"] {
-            let input = base_autotune_input(mode);
-            runtime_config_for_command(&input, Vec::new()).unwrap();
+        for raw_mode in ["observe", "suggest", "apply-low-risk"] {
+            let input = base_autotune_input(raw_mode);
+            let mode = parse_supported_live_autotune_mode(raw_mode).unwrap();
+            runtime_config_for_command(&input, mode, Vec::new()).unwrap();
+        }
+    }
+
+    #[test]
+    fn unsupported_medium_and_high_live_modes_are_rejected_by_central_gate() {
+        for raw_mode in ["apply-medium-risk", "apply-high-risk"] {
+            let err = parse_supported_live_autotune_mode(raw_mode)
+                .unwrap_err()
+                .to_string();
+
+            assert!(err.contains(&format!("mode '{raw_mode}' is not supported")));
+            assert!(err.contains("--mode observe"));
+            assert!(err.contains("--mode suggest"));
+            assert!(err.contains("--mode apply-low-risk"));
         }
     }
 
