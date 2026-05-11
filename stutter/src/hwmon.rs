@@ -63,11 +63,12 @@ pub fn probe_hwmon_with_options(
 ) -> HwmonProbeReport {
     let mut warnings = Vec::new();
     let selected_root = if let Some(root) = root_override {
-        if root.exists() {
-            Some(root.to_path_buf())
-        } else {
-            warnings.push(format!("hwmon root override not found: {}", root.display()));
-            None
+        match validate_hwmon_root_override(root) {
+            Ok(root) => Some(root),
+            Err(err) => {
+                warnings.push(err);
+                None
+            }
         }
     } else if let Some(card) = drm_card {
         let root = discover_drm_hwmon_root(Path::new("/sys/class/drm"), card);
@@ -159,11 +160,15 @@ impl HwmonReader {
         render_node: Option<&Path>,
     ) -> Option<Self> {
         let root = if let Some(root) = root_override {
-            if root.exists() {
-                Some(root.to_path_buf())
-            } else {
-                log::warn!("hwmon_root_override_not_found path={}", root.display());
-                None
+            match validate_hwmon_root_override(root) {
+                Ok(root) => Some(root),
+                Err(err) => {
+                    log::warn!(
+                        "hwmon_root_override_invalid path={} err={err}",
+                        root.display()
+                    );
+                    None
+                }
             }
         } else if let Some(card) = drm_card {
             let root = discover_drm_hwmon_root(Path::new("/sys/class/drm"), card);
@@ -341,10 +346,50 @@ fn discover_drm_hwmon_root(drm_root: &Path, drm_name: &str) -> Option<PathBuf> {
 }
 
 fn sensor_root(path: &Path) -> Option<PathBuf> {
-    (path.join("gpu_busy_percent").exists()
-        || path.join("temp1_input").exists()
-        || path.join("power1_average").exists())
-    .then(|| path.to_path_buf())
+    has_supported_hwmon_sensor_file(path).then(|| path.to_path_buf())
+}
+
+fn validate_hwmon_root_override(root: &Path) -> Result<PathBuf, String> {
+    let metadata = fs::metadata(root).map_err(|err| {
+        format!(
+            "hwmon root override not accessible: {}: {err}",
+            root.display()
+        )
+    })?;
+
+    if !metadata.is_dir() {
+        return Err(format!(
+            "hwmon root override is not a hwmon directory: {} is not a directory",
+            root.display()
+        ));
+    }
+
+    if !has_supported_hwmon_sensor_file(root) {
+        return Err(format!(
+            "hwmon root override is not a hwmon directory: {} has no supported sensor files",
+            root.display()
+        ));
+    }
+
+    Ok(root.to_path_buf())
+}
+
+fn has_supported_hwmon_sensor_file(root: &Path) -> bool {
+    [
+        "device/gpu_busy_percent",
+        "gpu_busy_percent",
+        "device/mem_info_vram_used",
+        "mem_info_vram_used",
+        "device/mem_info_vram_total",
+        "mem_info_vram_total",
+        "freq1_input",
+        "device/tile0/gt0/freq0/cur_freq_mhz",
+        "freq2_input",
+        "temp1_input",
+        "power1_average",
+    ]
+    .iter()
+    .any(|relative| root.join(relative).exists())
 }
 
 fn first_hwmon_child(path: &Path) -> Option<PathBuf> {
@@ -523,6 +568,75 @@ mod tests {
         assert!(!report.vram_used_available);
         assert!(report.temp_available);
         assert!(report.power_available);
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn hwmon_root_override_rejects_missing_path() {
+        let root = temp_dir("hwmon-missing");
+
+        let report = probe_hwmon_with_options(Some(&root), None, None);
+
+        assert_eq!(report.selected_root, None);
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("hwmon root override not accessible"))
+        );
+    }
+
+    #[test]
+    fn hwmon_root_override_rejects_file_path() {
+        let root = temp_dir("hwmon-file");
+        if let Some(parent) = root.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&root, "not a directory\n").unwrap();
+
+        let report = probe_hwmon_with_options(Some(&root), None, None);
+
+        assert_eq!(report.selected_root, None);
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("is not a directory"))
+        );
+
+        fs::remove_file(root).ok();
+    }
+
+    #[test]
+    fn hwmon_root_override_rejects_directory_without_supported_sensor_files() {
+        let root = temp_dir("hwmon-empty");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("name"), "fake\n").unwrap();
+
+        let report = probe_hwmon_with_options(Some(&root), None, None);
+
+        assert_eq!(report.selected_root, None);
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("has no supported sensor files"))
+        );
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn hwmon_root_override_accepts_non_sysfs_fake_root_with_supported_sensor_file() {
+        let root = temp_dir("hwmon-fake-valid");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("temp1_input"), "47000\n").unwrap();
+
+        let report = probe_hwmon_with_options(Some(&root), None, None);
+
+        assert_eq!(report.selected_root, Some(root.clone()));
+        assert!(report.temp_available);
 
         fs::remove_dir_all(root).ok();
     }

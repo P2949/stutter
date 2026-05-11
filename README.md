@@ -441,6 +441,11 @@ Hardware monitoring notes:
 - On multi-GPU systems, prefer an explicit selector such as `--hwmon-drm-card card1`,
   `--hwmon-render-node /dev/dri/renderD129`, or the direct `--hwmon-root /path/to/hwmon`
   override so automatic discovery does not pick the wrong device.
+- `--hwmon-root` is a trusted direct override. It is not restricted to `/sys/class/hwmon`,
+  so development and test fixtures can use alternate roots, but the path must exist, be a
+  directory, and contain at least one supported hwmon sensor file before sampling starts.
+  Passing a regular file or a directory without supported sensor files is rejected as an
+  invalid hwmon directory.
 - Frequent hwmon sampling uses cached file descriptors internally; if you see warnings about
   `latency_samples_truncated`, that means stutter is storing a bounded number of exact samples
   and will fall back to histogram-based percentile estimates for p95/p99.
@@ -823,7 +828,7 @@ Use `stutter probes` or `stutter probes --json` to list implemented, view-only, 
 - `--irq-latency`: enable IRQ latency tracing and record `irq_events.json`; at least one explicit `--irq <IRQ>` is required. Use `stutter inspect-irqs` to find the IRQ numbers for your devices.
 - `--irq <IRQ>`: add an IRQ number to target for IRQ latency measurement (can repeat).
 - `--hwmon`: enable GPU hwmon sampling; combine with `--hwmon-drm-card`, `--hwmon-render-node`, or `--hwmon-root` to avoid ambiguous multi-GPU discovery.
-- `--hwmon-root <PATH>`: override hwmon discovery path when automatic detection fails.
+- `--hwmon-root <PATH>`: trusted direct hwmon discovery override. The path may be outside `/sys/class/hwmon`, but it must exist, be a directory, and contain supported hwmon sensor files.
 - `--hwmon-drm-card <CARD>`: choose a DRM card such as `card0` or `card1` for hwmon discovery.
 - `--hwmon-render-node <PATH>`: choose the DRM render node whose device hwmon should be sampled.
 - `--mangohud-log <PATH>`: provide a MangoHud CSV to correlate frame times.
