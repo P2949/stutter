@@ -160,30 +160,6 @@ impl EventRuntimeConfig {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn handle_event(
-    event: &SchedulerEvent,
-    config: &crate::config::model::MonitorConfig,
-    started: Instant,
-    tasks: &mut TaskTracker,
-    monotonic_start_ns: Option<u64>,
-    scx_ops: Option<&str>,
-    scx_state: Option<&str>,
-    scx_enable_seq: Option<&str>,
-) -> interpret::SchedulerSampleUpdate {
-    let runtime_config = EventRuntimeConfig::from_monitor_config(config);
-    handle_event_with_runtime_config(
-        event,
-        &runtime_config,
-        started,
-        tasks,
-        monotonic_start_ns,
-        scx_ops,
-        scx_state,
-        scx_enable_seq,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
 pub fn handle_event_with_runtime_config(
     event: &SchedulerEvent,
     config: &EventRuntimeConfig,

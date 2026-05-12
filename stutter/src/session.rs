@@ -106,10 +106,6 @@ fn foreground_resolver_from_config(
         .with_max_stale_ms(config.focus.foreground_max_stale_ms)
 }
 
-fn event_runtime_config_from_config(config: &MonitorConfig) -> crate::events::EventRuntimeConfig {
-    crate::events::EventRuntimeConfig::from_monitor_config(config)
-}
-
 fn foreground_identity_changed(
     old: Option<&crate::foreground::ForegroundWindowSnapshot>,
     new: &crate::foreground::ForegroundWindowSnapshot,
@@ -755,6 +751,7 @@ impl MonitorSession {
         let started = Instant::now();
 
         let ui = UiRuntimeStage::begin(&config)?;
+        let event_runtime_config = crate::events::EventRuntimeConfig::from_monitor_config(&config);
 
         let interval_label = if config.timing.epoch_period_ms.is_some() {
             "epoch"
@@ -783,7 +780,7 @@ impl MonitorSession {
             exporter_runtime.prometheus_task,
             exporter_runtime.otel_exporter,
             alert_runtime.sender,
-            event_runtime_config_from_config(&config).output,
+            event_runtime_config.output,
         );
 
         let runtime = MonitorRuntime::from_config_parts(
@@ -792,6 +789,7 @@ impl MonitorSession {
             ui,
             targeting,
             MonitorEventBus::new(event_tx),
+            event_runtime_config,
         );
 
         Ok(Self {
@@ -855,7 +853,7 @@ impl MonitorSession {
     }
 
     async fn dispatch_monitor_event(&mut self, event: MonitorEvent) -> anyhow::Result<()> {
-        let output = event_runtime_config_from_config(&self.config).output;
+        let output = self.runtime.event_runtime_config.output;
         let outputs = &mut self.runtime.outputs;
         let mut sinks = MonitorOutputSinks::new(
             output,
@@ -1323,7 +1321,7 @@ impl MonitorSession {
                     {
                         let update = crate::events::handle_event_with_runtime_config(
                             &event,
-                            &event_runtime_config_from_config(&self.config),
+                            &self.runtime.event_runtime_config,
                             self.started,
                             &mut self.runtime.targeting.tasks,
                             recording_monotonic_start_ns,
