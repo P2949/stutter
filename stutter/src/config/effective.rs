@@ -53,38 +53,13 @@ impl EffectiveMonitorConfig {
 pub fn resolve_monitor_config_sources(
     sources: ConfigSources,
 ) -> Result<ResolvedMonitorConfig, ConfigError> {
-    let mut config = merge::merge_config_sources_checked(sources)?;
-    compile_task_filters(&mut config)?;
+    let config = merge::merge_config_sources_checked(sources)?;
 
     Ok(ResolvedMonitorConfig {
         config,
         provenance: Vec::new(),
         diagnostics: Vec::new(),
     })
-}
-
-pub(crate) fn compile_task_filters(config: &mut MonitorConfig) -> Result<(), ConfigError> {
-    let compiled_include = config
-        .target
-        .include_comm
-        .iter()
-        .map(|pattern| crate::process_tree::CompiledPattern::new(pattern.clone()))
-        .collect::<anyhow::Result<Vec<_>>>()
-        .map_err(ConfigError::InvalidUserLayer)?;
-    let compiled_exclude = config
-        .target
-        .exclude_comm
-        .iter()
-        .map(|pattern| crate::process_tree::CompiledPattern::new(pattern.clone()))
-        .collect::<anyhow::Result<Vec<_>>>()
-        .map_err(ConfigError::InvalidUserLayer)?;
-
-    config.target.task_filters = crate::process_tree::TaskFilters {
-        include_comm: compiled_include,
-        exclude_comm: compiled_exclude,
-    };
-
-    Ok(())
 }
 
 pub fn apply_layer(config: &mut MonitorConfig, layer: MonitorConfigLayer) {

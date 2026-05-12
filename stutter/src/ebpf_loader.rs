@@ -21,6 +21,7 @@ use tokio::io::unix::AsyncFd;
 
 use crate::{
     config::TARGET_PIDS_MAX, probe_activation::ProbeActivationPlan, probe_registry::ProbeKey,
+    session::targeting::TargetPolicy,
 };
 
 const DEFAULT_AVAILABLE_MEMORY_BYTES: u64 = 1 << 30;
@@ -167,7 +168,10 @@ pub fn resolve_cgroup_id_best_effort(_path: &Path) -> anyhow::Result<u64> {
     anyhow::bail!("native cgroup filtering is only supported on Unix/Linux");
 }
 
-pub fn load_and_attach(config: &crate::config::model::MonitorConfig) -> anyhow::Result<LoadedEbpf> {
+pub fn load_and_attach(
+    config: &crate::config::model::MonitorConfig,
+    target_policy: &TargetPolicy,
+) -> anyhow::Result<LoadedEbpf> {
     let memlock_report = raise_memlock_limit();
     log_memlock_policy_report(&memlock_report);
     let map_sizing = map_sizing_for_config_after_memlock(config, &memlock_report);
@@ -430,7 +434,7 @@ pub fn load_and_attach(config: &crate::config::model::MonitorConfig) -> anyhow::
         None
     };
 
-    if let Some(cgroup_path) = &config.target.cgroupv2 {
+    if let Some(cgroup_path) = &target_policy.cgroupv2 {
         // Pre-populate TARGET_PIDS from the cgroup hierarchy to avoid races
         // where a task appears in sched events before the eBPF-side target
         // maps are populated. Native cgroup filtering only applies to
@@ -444,9 +448,9 @@ pub fn load_and_attach(config: &crate::config::model::MonitorConfig) -> anyhow::
         let snapshot = crate::process_tree::target_snapshot(
             crate::process_tree::TargetSnapshotInput::default()
                 .cgroup_path(Some(cgroup_path))
-                .exclude_tree_pids(&config.target.exclude_tree_pids)
-                .filters(&config.target.task_filters)
-                .keep_missing_pid(config.target.keep_missing_pid)
+                .exclude_tree_pids(&target_policy.exclude_tree_pids)
+                .filters(&target_policy.compiled_filters)
+                .keep_missing_pid(target_policy.keep_missing_pid)
                 .cache(&mut cache),
         );
         let pids: Vec<_> = snapshot.tasks.keys().copied().collect();
@@ -460,11 +464,11 @@ pub fn load_and_attach(config: &crate::config::model::MonitorConfig) -> anyhow::
         }
 
         // Also respect the user-defined --max-tasks limit during prepopulation.
-        if pids.len() > config.target.max_tasks {
+        if pids.len() > target_policy.max_tasks {
             anyhow::bail!(
                 "cgroup target prepopulation failed: {} tasks in cgroup match filters, but --max-tasks is {}",
                 pids.len(),
-                config.target.max_tasks
+                target_policy.max_tasks
             );
         }
 

@@ -3,7 +3,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 use crate::{
     community_rules::CommunityRulesDb,
     config::model::MonitorConfig,
-    process_tree::{ProcessCache, TargetSnapshotInput, TaskFilters},
+    error::ConfigError,
+    process_tree::{CompiledPattern, ProcessCache, TargetSnapshotInput, TaskFilters},
     tasks::TaskTracker,
     watch::{
         WatchProcessState, add_watch_tree_pid, capture_tree_root_starttimes,
@@ -24,8 +25,11 @@ pub struct TargetPolicy {
 }
 
 impl TargetPolicy {
-    pub fn from_monitor_config(config: &MonitorConfig) -> Self {
-        Self {
+    pub fn from_monitor_config(config: &MonitorConfig) -> Result<Self, ConfigError> {
+        let compiled_filters =
+            compile_target_filters(&config.target.include_comm, &config.target.exclude_comm)?;
+
+        Ok(Self {
             manual_pids: config.target.target_pids.clone(),
             configured_tree_pids: config.target.tree_pids.clone(),
             cgroupv2: config.target.cgroupv2.clone(),
@@ -34,9 +38,37 @@ impl TargetPolicy {
             exclude_comm: config.target.exclude_comm.clone(),
             keep_missing_pid: config.target.keep_missing_pid,
             max_tasks: config.target.max_tasks,
-            compiled_filters: config.target.task_filters.clone(),
-        }
+            compiled_filters,
+        })
     }
+}
+
+fn compile_target_filters(
+    include_comm: &[String],
+    exclude_comm: &[String],
+) -> Result<TaskFilters, ConfigError> {
+    Ok(TaskFilters {
+        include_comm: compile_target_patterns("include_comm", include_comm)?,
+        exclude_comm: compile_target_patterns("exclude_comm", exclude_comm)?,
+    })
+}
+
+fn compile_target_patterns(
+    field: &'static str,
+    patterns: &[String],
+) -> Result<Vec<CompiledPattern>, ConfigError> {
+    patterns
+        .iter()
+        .map(|pattern| {
+            CompiledPattern::new(pattern.clone()).map_err(|source| {
+                ConfigError::InvalidTargetFilter {
+                    field,
+                    pattern: pattern.clone(),
+                    source,
+                }
+            })
+        })
+        .collect()
 }
 
 pub struct TargetController {
@@ -65,18 +97,13 @@ impl TargetController {
         }
     }
 
-    pub fn from_config_parts(
-        config: &MonitorConfig,
+    pub fn from_policy_parts(
+        policy: TargetPolicy,
         dynamic_tree_pids: Vec<u32>,
         watch_state: WatchProcessState,
         tree_root_starttimes: BTreeMap<u32, Option<u64>>,
     ) -> Self {
-        Self::new(
-            TargetPolicy::from_monitor_config(config),
-            dynamic_tree_pids,
-            watch_state,
-            tree_root_starttimes,
-        )
+        Self::new(policy, dynamic_tree_pids, watch_state, tree_root_starttimes)
     }
 
     pub fn effective_tree_pids(&self) -> &[u32] {

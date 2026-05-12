@@ -1,9 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-use crate::{
-    config::{CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX},
-    process_tree::TaskFilters,
-};
+use crate::config::{CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MonitorConfig {
@@ -34,7 +31,6 @@ pub struct TargetConfig {
     pub exclude_tree_pids: Vec<u32>,
     pub include_comm: Vec<String>,
     pub exclude_comm: Vec<String>,
-    pub task_filters: TaskFilters,
     pub watch_process: Option<String>,
     pub persistent: bool,
     pub keep_missing_pid: bool,
@@ -50,7 +46,6 @@ impl Default for TargetConfig {
             exclude_tree_pids: Vec::new(),
             include_comm: Vec::new(),
             exclude_comm: Vec::new(),
-            task_filters: TaskFilters::default(),
             watch_process: None,
             persistent: false,
             keep_missing_pid: false,
