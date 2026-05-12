@@ -13,7 +13,7 @@ use crate::{
     alert::AlertPayload,
     artifacts::{ArtifactKind, ArtifactSelection},
     ebpf_loader::DropCountersSnapshot,
-    events,
+    events as raw_events,
     metadata::SystemMetadata,
     metrics,
     process_tree::{self, TargetDiffAction, TaskClass, TaskInfo},
@@ -22,8 +22,45 @@ use crate::{
         RecordedLatency, RecordingRun, SESSION_SCHEMA_VERSION, SessionFile, SessionTask,
         SpikeEvent, SpikeEventBuffer, recorded_config, recorded_time,
     },
+    session::sinks::{MonitorEventSink, RecorderSink},
     tasks, tune,
 };
+
+mod events {
+    use super::MonitorEventSink;
+    pub use super::raw_events::push_artifact_event;
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn handle_event(
+        event: &super::SchedulerEvent,
+        config: &crate::config::model::MonitorConfig,
+        started: super::Instant,
+        tasks: &mut super::tasks::TaskTracker,
+        monotonic_start_ns: Option<u64>,
+        recorder: &mut super::recorder::LiveRecorder,
+        _alert_sender: Option<&tokio::sync::mpsc::Sender<super::AlertPayload>>,
+        scx_ops: Option<&str>,
+        scx_state: Option<&str>,
+        scx_enable_seq: Option<&str>,
+    ) -> Option<crate::recorder::SpikeEvent> {
+        let update = super::raw_events::handle_event(
+            event,
+            config,
+            started,
+            tasks,
+            monotonic_start_ns,
+            scx_ops,
+            scx_state,
+            scx_enable_seq,
+        );
+
+        for event in &update.events {
+            super::RecorderSink::new(recorder).on_event(event).unwrap();
+        }
+
+        update.spike_event
+    }
+}
 
 #[test]
 fn reused_tid_with_different_task_resets_stats_after_removal() {

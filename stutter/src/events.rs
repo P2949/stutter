@@ -11,7 +11,7 @@ use crate::{
     metrics::{self, format_latency},
     process_tree,
     recorder::{self, IrqEventRecord, LiveRecorder, RecordingCounters},
-    session::sinks::{MonitorEventSink, MonitorOutputConfig, MonitorOutputSinks, RecorderSink},
+    session::sinks::MonitorOutputConfig,
     session_events::MonitorEvent,
     tasks::TaskTracker,
 };
@@ -19,25 +19,19 @@ use crate::{
 pub mod decode;
 pub mod interpret;
 
-use crate::alert::AlertPayload;
-
-pub fn handle_irq_record(record: &IrqEventRecord, recorder: &mut LiveRecorder) {
-    let event = MonitorEvent::IrqEvent {
-        event: Box::new(record.clone()),
-    };
-    if let Err(err) = RecorderSink::new(recorder).on_event(&event) {
-        warn!("monitor_event_sink_failed err={err}");
-    }
+pub fn handle_irq_record(record: &IrqEventRecord) -> MonitorEvent {
     log_irq_record(record);
+    MonitorEvent::IrqEvent {
+        event: Box::new(record.clone()),
+    }
 }
 
 pub fn handle_migration_event(
     event: &MigrationEvent,
     tasks: &mut TaskTracker,
-    recorder: &mut LiveRecorder,
     cpu_to_pkg: &BTreeMap<u32, String>,
     started: Instant,
-) {
+) -> MonitorEvent {
     let elapsed_ms = started.elapsed().as_millis() as u64;
 
     if let Some(stats) = tasks.stats_by_task.get_mut(&event.tid) {
@@ -60,15 +54,12 @@ pub fn handle_migration_event(
         timestamp_ns: event.timestamp_ns,
     };
 
-    let event = MonitorEvent::MigrationEvent {
+    MonitorEvent::MigrationEvent {
         event: Box::new(record),
-    };
-    if let Err(err) = RecorderSink::new(recorder).on_event(&event) {
-        warn!("monitor_event_sink_failed err={err}");
     }
 }
 
-pub fn handle_cpu_freq_event(event: &CpuFreqEvent, recorder: &mut LiveRecorder, started: Instant) {
+pub fn handle_cpu_freq_event(event: &CpuFreqEvent, started: Instant) -> MonitorEvent {
     let elapsed_ms = started.elapsed().as_millis() as u64;
 
     let record = recorder::CpuFreqRecord {
@@ -78,11 +69,8 @@ pub fn handle_cpu_freq_event(event: &CpuFreqEvent, recorder: &mut LiveRecorder, 
         timestamp_ns: event.timestamp_ns,
     };
 
-    let event = MonitorEvent::CpuFreqSample {
+    MonitorEvent::CpuFreqSample {
         event: Box::new(record),
-    };
-    if let Err(err) = RecorderSink::new(recorder).on_event(&event) {
-        warn!("monitor_event_sink_failed err={err}");
     }
 }
 
@@ -108,12 +96,9 @@ pub fn block_io_event_record(
     }
 }
 
-pub fn handle_block_io_record(record: &recorder::BlockIoRecord, recorder: &mut LiveRecorder) {
-    let event = MonitorEvent::IoEvent {
+pub fn handle_block_io_record(record: &recorder::BlockIoRecord) -> MonitorEvent {
+    MonitorEvent::IoEvent {
         event: Box::new(record.clone()),
-    };
-    if let Err(err) = RecorderSink::new(recorder).on_event(&event) {
-        warn!("monitor_event_sink_failed err={err}");
     }
 }
 
@@ -194,12 +179,10 @@ pub fn handle_event(
     started: Instant,
     tasks: &mut TaskTracker,
     monotonic_start_ns: Option<u64>,
-    recorder: &mut LiveRecorder,
-    alert_sender: Option<&tokio::sync::mpsc::Sender<AlertPayload>>,
     scx_ops: Option<&str>,
     scx_state: Option<&str>,
     scx_enable_seq: Option<&str>,
-) -> Option<recorder::SpikeEvent> {
+) -> interpret::SchedulerSampleUpdate {
     let runtime_config = EventRuntimeConfig::from_monitor_config(config);
     handle_event_with_runtime_config(
         event,
@@ -207,8 +190,6 @@ pub fn handle_event(
         started,
         tasks,
         monotonic_start_ns,
-        recorder,
-        alert_sender,
         scx_ops,
         scx_state,
         scx_enable_seq,
@@ -222,13 +203,11 @@ pub fn handle_event_with_runtime_config(
     started: Instant,
     tasks: &mut TaskTracker,
     monotonic_start_ns: Option<u64>,
-    recorder: &mut LiveRecorder,
-    alert_sender: Option<&tokio::sync::mpsc::Sender<AlertPayload>>,
     scx_ops: Option<&str>,
     scx_state: Option<&str>,
     scx_enable_seq: Option<&str>,
-) -> Option<recorder::SpikeEvent> {
-    let update = interpret::interpret_scheduler_event(
+) -> interpret::SchedulerSampleUpdate {
+    interpret::interpret_scheduler_event(
         event,
         &config.spike,
         started,
@@ -237,16 +216,7 @@ pub fn handle_event_with_runtime_config(
         scx_ops,
         scx_state,
         scx_enable_seq,
-    );
-
-    let mut sinks = MonitorOutputSinks::new(config.output, recorder, alert_sender);
-    for event in &update.events {
-        if let Err(err) = sinks.dispatch(event) {
-            warn!("monitor_event_sink_failed err={err}");
-        }
-    }
-
-    update.spike_event
+    )
 }
 
 pub fn irq_event_record(monotonic_start_ns: Option<u64>, event: &IrqEvent) -> IrqEventRecord {
