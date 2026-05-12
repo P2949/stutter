@@ -35,9 +35,6 @@ pub struct RecordingCounters {
     pub process_scan_budget_exceeded_count: u64,
     pub thread_scan_limited_count: u64,
 
-    #[allow(dead_code)]
-    pub frame_events_dropped: u64,
-
     pub spike_event_count: u64,
     pub spike_events_dropped_count: u64,
     pub alert_events_dropped_count: u64,
@@ -105,7 +102,7 @@ impl LiveRecorder {
         self.stdout_spike_stream = Some(StdoutJsonStream::new());
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn write_foreground_event(&mut self, event: ForegroundEvent) -> anyhow::Result<()> {
         use crate::session::sinks::{
             MonitorEventSink, MonitorOutputConfig, MonitorSinkContext, RecorderSink,
