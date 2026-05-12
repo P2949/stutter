@@ -4,7 +4,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     actions::SafetyClass,
-    config::{FocusSource, ForegroundSource, model::MonitorConfig},
+    config::{FocusSource, ForegroundSource, layer::MonitorConfigLayer, model::MonitorConfig},
     daemon_policy::DaemonMode,
 };
 
@@ -49,6 +49,61 @@ pub struct RemoteMonitorRequest {
 
     pub record: bool,
     pub run_name: Option<String>,
+}
+
+impl RemoteMonitorRequest {
+    pub fn into_monitor_config_layer(self) -> anyhow::Result<MonitorConfigLayer> {
+        let focus_source = match self.focus_source.as_deref() {
+            Some(value) => crate::config_file::parse_focus_source_value(value)?,
+            None => FocusSource::Heuristic,
+        };
+        let foreground_source = match self.foreground_source.as_deref() {
+            Some(value) => crate::config_file::parse_foreground_source_value(value)?,
+            None => ForegroundSource::Auto,
+        };
+
+        let spike_threshold_ns = self.spike_us.unwrap_or(1000).saturating_mul(1_000);
+        let runtime_slices_max_tasks = self.runtime_slices_max_tasks.unwrap_or(256);
+
+        Ok(MonitorConfigLayer {
+            target_pids: (!self.target_pids.is_empty()).then_some(self.target_pids),
+            tree_pids: (!self.tree_pids.is_empty()).then_some(self.tree_pids),
+            exclude_tree_pids: (!self.exclude_tree_pids.is_empty())
+                .then_some(self.exclude_tree_pids),
+            include_comm: (!self.include_comm.is_empty()).then_some(self.include_comm),
+            exclude_comm: (!self.exclude_comm.is_empty()).then_some(self.exclude_comm),
+
+            summary_period_ms: self.summary_ms.filter(|value| *value != 1_000),
+            max_duration: self
+                .duration_seconds
+                .map(|seconds| Some(Duration::from_secs(seconds))),
+            spike_threshold_ns: (spike_threshold_ns != 1_000_000).then_some(spike_threshold_ns),
+
+            irq_latency: self.irq_latency.then_some(true),
+            irqs: (!self.irqs.is_empty()).then_some(self.irqs),
+            hwmon: self.hwmon.then_some(true),
+            cpu_freq: self.cpu_freq.then_some(true),
+            faults: self.faults.then_some(true),
+            block_io: self.block_io.then_some(true),
+            stat_wait: self.stat_wait.then_some(true),
+            runtime_slices: self.runtime_slices.then_some(true),
+            runtime_slices_max_tasks: (runtime_slices_max_tasks != 256)
+                .then_some(runtime_slices_max_tasks),
+            run_name: self
+                .record
+                .then(|| Some(self.run_name.unwrap_or_else(|| "remote-run".to_owned()))),
+            focus_source: (focus_source != FocusSource::Heuristic).then_some(focus_source),
+            foreground_window: (self.foreground_window || focus_source != FocusSource::Heuristic)
+                .then_some(true),
+            foreground_source: (foreground_source != ForegroundSource::Auto)
+                .then_some(foreground_source),
+            foreground_poll_ms: self.foreground_poll_ms.filter(|value| *value != 1_000),
+            foreground_max_stale_ms: self.foreground_max_stale_ms.filter(|value| *value != 2_500),
+            foreground_include_title: self.foreground_include_title.then_some(true),
+
+            ..MonitorConfigLayer::default()
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -568,5 +623,67 @@ mod tests {
 
         assert_eq!(limits.max_mode, DaemonMode::ApplyMediumRisk);
         assert_eq!(limits.max_safety_class, SafetyClass::ReversibleMediumRisk);
+    }
+
+    #[test]
+    fn remote_monitor_request_converts_to_monitor_config_layer() {
+        let request = RemoteMonitorRequest {
+            target_pids: vec![1234],
+            tree_pids: vec![5678],
+            exclude_tree_pids: vec![9999],
+            duration_seconds: Some(5),
+            spike_us: Some(750),
+            summary_ms: Some(500),
+            include_comm: vec!["Game".to_owned()],
+            exclude_comm: vec!["steamwebhelper".to_owned()],
+            hwmon: true,
+            cpu_freq: true,
+            faults: true,
+            stat_wait: true,
+            block_io: true,
+            runtime_slices: true,
+            runtime_slices_max_tasks: Some(64),
+            irq_latency: true,
+            irqs: vec![44],
+            foreground_window: false,
+            focus_source: Some("hybrid".to_owned()),
+            foreground_source: Some("sway".to_owned()),
+            foreground_poll_ms: Some(750),
+            foreground_max_stale_ms: Some(3000),
+            foreground_include_title: true,
+            record: true,
+            run_name: Some("remote-test".to_owned()),
+        };
+
+        let layer = request.into_monitor_config_layer().unwrap();
+
+        assert_eq!(layer.target_pids, Some(vec![1234]));
+        assert_eq!(layer.tree_pids, Some(vec![5678]));
+        assert_eq!(layer.exclude_tree_pids, Some(vec![9999]));
+        assert_eq!(
+            layer.max_duration,
+            Some(Some(std::time::Duration::from_secs(5)))
+        );
+        assert_eq!(layer.spike_threshold_ns, Some(750_000));
+        assert_eq!(layer.summary_period_ms, Some(500));
+        assert_eq!(layer.include_comm, Some(vec!["Game".to_owned()]));
+        assert_eq!(layer.exclude_comm, Some(vec!["steamwebhelper".to_owned()]));
+        assert_eq!(layer.hwmon, Some(true));
+        assert_eq!(layer.cpu_freq, Some(true));
+        assert_eq!(layer.faults, Some(true));
+        assert_eq!(layer.stat_wait, Some(true));
+        assert_eq!(layer.block_io, Some(true));
+        assert_eq!(layer.runtime_slices, Some(true));
+        assert_eq!(layer.runtime_slices_max_tasks, Some(64));
+        assert_eq!(layer.irq_latency, Some(true));
+        assert_eq!(layer.irqs, Some(vec![44]));
+        assert_eq!(layer.focus_source, Some(FocusSource::Hybrid));
+        assert_eq!(layer.foreground_window, Some(true));
+        assert_eq!(layer.foreground_source, Some(ForegroundSource::Sway));
+        assert_eq!(layer.foreground_poll_ms, Some(750));
+        assert_eq!(layer.foreground_max_stale_ms, Some(3000));
+        assert_eq!(layer.foreground_include_title, Some(true));
+        assert_eq!(layer.run_name, Some(Some("remote-test".to_owned())));
+        assert_eq!(layer.output_dir, None);
     }
 }
