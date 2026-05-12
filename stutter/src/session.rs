@@ -30,7 +30,7 @@ use crate::{
         probes::ProbeRuntime,
         runtime::MonitorRuntime,
         sinks::MonitorOutputSinks,
-        targeting::TargetController,
+        targeting::{TargetController, TargetPolicy},
         ui::{TuiRenderSnapshot, TuiRuntime},
     },
     session_events::MonitorEvent,
@@ -273,8 +273,8 @@ struct SessionProbePlan {
 }
 
 impl SessionProbePlan {
-    fn load(config: &MonitorConfig) -> anyhow::Result<Self> {
-        let mut loaded = ebpf_loader::load_and_attach(config)?;
+    fn load(config: &MonitorConfig, target_policy: &TargetPolicy) -> anyhow::Result<Self> {
+        let mut loaded = ebpf_loader::load_and_attach(config, target_policy)?;
         configure_target_irqs(&mut loaded, config)?;
         let block_io_correlation_basis = loaded.block_io_correlation_basis.as_str().to_owned();
         let block_io_correlation_confidence =
@@ -736,8 +736,9 @@ impl MonitorSession {
         shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
         event_tx: Option<tokio::sync::mpsc::Sender<MonitorEvent>>,
     ) -> anyhow::Result<Self> {
+        let target_policy = TargetPolicy::from_monitor_config(&config)?;
         let target_plan = SessionTargetPlan::resolve(&config).await?;
-        let probe_plan = SessionProbePlan::load(&config)?;
+        let probe_plan = SessionProbePlan::load(&config, &target_policy)?;
         let mut recorder = RecordingRuntime::begin(&config, &probe_plan)?;
         let exporter_runtime = ExporterRuntime::begin(&config, &mut recorder).await?;
         let alert_runtime = AlertRuntime::begin(&config);
@@ -769,8 +770,8 @@ impl MonitorSession {
             sampler_runtime.runtime_slice_sampler,
         );
 
-        let targeting = TargetController::from_config_parts(
-            &config,
+        let targeting = TargetController::from_policy_parts(
+            target_policy,
             target_plan.tree_pids,
             target_plan.watch_state,
             target_plan.tree_root_starttimes,

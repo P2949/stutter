@@ -8,10 +8,7 @@ use std::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    config::model::MonitorConfig,
-    process_tree::{CompiledPattern, TaskClass, TaskFilters},
-};
+use crate::{config::model::MonitorConfig, process_tree::TaskClass};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioFile {
@@ -344,18 +341,6 @@ pub fn prepare_scenario_run(input: ScenarioRunInput) -> Result<PreparedScenarioR
             tree_pids: scenario.tree_pid.map(|p| vec![p]).unwrap_or_default(),
             include_comm: scenario.include_comm.clone(),
             exclude_comm: scenario.exclude_comm.clone(),
-            task_filters: TaskFilters {
-                include_comm: scenario
-                    .include_comm
-                    .iter()
-                    .map(|s| CompiledPattern::new(s.clone()))
-                    .collect::<Result<Vec<_>>>()?,
-                exclude_comm: scenario
-                    .exclude_comm
-                    .iter()
-                    .map(|s| CompiledPattern::new(s.clone()))
-                    .collect::<Result<Vec<_>>>()?,
-            },
             watch_process: scenario.watch_process.clone(),
             persistent: scenario.persistent,
             max_tasks: 1024,

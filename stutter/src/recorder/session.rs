@@ -487,20 +487,8 @@ pub fn recorded_config(config: &MonitorConfig, tree_pids: &[u32]) -> RecordedCon
         tree_roots: tree_pids.to_vec(),
         cgroupv2: config.target.cgroupv2.clone(),
         exclude_tree_pids: config.target.exclude_tree_pids.clone(),
-        include_comm: config
-            .target
-            .task_filters
-            .include_comm
-            .iter()
-            .map(|p| p.raw().to_owned())
-            .collect(),
-        exclude_comm: config
-            .target
-            .task_filters
-            .exclude_comm
-            .iter()
-            .map(|p| p.raw().to_owned())
-            .collect(),
+        include_comm: config.target.include_comm.clone(),
+        exclude_comm: config.target.exclude_comm.clone(),
         watch_process: config.target.watch_process.clone(),
         persistent: config.target.persistent,
         keep_missing_pid: config.target.keep_missing_pid,

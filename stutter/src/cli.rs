@@ -2873,12 +2873,12 @@ mod tests {
         };
 
         assert_eq!(
-            input.config.target.task_filters.include_comm,
-            vec![crate::process_tree::CompiledPattern::new("RenderThread".to_owned()).unwrap()]
+            input.config.target.include_comm,
+            vec!["RenderThread".to_owned()]
         );
         assert_eq!(
-            input.config.target.task_filters.exclude_comm,
-            vec![crate::process_tree::CompiledPattern::new("steamwebhelper".to_owned()).unwrap()]
+            input.config.target.exclude_comm,
+            vec!["steamwebhelper".to_owned()]
         );
     }
 
@@ -3880,10 +3880,10 @@ mod tests {
             RecordingMode::Monitor,
         )
         .unwrap();
-        assert_eq!(config.target.task_filters.include_comm.len(), 2);
+        assert_eq!(config.target.include_comm.len(), 2);
         // They get sorted in monitor_config_from_monitor_args
-        assert_eq!(config.target.task_filters.include_comm[0].raw, "Game");
-        assert_eq!(config.target.task_filters.include_comm[1].raw, "Render");
+        assert_eq!(config.target.include_comm[0], "Game");
+        assert_eq!(config.target.include_comm[1], "Render");
     }
 
     #[test]
@@ -3904,11 +3904,8 @@ mod tests {
             RecordingMode::Monitor,
         )
         .unwrap();
-        assert_eq!(config.target.task_filters.include_comm.len(), 1);
-        assert_eq!(
-            config.target.task_filters.include_comm[0].raw,
-            "RenderThread"
-        );
+        assert_eq!(config.target.include_comm.len(), 1);
+        assert_eq!(config.target.include_comm[0], "RenderThread");
     }
 
     #[test]

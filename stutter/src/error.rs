@@ -30,6 +30,13 @@ pub enum ConfigError {
     InvalidPreset(#[source] anyhow::Error),
     #[error("failed to convert user config to monitor layer: {0:#}")]
     InvalidUserLayer(#[source] anyhow::Error),
+    #[error("invalid target filter in {field} pattern {pattern:?}: {source:#}")]
+    InvalidTargetFilter {
+        field: &'static str,
+        pattern: String,
+        #[source]
+        source: anyhow::Error,
+    },
 }
 
 #[derive(Debug, Error)]
