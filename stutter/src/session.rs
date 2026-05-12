@@ -782,6 +782,7 @@ impl MonitorSession {
             exporter_runtime.prometheus_task,
             exporter_runtime.otel_exporter,
             alert_runtime.sender,
+            event_runtime_config_from_config(&config).output,
         );
 
         let runtime = MonitorRuntime::from_config_parts(
@@ -854,10 +855,12 @@ impl MonitorSession {
 
     async fn dispatch_monitor_event(&mut self, event: MonitorEvent) -> anyhow::Result<()> {
         let output = event_runtime_config_from_config(&self.config).output;
+        let outputs = &mut self.runtime.outputs;
         let mut sinks = MonitorOutputSinks::new(
             output,
-            &mut self.runtime.outputs.recorder,
-            self.runtime.outputs.alert_sender.as_ref(),
+            &mut outputs.recorder,
+            outputs.alert_sender.as_ref(),
+            &mut outputs.sink_registry,
         );
 
         if let Err(err) = sinks.dispatch(&event) {

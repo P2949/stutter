@@ -22,7 +22,7 @@ use crate::{
         RecordedLatency, RecordingRun, SESSION_SCHEMA_VERSION, SessionFile, SessionTask,
         SpikeEvent, SpikeEventBuffer, recorded_config, recorded_time,
     },
-    session::sinks::{MonitorEventSink, RecorderSink},
+    session::sinks::{MonitorEventSink, MonitorOutputConfig, MonitorSinkContext, RecorderSink},
     tasks, tune,
 };
 
@@ -55,7 +55,13 @@ mod events {
         );
 
         for event in &update.events {
-            super::RecorderSink::new(recorder).on_event(event).unwrap();
+            let mut ctx = super::MonitorSinkContext {
+                recorder: &mut *recorder,
+                alert_sender: None,
+                output: super::MonitorOutputConfig::default(),
+            };
+            let mut sink = super::RecorderSink::new();
+            sink.on_event(event, &mut ctx).unwrap();
         }
 
         update.spike_event

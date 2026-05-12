@@ -44,146 +44,161 @@ impl fmt::Display for SinkError {
 
 impl std::error::Error for SinkError {}
 
-pub trait MonitorEventSink {
-    fn on_event(&mut self, event: &MonitorEvent) -> Result<(), SinkError>;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MonitorOutputSinkKind {
-    Recorder,
-    Prometheus,
-    Otel,
-    Stdout,
-    Alert,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct MonitorOutputSinkRegistry {
-    sinks: Vec<MonitorOutputSinkKind>,
-}
-
-impl MonitorOutputSinkRegistry {
-    fn for_runtime(
-        output: MonitorOutputConfig,
-        recorder: &LiveRecorder,
-        alert_sender: Option<&mpsc::Sender<AlertPayload>>,
-    ) -> Self {
-        let mut sinks = vec![MonitorOutputSinkKind::Recorder];
-
-        if recorder.exporters.prometheus_state.is_some() {
-            sinks.push(MonitorOutputSinkKind::Prometheus);
-        }
-
-        if recorder.exporters.otel_spike_tx.is_some() {
-            sinks.push(MonitorOutputSinkKind::Otel);
-        }
-
-        if !output.json_stream || output.verbose || recorder.stdout_spike_stream.is_some() {
-            sinks.push(MonitorOutputSinkKind::Stdout);
-        }
-
-        if alert_sender.is_some() {
-            sinks.push(MonitorOutputSinkKind::Alert);
-        }
-
-        Self { sinks }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MonitorOutputConfig {
     pub json_stream: bool,
     pub verbose: bool,
 }
 
-pub struct MonitorOutputSinks<'a> {
-    output: MonitorOutputConfig,
-    recorder: &'a mut LiveRecorder,
-    alert_sender: Option<&'a mpsc::Sender<AlertPayload>>,
-    registry: MonitorOutputSinkRegistry,
+pub struct MonitorSinkContext<'a> {
+    pub recorder: &'a mut LiveRecorder,
+    pub alert_sender: Option<&'a mpsc::Sender<AlertPayload>>,
+    pub output: MonitorOutputConfig,
 }
 
-impl<'a> MonitorOutputSinks<'a> {
+pub trait MonitorEventSink: Send {
+    fn name(&self) -> &'static str;
+
+    fn on_event(
+        &mut self,
+        event: &MonitorEvent,
+        ctx: &mut MonitorSinkContext<'_>,
+    ) -> Result<(), SinkError>;
+}
+
+pub struct MonitorOutputSinkRegistry {
+    sinks: Vec<Box<dyn MonitorEventSink + Send>>,
+}
+
+impl MonitorOutputSinkRegistry {
+    pub fn for_runtime(
+        output: MonitorOutputConfig,
+        recorder: &LiveRecorder,
+        alert_sender: Option<&mpsc::Sender<AlertPayload>>,
+    ) -> Self {
+        let mut sinks: Vec<Box<dyn MonitorEventSink + Send>> = vec![Box::new(RecorderSink::new())];
+
+        if recorder.exporters.prometheus_state.is_some() {
+            sinks.push(Box::new(PrometheusSink::new()));
+        }
+
+        if recorder.exporters.otel_spike_tx.is_some() {
+            sinks.push(Box::new(OtelSink::new()));
+        }
+
+        if !output.json_stream || output.verbose || recorder.stdout_spike_stream.is_some() {
+            sinks.push(Box::new(StdoutSink::new()));
+        }
+
+        if alert_sender.is_some() {
+            sinks.push(Box::new(AlertSink::new()));
+        }
+
+        Self { sinks }
+    }
+
+    pub fn dispatch(
+        &mut self,
+        event: &MonitorEvent,
+        ctx: &mut MonitorSinkContext<'_>,
+    ) -> Result<(), SinkError> {
+        for sink in &mut self.sinks {
+            sink.on_event(event, ctx)?;
+        }
+        Ok(())
+    }
+
+    pub fn dispatch_all<'a>(
+        &mut self,
+        events: impl IntoIterator<Item = &'a MonitorEvent>,
+        ctx: &mut MonitorSinkContext<'_>,
+    ) -> Result<(), SinkError> {
+        for event in events {
+            self.dispatch(event, ctx)?;
+        }
+        Ok(())
+    }
+
+    pub fn sink_names(&self) -> Vec<&'static str> {
+        self.sinks.iter().map(|sink| sink.name()).collect()
+    }
+}
+
+pub struct MonitorOutputSinks<'a, 'b> {
+    ctx: MonitorSinkContext<'a>,
+    registry: &'b mut MonitorOutputSinkRegistry,
+}
+
+impl<'a, 'b> MonitorOutputSinks<'a, 'b> {
     pub fn new(
         output: MonitorOutputConfig,
         recorder: &'a mut LiveRecorder,
         alert_sender: Option<&'a mpsc::Sender<AlertPayload>>,
+        registry: &'b mut MonitorOutputSinkRegistry,
     ) -> Self {
-        let registry = MonitorOutputSinkRegistry::for_runtime(output, recorder, alert_sender);
         Self {
-            output,
-            recorder,
-            alert_sender,
+            ctx: MonitorSinkContext {
+                recorder,
+                alert_sender,
+                output,
+            },
             registry,
         }
     }
 
     pub fn dispatch(&mut self, event: &MonitorEvent) -> Result<(), SinkError> {
-        let sinks = self.registry.sinks.clone();
-        for sink in sinks {
-            self.dispatch_sink(sink, event)?;
-        }
-        Ok(())
+        self.registry.dispatch(event, &mut self.ctx)
     }
 
-    fn dispatch_sink(
+    pub fn dispatch_all<'c>(
         &mut self,
-        sink: MonitorOutputSinkKind,
+        events: impl IntoIterator<Item = &'c MonitorEvent>,
+    ) -> Result<(), SinkError> {
+        self.registry.dispatch_all(events, &mut self.ctx)
+    }
+}
+
+pub struct RecorderSink;
+
+impl RecorderSink {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for RecorderSink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MonitorEventSink for RecorderSink {
+    fn name(&self) -> &'static str {
+        "recorder"
+    }
+
+    fn on_event(
+        &mut self,
         event: &MonitorEvent,
+        ctx: &mut MonitorSinkContext<'_>,
     ) -> Result<(), SinkError> {
-        match sink {
-            MonitorOutputSinkKind::Recorder => RecorderSink::new(self.recorder).on_event(event),
-            MonitorOutputSinkKind::Prometheus => PrometheusSink::new(self.recorder).on_event(event),
-            MonitorOutputSinkKind::Otel => OtelSink::new(self.recorder).on_event(event),
-            MonitorOutputSinkKind::Stdout => {
-                StdoutSink::new(self.output, self.recorder).on_event(event)
-            }
-            MonitorOutputSinkKind::Alert => {
-                AlertSink::new(self.recorder, self.alert_sender).on_event(event)
-            }
-        }
-    }
-
-    pub fn dispatch_all<'b>(
-        &mut self,
-        events: impl IntoIterator<Item = &'b MonitorEvent>,
-    ) -> Result<(), SinkError> {
-        for event in events {
-            self.dispatch(event)?;
-        }
-        Ok(())
-    }
-}
-
-pub struct RecorderSink<'a> {
-    recorder: &'a mut LiveRecorder,
-}
-
-impl<'a> RecorderSink<'a> {
-    pub fn new(recorder: &'a mut LiveRecorder) -> Self {
-        Self { recorder }
-    }
-}
-
-impl MonitorEventSink for RecorderSink<'_> {
-    fn on_event(&mut self, event: &MonitorEvent) -> Result<(), SinkError> {
         match event {
             MonitorEvent::Spike { event } => {
-                if self.recorder.streams.contains(ArtifactKind::SpikeEvents) {
+                if ctx.recorder.streams.contains(ArtifactKind::SpikeEvents) {
                     push_artifact_event(
-                        self.recorder,
+                        ctx.recorder,
                         ArtifactKind::SpikeEvents,
                         event.as_ref(),
                         "spike_events",
                         |c| c.spike_event_count += 1,
                     );
                 } else {
-                    self.recorder.push_spike_event_to_buffer((**event).clone());
+                    ctx.recorder.push_spike_event_to_buffer((**event).clone());
                 }
             }
             MonitorEvent::IrqEvent { event } => {
                 push_artifact_event(
-                    self.recorder,
+                    ctx.recorder,
                     ArtifactKind::IrqEvents,
                     event.as_ref(),
                     "irq_events",
@@ -192,7 +207,7 @@ impl MonitorEventSink for RecorderSink<'_> {
             }
             MonitorEvent::IoEvent { event } => {
                 push_artifact_event(
-                    self.recorder,
+                    ctx.recorder,
                     ArtifactKind::BlockIoEvents,
                     event.as_ref(),
                     "io_events",
@@ -201,7 +216,7 @@ impl MonitorEventSink for RecorderSink<'_> {
             }
             MonitorEvent::MigrationEvent { event } => {
                 push_artifact_event(
-                    self.recorder,
+                    ctx.recorder,
                     ArtifactKind::MigrationEvents,
                     event.as_ref(),
                     "migration_events",
@@ -210,7 +225,7 @@ impl MonitorEventSink for RecorderSink<'_> {
             }
             MonitorEvent::CpuFreqSample { event } => {
                 push_artifact_event(
-                    self.recorder,
+                    ctx.recorder,
                     ArtifactKind::CpuFreqSamples,
                     event.as_ref(),
                     "cpu_freq_samples",
@@ -219,7 +234,7 @@ impl MonitorEventSink for RecorderSink<'_> {
             }
             MonitorEvent::GpuSample { sample } => {
                 push_artifact_event(
-                    self.recorder,
+                    ctx.recorder,
                     ArtifactKind::GpuSamples,
                     sample.as_ref(),
                     "gpu_samples",
@@ -228,7 +243,7 @@ impl MonitorEventSink for RecorderSink<'_> {
             }
             MonitorEvent::Frame { event } => {
                 push_artifact_event(
-                    self.recorder,
+                    ctx.recorder,
                     ArtifactKind::FrameEvents,
                     event.as_ref(),
                     "frame_events",
@@ -236,9 +251,9 @@ impl MonitorEventSink for RecorderSink<'_> {
                 );
             }
             MonitorEvent::ForegroundEvent { event } => {
-                self.recorder.last_foreground_event = Some((**event).clone());
+                ctx.recorder.last_foreground_event = Some((**event).clone());
                 push_artifact_event(
-                    self.recorder,
+                    ctx.recorder,
                     ArtifactKind::ForegroundEvents,
                     event.as_ref(),
                     "foreground_events",
@@ -269,7 +284,7 @@ impl MonitorEventSink for RecorderSink<'_> {
                     reasons: reasons.to_vec(),
                 };
                 push_artifact_event(
-                    self.recorder,
+                    ctx.recorder,
                     ArtifactKind::FocusEvents,
                     &event,
                     "focus_events",
@@ -294,7 +309,7 @@ impl MonitorEventSink for RecorderSink<'_> {
                     reasons: vec![reason.clone()],
                 };
                 push_artifact_event(
-                    self.recorder,
+                    ctx.recorder,
                     ArtifactKind::FocusEvents,
                     &event,
                     "focus_events",
@@ -307,19 +322,31 @@ impl MonitorEventSink for RecorderSink<'_> {
     }
 }
 
-pub struct PrometheusSink<'a> {
-    recorder: &'a mut LiveRecorder,
-}
+pub struct PrometheusSink;
 
-impl<'a> PrometheusSink<'a> {
-    pub fn new(recorder: &'a mut LiveRecorder) -> Self {
-        Self { recorder }
+impl PrometheusSink {
+    pub fn new() -> Self {
+        Self
     }
 }
 
-impl MonitorEventSink for PrometheusSink<'_> {
-    fn on_event(&mut self, event: &MonitorEvent) -> Result<(), SinkError> {
-        let Some(state) = self.recorder.exporters.prometheus_state.as_ref() else {
+impl Default for PrometheusSink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MonitorEventSink for PrometheusSink {
+    fn name(&self) -> &'static str {
+        "prometheus"
+    }
+
+    fn on_event(
+        &mut self,
+        event: &MonitorEvent,
+        ctx: &mut MonitorSinkContext<'_>,
+    ) -> Result<(), SinkError> {
+        let Some(state) = ctx.recorder.exporters.prometheus_state.as_ref() else {
             return Ok(());
         };
 
@@ -338,29 +365,41 @@ impl MonitorEventSink for PrometheusSink<'_> {
     }
 }
 
-pub struct OtelSink<'a> {
-    recorder: &'a mut LiveRecorder,
-}
+pub struct OtelSink;
 
-impl<'a> OtelSink<'a> {
-    pub fn new(recorder: &'a mut LiveRecorder) -> Self {
-        Self { recorder }
+impl OtelSink {
+    pub fn new() -> Self {
+        Self
     }
 }
 
-impl MonitorEventSink for OtelSink<'_> {
-    fn on_event(&mut self, event: &MonitorEvent) -> Result<(), SinkError> {
+impl Default for OtelSink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MonitorEventSink for OtelSink {
+    fn name(&self) -> &'static str {
+        "otel"
+    }
+
+    fn on_event(
+        &mut self,
+        event: &MonitorEvent,
+        ctx: &mut MonitorSinkContext<'_>,
+    ) -> Result<(), SinkError> {
         let MonitorEvent::Spike { event } = event else {
             return Ok(());
         };
 
-        let Some(tx) = self.recorder.exporters.otel_spike_tx.as_ref() else {
+        let Some(tx) = ctx.recorder.exporters.otel_spike_tx.as_ref() else {
             return Ok(());
         };
 
         let item = crate::otel::OtelSpike::from(event.as_ref());
         if tx.try_send(item).is_err()
-            && let Some(dropped) = self.recorder.exporters.otel_spans_dropped.as_ref()
+            && let Some(dropped) = ctx.recorder.exporters.otel_spans_dropped.as_ref()
         {
             dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
@@ -369,32 +408,43 @@ impl MonitorEventSink for OtelSink<'_> {
     }
 }
 
-pub struct StdoutSink<'a> {
-    output: MonitorOutputConfig,
-    recorder: &'a mut LiveRecorder,
-}
+pub struct StdoutSink;
 
-impl<'a> StdoutSink<'a> {
-    pub fn new(output: MonitorOutputConfig, recorder: &'a mut LiveRecorder) -> Self {
-        Self { output, recorder }
+impl StdoutSink {
+    pub fn new() -> Self {
+        Self
     }
 }
 
-impl MonitorEventSink for StdoutSink<'_> {
-    fn on_event(&mut self, event: &MonitorEvent) -> Result<(), SinkError> {
+impl Default for StdoutSink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MonitorEventSink for StdoutSink {
+    fn name(&self) -> &'static str {
+        "stdout"
+    }
+
+    fn on_event(
+        &mut self,
+        event: &MonitorEvent,
+        ctx: &mut MonitorSinkContext<'_>,
+    ) -> Result<(), SinkError> {
         match event {
             MonitorEvent::SchedulerSample { event, comm, label }
-                if !self.output.json_stream
-                    && (*label == "spike" || (self.output.verbose && *label == "sample")) =>
+                if !ctx.output.json_stream
+                    && (*label == "spike" || (ctx.output.verbose && *label == "sample")) =>
             {
                 print_event(event.as_ref(), comm, label);
             }
             MonitorEvent::Spike { event } => {
-                if let Some(stream) = self.recorder.stdout_spike_stream.as_mut()
+                if let Some(stream) = ctx.recorder.stdout_spike_stream.as_mut()
                     && let Err(err) = stream.push(event.as_ref())
                 {
                     log::warn!("json_stream_write_failed err={err:#}");
-                    self.recorder.counters.stdout_spike_stream_errors += 1;
+                    ctx.recorder.counters.stdout_spike_stream_errors += 1;
                 }
             }
             _ => {}
@@ -404,30 +454,35 @@ impl MonitorEventSink for StdoutSink<'_> {
     }
 }
 
-pub struct AlertSink<'a> {
-    recorder: &'a mut LiveRecorder,
-    alert_sender: Option<&'a mpsc::Sender<AlertPayload>>,
-}
+pub struct AlertSink;
 
-impl<'a> AlertSink<'a> {
-    pub fn new(
-        recorder: &'a mut LiveRecorder,
-        alert_sender: Option<&'a mpsc::Sender<AlertPayload>>,
-    ) -> Self {
-        Self {
-            recorder,
-            alert_sender,
-        }
+impl AlertSink {
+    pub fn new() -> Self {
+        Self
     }
 }
 
-impl MonitorEventSink for AlertSink<'_> {
-    fn on_event(&mut self, event: &MonitorEvent) -> Result<(), SinkError> {
+impl Default for AlertSink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MonitorEventSink for AlertSink {
+    fn name(&self) -> &'static str {
+        "alert"
+    }
+
+    fn on_event(
+        &mut self,
+        event: &MonitorEvent,
+        ctx: &mut MonitorSinkContext<'_>,
+    ) -> Result<(), SinkError> {
         let MonitorEvent::Alert { payload } = event else {
             return Ok(());
         };
 
-        let Some(sender) = self.alert_sender else {
+        let Some(sender) = ctx.alert_sender else {
             return Ok(());
         };
 
@@ -435,11 +490,11 @@ impl MonitorEventSink for AlertSink<'_> {
             match err {
                 mpsc::error::TrySendError::Full(_) => {
                     log::warn!("alert_channel_full_dropping_alert");
-                    self.recorder.counters.alert_events_dropped_count += 1;
+                    ctx.recorder.counters.alert_events_dropped_count += 1;
                 }
                 mpsc::error::TrySendError::Closed(_) => {
                     log::warn!("alert_channel_closed");
-                    self.recorder.counters.alert_channel_closed_count += 1;
+                    ctx.recorder.counters.alert_channel_closed_count += 1;
                 }
             }
         }
@@ -459,13 +514,7 @@ mod tests {
         let recorder = LiveRecorder::default();
         let registry = MonitorOutputSinkRegistry::for_runtime(output, &recorder, None);
 
-        assert_eq!(
-            registry.sinks,
-            vec![
-                MonitorOutputSinkKind::Recorder,
-                MonitorOutputSinkKind::Stdout,
-            ]
-        );
+        assert_eq!(registry.sink_names(), vec!["recorder", "stdout"]);
     }
 
     #[test]
@@ -482,12 +531,13 @@ mod tests {
 
         let (alert_tx, _alert_rx) = mpsc::channel(1);
         let registry = MonitorOutputSinkRegistry::for_runtime(output, &recorder, Some(&alert_tx));
+        let names = registry.sink_names();
 
-        assert!(registry.sinks.contains(&MonitorOutputSinkKind::Recorder));
-        assert!(registry.sinks.contains(&MonitorOutputSinkKind::Prometheus));
-        assert!(registry.sinks.contains(&MonitorOutputSinkKind::Stdout));
-        assert!(registry.sinks.contains(&MonitorOutputSinkKind::Alert));
-        assert!(!registry.sinks.contains(&MonitorOutputSinkKind::Otel));
+        assert!(names.contains(&"recorder"));
+        assert!(names.contains(&"prometheus"));
+        assert!(names.contains(&"stdout"));
+        assert!(names.contains(&"alert"));
+        assert!(!names.contains(&"otel"));
     }
 
     #[test]
@@ -507,7 +557,13 @@ mod tests {
             event: Box::new(spike),
         };
 
-        RecorderSink::new(&mut recorder).on_event(&event).unwrap();
+        let mut ctx = MonitorSinkContext {
+            recorder: &mut recorder,
+            alert_sender: None,
+            output: MonitorOutputConfig::default(),
+        };
+        let mut sink = RecorderSink::new();
+        sink.on_event(&event, &mut ctx).unwrap();
 
         assert_eq!(
             recorder
@@ -552,9 +608,13 @@ mod tests {
             payload: Box::new(payload),
         };
 
-        AlertSink::new(&mut recorder, Some(&tx))
-            .on_event(&event)
-            .unwrap();
+        let mut ctx = MonitorSinkContext {
+            recorder: &mut recorder,
+            alert_sender: Some(&tx),
+            output: MonitorOutputConfig::default(),
+        };
+        let mut sink = AlertSink::new();
+        sink.on_event(&event, &mut ctx).unwrap();
 
         assert_eq!(recorder.counters.alert_events_dropped_count, 1);
     }
