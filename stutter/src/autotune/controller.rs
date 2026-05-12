@@ -1,5 +1,3 @@
-#![cfg(feature = "autotune-controller")]
-
 use std::time::Duration;
 
 use super::{

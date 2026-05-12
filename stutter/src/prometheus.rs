@@ -123,7 +123,6 @@ pub fn render_metrics(state: &PrometheusState) -> String {
         ebpf_ringbuf_drops = ebpf_ringbuf_drops,
     );
 
-    #[cfg(feature = "autotune-controller")]
     output.push_str(
         &crate::autotune::prometheus_metrics::render_default_autotune_prometheus_metrics(),
     );
@@ -241,7 +240,6 @@ mod tests {
             );
         }
 
-        #[cfg(feature = "autotune-controller")]
         for metric in [
             "stutter_autotune_phase",
             "stutter_autotune_mode",
@@ -260,7 +258,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "autotune-controller")]
     fn render_metrics_includes_autotune_metric_help_and_types() {
         let state = PrometheusState::default();
 

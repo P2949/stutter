@@ -1,5 +1,3 @@
-#![cfg(feature = "autotune-controller")]
-
 use std::time::Duration;
 
 pub use super::{candidate::CandidateAction, experiment::ExperimentId};

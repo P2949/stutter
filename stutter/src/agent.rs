@@ -89,7 +89,6 @@ pub struct AgentState {
     pub autotune_limits: AgentAutotuneLimits,
 }
 
-#[cfg(feature = "autotune-controller")]
 pub struct AutotuneControllerHandle {
     pub mode: String,
     pub watch_process: Option<String>,
@@ -97,15 +96,6 @@ pub struct AutotuneControllerHandle {
     pub started_unix_nanos: u128,
     pub stop_tx: oneshot::Sender<()>,
     pub join: JoinHandle<anyhow::Result<crate::autotune::runtime::AutotuneControllerExit>>,
-}
-
-#[cfg(not(feature = "autotune-controller"))]
-#[derive(Clone, Debug)]
-pub struct AutotuneControllerHandle {
-    pub mode: String,
-    pub watch_process: Option<String>,
-    pub tree_pid: Option<u32>,
-    pub started_unix_nanos: u128,
 }
 
 pub struct RunHandle {
@@ -132,65 +122,62 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
         std::fs::create_dir_all(&config.runs_dir)?;
     }
 
-    #[cfg(feature = "autotune-controller")]
-    {
-        let startup_recovery =
-            crate::autotune::startup_recovery::recover_controller_journal_on_startup(
-                crate::autotune::startup_recovery::StartupRecoveryConfig {
-                    rollback_on_crash_recovery: config.rollback_on_crash_recovery,
-                    ..crate::autotune::startup_recovery::StartupRecoveryConfig::default()
-                },
-            )?;
+    let startup_recovery =
+        crate::autotune::startup_recovery::recover_controller_journal_on_startup(
+            crate::autotune::startup_recovery::StartupRecoveryConfig {
+                rollback_on_crash_recovery: config.rollback_on_crash_recovery,
+                ..crate::autotune::startup_recovery::StartupRecoveryConfig::default()
+            },
+        )?;
 
-        match startup_recovery {
-            crate::autotune::startup_recovery::StartupRecoveryOutcome::Recovered {
-                experiment_id,
-                action_id,
-                affected_tasks,
-                manual_restore_command,
-            } => {
-                println!(
-                    "autotune startup recovery: rolled back interrupted action experiment_id={} action_id={} affected_tasks={} manual_restore_command=\"{}\"",
-                    experiment_id, action_id, affected_tasks, manual_restore_command
-                );
-            }
-            crate::autotune::startup_recovery::StartupRecoveryOutcome::Faulted {
-                experiment_id,
-                action_id,
-                manual_restore_command,
-                reason,
-            } => {
-                eprintln!(
-                    "autotune startup recovery faulted: experiment_id={} action_id={} reason={}",
-                    experiment_id, action_id, reason
-                );
-                eprintln!("manual restore command: {}", manual_restore_command);
-                anyhow::bail!(
-                    "autotune startup recovery failed; controller is Faulted; manual restore command: {}",
-                    manual_restore_command
-                );
-            }
-            crate::autotune::startup_recovery::StartupRecoveryOutcome::RollbackDisabled {
-                experiment_id,
-                action_id,
-                manual_restore_command,
-            } => {
-                println!(
-                    "autotune startup recovery: rollback_on_crash_recovery=false; leaving applied journal in place experiment_id={} action_id={} manual_restore_command=\"{}\"",
-                    experiment_id, action_id, manual_restore_command
-                );
-            }
-            crate::autotune::startup_recovery::StartupRecoveryOutcome::ApplyingWithoutRollback {
-                experiment_id,
-                action_id,
-            } => {
-                println!(
-                    "autotune startup recovery: found applying journal without rollback token experiment_id={} action_id={}; no automatic rollback attempted",
-                    experiment_id, action_id
-                );
-            }
-            crate::autotune::startup_recovery::StartupRecoveryOutcome::Clean => {}
+    match startup_recovery {
+        crate::autotune::startup_recovery::StartupRecoveryOutcome::Recovered {
+            experiment_id,
+            action_id,
+            affected_tasks,
+            manual_restore_command,
+        } => {
+            println!(
+                "autotune startup recovery: rolled back interrupted action experiment_id={} action_id={} affected_tasks={} manual_restore_command=\"{}\"",
+                experiment_id, action_id, affected_tasks, manual_restore_command
+            );
         }
+        crate::autotune::startup_recovery::StartupRecoveryOutcome::Faulted {
+            experiment_id,
+            action_id,
+            manual_restore_command,
+            reason,
+        } => {
+            eprintln!(
+                "autotune startup recovery faulted: experiment_id={} action_id={} reason={}",
+                experiment_id, action_id, reason
+            );
+            eprintln!("manual restore command: {}", manual_restore_command);
+            anyhow::bail!(
+                "autotune startup recovery failed; controller is Faulted; manual restore command: {}",
+                manual_restore_command
+            );
+        }
+        crate::autotune::startup_recovery::StartupRecoveryOutcome::RollbackDisabled {
+            experiment_id,
+            action_id,
+            manual_restore_command,
+        } => {
+            println!(
+                "autotune startup recovery: rollback_on_crash_recovery=false; leaving applied journal in place experiment_id={} action_id={} manual_restore_command=\"{}\"",
+                experiment_id, action_id, manual_restore_command
+            );
+        }
+        crate::autotune::startup_recovery::StartupRecoveryOutcome::ApplyingWithoutRollback {
+            experiment_id,
+            action_id,
+        } => {
+            println!(
+                "autotune startup recovery: found applying journal without rollback token experiment_id={} action_id={}; no automatic rollback attempted",
+                experiment_id, action_id
+            );
+        }
+        crate::autotune::startup_recovery::StartupRecoveryOutcome::Clean => {}
     }
 
     if !is_local_bind(&config.bind) {
@@ -1094,7 +1081,6 @@ async fn autotune_start_handler(
 
     let started_unix_nanos = crate::audit::unix_nanos_now();
 
-    #[cfg(feature = "autotune-controller")]
     let handle = {
         let profile_list = match input.profiles.as_deref() {
             Some(path) => match crate::profiles::load_profiles(path) {
@@ -1167,17 +1153,6 @@ async fn autotune_start_handler(
         }
     };
 
-    #[cfg(not(feature = "autotune-controller"))]
-    let handle = {
-        let _ = monitor_config;
-        AutotuneControllerHandle {
-            mode: policy.mode.as_str().to_owned(),
-            watch_process: request.watch_process.clone(),
-            tree_pid: request.tree_pid,
-            started_unix_nanos,
-        }
-    };
-
     *active = Some(handle);
 
     audit_agent_event_with_safety(
@@ -1233,75 +1208,55 @@ async fn autotune_stop_handler(
         .into_response();
     };
 
-    #[cfg(feature = "autotune-controller")]
-    {
-        let _ = handle.stop_tx.send(());
+    let _ = handle.stop_tx.send(());
 
-        match handle.join.await {
-            Ok(Ok(exit)) => {
-                audit_agent_event(
-                    "remote-autotune-stop",
-                    true,
-                    0,
-                    format!("active_before_stop=true reason={}", exit.reason),
-                );
+    match handle.join.await {
+        Ok(Ok(exit)) => {
+            audit_agent_event(
+                "remote-autotune-stop",
+                true,
+                0,
+                format!("active_before_stop=true reason={}", exit.reason),
+            );
 
-                Json(AutotuneStopResponse {
-                    status: "stopped".to_owned(),
-                    message: format!("remote autotune session stopped: {}", exit.reason),
-                })
-                .into_response()
-            }
-            Ok(Err(err)) => {
-                audit_agent_event(
-                    "remote-autotune-stop",
-                    false,
-                    0,
-                    format!("active_before_stop=true error={err:#}"),
-                );
-
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: format!("autotune controller failed: {err:#}"),
-                    }),
-                )
-                    .into_response()
-            }
-            Err(err) => {
-                audit_agent_event(
-                    "remote-autotune-stop",
-                    false,
-                    0,
-                    format!("active_before_stop=true join_error={err}"),
-                );
-
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: format!("autotune controller task join failed: {err}"),
-                    }),
-                )
-                    .into_response()
-            }
+            Json(AutotuneStopResponse {
+                status: "stopped".to_owned(),
+                message: format!("remote autotune session stopped: {}", exit.reason),
+            })
+            .into_response()
         }
-    }
+        Ok(Err(err)) => {
+            audit_agent_event(
+                "remote-autotune-stop",
+                false,
+                0,
+                format!("active_before_stop=true error={err:#}"),
+            );
 
-    #[cfg(not(feature = "autotune-controller"))]
-    {
-        let _ = handle;
-        audit_agent_event(
-            "remote-autotune-stop",
-            true,
-            0,
-            "active_before_stop=true".to_owned(),
-        );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("autotune controller failed: {err:#}"),
+                }),
+            )
+                .into_response()
+        }
+        Err(err) => {
+            audit_agent_event(
+                "remote-autotune-stop",
+                false,
+                0,
+                format!("active_before_stop=true join_error={err}"),
+            );
 
-        Json(AutotuneStopResponse {
-            status: "stopped".to_owned(),
-            message: "remote autotune session stopped".to_owned(),
-        })
-        .into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("autotune controller task join failed: {err}"),
+                }),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -2110,35 +2065,22 @@ mod tests {
     }
 
     fn test_autotune_handle() -> AutotuneControllerHandle {
-        #[cfg(feature = "autotune-controller")]
-        {
-            let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
-            let join = tokio::spawn(async move {
-                let _ = stop_rx.await;
-                Ok(crate::autotune::runtime::AutotuneControllerExit {
-                    reason: "test stop".to_owned(),
-                    last_decision: None,
-                })
-            });
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+        let join = tokio::spawn(async move {
+            let _ = stop_rx.await;
+            Ok(crate::autotune::runtime::AutotuneControllerExit {
+                reason: "test stop".to_owned(),
+                last_decision: None,
+            })
+        });
 
-            AutotuneControllerHandle {
-                mode: "observe".to_owned(),
-                watch_process: Some("Game.exe".to_owned()),
-                tree_pid: None,
-                started_unix_nanos: crate::audit::unix_nanos_now(),
-                stop_tx,
-                join,
-            }
-        }
-
-        #[cfg(not(feature = "autotune-controller"))]
-        {
-            AutotuneControllerHandle {
-                mode: "observe".to_owned(),
-                watch_process: Some("Game.exe".to_owned()),
-                tree_pid: None,
-                started_unix_nanos: crate::audit::unix_nanos_now(),
-            }
+        AutotuneControllerHandle {
+            mode: "observe".to_owned(),
+            watch_process: Some("Game.exe".to_owned()),
+            tree_pid: None,
+            started_unix_nanos: crate::audit::unix_nanos_now(),
+            stop_tx,
+            join,
         }
     }
 
