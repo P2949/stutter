@@ -4,8 +4,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     alert::AlertPayload,
-    artifacts::ArtifactKind,
-    events::push_artifact_event,
+    artifacts::{ArtifactKind, push_artifact_event},
     metrics::print_event,
     recorder::{self, LiveRecorder},
     session_events::MonitorEvent,

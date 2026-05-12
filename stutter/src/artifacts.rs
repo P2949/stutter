@@ -3,9 +3,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use log::warn;
 use serde::Serialize;
 
-use crate::recorder::NdjsonWriter;
+use crate::recorder::{LiveRecorder, NdjsonWriter, RecordingCounters};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -391,5 +392,27 @@ impl ArtifactSelection {
 impl Default for ArtifactSelection {
     fn default() -> Self {
         Self::empty()
+    }
+}
+
+/// Pushes an event to an NDJSON stream via the registry.
+pub fn push_artifact_event<T: Serialize, F>(
+    recorder: &mut LiveRecorder,
+    kind: ArtifactKind,
+    value: &T,
+    stream_name: &str,
+    mut success_fn: F,
+) where
+    F: FnMut(&mut RecordingCounters),
+{
+    match recorder.streams.push(kind, value) {
+        Ok(true) => success_fn(&mut recorder.counters),
+        Ok(false) => {}
+        Err(err) => {
+            warn!("ndjson_write_failed stream={stream_name} err={err:#}");
+            recorder
+                .counters
+                .record_stream_write_error(stream_name, err);
+        }
     }
 }
