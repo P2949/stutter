@@ -1604,7 +1604,7 @@ impl MonitorSession {
                     .contains(ArtifactKind::RuntimeSlices)
                 {
                     for record in &batch.records {
-                        crate::events::push_artifact_event(
+                        crate::artifacts::push_artifact_event(
                             &mut self.runtime.outputs.recorder,
                             ArtifactKind::RuntimeSlices,
                             record,
@@ -1799,7 +1799,7 @@ impl MonitorSession {
                 .streams
                 .contains(ArtifactKind::ScxEvents)
             {
-                crate::events::push_artifact_event(
+                crate::artifacts::push_artifact_event(
                     &mut self.runtime.outputs.recorder,
                     ArtifactKind::ScxEvents,
                     &event,

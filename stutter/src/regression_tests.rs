@@ -28,7 +28,7 @@ use crate::{
 
 mod events {
     use super::MonitorEventSink;
-    pub use super::raw_events::push_artifact_event;
+    pub use crate::artifacts::push_artifact_event;
 
     #[allow(clippy::too_many_arguments)]
     pub fn handle_event(

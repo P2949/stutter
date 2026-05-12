@@ -1,16 +1,14 @@
 use std::{collections::BTreeMap, time::Instant};
 
 use log::{debug, info, warn};
-use serde::Serialize;
 use stutter_common::{
     BlockIoEvent, CpuFreqEvent, ExecEvent, IrqEvent, MigrationEvent, SchedulerEvent,
 };
 
 use crate::{
-    artifacts::ArtifactKind,
     metrics::{self, format_latency},
     process_tree,
-    recorder::{self, IrqEventRecord, LiveRecorder, RecordingCounters},
+    recorder::{self, IrqEventRecord},
     session::sinks::MonitorOutputConfig,
     session_events::MonitorEvent,
     tasks::TaskTracker,
@@ -138,28 +136,6 @@ pub fn handle_exec_event(
     })
 }
 
-/// Pushes an event to an NDJSON stream via the registry.
-pub fn push_artifact_event<T: Serialize, F>(
-    recorder: &mut LiveRecorder,
-    kind: ArtifactKind,
-    value: &T,
-    stream_name: &str,
-    mut success_fn: F,
-) where
-    F: FnMut(&mut RecordingCounters),
-{
-    match recorder.streams.push(kind, value) {
-        Ok(true) => success_fn(&mut recorder.counters),
-        Ok(false) => {}
-        Err(err) => {
-            warn!("ndjson_write_failed stream={stream_name} err={err:#}");
-            recorder
-                .counters
-                .record_stream_write_error(stream_name, err);
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventRuntimeConfig {
     pub spike: interpret::SpikeConfig,
@@ -261,95 +237,9 @@ pub fn log_irq_event(event: &IrqEvent) {
     );
 }
 
-const IMMEDIATE_CAUSE_TAG_PRIORITY: &[&str] = &[
-    "major_page_fault",
-    "minor_page_fault",
-    "runqueue_contention",
-    "migration_or_cpu_mismatch",
-    "monitored_wakeup_backlog",
-];
-
-const RESERVED_CROSS_SIGNAL_TAG_PRIORITY: &[&str] = &[
-    // Reserved for future/cross-signal diagnosis. These tags are not emitted by
-    // immediate_cause_tags() today, but primary_from_tags() accepts them so
-    // higher-level diagnosis code can use the same primary-cause selection path.
-    "cpu_frequency",
-    "irq_interference",
-    "gpu_frame_pressure",
-    "block_io",
-];
-
-const PRIMARY_CAUSE_PRIORITY: &[&str] = &[
-    "major_page_fault",
-    "minor_page_fault",
-    "runqueue_contention",
-    // Reserved for future/cross-signal diagnosis. These tags are not emitted by
-    // immediate_cause_tags() today, but primary_from_tags() intentionally accepts
-    // them so report/diagnosis code can share one priority rule.
-    "cpu_frequency",
-    "irq_interference",
-    "gpu_frame_pressure",
-    "block_io",
-    "migration_or_cpu_mismatch",
-    "monitored_wakeup_backlog",
-];
-
-// Generates only immediate per-scheduler-event tags from fields available on
-// SchedulerEvent/TaskStats. Cross-signal tags such as block_io, irq_interference,
-// gpu_frame_pressure, and cpu_frequency are intentionally not emitted here; they
-// belong to higher-level correlation/diagnosis code.
-pub(crate) fn immediate_cause_tags(
-    event: &SchedulerEvent,
-    _stats: &metrics::TaskStats,
-    fault_deltas: (u64, u64),
-) -> Vec<String> {
-    let mut tags = Vec::with_capacity(IMMEDIATE_CAUSE_TAG_PRIORITY.len());
-
-    if event.observed_runnable_depth >= 4 {
-        tags.push("runqueue_contention".to_string());
-    }
-
-    if event.target_pending_wakeups > 2 {
-        tags.push("monitored_wakeup_backlog".to_string());
-    }
-
-    if fault_deltas.0 > 0 {
-        tags.push("major_page_fault".to_string());
-    }
-    if fault_deltas.1 > 0 {
-        tags.push("minor_page_fault".to_string());
-    }
-
-    if event.wakeup_target_cpu != event.cpu {
-        tags.push("migration_or_cpu_mismatch".to_string());
-    }
-
-    tags
-}
-
-pub(crate) fn primary_from_tags(tags: &[String]) -> Option<String> {
-    debug_assert!(
-        IMMEDIATE_CAUSE_TAG_PRIORITY
-            .iter()
-            .all(|candidate| PRIMARY_CAUSE_PRIORITY.contains(candidate))
-    );
-    debug_assert!(
-        RESERVED_CROSS_SIGNAL_TAG_PRIORITY
-            .iter()
-            .all(|candidate| PRIMARY_CAUSE_PRIORITY.contains(candidate))
-    );
-
-    PRIMARY_CAUSE_PRIORITY
-        .iter()
-        .find(|candidate| tags.iter().any(|tag| tag == **candidate))
-        .map(|cause| cause.to_string())
-}
-
 #[cfg(test)]
 mod tests {
-    use stutter_common::{
-        EVENT_BLOCK_IO, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_RUNNABLE_LATENCY, ExecEvent, IrqEvent,
-    };
+    use stutter_common::{EVENT_BLOCK_IO, EVENT_EXEC, EVENT_IRQ_LATENCY, ExecEvent, IrqEvent};
 
     use super::*;
 
@@ -388,171 +278,6 @@ mod tests {
         let record = irq_event_record(None, &event);
 
         assert_eq!(record.elapsed_ms, None);
-    }
-
-    #[test]
-    fn test_immediate_cause_tags() {
-        let mut event = SchedulerEvent {
-            kind: EVENT_RUNNABLE_LATENCY,
-            tid: 123,
-            cpu: 1,
-            wakeup_target_cpu: 1,
-            prio: 120,
-            waker_tid: 0,
-            target_pending_wakeups: 0,
-            observed_runnable_depth: 0,
-            maj_flt: 0,
-            min_flt: 0,
-            wakeup_ns: 0,
-            switch_ns: 0,
-            latency_ns: 1000,
-            comm: [0; 16],
-            switch_prev_pid: 0,
-            switch_prev_state: 0,
-        };
-        let stats = metrics::TaskStats::new(123, "test".to_string(), 0);
-
-        // No tags
-        let tags = immediate_cause_tags(&event, &stats, (0, 0));
-        assert!(tags.is_empty());
-
-        // Major fault
-        let tags = immediate_cause_tags(&event, &stats, (1, 0));
-        assert!(tags.contains(&"major_page_fault".to_string()));
-
-        // Minor fault
-        let tags = immediate_cause_tags(&event, &stats, (0, 1));
-        assert!(tags.contains(&"minor_page_fault".to_string()));
-
-        // Wakeup backlog
-        event.target_pending_wakeups = 5;
-        let tags = immediate_cause_tags(&event, &stats, (0, 0));
-        assert!(tags.contains(&"monitored_wakeup_backlog".to_string()));
-
-        // Migration
-        event.target_pending_wakeups = 0;
-        event.wakeup_target_cpu = 2;
-        let tags = immediate_cause_tags(&event, &stats, (0, 0));
-        assert!(tags.contains(&"migration_or_cpu_mismatch".to_string()));
-
-        // Both major and minor faults
-        let tags = immediate_cause_tags(&event, &stats, (1, 1));
-        assert!(tags.contains(&"major_page_fault".to_string()));
-        assert!(tags.contains(&"minor_page_fault".to_string()));
-    }
-
-    #[test]
-    fn test_primary_from_tags() {
-        let tags = vec![
-            "migration_or_cpu_mismatch".to_string(),
-            "major_page_fault".to_string(),
-        ];
-        // major_page_fault has higher priority
-        assert_eq!(
-            primary_from_tags(&tags),
-            Some("major_page_fault".to_string())
-        );
-
-        let tags = vec![
-            "monitored_wakeup_backlog".to_string(),
-            "migration_or_cpu_mismatch".to_string(),
-        ];
-        // migration_or_cpu_mismatch has higher priority
-        assert_eq!(
-            primary_from_tags(&tags),
-            Some("migration_or_cpu_mismatch".to_string())
-        );
-
-        assert_eq!(primary_from_tags(&[]), None);
-    }
-
-    #[test]
-    fn test_primary_from_tags_priority() {
-        let tags = vec![
-            "minor_page_fault".to_string(),
-            "major_page_fault".to_string(),
-        ];
-        // major_page_fault has higher priority
-        assert_eq!(
-            primary_from_tags(&tags),
-            Some("major_page_fault".to_string())
-        );
-
-        let tags = vec!["minor_page_fault".to_string()];
-        assert_eq!(
-            primary_from_tags(&tags),
-            Some("minor_page_fault".to_string())
-        );
-    }
-
-    #[test]
-    fn primary_from_tags_accepts_reserved_cross_signal_tags() {
-        let tags = vec!["block_io".to_string()];
-
-        assert_eq!(primary_from_tags(&tags), Some("block_io".to_string()));
-    }
-
-    #[test]
-    fn primary_from_tags_keeps_major_fault_above_reserved_cross_signal_tags() {
-        let tags = vec!["block_io".to_string(), "major_page_fault".to_string()];
-
-        assert_eq!(
-            primary_from_tags(&tags),
-            Some("major_page_fault".to_string())
-        );
-    }
-
-    #[test]
-    fn spike_record_is_created_with_cause_tags_without_late_patch() {
-        let event = SchedulerEvent {
-            kind: EVENT_RUNNABLE_LATENCY,
-            tid: 123,
-            cpu: 1,
-            wakeup_target_cpu: 1,
-            prio: 120,
-            waker_tid: 0,
-            target_pending_wakeups: 0,
-            observed_runnable_depth: 4,
-            maj_flt: 0,
-            min_flt: 0,
-            wakeup_ns: 10,
-            switch_ns: 20,
-            latency_ns: 2_000_000,
-            comm: [0; 16],
-            switch_prev_pid: 0,
-            switch_prev_state: 0,
-        };
-
-        let mut stats = metrics::TaskStats::new(123, "test".to_string(), 0);
-
-        let fault_deltas = (
-            event.maj_flt.saturating_sub(stats.last_spike_major_faults),
-            event.min_flt.saturating_sub(stats.last_spike_minor_faults),
-        );
-        let cause_tags = immediate_cause_tags(&event, &stats, fault_deltas);
-        let primary_cause = primary_from_tags(&cause_tags);
-
-        stats.record(
-            &event,
-            1_000_000,
-            0,
-            Some(metrics::SpikeRecordDiagnostics {
-                scx_ops: Some("ops".to_string()),
-                scx_state: Some("enabled".to_string()),
-                scx_enable_seq: Some("42".to_string()),
-                cause_tags: cause_tags.clone(),
-                primary_cause: primary_cause.clone(),
-            }),
-        );
-
-        assert_eq!(stats.top_spikes.len(), 1);
-        let spike = &stats.top_spikes[0];
-
-        assert_eq!(spike.cause_tags, cause_tags);
-        assert_eq!(spike.primary_cause, primary_cause);
-        assert_eq!(spike.scx_ops.as_deref(), Some("ops"));
-        assert_eq!(spike.scx_state.as_deref(), Some("enabled"));
-        assert_eq!(spike.scx_enable_seq.as_deref(), Some("42"));
     }
 
     #[test]
