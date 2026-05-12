@@ -29,7 +29,7 @@ use crate::{
         outputs::OutputRuntime,
         probes::ProbeRuntime,
         runtime::MonitorRuntime,
-        sinks::{MonitorEventSink, RecorderSink},
+        sinks::MonitorOutputSinks,
         targeting::TargetController,
         ui::{TuiRenderSnapshot, TuiRuntime},
     },
@@ -133,6 +133,402 @@ async fn optional_tick(tick: Option<&mut tokio::time::Interval>) {
         tick.tick().await;
     } else {
         futures_util::future::pending::<()>().await;
+    }
+}
+
+struct SessionTargetPlan {
+    tree_pids: Vec<u32>,
+    watch_state: WatchProcessState,
+    tree_root_starttimes: BTreeMap<u32, Option<u64>>,
+    had_tree_roots: bool,
+    focus_resolver: Option<FocusResolver>,
+    current_focus: Option<ResolvedFocus>,
+    foreground_resolver: Option<crate::foreground::ForegroundResolver>,
+    current_foreground: Option<crate::foreground::ForegroundWindowSnapshot>,
+    community_rules: crate::community_rules::CommunityRulesStatus,
+}
+
+impl SessionTargetPlan {
+    async fn resolve(config: &mut MonitorConfig) -> anyhow::Result<Self> {
+        let explicit_target = config.has_explicit_target();
+
+        let mut focus_resolver = None;
+        let mut current_focus = None;
+        let foreground_enabled = foreground_capture_enabled(config);
+        let foreground_resolver =
+            foreground_enabled.then(|| foreground_resolver_from_config(config));
+        let current_foreground = None;
+
+        let user_config = crate::config_file::load_user_config()?;
+
+        log::info!(
+            "monitor_session_config source=monitor_config summary_period_ms={} spike_threshold_ns={} max_tasks={} hwmon={} cpu_freq={} foreground_window={} focus_source={:?} foreground_source={:?}",
+            config.timing.summary_period_ms,
+            config.timing.spike_threshold_ns,
+            config.target.max_tasks,
+            config.probes.hwmon,
+            config.probes.cpu_freq,
+            config.focus.foreground_window,
+            config.focus.focus_source,
+            config.focus.foreground_source,
+        );
+
+        let community_rules_config =
+            crate::config_file::community_rules_config_from_user_config(user_config.as_ref());
+        let community_rules =
+            crate::community_rules::load_community_rules_status(&community_rules_config);
+        match &community_rules {
+            crate::community_rules::CommunityRulesStatus::Loaded { db } => {
+                log::info!(
+                    "community_rules_status status=loaded rules={}",
+                    db.rule_count()
+                );
+            }
+            crate::community_rules::CommunityRulesStatus::Disabled => {
+                log::info!("community_rules_status status=disabled");
+            }
+            crate::community_rules::CommunityRulesStatus::Failed { error } => {
+                log::warn!("community_rules_status status=failed err={error}");
+            }
+        }
+
+        if !explicit_target && config.focus.auto_focus {
+            let policy = FocusPolicy {
+                poll_ms: config.focus.auto_focus_poll_ms,
+                min_confidence: config.focus.auto_focus_min_confidence,
+                switch_margin: config.focus.auto_focus_switch_margin,
+                switch_cooldown_ms: config.focus.auto_focus_switch_cooldown_ms,
+                required_winner_polls: config.focus.auto_focus_required_polls,
+                max_roots: config.focus.auto_focus_max_roots,
+            };
+
+            let mut resolver = FocusResolver::new(policy);
+            match resolver.sample(Path::new("/proc"), 0, None, FocusSource::Heuristic) {
+                FocusDecision::Switch { new, .. } | FocusDecision::Keep { focus: new } => {
+                    config.target.tree_pids = new.group.root_pids.clone();
+                    info!(
+                        "auto_focus_initial_target kind={:?} score={:.3} confidence={:.3} roots={:?} situation={:?}",
+                        new.group.kind,
+                        new.group.score,
+                        new.group.confidence,
+                        new.group.root_pids,
+                        new.situation
+                    );
+                    current_focus = Some(new);
+                }
+                FocusDecision::NoTarget { reason } | FocusDecision::Clear { reason, .. } => {
+                    info!("auto_focus_no_initial_target reason={reason}");
+                }
+            }
+
+            focus_resolver = Some(resolver);
+        } else if !explicit_target {
+            let auto_targets = find_auto_target_pids(Path::new("/proc"));
+            if auto_targets.is_empty() {
+                anyhow::bail!(
+                    "no target specified and no game launcher (gamescope, pressure-vessel, etc.) detected. \
+                     Please provide --pid <PID>, --tree-pid <PID>, --watch-process <COMM>, or --cgroupv2 <PATH>"
+                );
+            }
+
+            let pids: Vec<_> = auto_targets.iter().map(|(p, _)| *p).collect();
+            let class = auto_targets[0].1;
+            info!("auto_detected_launcher class={class} pids={pids:?}");
+            let stdout_is_machine_stream =
+                config.outputs.json_stream || config.csv_streams_to_stdout();
+            if !stdout_is_machine_stream {
+                println!(
+                    "auto-detected game launcher: {class} (PIDs {pids:?}). monitoring tree..."
+                );
+            }
+            config.target.tree_pids = pids;
+        }
+
+        let mut tree_pids = config.target.tree_pids.clone();
+        let watch_state = match resolve_watch_process(config, &mut tree_pids).await? {
+            Some(pid) => WatchProcessState::Running(pid),
+            None => WatchProcessState::None,
+        };
+
+        let had_tree_roots = !tree_pids.is_empty();
+        let tree_root_starttimes = capture_tree_root_starttimes(&tree_pids);
+
+        Ok(Self {
+            tree_pids,
+            watch_state,
+            tree_root_starttimes,
+            had_tree_roots,
+            focus_resolver,
+            current_focus,
+            foreground_resolver,
+            current_foreground,
+            community_rules,
+        })
+    }
+}
+
+struct SessionProbePlan {
+    loaded: ebpf_loader::LoadedEbpf,
+    block_io_correlation_basis: String,
+    block_io_correlation_confidence: String,
+}
+
+impl SessionProbePlan {
+    fn load(config: &MonitorConfig) -> anyhow::Result<Self> {
+        let mut loaded = ebpf_loader::load_and_attach(config)?;
+        configure_target_irqs(&mut loaded, config)?;
+        let block_io_correlation_basis = loaded.block_io_correlation_basis.as_str().to_owned();
+        let block_io_correlation_confidence =
+            loaded.block_io_correlation_basis.confidence().to_owned();
+
+        Ok(Self {
+            loaded,
+            block_io_correlation_basis,
+            block_io_correlation_confidence,
+        })
+    }
+}
+
+struct RecordingRuntime;
+
+impl RecordingRuntime {
+    fn begin(
+        config: &MonitorConfig,
+        probe_plan: &SessionProbePlan,
+    ) -> anyhow::Result<LiveRecorder> {
+        let recording = recorder::prepare_recording(config)?;
+        let mut recorder = LiveRecorder {
+            run: recording,
+            ..Default::default()
+        };
+
+        if config.streams.json_stream {
+            recorder.enable_stdout_spike_stream();
+        }
+
+        recorder.buffers.spike_events = recorder.run.as_ref().map(|_| SpikeEventBuffer::default());
+
+        if let Some(run) = recorder.run.as_mut() {
+            if let Some(path) = &config.mangohud.log
+                && let Ok(meta) = fs::metadata(path)
+            {
+                run.mangohud_start_offset = Some(meta.len());
+                info!(
+                    "mangohud_alignment_init path={} start_offset={}",
+                    path.display(),
+                    meta.len()
+                );
+            }
+
+            let registry = &mut recorder.streams;
+            let dir = &run.run_dir;
+
+            for kind in probe_plan
+                .loaded
+                .activation_plan
+                .required_stream_artifacts()
+            {
+                registry.create_stream(dir, kind)?;
+            }
+        }
+
+        if let Some(csv_stream) = &config.streams.csv {
+            recorder.csv_writer = Some(match csv_stream {
+                CsvStreamTarget::File(path) => {
+                    recorder::IntervalCsvWriter::create_file(path.clone())?
+                }
+                CsvStreamTarget::Stdout => recorder::IntervalCsvWriter::stdout(),
+            });
+        }
+
+        Ok(recorder)
+    }
+}
+
+struct ExporterRuntime {
+    prometheus_state: Option<Arc<crate::prometheus::PrometheusState>>,
+    prometheus_task: Option<tokio::task::JoinHandle<()>>,
+    otel_exporter: Option<crate::otel::OtelExporterHandle>,
+}
+
+impl ExporterRuntime {
+    async fn begin(config: &MonitorConfig, recorder: &mut LiveRecorder) -> anyhow::Result<Self> {
+        let (prometheus_state, prometheus_task) = if let Some(port) = config.outputs.metrics_port {
+            let state = Arc::new(crate::prometheus::PrometheusState::new_started_now());
+            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+            let task = crate::prometheus::spawn_metrics_server(addr, state.clone()).await?;
+            info!("prometheus metrics listening on http://127.0.0.1:{port}/metrics");
+            (Some(state), Some(task))
+        } else {
+            (None, None)
+        };
+
+        recorder.exporters.prometheus_state = prometheus_state.clone();
+
+        let mut otel_exporter = None;
+        if let Some(endpoint) = config.outputs.otlp_endpoint.as_ref() {
+            let started_at = recorder
+                .run
+                .as_ref()
+                .map(|r| r.started_at)
+                .unwrap_or_else(SystemTime::now);
+            let monotonic_start_ns = recorder
+                .run
+                .as_ref()
+                .and_then(|r| r.monotonic_start_ns)
+                .unwrap_or_else(|| recorder::monotonic_now_ns().unwrap_or(0));
+
+            let otel_config = crate::otel::OtelConfig {
+                endpoint: endpoint.clone(),
+                service_name: config.outputs.otel_service_name.clone(),
+                started_at,
+                monotonic_start_ns,
+            };
+
+            match crate::otel::spawn_exporter(otel_config) {
+                Ok(handle) => {
+                    recorder.exporters.otel_spike_tx = Some(handle.tx.clone());
+                    recorder.exporters.otel_spans_dropped = Some(handle.dropped.clone());
+                    otel_exporter = Some(handle);
+                }
+                Err(err) => {
+                    warn!("failed to start OTel exporter: {err:#}");
+                }
+            }
+        }
+
+        Ok(Self {
+            prometheus_state,
+            prometheus_task,
+            otel_exporter,
+        })
+    }
+}
+
+struct AlertRuntime {
+    sender: Option<tokio::sync::mpsc::Sender<crate::alert::AlertPayload>>,
+}
+
+impl AlertRuntime {
+    fn begin(config: &MonitorConfig) -> Self {
+        let sender = if config.alerts.threshold_ns.is_some() {
+            let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+            let webhook_url = config.alerts.webhook_url.clone();
+            let webhook_client = webhook_url.as_ref().map(|_| {
+                reqwest::Client::builder()
+                    .timeout(Duration::from_secs(10))
+                    .build()
+            });
+
+            tokio::spawn(async move {
+                while let Some(payload) = rx.recv().await {
+                    if let Err(err) = crate::alert::send_desktop_alert(&payload).await {
+                        warn!("desktop_alert_failed err={err}");
+                    }
+                    if let Some(url) = &webhook_url {
+                        match &webhook_client {
+                            Some(Ok(client)) => {
+                                if let Err(err) = crate::alert::send_webhook_alert_with_client(
+                                    client, url, &payload,
+                                )
+                                .await
+                                {
+                                    warn!("webhook_alert_failed url={url} err={err}");
+                                }
+                            }
+                            Some(Err(err)) => {
+                                warn!(
+                                    "webhook_alert_failed url={url} err=failed to build HTTP client: {err}"
+                                );
+                            }
+                            None => {}
+                        }
+                    }
+                }
+            });
+
+            Some(tx)
+        } else {
+            None
+        };
+
+        Self { sender }
+    }
+}
+
+struct SamplerRuntime {
+    cpu_perf_sampler: Option<crate::perf_counters::CpuPerfSampler>,
+    runtime_slice_sampler: Option<RuntimeSliceSampler>,
+}
+
+impl SamplerRuntime {
+    fn begin(config: &MonitorConfig) -> Self {
+        let cpu_perf_sampler = if config.probes.cpu_perf {
+            Some(crate::perf_counters::CpuPerfSampler::new(
+                crate::perf_counters::CpuPerfConfig {
+                    include_kernel: config.cpu_perf.include_kernel,
+                    max_tasks: config.cpu_perf.max_tasks,
+                    collect_cache_refs: config.cpu_perf.collect_cache_refs,
+                },
+            ))
+        } else {
+            None
+        };
+
+        let runtime_slice_sampler = config.probes.runtime_slices.then(RuntimeSliceSampler::new);
+
+        Self {
+            cpu_perf_sampler,
+            runtime_slice_sampler,
+        }
+    }
+}
+
+struct UiRuntimeStage;
+
+impl UiRuntimeStage {
+    fn begin(config: &MonitorConfig) -> anyhow::Result<TuiRuntime> {
+        let tui_state = crate::tui::TuiState::default();
+        let terminal = if config.ui.tui {
+            Some(
+                crate::tui::init_terminal()
+                    .map_err(|e| anyhow::anyhow!("failed to init terminal: {e}"))?,
+            )
+        } else {
+            None
+        };
+
+        Ok(TuiRuntime::from_parts(tui_state, terminal))
+    }
+}
+
+struct HwmonRuntime {
+    reader: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
+}
+
+impl HwmonRuntime {
+    fn begin(
+        config: &MonitorConfig,
+        shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
+    ) -> Self {
+        let reader = if !config.probes.hwmon {
+            None
+        } else if let Some(shared) = shared_hwmon {
+            Some(shared)
+        } else {
+            hwmon::HwmonReader::discover_with_options(
+                config.hwmon.root.as_deref(),
+                config.hwmon.drm_card.as_deref(),
+                config.hwmon.render_node.as_deref(),
+            )
+            .map(|r| Arc::new(std::sync::Mutex::new(r)))
+        };
+
+        if config.probes.hwmon && reader.is_none() {
+            warn!("hwmon_requested_but_no_gpu_hwmon_found");
+        }
+
+        Self { reader }
     }
 }
 
@@ -296,167 +692,12 @@ impl MonitorSession {
         shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
         event_tx: Option<tokio::sync::mpsc::Sender<MonitorEvent>>,
     ) -> anyhow::Result<Self> {
-        let explicit_target = config.has_explicit_target();
-
-        let mut focus_resolver = None;
-        let mut current_focus = None;
-        let focus_switch_count = 0;
-        let foreground_enabled = foreground_capture_enabled(&config);
-        let foreground_resolver =
-            foreground_enabled.then(|| foreground_resolver_from_config(&config));
-        let current_foreground = None;
-        let foreground_switch_count = 0;
-
-        let user_config = crate::config_file::load_user_config()?;
-
-        log::info!(
-            "monitor_session_config source=monitor_config summary_period_ms={} spike_threshold_ns={} max_tasks={} hwmon={} cpu_freq={} foreground_window={} focus_source={:?} foreground_source={:?}",
-            config.timing.summary_period_ms,
-            config.timing.spike_threshold_ns,
-            config.target.max_tasks,
-            config.probes.hwmon,
-            config.probes.cpu_freq,
-            config.focus.foreground_window,
-            config.focus.focus_source,
-            config.focus.foreground_source,
-        );
-
-        let community_rules_config =
-            crate::config_file::community_rules_config_from_user_config(user_config.as_ref());
-        let community_rules =
-            crate::community_rules::load_community_rules_status(&community_rules_config);
-        match &community_rules {
-            crate::community_rules::CommunityRulesStatus::Loaded { db } => {
-                log::info!(
-                    "community_rules_status status=loaded rules={}",
-                    db.rule_count()
-                );
-            }
-            crate::community_rules::CommunityRulesStatus::Disabled => {
-                log::info!("community_rules_status status=disabled");
-            }
-            crate::community_rules::CommunityRulesStatus::Failed { error } => {
-                log::warn!("community_rules_status status=failed err={error}");
-            }
-        }
-
-        if !explicit_target && config.focus.auto_focus {
-            let policy = FocusPolicy {
-                poll_ms: config.focus.auto_focus_poll_ms,
-                min_confidence: config.focus.auto_focus_min_confidence,
-                switch_margin: config.focus.auto_focus_switch_margin,
-                switch_cooldown_ms: config.focus.auto_focus_switch_cooldown_ms,
-                required_winner_polls: config.focus.auto_focus_required_polls,
-                max_roots: config.focus.auto_focus_max_roots,
-            };
-
-            let mut resolver = FocusResolver::new(policy);
-            match resolver.sample(Path::new("/proc"), 0, None, FocusSource::Heuristic) {
-                FocusDecision::Switch { new, .. } | FocusDecision::Keep { focus: new } => {
-                    config.target.tree_pids = new.group.root_pids.clone();
-                    info!(
-                        "auto_focus_initial_target kind={:?} score={:.3} confidence={:.3} roots={:?} situation={:?}",
-                        new.group.kind,
-                        new.group.score,
-                        new.group.confidence,
-                        new.group.root_pids,
-                        new.situation
-                    );
-                    current_focus = Some(new);
-                }
-                FocusDecision::NoTarget { reason } | FocusDecision::Clear { reason, .. } => {
-                    info!("auto_focus_no_initial_target reason={reason}");
-                }
-            }
-
-            focus_resolver = Some(resolver);
-        } else if !explicit_target {
-            let auto_targets = find_auto_target_pids(Path::new("/proc"));
-            if auto_targets.is_empty() {
-                anyhow::bail!(
-                    "no target specified and no game launcher (gamescope, pressure-vessel, etc.) detected. \
-                     Please provide --pid <PID>, --tree-pid <PID>, --watch-process <COMM>, or --cgroupv2 <PATH>"
-                );
-            }
-
-            let pids: Vec<_> = auto_targets.iter().map(|(p, _)| *p).collect();
-            let class = auto_targets[0].1;
-            info!("auto_detected_launcher class={class} pids={pids:?}");
-            let stdout_is_machine_stream =
-                config.outputs.json_stream || config.csv_streams_to_stdout();
-            if !stdout_is_machine_stream {
-                println!(
-                    "auto-detected game launcher: {class} (PIDs {pids:?}). monitoring tree..."
-                );
-            }
-            config.target.tree_pids = pids;
-        }
-
-        let mut tree_pids = config.target.tree_pids.clone();
-        let watch_state = match resolve_watch_process(&config, &mut tree_pids).await? {
-            Some(pid) => WatchProcessState::Running(pid),
-            None => WatchProcessState::None,
-        };
-
-        let had_tree_roots = !tree_pids.is_empty();
-        let tree_root_starttimes = capture_tree_root_starttimes(&tree_pids);
-
-        let recording = recorder::prepare_recording(&config)?;
-        let mut loaded = ebpf_loader::load_and_attach(&config)?;
-        configure_target_irqs(&mut loaded, &config)?;
-        let block_io_correlation_basis = loaded.block_io_correlation_basis.as_str().to_owned();
-        let block_io_correlation_confidence =
-            loaded.block_io_correlation_basis.confidence().to_owned();
-
-        let mut recorder = LiveRecorder {
-            run: recording,
-            ..Default::default()
-        };
-        if config.streams.json_stream {
-            recorder.enable_stdout_spike_stream();
-        }
-
-        let (prometheus_state, prometheus_task) = if let Some(port) = config.outputs.metrics_port {
-            let state = Arc::new(crate::prometheus::PrometheusState::new_started_now());
-            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-            let task = crate::prometheus::spawn_metrics_server(addr, state.clone()).await?;
-            info!("prometheus metrics listening on http://127.0.0.1:{port}/metrics");
-            (Some(state), Some(task))
-        } else {
-            (None, None)
-        };
-
-        recorder.exporters.prometheus_state = prometheus_state.clone();
-        recorder.buffers.spike_events = recorder.run.as_ref().map(|_| SpikeEventBuffer::default());
-
-        if let Some(run) = recorder.run.as_mut() {
-            if let Some(path) = &config.mangohud.log
-                && let Ok(meta) = fs::metadata(path)
-            {
-                run.mangohud_start_offset = Some(meta.len());
-                info!(
-                    "mangohud_alignment_init path={} start_offset={}",
-                    path.display(),
-                    meta.len()
-                );
-            }
-
-            let registry = &mut recorder.streams;
-            let dir = &run.run_dir;
-
-            for kind in loaded.activation_plan.required_stream_artifacts() {
-                registry.create_stream(dir, kind)?;
-            }
-        }
-
-        if let Some(csv_stream) = &config.streams.csv {
-            recorder.csv_writer = Some(match csv_stream {
-                CsvStreamTarget::File(path) => {
-                    recorder::IntervalCsvWriter::create_file(path.clone())?
-                }
-                CsvStreamTarget::Stdout => recorder::IntervalCsvWriter::stdout(),
-            });
-        }
+        let target_plan = SessionTargetPlan::resolve(&mut config).await?;
+        let probe_plan = SessionProbePlan::load(&config)?;
+        let mut recorder = RecordingRuntime::begin(&config, &probe_plan)?;
+        let exporter_runtime = ExporterRuntime::begin(&config, &mut recorder).await?;
+        let alert_runtime = AlertRuntime::begin(&config);
+        let sampler_runtime = SamplerRuntime::begin(&config);
 
         let metadata = crate::metadata::collect_system_metadata();
         let cpu_to_pkg: BTreeMap<u32, String> = metadata
@@ -465,34 +706,10 @@ impl MonitorSession {
             .map(|c| (c.cpu, c.physical_package_id.clone().unwrap_or_default()))
             .collect();
 
-        let hwmon_reader = if !config.probes.hwmon {
-            None
-        } else if let Some(shared) = shared_hwmon {
-            Some(shared)
-        } else {
-            hwmon::HwmonReader::discover_with_options(
-                config.hwmon.root.as_deref(),
-                config.hwmon.drm_card.as_deref(),
-                config.hwmon.render_node.as_deref(),
-            )
-            .map(|r| Arc::new(std::sync::Mutex::new(r)))
-        };
-
-        if config.probes.hwmon && hwmon_reader.is_none() {
-            warn!("hwmon_requested_but_no_gpu_hwmon_found");
-        }
-
+        let hwmon_runtime = HwmonRuntime::begin(&config, shared_hwmon);
         let started = Instant::now();
 
-        let tui_state = crate::tui::TuiState::default();
-        let terminal = if config.ui.tui {
-            Some(
-                crate::tui::init_terminal()
-                    .map_err(|e| anyhow::anyhow!("failed to init terminal: {e}"))?,
-            )
-        } else {
-            None
-        };
+        let ui = UiRuntimeStage::begin(&config)?;
 
         let interval_label = if config.timing.epoch_period_ms.is_some() {
             "epoch"
@@ -500,110 +717,27 @@ impl MonitorSession {
             "summary"
         };
 
-        let alert_sender = if config.alerts.threshold_ns.is_some() {
-            let (tx, mut rx) = tokio::sync::mpsc::channel(100);
-            let webhook_url = config.alerts.webhook_url.clone();
-            let webhook_client = webhook_url.as_ref().map(|_| {
-                reqwest::Client::builder()
-                    .timeout(Duration::from_secs(10))
-                    .build()
-            });
-            tokio::spawn(async move {
-                while let Some(payload) = rx.recv().await {
-                    if let Err(err) = crate::alert::send_desktop_alert(&payload).await {
-                        warn!("desktop_alert_failed err={err}");
-                    }
-                    if let Some(url) = &webhook_url {
-                        match &webhook_client {
-                            Some(Ok(client)) => {
-                                if let Err(err) = crate::alert::send_webhook_alert_with_client(
-                                    client, url, &payload,
-                                )
-                                .await
-                                {
-                                    warn!("webhook_alert_failed url={url} err={err}");
-                                }
-                            }
-                            Some(Err(err)) => {
-                                warn!(
-                                    "webhook_alert_failed url={url} err=failed to build HTTP client: {err}"
-                                );
-                            }
-                            None => {}
-                        }
-                    }
-                }
-            });
-            Some(tx)
-        } else {
-            None
-        };
-
-        let cpu_perf_sampler = if config.probes.cpu_perf {
-            Some(crate::perf_counters::CpuPerfSampler::new(
-                crate::perf_counters::CpuPerfConfig {
-                    include_kernel: config.cpu_perf.include_kernel,
-                    max_tasks: config.cpu_perf.max_tasks,
-                    collect_cache_refs: config.cpu_perf.collect_cache_refs,
-                },
-            ))
-        } else {
-            None
-        };
-        let runtime_slice_sampler = config.probes.runtime_slices.then(RuntimeSliceSampler::new);
-
         let probes = ProbeRuntime::new(
-            loaded,
-            block_io_correlation_basis,
-            block_io_correlation_confidence,
-            cpu_perf_sampler,
-            runtime_slice_sampler,
+            probe_plan.loaded,
+            probe_plan.block_io_correlation_basis,
+            probe_plan.block_io_correlation_confidence,
+            sampler_runtime.cpu_perf_sampler,
+            sampler_runtime.runtime_slice_sampler,
         );
 
-        let mut otel_exporter = None;
-        if let Some(endpoint) = config.outputs.otlp_endpoint.as_ref() {
-            let started_at = recorder
-                .run
-                .as_ref()
-                .map(|r| r.started_at)
-                .unwrap_or_else(SystemTime::now);
-            let monotonic_start_ns = recorder
-                .run
-                .as_ref()
-                .and_then(|r| r.monotonic_start_ns)
-                .unwrap_or_else(|| recorder::monotonic_now_ns().unwrap_or(0));
-
-            let otel_config = crate::otel::OtelConfig {
-                endpoint: endpoint.clone(),
-                service_name: config.outputs.otel_service_name.clone(),
-                started_at,
-                monotonic_start_ns,
-            };
-
-            match crate::otel::spawn_exporter(otel_config) {
-                Ok(handle) => {
-                    recorder.exporters.otel_spike_tx = Some(handle.tx.clone());
-                    recorder.exporters.otel_spans_dropped = Some(handle.dropped.clone());
-                    otel_exporter = Some(handle);
-                }
-                Err(err) => {
-                    warn!("failed to start OTel exporter: {err:#}");
-                }
-            }
-        }
-
-        let targeting =
-            TargetController::from_config_parts(tree_pids, watch_state, tree_root_starttimes);
+        let targeting = TargetController::from_config_parts(
+            target_plan.tree_pids,
+            target_plan.watch_state,
+            target_plan.tree_root_starttimes,
+        );
 
         let outputs = OutputRuntime::from_parts(
             recorder,
-            prometheus_state,
-            prometheus_task,
-            otel_exporter,
-            alert_sender,
+            exporter_runtime.prometheus_state,
+            exporter_runtime.prometheus_task,
+            exporter_runtime.otel_exporter,
+            alert_runtime.sender,
         );
-
-        let ui = TuiRuntime::from_parts(tui_state, terminal);
 
         let runtime = MonitorRuntime::from_config_parts(
             probes,
@@ -617,16 +751,16 @@ impl MonitorSession {
             config: Arc::new(config),
             runtime,
             cpu_to_pkg,
-            hwmon_reader,
-            community_rules,
-            focus_resolver,
-            current_focus,
-            focus_switch_count,
-            foreground_resolver,
-            current_foreground,
-            foreground_switch_count,
+            hwmon_reader: hwmon_runtime.reader,
+            community_rules: target_plan.community_rules,
+            focus_resolver: target_plan.focus_resolver,
+            current_focus: target_plan.current_focus,
+            focus_switch_count: 0,
+            foreground_resolver: target_plan.foreground_resolver,
+            current_foreground: target_plan.current_foreground,
+            foreground_switch_count: 0,
             started,
-            had_tree_roots,
+            had_tree_roots: target_plan.had_tree_roots,
             interval_label,
         })
     }
@@ -673,14 +807,18 @@ impl MonitorSession {
         Ok(())
     }
 
-    fn dispatch_recorder_event(&mut self, event: &MonitorEvent) -> anyhow::Result<()> {
-        RecorderSink::new(&mut self.runtime.outputs.recorder)
-            .on_event(event)
-            .map_err(|err| anyhow::anyhow!(err))
-    }
-
     async fn dispatch_monitor_event(&mut self, event: MonitorEvent) -> anyhow::Result<()> {
-        self.dispatch_recorder_event(&event)?;
+        let output = event_runtime_config_from_config(&self.config).output;
+        let mut sinks = MonitorOutputSinks::new(
+            output,
+            &mut self.runtime.outputs.recorder,
+            self.runtime.outputs.alert_sender.as_ref(),
+        );
+
+        if let Err(err) = sinks.dispatch(&event) {
+            warn!("monitor_event_sink_failed err={err}");
+        }
+
         self.emit(event).await;
         Ok(())
     }
@@ -1017,6 +1155,7 @@ impl MonitorSession {
         let mut pending_spikes = Vec::new();
         let mut pending_irqs = Vec::new();
         let mut pending_ios = Vec::new();
+        let mut pending_monitor_events = Vec::new();
 
         let current_scx = scx_snapshot(&self.runtime.probes.scx_tracker);
 
@@ -1033,21 +1172,24 @@ impl MonitorSession {
                         stutter_common::SchedulerEvent,
                     >(&item)
                     {
-                        let spike = crate::events::handle_event_with_runtime_config(
+                        let update = crate::events::handle_event_with_runtime_config(
                             &event,
                             &event_runtime_config_from_config(&self.config),
                             self.started,
                             &mut self.runtime.targeting.tasks,
                             recording_monotonic_start_ns,
-                            &mut self.runtime.outputs.recorder,
-                            self.runtime.outputs.alert_sender.as_ref(),
                             current_scx.ops.as_deref(),
                             current_scx.state.as_deref(),
                             current_scx.enable_seq.as_deref(),
                         );
-                        if let Some(spike) = spike {
+                        let crate::events::interpret::SchedulerSampleUpdate {
+                            events,
+                            spike_event,
+                        } = update;
+                        if let Some(spike) = spike_event {
                             pending_spikes.push(spike);
                         }
+                        pending_monitor_events.extend(events);
                     } else {
                         log::warn!("short_scheduler_event len={}", item.len());
                     }
@@ -1059,10 +1201,7 @@ impl MonitorSession {
                     {
                         let record =
                             crate::events::irq_event_record(recording_monotonic_start_ns, &event);
-                        crate::events::handle_irq_record(
-                            &record,
-                            &mut self.runtime.outputs.recorder,
-                        );
+                        pending_monitor_events.push(crate::events::handle_irq_record(&record));
                         pending_irqs.push(record);
                     } else {
                         log::warn!("short_irq_event len={}", item.len());
@@ -1073,13 +1212,12 @@ impl MonitorSession {
                         stutter_common::MigrationEvent,
                     >(&item)
                     {
-                        crate::events::handle_migration_event(
+                        pending_monitor_events.push(crate::events::handle_migration_event(
                             &event,
                             &mut self.runtime.targeting.tasks,
-                            &mut self.runtime.outputs.recorder,
                             &self.cpu_to_pkg,
                             self.started,
-                        );
+                        ));
                     } else {
                         log::warn!("short_migration_event len={}", item.len());
                     }
@@ -1089,11 +1227,8 @@ impl MonitorSession {
                         stutter_common::CpuFreqEvent,
                     >(&item)
                     {
-                        crate::events::handle_cpu_freq_event(
-                            &event,
-                            &mut self.runtime.outputs.recorder,
-                            self.started,
-                        );
+                        pending_monitor_events
+                            .push(crate::events::handle_cpu_freq_event(&event, self.started));
                     } else {
                         log::warn!("short_cpu_freq_event len={}", item.len());
                     }
@@ -1132,10 +1267,7 @@ impl MonitorSession {
                             self.started,
                         );
 
-                        crate::events::handle_block_io_record(
-                            &record,
-                            &mut self.runtime.outputs.recorder,
-                        );
+                        pending_monitor_events.push(crate::events::handle_block_io_record(&record));
                         pending_ios.push(record);
                     } else {
                         log::warn!("short_block_io_event len={}", item.len());
@@ -1152,6 +1284,10 @@ impl MonitorSession {
 
         guard.clear_ready();
         drop(guard);
+
+        for event in pending_monitor_events {
+            self.dispatch_monitor_event(event).await?;
+        }
 
         for irq in pending_irqs {
             self.runtime.telemetry.push_irq(irq);
