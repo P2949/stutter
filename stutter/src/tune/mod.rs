@@ -14,15 +14,8 @@ use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 
 use crate::{
-    artifacts::ArtifactSelection,
-    cli::{self, Config},
-    hwmon,
-    process_tree::TaskFilters,
-    profiles,
-    recorder::IntervalRecord,
-    scorer,
-    session::run_monitor,
-    session_io,
+    artifacts::ArtifactSelection, config::model::MonitorConfig, hwmon, profiles,
+    recorder::IntervalRecord, scorer, session::run_monitor, session_io,
 };
 
 pub mod comparability;
@@ -349,74 +342,36 @@ async fn collect_tune_results(
                 frame_events,
                 coverage,
             } = match measure_tune_candidate(
-                Arc::new(Config {
-                    monitor_config_layer: None,
-                    preset: None,
-                    target_pids: Vec::new(),
-                    tree_pids: vec![tree_pid],
-                    summary_period_ms: 1_000,
-                    epoch_period_ms: None,
-                    spike_threshold_ns: 1_000_000,
-                    alert_threshold_ns: None,
-                    alert_webhook_url: None,
-                    verbose: false,
-                    max_tasks: 1024,
-                    task_filters: TaskFilters::default(),
-                    keep_missing_pid: false,
-                    watch_process: None,
-                    persistent: false,
-                    watch_poll_ms: 2_000,
-                    watch_timeout: None,
-                    csv_stream: None,
-                    irq_latency: false,
-                    irqs: Vec::new(),
-                    hwmon,
-                    hwmon_root: None,
-                    hwmon_drm_card: None,
-                    hwmon_render_node: None,
-                    mangohud_log: mangohud_log.clone(),
-                    tui: false,
-                    retain_intervals: None,
-                    recording: Some(cli::RecordingConfig {
+                Arc::new(MonitorConfig {
+                    target: crate::config::model::TargetConfig {
+                        tree_pids: vec![tree_pid],
+                        max_tasks: 1024,
+                        ..Default::default()
+                    },
+                    timing: crate::config::model::TimingConfig {
+                        summary_period_ms: 1_000,
+                        max_duration: Some(Duration::from_secs(epoch_seconds)),
+                        ..Default::default()
+                    },
+                    probes: crate::config::model::ProbeConfig {
+                        hwmon,
+                        cpu_freq: true,
+                        ..Default::default()
+                    },
+                    recording: crate::config::model::RecordingConfig {
                         run_name: Some(format!("tune-{}", profile.name)),
-                        out_dir: Some(tune_run_dir(tune_output_dir, &profile.name, iteration)),
-                    }),
-                    max_duration: Some(Duration::from_secs(epoch_seconds)),
-                    cgroupv2: None,
-                    native_cgroup_filter: false,
-                    follow_exec: true,
-                    exclude_tree_pids: Vec::new(),
-                    cpu_freq: true,
-                    faults: false,
-                    cpu_perf: false,
-                    cpu_perf_kernel: false,
-                    cpu_perf_max_tasks: 128,
-                    cpu_perf_cache_refs: false,
-                    block_io: false,
-                    stat_wait: false,
-                    runtime_slices: false,
-                    runtime_slices_max_tasks: 256,
-                    json_stream: false,
-                    mangohud_log_live: false,
-                    metrics_port: None,
-                    ringbuf_size_kb: None,
-                    wakeup_map_factor: None,
-                    otlp_endpoint: None,
-                    otel_service_name: "stutter".to_owned(),
-                    auto_focus: false,
-                    focus_source: crate::config::FocusSource::Heuristic,
-                    foreground_window: false,
-                    foreground_source: crate::config::ForegroundSource::Auto,
-                    foreground_poll_ms: 1000,
-                    foreground_max_stale_ms: 2500,
-                    foreground_include_title: false,
-                    auto_focus_poll_ms: 1000,
-                    auto_focus_min_confidence: 0.60,
-                    auto_focus_switch_cooldown_ms: 5000,
-                    auto_focus_switch_margin: 0.20,
-                    auto_focus_required_polls: 2,
-                    auto_focus_max_roots: 4,
-                    remote: None,
+                        output_dir: Some(tune_run_dir(tune_output_dir, &profile.name, iteration)),
+                        ..Default::default()
+                    },
+                    mangohud: crate::config::model::MangoHudConfig {
+                        log: mangohud_log.clone(),
+                        ..Default::default()
+                    },
+                    watch: crate::config::model::WatchConfig {
+                        poll_ms: 2_000,
+                        ..Default::default()
+                    },
+                    ..Default::default()
                 }),
                 profile.clone(),
                 enforce,
@@ -631,7 +586,7 @@ async fn write_tune_summary(
 }
 
 pub async fn measure_tune_candidate(
-    config: Arc<Config>,
+    monitor_config: Arc<MonitorConfig>,
     profile: profiles::Profile,
     enforce: bool,
     shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
@@ -639,12 +594,10 @@ pub async fn measure_tune_candidate(
     _tune_output_dir: PathBuf,
     warmup_seconds: u64,
 ) -> anyhow::Result<TuneMeasureResult> {
-    let tree_pid = config.tree_pids[0];
-    let run_dir = config
+    let tree_pid = monitor_config.target.tree_pids[0];
+    let run_dir = monitor_config
         .recording
-        .as_ref()
-        .unwrap()
-        .out_dir
+        .output_dir
         .as_ref()
         .unwrap()
         .clone();
@@ -729,7 +682,6 @@ pub async fn measure_tune_candidate(
         enforce,
     }));
 
-    let monitor_config = Arc::new(crate::config::effective::resolve_monitor_config(&config)?);
     let mut profile_refresh_finished = false;
     let monitor_result = tokio::select! {
         result = run_monitor(monitor_config, shared_hwmon, None, None) => result,

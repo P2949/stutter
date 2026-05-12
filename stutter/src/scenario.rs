@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    cli::{Config, RecordingConfig},
+    config::model::MonitorConfig,
     process_tree::{CompiledPattern, TaskClass, TaskFilters},
 };
 
@@ -294,7 +294,7 @@ pub struct ScenarioRunInput {
 }
 
 pub struct PreparedScenarioRun {
-    pub config: Config,
+    pub config: MonitorConfig,
     pub record: ScenarioRunRecord,
     pub dry_run: bool,
     pub dry_run_text: String,
@@ -332,94 +332,69 @@ pub fn prepare_scenario_run(input: ScenarioRunInput) -> Result<PreparedScenarioR
     let runtime_slices = preset_defaults.runtime_slices.unwrap_or(false);
     let irq_latency = scenario.irq_latency;
 
-    let mut config = Config {
-        monitor_config_layer: None,
-        preset: Some(scenario.preset.clone()),
-        target_pids: scenario.pid.clone(),
-        tree_pids: scenario.tree_pid.map(|p| vec![p]).unwrap_or_default(),
-        summary_period_ms: scenario.summary_ms.unwrap_or(1000),
-        epoch_period_ms: scenario.summary_ms,
-        spike_threshold_ns: scenario.spike_us.unwrap_or(1000) * 1000,
-        alert_threshold_ns: None,
-        alert_webhook_url: None,
-        verbose: false,
-        task_filters: TaskFilters {
-            include_comm: scenario
-                .include_comm
-                .iter()
-                .map(|s| CompiledPattern::new(s.clone()))
-                .collect::<Result<Vec<_>>>()?,
-            exclude_comm: scenario
-                .exclude_comm
-                .iter()
-                .map(|s| CompiledPattern::new(s.clone()))
-                .collect::<Result<Vec<_>>>()?,
-        },
-        keep_missing_pid: false,
-        watch_process: scenario.watch_process.clone(),
-        persistent: scenario.persistent,
-        watch_poll_ms: 2000,
-        watch_timeout: None,
-        max_tasks: 1024,
-        csv_stream: None,
-        irq_latency,
-        irqs: scenario.irqs.clone(),
-        hwmon,
-        hwmon_root: None,
-        hwmon_drm_card: None,
-        hwmon_render_node: None,
-        mangohud_log: input
-            .mangohud_log_override
-            .or(scenario.mangohud_log.clone()),
-        mangohud_log_live: false,
-        otlp_endpoint: None,
-        otel_service_name: "stutter".to_owned(),
-        auto_focus: false,
-        focus_source: crate::config::FocusSource::Heuristic,
-        foreground_window: false,
-        foreground_source: crate::config::ForegroundSource::Auto,
-        foreground_poll_ms: 1000,
-        foreground_max_stale_ms: 2500,
-        foreground_include_title: false,
-        auto_focus_poll_ms: 1000,
-        auto_focus_min_confidence: 0.60,
-        auto_focus_switch_cooldown_ms: 5000,
-        auto_focus_switch_margin: 0.20,
-        auto_focus_required_polls: 2,
-        auto_focus_max_roots: 4,
-        remote: None,
-        tui: false,
-        retain_intervals: None,
-        recording: Some(RecordingConfig {
-            run_name: Some(run_name.clone()),
-            out_dir: Some(out_dir.clone()),
-        }),
-        max_duration: Some(Duration::from_secs(scenario.duration)),
-        cpu_freq: false, // will set below
-        cgroupv2: None,
-        native_cgroup_filter: false,
-        follow_exec: true,
-        exclude_tree_pids: Vec::new(),
-        faults,
-        cpu_perf: false,
-        cpu_perf_kernel: false,
-        cpu_perf_max_tasks: 128,
-        cpu_perf_cache_refs: false,
-        block_io,
-        stat_wait,
-        runtime_slices,
-        runtime_slices_max_tasks: 256,
-        json_stream: false,
-        metrics_port: None,
-        ringbuf_size_kb: None,
-        wakeup_map_factor: None,
-    };
-
     let cpu_freq_config = scenario
         .cpu_freq
         .or(preset_defaults.cpu_freq)
         .unwrap_or(false);
-    config.cpu_freq = (cpu_freq_config || true) && scenario.cpu_freq.unwrap_or(true);
+    let cpu_freq = (cpu_freq_config || true) && scenario.cpu_freq.unwrap_or(true);
+
+    let config = MonitorConfig {
+        target: crate::config::model::TargetConfig {
+            target_pids: scenario.pid.clone(),
+            tree_pids: scenario.tree_pid.map(|p| vec![p]).unwrap_or_default(),
+            include_comm: scenario.include_comm.clone(),
+            exclude_comm: scenario.exclude_comm.clone(),
+            task_filters: TaskFilters {
+                include_comm: scenario
+                    .include_comm
+                    .iter()
+                    .map(|s| CompiledPattern::new(s.clone()))
+                    .collect::<Result<Vec<_>>>()?,
+                exclude_comm: scenario
+                    .exclude_comm
+                    .iter()
+                    .map(|s| CompiledPattern::new(s.clone()))
+                    .collect::<Result<Vec<_>>>()?,
+            },
+            watch_process: scenario.watch_process.clone(),
+            persistent: scenario.persistent,
+            max_tasks: 1024,
+            ..Default::default()
+        },
+        timing: crate::config::model::TimingConfig {
+            summary_period_ms: scenario.summary_ms.unwrap_or(1000),
+            epoch_period_ms: scenario.summary_ms,
+            spike_threshold_ns: scenario.spike_us.unwrap_or(1000) * 1000,
+            max_duration: Some(Duration::from_secs(scenario.duration)),
+        },
+        probes: crate::config::model::ProbeConfig {
+            irq_latency,
+            irqs: scenario.irqs.clone(),
+            hwmon,
+            cpu_freq,
+            faults,
+            block_io,
+            stat_wait,
+            runtime_slices,
+            ..Default::default()
+        },
+        recording: crate::config::model::RecordingConfig {
+            run_name: Some(run_name.clone()),
+            output_dir: Some(out_dir.clone()),
+            ..Default::default()
+        },
+        mangohud: crate::config::model::MangoHudConfig {
+            log: input
+                .mangohud_log_override
+                .or(scenario.mangohud_log.clone()),
+            ..Default::default()
+        },
+        watch: crate::config::model::WatchConfig {
+            poll_ms: 2000,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
 
     let dry_run_text = format!(
         "scenario: {}\n\
@@ -449,16 +424,16 @@ pub fn prepare_scenario_run(input: ScenarioRunInput) -> Result<PreparedScenarioR
         scenario.pid,
         scenario.preset,
         out_dir.display(),
-        config.mangohud_log,
+        config.mangohud.log,
         scenario.expected_classes,
         scenario.notes.as_deref().unwrap_or(""),
-        config.hwmon,
-        config.cpu_freq,
-        config.faults,
-        config.stat_wait,
-        config.block_io,
-        config.irq_latency,
-        config.irqs,
+        config.probes.hwmon,
+        config.probes.cpu_freq,
+        config.probes.faults,
+        config.probes.stat_wait,
+        config.probes.block_io,
+        config.probes.irq_latency,
+        config.probes.irqs,
     );
 
     let start_text = format!(

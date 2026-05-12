@@ -35,9 +35,9 @@ pub mod startup_recovery;
 pub mod state;
 pub mod tui_panel;
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
-use crate::{cli::Config, daemon_policy::DaemonMode};
+use crate::daemon_policy::DaemonMode;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -202,11 +202,6 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
     }
 
     Ok(())
-}
-
-#[allow(dead_code)]
-pub fn make_monitor_config_for_tests(config: Arc<Config>) -> Arc<Config> {
-    config
 }
 
 #[cfg(test)]
