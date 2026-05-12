@@ -102,10 +102,14 @@ pub fn handle_block_io_record(record: &recorder::BlockIoRecord) -> MonitorEvent 
     }
 }
 
-pub fn handle_exec_event(item: &[u8], tasks: &mut TaskTracker) {
+pub fn handle_exec_event(
+    item: &[u8],
+    tasks: &mut TaskTracker,
+    elapsed_ms: u64,
+) -> Option<MonitorEvent> {
     let Some(event) = decode::read_event_unaligned::<ExecEvent>(item) else {
         warn!("short_exec_event len={}", item.len());
-        return;
+        return None;
     };
     let comm = metrics::comm_to_string(&event.comm);
     tasks.cache.invalidate(event.pid);
@@ -125,6 +129,13 @@ pub fn handle_exec_event(item: &[u8], tasks: &mut TaskTracker) {
         info.comm = comm.clone();
         info.class = process_tree::classify_task(&comm, &comm, "");
     }
+
+    Some(MonitorEvent::Exec {
+        elapsed_ms,
+        pid: event.pid,
+        tid: event.tid,
+        comm,
+    })
 }
 
 /// Pushes an event to an NDJSON stream via the registry.
@@ -336,7 +347,9 @@ pub(crate) fn primary_from_tags(tags: &[String]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use stutter_common::{EVENT_BLOCK_IO, EVENT_IRQ_LATENCY, EVENT_RUNNABLE_LATENCY, IrqEvent};
+    use stutter_common::{
+        EVENT_BLOCK_IO, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_RUNNABLE_LATENCY, ExecEvent, IrqEvent,
+    };
 
     use super::*;
 
@@ -540,6 +553,48 @@ mod tests {
         assert_eq!(spike.scx_ops.as_deref(), Some("ops"));
         assert_eq!(spike.scx_state.as_deref(), Some("enabled"));
         assert_eq!(spike.scx_enable_seq.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn handle_exec_event_updates_task_identity_and_returns_event() {
+        let mut comm = [0u8; 16];
+        comm[..8].copy_from_slice(b"game.exe");
+        let raw = ExecEvent {
+            kind: EVENT_EXEC,
+            pid: 44,
+            tid: 99,
+            comm,
+        };
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                (&raw as *const ExecEvent).cast::<u8>(),
+                std::mem::size_of::<ExecEvent>(),
+            )
+        };
+
+        let mut tasks = TaskTracker::default();
+        tasks
+            .stats_by_task
+            .insert(99, metrics::TaskStats::new(99, "?".to_owned(), 0));
+
+        let event = handle_exec_event(bytes, &mut tasks, 1234).unwrap();
+
+        assert_eq!(tasks.stats_by_task.get(&99).unwrap().comm, "game.exe");
+
+        match event {
+            MonitorEvent::Exec {
+                elapsed_ms,
+                pid,
+                tid,
+                comm,
+            } => {
+                assert_eq!(elapsed_ms, 1234);
+                assert_eq!(pid, 44);
+                assert_eq!(tid, 99);
+                assert_eq!(comm, "game.exe");
+            }
+            other => panic!("expected exec event, got {other:?}"),
+        }
     }
 
     #[test]

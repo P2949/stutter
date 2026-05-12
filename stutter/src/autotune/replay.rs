@@ -123,7 +123,8 @@ impl ReplayPolicyEngine for ObserveOnlyReplayPolicy {
             | MonitorEvent::MigrationEvent { .. }
             | MonitorEvent::CpuFreqSample { .. }
             | MonitorEvent::ForegroundEvent { .. }
-            | MonitorEvent::SchedulerSample { .. } => {}
+            | MonitorEvent::SchedulerSample { .. }
+            | MonitorEvent::Exec { .. } => {}
         }
         Ok(())
     }
