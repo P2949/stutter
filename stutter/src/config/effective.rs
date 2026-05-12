@@ -211,15 +211,23 @@ fn record_layer_provenance(
     record_if_present(&layer.irq_latency, provenance, "probes.irq_latency", source);
     record_if_present(&layer.irqs, provenance, "probes.irqs", source);
     record_if_present(&layer.hwmon, provenance, "probes.hwmon", source);
+    record_if_present(&layer.hwmon, provenance, "hwmon.enabled", source);
     record_if_present(&layer.cpu_freq, provenance, "probes.cpu_freq", source);
     record_if_present(&layer.faults, provenance, "probes.faults", source);
     record_if_present(&layer.cpu_perf, provenance, "probes.cpu_perf", source);
+    record_if_present(&layer.cpu_perf, provenance, "cpu_perf.enabled", source);
     record_if_present(&layer.block_io, provenance, "probes.block_io", source);
     record_if_present(&layer.stat_wait, provenance, "probes.stat_wait", source);
     record_if_present(
         &layer.runtime_slices,
         provenance,
         "probes.runtime_slices",
+        source,
+    );
+    record_if_present(
+        &layer.runtime_slices,
+        provenance,
+        "runtime_slices.enabled",
         source,
     );
 
@@ -241,6 +249,12 @@ fn record_layer_provenance(
         &layer.json_stream,
         provenance,
         "outputs.json_stream",
+        source,
+    );
+    record_if_present(
+        &layer.json_stream,
+        provenance,
+        "streams.json_stream",
         source,
     );
     record_if_present(
@@ -734,6 +748,54 @@ mod tests {
             last_source_for_field(&effective.provenance, "probes.cpu_freq"),
             Some(ConfigSource::Cli)
         );
+    }
+
+    #[test]
+    fn duplicated_layer_fields_record_provenance_for_each_config_field_they_apply() {
+        let user = MonitorConfigLayer {
+            hwmon: Some(true),
+            json_stream: Some(true),
+            cpu_perf: Some(true),
+            runtime_slices: Some(true),
+            ..Default::default()
+        };
+        let cli = MonitorConfigLayer {
+            hwmon: Some(false),
+            json_stream: Some(false),
+            cpu_perf: Some(false),
+            runtime_slices: Some(false),
+            ..Default::default()
+        };
+
+        let effective =
+            EffectiveMonitorConfig::from_layers(MonitorConfig::default(), Some(user), None, cli)
+                .unwrap();
+
+        assert!(!effective.config.probes.hwmon);
+        assert!(!effective.config.hwmon.enabled);
+        assert!(!effective.config.outputs.json_stream);
+        assert!(!effective.config.streams.json_stream);
+        assert!(!effective.config.probes.cpu_perf);
+        assert!(!effective.config.cpu_perf.enabled);
+        assert!(!effective.config.probes.runtime_slices);
+        assert!(!effective.config.runtime_slices.enabled);
+
+        for field in [
+            "probes.hwmon",
+            "hwmon.enabled",
+            "outputs.json_stream",
+            "streams.json_stream",
+            "probes.cpu_perf",
+            "cpu_perf.enabled",
+            "probes.runtime_slices",
+            "runtime_slices.enabled",
+        ] {
+            assert_eq!(
+                last_source_for_field(&effective.provenance, field),
+                Some(ConfigSource::Cli),
+                "wrong provenance for {field}"
+            );
+        }
     }
 
     #[test]
