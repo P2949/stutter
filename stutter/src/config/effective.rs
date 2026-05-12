@@ -1,11 +1,12 @@
 use crate::{
-    cli::Config,
     config::{
         layer::MonitorConfigLayer,
+        merge::{self, CliOverrides, ConfigSources, DefaultConfig, PresetConfig},
         model::{
             FocusConfig, MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, SafetyConfig,
             TargetConfig, TimingConfig,
         },
+        source::{ConfigDiagnostic, FieldProvenance},
     },
     error::ConfigError,
     presets::Preset,
@@ -14,6 +15,13 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectiveMonitorConfig {
     pub config: MonitorConfig,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedMonitorConfig {
+    pub config: MonitorConfig,
+    pub provenance: Vec<FieldProvenance>,
+    pub diagnostics: Vec<ConfigDiagnostic>,
 }
 
 impl EffectiveMonitorConfig {
@@ -38,183 +46,81 @@ impl EffectiveMonitorConfig {
         Ok(Self { config })
     }
 
-    pub fn from_cli_config(config: &Config) -> Result<Self, ConfigError> {
-        let user_file = crate::config_file::load_user_config()
-            .map_err(ConfigError::UserConfig)?
-            .as_ref()
-            .map(MonitorConfigLayer::from_user_file)
-            .transpose()
-            .map_err(ConfigError::InvalidUserLayer)?;
-
-        let preset = config
-            .preset
-            .as_deref()
-            .map(|value| {
-                let preset = value
-                    .parse::<Preset>()
-                    .map_err(ConfigError::InvalidPreset)?;
-                Ok::<MonitorConfigLayer, ConfigError>(MonitorConfigLayer::from_preset_defaults(
-                    preset.defaults(),
-                ))
-            })
-            .transpose()?;
-
-        let mut cli = MonitorConfigLayer::from_existing_cli_config(config);
-        if let Some(layer) = &config.monitor_config_layer {
-            apply_presence_aware_cli_overrides(&mut cli, layer, config.epoch_period_ms.is_some());
-        }
-
-        Self::from_layers(MonitorConfig::default(), user_file, preset, cli)
-    }
-
     pub fn into_monitor_config(self) -> MonitorConfig {
         self.config
     }
 }
 
-pub fn resolve_arc_monitor_config(
-    config: std::sync::Arc<Config>,
-) -> Result<std::sync::Arc<Config>, ConfigError> {
-    let effective_config = resolve_monitor_config(&config)?;
-    let effective = effective_config.clone();
-    let mut resolved = (*config).clone();
+pub fn resolve_monitor_config_sources(
+    sources: ConfigSources,
+) -> Result<ResolvedMonitorConfig, ConfigError> {
+    let mut config = merge::merge_config_sources_checked(sources)?;
+    compile_task_filters(&mut config)?;
 
-    resolved.target_pids = effective.target.target_pids.clone();
-    resolved.tree_pids = effective.target.tree_pids.clone();
-    resolved.cgroupv2 = effective.target.cgroupv2.clone();
-    resolved.exclude_tree_pids = effective.target.exclude_tree_pids.clone();
-    resolved.watch_process = effective.target.watch_process.clone();
-    resolved.persistent = effective.target.persistent;
-    resolved.keep_missing_pid = effective.target.keep_missing_pid;
-    resolved.max_tasks = effective.target.max_tasks;
-
-    resolved.summary_period_ms = effective.timing.summary_period_ms;
-    resolved.epoch_period_ms = effective.timing.epoch_period_ms;
-    resolved.max_duration = effective.timing.max_duration;
-    resolved.spike_threshold_ns = effective.timing.spike_threshold_ns;
-
-    resolved.irq_latency = effective.probes.irq_latency;
-    resolved.irqs = effective.probes.irqs.clone();
-    resolved.hwmon = effective.probes.hwmon;
-    resolved.cpu_freq = effective.probes.cpu_freq;
-    resolved.faults = effective.probes.faults;
-    resolved.cpu_perf = effective.probes.cpu_perf;
-    resolved.block_io = effective.probes.block_io;
-    resolved.stat_wait = effective.probes.stat_wait;
-    resolved.runtime_slices = effective.probes.runtime_slices;
-
-    resolved.retain_intervals = effective.recording.retain_intervals;
-    if let Some(recording) = resolved.recording.as_mut() {
-        recording.run_name = effective.recording.run_name.clone();
-        recording.out_dir = effective.recording.output_dir.clone();
-    }
-
-    resolved.json_stream = effective.outputs.json_stream;
-    resolved.metrics_port = effective.outputs.metrics_port;
-    resolved.otlp_endpoint = effective.outputs.otlp_endpoint.clone();
-    resolved.otel_service_name = effective.outputs.otel_service_name.clone();
-
-    resolved.auto_focus = effective.focus.auto_focus;
-    resolved.focus_source = effective.focus.focus_source;
-    resolved.foreground_window = effective.focus.foreground_window;
-    resolved.foreground_source = effective.focus.foreground_source;
-    resolved.foreground_poll_ms = effective.focus.foreground_poll_ms;
-    resolved.foreground_max_stale_ms = effective.focus.foreground_max_stale_ms;
-    resolved.foreground_include_title = effective.focus.foreground_include_title;
-    resolved.auto_focus_poll_ms = effective.focus.auto_focus_poll_ms;
-    resolved.auto_focus_min_confidence = effective.focus.auto_focus_min_confidence;
-    resolved.auto_focus_switch_cooldown_ms = effective.focus.auto_focus_switch_cooldown_ms;
-    resolved.auto_focus_switch_margin = effective.focus.auto_focus_switch_margin;
-    resolved.auto_focus_required_polls = effective.focus.auto_focus_required_polls;
-    resolved.auto_focus_max_roots = effective.focus.auto_focus_max_roots;
-
-    resolved.watch_poll_ms = effective.watch.poll_ms;
-    resolved.watch_timeout = effective.watch.timeout;
-
-    resolved.alert_threshold_ns = effective.alerts.threshold_ns;
-    resolved.alert_webhook_url = effective.alerts.webhook_url.clone();
-
-    resolved.csv_stream = effective.streams.csv.clone();
-    resolved.verbose = effective.streams.verbose;
-
-    resolved.hwmon = effective.hwmon.enabled;
-    resolved.hwmon_root = effective.hwmon.root.clone();
-    resolved.hwmon_drm_card = effective.hwmon.drm_card.clone();
-    resolved.hwmon_render_node = effective.hwmon.render_node.clone();
-
-    resolved.mangohud_log = effective.mangohud.log.clone();
-    resolved.mangohud_log_live = effective.mangohud.log_live;
-
-    resolved.tui = effective.ui.tui;
-
-    resolved.cpu_perf = effective.cpu_perf.enabled;
-    resolved.cpu_perf_kernel = effective.cpu_perf.include_kernel;
-    resolved.cpu_perf_max_tasks = effective.cpu_perf.max_tasks;
-    resolved.cpu_perf_cache_refs = effective.cpu_perf.collect_cache_refs;
-
-    resolved.runtime_slices = effective.runtime_slices.enabled;
-    resolved.runtime_slices_max_tasks = effective.runtime_slices.max_tasks;
-
-    resolved.ringbuf_size_kb = effective.ebpf_sizing.ringbuf_size_kb;
-    resolved.wakeup_map_factor = effective.ebpf_sizing.wakeup_map_factor;
-
-    resolved.remote = effective.remote.endpoint.clone();
-
-    resolved.follow_exec = effective.safety.follow_exec;
-    resolved.native_cgroup_filter = effective.safety.native_cgroup_filter;
-    let compiled_include = effective
-        .target
-        .include_comm
-        .iter()
-        .map(|pattern| crate::process_tree::CompiledPattern::new(pattern.clone()))
-        .collect::<anyhow::Result<Vec<_>>>()
-        .map_err(ConfigError::InvalidUserLayer)?;
-    let compiled_exclude = effective
-        .target
-        .exclude_comm
-        .iter()
-        .map(|pattern| crate::process_tree::CompiledPattern::new(pattern.clone()))
-        .collect::<anyhow::Result<Vec<_>>>()
-        .map_err(ConfigError::InvalidUserLayer)?;
-
-    resolved.task_filters = crate::process_tree::TaskFilters {
-        include_comm: compiled_include.clone(),
-        exclude_comm: compiled_exclude.clone(),
-    };
-
-    let mut effective_for_layer = effective.clone();
-    effective_for_layer.target.task_filters = crate::process_tree::TaskFilters {
-        include_comm: compiled_include,
-        exclude_comm: compiled_exclude,
-    };
-
-    resolved.monitor_config_layer =
-        Some(MonitorConfigLayer::from_monitor_config(effective_for_layer));
-
-    Ok(std::sync::Arc::new(resolved))
+    Ok(ResolvedMonitorConfig {
+        config,
+        provenance: Vec::new(),
+        diagnostics: Vec::new(),
+    })
 }
 
-pub fn resolve_monitor_config(config: &Config) -> Result<MonitorConfig, ConfigError> {
-    let mut res = EffectiveMonitorConfig::from_cli_config(config)?.into_monitor_config();
-    let compiled_include = res
+pub fn resolve_monitor_config(config: &crate::cli::Config) -> Result<MonitorConfig, ConfigError> {
+    let user_file = crate::config_file::load_user_config().map_err(ConfigError::UserConfig)?;
+
+    let preset = config
+        .preset
+        .as_deref()
+        .map(preset_config_from_name)
+        .transpose()?;
+
+    let cli_layer = config
+        .monitor_config_layer
+        .clone()
+        .unwrap_or_else(|| config.to_monitor_config_layer());
+
+    Ok(resolve_monitor_config_sources(ConfigSources {
+        defaults: DefaultConfig::default(),
+        user_file,
+        preset,
+        cli: CliOverrides { layer: cli_layer },
+    })?
+    .config)
+}
+
+fn preset_config_from_name(value: &str) -> Result<PresetConfig, ConfigError> {
+    let preset = value
+        .parse::<Preset>()
+        .map_err(ConfigError::InvalidPreset)?;
+    let mut config = MonitorConfig::default();
+    apply_layer(
+        &mut config,
+        MonitorConfigLayer::from_preset_defaults(preset.defaults()),
+    );
+    Ok(PresetConfig { config })
+}
+
+fn compile_task_filters(config: &mut MonitorConfig) -> Result<(), ConfigError> {
+    let compiled_include = config
         .target
         .include_comm
         .iter()
         .map(|pattern| crate::process_tree::CompiledPattern::new(pattern.clone()))
         .collect::<anyhow::Result<Vec<_>>>()
         .map_err(ConfigError::InvalidUserLayer)?;
-    let compiled_exclude = res
+    let compiled_exclude = config
         .target
         .exclude_comm
         .iter()
         .map(|pattern| crate::process_tree::CompiledPattern::new(pattern.clone()))
         .collect::<anyhow::Result<Vec<_>>>()
         .map_err(ConfigError::InvalidUserLayer)?;
-    res.target.task_filters = crate::process_tree::TaskFilters {
+
+    config.target.task_filters = crate::process_tree::TaskFilters {
         include_comm: compiled_include,
         exclude_comm: compiled_exclude,
     };
-    Ok(res)
+
+    Ok(())
 }
 
 pub fn apply_layer(config: &mut MonitorConfig, layer: MonitorConfigLayer) {
@@ -501,47 +407,6 @@ fn apply_ui_layer(config: &mut crate::config::model::UiConfig, layer: &MonitorCo
 fn apply_remote_layer(config: &mut crate::config::model::RemoteConfig, layer: &MonitorConfigLayer) {
     if let Some(value) = &layer.remote {
         config.endpoint = value.clone();
-    }
-}
-
-/// Overlays selected presence-aware CLI flags (such as explicit `--no-cpu-freq` or `--no-hwmon` booleans)
-/// from the unmerged `monitor_config_layer` onto the reconstructed base CLI configuration layer.
-/// This preserves Option-based override visibility for flags that differ from presence-unaware defaults,
-/// without overwriting pre-computed validation outcomes (like max_duration or epoch overrides) stored on Config.
-fn apply_presence_aware_cli_overrides(
-    cli: &mut MonitorConfigLayer,
-    layer: &MonitorConfigLayer,
-    is_epoch_set: bool,
-) {
-    if let Some(val) = layer.hwmon {
-        cli.hwmon = Some(val);
-    }
-    if let Some(val) = layer.cpu_freq {
-        cli.cpu_freq = Some(val);
-    }
-    if let Some(val) = layer.faults {
-        cli.faults = Some(val);
-    }
-    if let Some(val) = layer.block_io {
-        cli.block_io = Some(val);
-    }
-    if let Some(val) = layer.stat_wait {
-        cli.stat_wait = Some(val);
-    }
-    if let Some(val) = layer.runtime_slices {
-        cli.runtime_slices = Some(val);
-    }
-    if let Some(val) = layer.follow_exec {
-        cli.follow_exec = Some(val);
-    }
-    if let Some(val) = layer.focus_source {
-        cli.focus_source = Some(val);
-    }
-    if let Some(val) = layer.foreground_source {
-        cli.foreground_source = Some(val);
-    }
-    if layer.summary_period_ms.is_some() && !is_epoch_set {
-        cli.summary_period_ms = layer.summary_period_ms;
     }
 }
 

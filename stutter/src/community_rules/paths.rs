@@ -68,12 +68,9 @@ mod tests {
         }
     }
 
-    use std::sync::Mutex;
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
     #[test]
     fn default_user_rules_dir_uses_xdg_data_home() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let _xdg = EnvGuard::set("XDG_DATA_HOME", "/tmp/stutter-xdg-data");
         let _home = EnvGuard::set("HOME", "/tmp/stutter-home");
 
@@ -87,7 +84,7 @@ mod tests {
 
     #[test]
     fn default_user_rules_dir_falls_back_to_home() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let _xdg = EnvGuard::unset("XDG_DATA_HOME");
         let _home = EnvGuard::set("HOME", "/tmp/stutter-home");
 
