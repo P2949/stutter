@@ -167,7 +167,7 @@ pub fn resolve_cgroup_id_best_effort(_path: &Path) -> anyhow::Result<u64> {
     anyhow::bail!("native cgroup filtering is only supported on Unix/Linux");
 }
 
-pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf> {
+pub fn load_and_attach(config: &crate::config::model::MonitorConfig) -> anyhow::Result<LoadedEbpf> {
     let memlock_report = raise_memlock_limit();
     log_memlock_policy_report(&memlock_report);
     let map_sizing = map_sizing_for_config_after_memlock(config, &memlock_report);
@@ -401,11 +401,11 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         .transpose()
         .context("eBPF load failed: PREV_FAULTS map init")?;
 
-    let target_cgroup_map = if config.native_cgroup_filter {
-        let cgroup_path = config
-            .cgroupv2
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("native cgroup filtering requires --cgroupv2 PATH"))?;
+    let target_cgroup_map = if config.safety.native_cgroup_filter {
+        let cgroup_path =
+            config.target.cgroupv2.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("native cgroup filtering requires --cgroupv2 PATH")
+            })?;
         let cgroup_id = resolve_cgroup_id_best_effort(cgroup_path).with_context(|| {
             format!(
                 "failed to resolve native cgroup id for {}",
@@ -430,7 +430,7 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         None
     };
 
-    if let Some(cgroup_path) = &config.cgroupv2 {
+    if let Some(cgroup_path) = &config.target.cgroupv2 {
         // Pre-populate TARGET_PIDS from the cgroup hierarchy to avoid races
         // where a task appears in sched events before the eBPF-side target
         // maps are populated. Native cgroup filtering only applies to
@@ -444,9 +444,9 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         let snapshot = crate::process_tree::target_snapshot(
             crate::process_tree::TargetSnapshotInput::default()
                 .cgroup_path(Some(cgroup_path))
-                .exclude_tree_pids(&config.exclude_tree_pids)
-                .filters(&config.task_filters)
-                .keep_missing_pid(config.keep_missing_pid)
+                .exclude_tree_pids(&config.target.exclude_tree_pids)
+                .filters(&config.target.task_filters)
+                .keep_missing_pid(config.target.keep_missing_pid)
                 .cache(&mut cache),
         );
         let pids: Vec<_> = snapshot.tasks.keys().copied().collect();
@@ -460,11 +460,11 @@ pub fn load_and_attach(config: &crate::cli::Config) -> anyhow::Result<LoadedEbpf
         }
 
         // Also respect the user-defined --max-tasks limit during prepopulation.
-        if pids.len() > config.max_tasks {
+        if pids.len() > config.target.max_tasks {
             anyhow::bail!(
                 "cgroup target prepopulation failed: {} tasks in cgroup match filters, but --max-tasks is {}",
                 pids.len(),
-                config.max_tasks
+                config.target.max_tasks
             );
         }
 
@@ -613,12 +613,12 @@ fn wakeup_data_entries_floor_for_max_tasks(max_tasks: usize) -> u32 {
 }
 
 #[allow(dead_code)]
-pub(crate) fn map_sizing_for_config(config: &crate::cli::Config) -> EbpfMapSizing {
+pub(crate) fn map_sizing_for_config(config: &crate::config::model::MonitorConfig) -> EbpfMapSizing {
     map_sizing_for_config_from_memory(config, current_memory_snapshot())
 }
 
 fn map_sizing_for_config_after_memlock(
-    config: &crate::cli::Config,
+    config: &crate::config::model::MonitorConfig,
     memlock_report: &MemlockPolicyReport,
 ) -> EbpfMapSizing {
     map_sizing_for_config_from_memory(
@@ -632,12 +632,12 @@ fn map_sizing_for_config_after_memlock(
 }
 
 fn map_sizing_for_config_from_memory(
-    config: &crate::cli::Config,
+    config: &crate::config::model::MonitorConfig,
     snapshot: MemorySnapshot,
 ) -> EbpfMapSizing {
     let mut sizing = map_sizing_from_memory(snapshot);
 
-    if let Some(kb) = config.ringbuf_size_kb {
+    if let Some(kb) = config.ebpf_sizing.ringbuf_size_kb {
         let bytes = u64::from(kb).saturating_mul(1024);
         let page_size = system_page_size();
         // RingBuf requires power-of-two and page-alignment
@@ -650,8 +650,8 @@ fn map_sizing_for_config_from_memory(
 
     sizing.wakeup_data_entries = wakeup_data_entries_for_config(
         sizing.wakeup_data_entries,
-        config.max_tasks,
-        config.wakeup_map_factor,
+        config.target.max_tasks,
+        config.ebpf_sizing.wakeup_map_factor,
     );
 
     sizing
@@ -1910,7 +1910,7 @@ fn matching_request_key_offset(
 
 fn validate_tracepoint_formats(
     events_root: &Path,
-    config: &crate::cli::Config,
+    config: &crate::config::model::MonitorConfig,
 ) -> anyhow::Result<TracepointAvailability> {
     validate_tracepoint_format_at(
         &events_root.join("sched/sched_wakeup/format"),
@@ -1940,7 +1940,7 @@ fn validate_tracepoint_formats(
         &[("pid", 12), ("orig_cpu", 20), ("dest_cpu", 24)],
         true,
     )?;
-    let cpu_frequency = if config.cpu_freq {
+    let cpu_frequency = if config.probes.cpu_freq {
         validate_optional_tracepoint_format_at(
             &events_root.join("power/cpu_frequency/format"),
             "cpu_frequency",
@@ -1950,7 +1950,7 @@ fn validate_tracepoint_formats(
     } else {
         false
     };
-    let sched_stat_wait = if config.stat_wait {
+    let sched_stat_wait = if config.probes.stat_wait {
         validate_optional_tracepoint_format_at(
             &events_root.join("sched/sched_stat_wait/format"),
             "sched_stat_wait",
@@ -1963,7 +1963,7 @@ fn validate_tracepoint_formats(
 
     let irq_entry = events_root.join("irq/irq_handler_entry/format");
     let irq_exit = events_root.join("irq/irq_handler_exit/format");
-    let irq_handler = if config.irq_latency && irq_entry.exists() && irq_exit.exists() {
+    let irq_handler = if config.probes.irq_latency && irq_entry.exists() && irq_exit.exists() {
         validate_tracepoint_format_at_named(&irq_entry, "irq_handler_entry", &[("irq", 8)])?;
         validate_tracepoint_format_at_named(&irq_exit, "irq_handler_exit", &[("irq", 8)])?;
 
@@ -1976,11 +1976,11 @@ fn validate_tracepoint_formats(
     } else {
         false
     };
-    if !irq_handler && config.irq_latency {
+    if !irq_handler && config.probes.irq_latency {
         log::warn!("IRQ tracepoint formats missing; continuing without IRQ latency probe");
     }
 
-    let block_io = if config.block_io {
+    let block_io = if config.probes.block_io {
         validate_block_io_tracepoint_offsets(events_root)
     } else {
         BlockIoTracepointOffsets::default()
@@ -2002,7 +2002,7 @@ fn validate_tracepoint_formats(
     )?;
 
     let sched_process_exec = events_root.join("sched/sched_process_exec/format");
-    let sched_process_exec = if config.follow_exec && sched_process_exec.exists() {
+    let sched_process_exec = if config.safety.follow_exec && sched_process_exec.exists() {
         validate_tracepoint_format_at_named(&sched_process_exec, "sched_process_exec", &[])?;
         true
     } else {
@@ -2576,10 +2576,10 @@ format:
         };
 
         // Validating with optional features DISABLED should SUCCEED even with wrong formats
-        config.cpu_freq = false;
-        config.stat_wait = false;
-        config.irq_latency = false;
-        config.block_io = false;
+        config.probes.cpu_freq = false;
+        config.probes.stat_wait = false;
+        config.probes.irq_latency = false;
+        config.probes.block_io = false;
 
         let availability = validate_tracepoint_formats(&dir, &config).unwrap();
         assert!(!availability.cpu_frequency);
@@ -2587,24 +2587,24 @@ format:
         assert!(!availability.irq_handler);
 
         // Validating with cpu_freq = true should FAIL
-        config.cpu_freq = true;
+        config.probes.cpu_freq = true;
         let err = validate_tracepoint_formats(&dir, &config).unwrap_err();
         assert!(err.to_string().contains("cpu_frequency"));
-        config.cpu_freq = false;
+        config.probes.cpu_freq = false;
 
         // Validating with stat_wait = true should FAIL
-        config.stat_wait = true;
+        config.probes.stat_wait = true;
         let err = validate_tracepoint_formats(&dir, &config).unwrap_err();
         assert!(err.to_string().contains("sched_stat_wait"));
-        config.stat_wait = false;
+        config.probes.stat_wait = false;
 
         // Validating with irq_latency = true should FAIL
-        config.irq_latency = true;
+        config.probes.irq_latency = true;
         // irq_latency also requires --irq N in CLI, but validate_tracepoint_formats
         // only cares about the irq_latency flag and existence of files.
         let err = validate_tracepoint_formats(&dir, &config).unwrap_err();
         assert!(err.to_string().contains("irq_handler_entry"));
-        config.irq_latency = false;
+        config.probes.irq_latency = false;
 
         fs::remove_dir_all(dir).ok();
     }

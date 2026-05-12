@@ -11,7 +11,7 @@ use tokio::{
     time::{Instant, MissedTickBehavior, interval, sleep},
 };
 
-use crate::cli::Config;
+use crate::config::model::MonitorConfig;
 
 pub const PROFILE_WATCH_VERIFY_MS: u64 = 10_000;
 
@@ -36,10 +36,10 @@ impl WatchProcessState {
 }
 
 pub async fn resolve_watch_process(
-    config: &Config,
+    config: &MonitorConfig,
     tree_pids: &mut Vec<u32>,
 ) -> anyhow::Result<Option<u32>> {
-    let Some(pattern) = config.watch_process.clone() else {
+    let Some(pattern) = config.target.watch_process.clone() else {
         return Ok(None);
     };
 
@@ -58,24 +58,25 @@ pub async fn resolve_watch_process(
 }
 
 pub async fn wait_for_watch_process(
-    config: &Config,
+    config: &MonitorConfig,
     tree_pids: &mut Vec<u32>,
 ) -> anyhow::Result<Option<u32>> {
     let pattern = config
+        .target
         .watch_process
         .clone()
         .ok_or_else(|| anyhow::anyhow!("internal error: watch_process missing"))?;
 
     info!(
         "watch_process_waiting pattern={} persistent={}",
-        pattern, config.persistent
+        pattern, config.target.persistent
     );
 
-    let mut tick = interval(Duration::from_millis(config.watch_poll_ms));
+    let mut tick = interval(Duration::from_millis(config.watch.poll_ms));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut cache = crate::process_tree::ProcessCache::default();
 
-    let watch_timeout = config.watch_timeout;
+    let watch_timeout = config.watch.timeout;
     let timeout_future = async move {
         if let Some(timeout) = watch_timeout {
             sleep(timeout).await;

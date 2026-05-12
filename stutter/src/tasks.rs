@@ -4,14 +4,14 @@ use aya::maps::{HashMap as AyaHashMap, MapData};
 use log::info;
 
 use crate::{
-    cli::Config,
+    config::model::MonitorConfig,
     metrics,
     process_tree::{TargetDiffAction, TaskInfo},
     recorder::TreeEvent,
 };
 
 pub struct RefreshInput<'a> {
-    pub config: &'a Config,
+    pub config: &'a MonitorConfig,
     pub tree_pids: &'a [u32],
     pub tree_events: &'a mut Vec<TreeEvent>,
     pub target_pid_map: &'a mut AyaHashMap<MapData, u32, u8>,
@@ -167,12 +167,12 @@ impl TaskTracker {
     ) -> anyhow::Result<crate::process_tree::ScanBudgetReport> {
         let snapshot = crate::process_tree::target_snapshot(
             crate::process_tree::TargetSnapshotInput::default()
-                .manual_pids(&input.config.target_pids)
+                .manual_pids(&input.config.target.target_pids)
                 .tree_pids(input.tree_pids)
-                .cgroup_path(input.config.cgroupv2.as_deref())
-                .exclude_tree_pids(&input.config.exclude_tree_pids)
-                .filters(&input.config.task_filters)
-                .keep_missing_pid(input.config.keep_missing_pid)
+                .cgroup_path(input.config.target.cgroupv2.as_deref())
+                .exclude_tree_pids(&input.config.target.exclude_tree_pids)
+                .filters(&input.config.target.task_filters)
+                .keep_missing_pid(input.config.target.keep_missing_pid)
                 .cache(&mut self.cache)
                 .previous_tasks(Some(&self.active_targets))
                 .community_rules(input.community_rules),
@@ -198,18 +198,18 @@ impl TaskTracker {
     pub async fn refresh_internal(
         &mut self,
         snapshot: crate::process_tree::TargetSnapshot,
-        config: &Config,
+        config: &MonitorConfig,
         tree_events: &mut Vec<TreeEvent>,
         elapsed_ms: u64,
         recording_started: Option<Instant>,
         mut prev_faults_map: Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
         target_pid_map: &mut dyn TaskMap,
     ) -> anyhow::Result<()> {
-        if snapshot.tasks.len() > config.max_tasks {
+        if snapshot.tasks.len() > config.target.max_tasks {
             anyhow::bail!(
                 "too many target tasks after expansion: got {}, but --max-tasks is {}",
                 snapshot.tasks.len(),
-                config.max_tasks
+                config.target.max_tasks
             );
         }
 
@@ -461,75 +461,8 @@ mod tests {
     #[tokio::test]
     async fn test_refresh_exceeds_max_tasks() {
         let mut tracker = TaskTracker::default();
-        let config = Config {
-            monitor_config_layer: None,
-            preset: None,
-            target_pids: Vec::new(),
-            tree_pids: Vec::new(),
-            summary_period_ms: 1000,
-            epoch_period_ms: None,
-            spike_threshold_ns: 1000000,
-            alert_threshold_ns: None,
-            alert_webhook_url: None,
-            verbose: false,
-            task_filters: crate::process_tree::TaskFilters {
-                include_comm: Vec::new(),
-                exclude_comm: Vec::new(),
-            },
-            keep_missing_pid: false,
-            watch_process: None,
-            persistent: false,
-            watch_poll_ms: 1000,
-            watch_timeout: None,
-            max_tasks: 1,
-            csv_stream: None,
-            irq_latency: false,
-            irqs: Vec::new(),
-            hwmon: false,
-            hwmon_root: None,
-            hwmon_drm_card: None,
-            hwmon_render_node: None,
-            mangohud_log: None,
-            tui: false,
-            retain_intervals: None,
-            recording: None,
-            max_duration: None,
-            cpu_freq: false,
-            cgroupv2: None,
-            native_cgroup_filter: false,
-            follow_exec: false,
-            exclude_tree_pids: Vec::new(),
-            faults: false,
-            cpu_perf: false,
-            cpu_perf_kernel: false,
-            cpu_perf_max_tasks: 128,
-            cpu_perf_cache_refs: false,
-            block_io: false,
-            stat_wait: false,
-            runtime_slices: false,
-            runtime_slices_max_tasks: 256,
-            json_stream: false,
-            mangohud_log_live: false,
-            metrics_port: None,
-            ringbuf_size_kb: None,
-            wakeup_map_factor: None,
-            otlp_endpoint: None,
-            otel_service_name: "stutter".to_owned(),
-            auto_focus: false,
-            focus_source: crate::config::FocusSource::Heuristic,
-            foreground_window: false,
-            foreground_source: crate::config::ForegroundSource::Auto,
-            foreground_poll_ms: 1000,
-            foreground_max_stale_ms: 2500,
-            foreground_include_title: false,
-            auto_focus_poll_ms: 1000,
-            auto_focus_min_confidence: 0.60,
-            auto_focus_switch_cooldown_ms: 5000,
-            auto_focus_switch_margin: 0.20,
-            auto_focus_required_polls: 2,
-            auto_focus_max_roots: 4,
-            remote: None,
-        };
+        let mut config = MonitorConfig::default();
+        config.target.max_tasks = 1;
 
         let mut tasks = BTreeMap::new();
         tasks.insert(1, task_info(1, 100, "proc1", "task1", TaskClass::Game));

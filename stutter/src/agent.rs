@@ -709,10 +709,27 @@ async fn start_record_handler(
     );
 
     let (stop_tx, stop_rx) = oneshot::channel();
-    let config_arc = Arc::new(config);
+    let monitor_config = match crate::config::effective::resolve_monitor_config(&config) {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            audit_agent_event(
+                "remote-record-start",
+                false,
+                0,
+                format!("config_resolve_error reason={e}"),
+            );
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: format!("configuration resolution failed: {e}"),
+                }),
+            )
+                .into_response();
+        }
+    };
 
     let join = tokio::spawn(async move {
-        crate::session::run_monitor(config_arc, None, None, Some(stop_rx)).await
+        crate::session::run_monitor(monitor_config, None, None, Some(stop_rx)).await
     });
 
     *active = Some(RunHandle {

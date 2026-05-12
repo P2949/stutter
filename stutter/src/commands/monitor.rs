@@ -5,9 +5,9 @@ use crate::{
 };
 
 pub async fn run_monitor_command(input: MonitorCommandInput) -> anyhow::Result<()> {
-    let config = crate::config::effective::resolve_arc_monitor_config(input.config)?;
+    let config = input.config;
 
-    if let Some(remote) = config.remote.as_deref() {
+    if let Some(remote) = config.remote.endpoint.as_deref() {
         let request = remote::request_from_monitor_config(&config)?;
         remote::run_remote_monitor(remote, request).await?;
         Ok(())
@@ -17,7 +17,7 @@ pub async fn run_monitor_command(input: MonitorCommandInput) -> anyhow::Result<(
 }
 
 pub async fn run_bench_command(input: BenchCommandInput) -> anyhow::Result<()> {
-    let config = crate::config::effective::resolve_arc_monitor_config(input.config)?;
+    let config = input.config;
 
     run_monitor(config, None, None, None).await?;
     if input.role == "baseline" {
