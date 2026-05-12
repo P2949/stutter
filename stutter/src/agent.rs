@@ -21,8 +21,7 @@ use tokio::{
 
 use crate::{
     actions::SafetyClass,
-    cli::Config,
-    config::{FocusSource, ForegroundSource},
+    config::{FocusSource, ForegroundSource, layer::MonitorConfigLayer, model::MonitorConfig},
     daemon_policy::{ActionSource, DaemonMode, DaemonPolicy},
     remote::{
         AgentAutotuneLimits, AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
@@ -661,7 +660,8 @@ async fn start_record_handler(
     let run_id = new_run_id();
     let run_dir = state.runs_dir.join(&run_id);
 
-    let config = match config_from_remote_request(&request, &run_dir, &state.limits) {
+    let monitor_config = match monitor_config_from_remote_request(&request, &run_dir, &state.limits)
+    {
         Ok(c) => c,
         Err(e) => {
             audit_agent_event(
@@ -709,24 +709,7 @@ async fn start_record_handler(
     );
 
     let (stop_tx, stop_rx) = oneshot::channel();
-    let monitor_config = match crate::config::effective::resolve_monitor_config(&config) {
-        Ok(c) => Arc::new(c),
-        Err(e) => {
-            audit_agent_event(
-                "remote-record-start",
-                false,
-                0,
-                format!("config_resolve_error reason={e}"),
-            );
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: format!("configuration resolution failed: {e}"),
-                }),
-            )
-                .into_response();
-        }
-    };
+    let monitor_config = Arc::new(monitor_config);
 
     let join = tokio::spawn(async move {
         crate::session::run_monitor(monitor_config, None, None, Some(stop_rx)).await
@@ -1652,119 +1635,101 @@ fn new_run_id() -> String {
     format!("run-{}", now.as_nanos())
 }
 
-fn config_from_remote_request(
+fn monitor_config_from_remote_request(
     request: &RemoteMonitorRequest,
     run_dir: &StdPath,
     limits: &AgentLimits,
-) -> anyhow::Result<Config> {
+) -> anyhow::Result<MonitorConfig> {
     use crate::{
-        cli::RecordingConfig,
+        config::{TARGET_PIDS_MAX, effective::EffectiveMonitorConfig},
         process_tree::{CompiledPattern, TaskFilters},
-    };
-
-    let mut include_comm = Vec::new();
-    for p in &request.include_comm {
-        include_comm.push(CompiledPattern::new(p.clone())?);
-    }
-    let mut exclude_comm = Vec::new();
-    for p in &request.exclude_comm {
-        exclude_comm.push(CompiledPattern::new(p.clone())?);
-    }
-
-    let mut config = Config {
-        monitor_config_layer: None,
-        preset: None,
-        target_pids: request.target_pids.clone(),
-        tree_pids: request.tree_pids.clone(),
-        exclude_tree_pids: request.exclude_tree_pids.clone(),
-        summary_period_ms: request.summary_ms.unwrap_or(1000),
-        epoch_period_ms: None,
-        spike_threshold_ns: request.spike_us.unwrap_or(1000) * 1000,
-        alert_threshold_ns: None,
-        alert_webhook_url: None,
-        verbose: false,
-        task_filters: TaskFilters {
-            include_comm,
-            exclude_comm,
-        },
-        keep_missing_pid: false,
-        watch_process: None,
-        persistent: false,
-        watch_poll_ms: 2000,
-        watch_timeout: None,
-        max_tasks: limits.max_targets,
-        csv_stream: None,
-        irq_latency: request.irq_latency,
-        irqs: request.irqs.clone(),
-        hwmon: request.hwmon,
-        hwmon_root: None,
-        hwmon_drm_card: None,
-        hwmon_render_node: None,
-        mangohud_log: None,
-        mangohud_log_live: false,
-        tui: false,
-        retain_intervals: None,
-        recording: if request.record {
-            Some(RecordingConfig {
-                run_name: request.run_name.clone().or(Some("remote-run".to_owned())),
-                out_dir: Some(run_dir.to_path_buf()),
-            })
-        } else {
-            None
-        },
-        max_duration: Some(std::time::Duration::from_secs(
-            request
-                .duration_seconds
-                .unwrap_or(limits.max_duration_seconds),
-        )),
-        cpu_freq: request.cpu_freq,
-        cgroupv2: None,
-        native_cgroup_filter: false,
-        follow_exec: true,
-        faults: request.faults,
-        cpu_perf: false,
-        cpu_perf_kernel: false,
-        cpu_perf_max_tasks: 128,
-        cpu_perf_cache_refs: false,
-        block_io: request.block_io,
-        stat_wait: request.stat_wait,
-        runtime_slices: request.runtime_slices,
-        runtime_slices_max_tasks: request.runtime_slices_max_tasks.unwrap_or(256),
-        json_stream: false,
-        metrics_port: None,
-        ringbuf_size_kb: None,
-        wakeup_map_factor: None,
-        otlp_endpoint: None,
-        otel_service_name: "stutter".to_owned(),
-        auto_focus: false,
-        focus_source: FocusSource::Heuristic,
-        foreground_window: false,
-        foreground_source: ForegroundSource::Auto,
-        foreground_poll_ms: 1000,
-        foreground_max_stale_ms: 2500,
-        foreground_include_title: false,
-        auto_focus_poll_ms: 1000,
-        auto_focus_min_confidence: 0.60,
-        auto_focus_switch_cooldown_ms: 5000,
-        auto_focus_switch_margin: 0.20,
-        auto_focus_required_polls: 2,
-        auto_focus_max_roots: 4,
-        remote: None,
     };
 
     let focus_source = parse_remote_focus_source(request.focus_source.as_deref())?;
     let foreground_source = parse_remote_foreground_source(request.foreground_source.as_deref())?;
+    let duration_seconds = request
+        .duration_seconds
+        .unwrap_or(limits.max_duration_seconds);
+    let spike_threshold_ns = request.spike_us.unwrap_or(1000) * 1000;
+    let runtime_slices_max_tasks = request.runtime_slices_max_tasks.unwrap_or(256);
 
-    config.focus_source = focus_source;
-    config.foreground_window = request.foreground_window || focus_source != FocusSource::Heuristic;
-    config.foreground_source = foreground_source;
-    if let Some(foreground_poll_ms) = request.foreground_poll_ms {
-        config.foreground_poll_ms = foreground_poll_ms;
-    }
-    if let Some(foreground_max_stale_ms) = request.foreground_max_stale_ms {
-        config.foreground_max_stale_ms = foreground_max_stale_ms;
-    }
-    config.foreground_include_title = request.foreground_include_title;
+    let cli_layer = MonitorConfigLayer {
+        target_pids: (!request.target_pids.is_empty()).then(|| request.target_pids.clone()),
+        tree_pids: (!request.tree_pids.is_empty()).then(|| request.tree_pids.clone()),
+        exclude_tree_pids: (!request.exclude_tree_pids.is_empty())
+            .then(|| request.exclude_tree_pids.clone()),
+        include_comm: (!request.include_comm.is_empty()).then(|| request.include_comm.clone()),
+        exclude_comm: (!request.exclude_comm.is_empty()).then(|| request.exclude_comm.clone()),
+        max_tasks: (limits.max_targets != TARGET_PIDS_MAX).then_some(limits.max_targets),
+
+        summary_period_ms: request.summary_ms.filter(|value| *value != 1_000),
+        max_duration: Some(Some(std::time::Duration::from_secs(duration_seconds))),
+        spike_threshold_ns: (spike_threshold_ns != 1_000_000).then_some(spike_threshold_ns),
+
+        irq_latency: request.irq_latency.then_some(true),
+        irqs: (!request.irqs.is_empty()).then(|| request.irqs.clone()),
+        hwmon: request.hwmon.then_some(true),
+        cpu_freq: request.cpu_freq.then_some(true),
+        faults: request.faults.then_some(true),
+        block_io: request.block_io.then_some(true),
+        stat_wait: request.stat_wait.then_some(true),
+        runtime_slices: request.runtime_slices.then_some(true),
+
+        run_name: request.record.then(|| {
+            Some(
+                request
+                    .run_name
+                    .clone()
+                    .unwrap_or_else(|| "remote-run".to_owned()),
+            )
+        }),
+        output_dir: request.record.then(|| Some(run_dir.to_path_buf())),
+
+        focus_source: (focus_source != FocusSource::Heuristic).then_some(focus_source),
+        foreground_window: (request.foreground_window || focus_source != FocusSource::Heuristic)
+            .then_some(true),
+        foreground_source: (foreground_source != ForegroundSource::Auto)
+            .then_some(foreground_source),
+        foreground_poll_ms: request.foreground_poll_ms.filter(|value| *value != 1_000),
+        foreground_max_stale_ms: request
+            .foreground_max_stale_ms
+            .filter(|value| *value != 2_500),
+        foreground_include_title: request.foreground_include_title.then_some(true),
+
+        runtime_slices_max_tasks: (runtime_slices_max_tasks != 256)
+            .then_some(runtime_slices_max_tasks),
+
+        ..MonitorConfigLayer::default()
+    };
+
+    let user_layer = crate::config_file::load_user_config()
+        .map_err(crate::error::ConfigError::UserConfig)?
+        .as_ref()
+        .map(MonitorConfigLayer::from_user_file)
+        .transpose()
+        .map_err(crate::error::ConfigError::InvalidUserLayer)?;
+
+    let mut config =
+        EffectiveMonitorConfig::from_layers(MonitorConfig::default(), user_layer, None, cli_layer)?
+            .into_monitor_config();
+
+    let compiled_include = config
+        .target
+        .include_comm
+        .iter()
+        .map(|pattern| CompiledPattern::new(pattern.clone()))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let compiled_exclude = config
+        .target
+        .exclude_comm
+        .iter()
+        .map(|pattern| CompiledPattern::new(pattern.clone()))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    config.target.task_filters = TaskFilters {
+        include_comm: compiled_include,
+        exclude_comm: compiled_exclude,
+    };
 
     Ok(config)
 }
@@ -2743,7 +2708,7 @@ mod tests {
     }
 
     #[test]
-    fn config_from_remote_request_applies_foreground_fields() {
+    fn monitor_config_from_remote_request_applies_foreground_fields() {
         let mut request = minimal_remote_request();
         request.foreground_window = true;
         request.focus_source = Some("hybrid".to_owned());
@@ -2759,18 +2724,18 @@ mod tests {
             max_concurrent_recordings: 1,
         };
 
-        let config = config_from_remote_request(&request, &dir, &limits).unwrap();
+        let config = monitor_config_from_remote_request(&request, &dir, &limits).unwrap();
 
-        assert!(config.foreground_window);
-        assert_eq!(config.focus_source, FocusSource::Hybrid);
-        assert_eq!(config.foreground_source, ForegroundSource::Sway);
-        assert_eq!(config.foreground_poll_ms, 750);
-        assert_eq!(config.foreground_max_stale_ms, 3000);
-        assert!(!config.foreground_include_title);
+        assert!(config.focus.foreground_window);
+        assert_eq!(config.focus.focus_source, FocusSource::Hybrid);
+        assert_eq!(config.focus.foreground_source, ForegroundSource::Sway);
+        assert_eq!(config.focus.foreground_poll_ms, 750);
+        assert_eq!(config.focus.foreground_max_stale_ms, 3000);
+        assert!(!config.focus.foreground_include_title);
     }
 
     #[test]
-    fn config_from_remote_request_enables_foreground_window_for_non_heuristic_focus() {
+    fn monitor_config_from_remote_request_enables_foreground_window_for_non_heuristic_focus() {
         let mut request = minimal_remote_request();
         request.foreground_window = false;
         request.focus_source = Some("foreground".to_owned());
@@ -2782,10 +2747,10 @@ mod tests {
             max_concurrent_recordings: 1,
         };
 
-        let config = config_from_remote_request(&request, &dir, &limits).unwrap();
+        let config = monitor_config_from_remote_request(&request, &dir, &limits).unwrap();
 
-        assert!(config.foreground_window);
-        assert_eq!(config.focus_source, FocusSource::Foreground);
+        assert!(config.focus.foreground_window);
+        assert_eq!(config.focus.focus_source, FocusSource::Foreground);
     }
 
     #[test]
