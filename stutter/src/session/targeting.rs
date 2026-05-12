@@ -7,7 +7,7 @@ use crate::{
     process_tree::{CompiledPattern, ProcessCache, TargetSnapshotInput, TaskFilters},
     tasks::TaskTracker,
     watch::{
-        WatchProcessState, add_watch_tree_pid, capture_tree_root_starttimes,
+        WatchProcessConfig, WatchProcessState, add_watch_tree_pid, capture_tree_root_starttimes,
         process_root_starttime, remove_stale_tree_roots, remove_watch_tree_pid,
     },
 };
@@ -73,6 +73,7 @@ fn compile_target_patterns(
 
 pub struct TargetController {
     pub policy: TargetPolicy,
+    pub watch_config: WatchProcessConfig,
     pub dynamic_tree_pids: Vec<u32>,
     pub watch_state: WatchProcessState,
     pub tree_root_starttimes: BTreeMap<u32, Option<u64>>,
@@ -83,12 +84,14 @@ pub struct TargetController {
 impl TargetController {
     pub fn new(
         policy: TargetPolicy,
+        watch_config: WatchProcessConfig,
         dynamic_tree_pids: Vec<u32>,
         watch_state: WatchProcessState,
         tree_root_starttimes: BTreeMap<u32, Option<u64>>,
     ) -> Self {
         Self {
             policy,
+            watch_config,
             dynamic_tree_pids,
             watch_state,
             tree_root_starttimes,
@@ -99,11 +102,18 @@ impl TargetController {
 
     pub fn from_policy_parts(
         policy: TargetPolicy,
+        watch_config: WatchProcessConfig,
         dynamic_tree_pids: Vec<u32>,
         watch_state: WatchProcessState,
         tree_root_starttimes: BTreeMap<u32, Option<u64>>,
     ) -> Self {
-        Self::new(policy, dynamic_tree_pids, watch_state, tree_root_starttimes)
+        Self::new(
+            policy,
+            watch_config,
+            dynamic_tree_pids,
+            watch_state,
+            tree_root_starttimes,
+        )
     }
 
     pub fn effective_tree_pids(&self) -> &[u32] {

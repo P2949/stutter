@@ -35,8 +35,8 @@ use crate::{
     },
     session_events::MonitorEvent,
     watch::{
-        WatchProcessState, capture_tree_root_starttimes, find_process_by_pattern_at_with_cache,
-        resolve_watch_process, tree_root_is_stale,
+        WatchProcessConfig, WatchProcessState, capture_tree_root_starttimes,
+        find_process_by_pattern_at_with_cache, resolve_watch_process, tree_root_is_stale,
     },
 };
 
@@ -68,14 +68,6 @@ fn needs_tree_tick_from_parts(
     cgroupv2_active: bool,
 ) -> bool {
     had_tree_roots || watch_process_active || cgroupv2_active
-}
-
-fn needs_tree_tick(config: &MonitorConfig, had_tree_roots: bool) -> bool {
-    needs_tree_tick_from_parts(
-        had_tree_roots,
-        config.target.watch_process.is_some(),
-        config.target.cgroupv2.is_some(),
-    )
 }
 
 fn foreground_capture_enabled(config: &MonitorConfig) -> bool {
@@ -133,6 +125,7 @@ async fn optional_tick(tick: Option<&mut tokio::time::Interval>) {
 
 struct SessionTargetPlan {
     tree_pids: Vec<u32>,
+    watch_config: WatchProcessConfig,
     watch_state: WatchProcessState,
     tree_root_starttimes: BTreeMap<u32, Option<u64>>,
     had_tree_roots: bool,
@@ -240,7 +233,8 @@ impl SessionTargetPlan {
             tree_pids = pids;
         }
 
-        let watch_state = match resolve_watch_process(config, &mut tree_pids).await? {
+        let watch_config = WatchProcessConfig::from_monitor_config(config);
+        let watch_state = match resolve_watch_process(&watch_config, &mut tree_pids).await? {
             Some(pid) => WatchProcessState::Running(pid),
             None => WatchProcessState::None,
         };
@@ -250,6 +244,7 @@ impl SessionTargetPlan {
 
         Ok(Self {
             tree_pids,
+            watch_config,
             watch_state,
             tree_root_starttimes,
             had_tree_roots,
@@ -769,6 +764,7 @@ impl MonitorSession {
 
         let targeting = TargetController::from_policy_parts(
             target_policy,
+            target_plan.watch_config,
             target_plan.tree_pids,
             target_plan.watch_state,
             target_plan.tree_root_starttimes,
@@ -1116,7 +1112,11 @@ impl MonitorSession {
         let mut epoch_tick = interval(epoch_tick_duration);
         epoch_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        let mut tree_tick = if needs_tree_tick(&self.config, self.had_tree_roots) {
+        let mut tree_tick = if needs_tree_tick_from_parts(
+            self.had_tree_roots,
+            self.runtime.targeting.watch_config.is_active(),
+            self.config.target.cgroupv2.is_some(),
+        ) {
             let mut tick = interval(Duration::from_millis(2_000));
             tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
             Some(tick)
@@ -1140,7 +1140,9 @@ impl MonitorSession {
             None
         };
 
-        let mut watch_tick = interval(Duration::from_millis(self.config.watch.poll_ms));
+        let mut watch_tick = interval(Duration::from_millis(
+            self.runtime.targeting.watch_config.poll_ms,
+        ));
         watch_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut scx_tick = interval(Duration::from_millis(1_000));
@@ -1749,7 +1751,7 @@ impl MonitorSession {
     }
 
     pub async fn handle_watch_tick(&mut self) -> anyhow::Result<()> {
-        let Some(pattern) = self.config.target.watch_process.clone() else {
+        let Some(pattern) = self.runtime.targeting.watch_config.pattern.clone() else {
             return Ok(());
         };
 

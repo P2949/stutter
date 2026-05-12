@@ -11,8 +11,6 @@ use tokio::{
     time::{Instant, MissedTickBehavior, interval, sleep},
 };
 
-use crate::config::model::MonitorConfig;
-
 pub const PROFILE_WATCH_VERIFY_MS: u64 = 10_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -35,11 +33,34 @@ impl WatchProcessState {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WatchProcessConfig {
+    pub pattern: Option<String>,
+    pub persistent: bool,
+    pub poll_ms: u64,
+    pub timeout: Option<Duration>,
+}
+
+impl WatchProcessConfig {
+    pub fn from_monitor_config(config: &crate::config::model::MonitorConfig) -> Self {
+        Self {
+            pattern: config.target.watch_process.clone(),
+            persistent: config.target.persistent,
+            poll_ms: config.watch.poll_ms,
+            timeout: config.watch.timeout,
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.pattern.is_some()
+    }
+}
+
 pub async fn resolve_watch_process(
-    config: &MonitorConfig,
+    watch: &WatchProcessConfig,
     tree_pids: &mut Vec<u32>,
 ) -> anyhow::Result<Option<u32>> {
-    let Some(pattern) = config.target.watch_process.clone() else {
+    let Some(pattern) = watch.pattern.clone() else {
         return Ok(None);
     };
 
@@ -51,32 +72,31 @@ pub async fn resolve_watch_process(
         return Ok(Some(pid));
     }
 
-    wait_for_watch_process(config, tree_pids)
+    wait_for_watch_process(watch, tree_pids)
         .await?
         .ok_or_else(|| anyhow::anyhow!("stopped while waiting for --watch-process {pattern}"))
         .map(Some)
 }
 
 pub async fn wait_for_watch_process(
-    config: &MonitorConfig,
+    watch: &WatchProcessConfig,
     tree_pids: &mut Vec<u32>,
 ) -> anyhow::Result<Option<u32>> {
-    let pattern = config
-        .target
-        .watch_process
+    let pattern = watch
+        .pattern
         .clone()
         .ok_or_else(|| anyhow::anyhow!("internal error: watch_process missing"))?;
 
     info!(
         "watch_process_waiting pattern={} persistent={}",
-        pattern, config.target.persistent
+        pattern, watch.persistent
     );
 
-    let mut tick = interval(Duration::from_millis(config.watch.poll_ms));
+    let mut tick = interval(Duration::from_millis(watch.poll_ms));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut cache = crate::process_tree::ProcessCache::default();
 
-    let watch_timeout = config.watch.timeout;
+    let watch_timeout = watch.timeout;
     let timeout_future = async move {
         if let Some(timeout) = watch_timeout {
             sleep(timeout).await;
