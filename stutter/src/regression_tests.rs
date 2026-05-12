@@ -43,9 +43,10 @@ mod events {
         scx_state: Option<&str>,
         scx_enable_seq: Option<&str>,
     ) -> Option<crate::recorder::SpikeEvent> {
-        let update = super::raw_events::handle_event(
+        let runtime_config = super::raw_events::EventRuntimeConfig::from_monitor_config(config);
+        let update = super::raw_events::handle_event_with_runtime_config(
             event,
-            config,
+            &runtime_config,
             started,
             tasks,
             monotonic_start_ns,
