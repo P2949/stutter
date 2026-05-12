@@ -8,7 +8,7 @@ pub struct DefaultConfig {
 
 #[derive(Debug, Clone, Default)]
 pub struct PresetConfig {
-    pub config: MonitorConfig,
+    pub layer: MonitorConfigLayer,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -43,9 +43,7 @@ pub fn merge_config_sources_checked(sources: ConfigSources) -> Result<MonitorCon
         .transpose()
         .map_err(ConfigError::InvalidUserLayer)?;
 
-    let preset_layer = sources
-        .preset
-        .map(|preset| MonitorConfigLayer::from_monitor_config(preset.config));
+    let preset_layer = sources.preset.map(|preset| preset.layer);
 
     Ok(effective::EffectiveMonitorConfig::from_layers(
         default_config,

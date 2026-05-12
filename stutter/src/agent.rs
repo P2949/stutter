@@ -1595,9 +1595,10 @@ fn monitor_config_from_remote_request(
     run_dir: &StdPath,
     limits: &AgentLimits,
 ) -> anyhow::Result<MonitorConfig> {
-    use crate::{
-        config::{TARGET_PIDS_MAX, effective::EffectiveMonitorConfig},
-        process_tree::{CompiledPattern, TaskFilters},
+    use crate::config::{
+        TARGET_PIDS_MAX,
+        effective::resolve_monitor_config_sources,
+        merge::{ApiOverrides, ConfigSources, DefaultConfig},
     };
 
     let focus_source = parse_remote_focus_source(request.focus_source.as_deref())?;
@@ -1657,36 +1658,19 @@ fn monitor_config_from_remote_request(
         ..MonitorConfigLayer::default()
     };
 
-    let user_layer = crate::config_file::load_user_config()
-        .map_err(crate::error::ConfigError::UserConfig)?
-        .as_ref()
-        .map(MonitorConfigLayer::from_user_file)
-        .transpose()
-        .map_err(crate::error::ConfigError::InvalidUserLayer)?;
+    let user_file =
+        crate::config_file::load_user_config().map_err(crate::error::ConfigError::UserConfig)?;
 
-    let mut config =
-        EffectiveMonitorConfig::from_layers(MonitorConfig::default(), user_layer, None, cli_layer)?
-            .into_monitor_config();
+    let resolved = resolve_monitor_config_sources(ConfigSources {
+        defaults: DefaultConfig {
+            config: MonitorConfig::default(),
+        },
+        user_file,
+        preset: None,
+        cli: ApiOverrides { layer: cli_layer },
+    })?;
 
-    let compiled_include = config
-        .target
-        .include_comm
-        .iter()
-        .map(|pattern| CompiledPattern::new(pattern.clone()))
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    let compiled_exclude = config
-        .target
-        .exclude_comm
-        .iter()
-        .map(|pattern| CompiledPattern::new(pattern.clone()))
-        .collect::<anyhow::Result<Vec<_>>>()?;
-
-    config.target.task_filters = TaskFilters {
-        include_comm: compiled_include,
-        exclude_comm: compiled_exclude,
-    };
-
-    Ok(config)
+    Ok(resolved.config)
 }
 
 #[cfg(test)]

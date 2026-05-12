@@ -17,7 +17,10 @@ use crate::{
     },
     config::{
         CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX,
-        effective::EffectiveMonitorConfig, layer::MonitorConfigLayer, model::MonitorConfig,
+        effective::resolve_monitor_config_sources,
+        layer::MonitorConfigLayer,
+        merge::{CliOverrides, ConfigSources, DefaultConfig, PresetConfig},
+        model::MonitorConfig,
     },
     process_tree::TaskClass,
 };
@@ -2196,7 +2199,8 @@ fn monitor_config_from_monitor_args_with_file(
     file_config: Option<crate::config_file::UserConfigFile>,
     recording_mode: RecordingMode,
 ) -> anyhow::Result<MonitorConfig> {
-    let file_config = file_config.unwrap_or_default();
+    let user_file = file_config;
+    let file_config = user_file.clone().unwrap_or_default();
 
     let preset = match args.preset.as_deref() {
         Some(name) => Some(name.parse::<crate::presets::Preset>()?),
@@ -2477,16 +2481,17 @@ fn monitor_config_from_monitor_args_with_file(
         layer.cpu_freq = Some(true);
     }
 
-    let mut config = EffectiveMonitorConfig::from_layers(
-        MonitorConfig::default(),
-        Some(crate::config::layer::MonitorConfigLayer::from_user_file(
-            &file_config,
-        )?),
-        preset
-            .map(|p| crate::config::layer::MonitorConfigLayer::from_preset_defaults(p.defaults())),
-        layer,
-    )?
-    .into_monitor_config();
+    let resolved = resolve_monitor_config_sources(ConfigSources {
+        defaults: DefaultConfig {
+            config: MonitorConfig::default(),
+        },
+        user_file,
+        preset: preset.map(|preset| PresetConfig {
+            layer: MonitorConfigLayer::from_preset_defaults(preset.defaults()),
+        }),
+        cli: CliOverrides { layer },
+    })?;
+    let mut config = resolved.config;
 
     config.timing.summary_period_ms = summary_period_ms;
     config.timing.spike_threshold_ns = spike_threshold_ns;
@@ -2497,8 +2502,6 @@ fn monitor_config_from_monitor_args_with_file(
     config.probes.block_io = block_io;
     config.probes.runtime_slices = runtime_slices;
     config.probes.irq_latency = irq_latency;
-
-    crate::config::effective::compile_task_filters(&mut config)?;
 
     if config.csv_streams_to_stdout() && config.outputs.json_stream {
         anyhow::bail!(
