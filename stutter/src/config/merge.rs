@@ -13,9 +13,11 @@ pub struct PresetConfig {
 
 #[derive(Debug, Clone, Default)]
 pub struct CliOverrides {
-    pub config: MonitorConfig,
-    pub layer: Option<MonitorConfigLayer>,
+    pub layer: MonitorConfigLayer,
 }
+
+pub type ApiOverrides = CliOverrides;
+pub type RuntimeOverrides = CliOverrides;
 
 #[derive(Debug, Clone, Default)]
 pub struct ConfigSources {
@@ -45,16 +47,11 @@ pub fn merge_config_sources_checked(sources: ConfigSources) -> Result<MonitorCon
         .preset
         .map(|preset| MonitorConfigLayer::from_monitor_config(preset.config));
 
-    let cli_layer = sources
-        .cli
-        .layer
-        .unwrap_or_else(|| MonitorConfigLayer::from_monitor_config(sources.cli.config));
-
     Ok(effective::EffectiveMonitorConfig::from_layers(
         default_config,
         user_layer,
         preset_layer,
-        cli_layer,
+        sources.cli.layer,
     )?
     .into_monitor_config())
 }
@@ -67,8 +64,7 @@ pub fn merge_user_file(config: MonitorConfig) -> MonitorConfig {
                 user_file: Some(user_file),
                 preset: None,
                 cli: CliOverrides {
-                    config: MonitorConfig::default(),
-                    layer: Some(MonitorConfigLayer::default()),
+                    layer: MonitorConfigLayer::default(),
                 },
             };
             merge_config_sources(sources)
@@ -87,8 +83,7 @@ pub fn merge_monitor_config(base: MonitorConfig, override_config: MonitorConfig)
         user_file: None,
         preset: None,
         cli: CliOverrides {
-            config: override_config,
-            layer: None,
+            layer: MonitorConfigLayer::from_monitor_config(override_config),
         },
     };
     merge_config_sources(sources)
@@ -144,10 +139,7 @@ mod tests {
             defaults: DefaultConfig::default(),
             user_file: Some(user_file),
             preset: None,
-            cli: CliOverrides {
-                config: MonitorConfig::default(),
-                layer: Some(cli_layer),
-            },
+            cli: CliOverrides { layer: cli_layer },
         })
         .unwrap();
 
@@ -178,8 +170,7 @@ mod tests {
             user_file: Some(user_file),
             preset: None,
             cli: CliOverrides {
-                config: MonitorConfig::default(),
-                layer: Some(MonitorConfigLayer::default()),
+                layer: MonitorConfigLayer::default(),
             },
         })
         .unwrap();

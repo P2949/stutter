@@ -1,10 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use crate::{
-    cli::Config,
-    config::{
-        CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX, model::MonitorConfig,
-    },
+    config::{CsvStreamTarget, FocusSource, ForegroundSource, model::MonitorConfig},
     config_file::UserConfigFile,
     presets::PresetDefaults,
 };
@@ -223,127 +220,6 @@ impl MonitorConfigLayer {
             runtime_slices: defaults.runtime_slices,
             irq_latency: defaults.irq_latency,
             ..Self::default()
-        }
-    }
-
-    pub fn from_existing_cli_config(config: &Config) -> Self {
-        Self {
-            target_pids: (!config.target_pids.is_empty()).then(|| config.target_pids.clone()),
-            tree_pids: (!config.tree_pids.is_empty()).then(|| config.tree_pids.clone()),
-            cgroupv2: config.cgroupv2.clone().map(Some),
-            exclude_tree_pids: (!config.exclude_tree_pids.is_empty())
-                .then(|| config.exclude_tree_pids.clone()),
-            include_comm: (!config.task_filters.include_comm.is_empty()).then(|| {
-                config
-                    .task_filters
-                    .include_comm
-                    .iter()
-                    .map(|pattern| pattern.raw.clone())
-                    .collect()
-            }),
-            exclude_comm: (!config.task_filters.exclude_comm.is_empty()).then(|| {
-                config
-                    .task_filters
-                    .exclude_comm
-                    .iter()
-                    .map(|pattern| pattern.raw.clone())
-                    .collect()
-            }),
-            watch_process: config.watch_process.clone().map(Some),
-            persistent: config.persistent.then_some(true),
-            keep_missing_pid: config.keep_missing_pid.then_some(true),
-            max_tasks: (config.max_tasks != TARGET_PIDS_MAX).then_some(config.max_tasks),
-
-            summary_period_ms: (config.summary_period_ms != 1_000)
-                .then_some(config.summary_period_ms),
-            epoch_period_ms: config.epoch_period_ms.map(Some),
-            max_duration: config.max_duration.map(Some),
-            spike_threshold_ns: (config.spike_threshold_ns != 1_000_000)
-                .then_some(config.spike_threshold_ns),
-
-            irq_latency: config.irq_latency.then_some(true),
-            irqs: (!config.irqs.is_empty()).then(|| config.irqs.clone()),
-            hwmon: config.hwmon.then_some(true),
-            cpu_freq: config.cpu_freq.then_some(true),
-            faults: config.faults.then_some(true),
-            cpu_perf: config.cpu_perf.then_some(true),
-            block_io: config.block_io.then_some(true),
-            stat_wait: config.stat_wait.then_some(true),
-            runtime_slices: config.runtime_slices.then_some(true),
-
-            run_name: config
-                .recording
-                .as_ref()
-                .and_then(|recording| recording.run_name.clone().map(Some)),
-            output_dir: config
-                .recording
-                .as_ref()
-                .and_then(|recording| recording.out_dir.clone().map(Some)),
-            retain_intervals: config.retain_intervals.map(Some),
-
-            json_stream: config.json_stream.then_some(true),
-            metrics_port: config.metrics_port.map(Some),
-            otlp_endpoint: config.otlp_endpoint.clone().map(Some),
-            otel_service_name: (config.otel_service_name != "stutter")
-                .then(|| config.otel_service_name.clone()),
-
-            auto_focus: config.auto_focus.then_some(true),
-            focus_source: (config.focus_source != FocusSource::Heuristic)
-                .then_some(config.focus_source),
-            foreground_window: config.foreground_window.then_some(true),
-            foreground_source: (config.foreground_source != ForegroundSource::Auto)
-                .then_some(config.foreground_source),
-            foreground_poll_ms: (config.foreground_poll_ms != 1_000)
-                .then_some(config.foreground_poll_ms),
-            foreground_max_stale_ms: (config.foreground_max_stale_ms != 2_500)
-                .then_some(config.foreground_max_stale_ms),
-            foreground_include_title: config.foreground_include_title.then_some(true),
-            auto_focus_poll_ms: (config.auto_focus_poll_ms != 1_000)
-                .then_some(config.auto_focus_poll_ms),
-            auto_focus_min_confidence: (config.auto_focus_min_confidence != 0.60)
-                .then_some(config.auto_focus_min_confidence),
-            auto_focus_switch_cooldown_ms: (config.auto_focus_switch_cooldown_ms != 5_000)
-                .then_some(config.auto_focus_switch_cooldown_ms),
-            auto_focus_switch_margin: (config.auto_focus_switch_margin != 0.20)
-                .then_some(config.auto_focus_switch_margin),
-            auto_focus_required_polls: (config.auto_focus_required_polls != 2)
-                .then_some(config.auto_focus_required_polls),
-            auto_focus_max_roots: (config.auto_focus_max_roots != 4)
-                .then_some(config.auto_focus_max_roots),
-
-            follow_exec: (!config.follow_exec).then_some(false),
-            native_cgroup_filter: config.native_cgroup_filter.then_some(true),
-
-            watch_poll_ms: (config.watch_poll_ms != 2_000).then_some(config.watch_poll_ms),
-            watch_timeout: config.watch_timeout.map(Some),
-
-            alert_threshold_ns: config.alert_threshold_ns.map(Some),
-            alert_webhook_url: config.alert_webhook_url.clone().map(Some),
-
-            csv_stream: config.csv_stream.clone().map(Some),
-            verbose: config.verbose.then_some(true),
-
-            hwmon_root: config.hwmon_root.clone().map(Some),
-            hwmon_drm_card: config.hwmon_drm_card.clone().map(Some),
-            hwmon_render_node: config.hwmon_render_node.clone().map(Some),
-
-            mangohud_log: config.mangohud_log.clone().map(Some),
-            mangohud_log_live: config.mangohud_log_live.then_some(true),
-
-            tui: config.tui.then_some(true),
-
-            cpu_perf_kernel: config.cpu_perf_kernel.then_some(true),
-            cpu_perf_max_tasks: (config.cpu_perf_max_tasks != 128)
-                .then_some(config.cpu_perf_max_tasks),
-            cpu_perf_cache_refs: config.cpu_perf_cache_refs.then_some(true),
-
-            runtime_slices_max_tasks: (config.runtime_slices_max_tasks != 256)
-                .then_some(config.runtime_slices_max_tasks),
-
-            ringbuf_size_kb: config.ringbuf_size_kb.map(Some),
-            wakeup_map_factor: config.wakeup_map_factor.map(Some),
-
-            remote: config.remote.clone().map(Some),
         }
     }
 }

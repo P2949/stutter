@@ -651,136 +651,142 @@ pub struct AgentArgs {
     pub max_concurrent_recordings: usize,
 }
 
-fn monitor_args_layer(args: &MonitorArgs) -> MonitorConfigLayer {
-    MonitorConfigLayer {
-        target_pids: (!args.target_pids.is_empty()).then(|| args.target_pids.clone()),
-        tree_pids: (!args.tree_pids.is_empty()).then(|| args.tree_pids.clone()),
-        exclude_tree_pids: (!args.exclude_tree_pids.is_empty())
-            .then(|| args.exclude_tree_pids.clone()),
-        summary_period_ms: args.summary_period_ms,
-        epoch_period_ms: args.epoch_period_ms.map(Some),
-        spike_threshold_ns: args
-            .spike_threshold_us
-            .map(|value| value.saturating_mul(1_000)),
-        alert_threshold_ns: args
-            .alert_threshold_ms
-            .map(|value| Some(value.saturating_mul(1_000_000))),
-        alert_webhook_url: args.alert_webhook_url.clone().map(Some),
-        verbose: args.verbose.then_some(true),
-        watch_poll_ms: (args.watch_poll_ms != 2_000).then_some(args.watch_poll_ms),
-        watch_timeout: args
-            .watch_timeout_seconds
-            .map(|seconds| Some(Duration::from_secs(seconds))),
-        include_comm: (!args.include_comm.is_empty()).then(|| args.include_comm.clone()),
-        exclude_comm: (!args.exclude_comm.is_empty()).then(|| args.exclude_comm.clone()),
-        keep_missing_pid: args.keep_missing_pid.then_some(true),
-        watch_process: args.watch_process.clone().map(Some),
-        persistent: args.persistent.then_some(true),
-        max_tasks: args.max_tasks,
-        csv_stream: match (&args.csv_path, &args.stream_csv) {
-            (Some(path), None) => Some(Some(CsvStreamTarget::File(path.clone()))),
-            (None, Some(value)) if value == "-" => Some(Some(CsvStreamTarget::Stdout)),
-            (None, Some(value)) if value.trim().is_empty() => None,
-            (None, Some(value)) => Some(Some(CsvStreamTarget::File(PathBuf::from(value)))),
-            (None, None) => None,
-            (Some(_), Some(_)) => None,
-        },
-        irq_latency: args.irq_latency.then_some(true),
-        irqs: (!args.irqs.is_empty()).then(|| args.irqs.clone()),
-        hwmon: if args.no_hwmon {
-            Some(false)
-        } else if args.hwmon {
-            Some(true)
-        } else {
-            None
-        },
-        hwmon_root: args.hwmon_root.clone().map(Some),
-        hwmon_drm_card: args.hwmon_drm_card.clone().map(Some),
-        hwmon_render_node: args.hwmon_render_node.clone().map(Some),
-        cpu_freq: if args.no_cpu_freq {
-            Some(false)
-        } else if args.cpu_freq {
-            Some(true)
-        } else {
-            None
-        },
-        cgroupv2: args.cgroupv2.clone().map(Some),
-        native_cgroup_filter: args.native_cgroup_filter.then_some(true),
-        follow_exec: if args.no_follow_exec {
-            Some(false)
-        } else if args.follow_exec {
-            Some(true)
-        } else {
-            None
-        },
-        faults: if args.no_faults {
-            Some(false)
-        } else if args.faults {
-            Some(true)
-        } else {
-            None
-        },
-        cpu_perf: args.cpu_perf.then_some(true),
-        cpu_perf_kernel: args.cpu_perf_kernel.then_some(true),
-        cpu_perf_max_tasks: (args.cpu_perf_max_tasks != 128).then_some(args.cpu_perf_max_tasks),
-        cpu_perf_cache_refs: args.cpu_perf_cache_refs.then_some(true),
-        block_io: if args.no_block_io {
-            Some(false)
-        } else if args.block_io {
-            Some(true)
-        } else {
-            None
-        },
-        stat_wait: if args.no_stat_wait {
-            Some(false)
-        } else if args.stat_wait {
-            Some(true)
-        } else {
-            None
-        },
-        runtime_slices: if args.no_runtime_slices {
-            Some(false)
-        } else if args.runtime_slices {
-            Some(true)
-        } else {
-            None
-        },
-        runtime_slices_max_tasks: (args.runtime_slices_max_tasks != 256)
-            .then_some(args.runtime_slices_max_tasks),
-        mangohud_log: args.mangohud_log.clone().map(Some),
-        mangohud_log_live: args.mangohud_log_live.then_some(true),
-        tui: args.tui.then_some(true),
-        json_stream: args.json_stream.then_some(true),
-        metrics_port: args.metrics_port.map(Some),
-        ringbuf_size_kb: args.ringbuf_size_kb.map(Some),
-        wakeup_map_factor: args.wakeup_map_factor.map(Some),
-        otlp_endpoint: args.otlp_endpoint.clone().map(Some),
-        otel_service_name: (args.otel_service_name != "stutter")
-            .then(|| args.otel_service_name.clone()),
-        auto_focus: args.auto_focus.then_some(true),
-        focus_source: (args.focus_source != FocusSource::Heuristic).then_some(args.focus_source),
-        foreground_window: args.foreground_window.then_some(true),
-        foreground_source: (args.foreground_source != ForegroundSource::Auto)
-            .then_some(args.foreground_source),
-        foreground_poll_ms: (args.foreground_poll_ms != 1_000).then_some(args.foreground_poll_ms),
-        foreground_max_stale_ms: (args.foreground_max_stale_ms != 2_500)
-            .then_some(args.foreground_max_stale_ms),
-        foreground_include_title: args.foreground_include_title.then_some(true),
-        auto_focus_poll_ms: (args.auto_focus_poll_ms != 1_000).then_some(args.auto_focus_poll_ms),
-        auto_focus_min_confidence: (args.auto_focus_min_confidence != 0.60)
-            .then_some(args.auto_focus_min_confidence),
-        auto_focus_switch_cooldown_ms: (args.auto_focus_switch_cooldown_ms != 5_000)
-            .then_some(args.auto_focus_switch_cooldown_ms),
-        auto_focus_switch_margin: (args.auto_focus_switch_margin != 0.20)
-            .then_some(args.auto_focus_switch_margin),
-        auto_focus_required_polls: (args.auto_focus_required_polls != 2)
-            .then_some(args.auto_focus_required_polls),
-        auto_focus_max_roots: (args.auto_focus_max_roots != 4).then_some(args.auto_focus_max_roots),
-        retain_intervals: args.retain_intervals.map(Some),
-        run_name: args.run_name.clone().map(Some),
-        output_dir: args.out_dir.clone().map(Some),
-        remote: args.remote.clone().map(Some),
-        ..MonitorConfigLayer::default()
+impl MonitorArgs {
+    pub fn into_monitor_config_layer(self) -> MonitorConfigLayer {
+        MonitorConfigLayer {
+            target_pids: (!self.target_pids.is_empty()).then(|| self.target_pids.clone()),
+            tree_pids: (!self.tree_pids.is_empty()).then(|| self.tree_pids.clone()),
+            exclude_tree_pids: (!self.exclude_tree_pids.is_empty())
+                .then(|| self.exclude_tree_pids.clone()),
+            summary_period_ms: self.summary_period_ms,
+            epoch_period_ms: self.epoch_period_ms.map(Some),
+            spike_threshold_ns: self
+                .spike_threshold_us
+                .map(|value| value.saturating_mul(1_000)),
+            alert_threshold_ns: self
+                .alert_threshold_ms
+                .map(|value| Some(value.saturating_mul(1_000_000))),
+            alert_webhook_url: self.alert_webhook_url.clone().map(Some),
+            verbose: self.verbose.then_some(true),
+            watch_poll_ms: (self.watch_poll_ms != 2_000).then_some(self.watch_poll_ms),
+            watch_timeout: self
+                .watch_timeout_seconds
+                .map(|seconds| Some(Duration::from_secs(seconds))),
+            include_comm: (!self.include_comm.is_empty()).then(|| self.include_comm.clone()),
+            exclude_comm: (!self.exclude_comm.is_empty()).then(|| self.exclude_comm.clone()),
+            keep_missing_pid: self.keep_missing_pid.then_some(true),
+            watch_process: self.watch_process.clone().map(Some),
+            persistent: self.persistent.then_some(true),
+            max_tasks: self.max_tasks,
+            csv_stream: match (&self.csv_path, &self.stream_csv) {
+                (Some(path), None) => Some(Some(CsvStreamTarget::File(path.clone()))),
+                (None, Some(value)) if value == "-" => Some(Some(CsvStreamTarget::Stdout)),
+                (None, Some(value)) if value.trim().is_empty() => None,
+                (None, Some(value)) => Some(Some(CsvStreamTarget::File(PathBuf::from(value)))),
+                (None, None) => None,
+                (Some(_), Some(_)) => None,
+            },
+            irq_latency: self.irq_latency.then_some(true),
+            irqs: (!self.irqs.is_empty()).then(|| self.irqs.clone()),
+            hwmon: if self.no_hwmon {
+                Some(false)
+            } else if self.hwmon {
+                Some(true)
+            } else {
+                None
+            },
+            hwmon_root: self.hwmon_root.clone().map(Some),
+            hwmon_drm_card: self.hwmon_drm_card.clone().map(Some),
+            hwmon_render_node: self.hwmon_render_node.clone().map(Some),
+            cpu_freq: if self.no_cpu_freq {
+                Some(false)
+            } else if self.cpu_freq {
+                Some(true)
+            } else {
+                None
+            },
+            cgroupv2: self.cgroupv2.clone().map(Some),
+            native_cgroup_filter: self.native_cgroup_filter.then_some(true),
+            follow_exec: if self.no_follow_exec {
+                Some(false)
+            } else if self.follow_exec {
+                Some(true)
+            } else {
+                None
+            },
+            faults: if self.no_faults {
+                Some(false)
+            } else if self.faults {
+                Some(true)
+            } else {
+                None
+            },
+            cpu_perf: self.cpu_perf.then_some(true),
+            cpu_perf_kernel: self.cpu_perf_kernel.then_some(true),
+            cpu_perf_max_tasks: (self.cpu_perf_max_tasks != 128).then_some(self.cpu_perf_max_tasks),
+            cpu_perf_cache_refs: self.cpu_perf_cache_refs.then_some(true),
+            block_io: if self.no_block_io {
+                Some(false)
+            } else if self.block_io {
+                Some(true)
+            } else {
+                None
+            },
+            stat_wait: if self.no_stat_wait {
+                Some(false)
+            } else if self.stat_wait {
+                Some(true)
+            } else {
+                None
+            },
+            runtime_slices: if self.no_runtime_slices {
+                Some(false)
+            } else if self.runtime_slices {
+                Some(true)
+            } else {
+                None
+            },
+            runtime_slices_max_tasks: (self.runtime_slices_max_tasks != 256)
+                .then_some(self.runtime_slices_max_tasks),
+            mangohud_log: self.mangohud_log.clone().map(Some),
+            mangohud_log_live: self.mangohud_log_live.then_some(true),
+            tui: self.tui.then_some(true),
+            json_stream: self.json_stream.then_some(true),
+            metrics_port: self.metrics_port.map(Some),
+            ringbuf_size_kb: self.ringbuf_size_kb.map(Some),
+            wakeup_map_factor: self.wakeup_map_factor.map(Some),
+            otlp_endpoint: self.otlp_endpoint.clone().map(Some),
+            otel_service_name: (self.otel_service_name != "stutter")
+                .then(|| self.otel_service_name.clone()),
+            auto_focus: self.auto_focus.then_some(true),
+            focus_source: (self.focus_source != FocusSource::Heuristic)
+                .then_some(self.focus_source),
+            foreground_window: self.foreground_window.then_some(true),
+            foreground_source: (self.foreground_source != ForegroundSource::Auto)
+                .then_some(self.foreground_source),
+            foreground_poll_ms: (self.foreground_poll_ms != 1_000)
+                .then_some(self.foreground_poll_ms),
+            foreground_max_stale_ms: (self.foreground_max_stale_ms != 2_500)
+                .then_some(self.foreground_max_stale_ms),
+            foreground_include_title: self.foreground_include_title.then_some(true),
+            auto_focus_poll_ms: (self.auto_focus_poll_ms != 1_000)
+                .then_some(self.auto_focus_poll_ms),
+            auto_focus_min_confidence: (self.auto_focus_min_confidence != 0.60)
+                .then_some(self.auto_focus_min_confidence),
+            auto_focus_switch_cooldown_ms: (self.auto_focus_switch_cooldown_ms != 5_000)
+                .then_some(self.auto_focus_switch_cooldown_ms),
+            auto_focus_switch_margin: (self.auto_focus_switch_margin != 0.20)
+                .then_some(self.auto_focus_switch_margin),
+            auto_focus_required_polls: (self.auto_focus_required_polls != 2)
+                .then_some(self.auto_focus_required_polls),
+            auto_focus_max_roots: (self.auto_focus_max_roots != 4)
+                .then_some(self.auto_focus_max_roots),
+            retain_intervals: self.retain_intervals.map(Some),
+            run_name: self.run_name.clone().map(Some),
+            output_dir: self.out_dir.clone().map(Some),
+            remote: self.remote.clone().map(Some),
+            ..MonitorConfigLayer::default()
+        }
     }
 }
 
@@ -1574,6 +1580,123 @@ impl Config {
             poll_ms: self.foreground_poll_ms,
             max_stale_ms: self.foreground_max_stale_ms,
             include_title: self.foreground_include_title,
+        }
+    }
+
+    pub(crate) fn to_monitor_config_layer(&self) -> MonitorConfigLayer {
+        MonitorConfigLayer {
+            target_pids: (!self.target_pids.is_empty()).then(|| self.target_pids.clone()),
+            tree_pids: (!self.tree_pids.is_empty()).then(|| self.tree_pids.clone()),
+            cgroupv2: self.cgroupv2.clone().map(Some),
+            exclude_tree_pids: (!self.exclude_tree_pids.is_empty())
+                .then(|| self.exclude_tree_pids.clone()),
+            include_comm: (!self.task_filters.include_comm.is_empty()).then(|| {
+                self.task_filters
+                    .include_comm
+                    .iter()
+                    .map(|pattern| pattern.raw.clone())
+                    .collect()
+            }),
+            exclude_comm: (!self.task_filters.exclude_comm.is_empty()).then(|| {
+                self.task_filters
+                    .exclude_comm
+                    .iter()
+                    .map(|pattern| pattern.raw.clone())
+                    .collect()
+            }),
+            watch_process: self.watch_process.clone().map(Some),
+            persistent: self.persistent.then_some(true),
+            keep_missing_pid: self.keep_missing_pid.then_some(true),
+            max_tasks: (self.max_tasks != TARGET_PIDS_MAX).then_some(self.max_tasks),
+
+            summary_period_ms: (self.summary_period_ms != 1_000).then_some(self.summary_period_ms),
+            epoch_period_ms: self.epoch_period_ms.map(Some),
+            max_duration: self.max_duration.map(Some),
+            spike_threshold_ns: (self.spike_threshold_ns != 1_000_000)
+                .then_some(self.spike_threshold_ns),
+
+            irq_latency: self.irq_latency.then_some(true),
+            irqs: (!self.irqs.is_empty()).then(|| self.irqs.clone()),
+            hwmon: self.hwmon.then_some(true),
+            cpu_freq: self.cpu_freq.then_some(true),
+            faults: self.faults.then_some(true),
+            cpu_perf: self.cpu_perf.then_some(true),
+            block_io: self.block_io.then_some(true),
+            stat_wait: self.stat_wait.then_some(true),
+            runtime_slices: self.runtime_slices.then_some(true),
+
+            run_name: self
+                .recording
+                .as_ref()
+                .and_then(|recording| recording.run_name.clone().map(Some)),
+            output_dir: self
+                .recording
+                .as_ref()
+                .and_then(|recording| recording.out_dir.clone().map(Some)),
+            retain_intervals: self.retain_intervals.map(Some),
+
+            json_stream: self.json_stream.then_some(true),
+            metrics_port: self.metrics_port.map(Some),
+            otlp_endpoint: self.otlp_endpoint.clone().map(Some),
+            otel_service_name: (self.otel_service_name != "stutter")
+                .then(|| self.otel_service_name.clone()),
+
+            auto_focus: self.auto_focus.then_some(true),
+            focus_source: (self.focus_source != FocusSource::Heuristic)
+                .then_some(self.focus_source),
+            foreground_window: self.foreground_window.then_some(true),
+            foreground_source: (self.foreground_source != ForegroundSource::Auto)
+                .then_some(self.foreground_source),
+            foreground_poll_ms: (self.foreground_poll_ms != 1_000)
+                .then_some(self.foreground_poll_ms),
+            foreground_max_stale_ms: (self.foreground_max_stale_ms != 2_500)
+                .then_some(self.foreground_max_stale_ms),
+            foreground_include_title: self.foreground_include_title.then_some(true),
+            auto_focus_poll_ms: (self.auto_focus_poll_ms != 1_000)
+                .then_some(self.auto_focus_poll_ms),
+            auto_focus_min_confidence: (self.auto_focus_min_confidence != 0.60)
+                .then_some(self.auto_focus_min_confidence),
+            auto_focus_switch_cooldown_ms: (self.auto_focus_switch_cooldown_ms != 5_000)
+                .then_some(self.auto_focus_switch_cooldown_ms),
+            auto_focus_switch_margin: (self.auto_focus_switch_margin != 0.20)
+                .then_some(self.auto_focus_switch_margin),
+            auto_focus_required_polls: (self.auto_focus_required_polls != 2)
+                .then_some(self.auto_focus_required_polls),
+            auto_focus_max_roots: (self.auto_focus_max_roots != 4)
+                .then_some(self.auto_focus_max_roots),
+
+            follow_exec: (!self.follow_exec).then_some(false),
+            native_cgroup_filter: self.native_cgroup_filter.then_some(true),
+
+            watch_poll_ms: (self.watch_poll_ms != 2_000).then_some(self.watch_poll_ms),
+            watch_timeout: self.watch_timeout.map(Some),
+
+            alert_threshold_ns: self.alert_threshold_ns.map(Some),
+            alert_webhook_url: self.alert_webhook_url.clone().map(Some),
+
+            csv_stream: self.csv_stream.clone().map(Some),
+            verbose: self.verbose.then_some(true),
+
+            hwmon_root: self.hwmon_root.clone().map(Some),
+            hwmon_drm_card: self.hwmon_drm_card.clone().map(Some),
+            hwmon_render_node: self.hwmon_render_node.clone().map(Some),
+
+            mangohud_log: self.mangohud_log.clone().map(Some),
+            mangohud_log_live: self.mangohud_log_live.then_some(true),
+
+            tui: self.tui.then_some(true),
+
+            cpu_perf_kernel: self.cpu_perf_kernel.then_some(true),
+            cpu_perf_max_tasks: (self.cpu_perf_max_tasks != 128).then_some(self.cpu_perf_max_tasks),
+            cpu_perf_cache_refs: self.cpu_perf_cache_refs.then_some(true),
+
+            runtime_slices_max_tasks: (self.runtime_slices_max_tasks != 256)
+                .then_some(self.runtime_slices_max_tasks),
+
+            ringbuf_size_kb: self.ringbuf_size_kb.map(Some),
+            wakeup_map_factor: self.wakeup_map_factor.map(Some),
+
+            remote: self.remote.clone().map(Some),
         }
     }
 }
@@ -2566,23 +2689,36 @@ fn config_from_monitor_args_with_file(
         args.alert_webhook_url.clone()
     };
 
-    let monitor_config_layer = Some(monitor_args_layer(&args));
+    let mut layer = args.clone().into_monitor_config_layer();
+    if let Some(max_duration) = max_duration {
+        layer.max_duration = Some(Some(max_duration));
+    }
+    if let Some(epoch) = args.epoch_period_ms {
+        layer.summary_period_ms = Some(epoch);
+    }
     let preset = args.preset.clone();
 
     let recording = if args.no_record {
         None
     } else if force_recording || args.run_name.is_some() || args.out_dir.is_some() {
-        Some(RecordingConfig {
+        let rec = RecordingConfig {
             run_name: args
                 .run_name
                 .or_else(|| force_recording.then(|| "record".to_owned())),
             out_dir: args.out_dir,
-        })
+        };
+        layer.run_name = rec.run_name.clone().map(Some);
+        layer.output_dir = rec.out_dir.clone().map(Some);
+        Some(rec)
     } else {
         None
     };
 
     let cpu_freq = (cpu_freq_config || recording.is_some()) && !args.no_cpu_freq;
+    if cpu_freq {
+        layer.cpu_freq = Some(true);
+    }
+    let monitor_config_layer = Some(layer);
     if matches!(args.metrics_port, Some(0)) {
         anyhow::bail!("--metrics-port must be greater than zero");
     }
