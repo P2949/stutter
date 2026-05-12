@@ -107,14 +107,21 @@ impl LiveRecorder {
 
     #[allow(dead_code)]
     pub fn write_foreground_event(&mut self, event: ForegroundEvent) -> anyhow::Result<()> {
-        use crate::session::sinks::{MonitorEventSink, RecorderSink};
+        use crate::session::sinks::{
+            MonitorEventSink, MonitorOutputConfig, MonitorSinkContext, RecorderSink,
+        };
 
         let event = crate::session_events::MonitorEvent::ForegroundEvent {
             event: Box::new(event),
         };
+        let mut ctx = MonitorSinkContext {
+            recorder: self,
+            alert_sender: None,
+            output: MonitorOutputConfig::default(),
+        };
+        let mut sink = RecorderSink::new();
 
-        RecorderSink::new(self)
-            .on_event(&event)
+        sink.on_event(&event, &mut ctx)
             .map_err(|err| anyhow::anyhow!(err))
     }
 }
