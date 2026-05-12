@@ -907,6 +907,94 @@ mod tests {
     }
 
     #[test]
+    fn default_source_is_recorded_for_all_fields_applied_from_default_config() {
+        let effective = EffectiveMonitorConfig::from_layers(
+            MonitorConfig::default(),
+            None,
+            None,
+            MonitorConfigLayer::default(),
+        )
+        .unwrap();
+
+        for field in [
+            "target.target_pids",
+            "target.tree_pids",
+            "target.cgroupv2",
+            "target.exclude_tree_pids",
+            "target.include_comm",
+            "target.exclude_comm",
+            "target.watch_process",
+            "target.persistent",
+            "target.keep_missing_pid",
+            "target.max_tasks",
+            "timing.summary_period_ms",
+            "timing.epoch_period_ms",
+            "timing.max_duration",
+            "timing.spike_threshold_ns",
+            "probes.irq_latency",
+            "probes.irqs",
+            "probes.hwmon",
+            "hwmon.enabled",
+            "probes.cpu_freq",
+            "probes.faults",
+            "probes.cpu_perf",
+            "cpu_perf.enabled",
+            "probes.block_io",
+            "probes.stat_wait",
+            "probes.runtime_slices",
+            "runtime_slices.enabled",
+            "recording.run_name",
+            "recording.output_dir",
+            "recording.retain_intervals",
+            "outputs.json_stream",
+            "streams.json_stream",
+            "outputs.metrics_port",
+            "outputs.otlp_endpoint",
+            "outputs.otel_service_name",
+            "focus.auto_focus",
+            "focus.focus_source",
+            "focus.foreground_window",
+            "focus.foreground_source",
+            "focus.foreground_poll_ms",
+            "focus.foreground_max_stale_ms",
+            "focus.foreground_include_title",
+            "focus.auto_focus_poll_ms",
+            "focus.auto_focus_min_confidence",
+            "focus.auto_focus_switch_cooldown_ms",
+            "focus.auto_focus_switch_margin",
+            "focus.auto_focus_required_polls",
+            "focus.auto_focus_max_roots",
+            "safety.follow_exec",
+            "safety.native_cgroup_filter",
+            "watch.poll_ms",
+            "watch.timeout",
+            "alerts.threshold_ns",
+            "alerts.webhook_url",
+            "streams.csv",
+            "streams.verbose",
+            "hwmon.root",
+            "hwmon.drm_card",
+            "hwmon.render_node",
+            "mangohud.log",
+            "mangohud.log_live",
+            "ui.tui",
+            "cpu_perf.include_kernel",
+            "cpu_perf.max_tasks",
+            "cpu_perf.collect_cache_refs",
+            "runtime_slices.max_tasks",
+            "ebpf_sizing.ringbuf_size_kb",
+            "ebpf_sizing.wakeup_map_factor",
+            "remote.endpoint",
+        ] {
+            assert_eq!(
+                last_source_for_field(&effective.provenance, field),
+                Some(ConfigSource::Default),
+                "missing default provenance for {field}"
+            );
+        }
+    }
+
+    #[test]
     fn resolve_monitor_config_sources_carries_user_file_diagnostics_and_provenance() {
         let mut user_file = crate::config_file::UserConfigFile {
             summary_period_ms: Some(250),
