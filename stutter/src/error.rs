@@ -26,6 +26,12 @@ pub enum StutterError {
 pub enum ConfigError {
     #[error("failed to load user config: {0:#}")]
     UserConfig(#[source] anyhow::Error),
+    #[error("failed to parse user config TOML: {0:#}")]
+    InvalidUserConfigToml(#[source] anyhow::Error),
+    #[error("invalid config_version: {message}")]
+    InvalidConfigVersion { message: String },
+    #[error("unsupported config_version {version}; current supported version is {current}")]
+    UnsupportedConfigVersion { version: u32, current: u32 },
     #[error("failed to resolve monitor preset: {0:#}")]
     InvalidPreset(#[source] anyhow::Error),
     #[error("failed to convert user config to monitor layer: {0:#}")]

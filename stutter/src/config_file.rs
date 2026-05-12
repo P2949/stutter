@@ -4,14 +4,24 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::{
-    config::{FocusSource, ForegroundSource},
+    config::{
+        FocusSource, ForegroundSource,
+        schema::{CURRENT_CONFIG_VERSION, ConfigDiagnostic, ParsedUserConfigFile, RawConfigFile},
+        source::ConfigSource,
+    },
+    error::ConfigError,
     remote::AgentAutotuneLimits,
 };
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct UserConfigFile {
+    pub config_version: Option<u32>,
+
     pub summary_ms: Option<u64>,
+    pub summary_period_ms: Option<u64>,
     pub spike_us: Option<u64>,
+    pub spike_threshold_ns: Option<u64>,
+
     pub hwmon: Option<bool>,
     pub cpu_freq: Option<bool>,
     pub no_cpu_freq: Option<bool>,
@@ -28,6 +38,9 @@ pub struct UserConfigFile {
     #[allow(dead_code)]
     pub community_rules: Option<CommunityRulesConfigFile>,
     pub agent: Option<AgentConfigFile>,
+
+    #[serde(skip)]
+    pub diagnostics: Vec<ConfigDiagnostic>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -181,10 +194,21 @@ pub fn load_user_config() -> Result<Option<UserConfigFile>> {
     let contents = std::fs::read_to_string(&path)
         .with_context(|| format!("failed to read config file {}", path.display()))?;
 
-    let config = parse_user_config_toml(&contents)
+    let parsed = parse_user_config_toml_versioned(&contents)
+        .map_err(|err| anyhow::anyhow!(err))
         .with_context(|| format!("failed to parse config file {}", path.display()))?;
 
-    Ok(Some(config))
+    for diagnostic in &parsed.diagnostics {
+        log::warn!(
+            "config_file_diagnostic source={:?} level={:?} field={:?} message={}",
+            diagnostic.source,
+            diagnostic.level,
+            diagnostic.field,
+            diagnostic.message
+        );
+    }
+
+    Ok(Some(parsed.file))
 }
 
 pub fn parse_focus_source_value(value: &str) -> Result<FocusSource> {
@@ -212,8 +236,128 @@ pub fn parse_foreground_source_value(value: &str) -> Result<ForegroundSource> {
     }
 }
 
+#[cfg(test)]
 pub fn parse_user_config_toml(contents: &str) -> Result<UserConfigFile> {
-    Ok(toml::from_str::<UserConfigFile>(contents)?)
+    Ok(parse_user_config_toml_versioned(contents)?.file)
+}
+
+pub fn parse_user_config_toml_versioned(
+    contents: &str,
+) -> std::result::Result<ParsedUserConfigFile, ConfigError> {
+    let raw = raw_user_config_file(contents)?;
+    let version = raw.config_version.unwrap_or(1);
+
+    if version > CURRENT_CONFIG_VERSION {
+        return Err(ConfigError::UnsupportedConfigVersion {
+            version,
+            current: CURRENT_CONFIG_VERSION,
+        });
+    }
+
+    let mut file = toml::from_str::<UserConfigFile>(contents)
+        .map_err(|err| ConfigError::InvalidUserConfigToml(anyhow::Error::new(err)))?;
+
+    let diagnostics = schema_diagnostics(&raw);
+    file.config_version = Some(version);
+    file.diagnostics = diagnostics.clone();
+
+    Ok(ParsedUserConfigFile::new(version, file, diagnostics))
+}
+
+fn raw_user_config_file(contents: &str) -> std::result::Result<RawConfigFile, ConfigError> {
+    let flattened = toml::from_str::<toml::Value>(contents)
+        .map_err(|err| ConfigError::InvalidUserConfigToml(anyhow::Error::new(err)))?;
+    let config_version = config_version_from_raw_value(&flattened)?;
+
+    Ok(RawConfigFile {
+        config_version,
+        flattened,
+    })
+}
+
+fn config_version_from_raw_value(
+    value: &toml::Value,
+) -> std::result::Result<Option<u32>, ConfigError> {
+    let Some(table) = value.as_table() else {
+        return Err(ConfigError::InvalidConfigVersion {
+            message: "config file root must be a TOML table".to_owned(),
+        });
+    };
+
+    match table.get("config_version") {
+        None => Ok(None),
+        Some(toml::Value::Integer(value)) if (1..=u32::MAX as i64).contains(value) => {
+            Ok(Some(*value as u32))
+        }
+        Some(toml::Value::Integer(value)) => Err(ConfigError::InvalidConfigVersion {
+            message: format!("config_version must be a positive u32, got {value}"),
+        }),
+        Some(value) => Err(ConfigError::InvalidConfigVersion {
+            message: format!("config_version must be an integer, got {value:?}"),
+        }),
+    }
+}
+
+fn schema_diagnostics(raw: &RawConfigFile) -> Vec<ConfigDiagnostic> {
+    let Some(table) = raw.flattened.as_table() else {
+        return Vec::new();
+    };
+
+    let mut diagnostics = Vec::new();
+
+    if table.contains_key("summary_ms") {
+        diagnostics.push(ConfigDiagnostic::warning(
+            ConfigSource::UserFile,
+            Some("summary_ms".to_owned()),
+            "`summary_ms` is deprecated; use `summary_period_ms`",
+        ));
+    }
+
+    if table.contains_key("spike_us") {
+        diagnostics.push(ConfigDiagnostic::warning(
+            ConfigSource::UserFile,
+            Some("spike_us".to_owned()),
+            "`spike_us` is deprecated; use `spike_threshold_ns`",
+        ));
+    }
+
+    for key in table.keys() {
+        if !known_top_level_user_config_field(key) {
+            diagnostics.push(ConfigDiagnostic::warning(
+                ConfigSource::UserFile,
+                Some(key.clone()),
+                format!("unknown top-level config field `{key}` will be ignored"),
+            ));
+        }
+    }
+
+    diagnostics
+}
+
+fn known_top_level_user_config_field(field: &str) -> bool {
+    matches!(
+        field,
+        "config_version"
+            | "summary_ms"
+            | "summary_period_ms"
+            | "spike_us"
+            | "spike_threshold_ns"
+            | "hwmon"
+            | "cpu_freq"
+            | "no_cpu_freq"
+            | "include_comm"
+            | "exclude_comm"
+            | "max_tasks"
+            | "retain_intervals"
+            | "foreground_window"
+            | "focus_source"
+            | "foreground_source"
+            | "foreground_poll_ms"
+            | "foreground_max_stale_ms"
+            | "foreground_include_title"
+            | "community_rules"
+            | "agent"
+    )
 }
 
 pub fn resolve_user_config_path() -> Option<PathBuf> {
@@ -249,6 +393,95 @@ pub fn resolve_user_config_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_user_config_toml_versioned_accepts_missing_version_as_v1() {
+        let toml = r#"
+            summary_period_ms = 500
+            spike_threshold_ns = 1000000
+        "#;
+
+        let parsed = parse_user_config_toml_versioned(toml).unwrap();
+
+        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.file.config_version, Some(1));
+        assert_eq!(parsed.file.summary_period_ms, Some(500));
+        assert_eq!(parsed.file.spike_threshold_ns, Some(1_000_000));
+        assert!(parsed.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn parse_user_config_toml_versioned_accepts_explicit_v1() {
+        let toml = r#"
+            config_version = 1
+            summary_period_ms = 250
+        "#;
+
+        let parsed = parse_user_config_toml_versioned(toml).unwrap();
+
+        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.file.config_version, Some(1));
+        assert_eq!(parsed.file.summary_period_ms, Some(250));
+    }
+
+    #[test]
+    fn parse_user_config_toml_versioned_rejects_future_version() {
+        let toml = r#"
+            config_version = 2
+        "#;
+
+        let err = parse_user_config_toml_versioned(toml).unwrap_err();
+
+        match err {
+            ConfigError::UnsupportedConfigVersion { version, current } => {
+                assert_eq!(version, 2);
+                assert_eq!(current, CURRENT_CONFIG_VERSION);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn parse_user_config_toml_versioned_warns_for_deprecated_aliases() {
+        let toml = r#"
+            summary_ms = 500
+            spike_us = 1000
+        "#;
+
+        let parsed = parse_user_config_toml_versioned(toml).unwrap();
+        let fields: Vec<_> = parsed
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.field.as_deref())
+            .collect();
+
+        assert!(fields.contains(&Some("summary_ms")));
+        assert!(fields.contains(&Some("spike_us")));
+        assert!(parsed.diagnostics.iter().all(|diagnostic| {
+            diagnostic.level == crate::config::schema::ConfigDiagnosticLevel::Warning
+        }));
+
+        let layer = crate::config::layer::MonitorConfigLayer::from_user_file(&parsed.file).unwrap();
+        assert_eq!(layer.summary_period_ms, Some(500));
+        assert_eq!(layer.spike_threshold_ns, Some(1_000_000));
+    }
+
+    #[test]
+    fn parse_user_config_toml_versioned_warns_for_unknown_top_level_fields() {
+        let toml = r#"
+            mystery_toggle = true
+            summary_period_ms = 500
+        "#;
+
+        let parsed = parse_user_config_toml_versioned(toml).unwrap();
+
+        assert!(parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic.field.as_deref() == Some("mystery_toggle")
+                && diagnostic
+                    .message
+                    .contains("unknown top-level config field")
+        }));
+    }
 
     #[test]
     fn test_parse_valid_toml() {
