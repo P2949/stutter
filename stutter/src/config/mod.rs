@@ -34,6 +34,7 @@ impl From<&Config> for MonitorConfig {
                     .iter()
                     .map(|p| p.raw.clone())
                     .collect(),
+                task_filters: config.task_filters.clone(),
                 watch_process: config.watch_process.clone(),
                 persistent: config.persistent,
                 keep_missing_pid: config.keep_missing_pid,

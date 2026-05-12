@@ -1659,9 +1659,12 @@ where
     let cli = Cli::try_parse_from(args)?;
 
     match cli.command {
-        Some(Command::Monitor(args)) => Ok(AppCommand::Monitor(MonitorCommandInput {
-            config: Arc::new(config_from_monitor_args(args, false, None)?),
-        })),
+        Some(Command::Monitor(args)) => {
+            let legacy = config_from_monitor_args(args, false, None)?;
+            Ok(AppCommand::Monitor(MonitorCommandInput {
+                config: Arc::new(crate::config::effective::resolve_monitor_config(&legacy)?),
+            }))
+        }
         Some(Command::Record(args)) => {
             if matches!(args.duration, Some(0)) {
                 anyhow::bail!("--duration must be greater than zero");
@@ -1674,8 +1677,9 @@ where
             }
 
             let max_duration = args.duration.map(Duration::from_secs);
+            let legacy = config_from_monitor_args(args.monitor, true, max_duration)?;
             Ok(AppCommand::Monitor(MonitorCommandInput {
-                config: Arc::new(config_from_monitor_args(args.monitor, true, max_duration)?),
+                config: Arc::new(crate::config::effective::resolve_monitor_config(&legacy)?),
             }))
         }
         Some(Command::Bench(mut args)) => {
@@ -1694,11 +1698,12 @@ where
 
             let run_name = format!("bench-{}-{}", args.role, args.scenario);
             args.monitor.run_name = Some(run_name.clone());
-            let config = Arc::new(config_from_monitor_args(
+            let legacy = config_from_monitor_args(
                 args.monitor,
                 true,
                 Some(Duration::from_secs(args.duration)),
-            )?);
+            )?;
+            let config = Arc::new(crate::config::effective::resolve_monitor_config(&legacy)?);
             Ok(AppCommand::Bench(BenchCommandInput {
                 config,
                 role: args.role,
@@ -1972,9 +1977,12 @@ where
                 top: args.top,
             }))
         }
-        None => Ok(AppCommand::Monitor(MonitorCommandInput {
-            config: Arc::new(config_from_monitor_args(cli.legacy_monitor, false, None)?),
-        })),
+        None => {
+            let legacy = config_from_monitor_args(cli.legacy_monitor, false, None)?;
+            Ok(AppCommand::Monitor(MonitorCommandInput {
+                config: Arc::new(crate::config::effective::resolve_monitor_config(&legacy)?),
+            }))
+        }
         Some(Command::Agent(args)) => {
             if args.max_duration_seconds == 0 {
                 anyhow::bail!("--max-duration-seconds must be greater than zero");
@@ -2727,7 +2735,7 @@ fn validate_comm_patterns(flag: &str, patterns: &[String]) -> anyhow::Result<Vec
 #[cfg(test)]
 fn parse_monitor_config_for_phase15<const N: usize>(
     args: [&str; N],
-) -> anyhow::Result<Arc<Config>> {
+) -> anyhow::Result<Arc<crate::config::model::MonitorConfig>> {
     let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
     match parse_app_command_from(args.iter().map(OsString::from))? {
         AppCommand::Monitor(input) => Ok(input.config.clone()),
@@ -2749,10 +2757,10 @@ fn cli_accepts_auto_focus_foreground_source() {
     ])
     .unwrap();
 
-    assert!(config.auto_focus);
-    assert_eq!(config.focus_source, FocusSource::Foreground);
-    assert!(config.foreground_window);
-    assert_eq!(config.foreground_source, ForegroundSource::Sway);
+    assert!(config.focus.auto_focus);
+    assert_eq!(config.focus.focus_source, FocusSource::Foreground);
+    assert!(config.focus.foreground_window);
+    assert_eq!(config.focus.foreground_source, ForegroundSource::Sway);
 }
 
 #[cfg(test)]
@@ -2774,8 +2782,8 @@ fn foreground_include_title_requires_foreground_window_or_auto_focus_foreground(
         "--foreground-include-title",
     ])
     .unwrap();
-    assert!(foreground_window.foreground_window);
-    assert!(foreground_window.foreground_include_title);
+    assert!(foreground_window.focus.foreground_window);
+    assert!(foreground_window.focus.foreground_include_title);
 
     let foreground_focus = parse_monitor_config_for_phase15([
         "stutter",
@@ -2786,10 +2794,10 @@ fn foreground_include_title_requires_foreground_window_or_auto_focus_foreground(
         "--foreground-include-title",
     ])
     .unwrap();
-    assert!(foreground_focus.auto_focus);
-    assert_eq!(foreground_focus.focus_source, FocusSource::Foreground);
-    assert!(foreground_focus.foreground_window);
-    assert!(foreground_focus.foreground_include_title);
+    assert!(foreground_focus.focus.auto_focus);
+    assert_eq!(foreground_focus.focus.focus_source, FocusSource::Foreground);
+    assert!(foreground_focus.focus.foreground_window);
+    assert!(foreground_focus.focus.foreground_include_title);
 }
 
 #[cfg(test)]
@@ -2813,14 +2821,16 @@ mod tests {
 
     fn parse_monitor_config_from_inner<const N: usize>(
         args: [&str; N],
-    ) -> anyhow::Result<Arc<Config>> {
+    ) -> anyhow::Result<Arc<crate::config::model::MonitorConfig>> {
         match parse_app_command_from_inner(args.iter().map(OsString::from))? {
             AppCommand::Monitor(input) => Ok(input.config.clone()),
             other => anyhow::bail!("expected AppCommand::Monitor, got {other:?}"),
         }
     }
 
-    fn parse_monitor_config_from<const N: usize>(args: [&str; N]) -> anyhow::Result<Arc<Config>> {
+    fn parse_monitor_config_from<const N: usize>(
+        args: [&str; N],
+    ) -> anyhow::Result<Arc<crate::config::model::MonitorConfig>> {
         match parse_app_command_from(args.iter().map(OsString::from))? {
             AppCommand::Monitor(input) => Ok(input.config.clone()),
             other => anyhow::bail!("expected AppCommand::Monitor, got {other:?}"),
@@ -3031,11 +3041,11 @@ mod tests {
         };
 
         assert_eq!(
-            input.config.task_filters.include_comm,
+            input.config.target.task_filters.include_comm,
             vec![CompiledPattern::new("RenderThread".to_owned()).unwrap()]
         );
         assert_eq!(
-            input.config.task_filters.exclude_comm,
+            input.config.target.task_filters.exclude_comm,
             vec![CompiledPattern::new("steamwebhelper".to_owned()).unwrap()]
         );
     }
@@ -3060,8 +3070,8 @@ mod tests {
             panic!("expected monitor command");
         };
 
-        assert_eq!(input.config.tree_pids, vec![42]);
-        assert_eq!(input.config.exclude_tree_pids, vec![7, 100]);
+        assert_eq!(input.config.target.tree_pids, vec![42]);
+        assert_eq!(input.config.target.exclude_tree_pids, vec![7, 100]);
     }
 
     #[test]
@@ -3082,9 +3092,9 @@ mod tests {
             panic!("expected monitor command");
         };
 
-        assert_eq!(input.config.alert_threshold_ns, Some(250_000_000));
+        assert_eq!(input.config.alerts.threshold_ns, Some(250_000_000));
         assert_eq!(
-            input.config.alert_webhook_url.as_deref(),
+            input.config.alerts.webhook_url.as_deref(),
             Some("https://example.invalid/stutter")
         );
     }
@@ -3107,8 +3117,8 @@ mod tests {
             panic!("expected monitor command");
         };
 
-        assert_eq!(input.config.epoch_period_ms, Some(5_000));
-        assert_eq!(input.config.summary_period_ms, 5_000);
+        assert_eq!(input.config.timing.epoch_period_ms, Some(5_000));
+        assert_eq!(input.config.timing.summary_period_ms, 5_000);
     }
 
     #[test]
@@ -3127,9 +3137,12 @@ mod tests {
             panic!("expected monitor command");
         };
 
-        assert_eq!(input.config.watch_process.as_deref(), Some("KingdomCome"));
         assert_eq!(
-            input.config.csv_stream,
+            input.config.target.watch_process.as_deref(),
+            Some("KingdomCome")
+        );
+        assert_eq!(
+            input.config.streams.csv,
             Some(CsvStreamTarget::File(PathBuf::from("/tmp/stutter.csv")))
         );
     }
@@ -3141,7 +3154,7 @@ mod tests {
         let AppCommand::Monitor(default_input) = default_command else {
             panic!("expected monitor command");
         };
-        assert!(default_input.config.follow_exec);
+        assert!(default_input.config.safety.follow_exec);
 
         let disabled_command =
             parse_app_command_from(["stutter", "monitor", "--pid", "42", "--no-follow-exec"])
@@ -3149,7 +3162,7 @@ mod tests {
         let AppCommand::Monitor(disabled_input) = disabled_command else {
             panic!("expected monitor command");
         };
-        assert!(!disabled_input.config.follow_exec);
+        assert!(!disabled_input.config.safety.follow_exec);
     }
 
     #[test]
@@ -3181,10 +3194,10 @@ mod tests {
         };
 
         assert_eq!(
-            input.config.cgroupv2.as_deref(),
+            input.config.target.cgroupv2.as_deref(),
             Some(std::path::Path::new("/sys/fs/cgroup/test.slice"))
         );
-        assert!(input.config.native_cgroup_filter);
+        assert!(input.config.safety.native_cgroup_filter);
     }
 
     #[test]
@@ -3201,7 +3214,7 @@ mod tests {
             panic!("expected monitor command");
         };
 
-        assert!(!input.config.native_cgroup_filter);
+        assert!(!input.config.safety.native_cgroup_filter);
     }
 
     #[test]
@@ -3244,10 +3257,10 @@ mod tests {
             panic!("expected monitor command");
         };
 
-        assert!(input.config.cpu_perf);
-        assert!(input.config.cpu_perf_kernel);
-        assert_eq!(input.config.cpu_perf_max_tasks, 16);
-        assert!(!input.config.cpu_perf_cache_refs);
+        assert!(input.config.probes.cpu_perf);
+        assert!(input.config.cpu_perf.include_kernel);
+        assert_eq!(input.config.cpu_perf.max_tasks, 16);
+        assert!(!input.config.cpu_perf.collect_cache_refs);
     }
 
     #[test]
@@ -3266,9 +3279,12 @@ mod tests {
             panic!("expected monitor command");
         };
 
-        assert!(input.config.cpu_perf);
-        assert!(input.config.cpu_perf_cache_refs);
-        assert!(input.config.recording.is_some());
+        assert!(input.config.probes.cpu_perf);
+        assert!(input.config.cpu_perf.collect_cache_refs);
+        assert!(
+            input.config.recording.output_dir.is_some()
+                || input.config.recording.run_name.is_some()
+        );
     }
 
     #[test]
@@ -3419,9 +3435,9 @@ mod tests {
             panic!("expected monitor command");
         };
 
-        assert!(input.config.keep_missing_pid);
-        assert_eq!(input.config.watch_poll_ms, 500);
-        assert_eq!(input.config.watch_timeout, Some(Duration::from_secs(3)));
+        assert!(input.config.target.keep_missing_pid);
+        assert_eq!(input.config.watch.poll_ms, 500);
+        assert_eq!(input.config.watch.timeout, Some(Duration::from_secs(3)));
     }
 
     #[test]
@@ -3455,19 +3471,19 @@ mod tests {
             panic!("expected monitor command");
         };
 
-        assert!(input.config.irq_latency);
-        assert_eq!(input.config.irqs, vec![137]);
-        assert!(input.config.hwmon);
-        assert_eq!(input.config.hwmon_drm_card.as_deref(), Some("card1"));
+        assert!(input.config.probes.irq_latency);
+        assert_eq!(input.config.probes.irqs, vec![137]);
+        assert!(input.config.probes.hwmon);
+        assert_eq!(input.config.hwmon.drm_card.as_deref(), Some("card1"));
         assert_eq!(
-            input.config.hwmon_render_node,
+            input.config.hwmon.render_node,
             Some(PathBuf::from("/dev/dri/renderD129"))
         );
         assert_eq!(
-            input.config.mangohud_log,
+            input.config.mangohud.log,
             Some(PathBuf::from("/tmp/mango.csv"))
         );
-        assert!(input.config.tui);
+        assert!(input.config.ui.tui);
     }
 
     #[test]
@@ -3532,13 +3548,19 @@ mod tests {
 
         assert_eq!(input.role, "baseline");
         assert_eq!(input.run_name, "bench-baseline-route-a");
-        assert_eq!(input.config.max_duration, Some(Duration::from_secs(180)));
         assert_eq!(
-            input.config.recording.as_ref().unwrap().run_name.as_deref(),
+            input.config.timing.max_duration,
+            Some(Duration::from_secs(180))
+        );
+        assert_eq!(
+            input.config.recording.run_name.as_deref(),
             Some("bench-baseline-route-a")
         );
-        assert_eq!(input.config.watch_process.as_deref(), Some("Game.exe"));
-        assert!(input.config.persistent);
+        assert_eq!(
+            input.config.target.watch_process.as_deref(),
+            Some("Game.exe")
+        );
+        assert!(input.config.target.persistent);
     }
 
     #[test]
@@ -3600,10 +3622,13 @@ mod tests {
             panic!("expected bench command");
         };
 
-        assert_eq!(input.config.watch_process.as_deref(), Some("Game.exe"));
-        assert!(input.config.hwmon);
         assert_eq!(
-            input.config.mangohud_log,
+            input.config.target.watch_process.as_deref(),
+            Some("Game.exe")
+        );
+        assert!(input.config.probes.hwmon);
+        assert_eq!(
+            input.config.mangohud.log,
             Some(PathBuf::from("/tmp/mango.csv"))
         );
     }
@@ -3910,9 +3935,9 @@ mod tests {
             panic!("expected monitor command");
         };
 
-        assert!(input.config.faults);
-        assert!(input.config.block_io);
-        assert!(input.config.stat_wait);
+        assert!(input.config.probes.faults);
+        assert!(input.config.probes.block_io);
+        assert!(input.config.probes.stat_wait);
     }
 
     #[test]
@@ -3921,14 +3946,14 @@ mod tests {
         let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
-        assert!(input.config.cpu_freq);
+        assert!(input.config.probes.cpu_freq);
 
         let command =
             parse_app_command_from(["stutter", "record", "--pid", "42", "--no-cpu-freq"]).unwrap();
         let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
-        assert!(!input.config.cpu_freq);
+        assert!(!input.config.probes.cpu_freq);
     }
 
     #[test]
@@ -3937,14 +3962,14 @@ mod tests {
         let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
-        assert!(!input.config.cpu_freq);
+        assert!(!input.config.probes.cpu_freq);
 
         let command =
             parse_app_command_from(["stutter", "monitor", "--pid", "42", "--cpu-freq"]).unwrap();
         let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
-        assert!(input.config.cpu_freq);
+        assert!(input.config.probes.cpu_freq);
     }
 
     #[test]
@@ -3954,13 +3979,15 @@ mod tests {
         let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
-        assert!(input.config.json_stream);
+        assert!(input.config.outputs.json_stream);
+        assert!(input.config.streams.json_stream);
 
         let command = parse_app_command_from(["stutter", "monitor", "--pid", "42"]).unwrap();
         let AppCommand::Monitor(input) = command else {
             panic!("expected monitor command");
         };
-        assert!(!input.config.json_stream);
+        assert!(!input.config.outputs.json_stream);
+        assert!(!input.config.streams.json_stream);
     }
 
     #[test]
@@ -4298,21 +4325,13 @@ mod tests {
     fn monitor_defaults_keep_heuristic_focus_and_no_foreground_window() {
         let config = parse_monitor_config_from(["stutter", "monitor"]).unwrap();
 
-        assert!(!config.auto_focus);
-        assert_eq!(config.focus_source, FocusSource::Heuristic);
-        assert!(!config.foreground_window);
-        assert!(!config.foreground_window_config().enabled);
-        assert_eq!(config.foreground_source, ForegroundSource::Auto);
-        assert_eq!(config.foreground_poll_ms, 1000);
-        assert_eq!(config.foreground_max_stale_ms, 2500);
-        assert!(!config.foreground_include_title);
-
-        let foreground = config.foreground_window_config();
-        assert!(!foreground.enabled);
-        assert_eq!(foreground.source, ForegroundSource::Auto);
-        assert_eq!(foreground.poll_ms, 1000);
-        assert_eq!(foreground.max_stale_ms, 2500);
-        assert!(!foreground.include_title);
+        assert!(!config.focus.auto_focus);
+        assert_eq!(config.focus.focus_source, FocusSource::Heuristic);
+        assert!(!config.focus.foreground_window);
+        assert_eq!(config.focus.foreground_source, ForegroundSource::Auto);
+        assert_eq!(config.focus.foreground_poll_ms, 1000);
+        assert_eq!(config.focus.foreground_max_stale_ms, 2500);
+        assert!(!config.focus.foreground_include_title);
     }
 
     #[test]
@@ -4334,21 +4353,14 @@ mod tests {
         ])
         .unwrap();
 
-        assert_eq!(config.target_pids, vec![1234]);
-        assert_eq!(config.tree_pids, vec![5678]);
-        assert!(!config.auto_focus);
-        assert_eq!(config.focus_source, FocusSource::Heuristic);
-        assert!(config.foreground_window);
-        assert_eq!(config.foreground_source, ForegroundSource::Sway);
-        assert_eq!(config.foreground_poll_ms, 750);
-        assert_eq!(config.foreground_max_stale_ms, 3000);
-
-        let foreground = config.foreground_window_config();
-        assert!(foreground.enabled);
-        assert_eq!(foreground.source, ForegroundSource::Sway);
-        assert_eq!(foreground.poll_ms, 750);
-        assert_eq!(foreground.max_stale_ms, 3000);
-        assert!(!foreground.include_title);
+        assert_eq!(config.target.target_pids, vec![1234]);
+        assert_eq!(config.target.tree_pids, vec![5678]);
+        assert!(!config.focus.auto_focus);
+        assert_eq!(config.focus.focus_source, FocusSource::Heuristic);
+        assert!(config.focus.foreground_window);
+        assert_eq!(config.focus.foreground_source, ForegroundSource::Sway);
+        assert_eq!(config.focus.foreground_poll_ms, 750);
+        assert_eq!(config.focus.foreground_max_stale_ms, 3000);
     }
 
     #[test]
@@ -4364,10 +4376,10 @@ mod tests {
         ])
         .unwrap();
 
-        assert!(config.auto_focus);
-        assert_eq!(config.focus_source, FocusSource::Foreground);
-        assert!(config.foreground_window);
-        assert_eq!(config.foreground_source, ForegroundSource::Sway);
+        assert!(config.focus.auto_focus);
+        assert_eq!(config.focus.focus_source, FocusSource::Foreground);
+        assert!(config.focus.foreground_window);
+        assert_eq!(config.focus.foreground_source, ForegroundSource::Sway);
     }
 
     #[test]
@@ -4387,8 +4399,8 @@ mod tests {
             "--foreground-include-title",
         ])
         .unwrap();
-        assert!(foreground_window.foreground_window);
-        assert!(foreground_window.foreground_include_title);
+        assert!(foreground_window.focus.foreground_window);
+        assert!(foreground_window.focus.foreground_include_title);
 
         let foreground_focus = parse_monitor_config_from([
             "stutter",
@@ -4399,10 +4411,10 @@ mod tests {
             "--foreground-include-title",
         ])
         .unwrap();
-        assert!(foreground_focus.auto_focus);
-        assert_eq!(foreground_focus.focus_source, FocusSource::Foreground);
-        assert!(foreground_focus.foreground_window);
-        assert!(foreground_focus.foreground_include_title);
+        assert!(foreground_focus.focus.auto_focus);
+        assert_eq!(foreground_focus.focus.focus_source, FocusSource::Foreground);
+        assert!(foreground_focus.focus.foreground_window);
+        assert!(foreground_focus.focus.foreground_include_title);
     }
 
     #[test]
@@ -4419,23 +4431,14 @@ mod tests {
         ])
         .unwrap();
 
-        assert!(config.auto_focus);
-        assert_eq!(config.focus_source, FocusSource::Foreground);
+        assert!(config.focus.auto_focus);
+        assert_eq!(config.focus.focus_source, FocusSource::Foreground);
         assert!(
-            config.foreground_window,
+            config.focus.foreground_window,
             "non-heuristic focus_source must normalize foreground_window to true"
         );
-        assert_eq!(config.foreground_source, ForegroundSource::X11);
-        assert!(config.foreground_include_title);
-
-        let auto_focus = config.auto_focus_config();
-        assert!(auto_focus.enabled);
-        assert_eq!(auto_focus.source, FocusSource::Foreground);
-
-        let foreground = config.foreground_window_config();
-        assert!(foreground.enabled);
-        assert_eq!(foreground.source, ForegroundSource::X11);
-        assert!(foreground.include_title);
+        assert_eq!(config.focus.foreground_source, ForegroundSource::X11);
+        assert!(config.focus.foreground_include_title);
     }
 
     #[test]
@@ -4449,20 +4452,12 @@ mod tests {
         ])
         .unwrap();
 
-        assert!(config.auto_focus);
-        assert_eq!(config.focus_source, FocusSource::Hybrid);
+        assert!(config.focus.auto_focus);
+        assert_eq!(config.focus.focus_source, FocusSource::Hybrid);
         assert!(
-            config.foreground_window,
+            config.focus.foreground_window,
             "hybrid focus_source must normalize foreground_window to true"
         );
-
-        let auto_focus = config.auto_focus_config();
-        assert!(auto_focus.enabled);
-        assert_eq!(auto_focus.source, FocusSource::Hybrid);
-
-        let foreground = config.foreground_window_config();
-        assert!(foreground.enabled);
-        assert_eq!(foreground.source, ForegroundSource::Auto);
     }
 
     struct EnvGuard {
@@ -4523,19 +4518,12 @@ foreground_include_title = true
 
         let config = parse_monitor_config_from_inner(["stutter", "monitor"]).unwrap();
 
-        assert_eq!(config.focus_source, FocusSource::Foreground);
-        assert!(config.foreground_window);
-        assert_eq!(config.foreground_source, ForegroundSource::Sway);
-        assert_eq!(config.foreground_poll_ms, 750);
-        assert_eq!(config.foreground_max_stale_ms, 3000);
-        assert!(config.foreground_include_title);
-
-        let foreground = config.foreground_window_config();
-        assert!(foreground.enabled);
-        assert_eq!(foreground.source, ForegroundSource::Sway);
-        assert_eq!(foreground.poll_ms, 750);
-        assert_eq!(foreground.max_stale_ms, 3000);
-        assert!(foreground.include_title);
+        assert_eq!(config.focus.focus_source, FocusSource::Foreground);
+        assert!(config.focus.foreground_window);
+        assert_eq!(config.focus.foreground_source, ForegroundSource::Sway);
+        assert_eq!(config.focus.foreground_poll_ms, 750);
+        assert_eq!(config.focus.foreground_max_stale_ms, 3000);
+        assert!(config.focus.foreground_include_title);
 
         std::fs::remove_dir_all(dir).ok();
     }
@@ -4604,9 +4592,53 @@ foreground_include_title = true
         ])
         .unwrap();
 
-        assert!(config.foreground_window);
-        assert_eq!(config.foreground_poll_ms, 1000);
-        assert_eq!(config.foreground_max_stale_ms, 500);
+        assert!(config.focus.foreground_window);
+        assert_eq!(config.focus.foreground_poll_ms, 1000);
+        assert_eq!(config.focus.foreground_max_stale_ms, 500);
+    }
+
+    #[test]
+    fn explicit_cli_false_overrides_user_file_true_after_monitor_config_resolution() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+        let dir = temp_dir("explicit-cli-false-overrides-user-file");
+        let config_path = dir.join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+            hwmon = true
+            cpu_freq = true
+            "#,
+        )
+        .unwrap();
+
+        let _guard = EnvGuard::set("STUTTER_CONFIG", config_path.to_str().unwrap());
+
+        let config =
+            parse_monitor_config_from_inner(["stutter", "monitor", "--no-hwmon", "--no-cpu-freq"])
+                .unwrap();
+
+        assert!(!config.probes.hwmon);
+        assert!(!config.probes.cpu_freq);
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn explicit_cli_default_like_values_override_user_file_values() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+        let dir = temp_dir("explicit-cli-default-override");
+        let config_path = dir.join("config.toml");
+        std::fs::write(&config_path, "summary_ms = 750\n").unwrap();
+
+        let _guard = EnvGuard::set("STUTTER_CONFIG", config_path.to_str().unwrap());
+
+        let config =
+            parse_monitor_config_from_inner(["stutter", "monitor", "--summary-ms", "1000"])
+                .unwrap();
+
+        assert_eq!(config.timing.summary_period_ms, 1000);
+
+        std::fs::remove_dir_all(dir).ok();
     }
 }
 

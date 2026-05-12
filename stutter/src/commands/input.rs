@@ -1,20 +1,18 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use crate::{
-    autotune,
-    cli::{Config, RulesCommand},
-    doctor::DoctorInput,
+    autotune, cli::RulesCommand, config::model::MonitorConfig, doctor::DoctorInput,
     process_tree::TaskClass,
 };
 
 #[derive(Debug)]
 pub struct MonitorCommandInput {
-    pub config: Arc<Config>,
+    pub config: Arc<MonitorConfig>,
 }
 
 #[derive(Debug)]
 pub struct BenchCommandInput {
-    pub config: Arc<Config>,
+    pub config: Arc<MonitorConfig>,
     pub role: String,
     pub run_name: String,
 }

@@ -4,8 +4,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     actions::SafetyClass,
-    cli::Config,
-    config::{FocusSource, ForegroundSource},
+    config::{FocusSource, ForegroundSource, model::MonitorConfig},
     daemon_policy::DaemonMode,
 };
 
@@ -336,43 +335,33 @@ fn foreground_source_label(source: ForegroundSource) -> String {
     .to_owned()
 }
 
-pub fn request_from_monitor_config(config: &Config) -> anyhow::Result<RemoteMonitorRequest> {
+pub fn request_from_monitor_config(config: &MonitorConfig) -> anyhow::Result<RemoteMonitorRequest> {
     Ok(RemoteMonitorRequest {
-        target_pids: config.target_pids.clone(),
-        tree_pids: config.tree_pids.clone(),
-        exclude_tree_pids: config.exclude_tree_pids.clone(),
-        duration_seconds: config.max_duration.map(|d| d.as_secs()),
-        spike_us: Some(config.spike_threshold_ns / 1000),
-        summary_ms: Some(config.summary_period_ms),
-        include_comm: config
-            .task_filters
-            .include_comm
-            .iter()
-            .map(|p| p.raw().to_owned())
-            .collect(),
-        exclude_comm: config
-            .task_filters
-            .exclude_comm
-            .iter()
-            .map(|p| p.raw().to_owned())
-            .collect(),
-        hwmon: config.hwmon,
-        cpu_freq: config.cpu_freq,
-        faults: config.faults,
-        stat_wait: config.stat_wait,
-        block_io: config.block_io,
-        runtime_slices: config.runtime_slices,
-        runtime_slices_max_tasks: Some(config.runtime_slices_max_tasks),
-        irq_latency: config.irq_latency,
-        irqs: config.irqs.clone(),
-        foreground_window: config.foreground_window,
-        focus_source: Some(focus_source_label(config.focus_source)),
-        foreground_source: Some(foreground_source_label(config.foreground_source)),
-        foreground_poll_ms: Some(config.foreground_poll_ms),
-        foreground_max_stale_ms: Some(config.foreground_max_stale_ms),
-        foreground_include_title: config.foreground_include_title,
-        record: config.recording.is_some(),
-        run_name: config.recording.as_ref().and_then(|r| r.run_name.clone()),
+        target_pids: config.target.target_pids.clone(),
+        tree_pids: config.target.tree_pids.clone(),
+        exclude_tree_pids: config.target.exclude_tree_pids.clone(),
+        duration_seconds: config.timing.max_duration.map(|d| d.as_secs()),
+        spike_us: Some(config.timing.spike_threshold_ns / 1000),
+        summary_ms: Some(config.timing.summary_period_ms),
+        include_comm: config.target.include_comm.clone(),
+        exclude_comm: config.target.exclude_comm.clone(),
+        hwmon: config.probes.hwmon,
+        cpu_freq: config.probes.cpu_freq,
+        faults: config.probes.faults,
+        stat_wait: config.probes.stat_wait,
+        block_io: config.probes.block_io,
+        runtime_slices: config.probes.runtime_slices,
+        runtime_slices_max_tasks: Some(config.runtime_slices.max_tasks),
+        irq_latency: config.probes.irq_latency,
+        irqs: config.probes.irqs.clone(),
+        foreground_window: config.focus.foreground_window,
+        focus_source: Some(focus_source_label(config.focus.focus_source)),
+        foreground_source: Some(foreground_source_label(config.focus.foreground_source)),
+        foreground_poll_ms: Some(config.focus.foreground_poll_ms),
+        foreground_max_stale_ms: Some(config.focus.foreground_max_stale_ms),
+        foreground_include_title: config.focus.foreground_include_title,
+        record: config.recording.output_dir.is_some() || config.recording.run_name.is_some(),
+        run_name: config.recording.run_name.clone(),
     })
 }
 

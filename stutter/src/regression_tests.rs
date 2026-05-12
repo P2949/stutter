@@ -149,6 +149,7 @@ fn same_tid_same_names_different_starttime_resets_stats() {
 #[test]
 fn event_comm_updates_only_unknown_existing_name() {
     let config = test_config(vec![7], vec![], None);
+    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
     let stats_by_task = BTreeMap::from([(7, metrics::TaskStats::new(7, "?".to_owned(), 0))]);
 
     let first_event = scheduler_event(7, "real-name");
@@ -158,7 +159,7 @@ fn event_comm_updates_only_unknown_existing_name() {
 
     events::handle_event(
         &first_event,
-        &config,
+        &monitor_config,
         Instant::now(),
         &mut tasks,
         None,
@@ -174,7 +175,7 @@ fn event_comm_updates_only_unknown_existing_name() {
     let second_event = scheduler_event(7, "later-name");
     events::handle_event(
         &second_event,
-        &config,
+        &monitor_config,
         Instant::now(),
         &mut tasks,
         None,
@@ -191,6 +192,7 @@ fn event_comm_updates_only_unknown_existing_name() {
 #[test]
 fn spike_events_capture_only_threshold_crossing_events() {
     let config = test_config(vec![7], vec![], None);
+    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
     let active_targets = BTreeMap::from([(
         7,
         task_info(7, 77, "KingdomCome.exe", "RenderThread", TaskClass::Game),
@@ -207,7 +209,7 @@ fn spike_events_capture_only_threshold_crossing_events() {
 
     events::handle_event(
         &below_threshold,
-        &config,
+        &monitor_config,
         Instant::now(),
         &mut tasks,
         Some(100),
@@ -230,7 +232,7 @@ fn spike_events_capture_only_threshold_crossing_events() {
     let at_threshold = scheduler_event_with_latency(7, "RenderThread", 1_000_000);
     events::handle_event(
         &at_threshold,
-        &config,
+        &monitor_config,
         Instant::now(),
         &mut tasks,
         Some(100),
@@ -261,6 +263,7 @@ fn spike_events_capture_only_threshold_crossing_events() {
 #[test]
 fn spike_event_fault_deltas_are_captured_correctly() {
     let config = test_config(vec![7], vec![], None);
+    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
     let active_targets = BTreeMap::from([(
         7,
         task_info(7, 77, "KingdomCome.exe", "RenderThread", TaskClass::Game),
@@ -281,7 +284,7 @@ fn spike_event_fault_deltas_are_captured_correctly() {
 
     events::handle_event(
         &first_event,
-        &config,
+        &monitor_config,
         Instant::now(),
         &mut tasks,
         Some(100),
@@ -299,7 +302,7 @@ fn spike_event_fault_deltas_are_captured_correctly() {
 
     events::handle_event(
         &spike_event,
-        &config,
+        &monitor_config,
         Instant::now(),
         &mut tasks,
         Some(100),
@@ -865,9 +868,10 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         .push(spike_events[0].clone());
     recorder.buffers.spike_events.as_mut().unwrap().truncate(); // Force truncated state for testing
 
+    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
     recorder::finalize_recording(FinalizeRecordingInput {
         recorder: &recorder,
-        config: &config,
+        config: &monitor_config,
         tree_pids: &config.tree_pids,
         stop_reason: "test",
         tasks: &task_tracker,
@@ -1327,9 +1331,10 @@ fn report_reads_recorded_session_and_spike_events() {
     }
     recorder.buffers.spike_events = Some(buffer);
 
+    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
     recorder::finalize_recording(FinalizeRecordingInput {
         recorder: &recorder,
-        config: &config,
+        config: &monitor_config,
         tree_pids: &config.tree_pids,
         stop_reason: "test",
         tasks: &task_tracker,
@@ -1403,9 +1408,10 @@ fn report_cluster_output_caps_inline_points() {
     }
     recorder.buffers.spike_events = Some(buffer);
 
+    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
     recorder::finalize_recording(FinalizeRecordingInput {
         recorder: &recorder,
-        config: &config,
+        config: &monitor_config,
         tree_pids: &config.tree_pids,
         stop_reason: "test",
         tasks: &task_tracker,
@@ -1666,8 +1672,9 @@ fn prepare_recording_refuses_to_overwrite_existing_output_dir() {
         run_name: Some("collision-test".to_owned()),
         out_dir: Some(dir.clone()),
     });
+    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
 
-    let err = recorder::prepare_recording(&config).unwrap_err();
+    let err = recorder::prepare_recording(&monitor_config).unwrap_err();
 
     assert!(format!("{err:#}").contains("output directory already exists"));
 
@@ -1752,6 +1759,7 @@ fn minimal_session_for_report() -> SessionFile {
     config.irq_latency = true;
     config.irqs = vec![137];
     config.hwmon = true;
+    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
 
     SessionFile {
         core: crate::recorder::SessionMetadataCore {
@@ -1795,7 +1803,7 @@ fn minimal_session_for_report() -> SessionFile {
             ..Default::default()
         },
         stop_reason: "test".to_owned(),
-        config: recorded_config(&config, &config.tree_pids),
+        config: recorded_config(&monitor_config, &config.tree_pids),
         tasks: Vec::new(),
         top_spikes: Vec::new(),
     }

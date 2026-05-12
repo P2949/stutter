@@ -59,10 +59,10 @@ impl EffectiveMonitorConfig {
             })
             .transpose()?;
 
-        let cli = config
-            .monitor_config_layer
-            .clone()
-            .unwrap_or_else(|| MonitorConfigLayer::from_existing_cli_config(config));
+        let mut cli = MonitorConfigLayer::from_existing_cli_config(config);
+        if let Some(layer) = &config.monitor_config_layer {
+            apply_presence_aware_cli_overrides(&mut cli, layer, config.epoch_period_ms.is_some());
+        }
 
         Self::from_layers(MonitorConfig::default(), user_file, preset, cli)
     }
@@ -162,30 +162,59 @@ pub fn resolve_arc_monitor_config(
 
     resolved.follow_exec = effective.safety.follow_exec;
     resolved.native_cgroup_filter = effective.safety.native_cgroup_filter;
+    let compiled_include = effective
+        .target
+        .include_comm
+        .iter()
+        .map(|pattern| crate::process_tree::CompiledPattern::new(pattern.clone()))
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map_err(ConfigError::InvalidUserLayer)?;
+    let compiled_exclude = effective
+        .target
+        .exclude_comm
+        .iter()
+        .map(|pattern| crate::process_tree::CompiledPattern::new(pattern.clone()))
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map_err(ConfigError::InvalidUserLayer)?;
+
     resolved.task_filters = crate::process_tree::TaskFilters {
-        include_comm: effective
-            .target
-            .include_comm
-            .iter()
-            .map(|pattern| crate::process_tree::CompiledPattern::new(pattern.clone()))
-            .collect::<anyhow::Result<Vec<_>>>()
-            .map_err(ConfigError::InvalidUserLayer)?,
-        exclude_comm: effective
-            .target
-            .exclude_comm
-            .iter()
-            .map(|pattern| crate::process_tree::CompiledPattern::new(pattern.clone()))
-            .collect::<anyhow::Result<Vec<_>>>()
-            .map_err(ConfigError::InvalidUserLayer)?,
+        include_comm: compiled_include.clone(),
+        exclude_comm: compiled_exclude.clone(),
     };
+
+    let mut effective_for_layer = effective.clone();
+    effective_for_layer.target.task_filters = crate::process_tree::TaskFilters {
+        include_comm: compiled_include,
+        exclude_comm: compiled_exclude,
+    };
+
     resolved.monitor_config_layer =
-        Some(MonitorConfigLayer::from_monitor_config(effective.clone()));
+        Some(MonitorConfigLayer::from_monitor_config(effective_for_layer));
 
     Ok(std::sync::Arc::new(resolved))
 }
 
 pub fn resolve_monitor_config(config: &Config) -> Result<MonitorConfig, ConfigError> {
-    Ok(EffectiveMonitorConfig::from_cli_config(config)?.into_monitor_config())
+    let mut res = EffectiveMonitorConfig::from_cli_config(config)?.into_monitor_config();
+    let compiled_include = res
+        .target
+        .include_comm
+        .iter()
+        .map(|pattern| crate::process_tree::CompiledPattern::new(pattern.clone()))
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map_err(ConfigError::InvalidUserLayer)?;
+    let compiled_exclude = res
+        .target
+        .exclude_comm
+        .iter()
+        .map(|pattern| crate::process_tree::CompiledPattern::new(pattern.clone()))
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map_err(ConfigError::InvalidUserLayer)?;
+    res.target.task_filters = crate::process_tree::TaskFilters {
+        include_comm: compiled_include,
+        exclude_comm: compiled_exclude,
+    };
+    Ok(res)
 }
 
 pub fn apply_layer(config: &mut MonitorConfig, layer: MonitorConfigLayer) {
@@ -472,6 +501,47 @@ fn apply_ui_layer(config: &mut crate::config::model::UiConfig, layer: &MonitorCo
 fn apply_remote_layer(config: &mut crate::config::model::RemoteConfig, layer: &MonitorConfigLayer) {
     if let Some(value) = &layer.remote {
         config.endpoint = value.clone();
+    }
+}
+
+/// Overlays selected presence-aware CLI flags (such as explicit `--no-cpu-freq` or `--no-hwmon` booleans)
+/// from the unmerged `monitor_config_layer` onto the reconstructed base CLI configuration layer.
+/// This preserves Option-based override visibility for flags that differ from presence-unaware defaults,
+/// without overwriting pre-computed validation outcomes (like max_duration or epoch overrides) stored on Config.
+fn apply_presence_aware_cli_overrides(
+    cli: &mut MonitorConfigLayer,
+    layer: &MonitorConfigLayer,
+    is_epoch_set: bool,
+) {
+    if let Some(val) = layer.hwmon {
+        cli.hwmon = Some(val);
+    }
+    if let Some(val) = layer.cpu_freq {
+        cli.cpu_freq = Some(val);
+    }
+    if let Some(val) = layer.faults {
+        cli.faults = Some(val);
+    }
+    if let Some(val) = layer.block_io {
+        cli.block_io = Some(val);
+    }
+    if let Some(val) = layer.stat_wait {
+        cli.stat_wait = Some(val);
+    }
+    if let Some(val) = layer.runtime_slices {
+        cli.runtime_slices = Some(val);
+    }
+    if let Some(val) = layer.follow_exec {
+        cli.follow_exec = Some(val);
+    }
+    if let Some(val) = layer.focus_source {
+        cli.focus_source = Some(val);
+    }
+    if let Some(val) = layer.foreground_source {
+        cli.foreground_source = Some(val);
+    }
+    if layer.summary_period_ms.is_some() && !is_epoch_set {
+        cli.summary_period_ms = layer.summary_period_ms;
     }
 }
 

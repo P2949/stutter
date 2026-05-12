@@ -171,17 +171,17 @@ pub struct EventRuntimeConfig {
 }
 
 impl EventRuntimeConfig {
-    pub fn from_legacy_config(config: &crate::cli::Config) -> Self {
+    pub fn from_monitor_config(config: &crate::config::model::MonitorConfig) -> Self {
         Self {
             spike: interpret::SpikeConfig {
-                spike_threshold_ns: config.spike_threshold_ns,
-                alert_threshold_ns: config.alert_threshold_ns,
-                verbose: config.verbose,
-                cgroupv2_active: config.cgroupv2.is_some(),
+                spike_threshold_ns: config.timing.spike_threshold_ns,
+                alert_threshold_ns: config.alerts.threshold_ns,
+                verbose: config.streams.verbose,
+                cgroupv2_active: config.target.cgroupv2.is_some(),
             },
             output: MonitorOutputConfig {
-                json_stream: config.json_stream,
-                verbose: config.verbose,
+                json_stream: config.outputs.json_stream,
+                verbose: config.streams.verbose,
             },
         }
     }
@@ -190,7 +190,7 @@ impl EventRuntimeConfig {
 #[allow(clippy::too_many_arguments)]
 pub fn handle_event(
     event: &SchedulerEvent,
-    config: &crate::cli::Config,
+    config: &crate::config::model::MonitorConfig,
     started: Instant,
     tasks: &mut TaskTracker,
     monotonic_start_ns: Option<u64>,
@@ -200,7 +200,7 @@ pub fn handle_event(
     scx_state: Option<&str>,
     scx_enable_seq: Option<&str>,
 ) -> Option<recorder::SpikeEvent> {
-    let runtime_config = EventRuntimeConfig::from_legacy_config(config);
+    let runtime_config = EventRuntimeConfig::from_monitor_config(config);
     handle_event_with_runtime_config(
         event,
         &runtime_config,

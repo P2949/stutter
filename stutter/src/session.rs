@@ -15,8 +15,7 @@ use tokio::{
 
 use crate::{
     artifacts::ArtifactKind,
-    cli::Config,
-    config::{CsvStreamTarget, FocusSource, ForegroundSource},
+    config::{CsvStreamTarget, FocusSource, ForegroundSource, model::MonitorConfig},
     diagnosis::{LiveDiagnosisEntry, diagnose_cluster},
     ebpf_loader,
     focus::{FocusDecision, FocusPolicy, FocusResolver, ResolvedFocus},
@@ -72,22 +71,23 @@ fn needs_tree_tick_from_parts(
     had_tree_roots || watch_process_active || cgroupv2_active
 }
 
-fn needs_tree_tick(config: &Config, had_tree_roots: bool) -> bool {
+fn needs_tree_tick(config: &MonitorConfig, had_tree_roots: bool) -> bool {
     needs_tree_tick_from_parts(
         had_tree_roots,
-        config.watch_process.is_some(),
-        config.cgroupv2.is_some(),
+        config.target.watch_process.is_some(),
+        config.target.cgroupv2.is_some(),
     )
 }
 
-fn foreground_capture_enabled(config: &Config) -> bool {
-    config.foreground_window || (config.auto_focus && config.focus_source != FocusSource::Heuristic)
+fn foreground_capture_enabled(config: &MonitorConfig) -> bool {
+    config.focus.foreground_window
+        || (config.focus.auto_focus && config.focus.focus_source != FocusSource::Heuristic)
 }
 
 fn foreground_provider_for_config(
-    config: &Config,
+    config: &MonitorConfig,
 ) -> Box<dyn crate::foreground::ForegroundProvider + Send> {
-    match config.foreground_source {
+    match config.focus.foreground_source {
         ForegroundSource::Auto => crate::foreground::auto_foreground_provider(),
         ForegroundSource::Sway => Box::new(crate::foreground::SwayForegroundProvider::new()),
         ForegroundSource::Hyprland => {
@@ -99,14 +99,16 @@ fn foreground_provider_for_config(
     }
 }
 
-fn foreground_resolver_from_config(config: &Config) -> crate::foreground::ForegroundResolver {
+fn foreground_resolver_from_config(
+    config: &MonitorConfig,
+) -> crate::foreground::ForegroundResolver {
     crate::foreground::ForegroundResolver::new(foreground_provider_for_config(config))
-        .with_include_title(config.foreground_include_title)
-        .with_max_stale_ms(config.foreground_max_stale_ms)
+        .with_include_title(config.focus.foreground_include_title)
+        .with_max_stale_ms(config.focus.foreground_max_stale_ms)
 }
 
-fn event_runtime_config_from_config(config: &Config) -> crate::events::EventRuntimeConfig {
-    crate::events::EventRuntimeConfig::from_legacy_config(config)
+fn event_runtime_config_from_config(config: &MonitorConfig) -> crate::events::EventRuntimeConfig {
+    crate::events::EventRuntimeConfig::from_monitor_config(config)
 }
 
 fn foreground_identity_changed(
@@ -269,7 +271,7 @@ mod foreground_session_tests {
 }
 
 pub struct MonitorSession {
-    pub config: Arc<Config>,
+    pub config: Arc<MonitorConfig>,
     pub runtime: MonitorRuntime,
 
     pub cpu_to_pkg: BTreeMap<u32, String>,
@@ -290,7 +292,7 @@ pub struct MonitorSession {
 
 impl MonitorSession {
     pub async fn new(
-        mut config: Config,
+        mut config: MonitorConfig,
         shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
         event_tx: Option<tokio::sync::mpsc::Sender<MonitorEvent>>,
     ) -> anyhow::Result<Self> {
@@ -307,32 +309,17 @@ impl MonitorSession {
 
         let user_config = crate::config_file::load_user_config()?;
 
-        if let Some(layer) = &config.monitor_config_layer {
-            log::info!(
-                "monitor_session_config_resolved source=presence_aware summary_period_ms={} spike_threshold_ns={} max_tasks={} hwmon={} cpu_freq={} foreground_window={} focus_source={:?} foreground_source={:?}",
-                config.summary_period_ms,
-                config.spike_threshold_ns,
-                config.max_tasks,
-                config.hwmon,
-                config.cpu_freq,
-                config.foreground_window,
-                config.focus_source,
-                config.foreground_source,
-            );
-            log::debug!("monitor_config_layer: {:?}", layer);
-        } else {
-            log::info!(
-                "monitor_session_config_legacy source=legacy_cloned summary_period_ms={} spike_threshold_ns={} max_tasks={} hwmon={} cpu_freq={} foreground_window={} focus_source={:?} foreground_source={:?}",
-                config.summary_period_ms,
-                config.spike_threshold_ns,
-                config.max_tasks,
-                config.hwmon,
-                config.cpu_freq,
-                config.foreground_window,
-                config.focus_source,
-                config.foreground_source,
-            );
-        }
+        log::info!(
+            "monitor_session_config source=monitor_config summary_period_ms={} spike_threshold_ns={} max_tasks={} hwmon={} cpu_freq={} foreground_window={} focus_source={:?} foreground_source={:?}",
+            config.timing.summary_period_ms,
+            config.timing.spike_threshold_ns,
+            config.target.max_tasks,
+            config.probes.hwmon,
+            config.probes.cpu_freq,
+            config.focus.foreground_window,
+            config.focus.focus_source,
+            config.focus.foreground_source,
+        );
 
         let community_rules_config =
             crate::config_file::community_rules_config_from_user_config(user_config.as_ref());
@@ -353,20 +340,20 @@ impl MonitorSession {
             }
         }
 
-        if !explicit_target && config.auto_focus {
+        if !explicit_target && config.focus.auto_focus {
             let policy = FocusPolicy {
-                poll_ms: config.auto_focus_poll_ms,
-                min_confidence: config.auto_focus_min_confidence,
-                switch_margin: config.auto_focus_switch_margin,
-                switch_cooldown_ms: config.auto_focus_switch_cooldown_ms,
-                required_winner_polls: config.auto_focus_required_polls,
-                max_roots: config.auto_focus_max_roots,
+                poll_ms: config.focus.auto_focus_poll_ms,
+                min_confidence: config.focus.auto_focus_min_confidence,
+                switch_margin: config.focus.auto_focus_switch_margin,
+                switch_cooldown_ms: config.focus.auto_focus_switch_cooldown_ms,
+                required_winner_polls: config.focus.auto_focus_required_polls,
+                max_roots: config.focus.auto_focus_max_roots,
             };
 
             let mut resolver = FocusResolver::new(policy);
             match resolver.sample(Path::new("/proc"), 0, None, FocusSource::Heuristic) {
                 FocusDecision::Switch { new, .. } | FocusDecision::Keep { focus: new } => {
-                    config.tree_pids = new.group.root_pids.clone();
+                    config.target.tree_pids = new.group.root_pids.clone();
                     info!(
                         "auto_focus_initial_target kind={:?} score={:.3} confidence={:.3} roots={:?} situation={:?}",
                         new.group.kind,
@@ -395,16 +382,17 @@ impl MonitorSession {
             let pids: Vec<_> = auto_targets.iter().map(|(p, _)| *p).collect();
             let class = auto_targets[0].1;
             info!("auto_detected_launcher class={class} pids={pids:?}");
-            let stdout_is_machine_stream = config.json_stream || config.csv_streams_to_stdout();
+            let stdout_is_machine_stream =
+                config.outputs.json_stream || config.csv_streams_to_stdout();
             if !stdout_is_machine_stream {
                 println!(
                     "auto-detected game launcher: {class} (PIDs {pids:?}). monitoring tree..."
                 );
             }
-            config.tree_pids = pids;
+            config.target.tree_pids = pids;
         }
 
-        let mut tree_pids = config.tree_pids.clone();
+        let mut tree_pids = config.target.tree_pids.clone();
         let watch_state = match resolve_watch_process(&config, &mut tree_pids).await? {
             Some(pid) => WatchProcessState::Running(pid),
             None => WatchProcessState::None,
@@ -424,11 +412,11 @@ impl MonitorSession {
             run: recording,
             ..Default::default()
         };
-        if config.json_stream {
+        if config.streams.json_stream {
             recorder.enable_stdout_spike_stream();
         }
 
-        let (prometheus_state, prometheus_task) = if let Some(port) = config.metrics_port {
+        let (prometheus_state, prometheus_task) = if let Some(port) = config.outputs.metrics_port {
             let state = Arc::new(crate::prometheus::PrometheusState::new_started_now());
             let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
             let task = crate::prometheus::spawn_metrics_server(addr, state.clone()).await?;
@@ -442,7 +430,7 @@ impl MonitorSession {
         recorder.buffers.spike_events = recorder.run.as_ref().map(|_| SpikeEventBuffer::default());
 
         if let Some(run) = recorder.run.as_mut() {
-            if let Some(path) = &config.mangohud_log
+            if let Some(path) = &config.mangohud.log
                 && let Ok(meta) = fs::metadata(path)
             {
                 run.mangohud_start_offset = Some(meta.len());
@@ -461,7 +449,7 @@ impl MonitorSession {
             }
         }
 
-        if let Some(csv_stream) = &config.csv_stream {
+        if let Some(csv_stream) = &config.streams.csv {
             recorder.csv_writer = Some(match csv_stream {
                 CsvStreamTarget::File(path) => {
                     recorder::IntervalCsvWriter::create_file(path.clone())?
@@ -477,27 +465,27 @@ impl MonitorSession {
             .map(|c| (c.cpu, c.physical_package_id.clone().unwrap_or_default()))
             .collect();
 
-        let hwmon_reader = if !config.hwmon {
+        let hwmon_reader = if !config.probes.hwmon {
             None
         } else if let Some(shared) = shared_hwmon {
             Some(shared)
         } else {
             hwmon::HwmonReader::discover_with_options(
-                config.hwmon_root.as_deref(),
-                config.hwmon_drm_card.as_deref(),
-                config.hwmon_render_node.as_deref(),
+                config.hwmon.root.as_deref(),
+                config.hwmon.drm_card.as_deref(),
+                config.hwmon.render_node.as_deref(),
             )
             .map(|r| Arc::new(std::sync::Mutex::new(r)))
         };
 
-        if config.hwmon && hwmon_reader.is_none() {
+        if config.probes.hwmon && hwmon_reader.is_none() {
             warn!("hwmon_requested_but_no_gpu_hwmon_found");
         }
 
         let started = Instant::now();
 
         let tui_state = crate::tui::TuiState::default();
-        let terminal = if config.tui {
+        let terminal = if config.ui.tui {
             Some(
                 crate::tui::init_terminal()
                     .map_err(|e| anyhow::anyhow!("failed to init terminal: {e}"))?,
@@ -506,15 +494,15 @@ impl MonitorSession {
             None
         };
 
-        let interval_label = if config.epoch_period_ms.is_some() {
+        let interval_label = if config.timing.epoch_period_ms.is_some() {
             "epoch"
         } else {
             "summary"
         };
 
-        let alert_sender = if config.alert_threshold_ns.is_some() {
+        let alert_sender = if config.alerts.threshold_ns.is_some() {
             let (tx, mut rx) = tokio::sync::mpsc::channel(100);
-            let webhook_url = config.alert_webhook_url.clone();
+            let webhook_url = config.alerts.webhook_url.clone();
             let webhook_client = webhook_url.as_ref().map(|_| {
                 reqwest::Client::builder()
                     .timeout(Duration::from_secs(10))
@@ -551,18 +539,18 @@ impl MonitorSession {
             None
         };
 
-        let cpu_perf_sampler = if config.cpu_perf {
+        let cpu_perf_sampler = if config.probes.cpu_perf {
             Some(crate::perf_counters::CpuPerfSampler::new(
                 crate::perf_counters::CpuPerfConfig {
-                    include_kernel: config.cpu_perf_kernel,
-                    max_tasks: config.cpu_perf_max_tasks,
-                    collect_cache_refs: config.cpu_perf_cache_refs,
+                    include_kernel: config.cpu_perf.include_kernel,
+                    max_tasks: config.cpu_perf.max_tasks,
+                    collect_cache_refs: config.cpu_perf.collect_cache_refs,
                 },
             ))
         } else {
             None
         };
-        let runtime_slice_sampler = config.runtime_slices.then(RuntimeSliceSampler::new);
+        let runtime_slice_sampler = config.probes.runtime_slices.then(RuntimeSliceSampler::new);
 
         let probes = ProbeRuntime::new(
             loaded,
@@ -573,7 +561,7 @@ impl MonitorSession {
         );
 
         let mut otel_exporter = None;
-        if let Some(endpoint) = config.otlp_endpoint.as_ref() {
+        if let Some(endpoint) = config.outputs.otlp_endpoint.as_ref() {
             let started_at = recorder
                 .run
                 .as_ref()
@@ -587,7 +575,7 @@ impl MonitorSession {
 
             let otel_config = crate::otel::OtelConfig {
                 endpoint: endpoint.clone(),
-                service_name: config.otel_service_name.clone(),
+                service_name: config.outputs.otel_service_name.clone(),
                 started_at,
                 monotonic_start_ns,
             };
@@ -702,7 +690,7 @@ impl MonitorSession {
         snapshot: &crate::foreground::ForegroundWindowSnapshot,
     ) -> Option<MonitorEvent> {
         snapshot
-            .to_event(self.config.foreground_include_title)
+            .to_event(self.config.focus.foreground_include_title)
             .map(MonitorEvent::from)
     }
 
@@ -775,7 +763,7 @@ impl MonitorSession {
             Path::new("/proc"),
             elapsed_ms,
             foreground.as_ref(),
-            self.config.focus_source,
+            self.config.focus.focus_source,
         );
 
         match decision {
@@ -834,11 +822,13 @@ impl MonitorSession {
         &mut self,
         mut stop_rx: Option<tokio::sync::oneshot::Receiver<()>>,
     ) -> anyhow::Result<String> {
-        let mut summary_tick = interval(Duration::from_millis(self.config.summary_period_ms));
+        let mut summary_tick =
+            interval(Duration::from_millis(self.config.timing.summary_period_ms));
         summary_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let epoch_tick_duration = self
             .config
+            .timing
             .epoch_period_ms
             .map(Duration::from_millis)
             .unwrap_or(Duration::from_secs(3600 * 24 * 365));
@@ -854,7 +844,7 @@ impl MonitorSession {
         };
 
         let mut focus_tick = if self.focus_resolver.is_some() {
-            let mut tick = interval(Duration::from_millis(self.config.auto_focus_poll_ms));
+            let mut tick = interval(Duration::from_millis(self.config.focus.auto_focus_poll_ms));
             tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
             Some(tick)
         } else {
@@ -862,14 +852,14 @@ impl MonitorSession {
         };
 
         let mut foreground_tick = if self.foreground_resolver.is_some() {
-            let mut tick = interval(Duration::from_millis(self.config.foreground_poll_ms));
+            let mut tick = interval(Duration::from_millis(self.config.focus.foreground_poll_ms));
             tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
             Some(tick)
         } else {
             None
         };
 
-        let mut watch_tick = interval(Duration::from_millis(self.config.watch_poll_ms));
+        let mut watch_tick = interval(Duration::from_millis(self.config.watch.poll_ms));
         watch_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut scx_tick = interval(Duration::from_millis(1_000));
@@ -878,13 +868,13 @@ impl MonitorSession {
         let mut hwmon_tick = interval(Duration::from_millis(1_000));
         hwmon_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        let mut tui_event_reader = if self.config.tui {
+        let mut tui_event_reader = if self.config.ui.tui {
             Some(crossterm::event::EventStream::new())
         } else {
             None
         };
 
-        let max_duration = self.config.max_duration;
+        let max_duration = self.config.timing.max_duration;
         let max_duration_future = async move {
             if let Some(duration) = max_duration {
                 tokio::time::sleep(duration).await;
@@ -901,7 +891,7 @@ impl MonitorSession {
         let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel(1024);
 
         if let Some(run) = self.runtime.outputs.recorder.run.as_ref()
-            && let Some(path) = self.config.mangohud_log.clone()
+            && let Some(path) = self.config.mangohud.log.clone()
             && let Some(offset) = run.mangohud_start_offset
         {
             let path_clone = path.clone();
@@ -911,7 +901,7 @@ impl MonitorSession {
                 }
             });
 
-            if self.config.mangohud_log_live {
+            if self.config.mangohud.log_live {
                 tokio::spawn(async move {
                     if let Err(err) = mangohud::tail_frames(path, offset, frame_tx).await {
                         log::warn!("mangohud_tail_failed err={err:#}");
@@ -962,7 +952,7 @@ impl MonitorSession {
                 }
 
                 _ = epoch_tick.tick() => {
-                    if self.config.epoch_period_ms.is_some() {
+                    if self.config.timing.epoch_period_ms.is_some() {
                         return Ok("epoch_ended".to_owned());
                     }
                 }
@@ -1152,7 +1142,7 @@ impl MonitorSession {
                     }
                 }
                 stutter_common::EVENT_EXEC => {
-                    if self.config.follow_exec {
+                    if self.config.safety.follow_exec {
                         crate::events::handle_exec_event(&item, &mut self.runtime.targeting.tasks);
                     }
                 }
@@ -1243,7 +1233,7 @@ impl MonitorSession {
                         .streams
                         .push(ArtifactKind::Interval, record);
                 }
-            } else if self.config.retain_intervals.is_some() || self.config.tui {
+            } else if self.config.recording.retain_intervals.is_some() || self.config.ui.tui {
                 // For TUI sparklines we need interval_records
                 for record in &records {
                     self.runtime
@@ -1254,7 +1244,7 @@ impl MonitorSession {
                         .push(record.clone());
                 }
 
-                let max_intervals = self.config.retain_intervals.unwrap_or(120);
+                let max_intervals = self.config.recording.retain_intervals.unwrap_or(120);
                 if self.runtime.outputs.recorder.buffers.interval_records.len() > max_intervals {
                     let drop_count = self.runtime.outputs.recorder.buffers.interval_records.len()
                         - max_intervals;
@@ -1264,7 +1254,7 @@ impl MonitorSession {
                         .buffers
                         .interval_records
                         .drain(0..drop_count);
-                    if self.config.retain_intervals.is_some() {
+                    if self.config.recording.retain_intervals.is_some() {
                         self.runtime.outputs.recorder.counters.intervals_dropped +=
                             drop_count as u64;
                     }
@@ -1289,8 +1279,8 @@ impl MonitorSession {
                 let batch = sampler.collect(
                     &tasks,
                     elapsed_ms,
-                    self.config.summary_period_ms,
-                    self.config.runtime_slices_max_tasks,
+                    self.config.timing.summary_period_ms,
+                    self.config.runtime_slices.max_tasks,
                 );
                 self.runtime
                     .outputs
@@ -1380,7 +1370,7 @@ impl MonitorSession {
                 current_focus: self.current_focus.clone(),
                 current_foreground: self.current_foreground.clone(),
                 focus_switch_count: self.focus_switch_count,
-                foreground_include_title: self.config.foreground_include_title,
+                foreground_include_title: self.config.focus.foreground_include_title,
             };
 
             // TUI rendering errors and panics should be logged and dismissed,
@@ -1428,7 +1418,7 @@ impl MonitorSession {
                 .tree_root_starttimes
                 .remove(&root_pid);
 
-            if !self.config.persistent {
+            if !self.config.target.persistent {
                 should_exit = Some("watched_process_exit".to_owned());
             } else {
                 self.runtime.targeting.watch_state = WatchProcessState::Waiting;
@@ -1477,7 +1467,7 @@ impl MonitorSession {
     }
 
     pub async fn handle_watch_tick(&mut self) -> anyhow::Result<()> {
-        let Some(pattern) = self.config.watch_process.clone() else {
+        let Some(pattern) = self.config.target.watch_process.clone() else {
             return Ok(());
         };
 
@@ -1738,21 +1728,21 @@ impl MonitorSession {
         {
             let count = dropped.load(std::sync::atomic::Ordering::Relaxed);
             let stdout_is_machine_stream =
-                self.config.json_stream || self.config.csv_streams_to_stdout();
+                self.config.outputs.json_stream || self.config.csv_streams_to_stdout();
             if count > 0 && !stdout_is_machine_stream {
                 println!("OpenTelemetry export: dropped {count} spans due to channel pressure");
             }
         }
         let stdout_is_machine_stream =
-            self.config.json_stream || self.config.csv_streams_to_stdout();
-        if self.config.epoch_period_ms.is_none() && !stdout_is_machine_stream {
+            self.config.outputs.json_stream || self.config.csv_streams_to_stdout();
+        if self.config.timing.epoch_period_ms.is_none() && !stdout_is_machine_stream {
             print_session_summaries(&mut self.runtime.targeting.tasks.stats_by_task);
         }
 
         if let Some(writer) = self.runtime.outputs.recorder.csv_writer.as_mut() {
             writer.finish()?;
-            if let Some(CsvStreamTarget::File(path)) = &self.config.csv_stream
-                && !self.config.json_stream
+            if let Some(CsvStreamTarget::File(path)) = &self.config.streams.csv
+                && !self.config.outputs.json_stream
             {
                 println!("wrote interval CSV: {}", path.display());
             }
@@ -1761,8 +1751,8 @@ impl MonitorSession {
         if self.runtime.outputs.recorder.run.is_some() {
             self.runtime.outputs.recorder.streams.finish_all()?;
 
-            let frame_events = if !self.config.mangohud_log_live
-                && let Some(path) = &self.config.mangohud_log
+            let frame_events = if !self.config.mangohud.log_live
+                && let Some(path) = &self.config.mangohud.log
             {
                 let (alignment_monotonic_ns, alignment_raw_elapsed_ms, mangohud_ignore_offset) =
                     if let Some(run) = self.runtime.outputs.recorder.run.as_ref() {
@@ -1813,7 +1803,7 @@ impl MonitorSession {
                     .probes
                     .block_io_correlation_confidence
                     .clone(),
-                focus_mode: if self.config.auto_focus {
+                focus_mode: if self.config.focus.auto_focus {
                     Some("auto".to_owned())
                 } else if self.config.has_explicit_target() {
                     Some("explicit".to_owned())
@@ -1852,13 +1842,11 @@ impl MonitorSession {
 }
 
 pub async fn run_monitor(
-    config: impl Into<Arc<Config>>,
+    config: Arc<MonitorConfig>,
     shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
     event_tx: Option<tokio::sync::mpsc::Sender<MonitorEvent>>,
     stop_rx: Option<tokio::sync::oneshot::Receiver<()>>,
 ) -> anyhow::Result<String> {
-    let config = config.into();
-    let config = crate::config::effective::resolve_arc_monitor_config(config)?;
     let mut session = MonitorSession::new((*config).clone(), shared_hwmon, event_tx).await?;
     let stop_reason = session.run(stop_rx).await?;
     session.finalize(stop_reason)
@@ -1866,9 +1854,9 @@ pub async fn run_monitor(
 
 pub fn configure_target_irqs(
     loaded: &mut ebpf_loader::LoadedEbpf,
-    config: &Config,
+    config: &MonitorConfig,
 ) -> anyhow::Result<()> {
-    if !config.irq_latency {
+    if !config.probes.irq_latency {
         return Ok(());
     }
 
@@ -1877,13 +1865,13 @@ pub fn configure_target_irqs(
         return Ok(());
     };
 
-    if config.irqs.is_empty() {
+    if config.probes.irqs.is_empty() {
         anyhow::bail!(
             "--irq-latency requires at least one explicit --irq <N>; inspect /proc/interrupts to find the IRQ number for your GPU or device"
         );
     }
 
-    for irq in config.irqs.iter().copied() {
+    for irq in config.probes.irqs.iter().copied() {
         target_irq_map.insert(irq, 1, 0)?;
         info!("irq_latency_target_added irq={irq}");
     }

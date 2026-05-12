@@ -13,8 +13,10 @@ use stutter_common::SchedulerEvent;
 
 use crate::{
     artifacts::ArtifactKind,
-    cli::{Config, RecordingConfig},
-    config::{FocusSource, ForegroundSource, TARGET_PIDS_MAX},
+    config::{
+        FocusSource, ForegroundSource, TARGET_PIDS_MAX,
+        model::{MonitorConfig, RecordingConfig},
+    },
     ebpf_loader::DropCountersSnapshot,
     metadata::{SystemMetadata, collect_system_metadata},
     metrics::{
@@ -1172,7 +1174,7 @@ pub struct CpuPerfStatus {
 
 pub struct FinalizeRecordingInput<'a> {
     pub recorder: &'a LiveRecorder,
-    pub config: &'a Config,
+    pub config: &'a MonitorConfig,
     pub tree_pids: &'a [u32],
     pub stop_reason: &'a str,
     pub tasks: &'a crate::tasks::TaskTracker,
@@ -1189,10 +1191,11 @@ pub struct FinalizeRecordingInput<'a> {
     pub final_foreground_event: Option<ForegroundEvent>,
 }
 
-pub fn prepare_recording(config: &Config) -> anyhow::Result<Option<RecordingRun>> {
-    let Some(recording) = &config.recording else {
+pub fn prepare_recording(config: &MonitorConfig) -> anyhow::Result<Option<RecordingRun>> {
+    let recording = &config.recording;
+    if recording.run_name.is_none() && recording.output_dir.is_none() {
         return Ok(None);
-    };
+    }
 
     let started_at = SystemTime::now();
     let run_dir = resolve_run_dir(recording, started_at, env::var_os("HOME"));
@@ -1598,80 +1601,83 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         .map_err(map_write_err)?;
     }
 
-    if !input.config.json_stream {
+    if !input.config.outputs.json_stream {
         println!("recording written to {}", recording.run_dir.display());
     }
     Ok(())
 }
 
-pub fn recorded_config(config: &Config, tree_pids: &[u32]) -> RecordedConfig {
+pub fn recorded_config(config: &MonitorConfig, tree_pids: &[u32]) -> RecordedConfig {
     RecordedConfig {
-        manual_pids: config.target_pids.clone(),
+        manual_pids: config.target.target_pids.clone(),
         tree_roots: tree_pids.to_vec(),
-        cgroupv2: config.cgroupv2.clone(),
-        exclude_tree_pids: config.exclude_tree_pids.clone(),
+        cgroupv2: config.target.cgroupv2.clone(),
+        exclude_tree_pids: config.target.exclude_tree_pids.clone(),
         include_comm: config
+            .target
             .task_filters
             .include_comm
             .iter()
             .map(|p| p.raw().to_owned())
             .collect(),
         exclude_comm: config
+            .target
             .task_filters
             .exclude_comm
             .iter()
             .map(|p| p.raw().to_owned())
             .collect(),
-        watch_process: config.watch_process.clone(),
-        persistent: config.persistent,
-        keep_missing_pid: config.keep_missing_pid,
-        watch_poll_ms: config.watch_poll_ms,
+        watch_process: config.target.watch_process.clone(),
+        persistent: config.target.persistent,
+        keep_missing_pid: config.target.keep_missing_pid,
+        watch_poll_ms: config.watch.poll_ms,
         watch_timeout_ms: config
-            .watch_timeout
+            .watch
+            .timeout
             .map(|timeout| timeout.as_millis() as u64),
-        csv_stream: config.csv_stream.clone(),
-        irq_latency: config.irq_latency,
-        irqs: config.irqs.clone(),
-        hwmon: config.hwmon,
-        hwmon_root: config.hwmon_root.clone(),
-        hwmon_drm_card: config.hwmon_drm_card.clone(),
-        hwmon_render_node: config.hwmon_render_node.clone(),
-        mangohud_log: config.mangohud_log.clone(),
-        mangohud_log_live: config.mangohud_log_live,
-        tui: config.tui,
-        summary_period_ms: config.summary_period_ms,
-        epoch_period_ms: config.epoch_period_ms,
-        retain_intervals: config.retain_intervals,
-        max_tasks: config.max_tasks,
-        spike_threshold_ns: config.spike_threshold_ns,
-        alert_threshold_ns: config.alert_threshold_ns,
-        alert_webhook_url: config.alert_webhook_url.clone(),
-        follow_exec: config.follow_exec,
-        verbose: config.verbose,
-        faults: config.faults,
-        cpu_perf: config.cpu_perf,
-        cpu_perf_kernel: config.cpu_perf_kernel,
-        cpu_perf_max_tasks: config.cpu_perf_max_tasks,
-        cpu_perf_cache_refs: config.cpu_perf_cache_refs,
-        block_io: config.block_io,
-        stat_wait: config.stat_wait,
-        runtime_slices: config.runtime_slices,
-        runtime_slices_max_tasks: config.runtime_slices_max_tasks,
-        otlp_endpoint: config.otlp_endpoint.clone(),
-        otel_service_name: config.otel_service_name.clone(),
-        auto_focus: config.auto_focus,
-        foreground_window: config.foreground_window,
-        focus_source: focus_source_label(config.focus_source),
-        foreground_source: foreground_source_arg_label(config.foreground_source),
-        foreground_poll_ms: config.foreground_poll_ms,
-        foreground_max_stale_ms: config.foreground_max_stale_ms,
-        foreground_include_title: config.foreground_include_title,
-        auto_focus_poll_ms: config.auto_focus_poll_ms,
-        auto_focus_min_confidence: config.auto_focus_min_confidence,
-        auto_focus_switch_cooldown_ms: config.auto_focus_switch_cooldown_ms,
-        auto_focus_switch_margin: config.auto_focus_switch_margin,
-        auto_focus_required_polls: config.auto_focus_required_polls,
-        auto_focus_max_roots: config.auto_focus_max_roots,
+        csv_stream: config.streams.csv.clone(),
+        irq_latency: config.probes.irq_latency,
+        irqs: config.probes.irqs.clone(),
+        hwmon: config.probes.hwmon,
+        hwmon_root: config.hwmon.root.clone(),
+        hwmon_drm_card: config.hwmon.drm_card.clone(),
+        hwmon_render_node: config.hwmon.render_node.clone(),
+        mangohud_log: config.mangohud.log.clone(),
+        mangohud_log_live: config.mangohud.log_live,
+        tui: config.ui.tui,
+        summary_period_ms: config.timing.summary_period_ms,
+        epoch_period_ms: config.timing.epoch_period_ms,
+        retain_intervals: config.recording.retain_intervals,
+        max_tasks: config.target.max_tasks,
+        spike_threshold_ns: config.timing.spike_threshold_ns,
+        alert_threshold_ns: config.alerts.threshold_ns,
+        alert_webhook_url: config.alerts.webhook_url.clone(),
+        follow_exec: config.safety.follow_exec,
+        verbose: config.streams.verbose,
+        faults: config.probes.faults,
+        cpu_perf: config.probes.cpu_perf,
+        cpu_perf_kernel: config.cpu_perf.include_kernel,
+        cpu_perf_max_tasks: config.cpu_perf.max_tasks,
+        cpu_perf_cache_refs: config.cpu_perf.collect_cache_refs,
+        block_io: config.probes.block_io,
+        stat_wait: config.probes.stat_wait,
+        runtime_slices: config.probes.runtime_slices,
+        runtime_slices_max_tasks: config.runtime_slices.max_tasks,
+        otlp_endpoint: config.outputs.otlp_endpoint.clone(),
+        otel_service_name: config.outputs.otel_service_name.clone(),
+        auto_focus: config.focus.auto_focus,
+        foreground_window: config.focus.foreground_window,
+        focus_source: focus_source_label(config.focus.focus_source),
+        foreground_source: foreground_source_arg_label(config.focus.foreground_source),
+        foreground_poll_ms: config.focus.foreground_poll_ms,
+        foreground_max_stale_ms: config.focus.foreground_max_stale_ms,
+        foreground_include_title: config.focus.foreground_include_title,
+        auto_focus_poll_ms: config.focus.auto_focus_poll_ms,
+        auto_focus_min_confidence: config.focus.auto_focus_min_confidence,
+        auto_focus_switch_cooldown_ms: config.focus.auto_focus_switch_cooldown_ms,
+        auto_focus_switch_margin: config.focus.auto_focus_switch_margin,
+        auto_focus_required_polls: config.focus.auto_focus_required_polls,
+        auto_focus_max_roots: config.focus.auto_focus_max_roots,
     }
 }
 
@@ -1822,7 +1828,7 @@ fn resolve_run_dir(
     started_at: SystemTime,
     home: Option<std::ffi::OsString>,
 ) -> PathBuf {
-    if let Some(out_dir) = &recording.out_dir {
+    if let Some(out_dir) = &recording.output_dir {
         return out_dir.clone();
     }
 

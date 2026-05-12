@@ -1,6 +1,9 @@
 use std::{path::PathBuf, time::Duration};
 
-use crate::config::{CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX};
+use crate::{
+    config::{CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX},
+    process_tree::TaskFilters,
+};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MonitorConfig {
@@ -31,6 +34,7 @@ pub struct TargetConfig {
     pub exclude_tree_pids: Vec<u32>,
     pub include_comm: Vec<String>,
     pub exclude_comm: Vec<String>,
+    pub task_filters: TaskFilters,
     pub watch_process: Option<String>,
     pub persistent: bool,
     pub keep_missing_pid: bool,
@@ -46,6 +50,7 @@ impl Default for TargetConfig {
             exclude_tree_pids: Vec::new(),
             include_comm: Vec::new(),
             exclude_comm: Vec::new(),
+            task_filters: TaskFilters::default(),
             watch_process: None,
             persistent: false,
             keep_missing_pid: false,
@@ -253,5 +258,21 @@ impl Default for SafetyConfig {
             follow_exec: true,
             native_cgroup_filter: false,
         }
+    }
+}
+
+impl MonitorConfig {
+    /// Returns true if `streams.csv` targets stdout.
+    pub fn csv_streams_to_stdout(&self) -> bool {
+        matches!(self.streams.csv, Some(CsvStreamTarget::Stdout))
+    }
+
+    /// Returns true if the user specified at least one explicit target
+    /// (pid, tree-pid, watch-process, or cgroup path).
+    pub fn has_explicit_target(&self) -> bool {
+        !self.target.target_pids.is_empty()
+            || !self.target.tree_pids.is_empty()
+            || self.target.watch_process.is_some()
+            || self.target.cgroupv2.is_some()
     }
 }

@@ -1182,8 +1182,12 @@ pub async fn run_autotune_controller_session(
         (None, Some(stop_tx))
     };
 
+    let resolved_monitor_config = std::sync::Arc::new(
+        crate::config::effective::resolve_monitor_config(&monitor_config)?,
+    );
     let monitor_task = tokio::spawn(async move {
-        crate::session::run_monitor(monitor_config, None, Some(event_tx), Some(stop_rx)).await
+        crate::session::run_monitor(resolved_monitor_config, None, Some(event_tx), Some(stop_rx))
+            .await
     });
 
     while let Some(event) = event_rx.recv().await {

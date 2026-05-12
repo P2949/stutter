@@ -34,7 +34,9 @@ pub async fn run_scenario_command(input: input::ScenarioRunCommandInput) -> anyh
 
     println!("{}", prepared.start_text);
     let record = prepared.record.clone();
-    let config = Arc::new(prepared.config);
+    let config = Arc::new(crate::config::effective::resolve_monitor_config(
+        &prepared.config,
+    )?);
 
     match run_monitor(config, None, None, None).await {
         Ok(_) => {

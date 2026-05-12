@@ -729,9 +729,10 @@ pub async fn measure_tune_candidate(
         enforce,
     }));
 
+    let monitor_config = Arc::new(crate::config::effective::resolve_monitor_config(&config)?);
     let mut profile_refresh_finished = false;
     let monitor_result = tokio::select! {
-        result = run_monitor(config.clone(), shared_hwmon, None, None) => result,
+        result = run_monitor(monitor_config, shared_hwmon, None, None) => result,
         refresh_result = &mut profile_refresh => {
             profile_refresh_finished = true;
             match refresh_result {

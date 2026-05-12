@@ -4,8 +4,7 @@ use serde::Serialize;
 
 use crate::{
     artifacts::{ArtifactKind, artifact_is_ndjson_stream},
-    cli::Config,
-    config::FocusSource,
+    config::{FocusSource, model::MonitorConfig},
     ebpf_loader::TracepointAvailability,
     probe_catalog::ProbeStatus,
     probe_registry::{
@@ -39,7 +38,7 @@ pub struct ProbeActivationPlan {
 
 impl ProbeActivationPlan {
     pub fn from_config(
-        config: &Config,
+        config: &MonitorConfig,
         tracepoints: &TracepointAvailability,
     ) -> anyhow::Result<Self> {
         let mut enabled = Vec::new();
@@ -103,7 +102,7 @@ impl ProbeActivationPlan {
             });
         }
 
-        if config.follow_exec && !tracepoints.sched_process_exec {
+        if config.safety.follow_exec && !tracepoints.sched_process_exec {
             warnings.push(ProbeActivationWarning {
                 key: Some(ProbeKey::SchedulerRunnableLatency),
                 message:
@@ -112,7 +111,7 @@ impl ProbeActivationPlan {
             });
         }
 
-        if config.stat_wait && !tracepoints.sched_stat_wait {
+        if config.probes.stat_wait && !tracepoints.sched_stat_wait {
             warnings.push(ProbeActivationWarning {
                 key: Some(ProbeKey::Faults),
                 message: "sched_stat_wait tracepoint unavailable; stat-wait interval evidence is disabled"
@@ -134,9 +133,9 @@ impl ProbeActivationPlan {
             disabled,
             warnings,
             attach_programs,
-            follow_exec: config.follow_exec,
-            faults: config.faults,
-            stat_wait: config.stat_wait,
+            follow_exec: config.safety.follow_exec,
+            faults: config.probes.faults,
+            stat_wait: config.probes.stat_wait,
         })
     }
 
@@ -217,23 +216,23 @@ impl ProbeActivationPlan {
     }
 }
 
-fn probe_requested(key: ProbeKey, config: &Config) -> bool {
+fn probe_requested(key: ProbeKey, config: &MonitorConfig) -> bool {
     match key {
         ProbeKey::SchedulerRunnableLatency => true,
-        ProbeKey::CpuFreq => config.cpu_freq,
+        ProbeKey::CpuFreq => config.probes.cpu_freq,
         ProbeKey::PsiTimeline => true,
         ProbeKey::PressureStallTimelineOverlay => true,
-        ProbeKey::IrqLatency => config.irq_latency,
-        ProbeKey::GpuHwmon => config.hwmon,
-        ProbeKey::FrameLog => config.mangohud_log.is_some(),
+        ProbeKey::IrqLatency => config.probes.irq_latency,
+        ProbeKey::GpuHwmon => config.probes.hwmon,
+        ProbeKey::FrameLog => config.mangohud.log.is_some(),
         ProbeKey::ForegroundWindow => {
-            config.foreground_window
-                || (config.auto_focus && config.focus_source != FocusSource::Heuristic)
+            config.focus.foreground_window
+                || (config.focus.auto_focus && config.focus.focus_source != FocusSource::Heuristic)
         }
-        ProbeKey::BlockIo => config.block_io,
-        ProbeKey::Faults => config.faults || config.stat_wait,
-        ProbeKey::CpuPerf => config.cpu_perf,
-        ProbeKey::RuntimeSlices => config.runtime_slices,
+        ProbeKey::BlockIo => config.probes.block_io,
+        ProbeKey::Faults => config.probes.faults || config.probes.stat_wait,
+        ProbeKey::CpuPerf => config.probes.cpu_perf,
+        ProbeKey::RuntimeSlices => config.probes.runtime_slices,
         ProbeKey::DrmFenceLatency
         | ProbeKey::PerfCounterPresets
         | ProbeKey::CompositorFramePacingViews => false,
@@ -242,7 +241,7 @@ fn probe_requested(key: ProbeKey, config: &Config) -> bool {
 
 fn unavailable_reason(
     key: ProbeKey,
-    config: &Config,
+    config: &MonitorConfig,
     tracepoints: &TracepointAvailability,
 ) -> Option<String> {
     match key {
@@ -256,7 +255,9 @@ fn unavailable_reason(
         ProbeKey::BlockIo if !tracepoints.block_rq => {
             Some("block_rq tracepoints unavailable or incompatible".to_owned())
         }
-        ProbeKey::Faults if config.stat_wait && !tracepoints.sched_stat_wait && !config.faults => {
+        ProbeKey::Faults
+            if config.probes.stat_wait && !tracepoints.sched_stat_wait && !config.probes.faults =>
+        {
             Some(
                 "sched_stat_wait tracepoint unavailable and fault perf probes were not requested"
                     .to_owned(),
@@ -268,7 +269,7 @@ fn unavailable_reason(
 
 fn attach_programs_for(
     enabled: &[&'static ProbeSpec],
-    config: &Config,
+    config: &MonitorConfig,
     tracepoints: &TracepointAvailability,
 ) -> BTreeSet<&'static str> {
     let mut programs = BTreeSet::new();
@@ -286,7 +287,7 @@ fn attach_programs_for(
 
 fn program_available(
     program_name: &'static str,
-    config: &Config,
+    config: &MonitorConfig,
     tracepoints: &TracepointAvailability,
 ) -> bool {
     match program_name {
@@ -294,12 +295,12 @@ fn program_available(
         "sched_wakeup_new" => tracepoints.sched_wakeup_new,
         "sched_process_exit" => tracepoints.sched_process_exit,
         "sched_migrate_task" => tracepoints.sched_migrate_task,
-        "sched_process_exec" => config.follow_exec && tracepoints.sched_process_exec,
+        "sched_process_exec" => config.safety.follow_exec && tracepoints.sched_process_exec,
         "cpu_frequency" => tracepoints.cpu_frequency,
-        "sched_stat_wait" => config.stat_wait && tracepoints.sched_stat_wait,
+        "sched_stat_wait" => config.probes.stat_wait && tracepoints.sched_stat_wait,
         "irq_handler_entry" | "irq_handler_exit" => tracepoints.irq_handler,
         "block_rq_issue" | "block_rq_complete" => tracepoints.block_rq,
-        "major_fault" | "minor_fault" => config.faults,
+        "major_fault" | "minor_fault" => config.probes.faults,
         _ => false,
     }
 }
@@ -311,78 +312,12 @@ pub fn registry_spec_for_key(key: ProbeKey) -> &'static ProbeSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{CsvStreamTarget, ForegroundSource};
 
-    fn config() -> Config {
-        Config {
-            monitor_config_layer: None,
-            preset: None,
-            target_pids: Vec::new(),
-            tree_pids: Vec::new(),
-            summary_period_ms: 1000,
-            epoch_period_ms: None,
-            spike_threshold_ns: 1000000,
-            alert_threshold_ns: None,
-            alert_webhook_url: None,
-            verbose: false,
-            task_filters: crate::process_tree::TaskFilters {
-                include_comm: Vec::new(),
-                exclude_comm: Vec::new(),
-            },
-            keep_missing_pid: false,
-            watch_process: None,
-            persistent: false,
-            watch_poll_ms: 1000,
-            watch_timeout: None,
-            max_tasks: 1024,
-            csv_stream: None::<CsvStreamTarget>,
-            irq_latency: false,
-            irqs: Vec::new(),
-            hwmon: false,
-            hwmon_root: None,
-            hwmon_drm_card: None,
-            hwmon_render_node: None,
-            mangohud_log: None,
-            tui: false,
-            retain_intervals: None,
-            recording: None,
-            max_duration: None,
-            cpu_freq: true,
-            cgroupv2: None,
-            native_cgroup_filter: false,
-            follow_exec: true,
-            exclude_tree_pids: Vec::new(),
-            faults: false,
-            cpu_perf: false,
-            cpu_perf_kernel: false,
-            cpu_perf_max_tasks: 128,
-            cpu_perf_cache_refs: false,
-            block_io: false,
-            stat_wait: false,
-            runtime_slices: false,
-            runtime_slices_max_tasks: 256,
-            json_stream: false,
-            mangohud_log_live: false,
-            metrics_port: None,
-            ringbuf_size_kb: None,
-            wakeup_map_factor: None,
-            otlp_endpoint: None,
-            otel_service_name: "stutter".to_owned(),
-            auto_focus: false,
-            focus_source: FocusSource::Heuristic,
-            foreground_window: false,
-            foreground_source: ForegroundSource::Auto,
-            foreground_poll_ms: 1000,
-            foreground_max_stale_ms: 2500,
-            foreground_include_title: false,
-            auto_focus_poll_ms: 1000,
-            auto_focus_min_confidence: 0.60,
-            auto_focus_switch_cooldown_ms: 5000,
-            auto_focus_switch_margin: 0.20,
-            auto_focus_required_polls: 2,
-            auto_focus_max_roots: 4,
-            remote: None,
-        }
+    fn config() -> MonitorConfig {
+        let mut c = MonitorConfig::default();
+        c.probes.cpu_freq = true;
+        c.safety.follow_exec = true;
+        c
     }
 
     fn tracepoints() -> TracepointAvailability {
@@ -424,7 +359,7 @@ mod tests {
     #[test]
     fn optional_tracepoint_missing_disables_requested_probe_with_warning() {
         let mut config = config();
-        config.block_io = true;
+        config.probes.block_io = true;
         let mut tracepoints = tracepoints();
         tracepoints.block_rq = false;
 
@@ -446,8 +381,8 @@ mod tests {
     #[test]
     fn foreground_activation_accepts_auto_focus_foreground_source() {
         let mut config = config();
-        config.auto_focus = true;
-        config.focus_source = FocusSource::Foreground;
+        config.focus.auto_focus = true;
+        config.focus.focus_source = FocusSource::Foreground;
 
         let plan = ProbeActivationPlan::from_config(&config, &tracepoints()).unwrap();
 
