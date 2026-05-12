@@ -35,9 +35,8 @@ use crate::{
     },
     session_events::MonitorEvent,
     watch::{
-        WatchProcessState, add_watch_tree_pid, capture_tree_root_starttimes,
-        find_process_by_pattern_at_with_cache, process_root_starttime, remove_stale_tree_roots,
-        remove_watch_tree_pid, resolve_watch_process, tree_root_is_stale,
+        WatchProcessState, capture_tree_root_starttimes, find_process_by_pattern_at_with_cache,
+        resolve_watch_process, tree_root_is_stale,
     },
 };
 
@@ -771,6 +770,7 @@ impl MonitorSession {
         );
 
         let targeting = TargetController::from_config_parts(
+            &config,
             target_plan.tree_pids,
             target_plan.watch_state,
             target_plan.tree_root_starttimes,
@@ -956,7 +956,7 @@ impl MonitorSession {
             FocusDecision::Switch { old, new } => {
                 self.runtime
                     .targeting
-                    .replace_tree_roots(new.group.root_pids.clone());
+                    .replace_dynamic_tree_roots(new.group.root_pids.clone());
                 self.had_tree_roots = self.runtime.targeting.has_tree_roots();
                 self.current_focus = Some(new.clone());
                 self.focus_switch_count = self.focus_switch_count.saturating_add(1);
@@ -965,7 +965,7 @@ impl MonitorSession {
                     .await?;
             }
             FocusDecision::Clear { old, reason } => {
-                self.runtime.targeting.clear_tree_roots();
+                self.runtime.targeting.clear_dynamic_tree_roots();
                 self.had_tree_roots = false;
                 self.current_focus = None;
                 self.refresh_tasks_and_emit_snapshot().await?;
@@ -1703,11 +1703,7 @@ impl MonitorSession {
         if let Some(root_pid) = self.runtime.targeting.watch_state.running_pid()
             && tree_root_is_stale(root_pid, &self.runtime.targeting.tree_root_starttimes)
         {
-            remove_watch_tree_pid(&mut self.runtime.targeting.tree_pids, root_pid);
-            self.runtime
-                .targeting
-                .tree_root_starttimes
-                .remove(&root_pid);
+            self.runtime.targeting.remove_watch_root(root_pid);
 
             if !self.config.target.persistent {
                 should_exit = Some("watched_process_exit".to_owned());
@@ -1716,11 +1712,7 @@ impl MonitorSession {
                 info!("watch_process_waiting_for_relaunch");
             }
         } else {
-            let removed_roots = remove_stale_tree_roots(
-                &mut self.runtime.targeting.tree_pids,
-                &mut self.runtime.targeting.tree_root_starttimes,
-                self.runtime.targeting.watch_state.running_pid(),
-            );
+            let removed_roots = self.runtime.targeting.remove_stale_dynamic_tree_roots();
 
             for root in &removed_roots {
                 info!("tree_root_removed pid={root}");
@@ -1728,7 +1720,7 @@ impl MonitorSession {
 
             if !removed_roots.is_empty()
                 && self.had_tree_roots
-                && self.runtime.targeting.tree_pids.is_empty()
+                && self.runtime.targeting.effective_tree_pids().is_empty()
                 && !matches!(
                     self.runtime.targeting.watch_state,
                     WatchProcessState::Waiting
@@ -1771,11 +1763,7 @@ impl MonitorSession {
             &pattern,
             &mut self.runtime.targeting.process_cache,
         ) {
-            add_watch_tree_pid(&mut self.runtime.targeting.tree_pids, pid);
-            self.runtime
-                .targeting
-                .tree_root_starttimes
-                .insert(pid, process_root_starttime(pid));
+            self.runtime.targeting.add_watch_root(pid);
             self.runtime.targeting.watch_state = WatchProcessState::Running(pid);
             info!("watch_process_relaunched pattern={} pid={}", pattern, pid);
 
@@ -1954,13 +1942,22 @@ impl MonitorSession {
     }
 
     pub async fn refresh_tasks(&mut self) -> anyhow::Result<()> {
-        let budget_report = self
-            .runtime
-            .targeting
-            .tasks
+        let targeting = &mut self.runtime.targeting;
+        let policy = &targeting.policy;
+        let dynamic_tree_pids = &targeting.dynamic_tree_pids;
+        let process_cache = &mut targeting.process_cache;
+        let tasks = &mut targeting.tasks;
+        let target_snapshot_input = TargetController::target_snapshot_input_from_parts(
+            policy,
+            dynamic_tree_pids,
+            process_cache,
+            self.community_rules.as_db(),
+        );
+
+        let budget_report = tasks
             .refresh(crate::tasks::RefreshInput {
-                config: &self.config,
-                tree_pids: &self.runtime.targeting.tree_pids,
+                target_snapshot_input,
+                max_tasks: policy.max_tasks,
                 tree_events: &mut self.runtime.outputs.recorder.buffers.tree_events,
                 target_pid_map: &mut self.runtime.probes.loaded.target_pid_map,
                 prev_faults_map: self.runtime.probes.loaded.prev_faults_map.as_mut(),
@@ -1972,7 +1969,6 @@ impl MonitorSession {
                     .run
                     .as_ref()
                     .map(|run| run.started_instant),
-                community_rules: self.community_rules.as_db(),
             })
             .await?;
 
@@ -2083,7 +2079,7 @@ impl MonitorSession {
             recorder::finalize_recording(FinalizeRecordingInput {
                 recorder: &self.runtime.outputs.recorder,
                 config: &self.config,
-                tree_pids: &self.runtime.targeting.tree_pids,
+                tree_pids: self.runtime.targeting.effective_tree_pids(),
                 stop_reason: &stop_reason,
                 tasks: &self.runtime.targeting.tasks,
                 frame_events: &frame_events,
