@@ -1,5 +1,3 @@
-#![cfg(feature = "autotune-controller")]
-
 use std::{collections::BTreeMap, time::Duration};
 
 use serde::{Deserialize, Serialize};

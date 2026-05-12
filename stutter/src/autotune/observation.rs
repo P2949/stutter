@@ -1,5 +1,3 @@
-#![cfg(feature = "autotune-controller")]
-
 use serde::{Deserialize, Serialize};
 
 use super::{quality::OnlineDataQuality, state::SituationKind};

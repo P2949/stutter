@@ -1,4 +1,3 @@
-#![cfg(feature = "autotune-controller")]
 use std::{
     collections::{BTreeSet, VecDeque},
     time::Duration,
