@@ -49,6 +49,8 @@ pub use spike_buffer::{MAX_SPIKE_EVENTS, SpikeEventBuffer, SpikePushResult};
 pub use writers::write_interval_csv;
 // Re-export from writers.rs - these were pub in the original recorder.rs
 #[allow(unused_imports)]
-pub use writers::{IntervalCsvWriter, NdjsonWriter, StdoutJsonStream, write_ndjson_value};
+pub use writers::{
+    CsvOutput, IntervalCsvWriter, NdjsonWriter, StdoutJsonStream, write_ndjson_value,
+};
 
 pub use crate::{foreground::ForegroundEvent, scx::ScxEvent};
