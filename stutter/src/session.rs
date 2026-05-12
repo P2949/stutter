@@ -149,8 +149,9 @@ struct SessionTargetPlan {
 }
 
 impl SessionTargetPlan {
-    async fn resolve(config: &mut MonitorConfig) -> anyhow::Result<Self> {
+    async fn resolve(config: &MonitorConfig) -> anyhow::Result<Self> {
         let explicit_target = config.has_explicit_target();
+        let mut tree_pids = config.target.tree_pids.clone();
 
         let mut focus_resolver = None;
         let mut current_focus = None;
@@ -205,7 +206,7 @@ impl SessionTargetPlan {
             let mut resolver = FocusResolver::new(policy);
             match resolver.sample(Path::new("/proc"), 0, None, FocusSource::Heuristic) {
                 FocusDecision::Switch { new, .. } | FocusDecision::Keep { focus: new } => {
-                    config.target.tree_pids = new.group.root_pids.clone();
+                    tree_pids = new.group.root_pids.clone();
                     info!(
                         "auto_focus_initial_target kind={:?} score={:.3} confidence={:.3} roots={:?} situation={:?}",
                         new.group.kind,
@@ -241,10 +242,9 @@ impl SessionTargetPlan {
                     "auto-detected game launcher: {class} (PIDs {pids:?}). monitoring tree..."
                 );
             }
-            config.target.tree_pids = pids;
+            tree_pids = pids;
         }
 
-        let mut tree_pids = config.target.tree_pids.clone();
         let watch_state = match resolve_watch_process(config, &mut tree_pids).await? {
             Some(pid) => WatchProcessState::Running(pid),
             None => WatchProcessState::None,
@@ -733,11 +733,11 @@ pub struct MonitorSession {
 
 impl MonitorSession {
     pub async fn new(
-        mut config: MonitorConfig,
+        config: MonitorConfig,
         shared_hwmon: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
         event_tx: Option<tokio::sync::mpsc::Sender<MonitorEvent>>,
     ) -> anyhow::Result<Self> {
-        let target_plan = SessionTargetPlan::resolve(&mut config).await?;
+        let target_plan = SessionTargetPlan::resolve(&config).await?;
         let probe_plan = SessionProbePlan::load(&config)?;
         let mut recorder = RecordingRuntime::begin(&config, &probe_plan)?;
         let exporter_runtime = ExporterRuntime::begin(&config, &mut recorder).await?;
