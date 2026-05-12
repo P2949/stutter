@@ -27,13 +27,6 @@ pub struct ConfigSources {
     pub cli: CliOverrides,
 }
 
-pub fn merge_config_sources(sources: ConfigSources) -> MonitorConfig {
-    merge_config_sources_checked(sources).unwrap_or_else(|err| {
-        log::warn!("presence_aware_config_merge_failed err={err}");
-        MonitorConfig::default()
-    })
-}
-
 pub fn merge_config_sources_checked(sources: ConfigSources) -> Result<MonitorConfig, ConfigError> {
     let default_config = sources.defaults.config;
     let user_layer = sources
@@ -54,37 +47,12 @@ pub fn merge_config_sources_checked(sources: ConfigSources) -> Result<MonitorCon
     .into_monitor_config())
 }
 
-pub fn merge_user_file(config: MonitorConfig) -> MonitorConfig {
-    match crate::config_file::load_user_config() {
-        Ok(Some(user_file)) => {
-            let sources = ConfigSources {
-                defaults: DefaultConfig { config },
-                user_file: Some(user_file),
-                preset: None,
-                cli: CliOverrides {
-                    layer: MonitorConfigLayer::default(),
-                },
-            };
-            merge_config_sources(sources)
-        }
-        Ok(None) => config,
-        Err(err) => {
-            log::warn!("failed_to_load_user_config_for_monitor_config err={err:#}");
-            config
-        }
-    }
-}
-
-pub fn merge_monitor_config(base: MonitorConfig, override_config: MonitorConfig) -> MonitorConfig {
-    let sources = ConfigSources {
-        defaults: DefaultConfig { config: base },
-        user_file: None,
-        preset: None,
-        cli: CliOverrides {
-            layer: MonitorConfigLayer::from_monitor_config(override_config),
-        },
-    };
-    merge_config_sources(sources)
+#[cfg(test)]
+fn merge_config_sources_lossy_for_tests(sources: ConfigSources) -> MonitorConfig {
+    merge_config_sources_checked(sources).unwrap_or_else(|err| {
+        log::warn!("presence_aware_config_merge_failed err={err}");
+        MonitorConfig::default()
+    })
 }
 
 #[cfg(test)]
@@ -93,7 +61,7 @@ mod tests {
     use crate::config::{FocusSource, ForegroundSource};
 
     #[test]
-    fn merge_monitor_config_uses_override_even_when_override_equals_builtin_default() {
+    fn merge_config_sources_checked_uses_override_even_when_override_equals_builtin_default() {
         let mut base = MonitorConfig::default();
         base.timing.summary_period_ms = 333;
         base.focus.focus_source = FocusSource::Hybrid;
@@ -101,12 +69,74 @@ mod tests {
         base.focus.auto_focus_min_confidence = 0.75;
 
         let override_config = MonitorConfig::default();
-        let merged = merge_monitor_config(base, override_config);
+        let merged = merge_config_sources_checked(ConfigSources {
+            defaults: DefaultConfig { config: base },
+            user_file: None,
+            preset: None,
+            cli: CliOverrides {
+                layer: MonitorConfigLayer::from_monitor_config(override_config),
+            },
+        })
+        .unwrap();
 
         assert_eq!(merged.timing.summary_period_ms, 1_000);
         assert_eq!(merged.focus.focus_source, FocusSource::Heuristic);
         assert_eq!(merged.focus.foreground_source, ForegroundSource::Auto);
         assert_eq!(merged.focus.auto_focus_min_confidence, 0.60);
+    }
+
+    #[test]
+    fn merge_config_sources_checked_propagates_invalid_user_layer() {
+        let user_file = crate::config_file::UserConfigFile {
+            focus_source: Some("invalid".to_owned()),
+            ..Default::default()
+        };
+
+        let err = merge_config_sources_checked(ConfigSources {
+            defaults: DefaultConfig::default(),
+            user_file: Some(user_file),
+            preset: None,
+            cli: CliOverrides {
+                layer: MonitorConfigLayer::default(),
+            },
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            crate::error::ConfigError::InvalidUserLayer(_)
+        ));
+    }
+
+    #[test]
+    fn merge_config_sources_lossy_for_tests_returns_default_on_invalid_user_layer() {
+        let mut default_config = MonitorConfig::default();
+        default_config.timing.summary_period_ms = 333;
+
+        let user_file = crate::config_file::UserConfigFile {
+            focus_source: Some("invalid".to_owned()),
+            ..Default::default()
+        };
+
+        let merged = merge_config_sources_lossy_for_tests(ConfigSources {
+            defaults: DefaultConfig {
+                config: default_config,
+            },
+            user_file: Some(user_file),
+            preset: None,
+            cli: CliOverrides {
+                layer: MonitorConfigLayer::default(),
+            },
+        });
+
+        assert_eq!(
+            merged.timing.summary_period_ms,
+            MonitorConfig::default().timing.summary_period_ms
+        );
+        assert_eq!(
+            merged.focus.focus_source,
+            MonitorConfig::default().focus.focus_source
+        );
     }
 
     #[test]
