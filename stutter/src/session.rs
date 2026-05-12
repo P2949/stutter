@@ -532,6 +532,51 @@ impl HwmonRuntime {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct TargetTickContext {
+    event: TargetTickEvent,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TargetTickEvent {
+    Tree,
+    Watch,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FocusTickContext;
+
+#[derive(Debug, Clone, Copy)]
+struct ForegroundTickContext;
+
+#[derive(Debug, Clone, Copy)]
+struct SummaryTickContext;
+
+#[derive(Debug, Clone, Copy)]
+struct ProbeDrainContext;
+
+#[derive(Debug)]
+struct FrameTickContext {
+    frame: recorder::FrameEvent,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TelemetryTickContext {
+    event: TelemetryTickEvent,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TelemetryTickEvent {
+    MangoHudAlignment { raw_ms: u64, monotonic_ns: u64 },
+    Scx,
+    Hwmon,
+}
+
+#[derive(Debug)]
+struct UiTickContext {
+    event: Event,
+}
+
 #[cfg(test)]
 mod foreground_session_tests {
     use super::*;
@@ -956,6 +1001,102 @@ impl MonitorSession {
         Ok(())
     }
 
+    fn handle_ctrl_c_stop(&self) -> String {
+        "ctrl_c".to_owned()
+    }
+
+    fn handle_max_duration_stop(&self, reason: Option<String>) -> String {
+        reason.expect("max duration future must resolve with a stop reason")
+    }
+
+    fn handle_remote_stop(&self) -> String {
+        "remote_stop".to_owned()
+    }
+
+    fn handle_epoch_tick(&self) -> Option<String> {
+        self.config
+            .timing
+            .epoch_period_ms
+            .is_some()
+            .then(|| "epoch_ended".to_owned())
+    }
+
+    async fn handle_target_tick(
+        &mut self,
+        context: TargetTickContext,
+    ) -> anyhow::Result<Option<String>> {
+        match context.event {
+            TargetTickEvent::Tree => self.handle_tree_tick().await,
+            TargetTickEvent::Watch => {
+                self.handle_watch_tick().await?;
+                Ok(None)
+            }
+        }
+    }
+
+    async fn handle_focus_context_tick(
+        &mut self,
+        _context: FocusTickContext,
+    ) -> anyhow::Result<()> {
+        self.handle_focus_tick().await
+    }
+
+    async fn handle_foreground_context_tick(
+        &mut self,
+        _context: ForegroundTickContext,
+    ) -> anyhow::Result<()> {
+        self.handle_foreground_tick().await
+    }
+
+    async fn handle_summary_context_tick(
+        &mut self,
+        _context: SummaryTickContext,
+    ) -> anyhow::Result<()> {
+        self.handle_summary_tick().await
+    }
+
+    async fn handle_probe_drain(&mut self, _context: ProbeDrainContext) -> anyhow::Result<()> {
+        self.drain_bpf_events().await
+    }
+
+    async fn handle_frame_tick(&mut self, context: FrameTickContext) -> anyhow::Result<()> {
+        let frame = context.frame;
+        self.dispatch_monitor_event(MonitorEvent::Frame {
+            event: Box::new(frame.clone()),
+        })
+        .await?;
+        self.runtime.telemetry.push_frame(frame);
+        Ok(())
+    }
+
+    async fn handle_telemetry_tick(&mut self, context: TelemetryTickContext) -> anyhow::Result<()> {
+        match context.event {
+            TelemetryTickEvent::MangoHudAlignment {
+                raw_ms,
+                monotonic_ns,
+            } => {
+                if let Some(run) = self.runtime.outputs.recorder.run.as_mut() {
+                    run.mangohud_first_frame_raw_elapsed_ms = Some(raw_ms);
+                    run.mangohud_first_frame_monotonic_ns = Some(monotonic_ns);
+                    info!(
+                        "mangohud_alignment_observed raw_ms={} monotonic_ns={}",
+                        raw_ms, monotonic_ns
+                    );
+                }
+                Ok(())
+            }
+            TelemetryTickEvent::Scx => {
+                self.handle_scx_tick();
+                Ok(())
+            }
+            TelemetryTickEvent::Hwmon => self.handle_hwmon_tick().await,
+        }
+    }
+
+    fn handle_ui_tick(&mut self, context: UiTickContext) -> Option<String> {
+        self.handle_tui_event(context.event)
+    }
+
     pub async fn run(
         &mut self,
         mut stop_rx: Option<tokio::sync::oneshot::Receiver<()>>,
@@ -1051,28 +1192,24 @@ impl MonitorSession {
         loop {
             tokio::select! {
                 res = &mut mangohud_rx => {
-                    if let Ok((raw_ms, monotonic_ns)) = res
-                        && let Some(run) = self.runtime.outputs.recorder.run.as_mut()
-                    {
-                        run.mangohud_first_frame_raw_elapsed_ms = Some(raw_ms);
-                        run.mangohud_first_frame_monotonic_ns = Some(monotonic_ns);
-                        info!(
-                            "mangohud_alignment_observed raw_ms={} monotonic_ns={}",
-                            raw_ms, monotonic_ns
-                        );
+                    if let Ok((raw_ms, monotonic_ns)) = res {
+                        self.handle_telemetry_tick(TelemetryTickContext {
+                            event: TelemetryTickEvent::MangoHudAlignment {
+                                raw_ms,
+                                monotonic_ns,
+                            },
+                        })
+                        .await?;
                     }
                 }
                 Some(frame) = frame_rx.recv() => {
-                    crate::events::push_artifact_event(&mut self.runtime.outputs.recorder, ArtifactKind::FrameEvents, &frame, "frame_events", |c| {
-                        c.frame_event_count += 1;
-                    });
-                    self.runtime.telemetry.push_frame(frame);
+                    self.handle_frame_tick(FrameTickContext { frame }).await?;
                 }
                 _ = tokio::signal::ctrl_c() => {
-                    return Ok("ctrl_c".to_owned());
+                    return Ok(self.handle_ctrl_c_stop());
                 }
                 reason = &mut max_duration_future => {
-                    return Ok(reason.unwrap());
+                    return Ok(self.handle_max_duration_stop(reason));
                 }
                 _ = async {
                     if let Some(rx) = &mut stop_rx {
@@ -1082,43 +1219,51 @@ impl MonitorSession {
                         futures_util::future::pending().await
                     }
                 } => {
-                    return Ok("remote_stop".to_owned());
+                    return Ok(self.handle_remote_stop());
                 }
 
                 _ = summary_tick.tick() => {
-                    self.handle_summary_tick().await?;
+                    self.handle_summary_context_tick(SummaryTickContext).await?;
                 }
 
                 _ = epoch_tick.tick() => {
-                    if self.config.timing.epoch_period_ms.is_some() {
-                        return Ok("epoch_ended".to_owned());
+                    if let Some(reason) = self.handle_epoch_tick() {
+                        return Ok(reason);
                     }
                 }
 
                 _ = optional_tick(tree_tick.as_mut()) => {
-                    if let Some(reason) = self.handle_tree_tick().await? {
+                    if let Some(reason) = self.handle_target_tick(TargetTickContext {
+                        event: TargetTickEvent::Tree,
+                    }).await? {
                         return Ok(reason);
                     }
                 }
 
                 _ = optional_tick(focus_tick.as_mut()) => {
-                    self.handle_focus_tick().await?;
+                    self.handle_focus_context_tick(FocusTickContext).await?;
                 }
 
                 _ = optional_tick(foreground_tick.as_mut()) => {
-                    self.handle_foreground_tick().await?;
+                    self.handle_foreground_context_tick(ForegroundTickContext).await?;
                 }
 
                 _ = watch_tick.tick() => {
-                    self.handle_watch_tick().await?;
+                    self.handle_target_tick(TargetTickContext {
+                        event: TargetTickEvent::Watch,
+                    }).await?;
                 }
 
                 _ = scx_tick.tick() => {
-                    self.handle_scx_tick();
+                    self.handle_telemetry_tick(TelemetryTickContext {
+                        event: TelemetryTickEvent::Scx,
+                    }).await?;
                 }
 
                 _ = hwmon_tick.tick() => {
-                    self.handle_hwmon_tick().await?;
+                    self.handle_telemetry_tick(TelemetryTickContext {
+                        event: TelemetryTickEvent::Hwmon,
+                    }).await?;
                 }
 
                 maybe_event = async {
@@ -1129,13 +1274,13 @@ impl MonitorSession {
                     }
                 } => {
                     if let Some(Ok(event)) = maybe_event
-                        && let Some(reason) = self.handle_tui_event(event)
+                        && let Some(reason) = self.handle_ui_tick(UiTickContext { event })
                     {
                         return Ok(reason);
                     }
                 }
 
-                res = self.drain_bpf_events() => {
+                res = self.handle_probe_drain(ProbeDrainContext) => {
                     res?;
                 }
             }
@@ -1275,7 +1420,14 @@ impl MonitorSession {
                 }
                 stutter_common::EVENT_EXEC => {
                     if self.config.safety.follow_exec {
-                        crate::events::handle_exec_event(&item, &mut self.runtime.targeting.tasks);
+                        let elapsed_ms = self.started.elapsed().as_millis() as u64;
+                        if let Some(event) = crate::events::handle_exec_event(
+                            &item,
+                            &mut self.runtime.targeting.tasks,
+                            elapsed_ms,
+                        ) {
+                            pending_monitor_events.push(event);
+                        }
                     }
                 }
                 other => log::warn!("unknown_bpf_event kind={other} len={}", item.len()),
@@ -1296,7 +1448,7 @@ impl MonitorSession {
             self.runtime.telemetry.push_io(io);
         }
         for spike in pending_spikes {
-            self.handle_live_spike(spike);
+            self.handle_live_spike(spike).await?;
         }
 
         Ok(())
@@ -1347,12 +1499,12 @@ impl MonitorSession {
             );
             self.runtime.outputs.recorder.counters.interval_record_count += records.len() as u64;
 
-            self.emit(MonitorEvent::Interval {
+            self.dispatch_monitor_event(MonitorEvent::Interval {
                 elapsed_ms,
                 records: records.clone(),
                 drop_counters: drop_counters_snapshot.clone(),
             })
-            .await;
+            .await?;
 
             if self
                 .runtime
@@ -1677,22 +1829,16 @@ impl MonitorSession {
 
             if let Some(sample) = sample_opt {
                 self.runtime.telemetry.push_gpu(sample.clone());
-
-                crate::events::push_artifact_event(
-                    &mut self.runtime.outputs.recorder,
-                    ArtifactKind::GpuSamples,
-                    &sample,
-                    "gpu_samples",
-                    |c| {
-                        c.gpu_sample_count += 1;
-                    },
-                );
+                self.dispatch_monitor_event(MonitorEvent::GpuSample {
+                    sample: Box::new(sample),
+                })
+                .await?;
             }
         }
         Ok(())
     }
 
-    fn handle_live_spike(&mut self, spike: SpikeEvent) {
+    async fn handle_live_spike(&mut self, spike: SpikeEvent) -> anyhow::Result<()> {
         let elapsed_ms = self.started.elapsed().as_millis() as u64;
         self.runtime.telemetry.push_spike(spike);
         // Prune old telemetry (history window controlled by LiveTelemetry::max_age_ms)
@@ -1712,7 +1858,7 @@ impl MonitorSession {
             .collect();
 
         if recent_spikes.is_empty() {
-            return;
+            return Ok(());
         }
 
         let mut points = Vec::new();
@@ -1778,17 +1924,20 @@ impl MonitorSession {
         cluster.anchor_kind = Some(anchor.kind);
 
         if diagnosis.cause != crate::diagnosis::StutterCause::Unknown {
-            self.runtime
-                .telemetry
-                .diagnoses
-                .push_back(LiveDiagnosisEntry {
-                    elapsed_ms,
-                    cause: diagnosis.cause,
-                    confidence: diagnosis.confidence,
-                    anchor_class: anchor.class,
-                    anchor_comm: anchor.comm.clone(),
-                    evidence: diagnosis.evidence.clone(),
-                });
+            let entry = LiveDiagnosisEntry {
+                elapsed_ms,
+                cause: diagnosis.cause,
+                confidence: diagnosis.confidence,
+                anchor_class: anchor.class,
+                anchor_comm: anchor.comm.clone(),
+                evidence: diagnosis.evidence.clone(),
+            };
+
+            self.runtime.telemetry.diagnoses.push_back(entry.clone());
+            self.dispatch_monitor_event(MonitorEvent::LiveDiagnosis {
+                entry: Box::new(entry),
+            })
+            .await?;
 
             log::info!(
                 "live_diagnosis cause={:?} confidence={:?} evidence={:?}",
@@ -1797,6 +1946,8 @@ impl MonitorSession {
                 diagnosis.evidence
             );
         }
+
+        Ok(())
     }
 
     pub async fn refresh_tasks(&mut self) -> anyhow::Result<()> {
@@ -1985,6 +2136,11 @@ pub async fn run_monitor(
 ) -> anyhow::Result<String> {
     let mut session = MonitorSession::new((*config).clone(), shared_hwmon, event_tx).await?;
     let stop_reason = session.run(stop_rx).await?;
+    session
+        .dispatch_monitor_event(MonitorEvent::Finished {
+            reason: stop_reason.clone(),
+        })
+        .await?;
     session.finalize(stop_reason)
 }
 

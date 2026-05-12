@@ -400,7 +400,8 @@ impl AutotuneRuntime {
             | MonitorEvent::Spike { .. }
             | MonitorEvent::GpuSample { .. }
             | MonitorEvent::IrqEvent { .. }
-            | MonitorEvent::IoEvent { .. } => {}
+            | MonitorEvent::IoEvent { .. }
+            | MonitorEvent::Exec { .. } => {}
         }
 
         Ok(None)

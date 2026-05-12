@@ -58,6 +58,12 @@ pub enum MonitorEvent {
     ForegroundEvent {
         event: Box<ForegroundEvent>,
     },
+    Exec {
+        elapsed_ms: u64,
+        pid: u32,
+        tid: u32,
+        comm: String,
+    },
     LiveDiagnosis {
         entry: Box<LiveDiagnosisEntry>,
     },
@@ -100,7 +106,8 @@ impl MonitorEvent {
             | Self::TargetSnapshot { .. }
             | Self::FocusChanged { .. }
             | Self::FocusCleared { .. }
-            | Self::ForegroundEvent { .. } => MonitorEventDeliveryClass::Reliable,
+            | Self::ForegroundEvent { .. }
+            | Self::Exec { .. } => MonitorEventDeliveryClass::Reliable,
             Self::Interval { .. } => MonitorEventDeliveryClass::Conflated,
             Self::SchedulerSample { .. }
             | Self::Spike { .. }
@@ -130,6 +137,7 @@ impl MonitorEvent {
             Self::CpuFreqSample { .. } => "cpu_freq_sample",
             Self::ForegroundEvent { .. } => "foreground_event",
             Self::LiveDiagnosis { .. } => "live_diagnosis",
+            Self::Exec { .. } => "exec",
             Self::DataQualityWarning { .. } => "data_quality_warning",
             Self::FocusChanged { .. } => "focus_changed",
             Self::FocusCleared { .. } => "focus_cleared",
@@ -152,6 +160,7 @@ impl MonitorEvent {
             Self::CpuFreqSample { event } => Some(event.elapsed_ms),
             Self::ForegroundEvent { event } => Some(event.elapsed_ms),
             Self::LiveDiagnosis { entry } => Some(entry.elapsed_ms),
+            Self::Exec { elapsed_ms, .. } => Some(*elapsed_ms),
             Self::DataQualityWarning { .. } => None,
             Self::FocusChanged { elapsed_ms, .. } => Some(*elapsed_ms),
             Self::FocusCleared { elapsed_ms, .. } => Some(*elapsed_ms),
@@ -210,6 +219,20 @@ mod tests {
 
         assert_eq!(event.kind(), "focus_changed");
         assert_eq!(event.elapsed_ms(), Some(1234));
+    }
+
+    #[test]
+    fn exec_event_reports_kind_elapsed_and_reliable_delivery() {
+        let event = MonitorEvent::Exec {
+            elapsed_ms: 123,
+            pid: 44,
+            tid: 55,
+            comm: "game.exe".to_owned(),
+        };
+
+        assert_eq!(event.kind(), "exec");
+        assert_eq!(event.elapsed_ms(), Some(123));
+        assert_eq!(event.delivery_class(), MonitorEventDeliveryClass::Reliable);
     }
 
     #[test]
