@@ -146,16 +146,6 @@ pub async fn send_webhook_alert_with_client(
     }
 }
 
-#[allow(dead_code)]
-pub async fn send_webhook_alert(url: &str, payload: &AlertPayload) -> Result<(), String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|err| format!("failed to build webhook HTTP client: {err}"))?;
-
-    send_webhook_alert_with_client(&client, url, payload).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

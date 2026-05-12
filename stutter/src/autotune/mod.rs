@@ -39,7 +39,6 @@ use std::{path::PathBuf, time::Duration};
 
 use crate::daemon_policy::DaemonMode;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AutotuneCommandInput {
     pub config: Option<PathBuf>,
