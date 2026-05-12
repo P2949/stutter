@@ -4,21 +4,19 @@ use aya::maps::{HashMap as AyaHashMap, MapData};
 use log::info;
 
 use crate::{
-    config::model::MonitorConfig,
     metrics,
-    process_tree::{TargetDiffAction, TaskInfo},
+    process_tree::{TargetDiffAction, TargetSnapshotInput, TaskInfo},
     recorder::TreeEvent,
 };
 
 pub struct RefreshInput<'a> {
-    pub config: &'a MonitorConfig,
-    pub tree_pids: &'a [u32],
+    pub target_snapshot_input: TargetSnapshotInput<'a>,
+    pub max_tasks: usize,
     pub tree_events: &'a mut Vec<TreeEvent>,
     pub target_pid_map: &'a mut AyaHashMap<MapData, u32, u8>,
     pub prev_faults_map: Option<&'a mut AyaHashMap<MapData, u32, [u64; 2]>>,
     pub elapsed_ms: u64,
     pub recording_started: Option<Instant>,
-    pub community_rules: Option<&'a crate::community_rules::CommunityRulesDb>,
 }
 
 pub type TaskExeInodesMap = BTreeMap<u32, (Option<u64>, Option<u64>, Option<u64>)>;
@@ -166,23 +164,16 @@ impl TaskTracker {
         mut input: RefreshInput<'_>,
     ) -> anyhow::Result<crate::process_tree::ScanBudgetReport> {
         let snapshot = crate::process_tree::target_snapshot(
-            crate::process_tree::TargetSnapshotInput::default()
-                .manual_pids(&input.config.target.target_pids)
-                .tree_pids(input.tree_pids)
-                .cgroup_path(input.config.target.cgroupv2.as_deref())
-                .exclude_tree_pids(&input.config.target.exclude_tree_pids)
-                .filters(&input.config.target.task_filters)
-                .keep_missing_pid(input.config.target.keep_missing_pid)
-                .cache(&mut self.cache)
-                .previous_tasks(Some(&self.active_targets))
-                .community_rules(input.community_rules),
+            input
+                .target_snapshot_input
+                .previous_tasks(Some(&self.active_targets)),
         );
 
         let budget_report = snapshot.budget_report.clone();
 
         self.refresh_internal(
             snapshot,
-            input.config,
+            input.max_tasks,
             input.tree_events,
             input.elapsed_ms,
             input.recording_started,
@@ -198,18 +189,18 @@ impl TaskTracker {
     pub async fn refresh_internal(
         &mut self,
         snapshot: crate::process_tree::TargetSnapshot,
-        config: &MonitorConfig,
+        max_tasks: usize,
         tree_events: &mut Vec<TreeEvent>,
         elapsed_ms: u64,
         recording_started: Option<Instant>,
         mut prev_faults_map: Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
         target_pid_map: &mut dyn TaskMap,
     ) -> anyhow::Result<()> {
-        if snapshot.tasks.len() > config.target.max_tasks {
+        if snapshot.tasks.len() > max_tasks {
             anyhow::bail!(
                 "too many target tasks after expansion: got {}, but --max-tasks is {}",
                 snapshot.tasks.len(),
-                config.target.max_tasks
+                max_tasks
             );
         }
 
@@ -456,7 +447,10 @@ pub fn should_replace_unknown_comm(current: &str, incoming: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::process_tree::{TargetSnapshot, TaskClass};
+    use crate::{
+        config::model::MonitorConfig,
+        process_tree::{TargetSnapshot, TaskClass},
+    };
 
     #[tokio::test]
     async fn test_refresh_exceeds_max_tasks() {
@@ -489,7 +483,7 @@ mod tests {
         let result = tracker
             .refresh_internal(
                 snapshot,
-                &config,
+                config.target.max_tasks,
                 &mut tree_events,
                 0,
                 None,
