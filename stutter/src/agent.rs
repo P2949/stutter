@@ -21,7 +21,7 @@ use tokio::{
 
 use crate::{
     actions::SafetyClass,
-    config::{FocusSource, ForegroundSource, layer::MonitorConfigLayer, model::MonitorConfig},
+    config::{FocusSource, ForegroundSource, model::MonitorConfig},
     daemon_policy::{ActionSource, DaemonMode, DaemonPolicy},
     remote::{
         AgentAutotuneLimits, AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
@@ -1601,62 +1601,17 @@ fn monitor_config_from_remote_request(
         merge::{ApiOverrides, ConfigSources, DefaultConfig},
     };
 
-    let focus_source = parse_remote_focus_source(request.focus_source.as_deref())?;
-    let foreground_source = parse_remote_foreground_source(request.foreground_source.as_deref())?;
     let duration_seconds = request
         .duration_seconds
         .unwrap_or(limits.max_duration_seconds);
-    let spike_threshold_ns = request.spike_us.unwrap_or(1000) * 1000;
-    let runtime_slices_max_tasks = request.runtime_slices_max_tasks.unwrap_or(256);
 
-    let cli_layer = MonitorConfigLayer {
-        target_pids: (!request.target_pids.is_empty()).then(|| request.target_pids.clone()),
-        tree_pids: (!request.tree_pids.is_empty()).then(|| request.tree_pids.clone()),
-        exclude_tree_pids: (!request.exclude_tree_pids.is_empty())
-            .then(|| request.exclude_tree_pids.clone()),
-        include_comm: (!request.include_comm.is_empty()).then(|| request.include_comm.clone()),
-        exclude_comm: (!request.exclude_comm.is_empty()).then(|| request.exclude_comm.clone()),
-        max_tasks: (limits.max_targets != TARGET_PIDS_MAX).then_some(limits.max_targets),
+    let mut api_layer = request.clone().into_monitor_config_layer()?;
+    api_layer.max_duration = Some(Some(std::time::Duration::from_secs(duration_seconds)));
+    api_layer.max_tasks = (limits.max_targets != TARGET_PIDS_MAX).then_some(limits.max_targets);
 
-        summary_period_ms: request.summary_ms.filter(|value| *value != 1_000),
-        max_duration: Some(Some(std::time::Duration::from_secs(duration_seconds))),
-        spike_threshold_ns: (spike_threshold_ns != 1_000_000).then_some(spike_threshold_ns),
-
-        irq_latency: request.irq_latency.then_some(true),
-        irqs: (!request.irqs.is_empty()).then(|| request.irqs.clone()),
-        hwmon: request.hwmon.then_some(true),
-        cpu_freq: request.cpu_freq.then_some(true),
-        faults: request.faults.then_some(true),
-        block_io: request.block_io.then_some(true),
-        stat_wait: request.stat_wait.then_some(true),
-        runtime_slices: request.runtime_slices.then_some(true),
-
-        run_name: request.record.then(|| {
-            Some(
-                request
-                    .run_name
-                    .clone()
-                    .unwrap_or_else(|| "remote-run".to_owned()),
-            )
-        }),
-        output_dir: request.record.then(|| Some(run_dir.to_path_buf())),
-
-        focus_source: (focus_source != FocusSource::Heuristic).then_some(focus_source),
-        foreground_window: (request.foreground_window || focus_source != FocusSource::Heuristic)
-            .then_some(true),
-        foreground_source: (foreground_source != ForegroundSource::Auto)
-            .then_some(foreground_source),
-        foreground_poll_ms: request.foreground_poll_ms.filter(|value| *value != 1_000),
-        foreground_max_stale_ms: request
-            .foreground_max_stale_ms
-            .filter(|value| *value != 2_500),
-        foreground_include_title: request.foreground_include_title.then_some(true),
-
-        runtime_slices_max_tasks: (runtime_slices_max_tasks != 256)
-            .then_some(runtime_slices_max_tasks),
-
-        ..MonitorConfigLayer::default()
-    };
+    if request.record {
+        api_layer.output_dir = Some(Some(run_dir.to_path_buf()));
+    }
 
     let user_file =
         crate::config_file::load_user_config().map_err(crate::error::ConfigError::UserConfig)?;
@@ -1667,7 +1622,7 @@ fn monitor_config_from_remote_request(
         },
         user_file,
         preset: None,
-        cli: ApiOverrides { layer: cli_layer },
+        cli: ApiOverrides { layer: api_layer },
     })?;
 
     Ok(resolved.config)
