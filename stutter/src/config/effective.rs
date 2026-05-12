@@ -7,7 +7,7 @@ use crate::{
             TargetConfig, TimingConfig,
         },
         schema::ConfigDiagnostic,
-        source::FieldProvenance,
+        source::{ConfigSource, FieldProvenance},
     },
     error::ConfigError,
 };
@@ -15,6 +15,8 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectiveMonitorConfig {
     pub config: MonitorConfig,
+    pub provenance: Vec<FieldProvenance>,
+    pub diagnostics: Vec<ConfigDiagnostic>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,19 +33,53 @@ impl EffectiveMonitorConfig {
         preset: Option<MonitorConfigLayer>,
         cli: MonitorConfigLayer,
     ) -> Result<Self, ConfigError> {
+        Self::from_layers_with_sources(
+            defaults,
+            user_file,
+            preset,
+            cli,
+            ConfigSource::Cli,
+            Vec::new(),
+        )
+    }
+
+    pub fn from_layers_with_sources(
+        defaults: MonitorConfig,
+        user_file: Option<MonitorConfigLayer>,
+        preset: Option<MonitorConfigLayer>,
+        overrides: MonitorConfigLayer,
+        overrides_source: ConfigSource,
+        diagnostics: Vec<ConfigDiagnostic>,
+    ) -> Result<Self, ConfigError> {
         let mut config = defaults;
+        let mut provenance = Vec::new();
+
+        record_layer_provenance(
+            &MonitorConfigLayer::from_monitor_config(config.clone()),
+            ConfigSource::Default,
+            &mut provenance,
+        );
 
         if let Some(layer) = user_file {
-            apply_layer(&mut config, layer);
+            apply_layer_with_provenance(
+                &mut config,
+                layer,
+                ConfigSource::UserFile,
+                &mut provenance,
+            );
         }
 
         if let Some(layer) = preset {
-            apply_layer(&mut config, layer);
+            apply_layer_with_provenance(&mut config, layer, ConfigSource::Preset, &mut provenance);
         }
 
-        apply_layer(&mut config, cli);
+        apply_layer_with_provenance(&mut config, overrides, overrides_source, &mut provenance);
 
-        Ok(Self { config })
+        Ok(Self {
+            config,
+            provenance,
+            diagnostics,
+        })
     }
 
     pub fn into_monitor_config(self) -> MonitorConfig {
@@ -54,21 +90,28 @@ impl EffectiveMonitorConfig {
 pub fn resolve_monitor_config_sources(
     sources: ConfigSources,
 ) -> Result<ResolvedMonitorConfig, ConfigError> {
-    let diagnostics = sources
-        .user_file
-        .as_ref()
-        .map(|user_file| user_file.diagnostics.clone())
-        .unwrap_or_default();
-    let config = merge::merge_config_sources_checked(sources)?;
+    let effective = merge::merge_config_sources_effective_checked(sources)?;
 
     Ok(ResolvedMonitorConfig {
-        config,
-        provenance: Vec::new(),
-        diagnostics,
+        config: effective.config,
+        provenance: effective.provenance,
+        diagnostics: effective.diagnostics,
     })
 }
 
 pub fn apply_layer(config: &mut MonitorConfig, layer: MonitorConfigLayer) {
+    let mut ignored_provenance = Vec::new();
+    apply_layer_with_provenance(config, layer, ConfigSource::Cli, &mut ignored_provenance);
+}
+
+fn apply_layer_with_provenance(
+    config: &mut MonitorConfig,
+    layer: MonitorConfigLayer,
+    source: ConfigSource,
+    provenance: &mut Vec<FieldProvenance>,
+) {
+    record_layer_provenance(&layer, source, provenance);
+
     apply_target_layer(&mut config.target, &layer);
     apply_timing_layer(&mut config.timing, &layer);
     apply_probe_layer(&mut config.probes, &layer);
@@ -86,6 +129,299 @@ pub fn apply_layer(config: &mut MonitorConfig, layer: MonitorConfigLayer) {
     apply_ebpf_sizing_layer(&mut config.ebpf_sizing, &layer);
     apply_ui_layer(&mut config.ui, &layer);
     apply_remote_layer(&mut config.remote, &layer);
+}
+
+fn record_layer_provenance(
+    layer: &MonitorConfigLayer,
+    source: ConfigSource,
+    provenance: &mut Vec<FieldProvenance>,
+) {
+    fn record_if_present<T>(
+        value: &Option<T>,
+        provenance: &mut Vec<FieldProvenance>,
+        field: &'static str,
+        source: ConfigSource,
+    ) {
+        if value.is_some() {
+            provenance.push(FieldProvenance::new(field, source));
+        }
+    }
+
+    record_if_present(&layer.target_pids, provenance, "target.target_pids", source);
+    record_if_present(&layer.tree_pids, provenance, "target.tree_pids", source);
+    record_if_present(&layer.cgroupv2, provenance, "target.cgroupv2", source);
+    record_if_present(
+        &layer.exclude_tree_pids,
+        provenance,
+        "target.exclude_tree_pids",
+        source,
+    );
+    record_if_present(
+        &layer.include_comm,
+        provenance,
+        "target.include_comm",
+        source,
+    );
+    record_if_present(
+        &layer.exclude_comm,
+        provenance,
+        "target.exclude_comm",
+        source,
+    );
+    record_if_present(
+        &layer.watch_process,
+        provenance,
+        "target.watch_process",
+        source,
+    );
+    record_if_present(&layer.persistent, provenance, "target.persistent", source);
+    record_if_present(
+        &layer.keep_missing_pid,
+        provenance,
+        "target.keep_missing_pid",
+        source,
+    );
+    record_if_present(&layer.max_tasks, provenance, "target.max_tasks", source);
+
+    record_if_present(
+        &layer.summary_period_ms,
+        provenance,
+        "timing.summary_period_ms",
+        source,
+    );
+    record_if_present(
+        &layer.epoch_period_ms,
+        provenance,
+        "timing.epoch_period_ms",
+        source,
+    );
+    record_if_present(
+        &layer.max_duration,
+        provenance,
+        "timing.max_duration",
+        source,
+    );
+    record_if_present(
+        &layer.spike_threshold_ns,
+        provenance,
+        "timing.spike_threshold_ns",
+        source,
+    );
+
+    record_if_present(&layer.irq_latency, provenance, "probes.irq_latency", source);
+    record_if_present(&layer.irqs, provenance, "probes.irqs", source);
+    record_if_present(&layer.hwmon, provenance, "probes.hwmon", source);
+    record_if_present(&layer.cpu_freq, provenance, "probes.cpu_freq", source);
+    record_if_present(&layer.faults, provenance, "probes.faults", source);
+    record_if_present(&layer.cpu_perf, provenance, "probes.cpu_perf", source);
+    record_if_present(&layer.block_io, provenance, "probes.block_io", source);
+    record_if_present(&layer.stat_wait, provenance, "probes.stat_wait", source);
+    record_if_present(
+        &layer.runtime_slices,
+        provenance,
+        "probes.runtime_slices",
+        source,
+    );
+
+    record_if_present(&layer.run_name, provenance, "recording.run_name", source);
+    record_if_present(
+        &layer.output_dir,
+        provenance,
+        "recording.output_dir",
+        source,
+    );
+    record_if_present(
+        &layer.retain_intervals,
+        provenance,
+        "recording.retain_intervals",
+        source,
+    );
+
+    record_if_present(
+        &layer.json_stream,
+        provenance,
+        "outputs.json_stream",
+        source,
+    );
+    record_if_present(
+        &layer.metrics_port,
+        provenance,
+        "outputs.metrics_port",
+        source,
+    );
+    record_if_present(
+        &layer.otlp_endpoint,
+        provenance,
+        "outputs.otlp_endpoint",
+        source,
+    );
+    record_if_present(
+        &layer.otel_service_name,
+        provenance,
+        "outputs.otel_service_name",
+        source,
+    );
+
+    record_if_present(&layer.auto_focus, provenance, "focus.auto_focus", source);
+    record_if_present(
+        &layer.focus_source,
+        provenance,
+        "focus.focus_source",
+        source,
+    );
+    record_if_present(
+        &layer.foreground_window,
+        provenance,
+        "focus.foreground_window",
+        source,
+    );
+    record_if_present(
+        &layer.foreground_source,
+        provenance,
+        "focus.foreground_source",
+        source,
+    );
+    record_if_present(
+        &layer.foreground_poll_ms,
+        provenance,
+        "focus.foreground_poll_ms",
+        source,
+    );
+    record_if_present(
+        &layer.foreground_max_stale_ms,
+        provenance,
+        "focus.foreground_max_stale_ms",
+        source,
+    );
+    record_if_present(
+        &layer.foreground_include_title,
+        provenance,
+        "focus.foreground_include_title",
+        source,
+    );
+    record_if_present(
+        &layer.auto_focus_poll_ms,
+        provenance,
+        "focus.auto_focus_poll_ms",
+        source,
+    );
+    record_if_present(
+        &layer.auto_focus_min_confidence,
+        provenance,
+        "focus.auto_focus_min_confidence",
+        source,
+    );
+    record_if_present(
+        &layer.auto_focus_switch_cooldown_ms,
+        provenance,
+        "focus.auto_focus_switch_cooldown_ms",
+        source,
+    );
+    record_if_present(
+        &layer.auto_focus_switch_margin,
+        provenance,
+        "focus.auto_focus_switch_margin",
+        source,
+    );
+    record_if_present(
+        &layer.auto_focus_required_polls,
+        provenance,
+        "focus.auto_focus_required_polls",
+        source,
+    );
+    record_if_present(
+        &layer.auto_focus_max_roots,
+        provenance,
+        "focus.auto_focus_max_roots",
+        source,
+    );
+
+    record_if_present(&layer.follow_exec, provenance, "safety.follow_exec", source);
+    record_if_present(
+        &layer.native_cgroup_filter,
+        provenance,
+        "safety.native_cgroup_filter",
+        source,
+    );
+
+    record_if_present(&layer.watch_poll_ms, provenance, "watch.poll_ms", source);
+    record_if_present(&layer.watch_timeout, provenance, "watch.timeout", source);
+
+    record_if_present(
+        &layer.alert_threshold_ns,
+        provenance,
+        "alerts.threshold_ns",
+        source,
+    );
+    record_if_present(
+        &layer.alert_webhook_url,
+        provenance,
+        "alerts.webhook_url",
+        source,
+    );
+
+    record_if_present(&layer.csv_stream, provenance, "streams.csv", source);
+    record_if_present(&layer.verbose, provenance, "streams.verbose", source);
+
+    record_if_present(&layer.hwmon_root, provenance, "hwmon.root", source);
+    record_if_present(&layer.hwmon_drm_card, provenance, "hwmon.drm_card", source);
+    record_if_present(
+        &layer.hwmon_render_node,
+        provenance,
+        "hwmon.render_node",
+        source,
+    );
+
+    record_if_present(&layer.mangohud_log, provenance, "mangohud.log", source);
+    record_if_present(
+        &layer.mangohud_log_live,
+        provenance,
+        "mangohud.log_live",
+        source,
+    );
+
+    record_if_present(&layer.tui, provenance, "ui.tui", source);
+
+    record_if_present(
+        &layer.cpu_perf_kernel,
+        provenance,
+        "cpu_perf.include_kernel",
+        source,
+    );
+    record_if_present(
+        &layer.cpu_perf_max_tasks,
+        provenance,
+        "cpu_perf.max_tasks",
+        source,
+    );
+    record_if_present(
+        &layer.cpu_perf_cache_refs,
+        provenance,
+        "cpu_perf.collect_cache_refs",
+        source,
+    );
+
+    record_if_present(
+        &layer.runtime_slices_max_tasks,
+        provenance,
+        "runtime_slices.max_tasks",
+        source,
+    );
+
+    record_if_present(
+        &layer.ringbuf_size_kb,
+        provenance,
+        "ebpf_sizing.ringbuf_size_kb",
+        source,
+    );
+    record_if_present(
+        &layer.wakeup_map_factor,
+        provenance,
+        "ebpf_sizing.wakeup_map_factor",
+        source,
+    );
+
+    record_if_present(&layer.remote, provenance, "remote.endpoint", source);
 }
 
 fn apply_target_layer(config: &mut TargetConfig, layer: &MonitorConfigLayer) {
@@ -360,6 +696,17 @@ mod tests {
     use super::*;
     use crate::config::{FocusSource, ForegroundSource};
 
+    fn last_source_for_field(
+        provenance: &[FieldProvenance],
+        field: &'static str,
+    ) -> Option<ConfigSource> {
+        provenance
+            .iter()
+            .rev()
+            .find(|entry| entry.field == field)
+            .map(|entry| entry.source)
+    }
+
     #[test]
     fn cli_false_override_replaces_user_true() {
         let user = MonitorConfigLayer {
@@ -379,6 +726,14 @@ mod tests {
 
         assert!(!effective.config.probes.hwmon);
         assert!(!effective.config.probes.cpu_freq);
+        assert_eq!(
+            last_source_for_field(&effective.provenance, "probes.hwmon"),
+            Some(ConfigSource::Cli)
+        );
+        assert_eq!(
+            last_source_for_field(&effective.provenance, "probes.cpu_freq"),
+            Some(ConfigSource::Cli)
+        );
     }
 
     #[test]
@@ -409,6 +764,22 @@ mod tests {
             ForegroundSource::Auto
         );
         assert_eq!(effective.config.focus.auto_focus_min_confidence, 0.60);
+        assert_eq!(
+            last_source_for_field(&effective.provenance, "timing.summary_period_ms"),
+            Some(ConfigSource::Cli)
+        );
+        assert_eq!(
+            last_source_for_field(&effective.provenance, "focus.focus_source"),
+            Some(ConfigSource::Cli)
+        );
+        assert_eq!(
+            last_source_for_field(&effective.provenance, "focus.foreground_source"),
+            Some(ConfigSource::Cli)
+        );
+        assert_eq!(
+            last_source_for_field(&effective.provenance, "focus.auto_focus_min_confidence"),
+            Some(ConfigSource::Cli)
+        );
     }
 
     #[test]
@@ -435,10 +806,46 @@ mod tests {
         .unwrap();
 
         assert!(!effective.config.probes.block_io);
+        assert_eq!(
+            last_source_for_field(&effective.provenance, "probes.block_io"),
+            Some(ConfigSource::Cli)
+        );
+
+        let block_io_sources: Vec<_> = effective
+            .provenance
+            .iter()
+            .filter(|entry| entry.field == "probes.block_io")
+            .map(|entry| entry.source)
+            .collect();
+
+        assert!(block_io_sources.contains(&ConfigSource::Default));
+        assert!(block_io_sources.contains(&ConfigSource::UserFile));
+        assert!(block_io_sources.contains(&ConfigSource::Preset));
+        assert!(block_io_sources.contains(&ConfigSource::Cli));
     }
 
     #[test]
-    fn resolve_monitor_config_sources_carries_user_file_diagnostics() {
+    fn default_source_is_recorded_for_default_fields() {
+        let effective = EffectiveMonitorConfig::from_layers(
+            MonitorConfig::default(),
+            None,
+            None,
+            MonitorConfigLayer::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            last_source_for_field(&effective.provenance, "timing.summary_period_ms"),
+            Some(ConfigSource::Default)
+        );
+        assert_eq!(
+            last_source_for_field(&effective.provenance, "target.max_tasks"),
+            Some(ConfigSource::Default)
+        );
+    }
+
+    #[test]
+    fn resolve_monitor_config_sources_carries_user_file_diagnostics_and_provenance() {
         let mut user_file = crate::config_file::UserConfigFile {
             summary_period_ms: Some(250),
             ..Default::default()
@@ -455,14 +862,19 @@ mod tests {
             defaults: crate::config::merge::DefaultConfig::default(),
             user_file: Some(user_file),
             preset: None,
-            cli: crate::config::merge::CliOverrides {
+            overrides: crate::config::merge::CliOverrides {
                 layer: MonitorConfigLayer::default(),
-            },
+            }
+            .into(),
         })
         .unwrap();
 
         assert_eq!(resolved.config.timing.summary_period_ms, 250);
         assert_eq!(resolved.diagnostics.len(), 1);
         assert_eq!(resolved.diagnostics[0].field.as_deref(), Some("summary_ms"));
+        assert_eq!(
+            last_source_for_field(&resolved.provenance, "timing.summary_period_ms"),
+            Some(ConfigSource::UserFile)
+        );
     }
 }
