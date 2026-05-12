@@ -1622,7 +1622,7 @@ fn monitor_config_from_remote_request(
         },
         user_file,
         preset: None,
-        cli: ApiOverrides { layer: api_layer },
+        overrides: ApiOverrides { layer: api_layer }.into(),
     })?;
 
     Ok(resolved.config)

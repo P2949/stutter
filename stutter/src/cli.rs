@@ -2489,7 +2489,7 @@ fn monitor_config_from_monitor_args_with_file(
         preset: preset.map(|preset| PresetConfig {
             layer: MonitorConfigLayer::from_preset_defaults(preset.defaults()),
         }),
-        cli: CliOverrides { layer },
+        overrides: CliOverrides { layer }.into(),
     })?;
     let mut config = resolved.config;
 

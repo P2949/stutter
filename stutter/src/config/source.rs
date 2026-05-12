@@ -4,6 +4,7 @@ pub enum ConfigSource {
     UserFile,
     Preset,
     Cli,
+    Api,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
