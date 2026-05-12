@@ -16,9 +16,10 @@ use crate::{
         ValidateCommandInput,
     },
     config::{
-        CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX, layer::MonitorConfigLayer,
+        CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX,
+        effective::EffectiveMonitorConfig, layer::MonitorConfigLayer, model::MonitorConfig,
     },
-    process_tree::{CompiledPattern, TaskClass, TaskFilters},
+    process_tree::TaskClass,
 };
 
 #[derive(Parser, Debug)]
@@ -1372,6 +1373,25 @@ pub struct ScenarioPathArgs {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RecordingMode {
+    Monitor,
+    ForceRecording { max_duration: Option<Duration> },
+}
+
+impl RecordingMode {
+    fn force_recording(self) -> bool {
+        matches!(self, Self::ForceRecording { .. })
+    }
+
+    fn max_duration(self) -> Option<Duration> {
+        match self {
+            Self::Monitor => None,
+            Self::ForceRecording { max_duration } => max_duration,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum AppCommand {
     Monitor(MonitorCommandInput),
@@ -1435,278 +1455,6 @@ impl ForegroundSource {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AutoFocusConfig {
-    pub enabled: bool,
-    pub source: FocusSource,
-    pub poll_ms: u64,
-    pub min_confidence: f32,
-    pub switch_cooldown_ms: u64,
-    pub switch_margin: f32,
-    pub required_polls: u32,
-    pub max_roots: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[allow(dead_code)]
-pub struct ForegroundWindowConfig {
-    pub enabled: bool,
-    pub source: ForegroundSource,
-    pub poll_ms: u64,
-    pub max_stale_ms: u64,
-    pub include_title: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct Config {
-    pub monitor_config_layer: Option<MonitorConfigLayer>,
-    pub preset: Option<String>,
-    pub target_pids: Vec<u32>,
-    pub tree_pids: Vec<u32>,
-    pub summary_period_ms: u64,
-    pub epoch_period_ms: Option<u64>,
-    pub spike_threshold_ns: u64,
-    pub alert_threshold_ns: Option<u64>,
-    pub alert_webhook_url: Option<String>,
-    pub verbose: bool,
-    pub task_filters: TaskFilters,
-    pub keep_missing_pid: bool,
-    pub watch_process: Option<String>,
-    pub persistent: bool,
-    pub watch_poll_ms: u64,
-    pub watch_timeout: Option<Duration>,
-    pub max_tasks: usize,
-    pub csv_stream: Option<CsvStreamTarget>,
-    pub irq_latency: bool,
-    pub irqs: Vec<u32>,
-    pub hwmon: bool,
-    pub hwmon_root: Option<PathBuf>,
-    pub hwmon_drm_card: Option<String>,
-    pub hwmon_render_node: Option<PathBuf>,
-    pub mangohud_log: Option<PathBuf>,
-    pub mangohud_log_live: bool,
-    pub otlp_endpoint: Option<String>,
-    pub otel_service_name: String,
-    pub auto_focus: bool,
-    pub focus_source: FocusSource,
-    #[allow(dead_code)]
-    pub foreground_window: bool,
-    #[allow(dead_code)]
-    pub foreground_source: ForegroundSource,
-    #[allow(dead_code)]
-    pub foreground_poll_ms: u64,
-    #[allow(dead_code)]
-    pub foreground_max_stale_ms: u64,
-    #[allow(dead_code)]
-    pub foreground_include_title: bool,
-    #[allow(dead_code)]
-    pub auto_focus_poll_ms: u64,
-    pub auto_focus_min_confidence: f32,
-    pub auto_focus_switch_cooldown_ms: u64,
-    pub auto_focus_switch_margin: f32,
-    #[allow(dead_code)]
-    pub auto_focus_required_polls: u32,
-    #[allow(dead_code)]
-    pub auto_focus_max_roots: usize,
-    pub remote: Option<String>,
-
-    pub tui: bool,
-    pub retain_intervals: Option<usize>,
-    pub recording: Option<RecordingConfig>,
-    pub max_duration: Option<Duration>,
-    pub cpu_freq: bool,
-    pub cgroupv2: Option<PathBuf>,
-    // Experimental: native cgroup filtering applies to current-task probes only.
-    // Scheduler wakee filtering still uses TARGET_PIDS.
-    pub native_cgroup_filter: bool,
-    pub follow_exec: bool,
-    pub exclude_tree_pids: Vec<u32>,
-    pub faults: bool,
-    pub cpu_perf: bool,
-    pub cpu_perf_kernel: bool,
-    pub cpu_perf_max_tasks: usize,
-    pub cpu_perf_cache_refs: bool,
-    pub block_io: bool,
-    pub stat_wait: bool,
-    pub runtime_slices: bool,
-    pub runtime_slices_max_tasks: usize,
-    pub json_stream: bool,
-    pub metrics_port: Option<u16>,
-    pub ringbuf_size_kb: Option<u32>,
-    pub wakeup_map_factor: Option<u32>,
-}
-
-impl Config {
-    pub fn csv_streams_to_stdout(&self) -> bool {
-        matches!(self.csv_stream, Some(CsvStreamTarget::Stdout))
-    }
-
-    pub fn has_explicit_target(&self) -> bool {
-        !self.target_pids.is_empty()
-            || !self.tree_pids.is_empty()
-            || self.watch_process.is_some()
-            || self.cgroupv2.is_some()
-    }
-
-    #[allow(dead_code)]
-    pub fn auto_focus_enabled(&self) -> bool {
-        self.auto_focus && !self.has_explicit_target()
-    }
-
-    #[allow(dead_code)]
-    pub fn auto_focus_config(&self) -> AutoFocusConfig {
-        AutoFocusConfig {
-            enabled: self.auto_focus_enabled(),
-            source: self.focus_source,
-            poll_ms: self.auto_focus_poll_ms,
-            min_confidence: self.auto_focus_min_confidence,
-            switch_cooldown_ms: self.auto_focus_switch_cooldown_ms,
-            switch_margin: self.auto_focus_switch_margin,
-            required_polls: self.auto_focus_required_polls,
-            max_roots: self.auto_focus_max_roots,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn foreground_window_config(&self) -> ForegroundWindowConfig {
-        ForegroundWindowConfig {
-            enabled: self.foreground_window
-                || (self.auto_focus
-                    && matches!(
-                        self.focus_source,
-                        FocusSource::Foreground | FocusSource::Hybrid
-                    )),
-            source: self.foreground_source,
-            poll_ms: self.foreground_poll_ms,
-            max_stale_ms: self.foreground_max_stale_ms,
-            include_title: self.foreground_include_title,
-        }
-    }
-
-    pub(crate) fn to_monitor_config_layer(&self) -> MonitorConfigLayer {
-        MonitorConfigLayer {
-            target_pids: (!self.target_pids.is_empty()).then(|| self.target_pids.clone()),
-            tree_pids: (!self.tree_pids.is_empty()).then(|| self.tree_pids.clone()),
-            cgroupv2: self.cgroupv2.clone().map(Some),
-            exclude_tree_pids: (!self.exclude_tree_pids.is_empty())
-                .then(|| self.exclude_tree_pids.clone()),
-            include_comm: (!self.task_filters.include_comm.is_empty()).then(|| {
-                self.task_filters
-                    .include_comm
-                    .iter()
-                    .map(|pattern| pattern.raw.clone())
-                    .collect()
-            }),
-            exclude_comm: (!self.task_filters.exclude_comm.is_empty()).then(|| {
-                self.task_filters
-                    .exclude_comm
-                    .iter()
-                    .map(|pattern| pattern.raw.clone())
-                    .collect()
-            }),
-            watch_process: self.watch_process.clone().map(Some),
-            persistent: self.persistent.then_some(true),
-            keep_missing_pid: self.keep_missing_pid.then_some(true),
-            max_tasks: (self.max_tasks != TARGET_PIDS_MAX).then_some(self.max_tasks),
-
-            summary_period_ms: (self.summary_period_ms != 1_000).then_some(self.summary_period_ms),
-            epoch_period_ms: self.epoch_period_ms.map(Some),
-            max_duration: self.max_duration.map(Some),
-            spike_threshold_ns: (self.spike_threshold_ns != 1_000_000)
-                .then_some(self.spike_threshold_ns),
-
-            irq_latency: self.irq_latency.then_some(true),
-            irqs: (!self.irqs.is_empty()).then(|| self.irqs.clone()),
-            hwmon: self.hwmon.then_some(true),
-            cpu_freq: self.cpu_freq.then_some(true),
-            faults: self.faults.then_some(true),
-            cpu_perf: self.cpu_perf.then_some(true),
-            block_io: self.block_io.then_some(true),
-            stat_wait: self.stat_wait.then_some(true),
-            runtime_slices: self.runtime_slices.then_some(true),
-
-            run_name: self
-                .recording
-                .as_ref()
-                .and_then(|recording| recording.run_name.clone().map(Some)),
-            output_dir: self
-                .recording
-                .as_ref()
-                .and_then(|recording| recording.out_dir.clone().map(Some)),
-            retain_intervals: self.retain_intervals.map(Some),
-
-            json_stream: self.json_stream.then_some(true),
-            metrics_port: self.metrics_port.map(Some),
-            otlp_endpoint: self.otlp_endpoint.clone().map(Some),
-            otel_service_name: (self.otel_service_name != "stutter")
-                .then(|| self.otel_service_name.clone()),
-
-            auto_focus: self.auto_focus.then_some(true),
-            focus_source: (self.focus_source != FocusSource::Heuristic)
-                .then_some(self.focus_source),
-            foreground_window: self.foreground_window.then_some(true),
-            foreground_source: (self.foreground_source != ForegroundSource::Auto)
-                .then_some(self.foreground_source),
-            foreground_poll_ms: (self.foreground_poll_ms != 1_000)
-                .then_some(self.foreground_poll_ms),
-            foreground_max_stale_ms: (self.foreground_max_stale_ms != 2_500)
-                .then_some(self.foreground_max_stale_ms),
-            foreground_include_title: self.foreground_include_title.then_some(true),
-            auto_focus_poll_ms: (self.auto_focus_poll_ms != 1_000)
-                .then_some(self.auto_focus_poll_ms),
-            auto_focus_min_confidence: (self.auto_focus_min_confidence != 0.60)
-                .then_some(self.auto_focus_min_confidence),
-            auto_focus_switch_cooldown_ms: (self.auto_focus_switch_cooldown_ms != 5_000)
-                .then_some(self.auto_focus_switch_cooldown_ms),
-            auto_focus_switch_margin: (self.auto_focus_switch_margin != 0.20)
-                .then_some(self.auto_focus_switch_margin),
-            auto_focus_required_polls: (self.auto_focus_required_polls != 2)
-                .then_some(self.auto_focus_required_polls),
-            auto_focus_max_roots: (self.auto_focus_max_roots != 4)
-                .then_some(self.auto_focus_max_roots),
-
-            follow_exec: (!self.follow_exec).then_some(false),
-            native_cgroup_filter: self.native_cgroup_filter.then_some(true),
-
-            watch_poll_ms: (self.watch_poll_ms != 2_000).then_some(self.watch_poll_ms),
-            watch_timeout: self.watch_timeout.map(Some),
-
-            alert_threshold_ns: self.alert_threshold_ns.map(Some),
-            alert_webhook_url: self.alert_webhook_url.clone().map(Some),
-
-            csv_stream: self.csv_stream.clone().map(Some),
-            verbose: self.verbose.then_some(true),
-
-            hwmon_root: self.hwmon_root.clone().map(Some),
-            hwmon_drm_card: self.hwmon_drm_card.clone().map(Some),
-            hwmon_render_node: self.hwmon_render_node.clone().map(Some),
-
-            mangohud_log: self.mangohud_log.clone().map(Some),
-            mangohud_log_live: self.mangohud_log_live.then_some(true),
-
-            tui: self.tui.then_some(true),
-
-            cpu_perf_kernel: self.cpu_perf_kernel.then_some(true),
-            cpu_perf_max_tasks: (self.cpu_perf_max_tasks != 128).then_some(self.cpu_perf_max_tasks),
-            cpu_perf_cache_refs: self.cpu_perf_cache_refs.then_some(true),
-
-            runtime_slices_max_tasks: (self.runtime_slices_max_tasks != 256)
-                .then_some(self.runtime_slices_max_tasks),
-
-            ringbuf_size_kb: self.ringbuf_size_kb.map(Some),
-            wakeup_map_factor: self.wakeup_map_factor.map(Some),
-
-            remote: self.remote.clone().map(Some),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct RecordingConfig {
-    pub run_name: Option<String>,
-    pub out_dir: Option<PathBuf>,
-}
-
 fn validate_autotune_mode(mode: &str) -> anyhow::Result<()> {
     match mode {
         "observe" | "suggest" | "apply-low-risk" => Ok(()),
@@ -1718,7 +1466,7 @@ fn validate_autotune_mode(mode: &str) -> anyhow::Result<()> {
 
 pub fn autotune_monitor_config(
     input: &crate::autotune::AutotuneCommandInput,
-) -> anyhow::Result<Arc<Config>> {
+) -> anyhow::Result<Arc<MonitorConfig>> {
     if input.allow_system_wide_actions {
         anyhow::bail!(
             "autotune system-wide actions are intentionally disabled; use observe/suggest focus mode"
@@ -1763,10 +1511,11 @@ pub fn autotune_monitor_config(
 
     monitor.no_record = true;
 
-    Ok(Arc::new(config_from_monitor_args(
+    Ok(Arc::new(monitor_config_from_monitor_args(
         monitor,
-        false,
-        input.duration_seconds.map(Duration::from_secs),
+        RecordingMode::ForceRecording {
+            max_duration: input.duration_seconds.map(Duration::from_secs),
+        },
     )?))
 }
 
@@ -1782,12 +1531,12 @@ where
     let cli = Cli::try_parse_from(args)?;
 
     match cli.command {
-        Some(Command::Monitor(args)) => {
-            let legacy = config_from_monitor_args(args, false, None)?;
-            Ok(AppCommand::Monitor(MonitorCommandInput {
-                config: Arc::new(crate::config::effective::resolve_monitor_config(&legacy)?),
-            }))
-        }
+        Some(Command::Monitor(args)) => Ok(AppCommand::Monitor(MonitorCommandInput {
+            config: Arc::new(monitor_config_from_monitor_args(
+                args,
+                RecordingMode::Monitor,
+            )?),
+        })),
         Some(Command::Record(args)) => {
             if matches!(args.duration, Some(0)) {
                 anyhow::bail!("--duration must be greater than zero");
@@ -1800,9 +1549,11 @@ where
             }
 
             let max_duration = args.duration.map(Duration::from_secs);
-            let legacy = config_from_monitor_args(args.monitor, true, max_duration)?;
             Ok(AppCommand::Monitor(MonitorCommandInput {
-                config: Arc::new(crate::config::effective::resolve_monitor_config(&legacy)?),
+                config: Arc::new(monitor_config_from_monitor_args(
+                    args.monitor,
+                    RecordingMode::ForceRecording { max_duration },
+                )?),
             }))
         }
         Some(Command::Bench(mut args)) => {
@@ -1821,12 +1572,12 @@ where
 
             let run_name = format!("bench-{}-{}", args.role, args.scenario);
             args.monitor.run_name = Some(run_name.clone());
-            let legacy = config_from_monitor_args(
+            let config = Arc::new(monitor_config_from_monitor_args(
                 args.monitor,
-                true,
-                Some(Duration::from_secs(args.duration)),
-            )?;
-            let config = Arc::new(crate::config::effective::resolve_monitor_config(&legacy)?);
+                RecordingMode::ForceRecording {
+                    max_duration: Some(Duration::from_secs(args.duration)),
+                },
+            )?);
             Ok(AppCommand::Bench(BenchCommandInput {
                 config,
                 role: args.role,
@@ -2100,12 +1851,12 @@ where
                 top: args.top,
             }))
         }
-        None => {
-            let legacy = config_from_monitor_args(cli.legacy_monitor, false, None)?;
-            Ok(AppCommand::Monitor(MonitorCommandInput {
-                config: Arc::new(crate::config::effective::resolve_monitor_config(&legacy)?),
-            }))
-        }
+        None => Ok(AppCommand::Monitor(MonitorCommandInput {
+            config: Arc::new(monitor_config_from_monitor_args(
+                cli.legacy_monitor,
+                RecordingMode::Monitor,
+            )?),
+        })),
         Some(Command::Agent(args)) => {
             if args.max_duration_seconds == 0 {
                 anyhow::bail!("--max-duration-seconds must be greater than zero");
@@ -2432,21 +2183,21 @@ fn merge_bool(
     }
 }
 
-pub fn config_from_monitor_args(
+fn monitor_config_from_monitor_args(
     args: MonitorArgs,
-    force_recording: bool,
-    max_duration: Option<Duration>,
-) -> anyhow::Result<Config> {
-    let file_config = crate::config_file::load_user_config()?.unwrap_or_default();
-    config_from_monitor_args_with_file(args, file_config, force_recording, max_duration)
+    recording_mode: RecordingMode,
+) -> anyhow::Result<MonitorConfig> {
+    let file_config = crate::config_file::load_user_config()?;
+    monitor_config_from_monitor_args_with_file(args, file_config, recording_mode)
 }
 
-fn config_from_monitor_args_with_file(
+fn monitor_config_from_monitor_args_with_file(
     mut args: MonitorArgs,
-    file_config: crate::config_file::UserConfigFile,
-    force_recording: bool,
-    max_duration: Option<Duration>,
-) -> anyhow::Result<Config> {
+    file_config: Option<crate::config_file::UserConfigFile>,
+    recording_mode: RecordingMode,
+) -> anyhow::Result<MonitorConfig> {
+    let file_config = file_config.unwrap_or_default();
+
     let preset = match args.preset.as_deref() {
         Some(name) => Some(name.parse::<crate::presets::Preset>()?),
         None => None,
@@ -2466,17 +2217,17 @@ fn config_from_monitor_args_with_file(
 
     if !args.include_comm.is_empty() {
         // use CLI
-    } else if let Some(config_include) = file_config.include_comm {
+    } else if let Some(config_include) = file_config.include_comm.clone() {
         args.include_comm = config_include;
     }
 
     if !args.exclude_comm.is_empty() {
         // use CLI
-    } else if let Some(config_exclude) = file_config.exclude_comm {
+    } else if let Some(config_exclude) = file_config.exclude_comm.clone() {
         args.exclude_comm = config_exclude;
     }
 
-    let hwmon = merge_bool(
+    let _hwmon = merge_bool(
         false,
         file_config.hwmon,
         preset_defaults.hwmon,
@@ -2523,18 +2274,13 @@ fn config_from_monitor_args_with_file(
         args.no_runtime_slices,
     );
 
-    // Re-evaluating irq_latency based on prompt: "Do not auto-enable all IRQ monitoring... Presets do not modify IRQ latency. Document that users should pass --irq-latency --irq N explicitly."
-    // But "lightweight" should disable it.
-    // Let's use merge_bool but with builtin = false.
     let irq_latency = merge_bool(
         false,
         None,
         preset_defaults.irq_latency,
         args.irq_latency,
-        false, // No no-irq-latency flag yet
+        false,
     );
-
-    let retain_intervals = args.retain_intervals.or(file_config.retain_intervals);
 
     if let Some(foreground_window) = file_config.foreground_window {
         args.foreground_window = foreground_window;
@@ -2639,8 +2385,9 @@ fn config_from_monitor_args_with_file(
     args.irqs.sort_unstable();
     args.irqs.dedup();
 
-    let include_comm = validate_comm_patterns("--include-comm", &args.include_comm)?;
-    let exclude_comm = validate_comm_patterns("--exclude-comm", &args.exclude_comm)?;
+    validate_comm_patterns("--include-comm", &args.include_comm)?;
+    validate_comm_patterns("--exclude-comm", &args.exclude_comm)?;
+
     if matches!(args.watch_process.as_deref(), Some("")) {
         anyhow::bail!("--watch-process must not be empty");
     }
@@ -2679,6 +2426,17 @@ fn config_from_monitor_args_with_file(
                 .ok_or_else(|| anyhow::anyhow!("--alert-threshold-ms value is too large"))
         })
         .transpose()?;
+
+    match (&args.csv_path, &args.stream_csv) {
+        (None, Some(value)) if value.trim().is_empty() => {
+            anyhow::bail!("--stream-csv path must not be empty");
+        }
+        (Some(_), Some(_)) => {
+            anyhow::bail!("--stream-csv conflicts with --csv");
+        }
+        _ => {}
+    }
+
     let alert_webhook_url = if alert_threshold_ns.is_some() {
         args.alert_webhook_url.clone().or_else(|| {
             std::env::var("STUTTER_ALERT_WEBHOOK_URL")
@@ -2690,133 +2448,79 @@ fn config_from_monitor_args_with_file(
     };
 
     let mut layer = args.clone().into_monitor_config_layer();
-    if let Some(max_duration) = max_duration {
+    layer.alert_webhook_url = alert_webhook_url.map(Some);
+    if let Some(max_duration) = recording_mode.max_duration() {
         layer.max_duration = Some(Some(max_duration));
     }
     if let Some(epoch) = args.epoch_period_ms {
         layer.summary_period_ms = Some(epoch);
     }
-    let preset = args.preset.clone();
 
-    let recording = if args.no_record {
-        None
-    } else if force_recording || args.run_name.is_some() || args.out_dir.is_some() {
-        let rec = RecordingConfig {
-            run_name: args
-                .run_name
-                .or_else(|| force_recording.then(|| "record".to_owned())),
-            out_dir: args.out_dir,
-        };
-        layer.run_name = rec.run_name.clone().map(Some);
-        layer.output_dir = rec.out_dir.clone().map(Some);
-        Some(rec)
+    let is_recording = if args.no_record {
+        false
     } else {
-        None
+        recording_mode.force_recording() || args.run_name.is_some() || args.out_dir.is_some()
     };
 
-    let cpu_freq = (cpu_freq_config || recording.is_some()) && !args.no_cpu_freq;
+    if is_recording {
+        let run_name = args.run_name.or_else(|| {
+            recording_mode
+                .force_recording()
+                .then(|| "record".to_owned())
+        });
+        layer.run_name = run_name.map(Some);
+        layer.output_dir = args.out_dir.map(Some);
+    }
+
+    let cpu_freq = (cpu_freq_config || is_recording) && !args.no_cpu_freq;
     if cpu_freq {
         layer.cpu_freq = Some(true);
     }
-    let monitor_config_layer = Some(layer);
-    if matches!(args.metrics_port, Some(0)) {
-        anyhow::bail!("--metrics-port must be greater than zero");
+
+    let mut config = EffectiveMonitorConfig::from_layers(
+        MonitorConfig::default(),
+        Some(crate::config::layer::MonitorConfigLayer::from_user_file(
+            &file_config,
+        )?),
+        preset
+            .map(|p| crate::config::layer::MonitorConfigLayer::from_preset_defaults(p.defaults())),
+        layer,
+    )?
+    .into_monitor_config();
+
+    config.timing.summary_period_ms = summary_period_ms;
+    config.timing.spike_threshold_ns = spike_threshold_ns;
+    config.alerts.threshold_ns = alert_threshold_ns;
+
+    config.probes.faults = faults;
+    config.probes.stat_wait = stat_wait;
+    config.probes.block_io = block_io;
+    config.probes.runtime_slices = runtime_slices;
+    config.probes.irq_latency = irq_latency;
+
+    crate::config::effective::compile_task_filters(&mut config)?;
+
+    if config.csv_streams_to_stdout() && config.outputs.json_stream {
+        anyhow::bail!(
+            "--stream-csv - cannot be used with --json-stream because both write to stdout"
+        );
     }
 
-    Ok(Config {
-        monitor_config_layer,
-        preset,
-        target_pids: args.target_pids,
-        tree_pids: args.tree_pids,
-        summary_period_ms,
-        epoch_period_ms: args.epoch_period_ms,
-        spike_threshold_ns,
-        alert_threshold_ns,
-        alert_webhook_url,
-        verbose: args.verbose,
-        task_filters: TaskFilters {
-            include_comm,
-            exclude_comm,
-        },
-        keep_missing_pid: args.keep_missing_pid,
-        watch_process: args.watch_process,
-        persistent: args.persistent,
-        watch_poll_ms: args.watch_poll_ms,
-        watch_timeout: args.watch_timeout_seconds.map(Duration::from_secs),
-        max_tasks,
-        csv_stream: {
-            let csv_stream = match (&args.csv_path, &args.stream_csv) {
-                (Some(path), None) => Some(CsvStreamTarget::File(path.clone())),
-                (None, Some(value)) if value == "-" => Some(CsvStreamTarget::Stdout),
-                (None, Some(value)) if value.trim().is_empty() => {
-                    anyhow::bail!("--stream-csv path must not be empty");
-                }
-                (None, Some(value)) => Some(CsvStreamTarget::File(PathBuf::from(value))),
-                (None, None) => None,
-                (Some(_), Some(_)) => {
-                    anyhow::bail!("--stream-csv conflicts with --csv");
-                }
-            };
-            if matches!(csv_stream, Some(CsvStreamTarget::Stdout)) && args.json_stream {
-                anyhow::bail!(
-                    "--stream-csv - cannot be used with --json-stream because both write to stdout"
-                );
-            }
-            csv_stream
-        },
-        irq_latency,
-        irqs: args.irqs,
-        hwmon,
-        hwmon_root: args.hwmon_root,
-        hwmon_drm_card: args.hwmon_drm_card,
-        hwmon_render_node: args.hwmon_render_node,
-        mangohud_log: args.mangohud_log,
-        mangohud_log_live: args.mangohud_log_live,
-
-        tui: args.tui,
-        retain_intervals,
-        recording,
-        max_duration,
-        cpu_freq,
-        cgroupv2: args.cgroupv2,
-        native_cgroup_filter: args.native_cgroup_filter,
-        follow_exec: args.follow_exec && !args.no_follow_exec,
-        exclude_tree_pids: args.exclude_tree_pids,
-        faults,
-        cpu_perf: args.cpu_perf,
-        cpu_perf_kernel: args.cpu_perf_kernel,
-        cpu_perf_max_tasks: args.cpu_perf_max_tasks,
-        cpu_perf_cache_refs: args.cpu_perf_cache_refs,
-        block_io,
-        stat_wait,
-        runtime_slices,
-        runtime_slices_max_tasks: args.runtime_slices_max_tasks,
-        json_stream: args.json_stream,
-        metrics_port: args.metrics_port,
-        ringbuf_size_kb: args.ringbuf_size_kb,
-        wakeup_map_factor: args.wakeup_map_factor,
-        otlp_endpoint: args.otlp_endpoint,
-        otel_service_name: args.otel_service_name,
-        auto_focus: args.auto_focus,
-        focus_source: args.focus_source,
-        foreground_window: args.foreground_window,
-        foreground_source: args.foreground_source,
-        foreground_poll_ms: args.foreground_poll_ms,
-        foreground_max_stale_ms: args.foreground_max_stale_ms,
-        foreground_include_title: args.foreground_include_title,
-        auto_focus_poll_ms: args.auto_focus_poll_ms,
-        auto_focus_min_confidence: args.auto_focus_min_confidence,
-        auto_focus_switch_cooldown_ms: args.auto_focus_switch_cooldown_ms,
-        auto_focus_switch_margin: args.auto_focus_switch_margin,
-        auto_focus_required_polls: args.auto_focus_required_polls,
-        auto_focus_max_roots: args.auto_focus_max_roots,
-        remote: args.remote,
-    })
+    Ok(config)
 }
 
 fn validate_pids(flag: &str, pids: &[u32]) -> anyhow::Result<()> {
     if pids.contains(&0) {
         anyhow::bail!("{flag} must be greater than zero");
+    }
+    Ok(())
+}
+
+fn validate_comm_patterns(flag: &str, patterns: &[String]) -> anyhow::Result<()> {
+    for pattern in patterns {
+        if pattern.is_empty() {
+            anyhow::bail!("{flag} patterns must not be empty");
+        }
     }
     Ok(())
 }
@@ -2855,17 +2559,6 @@ fn validate_foreground_monitor_args(args: &MonitorArgs) -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-fn validate_comm_patterns(flag: &str, patterns: &[String]) -> anyhow::Result<Vec<CompiledPattern>> {
-    let mut compiled = Vec::new();
-    for pattern in patterns {
-        if pattern.is_empty() {
-            anyhow::bail!("{flag} patterns must not be empty");
-        }
-        compiled.push(CompiledPattern::new(pattern.clone())?);
-    }
-    Ok(compiled)
 }
 
 #[cfg(test)]
@@ -3178,11 +2871,11 @@ mod tests {
 
         assert_eq!(
             input.config.target.task_filters.include_comm,
-            vec![CompiledPattern::new("RenderThread".to_owned()).unwrap()]
+            vec![crate::process_tree::CompiledPattern::new("RenderThread".to_owned()).unwrap()]
         );
         assert_eq!(
             input.config.target.task_filters.exclude_comm,
-            vec![CompiledPattern::new("steamwebhelper".to_owned()).unwrap()]
+            vec![crate::process_tree::CompiledPattern::new("steamwebhelper".to_owned()).unwrap()]
         );
     }
 
@@ -4137,8 +3830,13 @@ mod tests {
             summary_ms: Some(500),
             ..Default::default()
         };
-        let config = config_from_monitor_args_with_file(args, file_config, false, None).unwrap();
-        assert_eq!(config.summary_period_ms, 500);
+        let config = monitor_config_from_monitor_args_with_file(
+            args,
+            Some(file_config),
+            RecordingMode::Monitor,
+        )
+        .unwrap();
+        assert_eq!(config.timing.summary_period_ms, 500);
     }
 
     #[test]
@@ -4153,8 +3851,13 @@ mod tests {
             summary_ms: Some(500),
             ..Default::default()
         };
-        let config = config_from_monitor_args_with_file(args, file_config, false, None).unwrap();
-        assert_eq!(config.summary_period_ms, 200);
+        let config = monitor_config_from_monitor_args_with_file(
+            args,
+            Some(file_config),
+            RecordingMode::Monitor,
+        )
+        .unwrap();
+        assert_eq!(config.timing.summary_period_ms, 200);
     }
 
     #[test]
@@ -4168,11 +3871,16 @@ mod tests {
             include_comm: Some(vec!["Game".to_owned(), "Render".to_owned()]),
             ..Default::default()
         };
-        let config = config_from_monitor_args_with_file(args, file_config, false, None).unwrap();
-        assert_eq!(config.task_filters.include_comm.len(), 2);
-        // They get sorted in config_from_monitor_args
-        assert_eq!(config.task_filters.include_comm[0].raw, "Game");
-        assert_eq!(config.task_filters.include_comm[1].raw, "Render");
+        let config = monitor_config_from_monitor_args_with_file(
+            args,
+            Some(file_config),
+            RecordingMode::Monitor,
+        )
+        .unwrap();
+        assert_eq!(config.target.task_filters.include_comm.len(), 2);
+        // They get sorted in monitor_config_from_monitor_args
+        assert_eq!(config.target.task_filters.include_comm[0].raw, "Game");
+        assert_eq!(config.target.task_filters.include_comm[1].raw, "Render");
     }
 
     #[test]
@@ -4187,9 +3895,17 @@ mod tests {
             include_comm: Some(vec!["Game".to_owned()]),
             ..Default::default()
         };
-        let config = config_from_monitor_args_with_file(args, file_config, false, None).unwrap();
-        assert_eq!(config.task_filters.include_comm.len(), 1);
-        assert_eq!(config.task_filters.include_comm[0].raw, "RenderThread");
+        let config = monitor_config_from_monitor_args_with_file(
+            args,
+            Some(file_config),
+            RecordingMode::Monitor,
+        )
+        .unwrap();
+        assert_eq!(config.target.task_filters.include_comm.len(), 1);
+        assert_eq!(
+            config.target.task_filters.include_comm[0].raw,
+            "RenderThread"
+        );
     }
 
     #[test]
@@ -4202,15 +3918,15 @@ mod tests {
         };
         args.target_pids = vec![1234];
         let config =
-            config_from_monitor_args_with_file(args, Default::default(), false, None).unwrap();
+            monitor_config_from_monitor_args_with_file(args, None, RecordingMode::Monitor).unwrap();
 
-        assert!(config.hwmon);
-        assert!(config.cpu_freq);
-        assert!(config.faults);
-        assert!(config.stat_wait);
-        assert!(config.block_io);
-        assert!(config.runtime_slices);
-        assert!(!config.irq_latency);
+        assert!(config.probes.hwmon);
+        assert!(config.probes.cpu_freq);
+        assert!(config.probes.faults);
+        assert!(config.probes.stat_wait);
+        assert!(config.probes.block_io);
+        assert!(config.probes.runtime_slices);
+        assert!(!config.probes.irq_latency);
     }
 
     #[test]
@@ -4224,8 +3940,8 @@ mod tests {
         };
         args.target_pids = vec![1234];
         let config =
-            config_from_monitor_args_with_file(args, Default::default(), false, None).unwrap();
-        assert!(!config.cpu_freq);
+            monitor_config_from_monitor_args_with_file(args, None, RecordingMode::Monitor).unwrap();
+        assert!(!config.probes.cpu_freq);
     }
 
     #[test]
@@ -4238,14 +3954,14 @@ mod tests {
         };
         args.target_pids = vec![1234];
         let config =
-            config_from_monitor_args_with_file(args, Default::default(), false, None).unwrap();
+            monitor_config_from_monitor_args_with_file(args, None, RecordingMode::Monitor).unwrap();
 
-        assert!(!config.hwmon);
-        assert!(!config.cpu_freq);
-        assert!(!config.faults);
-        assert!(!config.stat_wait);
-        assert!(!config.block_io);
-        assert!(!config.runtime_slices);
+        assert!(!config.probes.hwmon);
+        assert!(!config.probes.cpu_freq);
+        assert!(!config.probes.faults);
+        assert!(!config.probes.stat_wait);
+        assert!(!config.probes.block_io);
+        assert!(!config.probes.runtime_slices);
     }
 
     #[test]
@@ -4259,8 +3975,8 @@ mod tests {
         };
         args.target_pids = vec![1234];
         let config =
-            config_from_monitor_args_with_file(args, Default::default(), false, None).unwrap();
-        assert!(config.faults);
+            monitor_config_from_monitor_args_with_file(args, None, RecordingMode::Monitor).unwrap();
+        assert!(config.probes.faults);
     }
 
     #[test]
@@ -4270,10 +3986,10 @@ mod tests {
             stream_csv: Some("out.csv".to_owned()),
             ..Default::default()
         };
-        let config = config_from_monitor_args(args, false, None).unwrap();
+        let config = monitor_config_from_monitor_args(args, RecordingMode::Monitor).unwrap();
 
         assert!(matches!(
-            config.csv_stream,
+            config.streams.csv,
             Some(CsvStreamTarget::File(ref path)) if path == std::path::Path::new("out.csv")
         ));
     }
@@ -4285,9 +4001,9 @@ mod tests {
             stream_csv: Some("-".to_owned()),
             ..Default::default()
         };
-        let config = config_from_monitor_args(args, false, None).unwrap();
+        let config = monitor_config_from_monitor_args(args, RecordingMode::Monitor).unwrap();
 
-        assert!(matches!(config.csv_stream, Some(CsvStreamTarget::Stdout)));
+        assert!(matches!(config.streams.csv, Some(CsvStreamTarget::Stdout)));
     }
 
     #[test]
@@ -4298,7 +4014,7 @@ mod tests {
             json_stream: true,
             ..Default::default()
         };
-        let err = config_from_monitor_args(args, false, None).unwrap_err();
+        let err = monitor_config_from_monitor_args(args, RecordingMode::Monitor).unwrap_err();
         assert!(err.to_string().contains("stdout"));
     }
 

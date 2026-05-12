@@ -1,7 +1,7 @@
 use crate::{
     config::{
         layer::MonitorConfigLayer,
-        merge::{self, CliOverrides, ConfigSources, DefaultConfig, PresetConfig},
+        merge::{self, ConfigSources},
         model::{
             FocusConfig, MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, SafetyConfig,
             TargetConfig, TimingConfig,
@@ -9,7 +9,6 @@ use crate::{
         source::{ConfigDiagnostic, FieldProvenance},
     },
     error::ConfigError,
-    presets::Preset,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,42 +63,7 @@ pub fn resolve_monitor_config_sources(
     })
 }
 
-pub fn resolve_monitor_config(config: &crate::cli::Config) -> Result<MonitorConfig, ConfigError> {
-    let user_file = crate::config_file::load_user_config().map_err(ConfigError::UserConfig)?;
-
-    let preset = config
-        .preset
-        .as_deref()
-        .map(preset_config_from_name)
-        .transpose()?;
-
-    let cli_layer = config
-        .monitor_config_layer
-        .clone()
-        .unwrap_or_else(|| config.to_monitor_config_layer());
-
-    Ok(resolve_monitor_config_sources(ConfigSources {
-        defaults: DefaultConfig::default(),
-        user_file,
-        preset,
-        cli: CliOverrides { layer: cli_layer },
-    })?
-    .config)
-}
-
-fn preset_config_from_name(value: &str) -> Result<PresetConfig, ConfigError> {
-    let preset = value
-        .parse::<Preset>()
-        .map_err(ConfigError::InvalidPreset)?;
-    let mut config = MonitorConfig::default();
-    apply_layer(
-        &mut config,
-        MonitorConfigLayer::from_preset_defaults(preset.defaults()),
-    );
-    Ok(PresetConfig { config })
-}
-
-fn compile_task_filters(config: &mut MonitorConfig) -> Result<(), ConfigError> {
+pub(crate) fn compile_task_filters(config: &mut MonitorConfig) -> Result<(), ConfigError> {
     let compiled_include = config
         .target
         .include_comm

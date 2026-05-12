@@ -275,4 +275,9 @@ impl MonitorConfig {
             || self.target.watch_process.is_some()
             || self.target.cgroupv2.is_some()
     }
+
+    /// Returns true if auto-focus is enabled and no explicit target is specified.
+    pub fn auto_focus_enabled(&self) -> bool {
+        self.focus.auto_focus && !self.has_explicit_target()
+    }
 }

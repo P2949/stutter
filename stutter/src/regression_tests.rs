@@ -12,7 +12,6 @@ use stutter_common::{EVENT_RUNNABLE_LATENCY, SchedulerEvent};
 use crate::{
     alert::AlertPayload,
     artifacts::{ArtifactKind, ArtifactSelection},
-    cli::{Config, RecordingConfig},
     ebpf_loader::DropCountersSnapshot,
     events,
     metadata::SystemMetadata,
@@ -149,7 +148,7 @@ fn same_tid_same_names_different_starttime_resets_stats() {
 #[test]
 fn event_comm_updates_only_unknown_existing_name() {
     let config = test_config(vec![7], vec![], None);
-    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
+    let monitor_config = config;
     let stats_by_task = BTreeMap::from([(7, metrics::TaskStats::new(7, "?".to_owned(), 0))]);
 
     let first_event = scheduler_event(7, "real-name");
@@ -192,7 +191,7 @@ fn event_comm_updates_only_unknown_existing_name() {
 #[test]
 fn spike_events_capture_only_threshold_crossing_events() {
     let config = test_config(vec![7], vec![], None);
-    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
+    let monitor_config = config;
     let active_targets = BTreeMap::from([(
         7,
         task_info(7, 77, "KingdomCome.exe", "RenderThread", TaskClass::Game),
@@ -263,7 +262,7 @@ fn spike_events_capture_only_threshold_crossing_events() {
 #[test]
 fn spike_event_fault_deltas_are_captured_correctly() {
     let config = test_config(vec![7], vec![], None);
-    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
+    let monitor_config = config;
     let active_targets = BTreeMap::from([(
         7,
         task_info(7, 77, "KingdomCome.exe", "RenderThread", TaskClass::Game),
@@ -481,56 +480,56 @@ fn config_reports_explicit_targets_for_manual_tree_watch_and_cgroup() {
     let mut config = test_config(Vec::new(), Vec::new(), None);
     assert!(!config.has_explicit_target());
 
-    config.target_pids = vec![123];
+    config.target.target_pids = vec![123];
     assert!(config.has_explicit_target());
 
-    config.target_pids.clear();
-    config.tree_pids = vec![456];
+    config.target.target_pids.clear();
+    config.target.tree_pids = vec![456];
     assert!(config.has_explicit_target());
 
-    config.tree_pids.clear();
-    config.watch_process = Some("gamescope".to_owned());
+    config.target.tree_pids.clear();
+    config.target.watch_process = Some("gamescope".to_owned());
     assert!(config.has_explicit_target());
 
-    config.watch_process = None;
-    config.cgroupv2 = Some(PathBuf::from("/sys/fs/cgroup/user.slice"));
+    config.target.watch_process = None;
+    config.target.cgroupv2 = Some(PathBuf::from("/sys/fs/cgroup/user.slice"));
     assert!(config.has_explicit_target());
 }
 
 #[test]
 fn config_auto_focus_enabled_ignores_explicit_targets() {
     let mut config = test_config(Vec::new(), Vec::new(), None);
-    config.auto_focus = true;
-    config.auto_focus_poll_ms = 250;
-    config.auto_focus_min_confidence = 0.75;
-    config.auto_focus_switch_cooldown_ms = 7500;
-    config.auto_focus_switch_margin = 0.30;
-    config.auto_focus_required_polls = 3;
-    config.auto_focus_max_roots = 2;
+    config.focus.auto_focus = true;
+    config.focus.auto_focus_poll_ms = 250;
+    config.focus.auto_focus_min_confidence = 0.75;
+    config.focus.auto_focus_switch_cooldown_ms = 7500;
+    config.focus.auto_focus_switch_margin = 0.30;
+    config.focus.auto_focus_required_polls = 3;
+    config.focus.auto_focus_max_roots = 2;
 
     assert!(config.auto_focus_enabled());
 
-    let auto_focus = config.auto_focus_config();
-    assert!(auto_focus.enabled);
-    assert_eq!(auto_focus.poll_ms, 250);
-    assert_eq!(auto_focus.min_confidence, 0.75);
-    assert_eq!(auto_focus.switch_cooldown_ms, 7500);
-    assert_eq!(auto_focus.switch_margin, 0.30);
-    assert_eq!(auto_focus.required_polls, 3);
-    assert_eq!(auto_focus.max_roots, 2);
+    let auto_focus = &config.focus;
+    assert!(auto_focus.auto_focus);
+    assert_eq!(auto_focus.auto_focus_poll_ms, 250);
+    assert_eq!(auto_focus.auto_focus_min_confidence, 0.75);
+    assert_eq!(auto_focus.auto_focus_switch_cooldown_ms, 7500);
+    assert_eq!(auto_focus.auto_focus_switch_margin, 0.30);
+    assert_eq!(auto_focus.auto_focus_required_polls, 3);
+    assert_eq!(auto_focus.auto_focus_max_roots, 2);
 
-    config.tree_pids = vec![999];
-    assert!(config.auto_focus);
+    config.target.tree_pids = vec![999];
+    assert!(config.focus.auto_focus);
     assert!(!config.auto_focus_enabled());
 
-    let auto_focus = config.auto_focus_config();
-    assert!(!auto_focus.enabled);
-    assert_eq!(auto_focus.poll_ms, 250);
-    assert_eq!(auto_focus.min_confidence, 0.75);
-    assert_eq!(auto_focus.switch_cooldown_ms, 7500);
-    assert_eq!(auto_focus.switch_margin, 0.30);
-    assert_eq!(auto_focus.required_polls, 3);
-    assert_eq!(auto_focus.max_roots, 2);
+    let auto_focus = &config.focus;
+    assert!(auto_focus.auto_focus);
+    assert_eq!(auto_focus.auto_focus_poll_ms, 250);
+    assert_eq!(auto_focus.auto_focus_min_confidence, 0.75);
+    assert_eq!(auto_focus.auto_focus_switch_cooldown_ms, 7500);
+    assert_eq!(auto_focus.auto_focus_switch_margin, 0.30);
+    assert_eq!(auto_focus.auto_focus_required_polls, 3);
+    assert_eq!(auto_focus.auto_focus_max_roots, 2);
 }
 
 #[test]
@@ -809,12 +808,12 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         mangohud_first_frame_raw_elapsed_ms: None,
     };
     let mut config = test_config(vec![9, 1, 4], vec![], Some(Duration::from_secs(1)));
-    config.cgroupv2 = Some(PathBuf::from("/sys/fs/cgroup/game"));
-    config.exclude_tree_pids = vec![77];
-    config.follow_exec = false;
-    config.max_tasks = 2048;
-    config.retain_intervals = Some(8);
-    config.hwmon_root = Some(PathBuf::from("/tmp/hwmon"));
+    config.target.cgroupv2 = Some(PathBuf::from("/sys/fs/cgroup/game"));
+    config.target.exclude_tree_pids = vec![77];
+    config.safety.follow_exec = false;
+    config.target.max_tasks = 2048;
+    config.recording.retain_intervals = Some(8);
+    config.hwmon.root = Some(PathBuf::from("/tmp/hwmon"));
     let active_targets = BTreeMap::from([
         (9, task_info(9, 9, "task-9", "task-9", TaskClass::Helper)),
         (1, task_info(1, 1, "task-1", "task-1", TaskClass::Helper)),
@@ -868,11 +867,11 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         .push(spike_events[0].clone());
     recorder.buffers.spike_events.as_mut().unwrap().truncate(); // Force truncated state for testing
 
-    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
+    let monitor_config = config.clone();
     recorder::finalize_recording(FinalizeRecordingInput {
         recorder: &recorder,
         config: &monitor_config,
-        tree_pids: &config.tree_pids,
+        tree_pids: &config.target.tree_pids,
         stop_reason: "test",
         tasks: &task_tracker,
         frame_events: &[],
@@ -1331,11 +1330,11 @@ fn report_reads_recorded_session_and_spike_events() {
     }
     recorder.buffers.spike_events = Some(buffer);
 
-    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
+    let monitor_config = config.clone();
     recorder::finalize_recording(FinalizeRecordingInput {
         recorder: &recorder,
         config: &monitor_config,
-        tree_pids: &config.tree_pids,
+        tree_pids: &config.target.tree_pids,
         stop_reason: "test",
         tasks: &task_tracker,
         frame_events: &[],
@@ -1408,11 +1407,11 @@ fn report_cluster_output_caps_inline_points() {
     }
     recorder.buffers.spike_events = Some(buffer);
 
-    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
+    let monitor_config = config.clone();
     recorder::finalize_recording(FinalizeRecordingInput {
         recorder: &recorder,
         config: &monitor_config,
-        tree_pids: &config.tree_pids,
+        tree_pids: &config.target.tree_pids,
         stop_reason: "test",
         tasks: &task_tracker,
         frame_events: &[],
@@ -1668,11 +1667,9 @@ fn prepare_recording_refuses_to_overwrite_existing_output_dir() {
     fs::create_dir_all(&dir).unwrap();
 
     let mut config = test_config(vec![7], vec![], None);
-    config.recording = Some(RecordingConfig {
-        run_name: Some("collision-test".to_owned()),
-        out_dir: Some(dir.clone()),
-    });
-    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
+    config.recording.run_name = Some("collision-test".to_owned());
+    config.recording.output_dir = Some(dir.clone());
+    let monitor_config = config;
 
     let err = recorder::prepare_recording(&monitor_config).unwrap_err();
 
@@ -1685,81 +1682,34 @@ fn test_config(
     target_pids: Vec<u32>,
     tree_pids: Vec<u32>,
     max_duration: Option<Duration>,
-) -> Config {
-    Config {
-        monitor_config_layer: None,
-        preset: None,
-        target_pids,
-        tree_pids,
-        summary_period_ms: 1_000,
-        epoch_period_ms: None,
-        spike_threshold_ns: 1_000_000,
-        alert_threshold_ns: None,
-        alert_webhook_url: None,
-        verbose: false,
-        max_tasks: 1024,
-        task_filters: process_tree::TaskFilters::default(),
-        keep_missing_pid: false,
-        watch_process: None,
-        persistent: false,
-        watch_poll_ms: 2_000,
-        watch_timeout: None,
-        csv_stream: None,
-        irq_latency: false,
-        irqs: Vec::new(),
-        hwmon: false,
-        hwmon_root: None,
-        hwmon_drm_card: None,
-        hwmon_render_node: None,
-        mangohud_log: None,
-        tui: false,
-        retain_intervals: None,
-        recording: None,
-        max_duration,
-        cgroupv2: None,
-        native_cgroup_filter: false,
-        follow_exec: true,
-        exclude_tree_pids: Vec::new(),
-        cpu_freq: false,
-        faults: false,
-        cpu_perf: false,
-        cpu_perf_kernel: false,
-        cpu_perf_max_tasks: 128,
-        cpu_perf_cache_refs: false,
-        block_io: false,
-        stat_wait: false,
-        runtime_slices: false,
-        runtime_slices_max_tasks: 256,
-        json_stream: false,
-        mangohud_log_live: false,
-        metrics_port: None,
-        ringbuf_size_kb: None,
-        wakeup_map_factor: None,
-        otlp_endpoint: None,
-        otel_service_name: "stutter".to_owned(),
-        auto_focus: false,
-        focus_source: crate::config::FocusSource::Heuristic,
-        foreground_window: false,
-        foreground_source: crate::config::ForegroundSource::Auto,
-        foreground_poll_ms: 1000,
-        foreground_max_stale_ms: 2500,
-        foreground_include_title: false,
-        auto_focus_poll_ms: 1000,
-        auto_focus_min_confidence: 0.60,
-        auto_focus_switch_cooldown_ms: 5000,
-        auto_focus_switch_margin: 0.20,
-        auto_focus_required_polls: 2,
-        auto_focus_max_roots: 4,
-        remote: None,
+) -> crate::config::model::MonitorConfig {
+    crate::config::model::MonitorConfig {
+        target: crate::config::model::TargetConfig {
+            target_pids,
+            tree_pids,
+            max_tasks: 1024,
+            ..Default::default()
+        },
+        timing: crate::config::model::TimingConfig {
+            summary_period_ms: 1_000,
+            spike_threshold_ns: 1_000_000,
+            max_duration,
+            ..Default::default()
+        },
+        watch: crate::config::model::WatchConfig {
+            poll_ms: 2_000,
+            ..Default::default()
+        },
+        ..Default::default()
     }
 }
 
 fn minimal_session_for_report() -> SessionFile {
     let mut config = test_config(vec![], vec![], None);
-    config.irq_latency = true;
-    config.irqs = vec![137];
-    config.hwmon = true;
-    let monitor_config = crate::config::effective::resolve_monitor_config(&config).unwrap();
+    config.probes.irq_latency = true;
+    config.probes.irqs = vec![137];
+    config.probes.hwmon = true;
+    let monitor_config = config.clone();
 
     SessionFile {
         core: crate::recorder::SessionMetadataCore {
@@ -1803,7 +1753,7 @@ fn minimal_session_for_report() -> SessionFile {
             ..Default::default()
         },
         stop_reason: "test".to_owned(),
-        config: recorded_config(&monitor_config, &config.tree_pids),
+        config: recorded_config(&monitor_config, &config.target.tree_pids),
         tasks: Vec::new(),
         top_spikes: Vec::new(),
     }

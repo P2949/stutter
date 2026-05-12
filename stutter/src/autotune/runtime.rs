@@ -44,7 +44,7 @@ use crate::{
         state::{AutotuneMode, ControllerPhase, SituationKind},
         washout::WashoutWindowConfig,
     },
-    cli::Config,
+    config::model::MonitorConfig,
     diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
     focus::FocusGroupKind,
@@ -1147,7 +1147,7 @@ pub struct AutotuneControllerExit {
 }
 
 pub async fn run_autotune_controller_session(
-    monitor_config: std::sync::Arc<Config>,
+    monitor_config: std::sync::Arc<MonitorConfig>,
     runtime_config: AutotuneRuntimeConfig,
     external_stop: Option<oneshot::Receiver<()>>,
     duration: Option<Duration>,
@@ -1182,12 +1182,8 @@ pub async fn run_autotune_controller_session(
         (None, Some(stop_tx))
     };
 
-    let resolved_monitor_config = std::sync::Arc::new(
-        crate::config::effective::resolve_monitor_config(&monitor_config)?,
-    );
     let monitor_task = tokio::spawn(async move {
-        crate::session::run_monitor(resolved_monitor_config, None, Some(event_tx), Some(stop_rx))
-            .await
+        crate::session::run_monitor(monitor_config, None, Some(event_tx), Some(stop_rx)).await
     });
 
     while let Some(event) = event_rx.recv().await {
