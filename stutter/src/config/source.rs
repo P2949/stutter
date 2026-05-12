@@ -17,16 +17,3 @@ impl FieldProvenance {
         Self { field, source }
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConfigDiagnostic {
-    pub message: String,
-}
-
-impl ConfigDiagnostic {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-}

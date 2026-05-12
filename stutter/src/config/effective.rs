@@ -6,7 +6,8 @@ use crate::{
             FocusConfig, MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, SafetyConfig,
             TargetConfig, TimingConfig,
         },
-        source::{ConfigDiagnostic, FieldProvenance},
+        schema::ConfigDiagnostic,
+        source::FieldProvenance,
     },
     error::ConfigError,
 };
@@ -53,12 +54,17 @@ impl EffectiveMonitorConfig {
 pub fn resolve_monitor_config_sources(
     sources: ConfigSources,
 ) -> Result<ResolvedMonitorConfig, ConfigError> {
+    let diagnostics = sources
+        .user_file
+        .as_ref()
+        .map(|user_file| user_file.diagnostics.clone())
+        .unwrap_or_default();
     let config = merge::merge_config_sources_checked(sources)?;
 
     Ok(ResolvedMonitorConfig {
         config,
         provenance: Vec::new(),
-        diagnostics: Vec::new(),
+        diagnostics,
     })
 }
 
@@ -429,5 +435,34 @@ mod tests {
         .unwrap();
 
         assert!(!effective.config.probes.block_io);
+    }
+
+    #[test]
+    fn resolve_monitor_config_sources_carries_user_file_diagnostics() {
+        let mut user_file = crate::config_file::UserConfigFile {
+            summary_period_ms: Some(250),
+            ..Default::default()
+        };
+        user_file
+            .diagnostics
+            .push(crate::config::schema::ConfigDiagnostic::warning(
+                crate::config::source::ConfigSource::UserFile,
+                Some("summary_ms".to_owned()),
+                "`summary_ms` is deprecated; use `summary_period_ms`",
+            ));
+
+        let resolved = resolve_monitor_config_sources(crate::config::merge::ConfigSources {
+            defaults: crate::config::merge::DefaultConfig::default(),
+            user_file: Some(user_file),
+            preset: None,
+            cli: crate::config::merge::CliOverrides {
+                layer: MonitorConfigLayer::default(),
+            },
+        })
+        .unwrap();
+
+        assert_eq!(resolved.config.timing.summary_period_ms, 250);
+        assert_eq!(resolved.diagnostics.len(), 1);
+        assert_eq!(resolved.diagnostics[0].field.as_deref(), Some("summary_ms"));
     }
 }

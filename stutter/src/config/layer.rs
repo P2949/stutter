@@ -188,8 +188,10 @@ impl MonitorConfigLayer {
         };
 
         Ok(Self {
-            summary_period_ms: user_file.summary_ms,
-            spike_threshold_ns: user_file.spike_us.map(|value| value.saturating_mul(1_000)),
+            summary_period_ms: user_file.summary_period_ms.or(user_file.summary_ms),
+            spike_threshold_ns: user_file
+                .spike_threshold_ns
+                .or_else(|| user_file.spike_us.map(|value| value.saturating_mul(1_000))),
             hwmon: user_file.hwmon,
             cpu_freq: match (user_file.cpu_freq, user_file.no_cpu_freq) {
                 (_, Some(true)) => Some(false),
