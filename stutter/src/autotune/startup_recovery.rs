@@ -16,6 +16,11 @@ use crate::{
             default_autotune_history_path,
         },
     },
+    daemon::{
+        DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus,
+        DaemonExperimentState, DaemonFaultState, DaemonMode, DaemonPhase, DaemonRollbackState,
+        DaemonState, DaemonStateSnapshotWriter, default_daemon_state_snapshot_path,
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -24,6 +29,7 @@ pub struct StartupRecoveryConfig {
     pub journal_path: PathBuf,
     pub audit_path: PathBuf,
     pub history_path: PathBuf,
+    pub state_snapshot_path: PathBuf,
 }
 
 impl Default for StartupRecoveryConfig {
@@ -33,6 +39,7 @@ impl Default for StartupRecoveryConfig {
             journal_path: default_controller_journal_path(),
             audit_path: crate::audit::default_audit_log_path(),
             history_path: default_autotune_history_path(),
+            state_snapshot_path: default_daemon_state_snapshot_path(),
         }
     }
 }
@@ -158,10 +165,30 @@ pub fn recover_controller_journal_with_executor<E: StartupRecoveryRollbackExecut
             experiment_id,
             action_id,
             ..
-        } => Ok(StartupRecoveryOutcome::ApplyingWithoutRollback {
-            experiment_id,
-            action_id,
-        }),
+        } => {
+            let reason =
+                "startup crash recovery found applying journal without rollback token".to_owned();
+            write_startup_recovery_daemon_state_snapshot(
+                &config.state_snapshot_path,
+                startup_recovery_daemon_state(
+                    DaemonPhase::Faulted,
+                    "applying_without_rollback",
+                    reason.clone(),
+                    &experiment_id,
+                    &action_id,
+                    None,
+                    false,
+                    true,
+                    true,
+                    Some("stutter autotune restore"),
+                ),
+            )?;
+
+            Ok(StartupRecoveryOutcome::ApplyingWithoutRollback {
+                experiment_id,
+                action_id,
+            })
+        }
         ControllerJournalRecord::Applied {
             experiment_id,
             action_id,
@@ -187,6 +214,26 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
     let manual_restore_command = manual_restore_command_for_token(&rollback_token);
 
     if !config.rollback_on_crash_recovery {
+        let reason = format!(
+            "startup crash recovery rollback disabled; manual_restore_command=\"{}\"",
+            manual_restore_command
+        );
+        write_startup_recovery_daemon_state_snapshot(
+            &config.state_snapshot_path,
+            startup_recovery_daemon_state(
+                DaemonPhase::Faulted,
+                "rollback_disabled",
+                reason,
+                &experiment_id,
+                &action_id,
+                Some(&rollback_token),
+                true,
+                true,
+                true,
+                Some(&manual_restore_command),
+            ),
+        )?;
+
         return Ok(StartupRecoveryOutcome::RollbackDisabled {
             experiment_id,
             action_id,
@@ -228,6 +275,25 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
                 ),
             )?;
 
+            write_startup_recovery_daemon_state_snapshot(
+                &config.state_snapshot_path,
+                startup_recovery_daemon_state(
+                    DaemonPhase::Cooldown,
+                    "restored",
+                    format!(
+                        "startup crash recovery rollback succeeded; affected_tasks={}",
+                        summary.affected_tasks
+                    ),
+                    &experiment_id,
+                    &action_id,
+                    None,
+                    false,
+                    false,
+                    false,
+                    Some(&manual_restore_command),
+                ),
+            )?;
+
             Ok(StartupRecoveryOutcome::Recovered {
                 experiment_id,
                 action_id,
@@ -260,6 +326,22 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
                 format!(
                     "{}; manual_restore_command=\"{}\"",
                     reason, manual_restore_command
+                ),
+            )?;
+
+            write_startup_recovery_daemon_state_snapshot(
+                &config.state_snapshot_path,
+                startup_recovery_daemon_state(
+                    DaemonPhase::Faulted,
+                    "faulted",
+                    reason.clone(),
+                    &experiment_id,
+                    &action_id,
+                    Some(&rollback_token),
+                    true,
+                    true,
+                    true,
+                    Some(&manual_restore_command),
                 ),
             )?;
 
@@ -339,6 +421,91 @@ fn write_startup_recovery_history_event(
             history_path.display()
         )
     })
+}
+
+fn write_startup_recovery_daemon_state_snapshot(
+    state_snapshot_path: &Path,
+    state: DaemonState,
+) -> anyhow::Result<()> {
+    DaemonStateSnapshotWriter::new(state_snapshot_path)
+        .write(&state)
+        .with_context(|| {
+            format!(
+                "failed to write startup recovery daemon state snapshot to {}",
+                state_snapshot_path.display()
+            )
+        })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn startup_recovery_daemon_state(
+    phase: DaemonPhase,
+    decision: &str,
+    reason: String,
+    experiment_id: &str,
+    action_id: &str,
+    rollback_token: Option<&RollbackToken>,
+    rollback_available: bool,
+    include_active_experiment: bool,
+    faulted: bool,
+    manual_restore_command: Option<&str>,
+) -> DaemonState {
+    let manual_restore_command = manual_restore_command
+        .map(str::to_owned)
+        .unwrap_or_else(|| "stutter autotune restore".to_owned());
+    let safety_class = rollback_token
+        .map(safety_class_for_rollback_token)
+        .unwrap_or(SafetyClass::ReversibleLowRisk);
+    let active_experiment = if include_active_experiment {
+        Some(DaemonExperimentState {
+            experiment_id: experiment_id.to_owned(),
+            action_id: action_id.to_owned(),
+            candidate_name: candidate_name_from_action_id(action_id),
+            safety_class,
+            started_unix_nanos: None,
+        })
+    } else {
+        None
+    };
+    let active_rollback = rollback_token.map(|token| DaemonRollbackState {
+        action_id: action_id.to_owned(),
+        rollback_available,
+        token: Some(token.clone()),
+        manual_restore_command: Some(manual_restore_command.clone()),
+    });
+    let degraded = if faulted {
+        vec![DaemonDegradedStatus {
+            category: "startup_recovery".to_owned(),
+            message: reason.clone(),
+        }]
+    } else {
+        Vec::new()
+    };
+    let faulted_state = if faulted {
+        Some(DaemonFaultState {
+            reason: reason.clone(),
+            manual_restore_command: Some(manual_restore_command.clone()),
+        })
+    } else {
+        None
+    };
+
+    DaemonState {
+        schema_version: DAEMON_STATE_SCHEMA_VERSION,
+        mode: DaemonMode::ApplyLowRisk,
+        phase,
+        active_experiment,
+        active_rollback,
+        last_decision: Some(DaemonDecisionState {
+            decision: decision.to_owned(),
+            reason,
+            unix_nanos: Some(crate::audit::unix_nanos_now()),
+            score_total: None,
+        }),
+        degraded,
+        faulted: faulted_state,
+        ..DaemonState::default()
+    }
 }
 
 fn empty_observation_summary() -> ObservationSummary {
@@ -503,7 +670,12 @@ mod tests {
             journal_path: dir.join("controller_journal.json"),
             audit_path: dir.join("audit.jsonl"),
             history_path: dir.join("history.jsonl"),
+            state_snapshot_path: dir.join("daemon_state.json"),
         }
+    }
+
+    fn read_daemon_state_snapshot(path: &Path) -> DaemonState {
+        crate::daemon::load_daemon_state(path).unwrap()
     }
 
     #[test]
@@ -531,8 +703,8 @@ mod tests {
         )
         .unwrap();
         let mut executor = FakeRollbackExecutor::default();
-
-        let outcome = recover_controller_journal_with_executor(config, &mut executor).unwrap();
+        let outcome =
+            recover_controller_journal_with_executor(config.clone(), &mut executor).unwrap();
 
         assert_eq!(
             outcome,
@@ -542,6 +714,25 @@ mod tests {
             }
         );
         assert_eq!(executor.calls, 0);
+
+        let state = read_daemon_state_snapshot(&config.state_snapshot_path);
+        assert_eq!(state.phase, DaemonPhase::Faulted);
+        assert_eq!(
+            state
+                .active_experiment
+                .as_ref()
+                .map(|experiment| experiment.action_id.as_str()),
+            Some("cpu-affinity-profile:game-main")
+        );
+        assert!(state.active_rollback.is_none());
+        assert!(
+            state
+                .faulted
+                .as_ref()
+                .map(|fault| fault.reason.contains("without rollback token"))
+                .unwrap_or(false)
+        );
+
         fs::remove_dir_all(dir).ok();
     }
 
@@ -598,6 +789,19 @@ mod tests {
         assert_eq!(history[0].decision.decision, "restored");
         assert!(history[0].rollback_performed);
 
+        let state = read_daemon_state_snapshot(&config.state_snapshot_path);
+        assert_eq!(state.phase, DaemonPhase::Cooldown);
+        assert_eq!(
+            state
+                .last_decision
+                .as_ref()
+                .map(|decision| decision.decision.as_str()),
+            Some("restored")
+        );
+        assert!(state.active_experiment.is_none());
+        assert!(state.active_rollback.is_none());
+        assert!(state.faulted.is_none());
+
         fs::remove_dir_all(dir).ok();
     }
 
@@ -630,6 +834,30 @@ mod tests {
             !crate::autotune::controller_journal::read_controller_journal(&config.journal_path)
                 .unwrap()
                 .is_clean()
+        );
+
+        let state = read_daemon_state_snapshot(&config.state_snapshot_path);
+        assert_eq!(state.phase, DaemonPhase::Faulted);
+        assert_eq!(
+            state
+                .last_decision
+                .as_ref()
+                .map(|decision| decision.decision.as_str()),
+            Some("rollback_disabled")
+        );
+        assert_eq!(
+            state
+                .active_rollback
+                .as_ref()
+                .map(|rollback| rollback.rollback_available),
+            Some(true)
+        );
+        assert!(
+            state
+                .faulted
+                .as_ref()
+                .map(|fault| fault.reason.contains("rollback disabled"))
+                .unwrap_or(false)
         );
 
         fs::remove_dir_all(dir).ok();
@@ -692,6 +920,32 @@ mod tests {
         assert_eq!(history[0].phase, ControllerPhase::Faulted);
         assert_eq!(history[0].decision.decision, "CrashRecoveryFault");
         assert!(!history[0].rollback_performed);
+
+        let state = read_daemon_state_snapshot(&config.state_snapshot_path);
+        assert_eq!(state.phase, DaemonPhase::Faulted);
+        assert_eq!(
+            state
+                .last_decision
+                .as_ref()
+                .map(|decision| decision.decision.as_str()),
+            Some("faulted")
+        );
+        assert_eq!(
+            state
+                .active_rollback
+                .as_ref()
+                .map(|rollback| rollback.rollback_available),
+            Some(true)
+        );
+        assert!(
+            state
+                .faulted
+                .as_ref()
+                .map(|fault| fault
+                    .reason
+                    .contains("intentional recovery rollback failure"))
+                .unwrap_or(false)
+        );
 
         fs::remove_dir_all(dir).ok();
     }
