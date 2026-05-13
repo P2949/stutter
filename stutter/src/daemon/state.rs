@@ -26,6 +26,24 @@ pub fn default_daemon_state_snapshot_path() -> PathBuf {
     path
 }
 
+pub fn load_daemon_state(path: &Path) -> anyhow::Result<DaemonState> {
+    let file = fs::File::open(path)
+        .with_context(|| format!("failed to open daemon state snapshot {}", path.display()))?;
+
+    let state: DaemonState = serde_json::from_reader(file)
+        .with_context(|| format!("failed to parse daemon state snapshot {}", path.display()))?;
+
+    if state.schema_version != DAEMON_STATE_SCHEMA_VERSION {
+        anyhow::bail!(
+            "unsupported daemon state snapshot schema_version={} in {}",
+            state.schema_version,
+            path.display()
+        );
+    }
+
+    Ok(state)
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DaemonPhase {
@@ -294,7 +312,7 @@ mod tests {
 
         writer.write(&state).unwrap();
 
-        let decoded: DaemonState = serde_json::from_reader(fs::File::open(&path).unwrap()).unwrap();
+        let decoded = load_daemon_state(&path).unwrap();
 
         assert_eq!(writer.path(), path.as_path());
         assert_eq!(decoded.mode, DaemonMode::ApplyLowRisk);
@@ -302,6 +320,27 @@ mod tests {
         assert_eq!(decoded.cooldown_until_unix_nanos, Some(9_000));
         assert_eq!(decoded.degraded[0].category, "data_quality");
         assert!(!temporary_daemon_state_snapshot_path(&path).exists());
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn load_daemon_state_rejects_unsupported_schema_version() {
+        let dir = temp_dir("unsupported-schema");
+        let path = dir.join("daemon_state.json");
+        let state = DaemonState {
+            schema_version: DAEMON_STATE_SCHEMA_VERSION + 1,
+            ..DaemonState::default()
+        };
+
+        serde_json::to_writer_pretty(fs::File::create(&path).unwrap(), &state).unwrap();
+
+        let err = load_daemon_state(&path).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("unsupported daemon state snapshot schema_version")
+        );
 
         fs::remove_dir_all(dir).ok();
     }
