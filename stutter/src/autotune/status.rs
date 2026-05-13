@@ -825,6 +825,47 @@ mod tests {
     }
 
     #[test]
+    fn status_from_daemon_state_renders_daemon_lifecycle_labels_and_candidates() {
+        let base_state = DaemonState {
+            mode: DaemonMode::ApplyLowRisk,
+            active_experiment: Some(DaemonExperimentState {
+                experiment_id: "experiment-1".to_owned(),
+                action_id: "cpu-affinity-profile:game-main".to_owned(),
+                candidate_name: Some("game-main".to_owned()),
+                safety_class: SafetyClass::ReversibleLowRisk,
+                started_unix_nanos: Some(100),
+            }),
+            ..DaemonState::default()
+        };
+
+        let cases = [
+            (DaemonPhase::Disabled, "disabled", None, None),
+            (DaemonPhase::Init, "init", None, None),
+            (DaemonPhase::Recover, "recover", None, None),
+            (DaemonPhase::Observe, "observe", None, None),
+            (DaemonPhase::Decide, "decide", None, Some("game-main")),
+            (DaemonPhase::Apply, "apply", None, Some("game-main")),
+            (DaemonPhase::Measure, "measure", None, Some("game-main")),
+            (DaemonPhase::Keep, "keep", Some("game-main"), None),
+            (DaemonPhase::Rollback, "rollback", None, None),
+            (DaemonPhase::Cooldown, "cooldown", Some("game-main"), None),
+            (DaemonPhase::Faulted, "faulted", None, None),
+            (DaemonPhase::Shutdown, "shutdown", None, None),
+        ];
+
+        for (phase, expected_phase, expected_profile, expected_candidate) in cases {
+            let mut state = base_state.clone();
+            state.phase = phase;
+
+            let status = status_from_daemon_state(PathBuf::from("/tmp/daemon_state.json"), &state);
+
+            assert_eq!(status.phase, expected_phase);
+            assert_eq!(status.active_profile.as_deref(), expected_profile);
+            assert_eq!(status.active_candidate.as_deref(), expected_candidate);
+        }
+    }
+
+    #[test]
     fn load_autotune_status_prefers_daemon_state_snapshot_when_present() {
         let dir = temp_dir("prefers-daemon-state");
         let history_path = dir.join("history.jsonl");
