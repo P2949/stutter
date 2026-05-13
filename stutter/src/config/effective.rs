@@ -1041,6 +1041,52 @@ mod tests {
     }
 
     #[test]
+    fn resolve_monitor_config_sources_returns_cli_precedence_provenance() {
+        let user_file = crate::config_file::UserConfigFile {
+            summary_period_ms: Some(250),
+            ..Default::default()
+        };
+        let preset = crate::config::merge::PresetConfig {
+            layer: MonitorConfigLayer {
+                summary_period_ms: Some(500),
+                ..Default::default()
+            },
+        };
+        let cli = crate::config::merge::CliOverrides {
+            layer: MonitorConfigLayer {
+                summary_period_ms: Some(1_000),
+                ..Default::default()
+            },
+        };
+
+        let resolved = resolve_monitor_config_sources(crate::config::merge::ConfigSources {
+            defaults: crate::config::merge::DefaultConfig::default(),
+            user_file: Some(user_file),
+            preset: Some(preset),
+            overrides: cli.into(),
+        })
+        .unwrap();
+
+        assert_eq!(resolved.config.timing.summary_period_ms, 1_000);
+        assert_eq!(
+            last_source_for_field(&resolved.provenance, "timing.summary_period_ms"),
+            Some(ConfigSource::Cli)
+        );
+
+        let sources: Vec<_> = resolved
+            .provenance
+            .iter()
+            .filter(|entry| entry.field == "timing.summary_period_ms")
+            .map(|entry| entry.source)
+            .collect();
+
+        assert!(sources.contains(&ConfigSource::Default));
+        assert!(sources.contains(&ConfigSource::UserFile));
+        assert!(sources.contains(&ConfigSource::Preset));
+        assert!(sources.contains(&ConfigSource::Cli));
+    }
+
+    #[test]
     fn resolve_monitor_config_sources_carries_user_file_diagnostics_and_provenance() {
         let mut user_file = crate::config_file::UserConfigFile {
             summary_period_ms: Some(250),
