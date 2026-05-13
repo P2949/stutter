@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::{
     actions::SafetyClass,
     config::{FocusSource, ForegroundSource, layer::MonitorConfigLayer, model::MonitorConfig},
-    daemon_policy::DaemonMode,
+    daemon::{DaemonMode, DaemonState},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -290,6 +290,7 @@ pub struct AutotuneStatusResponse {
     pub data_quality: Option<String>,
     pub last_fault: Option<String>,
     pub manual_restore_command: Option<String>,
+    pub daemon_state: DaemonState,
     pub message: String,
 }
 

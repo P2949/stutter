@@ -26,9 +26,11 @@ use crate::{
     },
     config::{FocusSource, ForegroundSource, model::MonitorConfig},
     daemon::{
-        ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicy,
-        DaemonPolicyBuildInput, PolicyDecisionKind, PolicyIntent, PolicyRejection,
-        RemotePolicyContext, RollbackRequirement, build_daemon_policy,
+        ActionDescriptor, ActionEffectScope, ActionSource, DaemonDecisionState,
+        DaemonDegradedStatus, DaemonExperimentState, DaemonFaultState, DaemonMode, DaemonPhase,
+        DaemonPolicy, DaemonPolicyBuildInput, DaemonRollbackState, DaemonState, DaemonTargetState,
+        PolicyDecisionKind, PolicyIntent, PolicyRejection, RemotePolicyContext,
+        RollbackRequirement, build_daemon_policy,
     },
     remote::{
         AgentAutotuneLimits, AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
@@ -89,6 +91,7 @@ pub struct AgentAuth {
 pub struct AgentState {
     pub active_run: Mutex<Option<RunHandle>>,
     pub active_autotune: Mutex<Option<AutotuneControllerHandle>>,
+    pub daemon_state: Mutex<DaemonState>,
     pub runs_dir: PathBuf,
     pub auth: AgentAuth,
     pub bind: SocketAddr,
@@ -136,6 +139,8 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
                 ..crate::autotune::startup_recovery::StartupRecoveryConfig::default()
             },
         )?;
+
+    let initial_daemon_state = daemon_state_from_startup_recovery(&startup_recovery);
 
     match startup_recovery {
         crate::autotune::startup_recovery::StartupRecoveryOutcome::Recovered {
@@ -217,6 +222,7 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
     let state = Arc::new(AgentState {
         active_run: Mutex::new(None),
         active_autotune: Mutex::new(None),
+        daemon_state: Mutex::new(initial_daemon_state),
         runs_dir: config.runs_dir,
         bind: config.bind,
         auth: AgentAuth {
@@ -492,6 +498,317 @@ fn rejection_from_policy_explanation(
     }
 }
 
+fn daemon_decision_state(decision: &str, reason: impl Into<String>) -> DaemonDecisionState {
+    DaemonDecisionState {
+        decision: decision.to_owned(),
+        reason: reason.into(),
+        unix_nanos: Some(crate::audit::unix_nanos_now()),
+        score_total: None,
+    }
+}
+
+fn daemon_state_for_agent_decision(
+    mode: DaemonMode,
+    phase: DaemonPhase,
+    decision: &str,
+    reason: impl Into<String>,
+) -> DaemonState {
+    DaemonState {
+        mode,
+        phase,
+        last_decision: Some(daemon_decision_state(decision, reason)),
+        ..DaemonState::default()
+    }
+}
+
+fn daemon_state_for_agent_fault(
+    mode: DaemonMode,
+    decision: &str,
+    reason: impl Into<String>,
+) -> DaemonState {
+    let reason = reason.into();
+
+    DaemonState {
+        mode,
+        phase: DaemonPhase::Faulted,
+        last_decision: Some(daemon_decision_state(decision, reason.clone())),
+        degraded: vec![DaemonDegradedStatus {
+            category: "agent".to_owned(),
+            message: reason.clone(),
+        }],
+        faulted: Some(DaemonFaultState {
+            reason,
+            manual_restore_command: Some("stutter autotune restore".to_owned()),
+        }),
+        ..DaemonState::default()
+    }
+}
+
+fn daemon_mode_from_agent_mode(value: &str) -> DaemonMode {
+    match value {
+        "suggest" => DaemonMode::Suggest,
+        "apply-low-risk" => DaemonMode::ApplyLowRisk,
+        "apply-medium-risk" => DaemonMode::ApplyMediumRisk,
+        "apply-high-risk" => DaemonMode::ApplyHighRisk,
+        _ => DaemonMode::Observe,
+    }
+}
+
+fn daemon_state_from_startup_recovery(
+    outcome: &crate::autotune::startup_recovery::StartupRecoveryOutcome,
+) -> DaemonState {
+    match outcome {
+        crate::autotune::startup_recovery::StartupRecoveryOutcome::Clean => DaemonState::default(),
+        crate::autotune::startup_recovery::StartupRecoveryOutcome::Recovered {
+            experiment_id,
+            action_id,
+            affected_tasks,
+            manual_restore_command,
+        } => DaemonState {
+            mode: DaemonMode::ApplyLowRisk,
+            phase: DaemonPhase::Cooldown,
+            last_decision: Some(daemon_decision_state(
+                "startup_recovery_recovered",
+                format!(
+                    "recovered experiment_id={experiment_id} action_id={action_id} affected_tasks={affected_tasks} manual_restore_command=\"{manual_restore_command}\""
+                ),
+            )),
+            ..DaemonState::default()
+        },
+        crate::autotune::startup_recovery::StartupRecoveryOutcome::RollbackDisabled {
+            experiment_id,
+            action_id,
+            manual_restore_command,
+        } => DaemonState {
+            mode: DaemonMode::ApplyLowRisk,
+            phase: DaemonPhase::Faulted,
+            active_experiment: Some(DaemonExperimentState {
+                experiment_id: experiment_id.clone(),
+                action_id: action_id.clone(),
+                candidate_name: None,
+                safety_class: SafetyClass::ReversibleLowRisk,
+                started_unix_nanos: None,
+            }),
+            active_rollback: Some(DaemonRollbackState {
+                action_id: action_id.clone(),
+                rollback_available: true,
+                token: None,
+                manual_restore_command: Some(manual_restore_command.clone()),
+            }),
+            last_decision: Some(daemon_decision_state(
+                "startup_recovery_rollback_disabled",
+                format!(
+                    "rollback disabled for experiment_id={experiment_id} action_id={action_id} manual_restore_command=\"{manual_restore_command}\""
+                ),
+            )),
+            degraded: vec![DaemonDegradedStatus {
+                category: "startup_recovery".to_owned(),
+                message: "rollback disabled".to_owned(),
+            }],
+            faulted: Some(DaemonFaultState {
+                reason: "startup recovery rollback disabled".to_owned(),
+                manual_restore_command: Some(manual_restore_command.clone()),
+            }),
+            ..DaemonState::default()
+        },
+        crate::autotune::startup_recovery::StartupRecoveryOutcome::ApplyingWithoutRollback {
+            experiment_id,
+            action_id,
+        } => DaemonState {
+            mode: DaemonMode::ApplyLowRisk,
+            phase: DaemonPhase::Faulted,
+            active_experiment: Some(DaemonExperimentState {
+                experiment_id: experiment_id.clone(),
+                action_id: action_id.clone(),
+                candidate_name: None,
+                safety_class: SafetyClass::ReversibleLowRisk,
+                started_unix_nanos: None,
+            }),
+            last_decision: Some(daemon_decision_state(
+                "startup_recovery_applying_without_rollback",
+                format!(
+                    "applying journal without rollback token experiment_id={experiment_id} action_id={action_id}"
+                ),
+            )),
+            degraded: vec![DaemonDegradedStatus {
+                category: "startup_recovery".to_owned(),
+                message: "applying journal without rollback token".to_owned(),
+            }],
+            faulted: Some(DaemonFaultState {
+                reason: "startup recovery found applying journal without rollback token".to_owned(),
+                manual_restore_command: Some("stutter autotune restore".to_owned()),
+            }),
+            ..DaemonState::default()
+        },
+        crate::autotune::startup_recovery::StartupRecoveryOutcome::Faulted {
+            experiment_id,
+            action_id,
+            manual_restore_command,
+            reason,
+        } => DaemonState {
+            mode: DaemonMode::ApplyLowRisk,
+            phase: DaemonPhase::Faulted,
+            active_experiment: Some(DaemonExperimentState {
+                experiment_id: experiment_id.clone(),
+                action_id: action_id.clone(),
+                candidate_name: None,
+                safety_class: SafetyClass::ReversibleLowRisk,
+                started_unix_nanos: None,
+            }),
+            last_decision: Some(daemon_decision_state(
+                "startup_recovery_faulted",
+                reason.clone(),
+            )),
+            degraded: vec![DaemonDegradedStatus {
+                category: "startup_recovery".to_owned(),
+                message: reason.clone(),
+            }],
+            faulted: Some(DaemonFaultState {
+                reason: reason.clone(),
+                manual_restore_command: Some(manual_restore_command.clone()),
+            }),
+            ..DaemonState::default()
+        },
+    }
+}
+
+fn daemon_target_from_record_request(request: &RemoteMonitorRequest) -> Option<DaemonTargetState> {
+    let root_pid = request
+        .tree_pids
+        .first()
+        .copied()
+        .or_else(|| request.target_pids.first().copied());
+    let active_targets = request.target_pids.len() + request.tree_pids.len();
+    let comm = request.include_comm.first().cloned();
+
+    if root_pid.is_none() && active_targets == 0 && comm.is_none() {
+        return None;
+    }
+
+    Some(DaemonTargetState {
+        root_pid,
+        active_targets,
+        comm,
+    })
+}
+
+fn daemon_state_for_record_start(
+    request: &RemoteMonitorRequest,
+    run_id: &str,
+    target_count: usize,
+) -> DaemonState {
+    DaemonState {
+        mode: DaemonMode::Observe,
+        phase: DaemonPhase::Observing,
+        active_target: daemon_target_from_record_request(request),
+        last_decision: Some(daemon_decision_state(
+            "record_started",
+            format!("remote recording run_id={run_id} target_count={target_count}"),
+        )),
+        ..DaemonState::default()
+    }
+}
+
+fn daemon_target_from_autotune_request(
+    request: &AutotuneStartRequest,
+) -> Option<DaemonTargetState> {
+    let active_targets = usize::from(request.tree_pid.is_some())
+        + usize::from(request.watch_process.is_some())
+        + usize::from(request.auto_focus);
+    let comm = request.watch_process.clone();
+
+    if request.tree_pid.is_none() && active_targets == 0 && comm.is_none() {
+        return None;
+    }
+
+    Some(DaemonTargetState {
+        root_pid: request.tree_pid,
+        active_targets,
+        comm,
+    })
+}
+
+fn daemon_phase_for_started_mode(mode: DaemonMode) -> DaemonPhase {
+    match mode {
+        DaemonMode::Observe => DaemonPhase::Observing,
+        DaemonMode::Suggest => DaemonPhase::Planning,
+        DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk | DaemonMode::ApplyHighRisk => {
+            DaemonPhase::Applying
+        }
+    }
+}
+
+fn daemon_state_for_autotune_start(
+    policy: &DaemonPolicy,
+    request: &AutotuneStartRequest,
+    started_unix_nanos: u128,
+) -> DaemonState {
+    let action_id = format!("remote-autotune-start:{}", policy.mode.as_str());
+
+    DaemonState {
+        mode: policy.mode,
+        phase: daemon_phase_for_started_mode(policy.mode),
+        active_target: daemon_target_from_autotune_request(request),
+        active_experiment: Some(DaemonExperimentState {
+            experiment_id: format!("remote-autotune-{started_unix_nanos}"),
+            action_id: action_id.clone(),
+            candidate_name: request
+                .watch_process
+                .clone()
+                .or_else(|| Some(policy.mode.as_str().to_owned())),
+            safety_class: safety_class_for_daemon_mode(policy.mode),
+            started_unix_nanos: Some(started_unix_nanos),
+        }),
+        active_rollback: policy.mode.supports_apply().then(|| DaemonRollbackState {
+            action_id,
+            rollback_available: false,
+            token: None,
+            manual_restore_command: Some("stutter autotune restore".to_owned()),
+        }),
+        last_decision: Some(daemon_decision_state(
+            "autotune_started",
+            format!("remote autotune {} controller started", policy.mode),
+        )),
+        ..DaemonState::default()
+    }
+}
+
+fn daemon_state_for_autotune_stop(
+    mode: DaemonMode,
+    exit: &crate::autotune::runtime::AutotuneControllerExit,
+) -> DaemonState {
+    let last_decision = exit
+        .last_decision
+        .as_ref()
+        .map(|decision| DaemonDecisionState {
+            decision: decision.decision.clone(),
+            reason: format!("stopped: {}; last_reason={}", exit.reason, decision.reason),
+            unix_nanos: Some(decision.unix_nanos),
+            score_total: Some(decision.score_total),
+        })
+        .unwrap_or_else(|| daemon_decision_state("autotune_stopped", exit.reason.clone()));
+
+    DaemonState {
+        mode,
+        phase: DaemonPhase::Disabled,
+        last_decision: Some(last_decision),
+        ..DaemonState::default()
+    }
+}
+
+async fn replace_agent_daemon_state(state: &AgentState, daemon_state: DaemonState) {
+    *state.daemon_state.lock().await = daemon_state;
+}
+
+async fn mark_agent_daemon_fault(
+    state: &AgentState,
+    mode: DaemonMode,
+    decision: &str,
+    reason: impl Into<String>,
+) {
+    replace_agent_daemon_state(state, daemon_state_for_agent_fault(mode, decision, reason)).await;
+}
+
 fn policy_for_remote_autotune_start(
     headers: &HeaderMap,
     state: &AgentState,
@@ -636,6 +953,13 @@ async fn start_record_handler(
 ) -> impl IntoResponse {
     if let Err(status) = authorize(&headers, &state.auth) {
         audit_agent_event("remote-record-start", false, 0, "unauthorized".to_owned());
+        mark_agent_daemon_fault(
+            &state,
+            DaemonMode::Observe,
+            "record_start_rejected",
+            "unauthorized",
+        )
+        .await;
         return status.into_response();
     }
 
@@ -662,6 +986,13 @@ async fn start_record_handler(
             0,
             format!("limit_rejected reason={e}"),
         );
+        mark_agent_daemon_fault(
+            &state,
+            DaemonMode::Observe,
+            "record_limit_rejected",
+            format!("limit rejected: {e}"),
+        )
+        .await;
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -679,6 +1010,13 @@ async fn start_record_handler(
             0,
             "conflict: recording already active".to_owned(),
         );
+        mark_agent_daemon_fault(
+            &state,
+            DaemonMode::Observe,
+            "record_start_conflict",
+            "a recording run is already active",
+        )
+        .await;
         return (
             StatusCode::CONFLICT,
             Json(ErrorResponse {
@@ -701,6 +1039,13 @@ async fn start_record_handler(
                 0,
                 format!("config_error reason={e}"),
             );
+            mark_agent_daemon_fault(
+                &state,
+                DaemonMode::Observe,
+                "record_config_error",
+                format!("invalid configuration: {e}"),
+            )
+            .await;
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
@@ -751,6 +1096,11 @@ async fn start_record_handler(
         stop_tx,
         join,
     });
+    replace_agent_daemon_state(
+        &state,
+        daemon_state_for_record_start(&request, &run_id, target_count),
+    )
+    .await;
 
     (
         StatusCode::OK,
@@ -779,6 +1129,17 @@ async fn stop_record_handler(
         match handle.join.await {
             Ok(Ok(_)) => {
                 audit_agent_event("remote-record-stop", true, 0, format!("run_id={run_id}"));
+                replace_agent_daemon_state(
+                    &state,
+                    daemon_state_for_agent_decision(
+                        DaemonMode::Observe,
+                        DaemonPhase::Disabled,
+                        "record_stopped",
+                        format!("run_id={run_id}"),
+                    ),
+                )
+                .await;
+
                 (
                     StatusCode::OK,
                     Json(StopRecordResponse {
@@ -795,6 +1156,14 @@ async fn stop_record_handler(
                     0,
                     format!("run_id={run_id} error={e}"),
                 );
+                mark_agent_daemon_fault(
+                    &state,
+                    DaemonMode::Observe,
+                    "record_failed",
+                    format!("run_id={run_id} error={e}"),
+                )
+                .await;
+
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ErrorResponse {
@@ -810,6 +1179,14 @@ async fn stop_record_handler(
                     0,
                     format!("run_id={run_id} join_error={e}"),
                 );
+                mark_agent_daemon_fault(
+                    &state,
+                    DaemonMode::Observe,
+                    "record_join_failed",
+                    format!("run_id={run_id} join_error={e}"),
+                )
+                .await;
+
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ErrorResponse {
@@ -820,6 +1197,17 @@ async fn stop_record_handler(
             }
         }
     } else {
+        replace_agent_daemon_state(
+            &state,
+            daemon_state_for_agent_decision(
+                DaemonMode::Observe,
+                DaemonPhase::Disabled,
+                "record_stop_no_active_run",
+                "no active recording run",
+            ),
+        )
+        .await;
+
         (
             StatusCode::OK,
             Json(StopRecordResponse {
@@ -937,6 +1325,7 @@ async fn autotune_status_handler(
     }
 
     let active = state.active_autotune.lock().await;
+    let daemon_state = state.daemon_state.lock().await.clone();
     let disk_status = crate::autotune::status::load_autotune_status(
         &crate::autotune::history::default_autotune_history_path(),
     )
@@ -978,6 +1367,7 @@ async fn autotune_status_handler(
                 .as_ref()
                 .and_then(|status| status.last_fault.clone()),
             manual_restore_command: Some("stutter autotune restore".to_owned()),
+            daemon_state: daemon_state.clone(),
             message: format!("autotune {} controller active", handle.mode),
         },
         None => AutotuneStatusResponse {
@@ -1013,6 +1403,7 @@ async fn autotune_status_handler(
                 .as_ref()
                 .and_then(|status| status.last_fault.clone()),
             manual_restore_command: Some("stutter autotune restore".to_owned()),
+            daemon_state,
             message: "no autotune session active".to_owned(),
         },
     };
@@ -1028,7 +1419,19 @@ async fn autotune_start_handler(
     let policy = match policy_for_remote_autotune_start(&headers, &state, &request) {
         Ok(policy) => policy,
         Err(rejection) => {
-            audit_agent_event("remote-autotune-start", false, 0, rejection.audit_message);
+            audit_agent_event(
+                "remote-autotune-start",
+                false,
+                0,
+                rejection.audit_message.clone(),
+            );
+            mark_agent_daemon_fault(
+                &state,
+                daemon_mode_from_agent_mode(&request.mode),
+                "autotune_policy_rejected",
+                rejection.audit_message,
+            )
+            .await;
             return (
                 rejection.status,
                 Json(ErrorResponse {
@@ -1047,6 +1450,13 @@ async fn autotune_start_handler(
             0,
             format!("limit_rejected reason={err:#}"),
         );
+        mark_agent_daemon_fault(
+            &state,
+            daemon_mode_from_agent_mode(&request.mode),
+            "autotune_limit_rejected",
+            format!("autotune limit rejected: {err}"),
+        )
+        .await;
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -1064,6 +1474,13 @@ async fn autotune_start_handler(
             0,
             "conflict: autotune session already active".to_owned(),
         );
+        mark_agent_daemon_fault(
+            &state,
+            policy.mode,
+            "autotune_start_conflict",
+            "an autotune session is already active",
+        )
+        .await;
         return (
             StatusCode::CONFLICT,
             Json(ErrorResponse {
@@ -1113,6 +1530,13 @@ async fn autotune_start_handler(
                 0,
                 format!("config_error reason={err:#}"),
             );
+            mark_agent_daemon_fault(
+                &state,
+                policy.mode,
+                "autotune_config_error",
+                format!("invalid autotune configuration: {err}"),
+            )
+            .await;
             return (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
@@ -1136,6 +1560,13 @@ async fn autotune_start_handler(
                         0,
                         format!("profile_load_error reason={err:#}"),
                     );
+                    mark_agent_daemon_fault(
+                        &state,
+                        policy.mode,
+                        "autotune_profile_load_error",
+                        format!("failed to load profiles: {err:#}"),
+                    )
+                    .await;
                     return (
                         StatusCode::BAD_REQUEST,
                         Json(ErrorResponse {
@@ -1190,7 +1621,9 @@ async fn autotune_start_handler(
         }
     };
 
+    let daemon_state = daemon_state_for_autotune_start(&policy, &request, started_unix_nanos);
     *active = Some(handle);
+    replace_agent_daemon_state(&state, daemon_state).await;
 
     audit_agent_event_with_safety(
         "remote-autotune-start",
@@ -1238,6 +1671,17 @@ async fn autotune_stop_handler(
             "active_before_stop=false".to_owned(),
         );
 
+        replace_agent_daemon_state(
+            &state,
+            daemon_state_for_agent_decision(
+                DaemonMode::Observe,
+                DaemonPhase::Disabled,
+                "autotune_stop_no_active_session",
+                "no remote autotune session was active",
+            ),
+        )
+        .await;
+
         return Json(AutotuneStopResponse {
             status: "no_active_session".to_owned(),
             message: "no remote autotune session was active".to_owned(),
@@ -1245,6 +1689,7 @@ async fn autotune_stop_handler(
         .into_response();
     };
 
+    let stop_mode = daemon_mode_from_agent_mode(&handle.mode);
     let _ = handle.stop_tx.send(());
 
     match handle.join.await {
@@ -1255,6 +1700,9 @@ async fn autotune_stop_handler(
                 0,
                 format!("active_before_stop=true reason={}", exit.reason),
             );
+
+            replace_agent_daemon_state(&state, daemon_state_for_autotune_stop(stop_mode, &exit))
+                .await;
 
             Json(AutotuneStopResponse {
                 status: "stopped".to_owned(),
@@ -1269,6 +1717,14 @@ async fn autotune_stop_handler(
                 0,
                 format!("active_before_stop=true error={err:#}"),
             );
+
+            mark_agent_daemon_fault(
+                &state,
+                stop_mode,
+                "autotune_controller_failed",
+                format!("autotune controller failed: {err:#}"),
+            )
+            .await;
 
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1285,6 +1741,14 @@ async fn autotune_stop_handler(
                 0,
                 format!("active_before_stop=true join_error={err}"),
             );
+
+            mark_agent_daemon_fault(
+                &state,
+                stop_mode,
+                "autotune_controller_join_failed",
+                format!("autotune controller task join failed: {err}"),
+            )
+            .await;
 
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1703,6 +2167,7 @@ mod tests {
         AgentState {
             active_run: Mutex::new(None),
             active_autotune: Mutex::new(None),
+            daemon_state: Mutex::new(DaemonState::default()),
             runs_dir: std::env::temp_dir(),
             auth: AgentAuth { bearer_token },
             bind,
@@ -1719,6 +2184,7 @@ mod tests {
         AgentState {
             active_run: Mutex::new(None),
             active_autotune: Mutex::new(None),
+            daemon_state: Mutex::new(DaemonState::default()),
             runs_dir: PathBuf::from("."),
             auth: AgentAuth {
                 bearer_token: token.map(str::to_owned),
@@ -2134,6 +2600,175 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn autotune_status_includes_serializable_daemon_state_without_task_handles() {
+        let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
+        *state.active_autotune.lock().await = Some(test_autotune_handle());
+        *state.daemon_state.lock().await = DaemonState {
+            mode: DaemonMode::ApplyLowRisk,
+            phase: DaemonPhase::Applying,
+            active_target: Some(DaemonTargetState {
+                root_pid: Some(1234),
+                active_targets: 1,
+                comm: Some("Game.exe".to_owned()),
+            }),
+            active_experiment: Some(DaemonExperimentState {
+                experiment_id: "experiment-1".to_owned(),
+                action_id: "remote-autotune-start:apply-low-risk".to_owned(),
+                candidate_name: Some("Game.exe".to_owned()),
+                safety_class: SafetyClass::ReversibleLowRisk,
+                started_unix_nanos: Some(100),
+            }),
+            active_rollback: Some(DaemonRollbackState {
+                action_id: "remote-autotune-start:apply-low-risk".to_owned(),
+                rollback_available: false,
+                token: None,
+                manual_restore_command: Some("stutter autotune restore".to_owned()),
+            }),
+            ..DaemonState::default()
+        };
+
+        let response = AutotuneStatusResponse {
+            active: true,
+            mode: Some("apply-low-risk".to_owned()),
+            watch_process: Some("Game.exe".to_owned()),
+            tree_pid: Some(1234),
+            started_unix_nanos: Some(100),
+            focus_group: None,
+            target_root: Some(1234),
+            current_score: None,
+            active_profile: None,
+            last_decision: None,
+            rollback_available: false,
+            cooldown_remaining_seconds: None,
+            data_quality: None,
+            last_fault: None,
+            manual_restore_command: Some("stutter autotune restore".to_owned()),
+            daemon_state: state.daemon_state.lock().await.clone(),
+            message: "test".to_owned(),
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+
+        assert!(json.contains("\"daemon_state\""));
+        assert!(json.contains("\"active_experiment\""));
+        assert!(json.contains("\"active_rollback\""));
+        assert!(!json.contains("stop_tx"));
+        assert!(!json.contains("join"));
+    }
+
+    #[tokio::test]
+    async fn autotune_start_updates_daemon_state_with_target_experiment_and_rollback_availability()
+    {
+        let mut state_value = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
+        state_value.auth = AgentAuth {
+            bearer_token: Some("secret".to_owned()),
+        };
+        let state = Arc::new(state_value);
+
+        let response = autotune_start_handler(
+            State(state.clone()),
+            autotune_headers(Some("secret")),
+            Json(AutotuneStartRequest {
+                mode: "apply-low-risk".to_owned(),
+                watch_process: None,
+                tree_pid: Some(1234),
+                profiles: None,
+                config: None,
+                duration_seconds: Some(30),
+                decision_log: None,
+                summary_ms: None,
+                preset: None,
+                hwmon: false,
+                mangohud_log: None,
+                auto_focus: false,
+                focus_source: None,
+                foreground_window: false,
+                foreground_source: None,
+                foreground_poll_ms: None,
+                foreground_max_stale_ms: None,
+                washout_seconds: None,
+                washout_verify_interval_ms: None,
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let daemon_state = state.daemon_state.lock().await.clone();
+        assert_eq!(daemon_state.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(daemon_state.phase, DaemonPhase::Applying);
+        assert_eq!(
+            daemon_state
+                .active_target
+                .as_ref()
+                .and_then(|target| target.root_pid),
+            Some(1234)
+        );
+        assert_eq!(
+            daemon_state
+                .active_experiment
+                .as_ref()
+                .map(|experiment| experiment.safety_class.clone()),
+            Some(SafetyClass::ReversibleLowRisk)
+        );
+        assert_eq!(
+            daemon_state
+                .active_rollback
+                .as_ref()
+                .map(|rollback| rollback.rollback_available),
+            Some(false)
+        );
+        assert!(daemon_state.faulted.is_none());
+    }
+
+    #[tokio::test]
+    async fn autotune_policy_rejection_updates_faulted_daemon_state() {
+        let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
+
+        let response = autotune_start_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Json(AutotuneStartRequest {
+                mode: "apply-low-risk".to_owned(),
+                watch_process: Some("Game.exe".to_owned()),
+                tree_pid: None,
+                profiles: None,
+                config: None,
+                duration_seconds: Some(30),
+                decision_log: None,
+                summary_ms: None,
+                preset: None,
+                hwmon: false,
+                mangohud_log: None,
+                auto_focus: false,
+                focus_source: None,
+                foreground_window: false,
+                foreground_source: None,
+                foreground_poll_ms: None,
+                foreground_max_stale_ms: None,
+                washout_seconds: None,
+                washout_verify_interval_ms: None,
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let daemon_state = state.daemon_state.lock().await.clone();
+        assert_eq!(daemon_state.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(daemon_state.phase, DaemonPhase::Faulted);
+        assert!(
+            daemon_state
+                .faulted
+                .as_ref()
+                .map(|fault| fault.reason.contains("bearer token"))
+                .unwrap_or(false)
+        );
+    }
+
+    #[tokio::test]
     async fn autotune_start_apply_low_risk_without_auth_is_rejected_before_mode_validation() {
         let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
         let response = autotune_start_handler(
@@ -2325,6 +2960,16 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert!(state.active_autotune.lock().await.is_none());
+
+        let daemon_state = state.daemon_state.lock().await.clone();
+        assert_eq!(daemon_state.phase, DaemonPhase::Disabled);
+        assert_eq!(
+            daemon_state
+                .last_decision
+                .as_ref()
+                .map(|decision| decision.decision.as_str()),
+            Some("autotune_stopped")
+        );
     }
 
     #[tokio::test]
@@ -2608,6 +3253,7 @@ mod tests {
         let state = AgentState {
             active_run: Mutex::new(None),
             active_autotune: Mutex::new(None),
+            daemon_state: Mutex::new(DaemonState::default()),
             runs_dir: PathBuf::from("."),
             auth: AgentAuth { bearer_token: None },
             bind: "127.0.0.1:9899".parse().unwrap(),
@@ -2815,6 +3461,7 @@ mod remote_policy_tests {
         AgentState {
             active_run: Mutex::new(None),
             active_autotune: Mutex::new(None),
+            daemon_state: Mutex::new(DaemonState::default()),
             runs_dir: PathBuf::from("/tmp"),
             auth: AgentAuth {
                 bearer_token: token.map(str::to_owned),
