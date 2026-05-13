@@ -3,7 +3,11 @@ use std::path::Path;
 use crate::{
     actions::{ActionError, ActionOutcome, ActionState, RollbackToken, SafetyClass, TuningAction},
     audit::{AuditEvent, append_audit_event_to_path, unix_nanos_now},
-    daemon_policy::{ActionSource, DaemonPolicy, PolicyIntent},
+    daemon::DaemonConfig,
+    daemon_policy::{
+        ActionSource, DaemonMode, DaemonPolicy, DaemonPolicyBuildInput, PolicyIntent,
+        build_daemon_policy,
+    },
 };
 
 #[derive(Debug)]
@@ -21,24 +25,15 @@ pub struct ActionRunPolicy {
 
 impl ActionRunPolicy {
     pub fn dry_run(source: ActionSource) -> Self {
-        Self {
-            policy: DaemonPolicy::suggest(source),
-            dry_run: true,
-        }
+        Self::for_mode(DaemonMode::Suggest, source, true)
     }
 
     pub fn apply_low_risk(source: ActionSource, dry_run: bool) -> Self {
-        Self {
-            policy: DaemonPolicy::apply_low_risk(source),
-            dry_run,
-        }
+        Self::for_mode(DaemonMode::ApplyLowRisk, source, dry_run)
     }
 
     pub fn apply_medium_risk(source: ActionSource, dry_run: bool) -> Self {
-        Self {
-            policy: DaemonPolicy::apply_medium_risk(source),
-            dry_run,
-        }
+        Self::for_mode(DaemonMode::ApplyMediumRisk, source, dry_run)
     }
 
     pub fn for_action<A: TuningAction>(action: &A, dry_run: bool, source: ActionSource) -> Self {
@@ -53,6 +48,22 @@ impl ActionRunPolicy {
             SafetyClass::ReversibleMediumRisk | SafetyClass::HighRisk => {
                 Self::apply_medium_risk(source, false)
             }
+        }
+    }
+
+    fn for_mode(mode: DaemonMode, source: ActionSource, dry_run: bool) -> Self {
+        let config = DaemonConfig {
+            mode,
+            source,
+            ..DaemonConfig::default()
+        };
+
+        Self {
+            policy: build_daemon_policy(DaemonPolicyBuildInput {
+                config: &config,
+                remote_context: None,
+            }),
+            dry_run,
         }
     }
 
@@ -370,6 +381,23 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn action_run_policy_constructors_resolve_policies_through_builder() {
+        let config = crate::daemon::DaemonConfig {
+            mode: DaemonMode::ApplyLowRisk,
+            source: ActionSource::Test,
+            ..crate::daemon::DaemonConfig::default()
+        };
+        let expected = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        });
+        let run_policy = ActionRunPolicy::apply_low_risk(ActionSource::Test, false);
+
+        assert_eq!(run_policy.policy, expected);
+        assert!(!run_policy.dry_run);
     }
 
     #[test]

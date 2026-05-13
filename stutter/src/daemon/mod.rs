@@ -9,8 +9,9 @@ pub use config::{
 };
 pub use explain::{DaemonPolicyExplanation, PolicyExplainLine};
 pub use policy::{
-    ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicy, PolicyIntent,
-    PolicyRejection, RemoteApplyPolicy, RollbackRequirement,
+    ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicy,
+    DaemonPolicyBuildInput, PolicyIntent, PolicyRejection, RemoteApplyPolicy, RemotePolicyContext,
+    RollbackRequirement, build_daemon_policy,
 };
 pub use state::{
     DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus, DaemonExperimentState,
