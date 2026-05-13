@@ -1,6 +1,6 @@
 use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
-use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand};
+use clap::{ArgAction, ArgMatches, Args, CommandFactory, Parser, Subcommand, parser::ValueSource};
 
 use crate::{
     commands::input::{
@@ -655,8 +655,63 @@ pub struct AgentArgs {
     pub max_concurrent_recordings: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct MonitorArgPresence {
+    watch_poll_ms: bool,
+    follow_exec: bool,
+    cpu_perf_max_tasks: bool,
+    runtime_slices_max_tasks: bool,
+    otel_service_name: bool,
+    focus_source: bool,
+    foreground_source: bool,
+    foreground_poll_ms: bool,
+    foreground_max_stale_ms: bool,
+    auto_focus_poll_ms: bool,
+    auto_focus_min_confidence: bool,
+    auto_focus_switch_cooldown_ms: bool,
+    auto_focus_switch_margin: bool,
+    auto_focus_required_polls: bool,
+    auto_focus_max_roots: bool,
+}
+
+impl MonitorArgPresence {
+    fn from_matches(matches: &ArgMatches) -> Self {
+        fn command_line(matches: &ArgMatches, id: &str) -> bool {
+            matches.value_source(id) == Some(ValueSource::CommandLine)
+        }
+
+        Self {
+            watch_poll_ms: command_line(matches, "watch_poll_ms"),
+            follow_exec: command_line(matches, "follow_exec"),
+            cpu_perf_max_tasks: command_line(matches, "cpu_perf_max_tasks"),
+            runtime_slices_max_tasks: command_line(matches, "runtime_slices_max_tasks"),
+            otel_service_name: command_line(matches, "otel_service_name"),
+            focus_source: command_line(matches, "focus_source"),
+            foreground_source: command_line(matches, "foreground_source"),
+            foreground_poll_ms: command_line(matches, "foreground_poll_ms"),
+            foreground_max_stale_ms: command_line(matches, "foreground_max_stale_ms"),
+            auto_focus_poll_ms: command_line(matches, "auto_focus_poll_ms"),
+            auto_focus_min_confidence: command_line(matches, "auto_focus_min_confidence"),
+            auto_focus_switch_cooldown_ms: command_line(matches, "auto_focus_switch_cooldown_ms"),
+            auto_focus_switch_margin: command_line(matches, "auto_focus_switch_margin"),
+            auto_focus_required_polls: command_line(matches, "auto_focus_required_polls"),
+            auto_focus_max_roots: command_line(matches, "auto_focus_max_roots"),
+        }
+    }
+
+    fn autotune_monitor_defaults() -> Self {
+        Self {
+            focus_source: true,
+            auto_focus_min_confidence: true,
+            auto_focus_required_polls: true,
+            auto_focus_max_roots: true,
+            ..Self::default()
+        }
+    }
+}
+
 impl MonitorArgs {
-    pub fn into_monitor_config_layer(self) -> MonitorConfigLayer {
+    fn into_monitor_config_layer(self, presence: MonitorArgPresence) -> MonitorConfigLayer {
         MonitorConfigLayer {
             target_pids: (!self.target_pids.is_empty()).then(|| self.target_pids.clone()),
             tree_pids: (!self.tree_pids.is_empty()).then(|| self.tree_pids.clone()),
@@ -672,7 +727,7 @@ impl MonitorArgs {
                 .map(|value| Some(value.saturating_mul(1_000_000))),
             alert_webhook_url: self.alert_webhook_url.clone().map(Some),
             verbose: self.verbose.then_some(true),
-            watch_poll_ms: (self.watch_poll_ms != 2_000).then_some(self.watch_poll_ms),
+            watch_poll_ms: presence.watch_poll_ms.then_some(self.watch_poll_ms),
             watch_timeout: self
                 .watch_timeout_seconds
                 .map(|seconds| Some(Duration::from_secs(seconds))),
@@ -713,8 +768,8 @@ impl MonitorArgs {
             native_cgroup_filter: self.native_cgroup_filter.then_some(true),
             follow_exec: if self.no_follow_exec {
                 Some(false)
-            } else if self.follow_exec {
-                Some(true)
+            } else if presence.follow_exec {
+                Some(self.follow_exec)
             } else {
                 None
             },
@@ -727,7 +782,9 @@ impl MonitorArgs {
             },
             cpu_perf: self.cpu_perf.then_some(true),
             cpu_perf_kernel: self.cpu_perf_kernel.then_some(true),
-            cpu_perf_max_tasks: (self.cpu_perf_max_tasks != 128).then_some(self.cpu_perf_max_tasks),
+            cpu_perf_max_tasks: presence
+                .cpu_perf_max_tasks
+                .then_some(self.cpu_perf_max_tasks),
             cpu_perf_cache_refs: self.cpu_perf_cache_refs.then_some(true),
             block_io: if self.no_block_io {
                 Some(false)
@@ -750,7 +807,8 @@ impl MonitorArgs {
             } else {
                 None
             },
-            runtime_slices_max_tasks: (self.runtime_slices_max_tasks != 256)
+            runtime_slices_max_tasks: presence
+                .runtime_slices_max_tasks
                 .then_some(self.runtime_slices_max_tasks),
             mangohud_log: self.mangohud_log.clone().map(Some),
             mangohud_log_live: self.mangohud_log_live.then_some(true),
@@ -760,30 +818,37 @@ impl MonitorArgs {
             ringbuf_size_kb: self.ringbuf_size_kb.map(Some),
             wakeup_map_factor: self.wakeup_map_factor.map(Some),
             otlp_endpoint: self.otlp_endpoint.clone().map(Some),
-            otel_service_name: (self.otel_service_name != "stutter")
+            otel_service_name: presence
+                .otel_service_name
                 .then(|| self.otel_service_name.clone()),
             auto_focus: self.auto_focus.then_some(true),
-            focus_source: (self.focus_source != FocusSource::Heuristic)
-                .then_some(self.focus_source),
+            focus_source: presence.focus_source.then_some(self.focus_source),
             foreground_window: self.foreground_window.then_some(true),
-            foreground_source: (self.foreground_source != ForegroundSource::Auto)
-                .then_some(self.foreground_source),
-            foreground_poll_ms: (self.foreground_poll_ms != 1_000)
+            foreground_source: presence.foreground_source.then_some(self.foreground_source),
+            foreground_poll_ms: presence
+                .foreground_poll_ms
                 .then_some(self.foreground_poll_ms),
-            foreground_max_stale_ms: (self.foreground_max_stale_ms != 2_500)
+            foreground_max_stale_ms: presence
+                .foreground_max_stale_ms
                 .then_some(self.foreground_max_stale_ms),
             foreground_include_title: self.foreground_include_title.then_some(true),
-            auto_focus_poll_ms: (self.auto_focus_poll_ms != 1_000)
+            auto_focus_poll_ms: presence
+                .auto_focus_poll_ms
                 .then_some(self.auto_focus_poll_ms),
-            auto_focus_min_confidence: (self.auto_focus_min_confidence != 0.60)
+            auto_focus_min_confidence: presence
+                .auto_focus_min_confidence
                 .then_some(self.auto_focus_min_confidence),
-            auto_focus_switch_cooldown_ms: (self.auto_focus_switch_cooldown_ms != 5_000)
+            auto_focus_switch_cooldown_ms: presence
+                .auto_focus_switch_cooldown_ms
                 .then_some(self.auto_focus_switch_cooldown_ms),
-            auto_focus_switch_margin: (self.auto_focus_switch_margin != 0.20)
+            auto_focus_switch_margin: presence
+                .auto_focus_switch_margin
                 .then_some(self.auto_focus_switch_margin),
-            auto_focus_required_polls: (self.auto_focus_required_polls != 2)
+            auto_focus_required_polls: presence
+                .auto_focus_required_polls
                 .then_some(self.auto_focus_required_polls),
-            auto_focus_max_roots: (self.auto_focus_max_roots != 4)
+            auto_focus_max_roots: presence
+                .auto_focus_max_roots
                 .then_some(self.auto_focus_max_roots),
             retain_intervals: self.retain_intervals.map(Some),
             run_name: self.run_name.clone().map(Some),
@@ -1514,11 +1579,12 @@ pub fn autotune_monitor_config(
 
     monitor.no_record = true;
 
-    Ok(Arc::new(monitor_config_from_monitor_args(
+    Ok(Arc::new(monitor_config_from_monitor_args_with_presence(
         monitor,
         RecordingMode::ForceRecording {
             max_duration: input.duration_seconds.map(Duration::from_secs),
         },
+        MonitorArgPresence::autotune_monitor_defaults(),
     )?))
 }
 
@@ -1526,18 +1592,36 @@ pub fn parse_app_command() -> anyhow::Result<AppCommand> {
     parse_app_command_from(std::env::args_os())
 }
 
+fn monitor_arg_presence_from_matches(
+    matches: &ArgMatches,
+    subcommand: Option<&str>,
+) -> MonitorArgPresence {
+    match subcommand {
+        Some(expected) => match matches.subcommand() {
+            Some((actual, sub_matches)) if actual == expected => {
+                MonitorArgPresence::from_matches(sub_matches)
+            }
+            _ => MonitorArgPresence::default(),
+        },
+        None => MonitorArgPresence::from_matches(matches),
+    }
+}
+
 pub fn parse_app_command_from<I, T>(args: I) -> anyhow::Result<AppCommand>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
-    let cli = Cli::try_parse_from(args)?;
+    let argv: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    let matches = Cli::command().try_get_matches_from(argv.clone())?;
+    let cli = Cli::try_parse_from(argv)?;
 
     match cli.command {
         Some(Command::Monitor(args)) => Ok(AppCommand::Monitor(MonitorCommandInput {
-            config: Arc::new(monitor_config_from_monitor_args(
+            config: Arc::new(monitor_config_from_monitor_args_with_presence(
                 args,
                 RecordingMode::Monitor,
+                monitor_arg_presence_from_matches(&matches, Some("monitor")),
             )?),
         })),
         Some(Command::Record(args)) => {
@@ -1553,9 +1637,10 @@ where
 
             let max_duration = args.duration.map(Duration::from_secs);
             Ok(AppCommand::Monitor(MonitorCommandInput {
-                config: Arc::new(monitor_config_from_monitor_args(
+                config: Arc::new(monitor_config_from_monitor_args_with_presence(
                     args.monitor,
                     RecordingMode::ForceRecording { max_duration },
+                    monitor_arg_presence_from_matches(&matches, Some("record")),
                 )?),
             }))
         }
@@ -1575,11 +1660,12 @@ where
 
             let run_name = format!("bench-{}-{}", args.role, args.scenario);
             args.monitor.run_name = Some(run_name.clone());
-            let config = Arc::new(monitor_config_from_monitor_args(
+            let config = Arc::new(monitor_config_from_monitor_args_with_presence(
                 args.monitor,
                 RecordingMode::ForceRecording {
                     max_duration: Some(Duration::from_secs(args.duration)),
                 },
+                monitor_arg_presence_from_matches(&matches, Some("bench")),
             )?);
             Ok(AppCommand::Bench(BenchCommandInput {
                 config,
@@ -1855,9 +1941,10 @@ where
             }))
         }
         None => Ok(AppCommand::Monitor(MonitorCommandInput {
-            config: Arc::new(monitor_config_from_monitor_args(
+            config: Arc::new(monitor_config_from_monitor_args_with_presence(
                 cli.legacy_monitor,
                 RecordingMode::Monitor,
+                monitor_arg_presence_from_matches(&matches, None),
             )?),
         })),
         Some(Command::Agent(args)) => {
@@ -2186,18 +2273,53 @@ fn merge_bool(
     }
 }
 
+#[allow(dead_code)]
 fn monitor_config_from_monitor_args(
     args: MonitorArgs,
     recording_mode: RecordingMode,
 ) -> anyhow::Result<MonitorConfig> {
     let file_config = crate::config_file::load_user_config()?;
-    monitor_config_from_monitor_args_with_file(args, file_config, recording_mode)
+    monitor_config_from_monitor_args_with_file_and_presence(
+        args,
+        file_config,
+        recording_mode,
+        MonitorArgPresence::default(),
+    )
 }
 
+fn monitor_config_from_monitor_args_with_presence(
+    args: MonitorArgs,
+    recording_mode: RecordingMode,
+    cli_presence: MonitorArgPresence,
+) -> anyhow::Result<MonitorConfig> {
+    let file_config = crate::config_file::load_user_config()?;
+    monitor_config_from_monitor_args_with_file_and_presence(
+        args,
+        file_config,
+        recording_mode,
+        cli_presence,
+    )
+}
+
+#[allow(dead_code)]
 fn monitor_config_from_monitor_args_with_file(
+    args: MonitorArgs,
+    file_config: Option<crate::config_file::UserConfigFile>,
+    recording_mode: RecordingMode,
+) -> anyhow::Result<MonitorConfig> {
+    monitor_config_from_monitor_args_with_file_and_presence(
+        args,
+        file_config,
+        recording_mode,
+        MonitorArgPresence::default(),
+    )
+}
+
+fn monitor_config_from_monitor_args_with_file_and_presence(
     mut args: MonitorArgs,
     file_config: Option<crate::config_file::UserConfigFile>,
     recording_mode: RecordingMode,
+    cli_presence: MonitorArgPresence,
 ) -> anyhow::Result<MonitorConfig> {
     let user_file = file_config;
     let file_config = user_file.clone().unwrap_or_default();
@@ -2286,27 +2408,39 @@ fn monitor_config_from_monitor_args_with_file(
         false,
     );
 
-    if let Some(foreground_window) = file_config.foreground_window {
+    if !args.foreground_window
+        && let Some(foreground_window) = file_config.foreground_window
+    {
         args.foreground_window = foreground_window;
     }
 
-    if let Some(focus_source) = file_config.focus_source.as_deref() {
+    if !cli_presence.focus_source
+        && let Some(focus_source) = file_config.focus_source.as_deref()
+    {
         args.focus_source = FocusSource::parse_config_value(focus_source)?;
     }
 
-    if let Some(foreground_source) = file_config.foreground_source.as_deref() {
+    if !cli_presence.foreground_source
+        && let Some(foreground_source) = file_config.foreground_source.as_deref()
+    {
         args.foreground_source = ForegroundSource::parse_config_value(foreground_source)?;
     }
 
-    if let Some(foreground_poll_ms) = file_config.foreground_poll_ms {
+    if !cli_presence.foreground_poll_ms
+        && let Some(foreground_poll_ms) = file_config.foreground_poll_ms
+    {
         args.foreground_poll_ms = foreground_poll_ms;
     }
 
-    if let Some(foreground_max_stale_ms) = file_config.foreground_max_stale_ms {
+    if !cli_presence.foreground_max_stale_ms
+        && let Some(foreground_max_stale_ms) = file_config.foreground_max_stale_ms
+    {
         args.foreground_max_stale_ms = foreground_max_stale_ms;
     }
 
-    if let Some(foreground_include_title) = file_config.foreground_include_title {
+    if !args.foreground_include_title
+        && let Some(foreground_include_title) = file_config.foreground_include_title
+    {
         args.foreground_include_title = foreground_include_title;
     }
 
@@ -2451,7 +2585,7 @@ fn monitor_config_from_monitor_args_with_file(
         args.alert_webhook_url.clone()
     };
 
-    let mut layer = args.clone().into_monitor_config_layer();
+    let mut layer = args.clone().into_monitor_config_layer(cli_presence);
     layer.alert_webhook_url = alert_webhook_url.map(Some);
     if let Some(max_duration) = recording_mode.max_duration() {
         layer.max_duration = Some(Some(max_duration));
@@ -4489,6 +4623,47 @@ foreground_include_title = true
                 .unwrap();
 
         assert_eq!(config.timing.summary_period_ms, 1000);
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn explicit_cli_default_focus_values_override_user_file_values() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+        let dir = temp_dir("explicit-cli-default-focus-override");
+        let config_path = dir.join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+            focus_source = "foreground"
+            foreground_source = "sway"
+            foreground_poll_ms = 777
+            foreground_max_stale_ms = 3000
+            "#,
+        )
+        .unwrap();
+
+        let _guard = EnvGuard::set("STUTTER_CONFIG", config_path.to_str().unwrap());
+
+        let config = parse_monitor_config_from_inner([
+            "stutter",
+            "monitor",
+            "--focus-source",
+            "heuristic",
+            "--foreground-source",
+            "auto",
+            "--foreground-poll-ms",
+            "1000",
+            "--foreground-max-stale-ms",
+            "2500",
+        ])
+        .unwrap();
+
+        assert_eq!(config.focus.focus_source, FocusSource::Heuristic);
+        assert_eq!(config.focus.foreground_source, ForegroundSource::Auto);
+        assert_eq!(config.focus.foreground_poll_ms, 1000);
+        assert_eq!(config.focus.foreground_max_stale_ms, 2500);
+        assert!(!config.focus.foreground_window);
 
         std::fs::remove_dir_all(dir).ok();
     }
