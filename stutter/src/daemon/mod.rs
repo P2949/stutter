@@ -1,5 +1,6 @@
 pub mod config;
 pub mod explain;
+pub mod monitor;
 pub mod policy;
 pub mod runtime;
 pub mod state;
@@ -12,6 +13,7 @@ pub use explain::{
     DaemonPolicyExplanation, PolicyDecisionKind, PolicyExplainLine, PolicyExplanation,
     PolicyRuleEvaluation,
 };
+pub use monitor::{MonitorShutdownSummary, MonitorSubsystem, MonitorSubsystemConfig};
 pub use policy::{
     ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicy,
     DaemonPolicyBuildInput, PolicyIntent, PolicyRejection, RemoteApplyPolicy, RemotePolicyContext,
