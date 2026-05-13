@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     actions::{ActionId, SafetyClass},
-    daemon::config::DaemonConfig,
+    daemon::{
+        config::DaemonConfig,
+        explain::{PolicyDecisionKind, PolicyExplanation, PolicyRuleEvaluation},
+    },
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -152,7 +155,8 @@ pub struct DaemonPolicy {
     pub remote_apply: RemoteApplyPolicy,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PolicyIntent {
     Observe,
     Suggest,
@@ -162,7 +166,8 @@ pub enum PolicyIntent {
     Rollback,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PolicyRejection {
     UnsupportedMode {
         mode: String,
@@ -394,6 +399,25 @@ fn config_for_constructor(
     config
 }
 
+fn record_policy_rule(
+    evaluated_rules: &mut Vec<PolicyRuleEvaluation>,
+    first_rejection: &mut Option<PolicyRejection>,
+    rule: &'static str,
+    passed: bool,
+    reason: String,
+    rejection: Option<PolicyRejection>,
+) {
+    evaluated_rules.push(PolicyRuleEvaluation {
+        rule,
+        passed,
+        reason,
+    });
+
+    if !passed && first_rejection.is_none() {
+        *first_rejection = rejection;
+    }
+}
+
 impl DaemonPolicy {
     pub fn observe(source: ActionSource) -> Self {
         let config = config_for_constructor(DaemonMode::Observe, source, false);
@@ -435,110 +459,376 @@ impl DaemonPolicy {
         })
     }
 
-    pub fn check_action(
+    pub fn explain_action(
         &self,
         intent: PolicyIntent,
         descriptor: &ActionDescriptor,
-    ) -> Result<(), PolicyRejection> {
+    ) -> PolicyExplanation {
+        let mut evaluated_rules = Vec::new();
+        let mut first_rejection = None;
+
         match intent {
             PolicyIntent::Observe
             | PolicyIntent::DryRun
             | PolicyIntent::Verify
             | PolicyIntent::Rollback => {
-                return Ok(());
+                record_policy_rule(
+                    &mut evaluated_rules,
+                    &mut first_rejection,
+                    "intent_allowed",
+                    true,
+                    format!("intent {intent:?} is allowed without apply authorization"),
+                    None,
+                );
+                return self.finish_policy_explanation(
+                    intent,
+                    descriptor,
+                    evaluated_rules,
+                    first_rejection,
+                );
             }
             PolicyIntent::Suggest => {
-                if self.mode == DaemonMode::Observe {
-                    return Err(PolicyRejection::IntentNotAllowed {
+                let passed = self.mode != DaemonMode::Observe;
+                record_policy_rule(
+                    &mut evaluated_rules,
+                    &mut first_rejection,
+                    "intent_allowed",
+                    passed,
+                    if passed {
+                        format!("suggest intent is allowed in daemon mode {}", self.mode)
+                    } else {
+                        format!("suggest intent is not allowed in daemon mode {}", self.mode)
+                    },
+                    (!passed).then_some(PolicyRejection::IntentNotAllowed {
                         mode: self.mode,
-                        intent,
-                    });
-                }
-                return Ok(());
+                        intent: intent.clone(),
+                    }),
+                );
+                return self.finish_policy_explanation(
+                    intent,
+                    descriptor,
+                    evaluated_rules,
+                    first_rejection,
+                );
             }
-            PolicyIntent::Apply => {}
+            PolicyIntent::Apply => {
+                let passed = self.mode.supports_apply();
+                record_policy_rule(
+                    &mut evaluated_rules,
+                    &mut first_rejection,
+                    "intent_allowed",
+                    passed,
+                    if passed {
+                        format!("apply intent is allowed in daemon mode {}", self.mode)
+                    } else {
+                        format!("apply intent is not allowed in daemon mode {}", self.mode)
+                    },
+                    (!passed).then_some(PolicyRejection::IntentNotAllowed {
+                        mode: self.mode,
+                        intent: intent.clone(),
+                    }),
+                );
+
+                if !passed {
+                    return self.finish_policy_explanation(
+                        intent,
+                        descriptor,
+                        evaluated_rules,
+                        first_rejection,
+                    );
+                }
+            }
         }
 
         match self.mode {
-            DaemonMode::Observe | DaemonMode::Suggest => {
-                return Err(PolicyRejection::IntentNotAllowed {
-                    mode: self.mode,
-                    intent,
-                });
-            }
+            DaemonMode::Observe | DaemonMode::Suggest => {}
             DaemonMode::ApplyLowRisk => {
-                if descriptor.safety_class != SafetyClass::ReversibleLowRisk {
-                    return Err(PolicyRejection::SafetyClassTooHigh {
+                let passed = descriptor.safety_class == SafetyClass::ReversibleLowRisk;
+                record_policy_rule(
+                    &mut evaluated_rules,
+                    &mut first_rejection,
+                    "safety_class_allowed",
+                    passed,
+                    if passed {
+                        "safety class ReversibleLowRisk is allowed in daemon mode apply-low-risk"
+                            .to_owned()
+                    } else {
+                        format!(
+                            "safety class {:?} is not allowed in daemon mode apply-low-risk",
+                            descriptor.safety_class
+                        )
+                    },
+                    (!passed).then_some(PolicyRejection::SafetyClassTooHigh {
                         mode: self.mode,
                         safety_class: descriptor.safety_class.clone(),
-                    });
-                }
+                    }),
+                );
 
-                if !descriptor.effect_scope.is_low_risk_apply_scope() {
-                    return Err(PolicyRejection::EffectScopeNotAllowed {
+                let passed = descriptor.effect_scope.is_low_risk_apply_scope();
+                record_policy_rule(
+                    &mut evaluated_rules,
+                    &mut first_rejection,
+                    "effect_scope_allowed",
+                    passed,
+                    if passed {
+                        format!(
+                            "effect scope {:?} is allowed in daemon mode apply-low-risk",
+                            descriptor.effect_scope
+                        )
+                    } else {
+                        format!(
+                            "effect scope {:?} is not allowed in daemon mode apply-low-risk",
+                            descriptor.effect_scope
+                        )
+                    },
+                    (!passed).then_some(PolicyRejection::EffectScopeNotAllowed {
                         mode: self.mode,
                         effect_scope: descriptor.effect_scope,
-                    });
-                }
+                    }),
+                );
             }
             DaemonMode::ApplyMediumRisk => {
-                if descriptor.safety_class > SafetyClass::ReversibleMediumRisk {
-                    return Err(PolicyRejection::SafetyClassTooHigh {
+                let passed = descriptor.safety_class <= SafetyClass::ReversibleMediumRisk;
+                record_policy_rule(
+                    &mut evaluated_rules,
+                    &mut first_rejection,
+                    "safety_class_allowed",
+                    passed,
+                    if passed {
+                        format!(
+                            "safety class {:?} is allowed in daemon mode apply-medium-risk",
+                            descriptor.safety_class
+                        )
+                    } else {
+                        format!(
+                            "safety class {:?} is not allowed in daemon mode apply-medium-risk",
+                            descriptor.safety_class
+                        )
+                    },
+                    (!passed).then_some(PolicyRejection::SafetyClassTooHigh {
                         mode: self.mode,
                         safety_class: descriptor.safety_class.clone(),
-                    });
-                }
+                    }),
+                );
 
-                if !descriptor.effect_scope.is_explicit_target_scope() {
-                    return Err(PolicyRejection::EffectScopeNotAllowed {
+                let passed = descriptor.effect_scope.is_explicit_target_scope();
+                record_policy_rule(
+                    &mut evaluated_rules,
+                    &mut first_rejection,
+                    "effect_scope_allowed",
+                    passed,
+                    if passed {
+                        format!(
+                            "effect scope {:?} is allowed in daemon mode apply-medium-risk",
+                            descriptor.effect_scope
+                        )
+                    } else {
+                        format!(
+                            "effect scope {:?} is not allowed in daemon mode apply-medium-risk",
+                            descriptor.effect_scope
+                        )
+                    },
+                    (!passed).then_some(PolicyRejection::EffectScopeNotAllowed {
                         mode: self.mode,
                         effect_scope: descriptor.effect_scope,
-                    });
-                }
+                    }),
+                );
             }
             DaemonMode::ApplyHighRisk => {
-                if descriptor.safety_class == SafetyClass::HighRisk && !self.allow_high_risk {
-                    return Err(PolicyRejection::HighRiskRequiresExplicitOptIn);
-                }
+                record_policy_rule(
+                    &mut evaluated_rules,
+                    &mut first_rejection,
+                    "safety_class_allowed",
+                    true,
+                    format!(
+                        "safety class {:?} is within daemon mode apply-high-risk ceiling",
+                        descriptor.safety_class
+                    ),
+                    None,
+                );
+
+                record_policy_rule(
+                    &mut evaluated_rules,
+                    &mut first_rejection,
+                    "effect_scope_allowed",
+                    true,
+                    format!(
+                        "effect scope {:?} is allowed in daemon mode apply-high-risk",
+                        descriptor.effect_scope
+                    ),
+                    None,
+                );
+
+                let passed =
+                    descriptor.safety_class != SafetyClass::HighRisk || self.allow_high_risk;
+                record_policy_rule(
+                    &mut evaluated_rules,
+                    &mut first_rejection,
+                    "high_risk_opt_in",
+                    passed,
+                    if passed {
+                        "high-risk opt-in requirement is satisfied".to_owned()
+                    } else {
+                        "high-risk apply requires explicit high-risk opt-in".to_owned()
+                    },
+                    (!passed).then_some(PolicyRejection::HighRiskRequiresExplicitOptIn),
+                );
             }
         }
 
-        if descriptor.touches_system_wide_state && !self.allow_system_wide_actions {
-            return Err(PolicyRejection::SystemWideActionBlocked);
-        }
+        let passed = !descriptor.touches_system_wide_state || self.allow_system_wide_actions;
+        record_policy_rule(
+            &mut evaluated_rules,
+            &mut first_rejection,
+            "system_wide_permission",
+            passed,
+            if passed {
+                "system-wide action permission is satisfied".to_owned()
+            } else {
+                "system-wide action is blocked by daemon policy".to_owned()
+            },
+            (!passed).then_some(PolicyRejection::SystemWideActionBlocked),
+        );
 
-        if descriptor.persistent_effect && !self.allow_persistent_effects {
-            return Err(PolicyRejection::PersistentEffectBlocked);
-        }
+        let passed = !descriptor.persistent_effect || self.allow_persistent_effects;
+        record_policy_rule(
+            &mut evaluated_rules,
+            &mut first_rejection,
+            "persistent_effect_permission",
+            passed,
+            if passed {
+                "persistent effect permission is satisfied".to_owned()
+            } else {
+                "persistent effect is blocked by daemon policy".to_owned()
+            },
+            (!passed).then_some(PolicyRejection::PersistentEffectBlocked),
+        );
 
         match descriptor.rollback {
-            RollbackRequirement::RequiredBeforeApply => {}
-            RollbackRequirement::Unavailable => {
-                return Err(PolicyRejection::RollbackUnavailable);
-            }
+            RollbackRequirement::RequiredBeforeApply => record_policy_rule(
+                &mut evaluated_rules,
+                &mut first_rejection,
+                "rollback_available",
+                true,
+                "rollback is available before apply".to_owned(),
+                None,
+            ),
+            RollbackRequirement::Unavailable => record_policy_rule(
+                &mut evaluated_rules,
+                &mut first_rejection,
+                "rollback_available",
+                false,
+                "apply is rejected because rollback is unavailable".to_owned(),
+                Some(PolicyRejection::RollbackUnavailable),
+            ),
             RollbackRequirement::NotRequiredForDryRun | RollbackRequirement::BestEffortOnly => {
-                return Err(PolicyRejection::RollbackRequired {
-                    rollback: descriptor.rollback,
-                });
+                record_policy_rule(
+                    &mut evaluated_rules,
+                    &mut first_rejection,
+                    "rollback_available",
+                    false,
+                    format!(
+                        "apply requires rollback to be available before apply; got {:?}",
+                        descriptor.rollback
+                    ),
+                    Some(PolicyRejection::RollbackRequired {
+                        rollback: descriptor.rollback,
+                    }),
+                );
             }
         }
 
-        if descriptor.requires_explicit_target
-            && !descriptor.effect_scope.is_explicit_target_scope()
-        {
-            return Err(PolicyRejection::ExplicitTargetRequired);
+        let passed = !descriptor.requires_explicit_target
+            || descriptor.effect_scope.is_explicit_target_scope();
+        record_policy_rule(
+            &mut evaluated_rules,
+            &mut first_rejection,
+            "explicit_target_scope",
+            passed,
+            if passed {
+                "explicit target requirement is satisfied".to_owned()
+            } else {
+                "apply requires an explicit target scope".to_owned()
+            },
+            (!passed).then_some(PolicyRejection::ExplicitTargetRequired),
+        );
+
+        if let Some(confidence) = descriptor.confidence {
+            let passed = confidence >= self.min_confidence;
+            record_policy_rule(
+                &mut evaluated_rules,
+                &mut first_rejection,
+                "confidence_threshold",
+                passed,
+                if passed {
+                    format!(
+                        "action confidence {confidence:.3} meets required minimum {:.3}",
+                        self.min_confidence
+                    )
+                } else {
+                    format!(
+                        "action confidence {confidence:.3} is below required minimum {:.3}",
+                        self.min_confidence
+                    )
+                },
+                (!passed).then_some(PolicyRejection::ConfidenceTooLow {
+                    confidence,
+                    min_confidence: self.min_confidence,
+                }),
+            );
+        } else {
+            record_policy_rule(
+                &mut evaluated_rules,
+                &mut first_rejection,
+                "confidence_threshold",
+                true,
+                "action did not report confidence; threshold check is not required".to_owned(),
+                None,
+            );
         }
 
-        if let Some(confidence) = descriptor.confidence
-            && confidence < self.min_confidence
-        {
-            return Err(PolicyRejection::ConfidenceTooLow {
-                confidence,
-                min_confidence: self.min_confidence,
-            });
-        }
+        self.finish_policy_explanation(intent, descriptor, evaluated_rules, first_rejection)
+    }
 
-        Ok(())
+    pub fn check_action(
+        &self,
+        intent: PolicyIntent,
+        descriptor: &ActionDescriptor,
+    ) -> Result<(), PolicyRejection> {
+        match self.explain_action(intent, descriptor).decision {
+            PolicyDecisionKind::Allowed => Ok(()),
+            PolicyDecisionKind::Rejected { rejection } => Err(rejection),
+        }
+    }
+
+    fn finish_policy_explanation(
+        &self,
+        intent: PolicyIntent,
+        descriptor: &ActionDescriptor,
+        evaluated_rules: Vec<PolicyRuleEvaluation>,
+        rejection: Option<PolicyRejection>,
+    ) -> PolicyExplanation {
+        let (decision, final_reason) = match rejection {
+            Some(rejection) => {
+                let final_reason = rejection.to_string();
+                (PolicyDecisionKind::Rejected { rejection }, final_reason)
+            }
+            None => (
+                PolicyDecisionKind::Allowed,
+                "action is allowed by daemon policy".to_owned(),
+            ),
+        };
+
+        PolicyExplanation {
+            decision,
+            intent,
+            action_id: descriptor.action_id.clone(),
+            action_kind: descriptor.action_kind.clone(),
+            mode: self.mode,
+            source: self.source,
+            evaluated_rules,
+            final_reason,
+        }
     }
 }
 
@@ -843,6 +1133,71 @@ mod tests {
             policy.check_action(PolicyIntent::Apply, &desc),
             Err(PolicyRejection::RollbackUnavailable)
         ));
+    }
+
+    #[test]
+    fn explain_action_allowed_includes_identity_final_reason_and_rules() {
+        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        let desc = descriptor_with(
+            SafetyClass::ReversibleLowRisk,
+            ActionEffectScope::LocalProcessTree,
+            RollbackRequirement::RequiredBeforeApply,
+        );
+
+        let explanation = policy.explain_action(PolicyIntent::Apply, &desc);
+
+        assert!(matches!(explanation.decision, PolicyDecisionKind::Allowed));
+        assert_eq!(explanation.intent, PolicyIntent::Apply);
+        assert_eq!(explanation.action_id, desc.action_id);
+        assert_eq!(explanation.action_kind, "test");
+        assert_eq!(explanation.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(explanation.source, ActionSource::Test);
+        assert_eq!(
+            explanation.final_reason,
+            "action is allowed by daemon policy"
+        );
+        assert!(
+            explanation
+                .evaluated_rules
+                .iter()
+                .any(|rule| { rule.rule == "rollback_available" && rule.passed })
+        );
+    }
+
+    #[test]
+    fn explain_action_rejection_includes_identity_final_reason_and_failing_rule() {
+        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        let desc = descriptor(SafetyClass::ReversibleMediumRisk);
+
+        let explanation = policy.explain_action(PolicyIntent::Apply, &desc);
+
+        assert!(matches!(
+            explanation.decision,
+            PolicyDecisionKind::Rejected {
+                rejection: PolicyRejection::SafetyClassTooHigh {
+                    mode: DaemonMode::ApplyLowRisk,
+                    safety_class: SafetyClass::ReversibleMediumRisk
+                }
+            }
+        ));
+        assert_eq!(explanation.intent, PolicyIntent::Apply);
+        assert_eq!(explanation.action_id, desc.action_id);
+        assert_eq!(explanation.action_kind, "test");
+        assert_eq!(explanation.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(explanation.source, ActionSource::Test);
+        assert!(
+            explanation
+                .final_reason
+                .contains("safety class ReversibleMediumRisk")
+        );
+
+        let failing_rule = explanation
+            .evaluated_rules
+            .iter()
+            .find(|rule| !rule.passed)
+            .expect("expected a failing policy rule");
+        assert_eq!(failing_rule.rule, "safety_class_allowed");
+        assert!(failing_rule.reason.contains("ReversibleMediumRisk"));
     }
 
     #[test]
