@@ -249,3 +249,73 @@ pub struct ScenarioPathCommandInput {
 
 #[derive(Debug)]
 pub struct ScenarioListCommandInput;
+
+#[cfg(test)]
+mod runtime_decoupling_tests {
+    use std::sync::Arc;
+
+    use crate::config::model::MonitorConfig;
+
+    #[test]
+    fn monitor_command_inputs_store_resolved_monitor_config() {
+        fn assert_arc_monitor_config(_: &Arc<MonitorConfig>) {}
+
+        let monitor = super::MonitorCommandInput {
+            config: Arc::new(MonitorConfig::default()),
+        };
+        assert_arc_monitor_config(&monitor.config);
+
+        let bench = super::BenchCommandInput {
+            config: monitor.config.clone(),
+            role: "test-role".to_owned(),
+            run_name: "test-run".to_owned(),
+        };
+        assert_arc_monitor_config(&bench.config);
+    }
+
+    #[test]
+    fn long_running_runtime_sources_do_not_store_cli_config() {
+        let forbidden_terms = [
+            concat!("cli", "::", "Config"),
+            concat!("crate", "::", "cli", "::", "Config"),
+            concat!("from", "_existing", "_cli", "_config"),
+            concat!("from", "_cli", "_config"),
+        ];
+        let sources = [
+            ("stutter/src/commands/input.rs", include_str!("input.rs")),
+            ("stutter/src/session.rs", include_str!("../session.rs")),
+            (
+                "stutter/src/probe_activation.rs",
+                include_str!("../probe_activation.rs"),
+            ),
+            ("stutter/src/tasks.rs", include_str!("../tasks.rs")),
+            (
+                "stutter/src/ebpf_loader.rs",
+                include_str!("../ebpf_loader.rs"),
+            ),
+            ("stutter/src/remote.rs", include_str!("../remote.rs")),
+            ("stutter/src/agent.rs", include_str!("../agent.rs")),
+            (
+                "stutter/src/config/layer.rs",
+                include_str!("../config/layer.rs"),
+            ),
+            (
+                "stutter/src/config/effective.rs",
+                include_str!("../config/effective.rs"),
+            ),
+            (
+                "stutter/src/config/merge.rs",
+                include_str!("../config/merge.rs"),
+            ),
+        ];
+
+        for (path, source) in sources {
+            for term in &forbidden_terms {
+                assert!(
+                    !source.contains(term),
+                    "{path} still contains forbidden runtime coupling marker {term:?}"
+                );
+            }
+        }
+    }
+}
