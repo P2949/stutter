@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod autotune;
+pub mod daemon;
 pub mod input;
 pub mod misc;
 pub mod monitor;
@@ -37,6 +38,7 @@ pub async fn dispatch(command: AppCommand) -> anyhow::Result<()> {
         AppCommand::ProfileTemplate(input) => misc::run_profile_template_command(input),
         AppCommand::InspectIrqs(input) => misc::run_inspect_irqs_command(input),
         AppCommand::Agent(input) => agent::run_agent_command(input).await,
+        AppCommand::DaemonConfigExplain(input) => daemon::run_config_explain_command(input),
         AppCommand::Completions(input) => misc::run_completions_command(input),
         AppCommand::Man(input) => misc::run_man_command(input),
         AppCommand::Rules(input) => misc::run_rules_command(input),

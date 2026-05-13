@@ -8,12 +8,12 @@ use crate::{
         AutotuneCommandInput as AutotuneCommandDto, AutotuneGenerateProfilesCommandInput,
         AutotuneReplayCommandInput, AutotuneReplayHistoryCommandInput, AutotuneRestoreCommandInput,
         AutotuneStatusCommandInput, BenchCommandInput, CheckCommandInput, CompletionsCommandInput,
-        DoctorCommandInput, InspectIrqsCommandInput, InspectTreeCommandInput, ManCommandInput,
-        MonitorCommandInput, ProbesCommandInput, ProfileTemplateCommandInput,
-        RecommendCommandInput, ReportCommandInput, RestoreCommandInput, RulesCommandInput,
-        ScenarioCompareCommandInput, ScenarioCreateCommandInput, ScenarioListCommandInput,
-        ScenarioPathCommandInput, ScenarioRunCommandInput, SummaryCommandInput, TuneCommandInput,
-        ValidateCommandInput,
+        DaemonConfigExplainCommandInput, DoctorCommandInput, InspectIrqsCommandInput,
+        InspectTreeCommandInput, ManCommandInput, MonitorCommandInput, ProbesCommandInput,
+        ProfileTemplateCommandInput, RecommendCommandInput, ReportCommandInput,
+        RestoreCommandInput, RulesCommandInput, ScenarioCompareCommandInput,
+        ScenarioCreateCommandInput, ScenarioListCommandInput, ScenarioPathCommandInput,
+        ScenarioRunCommandInput, SummaryCommandInput, TuneCommandInput, ValidateCommandInput,
     },
     config::{
         CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX,
@@ -112,6 +112,7 @@ enum Command {
     #[command(name = "autotune-status")]
     AutotuneStatus(AutotuneStatusArgs),
     Agent(AgentArgs),
+    Daemon(DaemonArgs),
     #[command(name = "completions")]
     Completions(CompletionsArgs),
     #[command(name = "man")]
@@ -599,6 +600,26 @@ pub struct AutotuneReplayArgs {
 
     #[arg(long = "config", value_name = "AUTOTUNE_TOML")]
     pub config: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonArgs {
+    #[command(subcommand)]
+    pub command: DaemonCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum DaemonCommand {
+    Config(DaemonConfigArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonConfigArgs {
+    #[arg(long = "explain")]
+    pub explain: bool,
+
+    #[arg(long = "json", requires = "explain")]
+    pub json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -1486,6 +1507,7 @@ pub enum AppCommand {
     ProfileTemplate(ProfileTemplateCommandInput),
     InspectIrqs(InspectIrqsCommandInput),
     Agent(AgentCommandInput),
+    DaemonConfigExplain(DaemonConfigExplainCommandInput),
     Completions(CompletionsCommandInput),
     Man(ManCommandInput),
     Rules(RulesCommandInput),
@@ -1977,6 +1999,19 @@ where
                 max_concurrent_recordings: args.max_concurrent_recordings,
             }))
         }
+        Some(Command::Daemon(args)) => match args.command {
+            DaemonCommand::Config(config_args) => {
+                if !config_args.explain {
+                    anyhow::bail!("daemon config requires --explain");
+                }
+
+                Ok(AppCommand::DaemonConfigExplain(
+                    DaemonConfigExplainCommandInput {
+                        json: config_args.json,
+                    },
+                ))
+            }
+        },
         Some(Command::Completions(args)) => Ok(AppCommand::Completions(CompletionsCommandInput {
             shell: args.shell,
         })),
@@ -2813,6 +2848,25 @@ mod tests {
             err.to_string()
                 .contains("--duration must be greater than zero")
         );
+    }
+
+    #[test]
+    fn parses_daemon_config_explain_json_command() {
+        let command =
+            parse_app_command_from(["stutter", "daemon", "config", "--explain", "--json"]).unwrap();
+
+        let AppCommand::DaemonConfigExplain(input) = command else {
+            panic!("expected daemon config explain command");
+        };
+
+        assert!(input.json);
+    }
+
+    #[test]
+    fn daemon_config_command_requires_explain_flag() {
+        let err = parse_app_command_from(["stutter", "daemon", "config"]).unwrap_err();
+
+        assert!(err.to_string().contains("daemon config requires --explain"));
     }
 
     #[test]

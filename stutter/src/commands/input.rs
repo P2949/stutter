@@ -186,6 +186,11 @@ pub struct InspectIrqsCommandInput {
 }
 
 #[derive(Debug)]
+pub struct DaemonConfigExplainCommandInput {
+    pub json: bool,
+}
+
+#[derive(Debug)]
 pub struct AgentCommandInput {
     pub bind: SocketAddr,
     pub runs_dir: Option<PathBuf>,
