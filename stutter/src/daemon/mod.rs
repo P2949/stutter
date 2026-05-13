@@ -7,7 +7,10 @@ pub use config::{
     DaemonAutotuneConfig, DaemonConfig, DaemonRemoteConfig, DaemonRetentionConfig,
     DaemonSafetyConfig, DaemonTargetConfig,
 };
-pub use explain::{DaemonPolicyExplanation, PolicyExplainLine};
+pub use explain::{
+    DaemonPolicyExplanation, PolicyDecisionKind, PolicyExplainLine, PolicyExplanation,
+    PolicyRuleEvaluation,
+};
 pub use policy::{
     ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicy,
     DaemonPolicyBuildInput, PolicyIntent, PolicyRejection, RemoteApplyPolicy, RemotePolicyContext,

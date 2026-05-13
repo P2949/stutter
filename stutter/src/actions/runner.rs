@@ -5,8 +5,8 @@ use crate::{
     audit::{AuditEvent, append_audit_event_to_path, unix_nanos_now},
     daemon::DaemonConfig,
     daemon_policy::{
-        ActionSource, DaemonMode, DaemonPolicy, DaemonPolicyBuildInput, PolicyIntent,
-        build_daemon_policy,
+        ActionDescriptor, ActionSource, DaemonMode, DaemonPolicy, DaemonPolicyBuildInput,
+        PolicyDecisionKind, PolicyIntent, build_daemon_policy,
     },
 };
 
@@ -76,6 +76,20 @@ impl ActionRunPolicy {
     }
 }
 
+fn check_action_with_explanation(
+    policy: &DaemonPolicy,
+    intent: PolicyIntent,
+    descriptor: &ActionDescriptor,
+) -> Result<(), ActionError> {
+    let explanation = policy.explain_action(intent, descriptor);
+    match explanation.decision {
+        PolicyDecisionKind::Allowed => Ok(()),
+        PolicyDecisionKind::Rejected { .. } => {
+            Err(ActionError::policy_rejected(explanation.final_reason))
+        }
+    }
+}
+
 pub fn run_audited_action<A>(
     command: &str,
     action: &A,
@@ -128,10 +142,7 @@ where
 
         if dry_run {
             audit_event.action_phase = Some(crate::actions::ActionPhase::DryRun);
-            run_policy
-                .policy
-                .check_action(PolicyIntent::DryRun, &descriptor)
-                .map_err(ActionError::policy_rejected)?;
+            check_action_with_explanation(&run_policy.policy, PolicyIntent::DryRun, &descriptor)?;
             let state = action.dry_run().map_err(ActionError::dry_run)?;
             audit_event.success = true;
             audit_event.affected_tasks = state.affected_tasks;
@@ -158,10 +169,7 @@ where
             })
         } else {
             audit_event.action_phase = Some(crate::actions::ActionPhase::Apply);
-            run_policy
-                .policy
-                .check_action(PolicyIntent::Apply, &descriptor)
-                .map_err(ActionError::policy_rejected)?;
+            check_action_with_explanation(&run_policy.policy, PolicyIntent::Apply, &descriptor)?;
             let rollback = action.apply().map_err(ActionError::apply)?;
             audit_event.affected_tasks = rollback.affected_tasks();
             audit_event.restore_path = rollback.restore_path().cloned();
@@ -427,6 +435,11 @@ mod tests {
         assert!(!events[0].success);
         assert_eq!(events[0].error_category.as_deref(), Some("policy_rejected"));
         assert!(events[0].message.contains("policy rejected"));
+        assert!(
+            events[0]
+                .message
+                .contains("safety class ReversibleMediumRisk")
+        );
 
         fs::remove_dir_all(dir).ok();
     }

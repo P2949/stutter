@@ -1,4 +1,4 @@
-pub use crate::daemon::policy::*;
+pub use crate::daemon::{explain::*, policy::*};
 
 #[cfg(test)]
 mod tests {
