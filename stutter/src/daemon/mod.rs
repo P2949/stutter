@@ -1,3 +1,4 @@
+pub mod autotune;
 pub mod config;
 pub mod explain;
 pub mod monitor;
@@ -5,6 +6,7 @@ pub mod policy;
 pub mod runtime;
 pub mod state;
 
+pub use autotune::{AutotuneSubsystem, AutotuneSubsystemEvent};
 pub use config::{
     DaemonAutotuneConfig, DaemonConfig, DaemonRemoteConfig, DaemonRetentionConfig,
     DaemonSafetyConfig, DaemonTargetConfig,

@@ -476,6 +476,20 @@ impl AutotuneRuntime {
         self.last_decision.as_ref()
     }
 
+    pub fn has_active_experiment(&self) -> bool {
+        self.live_low_risk_experiment.is_some()
+    }
+
+    pub fn rollback_on_stop(&mut self, reason: &str) -> anyhow::Result<Option<DaemonState>> {
+        if !self.has_active_experiment() {
+            return Ok(None);
+        }
+
+        self.rollback_live_experiment(crate::audit::unix_nanos_now(), reason)?;
+
+        Ok(Some(self.daemon_state_snapshot()))
+    }
+
     pub fn daemon_state_snapshot(&self) -> DaemonState {
         let active_experiment =
             self.live_low_risk_experiment
@@ -1793,6 +1807,54 @@ mod tests {
             SafetyClass::ReversibleLowRisk
         );
         assert_eq!(config.daemon_policy.min_confidence, 0.81);
+    }
+
+    #[test]
+    fn runtime_reports_active_low_risk_experiment_state() {
+        let mut runtime = runtime();
+
+        assert!(!runtime.has_active_experiment());
+
+        let candidate = CandidateAction::cpu_affinity_profile(low_risk_profile(), 1234);
+        let baseline_score = WindowScore {
+            started_unix_nanos: 100,
+            finished_unix_nanos: 200,
+            interval_count: 1,
+            scored_samples: 100,
+            scored_task_count: 1,
+            score: StutterScore {
+                total: 500,
+                over_1ms: 10,
+                over_2ms: 5,
+                over_5ms: 1,
+                ..StutterScore::default()
+            },
+        };
+
+        runtime.live_low_risk_experiment = Some(LiveLowRiskExperiment {
+            experiment_id: ExperimentId::new("experiment-active"),
+            candidate,
+            baseline_score,
+            applied_unix_nanos: 1_000,
+            washout_until_unix_nanos: 2_000,
+            measure_until_unix_nanos: 3_000,
+            rollback: RollbackToken::CpuAffinityRestoreFile {
+                path: PathBuf::from("/tmp/stutter-active-restore.json"),
+                affected_tasks: 1,
+            },
+        });
+
+        assert!(runtime.has_active_experiment());
+    }
+
+    #[test]
+    fn runtime_rollback_on_stop_noops_without_active_experiment() {
+        let mut runtime = runtime();
+
+        let snapshot = runtime.rollback_on_stop("daemon stop").unwrap();
+
+        assert!(snapshot.is_none());
+        assert!(!runtime.has_active_experiment());
     }
 
     #[test]
