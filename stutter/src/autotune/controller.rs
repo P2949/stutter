@@ -10,13 +10,21 @@ use super::{
     quality::OnlineDataQuality,
     state::{AutotuneMode, ControllerPhase},
 };
-use crate::{actions::SafetyClass, focus::FocusGroupKind, process_tree::TaskClass};
+use crate::{
+    actions::SafetyClass,
+    daemon::{
+        ActionSource, DaemonConfig, DaemonMode, DaemonPolicy, DaemonPolicyBuildInput,
+        build_daemon_policy,
+    },
+    focus::FocusGroupKind,
+    process_tree::TaskClass,
+};
 
 pub(crate) const DEFAULT_MIN_FOCUS_CONFIDENCE: f32 = super::DEFAULT_MIN_FOCUS_CONFIDENCE;
 
 #[derive(Clone, Debug)]
 pub struct ControllerPolicy {
-    pub mode: AutotuneMode,
+    pub mode: DaemonMode,
     pub max_safety_class: SafetyClass,
     pub min_improvement_percent: f64,
     pub max_regression_percent: f64,
@@ -28,21 +36,13 @@ pub struct ControllerPolicy {
 }
 
 impl ControllerPolicy {
-    pub fn for_mode(mode: AutotuneMode) -> Self {
-        let max_safety_class = match mode {
-            AutotuneMode::Observe => SafetyClass::ObserveOnly,
-            AutotuneMode::Suggest => SafetyClass::HighRisk,
-            AutotuneMode::ApplyLowRisk => SafetyClass::ReversibleLowRisk,
-            AutotuneMode::ApplyMediumRisk => SafetyClass::ReversibleMediumRisk,
-            AutotuneMode::ApplyHighRisk => SafetyClass::HighRisk,
-        };
-
+    pub fn from_daemon_policy(policy: &DaemonPolicy) -> Self {
         Self {
-            mode,
-            max_safety_class,
+            mode: policy.mode,
+            max_safety_class: policy.max_safety_class.clone(),
             min_improvement_percent: DEFAULT_SCORE_COMPARISON_CONFIG.min_improvement_percent,
             max_regression_percent: DEFAULT_SCORE_COMPARISON_CONFIG.max_regression_percent,
-            min_focus_confidence: DEFAULT_MIN_FOCUS_CONFIDENCE,
+            min_focus_confidence: policy.min_confidence,
             cooldown_after_keep: Duration::from_secs(60),
             cooldown_after_revert: Duration::from_secs(120),
             cooldown_after_fault: Duration::from_secs(300),
@@ -50,13 +50,34 @@ impl ControllerPolicy {
         }
     }
 
+    pub fn for_mode(mode: AutotuneMode) -> Self {
+        let daemon_mode = daemon_mode_from_autotune_mode(mode);
+        let mut config = DaemonConfig {
+            mode: daemon_mode,
+            source: ActionSource::AutotuneRuntime,
+            ..DaemonConfig::default()
+        };
+        config.safety.min_confidence = DEFAULT_MIN_FOCUS_CONFIDENCE;
+        let policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        });
+
+        Self::from_daemon_policy(&policy)
+    }
+
     pub fn can_start_experiment(&self) -> bool {
-        matches!(
-            self.mode,
-            AutotuneMode::ApplyLowRisk
-                | AutotuneMode::ApplyMediumRisk
-                | AutotuneMode::ApplyHighRisk
-        )
+        self.mode.supports_apply()
+    }
+}
+
+fn daemon_mode_from_autotune_mode(mode: AutotuneMode) -> DaemonMode {
+    match mode {
+        AutotuneMode::Observe => DaemonMode::Observe,
+        AutotuneMode::Suggest => DaemonMode::Suggest,
+        AutotuneMode::ApplyLowRisk => DaemonMode::ApplyLowRisk,
+        AutotuneMode::ApplyMediumRisk => DaemonMode::ApplyMediumRisk,
+        AutotuneMode::ApplyHighRisk => DaemonMode::ApplyHighRisk,
     }
 }
 
@@ -258,7 +279,7 @@ pub fn decide_autotune_transition(
         return decision;
     }
 
-    if policy.mode == AutotuneMode::Observe {
+    if policy.mode == DaemonMode::Observe {
         return AutotuneDecision::Noop {
             reason: "observe mode never applies or suggests actions".to_owned(),
         };
@@ -301,7 +322,7 @@ pub fn decide_autotune_transition(
         };
     }
 
-    if policy.mode == AutotuneMode::Suggest {
+    if policy.mode == DaemonMode::Suggest {
         return AutotuneDecision::Suggest {
             candidate,
             reason: "suggest mode reports candidate without applying".to_owned(),
@@ -560,6 +581,27 @@ mod tests {
             cooldown_until_unix_nanos: None,
             candidate_memory: CandidateMemory::default(),
         }
+    }
+
+    #[test]
+    fn controller_policy_derives_permissions_from_daemon_policy() {
+        let mut config = DaemonConfig {
+            mode: DaemonMode::ApplyLowRisk,
+            source: ActionSource::AutotuneRuntime,
+            ..DaemonConfig::default()
+        };
+        config.safety.min_confidence = 0.82;
+        let daemon_policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        });
+
+        let policy = ControllerPolicy::from_daemon_policy(&daemon_policy);
+
+        assert_eq!(policy.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(policy.max_safety_class, SafetyClass::ReversibleLowRisk);
+        assert_eq!(policy.min_focus_confidence, 0.82);
+        assert!(policy.can_start_experiment());
     }
 
     #[test]

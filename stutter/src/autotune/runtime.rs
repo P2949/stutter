@@ -39,14 +39,15 @@ use crate::{
         observation::AutotuneObservation,
         quality::{OnlineDataQuality, OnlineDataQualityPolicy},
         rolling_window::{RollingWindow, WindowScore as RuntimeWindowScore},
-        state::{AutotuneMode, ControllerPhase, SituationKind},
+        state::{ControllerPhase, SituationKind},
         washout::WashoutWindowConfig,
     },
     config::model::MonitorConfig,
     daemon::{
-        DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus,
-        DaemonExperimentState, DaemonFaultState, DaemonMode, DaemonPhase, DaemonRollbackState,
-        DaemonState, DaemonTargetState,
+        ActionSource, DAEMON_STATE_SCHEMA_VERSION, DaemonConfig, DaemonDecisionState,
+        DaemonDegradedStatus, DaemonExperimentState, DaemonFaultState, DaemonMode, DaemonPhase,
+        DaemonPolicy, DaemonPolicyBuildInput, DaemonRollbackState, DaemonState, DaemonTargetState,
+        build_daemon_policy,
     },
     diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
@@ -63,19 +64,38 @@ pub const DEFAULT_RECENT_DIAGNOSIS_LIMIT: usize = 16;
 
 #[derive(Clone, Debug)]
 pub struct AutotuneRuntimeConfig {
-    pub mode: AutotuneMode,
+    pub daemon_config: DaemonConfig,
+    pub daemon_policy: DaemonPolicy,
     pub controller_id: String,
     pub decision_log: Option<PathBuf>,
     pub history_log: Option<PathBuf>,
     pub window_seconds: u64,
     pub candidate_window_seconds: u64,
-    pub tree_pid: Option<u32>,
-    pub watch_process: Option<String>,
     pub profiles: Vec<Profile>,
-    pub allow_system_wide_actions: bool,
-    pub min_focus_confidence: f32,
     pub online_data_quality_policy: OnlineDataQualityPolicy,
     pub washout: WashoutWindowConfig,
+}
+
+pub fn daemon_config_for_runtime_mode(
+    mode: DaemonMode,
+    source: ActionSource,
+    tree_pid: Option<u32>,
+    watch_process: Option<String>,
+) -> DaemonConfig {
+    let mut config = DaemonConfig {
+        mode,
+        source,
+        ..DaemonConfig::default()
+    };
+    if let Some(tree_pid) = tree_pid {
+        config.target.tree_pids.push(tree_pid);
+    }
+    config.target.watch_process = watch_process;
+    config.target.require_explicit_target = mode.supports_apply();
+    config.safety.min_confidence = crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE;
+    config.autotune.candidate_window_seconds = DEFAULT_RUNTIME_WINDOW_SECONDS;
+    config.autotune.washout_seconds = crate::autotune::washout::DEFAULT_WASHOUT_SECONDS;
+    config
 }
 
 impl AutotuneRuntimeConfig {
@@ -84,21 +104,13 @@ impl AutotuneRuntimeConfig {
         tree_pid: Option<u32>,
         watch_process: Option<String>,
     ) -> Self {
-        Self {
-            mode: AutotuneMode::Observe,
-            controller_id: "local-autotune".to_owned(),
+        Self::for_mode(
+            DaemonMode::Observe,
+            ActionSource::AutotuneRuntime,
             decision_log,
-            history_log: Some(default_autotune_history_path()),
-            window_seconds: DEFAULT_RUNTIME_WINDOW_SECONDS,
-            candidate_window_seconds: DEFAULT_RUNTIME_WINDOW_SECONDS,
             tree_pid,
             watch_process,
-            profiles: Vec::new(),
-            allow_system_wide_actions: false,
-            min_focus_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
-            online_data_quality_policy: OnlineDataQualityPolicy::default(),
-            washout: WashoutWindowConfig::default(),
-        }
+        )
     }
 
     pub fn suggest(
@@ -106,21 +118,13 @@ impl AutotuneRuntimeConfig {
         tree_pid: Option<u32>,
         watch_process: Option<String>,
     ) -> Self {
-        Self {
-            mode: AutotuneMode::Suggest,
-            controller_id: "local-autotune".to_owned(),
+        Self::for_mode(
+            DaemonMode::Suggest,
+            ActionSource::AutotuneRuntime,
             decision_log,
-            history_log: Some(default_autotune_history_path()),
-            window_seconds: DEFAULT_RUNTIME_WINDOW_SECONDS,
-            candidate_window_seconds: DEFAULT_RUNTIME_WINDOW_SECONDS,
             tree_pid,
             watch_process,
-            profiles: Vec::new(),
-            allow_system_wide_actions: false,
-            min_focus_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
-            online_data_quality_policy: OnlineDataQualityPolicy::default(),
-            washout: WashoutWindowConfig::default(),
-        }
+        )
     }
 
     pub fn apply_low_risk(
@@ -128,21 +132,53 @@ impl AutotuneRuntimeConfig {
         tree_pid: Option<u32>,
         watch_process: Option<String>,
     ) -> Self {
+        Self::for_mode(
+            DaemonMode::ApplyLowRisk,
+            ActionSource::AutotuneRuntime,
+            decision_log,
+            tree_pid,
+            watch_process,
+        )
+    }
+
+    pub fn from_daemon_config(daemon_config: DaemonConfig, decision_log: Option<PathBuf>) -> Self {
+        let daemon_policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &daemon_config,
+            remote_context: None,
+        });
+        Self::from_daemon_parts(daemon_config, daemon_policy, decision_log)
+    }
+
+    pub fn from_daemon_parts(
+        daemon_config: DaemonConfig,
+        daemon_policy: DaemonPolicy,
+        decision_log: Option<PathBuf>,
+    ) -> Self {
+        let candidate_window_seconds = daemon_config.autotune.candidate_window_seconds.max(1);
+
         Self {
-            mode: AutotuneMode::ApplyLowRisk,
+            daemon_config,
+            daemon_policy,
             controller_id: "local-autotune".to_owned(),
             decision_log,
             history_log: Some(default_autotune_history_path()),
             window_seconds: DEFAULT_RUNTIME_WINDOW_SECONDS,
-            candidate_window_seconds: DEFAULT_RUNTIME_WINDOW_SECONDS,
-            tree_pid,
-            watch_process,
+            candidate_window_seconds,
             profiles: Vec::new(),
-            allow_system_wide_actions: false,
-            min_focus_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
             online_data_quality_policy: OnlineDataQualityPolicy::default(),
             washout: WashoutWindowConfig::default(),
         }
+    }
+
+    fn for_mode(
+        mode: DaemonMode,
+        source: ActionSource,
+        decision_log: Option<PathBuf>,
+        tree_pid: Option<u32>,
+        watch_process: Option<String>,
+    ) -> Self {
+        let daemon_config = daemon_config_for_runtime_mode(mode, source, tree_pid, watch_process);
+        Self::from_daemon_config(daemon_config, decision_log)
     }
 
     pub fn with_profiles(mut self, profiles: Vec<Profile>) -> Self {
@@ -151,7 +187,9 @@ impl AutotuneRuntimeConfig {
     }
 
     pub fn with_candidate_window_seconds(mut self, seconds: u64) -> Self {
-        self.candidate_window_seconds = seconds.max(1);
+        let seconds = seconds.max(1);
+        self.candidate_window_seconds = seconds;
+        self.daemon_config.autotune.candidate_window_seconds = seconds;
         self
     }
 
@@ -161,13 +199,34 @@ impl AutotuneRuntimeConfig {
     }
 
     pub fn with_min_focus_confidence(mut self, value: f32) -> Self {
-        self.min_focus_confidence = value.clamp(0.0, 1.0);
+        self.daemon_config.safety.min_confidence = value.clamp(0.0, 1.0);
+        self.refresh_daemon_policy();
         self
     }
 
     pub fn with_washout(mut self, seconds: u64, verify_interval_ms: u64) -> Self {
         self.washout = WashoutWindowConfig::default().with_washout(seconds, verify_interval_ms);
+        self.daemon_config.autotune.washout_seconds = seconds;
         self
+    }
+
+    pub fn mode(&self) -> DaemonMode {
+        self.daemon_config.mode
+    }
+
+    pub fn tree_pid(&self) -> Option<u32> {
+        self.daemon_config.target.tree_pids.first().copied()
+    }
+
+    pub fn watch_process(&self) -> Option<&str> {
+        self.daemon_config.target.watch_process.as_deref()
+    }
+
+    fn refresh_daemon_policy(&mut self) {
+        self.daemon_policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &self.daemon_config,
+            remote_context: None,
+        });
     }
 }
 
@@ -207,9 +266,9 @@ pub struct OnlineAutotuneController {
 }
 
 impl OnlineAutotuneController {
-    pub fn new(mode: AutotuneMode, window_seconds: u64) -> Self {
+    pub fn new(daemon_policy: DaemonPolicy, window_seconds: u64) -> Self {
         Self {
-            policy: ControllerPolicy::for_mode(mode),
+            policy: ControllerPolicy::from_daemon_policy(&daemon_policy),
             state: ControllerRuntimeState::default(),
             window: RollingWindow::new(Duration::from_secs(window_seconds)),
             active_profile_state: ActiveProfileState::default(),
@@ -306,13 +365,12 @@ pub struct AutotuneRuntime {
 
 impl AutotuneRuntime {
     pub fn new(config: AutotuneRuntimeConfig) -> Self {
-        let mode = config.mode;
+        let daemon_policy = config.daemon_policy.clone();
         let window_seconds = config.window_seconds;
-        let mut controller = OnlineAutotuneController::new(mode, window_seconds);
-        controller.policy.min_focus_confidence = config.min_focus_confidence;
+        let controller = OnlineAutotuneController::new(daemon_policy, window_seconds);
 
         Self {
-            target_state: RuntimeTargetState::new(config.tree_pid),
+            target_state: RuntimeTargetState::new(config.tree_pid()),
             controller,
             latest_focus: None,
             latest_drop_counters: DropCountersSnapshot::default(),
@@ -374,7 +432,7 @@ impl AutotuneRuntime {
                     situation,
                     reasons,
                 });
-                self.target_state.root_pid = root_pids.first().copied().or(self.config.tree_pid);
+                self.target_state.root_pid = root_pids.first().copied().or(self.config.tree_pid());
                 return self.evaluate_and_emit(Some("focus changed; measurement window reset"));
             }
             MonitorEvent::FocusCleared { reason, .. } => {
@@ -386,7 +444,7 @@ impl AutotuneRuntime {
                     )?;
                 }
                 self.latest_focus = None;
-                self.target_state.root_pid = self.config.tree_pid;
+                self.target_state.root_pid = self.config.tree_pid();
                 return self.evaluate_and_emit(Some(&reason));
             }
             MonitorEvent::DataQualityWarning { message } => {
@@ -442,7 +500,7 @@ impl AutotuneRuntime {
 
         DaemonState {
             schema_version: DAEMON_STATE_SCHEMA_VERSION,
-            mode: daemon_mode_from_autotune_mode(self.config.mode),
+            mode: self.config.mode(),
             phase: daemon_phase_from_controller_phase(self.controller.state.phase),
             cooldown_until_unix_nanos: self.controller.state.cooldown_until_unix_nanos,
             active_target: self.daemon_active_target_snapshot(),
@@ -548,7 +606,7 @@ impl AutotuneRuntime {
                 .latest_focus
                 .as_ref()
                 .and_then(|focus| focus.root_pids.first().copied())
-                .or(self.config.tree_pid);
+                .or(self.config.tree_pid());
         }
 
         if let Some(root_pid) = self.target_state.root_pid {
@@ -686,11 +744,11 @@ impl AutotuneRuntime {
         &self,
         observation: &AutotuneObservation,
     ) -> Option<CandidateAction> {
-        if matches!(self.config.mode, AutotuneMode::Observe) {
+        if self.config.mode() == DaemonMode::Observe {
             return None;
         }
 
-        if self.config.allow_system_wide_actions {
+        if self.config.daemon_policy.allow_system_wide_actions {
             return None;
         }
 
@@ -702,7 +760,7 @@ impl AutotuneRuntime {
             return None;
         }
 
-        let tree_pid = observation.target_root_pid.or(self.config.tree_pid)?;
+        let tree_pid = observation.target_root_pid.or(self.config.tree_pid())?;
 
         let candidates = self.candidates_for_tree(tree_pid);
         let records = dry_run_candidates(&candidates);
@@ -782,7 +840,7 @@ impl AutotuneRuntime {
         candidate: CandidateAction,
         reason: &str,
     ) -> anyhow::Result<()> {
-        if self.config.mode != AutotuneMode::ApplyLowRisk {
+        if self.config.mode() != DaemonMode::ApplyLowRisk {
             return Ok(());
         }
 
@@ -1019,7 +1077,7 @@ impl AutotuneRuntime {
         AutotuneDecisionStreamEntry {
             unix_nanos: observation.now_unix_nanos,
             phase: format!("{:?}", self.controller.state.phase),
-            mode: format!("{:?}", self.config.mode),
+            mode: format!("{:?}", self.config.mode()),
             focus_kind: observation.focus_kind.map(|kind| format!("{kind:?}")),
             focus_confidence: observation.focus_confidence,
             target_root_pid: observation.target_root_pid,
@@ -1090,7 +1148,7 @@ impl AutotuneRuntime {
         let mut history = AutotuneHistoryEvent::new(
             self.config.controller_id.clone(),
             history_phase(self.controller.state.phase),
-            history_mode(self.config.mode),
+            history_mode(self.config.mode()),
             target,
             history_situation(observation.primary_situation),
             ObservationSummary {
@@ -1151,7 +1209,7 @@ impl AutotuneRuntime {
                 .target_state
                 .target_comm
                 .clone()
-                .or_else(|| self.config.watch_process.clone())
+                .or_else(|| self.config.watch_process().map(str::to_owned))
                 .unwrap_or_else(|| "unknown".to_owned()),
             process_starttime_ticks: None,
             exe_dev: None,
@@ -1232,7 +1290,7 @@ impl AutotuneRuntime {
         AutotuneHistoryEvent::new(
             self.config.controller_id.clone(),
             history_phase(phase),
-            history_mode(self.config.mode),
+            history_mode(self.config.mode()),
             self.target_identity_from_observation(observation),
             history_situation(observation.primary_situation),
             ObservationSummary {
@@ -1568,16 +1626,6 @@ fn daemon_phase_from_controller_phase(phase: ControllerPhase) -> DaemonPhase {
     }
 }
 
-fn daemon_mode_from_autotune_mode(mode: AutotuneMode) -> DaemonMode {
-    match mode {
-        AutotuneMode::Observe => DaemonMode::Observe,
-        AutotuneMode::Suggest => DaemonMode::Suggest,
-        AutotuneMode::ApplyLowRisk => DaemonMode::ApplyLowRisk,
-        AutotuneMode::ApplyMediumRisk => DaemonMode::ApplyMediumRisk,
-        AutotuneMode::ApplyHighRisk => DaemonMode::ApplyHighRisk,
-    }
-}
-
 fn history_phase(phase: ControllerPhase) -> HistoryControllerPhase {
     match phase {
         ControllerPhase::Disabled => HistoryControllerPhase::Disabled,
@@ -1592,13 +1640,13 @@ fn history_phase(phase: ControllerPhase) -> HistoryControllerPhase {
     }
 }
 
-fn history_mode(mode: AutotuneMode) -> HistoryAutotuneMode {
+fn history_mode(mode: DaemonMode) -> HistoryAutotuneMode {
     match mode {
-        AutotuneMode::Observe => HistoryAutotuneMode::Observe,
-        AutotuneMode::Suggest => HistoryAutotuneMode::Suggest,
-        AutotuneMode::ApplyLowRisk => HistoryAutotuneMode::ApplyLowRisk,
-        AutotuneMode::ApplyMediumRisk => HistoryAutotuneMode::ApplyMediumRisk,
-        AutotuneMode::ApplyHighRisk => HistoryAutotuneMode::ApplyHighRisk,
+        DaemonMode::Observe => HistoryAutotuneMode::Observe,
+        DaemonMode::Suggest => HistoryAutotuneMode::Suggest,
+        DaemonMode::ApplyLowRisk => HistoryAutotuneMode::ApplyLowRisk,
+        DaemonMode::ApplyMediumRisk => HistoryAutotuneMode::ApplyMediumRisk,
+        DaemonMode::ApplyHighRisk => HistoryAutotuneMode::ApplyHighRisk,
     }
 }
 
@@ -1698,6 +1746,31 @@ mod tests {
             frame_max_ms: 20.0,
             drop_counter_total: 0,
         }
+    }
+
+    #[test]
+    fn runtime_config_stores_intent_and_permissions_in_daemon_fields() {
+        let config =
+            AutotuneRuntimeConfig::apply_low_risk(None, Some(1234), Some("Game.exe".to_owned()))
+                .with_min_focus_confidence(0.81)
+                .with_candidate_window_seconds(45);
+
+        assert_eq!(config.daemon_config.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(config.daemon_config.source, ActionSource::AutotuneRuntime);
+        assert_eq!(config.daemon_config.target.tree_pids, vec![1234]);
+        assert_eq!(
+            config.daemon_config.target.watch_process.as_deref(),
+            Some("Game.exe")
+        );
+        assert!(config.daemon_config.target.require_explicit_target);
+        assert_eq!(config.daemon_config.safety.min_confidence, 0.81);
+        assert_eq!(config.daemon_config.autotune.candidate_window_seconds, 45);
+        assert_eq!(config.daemon_policy.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(
+            config.daemon_policy.max_safety_class,
+            SafetyClass::ReversibleLowRisk
+        );
+        assert_eq!(config.daemon_policy.min_confidence, 0.81);
     }
 
     #[test]
@@ -1983,7 +2056,7 @@ mod tests {
         let runtime = AutotuneRuntime::new(config.clone());
 
         assert_eq!(
-            config.min_focus_confidence,
+            config.daemon_config.safety.min_confidence,
             crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE
         );
         assert_eq!(
@@ -1998,7 +2071,7 @@ mod tests {
             AutotuneRuntimeConfig::suggest(None, None, None).with_min_focus_confidence(0.42);
         let runtime = AutotuneRuntime::new(config.clone());
 
-        assert_eq!(config.min_focus_confidence, 0.42);
+        assert_eq!(config.daemon_config.safety.min_confidence, 0.42);
         assert_eq!(runtime.controller.policy.min_focus_confidence, 0.42);
     }
 
@@ -2007,8 +2080,8 @@ mod tests {
         let low = AutotuneRuntimeConfig::suggest(None, None, None).with_min_focus_confidence(-1.0);
         let high = AutotuneRuntimeConfig::suggest(None, None, None).with_min_focus_confidence(2.0);
 
-        assert_eq!(low.min_focus_confidence, 0.0);
-        assert_eq!(high.min_focus_confidence, 1.0);
+        assert_eq!(low.daemon_config.safety.min_confidence, 0.0);
+        assert_eq!(high.daemon_config.safety.min_confidence, 1.0);
     }
 
     #[test]

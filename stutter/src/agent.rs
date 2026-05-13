@@ -21,11 +21,13 @@ use tokio::{
 
 use crate::{
     actions::SafetyClass,
+    autotune::runtime::{
+        AutotuneRuntimeConfig, daemon_config_for_runtime_mode, run_autotune_controller_session,
+    },
     config::{FocusSource, ForegroundSource, model::MonitorConfig},
-    daemon::DaemonConfig,
-    daemon_policy::{
-        ActionSource, DaemonMode, DaemonPolicy, DaemonPolicyBuildInput, RemotePolicyContext,
-        build_daemon_policy,
+    daemon::{
+        ActionSource, DaemonConfig, DaemonMode, DaemonPolicy, DaemonPolicyBuildInput,
+        RemotePolicyContext, build_daemon_policy,
     },
     remote::{
         AgentAutotuneLimits, AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
@@ -1133,28 +1135,27 @@ async fn autotune_start_handler(
             None => Vec::new(),
         };
 
-        let runtime_config = match mode.as_str() {
-            "observe" => crate::autotune::runtime::AutotuneRuntimeConfig::observe(
-                input.decision_log.clone(),
-                input.tree_pid,
-                input.watch_process.clone(),
-            )
-            .with_profiles(profile_list),
-            "suggest" => crate::autotune::runtime::AutotuneRuntimeConfig::suggest(
-                input.decision_log.clone(),
-                input.tree_pid,
-                input.watch_process.clone(),
-            )
-            .with_profiles(profile_list),
-            "apply-low-risk" => crate::autotune::runtime::AutotuneRuntimeConfig::apply_low_risk(
-                input.decision_log.clone(),
-                input.tree_pid,
-                input.watch_process.clone(),
-            )
-            .with_profiles(profile_list)
-            .with_candidate_window_seconds(input.duration_seconds.unwrap_or(30)),
-            _ => unreachable!("mode was validated above"),
-        };
+        let mut daemon_config = daemon_config_for_runtime_mode(
+            policy.mode,
+            policy.source,
+            request.tree_pid,
+            request.watch_process.clone(),
+        );
+        daemon_config.remote.allow_remote_apply = policy.mode.supports_apply();
+        daemon_config.safety.allow_high_risk = policy.allow_high_risk;
+        daemon_config.safety.allow_system_wide_actions = policy.allow_system_wide_actions;
+
+        let mut runtime_config = AutotuneRuntimeConfig::from_daemon_parts(
+            daemon_config,
+            policy.clone(),
+            request.decision_log.as_deref().map(PathBuf::from),
+        )
+        .with_profiles(profile_list);
+
+        if mode == "apply-low-risk" {
+            runtime_config =
+                runtime_config.with_candidate_window_seconds(input.duration_seconds.unwrap_or(30));
+        }
 
         let (stop_tx, stop_rx) = oneshot::channel();
         let duration = if mode == "apply-low-risk" {
@@ -1163,15 +1164,9 @@ async fn autotune_start_handler(
             input.duration_seconds.map(std::time::Duration::from_secs)
         };
         let join = tokio::spawn(async move {
-            crate::autotune::runtime::run_autotune_controller_session(
-                monitor_config,
-                runtime_config,
-                Some(stop_rx),
-                duration,
-            )
-            .await
+            run_autotune_controller_session(monitor_config, runtime_config, Some(stop_rx), duration)
+                .await
         });
-
         AutotuneControllerHandle {
             mode: policy.mode.as_str().to_owned(),
             watch_process: request.watch_process.clone(),

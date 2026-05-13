@@ -37,7 +37,7 @@ pub mod tui_panel;
 
 use std::{path::PathBuf, time::Duration};
 
-use crate::daemon_policy::DaemonMode;
+use crate::daemon::{ActionSource, DaemonMode};
 
 #[derive(Debug, Clone)]
 pub struct AutotuneCommandInput {
@@ -93,36 +93,26 @@ fn runtime_config_for_command(
     mode: DaemonMode,
     profiles: Vec<crate::profiles::Profile>,
 ) -> anyhow::Result<runtime::AutotuneRuntimeConfig> {
-    let config = match mode {
-        DaemonMode::Observe => runtime::AutotuneRuntimeConfig::observe(
-            input.decision_log.clone(),
-            input.tree_pid,
-            input.watch_process.clone(),
-        )
-        .with_profiles(profiles)
-        .with_min_focus_confidence(input.min_focus_confidence)
-        .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
-        DaemonMode::Suggest => runtime::AutotuneRuntimeConfig::suggest(
-            input.decision_log.clone(),
-            input.tree_pid,
-            input.watch_process.clone(),
-        )
-        .with_profiles(profiles)
-        .with_min_focus_confidence(input.min_focus_confidence)
-        .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
-        DaemonMode::ApplyLowRisk => runtime::AutotuneRuntimeConfig::apply_low_risk(
-            input.decision_log.clone(),
-            input.tree_pid,
-            input.watch_process.clone(),
-        )
-        .with_profiles(profiles)
-        .with_min_focus_confidence(input.min_focus_confidence)
-        .with_candidate_window_seconds(input.duration_seconds.unwrap_or(30))
-        .with_washout(input.washout_seconds, input.washout_verify_interval_ms),
-        DaemonMode::ApplyMediumRisk | DaemonMode::ApplyHighRisk => {
-            return Err(unsupported_live_autotune_mode_error(mode));
-        }
-    };
+    let mut daemon_config = runtime::daemon_config_for_runtime_mode(
+        mode,
+        ActionSource::AutotuneRuntime,
+        input.tree_pid,
+        input.watch_process.clone(),
+    );
+
+    daemon_config.safety.min_confidence = input.min_focus_confidence;
+    daemon_config.autotune.washout_seconds = input.washout_seconds;
+
+    if mode == DaemonMode::ApplyLowRisk {
+        daemon_config.autotune.candidate_window_seconds = input.duration_seconds.unwrap_or(30);
+    }
+
+    let config = runtime::AutotuneRuntimeConfig::from_daemon_config(
+        daemon_config,
+        input.decision_log.clone(),
+    )
+    .with_profiles(profiles)
+    .with_washout(input.washout_seconds, input.washout_verify_interval_ms);
 
     Ok(config)
 }
@@ -240,6 +230,27 @@ mod tests {
             let mode = parse_supported_live_autotune_mode(raw_mode).unwrap();
             runtime_config_for_command(&input, mode, Vec::new()).unwrap();
         }
+    }
+
+    #[test]
+    fn verify_autotune_construction_applies_mode_and_target_to_daemon_config() {
+        let mut input = base_autotune_input("apply-low-risk");
+        input.tree_pid = Some(4444);
+        input.watch_process = Some("Game.exe".to_owned());
+        input.min_focus_confidence = 0.88;
+
+        let config =
+            runtime_config_for_command(&input, DaemonMode::ApplyLowRisk, Vec::new()).unwrap();
+
+        assert_eq!(config.daemon_config.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(config.daemon_config.target.tree_pids, vec![4444]);
+        assert_eq!(
+            config.daemon_config.target.watch_process.as_deref(),
+            Some("Game.exe")
+        );
+        assert_eq!(config.daemon_config.safety.min_confidence, 0.88);
+        assert_eq!(config.daemon_policy.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(config.daemon_policy.min_confidence, 0.88);
     }
 
     #[test]
