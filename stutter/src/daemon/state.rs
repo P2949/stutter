@@ -1,3 +1,10 @@
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
+
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -6,6 +13,18 @@ use crate::{
 };
 
 pub const DAEMON_STATE_SCHEMA_VERSION: u32 = 1;
+
+pub fn default_daemon_state_snapshot_path() -> PathBuf {
+    let mut path = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    path.push(".local");
+    path.push("state");
+    path.push("stutter");
+    path.push("autotune");
+    path.push("daemon_state.json");
+    path
+}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -26,6 +45,8 @@ pub struct DaemonState {
     pub schema_version: u32,
     pub mode: DaemonMode,
     pub phase: DaemonPhase,
+    #[serde(default)]
+    pub cooldown_until_unix_nanos: Option<u128>,
     pub active_target: Option<DaemonTargetState>,
     pub active_experiment: Option<DaemonExperimentState>,
     pub active_rollback: Option<DaemonRollbackState>,
@@ -40,6 +61,7 @@ impl Default for DaemonState {
             schema_version: DAEMON_STATE_SCHEMA_VERSION,
             mode: DaemonMode::Observe,
             phase: DaemonPhase::Disabled,
+            cooldown_until_unix_nanos: None,
             active_target: None,
             active_experiment: None,
             active_rollback: None,
@@ -94,9 +116,101 @@ pub struct DaemonFaultState {
     pub manual_restore_command: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DaemonStateSnapshotWriter {
+    path: PathBuf,
+}
+
+impl DaemonStateSnapshotWriter {
+    pub fn new(path: impl AsRef<Path>) -> Self {
+        Self {
+            path: path.as_ref().to_path_buf(),
+        }
+    }
+
+    pub fn default_path() -> PathBuf {
+        default_daemon_state_snapshot_path()
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn write(&self, state: &DaemonState) -> anyhow::Result<()> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create daemon state snapshot directory {}",
+                    parent.display()
+                )
+            })?;
+        }
+
+        let temporary_path = temporary_daemon_state_snapshot_path(&self.path);
+        {
+            let mut file = fs::File::create(&temporary_path).with_context(|| {
+                format!(
+                    "failed to create daemon state snapshot temp file {}",
+                    temporary_path.display()
+                )
+            })?;
+
+            serde_json::to_writer_pretty(&mut file, state).with_context(|| {
+                format!(
+                    "failed to serialize daemon state snapshot {}",
+                    temporary_path.display()
+                )
+            })?;
+            file.write_all(b"\n").with_context(|| {
+                format!(
+                    "failed to terminate daemon state snapshot {}",
+                    temporary_path.display()
+                )
+            })?;
+            file.sync_all().with_context(|| {
+                format!(
+                    "failed to sync daemon state snapshot temp file {}",
+                    temporary_path.display()
+                )
+            })?;
+        }
+
+        fs::rename(&temporary_path, &self.path).with_context(|| {
+            format!(
+                "failed to atomically replace daemon state snapshot {} with {}",
+                self.path.display(),
+                temporary_path.display()
+            )
+        })?;
+
+        Ok(())
+    }
+}
+
+fn temporary_daemon_state_snapshot_path(path: &Path) -> PathBuf {
+    let mut temporary_path = path.to_path_buf();
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("daemon_state.json");
+    temporary_path.set_file_name(format!("{file_name}.tmp"));
+    temporary_path
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "stutter-daemon-state-test-{name}-{}-{}",
+            std::process::id(),
+            crate::audit::unix_nanos_now()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[test]
     fn daemon_state_default_serializes_with_schema_version() {
@@ -160,5 +274,43 @@ mod tests {
         );
         assert!(decoded.active_rollback.unwrap().rollback_available);
         assert_eq!(decoded.degraded.len(), 1);
+    }
+
+    #[test]
+    fn daemon_state_snapshot_writer_atomically_writes_json_and_removes_temp_file() {
+        let dir = temp_dir("snapshot-writer");
+        let path = dir.join("daemon_state.json");
+        let writer = DaemonStateSnapshotWriter::new(&path);
+        let state = DaemonState {
+            mode: DaemonMode::ApplyLowRisk,
+            phase: DaemonPhase::Cooldown,
+            cooldown_until_unix_nanos: Some(9_000),
+            degraded: vec![DaemonDegradedStatus {
+                category: "data_quality".to_owned(),
+                message: "low data quality".to_owned(),
+            }],
+            ..DaemonState::default()
+        };
+
+        writer.write(&state).unwrap();
+
+        let decoded: DaemonState = serde_json::from_reader(fs::File::open(&path).unwrap()).unwrap();
+
+        assert_eq!(writer.path(), path.as_path());
+        assert_eq!(decoded.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(decoded.phase, DaemonPhase::Cooldown);
+        assert_eq!(decoded.cooldown_until_unix_nanos, Some(9_000));
+        assert_eq!(decoded.degraded[0].category, "data_quality");
+        assert!(!temporary_daemon_state_snapshot_path(&path).exists());
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn default_daemon_state_snapshot_path_matches_autotune_state_directory() {
+        let path = default_daemon_state_snapshot_path();
+        let rendered = path.to_string_lossy();
+
+        assert!(rendered.ends_with(".local/state/stutter/autotune/daemon_state.json"));
     }
 }
