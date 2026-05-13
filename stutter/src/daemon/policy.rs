@@ -8,6 +8,7 @@ use crate::{
         config::DaemonConfig,
         explain::{PolicyDecisionKind, PolicyExplanation, PolicyRuleEvaluation},
     },
+    remote::AgentAutotuneLimits,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -124,18 +125,32 @@ pub struct ActionDescriptor {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RemoteApplyPolicy {
     pub allow_remote_apply: bool,
+    pub remote_apply_enabled: bool,
     pub require_loopback_bind: bool,
     pub require_auth: bool,
     pub max_remote_targets: usize,
+    pub target_count: usize,
+    pub target_count_allowed: bool,
+    pub mode_supported_by_limits: bool,
+    pub auth_configured: bool,
+    pub request_authorized: bool,
+    pub bind_is_loopback: bool,
 }
 
 impl Default for RemoteApplyPolicy {
     fn default() -> Self {
         Self {
             allow_remote_apply: false,
+            remote_apply_enabled: false,
             require_loopback_bind: true,
             require_auth: true,
             max_remote_targets: 1,
+            target_count: 0,
+            target_count_allowed: true,
+            mode_supported_by_limits: false,
+            auth_configured: false,
+            request_authorized: false,
+            bind_is_loopback: false,
         }
     }
 }
@@ -196,6 +211,17 @@ pub enum PolicyRejection {
         confidence: f32,
         min_confidence: f32,
     },
+    RemoteApplyDisabled,
+    RemoteModeNotAllowed {
+        mode: DaemonMode,
+    },
+    RemoteApplyRequiresConfiguredAuth,
+    RemoteApplyRequiresAuthorizedRequest,
+    RemoteApplyRequiresLoopbackBind,
+    RemoteTargetCountTooHigh {
+        target_count: usize,
+        max_targets: usize,
+    },
 }
 
 impl fmt::Display for PolicyRejection {
@@ -247,6 +273,33 @@ impl fmt::Display for PolicyRejection {
                     "action confidence {confidence:.3} is below required minimum {min_confidence:.3}"
                 )
             }
+            Self::RemoteApplyDisabled => {
+                f.write_str("remote apply is disabled by daemon configuration")
+            }
+            Self::RemoteModeNotAllowed { mode } => {
+                write!(
+                    f,
+                    "remote autotune mode {mode} is not allowed by configured remote limits"
+                )
+            }
+            Self::RemoteApplyRequiresConfiguredAuth => {
+                f.write_str("remote autotune apply mode requires a configured bearer token")
+            }
+            Self::RemoteApplyRequiresAuthorizedRequest => {
+                f.write_str("remote autotune apply mode requires a valid bearer token")
+            }
+            Self::RemoteApplyRequiresLoopbackBind => {
+                f.write_str("remote autotune apply mode is only allowed on loopback binds")
+            }
+            Self::RemoteTargetCountTooHigh {
+                target_count,
+                max_targets,
+            } => {
+                write!(
+                    f,
+                    "autotune target count {target_count} exceeds max_targets {max_targets}"
+                )
+            }
         }
     }
 }
@@ -255,14 +308,10 @@ impl std::error::Error for PolicyRejection {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RemotePolicyContext {
-    pub is_loopback_bind: bool,
+    pub bind_is_loopback: bool,
     pub auth_configured: bool,
-    pub valid_auth: bool,
-    pub max_mode: DaemonMode,
-    pub max_safety_class: SafetyClass,
-    pub allow_high_risk: bool,
-    pub allow_system_wide_actions: bool,
-    pub max_remote_targets: usize,
+    pub request_authorized: bool,
+    pub limits: AgentAutotuneLimits,
 }
 
 #[derive(Clone, Debug)]
@@ -278,9 +327,9 @@ pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
     let mut max_safety_class = mode_max_safety_class.clone();
 
     if let Some(context) = remote_context
-        && context.max_safety_class < max_safety_class
+        && context.limits.max_safety_class < max_safety_class
     {
-        max_safety_class = context.max_safety_class.clone();
+        max_safety_class = context.limits.max_safety_class.clone();
     }
 
     let mut allow_system_wide_actions = config.safety.allow_system_wide_actions;
@@ -288,8 +337,8 @@ pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
         config.mode == DaemonMode::ApplyHighRisk && config.safety.allow_high_risk;
 
     if let Some(context) = remote_context {
-        allow_system_wide_actions &= context.allow_system_wide_actions;
-        allow_high_risk &= context.allow_high_risk;
+        allow_system_wide_actions &= context.limits.allow_system_wide_actions;
+        allow_high_risk &= context.limits.allow_high_risk;
     }
 
     DaemonPolicy {
@@ -358,29 +407,45 @@ fn remote_apply_policy_for_config(
     };
 
     let mode_supported_by_limits = remote_mode_supported_by_context(config.mode, context);
-    let auth_allowed =
-        !config.remote.require_auth_for_apply || (context.auth_configured && context.valid_auth);
-    let bind_allowed = config.remote.allow_non_loopback_apply || context.is_loopback_bind;
+    let auth_allowed = !config.remote.require_auth_for_apply
+        || (context.auth_configured && context.request_authorized);
+    let bind_allowed = config.remote.allow_non_loopback_apply || context.bind_is_loopback;
+    let target_count = remote_target_count_for_config(config);
+    let target_count_allowed = target_count <= context.limits.max_targets;
 
     RemoteApplyPolicy {
         allow_remote_apply: config.remote.allow_remote_apply
             && config.mode.supports_apply()
             && mode_supported_by_limits
             && auth_allowed
-            && bind_allowed,
+            && bind_allowed
+            && target_count_allowed,
+        remote_apply_enabled: config.remote.allow_remote_apply,
         require_loopback_bind: config.mode.supports_apply()
             && !config.remote.allow_non_loopback_apply,
         require_auth: config.mode.supports_apply() && config.remote.require_auth_for_apply,
-        max_remote_targets: context.max_remote_targets,
+        max_remote_targets: context.limits.max_targets,
+        target_count,
+        target_count_allowed,
+        mode_supported_by_limits,
+        auth_configured: context.auth_configured,
+        request_authorized: context.request_authorized,
+        bind_is_loopback: context.bind_is_loopback,
     }
 }
 
 fn remote_mode_supported_by_context(mode: DaemonMode, context: &RemotePolicyContext) -> bool {
     let mode_max_safety_class = max_safety_class_for_mode(mode);
 
-    mode <= context.max_mode
-        && mode_max_safety_class <= context.max_safety_class
-        && (mode != DaemonMode::ApplyHighRisk || context.allow_high_risk)
+    mode <= context.limits.max_mode
+        && mode_max_safety_class <= context.limits.max_safety_class
+        && (mode != DaemonMode::ApplyHighRisk || context.limits.allow_high_risk)
+}
+
+fn remote_target_count_for_config(config: &DaemonConfig) -> usize {
+    config.target.target_pids.len()
+        + config.target.tree_pids.len()
+        + usize::from(config.target.watch_process.is_some())
 }
 
 fn config_for_constructor(
@@ -416,6 +481,123 @@ fn record_policy_rule(
     if !passed && first_rejection.is_none() {
         *first_rejection = rejection;
     }
+}
+
+fn record_remote_target_count_rule(
+    policy: &DaemonPolicy,
+    evaluated_rules: &mut Vec<PolicyRuleEvaluation>,
+    first_rejection: &mut Option<PolicyRejection>,
+) {
+    let remote = &policy.remote_apply;
+
+    record_policy_rule(
+        evaluated_rules,
+        first_rejection,
+        "remote_target_count",
+        remote.target_count_allowed,
+        if remote.target_count_allowed {
+            format!(
+                "remote target count {} is within max_targets {}",
+                remote.target_count, remote.max_remote_targets
+            )
+        } else {
+            format!(
+                "remote target count {} exceeds max_targets {}",
+                remote.target_count, remote.max_remote_targets
+            )
+        },
+        (!remote.target_count_allowed).then_some(PolicyRejection::RemoteTargetCountTooHigh {
+            target_count: remote.target_count,
+            max_targets: remote.max_remote_targets,
+        }),
+    );
+}
+
+fn record_remote_apply_rules(
+    policy: &DaemonPolicy,
+    evaluated_rules: &mut Vec<PolicyRuleEvaluation>,
+    first_rejection: &mut Option<PolicyRejection>,
+) {
+    let remote = &policy.remote_apply;
+
+    record_policy_rule(
+        evaluated_rules,
+        first_rejection,
+        "remote_apply_enabled",
+        remote.remote_apply_enabled,
+        if remote.remote_apply_enabled {
+            "remote apply is enabled by daemon configuration".to_owned()
+        } else {
+            "remote apply is disabled by daemon configuration".to_owned()
+        },
+        (!remote.remote_apply_enabled).then_some(PolicyRejection::RemoteApplyDisabled),
+    );
+
+    if remote.require_auth {
+        record_policy_rule(
+            evaluated_rules,
+            first_rejection,
+            "remote_auth_configured",
+            remote.auth_configured,
+            if remote.auth_configured {
+                "remote apply has configured bearer-token authentication".to_owned()
+            } else {
+                "remote apply requires configured bearer-token authentication".to_owned()
+            },
+            (!remote.auth_configured).then_some(PolicyRejection::RemoteApplyRequiresConfiguredAuth),
+        );
+
+        record_policy_rule(
+            evaluated_rules,
+            first_rejection,
+            "remote_request_authorized",
+            remote.request_authorized,
+            if remote.request_authorized {
+                "remote apply request is authorized".to_owned()
+            } else {
+                "remote apply request is not authorized".to_owned()
+            },
+            (!remote.request_authorized)
+                .then_some(PolicyRejection::RemoteApplyRequiresAuthorizedRequest),
+        );
+    }
+
+    if remote.require_loopback_bind {
+        record_policy_rule(
+            evaluated_rules,
+            first_rejection,
+            "remote_loopback_bind",
+            remote.bind_is_loopback,
+            if remote.bind_is_loopback {
+                "remote apply bind address is loopback".to_owned()
+            } else {
+                "remote apply bind address is not loopback".to_owned()
+            },
+            (!remote.bind_is_loopback).then_some(PolicyRejection::RemoteApplyRequiresLoopbackBind),
+        );
+    }
+
+    record_policy_rule(
+        evaluated_rules,
+        first_rejection,
+        "remote_mode_supported",
+        remote.mode_supported_by_limits,
+        if remote.mode_supported_by_limits {
+            format!(
+                "remote mode {} is within configured remote limits",
+                policy.mode
+            )
+        } else {
+            format!(
+                "remote mode {} exceeds configured remote limits",
+                policy.mode
+            )
+        },
+        (!remote.mode_supported_by_limits)
+            .then_some(PolicyRejection::RemoteModeNotAllowed { mode: policy.mode }),
+    );
+
+    record_remote_target_count_rule(policy, evaluated_rules, first_rejection);
 }
 
 impl DaemonPolicy {
@@ -466,6 +648,19 @@ impl DaemonPolicy {
     ) -> PolicyExplanation {
         let mut evaluated_rules = Vec::new();
         let mut first_rejection = None;
+
+        if self.source == ActionSource::RemoteAgent
+            && !self.mode.supports_apply()
+            && !self.remote_apply.target_count_allowed
+        {
+            record_remote_target_count_rule(self, &mut evaluated_rules, &mut first_rejection);
+            return self.finish_policy_explanation(
+                intent,
+                descriptor,
+                evaluated_rules,
+                first_rejection,
+            );
+        }
 
         match intent {
             PolicyIntent::Observe
@@ -538,6 +733,10 @@ impl DaemonPolicy {
                     );
                 }
             }
+        }
+
+        if self.source == ActionSource::RemoteAgent && self.mode.supports_apply() {
+            record_remote_apply_rules(self, &mut evaluated_rules, &mut first_rejection);
         }
 
         match self.mode {
@@ -1242,14 +1441,13 @@ mod tests {
         config.safety.allow_system_wide_actions = true;
 
         let remote_context = RemotePolicyContext {
-            is_loopback_bind: true,
+            bind_is_loopback: true,
             auth_configured: true,
-            valid_auth: true,
-            max_mode: DaemonMode::ApplyLowRisk,
-            max_safety_class: SafetyClass::ReversibleLowRisk,
-            allow_high_risk: false,
-            allow_system_wide_actions: false,
-            max_remote_targets: 3,
+            request_authorized: true,
+            limits: AgentAutotuneLimits {
+                max_targets: 3,
+                ..AgentAutotuneLimits::default()
+            },
         };
 
         let first = build_daemon_policy(DaemonPolicyBuildInput {
@@ -1267,5 +1465,207 @@ mod tests {
         assert!(first.remote_apply.require_auth);
         assert_eq!(first.remote_apply.max_remote_targets, 3);
         assert!(!first.allow_system_wide_actions);
+    }
+
+    #[test]
+    fn remote_apply_explanation_rejects_unconfigured_auth() {
+        let mut config = crate::daemon::config::DaemonConfig {
+            mode: DaemonMode::ApplyLowRisk,
+            source: ActionSource::RemoteAgent,
+            ..crate::daemon::config::DaemonConfig::default()
+        };
+        config.remote.allow_remote_apply = true;
+        config.target.tree_pids.push(1234);
+
+        let policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: Some(RemotePolicyContext {
+                bind_is_loopback: true,
+                auth_configured: false,
+                request_authorized: true,
+                limits: AgentAutotuneLimits::default(),
+            }),
+        });
+        let desc = descriptor(SafetyClass::ReversibleLowRisk);
+
+        let explanation = policy.explain_action(PolicyIntent::Apply, &desc);
+
+        assert!(matches!(
+            explanation.decision,
+            PolicyDecisionKind::Rejected {
+                rejection: PolicyRejection::RemoteApplyRequiresConfiguredAuth
+            }
+        ));
+        assert!(
+            explanation
+                .evaluated_rules
+                .iter()
+                .any(|rule| rule.rule == "remote_auth_configured" && !rule.passed)
+        );
+        assert!(explanation.final_reason.contains("configured bearer token"));
+    }
+
+    #[test]
+    fn remote_apply_explanation_rejects_non_loopback_bind() {
+        let mut config = crate::daemon::config::DaemonConfig {
+            mode: DaemonMode::ApplyLowRisk,
+            source: ActionSource::RemoteAgent,
+            ..crate::daemon::config::DaemonConfig::default()
+        };
+        config.remote.allow_remote_apply = true;
+        config.target.tree_pids.push(1234);
+
+        let policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: Some(RemotePolicyContext {
+                bind_is_loopback: false,
+                auth_configured: true,
+                request_authorized: true,
+                limits: AgentAutotuneLimits::default(),
+            }),
+        });
+        let desc = descriptor(SafetyClass::ReversibleLowRisk);
+
+        let explanation = policy.explain_action(PolicyIntent::Apply, &desc);
+
+        assert!(matches!(
+            explanation.decision,
+            PolicyDecisionKind::Rejected {
+                rejection: PolicyRejection::RemoteApplyRequiresLoopbackBind
+            }
+        ));
+        assert!(
+            explanation
+                .evaluated_rules
+                .iter()
+                .any(|rule| rule.rule == "remote_loopback_bind" && !rule.passed)
+        );
+        assert!(explanation.final_reason.contains("loopback"));
+    }
+
+    #[test]
+    fn remote_apply_explanation_reports_auth_before_mode_limit() {
+        let mut config = crate::daemon::config::DaemonConfig {
+            mode: DaemonMode::ApplyHighRisk,
+            source: ActionSource::RemoteAgent,
+            ..crate::daemon::config::DaemonConfig::default()
+        };
+        config.remote.allow_remote_apply = true;
+        config.safety.allow_high_risk = true;
+        config.target.tree_pids.push(1234);
+
+        let policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: Some(RemotePolicyContext {
+                bind_is_loopback: true,
+                auth_configured: false,
+                request_authorized: true,
+                limits: AgentAutotuneLimits::default(),
+            }),
+        });
+        let desc = descriptor(SafetyClass::HighRisk);
+
+        let explanation = policy.explain_action(PolicyIntent::Apply, &desc);
+
+        assert!(matches!(
+            explanation.decision,
+            PolicyDecisionKind::Rejected {
+                rejection: PolicyRejection::RemoteApplyRequiresConfiguredAuth
+            }
+        ));
+        let first_failed_rule = explanation
+            .evaluated_rules
+            .iter()
+            .find(|rule| !rule.passed)
+            .expect("expected a failing remote policy rule");
+        assert_eq!(first_failed_rule.rule, "remote_auth_configured");
+        assert!(explanation.final_reason.contains("configured bearer token"));
+    }
+
+    #[test]
+    fn remote_apply_explanation_rejects_mode_over_limits() {
+        let mut config = crate::daemon::config::DaemonConfig {
+            mode: DaemonMode::ApplyHighRisk,
+            source: ActionSource::RemoteAgent,
+            ..crate::daemon::config::DaemonConfig::default()
+        };
+        config.remote.allow_remote_apply = true;
+        config.safety.allow_high_risk = true;
+        config.target.tree_pids.push(1234);
+
+        let policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: Some(RemotePolicyContext {
+                bind_is_loopback: true,
+                auth_configured: true,
+                request_authorized: true,
+                limits: AgentAutotuneLimits::default(),
+            }),
+        });
+        let desc = descriptor(SafetyClass::HighRisk);
+
+        let explanation = policy.explain_action(PolicyIntent::Apply, &desc);
+
+        assert!(matches!(
+            explanation.decision,
+            PolicyDecisionKind::Rejected {
+                rejection: PolicyRejection::RemoteModeNotAllowed {
+                    mode: DaemonMode::ApplyHighRisk
+                }
+            }
+        ));
+        assert!(
+            explanation
+                .evaluated_rules
+                .iter()
+                .any(|rule| rule.rule == "remote_mode_supported" && !rule.passed)
+        );
+        assert!(
+            explanation
+                .final_reason
+                .contains("configured remote limits")
+        );
+    }
+
+    #[test]
+    fn remote_apply_explanation_rejects_target_count_over_limits() {
+        let mut config = crate::daemon::config::DaemonConfig {
+            mode: DaemonMode::ApplyLowRisk,
+            source: ActionSource::RemoteAgent,
+            ..crate::daemon::config::DaemonConfig::default()
+        };
+        config.remote.allow_remote_apply = true;
+        config.target.tree_pids.push(1234);
+        config.target.watch_process = Some("game".to_owned());
+
+        let policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: Some(RemotePolicyContext {
+                bind_is_loopback: true,
+                auth_configured: true,
+                request_authorized: true,
+                limits: AgentAutotuneLimits::default(),
+            }),
+        });
+        let desc = descriptor(SafetyClass::ReversibleLowRisk);
+
+        let explanation = policy.explain_action(PolicyIntent::Apply, &desc);
+
+        assert!(matches!(
+            explanation.decision,
+            PolicyDecisionKind::Rejected {
+                rejection: PolicyRejection::RemoteTargetCountTooHigh {
+                    target_count: 2,
+                    max_targets: 1
+                }
+            }
+        ));
+        assert!(
+            explanation
+                .evaluated_rules
+                .iter()
+                .any(|rule| rule.rule == "remote_target_count" && !rule.passed)
+        );
+        assert!(explanation.final_reason.contains("max_targets"));
     }
 }

@@ -20,14 +20,15 @@ use tokio::{
 };
 
 use crate::{
-    actions::SafetyClass,
+    actions::{ActionId, SafetyClass},
     autotune::runtime::{
         AutotuneRuntimeConfig, daemon_config_for_runtime_mode, run_autotune_controller_session,
     },
     config::{FocusSource, ForegroundSource, model::MonitorConfig},
     daemon::{
-        ActionSource, DaemonConfig, DaemonMode, DaemonPolicy, DaemonPolicyBuildInput,
-        RemotePolicyContext, build_daemon_policy,
+        ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicy,
+        DaemonPolicyBuildInput, PolicyDecisionKind, PolicyIntent, PolicyRejection,
+        RemotePolicyContext, RollbackRequirement, build_daemon_policy,
     },
     remote::{
         AgentAutotuneLimits, AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
@@ -339,17 +340,20 @@ fn remote_mode_supported(limits: &AgentAutotuneLimits, mode: DaemonMode) -> bool
 
 fn daemon_policy_for_remote_mode(
     mode: DaemonMode,
-    limits: &AgentAutotuneLimits,
+    state: &AgentState,
+    request: &AutotuneStartRequest,
     remote_context: RemotePolicyContext,
 ) -> DaemonPolicy {
-    let mut config = DaemonConfig {
+    let mut config = daemon_config_for_runtime_mode(
         mode,
-        source: ActionSource::RemoteAgent,
-        ..DaemonConfig::default()
-    };
+        ActionSource::RemoteAgent,
+        request.tree_pid,
+        request.watch_process.clone(),
+    );
     config.remote.allow_remote_apply = mode.supports_apply();
-    config.safety.allow_high_risk = limits.allow_high_risk && mode == DaemonMode::ApplyHighRisk;
-    config.safety.allow_system_wide_actions = limits.allow_system_wide_actions;
+    config.safety.allow_high_risk =
+        state.autotune_limits.allow_high_risk && mode == DaemonMode::ApplyHighRisk;
+    config.safety.allow_system_wide_actions = state.autotune_limits.allow_system_wide_actions;
 
     build_daemon_policy(DaemonPolicyBuildInput {
         config: &config,
@@ -359,17 +363,13 @@ fn daemon_policy_for_remote_mode(
 
 fn remote_policy_context_for_request(
     state: &AgentState,
-    headers: &HeaderMap,
+    request_authorized: bool,
 ) -> RemotePolicyContext {
     RemotePolicyContext {
-        is_loopback_bind: is_local_bind(&state.bind),
+        bind_is_loopback: is_local_bind(&state.bind),
         auth_configured: state.auth.bearer_token.is_some(),
-        valid_auth: authorize(headers, &state.auth).is_ok(),
-        max_mode: state.autotune_limits.max_mode,
-        max_safety_class: state.autotune_limits.max_safety_class.clone(),
-        allow_high_risk: state.autotune_limits.allow_high_risk,
-        allow_system_wide_actions: state.autotune_limits.allow_system_wide_actions,
-        max_remote_targets: state.autotune_limits.max_targets,
+        request_authorized,
+        limits: state.autotune_limits.clone(),
     }
 }
 
@@ -413,14 +413,6 @@ fn validate_autotune_start_limits(
         anyhow::bail!("autotune start requires watch_process, tree_pid, or auto_focus");
     }
 
-    if requested_target_count > limits.max_targets {
-        anyhow::bail!(
-            "autotune target count {} exceeds max_targets {}",
-            requested_target_count,
-            limits.max_targets
-        );
-    }
-
     if let Some(duration_seconds) = request
         .duration_seconds
         .filter(|&d| d > limits.max_candidate_window_seconds)
@@ -433,6 +425,71 @@ fn validate_autotune_start_limits(
     }
 
     Ok(())
+}
+
+fn remote_autotune_start_descriptor(
+    mode: DaemonMode,
+    request: &AutotuneStartRequest,
+) -> ActionDescriptor {
+    ActionDescriptor {
+        action_id: ActionId(format!("remote-autotune-start:{}", mode.as_str())),
+        action_kind: "remote-autotune-start".to_owned(),
+        safety_class: safety_class_for_daemon_mode(mode),
+        effect_scope: if mode.supports_apply() {
+            ActionEffectScope::LocalProcessTree
+        } else {
+            ActionEffectScope::ObserveOnly
+        },
+        rollback: if mode.supports_apply() {
+            RollbackRequirement::RequiredBeforeApply
+        } else {
+            RollbackRequirement::NotRequiredForDryRun
+        },
+        persistent_effect: false,
+        touches_system_wide_state: false,
+        requires_explicit_target: mode.supports_apply()
+            && request.tree_pid.is_none()
+            && request.watch_process.is_none()
+            && !request.auto_focus,
+        confidence: Some(1.0),
+    }
+}
+
+fn policy_rejection_status(
+    rejection: &PolicyRejection,
+    auth_error: Option<StatusCode>,
+) -> StatusCode {
+    match rejection {
+        PolicyRejection::RemoteApplyRequiresConfiguredAuth => StatusCode::UNAUTHORIZED,
+        PolicyRejection::RemoteApplyRequiresAuthorizedRequest => {
+            auth_error.unwrap_or(StatusCode::UNAUTHORIZED)
+        }
+        PolicyRejection::RemoteApplyRequiresLoopbackBind
+        | PolicyRejection::HighRiskRequiresExplicitOptIn => StatusCode::FORBIDDEN,
+        PolicyRejection::RemoteApplyDisabled
+        | PolicyRejection::RemoteModeNotAllowed { .. }
+        | PolicyRejection::RemoteTargetCountTooHigh { .. } => StatusCode::BAD_REQUEST,
+        _ => StatusCode::BAD_REQUEST,
+    }
+}
+
+fn rejection_from_policy_explanation(
+    mode: DaemonMode,
+    explanation: crate::daemon::PolicyExplanation,
+    auth_error: Option<StatusCode>,
+) -> Option<AutotuneStartSecurityRejection> {
+    match explanation.decision {
+        PolicyDecisionKind::Allowed => None,
+        PolicyDecisionKind::Rejected { rejection } => {
+            let status = policy_rejection_status(&rejection, auth_error);
+            let reason = explanation.final_reason;
+            Some(AutotuneStartSecurityRejection {
+                status,
+                audit_message: format!("rejected remote autotune mode={mode}: {reason}"),
+                response_message: reason,
+            })
+        }
+    }
 }
 
 fn policy_for_remote_autotune_start(
@@ -451,82 +508,38 @@ fn policy_for_remote_autotune_start(
                     .to_owned(),
         })?;
 
-    // Phase 1 security mandate: Apply modes require authentication and loopback bind
-    if mode.supports_apply() {
-        if state.auth.bearer_token.is_none() {
-            return Err(AutotuneStartSecurityRejection {
-                status: StatusCode::UNAUTHORIZED,
-                audit_message: format!(
-                    "rejected remote autotune apply mode={mode}: bearer token is required"
-                ),
-                response_message: "remote autotune apply mode requires a configured bearer token"
-                    .to_owned(),
-            });
-        }
+    let auth_result = authorize(headers, &state.auth);
+    let auth_error = auth_result.as_ref().err().copied();
 
-        if let Err(status) = authorize(headers, &state.auth) {
-            return Err(AutotuneStartSecurityRejection {
-                status,
-                audit_message: format!(
-                    "rejected remote autotune apply mode={mode}: invalid bearer token"
-                ),
-                response_message: "remote autotune apply mode requires a valid bearer token"
-                    .to_owned(),
-            });
-        }
-
-        if !is_local_bind(&state.bind) {
-            return Err(AutotuneStartSecurityRejection {
-                status: StatusCode::FORBIDDEN,
-                audit_message: format!(
-                    "rejected remote autotune apply mode={mode}: non-loopback bind {} is not allowed",
-                    state.bind
-                ),
-                response_message:
-                    "remote autotune apply mode is only allowed on loopback binds for now"
-                        .to_owned(),
-            });
-        }
-    } else {
-        // Observe/Suggest still require auth if a token is configured
-        if let Err(status) = authorize(headers, &state.auth) {
-            return Err(AutotuneStartSecurityRejection {
-                status,
-                audit_message: format!("rejected remote autotune mode={mode}: unauthorized"),
-                response_message: "unauthorized".to_owned(),
-            });
-        }
-    }
-
-    // Now check if the mode is actually supported by the agent's configured limits
-    if !remote_mode_supported(&state.autotune_limits, mode) {
+    if !mode.supports_apply()
+        && let Err(status) = auth_result
+    {
         return Err(AutotuneStartSecurityRejection {
-            status: StatusCode::BAD_REQUEST,
-            audit_message: format!(
-                "rejected remote autotune mode={mode}: exceeds configured remote limits max_mode={} max_safety_class={:?} allow_high_risk={}",
-                state.autotune_limits.max_mode,
-                state.autotune_limits.max_safety_class,
-                state.autotune_limits.allow_high_risk
-            ),
-            response_message:
-                "unsupported remote autotune mode; use observe, suggest, or apply-low-risk"
-                    .to_owned(),
+            status,
+            audit_message: format!("rejected remote autotune mode={mode}: unauthorized"),
+            response_message: "unauthorized".to_owned(),
         });
     }
 
+    let request_authorized = auth_error.is_none();
     let policy = daemon_policy_for_remote_mode(
         mode,
-        &state.autotune_limits,
-        remote_policy_context_for_request(state, headers),
+        state,
+        request,
+        remote_policy_context_for_request(state, request_authorized),
     );
 
-    if mode == DaemonMode::ApplyHighRisk && !policy.allow_high_risk {
-        return Err(AutotuneStartSecurityRejection {
-            status: StatusCode::FORBIDDEN,
-            audit_message: "rejected remote autotune apply-high-risk: high risk not enabled"
-                .to_owned(),
-            response_message: "remote autotune high-risk mode is disabled".to_owned(),
-        });
+    let descriptor = remote_autotune_start_descriptor(mode, request);
+    let intent = match mode {
+        DaemonMode::Observe => PolicyIntent::Observe,
+        DaemonMode::Suggest => PolicyIntent::Suggest,
+        DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk | DaemonMode::ApplyHighRisk => {
+            PolicyIntent::Apply
+        }
+    };
+    let explanation = policy.explain_action(intent, &descriptor);
+    if let Some(rejection) = rejection_from_policy_explanation(mode, explanation, auth_error) {
+        return Err(rejection);
     }
 
     Ok(policy)
@@ -1842,17 +1855,22 @@ mod tests {
             axum::http::header::AUTHORIZATION,
             axum::http::HeaderValue::from_static("Bearer secret"),
         );
-        let first_context = remote_policy_context_for_request(&state, &headers);
-        let second_context = remote_policy_context_for_request(&state, &headers);
+        let request = autotune_request("apply-low-risk");
+        let first_context =
+            remote_policy_context_for_request(&state, authorize(&headers, &state.auth).is_ok());
+        let second_context =
+            remote_policy_context_for_request(&state, authorize(&headers, &state.auth).is_ok());
 
         let first = daemon_policy_for_remote_mode(
             DaemonMode::ApplyLowRisk,
-            &state.autotune_limits,
+            &state,
+            &request,
             first_context,
         );
         let second = daemon_policy_for_remote_mode(
             DaemonMode::ApplyLowRisk,
-            &state.autotune_limits,
+            &state,
+            &request,
             second_context,
         );
 
@@ -1884,7 +1902,7 @@ mod tests {
         assert!(
             rejection
                 .response_message
-                .contains("unsupported remote autotune mode")
+                .contains("configured remote limits")
         );
     }
 
@@ -1902,6 +1920,44 @@ mod tests {
                 .unwrap_err();
 
         assert_eq!(rejection.status, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn remote_autotune_observe_target_count_rejection_uses_policy_explanation() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer secret"),
+        );
+        let mut request = autotune_request("observe");
+        request.tree_pid = Some(1234);
+        request.watch_process = Some("game".to_owned());
+
+        let rejection = policy_for_remote_autotune_start(&headers, &state, &request).unwrap_err();
+
+        assert_eq!(rejection.status, StatusCode::BAD_REQUEST);
+        assert!(rejection.response_message.contains("max_targets"));
+        assert!(rejection.audit_message.contains("max_targets"));
+    }
+
+    #[test]
+    fn remote_autotune_target_count_rejection_uses_policy_explanation() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer secret"),
+        );
+        let mut request = autotune_request("apply-low-risk");
+        request.tree_pid = Some(1234);
+        request.watch_process = Some("game".to_owned());
+
+        let rejection = policy_for_remote_autotune_start(&headers, &state, &request).unwrap_err();
+
+        assert_eq!(rejection.status, StatusCode::BAD_REQUEST);
+        assert!(rejection.response_message.contains("max_targets"));
+        assert!(rejection.audit_message.contains("max_targets"));
     }
 
     #[test]
@@ -2838,5 +2894,20 @@ mod remote_policy_tests {
 
         let res = policy_for_remote_autotune_start(&headers, &state, &request);
         assert_eq!(res.unwrap_err().status, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn remote_policy_response_uses_policy_explanation_text() {
+        let state = test_agent_state(Some("secret"), false);
+        let request = autotune_start_request("apply-low-risk");
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Authorization", "Bearer secret".parse().unwrap());
+
+        let err = policy_for_remote_autotune_start(&headers, &state, &request).unwrap_err();
+
+        assert_eq!(err.status, StatusCode::FORBIDDEN);
+        assert!(err.response_message.contains("loopback"));
+        assert!(err.audit_message.contains("loopback"));
     }
 }
