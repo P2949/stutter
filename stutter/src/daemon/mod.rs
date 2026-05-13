@@ -1,6 +1,7 @@
 pub mod config;
 pub mod explain;
 pub mod policy;
+pub mod runtime;
 pub mod state;
 
 pub use config::{
@@ -16,6 +17,7 @@ pub use policy::{
     DaemonPolicyBuildInput, PolicyIntent, PolicyRejection, RemoteApplyPolicy, RemotePolicyContext,
     RollbackRequirement, build_daemon_policy,
 };
+pub use runtime::{DaemonRuntime, DaemonRuntimeConfig, DaemonRuntimeEvent, DaemonTransition};
 pub use state::{
     DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus, DaemonExperimentState,
     DaemonFaultState, DaemonPhase, DaemonRollbackState, DaemonState, DaemonStateSnapshotWriter,
