@@ -699,7 +699,7 @@ fn daemon_state_for_record_start(
 ) -> DaemonState {
     DaemonState {
         mode: DaemonMode::Observe,
-        phase: DaemonPhase::Observing,
+        phase: DaemonPhase::Observe,
         active_target: daemon_target_from_record_request(request),
         last_decision: Some(daemon_decision_state(
             "record_started",
@@ -730,10 +730,10 @@ fn daemon_target_from_autotune_request(
 
 fn daemon_phase_for_started_mode(mode: DaemonMode) -> DaemonPhase {
     match mode {
-        DaemonMode::Observe => DaemonPhase::Observing,
-        DaemonMode::Suggest => DaemonPhase::Planning,
+        DaemonMode::Observe => DaemonPhase::Observe,
+        DaemonMode::Suggest => DaemonPhase::Decide,
         DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk | DaemonMode::ApplyHighRisk => {
-            DaemonPhase::Applying
+            DaemonPhase::Apply
         }
     }
 }
@@ -2605,7 +2605,7 @@ mod tests {
         *state.active_autotune.lock().await = Some(test_autotune_handle());
         *state.daemon_state.lock().await = DaemonState {
             mode: DaemonMode::ApplyLowRisk,
-            phase: DaemonPhase::Applying,
+            phase: DaemonPhase::Apply,
             active_target: Some(DaemonTargetState {
                 root_pid: Some(1234),
                 active_targets: 1,
@@ -2697,7 +2697,7 @@ mod tests {
 
         let daemon_state = state.daemon_state.lock().await.clone();
         assert_eq!(daemon_state.mode, DaemonMode::ApplyLowRisk);
-        assert_eq!(daemon_state.phase, DaemonPhase::Applying);
+        assert_eq!(daemon_state.phase, DaemonPhase::Apply);
         assert_eq!(
             daemon_state
                 .active_target

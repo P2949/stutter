@@ -1612,15 +1612,15 @@ fn data_quality_label(quality: &OnlineDataQuality) -> String {
     }
 }
 
-fn daemon_phase_from_controller_phase(phase: ControllerPhase) -> DaemonPhase {
+pub fn daemon_phase_from_controller_phase(phase: ControllerPhase) -> DaemonPhase {
     match phase {
         ControllerPhase::Disabled => DaemonPhase::Disabled,
-        ControllerPhase::Observing => DaemonPhase::Observing,
-        ControllerPhase::Planning => DaemonPhase::Planning,
-        ControllerPhase::Applying => DaemonPhase::Applying,
-        ControllerPhase::Measuring => DaemonPhase::Measuring,
-        ControllerPhase::Keeping => DaemonPhase::Keeping,
-        ControllerPhase::Reverting => DaemonPhase::Reverting,
+        ControllerPhase::Observing => DaemonPhase::Observe,
+        ControllerPhase::Planning => DaemonPhase::Decide,
+        ControllerPhase::Applying => DaemonPhase::Apply,
+        ControllerPhase::Measuring => DaemonPhase::Measure,
+        ControllerPhase::Keeping => DaemonPhase::Keep,
+        ControllerPhase::Reverting => DaemonPhase::Rollback,
         ControllerPhase::Cooldown => DaemonPhase::Cooldown,
         ControllerPhase::Faulted => DaemonPhase::Faulted,
     }

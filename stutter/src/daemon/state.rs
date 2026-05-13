@@ -48,14 +48,50 @@ pub fn load_daemon_state(path: &Path) -> anyhow::Result<DaemonState> {
 #[serde(rename_all = "snake_case")]
 pub enum DaemonPhase {
     Disabled,
-    Observing,
-    Planning,
-    Applying,
-    Measuring,
-    Keeping,
-    Reverting,
+    Init,
+    Recover,
+    #[serde(rename = "observing", alias = "observe")]
+    Observe,
+    #[serde(rename = "planning", alias = "decide")]
+    Decide,
+    #[serde(rename = "applying", alias = "apply")]
+    Apply,
+    #[serde(rename = "measuring", alias = "measure")]
+    Measure,
+    #[serde(rename = "keeping", alias = "keep")]
+    Keep,
+    #[serde(rename = "reverting", alias = "rollback")]
+    Rollback,
     Cooldown,
     Faulted,
+    Shutdown,
+}
+
+impl DaemonPhase {
+    pub fn lifecycle_label(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::Init => "init",
+            Self::Recover => "recover",
+            Self::Observe => "observe",
+            Self::Decide => "decide",
+            Self::Apply => "apply",
+            Self::Measure => "measure",
+            Self::Keep => "keep",
+            Self::Rollback => "rollback",
+            Self::Cooldown => "cooldown",
+            Self::Faulted => "faulted",
+            Self::Shutdown => "shutdown",
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Disabled | Self::Faulted | Self::Shutdown)
+    }
+
+    pub fn is_faulted(self) -> bool {
+        matches!(self, Self::Faulted)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -242,10 +278,98 @@ mod tests {
     }
 
     #[test]
+    fn daemon_phase_helpers_report_lifecycle_labels_and_terminal_states() {
+        assert_eq!(DaemonPhase::Init.lifecycle_label(), "init");
+        assert_eq!(DaemonPhase::Recover.lifecycle_label(), "recover");
+        assert_eq!(DaemonPhase::Observe.lifecycle_label(), "observe");
+        assert_eq!(DaemonPhase::Decide.lifecycle_label(), "decide");
+        assert_eq!(DaemonPhase::Apply.lifecycle_label(), "apply");
+        assert_eq!(DaemonPhase::Measure.lifecycle_label(), "measure");
+        assert_eq!(DaemonPhase::Rollback.lifecycle_label(), "rollback");
+        assert_eq!(DaemonPhase::Cooldown.lifecycle_label(), "cooldown");
+        assert_eq!(DaemonPhase::Faulted.lifecycle_label(), "faulted");
+        assert_eq!(DaemonPhase::Shutdown.lifecycle_label(), "shutdown");
+
+        assert!(DaemonPhase::Disabled.is_terminal());
+        assert!(DaemonPhase::Faulted.is_terminal());
+        assert!(DaemonPhase::Shutdown.is_terminal());
+        assert!(!DaemonPhase::Observe.is_terminal());
+        assert!(!DaemonPhase::Measure.is_terminal());
+
+        assert!(DaemonPhase::Faulted.is_faulted());
+        assert!(!DaemonPhase::Shutdown.is_faulted());
+    }
+
+    #[test]
+    fn daemon_phase_preserves_existing_serialized_names_and_accepts_new_aliases() {
+        assert_eq!(
+            serde_json::to_string(&DaemonPhase::Observe).unwrap(),
+            "\"observing\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DaemonPhase::Decide).unwrap(),
+            "\"planning\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DaemonPhase::Apply).unwrap(),
+            "\"applying\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DaemonPhase::Measure).unwrap(),
+            "\"measuring\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DaemonPhase::Rollback).unwrap(),
+            "\"reverting\""
+        );
+
+        assert_eq!(
+            serde_json::from_str::<DaemonPhase>("\"observing\"").unwrap(),
+            DaemonPhase::Observe
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonPhase>("\"observe\"").unwrap(),
+            DaemonPhase::Observe
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonPhase>("\"planning\"").unwrap(),
+            DaemonPhase::Decide
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonPhase>("\"decide\"").unwrap(),
+            DaemonPhase::Decide
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonPhase>("\"applying\"").unwrap(),
+            DaemonPhase::Apply
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonPhase>("\"apply\"").unwrap(),
+            DaemonPhase::Apply
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonPhase>("\"measuring\"").unwrap(),
+            DaemonPhase::Measure
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonPhase>("\"measure\"").unwrap(),
+            DaemonPhase::Measure
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonPhase>("\"reverting\"").unwrap(),
+            DaemonPhase::Rollback
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonPhase>("\"rollback\"").unwrap(),
+            DaemonPhase::Rollback
+        );
+    }
+
+    #[test]
     fn daemon_state_can_store_live_runtime_fields() {
         let state = DaemonState {
             mode: DaemonMode::ApplyLowRisk,
-            phase: DaemonPhase::Measuring,
+            phase: DaemonPhase::Measure,
             active_target: Some(DaemonTargetState {
                 root_pid: Some(1234),
                 active_targets: 12,
@@ -282,7 +406,7 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
 
         assert_eq!(decoded.mode, DaemonMode::ApplyLowRisk);
-        assert_eq!(decoded.phase, DaemonPhase::Measuring);
+        assert_eq!(decoded.phase, DaemonPhase::Measure);
         assert_eq!(
             decoded
                 .active_target
