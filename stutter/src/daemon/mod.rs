@@ -18,5 +18,6 @@ pub use policy::{
 };
 pub use state::{
     DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus, DaemonExperimentState,
-    DaemonFaultState, DaemonPhase, DaemonRollbackState, DaemonState, DaemonTargetState,
+    DaemonFaultState, DaemonPhase, DaemonRollbackState, DaemonState, DaemonStateSnapshotWriter,
+    DaemonTargetState, default_daemon_state_snapshot_path,
 };

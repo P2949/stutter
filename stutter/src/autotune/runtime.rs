@@ -43,6 +43,11 @@ use crate::{
         washout::WashoutWindowConfig,
     },
     config::model::MonitorConfig,
+    daemon::{
+        DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus,
+        DaemonExperimentState, DaemonFaultState, DaemonMode, DaemonPhase, DaemonRollbackState,
+        DaemonState, DaemonTargetState,
+    },
     diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
     focus::FocusGroupKind,
@@ -411,6 +416,128 @@ impl AutotuneRuntime {
 
     pub fn last_decision(&self) -> Option<&AutotuneDecisionStreamEntry> {
         self.last_decision.as_ref()
+    }
+
+    pub fn daemon_state_snapshot(&self) -> DaemonState {
+        let active_experiment =
+            self.live_low_risk_experiment
+                .as_ref()
+                .map(|experiment| DaemonExperimentState {
+                    experiment_id: experiment.experiment_id.as_str().to_owned(),
+                    action_id: experiment.action_id(),
+                    candidate_name: Some(experiment.candidate_name().to_owned()),
+                    safety_class: experiment.candidate.safety_class(),
+                    started_unix_nanos: Some(experiment.applied_unix_nanos),
+                });
+
+        let active_rollback =
+            self.live_low_risk_experiment
+                .as_ref()
+                .map(|experiment| DaemonRollbackState {
+                    action_id: experiment.action_id(),
+                    rollback_available: true,
+                    token: Some(experiment.rollback.clone()),
+                    manual_restore_command: Some("stutter autotune restore".to_owned()),
+                });
+
+        DaemonState {
+            schema_version: DAEMON_STATE_SCHEMA_VERSION,
+            mode: daemon_mode_from_autotune_mode(self.config.mode),
+            phase: daemon_phase_from_controller_phase(self.controller.state.phase),
+            cooldown_until_unix_nanos: self.controller.state.cooldown_until_unix_nanos,
+            active_target: self.daemon_active_target_snapshot(),
+            active_experiment,
+            active_rollback,
+            last_decision: self
+                .last_decision
+                .as_ref()
+                .map(|decision| DaemonDecisionState {
+                    decision: decision.decision.clone(),
+                    reason: decision.reason.clone(),
+                    unix_nanos: Some(decision.unix_nanos),
+                    score_total: Some(decision.score_total),
+                }),
+            degraded: self.daemon_degraded_statuses(),
+            faulted: self.daemon_fault_state(),
+        }
+    }
+
+    fn daemon_active_target_snapshot(&self) -> Option<DaemonTargetState> {
+        let focus = self.latest_focus.as_ref();
+        let root_pid = self
+            .target_state
+            .root_pid
+            .or_else(|| focus.and_then(|focus| focus.root_pids.first().copied()));
+        let active_targets = if self.target_state.active_targets > 0 {
+            self.target_state.active_targets
+        } else {
+            focus.map(|focus| focus.member_pids.len()).unwrap_or(0)
+        };
+        let comm = self.target_state.target_comm.clone();
+
+        if root_pid.is_none() && active_targets == 0 && comm.is_none() {
+            return None;
+        }
+
+        Some(DaemonTargetState {
+            root_pid,
+            active_targets,
+            comm,
+        })
+    }
+
+    fn daemon_degraded_statuses(&self) -> Vec<DaemonDegradedStatus> {
+        let mut degraded = Vec::new();
+
+        if self.last_observation.data_quality.is_low() {
+            degraded.push(DaemonDegradedStatus {
+                category: "data_quality".to_owned(),
+                message: data_quality_label(&self.last_observation.data_quality),
+            });
+        }
+
+        let drop_counter_total = self.latest_drop_counters.total();
+        if drop_counter_total > 0 {
+            degraded.push(DaemonDegradedStatus {
+                category: "drop_counters".to_owned(),
+                message: format!("drop counters reported {drop_counter_total} lost events"),
+            });
+        }
+
+        if let Some(cooldown_until_unix_nanos) = self.controller.state.cooldown_until_unix_nanos {
+            degraded.push(DaemonDegradedStatus {
+                category: "cooldown".to_owned(),
+                message: format!("cooldown_until_unix_nanos={cooldown_until_unix_nanos}"),
+            });
+        }
+
+        for diagnosis in &self.recent_diagnoses {
+            degraded.push(DaemonDegradedStatus {
+                category: "recent_diagnosis".to_owned(),
+                message: format!(
+                    "{:?} {:?} anchored on {}",
+                    diagnosis.confidence, diagnosis.cause, diagnosis.anchor_comm
+                ),
+            });
+        }
+
+        degraded
+    }
+
+    fn daemon_fault_state(&self) -> Option<DaemonFaultState> {
+        if self.controller.state.phase != ControllerPhase::Faulted {
+            return None;
+        }
+
+        Some(DaemonFaultState {
+            reason: self
+                .last_decision
+                .as_ref()
+                .map(|decision| decision.reason.clone())
+                .filter(|reason| !reason.trim().is_empty())
+                .unwrap_or_else(|| "controller is faulted".to_owned()),
+            manual_restore_command: Some("stutter autotune restore".to_owned()),
+        })
     }
 
     fn update_target_snapshot(&mut self, active_targets: &BTreeMap<u32, TaskInfo>) {
@@ -1427,6 +1554,30 @@ fn data_quality_label(quality: &OnlineDataQuality) -> String {
     }
 }
 
+fn daemon_phase_from_controller_phase(phase: ControllerPhase) -> DaemonPhase {
+    match phase {
+        ControllerPhase::Disabled => DaemonPhase::Disabled,
+        ControllerPhase::Observing => DaemonPhase::Observing,
+        ControllerPhase::Planning => DaemonPhase::Planning,
+        ControllerPhase::Applying => DaemonPhase::Applying,
+        ControllerPhase::Measuring => DaemonPhase::Measuring,
+        ControllerPhase::Keeping => DaemonPhase::Keeping,
+        ControllerPhase::Reverting => DaemonPhase::Reverting,
+        ControllerPhase::Cooldown => DaemonPhase::Cooldown,
+        ControllerPhase::Faulted => DaemonPhase::Faulted,
+    }
+}
+
+fn daemon_mode_from_autotune_mode(mode: AutotuneMode) -> DaemonMode {
+    match mode {
+        AutotuneMode::Observe => DaemonMode::Observe,
+        AutotuneMode::Suggest => DaemonMode::Suggest,
+        AutotuneMode::ApplyLowRisk => DaemonMode::ApplyLowRisk,
+        AutotuneMode::ApplyMediumRisk => DaemonMode::ApplyMediumRisk,
+        AutotuneMode::ApplyHighRisk => DaemonMode::ApplyHighRisk,
+    }
+}
+
 fn history_phase(phase: ControllerPhase) -> HistoryControllerPhase {
     match phase {
         ControllerPhase::Disabled => HistoryControllerPhase::Disabled,
@@ -1479,7 +1630,12 @@ fn history_situation(situation: SituationKind) -> HistorySituationKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ebpf_loader::DropCountersSnapshot, recorder::IntervalRecord};
+    use crate::{
+        diagnosis::{Confidence, StutterCause},
+        ebpf_loader::DropCountersSnapshot,
+        process_tree::TaskClass,
+        recorder::IntervalRecord,
+    };
 
     fn runtime() -> AutotuneRuntime {
         let mut config = AutotuneRuntimeConfig::observe(None, Some(1234), None);
@@ -1542,6 +1698,175 @@ mod tests {
             frame_max_ms: 20.0,
             drop_counter_total: 0,
         }
+    }
+
+    #[test]
+    fn daemon_state_snapshot_serializes_live_runtime_state() {
+        let mut runtime = AutotuneRuntime::new(
+            AutotuneRuntimeConfig::apply_low_risk(None, Some(1234), None)
+                .with_profiles(vec![low_risk_profile()]),
+        );
+        let candidate = CandidateAction::cpu_affinity_profile(low_risk_profile(), 1234);
+        let baseline_score = WindowScore {
+            started_unix_nanos: 100,
+            finished_unix_nanos: 200,
+            interval_count: 1,
+            scored_samples: 100,
+            scored_task_count: 1,
+            score: StutterScore {
+                total: 500,
+                over_1ms: 10,
+                over_2ms: 5,
+                over_5ms: 1,
+                ..StutterScore::default()
+            },
+        };
+        let rollback = RollbackToken::CpuAffinityRestoreFile {
+            path: PathBuf::from("/tmp/stutter-restore.json"),
+            affected_tasks: 2,
+        };
+
+        runtime.target_state = RuntimeTargetState {
+            root_pid: Some(1234),
+            active_targets: 2,
+            target_comm: Some("game".to_owned()),
+        };
+        runtime.latest_focus = Some(RuntimeFocusState {
+            kind: FocusGroupKind::Game,
+            root_pids: vec![1234],
+            member_pids: vec![1234, 1235],
+            confidence: 0.95,
+            score: 0.99,
+            situation: SituationKind::GameCpuSchedulerPressure,
+            reasons: vec!["game focus selected".to_owned()],
+        });
+        runtime.latest_drop_counters = DropCountersSnapshot {
+            ringbuf_reserve_failed: 7,
+            ..DropCountersSnapshot::default()
+        };
+        runtime.recent_diagnoses.push_back(LiveDiagnosisEntry {
+            elapsed_ms: 12_345,
+            cause: StutterCause::GpuBoundCandidate,
+            confidence: Confidence::High,
+            anchor_class: TaskClass::Game,
+            anchor_comm: "game".to_owned(),
+            evidence: vec!["gpu busy".to_owned()],
+        });
+        runtime.live_low_risk_experiment = Some(LiveLowRiskExperiment {
+            experiment_id: ExperimentId::new("experiment-1"),
+            candidate,
+            baseline_score,
+            applied_unix_nanos: 1_000,
+            washout_until_unix_nanos: 2_000,
+            measure_until_unix_nanos: 3_000,
+            rollback,
+        });
+        runtime.controller.state.phase = ControllerPhase::Faulted;
+        runtime.controller.state.cooldown_until_unix_nanos = Some(9_000);
+
+        let mut observation = high_quality_game_observation_with_focus_confidence(0.95);
+        observation.data_quality = OnlineDataQuality::Low {
+            reasons: vec!["low scored samples".to_owned()],
+        };
+        observation.drop_counter_total = 7;
+        observation.score.total = 999;
+        runtime.last_observation = observation;
+        runtime.last_decision = Some(AutotuneDecisionStreamEntry {
+            unix_nanos: 8_000,
+            phase: "Faulted".to_owned(),
+            mode: "ApplyLowRisk".to_owned(),
+            focus_kind: Some("Game".to_owned()),
+            focus_confidence: 0.95,
+            target_root_pid: Some(1234),
+            active_target_count: 2,
+            situation: "GameCpuSchedulerPressure".to_owned(),
+            score_total: 999,
+            data_quality: "Low: low scored samples".to_owned(),
+            decision: "faulted".to_owned(),
+            reason: "rollback failed".to_owned(),
+        });
+
+        let snapshot = runtime.daemon_state_snapshot();
+        let value = serde_json::to_value(&snapshot).unwrap();
+
+        assert_eq!(snapshot.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(snapshot.phase, DaemonPhase::Faulted);
+        assert_eq!(snapshot.cooldown_until_unix_nanos, Some(9_000));
+        assert_eq!(
+            snapshot
+                .active_target
+                .as_ref()
+                .and_then(|target| target.root_pid),
+            Some(1234)
+        );
+        assert_eq!(
+            snapshot
+                .active_experiment
+                .as_ref()
+                .map(|experiment| experiment.experiment_id.as_str()),
+            Some("experiment-1")
+        );
+        assert_eq!(
+            snapshot
+                .active_rollback
+                .as_ref()
+                .map(|rollback| rollback.rollback_available),
+            Some(true)
+        );
+        assert_eq!(
+            snapshot
+                .last_decision
+                .as_ref()
+                .map(|decision| decision.decision.as_str()),
+            Some("faulted")
+        );
+        assert_eq!(
+            snapshot.faulted.as_ref().map(|fault| fault.reason.as_str()),
+            Some("rollback failed")
+        );
+        assert!(
+            snapshot
+                .degraded
+                .iter()
+                .any(|status| status.category == "data_quality")
+        );
+        assert!(
+            snapshot
+                .degraded
+                .iter()
+                .any(|status| status.category == "drop_counters")
+        );
+        assert!(
+            snapshot
+                .degraded
+                .iter()
+                .any(|status| status.category == "cooldown")
+        );
+        assert!(
+            snapshot
+                .degraded
+                .iter()
+                .any(|status| status.category == "recent_diagnosis")
+        );
+
+        assert_eq!(value["schema_version"], DAEMON_STATE_SCHEMA_VERSION);
+        assert_eq!(value["mode"], "apply-low-risk");
+        assert_eq!(value["phase"], "faulted");
+        assert_eq!(value["cooldown_until_unix_nanos"].as_u64(), Some(9_000));
+        assert_eq!(value["active_target"]["comm"], "game");
+        assert_eq!(
+            value["active_experiment"]["action_id"],
+            "cpu-affinity-profile:game-low-risk"
+        );
+        assert_eq!(
+            value["active_rollback"]["token"]["kind"],
+            "cpu-affinity-restore-file"
+        );
+        assert_eq!(value["last_decision"]["score_total"].as_u64(), Some(999));
+        assert_eq!(
+            value["faulted"]["manual_restore_command"],
+            "stutter autotune restore"
+        );
     }
 
     #[test]
