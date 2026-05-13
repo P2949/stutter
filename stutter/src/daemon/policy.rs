@@ -2,7 +2,10 @@ use std::{collections::BTreeSet, fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
-use crate::actions::{ActionId, SafetyClass};
+use crate::{
+    actions::{ActionId, SafetyClass},
+    daemon::config::DaemonConfig,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -245,75 +248,191 @@ impl fmt::Display for PolicyRejection {
 
 impl std::error::Error for PolicyRejection {}
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemotePolicyContext {
+    pub is_loopback_bind: bool,
+    pub auth_configured: bool,
+    pub valid_auth: bool,
+    pub max_mode: DaemonMode,
+    pub max_safety_class: SafetyClass,
+    pub allow_high_risk: bool,
+    pub allow_system_wide_actions: bool,
+    pub max_remote_targets: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct DaemonPolicyBuildInput<'a> {
+    pub config: &'a DaemonConfig,
+    pub remote_context: Option<RemotePolicyContext>,
+}
+
+pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
+    let config = input.config;
+    let remote_context = input.remote_context.as_ref();
+    let mode_max_safety_class = max_safety_class_for_mode(config.mode);
+    let mut max_safety_class = mode_max_safety_class.clone();
+
+    if let Some(context) = remote_context
+        && context.max_safety_class < max_safety_class
+    {
+        max_safety_class = context.max_safety_class.clone();
+    }
+
+    let mut allow_system_wide_actions = config.safety.allow_system_wide_actions;
+    let mut allow_high_risk =
+        config.mode == DaemonMode::ApplyHighRisk && config.safety.allow_high_risk;
+
+    if let Some(context) = remote_context {
+        allow_system_wide_actions &= context.allow_system_wide_actions;
+        allow_high_risk &= context.allow_high_risk;
+    }
+
+    DaemonPolicy {
+        mode: config.mode,
+        source: config.source,
+        max_safety_class,
+        allowed_effect_scopes: allowed_effect_scopes_for_mode(config.mode),
+        denied_action_families: config.safety.denied_action_families.clone(),
+        rollback_required_before_apply: config.mode.supports_apply(),
+        allow_system_wide_actions,
+        allow_high_risk,
+        allow_persistent_effects: config.safety.allow_persistent_effects,
+        min_confidence: min_confidence_for_config(config),
+        remote_apply: remote_apply_policy_for_config(config, remote_context),
+    }
+}
+
+fn max_safety_class_for_mode(mode: DaemonMode) -> SafetyClass {
+    match mode {
+        DaemonMode::Observe => SafetyClass::ObserveOnly,
+        DaemonMode::Suggest => SafetyClass::HighRisk,
+        DaemonMode::ApplyLowRisk => SafetyClass::ReversibleLowRisk,
+        DaemonMode::ApplyMediumRisk => SafetyClass::ReversibleMediumRisk,
+        DaemonMode::ApplyHighRisk => SafetyClass::HighRisk,
+    }
+}
+
+fn allowed_effect_scopes_for_mode(mode: DaemonMode) -> BTreeSet<ActionEffectScope> {
+    match mode {
+        DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk => BTreeSet::from([
+            ActionEffectScope::LocalProcess,
+            ActionEffectScope::LocalProcessTree,
+        ]),
+        DaemonMode::Observe | DaemonMode::Suggest | DaemonMode::ApplyHighRisk => BTreeSet::from([
+            ActionEffectScope::ObserveOnly,
+            ActionEffectScope::LocalProcess,
+            ActionEffectScope::LocalProcessTree,
+            ActionEffectScope::UserStateFile,
+            ActionEffectScope::Cgroup,
+            ActionEffectScope::Irq,
+            ActionEffectScope::Sysfs,
+            ActionEffectScope::CpuPower,
+            ActionEffectScope::GpuPower,
+            ActionEffectScope::VmKnob,
+            ActionEffectScope::SystemWide,
+        ]),
+    }
+}
+
+fn min_confidence_for_config(config: &DaemonConfig) -> f32 {
+    if config.safety.min_confidence > 0.0 {
+        config.safety.min_confidence
+    } else if config.mode.supports_apply() {
+        crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE
+    } else {
+        0.0
+    }
+}
+
+fn remote_apply_policy_for_config(
+    config: &DaemonConfig,
+    remote_context: Option<&RemotePolicyContext>,
+) -> RemoteApplyPolicy {
+    let Some(context) = remote_context else {
+        return RemoteApplyPolicy::default();
+    };
+
+    let mode_supported_by_limits = remote_mode_supported_by_context(config.mode, context);
+    let auth_allowed =
+        !config.remote.require_auth_for_apply || (context.auth_configured && context.valid_auth);
+    let bind_allowed = config.remote.allow_non_loopback_apply || context.is_loopback_bind;
+
+    RemoteApplyPolicy {
+        allow_remote_apply: config.remote.allow_remote_apply
+            && config.mode.supports_apply()
+            && mode_supported_by_limits
+            && auth_allowed
+            && bind_allowed,
+        require_loopback_bind: config.mode.supports_apply()
+            && !config.remote.allow_non_loopback_apply,
+        require_auth: config.mode.supports_apply() && config.remote.require_auth_for_apply,
+        max_remote_targets: context.max_remote_targets,
+    }
+}
+
+fn remote_mode_supported_by_context(mode: DaemonMode, context: &RemotePolicyContext) -> bool {
+    let mode_max_safety_class = max_safety_class_for_mode(mode);
+
+    mode <= context.max_mode
+        && mode_max_safety_class <= context.max_safety_class
+        && (mode != DaemonMode::ApplyHighRisk || context.allow_high_risk)
+}
+
+fn config_for_constructor(
+    mode: DaemonMode,
+    source: ActionSource,
+    allow_high_risk: bool,
+) -> DaemonConfig {
+    let mut config = DaemonConfig {
+        mode,
+        source,
+        ..DaemonConfig::default()
+    };
+    config.safety.max_safety_class = max_safety_class_for_mode(mode);
+    config.safety.allow_high_risk = allow_high_risk;
+    config.safety.min_confidence = min_confidence_for_config(&config);
+    config
+}
+
 impl DaemonPolicy {
     pub fn observe(source: ActionSource) -> Self {
-        Self::for_mode(DaemonMode::Observe, source, false)
+        let config = config_for_constructor(DaemonMode::Observe, source, false);
+        build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        })
     }
 
     pub fn suggest(source: ActionSource) -> Self {
-        Self::for_mode(DaemonMode::Suggest, source, false)
+        let config = config_for_constructor(DaemonMode::Suggest, source, false);
+        build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        })
     }
 
     pub fn apply_low_risk(source: ActionSource) -> Self {
-        Self::for_mode(DaemonMode::ApplyLowRisk, source, false)
+        let config = config_for_constructor(DaemonMode::ApplyLowRisk, source, false);
+        build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        })
     }
 
     pub fn apply_medium_risk(source: ActionSource) -> Self {
-        Self::for_mode(DaemonMode::ApplyMediumRisk, source, false)
+        let config = config_for_constructor(DaemonMode::ApplyMediumRisk, source, false);
+        build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        })
     }
 
     pub fn apply_high_risk_explicit(source: ActionSource) -> Self {
-        Self::for_mode(DaemonMode::ApplyHighRisk, source, true)
-    }
-
-    fn for_mode(mode: DaemonMode, source: ActionSource, allow_high_risk: bool) -> Self {
-        let max_safety_class = match mode {
-            DaemonMode::Observe => SafetyClass::ObserveOnly,
-            DaemonMode::Suggest => SafetyClass::HighRisk,
-            DaemonMode::ApplyLowRisk => SafetyClass::ReversibleLowRisk,
-            DaemonMode::ApplyMediumRisk => SafetyClass::ReversibleMediumRisk,
-            DaemonMode::ApplyHighRisk => SafetyClass::HighRisk,
-        };
-
-        let allowed_effect_scopes = match mode {
-            DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk => BTreeSet::from([
-                ActionEffectScope::LocalProcess,
-                ActionEffectScope::LocalProcessTree,
-            ]),
-            DaemonMode::Observe | DaemonMode::Suggest | DaemonMode::ApplyHighRisk => {
-                BTreeSet::from([
-                    ActionEffectScope::ObserveOnly,
-                    ActionEffectScope::LocalProcess,
-                    ActionEffectScope::LocalProcessTree,
-                    ActionEffectScope::UserStateFile,
-                    ActionEffectScope::Cgroup,
-                    ActionEffectScope::Irq,
-                    ActionEffectScope::Sysfs,
-                    ActionEffectScope::CpuPower,
-                    ActionEffectScope::GpuPower,
-                    ActionEffectScope::VmKnob,
-                    ActionEffectScope::SystemWide,
-                ])
-            }
-        };
-
-        Self {
-            mode,
-            source,
-            max_safety_class,
-            allowed_effect_scopes,
-            denied_action_families: BTreeSet::new(),
-            rollback_required_before_apply: mode.supports_apply(),
-            allow_system_wide_actions: false,
-            allow_high_risk,
-            allow_persistent_effects: false,
-            min_confidence: if mode.supports_apply() {
-                crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE
-            } else {
-                0.0
-            },
-            remote_apply: RemoteApplyPolicy::default(),
-        }
+        let config = config_for_constructor(DaemonMode::ApplyHighRisk, source, true);
+        build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        })
     }
 
     pub fn check_action(
@@ -724,5 +843,74 @@ mod tests {
             policy.check_action(PolicyIntent::Apply, &desc),
             Err(PolicyRejection::RollbackUnavailable)
         ));
+    }
+
+    #[test]
+    fn build_daemon_policy_is_deterministic_for_same_config() {
+        let mut config = crate::daemon::config::DaemonConfig {
+            mode: DaemonMode::ApplyMediumRisk,
+            source: ActionSource::Test,
+            ..crate::daemon::config::DaemonConfig::default()
+        };
+        config.safety.allow_system_wide_actions = true;
+        config.safety.allow_persistent_effects = true;
+        config
+            .safety
+            .denied_action_families
+            .insert("gpu-power".to_owned());
+
+        let first = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        });
+        let second = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        });
+
+        assert_eq!(first, second);
+        assert_eq!(first.mode, DaemonMode::ApplyMediumRisk);
+        assert_eq!(first.max_safety_class, SafetyClass::ReversibleMediumRisk);
+        assert!(first.allow_system_wide_actions);
+        assert!(first.allow_persistent_effects);
+        assert!(first.denied_action_families.contains("gpu-power"));
+    }
+
+    #[test]
+    fn build_daemon_policy_remote_context_is_deterministic_and_respects_limits() {
+        let mut config = crate::daemon::config::DaemonConfig {
+            mode: DaemonMode::ApplyLowRisk,
+            source: ActionSource::RemoteAgent,
+            ..crate::daemon::config::DaemonConfig::default()
+        };
+        config.remote.allow_remote_apply = true;
+        config.safety.allow_system_wide_actions = true;
+
+        let remote_context = RemotePolicyContext {
+            is_loopback_bind: true,
+            auth_configured: true,
+            valid_auth: true,
+            max_mode: DaemonMode::ApplyLowRisk,
+            max_safety_class: SafetyClass::ReversibleLowRisk,
+            allow_high_risk: false,
+            allow_system_wide_actions: false,
+            max_remote_targets: 3,
+        };
+
+        let first = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: Some(remote_context.clone()),
+        });
+        let second = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: Some(remote_context),
+        });
+
+        assert_eq!(first, second);
+        assert!(first.remote_apply.allow_remote_apply);
+        assert!(first.remote_apply.require_loopback_bind);
+        assert!(first.remote_apply.require_auth);
+        assert_eq!(first.remote_apply.max_remote_targets, 3);
+        assert!(!first.allow_system_wide_actions);
     }
 }

@@ -22,7 +22,11 @@ use tokio::{
 use crate::{
     actions::SafetyClass,
     config::{FocusSource, ForegroundSource, model::MonitorConfig},
-    daemon_policy::{ActionSource, DaemonMode, DaemonPolicy},
+    daemon::DaemonConfig,
+    daemon_policy::{
+        ActionSource, DaemonMode, DaemonPolicy, DaemonPolicyBuildInput, RemotePolicyContext,
+        build_daemon_policy,
+    },
     remote::{
         AgentAutotuneLimits, AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
         AutotuneRestoreResponse, AutotuneStartRequest, AutotuneStartResponse,
@@ -331,19 +335,40 @@ fn remote_mode_supported(limits: &AgentAutotuneLimits, mode: DaemonMode) -> bool
     supported_remote_modes(limits).contains(&mode)
 }
 
-fn daemon_policy_for_remote_mode(mode: DaemonMode, limits: &AgentAutotuneLimits) -> DaemonPolicy {
-    let mut policy = match mode {
-        DaemonMode::Observe => DaemonPolicy::observe(ActionSource::RemoteAgent),
-        DaemonMode::Suggest => DaemonPolicy::suggest(ActionSource::RemoteAgent),
-        DaemonMode::ApplyLowRisk => DaemonPolicy::apply_low_risk(ActionSource::RemoteAgent),
-        DaemonMode::ApplyMediumRisk => DaemonPolicy::apply_medium_risk(ActionSource::RemoteAgent),
-        DaemonMode::ApplyHighRisk => {
-            DaemonPolicy::apply_high_risk_explicit(ActionSource::RemoteAgent)
-        }
+fn daemon_policy_for_remote_mode(
+    mode: DaemonMode,
+    limits: &AgentAutotuneLimits,
+    remote_context: RemotePolicyContext,
+) -> DaemonPolicy {
+    let mut config = DaemonConfig {
+        mode,
+        source: ActionSource::RemoteAgent,
+        ..DaemonConfig::default()
     };
-    policy.allow_high_risk = limits.allow_high_risk && mode == DaemonMode::ApplyHighRisk;
-    policy.allow_system_wide_actions = limits.allow_system_wide_actions;
-    policy
+    config.remote.allow_remote_apply = mode.supports_apply();
+    config.safety.allow_high_risk = limits.allow_high_risk && mode == DaemonMode::ApplyHighRisk;
+    config.safety.allow_system_wide_actions = limits.allow_system_wide_actions;
+
+    build_daemon_policy(DaemonPolicyBuildInput {
+        config: &config,
+        remote_context: Some(remote_context),
+    })
+}
+
+fn remote_policy_context_for_request(
+    state: &AgentState,
+    headers: &HeaderMap,
+) -> RemotePolicyContext {
+    RemotePolicyContext {
+        is_loopback_bind: is_local_bind(&state.bind),
+        auth_configured: state.auth.bearer_token.is_some(),
+        valid_auth: authorize(headers, &state.auth).is_ok(),
+        max_mode: state.autotune_limits.max_mode,
+        max_safety_class: state.autotune_limits.max_safety_class.clone(),
+        allow_high_risk: state.autotune_limits.allow_high_risk,
+        allow_system_wide_actions: state.autotune_limits.allow_system_wide_actions,
+        max_remote_targets: state.autotune_limits.max_targets,
+    }
 }
 
 fn parse_focus_source_or_hybrid(value: Option<&str>) -> FocusSource {
@@ -487,7 +512,11 @@ fn policy_for_remote_autotune_start(
         });
     }
 
-    let policy = daemon_policy_for_remote_mode(mode, &state.autotune_limits);
+    let policy = daemon_policy_for_remote_mode(
+        mode,
+        &state.autotune_limits,
+        remote_policy_context_for_request(state, headers),
+    );
 
     if mode == DaemonMode::ApplyHighRisk && !policy.allow_high_risk {
         return Err(AutotuneStartSecurityRejection {
@@ -1808,6 +1837,36 @@ mod tests {
         assert_eq!(policy.source, ActionSource::RemoteAgent);
         assert!(!policy.allow_system_wide_actions);
         assert!(!policy.allow_high_risk);
+    }
+
+    #[test]
+    fn remote_autotune_policy_build_is_deterministic_for_same_context() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer secret"),
+        );
+        let first_context = remote_policy_context_for_request(&state, &headers);
+        let second_context = remote_policy_context_for_request(&state, &headers);
+
+        let first = daemon_policy_for_remote_mode(
+            DaemonMode::ApplyLowRisk,
+            &state.autotune_limits,
+            first_context,
+        );
+        let second = daemon_policy_for_remote_mode(
+            DaemonMode::ApplyLowRisk,
+            &state.autotune_limits,
+            second_context,
+        );
+
+        assert_eq!(first, second);
+        assert!(first.remote_apply.allow_remote_apply);
+        assert_eq!(
+            first.remote_apply.max_remote_targets,
+            state.autotune_limits.max_targets
+        );
     }
 
     #[test]
