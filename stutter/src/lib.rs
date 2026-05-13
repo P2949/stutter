@@ -4,6 +4,7 @@ pub mod alert;
 pub mod artifacts;
 pub mod autotune;
 pub mod config;
+pub mod daemon;
 pub mod daemon_policy;
 pub mod error;
 pub mod events;
