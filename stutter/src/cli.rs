@@ -4667,6 +4667,138 @@ foreground_include_title = true
 
         std::fs::remove_dir_all(dir).ok();
     }
+
+    #[test]
+    fn explicit_cli_default_focus_values_override_user_file_values_for_legacy_monitor_args() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+        let dir = temp_dir("explicit-cli-default-focus-override-legacy");
+        let config_path = dir.join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+            focus_source = "foreground"
+            foreground_source = "sway"
+            foreground_poll_ms = 777
+            foreground_max_stale_ms = 3000
+            "#,
+        )
+        .unwrap();
+
+        let _guard = EnvGuard::set("STUTTER_CONFIG", config_path.to_str().unwrap());
+
+        let config = parse_monitor_config_from_inner([
+            "stutter",
+            "--focus-source",
+            "heuristic",
+            "--foreground-source",
+            "auto",
+            "--foreground-poll-ms",
+            "1000",
+            "--foreground-max-stale-ms",
+            "2500",
+        ])
+        .unwrap();
+
+        assert_eq!(config.focus.focus_source, FocusSource::Heuristic);
+        assert_eq!(config.focus.foreground_source, ForegroundSource::Auto);
+        assert_eq!(config.focus.foreground_poll_ms, 1000);
+        assert_eq!(config.focus.foreground_max_stale_ms, 2500);
+        assert!(!config.focus.foreground_window);
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn explicit_cli_default_focus_values_override_user_file_values_for_record_args() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+        let dir = temp_dir("explicit-cli-default-focus-override-record");
+        let config_path = dir.join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+            focus_source = "foreground"
+            foreground_source = "sway"
+            foreground_poll_ms = 777
+            foreground_max_stale_ms = 3000
+            "#,
+        )
+        .unwrap();
+
+        let _guard = EnvGuard::set("STUTTER_CONFIG", config_path.to_str().unwrap());
+
+        let config = parse_monitor_config_from_inner([
+            "stutter",
+            "record",
+            "--duration",
+            "1",
+            "--focus-source",
+            "heuristic",
+            "--foreground-source",
+            "auto",
+            "--foreground-poll-ms",
+            "1000",
+            "--foreground-max-stale-ms",
+            "2500",
+        ])
+        .unwrap();
+
+        assert_eq!(config.focus.focus_source, FocusSource::Heuristic);
+        assert_eq!(config.focus.foreground_source, ForegroundSource::Auto);
+        assert_eq!(config.focus.foreground_poll_ms, 1000);
+        assert_eq!(config.focus.foreground_max_stale_ms, 2500);
+        assert!(!config.focus.foreground_window);
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn explicit_cli_default_focus_values_override_user_file_values_for_bench_args() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+        let dir = temp_dir("explicit-cli-default-focus-override-bench");
+        let config_path = dir.join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+            focus_source = "foreground"
+            foreground_source = "sway"
+            foreground_poll_ms = 777
+            foreground_max_stale_ms = 3000
+            "#,
+        )
+        .unwrap();
+
+        let _guard = EnvGuard::set("STUTTER_CONFIG", config_path.to_str().unwrap());
+
+        let command = parse_app_command_from_inner([
+            "stutter",
+            "bench",
+            "--duration",
+            "1",
+            "--scenario",
+            "cli-presence",
+            "--focus-source",
+            "heuristic",
+            "--foreground-source",
+            "auto",
+            "--foreground-poll-ms",
+            "1000",
+            "--foreground-max-stale-ms",
+            "2500",
+        ])
+        .unwrap();
+
+        let AppCommand::Bench(input) = command else {
+            panic!("expected bench command");
+        };
+
+        assert_eq!(input.config.focus.focus_source, FocusSource::Heuristic);
+        assert_eq!(input.config.focus.foreground_source, ForegroundSource::Auto);
+        assert_eq!(input.config.focus.foreground_poll_ms, 1000);
+        assert_eq!(input.config.focus.foreground_max_stale_ms, 2500);
+        assert!(!input.config.focus.foreground_window);
+
+        std::fs::remove_dir_all(dir).ok();
+    }
 }
 
 fn parse_optional_task_class(value: Option<&str>) -> anyhow::Result<Option<TaskClass>> {
