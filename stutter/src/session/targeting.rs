@@ -182,3 +182,25 @@ impl TargetController {
             .community_rules(community_rules)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_policy_rejects_invalid_include_comm_regex() {
+        let mut config = MonitorConfig::default();
+        config.target.include_comm = vec!["/[unclosed/".to_owned()];
+
+        let result = TargetPolicy::from_monitor_config(&config);
+
+        match result {
+            Err(ConfigError::InvalidTargetFilter { field, pattern, .. }) => {
+                assert_eq!(field, "include_comm");
+                assert_eq!(pattern, "/[unclosed/");
+            }
+            Err(other) => panic!("unexpected error: {other}"),
+            Ok(_) => panic!("expected invalid include_comm regex to fail"),
+        }
+    }
+}

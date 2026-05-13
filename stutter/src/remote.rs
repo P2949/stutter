@@ -54,16 +54,15 @@ pub struct RemoteMonitorRequest {
 impl RemoteMonitorRequest {
     pub fn into_monitor_config_layer(self) -> anyhow::Result<MonitorConfigLayer> {
         let focus_source = match self.focus_source.as_deref() {
-            Some(value) => crate::config_file::parse_focus_source_value(value)?,
-            None => FocusSource::Heuristic,
+            Some(value) => Some(crate::config_file::parse_focus_source_value(value)?),
+            None => None,
         };
         let foreground_source = match self.foreground_source.as_deref() {
-            Some(value) => crate::config_file::parse_foreground_source_value(value)?,
-            None => ForegroundSource::Auto,
+            Some(value) => Some(crate::config_file::parse_foreground_source_value(value)?),
+            None => None,
         };
 
-        let spike_threshold_ns = self.spike_us.unwrap_or(1000).saturating_mul(1_000);
-        let runtime_slices_max_tasks = self.runtime_slices_max_tasks.unwrap_or(256);
+        let spike_threshold_ns = self.spike_us.map(|value| value.saturating_mul(1_000));
 
         Ok(MonitorConfigLayer {
             target_pids: (!self.target_pids.is_empty()).then_some(self.target_pids),
@@ -73,11 +72,11 @@ impl RemoteMonitorRequest {
             include_comm: (!self.include_comm.is_empty()).then_some(self.include_comm),
             exclude_comm: (!self.exclude_comm.is_empty()).then_some(self.exclude_comm),
 
-            summary_period_ms: self.summary_ms.filter(|value| *value != 1_000),
+            summary_period_ms: self.summary_ms,
             max_duration: self
                 .duration_seconds
                 .map(|seconds| Some(Duration::from_secs(seconds))),
-            spike_threshold_ns: (spike_threshold_ns != 1_000_000).then_some(spike_threshold_ns),
+            spike_threshold_ns,
 
             irq_latency: self.irq_latency.then_some(true),
             irqs: (!self.irqs.is_empty()).then_some(self.irqs),
@@ -87,18 +86,17 @@ impl RemoteMonitorRequest {
             block_io: self.block_io.then_some(true),
             stat_wait: self.stat_wait.then_some(true),
             runtime_slices: self.runtime_slices.then_some(true),
-            runtime_slices_max_tasks: (runtime_slices_max_tasks != 256)
-                .then_some(runtime_slices_max_tasks),
+            runtime_slices_max_tasks: self.runtime_slices_max_tasks,
             run_name: self
                 .record
                 .then(|| Some(self.run_name.unwrap_or_else(|| "remote-run".to_owned()))),
-            focus_source: (focus_source != FocusSource::Heuristic).then_some(focus_source),
-            foreground_window: (self.foreground_window || focus_source != FocusSource::Heuristic)
-                .then_some(true),
-            foreground_source: (foreground_source != ForegroundSource::Auto)
-                .then_some(foreground_source),
-            foreground_poll_ms: self.foreground_poll_ms.filter(|value| *value != 1_000),
-            foreground_max_stale_ms: self.foreground_max_stale_ms.filter(|value| *value != 2_500),
+            focus_source,
+            foreground_window: (self.foreground_window
+                || focus_source.is_some_and(|source| source != FocusSource::Heuristic))
+            .then_some(true),
+            foreground_source,
+            foreground_poll_ms: self.foreground_poll_ms,
+            foreground_max_stale_ms: self.foreground_max_stale_ms,
             foreground_include_title: self.foreground_include_title.then_some(true),
 
             ..MonitorConfigLayer::default()
@@ -685,5 +683,47 @@ mod tests {
         assert_eq!(layer.foreground_include_title, Some(true));
         assert_eq!(layer.run_name, Some(Some("remote-test".to_owned())));
         assert_eq!(layer.output_dir, None);
+    }
+
+    #[test]
+    fn remote_monitor_request_preserves_explicit_default_valued_layer_fields() {
+        let request = RemoteMonitorRequest {
+            target_pids: Vec::new(),
+            tree_pids: Vec::new(),
+            exclude_tree_pids: Vec::new(),
+            duration_seconds: None,
+            spike_us: Some(1_000),
+            summary_ms: Some(1_000),
+            include_comm: Vec::new(),
+            exclude_comm: Vec::new(),
+            hwmon: false,
+            cpu_freq: false,
+            faults: false,
+            stat_wait: false,
+            block_io: false,
+            runtime_slices: false,
+            runtime_slices_max_tasks: Some(256),
+            irq_latency: false,
+            irqs: Vec::new(),
+            foreground_window: false,
+            focus_source: Some("heuristic".to_owned()),
+            foreground_source: Some("auto".to_owned()),
+            foreground_poll_ms: Some(1_000),
+            foreground_max_stale_ms: Some(2_500),
+            foreground_include_title: false,
+            record: false,
+            run_name: None,
+        };
+
+        let layer = request.into_monitor_config_layer().unwrap();
+
+        assert_eq!(layer.summary_period_ms, Some(1_000));
+        assert_eq!(layer.spike_threshold_ns, Some(1_000_000));
+        assert_eq!(layer.runtime_slices_max_tasks, Some(256));
+        assert_eq!(layer.focus_source, Some(FocusSource::Heuristic));
+        assert_eq!(layer.foreground_source, Some(ForegroundSource::Auto));
+        assert_eq!(layer.foreground_poll_ms, Some(1_000));
+        assert_eq!(layer.foreground_max_stale_ms, Some(2_500));
+        assert_eq!(layer.foreground_window, None);
     }
 }
