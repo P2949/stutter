@@ -1749,6 +1749,28 @@ mod tests {
     }
 
     #[test]
+    fn daemon_phase_from_controller_phase_maps_all_controller_phases() {
+        let cases = [
+            (ControllerPhase::Disabled, DaemonPhase::Disabled),
+            (ControllerPhase::Observing, DaemonPhase::Observe),
+            (ControllerPhase::Planning, DaemonPhase::Decide),
+            (ControllerPhase::Applying, DaemonPhase::Apply),
+            (ControllerPhase::Measuring, DaemonPhase::Measure),
+            (ControllerPhase::Keeping, DaemonPhase::Keep),
+            (ControllerPhase::Reverting, DaemonPhase::Rollback),
+            (ControllerPhase::Cooldown, DaemonPhase::Cooldown),
+            (ControllerPhase::Faulted, DaemonPhase::Faulted),
+        ];
+
+        for (controller_phase, expected_daemon_phase) in cases {
+            assert_eq!(
+                daemon_phase_from_controller_phase(controller_phase),
+                expected_daemon_phase
+            );
+        }
+    }
+
+    #[test]
     fn runtime_config_stores_intent_and_permissions_in_daemon_fields() {
         let config =
             AutotuneRuntimeConfig::apply_low_risk(None, Some(1234), Some("Game.exe".to_owned()))

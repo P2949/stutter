@@ -302,67 +302,52 @@ mod tests {
 
     #[test]
     fn daemon_phase_preserves_existing_serialized_names_and_accepts_new_aliases() {
-        assert_eq!(
-            serde_json::to_string(&DaemonPhase::Observe).unwrap(),
-            "\"observing\""
-        );
-        assert_eq!(
-            serde_json::to_string(&DaemonPhase::Decide).unwrap(),
-            "\"planning\""
-        );
-        assert_eq!(
-            serde_json::to_string(&DaemonPhase::Apply).unwrap(),
-            "\"applying\""
-        );
-        assert_eq!(
-            serde_json::to_string(&DaemonPhase::Measure).unwrap(),
-            "\"measuring\""
-        );
-        assert_eq!(
-            serde_json::to_string(&DaemonPhase::Rollback).unwrap(),
-            "\"reverting\""
-        );
+        let serialized_names = [
+            (DaemonPhase::Disabled, "\"disabled\""),
+            (DaemonPhase::Init, "\"init\""),
+            (DaemonPhase::Recover, "\"recover\""),
+            (DaemonPhase::Observe, "\"observing\""),
+            (DaemonPhase::Decide, "\"planning\""),
+            (DaemonPhase::Apply, "\"applying\""),
+            (DaemonPhase::Measure, "\"measuring\""),
+            (DaemonPhase::Keep, "\"keeping\""),
+            (DaemonPhase::Rollback, "\"reverting\""),
+            (DaemonPhase::Cooldown, "\"cooldown\""),
+            (DaemonPhase::Faulted, "\"faulted\""),
+            (DaemonPhase::Shutdown, "\"shutdown\""),
+        ];
 
-        assert_eq!(
-            serde_json::from_str::<DaemonPhase>("\"observing\"").unwrap(),
-            DaemonPhase::Observe
-        );
-        assert_eq!(
-            serde_json::from_str::<DaemonPhase>("\"observe\"").unwrap(),
-            DaemonPhase::Observe
-        );
-        assert_eq!(
-            serde_json::from_str::<DaemonPhase>("\"planning\"").unwrap(),
-            DaemonPhase::Decide
-        );
-        assert_eq!(
-            serde_json::from_str::<DaemonPhase>("\"decide\"").unwrap(),
-            DaemonPhase::Decide
-        );
-        assert_eq!(
-            serde_json::from_str::<DaemonPhase>("\"applying\"").unwrap(),
-            DaemonPhase::Apply
-        );
-        assert_eq!(
-            serde_json::from_str::<DaemonPhase>("\"apply\"").unwrap(),
-            DaemonPhase::Apply
-        );
-        assert_eq!(
-            serde_json::from_str::<DaemonPhase>("\"measuring\"").unwrap(),
-            DaemonPhase::Measure
-        );
-        assert_eq!(
-            serde_json::from_str::<DaemonPhase>("\"measure\"").unwrap(),
-            DaemonPhase::Measure
-        );
-        assert_eq!(
-            serde_json::from_str::<DaemonPhase>("\"reverting\"").unwrap(),
-            DaemonPhase::Rollback
-        );
-        assert_eq!(
-            serde_json::from_str::<DaemonPhase>("\"rollback\"").unwrap(),
-            DaemonPhase::Rollback
-        );
+        for (phase, expected_json) in serialized_names {
+            assert_eq!(serde_json::to_string(&phase).unwrap(), expected_json);
+        }
+
+        let accepted_names = [
+            ("\"disabled\"", DaemonPhase::Disabled),
+            ("\"init\"", DaemonPhase::Init),
+            ("\"recover\"", DaemonPhase::Recover),
+            ("\"observing\"", DaemonPhase::Observe),
+            ("\"observe\"", DaemonPhase::Observe),
+            ("\"planning\"", DaemonPhase::Decide),
+            ("\"decide\"", DaemonPhase::Decide),
+            ("\"applying\"", DaemonPhase::Apply),
+            ("\"apply\"", DaemonPhase::Apply),
+            ("\"measuring\"", DaemonPhase::Measure),
+            ("\"measure\"", DaemonPhase::Measure),
+            ("\"keeping\"", DaemonPhase::Keep),
+            ("\"keep\"", DaemonPhase::Keep),
+            ("\"reverting\"", DaemonPhase::Rollback),
+            ("\"rollback\"", DaemonPhase::Rollback),
+            ("\"cooldown\"", DaemonPhase::Cooldown),
+            ("\"faulted\"", DaemonPhase::Faulted),
+            ("\"shutdown\"", DaemonPhase::Shutdown),
+        ];
+
+        for (json, expected_phase) in accepted_names {
+            assert_eq!(
+                serde_json::from_str::<DaemonPhase>(json).unwrap(),
+                expected_phase
+            );
+        }
     }
 
     #[test]
