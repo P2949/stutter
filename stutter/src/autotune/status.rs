@@ -195,7 +195,7 @@ fn daemon_state_path_for_history_path(history_path: &Path) -> PathBuf {
 }
 
 fn format_daemon_phase(phase: DaemonPhase) -> String {
-    format!("{phase:?}")
+    phase.lifecycle_label().to_owned()
 }
 
 fn format_daemon_mode(mode: DaemonMode) -> String {
@@ -210,7 +210,7 @@ fn status_target_from_daemon_target(target: &DaemonTargetState) -> Option<Status
 }
 
 fn active_profile_from_daemon_state(state: &DaemonState) -> Option<String> {
-    if matches!(state.phase, DaemonPhase::Keeping | DaemonPhase::Cooldown) {
+    if matches!(state.phase, DaemonPhase::Keep | DaemonPhase::Cooldown) {
         return state
             .active_experiment
             .as_ref()
@@ -223,7 +223,7 @@ fn active_profile_from_daemon_state(state: &DaemonState) -> Option<String> {
 fn active_candidate_from_daemon_state(state: &DaemonState) -> Option<String> {
     if matches!(
         state.phase,
-        DaemonPhase::Planning | DaemonPhase::Applying | DaemonPhase::Measuring
+        DaemonPhase::Decide | DaemonPhase::Apply | DaemonPhase::Measure
     ) {
         return state
             .active_experiment
@@ -754,7 +754,7 @@ mod tests {
     fn status_from_daemon_state_reports_snapshot_fields() {
         let state = DaemonState {
             mode: DaemonMode::ApplyLowRisk,
-            phase: DaemonPhase::Measuring,
+            phase: DaemonPhase::Measure,
             cooldown_until_unix_nanos: Some(
                 crate::audit::unix_nanos_now().saturating_add(30_000_000_000),
             ),
@@ -795,7 +795,7 @@ mod tests {
 
         let status = status_from_daemon_state(PathBuf::from("/tmp/daemon_state.json"), &state);
 
-        assert_eq!(status.phase, "Measuring");
+        assert_eq!(status.phase, "measure");
         assert_eq!(status.mode, "ApplyLowRisk");
         assert_eq!(
             status.target,
@@ -855,7 +855,7 @@ mod tests {
 
         let status = load_autotune_status(&history_path).unwrap();
 
-        assert_eq!(status.phase, "Faulted");
+        assert_eq!(status.phase, "faulted");
         assert_eq!(status.mode, "ApplyLowRisk");
         assert_eq!(status.current_score, Some(42));
         assert_eq!(
