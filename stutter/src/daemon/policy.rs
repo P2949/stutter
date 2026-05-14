@@ -5,8 +5,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     actions::{ActionId, SafetyClass},
     daemon::{
+        capabilities::DaemonCapabilities,
         config::DaemonConfig,
         explain::{PolicyDecisionKind, PolicyExplanation, PolicyRuleEvaluation},
+        health::SystemHealthSnapshot,
     },
     remote::AgentAutotuneLimits,
 };
@@ -122,6 +124,41 @@ pub struct ActionDescriptor {
     pub confidence: Option<f32>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DaemonPolicyContext {
+    pub data_quality_ok: bool,
+    pub data_quality_reason_code: Option<String>,
+    pub system_health_ok: bool,
+    pub system_health_reason_code: Option<String>,
+    pub workload_stable: bool,
+    pub cooldown_active: bool,
+    pub rollback_pending: bool,
+    pub capabilities: Option<DaemonCapabilities>,
+}
+
+impl Default for DaemonPolicyContext {
+    fn default() -> Self {
+        Self {
+            data_quality_ok: true,
+            data_quality_reason_code: None,
+            system_health_ok: true,
+            system_health_reason_code: None,
+            workload_stable: true,
+            cooldown_active: false,
+            rollback_pending: false,
+            capabilities: None,
+        }
+    }
+}
+
+impl DaemonPolicyContext {
+    pub fn with_system_health(mut self, health: &SystemHealthSnapshot) -> Self {
+        self.system_health_ok = health.ok_for_apply;
+        self.system_health_reason_code = health.reason_code.clone();
+        self
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RemoteApplyPolicy {
     pub allow_remote_apply: bool,
@@ -161,6 +198,7 @@ pub struct DaemonPolicy {
     pub source: ActionSource,
     pub max_safety_class: SafetyClass,
     pub allowed_effect_scopes: BTreeSet<ActionEffectScope>,
+    pub enabled_action_families: BTreeSet<String>,
     pub denied_action_families: BTreeSet<String>,
     pub rollback_required_before_apply: bool,
     pub allow_system_wide_actions: bool,
@@ -179,6 +217,32 @@ pub enum PolicyIntent {
     Apply,
     Verify,
     Rollback,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonPolicyVerdict {
+    Allow,
+    Reject,
+    Delay,
+    RequireObserveOnly,
+    RequireManualConfirmation,
+}
+
+impl DaemonPolicyVerdict {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Reject => "reject",
+            Self::Delay => "delay",
+            Self::RequireObserveOnly => "require_observe_only",
+            Self::RequireManualConfirmation => "require_manual_confirmation",
+        }
+    }
+
+    pub fn is_allowed(self) -> bool {
+        matches!(self, Self::Allow)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -205,12 +269,31 @@ pub enum PolicyRejection {
     RollbackUnavailable,
     SystemWideActionBlocked,
     PersistentEffectBlocked,
+    ActionFamilyNotEnabled {
+        action_kind: String,
+    },
+    ActionFamilyDenied {
+        action_kind: String,
+    },
+    CapabilityUnavailable {
+        action_kind: String,
+        feature: &'static str,
+    },
     ExplicitTargetRequired,
     HighRiskRequiresExplicitOptIn,
     ConfidenceTooLow {
         confidence: f32,
         min_confidence: f32,
     },
+    DataQualityBlocked {
+        reason_code: String,
+    },
+    SystemHealthBlocked {
+        reason_code: String,
+    },
+    WorkloadUnstable,
+    CooldownActive,
+    RollbackPending,
     RemoteApplyDisabled,
     RemoteModeNotAllowed {
         mode: DaemonMode,
@@ -260,6 +343,24 @@ impl fmt::Display for PolicyRejection {
             Self::PersistentEffectBlocked => {
                 f.write_str("persistent effect is blocked by daemon policy")
             }
+            Self::ActionFamilyNotEnabled { action_kind } => {
+                write!(
+                    f,
+                    "action family is not enabled by daemon preset: {action_kind}"
+                )
+            }
+            Self::ActionFamilyDenied { action_kind } => {
+                write!(f, "action family is denied by daemon policy: {action_kind}")
+            }
+            Self::CapabilityUnavailable {
+                action_kind,
+                feature,
+            } => {
+                write!(
+                    f,
+                    "action {action_kind} requires unavailable daemon capability: {feature}"
+                )
+            }
             Self::ExplicitTargetRequired => f.write_str("apply requires an explicit target scope"),
             Self::HighRiskRequiresExplicitOptIn => {
                 f.write_str("high-risk apply requires explicit high-risk opt-in")
@@ -272,6 +373,19 @@ impl fmt::Display for PolicyRejection {
                     f,
                     "action confidence {confidence:.3} is below required minimum {min_confidence:.3}"
                 )
+            }
+            Self::DataQualityBlocked { reason_code } => {
+                write!(f, "data quality blocks apply: {reason_code}")
+            }
+            Self::SystemHealthBlocked { reason_code } => {
+                write!(f, "system health blocks apply: {reason_code}")
+            }
+            Self::WorkloadUnstable => {
+                f.write_str("apply is rejected because workload identity is unstable")
+            }
+            Self::CooldownActive => f.write_str("apply is rejected because cooldown is active"),
+            Self::RollbackPending => {
+                f.write_str("apply is rejected because a previous rollback is pending")
             }
             Self::RemoteApplyDisabled => {
                 f.write_str("remote apply is disabled by daemon configuration")
@@ -305,6 +419,74 @@ impl fmt::Display for PolicyRejection {
 }
 
 impl std::error::Error for PolicyRejection {}
+
+impl PolicyRejection {
+    pub fn verdict(&self) -> DaemonPolicyVerdict {
+        match self {
+            Self::CooldownActive => DaemonPolicyVerdict::Delay,
+            Self::DataQualityBlocked { .. }
+            | Self::SystemHealthBlocked { .. }
+            | Self::WorkloadUnstable
+            | Self::ConfidenceTooLow { .. } => DaemonPolicyVerdict::RequireObserveOnly,
+            Self::HighRiskRequiresExplicitOptIn
+            | Self::SystemWideActionBlocked
+            | Self::PersistentEffectBlocked
+            | Self::SafetyClassTooHigh {
+                safety_class: SafetyClass::HighRisk,
+                ..
+            } => DaemonPolicyVerdict::RequireManualConfirmation,
+            Self::UnsupportedMode { .. }
+            | Self::IntentNotAllowed { .. }
+            | Self::SafetyClassTooHigh { .. }
+            | Self::EffectScopeNotAllowed { .. }
+            | Self::RollbackRequired { .. }
+            | Self::RollbackUnavailable
+            | Self::ActionFamilyNotEnabled { .. }
+            | Self::ActionFamilyDenied { .. }
+            | Self::CapabilityUnavailable { .. }
+            | Self::ExplicitTargetRequired
+            | Self::RollbackPending
+            | Self::RemoteApplyDisabled
+            | Self::RemoteModeNotAllowed { .. }
+            | Self::RemoteApplyRequiresConfiguredAuth
+            | Self::RemoteApplyRequiresAuthorizedRequest
+            | Self::RemoteApplyRequiresLoopbackBind
+            | Self::RemoteTargetCountTooHigh { .. } => DaemonPolicyVerdict::Reject,
+        }
+    }
+
+    pub fn reason_code(&self) -> &'static str {
+        match self {
+            Self::UnsupportedMode { .. } => "unsupported_mode",
+            Self::IntentNotAllowed { .. } => "intent_not_allowed",
+            Self::SafetyClassTooHigh { .. } => "safety_class_too_high",
+            Self::EffectScopeNotAllowed { .. } => "effect_scope_not_allowed",
+            Self::RollbackRequired { .. } => "rollback_required",
+            Self::RollbackUnavailable => "rollback_unavailable",
+            Self::SystemWideActionBlocked => "system_wide_action_blocked",
+            Self::PersistentEffectBlocked => "persistent_effect_blocked",
+            Self::ActionFamilyNotEnabled { .. } => "action_family_not_enabled",
+            Self::ActionFamilyDenied { .. } => "action_family_denied",
+            Self::CapabilityUnavailable { .. } => "capability_unavailable",
+            Self::ExplicitTargetRequired => "explicit_target_required",
+            Self::HighRiskRequiresExplicitOptIn => "high_risk_requires_explicit_opt_in",
+            Self::ConfidenceTooLow { .. } => "confidence_too_low",
+            Self::DataQualityBlocked { .. } => "data_quality_blocked",
+            Self::SystemHealthBlocked { .. } => "system_health_blocked",
+            Self::WorkloadUnstable => "workload_unstable",
+            Self::CooldownActive => "cooldown_active",
+            Self::RollbackPending => "rollback_pending",
+            Self::RemoteApplyDisabled => "remote_apply_disabled",
+            Self::RemoteModeNotAllowed { .. } => "remote_mode_not_allowed",
+            Self::RemoteApplyRequiresConfiguredAuth => "remote_apply_requires_configured_auth",
+            Self::RemoteApplyRequiresAuthorizedRequest => {
+                "remote_apply_requires_authorized_request"
+            }
+            Self::RemoteApplyRequiresLoopbackBind => "remote_apply_requires_loopback_bind",
+            Self::RemoteTargetCountTooHigh { .. } => "remote_target_count_too_high",
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RemotePolicyContext {
@@ -346,6 +528,7 @@ pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
         source: config.source,
         max_safety_class,
         allowed_effect_scopes: allowed_effect_scopes_for_mode(config.mode),
+        enabled_action_families: config.safety.enabled_action_families.clone(),
         denied_action_families: config.safety.denied_action_families.clone(),
         rollback_required_before_apply: config.mode.supports_apply(),
         allow_system_wide_actions,
@@ -446,6 +629,48 @@ fn remote_target_count_for_config(config: &DaemonConfig) -> usize {
     config.target.target_pids.len()
         + config.target.tree_pids.len()
         + usize::from(config.target.watch_process.is_some())
+}
+
+fn action_kind_matches_family(action_kind: &str, family: &str) -> bool {
+    action_kind == family
+        || action_kind
+            .strip_prefix(family)
+            .is_some_and(|suffix| matches!(suffix.as_bytes().first(), Some(b':') | Some(b'-')))
+}
+
+fn unavailable_capability_for_action(
+    action_kind: &str,
+    capabilities: &DaemonCapabilities,
+) -> Option<&'static str> {
+    if action_kind_matches_family(action_kind, "ionice") && !capabilities.ionice_available {
+        Some("ionice")
+    } else if action_kind_matches_family(action_kind, "uclamp") && !capabilities.uclamp_available {
+        Some("uclamp")
+    } else if (action_kind_matches_family(action_kind, "irq")
+        || action_kind_matches_family(action_kind, "irq_affinity"))
+        && !capabilities.irq_affinity_available
+    {
+        Some("irq_affinity")
+    } else if (action_kind_matches_family(action_kind, "cgroup")
+        || action_kind_matches_family(action_kind, "cpuset"))
+        && !capabilities.cgroup_v2_available
+    {
+        Some("cgroup_v2")
+    } else if (action_kind_matches_family(action_kind, "gpu")
+        || action_kind_matches_family(action_kind, "gpu_power"))
+        && !capabilities.gpu_sysfs_available
+    {
+        Some("gpu_sysfs")
+    } else if action_kind_matches_family(action_kind, "scx") && !capabilities.sched_ext_available {
+        Some("sched_ext")
+    } else if (action_kind_matches_family(action_kind, "cpu_perf")
+        || action_kind_matches_family(action_kind, "perf"))
+        && !capabilities.perf_permissions_likely
+    {
+        Some("perf_permissions")
+    } else {
+        None
+    }
 }
 
 fn config_for_constructor(
@@ -639,6 +864,37 @@ impl DaemonPolicy {
             config: &config,
             remote_context: None,
         })
+    }
+
+    pub fn explain_action_with_context(
+        &self,
+        intent: PolicyIntent,
+        descriptor: &ActionDescriptor,
+        context: &DaemonPolicyContext,
+    ) -> PolicyExplanation {
+        let mut evaluated_rules = Vec::new();
+        let mut first_rejection = None;
+        self.record_context_rules(
+            &intent,
+            descriptor,
+            context,
+            &mut evaluated_rules,
+            &mut first_rejection,
+        );
+
+        if first_rejection.is_some() {
+            return self.finish_policy_explanation(
+                intent,
+                descriptor,
+                evaluated_rules,
+                first_rejection,
+            );
+        }
+
+        let mut explanation = self.explain_action(intent, descriptor);
+        evaluated_rules.append(&mut explanation.evaluated_rules);
+        explanation.evaluated_rules = evaluated_rules;
+        explanation
     }
 
     pub fn explain_action(
@@ -903,6 +1159,51 @@ impl DaemonPolicy {
             (!passed).then_some(PolicyRejection::PersistentEffectBlocked),
         );
 
+        let enabled_passed = self.enabled_action_families.is_empty()
+            || self
+                .enabled_action_families
+                .iter()
+                .any(|family| action_kind_matches_family(&descriptor.action_kind, family));
+        record_policy_rule(
+            &mut evaluated_rules,
+            &mut first_rejection,
+            "action_family_enabled",
+            enabled_passed,
+            if enabled_passed {
+                "action family is enabled by daemon policy".to_owned()
+            } else {
+                format!(
+                    "action family {} is not enabled by daemon preset",
+                    descriptor.action_kind
+                )
+            },
+            (!enabled_passed).then_some(PolicyRejection::ActionFamilyNotEnabled {
+                action_kind: descriptor.action_kind.clone(),
+            }),
+        );
+
+        let denied = self
+            .denied_action_families
+            .iter()
+            .any(|family| action_kind_matches_family(&descriptor.action_kind, family));
+        record_policy_rule(
+            &mut evaluated_rules,
+            &mut first_rejection,
+            "action_family_not_denied",
+            !denied,
+            if denied {
+                format!(
+                    "action family {} is denied by daemon policy",
+                    descriptor.action_kind
+                )
+            } else {
+                "action family is not denied by daemon policy".to_owned()
+            },
+            denied.then_some(PolicyRejection::ActionFamilyDenied {
+                action_kind: descriptor.action_kind.clone(),
+            }),
+        );
+
         match descriptor.rollback {
             RollbackRequirement::RequiredBeforeApply => record_policy_rule(
                 &mut evaluated_rules,
@@ -1000,6 +1301,160 @@ impl DaemonPolicy {
         }
     }
 
+    pub fn check_action_with_context(
+        &self,
+        intent: PolicyIntent,
+        descriptor: &ActionDescriptor,
+        context: &DaemonPolicyContext,
+    ) -> Result<(), PolicyRejection> {
+        match self
+            .explain_action_with_context(intent, descriptor, context)
+            .decision
+        {
+            PolicyDecisionKind::Allowed => Ok(()),
+            PolicyDecisionKind::Rejected { rejection } => Err(rejection),
+        }
+    }
+
+    pub fn verdict_for_action(
+        &self,
+        intent: PolicyIntent,
+        descriptor: &ActionDescriptor,
+    ) -> DaemonPolicyVerdict {
+        self.explain_action(intent, descriptor).verdict
+    }
+
+    pub fn verdict_for_action_with_context(
+        &self,
+        intent: PolicyIntent,
+        descriptor: &ActionDescriptor,
+        context: &DaemonPolicyContext,
+    ) -> DaemonPolicyVerdict {
+        self.explain_action_with_context(intent, descriptor, context)
+            .verdict
+    }
+
+    fn record_context_rules(
+        &self,
+        intent: &PolicyIntent,
+        descriptor: &ActionDescriptor,
+        context: &DaemonPolicyContext,
+        evaluated_rules: &mut Vec<PolicyRuleEvaluation>,
+        first_rejection: &mut Option<PolicyRejection>,
+    ) {
+        let apply_intent = matches!(intent, PolicyIntent::Apply);
+        let data_quality_reason = context
+            .data_quality_reason_code
+            .clone()
+            .unwrap_or_else(|| "insufficient_data".to_owned());
+        let data_quality_passed = !apply_intent || context.data_quality_ok;
+        record_policy_rule(
+            evaluated_rules,
+            first_rejection,
+            "data_quality_gate",
+            data_quality_passed,
+            if data_quality_passed {
+                "data quality gate is satisfied".to_owned()
+            } else {
+                format!("data quality gate blocks apply: {data_quality_reason}")
+            },
+            (!data_quality_passed).then_some(PolicyRejection::DataQualityBlocked {
+                reason_code: data_quality_reason,
+            }),
+        );
+
+        let health_reason = context
+            .system_health_reason_code
+            .clone()
+            .unwrap_or_else(|| "system_health_degraded".to_owned());
+        let health_passed = !apply_intent || context.system_health_ok;
+        record_policy_rule(
+            evaluated_rules,
+            first_rejection,
+            "system_health_gate",
+            health_passed,
+            if health_passed {
+                "system health gate is satisfied".to_owned()
+            } else {
+                format!("system health gate blocks apply: {health_reason}")
+            },
+            (!health_passed).then_some(PolicyRejection::SystemHealthBlocked {
+                reason_code: health_reason,
+            }),
+        );
+
+        let workload_passed = !apply_intent || context.workload_stable;
+        record_policy_rule(
+            evaluated_rules,
+            first_rejection,
+            "workload_stability_gate",
+            workload_passed,
+            if workload_passed {
+                "workload stability gate is satisfied".to_owned()
+            } else {
+                "workload identity is unstable".to_owned()
+            },
+            (!workload_passed).then_some(PolicyRejection::WorkloadUnstable),
+        );
+
+        let cooldown_passed = !apply_intent || !context.cooldown_active;
+        record_policy_rule(
+            evaluated_rules,
+            first_rejection,
+            "cooldown_gate",
+            cooldown_passed,
+            if cooldown_passed {
+                "cooldown gate is satisfied".to_owned()
+            } else {
+                "cooldown is active".to_owned()
+            },
+            (!cooldown_passed).then_some(PolicyRejection::CooldownActive),
+        );
+
+        let rollback_passed = !apply_intent || !context.rollback_pending;
+        record_policy_rule(
+            evaluated_rules,
+            first_rejection,
+            "rollback_pending_gate",
+            rollback_passed,
+            if rollback_passed {
+                "rollback pending gate is satisfied".to_owned()
+            } else {
+                "a previous rollback is pending".to_owned()
+            },
+            (!rollback_passed).then_some(PolicyRejection::RollbackPending),
+        );
+
+        let capability_checked = matches!(
+            intent,
+            PolicyIntent::Suggest | PolicyIntent::DryRun | PolicyIntent::Apply
+        );
+        let missing_capability = context.capabilities.as_ref().and_then(|capabilities| {
+            unavailable_capability_for_action(&descriptor.action_kind, capabilities)
+        });
+        let capability_passed = !capability_checked || missing_capability.is_none();
+        record_policy_rule(
+            evaluated_rules,
+            first_rejection,
+            "capability_gate",
+            capability_passed,
+            if let Some(feature) = missing_capability {
+                format!(
+                    "action {} requires unavailable daemon capability: {feature}",
+                    descriptor.action_kind
+                )
+            } else if context.capabilities.is_some() {
+                "daemon capability gate is satisfied".to_owned()
+            } else {
+                "daemon capabilities were not provided for this policy check".to_owned()
+            },
+            (!capability_passed).then(|| PolicyRejection::CapabilityUnavailable {
+                action_kind: descriptor.action_kind.clone(),
+                feature: missing_capability.expect("missing capability is required on rejection"),
+            }),
+        );
+    }
+
     fn finish_policy_explanation(
         &self,
         intent: PolicyIntent,
@@ -1007,18 +1462,25 @@ impl DaemonPolicy {
         evaluated_rules: Vec<PolicyRuleEvaluation>,
         rejection: Option<PolicyRejection>,
     ) -> PolicyExplanation {
-        let (decision, final_reason) = match rejection {
+        let (verdict, decision, final_reason) = match rejection {
             Some(rejection) => {
+                let verdict = rejection.verdict();
                 let final_reason = rejection.to_string();
-                (PolicyDecisionKind::Rejected { rejection }, final_reason)
+                (
+                    verdict,
+                    PolicyDecisionKind::Rejected { rejection },
+                    final_reason,
+                )
             }
             None => (
+                DaemonPolicyVerdict::Allow,
                 PolicyDecisionKind::Allowed,
                 "action is allowed by daemon policy".to_owned(),
             ),
         };
 
         PolicyExplanation {
+            verdict,
             decision,
             intent,
             action_id: descriptor.action_id.clone(),
@@ -1068,6 +1530,22 @@ mod tests {
             SafetyClass::ReversibleMediumRisk,
             SafetyClass::HighRisk,
         ]
+    }
+
+    fn all_capabilities_available() -> DaemonCapabilities {
+        DaemonCapabilities {
+            kernel_release: Some("6.9.1-test".to_owned()),
+            btf_available: true,
+            sched_tracepoints_available: true,
+            perf_permissions_likely: true,
+            perf_event_paranoid: Some(1),
+            cgroup_v2_available: true,
+            sched_ext_available: true,
+            uclamp_available: true,
+            ionice_available: true,
+            irq_affinity_available: true,
+            gpu_sysfs_available: true,
+        }
     }
 
     #[test]
@@ -1272,6 +1750,259 @@ mod tests {
     }
 
     #[test]
+    fn policy_verdicts_distinguish_delay_observe_only_manual_and_reject() {
+        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        let desc = descriptor(SafetyClass::ReversibleLowRisk);
+
+        assert_eq!(
+            policy.verdict_for_action_with_context(
+                PolicyIntent::Apply,
+                &desc,
+                &DaemonPolicyContext {
+                    cooldown_active: true,
+                    ..DaemonPolicyContext::default()
+                },
+            ),
+            DaemonPolicyVerdict::Delay
+        );
+        assert_eq!(
+            policy.verdict_for_action_with_context(
+                PolicyIntent::Apply,
+                &desc,
+                &DaemonPolicyContext {
+                    system_health_ok: false,
+                    system_health_reason_code: Some("thermal_degraded".to_owned()),
+                    ..DaemonPolicyContext::default()
+                },
+            ),
+            DaemonPolicyVerdict::RequireObserveOnly
+        );
+
+        let mut high_risk = descriptor(SafetyClass::HighRisk);
+        high_risk.confidence = Some(1.0);
+        assert_eq!(
+            policy.verdict_for_action(PolicyIntent::Apply, &high_risk),
+            DaemonPolicyVerdict::RequireManualConfirmation
+        );
+
+        let no_rollback = descriptor_with(
+            SafetyClass::ReversibleLowRisk,
+            ActionEffectScope::LocalProcessTree,
+            RollbackRequirement::Unavailable,
+        );
+        assert_eq!(
+            policy.verdict_for_action(PolicyIntent::Apply, &no_rollback),
+            DaemonPolicyVerdict::Reject
+        );
+    }
+
+    #[test]
+    fn policy_explanation_exposes_verdict_for_machine_clients() {
+        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        let desc = descriptor(SafetyClass::ReversibleLowRisk);
+
+        let allowed = policy.explain_action(PolicyIntent::Apply, &desc);
+        let delayed = policy.explain_action_with_context(
+            PolicyIntent::Apply,
+            &desc,
+            &DaemonPolicyContext {
+                cooldown_active: true,
+                ..DaemonPolicyContext::default()
+            },
+        );
+
+        assert_eq!(allowed.verdict, DaemonPolicyVerdict::Allow);
+        assert!(allowed.verdict.is_allowed());
+        assert_eq!(delayed.verdict, DaemonPolicyVerdict::Delay);
+        assert!(!delayed.verdict.is_allowed());
+        assert_eq!(DaemonPolicyVerdict::Delay.as_str(), "delay");
+    }
+
+    #[test]
+    fn daemon_policy_context_blocks_apply_on_bad_data_quality() {
+        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        let desc = descriptor(SafetyClass::ReversibleLowRisk);
+        let context = DaemonPolicyContext {
+            data_quality_ok: false,
+            data_quality_reason_code: Some("insufficient_samples".to_owned()),
+            ..DaemonPolicyContext::default()
+        };
+
+        let explanation = policy.explain_action_with_context(PolicyIntent::Apply, &desc, &context);
+
+        assert!(matches!(
+            explanation.decision,
+            PolicyDecisionKind::Rejected {
+                rejection: PolicyRejection::DataQualityBlocked { .. }
+            }
+        ));
+        assert_eq!(
+            policy
+                .check_action_with_context(PolicyIntent::Apply, &desc, &context)
+                .unwrap_err()
+                .reason_code(),
+            "data_quality_blocked"
+        );
+        assert!(
+            explanation
+                .evaluated_rules
+                .iter()
+                .any(|rule| rule.rule == "data_quality_gate" && !rule.passed)
+        );
+    }
+
+    #[test]
+    fn daemon_policy_context_blocks_apply_when_health_or_state_is_unsafe() {
+        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        let desc = descriptor(SafetyClass::ReversibleLowRisk);
+
+        for (context, expected) in [
+            (
+                DaemonPolicyContext {
+                    system_health_ok: false,
+                    system_health_reason_code: Some("thermal_degraded".to_owned()),
+                    ..DaemonPolicyContext::default()
+                },
+                "system_health_blocked",
+            ),
+            (
+                DaemonPolicyContext {
+                    workload_stable: false,
+                    ..DaemonPolicyContext::default()
+                },
+                "workload_unstable",
+            ),
+            (
+                DaemonPolicyContext {
+                    cooldown_active: true,
+                    ..DaemonPolicyContext::default()
+                },
+                "cooldown_active",
+            ),
+            (
+                DaemonPolicyContext {
+                    rollback_pending: true,
+                    ..DaemonPolicyContext::default()
+                },
+                "rollback_pending",
+            ),
+        ] {
+            let rejection = policy
+                .check_action_with_context(PolicyIntent::Apply, &desc, &context)
+                .unwrap_err();
+
+            assert_eq!(rejection.reason_code(), expected);
+        }
+    }
+
+    #[test]
+    fn daemon_policy_context_can_be_derived_from_health_snapshot() {
+        let context = DaemonPolicyContext::default().with_system_health(
+            &crate::daemon::SystemHealthSnapshot {
+                ok_for_apply: false,
+                reason_code: Some("low_disk".to_owned()),
+                ..crate::daemon::SystemHealthSnapshot::default()
+            },
+        );
+
+        assert!(!context.system_health_ok);
+        assert_eq!(
+            context.system_health_reason_code.as_deref(),
+            Some("low_disk")
+        );
+    }
+
+    #[test]
+    fn daemon_policy_context_does_not_block_observe_intent() {
+        let policy = DaemonPolicy::observe(ActionSource::Test);
+        let desc = descriptor_with(
+            SafetyClass::HighRisk,
+            ActionEffectScope::SystemWide,
+            RollbackRequirement::Unavailable,
+        );
+        let context = DaemonPolicyContext {
+            data_quality_ok: false,
+            system_health_ok: false,
+            workload_stable: false,
+            cooldown_active: true,
+            rollback_pending: true,
+            ..DaemonPolicyContext::default()
+        };
+
+        let explanation =
+            policy.explain_action_with_context(PolicyIntent::Observe, &desc, &context);
+
+        assert!(matches!(explanation.decision, PolicyDecisionKind::Allowed));
+        assert!(
+            explanation
+                .evaluated_rules
+                .iter()
+                .filter(|rule| rule.rule.ends_with("_gate"))
+                .all(|rule| rule.passed)
+        );
+    }
+
+    #[test]
+    fn daemon_policy_context_blocks_unsupported_action_capabilities() {
+        let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
+        let mut desc = descriptor(SafetyClass::ReversibleLowRisk);
+        desc.action_kind = "uclamp:min".to_owned();
+        let mut capabilities = all_capabilities_available();
+        capabilities.uclamp_available = false;
+        let context = DaemonPolicyContext {
+            capabilities: Some(capabilities),
+            ..DaemonPolicyContext::default()
+        };
+
+        let explanation = policy.explain_action_with_context(PolicyIntent::Apply, &desc, &context);
+
+        assert!(matches!(
+            explanation.decision,
+            PolicyDecisionKind::Rejected {
+                rejection: PolicyRejection::CapabilityUnavailable {
+                    feature: "uclamp",
+                    ..
+                }
+            }
+        ));
+        assert!(
+            explanation
+                .evaluated_rules
+                .iter()
+                .any(|rule| rule.rule == "capability_gate" && !rule.passed)
+        );
+    }
+
+    #[test]
+    fn daemon_policy_context_uses_capabilities_for_dry_run_and_suggest_but_not_observe() {
+        let policy = DaemonPolicy::suggest(ActionSource::Test);
+        let mut desc = descriptor_with(
+            SafetyClass::ReversibleLowRisk,
+            ActionEffectScope::LocalProcessTree,
+            RollbackRequirement::RequiredBeforeApply,
+        );
+        desc.action_kind = "ionice".to_owned();
+        let mut capabilities = all_capabilities_available();
+        capabilities.ionice_available = false;
+        let context = DaemonPolicyContext {
+            capabilities: Some(capabilities),
+            ..DaemonPolicyContext::default()
+        };
+
+        let dry_run_rejection = policy
+            .check_action_with_context(PolicyIntent::DryRun, &desc, &context)
+            .unwrap_err();
+        let suggest_rejection = policy
+            .check_action_with_context(PolicyIntent::Suggest, &desc, &context)
+            .unwrap_err();
+        let observe = policy.check_action_with_context(PolicyIntent::Observe, &desc, &context);
+
+        assert_eq!(dry_run_rejection.reason_code(), "capability_unavailable");
+        assert_eq!(suggest_rejection.reason_code(), "capability_unavailable");
+        assert!(observe.is_ok());
+    }
+
+    #[test]
     fn apply_medium_risk_allows_medium_risk_only_when_explicit() {
         let medium_desc = descriptor(SafetyClass::ReversibleMediumRisk);
         let low_policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
@@ -1428,6 +2159,51 @@ mod tests {
         assert!(first.allow_system_wide_actions);
         assert!(first.allow_persistent_effects);
         assert!(first.denied_action_families.contains("gpu-power"));
+    }
+
+    #[test]
+    fn preset_enabled_action_families_gate_apply_actions() {
+        let config = crate::daemon::config::DaemonConfig::from_preset(
+            crate::daemon::config::DaemonPreset::GamingLowRisk,
+            ActionSource::Test,
+        );
+        let policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        });
+
+        let mut cpu = descriptor(SafetyClass::ReversibleLowRisk);
+        cpu.action_kind = "cpu_affinity_profile".to_owned();
+        assert!(policy.check_action(PolicyIntent::Apply, &cpu).is_ok());
+
+        let mut nice = descriptor(SafetyClass::ReversibleLowRisk);
+        nice.action_kind = "nice".to_owned();
+        let rejection = policy.check_action(PolicyIntent::Apply, &nice).unwrap_err();
+
+        assert_eq!(rejection.reason_code(), "action_family_not_enabled");
+    }
+
+    #[test]
+    fn denied_action_families_gate_apply_actions() {
+        let mut config = crate::daemon::config::DaemonConfig {
+            mode: DaemonMode::ApplyLowRisk,
+            source: ActionSource::Test,
+            ..crate::daemon::config::DaemonConfig::default()
+        };
+        config
+            .safety
+            .denied_action_families
+            .insert("cpu_affinity_profile".to_owned());
+        let policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        });
+        let mut desc = descriptor(SafetyClass::ReversibleLowRisk);
+        desc.action_kind = "cpu_affinity_profile".to_owned();
+
+        let rejection = policy.check_action(PolicyIntent::Apply, &desc).unwrap_err();
+
+        assert_eq!(rejection.reason_code(), "action_family_denied");
     }
 
     #[test]

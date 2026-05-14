@@ -154,6 +154,11 @@ impl EventRuntimeConfig {
             output: MonitorOutputConfig {
                 json_stream: config.outputs.json_stream,
                 verbose: config.streams.verbose,
+                retain_interval_limit: config
+                    .recording
+                    .retain_intervals
+                    .or_else(|| config.ui.tui.then_some(120)),
+                count_interval_retention_drops: config.recording.retain_intervals.is_some(),
             },
         }
     }

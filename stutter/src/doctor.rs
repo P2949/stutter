@@ -7,7 +7,12 @@ use std::{
 
 use serde::Serialize;
 
-use crate::{ebpf_loader, hwmon, probe_catalog::ProbeStatus, probe_registry::PROBE_REGISTRY};
+use crate::{
+    daemon::{CapabilityProbe, DaemonCapabilities},
+    ebpf_loader, hwmon,
+    probe_catalog::ProbeStatus,
+    probe_registry::PROBE_REGISTRY,
+};
 
 #[derive(Debug, Clone)]
 pub struct DoctorInput {
@@ -62,6 +67,7 @@ pub fn build_doctor_report(input: &DoctorInput) -> DoctorReport {
         ebpf_build_check(),
         ebpf_runtime_permission_check(),
         ebpf_map_sizing_check(),
+        daemon_capabilities_check(),
         tracepoint_check(input),
         probe_registry_check(input),
     ];
@@ -263,6 +269,90 @@ fn ebpf_map_sizing_check() -> DoctorCheck {
         } else {
             "dynamic eBPF map sizing is at the conservative minimum".to_owned()
         },
+        details,
+    }
+}
+
+fn daemon_capabilities_check() -> DoctorCheck {
+    let capabilities = CapabilityProbe::default().probe();
+    daemon_capabilities_check_from_snapshot(capabilities)
+}
+
+fn daemon_capabilities_check_from_snapshot(capabilities: DaemonCapabilities) -> DoctorCheck {
+    let unavailable = capabilities.unavailable_features();
+    let mut details = BTreeMap::new();
+
+    details.insert(
+        "kernel_release".to_owned(),
+        capabilities
+            .kernel_release
+            .as_deref()
+            .unwrap_or("unknown")
+            .to_owned(),
+    );
+    details.insert(
+        "btf_available".to_owned(),
+        yes_no(capabilities.btf_available),
+    );
+    details.insert(
+        "sched_tracepoints_available".to_owned(),
+        yes_no(capabilities.sched_tracepoints_available),
+    );
+    details.insert(
+        "perf_permissions_likely".to_owned(),
+        yes_no(capabilities.perf_permissions_likely),
+    );
+    details.insert(
+        "perf_event_paranoid".to_owned(),
+        capabilities
+            .perf_event_paranoid
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_owned()),
+    );
+    details.insert(
+        "cgroup_v2_available".to_owned(),
+        yes_no(capabilities.cgroup_v2_available),
+    );
+    details.insert(
+        "sched_ext_available".to_owned(),
+        yes_no(capabilities.sched_ext_available),
+    );
+    details.insert(
+        "uclamp_available".to_owned(),
+        yes_no(capabilities.uclamp_available),
+    );
+    details.insert(
+        "ionice_available".to_owned(),
+        yes_no(capabilities.ionice_available),
+    );
+    details.insert(
+        "irq_affinity_available".to_owned(),
+        yes_no(capabilities.irq_affinity_available),
+    );
+    details.insert(
+        "gpu_sysfs_available".to_owned(),
+        yes_no(capabilities.gpu_sysfs_available),
+    );
+
+    let required_missing = !capabilities.btf_available || !capabilities.sched_tracepoints_available;
+    let status = if required_missing {
+        DoctorStatus::Warn
+    } else {
+        DoctorStatus::Pass
+    };
+    let message = if unavailable.is_empty() {
+        "daemon capability probe found all known optional features".to_owned()
+    } else {
+        format!(
+            "daemon capability probe missing or cannot confirm: {}",
+            unavailable.join(", ")
+        )
+    };
+
+    DoctorCheck {
+        name: "daemon_capabilities".to_owned(),
+        status,
+        message,
         details,
     }
 }
@@ -812,6 +902,35 @@ mod tests {
                 .iter()
                 .any(|c| c.name == "ebpf_runtime_permissions")
         );
+        assert!(
+            report
+                .checks
+                .iter()
+                .any(|c| c.name == "daemon_capabilities")
+        );
+    }
+
+    #[test]
+    fn daemon_capability_check_reports_missing_required_features_as_warning() {
+        let check = daemon_capabilities_check_from_snapshot(DaemonCapabilities {
+            kernel_release: Some("6.9.1-test".to_owned()),
+            btf_available: false,
+            sched_tracepoints_available: true,
+            perf_permissions_likely: true,
+            perf_event_paranoid: Some(1),
+            cgroup_v2_available: false,
+            sched_ext_available: false,
+            uclamp_available: false,
+            ionice_available: true,
+            irq_affinity_available: false,
+            gpu_sysfs_available: false,
+        });
+
+        assert_eq!(check.name, "daemon_capabilities");
+        assert_eq!(check.status, DoctorStatus::Warn);
+        assert_eq!(check.details["kernel_release"], "6.9.1-test");
+        assert_eq!(check.details["btf_available"], "no");
+        assert!(check.message.contains("btf"));
     }
 
     #[test]

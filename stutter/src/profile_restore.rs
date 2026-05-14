@@ -52,7 +52,7 @@ pub struct IoPrioRestoreRecordV2 {
     pub applied_ioprio: i32,
 }
 
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProfileRestoreSummary {
     pub affinity: usize,
     pub nice: usize,

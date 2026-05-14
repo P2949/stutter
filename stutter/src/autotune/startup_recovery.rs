@@ -3,12 +3,12 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 
 use crate::{
-    actions::{RollbackToken, SafetyClass},
+    actions::RollbackToken,
     audit::{AuditEvent, append_audit_event_to_path},
     autotune::{
         controller_journal::{
-            ControllerJournalRecord, default_controller_journal_path, read_controller_journal,
-            write_controller_journal_clean,
+            ControllerJournalRecord, ControllerJournalState, default_controller_journal_path,
+            read_controller_journal, write_controller_journal_clean,
         },
         history::{
             AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneMode, ControllerPhase,
@@ -17,9 +17,9 @@ use crate::{
         },
     },
     daemon::{
-        DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus,
-        DaemonExperimentState, DaemonFaultState, DaemonMode, DaemonPhase, DaemonRollbackState,
-        DaemonState, DaemonStateSnapshotWriter, default_daemon_state_snapshot_path,
+        DaemonPhase, DaemonState, DaemonStateSnapshotWriter, DaemonStateStore,
+        StartupRecoveryDaemonStateInput, daemon_state_for_startup_recovery_snapshot,
+        default_daemon_state_snapshot_path, safety_class_for_rollback_token,
     },
 };
 
@@ -95,54 +95,28 @@ impl StartupRecoveryRollbackExecutor for RealStartupRecoveryRollbackExecutor {
         &mut self,
         token: &RollbackToken,
     ) -> anyhow::Result<StartupRecoveryRollbackSummary> {
-        match token {
-            RollbackToken::CpuAffinityRestoreFile { path, .. } => {
-                if crate::profile_restore::load_restore_state(path).is_ok() {
-                    let summary = crate::profile_restore::restore_saved(path).with_context(|| {
-                        format!(
-                            "failed to restore profile state from crash-recovery restore file {}",
-                            path.display()
-                        )
-                    })?;
+        let summary = crate::autotune::emergency_restore::restore_rollback_token(token)
+            .with_context(|| {
+                format!(
+                    "startup crash recovery failed to restore rollback token_kind={}",
+                    rollback_token_kind(token)
+                )
+            })?;
 
-                    return Ok(StartupRecoveryRollbackSummary {
-                        affected_tasks: summary.restored_total(),
-                        message: format!(
-                            "affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={} errors={}",
-                            summary.affinity,
-                            summary.nice,
-                            summary.ionice,
-                            summary.skipped_dead,
-                            summary.skipped_identity_mismatch,
-                            summary.errors
-                        ),
-                    });
-                }
-
-                let summary = crate::affinity::restore_saved(path).with_context(|| {
-                    format!(
-                        "failed to restore CPU affinity from crash-recovery restore file {}",
-                        path.display()
-                    )
-                })?;
-
-                Ok(StartupRecoveryRollbackSummary {
-                    affected_tasks: summary.restored,
-                    message: format!(
-                        "restored={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={} errors={}",
-                        summary.restored,
-                        summary.skipped_dead,
-                        summary.skipped_identity_mismatch,
-                        summary.legacy_unverified,
-                        summary.errors
-                    ),
-                })
-            }
-            other => anyhow::bail!(
-                "startup crash recovery only supports CPU affinity rollback tokens for now; token_kind={}",
-                rollback_token_kind(other)
-            ),
+        let mut message = format!(
+            "rollback_kind={} restored_items={} skipped_items={}",
+            summary.rollback_kind, summary.restored_items, summary.skipped_items
+        );
+        if !summary.messages.is_empty() {
+            message.push_str(" messages=\"");
+            message.push_str(&summary.messages.join("; "));
+            message.push('"');
         }
+
+        Ok(StartupRecoveryRollbackSummary {
+            affected_tasks: summary.restored_items,
+            message,
+        })
     }
 }
 
@@ -159,13 +133,25 @@ pub fn recover_controller_journal_with_executor<E: StartupRecoveryRollbackExecut
 ) -> anyhow::Result<StartupRecoveryOutcome> {
     let record = read_controller_journal(&config.journal_path)?;
 
-    match record {
-        ControllerJournalRecord::Clean { .. } => Ok(StartupRecoveryOutcome::Clean),
-        ControllerJournalRecord::Applying {
-            experiment_id,
-            action_id,
-            ..
-        } => {
+    match record.state() {
+        ControllerJournalState::Clean => Ok(StartupRecoveryOutcome::Clean),
+        ControllerJournalState::Reverted => {
+            write_controller_journal_clean(&config.journal_path).with_context(
+                || "failed to clear reverted controller journal phase during startup recovery",
+            )?;
+            Ok(StartupRecoveryOutcome::Clean)
+        }
+        ControllerJournalState::Planned | ControllerJournalState::Preflighted => {
+            write_controller_journal_clean(&config.journal_path).with_context(|| {
+                format!(
+                    "failed to clear pre-apply controller journal phase={} during startup recovery",
+                    record.state().as_str()
+                )
+            })?;
+            Ok(StartupRecoveryOutcome::Clean)
+        }
+        ControllerJournalState::Applying => {
+            let (experiment_id, action_id) = journal_experiment_action(&record);
             let reason =
                 "startup crash recovery found applying journal without rollback token".to_owned();
             write_startup_recovery_daemon_state_snapshot(
@@ -189,19 +175,63 @@ pub fn recover_controller_journal_with_executor<E: StartupRecoveryRollbackExecut
                 action_id,
             })
         }
-        ControllerJournalRecord::Applied {
-            experiment_id,
-            action_id,
-            rollback_token,
-            ..
-        } => recover_applied_journal_record(
-            config,
-            executor,
-            experiment_id,
-            action_id,
-            rollback_token,
-        ),
+        ControllerJournalState::Applied
+        | ControllerJournalState::Verifying
+        | ControllerJournalState::Measuring
+        | ControllerJournalState::Keeping
+        | ControllerJournalState::Reverting
+        | ControllerJournalState::Faulted => {
+            let (experiment_id, action_id) = journal_experiment_action(&record);
+            if let Some(rollback_token) = record.rollback_token().cloned() {
+                recover_applied_journal_record(
+                    config,
+                    executor,
+                    experiment_id,
+                    action_id,
+                    rollback_token,
+                )
+            } else {
+                let reason = format!(
+                    "startup crash recovery found {} journal without rollback token",
+                    record.state().as_str()
+                );
+                write_startup_recovery_daemon_state_snapshot(
+                    &config.state_snapshot_path,
+                    startup_recovery_daemon_state(
+                        DaemonPhase::Faulted,
+                        "missing_rollback_token",
+                        reason,
+                        &experiment_id,
+                        &action_id,
+                        None,
+                        false,
+                        true,
+                        true,
+                        Some("stutter autotune restore"),
+                    ),
+                )?;
+
+                Ok(StartupRecoveryOutcome::ApplyingWithoutRollback {
+                    experiment_id,
+                    action_id,
+                })
+            }
+        }
     }
+}
+
+fn journal_experiment_action(record: &ControllerJournalRecord) -> (String, String) {
+    let state = record.state().as_str();
+    (
+        record
+            .experiment_id
+            .clone()
+            .unwrap_or_else(|| format!("{state}-unknown-experiment")),
+        record
+            .action_id
+            .clone()
+            .unwrap_or_else(|| format!("{state}-unknown-action")),
+    )
 }
 
 fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
@@ -427,14 +457,15 @@ fn write_startup_recovery_daemon_state_snapshot(
     state_snapshot_path: &Path,
     state: DaemonState,
 ) -> anyhow::Result<()> {
-    DaemonStateSnapshotWriter::new(state_snapshot_path)
-        .write(&state)
-        .with_context(|| {
-            format!(
-                "failed to write startup recovery daemon state snapshot to {}",
-                state_snapshot_path.display()
-            )
-        })
+    let writer = DaemonStateSnapshotWriter::new(state_snapshot_path);
+    let mut store = DaemonStateStore::new(DaemonState::default(), Some(writer));
+
+    store.replace(state).with_context(|| {
+        format!(
+            "failed to write startup recovery daemon state snapshot to {}",
+            state_snapshot_path.display()
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -450,62 +481,18 @@ fn startup_recovery_daemon_state(
     faulted: bool,
     manual_restore_command: Option<&str>,
 ) -> DaemonState {
-    let manual_restore_command = manual_restore_command
-        .map(str::to_owned)
-        .unwrap_or_else(|| "stutter autotune restore".to_owned());
-    let safety_class = rollback_token
-        .map(safety_class_for_rollback_token)
-        .unwrap_or(SafetyClass::ReversibleLowRisk);
-    let active_experiment = if include_active_experiment {
-        Some(DaemonExperimentState {
-            experiment_id: experiment_id.to_owned(),
-            action_id: action_id.to_owned(),
-            candidate_name: candidate_name_from_action_id(action_id),
-            safety_class,
-            started_unix_nanos: None,
-        })
-    } else {
-        None
-    };
-    let active_rollback = rollback_token.map(|token| DaemonRollbackState {
-        action_id: action_id.to_owned(),
-        rollback_available,
-        token: Some(token.clone()),
-        manual_restore_command: Some(manual_restore_command.clone()),
-    });
-    let degraded = if faulted {
-        vec![DaemonDegradedStatus {
-            category: "startup_recovery".to_owned(),
-            message: reason.clone(),
-        }]
-    } else {
-        Vec::new()
-    };
-    let faulted_state = if faulted {
-        Some(DaemonFaultState {
-            reason: reason.clone(),
-            manual_restore_command: Some(manual_restore_command.clone()),
-        })
-    } else {
-        None
-    };
-
-    DaemonState {
-        schema_version: DAEMON_STATE_SCHEMA_VERSION,
-        mode: DaemonMode::ApplyLowRisk,
+    daemon_state_for_startup_recovery_snapshot(StartupRecoveryDaemonStateInput {
         phase,
-        active_experiment,
-        active_rollback,
-        last_decision: Some(DaemonDecisionState {
-            decision: decision.to_owned(),
-            reason,
-            unix_nanos: Some(crate::audit::unix_nanos_now()),
-            score_total: None,
-        }),
-        degraded,
-        faulted: faulted_state,
-        ..DaemonState::default()
-    }
+        decision,
+        reason,
+        experiment_id,
+        action_id,
+        rollback_token,
+        rollback_available,
+        include_active_experiment,
+        faulted,
+        manual_restore_command,
+    })
 }
 
 fn empty_observation_summary() -> ObservationSummary {
@@ -527,39 +514,7 @@ fn empty_observation_summary() -> ObservationSummary {
 }
 
 pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
-    match token {
-        RollbackToken::CpuAffinityRestoreFile { path, .. } => {
-            let default_path = crate::affinity::default_restore_path();
-            if path == &default_path {
-                "stutter restore".to_owned()
-            } else {
-                format!(
-                    "cp -- {} {} && stutter restore",
-                    shell_quote_path(path),
-                    shell_quote_path(&default_path)
-                )
-            }
-        }
-        RollbackToken::SysfsRestore {
-            path,
-            original_value,
-        } => format!(
-            "printf '%s' {} | sudo tee {} >/dev/null",
-            shell_quote_value(original_value),
-            shell_quote_path(path)
-        ),
-        other => format!(
-            "no supported manual restore command for rollback token kind {}",
-            rollback_token_kind(other)
-        ),
-    }
-}
-
-fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyClass {
-    match token {
-        RollbackToken::CpuAffinityRestoreFile { .. } => SafetyClass::ReversibleLowRisk,
-        _ => SafetyClass::HighRisk,
-    }
+    crate::autotune::emergency_restore::manual_restore_command_for_token(token)
 }
 
 fn rollback_token_kind(token: &RollbackToken) -> &'static str {
@@ -593,32 +548,21 @@ fn candidate_name_from_action_id(action_id: &str) -> Option<String> {
         .filter(|candidate| !candidate.trim().is_empty())
 }
 
-fn shell_quote_path(path: &Path) -> String {
-    shell_quote_value(&path.display().to_string())
-}
-
-fn shell_quote_value(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_owned();
-    }
-
-    if value.chars().all(|ch| {
-        ch.is_ascii_alphanumeric() || matches!(ch, '/' | '_' | '-' | '.' | ':' | '+' | ',' | '=')
-    }) {
-        value.to_owned()
-    } else {
-        format!("'{}'", value.replace('\'', "'\\''"))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
 
     use super::*;
-    use crate::autotune::controller_journal::{
-        write_controller_journal_applied, write_controller_journal_applying,
-        write_controller_journal_clean,
+    use crate::{
+        actions::{
+            CgroupRestoreRecord, CpuPowerRestoreRecord, GpuPowerRestoreRecord, IoPrioRestoreRecord,
+            IrqAffinityRestoreRecord, NiceRestoreRecord, UclampRestoreRecord, VmKnobRestoreRecord,
+        },
+        autotune::controller_journal::{
+            ControllerJournalRecord, ControllerJournalState, write_controller_journal_applied,
+            write_controller_journal_applying, write_controller_journal_clean,
+            write_controller_journal_record,
+        },
     };
 
     #[derive(Default)]
@@ -689,6 +633,148 @@ mod tests {
 
         assert_eq!(outcome, StartupRecoveryOutcome::Clean);
         assert_eq!(executor.calls, 0);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn pre_apply_transaction_phase_cleans_without_rollback() {
+        let dir = temp_dir("planned");
+        let config = config_for_dir(&dir, true);
+        let record = ControllerJournalRecord::for_phase(
+            ControllerJournalState::Planned,
+            "experiment-1",
+            "cpu-affinity-profile:game-main",
+            None,
+        )
+        .with_candidate("game-main");
+        write_controller_journal_record(&config.journal_path, &record).unwrap();
+        let mut executor = FakeRollbackExecutor::default();
+
+        let outcome =
+            recover_controller_journal_with_executor(config.clone(), &mut executor).unwrap();
+
+        assert_eq!(outcome, StartupRecoveryOutcome::Clean);
+        assert_eq!(executor.calls, 0);
+        assert!(
+            crate::autotune::controller_journal::read_controller_journal(&config.journal_path)
+                .unwrap()
+                .is_clean()
+        );
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn post_apply_transaction_phase_rolls_back_on_startup() {
+        let dir = temp_dir("verifying");
+        let config = config_for_dir(&dir, true);
+        let record = ControllerJournalRecord::for_phase(
+            ControllerJournalState::Verifying,
+            "experiment-1",
+            "cpu-affinity-profile:game-main",
+            Some(rollback_token()),
+        )
+        .with_verify_result("pending");
+        write_controller_journal_record(&config.journal_path, &record).unwrap();
+        let mut executor = FakeRollbackExecutor {
+            calls: 0,
+            fail: false,
+            affected_tasks: 31,
+        };
+
+        let outcome =
+            recover_controller_journal_with_executor(config.clone(), &mut executor).unwrap();
+
+        assert_eq!(
+            outcome,
+            StartupRecoveryOutcome::Recovered {
+                experiment_id: "experiment-1".to_owned(),
+                action_id: "cpu-affinity-profile:game-main".to_owned(),
+                affected_tasks: 31,
+                manual_restore_command: "stutter restore".to_owned(),
+            }
+        );
+        assert_eq!(executor.calls, 1);
+        assert!(
+            crate::autotune::controller_journal::read_controller_journal(&config.journal_path)
+                .unwrap()
+                .is_clean()
+        );
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn live_runtime_transaction_phases_roll_back_on_startup() {
+        for phase in [
+            ControllerJournalState::Measuring,
+            ControllerJournalState::Keeping,
+            ControllerJournalState::Reverting,
+        ] {
+            let dir = temp_dir(phase.as_str());
+            let config = config_for_dir(&dir, true);
+            let record = ControllerJournalRecord::for_phase(
+                phase,
+                "experiment-live",
+                "cpu-affinity-profile:game-main",
+                Some(rollback_token()),
+            )
+            .with_candidate("game-main")
+            .with_verify_result("phase_written_by_runtime");
+            write_controller_journal_record(&config.journal_path, &record).unwrap();
+            let mut executor = FakeRollbackExecutor {
+                calls: 0,
+                fail: false,
+                affected_tasks: 31,
+            };
+
+            let outcome =
+                recover_controller_journal_with_executor(config.clone(), &mut executor).unwrap();
+
+            assert_eq!(
+                outcome,
+                StartupRecoveryOutcome::Recovered {
+                    experiment_id: "experiment-live".to_owned(),
+                    action_id: "cpu-affinity-profile:game-main".to_owned(),
+                    affected_tasks: 31,
+                    manual_restore_command: "stutter restore".to_owned(),
+                }
+            );
+            assert_eq!(executor.calls, 1);
+            assert!(
+                crate::autotune::controller_journal::read_controller_journal(&config.journal_path)
+                    .unwrap()
+                    .is_clean()
+            );
+            fs::remove_dir_all(dir).ok();
+        }
+    }
+
+    #[test]
+    fn reverted_transaction_phase_cleans_without_rollback() {
+        let dir = temp_dir("reverted");
+        let config = config_for_dir(&dir, true);
+        let record = ControllerJournalRecord::for_phase(
+            ControllerJournalState::Reverted,
+            "experiment-live",
+            "cpu-affinity-profile:game-main",
+            Some(rollback_token()),
+        );
+        write_controller_journal_record(&config.journal_path, &record).unwrap();
+        let mut executor = FakeRollbackExecutor {
+            calls: 0,
+            fail: false,
+            affected_tasks: 31,
+        };
+
+        let outcome =
+            recover_controller_journal_with_executor(config.clone(), &mut executor).unwrap();
+
+        assert_eq!(outcome, StartupRecoveryOutcome::Clean);
+        assert_eq!(executor.calls, 0);
+        assert!(
+            crate::autotune::controller_journal::read_controller_journal(&config.journal_path)
+                .unwrap()
+                .is_clean()
+        );
         fs::remove_dir_all(dir).ok();
     }
 
@@ -1138,6 +1224,26 @@ mod tests {
     }
 
     #[test]
+    fn real_startup_recovery_executor_uses_universal_restore_for_sysfs_tokens() {
+        let dir = temp_dir("sysfs-token");
+        let path = dir.join("knob");
+        fs::write(&path, "performance\n").unwrap();
+        let token = RollbackToken::SysfsRestore {
+            path: path.clone(),
+            original_value: "powersave\n".to_owned(),
+        };
+        let mut executor = RealStartupRecoveryRollbackExecutor;
+
+        let summary = executor.rollback(&token).unwrap();
+
+        assert_eq!(summary.affected_tasks, 1);
+        assert!(summary.message.contains("rollback_kind=sysfs-restore"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "powersave\n");
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn manual_restore_command_for_non_default_cpu_affinity_restore_file_copies_then_restores() {
         let token = RollbackToken::CpuAffinityRestoreFile {
             path: PathBuf::from("/tmp/custom restore.json"),
@@ -1149,5 +1255,84 @@ mod tests {
         assert!(command.contains("cp --"));
         assert!(command.contains("'/tmp/custom restore.json'"));
         assert!(command.ends_with("&& stutter restore"));
+    }
+
+    #[test]
+    fn manual_restore_command_supports_every_rollback_token_kind() {
+        let tokens = [
+            RollbackToken::CpuAffinityRestoreFile {
+                path: crate::affinity::default_restore_path(),
+                affected_tasks: 1,
+            },
+            RollbackToken::NiceRestore {
+                records: vec![NiceRestoreRecord {
+                    tid: 1001,
+                    original_nice: 5,
+                }],
+            },
+            RollbackToken::IrqAffinityRestore {
+                records: vec![IrqAffinityRestoreRecord {
+                    irq: 42,
+                    device_hint: "gpu".to_owned(),
+                    original_smp_affinity: "ff".to_owned(),
+                }],
+            },
+            RollbackToken::IoPrioRestore {
+                records: vec![IoPrioRestoreRecord {
+                    tid: 1002,
+                    original_ioprio: 0x4000,
+                }],
+            },
+            RollbackToken::UclampRestore {
+                records: vec![UclampRestoreRecord {
+                    tid: 1003,
+                    original_util_min: 0,
+                    original_util_max: 1024,
+                }],
+            },
+            RollbackToken::CgroupRestore {
+                records: vec![CgroupRestoreRecord {
+                    pid: 1004,
+                    original_cgroup: PathBuf::from("/sys/fs/cgroup/game.slice"),
+                }],
+            },
+            RollbackToken::CpuPowerRestore {
+                records: vec![CpuPowerRestoreRecord {
+                    path: PathBuf::from("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
+                    original_value: "schedutil\n".to_owned(),
+                }],
+            },
+            RollbackToken::VmKnobRestore {
+                records: vec![VmKnobRestoreRecord {
+                    path: PathBuf::from("/proc/sys/vm/compaction_proactiveness"),
+                    original_value: "20\n".to_owned(),
+                }],
+            },
+            RollbackToken::GpuPowerRestore {
+                records: vec![GpuPowerRestoreRecord {
+                    path: PathBuf::from(
+                        "/sys/class/drm/card0/device/power_dpm_force_performance_level",
+                    ),
+                    original_value: "auto\n".to_owned(),
+                }],
+            },
+            RollbackToken::SysfsRestore {
+                path: PathBuf::from("/sys/module/test/parameters/knob"),
+                original_value: "0\n".to_owned(),
+            },
+        ];
+
+        for token in tokens {
+            let command = manual_restore_command_for_token(&token);
+
+            assert!(
+                !command.trim().is_empty(),
+                "manual restore command must not be empty for {token:?}"
+            );
+            assert!(
+                !command.contains("no supported manual restore command"),
+                "manual restore command must be supported for {token:?}: {command}"
+            );
+        }
     }
 }

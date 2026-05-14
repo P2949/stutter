@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, VecDeque},
     fs::{self, OpenOptions},
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -24,8 +24,10 @@ use crate::{
             ControllerRuntimeState, decide_autotune_transition,
         },
         controller_journal::{
-            default_controller_journal_path, write_controller_journal_applied,
-            write_controller_journal_applying, write_controller_journal_clean,
+            ControllerJournalActionMetadata, ControllerJournalRecord, ControllerJournalState,
+            default_controller_journal_path, journal_process_identity,
+            write_controller_journal_applied_with_metadata,
+            write_controller_journal_applying_with_metadata, write_controller_journal_record,
         },
         decision::AutotuneDecision,
         experiment::{ExperimentId, WindowScore},
@@ -47,7 +49,12 @@ use crate::{
         ActionSource, DAEMON_STATE_SCHEMA_VERSION, DaemonConfig, DaemonDecisionState,
         DaemonDegradedStatus, DaemonExperimentState, DaemonFaultState, DaemonMode, DaemonPhase,
         DaemonPolicy, DaemonPolicyBuildInput, DaemonRollbackState, DaemonState, DaemonTargetState,
-        build_daemon_policy,
+        DaemonWorkloadProfile, SystemHealthInputs, SystemHealthSnapshot, SystemHealthThresholds,
+        build_daemon_policy, evaluate_system_health,
+        state::{
+            DaemonProfileEnvironment, DaemonProfileMemory, DaemonProfilePartition,
+            daemon_profile_stable_hash,
+        },
     },
     diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
@@ -74,6 +81,8 @@ pub struct AutotuneRuntimeConfig {
     pub profiles: Vec<Profile>,
     pub online_data_quality_policy: OnlineDataQualityPolicy,
     pub washout: WashoutWindowConfig,
+    pub simulated_candidates: Vec<CandidateAction>,
+    pub simulate_action_effects: bool,
 }
 
 pub fn daemon_config_for_runtime_mode(
@@ -167,6 +176,8 @@ impl AutotuneRuntimeConfig {
             profiles: Vec::new(),
             online_data_quality_policy: OnlineDataQualityPolicy::default(),
             washout: WashoutWindowConfig::default(),
+            simulated_candidates: Vec::new(),
+            simulate_action_effects: false,
         }
     }
 
@@ -210,6 +221,16 @@ impl AutotuneRuntimeConfig {
         self
     }
 
+    pub fn with_simulated_candidates(mut self, candidates: Vec<CandidateAction>) -> Self {
+        self.simulated_candidates = candidates;
+        self
+    }
+
+    pub fn with_simulated_action_effects(mut self) -> Self {
+        self.simulate_action_effects = true;
+        self
+    }
+
     pub fn mode(&self) -> DaemonMode {
         self.daemon_config.mode
     }
@@ -242,6 +263,7 @@ pub struct AutotuneDecisionStreamEntry {
     pub situation: String,
     pub score_total: u64,
     pub data_quality: String,
+    pub data_quality_reason_codes: Vec<String>,
     pub decision: String,
     pub reason: String,
 }
@@ -462,6 +484,7 @@ impl AutotuneRuntime {
             | MonitorEvent::GpuSample { .. }
             | MonitorEvent::IrqEvent { .. }
             | MonitorEvent::IoEvent { .. }
+            | MonitorEvent::ScxEvent { .. }
             | MonitorEvent::Exec { .. } => {}
         }
 
@@ -512,12 +535,15 @@ impl AutotuneRuntime {
                     manual_restore_command: Some("stutter autotune restore".to_owned()),
                 });
 
+        let active_target = self.daemon_active_target_snapshot();
+        let profile_memory = self.daemon_profile_memory_snapshot(active_target.as_ref());
+
         DaemonState {
             schema_version: DAEMON_STATE_SCHEMA_VERSION,
             mode: self.config.mode(),
             phase: daemon_phase_from_controller_phase(self.controller.state.phase),
             cooldown_until_unix_nanos: self.controller.state.cooldown_until_unix_nanos,
-            active_target: self.daemon_active_target_snapshot(),
+            active_target,
             active_experiment,
             active_rollback,
             last_decision: self
@@ -529,9 +555,73 @@ impl AutotuneRuntime {
                     unix_nanos: Some(decision.unix_nanos),
                     score_total: Some(decision.score_total),
                 }),
+            health: self.daemon_health_snapshot(),
             degraded: self.daemon_degraded_statuses(),
             faulted: self.daemon_fault_state(),
+            profile_memory,
         }
+    }
+
+    fn daemon_profile_memory_snapshot(
+        &self,
+        active_target: Option<&DaemonTargetState>,
+    ) -> DaemonProfileMemory {
+        let environment = DaemonProfileEnvironment::current();
+        let workload_identity_hash = daemon_profile_workload_identity_hash(active_target);
+        let workload_label = active_target
+            .and_then(|target| target.comm.clone())
+            .or_else(|| self.target_state.target_comm.clone());
+        let profiles = self
+            .controller
+            .state
+            .candidate_memory
+            .records
+            .iter()
+            .filter(|record| record.result == CandidateMemoryResult::Kept)
+            .map(|record| {
+                let (action_kind, safety_class) =
+                    daemon_profile_action_kind_and_safety_class(&record.action_id.0);
+                DaemonWorkloadProfile {
+                    workload_identity_hash: workload_identity_hash.clone(),
+                    workload_label: workload_label.clone(),
+                    candidate_name: record.candidate_name.clone(),
+                    action_id: record.action_id.0.clone(),
+                    action_kind,
+                    safety_class,
+                    kept_unix_nanos: record.last_tried_unix_nanos,
+                    last_validated_unix_nanos: Some(record.last_tried_unix_nanos),
+                    baseline_score_total: None,
+                    candidate_score_total: None,
+                    score_delta: record.score_delta,
+                    confidence_milli: daemon_profile_confidence_milli(record.score_delta),
+                    environment: environment.clone(),
+                    partition: DaemonProfilePartition {
+                        scheduler_label: environment.scheduler_label.clone(),
+                        ..DaemonProfilePartition::default()
+                    },
+                }
+            })
+            .collect();
+
+        DaemonProfileMemory { profiles }
+    }
+
+    fn daemon_health_snapshot(&self) -> SystemHealthSnapshot {
+        let thresholds = SystemHealthThresholds {
+            max_ebpf_dropped_events: self
+                .config
+                .online_data_quality_policy
+                .max_drop_counter_total,
+            ..SystemHealthThresholds::default()
+        };
+
+        evaluate_system_health(
+            SystemHealthInputs {
+                ebpf_dropped_events: self.latest_drop_counters.total(),
+                ..SystemHealthInputs::default()
+            },
+            &thresholds,
+        )
     }
 
     fn daemon_active_target_snapshot(&self) -> Option<DaemonTargetState> {
@@ -562,9 +652,20 @@ impl AutotuneRuntime {
         let mut degraded = Vec::new();
 
         if self.last_observation.data_quality.is_low() {
+            let data_quality_reason_codes =
+                self.last_observation.data_quality.reason_code_strings();
+            let message = if data_quality_reason_codes.is_empty() {
+                data_quality_label(&self.last_observation.data_quality)
+            } else {
+                format!(
+                    "{} reason_codes={}",
+                    data_quality_label(&self.last_observation.data_quality),
+                    data_quality_reason_codes.join(",")
+                )
+            };
             degraded.push(DaemonDegradedStatus {
                 category: "data_quality".to_owned(),
-                message: data_quality_label(&self.last_observation.data_quality),
+                message,
             });
         }
 
@@ -776,6 +877,18 @@ impl AutotuneRuntime {
 
         let tree_pid = observation.target_root_pid.or(self.config.tree_pid())?;
 
+        if !self.config.simulated_candidates.is_empty() {
+            let candidates = self.config.simulated_candidates.clone();
+            let records = simulated_dry_run_records(&candidates, observation.active_target_count);
+            return select_best_candidate_for_situation(
+                &candidates,
+                &records,
+                observation,
+                self.controller.policy.max_safety_class.clone(),
+                &self.controller.state,
+            );
+        }
+
         let candidates = self.candidates_for_tree(tree_pid);
         let records = dry_run_candidates(&candidates);
 
@@ -840,6 +953,10 @@ impl AutotuneRuntime {
     }
 
     fn experiment_deadlines_from_now(&self, applied_unix_nanos: u128) -> (u128, u128) {
+        if self.config.simulate_action_effects {
+            return (applied_unix_nanos, applied_unix_nanos);
+        }
+
         let washout_until_unix_nanos =
             applied_unix_nanos.saturating_add(self.config.washout.washout_duration().as_nanos());
         let measure_until_unix_nanos = washout_until_unix_nanos
@@ -875,15 +992,11 @@ impl AutotuneRuntime {
             observation.now_unix_nanos
         ));
         let action_id = candidate.action_id().0;
-        let journal_path = default_controller_journal_path();
-
-        write_controller_journal_applying(&journal_path, experiment_id.as_str(), &action_id)?;
-        let applied = apply_candidate_with_audit(candidate.clone())?;
-        write_controller_journal_applied(
-            &journal_path,
+        let rollback = self.apply_candidate_for_runtime(
+            &candidate,
             experiment_id.as_str(),
             &action_id,
-            applied.rollback.clone(),
+            observation,
         )?;
 
         self.controller.state.record_candidate_attempt(
@@ -917,8 +1030,16 @@ impl AutotuneRuntime {
             applied_unix_nanos: observation.now_unix_nanos,
             washout_until_unix_nanos,
             measure_until_unix_nanos,
-            rollback: applied.rollback,
+            rollback,
         });
+        if let Some(experiment) = self.live_low_risk_experiment.as_ref() {
+            self.write_controller_journal_phase_for_live_experiment(
+                experiment,
+                observation,
+                ControllerJournalState::Measuring,
+                "measurement_window_collecting",
+            )?;
+        }
 
         self.controller.window.clear();
 
@@ -948,6 +1069,81 @@ impl AutotuneRuntime {
         Ok(())
     }
 
+    fn apply_candidate_for_runtime(
+        &self,
+        candidate: &CandidateAction,
+        experiment_id: &str,
+        action_id: &str,
+        observation: &AutotuneObservation,
+    ) -> anyhow::Result<RollbackToken> {
+        if self.config.simulate_action_effects {
+            return Ok(RollbackToken::CpuAffinityRestoreFile {
+                path: PathBuf::from(format!(
+                    "/tmp/stutter-simulated-rollback-{experiment_id}.json"
+                )),
+                affected_tasks: observation.active_target_count.max(1),
+            });
+        }
+
+        let journal_path = default_controller_journal_path();
+
+        write_controller_journal_applying_with_metadata(
+            &journal_path,
+            experiment_id,
+            action_id,
+            self.controller_journal_metadata_for_candidate(
+                candidate,
+                observation,
+                None,
+                "pending_apply",
+            ),
+        )?;
+        let applied = apply_candidate_with_audit(candidate.clone())?;
+        write_controller_journal_applied_with_metadata(
+            &journal_path,
+            experiment_id,
+            action_id,
+            applied.rollback.clone(),
+            self.controller_journal_metadata_for_candidate(
+                candidate,
+                observation,
+                Some(applied.affected_tasks),
+                "applied_pending_verify",
+            ),
+        )?;
+
+        Ok(applied.rollback)
+    }
+
+    fn controller_journal_metadata_for_candidate(
+        &self,
+        candidate: &CandidateAction,
+        observation: &AutotuneObservation,
+        affected_tasks: Option<usize>,
+        verify_result: &'static str,
+    ) -> ControllerJournalActionMetadata {
+        let pid = observation
+            .target_root_pid
+            .filter(|pid| *pid != 0)
+            .unwrap_or_else(|| candidate.tree_pid());
+        let starttime_ticks = (pid != 0)
+            .then(|| crate::process_tree::process_starttime_at(Path::new("/proc"), pid))
+            .flatten();
+        let active_task_count = affected_tasks.or(Some(observation.active_target_count));
+
+        ControllerJournalActionMetadata::default()
+            .with_candidate(candidate.profile_name().to_owned())
+            .with_workload_identity(journal_process_identity(pid, starttime_ticks, None))
+            .with_target_identity(journal_process_identity(
+                pid,
+                starttime_ticks,
+                active_task_count,
+            ))
+            .with_restore_command("stutter autotune restore")
+            .with_verify_result(verify_result)
+            .with_safety_class(candidate.safety_class())
+    }
+
     fn keep_live_experiment(
         &mut self,
         observation: &AutotuneObservation,
@@ -969,6 +1165,16 @@ impl AutotuneRuntime {
 
         match result {
             ExperimentResult::Improved { .. } => {
+                if let Err(err) = self.write_controller_journal_phase_for_live_experiment(
+                    &experiment,
+                    observation,
+                    ControllerJournalState::Keeping,
+                    "kept_pending_manual_restore",
+                ) {
+                    self.live_low_risk_experiment = Some(experiment);
+                    return Err(err);
+                }
+
                 let kept = KeptCandidateState::new(
                     experiment.experiment_id.clone(),
                     experiment.candidate.clone(),
@@ -1040,10 +1246,23 @@ impl AutotuneRuntime {
             return Ok(());
         };
 
-        let (_, action) = action_from_candidate(experiment.candidate.clone())?;
-        action.rollback(&experiment.rollback)?;
+        if let Err(err) = self.write_controller_journal_phase_for_live_experiment(
+            &experiment,
+            &self.last_observation,
+            ControllerJournalState::Reverting,
+            "rollback_in_progress",
+        ) {
+            self.live_low_risk_experiment = Some(experiment);
+            return Err(err);
+        }
 
-        write_controller_journal_clean(&default_controller_journal_path())?;
+        self.rollback_experiment_for_runtime(&experiment)?;
+        self.write_controller_journal_phase_for_live_experiment(
+            &experiment,
+            &self.last_observation,
+            ControllerJournalState::Reverted,
+            "rollback_verified",
+        )?;
 
         self.controller.state.record_candidate_result(
             &experiment.candidate,
@@ -1082,6 +1301,62 @@ impl AutotuneRuntime {
         Ok(())
     }
 
+    fn controller_journal_record_for_live_experiment(
+        &self,
+        experiment: &LiveLowRiskExperiment,
+        observation: &AutotuneObservation,
+        state: ControllerJournalState,
+        verify_result: &'static str,
+    ) -> ControllerJournalRecord {
+        let action_id = experiment.action_id();
+        ControllerJournalRecord::for_phase(
+            state,
+            experiment.experiment_id.as_str(),
+            action_id,
+            Some(experiment.rollback.clone()),
+        )
+        .with_metadata(self.controller_journal_metadata_for_candidate(
+            &experiment.candidate,
+            observation,
+            Some(experiment.rollback.affected_tasks()),
+            verify_result,
+        ))
+    }
+
+    fn write_controller_journal_phase_for_live_experiment(
+        &self,
+        experiment: &LiveLowRiskExperiment,
+        observation: &AutotuneObservation,
+        state: ControllerJournalState,
+        verify_result: &'static str,
+    ) -> anyhow::Result<()> {
+        if self.config.simulate_action_effects {
+            return Ok(());
+        }
+
+        let record = self.controller_journal_record_for_live_experiment(
+            experiment,
+            observation,
+            state,
+            verify_result,
+        );
+        write_controller_journal_record(&default_controller_journal_path(), &record)
+    }
+
+    fn rollback_experiment_for_runtime(
+        &self,
+        experiment: &LiveLowRiskExperiment,
+    ) -> anyhow::Result<()> {
+        if self.config.simulate_action_effects {
+            return Ok(());
+        }
+
+        let (_, action) = action_from_candidate(experiment.candidate.clone())?;
+        action.rollback(&experiment.rollback)?;
+
+        Ok(())
+    }
+
     fn stream_entry_from_decision(
         &self,
         observation: &AutotuneObservation,
@@ -1099,6 +1374,7 @@ impl AutotuneRuntime {
             situation: format!("{:?}", observation.primary_situation),
             score_total: observation.score.total,
             data_quality: data_quality_label(&observation.data_quality),
+            data_quality_reason_codes: observation.data_quality.reason_code_strings(),
             decision: decision_label(decision),
             reason,
         }
@@ -1428,8 +1704,11 @@ fn select_best_candidate_for_situation(
                 return None;
             }
 
-            let rank =
-                candidate_situation_rank(candidate.profile_name(), observation.primary_situation)?;
+            let rank = if matches!(candidate, CandidateAction::Fake { .. }) {
+                0
+            } else {
+                candidate_situation_rank(candidate.profile_name(), observation.primary_situation)?
+            };
             Some((rank, candidate.clone()))
         })
         .collect::<Vec<_>>();
@@ -1544,6 +1823,23 @@ fn stutter_score_from_runtime_window_score(score: &RuntimeWindowScore) -> Stutte
     }
 }
 
+fn simulated_dry_run_records(
+    candidates: &[CandidateAction],
+    active_target_count: usize,
+) -> Vec<CandidateDryRunRecord> {
+    candidates
+        .iter()
+        .map(|candidate| CandidateDryRunRecord {
+            candidate_name: candidate.profile_name().to_owned(),
+            affected_tasks: active_target_count.max(1),
+            warnings: Vec::new(),
+            safety_class: candidate.safety_class(),
+            eligible: true,
+            reason: None,
+        })
+        .collect()
+}
+
 fn decision_reason(decision: &AutotuneDecision) -> String {
     match decision {
         AutotuneDecision::Noop { reason }
@@ -1637,6 +1933,42 @@ pub fn daemon_phase_from_controller_phase(phase: ControllerPhase) -> DaemonPhase
         ControllerPhase::Reverting => DaemonPhase::Rollback,
         ControllerPhase::Cooldown => DaemonPhase::Cooldown,
         ControllerPhase::Faulted => DaemonPhase::Faulted,
+    }
+}
+
+fn daemon_profile_workload_identity_hash(active_target: Option<&DaemonTargetState>) -> String {
+    let root_pid = active_target
+        .and_then(|target| target.root_pid)
+        .map(|pid| pid.to_string())
+        .unwrap_or_else(|| "unknown".to_owned());
+    let active_targets = active_target
+        .map(|target| target.active_targets.to_string())
+        .unwrap_or_else(|| "0".to_owned());
+    let comm = active_target
+        .and_then(|target| target.comm.as_deref())
+        .unwrap_or("unknown");
+
+    daemon_profile_stable_hash([root_pid.as_str(), active_targets.as_str(), comm])
+}
+
+fn daemon_profile_action_kind_and_safety_class(action_id: &str) -> (String, SafetyClass) {
+    if action_id.starts_with("cpu-affinity-profile:") {
+        (
+            "cpu_affinity_profile".to_owned(),
+            SafetyClass::ReversibleLowRisk,
+        )
+    } else {
+        ("unknown".to_owned(), SafetyClass::ObserveOnly)
+    }
+}
+
+fn daemon_profile_confidence_milli(score_delta: i64) -> u16 {
+    if score_delta < 0 {
+        900
+    } else if score_delta == 0 {
+        600
+    } else {
+        350
     }
 }
 
@@ -1848,6 +2180,64 @@ mod tests {
     }
 
     #[test]
+    fn live_experiment_journal_record_carries_phase_metadata_and_rollback() {
+        let runtime = runtime();
+        let observation = high_quality_game_observation_with_focus_confidence(0.95);
+        let candidate = CandidateAction::cpu_affinity_profile(low_risk_profile(), 1234);
+        let baseline_score = WindowScore {
+            started_unix_nanos: 100,
+            finished_unix_nanos: 200,
+            interval_count: 1,
+            scored_samples: 100,
+            scored_task_count: 1,
+            score: StutterScore {
+                total: 500,
+                over_1ms: 10,
+                over_2ms: 5,
+                over_5ms: 1,
+                ..StutterScore::default()
+            },
+        };
+        let experiment = LiveLowRiskExperiment {
+            experiment_id: ExperimentId::new("experiment-active"),
+            candidate,
+            baseline_score,
+            applied_unix_nanos: 1_000,
+            washout_until_unix_nanos: 2_000,
+            measure_until_unix_nanos: 3_000,
+            rollback: RollbackToken::CpuAffinityRestoreFile {
+                path: PathBuf::from("/tmp/stutter-active-restore.json"),
+                affected_tasks: 2,
+            },
+        };
+
+        let record = runtime.controller_journal_record_for_live_experiment(
+            &experiment,
+            &observation,
+            ControllerJournalState::Reverting,
+            "rollback_in_progress",
+        );
+
+        assert_eq!(record.state(), ControllerJournalState::Reverting);
+        assert_eq!(
+            record.experiment_action(),
+            Some(("experiment-active", "cpu-affinity-profile:game-low-risk"))
+        );
+        assert_eq!(record.candidate.as_deref(), Some("game-low-risk"));
+        assert_eq!(
+            record.target_identity.as_deref(),
+            Some("pid:1234:starttime:unknown:active_tasks:2")
+        );
+        assert_eq!(
+            record.verify_result.as_deref(),
+            Some("rollback_in_progress")
+        );
+        assert_eq!(record.safety_class, Some(SafetyClass::ReversibleLowRisk));
+        assert!(record.rollback_token().is_some());
+        assert!(record.may_have_mutated_system());
+    }
+
+    #[test]
     fn runtime_rollback_on_stop_noops_without_active_experiment() {
         let mut runtime = runtime();
 
@@ -1939,9 +2329,21 @@ mod tests {
             situation: "GameCpuSchedulerPressure".to_owned(),
             score_total: 999,
             data_quality: "Low: low scored samples".to_owned(),
+            data_quality_reason_codes: vec!["measurement_uncertain".to_owned()],
             decision: "faulted".to_owned(),
             reason: "rollback failed".to_owned(),
         });
+        let kept_candidate = CandidateAction::cpu_affinity_profile(low_risk_profile(), 1234);
+        runtime.controller.state.record_candidate_result(
+            &kept_candidate,
+            &runtime.last_observation,
+            None,
+            CandidateMemoryResult::Kept,
+            Some(500),
+            Some(400),
+            None,
+            None,
+        );
 
         let snapshot = runtime.daemon_state_snapshot();
         let value = serde_json::to_value(&snapshot).unwrap();
@@ -1987,11 +2389,22 @@ mod tests {
                 .iter()
                 .any(|status| status.category == "data_quality")
         );
+        assert!(snapshot.degraded.iter().any(|status| {
+            status.category == "data_quality"
+                && status
+                    .message
+                    .contains("reason_codes=measurement_uncertain")
+        }));
         assert!(
             snapshot
                 .degraded
                 .iter()
                 .any(|status| status.category == "drop_counters")
+        );
+        assert!(!snapshot.health.ok_for_apply);
+        assert_eq!(
+            snapshot.health.reason_code.as_deref(),
+            Some("drop_counters_high")
         );
         assert!(
             snapshot
@@ -2023,6 +2436,21 @@ mod tests {
         assert_eq!(
             value["faulted"]["manual_restore_command"],
             "stutter autotune restore"
+        );
+        assert_eq!(snapshot.profile_memory.profiles.len(), 1);
+        assert_eq!(
+            snapshot.profile_memory.profiles[0].candidate_name,
+            "game-low-risk"
+        );
+        assert_eq!(
+            snapshot.profile_memory.profiles[0]
+                .workload_label
+                .as_deref(),
+            Some("game")
+        );
+        assert_eq!(
+            value["profile_memory"]["profiles"][0]["action_kind"],
+            "cpu_affinity_profile"
         );
     }
 
@@ -2259,6 +2687,13 @@ mod tests {
 
         assert_eq!(emitted.decision, "observed");
         assert!(emitted.data_quality.starts_with("Low"));
+        assert_eq!(
+            emitted.data_quality_reason_codes,
+            vec![
+                "insufficient_samples".to_owned(),
+                "target_missing".to_owned()
+            ]
+        );
     }
 
     #[test]

@@ -47,6 +47,8 @@ impl std::error::Error for SinkError {}
 pub struct MonitorOutputConfig {
     pub json_stream: bool,
     pub verbose: bool,
+    pub retain_interval_limit: Option<usize>,
+    pub count_interval_retention_drops: bool,
 }
 
 pub struct MonitorSinkContext<'a> {
@@ -182,6 +184,40 @@ impl MonitorEventSink for RecorderSink {
         ctx: &mut MonitorSinkContext<'_>,
     ) -> Result<(), SinkError> {
         match event {
+            MonitorEvent::Interval { records, .. } => {
+                ctx.recorder.counters.interval_record_count += records.len() as u64;
+
+                if ctx.recorder.streams.contains(ArtifactKind::Interval) {
+                    for record in records {
+                        ctx.recorder
+                            .streams
+                            .push(ArtifactKind::Interval, record)
+                            .map_err(|err| SinkError::new(self.name(), event.kind(), err))?;
+                    }
+                } else if let Some(max_intervals) = ctx.output.retain_interval_limit {
+                    ctx.recorder
+                        .buffers
+                        .interval_records
+                        .extend(records.iter().cloned());
+
+                    if ctx.recorder.buffers.interval_records.len() > max_intervals {
+                        let drop_count =
+                            ctx.recorder.buffers.interval_records.len() - max_intervals;
+                        ctx.recorder.buffers.interval_records.drain(0..drop_count);
+                        if ctx.output.count_interval_retention_drops {
+                            ctx.recorder.counters.intervals_dropped += drop_count as u64;
+                        }
+                    }
+                }
+
+                if let Some(writer) = ctx.recorder.csv_writer.as_mut() {
+                    for record in records {
+                        writer
+                            .push(record)
+                            .map_err(|err| SinkError::new(self.name(), event.kind(), err))?;
+                    }
+                }
+            }
             MonitorEvent::Spike { event } => {
                 if ctx.recorder.streams.contains(ArtifactKind::SpikeEvents) {
                     push_artifact_event(
@@ -258,6 +294,20 @@ impl MonitorEventSink for RecorderSink {
                     "foreground_events",
                     |c| c.foreground_event_count += 1,
                 );
+            }
+            MonitorEvent::ScxEvent { event } => {
+                if ctx.recorder.streams.contains(ArtifactKind::ScxEvents) {
+                    push_artifact_event(
+                        ctx.recorder,
+                        ArtifactKind::ScxEvents,
+                        event.as_ref(),
+                        "scx_events",
+                        |c| c.scx_event_count += 1,
+                    );
+                } else {
+                    ctx.recorder.buffers.scx_events.push((**event).clone());
+                    ctx.recorder.counters.scx_event_count += 1;
+                }
             }
             MonitorEvent::FocusChanged {
                 elapsed_ms,
@@ -521,6 +571,7 @@ mod tests {
         let output = MonitorOutputConfig {
             json_stream: true,
             verbose: false,
+            ..MonitorOutputConfig::default()
         };
         let mut recorder = LiveRecorder::default();
         recorder.exporters.prometheus_state = Some(std::sync::Arc::new(

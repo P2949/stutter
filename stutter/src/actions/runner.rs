@@ -1,12 +1,18 @@
-use std::path::Path;
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 
 use crate::{
-    actions::{ActionError, ActionOutcome, ActionState, RollbackToken, SafetyClass, TuningAction},
+    actions::{
+        ActionError, ActionOutcome, ActionPhase, ActionState, RollbackToken, SafetyClass,
+        TuningAction,
+    },
     audit::{AuditEvent, append_audit_event_to_path, unix_nanos_now},
     daemon::DaemonConfig,
     daemon_policy::{
         ActionDescriptor, ActionSource, DaemonMode, DaemonPolicy, DaemonPolicyBuildInput,
-        PolicyDecisionKind, PolicyIntent, build_daemon_policy,
+        DaemonPolicyContext, PolicyDecisionKind, PolicyIntent, build_daemon_policy,
     },
 };
 
@@ -20,6 +26,9 @@ pub struct AuditedActionResult {
 #[derive(Clone, Debug)]
 pub struct ActionRunPolicy {
     pub policy: DaemonPolicy,
+    pub context: DaemonPolicyContext,
+    pub max_affected_tasks: Option<usize>,
+    pub max_total_duration: Option<Duration>,
     pub dry_run: bool,
 }
 
@@ -63,8 +72,31 @@ impl ActionRunPolicy {
                 config: &config,
                 remote_context: None,
             }),
+            context: DaemonPolicyContext::default(),
+            max_affected_tasks: None,
+            max_total_duration: None,
             dry_run,
         }
+    }
+
+    pub fn with_context(mut self, context: DaemonPolicyContext) -> Self {
+        self.context = context;
+        self
+    }
+
+    pub fn with_capabilities(mut self, capabilities: crate::daemon::DaemonCapabilities) -> Self {
+        self.context.capabilities = Some(capabilities);
+        self
+    }
+
+    pub fn with_max_affected_tasks(mut self, max_affected_tasks: usize) -> Self {
+        self.max_affected_tasks = Some(max_affected_tasks);
+        self
+    }
+
+    pub fn with_max_total_duration(mut self, max_total_duration: Duration) -> Self {
+        self.max_total_duration = Some(max_total_duration);
+        self
     }
 
     fn policy_intent(&self) -> PolicyIntent {
@@ -78,14 +110,93 @@ impl ActionRunPolicy {
 
 fn check_action_with_explanation(
     policy: &DaemonPolicy,
+    context: &DaemonPolicyContext,
     intent: PolicyIntent,
     descriptor: &ActionDescriptor,
 ) -> Result<(), ActionError> {
-    let explanation = policy.explain_action(intent, descriptor);
+    let explanation = policy.explain_action_with_context(intent, descriptor, context);
     match explanation.decision {
         PolicyDecisionKind::Allowed => Ok(()),
         PolicyDecisionKind::Rejected { .. } => {
             Err(ActionError::policy_rejected(explanation.final_reason))
+        }
+    }
+}
+
+fn append_runner_audit_event(
+    audit_path: &Path,
+    base_event: &AuditEvent,
+    phase: Option<ActionPhase>,
+    success: bool,
+    affected_tasks: usize,
+    restore_path: Option<PathBuf>,
+    error_category: Option<String>,
+    message: impl Into<String>,
+) {
+    let mut event = base_event.clone();
+    event.unix_nanos = unix_nanos_now();
+    event.action_phase = phase;
+    event.success = success;
+    event.affected_tasks = affected_tasks;
+    event.restore_path = restore_path;
+    event.error_category = error_category;
+    event.message = message.into();
+
+    if let Err(audit_err) = append_audit_event_to_path(audit_path, &event) {
+        log::warn!(
+            "failed to write audit event to {}: {audit_err:#}",
+            audit_path.display()
+        );
+    }
+}
+
+fn total_timeout_error(
+    started: Instant,
+    max_total_duration: Option<Duration>,
+    phase: ActionPhase,
+) -> Option<ActionError> {
+    let max_total_duration = max_total_duration?;
+    let elapsed = started.elapsed();
+
+    (elapsed > max_total_duration)
+        .then(|| ActionError::timeout(phase, elapsed.as_millis(), max_total_duration.as_millis()))
+}
+
+fn rollback_after_timeout<A>(
+    action: &A,
+    rollback: &RollbackToken,
+    timeout_error: ActionError,
+    audit_path: &Path,
+    audit_event: &AuditEvent,
+) -> ActionError
+where
+    A: TuningAction,
+{
+    let ActionError::Timeout {
+        phase,
+        elapsed_ms,
+        timeout_ms,
+    } = timeout_error
+    else {
+        return timeout_error;
+    };
+
+    match action.rollback(rollback) {
+        Ok(()) => {
+            append_runner_audit_event(
+                audit_path,
+                audit_event,
+                Some(ActionPhase::Rollback),
+                true,
+                rollback.affected_tasks(),
+                rollback.restore_path().cloned(),
+                None,
+                "rollback completed after action timeout",
+            );
+            ActionError::timeout_rollback_completed(phase, elapsed_ms, timeout_ms)
+        }
+        Err(rollback_error) => {
+            ActionError::timeout_rollback_failure(phase, elapsed_ms, timeout_ms, rollback_error)
         }
     }
 }
@@ -117,6 +228,7 @@ where
 {
     let dry_run = run_policy.dry_run;
     let started_unix_nanos = unix_nanos_now();
+    let started_instant = Instant::now();
     let descriptor = action.descriptor();
     let action_id = descriptor.action_id.clone();
     let safety_class = descriptor.safety_class.clone();
@@ -139,11 +251,50 @@ where
     let result = (|| -> Result<AuditedActionResult, ActionError> {
         audit_event.action_phase = Some(crate::actions::ActionPhase::Preflight);
         let preflight_warnings = action.preflight().map_err(ActionError::preflight)?;
+        append_runner_audit_event(
+            audit_path,
+            &audit_event,
+            Some(crate::actions::ActionPhase::Preflight),
+            true,
+            0,
+            None,
+            None,
+            "preflight successful",
+        );
+        if let Some(timeout) = total_timeout_error(
+            started_instant,
+            run_policy.max_total_duration,
+            ActionPhase::Preflight,
+        ) {
+            return Err(timeout);
+        }
 
         if dry_run {
             audit_event.action_phase = Some(crate::actions::ActionPhase::DryRun);
-            check_action_with_explanation(&run_policy.policy, PolicyIntent::DryRun, &descriptor)?;
+            check_action_with_explanation(
+                &run_policy.policy,
+                &run_policy.context,
+                PolicyIntent::DryRun,
+                &descriptor,
+            )?;
             let state = action.dry_run().map_err(ActionError::dry_run)?;
+            append_runner_audit_event(
+                audit_path,
+                &audit_event,
+                Some(crate::actions::ActionPhase::DryRun),
+                true,
+                state.affected_tasks,
+                None,
+                None,
+                "dry run successful",
+            );
+            if let Some(timeout) = total_timeout_error(
+                started_instant,
+                run_policy.max_total_duration,
+                ActionPhase::DryRun,
+            ) {
+                return Err(timeout);
+            }
             audit_event.success = true;
             audit_event.affected_tasks = state.affected_tasks;
             audit_event.action_phase = None;
@@ -168,19 +319,118 @@ where
                 outcome,
             })
         } else {
+            audit_event.action_phase = Some(crate::actions::ActionPhase::DryRun);
+            check_action_with_explanation(
+                &run_policy.policy,
+                &run_policy.context,
+                PolicyIntent::DryRun,
+                &descriptor,
+            )?;
+            let dry_run_state = action.dry_run().map_err(ActionError::dry_run)?;
+            append_runner_audit_event(
+                audit_path,
+                &audit_event,
+                Some(crate::actions::ActionPhase::DryRun),
+                true,
+                dry_run_state.affected_tasks,
+                None,
+                None,
+                "pre-apply dry run successful",
+            );
+            if let Some(timeout) = total_timeout_error(
+                started_instant,
+                run_policy.max_total_duration,
+                ActionPhase::DryRun,
+            ) {
+                return Err(timeout);
+            }
+            if let Some(max_affected_tasks) = run_policy.max_affected_tasks
+                && dry_run_state.affected_tasks > max_affected_tasks
+            {
+                return Err(ActionError::scope_limit_exceeded(
+                    dry_run_state.affected_tasks,
+                    max_affected_tasks,
+                ));
+            }
+
             audit_event.action_phase = Some(crate::actions::ActionPhase::Apply);
-            check_action_with_explanation(&run_policy.policy, PolicyIntent::Apply, &descriptor)?;
+            check_action_with_explanation(
+                &run_policy.policy,
+                &run_policy.context,
+                PolicyIntent::Apply,
+                &descriptor,
+            )?;
             let rollback = action.apply().map_err(ActionError::apply)?;
             audit_event.affected_tasks = rollback.affected_tasks();
             audit_event.restore_path = rollback.restore_path().cloned();
+            append_runner_audit_event(
+                audit_path,
+                &audit_event,
+                Some(crate::actions::ActionPhase::Apply),
+                true,
+                rollback.affected_tasks(),
+                rollback.restore_path().cloned(),
+                None,
+                "apply successful",
+            );
+            if let Some(timeout) = total_timeout_error(
+                started_instant,
+                run_policy.max_total_duration,
+                ActionPhase::Apply,
+            ) {
+                audit_event.action_phase = Some(crate::actions::ActionPhase::Rollback);
+                return Err(rollback_after_timeout(
+                    action,
+                    &rollback,
+                    timeout,
+                    audit_path,
+                    &audit_event,
+                ));
+            }
 
             audit_event.action_phase = Some(crate::actions::ActionPhase::Verify);
             let state = match action.verify() {
-                Ok(state) => state,
+                Ok(state) => {
+                    append_runner_audit_event(
+                        audit_path,
+                        &audit_event,
+                        Some(crate::actions::ActionPhase::Verify),
+                        true,
+                        state.affected_tasks,
+                        rollback.restore_path().cloned(),
+                        None,
+                        "verify successful",
+                    );
+                    if let Some(timeout) = total_timeout_error(
+                        started_instant,
+                        run_policy.max_total_duration,
+                        ActionPhase::Verify,
+                    ) {
+                        audit_event.action_phase = Some(crate::actions::ActionPhase::Rollback);
+                        return Err(rollback_after_timeout(
+                            action,
+                            &rollback,
+                            timeout,
+                            audit_path,
+                            &audit_event,
+                        ));
+                    }
+                    state
+                }
                 Err(verify_err) => {
                     audit_event.action_phase = Some(crate::actions::ActionPhase::Rollback);
                     match action.rollback(&rollback) {
                         Ok(()) => {
+                            append_runner_audit_event(
+                                audit_path,
+                                &audit_event,
+                                Some(crate::actions::ActionPhase::Rollback),
+                                true,
+                                rollback.affected_tasks(),
+                                rollback.restore_path().cloned(),
+                                None,
+                                "rollback completed after verify failure",
+                            );
                             return Err(ActionError::verify_rollback_completed(verify_err));
                         }
                         Err(rollback_err) => {
@@ -223,12 +473,16 @@ where
         audit_event.message = err.human_message();
     }
 
-    if let Err(audit_err) = append_audit_event_to_path(audit_path, &audit_event) {
-        log::warn!(
-            "failed to write audit event to {}: {audit_err:#}",
-            audit_path.display()
-        );
-    }
+    append_runner_audit_event(
+        audit_path,
+        &audit_event,
+        audit_event.action_phase,
+        audit_event.success,
+        audit_event.affected_tasks,
+        audit_event.restore_path.clone(),
+        audit_event.error_category.clone(),
+        audit_event.message.clone(),
+    );
 
     result
 }
@@ -391,6 +645,32 @@ mod tests {
         dir
     }
 
+    fn all_capabilities_available() -> crate::daemon::DaemonCapabilities {
+        crate::daemon::DaemonCapabilities {
+            kernel_release: Some("6.9.1-test".to_owned()),
+            btf_available: true,
+            sched_tracepoints_available: true,
+            perf_permissions_likely: true,
+            perf_event_paranoid: Some(1),
+            cgroup_v2_available: true,
+            sched_ext_available: true,
+            uclamp_available: true,
+            ionice_available: true,
+            irq_affinity_available: true,
+            gpu_sysfs_available: true,
+        }
+    }
+
+    fn terminal_event(events: &[crate::audit::AuditEvent]) -> &crate::audit::AuditEvent {
+        events.last().expect("expected at least one audit event")
+    }
+
+    fn action_phases(
+        events: &[crate::audit::AuditEvent],
+    ) -> Vec<Option<crate::actions::ActionPhase>> {
+        events.iter().map(|event| event.action_phase).collect()
+    }
+
     #[test]
     fn action_run_policy_constructors_resolve_policies_through_builder() {
         let config = crate::daemon::DaemonConfig {
@@ -406,6 +686,7 @@ mod tests {
 
         assert_eq!(run_policy.policy, expected);
         assert!(!run_policy.dry_run);
+        assert_eq!(run_policy.max_affected_tasks, None);
     }
 
     #[test]
@@ -422,7 +703,7 @@ mod tests {
         );
 
         assert!(result.is_err());
-        assert_eq!(action.events(), vec!["preflight"]);
+        assert_eq!(action.events(), vec!["preflight", "dry_run"]);
         assert!(!action.applied());
         assert!(!action.rolled_back());
 
@@ -431,14 +712,94 @@ mod tests {
         assert!(err.to_string().contains("policy rejected"));
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(!events[0].success);
-        assert_eq!(events[0].error_category.as_deref(), Some("policy_rejected"));
-        assert!(events[0].message.contains("policy rejected"));
+        assert_eq!(
+            action_phases(&events),
+            vec![
+                Some(crate::actions::ActionPhase::Preflight),
+                Some(crate::actions::ActionPhase::DryRun),
+                Some(crate::actions::ActionPhase::Preflight),
+            ]
+        );
+        let terminal = terminal_event(&events);
+        assert!(!terminal.success);
+        assert_eq!(terminal.error_category.as_deref(), Some("policy_rejected"));
+        assert!(terminal.message.contains("policy rejected"));
         assert!(
-            events[0]
+            terminal
                 .message
                 .contains("safety class ReversibleMediumRisk")
+        );
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn runner_context_capability_rejection_happens_before_apply() {
+        let dir = temp_dir("capability-rejection");
+        let audit_path = dir.join("audit.jsonl");
+        let action = FakeAction::new().with_action_id("uclamp:min");
+        let mut capabilities = all_capabilities_available();
+        capabilities.uclamp_available = false;
+
+        let result = run_audited_action_with_audit_path(
+            "fake-controller",
+            &action,
+            apply_policy().with_capabilities(capabilities),
+            &audit_path,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(action.events(), vec!["preflight"]);
+        assert!(!action.applied());
+        assert!(!action.rolled_back());
+
+        let err = result.unwrap_err();
+        assert!(matches!(err, ActionError::PolicyRejected { .. }));
+        assert!(err.to_string().contains("uclamp"));
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 2);
+        let terminal = terminal_event(&events);
+        assert!(!terminal.success);
+        assert_eq!(terminal.error_category.as_deref(), Some("policy_rejected"));
+        assert!(terminal.message.contains("uclamp"));
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn runner_scope_limit_rejection_happens_after_dry_run_before_apply() {
+        let dir = temp_dir("scope-limit");
+        let audit_path = dir.join("audit.jsonl");
+        let action = FakeAction::new().with_affected_tasks(8);
+
+        let result = run_audited_action_with_audit_path(
+            "fake-controller",
+            &action,
+            apply_policy().with_max_affected_tasks(3),
+            &audit_path,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(action.events(), vec!["preflight", "dry_run"]);
+        assert!(!action.applied());
+        assert!(!action.rolled_back());
+
+        let err = result.unwrap_err();
+        assert!(matches!(err, ActionError::ScopeLimitExceeded { .. }));
+        assert!(err.to_string().contains("exceeding scope limit 3"));
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 3);
+        let terminal = terminal_event(&events);
+        assert!(!terminal.success);
+        assert_eq!(
+            terminal.error_category.as_deref(),
+            Some("scope_limit_exceeded")
+        );
+        assert_eq!(
+            terminal.action_phase,
+            Some(crate::actions::ActionPhase::DryRun)
         );
 
         fs::remove_dir_all(dir).ok();
@@ -468,10 +829,11 @@ mod tests {
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
         assert_eq!(events.len(), 1);
-        assert!(!events[0].success);
-        assert_eq!(events[0].command, "fake-controller");
-        assert!(events[0].message.contains("preflight failed"));
-        assert!(events[0].message.contains("fake preflight failure"));
+        let terminal = terminal_event(&events);
+        assert!(!terminal.success);
+        assert_eq!(terminal.command, "fake-controller");
+        assert!(terminal.message.contains("preflight failed"));
+        assert!(terminal.message.contains("fake preflight failure"));
 
         fs::remove_dir_all(dir).ok();
     }
@@ -490,7 +852,7 @@ mod tests {
         );
 
         assert!(result.is_err());
-        assert_eq!(action.events(), vec!["preflight", "apply"]);
+        assert_eq!(action.events(), vec!["preflight", "dry_run", "apply"]);
         assert!(!action.applied());
         assert!(!action.rolled_back());
 
@@ -499,10 +861,11 @@ mod tests {
         assert!(err.contains("fake apply failure"));
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(!events[0].success);
-        assert!(events[0].message.contains("apply failed"));
-        assert!(events[0].message.contains("fake apply failure"));
+        assert_eq!(events.len(), 3);
+        let terminal = terminal_event(&events);
+        assert!(!terminal.success);
+        assert!(terminal.message.contains("apply failed"));
+        assert!(terminal.message.contains("fake apply failure"));
 
         fs::remove_dir_all(dir).ok();
     }
@@ -523,7 +886,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             action.events(),
-            vec!["preflight", "apply", "verify", "rollback"]
+            vec!["preflight", "dry_run", "apply", "verify", "rollback"]
         );
         assert!(!action.applied());
         assert!(action.rolled_back());
@@ -534,15 +897,19 @@ mod tests {
         assert!(err.contains("fake verify failure"));
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(!events[0].success);
-        assert_eq!(events[0].affected_tasks, 5);
+        assert_eq!(events.len(), 5);
+        assert!(events.iter().any(|event| event.action_phase
+            == Some(crate::actions::ActionPhase::Rollback)
+            && event.success));
+        let terminal = terminal_event(&events);
+        assert!(!terminal.success);
+        assert_eq!(terminal.affected_tasks, 5);
         assert_eq!(
-            events[0].restore_path,
+            terminal.restore_path,
             Some(PathBuf::from("/tmp/stutter-fake-action-restore.json"))
         );
-        assert!(events[0].message.contains("verify failed"));
-        assert!(events[0].message.contains("rollback completed"));
+        assert!(terminal.message.contains("verify failed"));
+        assert!(terminal.message.contains("rollback completed"));
 
         fs::remove_dir_all(dir).ok();
     }
@@ -563,7 +930,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             action.events(),
-            vec!["preflight", "apply", "verify", "rollback"]
+            vec!["preflight", "dry_run", "apply", "verify", "rollback"]
         );
         assert!(action.applied());
         assert!(!action.rolled_back());
@@ -574,12 +941,13 @@ mod tests {
         assert!(err.contains("fake rollback failure"));
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(!events[0].success);
-        assert_eq!(events[0].affected_tasks, 5);
-        assert!(events[0].message.contains("emergency rollback failed"));
-        assert!(events[0].message.contains("fake verify failure"));
-        assert!(events[0].message.contains("fake rollback failure"));
+        assert_eq!(events.len(), 4);
+        let terminal = terminal_event(&events);
+        assert!(!terminal.success);
+        assert_eq!(terminal.affected_tasks, 5);
+        assert!(terminal.message.contains("emergency rollback failed"));
+        assert!(terminal.message.contains("fake verify failure"));
+        assert!(terminal.message.contains("fake rollback failure"));
 
         fs::remove_dir_all(dir).ok();
     }
@@ -611,7 +979,7 @@ mod tests {
         );
         assert_eq!(
             action.events(),
-            vec!["preflight", "apply", "slow_apply", "verify"]
+            vec!["preflight", "dry_run", "apply", "slow_apply", "verify"]
         );
         assert!(action.applied());
         assert!(!action.rolled_back());
@@ -625,10 +993,66 @@ mod tests {
         );
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(events[0].success);
-        assert_eq!(events[0].affected_tasks, 9);
-        assert_eq!(events[0].message, "action applied and verified");
+        assert_eq!(
+            action_phases(&events),
+            vec![
+                Some(crate::actions::ActionPhase::Preflight),
+                Some(crate::actions::ActionPhase::DryRun),
+                Some(crate::actions::ActionPhase::Apply),
+                Some(crate::actions::ActionPhase::Verify),
+                None,
+            ]
+        );
+        let terminal = terminal_event(&events);
+        assert!(terminal.success);
+        assert_eq!(terminal.affected_tasks, 9);
+        assert_eq!(terminal.message, "action applied and verified");
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn runner_timeout_after_apply_rolls_back_mutation() {
+        let dir = temp_dir("timeout-after-apply");
+        let audit_path = dir.join("audit.jsonl");
+        let action = FakeAction::new()
+            .with_slow_apply()
+            .with_slow_apply_duration(Duration::from_millis(25));
+
+        let result = run_audited_action_with_audit_path(
+            "fake-controller",
+            &action,
+            apply_policy().with_max_total_duration(Duration::from_millis(1)),
+            &audit_path,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            action.events(),
+            vec!["preflight", "dry_run", "apply", "slow_apply", "rollback"]
+        );
+        assert!(!action.applied());
+        assert!(action.rolled_back());
+
+        let err = result.unwrap_err();
+        assert!(matches!(err, ActionError::TimeoutRollbackCompleted { .. }));
+        assert!(err.to_string().contains("rollback completed"));
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert!(events.iter().any(|event| event.action_phase
+            == Some(crate::actions::ActionPhase::Rollback)
+            && event.success
+            && event.message.contains("action timeout")));
+        let terminal = terminal_event(&events);
+        assert!(!terminal.success);
+        assert_eq!(
+            terminal.error_category.as_deref(),
+            Some("timeout_rollback_completed")
+        );
+        assert_eq!(
+            terminal.action_phase,
+            Some(crate::actions::ActionPhase::Apply)
+        );
 
         fs::remove_dir_all(dir).ok();
     }
@@ -654,11 +1078,12 @@ mod tests {
         assert_eq!(result.rollback, None);
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(events[0].success);
-        assert!(events[0].dry_run);
-        assert_eq!(events[0].affected_tasks, 7);
-        assert_eq!(events[0].message, "dry run successful");
+        assert_eq!(events.len(), 3);
+        let terminal = terminal_event(&events);
+        assert!(terminal.success);
+        assert!(terminal.dry_run);
+        assert_eq!(terminal.affected_tasks, 7);
+        assert_eq!(terminal.message, "dry run successful");
 
         fs::remove_dir_all(dir).ok();
     }
@@ -670,6 +1095,9 @@ mod tests {
         let action = FakeAction::new().with_affected_tasks(11);
         let run_policy = ActionRunPolicy {
             policy: DaemonPolicy::observe(ActionSource::Test),
+            context: DaemonPolicyContext::default(),
+            max_affected_tasks: None,
+            max_total_duration: None,
             dry_run: true,
         };
 
@@ -684,10 +1112,11 @@ mod tests {
         assert_eq!(result.rollback, None);
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(events[0].success);
-        assert!(events[0].dry_run);
-        assert_eq!(events[0].message, "dry run successful");
+        assert_eq!(events.len(), 3);
+        let terminal = terminal_event(&events);
+        assert!(terminal.success);
+        assert!(terminal.dry_run);
+        assert_eq!(terminal.message, "dry run successful");
 
         fs::remove_dir_all(dir).ok();
     }
@@ -725,16 +1154,17 @@ mod tests {
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
         assert_eq!(events.len(), 1);
-        assert!(!events[0].success);
-        assert!(!events[0].dry_run);
-        assert!(events[0].message.contains("preflight failed"));
-        assert!(events[0].message.contains("preflight intentional failure"));
+        let terminal = terminal_event(&events);
+        assert!(!terminal.success);
+        assert!(!terminal.dry_run);
+        assert!(terminal.message.contains("preflight failed"));
+        assert!(terminal.message.contains("preflight intentional failure"));
         assert_eq!(
-            events[0].action_phase,
+            terminal.action_phase,
             Some(crate::actions::ActionPhase::Preflight)
         );
         assert_eq!(
-            events[0].error_category.as_deref(),
+            terminal.error_category.as_deref(),
             Some("preflight_failure")
         );
         fs::remove_dir_all(dir).ok();
@@ -758,11 +1188,12 @@ mod tests {
         assert!(!log.rolled_back.get());
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(events[0].success);
-        assert!(events[0].dry_run);
-        assert_eq!(events[0].affected_tasks, 5);
-        assert_eq!(events[0].message, "dry run successful");
+        assert_eq!(events.len(), 3);
+        let terminal = terminal_event(&events);
+        assert!(terminal.success);
+        assert!(terminal.dry_run);
+        assert_eq!(terminal.affected_tasks, 5);
+        assert_eq!(terminal.message, "dry run successful");
         fs::remove_dir_all(dir).ok();
     }
 
@@ -777,16 +1208,17 @@ mod tests {
             run_audited_action_with_audit_path("test-cmd", &action, apply_policy(), &audit_path);
         assert!(result.is_err());
 
-        assert_eq!(*log.events.borrow(), vec!["preflight", "apply"]);
+        assert_eq!(*log.events.borrow(), vec!["preflight", "dry_run", "apply"]);
         assert!(!log.mutated.get());
         assert!(!log.rolled_back.get());
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(!events[0].success);
-        assert!(!events[0].dry_run);
-        assert!(events[0].message.contains("apply failed"));
-        assert!(events[0].message.contains("apply intentional failure"));
+        assert_eq!(events.len(), 3);
+        let terminal = terminal_event(&events);
+        assert!(!terminal.success);
+        assert!(!terminal.dry_run);
+        assert!(terminal.message.contains("apply failed"));
+        assert!(terminal.message.contains("apply intentional failure"));
         fs::remove_dir_all(dir).ok();
     }
 
@@ -803,7 +1235,7 @@ mod tests {
 
         assert_eq!(
             *log.events.borrow(),
-            vec!["preflight", "apply", "verify", "rollback"]
+            vec!["preflight", "dry_run", "apply", "verify", "rollback"]
         );
         assert!(!log.mutated.get());
         assert!(log.rolled_back.get());
@@ -813,13 +1245,14 @@ mod tests {
         assert!(err.contains("rollback completed"));
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(!events[0].success);
-        assert!(!events[0].dry_run);
-        assert_eq!(events[0].affected_tasks, 5);
-        assert_eq!(events[0].restore_path, Some(PathBuf::from("/tmp/restore")));
-        assert!(events[0].message.contains("verify failed"));
-        assert!(events[0].message.contains("rollback completed"));
+        assert_eq!(events.len(), 5);
+        let terminal = terminal_event(&events);
+        assert!(!terminal.success);
+        assert!(!terminal.dry_run);
+        assert_eq!(terminal.affected_tasks, 5);
+        assert_eq!(terminal.restore_path, Some(PathBuf::from("/tmp/restore")));
+        assert!(terminal.message.contains("verify failed"));
+        assert!(terminal.message.contains("rollback completed"));
         fs::remove_dir_all(dir).ok();
     }
 
@@ -838,7 +1271,7 @@ mod tests {
 
         assert_eq!(
             *log.events.borrow(),
-            vec!["preflight", "apply", "verify", "rollback"]
+            vec!["preflight", "dry_run", "apply", "verify", "rollback"]
         );
         assert!(log.mutated.get());
         assert!(!log.rolled_back.get());
@@ -849,20 +1282,21 @@ mod tests {
         assert!(err.contains("rollback intentional failure"));
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(!events[0].success);
-        assert!(!events[0].dry_run);
-        assert_eq!(events[0].affected_tasks, 5);
-        assert_eq!(events[0].restore_path, Some(PathBuf::from("/tmp/restore")));
-        assert!(events[0].message.contains("emergency rollback failed"));
-        assert!(events[0].message.contains("verify intentional failure"));
-        assert!(events[0].message.contains("rollback intentional failure"));
+        assert_eq!(events.len(), 4);
+        let terminal = terminal_event(&events);
+        assert!(!terminal.success);
+        assert!(!terminal.dry_run);
+        assert_eq!(terminal.affected_tasks, 5);
+        assert_eq!(terminal.restore_path, Some(PathBuf::from("/tmp/restore")));
+        assert!(terminal.message.contains("emergency rollback failed"));
+        assert!(terminal.message.contains("verify intentional failure"));
+        assert!(terminal.message.contains("rollback intentional failure"));
         assert_eq!(
-            events[0].action_phase,
+            terminal.action_phase,
             Some(crate::actions::ActionPhase::EmergencyRollback)
         );
         assert_eq!(
-            events[0].error_category.as_deref(),
+            terminal.error_category.as_deref(),
             Some("emergency_rollback_failure")
         );
         fs::remove_dir_all(dir).ok();

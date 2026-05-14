@@ -1,0 +1,60 @@
+# Copyright 2026 Gentoo Authors
+# Distributed under the terms of the GNU General Public License v2
+
+EAPI=8
+
+inherit cargo systemd
+
+DESCRIPTION="Scheduler latency recorder and conservative autotune daemon"
+HOMEPAGE="https://github.com/P2949/stutter"
+EGIT_REPO_URI="https://github.com/P2949/stutter.git"
+
+if [[ ${PV} == 9999 ]]; then
+	inherit git-r3
+fi
+
+LICENSE="MIT"
+SLOT="0"
+KEYWORDS=""
+IUSE="systemd openrc"
+
+BDEPEND="
+	virtual/rust
+	sys-devel/clang
+	sys-devel/llvm
+"
+RDEPEND="
+	acct-group/stutter
+	acct-user/stutter
+"
+
+src_compile() {
+	RUSTUP_TOOLCHAIN=nightly cargo_src_compile -p stutter
+}
+
+src_install() {
+	dobin target/release/stutter
+	dodoc docs/INSTALL.md docs/PACKAGING.md docs/DAEMON_CONTRACT.md
+
+	if use systemd; then
+		systemd_dounit packaging/systemd/stutter-agent.service
+		systemd_dounit packaging/systemd/stutter-autotune-observe.service
+		systemd_dounit packaging/systemd/stutter-autotune-low-risk.service
+	fi
+
+	if use openrc; then
+		newinitd packaging/openrc/stutter-agent stutter-agent
+		newinitd packaging/openrc/stutter-autotune-observe stutter-autotune-observe
+		newinitd packaging/openrc/stutter-autotune-low-risk stutter-autotune-low-risk
+	fi
+
+	keepdir /etc/stutter
+	keepdir /var/lib/stutter
+	keepdir /var/log/stutter
+}
+
+pkg_postinst() {
+	elog "Run 'stutter service doctor --manager systemd-system --mode system-observe'"
+	elog "or 'stutter service doctor --manager openrc --mode system-observe' before enabling services."
+	elog "Low-risk apply mode remains opt-in and should be tested with restore dry-runs first."
+}

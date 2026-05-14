@@ -29,7 +29,10 @@ toml = { workspace = true }
 which = { workspace = true }
 
 axum = "0.7"
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service", "http1", "http2"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tower = "0.5"
 url = "2"
 tokio = { workspace = true, features = [
     "macros",
@@ -50,6 +53,8 @@ futures-util = "0.3.32"
  
 [features]
 default = []
+# Deprecated no-op compatibility alias. The autotune controller is now
+# unconditional; keep this only so old local build commands do not fail.
 autotune-controller = []
 otel = [
     "dep:opentelemetry",

@@ -12,7 +12,10 @@ use crate::{
         BlockIoRecord, CpuFreqRecord, FocusEvent, ForegroundEvent, FrameEvent, GpuSample,
         IntervalRecord, IrqEventRecord, MigrationEventRecord, SpikeEvent,
     },
+    scx::ScxEvent,
 };
+
+pub type DaemonEvent = MonitorEvent;
 
 #[derive(Clone, Debug)]
 pub enum MonitorEvent {
@@ -58,6 +61,9 @@ pub enum MonitorEvent {
     ForegroundEvent {
         event: Box<ForegroundEvent>,
     },
+    ScxEvent {
+        event: Box<ScxEvent>,
+    },
     Exec {
         elapsed_ms: u64,
         pid: u32,
@@ -96,22 +102,24 @@ pub enum MonitorEventDeliveryClass {
     Reliable,
     Conflated,
     Droppable,
+    AuditCritical,
 }
 
 impl MonitorEvent {
     pub fn delivery_class(&self) -> MonitorEventDeliveryClass {
         match self {
-            Self::Finished { .. }
-            | Self::DataQualityWarning { .. }
-            | Self::TargetSnapshot { .. }
+            Self::Finished { .. } | Self::DataQualityWarning { .. } | Self::Alert { .. } => {
+                MonitorEventDeliveryClass::AuditCritical
+            }
+            Self::TargetSnapshot { .. }
             | Self::FocusChanged { .. }
             | Self::FocusCleared { .. }
             | Self::ForegroundEvent { .. }
+            | Self::ScxEvent { .. }
             | Self::Exec { .. } => MonitorEventDeliveryClass::Reliable,
             Self::Interval { .. } => MonitorEventDeliveryClass::Conflated,
             Self::SchedulerSample { .. }
             | Self::Spike { .. }
-            | Self::Alert { .. }
             | Self::Frame { .. }
             | Self::GpuSample { .. }
             | Self::IrqEvent { .. }
@@ -136,6 +144,7 @@ impl MonitorEvent {
             Self::MigrationEvent { .. } => "migration_event",
             Self::CpuFreqSample { .. } => "cpu_freq_sample",
             Self::ForegroundEvent { .. } => "foreground_event",
+            Self::ScxEvent { .. } => "scx_event",
             Self::LiveDiagnosis { .. } => "live_diagnosis",
             Self::Exec { .. } => "exec",
             Self::DataQualityWarning { .. } => "data_quality_warning",
@@ -159,6 +168,7 @@ impl MonitorEvent {
             Self::MigrationEvent { event } => Some(event.elapsed_ms),
             Self::CpuFreqSample { event } => Some(event.elapsed_ms),
             Self::ForegroundEvent { event } => Some(event.elapsed_ms),
+            Self::ScxEvent { event } => Some(event.elapsed_ms),
             Self::LiveDiagnosis { entry } => Some(entry.elapsed_ms),
             Self::Exec { elapsed_ms, .. } => Some(*elapsed_ms),
             Self::DataQualityWarning { .. } => None,
@@ -236,6 +246,37 @@ mod tests {
     }
 
     #[test]
+    fn alert_event_is_audit_critical() {
+        let event = MonitorEvent::Alert {
+            payload: Box::new(crate::alert::AlertPayload {
+                title: "test".to_owned(),
+                message: "test alert".to_owned(),
+                task: 7,
+                active: true,
+                class: crate::process_tree::TaskClass::Unknown,
+                comm: "game".to_owned(),
+                process_pid: Some(7),
+                process_comm: "game".to_owned(),
+                latency_ns: 1_000_000,
+                latency_ms: 1,
+                cpu: 0,
+                prio: 120,
+                wakeup_ns: 10,
+                switch_ns: 20,
+                elapsed_ms: 42,
+                scx_ops: None,
+                scx_state: None,
+                scx_enable_seq: None,
+            }),
+        };
+
+        assert_eq!(
+            event.delivery_class(),
+            MonitorEventDeliveryClass::AuditCritical
+        );
+    }
+
+    #[test]
     fn focus_cleared_event_reports_kind_and_elapsed_ms() {
         let event = MonitorEvent::FocusCleared {
             elapsed_ms: 5678,
@@ -274,5 +315,21 @@ mod tests {
 
         assert_eq!(event.kind(), "scheduler_sample");
         assert_eq!(event.elapsed_ms(), None);
+    }
+
+    #[test]
+    fn scx_event_reports_kind_elapsed_and_reliable_delivery() {
+        let event = MonitorEvent::ScxEvent {
+            event: Box::new(crate::scx::ScxEvent {
+                elapsed_ms: 77,
+                state: Some("enabled".to_owned()),
+                ops: Some("scx_rusty".to_owned()),
+                enable_seq: Some("1".to_owned()),
+            }),
+        };
+
+        assert_eq!(event.kind(), "scx_event");
+        assert_eq!(event.elapsed_ms(), Some(77));
+        assert_eq!(event.delivery_class(), MonitorEventDeliveryClass::Reliable);
     }
 }

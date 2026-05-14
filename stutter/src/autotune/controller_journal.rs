@@ -7,46 +7,130 @@ use std::{
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::actions::RollbackToken;
+use crate::actions::{RollbackToken, SafetyClass};
 
 pub const CONTROLLER_JOURNAL_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ControllerJournalState {
+    Clean,
+    Planned,
+    Preflighted,
     Applying,
     Applied,
-    Clean,
+    Verifying,
+    Measuring,
+    Keeping,
+    Reverting,
+    Reverted,
+    Faulted,
+}
+
+impl ControllerJournalState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Clean => "clean",
+            Self::Planned => "planned",
+            Self::Preflighted => "preflighted",
+            Self::Applying => "applying",
+            Self::Applied => "applied",
+            Self::Verifying => "verifying",
+            Self::Measuring => "measuring",
+            Self::Keeping => "keeping",
+            Self::Reverting => "reverting",
+            Self::Reverted => "reverted",
+            Self::Faulted => "faulted",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum ControllerJournalRecord {
-    Applying {
-        schema_version: u32,
-        experiment_id: String,
-        action_id: String,
-        rollback_token: Option<RollbackToken>,
-    },
-    Applied {
-        schema_version: u32,
-        experiment_id: String,
-        action_id: String,
-        rollback_token: RollbackToken,
-    },
-    Clean {
-        schema_version: u32,
-    },
+pub struct ControllerJournalRecord {
+    pub schema_version: u32,
+    pub state: ControllerJournalState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experiment_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_result: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safety_class: Option<SafetyClass>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollback_token: Option<RollbackToken>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase_started_unix_nanos: Option<u128>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_unix_nanos: Option<u128>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fault_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ControllerJournalActionMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_result: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safety_class: Option<SafetyClass>,
+}
+
+impl ControllerJournalActionMetadata {
+    pub fn with_candidate(mut self, candidate: impl Into<String>) -> Self {
+        self.candidate = Some(candidate.into());
+        self
+    }
+
+    pub fn with_workload_identity(mut self, workload_identity: impl Into<String>) -> Self {
+        self.workload_identity = Some(workload_identity.into());
+        self
+    }
+
+    pub fn with_target_identity(mut self, target_identity: impl Into<String>) -> Self {
+        self.target_identity = Some(target_identity.into());
+        self
+    }
+
+    pub fn with_restore_command(mut self, restore_command: impl Into<String>) -> Self {
+        self.restore_command = Some(restore_command.into());
+        self
+    }
+
+    pub fn with_verify_result(mut self, verify_result: impl Into<String>) -> Self {
+        self.verify_result = Some(verify_result.into());
+        self
+    }
+
+    pub fn with_safety_class(mut self, safety_class: SafetyClass) -> Self {
+        self.safety_class = Some(safety_class);
+        self
+    }
 }
 
 impl ControllerJournalRecord {
     pub fn applying(experiment_id: impl Into<String>, action_id: impl Into<String>) -> Self {
-        Self::Applying {
-            schema_version: CONTROLLER_JOURNAL_SCHEMA_VERSION,
-            experiment_id: experiment_id.into(),
-            action_id: action_id.into(),
-            rollback_token: None,
-        }
+        Self::for_phase(
+            ControllerJournalState::Applying,
+            experiment_id,
+            action_id,
+            None,
+        )
     }
 
     pub fn applied(
@@ -54,38 +138,158 @@ impl ControllerJournalRecord {
         action_id: impl Into<String>,
         rollback_token: RollbackToken,
     ) -> Self {
-        Self::Applied {
-            schema_version: CONTROLLER_JOURNAL_SCHEMA_VERSION,
-            experiment_id: experiment_id.into(),
-            action_id: action_id.into(),
-            rollback_token,
-        }
+        Self::for_phase(
+            ControllerJournalState::Applied,
+            experiment_id,
+            action_id,
+            Some(rollback_token),
+        )
     }
 
     pub fn clean() -> Self {
-        Self::Clean {
+        Self {
             schema_version: CONTROLLER_JOURNAL_SCHEMA_VERSION,
+            state: ControllerJournalState::Clean,
+            experiment_id: None,
+            action_id: None,
+            candidate: None,
+            workload_identity: None,
+            target_identity: None,
+            restore_command: None,
+            verify_result: None,
+            safety_class: None,
+            rollback_token: None,
+            phase_started_unix_nanos: None,
+            updated_unix_nanos: None,
+            fault_reason: None,
         }
+    }
+
+    pub fn for_phase(
+        state: ControllerJournalState,
+        experiment_id: impl Into<String>,
+        action_id: impl Into<String>,
+        rollback_token: Option<RollbackToken>,
+    ) -> Self {
+        Self {
+            schema_version: CONTROLLER_JOURNAL_SCHEMA_VERSION,
+            state,
+            experiment_id: Some(experiment_id.into()),
+            action_id: Some(action_id.into()),
+            candidate: None,
+            workload_identity: None,
+            target_identity: None,
+            restore_command: None,
+            verify_result: None,
+            safety_class: None,
+            rollback_token,
+            phase_started_unix_nanos: Some(crate::audit::unix_nanos_now()),
+            updated_unix_nanos: Some(crate::audit::unix_nanos_now()),
+            fault_reason: None,
+        }
+    }
+
+    pub fn with_candidate(mut self, candidate: impl Into<String>) -> Self {
+        self.candidate = Some(candidate.into());
+        self
+    }
+
+    pub fn with_workload_identity(mut self, workload_identity: impl Into<String>) -> Self {
+        self.workload_identity = Some(workload_identity.into());
+        self
+    }
+
+    pub fn with_target_identity(mut self, target_identity: impl Into<String>) -> Self {
+        self.target_identity = Some(target_identity.into());
+        self
+    }
+
+    pub fn with_restore_command(mut self, restore_command: impl Into<String>) -> Self {
+        self.restore_command = Some(restore_command.into());
+        self
+    }
+
+    pub fn with_verify_result(mut self, verify_result: impl Into<String>) -> Self {
+        self.verify_result = Some(verify_result.into());
+        self
+    }
+
+    pub fn with_safety_class(mut self, safety_class: SafetyClass) -> Self {
+        self.safety_class = Some(safety_class);
+        self
+    }
+
+    pub fn with_fault_reason(mut self, fault_reason: impl Into<String>) -> Self {
+        self.fault_reason = Some(fault_reason.into());
+        self
+    }
+
+    pub fn with_metadata(mut self, metadata: ControllerJournalActionMetadata) -> Self {
+        if metadata.candidate.is_some() {
+            self.candidate = metadata.candidate;
+        }
+        if metadata.workload_identity.is_some() {
+            self.workload_identity = metadata.workload_identity;
+        }
+        if metadata.target_identity.is_some() {
+            self.target_identity = metadata.target_identity;
+        }
+        if metadata.restore_command.is_some() {
+            self.restore_command = metadata.restore_command;
+        }
+        if metadata.verify_result.is_some() {
+            self.verify_result = metadata.verify_result;
+        }
+        if metadata.safety_class.is_some() {
+            self.safety_class = metadata.safety_class;
+        }
+        self
     }
 
     pub fn schema_version(&self) -> u32 {
-        match self {
-            Self::Applying { schema_version, .. }
-            | Self::Applied { schema_version, .. }
-            | Self::Clean { schema_version } => *schema_version,
-        }
+        self.schema_version
     }
 
     pub fn state(&self) -> ControllerJournalState {
-        match self {
-            Self::Applying { .. } => ControllerJournalState::Applying,
-            Self::Applied { .. } => ControllerJournalState::Applied,
-            Self::Clean { .. } => ControllerJournalState::Clean,
-        }
+        self.state
     }
 
     pub fn is_clean(&self) -> bool {
-        matches!(self, Self::Clean { .. })
+        self.state == ControllerJournalState::Clean
+    }
+
+    pub fn experiment_action(&self) -> Option<(&str, &str)> {
+        Some((self.experiment_id.as_deref()?, self.action_id.as_deref()?))
+    }
+
+    pub fn rollback_token(&self) -> Option<&RollbackToken> {
+        self.rollback_token.as_ref()
+    }
+
+    pub fn is_active_experiment_state(&self) -> bool {
+        matches!(
+            self.state,
+            ControllerJournalState::Applying
+                | ControllerJournalState::Applied
+                | ControllerJournalState::Verifying
+                | ControllerJournalState::Measuring
+                | ControllerJournalState::Keeping
+                | ControllerJournalState::Reverting
+                | ControllerJournalState::Faulted
+        )
+    }
+
+    pub fn may_have_mutated_system(&self) -> bool {
+        matches!(
+            self.state,
+            ControllerJournalState::Applying
+                | ControllerJournalState::Applied
+                | ControllerJournalState::Verifying
+                | ControllerJournalState::Measuring
+                | ControllerJournalState::Keeping
+                | ControllerJournalState::Reverting
+                | ControllerJournalState::Faulted
+        )
     }
 }
 
@@ -99,6 +303,21 @@ pub fn default_controller_journal_path() -> PathBuf {
     path.push("autotune");
     path.push("controller_journal.json");
     path
+}
+
+pub fn journal_process_identity(
+    pid: u32,
+    starttime_ticks: Option<u64>,
+    active_task_count: Option<usize>,
+) -> String {
+    let starttime = starttime_ticks
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown".to_owned());
+    let mut identity = format!("pid:{pid}:starttime:{starttime}");
+    if let Some(active_task_count) = active_task_count {
+        identity.push_str(&format!(":active_tasks:{active_task_count}"));
+    }
+    identity
 }
 
 pub fn write_controller_journal_record(
@@ -184,6 +403,21 @@ pub fn read_controller_journal(path: &Path) -> anyhow::Result<ControllerJournalR
     Ok(record)
 }
 
+pub fn write_controller_journal_phase_with_metadata(
+    path: &Path,
+    state: ControllerJournalState,
+    experiment_id: &str,
+    action_id: &str,
+    rollback_token: Option<RollbackToken>,
+    metadata: ControllerJournalActionMetadata,
+) -> anyhow::Result<ControllerJournalRecord> {
+    let record =
+        ControllerJournalRecord::for_phase(state, experiment_id, action_id, rollback_token)
+            .with_metadata(metadata);
+    write_controller_journal_record(path, &record)?;
+    Ok(record)
+}
+
 pub fn write_controller_journal_applying(
     path: &Path,
     experiment_id: &str,
@@ -192,6 +426,22 @@ pub fn write_controller_journal_applying(
     let record = ControllerJournalRecord::applying(experiment_id, action_id);
     write_controller_journal_record(path, &record)?;
     Ok(record)
+}
+
+pub fn write_controller_journal_applying_with_metadata(
+    path: &Path,
+    experiment_id: &str,
+    action_id: &str,
+    metadata: ControllerJournalActionMetadata,
+) -> anyhow::Result<ControllerJournalRecord> {
+    write_controller_journal_phase_with_metadata(
+        path,
+        ControllerJournalState::Applying,
+        experiment_id,
+        action_id,
+        None,
+        metadata,
+    )
 }
 
 pub fn write_controller_journal_applied(
@@ -203,6 +453,23 @@ pub fn write_controller_journal_applied(
     let record = ControllerJournalRecord::applied(experiment_id, action_id, rollback_token);
     write_controller_journal_record(path, &record)?;
     Ok(record)
+}
+
+pub fn write_controller_journal_applied_with_metadata(
+    path: &Path,
+    experiment_id: &str,
+    action_id: &str,
+    rollback_token: RollbackToken,
+    metadata: ControllerJournalActionMetadata,
+) -> anyhow::Result<ControllerJournalRecord> {
+    write_controller_journal_phase_with_metadata(
+        path,
+        ControllerJournalState::Applied,
+        experiment_id,
+        action_id,
+        Some(rollback_token),
+        metadata,
+    )
 }
 
 pub fn write_controller_journal_clean(path: &Path) -> anyhow::Result<ControllerJournalRecord> {
@@ -269,7 +536,19 @@ mod tests {
     }
 
     #[test]
-    fn applying_journal_serializes_with_null_rollback_token() {
+    fn process_identity_label_includes_starttime_and_active_tasks_when_known() {
+        assert_eq!(
+            journal_process_identity(1234, Some(99), Some(7)),
+            "pid:1234:starttime:99:active_tasks:7"
+        );
+        assert_eq!(
+            journal_process_identity(1234, None, None),
+            "pid:1234:starttime:unknown"
+        );
+    }
+
+    #[test]
+    fn applying_journal_serializes_without_rollback_token_until_applied() {
         let record =
             ControllerJournalRecord::applying("experiment-1", "cpu-affinity-profile:game-main");
 
@@ -279,8 +558,13 @@ mod tests {
         assert_eq!(value["state"], "applying");
         assert_eq!(value["experiment_id"], "experiment-1");
         assert_eq!(value["action_id"], "cpu-affinity-profile:game-main");
-        assert!(value["rollback_token"].is_null());
+        assert!(value.get("rollback_token").is_none());
         assert_eq!(record.state(), ControllerJournalState::Applying);
+        assert_eq!(
+            record.experiment_action(),
+            Some(("experiment-1", "cpu-affinity-profile:game-main"))
+        );
+        assert!(record.is_active_experiment_state());
     }
 
     #[test]
@@ -300,6 +584,8 @@ mod tests {
         assert_eq!(value["rollback_token"]["kind"], "cpu-affinity-restore-file");
         assert_eq!(value["rollback_token"]["affected_tasks"], 31);
         assert_eq!(record.state(), ControllerJournalState::Applied);
+        assert!(record.rollback_token().is_some());
+        assert!(record.may_have_mutated_system());
     }
 
     #[test]
@@ -314,6 +600,61 @@ mod tests {
         assert!(value.get("action_id").is_none());
         assert!(value.get("rollback_token").is_none());
         assert!(record.is_clean());
+        assert!(!record.is_active_experiment_state());
+    }
+
+    #[test]
+    fn transaction_journal_supports_expanded_phases_and_metadata() {
+        let rollback = rollback_token();
+        let phases = [
+            ControllerJournalState::Planned,
+            ControllerJournalState::Preflighted,
+            ControllerJournalState::Applying,
+            ControllerJournalState::Applied,
+            ControllerJournalState::Verifying,
+            ControllerJournalState::Measuring,
+            ControllerJournalState::Keeping,
+            ControllerJournalState::Reverting,
+            ControllerJournalState::Reverted,
+            ControllerJournalState::Faulted,
+        ];
+
+        for phase in phases {
+            let record = ControllerJournalRecord::for_phase(
+                phase,
+                "experiment-1",
+                "cpu-affinity-profile:game-main",
+                matches!(
+                    phase,
+                    ControllerJournalState::Applied
+                        | ControllerJournalState::Verifying
+                        | ControllerJournalState::Measuring
+                        | ControllerJournalState::Keeping
+                        | ControllerJournalState::Reverting
+                        | ControllerJournalState::Faulted
+                )
+                .then(|| rollback.clone()),
+            )
+            .with_candidate("game-main")
+            .with_workload_identity("workload:game")
+            .with_target_identity("pid:1234:start:99")
+            .with_restore_command("stutter daemon emergency-restore")
+            .with_verify_result("pending")
+            .with_safety_class(SafetyClass::ReversibleLowRisk);
+
+            let value = serde_json::to_value(&record).unwrap();
+
+            assert_eq!(value["schema_version"], 1);
+            assert_eq!(record.state(), phase);
+            assert_eq!(record.candidate.as_deref(), Some("game-main"));
+            assert_eq!(record.workload_identity.as_deref(), Some("workload:game"));
+            assert_eq!(record.target_identity.as_deref(), Some("pid:1234:start:99"));
+            assert_eq!(
+                record.restore_command.as_deref(),
+                Some("stutter daemon emergency-restore")
+            );
+            assert_eq!(record.verify_result.as_deref(), Some("pending"));
+        }
     }
 
     #[test]
@@ -342,6 +683,50 @@ mod tests {
         assert_eq!(read_controller_journal(&path).unwrap(), clean);
         assert!(!temporary_journal_path(&path).exists());
 
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn metadata_aware_writer_persists_action_context() {
+        let dir = temp_dir("metadata-writer");
+        let path = dir.join("controller_journal.json");
+        let metadata = ControllerJournalActionMetadata::default()
+            .with_candidate("game-main")
+            .with_workload_identity("pid:1234:starttime:99")
+            .with_target_identity("pid:1234:starttime:99:active_tasks:31")
+            .with_restore_command("stutter autotune restore")
+            .with_verify_result("applied_pending_verify")
+            .with_safety_class(SafetyClass::ReversibleLowRisk);
+
+        let written = write_controller_journal_applied_with_metadata(
+            &path,
+            "experiment-1",
+            "cpu-affinity-profile:game-main",
+            rollback_token(),
+            metadata,
+        )
+        .unwrap();
+        let read = read_controller_journal(&path).unwrap();
+
+        assert_eq!(read, written);
+        assert_eq!(read.candidate.as_deref(), Some("game-main"));
+        assert_eq!(
+            read.workload_identity.as_deref(),
+            Some("pid:1234:starttime:99")
+        );
+        assert_eq!(
+            read.target_identity.as_deref(),
+            Some("pid:1234:starttime:99:active_tasks:31")
+        );
+        assert_eq!(
+            read.restore_command.as_deref(),
+            Some("stutter autotune restore")
+        );
+        assert_eq!(
+            read.verify_result.as_deref(),
+            Some("applied_pending_verify")
+        );
+        assert_eq!(read.safety_class, Some(SafetyClass::ReversibleLowRisk));
         fs::remove_dir_all(dir).ok();
     }
 

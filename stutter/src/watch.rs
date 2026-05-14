@@ -387,6 +387,9 @@ pub async fn apply_profile_command(input: ApplyProfileCommandInput) -> anyhow::R
         let result = tokio::task::spawn_blocking(move || {
             let run_policy = crate::actions::runner::ActionRunPolicy {
                 policy,
+                context: crate::daemon_policy::DaemonPolicyContext::default(),
+                max_affected_tasks: None,
+                max_total_duration: None,
                 dry_run: false,
             };
             crate::actions::runner::run_audited_action("apply-profile", &action, run_policy)

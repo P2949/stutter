@@ -9,6 +9,7 @@ use crate::{
         schema::{CURRENT_CONFIG_VERSION, ConfigDiagnostic, ParsedUserConfigFile, RawConfigFile},
         source::ConfigSource,
     },
+    daemon::{ActionSource, DaemonConfig, DaemonPreset, SystemHealthThresholds},
     error::ConfigError,
     remote::AgentAutotuneLimits,
 };
@@ -16,6 +17,8 @@ use crate::{
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct UserConfigFile {
     pub config_version: Option<u32>,
+
+    pub experimental: Option<bool>,
 
     pub summary_ms: Option<u64>,
     pub summary_period_ms: Option<u64>,
@@ -29,12 +32,26 @@ pub struct UserConfigFile {
     pub exclude_comm: Option<Vec<String>>,
     pub max_tasks: Option<usize>,
     pub retain_intervals: Option<usize>,
+    pub retention_max_run_count: Option<usize>,
+    pub retention_max_total_bytes: Option<u64>,
+    pub retention_max_age_seconds: Option<u64>,
+    pub retention_min_free_bytes: Option<u64>,
     pub foreground_window: Option<bool>,
     pub focus_source: Option<String>,
     pub foreground_source: Option<String>,
     pub foreground_poll_ms: Option<u64>,
     pub foreground_max_stale_ms: Option<u64>,
     pub foreground_include_title: Option<bool>,
+    pub daemon_preset: Option<String>,
+    pub daemon_enabled_action_families: Option<Vec<String>>,
+    pub daemon_denied_action_families: Option<Vec<String>>,
+    pub daemon_min_confidence: Option<f32>,
+    pub daemon_max_cpu_temp_celsius: Option<u32>,
+    pub daemon_max_gpu_temp_celsius: Option<u32>,
+    pub daemon_min_disk_available_bytes: Option<u64>,
+    pub daemon_max_memory_pressure_some_avg10_percent: Option<f32>,
+    pub daemon_allow_system_wide_actions: Option<bool>,
+    pub daemon_allow_high_risk: Option<bool>,
     #[allow(dead_code)]
     pub community_rules: Option<CommunityRulesConfigFile>,
     pub agent: Option<AgentConfigFile>,
@@ -182,6 +199,162 @@ pub fn agent_autotune_limits_from_user_config(
     autotune_limits.into_limits()
 }
 
+pub fn daemon_config_from_user_config(
+    config: Option<&UserConfigFile>,
+    preset_override: Option<&str>,
+    source: ActionSource,
+) -> Result<DaemonConfig> {
+    let preset = preset_override
+        .or_else(|| config.and_then(|config| config.daemon_preset.as_deref()))
+        .map(str::parse::<DaemonPreset>)
+        .transpose()?
+        .unwrap_or(DaemonPreset::ObserveOnly);
+
+    if let Some(config) = config {
+        validate_daemon_user_config(config)?;
+    }
+
+    let mut daemon_config = DaemonConfig::from_preset(preset, source);
+    apply_daemon_user_config_overrides(&mut daemon_config, config);
+    Ok(daemon_config)
+}
+
+pub fn daemon_health_thresholds_from_user_config(
+    config: Option<&UserConfigFile>,
+    preset_override: Option<&str>,
+    source: ActionSource,
+) -> Result<SystemHealthThresholds> {
+    Ok(
+        daemon_config_from_user_config(config, preset_override, source)?
+            .health
+            .thresholds(),
+    )
+}
+
+pub fn apply_daemon_user_config_overrides(
+    daemon_config: &mut DaemonConfig,
+    user_config: Option<&UserConfigFile>,
+) {
+    let Some(user_config) = user_config else {
+        return;
+    };
+
+    if let Some(families) = user_config.daemon_enabled_action_families.as_ref() {
+        daemon_config.safety.enabled_action_families = families.iter().cloned().collect();
+    }
+    if let Some(families) = user_config.daemon_denied_action_families.as_ref() {
+        daemon_config.safety.denied_action_families = families.iter().cloned().collect();
+    }
+    if let Some(min_confidence) = user_config.daemon_min_confidence {
+        daemon_config.safety.min_confidence = min_confidence;
+    }
+    if let Some(cpu_temp) = user_config.daemon_max_cpu_temp_celsius {
+        daemon_config.health.max_cpu_temp_celsius = cpu_temp;
+    }
+    if let Some(gpu_temp) = user_config.daemon_max_gpu_temp_celsius {
+        daemon_config.health.max_gpu_temp_celsius = gpu_temp;
+    }
+    if let Some(bytes) = user_config.daemon_min_disk_available_bytes {
+        daemon_config.health.min_disk_available_bytes = bytes;
+    }
+    if let Some(memory_pressure) = user_config.daemon_max_memory_pressure_some_avg10_percent {
+        daemon_config.health.max_memory_pressure_some_avg10_percent = memory_pressure;
+    }
+    if let Some(allow_system_wide) = user_config.daemon_allow_system_wide_actions {
+        daemon_config.safety.allow_system_wide_actions = allow_system_wide;
+    }
+    if let Some(allow_high_risk) = user_config.daemon_allow_high_risk {
+        daemon_config.safety.allow_high_risk = allow_high_risk;
+    }
+}
+
+pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
+    if let Some(preset) = config.daemon_preset.as_deref() {
+        preset
+            .parse::<crate::daemon::DaemonPreset>()
+            .context("invalid daemon_preset")?;
+    }
+
+    validate_action_families(
+        "daemon_enabled_action_families",
+        config.daemon_enabled_action_families.as_deref(),
+    )?;
+    validate_action_families(
+        "daemon_denied_action_families",
+        config.daemon_denied_action_families.as_deref(),
+    )?;
+
+    if let Some(confidence) = config.daemon_min_confidence
+        && (!confidence.is_finite() || !(0.0..=1.0).contains(&confidence))
+    {
+        anyhow::bail!("daemon_min_confidence must be a finite value between 0.0 and 1.0");
+    }
+    if let Some(cpu_temp) = config.daemon_max_cpu_temp_celsius
+        && !(40..=120).contains(&cpu_temp)
+    {
+        anyhow::bail!("daemon_max_cpu_temp_celsius must be between 40 and 120");
+    }
+    if let Some(gpu_temp) = config.daemon_max_gpu_temp_celsius
+        && !(40..=125).contains(&gpu_temp)
+    {
+        anyhow::bail!("daemon_max_gpu_temp_celsius must be between 40 and 125");
+    }
+    if let Some(bytes) = config.daemon_min_disk_available_bytes
+        && bytes == 0
+    {
+        anyhow::bail!("daemon_min_disk_available_bytes must be greater than zero");
+    }
+    if let Some(memory_pressure) = config.daemon_max_memory_pressure_some_avg10_percent
+        && (!memory_pressure.is_finite() || !(0.0..=100.0).contains(&memory_pressure))
+    {
+        anyhow::bail!(
+            "daemon_max_memory_pressure_some_avg10_percent must be a finite value between 0.0 and 100.0"
+        );
+    }
+
+    let experimental = config.experimental.unwrap_or(false);
+    if config.daemon_allow_system_wide_actions == Some(true) && !experimental {
+        anyhow::bail!(
+            "daemon_allow_system_wide_actions requires experimental = true in the user config"
+        );
+    }
+    if config.daemon_allow_high_risk == Some(true) && !experimental {
+        anyhow::bail!("daemon_allow_high_risk requires experimental = true in the user config");
+    }
+
+    Ok(())
+}
+
+fn validate_action_families(field: &str, families: Option<&[String]>) -> Result<()> {
+    let Some(families) = families else {
+        return Ok(());
+    };
+
+    if families.is_empty() {
+        anyhow::bail!("{field} must not be empty when present");
+    }
+
+    for family in families {
+        let trimmed = family.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("{field} contains an empty action family");
+        }
+        if trimmed != family {
+            anyhow::bail!("{field} entries must not contain leading or trailing whitespace");
+        }
+        if !trimmed
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        {
+            anyhow::bail!(
+                "{field} entry {family:?} may contain only ASCII letters, numbers, '_' or '-'"
+            );
+        }
+    }
+
+    Ok(())
+}
+
 pub fn load_user_config() -> Result<Option<UserConfigFile>> {
     let Some(path) = resolve_user_config_path() else {
         return Ok(None);
@@ -197,6 +370,8 @@ pub fn load_user_config() -> Result<Option<UserConfigFile>> {
     let parsed = parse_user_config_toml_versioned(&contents)
         .map_err(|err| anyhow::anyhow!(err))
         .with_context(|| format!("failed to parse config file {}", path.display()))?;
+    validate_daemon_user_config(&parsed.file)
+        .with_context(|| format!("failed to validate daemon config in {}", path.display()))?;
 
     for diagnostic in &parsed.diagnostics {
         log::warn!(
@@ -338,6 +513,7 @@ fn known_top_level_user_config_field(field: &str) -> bool {
     matches!(
         field,
         "config_version"
+            | "experimental"
             | "summary_ms"
             | "summary_period_ms"
             | "spike_us"
@@ -349,12 +525,26 @@ fn known_top_level_user_config_field(field: &str) -> bool {
             | "exclude_comm"
             | "max_tasks"
             | "retain_intervals"
+            | "retention_max_run_count"
+            | "retention_max_total_bytes"
+            | "retention_max_age_seconds"
+            | "retention_min_free_bytes"
             | "foreground_window"
             | "focus_source"
             | "foreground_source"
             | "foreground_poll_ms"
             | "foreground_max_stale_ms"
             | "foreground_include_title"
+            | "daemon_preset"
+            | "daemon_enabled_action_families"
+            | "daemon_denied_action_families"
+            | "daemon_min_confidence"
+            | "daemon_max_cpu_temp_celsius"
+            | "daemon_max_gpu_temp_celsius"
+            | "daemon_min_disk_available_bytes"
+            | "daemon_max_memory_pressure_some_avg10_percent"
+            | "daemon_allow_system_wide_actions"
+            | "daemon_allow_high_risk"
             | "community_rules"
             | "agent"
     )
@@ -491,13 +681,174 @@ mod tests {
             hwmon = true
             cpu_freq = true
             include_comm = ["Game", "Render"]
+            retention_max_run_count = 10
+            retention_max_total_bytes = 2000000
+            retention_max_age_seconds = 86400
+            retention_min_free_bytes = 1000000
+            daemon_preset = "gaming-low-risk"
+            daemon_enabled_action_families = ["cpu_affinity_profile"]
+            daemon_denied_action_families = ["gpu-power"]
+            daemon_min_confidence = 0.91
+            daemon_max_cpu_temp_celsius = 83
+            daemon_max_gpu_temp_celsius = 84
+            daemon_min_disk_available_bytes = 1073741824
+            daemon_max_memory_pressure_some_avg10_percent = 25.5
         "#;
         let config = parse_user_config_toml(toml).unwrap();
         assert_eq!(config.summary_ms, Some(500));
         assert_eq!(config.spike_us, Some(1000));
         assert_eq!(config.hwmon, Some(true));
         assert_eq!(config.cpu_freq, Some(true));
-        assert_eq!(config.include_comm.unwrap(), vec!["Game", "Render"]);
+        assert_eq!(
+            config.include_comm.as_deref(),
+            Some(&["Game".to_owned(), "Render".to_owned()][..])
+        );
+        assert_eq!(config.retention_max_run_count, Some(10));
+        assert_eq!(config.retention_max_total_bytes, Some(2_000_000));
+        assert_eq!(config.retention_max_age_seconds, Some(86_400));
+        assert_eq!(config.retention_min_free_bytes, Some(1_000_000));
+        assert_eq!(config.daemon_preset.as_deref(), Some("gaming-low-risk"));
+        assert_eq!(
+            config.daemon_enabled_action_families.as_deref(),
+            Some(&["cpu_affinity_profile".to_owned()][..])
+        );
+        assert_eq!(
+            config.daemon_denied_action_families.as_deref(),
+            Some(&["gpu-power".to_owned()][..])
+        );
+        assert_eq!(config.daemon_min_confidence, Some(0.91));
+        assert_eq!(config.daemon_max_cpu_temp_celsius, Some(83));
+        assert_eq!(config.daemon_max_gpu_temp_celsius, Some(84));
+        assert_eq!(config.daemon_min_disk_available_bytes, Some(1_073_741_824));
+        assert_eq!(
+            config.daemon_max_memory_pressure_some_avg10_percent,
+            Some(25.5)
+        );
+        validate_daemon_user_config(&config).unwrap();
+    }
+
+    #[test]
+    fn daemon_user_config_validation_rejects_invalid_confidence_and_family_names() {
+        let invalid_confidence = UserConfigFile {
+            daemon_min_confidence: Some(1.25),
+            ..Default::default()
+        };
+        assert!(
+            validate_daemon_user_config(&invalid_confidence)
+                .unwrap_err()
+                .to_string()
+                .contains("daemon_min_confidence")
+        );
+
+        let invalid_family = UserConfigFile {
+            daemon_enabled_action_families: Some(vec![" gpu ".to_owned()]),
+            ..Default::default()
+        };
+        assert!(
+            validate_daemon_user_config(&invalid_family)
+                .unwrap_err()
+                .to_string()
+                .contains("leading or trailing whitespace")
+        );
+    }
+
+    #[test]
+    fn daemon_user_config_validation_rejects_invalid_health_guardrails() {
+        let invalid_cpu_temp = UserConfigFile {
+            daemon_max_cpu_temp_celsius: Some(20),
+            ..Default::default()
+        };
+        assert!(
+            validate_daemon_user_config(&invalid_cpu_temp)
+                .unwrap_err()
+                .to_string()
+                .contains("daemon_max_cpu_temp_celsius")
+        );
+
+        let invalid_memory_pressure = UserConfigFile {
+            daemon_max_memory_pressure_some_avg10_percent: Some(101.0),
+            ..Default::default()
+        };
+        assert!(
+            validate_daemon_user_config(&invalid_memory_pressure)
+                .unwrap_err()
+                .to_string()
+                .contains("daemon_max_memory_pressure_some_avg10_percent")
+        );
+
+        let invalid_disk = UserConfigFile {
+            daemon_min_disk_available_bytes: Some(0),
+            ..Default::default()
+        };
+        assert!(
+            validate_daemon_user_config(&invalid_disk)
+                .unwrap_err()
+                .to_string()
+                .contains("daemon_min_disk_available_bytes")
+        );
+    }
+
+    #[test]
+    fn daemon_config_from_user_config_applies_policy_and_health_overrides() {
+        let config = UserConfigFile {
+            daemon_preset: Some("gaming-low-risk".to_owned()),
+            daemon_enabled_action_families: Some(vec!["cpu_affinity_profile".to_owned()]),
+            daemon_denied_action_families: Some(vec!["ionice".to_owned()]),
+            daemon_min_confidence: Some(0.92),
+            daemon_max_cpu_temp_celsius: Some(76),
+            daemon_max_gpu_temp_celsius: Some(77),
+            daemon_min_disk_available_bytes: Some(2_500_000_000),
+            daemon_max_memory_pressure_some_avg10_percent: Some(18.5),
+            ..Default::default()
+        };
+
+        let daemon_config =
+            daemon_config_from_user_config(Some(&config), None, ActionSource::Cli).unwrap();
+
+        assert_eq!(daemon_config.preset, DaemonPreset::GamingLowRisk);
+        assert!(
+            daemon_config
+                .safety
+                .enabled_action_families
+                .contains("cpu_affinity_profile")
+        );
+        assert!(
+            daemon_config
+                .safety
+                .denied_action_families
+                .contains("ionice")
+        );
+        assert_eq!(daemon_config.safety.min_confidence, 0.92);
+        assert_eq!(daemon_config.health.max_cpu_temp_celsius, 76);
+        assert_eq!(
+            daemon_config
+                .health
+                .thresholds()
+                .max_memory_pressure_some_avg10_millipercent,
+            18_500
+        );
+    }
+
+    #[test]
+    fn daemon_user_config_validation_guards_experimental_high_risk_fields() {
+        let blocked = UserConfigFile {
+            daemon_allow_high_risk: Some(true),
+            ..Default::default()
+        };
+        assert!(
+            validate_daemon_user_config(&blocked)
+                .unwrap_err()
+                .to_string()
+                .contains("experimental = true")
+        );
+
+        let allowed = UserConfigFile {
+            experimental: Some(true),
+            daemon_allow_high_risk: Some(true),
+            daemon_allow_system_wide_actions: Some(true),
+            ..Default::default()
+        };
+        validate_daemon_user_config(&allowed).unwrap();
     }
 
     #[test]

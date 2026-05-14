@@ -478,7 +478,6 @@ fn candidate_looks_like_game_cpu_isolation_profile(candidate: &CandidateAction) 
                     })
                 })
         }
-        #[cfg(test)]
         CandidateAction::Fake { .. } => false,
     }
 }

@@ -21,7 +21,6 @@ pub enum CandidateAction {
         profile: Profile,
         tree_pid: u32,
     },
-    #[cfg(test)]
     Fake {
         action_id: crate::actions::ActionId,
         safety_class: crate::actions::SafetyClass,
@@ -40,7 +39,6 @@ impl CandidateAction {
     pub fn profile_name(&self) -> &str {
         match self {
             Self::CpuAffinityProfile { profile_name, .. } => profile_name,
-            #[cfg(test)]
             Self::Fake { .. } => "fake-profile",
         }
     }
@@ -48,7 +46,6 @@ impl CandidateAction {
     pub fn tree_pid(&self) -> u32 {
         match self {
             Self::CpuAffinityProfile { tree_pid, .. } => *tree_pid,
-            #[cfg(test)]
             Self::Fake { .. } => 0,
         }
     }
@@ -56,7 +53,6 @@ impl CandidateAction {
     pub fn action_kind(&self) -> &'static str {
         match self {
             Self::CpuAffinityProfile { .. } => "cpu_affinity_profile",
-            #[cfg(test)]
             Self::Fake { .. } => "fake",
         }
     }
@@ -70,7 +66,6 @@ impl CandidateAction {
                     crate::actions::SafetyClass::ReversibleLowRisk
                 }
             }
-            #[cfg(test)]
             Self::Fake { safety_class, .. } => safety_class.clone(),
         }
     }
@@ -80,7 +75,6 @@ impl CandidateAction {
             Self::CpuAffinityProfile { profile_name, .. } => {
                 crate::actions::ActionId(format!("cpu-affinity-profile:{}", profile_name))
             }
-            #[cfg(test)]
             Self::Fake { action_id, .. } => action_id.clone(),
         }
     }
@@ -97,7 +91,6 @@ impl CandidateAction {
                     profile_name, tree_pid
                 )
             }
-            #[cfg(test)]
             Self::Fake { action_id, .. } => format!("fake action {}", action_id.0),
         }
     }
@@ -449,7 +442,6 @@ pub fn dry_run_candidate(candidate: &CandidateAction) -> CandidateDryRunRecord {
                 },
             }
         }
-        #[cfg(test)]
         CandidateAction::Fake { .. } => {
             panic!("dry-run not implemented for Fake candidate");
         }
