@@ -3595,7 +3595,14 @@ mod tests {
         )
         .await
         .into_response();
-        assert_eq!(response.status(), StatusCode::OK);
+
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+
+        assert_eq!(status, StatusCode::OK, "body={body}");
         assert!(state.active_autotune.lock().await.is_some());
     }
 
@@ -3734,7 +3741,13 @@ mod tests {
         .await
         .into_response();
 
-        assert_eq!(response.status(), StatusCode::OK);
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+
+        assert_eq!(status, StatusCode::OK, "body={body}");
 
         let daemon_state = state.daemon_state.lock().await.clone();
         assert_eq!(daemon_state.mode, DaemonMode::ApplyLowRisk);
