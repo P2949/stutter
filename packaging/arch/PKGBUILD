@@ -1,0 +1,38 @@
+# Maintainer: stutter developers
+pkgname=stutter-git
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Scheduler latency recorder and conservative autotune daemon"
+arch=('x86_64')
+url="https://github.com/P2949/stutter"
+license=('MIT')
+depends=('glibc')
+makedepends=('git' 'rustup' 'clang' 'llvm')
+optdepends=('systemd: service units')
+provides=('stutter')
+conflicts=('stutter')
+source=('git+https://github.com/P2949/stutter.git')
+sha256sums=('SKIP')
+
+pkgver() {
+	cd "$srcdir/stutter"
+	git describe --tags --long 2>/dev/null | sed 's/^v//;s/-/./g' || git rev-parse --short HEAD
+}
+
+build() {
+	cd "$srcdir/stutter"
+	RUSTUP_TOOLCHAIN=nightly cargo build --release -p stutter
+}
+
+package() {
+	cd "$srcdir/stutter"
+	install -Dm0755 target/release/stutter "$pkgdir/usr/bin/stutter"
+	install -Dm0644 packaging/systemd/stutter-agent.service "$pkgdir/usr/lib/systemd/system/stutter-agent.service"
+	install -Dm0644 packaging/systemd/stutter-autotune-observe.service "$pkgdir/usr/lib/systemd/system/stutter-autotune-observe.service"
+	install -Dm0644 packaging/systemd/stutter-autotune-low-risk.service "$pkgdir/usr/lib/systemd/system/stutter-autotune-low-risk.service"
+	install -Dm0644 docs/INSTALL.md "$pkgdir/usr/share/doc/stutter/INSTALL.md"
+	install -Dm0644 docs/PACKAGING.md "$pkgdir/usr/share/doc/stutter/PACKAGING.md"
+	install -dm0755 "$pkgdir/etc/stutter"
+	install -dm0755 "$pkgdir/var/lib/stutter"
+	install -dm0755 "$pkgdir/var/log/stutter"
+}

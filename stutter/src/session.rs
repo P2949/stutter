@@ -1083,10 +1083,7 @@ impl MonitorSession {
                 }
                 Ok(())
             }
-            TelemetryTickEvent::Scx => {
-                self.handle_scx_tick();
-                Ok(())
-            }
+            TelemetryTickEvent::Scx => self.handle_scx_tick().await,
             TelemetryTickEvent::Hwmon => self.handle_hwmon_tick().await,
         }
     }
@@ -1501,7 +1498,6 @@ impl MonitorSession {
                 psi_snapshot.as_ref(),
                 &mut self.runtime.targeting.tasks.prev_faults_snapshot,
             );
-            self.runtime.outputs.recorder.counters.interval_record_count += records.len() as u64;
 
             self.dispatch_monitor_event(MonitorEvent::Interval {
                 elapsed_ms,
@@ -1509,55 +1505,6 @@ impl MonitorSession {
                 drop_counters: drop_counters_snapshot.clone(),
             })
             .await?;
-
-            if self
-                .runtime
-                .outputs
-                .recorder
-                .streams
-                .contains(ArtifactKind::Interval)
-            {
-                for record in &records {
-                    let _ = self
-                        .runtime
-                        .outputs
-                        .recorder
-                        .streams
-                        .push(ArtifactKind::Interval, record);
-                }
-            } else if self.config.recording.retain_intervals.is_some() || self.config.ui.tui {
-                // For TUI sparklines we need interval_records
-                for record in &records {
-                    self.runtime
-                        .outputs
-                        .recorder
-                        .buffers
-                        .interval_records
-                        .push(record.clone());
-                }
-
-                let max_intervals = self.config.recording.retain_intervals.unwrap_or(120);
-                if self.runtime.outputs.recorder.buffers.interval_records.len() > max_intervals {
-                    let drop_count = self.runtime.outputs.recorder.buffers.interval_records.len()
-                        - max_intervals;
-                    self.runtime
-                        .outputs
-                        .recorder
-                        .buffers
-                        .interval_records
-                        .drain(0..drop_count);
-                    if self.config.recording.retain_intervals.is_some() {
-                        self.runtime.outputs.recorder.counters.intervals_dropped +=
-                            drop_count as u64;
-                    }
-                }
-            }
-
-            if let Some(writer) = self.runtime.outputs.recorder.csv_writer.as_mut() {
-                for record in &records {
-                    writer.push(record)?;
-                }
-            }
 
             if let Some(sampler) = self.runtime.probes.runtime_slice_sampler.as_mut() {
                 let tasks = self
@@ -1774,34 +1721,20 @@ impl MonitorSession {
         Ok(())
     }
 
-    pub fn handle_scx_tick(&mut self) {
+    pub async fn handle_scx_tick(&mut self) -> anyhow::Result<()> {
         if let Some(event) = self
             .runtime
             .probes
             .scx_tracker
             .sample(self.started.elapsed().as_millis() as u64)
         {
-            if self
-                .runtime
-                .outputs
-                .recorder
-                .streams
-                .contains(ArtifactKind::ScxEvents)
-            {
-                crate::artifacts::push_artifact_event(
-                    &mut self.runtime.outputs.recorder,
-                    ArtifactKind::ScxEvents,
-                    &event,
-                    "scx_events",
-                    |c| {
-                        c.scx_event_count += 1;
-                    },
-                );
-            } else {
-                self.runtime.outputs.recorder.buffers.scx_events.push(event);
-                self.runtime.outputs.recorder.counters.scx_event_count += 1;
-            }
+            self.dispatch_monitor_event(MonitorEvent::ScxEvent {
+                event: Box::new(event),
+            })
+            .await?;
         }
+
+        Ok(())
     }
 
     pub async fn handle_hwmon_tick(&mut self) -> anyhow::Result<()> {

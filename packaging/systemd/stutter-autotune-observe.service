@@ -34,6 +34,15 @@ fi; \
 exec /usr/bin/stutter autotune --mode observe --auto-focus --focus-source "$focus_source" --preset "$preset" --summary-ms "$summary_ms"'
 Restart=on-failure
 RestartSec=5s
+StateDirectory=stutter
+LogsDirectory=stutter
+RuntimeDirectory=stutter
+PrivateTmp=true
+ProtectSystem=full
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/stutter /var/log/stutter /run
 
 [Install]
 WantedBy=multi-user.target

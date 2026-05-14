@@ -22,6 +22,11 @@ use crate::{
             CandidateAction, CandidateDryRunRecord, dry_run_candidates,
             dry_run_record_from_action_state, generate_profile_candidates,
         },
+        controller_journal::{
+            ControllerJournalActionMetadata, journal_process_identity,
+            write_controller_journal_applied_with_metadata,
+            write_controller_journal_applying_with_metadata, write_controller_journal_clean,
+        },
         washout::{WashoutWindowConfig, run_washout_for_action},
     },
     profiles::Profile,
@@ -74,7 +79,6 @@ impl CpuAffinityCandidateExecutor {
                     force_restore_overwrite: false,
                 },
             }),
-            #[cfg(test)]
             CandidateAction::Fake { .. } => {
                 anyhow::bail!("apply-low-risk currently supports CPU-affinity profile actions only")
             }
@@ -223,7 +227,6 @@ pub fn action_from_candidate(
                 force_restore_overwrite: false,
             },
         )),
-        #[cfg(test)]
         CandidateAction::Fake { .. } => {
             anyhow::bail!("apply-low-risk currently supports CPU-affinity profile actions only")
         }
@@ -613,6 +616,32 @@ pub fn ensure_baseline_ready_for_apply(
     }
 }
 
+fn controller_journal_metadata_for_cpu_affinity_action(
+    candidate_name: &str,
+    action: &CpuAffinityProfileAction,
+    active_task_count: Option<usize>,
+    verify_result: &'static str,
+) -> ControllerJournalActionMetadata {
+    let starttime_ticks =
+        crate::process_tree::process_starttime_at(Path::new("/proc"), action.tree_pid);
+
+    ControllerJournalActionMetadata::default()
+        .with_candidate(candidate_name.to_owned())
+        .with_workload_identity(journal_process_identity(
+            action.tree_pid,
+            starttime_ticks,
+            None,
+        ))
+        .with_target_identity(journal_process_identity(
+            action.tree_pid,
+            starttime_ticks,
+            active_task_count,
+        ))
+        .with_restore_command("stutter autotune restore")
+        .with_verify_result(verify_result)
+        .with_safety_class(action.safety_class())
+}
+
 pub async fn apply_low_risk_command(
     input: &crate::autotune::AutotuneCommandInput,
 ) -> anyhow::Result<ApplyLowRiskOutcome> {
@@ -639,10 +668,16 @@ pub async fn apply_low_risk_command(
     let action_id = format!("cpu-affinity-profile:{}", candidate_name);
     let journal_path = crate::autotune::controller_journal::default_controller_journal_path();
 
-    crate::autotune::controller_journal::write_controller_journal_applying(
+    write_controller_journal_applying_with_metadata(
         &journal_path,
         &experiment_id,
         &action_id,
+        controller_journal_metadata_for_cpu_affinity_action(
+            &candidate_name,
+            &action,
+            None,
+            "pending_apply",
+        ),
     )
     .with_context(|| {
         format!(
@@ -655,11 +690,17 @@ pub async fn apply_low_risk_command(
     let _affected_tasks = audited.affected_tasks;
     let mut guard = AuditedRollbackGuard::new(&action, audited.rollback.clone());
 
-    crate::autotune::controller_journal::write_controller_journal_applied(
+    write_controller_journal_applied_with_metadata(
         &journal_path,
         &experiment_id,
         &action_id,
         audited.rollback.clone(),
+        controller_journal_metadata_for_cpu_affinity_action(
+            &audited.candidate_name,
+            &action,
+            Some(audited.affected_tasks),
+            "applied_pending_verify",
+        ),
     )
     .with_context(|| {
         format!(
@@ -688,13 +729,12 @@ pub async fn apply_low_risk_command(
         )
     })?;
 
-    crate::autotune::controller_journal::write_controller_journal_clean(&journal_path)
-        .with_context(|| {
-            format!(
-                "failed to write clean controller journal after rolling back autotune candidate '{}'",
-                audited.candidate_name
-            )
-        })?;
+    write_controller_journal_clean(&journal_path).with_context(|| {
+        format!(
+            "failed to write clean controller journal after rolling back autotune candidate '{}'",
+            audited.candidate_name
+        )
+    })?;
 
     Ok(ApplyLowRiskOutcome {
         candidate_name: audited.candidate_name,
@@ -779,6 +819,44 @@ mod tests {
             self.rollback_calls += 1;
             Ok(())
         }
+    }
+
+    #[test]
+    fn controller_journal_metadata_for_cpu_affinity_action_describes_target_and_restore() {
+        let action = CpuAffinityProfileAction {
+            tree_pid: 0,
+            profile: Profile {
+                name: "game-main".to_owned(),
+                rules: Vec::new(),
+            },
+            force_restore_overwrite: false,
+        };
+
+        let metadata = controller_journal_metadata_for_cpu_affinity_action(
+            "game-main",
+            &action,
+            Some(31),
+            "applied_pending_verify",
+        );
+
+        assert_eq!(metadata.candidate.as_deref(), Some("game-main"));
+        assert_eq!(
+            metadata.workload_identity.as_deref(),
+            Some("pid:0:starttime:unknown")
+        );
+        assert_eq!(
+            metadata.target_identity.as_deref(),
+            Some("pid:0:starttime:unknown:active_tasks:31")
+        );
+        assert_eq!(
+            metadata.restore_command.as_deref(),
+            Some("stutter autotune restore")
+        );
+        assert_eq!(
+            metadata.verify_result.as_deref(),
+            Some("applied_pending_verify")
+        );
+        assert_eq!(metadata.safety_class, Some(SafetyClass::ReversibleLowRisk));
     }
 
     #[tokio::test]
@@ -1248,14 +1326,15 @@ mod tests {
         assert!(result.rollback.is_some());
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].command, "autotune candidate");
-        assert_eq!(events[0].action_id.as_deref(), Some("test-candidate"));
-        assert_eq!(events[0].safety_class, Some(SafetyClass::ReversibleLowRisk));
-        assert!(!events[0].dry_run);
-        assert!(events[0].success);
-        assert_eq!(events[0].affected_tasks, 31);
-        assert!(events[0].message.contains("action applied and verified"));
+        assert_eq!(events.len(), 5);
+        let terminal = events.last().expect("expected terminal audit event");
+        assert_eq!(terminal.command, "autotune candidate");
+        assert_eq!(terminal.action_id.as_deref(), Some("test-candidate"));
+        assert_eq!(terminal.safety_class, Some(SafetyClass::ReversibleLowRisk));
+        assert!(!terminal.dry_run);
+        assert!(terminal.success);
+        assert_eq!(terminal.affected_tasks, 31);
+        assert!(terminal.message.contains("action applied and verified"));
 
         fs::remove_dir_all(dir).ok();
     }
@@ -1282,11 +1361,12 @@ mod tests {
         assert!(result.is_err());
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].command, "autotune candidate");
-        assert!(!events[0].success);
-        assert!(events[0].message.contains("apply failed"));
-        assert!(events[0].message.contains("intentional apply failure"));
+        assert_eq!(events.len(), 3);
+        let terminal = events.last().expect("expected terminal audit event");
+        assert_eq!(terminal.command, "autotune candidate");
+        assert!(!terminal.success);
+        assert!(terminal.message.contains("apply failed"));
+        assert!(terminal.message.contains("intentional apply failure"));
 
         fs::remove_dir_all(dir).ok();
     }
@@ -1313,11 +1393,12 @@ mod tests {
         assert!(result.is_err());
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].command, "autotune candidate");
-        assert!(!events[0].success);
-        assert!(events[0].message.contains("verify failed"));
-        assert!(events[0].message.contains("intentional verify failure"));
+        assert_eq!(events.len(), 5);
+        let terminal = events.last().expect("expected terminal audit event");
+        assert_eq!(terminal.command, "autotune candidate");
+        assert!(!terminal.success);
+        assert!(terminal.message.contains("verify failed"));
+        assert!(terminal.message.contains("intentional verify failure"));
 
         fs::remove_dir_all(dir).ok();
     }

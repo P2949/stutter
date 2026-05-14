@@ -73,6 +73,91 @@ The GitHub release workflow automatically uploads the eBPF object alongside the
 binary. Packagers can download `stutter.bpf.o` from the release artifacts and
 use it with the build-time or runtime override.
 
+## Service Packaging
+
+Package managers should install the binary, the selected service units, and
+empty state/config/log directories:
+
+```text
+/usr/bin/stutter
+/etc/stutter
+/var/lib/stutter
+/var/log/stutter
+```
+
+The built-in planner can be used as a packaging smoke check:
+
+```bash
+stutter service doctor --mode system-observe --manager systemd-system
+stutter service doctor --mode system-low-risk --manager openrc
+stutter service install --dry-run --mode system-observe --manager systemd-system
+```
+
+Templates live under:
+
+```text
+packaging/systemd/
+packaging/openrc/
+packaging/arch/PKGBUILD
+packaging/gentoo/stutter-9999.ebuild
+packaging/tarball/MANIFEST.txt
+```
+
+The service command installs or removes unit files but intentionally does not
+enable services automatically. Low-risk apply services must remain opt-in and
+must preserve the `stutter daemon emergency-restore` hook on stop.
+
+The packaged agent service should prefer Unix sockets over TCP. The upstream
+systemd and OpenRC units bind `/run/stutter/agent.sock` by default; packagers
+should only expose `--bind 127.0.0.1:9899` as an explicit compatibility
+override.
+
+For deployed services, prefer separate token files instead of a shared
+full-access token. `--read-token-file` is suitable for status clients, while
+`--apply-token-file` is required for state-changing endpoints such as record
+start/stop, autotune start/stop, daemon pause/resume, and restore. The agent
+has built-in request body and request rate limits and does not install a CORS
+policy by default.
+
+## Release Readiness Gates
+
+Use the release gate command before tagging:
+
+```bash
+stutter release check --channel experimental
+stutter release check --channel observe-stable --enforce
+stutter release check --channel low-risk-stable --soak-tests --enforce
+```
+
+`observe-stable` fails if apply actions are enabled. `low-risk-stable` requires
+the action runner, rollback, crash recovery, service packaging, docs, and soak
+test evidence. Medium-risk channels require per-action opt-in, stronger tests,
+and manual confirmation or explicit config.
+
+For a no-root deterministic soak smoke test:
+
+```bash
+stutter daemon soak --duration-seconds 3600 --profile observe-only
+stutter daemon soak --duration-seconds 3600 --profile apply-low-risk-fake
+```
+
+The fake soak checks bounded memory, file descriptor, disk/history growth,
+event queue depth, task count, CPU overhead, wakeups, and event drops. It is not
+a replacement for a real privileged multi-hour soak, but it gives CI a cheap
+budget gate.
+
+The CI `acceptance` test enumerates the final daemon acceptance scenario as a
+fake no-root suite. It must stay green, but release candidates still need the
+real-machine acceptance pass described in the daemon roadmap before claiming a
+low-risk-stable channel.
+
+You can run the same no-root acceptance checklist locally:
+
+```bash
+stutter daemon acceptance
+stutter daemon acceptance --json
+```
+
 ## Environment Variable Reference
 
 | Variable | Phase | Description |

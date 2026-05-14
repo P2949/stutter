@@ -124,6 +124,7 @@ impl ReplayPolicyEngine for ObserveOnlyReplayPolicy {
             | MonitorEvent::CpuFreqSample { .. }
             | MonitorEvent::ForegroundEvent { .. }
             | MonitorEvent::SchedulerSample { .. }
+            | MonitorEvent::ScxEvent { .. }
             | MonitorEvent::Exec { .. } => {}
         }
         Ok(())

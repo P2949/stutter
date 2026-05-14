@@ -45,6 +45,7 @@ pub(crate) mod prometheus;
 pub(crate) mod psi;
 pub(crate) mod recommend;
 pub(crate) mod recorder;
+pub(crate) mod release;
 pub(crate) mod remote;
 pub(crate) mod report;
 pub(crate) mod runtime_slices;
@@ -52,6 +53,7 @@ pub(crate) mod scenario;
 pub(crate) mod sched_state;
 pub(crate) mod scorer;
 pub(crate) mod scx;
+pub(crate) mod service;
 pub(crate) mod spike;
 pub(crate) mod summary;
 pub(crate) mod target_snapshot;
@@ -69,6 +71,8 @@ pub async fn run_cli() -> anyhow::Result<()> {
     commands::dispatch(command).await
 }
 
+#[cfg(test)]
+mod architecture_tests;
 #[cfg(test)]
 mod artifact_contract_tests;
 #[cfg(test)]

@@ -60,8 +60,47 @@ Default state paths:
 
 ## Agent and Autotune Services
 
-`packaging/systemd/stutter-agent.service` starts the local HTTP agent on
-`127.0.0.1:9899`.
+The service planner shows the exact filesystem changes before you install
+units:
+
+```bash
+stutter service doctor --mode system-observe --manager systemd-system
+stutter service install --dry-run --mode system-observe --manager systemd-system
+stutter service install --dry-run --mode system-low-risk --manager systemd-system
+stutter service install --dry-run --mode system-observe --manager openrc
+```
+
+`service install` copies packaged unit files and creates the configured
+`/etc/stutter`, `/var/lib/stutter`, and `/var/log/stutter` directories. It does
+not enable services automatically; the output prints the follow-up
+`systemctl`, `systemctl --user`, or `rc-service` command. Use
+`stutter service uninstall --dry-run ...` to preview removal of an installed
+unit file.
+
+`packaging/systemd/stutter-agent.service` starts the local agent on the Unix
+socket `/run/stutter/agent.sock`. The standalone `stutter agent` command also
+defaults to a Unix socket under `XDG_RUNTIME_DIR` when available. Use
+`stutter agent --bind 127.0.0.1:9899` only when an HTTP TCP listener is needed
+for compatibility with an existing local client.
+
+Agent auth supports a legacy full-access token through `STUTTER_AGENT_TOKEN`
+or `--bearer-token-file`, plus split tokens for safer clients. The packaged
+systemd unit reads `/etc/stutter/agent.env` if present:
+
+```text
+STUTTER_AGENT_READ_TOKEN=...
+STUTTER_AGENT_APPLY_TOKEN=...
+stutter agent --read-token-file /etc/stutter/agent-read.token --apply-token-file /etc/stutter/agent-apply.token
+```
+
+Read tokens may call status, health, history, and artifact endpoints. Apply
+tokens are required for state-changing control when split tokens are
+configured. The agent also applies an explicit JSON body-size limit, a request
+rate limit, per-request audit records, and no CORS headers by default.
+The daemon API includes `/daemon/status`, `/daemon/health`, `/daemon/policy`,
+and `/daemon/explain`; `/daemon/explain` includes machine-readable
+`why_no_optimize` and `what_changed` lists alongside the canonical policy rule
+explanation.
 
 `packaging/systemd/stutter-autotune-observe.service` starts the live observe-only
 autotune controller. By default it uses:
@@ -99,6 +138,54 @@ cooldown remaining, data quality, last fault, and manual restore command.
 `stutter autotune restore` writes a normalized `restored` history event after
 successful emergency restore.
 
+Daemon-level status is available through:
+
+```bash
+stutter daemon status
+stutter daemon status --json
+stutter daemon explain
+stutter daemon why-not-optimize
+stutter daemon what-changed
+stutter daemon policy explain
+stutter daemon profiles list
+stutter daemon profiles explain
+stutter daemon profiles forget --workload-hash <hash> --dry-run
+stutter daemon doctor
+stutter daemon reset-state --dry-run
+stutter daemon watch
+```
+
+`stutter daemon status --explain-last 10` includes recent autotune decisions.
+`stutter daemon explain` focuses on local state explainability: why the daemon
+is not optimizing now, what changed recently, and the canonical policy rule
+outcomes.
+`stutter daemon why-not-optimize` and `stutter daemon what-changed` print the
+two focused halves of that explanation for scripts or quick terminal checks.
+`stutter daemon policy explain` shows the effective policy decision for
+canonical observe, low-risk, medium-risk, high-risk, and missing-rollback
+action shapes; add `--json` for machine-readable rule outcomes.
+`stutter daemon profiles list` shows remembered kept candidates by workload
+identity hash. `profiles explain` compares those records to the current kernel,
+CPU topology, and scheduler state so stale learned profiles are visible before
+reuse. `profiles forget` removes stale memory, and requires either
+`--workload-hash` or `--all` so accidental broad deletion is explicit.
+`stutter daemon doctor` checks state-store load, health, watchdog, rollback,
+and capability status. If daemon state is corrupt or uncertain, `stutter daemon
+reset-state --dry-run` previews the safe observe-only reset; running it without
+`--dry-run` writes a new disabled observe state after backing up the old
+snapshot when one exists.
+`stutter daemon watch` is quiet by default and emits compact notifications for
+action apply, rollback, fault, and restore-needed transitions. Add `--verbose`
+to print the full status block on each tick.
+
+Daemon user config supports conservative guardrail overrides in
+`~/.config/stutter/config.toml`: `daemon_preset`,
+`daemon_enabled_action_families`, `daemon_denied_action_families`,
+`daemon_min_confidence`, `daemon_max_cpu_temp_celsius`,
+`daemon_max_gpu_temp_celsius`, `daemon_min_disk_available_bytes`, and
+`daemon_max_memory_pressure_some_avg10_percent`. System-wide and high-risk
+daemon fields still require `experimental = true`.
+
 Optional environment overrides for `/etc/stutter/autotune-observe.env`:
 
 ```text
@@ -117,7 +204,13 @@ whole-system observation.
 service for continuous low-risk CPU-affinity experiments. It uses the same
 focused target policy as observe mode, only permits `ReversibleLowRisk`
 CPU-affinity profile candidates, writes controller history/audit/journal
-state, and runs `stutter autotune restore` on service stop.
+state, and runs `stutter daemon emergency-restore` on service stop so both
+controller rollback state and managed profile restore files are considered.
+
+OpenRC equivalents are available under `packaging/openrc/` for the agent,
+observe, and low-risk services. The OpenRC agent defaults to
+`/run/stutter/agent.sock`; set `stutter_bind="127.0.0.1:9899"` in the service
+environment if a loopback TCP listener is required instead.
 
 Optional environment overrides for
 `/etc/stutter/autotune-low-risk.env`:

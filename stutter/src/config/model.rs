@@ -91,6 +91,15 @@ pub struct RecordingConfig {
     pub run_name: Option<String>,
     pub output_dir: Option<PathBuf>,
     pub retain_intervals: Option<usize>,
+    pub retention: RecordingRetentionConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RecordingRetentionConfig {
+    pub max_run_count: Option<usize>,
+    pub max_total_bytes: Option<u64>,
+    pub max_age_seconds: Option<u64>,
+    pub min_free_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
