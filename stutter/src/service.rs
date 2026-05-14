@@ -599,6 +599,32 @@ mod tests {
     }
 
     #[test]
+    fn gentoo_live_rust_ebuild_uses_live_unpack_and_cargo_target_dir() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("stutter crate should live under the repository root")
+            .to_path_buf();
+        let ebuild_path = root
+            .join("packaging")
+            .join("gentoo")
+            .join("stutter-9999.ebuild");
+        let ebuild = std::fs::read_to_string(ebuild_path).unwrap();
+
+        assert!(
+            ebuild.contains("src_unpack() {\n\tgit-r3_src_unpack\n\tcargo_live_src_unpack\n}"),
+            "live Rust ebuild should unpack source with git-r3 and vendor Cargo dependencies during src_unpack"
+        );
+        assert!(
+            ebuild.contains("dobin \"$(cargo_target_dir)\"/stutter"),
+            "ebuild should install the stutter binary from cargo_target_dir"
+        );
+        assert!(
+            !ebuild.contains("dobin target/release/stutter"),
+            "ebuild should not hardcode target/release/stutter"
+        );
+    }
+
+    #[test]
     fn packaged_systemd_system_units_pin_home_to_var_lib_stutter() {
         for mode in [
             ServiceMode::Agent,
