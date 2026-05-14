@@ -37,12 +37,12 @@ pub struct DaemonAcceptanceStep {
 
 pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
     let service_probe = ServiceAcceptanceProbe::default();
-    let _observe_service_plan = build_service_plan(service_probe.request(
+    let _ = build_service_plan(service_probe.request(
         ServiceAction::Install,
         ServiceManager::SystemdSystem,
         ServiceMode::SystemObserve,
     ));
-    let _low_risk_service_plan = build_service_plan(service_probe.request(
+    let _ = build_service_plan(service_probe.request(
         ServiceAction::Install,
         ServiceManager::SystemdSystem,
         ServiceMode::SystemLowRisk,
