@@ -28,8 +28,13 @@ src_compile() {
 	RUSTUP_TOOLCHAIN=nightly cargo_src_compile -p stutter
 }
 
+src_unpack() {
+	git-r3_src_unpack
+	cargo_live_src_unpack
+}
+
 src_install() {
-	dobin target/release/stutter
+	dobin "$(cargo_target_dir)"/stutter
 	dodoc docs/INSTALL.md docs/PACKAGING.md docs/DAEMON_CONTRACT.md
 
 	if use systemd; then
