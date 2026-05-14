@@ -3,7 +3,8 @@
 name="stutter agent"
 description="Stutter remote agent with autotune emergency restore on stop"
 
-export HOME="${stutter_home:-/var/lib/stutter}"
+: "${stutter_home:=/var/lib/stutter}"
+export HOME="${stutter_home}"
 
 command="${stutter_command:-/usr/bin/stutter}"
 if [ -n "${stutter_bind:-}" ]; then
@@ -20,6 +21,7 @@ depend() {
 }
 
 start_pre() {
+	checkpath --directory --mode 0755 "${stutter_home}"
 	checkpath --directory --mode 0755 /run/stutter
 }
 
