@@ -10,20 +10,15 @@ use crate::{
     },
 };
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum DaemonPreset {
+    #[default]
     ObserveOnly,
     GamingLowRisk,
     GamingLaptopSafe,
     WorkstationLowRisk,
     DebugAggressive,
-}
-
-impl Default for DaemonPreset {
-    fn default() -> Self {
-        Self::ObserveOnly
-    }
 }
 
 impl DaemonPreset {

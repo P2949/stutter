@@ -268,7 +268,7 @@ fn available_bytes_for_path(path: &Path) -> io::Result<u64> {
         return Err(io::Error::last_os_error());
     }
     let stat = unsafe { stat.assume_init() };
-    Ok((stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64))
+    Ok(stat.f_bavail.saturating_mul(stat.f_frsize))
 }
 
 fn nearest_existing_path(path: &Path) -> PathBuf {

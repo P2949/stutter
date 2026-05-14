@@ -435,9 +435,11 @@ mod tests {
             category: "data_quality".to_owned(),
             message: "insufficient_samples".to_owned(),
         });
-        let mut health = SystemHealthSnapshot::default();
-        health.ok_for_apply = false;
-        health.reason_code = Some("cpu_overheated".to_owned());
+        let health = SystemHealthSnapshot {
+            ok_for_apply: false,
+            reason_code: Some("cpu_overheated".to_owned()),
+            ..SystemHealthSnapshot::default()
+        };
         let capabilities = DaemonCapabilities {
             kernel_release: Some("6.9.1-test".to_owned()),
             btf_available: true,

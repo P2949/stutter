@@ -2362,10 +2362,12 @@ where
         })),
         Some(Command::Release(args)) => match args.command {
             ReleaseCommand::Check(args) => {
-                let mut inputs = ReleaseReadinessInputs::default();
-                inputs.apply_actions_enabled = args.apply_actions_enabled;
-                inputs.soak_tests = args.soak_tests;
-                inputs.stronger_tests = args.stronger_tests;
+                let inputs = ReleaseReadinessInputs {
+                    apply_actions_enabled: args.apply_actions_enabled,
+                    soak_tests: args.soak_tests,
+                    stronger_tests: args.stronger_tests,
+                    ..ReleaseReadinessInputs::default()
+                };
 
                 Ok(AppCommand::ReleaseCheck(ReleaseCheckCommandInput {
                     channel: args.channel.parse::<ReleaseChannel>()?,

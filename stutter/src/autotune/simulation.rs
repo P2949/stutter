@@ -68,10 +68,10 @@ pub fn run_fake_daemon_scenario(
 
     for step in scenario.steps {
         elapsed_ms = elapsed_ms.saturating_add(1_000);
-        if let Some(event) = event_for_step(step, elapsed_ms) {
-            if let Some(decision) = runtime.on_event(event)? {
-                decisions.push(decision);
-            }
+        if let Some(event) = event_for_step(step, elapsed_ms)
+            && let Some(decision) = runtime.on_event(event)?
+        {
+            decisions.push(decision);
         }
     }
 

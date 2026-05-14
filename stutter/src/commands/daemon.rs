@@ -898,10 +898,10 @@ fn build_daemon_config_from_state(
 fn apply_daemon_state_target_to_config(config: &mut DaemonConfig, state: &DaemonState) {
     config.target.require_explicit_target = config.mode.supports_apply();
     if let Some(target) = state.active_target.as_ref() {
-        if let Some(root_pid) = target.root_pid {
-            if !config.target.tree_pids.contains(&root_pid) {
-                config.target.tree_pids.push(root_pid);
-            }
+        if let Some(root_pid) = target.root_pid
+            && !config.target.tree_pids.contains(&root_pid)
+        {
+            config.target.tree_pids.push(root_pid);
         }
         config.target.watch_process = target.comm.clone();
     }
@@ -1948,10 +1948,11 @@ fn render_watch_notification(
         return Some(format!("restore needed for action_id={action_id}"));
     }
 
-    if previous.rollback_available && !current.rollback_available {
-        if let Some(action_id) = current.rollback_action_id.as_ref() {
-            return Some(format!("restore needed for action_id={action_id}"));
-        }
+    if previous.rollback_available
+        && !current.rollback_available
+        && let Some(action_id) = current.rollback_action_id.as_ref()
+    {
+        return Some(format!("restore needed for action_id={action_id}"));
     }
 
     if current.phase == DaemonPhase::Rollback && previous.phase != DaemonPhase::Rollback {
@@ -2685,33 +2686,35 @@ mod tests {
 
     #[test]
     fn daemon_status_text_contains_active_workload_action_score_and_recent_decisions() {
-        let mut state = DaemonState::default();
-        state.mode = crate::daemon::DaemonMode::ApplyLowRisk;
-        state.phase = DaemonPhase::Measure;
-        state.active_target = Some(crate::daemon::DaemonTargetState {
-            root_pid: Some(4242),
-            active_targets: 3,
-            comm: Some("Game.exe".to_owned()),
-        });
-        state.active_experiment = Some(crate::daemon::DaemonExperimentState {
-            experiment_id: "experiment-1".to_owned(),
-            action_id: "cpu-affinity:game".to_owned(),
-            candidate_name: Some("game-affinity".to_owned()),
-            safety_class: SafetyClass::ReversibleLowRisk,
-            started_unix_nanos: Some(1),
-        });
-        state.active_rollback = Some(crate::daemon::DaemonRollbackState {
-            action_id: "cpu-affinity:game".to_owned(),
-            rollback_available: true,
-            token: None,
-            manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
-        });
-        state.last_decision = Some(crate::daemon::DaemonDecisionState {
-            decision: "candidate_applied".to_owned(),
-            reason: "measurement started".to_owned(),
-            unix_nanos: Some(2),
-            score_total: Some(42),
-        });
+        let state = DaemonState {
+            mode: crate::daemon::DaemonMode::ApplyLowRisk,
+            phase: DaemonPhase::Measure,
+            active_target: Some(crate::daemon::DaemonTargetState {
+                root_pid: Some(4242),
+                active_targets: 3,
+                comm: Some("Game.exe".to_owned()),
+            }),
+            active_experiment: Some(crate::daemon::DaemonExperimentState {
+                experiment_id: "experiment-1".to_owned(),
+                action_id: "cpu-affinity:game".to_owned(),
+                candidate_name: Some("game-affinity".to_owned()),
+                safety_class: SafetyClass::ReversibleLowRisk,
+                started_unix_nanos: Some(1),
+            }),
+            active_rollback: Some(crate::daemon::DaemonRollbackState {
+                action_id: "cpu-affinity:game".to_owned(),
+                rollback_available: true,
+                token: None,
+                manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
+            }),
+            last_decision: Some(crate::daemon::DaemonDecisionState {
+                decision: "candidate_applied".to_owned(),
+                reason: "measurement started".to_owned(),
+                unix_nanos: Some(2),
+                score_total: Some(42),
+            }),
+            ..DaemonState::default()
+        };
 
         let output = DaemonStatusOutput {
             state_path: "/tmp/daemon_state.json".to_owned(),

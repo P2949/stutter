@@ -3018,9 +3018,11 @@ mod tests {
 
     #[test]
     fn daemon_policy_response_reports_live_safety_context() {
-        let mut health = SystemHealthSnapshot::default();
-        health.ok_for_apply = false;
-        health.reason_code = Some("cpu_overheated".to_owned());
+        let health = SystemHealthSnapshot {
+            ok_for_apply: false,
+            reason_code: Some("cpu_overheated".to_owned()),
+            ..SystemHealthSnapshot::default()
+        };
         let state = DaemonState {
             mode: DaemonMode::ApplyLowRisk,
             phase: DaemonPhase::Decide,
@@ -3329,9 +3331,11 @@ mod tests {
             axum::http::header::AUTHORIZATION,
             axum::http::HeaderValue::from_static("Bearer secret"),
         );
-        let mut health = SystemHealthSnapshot::default();
-        health.ok_for_apply = false;
-        health.reason_code = Some("cpu_overheated".to_owned());
+        let health = SystemHealthSnapshot {
+            ok_for_apply: false,
+            reason_code: Some("cpu_overheated".to_owned()),
+            ..SystemHealthSnapshot::default()
+        };
 
         let rejection = policy_for_remote_autotune_start_with_safety_context(
             &headers,
