@@ -42,9 +42,9 @@ if [ -n "$tree_pid" ]; then \
   exec /usr/bin/stutter autotune --mode apply-low-risk --tree-pid "$tree_pid" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds" --foreground-window --focus-source "$focus_source"; \
 fi; \
 if [ -n "$profiles" ]; then \
-  exec /usr/bin/stutter autotune --mode apply-low-risk --auto-focus --profiles "$profiles" --focus-source "$focus_source" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds"; \
+  exec /usr/bin/stutter autotune --mode apply-low-risk --auto-focus --profiles "$profiles" --foreground-window --focus-source "$focus_source" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds"; \
 fi; \
-exec /usr/bin/stutter autotune --mode apply-low-risk --auto-focus --focus-source "$focus_source" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds"'
+exec /usr/bin/stutter autotune --mode apply-low-risk --auto-focus --foreground-window --focus-source "$focus_source" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds"'
 ExecStop=/usr/bin/stutter daemon emergency-restore
 Restart=on-failure
 RestartSec=5s
