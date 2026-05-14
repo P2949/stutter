@@ -192,14 +192,14 @@ pub fn run_fake_daemon_soak(config: &DaemonSoakConfig) -> DaemonSoakReport {
 fn memory_growth_per_tick(profile: DaemonSoakProfile, tick: u64) -> u64 {
     match profile {
         DaemonSoakProfile::ObserveOnly => {
-            if tick % 120 == 0 {
+            if tick.is_multiple_of(120) {
                 1024
             } else {
                 0
             }
         }
         DaemonSoakProfile::ApplyLowRiskFake => {
-            if tick % 60 == 0 {
+            if tick.is_multiple_of(60) {
                 2048
             } else {
                 0

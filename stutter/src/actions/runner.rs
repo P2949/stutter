@@ -123,24 +123,48 @@ fn check_action_with_explanation(
     }
 }
 
-fn append_runner_audit_event(
-    audit_path: &Path,
-    base_event: &AuditEvent,
+struct RunnerAuditEventUpdate {
     phase: Option<ActionPhase>,
     success: bool,
     affected_tasks: usize,
     restore_path: Option<PathBuf>,
     error_category: Option<String>,
-    message: impl Into<String>,
+    message: String,
+}
+
+impl RunnerAuditEventUpdate {
+    fn new(
+        phase: Option<ActionPhase>,
+        success: bool,
+        affected_tasks: usize,
+        restore_path: Option<PathBuf>,
+        error_category: Option<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            phase,
+            success,
+            affected_tasks,
+            restore_path,
+            error_category,
+            message: message.into(),
+        }
+    }
+}
+
+fn append_runner_audit_event(
+    audit_path: &Path,
+    base_event: &AuditEvent,
+    update: RunnerAuditEventUpdate,
 ) {
     let mut event = base_event.clone();
     event.unix_nanos = unix_nanos_now();
-    event.action_phase = phase;
-    event.success = success;
-    event.affected_tasks = affected_tasks;
-    event.restore_path = restore_path;
-    event.error_category = error_category;
-    event.message = message.into();
+    event.action_phase = update.phase;
+    event.success = update.success;
+    event.affected_tasks = update.affected_tasks;
+    event.restore_path = update.restore_path;
+    event.error_category = update.error_category;
+    event.message = update.message;
 
     if let Err(audit_err) = append_audit_event_to_path(audit_path, &event) {
         log::warn!(
@@ -186,12 +210,14 @@ where
             append_runner_audit_event(
                 audit_path,
                 audit_event,
-                Some(ActionPhase::Rollback),
-                true,
-                rollback.affected_tasks(),
-                rollback.restore_path().cloned(),
-                None,
-                "rollback completed after action timeout",
+                RunnerAuditEventUpdate::new(
+                    Some(ActionPhase::Rollback),
+                    true,
+                    rollback.affected_tasks(),
+                    rollback.restore_path().cloned(),
+                    None,
+                    "rollback completed after action timeout",
+                ),
             );
             ActionError::timeout_rollback_completed(phase, elapsed_ms, timeout_ms)
         }
@@ -254,12 +280,14 @@ where
         append_runner_audit_event(
             audit_path,
             &audit_event,
-            Some(crate::actions::ActionPhase::Preflight),
-            true,
-            0,
-            None,
-            None,
-            "preflight successful",
+            RunnerAuditEventUpdate::new(
+                Some(crate::actions::ActionPhase::Preflight),
+                true,
+                0,
+                None,
+                None,
+                "preflight successful",
+            ),
         );
         if let Some(timeout) = total_timeout_error(
             started_instant,
@@ -281,12 +309,14 @@ where
             append_runner_audit_event(
                 audit_path,
                 &audit_event,
-                Some(crate::actions::ActionPhase::DryRun),
-                true,
-                state.affected_tasks,
-                None,
-                None,
-                "dry run successful",
+                RunnerAuditEventUpdate::new(
+                    Some(crate::actions::ActionPhase::DryRun),
+                    true,
+                    state.affected_tasks,
+                    None,
+                    None,
+                    "dry run successful",
+                ),
             );
             if let Some(timeout) = total_timeout_error(
                 started_instant,
@@ -330,12 +360,14 @@ where
             append_runner_audit_event(
                 audit_path,
                 &audit_event,
-                Some(crate::actions::ActionPhase::DryRun),
-                true,
-                dry_run_state.affected_tasks,
-                None,
-                None,
-                "pre-apply dry run successful",
+                RunnerAuditEventUpdate::new(
+                    Some(crate::actions::ActionPhase::DryRun),
+                    true,
+                    dry_run_state.affected_tasks,
+                    None,
+                    None,
+                    "pre-apply dry run successful",
+                ),
             );
             if let Some(timeout) = total_timeout_error(
                 started_instant,
@@ -366,12 +398,14 @@ where
             append_runner_audit_event(
                 audit_path,
                 &audit_event,
-                Some(crate::actions::ActionPhase::Apply),
-                true,
-                rollback.affected_tasks(),
-                rollback.restore_path().cloned(),
-                None,
-                "apply successful",
+                RunnerAuditEventUpdate::new(
+                    Some(crate::actions::ActionPhase::Apply),
+                    true,
+                    rollback.affected_tasks(),
+                    rollback.restore_path().cloned(),
+                    None,
+                    "apply successful",
+                ),
             );
             if let Some(timeout) = total_timeout_error(
                 started_instant,
@@ -394,12 +428,14 @@ where
                     append_runner_audit_event(
                         audit_path,
                         &audit_event,
-                        Some(crate::actions::ActionPhase::Verify),
-                        true,
-                        state.affected_tasks,
-                        rollback.restore_path().cloned(),
-                        None,
-                        "verify successful",
+                        RunnerAuditEventUpdate::new(
+                            Some(crate::actions::ActionPhase::Verify),
+                            true,
+                            state.affected_tasks,
+                            rollback.restore_path().cloned(),
+                            None,
+                            "verify successful",
+                        ),
                     );
                     if let Some(timeout) = total_timeout_error(
                         started_instant,
@@ -424,12 +460,14 @@ where
                             append_runner_audit_event(
                                 audit_path,
                                 &audit_event,
-                                Some(crate::actions::ActionPhase::Rollback),
-                                true,
-                                rollback.affected_tasks(),
-                                rollback.restore_path().cloned(),
-                                None,
-                                "rollback completed after verify failure",
+                                RunnerAuditEventUpdate::new(
+                                    Some(crate::actions::ActionPhase::Rollback),
+                                    true,
+                                    rollback.affected_tasks(),
+                                    rollback.restore_path().cloned(),
+                                    None,
+                                    "rollback completed after verify failure",
+                                ),
                             );
                             return Err(ActionError::verify_rollback_completed(verify_err));
                         }
@@ -476,12 +514,14 @@ where
     append_runner_audit_event(
         audit_path,
         &audit_event,
-        audit_event.action_phase,
-        audit_event.success,
-        audit_event.affected_tasks,
-        audit_event.restore_path.clone(),
-        audit_event.error_category.clone(),
-        audit_event.message.clone(),
+        RunnerAuditEventUpdate::new(
+            audit_event.action_phase,
+            audit_event.success,
+            audit_event.affected_tasks,
+            audit_event.restore_path.clone(),
+            audit_event.error_category.clone(),
+            audit_event.message.clone(),
+        ),
     );
 
     result

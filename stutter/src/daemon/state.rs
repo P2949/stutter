@@ -353,14 +353,11 @@ impl DaemonProfileEnvironment {
 
     pub fn from_system_metadata(metadata: &SystemMetadata) -> Self {
         let cpu_topology_hash = daemon_profile_cpu_topology_hash(metadata);
-        let hardware_fingerprint = daemon_profile_stable_hash(
-            [
-                metadata.cpu_possible.as_deref().unwrap_or("-"),
-                metadata.cpu_online.as_deref().unwrap_or("-"),
-                cpu_topology_hash.as_deref().unwrap_or("-"),
-            ]
-            .into_iter(),
-        );
+        let hardware_fingerprint = daemon_profile_stable_hash([
+            metadata.cpu_possible.as_deref().unwrap_or("-"),
+            metadata.cpu_online.as_deref().unwrap_or("-"),
+            cpu_topology_hash.as_deref().unwrap_or("-"),
+        ]);
         let scheduler_label = metadata
             .scx_ops
             .clone()
