@@ -8,6 +8,7 @@ inherit cargo systemd
 DESCRIPTION="Scheduler latency recorder and conservative autotune daemon"
 HOMEPAGE="https://github.com/P2949/stutter"
 EGIT_REPO_URI="https://github.com/P2949/stutter.git"
+EGIT_BRANCH="review/big-daemon-packaging-work"
 
 if [[ ${PV} == 9999 ]]; then
 	inherit git-r3
@@ -19,9 +20,9 @@ KEYWORDS=""
 IUSE="systemd openrc"
 
 BDEPEND="
-	virtual/rust
-	sys-devel/clang
-	sys-devel/llvm
+	|| ( dev-lang/rust-bin dev-lang/rust )
+	llvm-core/clang
+	llvm-core/llvm
 "
 
 src_compile() {
