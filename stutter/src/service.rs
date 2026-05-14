@@ -1,11 +1,32 @@
-use std::{
-    fmt, fs,
-    path::{Path, PathBuf},
-    str::FromStr,
-};
+use std::{fmt, fs, path::PathBuf, str::FromStr};
 
 use anyhow::Context;
 use serde::Serialize;
+
+const SYSTEMD_AGENT_UNIT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../packaging/systemd/stutter-agent.service"
+));
+const SYSTEMD_AUTOTUNE_OBSERVE_UNIT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../packaging/systemd/stutter-autotune-observe.service"
+));
+const SYSTEMD_AUTOTUNE_LOW_RISK_UNIT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../packaging/systemd/stutter-autotune-low-risk.service"
+));
+const OPENRC_AGENT_UNIT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../packaging/openrc/stutter-agent"
+));
+const OPENRC_AUTOTUNE_OBSERVE_UNIT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../packaging/openrc/stutter-autotune-observe"
+));
+const OPENRC_AUTOTUNE_LOW_RISK_UNIT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../packaging/openrc/stutter-autotune-low-risk"
+));
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -102,21 +123,34 @@ impl ServiceMode {
         }
     }
 
-    pub fn packaged_unit_path(self, manager: ServiceManager) -> PathBuf {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
+    pub fn packaged_unit_source(self, manager: ServiceManager) -> PathBuf {
+        let unit_family = match manager {
+            ServiceManager::SystemdSystem | ServiceManager::SystemdUser => "systemd",
+            ServiceManager::OpenRc => "openrc",
+        };
 
-        match manager {
-            ServiceManager::SystemdSystem | ServiceManager::SystemdUser => root
-                .join("packaging")
-                .join("systemd")
-                .join(self.unit_name(manager)),
-            ServiceManager::OpenRc => root
-                .join("packaging")
-                .join("openrc")
-                .join(self.unit_name(manager)),
+        PathBuf::from("embedded")
+            .join(unit_family)
+            .join(self.unit_name(manager))
+    }
+
+    pub fn packaged_unit_template(self, manager: ServiceManager) -> &'static str {
+        match (self, manager) {
+            (Self::Agent, ServiceManager::OpenRc) => OPENRC_AGENT_UNIT,
+            (Self::SystemObserve | Self::UserObserve, ServiceManager::OpenRc) => {
+                OPENRC_AUTOTUNE_OBSERVE_UNIT
+            }
+            (Self::SystemLowRisk, ServiceManager::OpenRc) => OPENRC_AUTOTUNE_LOW_RISK_UNIT,
+            (Self::Agent, ServiceManager::SystemdSystem | ServiceManager::SystemdUser) => {
+                SYSTEMD_AGENT_UNIT
+            }
+            (
+                Self::SystemObserve | Self::UserObserve,
+                ServiceManager::SystemdSystem | ServiceManager::SystemdUser,
+            ) => SYSTEMD_AUTOTUNE_OBSERVE_UNIT,
+            (Self::SystemLowRisk, ServiceManager::SystemdSystem | ServiceManager::SystemdUser) => {
+                SYSTEMD_AUTOTUNE_LOW_RISK_UNIT
+            }
         }
     }
 }
@@ -201,7 +235,7 @@ pub fn default_service_binary_path() -> PathBuf {
 
 pub fn build_service_plan(request: ServiceCommandRequest) -> ServicePlan {
     let unit_name = request.mode.unit_name(request.manager).to_owned();
-    let unit_source = request.mode.packaged_unit_path(request.manager);
+    let unit_source = request.mode.packaged_unit_source(request.manager);
     let unit_dir = request
         .unit_dir
         .unwrap_or_else(|| request.manager.default_unit_dir());
@@ -306,13 +340,18 @@ pub fn execute_service_plan(plan: &ServicePlan) -> anyhow::Result<()> {
                     format!("failed to create unit directory {}", parent.display())
                 })?;
             }
-            fs::copy(&plan.unit_source, &plan.unit_target).with_context(|| {
+            fs::write(
+                &plan.unit_target,
+                plan.mode.packaged_unit_template(plan.manager),
+            )
+            .with_context(|| {
                 format!(
-                    "failed to copy service unit {} to {}",
+                    "failed to write embedded service unit {} to {}",
                     plan.unit_source.display(),
                     plan.unit_target.display()
                 )
             })?;
+            set_installed_unit_permissions(plan)?;
         }
         ServiceAction::Uninstall => {
             if plan.unit_target.exists() {
@@ -334,7 +373,11 @@ pub fn diagnose_service_plan(plan: ServicePlan) -> ServiceDoctorReport {
     let checks = vec![
         ServiceDoctorCheck {
             name: "packaged_unit",
-            ok: plan.unit_source.exists(),
+            ok: !plan
+                .mode
+                .packaged_unit_template(plan.manager)
+                .trim()
+                .is_empty(),
             detail: plan.unit_source.display().to_string(),
         },
         ServiceDoctorCheck {
@@ -370,6 +413,36 @@ pub fn diagnose_service_plan(plan: ServicePlan) -> ServiceDoctorReport {
     let ok = checks.iter().all(|check| check.ok);
 
     ServiceDoctorReport { plan, checks, ok }
+}
+
+#[cfg(unix)]
+fn set_installed_unit_permissions(plan: &ServicePlan) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if plan.manager != ServiceManager::OpenRc {
+        return Ok(());
+    }
+
+    let mut permissions = fs::metadata(&plan.unit_target)
+        .with_context(|| {
+            format!(
+                "failed to read installed OpenRC unit metadata {}",
+                plan.unit_target.display()
+            )
+        })?
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&plan.unit_target, permissions).with_context(|| {
+        format!(
+            "failed to set OpenRC unit permissions on {}",
+            plan.unit_target.display()
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn set_installed_unit_permissions(_plan: &ServicePlan) -> anyhow::Result<()> {
+    Ok(())
 }
 
 fn user_systemd_dir() -> PathBuf {
@@ -429,6 +502,10 @@ mod tests {
             ServiceMode::Agent.unit_name(ServiceManager::OpenRc),
             "stutter-agent"
         );
+        assert_eq!(
+            ServiceMode::SystemObserve.packaged_unit_source(ServiceManager::SystemdSystem),
+            PathBuf::from("embedded/systemd/stutter-autotune-observe.service")
+        );
     }
 
     #[test]
@@ -465,11 +542,155 @@ mod tests {
             (ServiceMode::SystemLowRisk, ServiceManager::SystemdSystem),
             (ServiceMode::SystemLowRisk, ServiceManager::OpenRc),
         ] {
-            let unit = std::fs::read_to_string(mode.packaged_unit_path(manager)).unwrap();
+            let unit = mode.packaged_unit_template(manager);
 
             assert!(unit.contains("daemon emergency-restore"));
             assert!(!unit.contains("autotune restore"));
         }
+    }
+
+    #[test]
+    fn gentoo_ebuild_does_not_depend_on_stutter_account_services() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("stutter crate should live under the repository root")
+            .to_path_buf();
+        let ebuild_path = root
+            .join("packaging")
+            .join("gentoo")
+            .join("stutter-9999.ebuild");
+        let ebuild = std::fs::read_to_string(ebuild_path).unwrap();
+
+        assert!(!ebuild.contains("acct-group/stutter"));
+        assert!(!ebuild.contains("acct-user/stutter"));
+
+        for (mode, manager) in [
+            (ServiceMode::Agent, ServiceManager::SystemdSystem),
+            (ServiceMode::SystemObserve, ServiceManager::SystemdSystem),
+            (ServiceMode::SystemLowRisk, ServiceManager::SystemdSystem),
+            (ServiceMode::Agent, ServiceManager::OpenRc),
+            (ServiceMode::SystemObserve, ServiceManager::OpenRc),
+            (ServiceMode::SystemLowRisk, ServiceManager::OpenRc),
+        ] {
+            let unit_path = match manager {
+                ServiceManager::SystemdSystem | ServiceManager::SystemdUser => root
+                    .join("packaging")
+                    .join("systemd")
+                    .join(mode.unit_name(manager)),
+                ServiceManager::OpenRc => root
+                    .join("packaging")
+                    .join("openrc")
+                    .join(mode.unit_name(manager)),
+            };
+            let unit = std::fs::read_to_string(unit_path).unwrap();
+
+            assert!(
+                !unit.lines().any(|line| line.trim() == "User=stutter"),
+                "{mode:?} {manager:?} should not require acct-user/stutter"
+            );
+            assert!(
+                !unit.lines().any(|line| {
+                    let line = line.trim();
+                    line.starts_with("command_user=") && line.contains("stutter")
+                }),
+                "{mode:?} {manager:?} should not require acct-user/stutter"
+            );
+        }
+    }
+
+    #[test]
+    fn packaged_systemd_system_units_pin_home_to_var_lib_stutter() {
+        for mode in [
+            ServiceMode::Agent,
+            ServiceMode::SystemObserve,
+            ServiceMode::SystemLowRisk,
+        ] {
+            let unit = mode.packaged_unit_template(ServiceManager::SystemdSystem);
+
+            assert!(
+                unit.contains("Environment=HOME=/var/lib/stutter"),
+                "{mode:?} systemd unit should set HOME=/var/lib/stutter"
+            );
+        }
+    }
+
+    #[test]
+    fn packaged_openrc_units_export_home_to_var_lib_stutter() {
+        for mode in [
+            ServiceMode::Agent,
+            ServiceMode::SystemObserve,
+            ServiceMode::SystemLowRisk,
+        ] {
+            let unit = mode.packaged_unit_template(ServiceManager::OpenRc);
+
+            assert!(
+                unit.contains("export HOME=\"${stutter_home:-/var/lib/stutter}\""),
+                "{mode:?} OpenRC unit should export HOME from stutter_home with /var/lib/stutter fallback"
+            );
+        }
+    }
+
+    #[test]
+    fn service_install_writes_embedded_systemd_unit_template() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut request = request(
+            ServiceAction::Install,
+            ServiceManager::SystemdSystem,
+            ServiceMode::SystemObserve,
+        );
+        request.dry_run = false;
+        request.unit_dir = Some(temp.path().join("units"));
+        request.config_dir = temp.path().join("etc");
+        request.state_dir = temp.path().join("state");
+        request.log_dir = temp.path().join("log");
+
+        let plan = build_service_plan(request);
+        execute_service_plan(&plan).unwrap();
+
+        let installed_unit = fs::read_to_string(&plan.unit_target).unwrap();
+        assert_eq!(
+            installed_unit,
+            ServiceMode::SystemObserve.packaged_unit_template(ServiceManager::SystemdSystem)
+        );
+        assert_eq!(
+            plan.unit_source,
+            PathBuf::from("embedded/systemd/stutter-autotune-observe.service")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn service_install_marks_openrc_unit_executable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let mut request = request(
+            ServiceAction::Install,
+            ServiceManager::OpenRc,
+            ServiceMode::Agent,
+        );
+        request.dry_run = false;
+        request.unit_dir = Some(temp.path().join("init.d"));
+        request.config_dir = temp.path().join("etc");
+        request.state_dir = temp.path().join("state");
+        request.log_dir = temp.path().join("log");
+
+        let plan = build_service_plan(request);
+        execute_service_plan(&plan).unwrap();
+
+        let installed_unit = fs::read_to_string(&plan.unit_target).unwrap();
+        assert_eq!(
+            installed_unit,
+            ServiceMode::Agent.packaged_unit_template(ServiceManager::OpenRc)
+        );
+        assert_eq!(
+            fs::metadata(&plan.unit_target)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
     }
 
     #[test]
