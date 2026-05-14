@@ -1,5 +1,3 @@
-use std::fs;
-
 use serde::Serialize;
 
 use crate::{
@@ -39,18 +37,24 @@ pub struct DaemonAcceptanceStep {
 
 pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
     let service_probe = ServiceAcceptanceProbe::default();
-    let observe_service_plan = build_service_plan(service_probe.request(
+    let _observe_service_plan = build_service_plan(service_probe.request(
         ServiceAction::Install,
         ServiceManager::SystemdSystem,
         ServiceMode::SystemObserve,
     ));
-    let low_risk_service_plan = build_service_plan(service_probe.request(
+    let _low_risk_service_plan = build_service_plan(service_probe.request(
         ServiceAction::Install,
         ServiceManager::SystemdSystem,
         ServiceMode::SystemLowRisk,
     ));
+    let observe_service_unit =
+        ServiceMode::SystemObserve.packaged_unit_template(ServiceManager::SystemdSystem);
     let low_risk_service_unit =
-        fs::read_to_string(&low_risk_service_plan.unit_source).unwrap_or_default();
+        ServiceMode::SystemLowRisk.packaged_unit_template(ServiceManager::SystemdSystem);
+
+    let observe_service_is_packaged = !observe_service_unit.trim().is_empty();
+    let low_risk_service_is_packaged = !low_risk_service_unit.trim().is_empty();
+
     let low_risk_service_has_restore_hook = low_risk_service_unit
         .contains("daemon emergency-restore")
         && !low_risk_service_unit.contains("autotune restore");
@@ -165,7 +169,7 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         step(
             1,
             "install_service",
-            observe_service_plan.unit_source.exists(),
+            observe_service_is_packaged,
             "observe service unit is packaged",
         ),
         step(
@@ -195,7 +199,7 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         step(
             5,
             "enter_apply_low_risk",
-            low_risk_service_plan.unit_source.exists()
+            low_risk_service_is_packaged
                 && start_report.final_state.mode == DaemonMode::ApplyLowRisk,
             "low-risk service unit is packaged and simulation entered apply-low-risk mode",
         ),

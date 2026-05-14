@@ -3,7 +3,8 @@
 name="stutter autotune low-risk"
 description="Stutter low-risk autotune daemon with emergency restore on stop"
 
-export HOME="${stutter_home:-/var/lib/stutter}"
+: "${stutter_home:=/var/lib/stutter}"
+export HOME="${stutter_home}"
 
 command="${stutter_command:-/usr/bin/stutter}"
 command_background="yes"
@@ -29,6 +30,7 @@ start_pre() {
 		eerror "set only one of stutter_watch_process or stutter_tree_pid"
 		return 64
 	fi
+	checkpath --directory --mode 0755 "${stutter_home}"
 	checkpath --directory --mode 0755 /run
 }
 

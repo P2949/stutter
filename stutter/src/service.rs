@@ -624,8 +624,16 @@ mod tests {
             let unit = mode.packaged_unit_template(ServiceManager::OpenRc);
 
             assert!(
-                unit.contains("export HOME=\"${stutter_home:-/var/lib/stutter}\""),
-                "{mode:?} OpenRC unit should export HOME from stutter_home with /var/lib/stutter fallback"
+                unit.contains(": \"${stutter_home:=/var/lib/stutter}\""),
+                "{mode:?} OpenRC unit should default stutter_home to /var/lib/stutter"
+            );
+            assert!(
+                unit.contains("export HOME=\"${stutter_home}\""),
+                "{mode:?} OpenRC unit should export HOME from stutter_home"
+            );
+            assert!(
+                unit.contains("checkpath --directory --mode 0755 \"${stutter_home}\""),
+                "{mode:?} OpenRC unit should create stutter_home before start"
             );
         }
     }
