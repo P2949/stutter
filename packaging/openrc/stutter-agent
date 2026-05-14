@@ -3,6 +3,8 @@
 name="stutter agent"
 description="Stutter remote agent with autotune emergency restore on stop"
 
+export HOME="${stutter_home:-/var/lib/stutter}"
+
 command="${stutter_command:-/usr/bin/stutter}"
 if [ -n "${stutter_bind:-}" ]; then
 	command_args="agent --bind ${stutter_bind} ${stutter_extra_args:-}"

@@ -3,6 +3,8 @@
 name="stutter autotune low-risk"
 description="Stutter low-risk autotune daemon with emergency restore on stop"
 
+export HOME="${stutter_home:-/var/lib/stutter}"
+
 command="${stutter_command:-/usr/bin/stutter}"
 command_background="yes"
 pidfile="${stutter_pidfile:-/run/${RC_SVCNAME}.pid}"

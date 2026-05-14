@@ -6,6 +6,7 @@ After=network.target
 [Service]
 Type=simple
 EnvironmentFile=-/etc/stutter/autotune-low-risk.env
+Environment=HOME=/var/lib/stutter
 Environment=STUTTER_AUTOTUNE_MODE=apply-low-risk
 Environment=STUTTER_AUTOTUNE_PRESET=diagnosis
 Environment=STUTTER_AUTOTUNE_SUMMARY_MS=1000

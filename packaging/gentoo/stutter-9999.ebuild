@@ -23,10 +23,6 @@ BDEPEND="
 	sys-devel/clang
 	sys-devel/llvm
 "
-RDEPEND="
-	acct-group/stutter
-	acct-user/stutter
-"
 
 src_compile() {
 	RUSTUP_TOOLCHAIN=nightly cargo_src_compile -p stutter

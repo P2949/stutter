@@ -3,6 +3,8 @@
 name="stutter autotune observe"
 description="Stutter observe-only autotune daemon"
 
+export HOME="${stutter_home:-/var/lib/stutter}"
+
 command="${stutter_command:-/usr/bin/stutter}"
 command_background="yes"
 pidfile="${stutter_pidfile:-/run/${RC_SVCNAME}.pid}"
