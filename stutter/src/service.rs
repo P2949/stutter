@@ -639,6 +639,30 @@ mod tests {
     }
 
     #[test]
+    fn packaged_systemd_autotune_auto_focus_units_collect_foreground_window_context() {
+        for mode in [ServiceMode::SystemObserve, ServiceMode::SystemLowRisk] {
+            let unit = mode.packaged_unit_template(ServiceManager::SystemdSystem);
+            let auto_focus_commands = unit
+                .lines()
+                .map(str::trim)
+                .filter(|line| line.contains("--auto-focus"))
+                .collect::<Vec<_>>();
+
+            assert!(
+                !auto_focus_commands.is_empty(),
+                "{mode:?} systemd unit should contain at least one auto-focus command"
+            );
+
+            for command in auto_focus_commands {
+                assert!(
+                    command.contains("--foreground-window"),
+                    "{mode:?} systemd auto-focus branch should collect foreground-window context: {command}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn service_install_writes_embedded_systemd_unit_template() {
         let temp = tempfile::tempdir().unwrap();
         let mut request = request(
