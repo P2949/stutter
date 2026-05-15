@@ -663,7 +663,7 @@ apply-high-risk
 
 Their contract is documented in [docs/DAEMON_CONTRACT.md](docs/DAEMON_CONTRACT.md).
 
-Live `stutter autotune --mode` currently supports `observe`, `suggest`, and `apply-low-risk`. The central `DaemonMode` type also defines `apply-medium-risk` and `apply-high-risk` as policy labels, but the live autotune command rejects those modes until their apply paths are implemented and explicitly unlocked.
+Live `stutter autotune --mode` currently supports `observe`, `suggest`, `apply-low-risk`, and `apply-medium-risk` when `--allow-medium-risk` is set. `apply-medium-risk` is limited to reversible process-local/cgroup candidates (`nice`, `ionice`, `uclamp`, `cgroup_placement`, and medium-risk CPU-affinity profiles), still requires an explicit target, and still passes through the strict planner and daemon policy gates. `apply-high-risk` remains a policy label and is not implemented for live apply.
 
 `apply-low-risk` is the default apply ceiling and currently applies CPU-affinity candidates only for explicit target process trees. It is not a system-wide auto-tuner.
 

@@ -508,7 +508,7 @@ pub struct AutotuneArgs {
     #[arg(
         long = "mode",
         default_value = "observe",
-        help = "Autotune mode: observe, suggest, apply-low-risk, apply-medium-risk, or apply-high-risk. Live autotune currently supports observe, suggest, and apply-low-risk only; apply-low-risk applies CPU-affinity candidates only."
+        help = "Autotune mode: observe, suggest, apply-low-risk, apply-medium-risk, or apply-high-risk. Live autotune supports observe, suggest, apply-low-risk, and apply-medium-risk when --allow-medium-risk is set; apply-medium-risk is limited to reversible process-local/cgroup candidates, and apply-high-risk is not implemented."
     )]
     pub mode: String,
 
