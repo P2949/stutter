@@ -1,7 +1,7 @@
 use crate::{
     autotune::{
         candidate::CandidateAction, controller::ControllerRuntimeState, objective::ObjectiveKind,
-        observation::AutotuneObservation,
+        observation::AutotuneObservation, system_context::SystemContextSnapshot,
     },
     daemon::{DaemonCapabilities, DaemonPolicy, SystemHealthSnapshot},
     profiles::Profile,
@@ -37,6 +37,7 @@ pub struct CandidateProviderInput<'a> {
     pub daemon_policy: &'a DaemonPolicy,
     pub capabilities: &'a DaemonCapabilities,
     pub system_health: &'a SystemHealthSnapshot,
+    pub system_context: &'a SystemContextSnapshot,
     pub controller_state: &'a ControllerRuntimeState,
     pub profiles: &'a [Profile],
 }
@@ -157,6 +158,10 @@ mod tests {
         })
     }
 
+    fn system_context_for_observation(observation: &AutotuneObservation) -> SystemContextSnapshot {
+        SystemContextSnapshot::from_observation(observation)
+    }
+
     #[test]
     fn registry_includes_safe_and_suggest_first_provider_families() {
         let registry = CandidateProviderRegistry::default_for_policy(&policy(DaemonMode::Suggest));
@@ -190,11 +195,13 @@ mod tests {
         observation.refresh_situation_classification();
         observation.primary_situation = SituationKind::IoPressure;
 
+        let system_context = system_context_for_observation(&observation);
         let proposals = provider.propose(&CandidateProviderInput {
             observation: &observation,
             daemon_policy: &policy,
             capabilities: &observation.capabilities,
             system_health: &observation.system_health,
+            system_context: &system_context,
             controller_state: &ControllerRuntimeState::default(),
             profiles: &[],
         });
@@ -216,11 +223,13 @@ mod tests {
             ..AutotuneObservation::default()
         };
 
+        let system_context = system_context_for_observation(&observation);
         let proposals = provider.propose(&CandidateProviderInput {
             observation: &observation,
             daemon_policy: &policy,
             capabilities: &observation.capabilities,
             system_health: &observation.system_health,
+            system_context: &system_context,
             controller_state: &ControllerRuntimeState::default(),
             profiles: &[],
         });
@@ -278,11 +287,13 @@ mod tests {
         };
         observation.refresh_situation_classification();
 
+        let system_context = system_context_for_observation(&observation);
         let proposals = provider.propose(&CandidateProviderInput {
             observation: &observation,
             daemon_policy: &policy,
             capabilities: &observation.capabilities,
             system_health: &observation.system_health,
+            system_context: &system_context,
             controller_state: &ControllerRuntimeState::default(),
             profiles: &[],
         });

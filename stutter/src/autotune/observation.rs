@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     quality::OnlineDataQuality,
     situation::{SituationClassification, SituationKind, classify_situation},
+    system_context::SystemContextSnapshot,
 };
 use crate::{
     daemon::{capabilities::DaemonCapabilities, health::SystemHealthSnapshot},
@@ -149,6 +150,7 @@ pub struct AutotuneObservation {
     pub active_tasks: Vec<ActiveTaskSnapshot>,
     pub protected_tasks: Vec<ProtectedTask>,
     pub active_config_snapshot: Option<ActiveConfigSnapshot>,
+    pub system_context: Option<SystemContextSnapshot>,
 
     pub frame_count: usize,
     pub frame_p99_ms: f64,
@@ -184,6 +186,7 @@ impl Default for AutotuneObservation {
             active_tasks: Vec::new(),
             protected_tasks: Vec::new(),
             active_config_snapshot: None,
+            system_context: None,
             frame_count: 0,
             frame_p99_ms: 0.0,
             frame_max_ms: 0.0,

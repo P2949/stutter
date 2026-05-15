@@ -14,7 +14,6 @@ use tokio::sync::{mpsc, oneshot};
 use crate::{
     actions::{RollbackToken, SafetyClass, runner::ActionRunPolicy},
     autotune::{
-        active_config::{ActiveConfigCollectorInput, collect_active_config},
         apply::executor_for_candidate,
         apply_low_risk::apply_candidate_with_audit,
         candidate::{CandidateAction, CandidateDryRunRecord},
@@ -48,6 +47,7 @@ use crate::{
         quality::{OnlineDataQuality, OnlineDataQualityPolicy},
         rolling_window::{RollingWindow, WindowScore as RuntimeWindowScore},
         state::{ControllerPhase, SituationKind},
+        system_context::{SystemContextSnapshotInput, collect_system_context},
         washout::WashoutWindowConfig,
     },
     config::model::MonitorConfig,
@@ -860,10 +860,18 @@ impl AutotuneRuntime {
             .map(|focus| focus.situation)
             .unwrap_or(SituationKind::Unknown);
         let system_health = self.daemon_health_snapshot();
-        let capabilities = crate::daemon::capabilities::CapabilityProbe::default().probe();
-        let inventory = crate::system_inventory::SystemInventory::probe();
         let active_tasks = active_task_snapshots_from_active_tasks(&self.target_state.active_tasks);
         let protected_tasks = protected_tasks_from_active_tasks(&self.target_state.active_tasks);
+        let system_context = collect_system_context(SystemContextSnapshotInput {
+            proc_root: Path::new("/proc"),
+            sys_root: Path::new("/sys"),
+            active_tasks: &active_tasks,
+            health: system_health,
+            sampled_at_unix_nanos: crate::audit::unix_nanos_now(),
+        });
+        let capabilities = system_context.capabilities.clone();
+        let topology_signature = system_context.inventory.inventory_hash.clone();
+        let active_config_snapshot = system_context.active_config.clone();
         let workload_identity = workload_identity_from_runtime_context(
             self.target_state
                 .root_pid
@@ -871,16 +879,8 @@ impl AutotuneRuntime {
             focus_kind,
             &self.target_state.active_tasks,
         );
-        let active_config_snapshot = collect_active_config(ActiveConfigCollectorInput {
-            proc_root: Path::new("/proc"),
-            sys_root: Path::new("/sys"),
-            active_tasks: &active_tasks,
-            capabilities: &capabilities,
-            inventory: &inventory,
-        });
-
         let mut observation = AutotuneObservation {
-            now_unix_nanos: crate::audit::unix_nanos_now(),
+            now_unix_nanos: system_context.sampled_at_unix_nanos,
             elapsed_ms: self.controller.window.latest_elapsed_ms().unwrap_or(0),
             target_present: self.target_present(&window_score),
             target_root_pid: self
@@ -900,13 +900,14 @@ impl AutotuneRuntime {
             focus_roots,
             focus_reasons,
             recent_diagnoses: self.recent_diagnoses.iter().cloned().collect(),
-            system_health,
+            system_health: system_context.health.clone(),
             capabilities,
-            topology_signature: Some(inventory.inventory_hash),
+            topology_signature: Some(topology_signature),
             workload_identity,
             active_tasks,
             protected_tasks,
             active_config_snapshot: Some(active_config_snapshot),
+            system_context: Some(system_context),
             frame_count: window_score.frame_count,
             frame_p99_ms: window_score.frame_p99_ms,
             frame_max_ms: window_score.frame_max_ms,
@@ -2357,7 +2358,7 @@ mod tests {
             frame_count: 100,
             frame_p99_ms: 12.0,
             frame_max_ms: 20.0,
-            drop_counter_total: 0,
+            ..AutotuneObservation::default()
         }
     }
 

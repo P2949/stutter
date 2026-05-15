@@ -6,7 +6,6 @@ use crate::{
         providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
         situation::SituationKind,
     },
-    system_inventory::SystemInventory,
 };
 
 #[derive(Default)]
@@ -26,7 +25,7 @@ impl CandidateProvider for GpuPowerProvider {
             return Vec::new();
         }
 
-        let inventory = SystemInventory::probe();
+        let inventory = &input.system_context.inventory;
         let Some(card) = inventory.drm_devices.first() else {
             return Vec::new();
         };
@@ -56,5 +55,88 @@ impl CandidateProvider for GpuPowerProvider {
             objective: ObjectiveKind::GameFramePacing,
             rank_hint: 85,
         }]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::{
+        autotune::{
+            controller::ControllerRuntimeState, observation::AutotuneObservation,
+            system_context::SystemContextSnapshot,
+        },
+        daemon::{ActionSource, DaemonCapabilities, DaemonMode, SystemHealthSnapshot},
+        daemon_policy::{DaemonPolicyBuildInput, build_daemon_policy},
+        focus::FocusGroupKind,
+        system_inventory::{DrmDeviceInventory, SystemInventory},
+    };
+
+    #[test]
+    fn gpu_power_provider_uses_system_context_inventory() {
+        let provider = GpuPowerProvider;
+        let mut observation = AutotuneObservation {
+            target_present: true,
+            target_root_pid: Some(1234),
+            primary_situation: SituationKind::GameGpuBound,
+            focus_kind: Some(FocusGroupKind::Game),
+            focus_confidence: 0.95,
+            ..AutotuneObservation::default()
+        };
+        observation.refresh_situation_classification();
+        observation.primary_situation = SituationKind::GameGpuBound;
+
+        let policy = policy();
+        let system_context = SystemContextSnapshot {
+            capabilities: DaemonCapabilities::default(),
+            health: SystemHealthSnapshot::default(),
+            inventory: SystemInventory {
+                cpu_policies: Vec::new(),
+                drm_devices: vec![DrmDeviceInventory {
+                    name: "card77".to_owned(),
+                    path: PathBuf::from("/fake/sys/class/drm/card77"),
+                    render_node: Some("renderD777".to_owned()),
+                    hwmon_paths: Vec::new(),
+                }],
+                irq_default_smp_affinity: None,
+                sched_ext_available: false,
+                vm_knobs: Default::default(),
+                inventory_hash: "fake-gpu-inventory".to_owned(),
+            },
+            active_config: Default::default(),
+            sampled_at_unix_nanos: 10,
+        };
+
+        let proposals = provider.propose(&CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            system_context: &system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        });
+
+        assert_eq!(proposals.len(), 1);
+        let CandidateAction::GpuPower { plan } = &proposals[0].candidate else {
+            panic!("expected gpu power candidate");
+        };
+        assert_eq!(plan.name, "gpu-power-card77-high");
+        assert_eq!(plan.action.drm_card, "card77");
+    }
+
+    fn policy() -> crate::daemon::DaemonPolicy {
+        let config = crate::autotune::runtime::daemon_config_for_runtime_mode(
+            DaemonMode::Suggest,
+            ActionSource::AutotuneRuntime,
+            Some(1234),
+            None,
+        );
+        build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        })
     }
 }

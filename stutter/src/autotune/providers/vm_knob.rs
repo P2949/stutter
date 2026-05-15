@@ -26,6 +26,14 @@ impl CandidateProvider for VmKnobProvider {
             return Vec::new();
         }
 
+        let current_swappiness = input
+            .system_context
+            .inventory
+            .vm_knobs
+            .get("sys/vm/swappiness")
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_owned());
+
         let candidate = CandidateAction::VmKnob {
             plan: VmKnobActionPlan {
                 name: "vm-swappiness-investigate-10".to_owned(),
@@ -38,7 +46,10 @@ impl CandidateProvider for VmKnobProvider {
                 },
                 evidence: vec![CandidateEvidence::new(
                     "situation",
-                    format!("{:?}", input.observation.primary_situation),
+                    format!(
+                        "{:?}; current_swappiness={current_swappiness}",
+                        input.observation.primary_situation
+                    ),
                     input.observation.situation.confidence,
                 )],
                 objective: ObjectiveKind::IoLatency,
