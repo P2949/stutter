@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{actions::SafetyClass, audit::AuditEvent};
+use crate::{
+    actions::{ActionState, RollbackToken, SafetyClass, runner::ActionRunPolicy},
+    audit::AuditEvent,
+    autotune::{
+        apply::executor_for_candidate,
+        candidate::{CandidateAction, CandidateDryRunRecord},
+        objective::ObjectiveKind,
+    },
+    daemon_policy::{ActionDescriptor, DaemonPolicy, DaemonPolicyContext, PolicyIntent},
+};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -237,6 +246,149 @@ pub fn privileged_operation_audit_event(
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct CandidatePlanRequest {
+    pub candidate: CandidateAction,
+    pub descriptor: ActionDescriptor,
+    pub objective: ObjectiveKind,
+    pub evidence_count: usize,
+    pub created_unix_nanos: u128,
+}
+
+impl CandidatePlanRequest {
+    pub fn from_candidate(candidate: CandidateAction, created_unix_nanos: u128) -> Self {
+        Self {
+            descriptor: candidate.descriptor(),
+            objective: candidate.objective(),
+            evidence_count: candidate.evidence().len(),
+            candidate,
+            created_unix_nanos,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CandidateApplyRequest {
+    pub plan: CandidatePlanRequest,
+    pub policy: DaemonPolicy,
+    pub context: DaemonPolicyContext,
+    pub max_plan_age_nanos: u128,
+}
+
+#[derive(Clone, Debug)]
+pub struct RollbackRequest {
+    pub candidate: CandidateAction,
+    pub token: RollbackToken,
+    pub policy: DaemonPolicy,
+    pub context: DaemonPolicyContext,
+}
+
+#[derive(Clone, Debug)]
+pub struct ApplyResult {
+    pub state: ActionState,
+    pub rollback: RollbackToken,
+}
+
+#[derive(Clone, Debug)]
+pub struct RollbackResult {
+    pub affected_tasks: usize,
+}
+
+pub trait PrivilegedActionService {
+    fn dry_run_candidate(
+        &self,
+        request: CandidateApplyRequest,
+    ) -> anyhow::Result<CandidateDryRunRecord>;
+    fn apply_candidate(&self, request: CandidateApplyRequest) -> anyhow::Result<ApplyResult>;
+    fn rollback(&self, request: RollbackRequest) -> anyhow::Result<RollbackResult>;
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct InProcessPrivilegedActionService;
+
+impl PrivilegedActionService for InProcessPrivilegedActionService {
+    fn dry_run_candidate(
+        &self,
+        request: CandidateApplyRequest,
+    ) -> anyhow::Result<CandidateDryRunRecord> {
+        validate_candidate_plan_request(&request, PolicyIntent::DryRun)?;
+        let executor = executor_for_candidate(request.plan.candidate)?;
+        executor.dry_run()
+    }
+
+    fn apply_candidate(&self, request: CandidateApplyRequest) -> anyhow::Result<ApplyResult> {
+        validate_candidate_plan_request(&request, PolicyIntent::Apply)?;
+        let executor = executor_for_candidate(request.plan.candidate)?;
+        let run_policy = ActionRunPolicy {
+            policy: request.policy,
+            context: request.context,
+            max_affected_tasks: None,
+            max_total_duration: None,
+            dry_run: false,
+        };
+        let result = executor.apply_with_audit(run_policy)?;
+        let rollback = result
+            .rollback
+            .ok_or_else(|| anyhow::anyhow!("privileged apply completed without rollback token"))?;
+        Ok(ApplyResult {
+            state: result.state,
+            rollback,
+        })
+    }
+
+    fn rollback(&self, request: RollbackRequest) -> anyhow::Result<RollbackResult> {
+        request.policy.check_action_with_context(
+            PolicyIntent::Rollback,
+            &request.candidate.descriptor(),
+            &request.context,
+        )?;
+        let affected_tasks = request.token.affected_tasks();
+        let executor = executor_for_candidate(request.candidate)?;
+        executor.rollback(&request.token)?;
+        Ok(RollbackResult { affected_tasks })
+    }
+}
+
+fn validate_candidate_plan_request(
+    request: &CandidateApplyRequest,
+    intent: PolicyIntent,
+) -> anyhow::Result<()> {
+    let now = crate::audit::unix_nanos_now();
+    if request.max_plan_age_nanos > 0
+        && now.saturating_sub(request.plan.created_unix_nanos) > request.max_plan_age_nanos
+    {
+        anyhow::bail!("stale_candidate_plan: candidate plan timestamp is too old");
+    }
+
+    let live_descriptor = request.plan.candidate.descriptor();
+    if live_descriptor.action_id != request.plan.descriptor.action_id
+        || live_descriptor.action_kind != request.plan.descriptor.action_kind
+        || live_descriptor.safety_class != request.plan.descriptor.safety_class
+        || live_descriptor.effect_scope != request.plan.descriptor.effect_scope
+    {
+        anyhow::bail!(
+            "candidate_plan_descriptor_mismatch: candidate plan descriptor does not match action payload"
+        );
+    }
+
+    if request.plan.objective != request.plan.candidate.objective() {
+        anyhow::bail!("candidate_plan_objective_mismatch: candidate objective changed");
+    }
+
+    if request.plan.evidence_count == 0
+        && request.plan.candidate.evidence().is_empty()
+        && request.plan.candidate.action_kind() != "cpu_affinity_profile"
+    {
+        anyhow::bail!("candidate_plan_missing_evidence: candidate plan has no evidence");
+    }
+
+    request
+        .policy
+        .check_action_with_context(intent, &request.plan.descriptor, &request.context)?;
+
+    Ok(())
+}
+
 fn allow(
     reason_code: &'static str,
     privileged_worker_required: bool,
@@ -393,5 +545,52 @@ mod tests {
         assert_eq!(event.safety_class, Some(SafetyClass::ReversibleLowRisk));
         assert!(!event.success);
         assert_eq!(event.message, "rollback denied");
+    }
+
+    fn fake_apply_request() -> CandidateApplyRequest {
+        let candidate = CandidateAction::Fake {
+            action_id: crate::actions::ActionId("fake:privilege".to_owned()),
+            safety_class: SafetyClass::ReversibleLowRisk,
+        };
+        CandidateApplyRequest {
+            plan: CandidatePlanRequest::from_candidate(candidate, crate::audit::unix_nanos_now()),
+            policy: DaemonPolicy::apply_low_risk(crate::daemon_policy::ActionSource::Test),
+            context: DaemonPolicyContext::default(),
+            max_plan_age_nanos: 1_000_000_000,
+        }
+    }
+
+    #[test]
+    fn privileged_action_service_rejects_stale_candidate_plan_before_execution() {
+        let service = InProcessPrivilegedActionService;
+        let mut request = fake_apply_request();
+        request.plan.created_unix_nanos = 1;
+        request.max_plan_age_nanos = 1;
+
+        let err = service.apply_candidate(request).unwrap_err().to_string();
+
+        assert!(err.contains("stale_candidate_plan"));
+    }
+
+    #[test]
+    fn privileged_action_service_rechecks_descriptor_integrity() {
+        let service = InProcessPrivilegedActionService;
+        let mut request = fake_apply_request();
+        request.plan.descriptor.action_kind = "nice".to_owned();
+
+        let err = service.apply_candidate(request).unwrap_err().to_string();
+
+        assert!(err.contains("candidate_plan_descriptor_mismatch"));
+    }
+
+    #[test]
+    fn privileged_action_service_rejects_payload_without_evidence() {
+        let service = InProcessPrivilegedActionService;
+        let mut request = fake_apply_request();
+        request.plan.evidence_count = 0;
+
+        let err = service.apply_candidate(request).unwrap_err().to_string();
+
+        assert!(err.contains("candidate_plan_missing_evidence"));
     }
 }

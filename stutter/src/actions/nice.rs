@@ -1,6 +1,7 @@
 use std::{fs, path::Path};
 
 use anyhow::Context;
+use serde::{Deserialize, Serialize};
 
 use crate::actions::{
     ActionId, ActionState, ActionWarning, NiceRestoreRecord, RollbackToken, SafetyClass,
@@ -10,7 +11,7 @@ use crate::actions::{
 const LINUX_MIN_NICE: i32 = -20;
 const LINUX_MAX_NICE: i32 = 19;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NicePolicy {
     pub allow_nice_changes: bool,
     pub min_nice: i32,
@@ -27,7 +28,7 @@ impl Default for NicePolicy {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NiceAction {
     pub targets: Vec<TaskIdentity>,
     pub nice: i32,

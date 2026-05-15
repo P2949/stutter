@@ -1,0 +1,1 @@
+{"name":"low_data_quality_burst","profile":"observe-only","duration_seconds":45,"expect_actions":false,"expect_rollbacks":false,"forbid_high_risk_apply":true}

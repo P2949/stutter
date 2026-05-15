@@ -1,6 +1,7 @@
 use std::{fs, mem, path::Path};
 
 use anyhow::Context;
+use serde::{Deserialize, Serialize};
 
 use crate::actions::{
     ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TaskIdentity, TuningAction,
@@ -97,7 +98,7 @@ impl Default for UclampPolicy {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UclampAction {
     pub targets: Vec<TaskIdentity>,
     pub values: UclampValues,

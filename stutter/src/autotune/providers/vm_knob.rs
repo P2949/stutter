@@ -10,6 +10,16 @@ use crate::{
     },
 };
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct VmKnobCandidateEvidence {
+    pub knob: String,
+    pub current_value: String,
+    pub proposed_value: String,
+    pub memory_pressure: Option<f32>,
+    pub swap_activity: Option<u64>,
+    pub dirty_writeback_pressure: Option<u64>,
+}
+
 #[derive(Default)]
 pub struct VmKnobProvider;
 
@@ -26,13 +36,9 @@ impl CandidateProvider for VmKnobProvider {
             return Vec::new();
         }
 
-        let current_swappiness = input
-            .system_context
-            .inventory
-            .vm_knobs
-            .get("sys/vm/swappiness")
-            .cloned()
-            .unwrap_or_else(|| "unknown".to_owned());
+        let Some(evidence_model) = vm_knob_evidence(input) else {
+            return Vec::new();
+        };
 
         let candidate = CandidateAction::VmKnob {
             plan: VmKnobActionPlan {
@@ -45,10 +51,15 @@ impl CandidateProvider for VmKnobProvider {
                     }],
                 },
                 evidence: vec![CandidateEvidence::new(
-                    "situation",
+                    "vm_knob",
                     format!(
-                        "{:?}; current_swappiness={current_swappiness}",
-                        input.observation.primary_situation
+                        "knob={} current={} proposed={} memory_pressure={:?} swap_activity={:?} dirty_writeback_pressure={:?}",
+                        evidence_model.knob,
+                        evidence_model.current_value,
+                        evidence_model.proposed_value,
+                        evidence_model.memory_pressure,
+                        evidence_model.swap_activity,
+                        evidence_model.dirty_writeback_pressure
                     ),
                     input.observation.situation.confidence,
                 )],
@@ -65,4 +76,39 @@ impl CandidateProvider for VmKnobProvider {
             rank_hint: 90,
         }]
     }
+}
+
+fn vm_knob_evidence(input: &CandidateProviderInput<'_>) -> Option<VmKnobCandidateEvidence> {
+    let current_value = input
+        .system_context
+        .inventory
+        .vm_knobs
+        .get("proc/sys/vm/swappiness")
+        .or_else(|| {
+            input
+                .system_context
+                .inventory
+                .vm_knobs
+                .get("sys/vm/swappiness")
+        })?
+        .clone();
+
+    // Do not emit a VM knob recommendation from generic I/O pressure alone. The
+    // current observation model does not yet carry swap/writeback counters, so
+    // this provider stays silent until that structured evidence is available.
+    let memory_pressure: Option<f32> = None;
+    let swap_activity: Option<u64> = None;
+    let dirty_writeback_pressure: Option<u64> = None;
+    if memory_pressure.is_none() && swap_activity.is_none() && dirty_writeback_pressure.is_none() {
+        return None;
+    }
+
+    Some(VmKnobCandidateEvidence {
+        knob: "vm.swappiness".to_owned(),
+        current_value,
+        proposed_value: "10".to_owned(),
+        memory_pressure,
+        swap_activity,
+        dirty_writeback_pressure,
+    })
 }

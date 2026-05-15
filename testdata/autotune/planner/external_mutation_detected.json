@@ -1,0 +1,1 @@
+{"situation":"game_cpu_scheduler_pressure","focus_kind":"Game","mode":"suggest","candidate_action_kind":"nice","external_mutation":true,"expected_selected_action_kind":null,"expected_denials":[{"action_kind":"nice","reason":"external_mutation_detected"}]}

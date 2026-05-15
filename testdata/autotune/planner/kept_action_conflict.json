@@ -1,0 +1,1 @@
+{"situation":"compile_cpu_bound","focus_kind":"Compile","mode":"suggest","candidate_action_kind":"cgroup_placement","kept_conflict":true,"expected_selected_action_kind":null,"expected_denials":[{"action_kind":"cgroup_placement","reason":"conflict_with_kept_action"}]}

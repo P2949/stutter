@@ -164,6 +164,12 @@ pub struct AutotuneRestoreCommandInput {
 }
 
 #[derive(Debug)]
+pub struct AutotuneApplyCandidateCommandInput {
+    pub candidate_json: PathBuf,
+    pub dry_run: bool,
+}
+
+#[derive(Debug)]
 pub struct AutotuneReplayCommandInput {
     pub run: PathBuf,
     pub config: Option<PathBuf>,

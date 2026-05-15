@@ -8,6 +8,16 @@ use crate::{
     },
 };
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CpuPowerCandidateEvidence {
+    pub policy: String,
+    pub related_cpus: Vec<u32>,
+    pub current_governor: Option<String>,
+    pub current_epp: Option<String>,
+    pub thermal_headroom: bool,
+    pub ac_power: Option<bool>,
+}
+
 #[derive(Default)]
 pub struct CpuPowerProvider;
 
@@ -29,10 +39,21 @@ impl CandidateProvider for CpuPowerProvider {
         let Some(policy) = inventory.cpu_policies.first() else {
             return Vec::new();
         };
-        let cpu = first_cpu(policy.related_cpus.as_deref()).unwrap_or(0);
+        let cpus = parse_related_cpus(policy.related_cpus.as_deref());
+        if cpus.is_empty() {
+            return Vec::new();
+        }
+        let structured_evidence = CpuPowerCandidateEvidence {
+            policy: policy.policy.clone(),
+            related_cpus: cpus.clone(),
+            current_governor: policy.scaling_governor.clone(),
+            current_epp: policy.energy_performance_preference.clone(),
+            thermal_headroom: input.system_health.ok_for_apply,
+            ac_power: None,
+        };
         let action = CpuPowerAction {
             sysfs_root: std::path::PathBuf::from("/sys"),
-            cpus: vec![cpu],
+            cpus,
             scaling_governor: Some("performance".to_owned()),
             energy_performance_preference: Some("performance".to_owned()),
         };
@@ -48,7 +69,13 @@ impl CandidateProvider for CpuPowerProvider {
                 action,
                 evidence: vec![CandidateEvidence::new(
                     "inventory",
-                    format!("{} cpu={cpu}", policy.policy),
+                    format!(
+                        "policy={} related_cpus={:?} governor={:?} epp={:?}",
+                        structured_evidence.policy,
+                        structured_evidence.related_cpus,
+                        structured_evidence.current_governor,
+                        structured_evidence.current_epp
+                    ),
                     0.7,
                 )],
                 objective,
@@ -66,10 +93,30 @@ impl CandidateProvider for CpuPowerProvider {
     }
 }
 
-fn first_cpu(related_cpus: Option<&str>) -> Option<u32> {
-    related_cpus?
+fn parse_related_cpus(related_cpus: Option<&str>) -> Vec<u32> {
+    let mut cpus = related_cpus
+        .unwrap_or_default()
         .split_whitespace()
-        .find_map(|part| part.parse::<u32>().ok())
+        .flat_map(|part| part.split(','))
+        .flat_map(parse_cpu_token)
+        .collect::<Vec<_>>();
+    cpus.sort_unstable();
+    cpus.dedup();
+    cpus
+}
+
+fn parse_cpu_token(token: &str) -> Vec<u32> {
+    if let Some((start, end)) = token.split_once('-') {
+        let Some(start) = start.parse::<u32>().ok() else {
+            return Vec::new();
+        };
+        let Some(end) = end.parse::<u32>().ok() else {
+            return Vec::new();
+        };
+        return (start..=end).collect();
+    }
+
+    token.parse::<u32>().ok().into_iter().collect()
 }
 
 #[cfg(test)]

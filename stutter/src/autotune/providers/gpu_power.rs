@@ -8,6 +8,17 @@ use crate::{
     },
 };
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GpuPowerCandidateEvidence {
+    pub drm_card: String,
+    pub render_node: Option<String>,
+    pub pci_id: Option<String>,
+    pub vendor: Option<String>,
+    pub current_dpm: Option<String>,
+    pub current_profile: Option<String>,
+    pub active_for_focus: bool,
+}
+
 #[derive(Default)]
 pub struct GpuPowerProvider;
 
@@ -26,8 +37,31 @@ impl CandidateProvider for GpuPowerProvider {
         }
 
         let inventory = &input.system_context.inventory;
-        let Some(card) = inventory.drm_devices.first() else {
+        if inventory.drm_devices.len() != 1 {
             return Vec::new();
+        }
+        let card = &inventory.drm_devices[0];
+        let runtime_state =
+            input
+                .observation
+                .active_config_snapshot
+                .as_ref()
+                .and_then(|snapshot| {
+                    snapshot
+                        .gpu_power
+                        .devices
+                        .iter()
+                        .find(|device| device.device == card.name)
+                });
+        let structured_evidence = GpuPowerCandidateEvidence {
+            drm_card: card.name.clone(),
+            render_node: card.render_node.clone(),
+            pci_id: None,
+            vendor: None,
+            current_dpm: runtime_state
+                .and_then(|state| state.power_dpm_force_performance_level.clone()),
+            current_profile: runtime_state.and_then(|state| state.pp_power_profile_mode.clone()),
+            active_for_focus: true,
         };
         let candidate = CandidateAction::GpuPower {
             plan: GpuPowerActionPlan {
@@ -40,7 +74,13 @@ impl CandidateProvider for GpuPowerProvider {
                 },
                 evidence: vec![CandidateEvidence::new(
                     "inventory",
-                    card.render_node.as_deref().unwrap_or(&card.name),
+                    format!(
+                        "drm_card={} render_node={:?} current_dpm={:?} current_profile={:?}",
+                        structured_evidence.drm_card,
+                        structured_evidence.render_node,
+                        structured_evidence.current_dpm,
+                        structured_evidence.current_profile
+                    ),
                     0.7,
                 )],
                 objective: ObjectiveKind::GameFramePacing,

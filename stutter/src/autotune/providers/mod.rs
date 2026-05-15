@@ -61,10 +61,13 @@ impl CandidateProviderRegistry {
             registry.register(Box::new(cgroup::CgroupProvider));
         }
 
-        registry.register(Box::new(irq_affinity::IrqAffinityProvider));
-        registry.register(Box::new(cpu_power::CpuPowerProvider));
-        registry.register(Box::new(gpu_power::GpuPowerProvider));
-        registry.register(Box::new(vm_knob::VmKnobProvider));
+        if policy.mode == crate::daemon::DaemonMode::Suggest && policy.allow_system_wide_suggestions
+        {
+            registry.register(Box::new(irq_affinity::IrqAffinityProvider));
+            registry.register(Box::new(cpu_power::CpuPowerProvider));
+            registry.register(Box::new(gpu_power::GpuPowerProvider));
+            registry.register(Box::new(vm_knob::VmKnobProvider));
+        }
 
         registry
     }
@@ -142,6 +145,20 @@ mod tests {
         })
     }
 
+    fn policy_with_system_wide_suggestions(mode: DaemonMode) -> DaemonPolicy {
+        let mut config = crate::autotune::runtime::daemon_config_for_runtime_mode(
+            mode,
+            ActionSource::AutotuneRuntime,
+            Some(1234),
+            None,
+        );
+        config.safety.allow_system_wide_suggestions = true;
+        build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        })
+    }
+
     fn policy_with_compile_cgroup() -> DaemonPolicy {
         let mut config = crate::autotune::runtime::daemon_config_for_runtime_mode(
             DaemonMode::Suggest,
@@ -164,7 +181,9 @@ mod tests {
 
     #[test]
     fn registry_includes_safe_and_suggest_first_provider_families() {
-        let registry = CandidateProviderRegistry::default_for_policy(&policy(DaemonMode::Suggest));
+        let registry = CandidateProviderRegistry::default_for_policy(
+            &policy_with_system_wide_suggestions(DaemonMode::Suggest),
+        );
         let families = registry.families();
 
         assert!(families.contains(&"cpu_affinity_profile"));
@@ -179,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn vm_knob_provider_suggests_only_for_io_situation() {
+    fn vm_knob_provider_stays_silent_without_memory_or_swap_evidence() {
         let policy = policy(DaemonMode::Suggest);
         let provider = vm_knob::VmKnobProvider;
         let mut observation = AutotuneObservation {
@@ -206,8 +225,7 @@ mod tests {
             profiles: &[],
         });
 
-        assert_eq!(proposals.len(), 1);
-        assert_eq!(proposals[0].candidate.action_kind(), "vm_knob");
+        assert!(proposals.is_empty());
     }
 
     #[test]

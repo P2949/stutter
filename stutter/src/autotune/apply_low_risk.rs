@@ -67,15 +67,11 @@ pub struct CpuAffinityLowRiskExecutor {
 impl CpuAffinityLowRiskExecutor {
     pub fn from_candidate(candidate: CandidateAction) -> anyhow::Result<Self> {
         match candidate {
-            CandidateAction::CpuAffinityProfile {
-                profile_name,
-                profile,
-                tree_pid,
-            } => Ok(Self {
-                candidate_name: profile_name,
+            CandidateAction::CpuAffinityProfile { plan } => Ok(Self {
+                candidate_name: plan.profile_name,
                 action: CpuAffinityProfileAction {
-                    tree_pid,
-                    profile,
+                    tree_pid: plan.tree_pid,
+                    profile: plan.profile,
                     force_restore_overwrite: false,
                 },
             }),
@@ -231,15 +227,11 @@ pub fn action_from_candidate(
     candidate: CandidateAction,
 ) -> anyhow::Result<(String, CpuAffinityProfileAction)> {
     match candidate {
-        CandidateAction::CpuAffinityProfile {
-            profile_name,
-            profile,
-            tree_pid,
-        } => Ok((
-            profile_name,
+        CandidateAction::CpuAffinityProfile { plan } => Ok((
+            plan.profile_name,
             CpuAffinityProfileAction {
-                tree_pid,
-                profile,
+                tree_pid: plan.tree_pid,
+                profile: plan.profile,
                 force_restore_overwrite: false,
             },
         )),

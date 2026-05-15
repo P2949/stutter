@@ -1,0 +1,1 @@
+{"name":"thermal_during_experiment","profile":"apply-low-risk-fake","duration_seconds":120,"expect_actions":true,"expect_rollbacks":true,"forbid_high_risk_apply":true}

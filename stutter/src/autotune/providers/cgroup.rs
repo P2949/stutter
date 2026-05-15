@@ -12,6 +12,7 @@ use crate::{
         protection::mutation_allowed_for_pid,
         providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
         situation::SituationKind,
+        target_selection::{TaskTargetSelector, mutable_task_snapshots_for_observation},
     },
     daemon::CgroupTargetRole,
     process_tree::TaskClass,
@@ -142,11 +143,16 @@ fn cgroup_targets_for_observation(
     root_pid: u32,
     role: &str,
 ) -> Vec<CgroupPlacementTarget> {
-    let selected = if observation.active_tasks.is_empty() {
-        vec![fallback_task_snapshot(observation, root_pid, role)]
-    } else {
-        observation.active_tasks.clone()
+    let selector = match role {
+        "compile" => TaskTargetSelector::CompilerAndLinker,
+        "game" => TaskTargetSelector::GameRenderAndWorkers,
+        "virtual_machine" => TaskTargetSelector::BackgroundHelpers,
+        _ => TaskTargetSelector::FullTargetTree,
     };
+    let mut selected = mutable_task_snapshots_for_observation(observation, selector);
+    if selected.is_empty() {
+        selected.push(fallback_task_snapshot(observation, root_pid, role));
+    }
 
     selected
         .into_iter()
