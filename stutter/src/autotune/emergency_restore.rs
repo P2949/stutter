@@ -14,8 +14,8 @@ use crate::{
     audit::{AuditEvent, append_audit_event_to_path},
     autotune::{
         controller_journal::{
-            ControllerJournalRecord, default_controller_journal_path, read_controller_journal,
-            write_controller_journal_clean,
+            ControllerJournalRecord, ControllerJournalState, default_controller_journal_path,
+            read_controller_journal, write_controller_journal_clean,
         },
         history::{
             AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneMode, ControllerPhase,
@@ -147,8 +147,10 @@ pub fn restore_known_autotune_actions(
 
     let record = read_controller_journal(&journal_path)?;
 
-    match record {
-        ControllerJournalRecord::Clean { .. } => Ok(AutotuneRestoreOutcome {
+    match record.state() {
+        ControllerJournalState::Clean
+        | ControllerJournalState::Planned
+        | ControllerJournalState::Preflighted => Ok(AutotuneRestoreOutcome {
             status: AutotuneRestoreStatus::Clean,
             restored_actions: 0,
             failed_actions: 0,
@@ -158,35 +160,86 @@ pub fn restore_known_autotune_actions(
                 journal_path.display()
             )],
         }),
-        ControllerJournalRecord::Applying {
-            experiment_id,
-            action_id,
-            ..
-        } => Ok(AutotuneRestoreOutcome {
-            status: AutotuneRestoreStatus::ApplyingWithoutRollbackToken,
-            restored_actions: 0,
-            failed_actions: 0,
-            skipped_actions: 1,
-            messages: vec![format!(
-                "autotune restore: journal is applying without rollback_token experiment_id={} action_id={}; no automatic restore is possible",
-                experiment_id, action_id
-            )],
-        }),
-        ControllerJournalRecord::Applied {
-            experiment_id,
-            action_id,
-            rollback_token,
-            ..
-        } => restore_applied_journal_record(
-            &journal_path,
-            &audit_path,
-            &history_path,
-            &experiment_id,
-            &action_id,
-            &rollback_token,
-            input.dry_run,
-        ),
+        ControllerJournalState::Reverted => {
+            if !input.dry_run {
+                write_controller_journal_clean(&journal_path).with_context(|| {
+                    format!(
+                        "failed to clear reverted controller journal {}",
+                        journal_path.display()
+                    )
+                })?;
+            }
+            Ok(AutotuneRestoreOutcome {
+                status: AutotuneRestoreStatus::Clean,
+                restored_actions: 0,
+                failed_actions: 0,
+                skipped_actions: 0,
+                messages: vec![format!(
+                    "autotune restore: no active autotune action in {}",
+                    journal_path.display()
+                )],
+            })
+        }
+        ControllerJournalState::Applying => {
+            let (experiment_id, action_id) = journal_experiment_action(&record);
+            Ok(AutotuneRestoreOutcome {
+                status: AutotuneRestoreStatus::ApplyingWithoutRollbackToken,
+                restored_actions: 0,
+                failed_actions: 0,
+                skipped_actions: 1,
+                messages: vec![format!(
+                    "autotune restore: journal is applying without rollback_token experiment_id={} action_id={}; no automatic restore is possible",
+                    experiment_id, action_id
+                )],
+            })
+        }
+        ControllerJournalState::Applied
+        | ControllerJournalState::Verifying
+        | ControllerJournalState::Measuring
+        | ControllerJournalState::Keeping
+        | ControllerJournalState::Reverting
+        | ControllerJournalState::Faulted => {
+            let (experiment_id, action_id) = journal_experiment_action(&record);
+            if let Some(rollback_token) = record.rollback_token() {
+                restore_applied_journal_record(
+                    &journal_path,
+                    &audit_path,
+                    &history_path,
+                    &experiment_id,
+                    &action_id,
+                    rollback_token,
+                    input.dry_run,
+                )
+            } else {
+                Ok(AutotuneRestoreOutcome {
+                    status: AutotuneRestoreStatus::ApplyingWithoutRollbackToken,
+                    restored_actions: 0,
+                    failed_actions: 0,
+                    skipped_actions: 1,
+                    messages: vec![format!(
+                        "autotune restore: journal is {} without rollback_token experiment_id={} action_id={}; no automatic restore is possible",
+                        record.state().as_str(),
+                        experiment_id,
+                        action_id
+                    )],
+                })
+            }
+        }
     }
+}
+
+fn journal_experiment_action(record: &ControllerJournalRecord) -> (String, String) {
+    let state = record.state().as_str();
+    (
+        record
+            .experiment_id
+            .clone()
+            .unwrap_or_else(|| format!("{state}-unknown-experiment")),
+        record
+            .action_id
+            .clone()
+            .unwrap_or_else(|| format!("{state}-unknown-action")),
+    )
 }
 
 fn restore_applied_journal_record(
@@ -263,8 +316,12 @@ fn restore_applied_journal_record(
                 failed_actions: 0,
                 skipped_actions: 0,
                 messages: vec![format!(
-                    "autotune restore: restored experiment_id={} action_id={} rollback_kind={} restored_items={}",
-                    experiment_id, action_id, summary.rollback_kind, summary.restored_items
+                    "autotune restore: restored experiment_id={} action_id={} rollback_kind={} restored_items={} skipped_items={}",
+                    experiment_id,
+                    action_id,
+                    summary.rollback_kind,
+                    summary.restored_items,
+                    summary.skipped_items
                 )],
             })
         }
@@ -913,8 +970,9 @@ mod tests {
             NiceRestoreRecord, VmKnobRestoreRecord,
         },
         autotune::controller_journal::{
-            read_controller_journal, write_controller_journal_applied,
-            write_controller_journal_applying, write_controller_journal_clean,
+            ControllerJournalRecord, ControllerJournalState, read_controller_journal,
+            write_controller_journal_applied, write_controller_journal_applying,
+            write_controller_journal_clean, write_controller_journal_record,
         },
     };
 
@@ -949,6 +1007,30 @@ mod tests {
         assert_eq!(outcome.status, AutotuneRestoreStatus::Clean);
         assert_eq!(outcome.restored_actions, 0);
         assert!(outcome.messages[0].contains("no active autotune action"));
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn reverted_journal_reports_clean_and_normalizes_journal() {
+        let dir = temp_dir("reverted");
+        let input = command_input_for_dir(&dir, false);
+        let journal_path = input.journal_path.clone().unwrap();
+        let record = ControllerJournalRecord::for_phase(
+            ControllerJournalState::Reverted,
+            "experiment-live",
+            "cpu-affinity-profile:game-main",
+            Some(RollbackToken::CpuAffinityRestoreFile {
+                path: dir.join("restore.json"),
+                affected_tasks: 1,
+            }),
+        );
+        write_controller_journal_record(&journal_path, &record).unwrap();
+
+        let outcome = restore_known_autotune_actions(input).unwrap();
+
+        assert_eq!(outcome.status, AutotuneRestoreStatus::Clean);
+        assert_eq!(outcome.restored_actions, 0);
+        assert!(read_controller_journal(&journal_path).unwrap().is_clean());
         fs::remove_dir_all(dir).ok();
     }
 
@@ -1007,6 +1089,39 @@ mod tests {
     }
 
     #[test]
+    fn dry_run_for_live_runtime_phases_does_not_clean_journal() {
+        for phase in [
+            ControllerJournalState::Measuring,
+            ControllerJournalState::Keeping,
+            ControllerJournalState::Reverting,
+        ] {
+            let dir = temp_dir(phase.as_str());
+            let input = command_input_for_dir(&dir, true);
+            let journal_path = input.journal_path.clone().unwrap();
+            let record = ControllerJournalRecord::for_phase(
+                phase,
+                "experiment-live",
+                "nice:set:5:targets:1",
+                Some(RollbackToken::NiceRestore {
+                    records: vec![NiceRestoreRecord {
+                        tid: 123,
+                        original_nice: 0,
+                    }],
+                }),
+            )
+            .with_candidate("game-main");
+            write_controller_journal_record(&journal_path, &record).unwrap();
+
+            let outcome = restore_known_autotune_actions(input).unwrap();
+
+            assert_eq!(outcome.status, AutotuneRestoreStatus::DryRun);
+            assert_eq!(outcome.skipped_actions, 1);
+            assert!(!read_controller_journal(&journal_path).unwrap().is_clean());
+            fs::remove_dir_all(dir).ok();
+        }
+    }
+
+    #[test]
     fn sysfs_restore_token_restores_file_and_cleans_journal_and_writes_logs() {
         let dir = temp_dir("sysfs");
         let target = dir.join("sysfs-knob");
@@ -1032,6 +1147,9 @@ mod tests {
 
         assert_eq!(outcome.status, AutotuneRestoreStatus::Restored);
         assert_eq!(outcome.restored_actions, 1);
+        assert!(outcome.messages.iter().any(|message| {
+            message.contains("restored_items=1") && message.contains("skipped_items=0")
+        }));
         assert_eq!(fs::read_to_string(&target).unwrap(), "original");
         assert!(read_controller_journal(&journal_path).unwrap().is_clean());
 
@@ -1047,6 +1165,35 @@ mod tests {
         assert_eq!(history[0].decision.decision, "restored");
         assert!(history[0].rollback_performed);
 
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn keeping_journal_restores_file_and_cleans_journal() {
+        let dir = temp_dir("keeping-sysfs");
+        let target = dir.join("sysfs-knob");
+        fs::write(&target, "changed").unwrap();
+
+        let input = command_input_for_dir(&dir, false);
+        let journal_path = input.journal_path.clone().unwrap();
+        let record = ControllerJournalRecord::for_phase(
+            ControllerJournalState::Keeping,
+            "experiment-live",
+            "sysfs-restore:test",
+            Some(RollbackToken::SysfsRestore {
+                path: target.clone(),
+                original_value: "original".to_owned(),
+            }),
+        )
+        .with_restore_command("stutter autotune restore");
+        write_controller_journal_record(&journal_path, &record).unwrap();
+
+        let outcome = restore_known_autotune_actions(input).unwrap();
+
+        assert_eq!(outcome.status, AutotuneRestoreStatus::Restored);
+        assert_eq!(outcome.restored_actions, 1);
+        assert_eq!(fs::read_to_string(&target).unwrap(), "original");
+        assert!(read_controller_journal(&journal_path).unwrap().is_clean());
         fs::remove_dir_all(dir).ok();
     }
 

@@ -579,6 +579,11 @@ The levels are:
 
 For machine-readable consumers, `stutter report --analysis-json <run-dir>` is the stable machine-readable interface and includes the same data-quality summary. `stutter validate <run-dir>` validates artifact compatibility and data quality before automation consumes a run.
 
+Live daemon/autotune status also carries machine-readable online quality reason
+codes such as `insufficient_samples`, `target_missing`,
+`focus_low_confidence`, `drop_counters_high`, `workload_changed`, and
+`thermal_degraded` so policy rejections can be explained without parsing prose.
+
 Diagnosis output uses candidate wording intentionally. A `High` confidence diagnosis means the evidence is strong for a profiler inference, not proof of root cause. `Medium` and `Low` confidence diagnoses should be treated as leads for further testing. Text reports show the top diagnosis candidates and evidence items so the score is auditable instead of sounding final.
 
 Generate a self-contained HTML report:
@@ -665,6 +670,30 @@ Live `stutter autotune --mode` currently supports `observe`, `suggest`, and `app
 Remote autotune uses the same mode labels, but remote apply support is bounded by the agent's configured limits. High-risk remote support is never enabled by default.
 
 `suggest` mode does not apply candidate changes. Candidate suggestion text always includes a dry-run command, `required_mode`, `required_safety_class`, and `rollback=stutter restore`. A manual apply command is shown only when the central CLI daemon policy would allow that candidate; high-risk candidates do not get direct apply commands.
+
+Daemon status and watch commands are intended to answer "what is it doing?"
+without reading logs:
+
+```bash
+stutter daemon status
+stutter daemon status --json
+stutter daemon status --explain-last 10
+stutter daemon doctor
+stutter daemon reset-state --dry-run
+stutter daemon watch
+stutter daemon watch --verbose --interval-ms 1000
+```
+
+`daemon status` includes the active workload, active action, rollback status,
+health, watchdog state, current score when available, manual restore command,
+and recent autotune decisions. `daemon doctor` checks the persisted daemon
+state, health, watchdog, rollback state, and machine capabilities, and reports
+when safe observe-only mode is required. `daemon reset-state --dry-run`
+previews a safe state-store reset; without `--dry-run`, it backs up the current
+snapshot before writing observe-only disabled state. `daemon watch` is quiet by default: it prints a
+compact first line and then emits notifications only for action apply,
+rollback, fault, or restore-needed transitions. Use `--iterations N` for a
+bounded watch in scripts.
 
 ## Doctor / preflight
 
@@ -888,10 +917,17 @@ If you need machine-readable schemas, open a recorded run under `~/.local/state/
 Run the collector as a privileged local agent:
 
 ```bash
-sudo stutter agent --port 9899
+sudo stutter agent
 ```
 
-Control it from a client:
+By default, the agent listens on a Unix socket under `XDG_RUNTIME_DIR` when
+available. For older local HTTP clients, start an explicit loopback listener:
+
+```bash
+sudo stutter agent --bind 127.0.0.1:9899
+```
+
+Control the loopback listener from a client:
 
 ```bash
 stutter monitor --remote http://127.0.0.1:9899 --pid 1234 --duration 10
@@ -911,12 +947,15 @@ The agent provides a local HTTP JSON API:
 
 **Security & Hardening:**
 
-* **Loopback only:** The agent binds to loopback (`127.0.0.1`) by default.
+* **Unix socket default:** The agent uses a local Unix socket by default when no bind address is provided.
+* **Loopback TCP:** TCP listeners should be explicit, for example `--bind 127.0.0.1:9899`.
 * **Unsafe bind:** Binding to a non-loopback address requires the `--allow-unsafe-bind` flag.
-* **Authentication:** Bearer token authentication can be enabled by setting the `STUTTER_AGENT_TOKEN` environment variable or using `--bearer-token-file`.
+* **Authentication:** Legacy full-access bearer authentication can be enabled with `STUTTER_AGENT_TOKEN` or `--bearer-token-file`.
+* **Split tokens:** Use `STUTTER_AGENT_READ_TOKEN` for read-only clients and `STUTTER_AGENT_APPLY_TOKEN` for state-changing control, or pass `--read-token-file` and `--apply-token-file`.
 * **Client Auth:** The local `stutter monitor --remote` client will automatically send the token if `STUTTER_AGENT_TOKEN` is set in its environment.
-* **Request Limits:** The agent enforces default limits on recording duration and target count, which can be configured via `--max-duration-seconds` and `--max-targets`.
+* **Request Limits:** The agent enforces default limits on JSON request size, request rate, recording duration, and target count. Duration and target count can be configured via `--max-duration-seconds` and `--max-targets`.
 * **Artifact Whitelist:** Artifact downloads are restricted to a known allowlist of stutter-generated files.
+* **CORS:** The agent does not enable browser cross-origin access by default.
 
 > [!WARNING]
 > Do not expose the stutter agent to untrusted networks. It is a privileged control plane that can remotely start eBPF profiling sessions.

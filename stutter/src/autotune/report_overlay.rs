@@ -270,13 +270,21 @@ fn first_existing_history_path(report_path: &Path) -> Option<PathBuf> {
 
 fn candidate_history_paths(report_path: &Path) -> Vec<PathBuf> {
     let run_dir = report_run_dir(report_path);
-    let mut paths = BTreeSet::new();
+    let candidates = [
+        run_dir.join("autotune_history.jsonl"),
+        run_dir.join("autotune").join("history.jsonl"),
+        default_autotune_history_path(),
+    ];
+    let mut seen = BTreeSet::new();
+    let mut paths = Vec::new();
 
-    paths.insert(run_dir.join("autotune_history.jsonl"));
-    paths.insert(run_dir.join("autotune").join("history.jsonl"));
-    paths.insert(default_autotune_history_path());
+    for path in candidates {
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
+    }
 
-    paths.into_iter().collect()
+    paths
 }
 
 fn report_run_dir(report_path: &Path) -> PathBuf {

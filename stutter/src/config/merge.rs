@@ -221,6 +221,10 @@ mod tests {
             cpu_freq: Some(true),
             max_tasks: Some(77),
             retain_intervals: Some(12),
+            retention_max_run_count: Some(20),
+            retention_max_total_bytes: Some(2_000_000),
+            retention_max_age_seconds: Some(86_400),
+            retention_min_free_bytes: Some(1_000_000_000),
             foreground_window: Some(true),
             focus_source: Some("hybrid".to_owned()),
             foreground_source: Some("sway".to_owned()),
@@ -244,6 +248,13 @@ mod tests {
         assert!(merged.probes.cpu_freq);
         assert_eq!(merged.target.max_tasks, 77);
         assert_eq!(merged.recording.retain_intervals, Some(12));
+        assert_eq!(merged.recording.retention.max_run_count, Some(20));
+        assert_eq!(merged.recording.retention.max_total_bytes, Some(2_000_000));
+        assert_eq!(merged.recording.retention.max_age_seconds, Some(86_400));
+        assert_eq!(
+            merged.recording.retention.min_free_bytes,
+            Some(1_000_000_000)
+        );
         assert!(merged.focus.foreground_window);
         assert_eq!(merged.focus.focus_source, FocusSource::Hybrid);
         assert_eq!(merged.focus.foreground_source, ForegroundSource::Sway);

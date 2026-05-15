@@ -1,0 +1,14 @@
+bin/stutter
+lib/stutter/stutter.bpf.o
+share/doc/stutter/INSTALL.md
+share/doc/stutter/PACKAGING.md
+share/doc/stutter/DAEMON_CONTRACT.md
+share/stutter/systemd/stutter-agent.service
+share/stutter/systemd/stutter-autotune-observe.service
+share/stutter/systemd/stutter-autotune-low-risk.service
+share/stutter/openrc/stutter-agent
+share/stutter/openrc/stutter-autotune-observe
+share/stutter/openrc/stutter-autotune-low-risk
+etc/stutter/
+var/lib/stutter/
+var/log/stutter/

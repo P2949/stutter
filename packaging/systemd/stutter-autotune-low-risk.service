@@ -6,6 +6,7 @@ After=network.target
 [Service]
 Type=simple
 EnvironmentFile=-/etc/stutter/autotune-low-risk.env
+Environment=HOME=/var/lib/stutter
 Environment=STUTTER_AUTOTUNE_MODE=apply-low-risk
 Environment=STUTTER_AUTOTUNE_PRESET=diagnosis
 Environment=STUTTER_AUTOTUNE_SUMMARY_MS=1000
@@ -41,14 +42,23 @@ if [ -n "$tree_pid" ]; then \
   exec /usr/bin/stutter autotune --mode apply-low-risk --tree-pid "$tree_pid" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds" --foreground-window --focus-source "$focus_source"; \
 fi; \
 if [ -n "$profiles" ]; then \
-  exec /usr/bin/stutter autotune --mode apply-low-risk --auto-focus --profiles "$profiles" --focus-source "$focus_source" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds"; \
+  exec /usr/bin/stutter autotune --mode apply-low-risk --auto-focus --profiles "$profiles" --foreground-window --focus-source "$focus_source" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds"; \
 fi; \
-exec /usr/bin/stutter autotune --mode apply-low-risk --auto-focus --focus-source "$focus_source" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds"'
-ExecStop=/usr/bin/stutter autotune restore
+exec /usr/bin/stutter autotune --mode apply-low-risk --auto-focus --foreground-window --focus-source "$focus_source" --preset "$preset" --summary-ms "$summary_ms" --duration-seconds "$candidate_seconds"'
+ExecStop=/usr/bin/stutter daemon emergency-restore
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
 KillMode=control-group
+StateDirectory=stutter
+LogsDirectory=stutter
+RuntimeDirectory=stutter
+PrivateTmp=true
+ProtectSystem=full
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/stutter /var/log/stutter /run
 
 [Install]
 WantedBy=multi-user.target

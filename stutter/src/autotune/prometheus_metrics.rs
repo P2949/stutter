@@ -220,11 +220,7 @@ fn active_experiment_from_history(events: &[AutotuneHistoryEvent]) -> bool {
 }
 
 fn active_experiment_from_journal(record: Option<&ControllerJournalRecord>) -> bool {
-    matches!(
-        record,
-        Some(ControllerJournalRecord::Applying { .. })
-            | Some(ControllerJournalRecord::Applied { .. })
-    )
+    record.is_some_and(ControllerJournalRecord::is_active_experiment_state)
 }
 
 fn count_unique_applied_actions(events: &[AutotuneHistoryEvent]) -> u64 {

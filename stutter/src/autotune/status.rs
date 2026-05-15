@@ -842,6 +842,7 @@ mod tests {
             (DaemonPhase::Disabled, "disabled", None, None),
             (DaemonPhase::Init, "init", None, None),
             (DaemonPhase::Recover, "recover", None, None),
+            (DaemonPhase::Paused, "paused", None, None),
             (DaemonPhase::Observe, "observe", None, None),
             (DaemonPhase::Decide, "decide", None, Some("game-main")),
             (DaemonPhase::Apply, "apply", None, Some("game-main")),

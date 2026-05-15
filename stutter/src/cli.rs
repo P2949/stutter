@@ -8,12 +8,20 @@ use crate::{
         AutotuneCommandInput as AutotuneCommandDto, AutotuneGenerateProfilesCommandInput,
         AutotuneReplayCommandInput, AutotuneReplayHistoryCommandInput, AutotuneRestoreCommandInput,
         AutotuneStatusCommandInput, BenchCommandInput, CheckCommandInput, CompletionsCommandInput,
-        DaemonConfigExplainCommandInput, DoctorCommandInput, InspectIrqsCommandInput,
-        InspectTreeCommandInput, ManCommandInput, MonitorCommandInput, ProbesCommandInput,
-        ProfileTemplateCommandInput, RecommendCommandInput, ReportCommandInput,
-        RestoreCommandInput, RulesCommandInput, ScenarioCompareCommandInput,
-        ScenarioCreateCommandInput, ScenarioListCommandInput, ScenarioPathCommandInput,
-        ScenarioRunCommandInput, SummaryCommandInput, TuneCommandInput, ValidateCommandInput,
+        ConfigCheckCommandInput, DaemonAcceptanceCommandInput, DaemonBenchOverheadCommandInput,
+        DaemonConfigExplainCommandInput, DaemonDoctorCommandInput, DaemonExplainCommandInput,
+        DaemonPauseCommandInput, DaemonPolicyExplainCommandInput, DaemonProfilesCommandInput,
+        DaemonProfilesExplainCommandInput, DaemonProfilesForgetCommandInput,
+        DaemonProfilesListCommandInput, DaemonResetStateCommandInput, DaemonRestoreCommandInput,
+        DaemonResumeCommandInput, DaemonSoakCommandInput, DaemonStatusCommandInput,
+        DaemonWatchCommandInput, DaemonWhatChangedCommandInput, DaemonWhyNotOptimizeCommandInput,
+        DoctorCommandInput, InspectIrqsCommandInput, InspectTreeCommandInput, ManCommandInput,
+        MonitorCommandInput, ProbesCommandInput, ProfileTemplateCommandInput,
+        RecommendCommandInput, ReleaseCheckCommandInput, ReportCommandInput, RestoreCommandInput,
+        RulesCommandInput, ScenarioCompareCommandInput, ScenarioCreateCommandInput,
+        ScenarioListCommandInput, ScenarioPathCommandInput, ScenarioRunCommandInput,
+        ServiceCommandInput, SummaryCommandInput, TuneCommandInput, ValidateCommandInput,
+        VersionCommandInput,
     },
     config::{
         CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX,
@@ -22,7 +30,13 @@ use crate::{
         merge::{CliOverrides, ConfigSources, DefaultConfig, PresetConfig},
         model::MonitorConfig,
     },
+    daemon::{DaemonSoakBudget, DaemonSoakConfig, DaemonSoakProfile},
     process_tree::TaskClass,
+    release::{ReleaseChannel, ReleaseReadinessInputs},
+    service::{
+        ServiceAction, ServiceCommandRequest, ServiceManager, ServiceMode,
+        default_service_binary_path,
+    },
 };
 
 #[derive(Parser, Debug)]
@@ -49,6 +63,17 @@ mod version_tests {
             Some(crate::metadata::build_version())
         );
         assert_eq!(crate::metadata::build_git_rev(), env!("STUTTER_GIT_REV"));
+    }
+
+    #[test]
+    fn parse_version_features_request_bypasses_clap_version_exit() {
+        let command = parse_app_command_from(["stutter", "--version", "--features"]).unwrap();
+
+        let AppCommand::Version(input) = command else {
+            panic!("expected version command");
+        };
+
+        assert!(input.features);
     }
 
     #[test]
@@ -101,7 +126,9 @@ enum Command {
     ApplyProfile(ApplyProfileArgs),
     Tune(TuneArgs),
     Recommend(RecommendArgs),
+    Release(ReleaseArgs),
     Check(CheckArgs),
+    Config(ConfigArgs),
     Audit(AuditArgs),
     Advisor(AdvisorArgs),
     Doctor(DoctorArgs),
@@ -113,6 +140,7 @@ enum Command {
     AutotuneStatus(AutotuneStatusArgs),
     Agent(AgentArgs),
     Daemon(DaemonArgs),
+    Service(ServiceArgs),
     #[command(name = "completions")]
     Completions(CompletionsArgs),
     #[command(name = "man")]
@@ -132,6 +160,33 @@ pub struct ManArgs {
 pub struct CompletionsArgs {
     #[arg(value_enum)]
     pub shell: clap_complete::Shell,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub command: ConfigCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ConfigCommand {
+    Check(ConfigCheckArgs),
+    Explain(ConfigExplainArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ConfigCheckArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ConfigExplainArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "preset", value_name = "NAME")]
+    pub preset: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -241,6 +296,18 @@ pub struct MonitorArgs {
 
     #[arg(long = "retain-intervals", value_name = "N")]
     retain_intervals: Option<usize>,
+
+    #[arg(long = "retention-max-runs", value_name = "N")]
+    retention_max_run_count: Option<usize>,
+
+    #[arg(long = "retention-max-bytes", value_name = "BYTES")]
+    retention_max_total_bytes: Option<u64>,
+
+    #[arg(long = "retention-max-age-seconds", value_name = "SECONDS")]
+    retention_max_age_seconds: Option<u64>,
+
+    #[arg(long = "retention-min-free-bytes", value_name = "BYTES")]
+    retention_min_free_bytes: Option<u64>,
 
     #[arg(long = "no-record")]
     no_record: bool,
@@ -611,6 +678,256 @@ pub struct DaemonArgs {
 #[derive(Subcommand, Debug, Clone)]
 pub enum DaemonCommand {
     Config(DaemonConfigArgs),
+    Policy(DaemonPolicyArgs),
+    Profiles(DaemonProfilesArgs),
+    Explain(DaemonExplainArgs),
+    #[command(name = "why-not-optimize")]
+    WhyNotOptimize(DaemonWhyNotOptimizeArgs),
+    #[command(name = "what-changed")]
+    WhatChanged(DaemonWhatChangedArgs),
+    Status(DaemonStatusArgs),
+    Watch(DaemonWatchArgs),
+    Doctor(DaemonDoctorArgs),
+    #[command(name = "reset-state")]
+    ResetState(DaemonResetStateArgs),
+    #[command(name = "bench-overhead")]
+    BenchOverhead(DaemonBenchOverheadArgs),
+    Soak(DaemonSoakArgs),
+    Acceptance(DaemonAcceptanceArgs),
+    Pause(DaemonPauseArgs),
+    Resume(DaemonResumeArgs),
+    Restore(DaemonRestoreArgs),
+    #[command(name = "emergency-restore")]
+    EmergencyRestore(DaemonRestoreArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonPolicyArgs {
+    #[command(subcommand)]
+    pub command: DaemonPolicyCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum DaemonPolicyCommand {
+    Explain(DaemonPolicyExplainArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonPolicyExplainArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "preset", value_name = "NAME")]
+    pub preset: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonProfilesArgs {
+    #[command(subcommand)]
+    pub command: DaemonProfilesCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum DaemonProfilesCommand {
+    List(DaemonProfilesListArgs),
+    Forget(DaemonProfilesForgetArgs),
+    Explain(DaemonProfilesExplainArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonProfilesListArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonProfilesForgetArgs {
+    #[arg(long = "workload-hash", value_name = "HASH")]
+    pub workload_identity_hash: Option<String>,
+
+    #[arg(long = "candidate", value_name = "NAME_OR_ACTION_ID")]
+    pub candidate: Option<String>,
+
+    #[arg(long = "all")]
+    pub all: bool,
+
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+
+    #[arg(long = "json")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonProfilesExplainArgs {
+    #[arg(long = "workload-hash", value_name = "HASH")]
+    pub workload_identity_hash: Option<String>,
+
+    #[arg(long = "json")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonExplainArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "explain-last", default_value_t = 10)]
+    pub explain_last: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonWhyNotOptimizeArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "explain-last", default_value_t = 10)]
+    pub explain_last: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonWhatChangedArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "explain-last", default_value_t = 10)]
+    pub explain_last: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ServiceArgs {
+    #[command(subcommand)]
+    pub command: ServiceCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ServiceCommand {
+    Install(ServiceInstallArgs),
+    Uninstall(ServiceUninstallArgs),
+    Doctor(ServiceDoctorArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ServiceInstallArgs {
+    #[arg(long = "mode", default_value = "system-observe")]
+    pub mode: String,
+
+    #[arg(long = "manager", default_value = "systemd-system")]
+    pub manager: String,
+
+    #[arg(long = "unit-dir", value_name = "DIR")]
+    pub unit_dir: Option<PathBuf>,
+
+    #[arg(
+        long = "config-dir",
+        value_name = "DIR",
+        default_value = "/etc/stutter"
+    )]
+    pub config_dir: PathBuf,
+
+    #[arg(
+        long = "state-dir",
+        value_name = "DIR",
+        default_value = "/var/lib/stutter"
+    )]
+    pub state_dir: PathBuf,
+
+    #[arg(
+        long = "log-dir",
+        value_name = "DIR",
+        default_value = "/var/log/stutter"
+    )]
+    pub log_dir: PathBuf,
+
+    #[arg(long = "binary", value_name = "PATH")]
+    pub binary: Option<PathBuf>,
+
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+
+    #[arg(long = "json")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ServiceUninstallArgs {
+    #[arg(long = "mode", default_value = "system-observe")]
+    pub mode: String,
+
+    #[arg(long = "manager", default_value = "systemd-system")]
+    pub manager: String,
+
+    #[arg(long = "unit-dir", value_name = "DIR")]
+    pub unit_dir: Option<PathBuf>,
+
+    #[arg(
+        long = "config-dir",
+        value_name = "DIR",
+        default_value = "/etc/stutter"
+    )]
+    pub config_dir: PathBuf,
+
+    #[arg(
+        long = "state-dir",
+        value_name = "DIR",
+        default_value = "/var/lib/stutter"
+    )]
+    pub state_dir: PathBuf,
+
+    #[arg(
+        long = "log-dir",
+        value_name = "DIR",
+        default_value = "/var/log/stutter"
+    )]
+    pub log_dir: PathBuf,
+
+    #[arg(long = "binary", value_name = "PATH")]
+    pub binary: Option<PathBuf>,
+
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+
+    #[arg(long = "json")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ServiceDoctorArgs {
+    #[arg(long = "mode", default_value = "system-observe")]
+    pub mode: String,
+
+    #[arg(long = "manager", default_value = "systemd-system")]
+    pub manager: String,
+
+    #[arg(long = "unit-dir", value_name = "DIR")]
+    pub unit_dir: Option<PathBuf>,
+
+    #[arg(
+        long = "config-dir",
+        value_name = "DIR",
+        default_value = "/etc/stutter"
+    )]
+    pub config_dir: PathBuf,
+
+    #[arg(
+        long = "state-dir",
+        value_name = "DIR",
+        default_value = "/var/lib/stutter"
+    )]
+    pub state_dir: PathBuf,
+
+    #[arg(
+        long = "log-dir",
+        value_name = "DIR",
+        default_value = "/var/log/stutter"
+    )]
+    pub log_dir: PathBuf,
+
+    #[arg(long = "binary", value_name = "PATH")]
+    pub binary: Option<PathBuf>,
+
+    #[arg(long = "json")]
+    pub json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -620,15 +937,117 @@ pub struct DaemonConfigArgs {
 
     #[arg(long = "json", requires = "explain")]
     pub json: bool,
+
+    #[arg(long = "preset", value_name = "NAME")]
+    pub preset: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonStatusArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "explain-last", default_value_t = 10)]
+    pub explain_last: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonWatchArgs {
+    #[arg(long = "interval-ms", default_value_t = 1_000)]
+    pub interval_ms: u64,
+
+    #[arg(long = "iterations", value_name = "N")]
+    pub iterations: Option<u64>,
+
+    #[arg(long = "verbose")]
+    pub verbose: bool,
+
+    #[arg(long = "explain-last", default_value_t = 10)]
+    pub explain_last: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonDoctorArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonResetStateArgs {
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+
+    #[arg(long = "json")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonBenchOverheadArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "duration-ms", default_value_t = 1_000)]
+    pub duration_ms: u64,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonSoakArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "duration-seconds", default_value_t = 60)]
+    pub duration_seconds: u64,
+
+    #[arg(long = "tick-ms", default_value_t = 1_000)]
+    pub tick_ms: u64,
+
+    #[arg(long = "profile", default_value = "observe-only")]
+    pub profile: String,
+
+    #[arg(long = "max-disk-growth-bytes")]
+    pub max_disk_growth_bytes: Option<u64>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonAcceptanceArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonPauseArgs {}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonResumeArgs {}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonRestoreArgs {
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
 pub struct AgentArgs {
-    #[arg(long = "bind", default_value = "127.0.0.1:9899")]
-    pub bind: std::net::SocketAddr,
+    #[arg(
+        long = "bind",
+        conflicts_with = "unix_socket",
+        help = "Bind the agent to a TCP address instead of the default Unix socket"
+    )]
+    pub bind: Option<std::net::SocketAddr>,
 
-    #[arg(long = "port", value_name = "PORT")]
+    #[arg(
+        long = "port",
+        value_name = "PORT",
+        conflicts_with_all = ["bind", "unix_socket"]
+    )]
     pub port: Option<u16>,
+
+    #[arg(
+        long = "unix-socket",
+        value_name = "PATH",
+        help = "Bind the agent to a Unix domain socket; defaults to the platform runtime path"
+    )]
+    pub unix_socket: Option<PathBuf>,
 
     #[arg(long = "runs-dir", value_name = "PATH")]
     pub runs_dir: Option<std::path::PathBuf>,
@@ -653,6 +1072,36 @@ pub struct AgentArgs {
         help = "Read bearer token for agent HTTP API from this file"
     )]
     pub bearer_token_file: Option<PathBuf>,
+
+    #[arg(
+        long = "read-token-env",
+        value_name = "ENV",
+        default_value = "STUTTER_AGENT_READ_TOKEN",
+        help = "Environment variable containing read-only bearer token for agent API"
+    )]
+    pub read_token_env: String,
+
+    #[arg(
+        long = "read-token-file",
+        value_name = "PATH",
+        help = "Read read-only bearer token for agent API from this file"
+    )]
+    pub read_token_file: Option<PathBuf>,
+
+    #[arg(
+        long = "apply-token-env",
+        value_name = "ENV",
+        default_value = "STUTTER_AGENT_APPLY_TOKEN",
+        help = "Environment variable containing state-changing bearer token for agent API"
+    )]
+    pub apply_token_env: String,
+
+    #[arg(
+        long = "apply-token-file",
+        value_name = "PATH",
+        help = "Read state-changing bearer token for agent API from this file"
+    )]
+    pub apply_token_file: Option<PathBuf>,
 
     #[arg(
         long = "max-duration-seconds",
@@ -872,6 +1321,10 @@ impl MonitorArgs {
                 .auto_focus_max_roots
                 .then_some(self.auto_focus_max_roots),
             retain_intervals: self.retain_intervals.map(Some),
+            retention_max_run_count: self.retention_max_run_count.map(Some),
+            retention_max_total_bytes: self.retention_max_total_bytes.map(Some),
+            retention_max_age_seconds: self.retention_max_age_seconds.map(Some),
+            retention_min_free_bytes: self.retention_min_free_bytes.map(Some),
             run_name: self.run_name.clone().map(Some),
             output_dir: self.out_dir.clone().map(Some),
             remote: self.remote.clone().map(Some),
@@ -915,6 +1368,10 @@ impl Default for MonitorArgs {
             mangohud_log_live: false,
             tui: false,
             retain_intervals: None,
+            retention_max_run_count: None,
+            retention_max_total_bytes: None,
+            retention_max_age_seconds: None,
+            retention_min_free_bytes: None,
             no_record: false,
             cpu_freq: false,
             no_cpu_freq: false,
@@ -1209,6 +1666,38 @@ pub struct RecommendArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+pub struct ReleaseArgs {
+    #[command(subcommand)]
+    pub command: ReleaseCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ReleaseCommand {
+    Check(ReleaseCheckArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ReleaseCheckArgs {
+    #[arg(long = "channel", default_value = "experimental")]
+    pub channel: String,
+
+    #[arg(long = "apply-actions-enabled")]
+    pub apply_actions_enabled: bool,
+
+    #[arg(long = "soak-tests")]
+    pub soak_tests: bool,
+
+    #[arg(long = "stronger-tests")]
+    pub stronger_tests: bool,
+
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "enforce")]
+    pub enforce: bool,
+}
+
+#[derive(Args, Debug, Clone)]
 pub struct AutotuneStatusArgs {
     #[arg(long = "json")]
     pub json: bool,
@@ -1485,6 +1974,7 @@ impl RecordingMode {
 pub enum AppCommand {
     Monitor(MonitorCommandInput),
     Bench(BenchCommandInput),
+    Version(VersionCommandInput),
     Restore(RestoreCommandInput),
     ApplyProfile(ApplyProfileCommandInput),
     InspectTree(InspectTreeCommandInput),
@@ -1493,7 +1983,10 @@ pub enum AppCommand {
     Report(ReportCommandInput),
     Tune(TuneCommandInput),
     Recommend(RecommendCommandInput),
+    ReleaseCheck(ReleaseCheckCommandInput),
     Check(CheckCommandInput),
+    ConfigCheck(ConfigCheckCommandInput),
+    ConfigExplain(DaemonConfigExplainCommandInput),
     AutotuneGenerateProfiles(AutotuneGenerateProfilesCommandInput),
     Autotune(AutotuneCommandDto),
     AutotuneStatus(AutotuneStatusCommandInput),
@@ -1508,6 +2001,22 @@ pub enum AppCommand {
     InspectIrqs(InspectIrqsCommandInput),
     Agent(AgentCommandInput),
     DaemonConfigExplain(DaemonConfigExplainCommandInput),
+    DaemonPolicyExplain(DaemonPolicyExplainCommandInput),
+    DaemonProfiles(DaemonProfilesCommandInput),
+    DaemonExplain(DaemonExplainCommandInput),
+    DaemonWhyNotOptimize(DaemonWhyNotOptimizeCommandInput),
+    DaemonWhatChanged(DaemonWhatChangedCommandInput),
+    DaemonStatus(DaemonStatusCommandInput),
+    DaemonWatch(DaemonWatchCommandInput),
+    DaemonDoctor(DaemonDoctorCommandInput),
+    DaemonResetState(DaemonResetStateCommandInput),
+    DaemonBenchOverhead(DaemonBenchOverheadCommandInput),
+    DaemonSoak(DaemonSoakCommandInput),
+    DaemonAcceptance(DaemonAcceptanceCommandInput),
+    DaemonPause(DaemonPauseCommandInput),
+    DaemonResume(DaemonResumeCommandInput),
+    DaemonRestore(DaemonRestoreCommandInput),
+    Service(ServiceCommandInput),
     Completions(CompletionsCommandInput),
     Man(ManCommandInput),
     Rules(RulesCommandInput),
@@ -1552,6 +2061,52 @@ fn validate_autotune_mode(mode: &str) -> anyhow::Result<()> {
             "apply mode is not implemented yet; use --mode observe, --mode suggest, or --mode apply-low-risk"
         ),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_service_command_request(
+    action: ServiceAction,
+    manager: String,
+    mode: String,
+    dry_run: bool,
+    unit_dir: Option<PathBuf>,
+    config_dir: PathBuf,
+    state_dir: PathBuf,
+    log_dir: PathBuf,
+    binary: Option<PathBuf>,
+) -> anyhow::Result<ServiceCommandRequest> {
+    Ok(ServiceCommandRequest {
+        action,
+        manager: manager.parse::<ServiceManager>()?,
+        mode: mode.parse::<ServiceMode>()?,
+        dry_run,
+        unit_dir,
+        config_dir,
+        state_dir,
+        log_dir,
+        binary_path: binary.unwrap_or_else(default_service_binary_path),
+    })
+}
+
+fn agent_listen_args(
+    bind: Option<std::net::SocketAddr>,
+    port: Option<u16>,
+    unix_socket: Option<PathBuf>,
+) -> anyhow::Result<(std::net::SocketAddr, Option<PathBuf>)> {
+    if let Some(path) = unix_socket {
+        return Ok((std::net::SocketAddr::from(([127, 0, 0, 1], 0)), Some(path)));
+    }
+    if let Some(port) = port {
+        return Ok((std::net::SocketAddr::from(([127, 0, 0, 1], port)), None));
+    }
+    if let Some(bind) = bind {
+        return Ok((bind, None));
+    }
+
+    Ok((
+        std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
+        Some(crate::agent::default_agent_unix_socket_path()?),
+    ))
 }
 
 pub fn autotune_monitor_config(
@@ -1635,6 +2190,10 @@ where
     T: Into<OsString> + Clone,
 {
     let argv: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    if requested_version_features(&argv) {
+        return Ok(AppCommand::Version(VersionCommandInput { features: true }));
+    }
+
     let matches = Cli::command().try_get_matches_from(argv.clone())?;
     let cli = Cli::try_parse_from(argv)?;
 
@@ -1801,6 +2360,23 @@ where
             json: args.json,
             markdown: args.markdown,
         })),
+        Some(Command::Release(args)) => match args.command {
+            ReleaseCommand::Check(args) => {
+                let inputs = ReleaseReadinessInputs {
+                    apply_actions_enabled: args.apply_actions_enabled,
+                    soak_tests: args.soak_tests,
+                    stronger_tests: args.stronger_tests,
+                    ..ReleaseReadinessInputs::default()
+                };
+
+                Ok(AppCommand::ReleaseCheck(ReleaseCheckCommandInput {
+                    channel: args.channel.parse::<ReleaseChannel>()?,
+                    inputs,
+                    json: args.json,
+                    enforce: args.enforce,
+                }))
+            }
+        },
         Some(Command::Check(args)) => {
             if args.max_regression_p99_ms.is_none() && args.max_max_regression_ms.is_none() {
                 anyhow::bail!(
@@ -1830,6 +2406,19 @@ where
                 filter_class: parse_optional_task_class(args.filter_class.as_deref())?,
             }))
         }
+        Some(Command::Config(args)) => match args.command {
+            ConfigCommand::Check(check_args) => {
+                Ok(AppCommand::ConfigCheck(ConfigCheckCommandInput {
+                    json: check_args.json,
+                }))
+            }
+            ConfigCommand::Explain(explain_args) => {
+                Ok(AppCommand::ConfigExplain(DaemonConfigExplainCommandInput {
+                    json: explain_args.json,
+                    preset: explain_args.preset,
+                }))
+            }
+        },
         Some(Command::Autotune(args)) => {
             if let Some(cmd) = args.command {
                 match cmd {
@@ -1983,17 +2572,18 @@ where
                 anyhow::bail!("agent currently supports at most 1 concurrent recording");
             }
 
-            let bind = if let Some(port) = args.port {
-                std::net::SocketAddr::from(([127, 0, 0, 1], port))
-            } else {
-                args.bind
-            };
+            let (bind, unix_socket) = agent_listen_args(args.bind, args.port, args.unix_socket)?;
             Ok(AppCommand::Agent(AgentCommandInput {
                 bind,
+                unix_socket,
                 runs_dir: args.runs_dir,
                 allow_unsafe_bind: args.allow_unsafe_bind,
                 bearer_token_env: args.bearer_token_env,
                 bearer_token_file: args.bearer_token_file,
+                read_token_env: args.read_token_env,
+                read_token_file: args.read_token_file,
+                apply_token_env: args.apply_token_env,
+                apply_token_file: args.apply_token_file,
                 max_duration_seconds: args.max_duration_seconds,
                 max_targets: args.max_targets,
                 max_concurrent_recordings: args.max_concurrent_recordings,
@@ -2008,9 +2598,188 @@ where
                 Ok(AppCommand::DaemonConfigExplain(
                     DaemonConfigExplainCommandInput {
                         json: config_args.json,
+                        preset: config_args.preset,
                     },
                 ))
             }
+            DaemonCommand::Policy(policy_args) => match policy_args.command {
+                DaemonPolicyCommand::Explain(explain_args) => Ok(AppCommand::DaemonPolicyExplain(
+                    DaemonPolicyExplainCommandInput {
+                        json: explain_args.json,
+                        preset: explain_args.preset,
+                    },
+                )),
+            },
+            DaemonCommand::Profiles(profiles_args) => match profiles_args.command {
+                DaemonProfilesCommand::List(list_args) => Ok(AppCommand::DaemonProfiles(
+                    DaemonProfilesCommandInput::List(DaemonProfilesListCommandInput {
+                        json: list_args.json,
+                    }),
+                )),
+                DaemonProfilesCommand::Forget(forget_args) => {
+                    if !forget_args.all && forget_args.workload_identity_hash.is_none() {
+                        anyhow::bail!("daemon profiles forget requires --workload-hash or --all");
+                    }
+                    if forget_args.all && forget_args.workload_identity_hash.is_some() {
+                        anyhow::bail!("--all conflicts with --workload-hash");
+                    }
+                    Ok(AppCommand::DaemonProfiles(
+                        DaemonProfilesCommandInput::Forget(DaemonProfilesForgetCommandInput {
+                            workload_identity_hash: forget_args.workload_identity_hash,
+                            candidate: forget_args.candidate,
+                            all: forget_args.all,
+                            dry_run: forget_args.dry_run,
+                            json: forget_args.json,
+                        }),
+                    ))
+                }
+                DaemonProfilesCommand::Explain(explain_args) => Ok(AppCommand::DaemonProfiles(
+                    DaemonProfilesCommandInput::Explain(DaemonProfilesExplainCommandInput {
+                        workload_identity_hash: explain_args.workload_identity_hash,
+                        json: explain_args.json,
+                    }),
+                )),
+            },
+            DaemonCommand::Explain(explain_args) => {
+                Ok(AppCommand::DaemonExplain(DaemonExplainCommandInput {
+                    json: explain_args.json,
+                    explain_last: explain_args.explain_last,
+                }))
+            }
+            DaemonCommand::WhyNotOptimize(args) => Ok(AppCommand::DaemonWhyNotOptimize(
+                DaemonWhyNotOptimizeCommandInput {
+                    json: args.json,
+                    explain_last: args.explain_last,
+                },
+            )),
+            DaemonCommand::WhatChanged(args) => Ok(AppCommand::DaemonWhatChanged(
+                DaemonWhatChangedCommandInput {
+                    json: args.json,
+                    explain_last: args.explain_last,
+                },
+            )),
+            DaemonCommand::Status(status_args) => {
+                Ok(AppCommand::DaemonStatus(DaemonStatusCommandInput {
+                    json: status_args.json,
+                    explain_last: status_args.explain_last,
+                }))
+            }
+            DaemonCommand::Watch(watch_args) => {
+                if watch_args.interval_ms == 0 {
+                    anyhow::bail!("--interval-ms must be greater than zero");
+                }
+                if watch_args.iterations == Some(0) {
+                    anyhow::bail!("--iterations must be greater than zero");
+                }
+                Ok(AppCommand::DaemonWatch(DaemonWatchCommandInput {
+                    interval_ms: watch_args.interval_ms,
+                    iterations: watch_args.iterations,
+                    verbose: watch_args.verbose,
+                    explain_last: watch_args.explain_last,
+                }))
+            }
+            DaemonCommand::Doctor(doctor_args) => {
+                Ok(AppCommand::DaemonDoctor(DaemonDoctorCommandInput {
+                    json: doctor_args.json,
+                }))
+            }
+            DaemonCommand::ResetState(reset_args) => {
+                Ok(AppCommand::DaemonResetState(DaemonResetStateCommandInput {
+                    dry_run: reset_args.dry_run,
+                    json: reset_args.json,
+                }))
+            }
+            DaemonCommand::BenchOverhead(bench_args) => Ok(AppCommand::DaemonBenchOverhead(
+                DaemonBenchOverheadCommandInput {
+                    json: bench_args.json,
+                    duration_ms: bench_args.duration_ms,
+                },
+            )),
+            DaemonCommand::Soak(soak_args) => {
+                if soak_args.duration_seconds == 0 {
+                    anyhow::bail!("--duration-seconds must be greater than zero");
+                }
+                if soak_args.tick_ms == 0 {
+                    anyhow::bail!("--tick-ms must be greater than zero");
+                }
+                let mut budget = DaemonSoakBudget::default();
+                if let Some(max_disk_growth_bytes) = soak_args.max_disk_growth_bytes {
+                    budget.max_disk_growth_bytes = max_disk_growth_bytes;
+                }
+
+                Ok(AppCommand::DaemonSoak(DaemonSoakCommandInput {
+                    config: DaemonSoakConfig {
+                        profile: soak_args.profile.parse::<DaemonSoakProfile>()?,
+                        duration_seconds: soak_args.duration_seconds,
+                        tick_millis: soak_args.tick_ms,
+                        budget,
+                    },
+                    json: soak_args.json,
+                }))
+            }
+            DaemonCommand::Acceptance(acceptance_args) => {
+                Ok(AppCommand::DaemonAcceptance(DaemonAcceptanceCommandInput {
+                    json: acceptance_args.json,
+                }))
+            }
+            DaemonCommand::Pause(_) => Ok(AppCommand::DaemonPause(DaemonPauseCommandInput)),
+            DaemonCommand::Resume(_) => Ok(AppCommand::DaemonResume(DaemonResumeCommandInput)),
+            DaemonCommand::Restore(restore_args) => {
+                Ok(AppCommand::DaemonRestore(DaemonRestoreCommandInput {
+                    dry_run: restore_args.dry_run,
+                    emergency: false,
+                }))
+            }
+            DaemonCommand::EmergencyRestore(restore_args) => {
+                Ok(AppCommand::DaemonRestore(DaemonRestoreCommandInput {
+                    dry_run: restore_args.dry_run,
+                    emergency: true,
+                }))
+            }
+        },
+        Some(Command::Service(args)) => match args.command {
+            ServiceCommand::Install(args) => Ok(AppCommand::Service(ServiceCommandInput {
+                request: build_service_command_request(
+                    ServiceAction::Install,
+                    args.manager,
+                    args.mode,
+                    args.dry_run,
+                    args.unit_dir,
+                    args.config_dir,
+                    args.state_dir,
+                    args.log_dir,
+                    args.binary,
+                )?,
+                json: args.json,
+            })),
+            ServiceCommand::Uninstall(args) => Ok(AppCommand::Service(ServiceCommandInput {
+                request: build_service_command_request(
+                    ServiceAction::Uninstall,
+                    args.manager,
+                    args.mode,
+                    args.dry_run,
+                    args.unit_dir,
+                    args.config_dir,
+                    args.state_dir,
+                    args.log_dir,
+                    args.binary,
+                )?,
+                json: args.json,
+            })),
+            ServiceCommand::Doctor(args) => Ok(AppCommand::Service(ServiceCommandInput {
+                request: build_service_command_request(
+                    ServiceAction::Doctor,
+                    args.manager,
+                    args.mode,
+                    true,
+                    args.unit_dir,
+                    args.config_dir,
+                    args.state_dir,
+                    args.log_dir,
+                    args.binary,
+                )?,
+                json: args.json,
+            })),
         },
         Some(Command::Completions(args)) => Ok(AppCommand::Completions(CompletionsCommandInput {
             shell: args.shell,
@@ -2084,6 +2853,21 @@ where
             ScenarioCommand::List => Ok(AppCommand::ScenarioList(ScenarioListCommandInput)),
         },
     }
+}
+
+fn requested_version_features(argv: &[OsString]) -> bool {
+    let mut version = false;
+    let mut features = false;
+
+    for arg in argv.iter().skip(1).filter_map(|arg| arg.to_str()) {
+        match arg {
+            "--version" | "-V" => version = true,
+            "--features" => features = true,
+            _ => {}
+        }
+    }
+
+    version && features
 }
 
 #[cfg(test)]
@@ -2544,6 +3328,18 @@ fn monitor_config_from_monitor_args_with_file_and_presence(
     if args.runtime_slices_max_tasks == 0 {
         anyhow::bail!("--runtime-slices-max-tasks must be greater than zero");
     }
+    if matches!(args.retention_max_run_count, Some(0)) {
+        anyhow::bail!("--retention-max-runs must be greater than zero");
+    }
+    if matches!(args.retention_max_total_bytes, Some(0)) {
+        anyhow::bail!("--retention-max-bytes must be greater than zero");
+    }
+    if matches!(args.retention_max_age_seconds, Some(0)) {
+        anyhow::bail!("--retention-max-age-seconds must be greater than zero");
+    }
+    if matches!(args.retention_min_free_bytes, Some(0)) {
+        anyhow::bail!("--retention-min-free-bytes must be greater than zero");
+    }
 
     args.target_pids.sort_unstable();
     args.target_pids.dedup();
@@ -2860,6 +3656,438 @@ mod tests {
         };
 
         assert!(input.json);
+        assert_eq!(input.preset, None);
+    }
+
+    #[test]
+    fn parses_daemon_config_preset() {
+        let command = parse_app_command_from([
+            "stutter",
+            "daemon",
+            "config",
+            "--explain",
+            "--preset",
+            "gaming-low-risk",
+        ])
+        .unwrap();
+
+        let AppCommand::DaemonConfigExplain(input) = command else {
+            panic!("expected daemon config explain command");
+        };
+
+        assert_eq!(input.preset.as_deref(), Some("gaming-low-risk"));
+    }
+
+    #[test]
+    fn parses_daemon_policy_explain_json_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "daemon",
+            "policy",
+            "explain",
+            "--preset",
+            "gaming-low-risk",
+            "--json",
+        ])
+        .unwrap();
+
+        let AppCommand::DaemonPolicyExplain(input) = command else {
+            panic!("expected daemon policy explain command");
+        };
+
+        assert!(input.json);
+        assert_eq!(input.preset.as_deref(), Some("gaming-low-risk"));
+    }
+
+    #[test]
+    fn parses_daemon_profiles_list_command() {
+        let command =
+            parse_app_command_from(["stutter", "daemon", "profiles", "list", "--json"]).unwrap();
+
+        let AppCommand::DaemonProfiles(crate::commands::input::DaemonProfilesCommandInput::List(
+            input,
+        )) = command
+        else {
+            panic!("expected daemon profiles list command");
+        };
+
+        assert!(input.json);
+    }
+
+    #[test]
+    fn parses_daemon_profiles_forget_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "daemon",
+            "profiles",
+            "forget",
+            "--workload-hash",
+            "workload-a",
+            "--candidate",
+            "game-main",
+            "--dry-run",
+            "--json",
+        ])
+        .unwrap();
+
+        let AppCommand::DaemonProfiles(crate::commands::input::DaemonProfilesCommandInput::Forget(
+            input,
+        )) = command
+        else {
+            panic!("expected daemon profiles forget command");
+        };
+
+        assert_eq!(input.workload_identity_hash.as_deref(), Some("workload-a"));
+        assert_eq!(input.candidate.as_deref(), Some("game-main"));
+        assert!(input.dry_run);
+        assert!(input.json);
+    }
+
+    #[test]
+    fn rejects_daemon_profiles_forget_without_scope() {
+        let err = parse_app_command_from(["stutter", "daemon", "profiles", "forget"])
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("requires --workload-hash or --all"));
+    }
+
+    #[test]
+    fn parses_daemon_profiles_explain_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "daemon",
+            "profiles",
+            "explain",
+            "--workload-hash",
+            "workload-a",
+            "--json",
+        ])
+        .unwrap();
+
+        let AppCommand::DaemonProfiles(
+            crate::commands::input::DaemonProfilesCommandInput::Explain(input),
+        ) = command
+        else {
+            panic!("expected daemon profiles explain command");
+        };
+
+        assert_eq!(input.workload_identity_hash.as_deref(), Some("workload-a"));
+        assert!(input.json);
+    }
+
+    #[test]
+    fn parses_daemon_explain_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "daemon",
+            "explain",
+            "--json",
+            "--explain-last",
+            "3",
+        ])
+        .unwrap();
+
+        let AppCommand::DaemonExplain(input) = command else {
+            panic!("expected daemon explain command");
+        };
+
+        assert!(input.json);
+        assert_eq!(input.explain_last, 3);
+    }
+
+    #[test]
+    fn parses_daemon_why_not_optimize_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "daemon",
+            "why-not-optimize",
+            "--json",
+            "--explain-last",
+            "2",
+        ])
+        .unwrap();
+
+        let AppCommand::DaemonWhyNotOptimize(input) = command else {
+            panic!("expected daemon why-not-optimize command");
+        };
+
+        assert!(input.json);
+        assert_eq!(input.explain_last, 2);
+    }
+
+    #[test]
+    fn parses_daemon_what_changed_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "daemon",
+            "what-changed",
+            "--json",
+            "--explain-last",
+            "2",
+        ])
+        .unwrap();
+
+        let AppCommand::DaemonWhatChanged(input) = command else {
+            panic!("expected daemon what-changed command");
+        };
+
+        assert!(input.json);
+        assert_eq!(input.explain_last, 2);
+    }
+
+    #[test]
+    fn parses_config_check_json_command() {
+        let command = parse_app_command_from(["stutter", "config", "check", "--json"]).unwrap();
+
+        let AppCommand::ConfigCheck(input) = command else {
+            panic!("expected config check command");
+        };
+
+        assert!(input.json);
+    }
+
+    #[test]
+    fn parses_daemon_watch_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "daemon",
+            "watch",
+            "--interval-ms",
+            "250",
+            "--iterations",
+            "2",
+            "--verbose",
+            "--explain-last",
+            "4",
+        ])
+        .unwrap();
+
+        let AppCommand::DaemonWatch(input) = command else {
+            panic!("expected daemon watch command");
+        };
+
+        assert_eq!(input.interval_ms, 250);
+        assert_eq!(input.iterations, Some(2));
+        assert!(input.verbose);
+        assert_eq!(input.explain_last, 4);
+    }
+
+    #[test]
+    fn rejects_daemon_watch_zero_interval() {
+        assert!(
+            parse_app_command_from(["stutter", "daemon", "watch", "--interval-ms", "0"]).is_err()
+        );
+    }
+
+    #[test]
+    fn parses_daemon_doctor_command() {
+        let command = parse_app_command_from(["stutter", "daemon", "doctor", "--json"]).unwrap();
+
+        let AppCommand::DaemonDoctor(input) = command else {
+            panic!("expected daemon doctor command");
+        };
+
+        assert!(input.json);
+    }
+
+    #[test]
+    fn parses_daemon_reset_state_command() {
+        let command =
+            parse_app_command_from(["stutter", "daemon", "reset-state", "--dry-run", "--json"])
+                .unwrap();
+
+        let AppCommand::DaemonResetState(input) = command else {
+            panic!("expected daemon reset-state command");
+        };
+
+        assert!(input.dry_run);
+        assert!(input.json);
+    }
+
+    #[test]
+    fn parses_config_explain_preset_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "config",
+            "explain",
+            "--preset",
+            "gaming-low-risk",
+            "--json",
+        ])
+        .unwrap();
+
+        let AppCommand::ConfigExplain(input) = command else {
+            panic!("expected config explain command");
+        };
+
+        assert!(input.json);
+        assert_eq!(input.preset.as_deref(), Some("gaming-low-risk"));
+    }
+
+    #[test]
+    fn parses_release_check_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "release",
+            "check",
+            "--channel",
+            "low-risk-stable",
+            "--soak-tests",
+            "--json",
+        ])
+        .unwrap();
+
+        let AppCommand::ReleaseCheck(input) = command else {
+            panic!("expected release check command");
+        };
+
+        assert_eq!(input.channel, ReleaseChannel::LowRiskStable);
+        assert!(input.inputs.soak_tests);
+        assert!(input.json);
+    }
+
+    #[test]
+    fn parses_daemon_status_json_command() {
+        let command = parse_app_command_from(["stutter", "daemon", "status", "--json"]).unwrap();
+
+        let AppCommand::DaemonStatus(input) = command else {
+            panic!("expected daemon status command");
+        };
+
+        assert!(input.json);
+        assert_eq!(input.explain_last, 10);
+    }
+
+    #[test]
+    fn parses_daemon_bench_overhead_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "daemon",
+            "bench-overhead",
+            "--duration-ms",
+            "25",
+            "--json",
+        ])
+        .unwrap();
+
+        let AppCommand::DaemonBenchOverhead(input) = command else {
+            panic!("expected daemon bench-overhead command");
+        };
+
+        assert!(input.json);
+        assert_eq!(input.duration_ms, 25);
+    }
+
+    #[test]
+    fn parses_daemon_soak_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "daemon",
+            "soak",
+            "--duration-seconds",
+            "120",
+            "--tick-ms",
+            "500",
+            "--profile",
+            "apply-low-risk-fake",
+            "--max-disk-growth-bytes",
+            "1024",
+            "--json",
+        ])
+        .unwrap();
+
+        let AppCommand::DaemonSoak(input) = command else {
+            panic!("expected daemon soak command");
+        };
+
+        assert!(input.json);
+        assert_eq!(input.config.duration_seconds, 120);
+        assert_eq!(input.config.tick_millis, 500);
+        assert_eq!(input.config.profile, DaemonSoakProfile::ApplyLowRiskFake);
+        assert_eq!(input.config.budget.max_disk_growth_bytes, 1024);
+    }
+
+    #[test]
+    fn parses_daemon_acceptance_command() {
+        let command =
+            parse_app_command_from(["stutter", "daemon", "acceptance", "--json"]).unwrap();
+
+        let AppCommand::DaemonAcceptance(input) = command else {
+            panic!("expected daemon acceptance command");
+        };
+
+        assert!(input.json);
+    }
+
+    #[test]
+    fn parses_daemon_pause_resume_and_restore_commands() {
+        assert!(matches!(
+            parse_app_command_from(["stutter", "daemon", "pause"]).unwrap(),
+            AppCommand::DaemonPause(_)
+        ));
+        assert!(matches!(
+            parse_app_command_from(["stutter", "daemon", "resume"]).unwrap(),
+            AppCommand::DaemonResume(_)
+        ));
+
+        let restore =
+            parse_app_command_from(["stutter", "daemon", "restore", "--dry-run"]).unwrap();
+        let AppCommand::DaemonRestore(input) = restore else {
+            panic!("expected daemon restore command");
+        };
+        assert!(input.dry_run);
+        assert!(!input.emergency);
+
+        let emergency = parse_app_command_from(["stutter", "daemon", "emergency-restore"]).unwrap();
+        let AppCommand::DaemonRestore(input) = emergency else {
+            panic!("expected daemon emergency restore command");
+        };
+        assert!(!input.dry_run);
+        assert!(input.emergency);
+    }
+
+    #[test]
+    fn parses_service_install_dry_run_command() {
+        let command = parse_app_command_from([
+            "stutter",
+            "service",
+            "install",
+            "--mode",
+            "system-low-risk",
+            "--manager",
+            "openrc",
+            "--unit-dir",
+            "/tmp/init.d",
+            "--dry-run",
+            "--json",
+        ])
+        .unwrap();
+
+        let AppCommand::Service(input) = command else {
+            panic!("expected service command");
+        };
+
+        assert!(input.json);
+        assert_eq!(input.request.action, ServiceAction::Install);
+        assert_eq!(input.request.manager, ServiceManager::OpenRc);
+        assert_eq!(input.request.mode, ServiceMode::SystemLowRisk);
+        assert!(input.request.dry_run);
+        assert_eq!(input.request.unit_dir, Some(PathBuf::from("/tmp/init.d")));
+    }
+
+    #[test]
+    fn parses_service_doctor_as_dry_run_plan() {
+        let command =
+            parse_app_command_from(["stutter", "service", "doctor", "--mode", "agent"]).unwrap();
+
+        let AppCommand::Service(input) = command else {
+            panic!("expected service command");
+        };
+
+        assert_eq!(input.request.action, ServiceAction::Doctor);
+        assert_eq!(input.request.mode, ServiceMode::Agent);
+        assert!(input.request.dry_run);
     }
 
     #[test]
@@ -3977,6 +5205,61 @@ mod tests {
     }
 
     #[test]
+    fn parses_recording_retention_flags() {
+        let command = parse_app_command_from([
+            "stutter",
+            "record",
+            "--pid",
+            "42",
+            "--retention-max-runs",
+            "7",
+            "--retention-max-bytes",
+            "2000000",
+            "--retention-max-age-seconds",
+            "86400",
+            "--retention-min-free-bytes",
+            "1000000",
+        ])
+        .unwrap();
+
+        let AppCommand::Monitor(input) = command else {
+            panic!("expected monitor command");
+        };
+
+        assert_eq!(input.config.recording.retention.max_run_count, Some(7));
+        assert_eq!(
+            input.config.recording.retention.max_total_bytes,
+            Some(2_000_000)
+        );
+        assert_eq!(
+            input.config.recording.retention.max_age_seconds,
+            Some(86_400)
+        );
+        assert_eq!(
+            input.config.recording.retention.min_free_bytes,
+            Some(1_000_000)
+        );
+    }
+
+    #[test]
+    fn rejects_zero_recording_retention_flags() {
+        for flag in [
+            "--retention-max-runs",
+            "--retention-max-bytes",
+            "--retention-max-age-seconds",
+            "--retention-min-free-bytes",
+        ] {
+            let err = parse_app_command_from(["stutter", "record", "--pid", "42", flag, "0"])
+                .unwrap_err();
+
+            assert!(
+                err.to_string().contains("must be greater than zero"),
+                "expected zero value rejection for {flag}, got {err:#}"
+            );
+        }
+    }
+
+    #[test]
     fn monitor_disables_cpu_freq_by_default_but_can_be_enabled() {
         let command = parse_app_command_from(["stutter", "monitor", "--pid", "42"]).unwrap();
         let AppCommand::Monitor(input) = command else {
@@ -4213,6 +5496,62 @@ mod tests {
             panic!("expected agent command");
         };
         assert!(input.allow_unsafe_bind);
+        assert!(input.unix_socket.is_some());
+    }
+
+    #[test]
+    fn agent_defaults_to_unix_socket() {
+        let command = parse_app_command_from(["stutter", "agent"]).unwrap();
+        let AppCommand::Agent(input) = command else {
+            panic!("expected agent command");
+        };
+
+        assert!(input.unix_socket.is_some());
+        assert_eq!(input.bind.port(), 0);
+    }
+
+    #[test]
+    fn agent_accepts_tcp_bind_and_port_overrides() {
+        let command =
+            parse_app_command_from(["stutter", "agent", "--bind", "127.0.0.1:9999"]).unwrap();
+        let AppCommand::Agent(input) = command else {
+            panic!("expected agent command");
+        };
+        assert_eq!(input.bind, "127.0.0.1:9999".parse().unwrap());
+        assert!(input.unix_socket.is_none());
+
+        let command = parse_app_command_from(["stutter", "agent", "--port", "9998"]).unwrap();
+        let AppCommand::Agent(input) = command else {
+            panic!("expected agent command");
+        };
+        assert_eq!(input.bind, "127.0.0.1:9998".parse().unwrap());
+        assert!(input.unix_socket.is_none());
+    }
+
+    #[test]
+    fn agent_rejects_ambiguous_listen_overrides() {
+        assert!(
+            parse_app_command_from([
+                "stutter",
+                "agent",
+                "--bind",
+                "127.0.0.1:9999",
+                "--port",
+                "9998"
+            ])
+            .is_err()
+        );
+        assert!(
+            parse_app_command_from([
+                "stutter",
+                "agent",
+                "--unix-socket",
+                "/tmp/stutter-agent.sock",
+                "--port",
+                "9998"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
@@ -4234,6 +5573,36 @@ mod tests {
             panic!("expected agent command");
         };
         assert_eq!(input.bearer_token_env, "MY_TOKEN");
+    }
+
+    #[test]
+    fn agent_accepts_split_read_and_apply_tokens() {
+        let command = parse_app_command_from([
+            "stutter",
+            "agent",
+            "--read-token-env",
+            "READ_TOKEN",
+            "--read-token-file",
+            "/tmp/read-token",
+            "--apply-token-env",
+            "APPLY_TOKEN",
+            "--apply-token-file",
+            "/tmp/apply-token",
+        ])
+        .unwrap();
+        let AppCommand::Agent(input) = command else {
+            panic!("expected agent command");
+        };
+        assert_eq!(input.read_token_env, "READ_TOKEN");
+        assert_eq!(
+            input.read_token_file,
+            Some(PathBuf::from("/tmp/read-token"))
+        );
+        assert_eq!(input.apply_token_env, "APPLY_TOKEN");
+        assert_eq!(
+            input.apply_token_file,
+            Some(PathBuf::from("/tmp/apply-token"))
+        );
     }
 
     #[test]

@@ -1,5 +1,6 @@
 mod event_types;
 mod live;
+mod retention;
 mod session;
 mod session_files;
 mod spike_buffer;
@@ -21,6 +22,11 @@ pub use event_types::{
 // Re-export from live.rs - these were pub in the original recorder.rs
 #[allow(unused_imports)]
 pub use live::{ExporterState, LiveBuffers, LiveRecorder, RecordingCounters};
+#[allow(unused_imports)]
+pub use retention::{
+    RecordingRetentionPolicy, RecordingRetentionSummary, apply_recording_retention,
+    ensure_min_free_space_for_path,
+};
 // Re-export from session.rs - these were pub in the original recorder.rs
 #[allow(unused_imports)]
 pub use session::{

@@ -244,6 +244,30 @@ fn record_layer_provenance(
         "recording.retain_intervals",
         source,
     );
+    record_if_present(
+        &layer.retention_max_run_count,
+        provenance,
+        "recording.retention.max_run_count",
+        source,
+    );
+    record_if_present(
+        &layer.retention_max_total_bytes,
+        provenance,
+        "recording.retention.max_total_bytes",
+        source,
+    );
+    record_if_present(
+        &layer.retention_max_age_seconds,
+        provenance,
+        "recording.retention.max_age_seconds",
+        source,
+    );
+    record_if_present(
+        &layer.retention_min_free_bytes,
+        provenance,
+        "recording.retention.min_free_bytes",
+        source,
+    );
 
     record_if_present(
         &layer.json_stream,
@@ -525,6 +549,18 @@ fn apply_recording_layer(config: &mut RecordingConfig, layer: &MonitorConfigLaye
     }
     if let Some(value) = layer.retain_intervals {
         config.retain_intervals = value;
+    }
+    if let Some(value) = layer.retention_max_run_count {
+        config.retention.max_run_count = value;
+    }
+    if let Some(value) = layer.retention_max_total_bytes {
+        config.retention.max_total_bytes = value;
+    }
+    if let Some(value) = layer.retention_max_age_seconds {
+        config.retention.max_age_seconds = value;
+    }
+    if let Some(value) = layer.retention_min_free_bytes {
+        config.retention.min_free_bytes = value;
     }
 }
 
@@ -946,6 +982,10 @@ mod tests {
             "recording.run_name",
             "recording.output_dir",
             "recording.retain_intervals",
+            "recording.retention.max_run_count",
+            "recording.retention.max_total_bytes",
+            "recording.retention.max_age_seconds",
+            "recording.retention.min_free_bytes",
             "outputs.json_stream",
             "streams.json_stream",
             "outputs.metrics_port",
