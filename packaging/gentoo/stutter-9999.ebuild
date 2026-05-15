@@ -22,10 +22,12 @@ IUSE="systemd openrc"
 BDEPEND="
 	|| ( dev-lang/rust-bin dev-lang/rust )
 	llvm-core/clang
+	dev-util/bpf-linker
 	llvm-core/llvm
 "
 
 src_compile() {
+	export RUSTC_BOOTSTRAP=1
 	RUSTUP_TOOLCHAIN=nightly cargo_src_compile -p stutter
 }
 
