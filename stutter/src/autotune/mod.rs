@@ -70,7 +70,7 @@ pub struct AutotuneCommandInput {
     pub foreground_source: crate::config::ForegroundSource,
     pub foreground_poll_ms: u64,
     pub foreground_max_stale_ms: u64,
-    pub allow_system_wide_actions: bool,
+    pub allow_system_wide_suggestions: bool,
 }
 
 fn unsupported_live_autotune_mode_error(mode: impl std::fmt::Display) -> anyhow::Error {
@@ -111,6 +111,7 @@ fn runtime_config_for_command(
 
     daemon_config.safety.min_confidence = input.min_focus_confidence;
     daemon_config.autotune.washout_seconds = input.washout_seconds;
+    daemon_config.safety.allow_system_wide_suggestions = input.allow_system_wide_suggestions;
 
     if mode == DaemonMode::ApplyLowRisk {
         daemon_config.autotune.candidate_window_seconds = input.duration_seconds.unwrap_or(30);
@@ -228,7 +229,7 @@ mod tests {
             foreground_source: crate::config::ForegroundSource::Auto,
             foreground_poll_ms: 1000,
             foreground_max_stale_ms: 2500,
-            allow_system_wide_actions: false,
+            allow_system_wide_suggestions: false,
         }
     }
 
@@ -299,7 +300,7 @@ mod tests {
             foreground_source: crate::config::ForegroundSource::Auto,
             foreground_poll_ms: 1000,
             foreground_max_stale_ms: 2500,
-            allow_system_wide_actions: false,
+            allow_system_wide_suggestions: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();
@@ -329,7 +330,7 @@ mod tests {
             foreground_source: crate::config::ForegroundSource::Auto,
             foreground_poll_ms: 1000,
             foreground_max_stale_ms: 2500,
-            allow_system_wide_actions: false,
+            allow_system_wide_suggestions: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();
@@ -362,7 +363,7 @@ mod tests {
             foreground_source: crate::config::ForegroundSource::Auto,
             foreground_poll_ms: 1000,
             foreground_max_stale_ms: 2500,
-            allow_system_wide_actions: false,
+            allow_system_wide_suggestions: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();

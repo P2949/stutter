@@ -911,17 +911,6 @@ impl AutotuneRuntime {
             return None;
         }
 
-        if self.config.daemon_policy.allow_system_wide_actions {
-            self.last_plan_result = Some(PlanResult {
-                selected: None,
-                evaluations: Vec::new(),
-                no_action_reason: Some(
-                    "system-wide actions are blocked in live planner".to_owned(),
-                ),
-            });
-            return None;
-        }
-
         if observation.data_quality.blocks_action()
             || observation.focus_is_idle_or_unknown()
             || observation.focus_has_critical_realtime_warning()

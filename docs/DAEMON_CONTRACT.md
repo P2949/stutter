@@ -36,9 +36,9 @@ A daemon action may be treated as "free performance" only when all of these inva
 - no unrecoverable state;
 - no changes without a rollback path;
 - no action when confidence is low;
-- no system-wide mutation by default.
+- no system-wide mutation by default (suggestions allowed with `allow_system_wide_suggestions`, apply requires `allow_system_wide_apply`).
 
-`DaemonPolicy::check_action` enforces the apply-side parts of this contract by rejecting low-confidence actions, missing rollback, unavailable rollback, persistent effects without explicit permission, system-wide effects without explicit permission, and effect scopes outside the selected mode.
+`DaemonPolicy::check_action` enforces the policy-side parts of this contract by rejecting system-wide suggestions without explicit suggestion permission, low-confidence apply actions, missing rollback, unavailable rollback, persistent effects without explicit permission, system-wide apply without explicit `allow_system_wide_apply`, and effect scopes outside the selected mode.
 
 ## Default allowed touch points
 

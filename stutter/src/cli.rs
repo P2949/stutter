@@ -583,10 +583,10 @@ pub struct AutotuneArgs {
     pub foreground_max_stale_ms: u64,
 
     #[arg(
-        long = "allow-system-wide-actions",
-        help = "Reserved for future use; currently rejected so autotune cannot mutate arbitrary system processes"
+        long = "allow-system-wide-suggestions",
+        help = "Allow autotune to suggest system-wide candidates when in suggest mode"
     )]
-    pub allow_system_wide_actions: bool,
+    pub allow_system_wide_suggestions: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -2112,11 +2112,8 @@ fn agent_listen_args(
 pub fn autotune_monitor_config(
     input: &crate::autotune::AutotuneCommandInput,
 ) -> anyhow::Result<Arc<MonitorConfig>> {
-    if input.allow_system_wide_actions {
-        anyhow::bail!(
-            "autotune system-wide actions are intentionally disabled; use observe/suggest focus mode"
-        );
-    }
+    // We allow system-wide suggestions now, but we don't have a CLI flag for system-wide apply yet.
+    // The underlying policy will still block system-wide apply if it's not allowed.
 
     let has_target = input.tree_pid.is_some() || input.watch_process.is_some();
     if !has_target && !input.auto_focus {
@@ -2457,11 +2454,8 @@ where
                     }
                 }
             } else {
-                if args.allow_system_wide_actions {
-                    anyhow::bail!(
-                        "--allow-system-wide-actions is reserved for future use and is intentionally rejected"
-                    );
-                }
+                // System-wide suggestions are allowed if the flag is set.
+                // System-wide apply is not yet supported via CLI flags.
 
                 validate_autotune_mode(&args.mode)?;
                 Ok(AppCommand::Autotune(AutotuneCommandDto {
@@ -2486,7 +2480,7 @@ where
                         foreground_source: args.foreground_source,
                         foreground_poll_ms: args.foreground_poll_ms,
                         foreground_max_stale_ms: args.foreground_max_stale_ms,
-                        allow_system_wide_actions: args.allow_system_wide_actions,
+                        allow_system_wide_suggestions: args.allow_system_wide_suggestions,
                     },
                 }))
             }

@@ -58,7 +58,8 @@ pub struct UserConfigFile {
     pub daemon_max_gpu_temp_celsius: Option<u32>,
     pub daemon_min_disk_available_bytes: Option<u64>,
     pub daemon_max_memory_pressure_some_avg10_percent: Option<f32>,
-    pub daemon_allow_system_wide_actions: Option<bool>,
+    pub daemon_allow_system_wide_suggestions: Option<bool>,
+    pub daemon_allow_system_wide_apply: Option<bool>,
     pub daemon_allow_high_risk: Option<bool>,
     #[allow(dead_code)]
     pub community_rules: Option<CommunityRulesConfigFile>,
@@ -102,7 +103,8 @@ pub struct AgentAutotuneLimitsFile {
     pub allow_high_risk: Option<bool>,
     pub max_candidate_window_seconds: Option<u64>,
     pub max_targets: Option<usize>,
-    pub allow_system_wide_actions: Option<bool>,
+    pub allow_system_wide_suggestions: Option<bool>,
+    pub allow_system_wide_apply: Option<bool>,
 }
 
 impl AgentAutotuneLimitsFile {
@@ -133,9 +135,12 @@ impl AgentAutotuneLimitsFile {
                 .max_candidate_window_seconds
                 .unwrap_or(defaults.max_candidate_window_seconds),
             max_targets: self.max_targets.unwrap_or(defaults.max_targets),
-            allow_system_wide_actions: self
-                .allow_system_wide_actions
-                .unwrap_or(defaults.allow_system_wide_actions),
+            allow_system_wide_suggestions: self
+                .allow_system_wide_suggestions
+                .unwrap_or(defaults.allow_system_wide_suggestions),
+            allow_system_wide_apply: self
+                .allow_system_wide_apply
+                .unwrap_or(defaults.allow_system_wide_apply),
         };
 
         validate_agent_autotune_limits(&limits)?;
@@ -182,8 +187,8 @@ pub fn validate_agent_autotune_limits(limits: &AgentAutotuneLimits) -> Result<()
         anyhow::bail!("remote autotune currently supports max_targets = 1 only");
     }
 
-    if limits.allow_system_wide_actions {
-        anyhow::bail!("agent.autotune_limits.allow_system_wide_actions must be false");
+    if limits.allow_system_wide_apply {
+        anyhow::bail!("agent.autotune_limits.allow_system_wide_apply must be false");
     }
 
     Ok(())
@@ -301,8 +306,11 @@ pub fn apply_daemon_user_config_overrides(
     if let Some(memory_pressure) = user_config.daemon_max_memory_pressure_some_avg10_percent {
         daemon_config.health.max_memory_pressure_some_avg10_percent = memory_pressure;
     }
-    if let Some(allow_system_wide) = user_config.daemon_allow_system_wide_actions {
-        daemon_config.safety.allow_system_wide_actions = allow_system_wide;
+    if let Some(allow) = user_config.daemon_allow_system_wide_suggestions {
+        daemon_config.safety.allow_system_wide_suggestions = allow;
+    }
+    if let Some(allow) = user_config.daemon_allow_system_wide_apply {
+        daemon_config.safety.allow_system_wide_apply = allow;
     }
     if let Some(allow_high_risk) = user_config.daemon_allow_high_risk {
         daemon_config.safety.allow_high_risk = allow_high_risk;
@@ -373,9 +381,9 @@ pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
     }
 
     let experimental = config.experimental.unwrap_or(false);
-    if config.daemon_allow_system_wide_actions == Some(true) && !experimental {
+    if config.daemon_allow_system_wide_apply == Some(true) && !experimental {
         anyhow::bail!(
-            "daemon_allow_system_wide_actions requires experimental = true in the user config"
+            "daemon_allow_system_wide_apply requires experimental = true in the user config"
         );
     }
     if config.daemon_allow_high_risk == Some(true) && !experimental {
@@ -621,7 +629,8 @@ fn known_top_level_user_config_field(field: &str) -> bool {
             | "daemon_max_gpu_temp_celsius"
             | "daemon_min_disk_available_bytes"
             | "daemon_max_memory_pressure_some_avg10_percent"
-            | "daemon_allow_system_wide_actions"
+            | "daemon_allow_system_wide_suggestions"
+            | "daemon_allow_system_wide_apply"
             | "daemon_allow_high_risk"
             | "community_rules"
             | "agent"
@@ -961,10 +970,28 @@ mod tests {
                 .contains("experimental = true")
         );
 
+        let suggestions_allowed_without_experimental = UserConfigFile {
+            daemon_allow_system_wide_suggestions: Some(true),
+            ..Default::default()
+        };
+        validate_daemon_user_config(&suggestions_allowed_without_experimental).unwrap();
+
+        let apply_blocked_without_experimental = UserConfigFile {
+            daemon_allow_system_wide_apply: Some(true),
+            ..Default::default()
+        };
+        assert!(
+            validate_daemon_user_config(&apply_blocked_without_experimental)
+                .unwrap_err()
+                .to_string()
+                .contains("experimental = true")
+        );
+
         let allowed = UserConfigFile {
             experimental: Some(true),
             daemon_allow_high_risk: Some(true),
-            daemon_allow_system_wide_actions: Some(true),
+            daemon_allow_system_wide_suggestions: Some(true),
+            daemon_allow_system_wide_apply: Some(true),
             ..Default::default()
         };
         validate_daemon_user_config(&allowed).unwrap();
@@ -1103,7 +1130,8 @@ mod tests {
             max_safety_class = "ReversibleLowRisk"
             max_candidate_window_seconds = 120
             max_targets = 1
-            allow_system_wide_actions = false
+            allow_system_wide_suggestions = false
+            allow_system_wide_apply = false
         "#;
 
         let config = parse_user_config_toml(toml).unwrap();
@@ -1120,7 +1148,8 @@ mod tests {
         );
         assert_eq!(limits.max_candidate_window_seconds, 120);
         assert_eq!(limits.max_targets, 1);
-        assert!(!limits.allow_system_wide_actions);
+        assert!(!limits.allow_system_wide_suggestions);
+        assert!(!limits.allow_system_wide_apply);
     }
 
     #[test]
@@ -1139,7 +1168,7 @@ mod tests {
     fn test_agent_autotune_limits_reject_system_wide_actions() {
         let toml = r#"
             [agent.autotune_limits]
-            allow_system_wide_actions = true
+            allow_system_wide_apply = true
         "#;
 
         let config = parse_user_config_toml(toml).unwrap();
@@ -1147,7 +1176,7 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("allow_system_wide_actions must be false"));
+        assert!(err.contains("allow_system_wide_apply must be false"));
     }
 
     #[test]

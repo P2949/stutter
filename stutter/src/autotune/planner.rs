@@ -553,12 +553,13 @@ mod tests {
     };
 
     fn policy(mode: DaemonMode) -> DaemonPolicy {
-        let config = crate::autotune::runtime::daemon_config_for_runtime_mode(
+        let mut config = crate::autotune::runtime::daemon_config_for_runtime_mode(
             mode,
             ActionSource::AutotuneRuntime,
             Some(1234),
             None,
         );
+        config.safety.allow_system_wide_suggestions = true;
         build_daemon_policy(DaemonPolicyBuildInput {
             config: &config,
             remote_context: None,

@@ -205,7 +205,8 @@ pub struct DaemonPolicy {
     pub denied_action_families: BTreeSet<String>,
     pub cgroup_targets: DaemonCgroupTargetsConfig,
     pub rollback_required_before_apply: bool,
-    pub allow_system_wide_actions: bool,
+    pub allow_system_wide_suggestions: bool,
+    pub allow_system_wide_apply: bool,
     pub allow_high_risk: bool,
     pub allow_persistent_effects: bool,
     pub min_confidence: f32,
@@ -522,12 +523,17 @@ pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
     let min_confidence = min_confidence_for_config(config);
     let confidence = confidence_thresholds_for_config(config, min_confidence);
 
-    let mut allow_system_wide_actions = config.safety.allow_system_wide_actions;
     let mut allow_high_risk =
         config.mode == DaemonMode::ApplyHighRisk && config.safety.allow_high_risk;
+    let mut allow_system_wide_suggestions =
+        config.mode != DaemonMode::Observe && config.safety.allow_system_wide_suggestions;
+    let mut allow_system_wide_apply = config.mode == DaemonMode::ApplyHighRisk
+        && config.safety.allow_high_risk
+        && config.safety.allow_system_wide_apply;
 
     if let Some(context) = remote_context {
-        allow_system_wide_actions &= context.limits.allow_system_wide_actions;
+        allow_system_wide_suggestions &= context.limits.allow_system_wide_suggestions;
+        allow_system_wide_apply &= context.limits.allow_system_wide_apply;
         allow_high_risk &= context.limits.allow_high_risk;
     }
 
@@ -540,7 +546,8 @@ pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
         denied_action_families: config.safety.denied_action_families.clone(),
         cgroup_targets: config.safety.cgroup_targets.clone(),
         rollback_required_before_apply: config.mode.supports_apply(),
-        allow_system_wide_actions,
+        allow_system_wide_suggestions,
+        allow_system_wide_apply,
         allow_high_risk,
         allow_persistent_effects: config.safety.allow_persistent_effects,
         min_confidence,
@@ -1005,6 +1012,22 @@ impl DaemonPolicy {
                         intent: intent.clone(),
                     }),
                 );
+
+                let passed =
+                    !descriptor.touches_system_wide_state || self.allow_system_wide_suggestions;
+                record_policy_rule(
+                    &mut evaluated_rules,
+                    &mut first_rejection,
+                    "system_wide_suggestion_permission",
+                    passed,
+                    if passed {
+                        "system-wide suggestion permission is satisfied".to_owned()
+                    } else {
+                        "system-wide suggestion is blocked by daemon policy".to_owned()
+                    },
+                    (!passed).then_some(PolicyRejection::SystemWideActionBlocked),
+                );
+
                 return self.finish_policy_explanation(
                     intent,
                     descriptor,
@@ -1181,16 +1204,16 @@ impl DaemonPolicy {
             }
         }
 
-        let passed = !descriptor.touches_system_wide_state || self.allow_system_wide_actions;
+        let passed = !descriptor.touches_system_wide_state || self.allow_system_wide_apply;
         record_policy_rule(
             &mut evaluated_rules,
             &mut first_rejection,
-            "system_wide_permission",
+            "system_wide_apply_permission",
             passed,
             if passed {
-                "system-wide action permission is satisfied".to_owned()
+                "system-wide apply permission is satisfied".to_owned()
             } else {
-                "system-wide action is blocked by daemon policy".to_owned()
+                "system-wide apply is blocked by daemon policy".to_owned()
             },
             (!passed).then_some(PolicyRejection::SystemWideActionBlocked),
         );
@@ -1650,7 +1673,8 @@ mod tests {
                 .contains(&ActionEffectScope::LocalProcessTree)
         );
         assert!(policy.rollback_required_before_apply);
-        assert!(!policy.allow_system_wide_actions);
+        assert!(!policy.allow_system_wide_suggestions);
+        assert!(!policy.allow_system_wide_apply);
         assert!(!policy.allow_high_risk);
         assert!(!policy.allow_persistent_effects);
         assert_eq!(policy.confidence.min_suggest_confidence, 0.50);
@@ -1710,15 +1734,43 @@ mod tests {
     }
 
     #[test]
-    fn suggest_allows_suggestion_without_apply() {
+    fn suggest_rejects_system_wide_suggestion_without_permission() {
         let policy = DaemonPolicy::suggest(ActionSource::Test);
-        let desc = descriptor_with(
+        let mut desc = descriptor_with(
             SafetyClass::HighRisk,
             ActionEffectScope::SystemWide,
             RollbackRequirement::Unavailable,
         );
+        desc.touches_system_wide_state = true;
+
+        assert!(matches!(
+            policy.check_action(PolicyIntent::Suggest, &desc),
+            Err(PolicyRejection::SystemWideActionBlocked)
+        ));
+    }
+
+    #[test]
+    fn suggest_allows_system_wide_suggestion_with_suggestion_permission() {
+        let mut config = crate::daemon::config::DaemonConfig {
+            mode: DaemonMode::Suggest,
+            source: ActionSource::Test,
+            ..crate::daemon::config::DaemonConfig::default()
+        };
+        config.safety.allow_system_wide_suggestions = true;
+        let policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        });
+        let mut desc = descriptor_with(
+            SafetyClass::HighRisk,
+            ActionEffectScope::SystemWide,
+            RollbackRequirement::Unavailable,
+        );
+        desc.touches_system_wide_state = true;
 
         assert!(policy.check_action(PolicyIntent::Suggest, &desc).is_ok());
+        assert!(policy.allow_system_wide_suggestions);
+        assert!(!policy.allow_system_wide_apply);
     }
 
     #[test]
@@ -2194,7 +2246,8 @@ mod tests {
             source: ActionSource::Test,
             ..crate::daemon::config::DaemonConfig::default()
         };
-        config.safety.allow_system_wide_actions = true;
+        config.safety.allow_system_wide_suggestions = true;
+        config.safety.allow_system_wide_apply = true;
         config.safety.allow_persistent_effects = true;
         config
             .safety
@@ -2213,7 +2266,8 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.mode, DaemonMode::ApplyMediumRisk);
         assert_eq!(first.max_safety_class, SafetyClass::ReversibleMediumRisk);
-        assert!(first.allow_system_wide_actions);
+        assert!(first.allow_system_wide_suggestions);
+        assert!(!first.allow_system_wide_apply);
         assert!(first.allow_persistent_effects);
         assert!(first.denied_action_families.contains("gpu-power"));
     }
@@ -2271,7 +2325,8 @@ mod tests {
             ..crate::daemon::config::DaemonConfig::default()
         };
         config.remote.allow_remote_apply = true;
-        config.safety.allow_system_wide_actions = true;
+        config.safety.allow_system_wide_suggestions = true;
+        config.safety.allow_system_wide_apply = true;
 
         let remote_context = RemotePolicyContext {
             bind_is_loopback: true,
@@ -2297,7 +2352,43 @@ mod tests {
         assert!(first.remote_apply.require_loopback_bind);
         assert!(first.remote_apply.require_auth);
         assert_eq!(first.remote_apply.max_remote_targets, 3);
-        assert!(!first.allow_system_wide_actions);
+        assert!(!first.allow_system_wide_suggestions);
+        assert!(!first.allow_system_wide_apply);
+    }
+
+    #[test]
+    fn remote_limits_cap_system_wide_suggestion_and_apply_separately() {
+        let mut config = crate::daemon::config::DaemonConfig {
+            mode: DaemonMode::ApplyHighRisk,
+            source: ActionSource::RemoteAgent,
+            ..crate::daemon::config::DaemonConfig::default()
+        };
+        config.remote.allow_remote_apply = true;
+        config.safety.allow_high_risk = true;
+        config.safety.allow_system_wide_suggestions = true;
+        config.safety.allow_system_wide_apply = true;
+
+        let suggestion_only_context = RemotePolicyContext {
+            bind_is_loopback: true,
+            auth_configured: true,
+            request_authorized: true,
+            limits: AgentAutotuneLimits {
+                allow_system_wide_suggestions: true,
+                allow_system_wide_apply: false,
+                allow_high_risk: true,
+                max_mode: DaemonMode::ApplyHighRisk,
+                max_safety_class: SafetyClass::HighRisk,
+                ..AgentAutotuneLimits::default()
+            },
+        };
+
+        let policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: Some(suggestion_only_context),
+        });
+
+        assert!(policy.allow_system_wide_suggestions);
+        assert!(!policy.allow_system_wide_apply);
     }
 
     #[test]
