@@ -166,7 +166,7 @@ pub fn recover_controller_journal_with_executor<E: StartupRecoveryRollbackExecut
                     false,
                     true,
                     true,
-                    Some("stutter autotune restore"),
+                    Some("stutter daemon emergency-restore"),
                 ),
             )?;
 
@@ -207,7 +207,7 @@ pub fn recover_controller_journal_with_executor<E: StartupRecoveryRollbackExecut
                         false,
                         true,
                         true,
-                        Some("stutter autotune restore"),
+                        Some("stutter daemon emergency-restore"),
                     ),
                 )?;
 
@@ -811,6 +811,13 @@ mod tests {
             Some("cpu-affinity-profile:game-main")
         );
         assert!(state.active_rollback.is_none());
+        assert_eq!(
+            state
+                .faulted
+                .as_ref()
+                .and_then(|fault| fault.manual_restore_command.as_deref()),
+            Some("stutter daemon emergency-restore")
+        );
         assert!(
             state
                 .faulted
