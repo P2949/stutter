@@ -6,7 +6,7 @@ use crate::{
     actions::{ActionId, SafetyClass},
     daemon::{
         capabilities::DaemonCapabilities,
-        config::{DaemonCgroupTargetsConfig, DaemonConfig},
+        config::{DaemonCandidateConfidenceConfig, DaemonCgroupTargetsConfig, DaemonConfig},
         explain::{PolicyDecisionKind, PolicyExplanation, PolicyRuleEvaluation},
         health::SystemHealthSnapshot,
     },
@@ -209,6 +209,7 @@ pub struct DaemonPolicy {
     pub allow_high_risk: bool,
     pub allow_persistent_effects: bool,
     pub min_confidence: f32,
+    pub confidence: DaemonCandidateConfidenceConfig,
     pub remote_apply: RemoteApplyPolicy,
 }
 
@@ -518,6 +519,9 @@ pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
         max_safety_class = context.limits.max_safety_class.clone();
     }
 
+    let min_confidence = min_confidence_for_config(config);
+    let confidence = confidence_thresholds_for_config(config, min_confidence);
+
     let mut allow_system_wide_actions = config.safety.allow_system_wide_actions;
     let mut allow_high_risk =
         config.mode == DaemonMode::ApplyHighRisk && config.safety.allow_high_risk;
@@ -539,7 +543,8 @@ pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
         allow_system_wide_actions,
         allow_high_risk,
         allow_persistent_effects: config.safety.allow_persistent_effects,
-        min_confidence: min_confidence_for_config(config),
+        min_confidence,
+        confidence,
         remote_apply: remote_apply_policy_for_config(config, remote_context),
     }
 }
@@ -588,6 +593,23 @@ fn min_confidence_for_config(config: &DaemonConfig) -> f32 {
         crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE
     } else {
         0.0
+    }
+}
+
+fn confidence_thresholds_for_config(
+    config: &DaemonConfig,
+    min_confidence: f32,
+) -> DaemonCandidateConfidenceConfig {
+    let configured = config.autotune.confidence;
+
+    DaemonCandidateConfidenceConfig {
+        min_suggest_confidence: configured.min_suggest_confidence,
+        min_apply_low_risk_confidence: configured.min_apply_low_risk_confidence.max(min_confidence),
+        min_apply_medium_risk_confidence: configured
+            .min_apply_medium_risk_confidence
+            .max(min_confidence)
+            .max(0.85),
+        min_high_risk_suggestion_confidence: configured.min_high_risk_suggestion_confidence,
     }
 }
 
@@ -700,6 +722,21 @@ fn config_for_constructor(
     config.safety.allow_high_risk = allow_high_risk;
     config.safety.min_confidence = min_confidence_for_config(&config);
     config
+}
+
+impl DaemonPolicy {
+    pub fn provider_confidence_threshold(&self, descriptor: &ActionDescriptor) -> f32 {
+        match self.mode {
+            DaemonMode::Observe => 1.0,
+            DaemonMode::Suggest if descriptor.safety_class == SafetyClass::HighRisk => {
+                self.confidence.min_high_risk_suggestion_confidence
+            }
+            DaemonMode::Suggest => self.confidence.min_suggest_confidence,
+            DaemonMode::ApplyLowRisk => self.confidence.min_apply_low_risk_confidence,
+            DaemonMode::ApplyMediumRisk => self.confidence.min_apply_medium_risk_confidence,
+            DaemonMode::ApplyHighRisk => self.confidence.min_high_risk_suggestion_confidence,
+        }
+    }
 }
 
 fn record_policy_rule(
@@ -1616,6 +1653,13 @@ mod tests {
         assert!(!policy.allow_system_wide_actions);
         assert!(!policy.allow_high_risk);
         assert!(!policy.allow_persistent_effects);
+        assert_eq!(policy.confidence.min_suggest_confidence, 0.50);
+        assert_eq!(
+            policy.confidence.min_apply_low_risk_confidence,
+            policy.min_confidence
+        );
+        assert_eq!(policy.confidence.min_apply_medium_risk_confidence, 0.85);
+        assert_eq!(policy.confidence.min_high_risk_suggestion_confidence, 0.90);
         assert!(!policy.remote_apply.allow_remote_apply);
     }
 
