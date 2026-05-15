@@ -5,11 +5,14 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::irq_inspect::{IrqLine, parse_proc_interrupts};
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SystemInventory {
     pub cpu_policies: Vec<CpuPolicyInventory>,
     pub drm_devices: Vec<DrmDeviceInventory>,
     pub irq_default_smp_affinity: Option<String>,
+    pub irq_lines: Vec<IrqLine>,
     pub sched_ext_available: bool,
     pub vm_knobs: BTreeMap<String, String>,
     pub inventory_hash: String,
@@ -31,6 +34,8 @@ pub struct DrmDeviceInventory {
     pub name: String,
     pub path: PathBuf,
     pub render_node: Option<String>,
+    pub pci_id: Option<String>,
+    pub vendor: Option<String>,
     pub hwmon_paths: Vec<PathBuf>,
 }
 
@@ -59,12 +64,14 @@ impl SystemInventory {
         let drm_devices = probe_drm_devices(&root.sys_root);
         let irq_default_smp_affinity =
             read_trimmed(root.proc_root.join("irq/default_smp_affinity"));
+        let irq_lines = probe_irq_lines(&root.proc_root);
         let sched_ext_available = root.sys_root.join("kernel/sched_ext").exists();
         let vm_knobs = probe_vm_knobs(&root.proc_root);
         let inventory_hash = inventory_hash(
             &cpu_policies,
             &drm_devices,
             irq_default_smp_affinity.as_deref(),
+            &irq_lines,
             sched_ext_available,
             &vm_knobs,
         );
@@ -73,6 +80,7 @@ impl SystemInventory {
             cpu_policies,
             drm_devices,
             irq_default_smp_affinity,
+            irq_lines,
             sched_ext_available,
             vm_knobs,
             inventory_hash,
@@ -128,6 +136,20 @@ fn probe_drm_devices(sys_root: &Path) -> Vec<DrmDeviceInventory> {
             if !name.starts_with("card") || name.contains('-') || !path.exists() {
                 return None;
             }
+
+            let device_path = path.join("device");
+            let vendor_id = read_trimmed(device_path.join("vendor"));
+            let device_id = read_trimmed(device_path.join("device"));
+            let pci_id = match (vendor_id.as_deref(), device_id.as_deref()) {
+                (Some(vendor), Some(device)) => Some(format!(
+                    "{}:{}",
+                    trim_hex_prefix(vendor),
+                    trim_hex_prefix(device)
+                )),
+                _ => None,
+            };
+            let vendor = vendor_id.as_deref().map(gpu_vendor_name);
+
             let render_node = std::fs::read_dir(path.join("device/drm"))
                 .ok()
                 .and_then(|entries| {
@@ -152,6 +174,8 @@ fn probe_drm_devices(sys_root: &Path) -> Vec<DrmDeviceInventory> {
                 name,
                 path,
                 render_node,
+                pci_id,
+                vendor,
                 hwmon_paths,
             })
         })
@@ -159,6 +183,27 @@ fn probe_drm_devices(sys_root: &Path) -> Vec<DrmDeviceInventory> {
 
     devices.sort_by(|left, right| left.name.cmp(&right.name));
     devices
+}
+
+fn probe_irq_lines(proc_root: &Path) -> Vec<IrqLine> {
+    let Some(contents) = std::fs::read_to_string(proc_root.join("interrupts")).ok() else {
+        return Vec::new();
+    };
+
+    parse_proc_interrupts(&contents).unwrap_or_default()
+}
+
+fn trim_hex_prefix(value: &str) -> String {
+    value.trim().trim_start_matches("0x").to_ascii_lowercase()
+}
+
+fn gpu_vendor_name(vendor_id: &str) -> String {
+    match trim_hex_prefix(vendor_id).as_str() {
+        "1002" => "amd".to_owned(),
+        "10de" => "nvidia".to_owned(),
+        "8086" => "intel".to_owned(),
+        other => other.to_owned(),
+    }
 }
 
 fn probe_vm_knobs(proc_root: &Path) -> BTreeMap<String, String> {
@@ -179,6 +224,7 @@ fn inventory_hash(
     cpu_policies: &[CpuPolicyInventory],
     drm_devices: &[DrmDeviceInventory],
     irq_default_smp_affinity: Option<&str>,
+    irq_lines: &[IrqLine],
     sched_ext_available: bool,
     vm_knobs: &BTreeMap<String, String>,
 ) -> String {
@@ -197,16 +243,21 @@ fn inventory_hash(
     }
     for drm in drm_devices {
         parts.push(format!(
-            "drm:{}:{}:{}",
+            "drm:{}:{}:{}:{}:{}",
             drm.name,
             drm.render_node.as_deref().unwrap_or(""),
+            drm.pci_id.as_deref().unwrap_or(""),
+            drm.vendor.as_deref().unwrap_or(""),
             drm.hwmon_paths.len()
         ));
     }
     parts.push(format!(
-        "irq:{}",
+        "irq_default:{}",
         irq_default_smp_affinity.unwrap_or("unknown")
     ));
+    for irq in irq_lines {
+        parts.push(format!("irq:{}:{}:{}", irq.irq, irq.total, irq.name));
+    }
     parts.push(format!("sched_ext:{sched_ext_available}"));
     for (key, value) in vm_knobs {
         parts.push(format!("vm:{key}={value}"));
@@ -242,6 +293,30 @@ mod tests {
     fn write(path: &Path, text: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn fake_proc_inventory_parses_irq_lines() {
+        let root = temp_root("irq-lines");
+        let proc_root = root.join("proc");
+        let sys_root = root.join("sys");
+        write(
+            &proc_root.join("interrupts"),
+            r#"
+           CPU0       CPU1
+146:        10         20   PCI-MSI 524288-edge amdgpu
+"#,
+        );
+
+        let inventory = SystemInventory::probe_root(&SystemInventoryRoot {
+            proc_root,
+            sys_root,
+        });
+
+        assert_eq!(inventory.irq_lines.len(), 1);
+        assert_eq!(inventory.irq_lines[0].irq, "146");
+        assert_eq!(inventory.irq_lines[0].name, "524288-edge amdgpu");
+        fs::remove_dir_all(root).ok();
     }
 
     #[test]
@@ -281,6 +356,8 @@ mod tests {
         let card = sys_root.join("class/drm/card0");
         fs::create_dir_all(card.join("device/drm/renderD128")).unwrap();
         fs::create_dir_all(card.join("device/hwmon/hwmon0")).unwrap();
+        write(&card.join("device/vendor"), "0x1002\n");
+        write(&card.join("device/device"), "0x744c\n");
 
         let inventory = SystemInventory::probe_root(&SystemInventoryRoot {
             proc_root: root.join("proc"),
@@ -293,6 +370,11 @@ mod tests {
             inventory.drm_devices[0].render_node.as_deref(),
             Some("renderD128")
         );
+        assert_eq!(
+            inventory.drm_devices[0].pci_id.as_deref(),
+            Some("1002:744c")
+        );
+        assert_eq!(inventory.drm_devices[0].vendor.as_deref(), Some("amd"));
         assert_eq!(inventory.drm_devices[0].hwmon_paths.len(), 1);
         fs::remove_dir_all(root).ok();
     }

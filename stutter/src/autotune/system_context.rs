@@ -81,6 +81,7 @@ fn empty_inventory() -> SystemInventory {
         cpu_policies: Vec::new(),
         drm_devices: Vec::<DrmDeviceInventory>::new(),
         irq_default_smp_affinity: None,
+        irq_lines: Vec::new(),
         sched_ext_available: false,
         vm_knobs: BTreeMap::new(),
         inventory_hash: "empty".to_owned(),

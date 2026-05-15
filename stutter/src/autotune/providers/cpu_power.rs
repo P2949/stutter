@@ -35,27 +35,25 @@ impl CandidateProvider for CpuPowerProvider {
             return Vec::new();
         }
 
-        let inventory = &input.system_context.inventory;
-        let Some(policy) = inventory.cpu_policies.first() else {
+        let Some(structured_evidence) = cpu_power_evidence(input) else {
             return Vec::new();
         };
-        let cpus = parse_related_cpus(policy.related_cpus.as_deref());
-        if cpus.is_empty() {
-            return Vec::new();
-        }
-        let structured_evidence = CpuPowerCandidateEvidence {
-            policy: policy.policy.clone(),
-            related_cpus: cpus.clone(),
-            current_governor: policy.scaling_governor.clone(),
-            current_epp: policy.energy_performance_preference.clone(),
-            thermal_headroom: input.system_health.ok_for_apply,
-            ac_power: None,
-        };
+
+        let epp = input
+            .system_context
+            .inventory
+            .cpu_policies
+            .iter()
+            .find(|policy| policy.policy == structured_evidence.policy)
+            .and_then(|policy| policy.energy_performance_available_preferences.as_deref())
+            .filter(|available| supports_token(Some(available), "performance"))
+            .map(|_| "performance".to_owned());
+
         let action = CpuPowerAction {
             sysfs_root: std::path::PathBuf::from("/sys"),
-            cpus,
+            cpus: structured_evidence.related_cpus.clone(),
             scaling_governor: Some("performance".to_owned()),
-            energy_performance_preference: Some("performance".to_owned()),
+            energy_performance_preference: epp,
         };
         let objective = match input.observation.primary_situation {
             SituationKind::CompileCpuBound => {
@@ -63,20 +61,27 @@ impl CandidateProvider for CpuPowerProvider {
             }
             _ => ObjectiveKind::GameRunnableLatency,
         };
+        let confidence = cpu_power_confidence(input, &structured_evidence);
         let candidate = CandidateAction::CpuPower {
             plan: CpuPowerActionPlan {
-                name: format!("cpu-power-policy-{}-performance", policy.policy),
+                name: format!(
+                    "cpu-power-policy-{}-performance",
+                    structured_evidence.policy
+                ),
                 action,
                 evidence: vec![CandidateEvidence::new(
-                    "inventory",
+                    "cpu_power_structured",
                     format!(
-                        "policy={} related_cpus={:?} governor={:?} epp={:?}",
+                        "policy={} related_cpus={:?} governor={:?} epp={:?} thermal_headroom={} ac_power={:?} limited_cpu={:?}",
                         structured_evidence.policy,
                         structured_evidence.related_cpus,
                         structured_evidence.current_governor,
-                        structured_evidence.current_epp
+                        structured_evidence.current_epp,
+                        structured_evidence.thermal_headroom,
+                        structured_evidence.ac_power,
+                        input.observation.objective_signals.cpu_power_limited_cpu
                     ),
-                    0.7,
+                    confidence,
                 )],
                 objective,
             },
@@ -85,12 +90,84 @@ impl CandidateProvider for CpuPowerProvider {
         vec![CandidateProposal {
             candidate,
             provider: self.family(),
-            confidence: input.observation.situation.confidence,
+            confidence,
             deny_reasons: Vec::new(),
             objective,
             rank_hint: 80,
         }]
     }
+}
+
+fn cpu_power_evidence(input: &CandidateProviderInput<'_>) -> Option<CpuPowerCandidateEvidence> {
+    if input.observation.objective_signals.cpu_power_limited != Some(true) {
+        return None;
+    }
+
+    let limited_cpu = input.observation.objective_signals.cpu_power_limited_cpu?;
+    let policy = input
+        .system_context
+        .inventory
+        .cpu_policies
+        .iter()
+        .find(|policy| parse_related_cpus(policy.related_cpus.as_deref()).contains(&limited_cpu))?;
+
+    if !supports_token(policy.available_governors.as_deref(), "performance") {
+        return None;
+    }
+
+    let related_cpus = parse_related_cpus(policy.related_cpus.as_deref());
+    if related_cpus.is_empty() {
+        return None;
+    }
+
+    let already_performance = policy.scaling_governor.as_deref() == Some("performance")
+        && policy.energy_performance_preference.as_deref() == Some("performance");
+    if already_performance {
+        return None;
+    }
+
+    let thermal_headroom = input.observation.objective_signals.thermal_degraded != Some(true)
+        && input.system_health.ok_for_apply;
+
+    Some(CpuPowerCandidateEvidence {
+        policy: policy.policy.clone(),
+        related_cpus,
+        current_governor: policy.scaling_governor.clone(),
+        current_epp: policy.energy_performance_preference.clone(),
+        thermal_headroom,
+        ac_power: None,
+    })
+}
+
+fn supports_token(value: Option<&str>, token: &str) -> bool {
+    value
+        .unwrap_or_default()
+        .split_whitespace()
+        .any(|part| part == token)
+}
+
+fn cpu_power_confidence(
+    input: &CandidateProviderInput<'_>,
+    evidence: &CpuPowerCandidateEvidence,
+) -> f32 {
+    let completeness = [
+        true,
+        !evidence.related_cpus.is_empty(),
+        evidence.current_governor.is_some(),
+        evidence.current_epp.is_some(),
+        evidence.thermal_headroom,
+        input
+            .observation
+            .objective_signals
+            .cpu_power_limited_cpu
+            .is_some(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count() as f32
+        / 6.0;
+
+    (input.observation.situation.confidence * completeness).clamp(0.0, 1.0)
 }
 
 fn parse_related_cpus(related_cpus: Option<&str>) -> Vec<u32> {
@@ -136,6 +213,110 @@ mod tests {
     };
 
     #[test]
+    fn cpu_power_provider_rejects_missing_cpu_power_limit_evidence() {
+        let provider = CpuPowerProvider;
+        let mut observation = AutotuneObservation {
+            target_present: true,
+            target_root_pid: Some(1234),
+            primary_situation: SituationKind::CompileCpuBound,
+            focus_kind: Some(FocusGroupKind::Compile),
+            focus_confidence: 0.95,
+            ..AutotuneObservation::default()
+        };
+        observation.refresh_situation_classification();
+        observation.primary_situation = SituationKind::CompileCpuBound;
+
+        let policy = policy();
+        let system_context = SystemContextSnapshot {
+            capabilities: DaemonCapabilities::default(),
+            health: SystemHealthSnapshot::default(),
+            inventory: SystemInventory {
+                cpu_policies: Vec::new(),
+                drm_devices: Vec::new(),
+                irq_default_smp_affinity: None,
+                irq_lines: Vec::new(),
+                sched_ext_available: false,
+                vm_knobs: Default::default(),
+                inventory_hash: "empty-cpu-inventory".to_owned(),
+            },
+            active_config: Default::default(),
+            sampled_at_unix_nanos: 10,
+        };
+
+        let proposals = provider.propose(&CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            system_context: &system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        });
+
+        assert!(proposals.is_empty());
+    }
+
+    #[test]
+    fn cpu_power_provider_does_not_request_epp_without_available_epp_evidence() {
+        let provider = CpuPowerProvider;
+        let mut observation = AutotuneObservation {
+            target_present: true,
+            target_root_pid: Some(1234),
+            primary_situation: SituationKind::CompileCpuBound,
+            focus_kind: Some(FocusGroupKind::Compile),
+            focus_confidence: 0.95,
+            ..AutotuneObservation::default()
+        };
+        observation.refresh_situation_classification();
+        observation.primary_situation = SituationKind::CompileCpuBound;
+        observation.objective_signals.cpu_power_limited = Some(true);
+        observation.objective_signals.cpu_power_limited_cpu = Some(9);
+
+        let policy = policy();
+        let system_context = SystemContextSnapshot {
+            capabilities: DaemonCapabilities::default(),
+            health: SystemHealthSnapshot::default(),
+            inventory: SystemInventory {
+                cpu_policies: vec![CpuPolicyInventory {
+                    policy: "policy9".to_owned(),
+                    path: PathBuf::from("/fake/sys/devices/system/cpu/cpufreq/policy9"),
+                    scaling_governor: Some("powersave".to_owned()),
+                    available_governors: Some("powersave performance".to_owned()),
+                    energy_performance_preference: None,
+                    energy_performance_available_preferences: None,
+                    related_cpus: Some("9".to_owned()),
+                }],
+                drm_devices: Vec::new(),
+                irq_default_smp_affinity: None,
+                irq_lines: Vec::new(),
+                sched_ext_available: false,
+                vm_knobs: Default::default(),
+                inventory_hash: "fake-cpu-no-epp-inventory".to_owned(),
+            },
+            active_config: Default::default(),
+            sampled_at_unix_nanos: 10,
+        };
+
+        let proposals = provider.propose(&CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            system_context: &system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        });
+
+        assert_eq!(proposals.len(), 1);
+        let CandidateAction::CpuPower { plan } = &proposals[0].candidate else {
+            panic!("expected cpu power candidate");
+        };
+        assert_eq!(plan.action.cpus, vec![9]);
+        assert_eq!(plan.action.scaling_governor.as_deref(), Some("performance"));
+        assert_eq!(plan.action.energy_performance_preference, None);
+    }
+
+    #[test]
     fn cpu_power_provider_uses_system_context_inventory() {
         let provider = CpuPowerProvider;
         let mut observation = AutotuneObservation {
@@ -167,6 +348,7 @@ mod tests {
                 }],
                 drm_devices: Vec::new(),
                 irq_default_smp_affinity: None,
+                irq_lines: Vec::new(),
                 sched_ext_available: false,
                 vm_knobs: Default::default(),
                 inventory_hash: "fake-cpu-inventory".to_owned(),
@@ -174,6 +356,9 @@ mod tests {
             active_config: Default::default(),
             sampled_at_unix_nanos: 10,
         };
+
+        observation.objective_signals.cpu_power_limited = Some(true);
+        observation.objective_signals.cpu_power_limited_cpu = Some(9);
 
         let proposals = provider.propose(&CandidateProviderInput {
             observation: &observation,
