@@ -26,7 +26,7 @@ Suggestion output must include:
 - `rollback=stutter restore`;
 - a dry-run command.
 
-A manual apply command may be printed only when a `DaemonPolicy` for `ActionSource::Cli` would allow the candidate descriptor. High-risk candidates must not print direct manual apply commands until high-risk CLI unlock and documentation exist.
+A manual apply command may be printed only when a `DaemonPolicy` for `ActionSource::Cli` would allow the candidate descriptor. High-risk candidates must not print direct manual apply commands until high-risk CLI unlock and documentation exist. CPU-affinity-profile suggestions may use `stutter apply-profile ...`; generic candidate suggestions must use stable candidate plan files under `$HOME/.local/state/stutter/autotune/candidate_plans/<action_kind>-<candidate_name>.json` and expose `stutter autotune apply-candidate --candidate-json <file> --dry-run`. IRQ, CPU-power, GPU-power, and VM-knob candidates are dry-run/manual-investigation only until high-risk manual apply is explicitly supported.
 
 ## Free performance invariants
 
