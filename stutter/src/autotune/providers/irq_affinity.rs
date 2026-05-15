@@ -27,13 +27,21 @@ impl CandidateProvider for IrqAffinityProvider {
             return Vec::new();
         };
 
+        let default_smp_affinity = input
+            .system_context
+            .inventory
+            .irq_default_smp_affinity
+            .as_deref()
+            .unwrap_or("unknown");
         let evidence = IrqAffinityEvidence {
             strong_irq_evidence: true,
             stable_irq_identity: false,
-            known_device_mapping: !hint.is_empty(),
+            known_device_mapping: !hint.is_empty() || default_smp_affinity != "unknown",
             observed_irq: Some(irq),
             observed_device_hint: Some(hint.clone()),
-            reason: "IRQ pressure classified from live diagnosis".to_owned(),
+            reason: format!(
+                "IRQ pressure classified from live diagnosis; default_smp_affinity={default_smp_affinity}"
+            ),
         };
         let candidate = CandidateAction::IrqAffinity {
             plan: IrqAffinityActionPlan {
@@ -45,7 +53,11 @@ impl CandidateProvider for IrqAffinityProvider {
                     IrqAffinityRisk::HighRisk,
                     evidence,
                 ),
-                evidence: vec![CandidateEvidence::new("irq", hint, 0.8)],
+                evidence: vec![CandidateEvidence::new(
+                    "irq",
+                    format!("{hint}; default_smp_affinity={default_smp_affinity}"),
+                    0.8,
+                )],
                 objective: ObjectiveKind::IrqOverlapReduction,
             },
         };

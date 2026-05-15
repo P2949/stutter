@@ -581,7 +581,7 @@ mod tests {
             frame_count: 100,
             frame_p99_ms: 12.0,
             frame_max_ms: 20.0,
-            drop_counter_total: 0,
+            ..AutotuneObservation::default()
         }
     }
 

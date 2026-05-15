@@ -12,6 +12,7 @@ use crate::{
         objective::ObjectiveKind,
         observation::AutotuneObservation,
         providers::{CandidateProposal, CandidateProviderInput, CandidateProviderRegistry},
+        system_context::SystemContextSnapshot,
         workload_policy::workload_policy_for_situation,
     },
     daemon::{DaemonCapabilities, DaemonMode, DaemonPolicy, SystemHealthSnapshot},
@@ -118,11 +119,21 @@ impl CandidatePlanner {
             };
         }
 
+        let fallback_system_context;
+        let system_context = if let Some(system_context) = input.observation.system_context.as_ref()
+        {
+            system_context
+        } else {
+            fallback_system_context = SystemContextSnapshot::from_observation(input.observation);
+            &fallback_system_context
+        };
+
         let provider_input = CandidateProviderInput {
             observation: input.observation,
             daemon_policy: input.daemon_policy,
             capabilities: input.capabilities,
             system_health: input.system_health,
+            system_context,
             controller_state: input.controller_state,
             profiles: input.profiles,
         };
