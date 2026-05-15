@@ -669,7 +669,7 @@ Live `stutter autotune --mode` currently supports `observe`, `suggest`, and `app
 
 Remote autotune uses the same mode labels, but remote apply support is bounded by the agent's configured limits. High-risk remote support is never enabled by default.
 
-`suggest` mode does not apply candidate changes. Candidate suggestion text always includes a dry-run command, `required_mode`, `required_safety_class`, and `rollback=stutter restore`. A manual apply command is shown only when the central CLI daemon policy would allow that candidate; high-risk candidates do not get direct apply commands.
+`suggest` mode does not apply candidate changes. Candidate suggestion text always includes a dry-run command, `required_mode`, `required_safety_class`, and `rollback=stutter restore`. A manual apply command is shown only when the central CLI daemon policy would allow that candidate; high-risk candidates do not get direct apply commands. CPU-affinity-profile suggestions preserve the existing `stutter apply-profile ...` command. Generic candidate suggestions write stable plan files under `$HOME/.local/state/stutter/autotune/candidate_plans/<action_kind>-<candidate_name>.json` and use `stutter autotune apply-candidate --candidate-json <file> --dry-run`; reversible process-local plans may also show `stutter autotune apply-candidate --candidate-json <file>` when policy allows manual apply.
 
 Daemon status and watch commands are intended to answer "what is it doing?"
 without reading logs:

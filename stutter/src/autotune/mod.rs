@@ -166,13 +166,15 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
         let candidates =
             candidate::generate_profile_candidates(&loaded_profiles.profiles, tree_pid, None);
         let dry_run_records = candidate::dry_run_candidates(&candidates);
-        let suggestions = candidate::suggestions_from_dry_run_records(
+        let plan_dir = candidate::default_candidate_plan_dir();
+        let suggestions = candidate::suggestions_from_candidates_and_dry_run_records(
+            &candidates,
             &dry_run_records,
-            tree_pid,
+            &plan_dir,
             Some(profiles_path),
             crate::actions::SafetyClass::ReversibleMediumRisk,
             "scheduler pressure detected on Game/WineServer classes",
-        );
+        )?;
         candidate::print_candidate_suggestions(&suggestions);
     }
 

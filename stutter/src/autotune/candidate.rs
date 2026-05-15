@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, path::Path};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -272,6 +276,57 @@ impl CandidatePlanFile {
             evidence: candidate.evidence().to_vec(),
             executable: CandidateExecutablePlan::from_candidate(candidate),
         }
+    }
+}
+
+pub fn default_candidate_plan_dir() -> PathBuf {
+    let mut path = crate::autotune::history::default_autotune_history_path();
+    path.pop();
+    path.push("candidate_plans");
+    path
+}
+
+pub fn candidate_plan_path(candidate: &CandidateAction, plan_dir: &Path) -> PathBuf {
+    plan_dir.join(format!(
+        "{}-{}.json",
+        sanitize_candidate_plan_component(candidate.action_kind()),
+        sanitize_candidate_plan_component(candidate.candidate_name())
+    ))
+}
+
+pub fn write_candidate_plan_file(
+    path: &Path,
+    candidate: &CandidateAction,
+    affected_tasks: Option<usize>,
+) -> anyhow::Result<CandidatePlanFile> {
+    let plan = CandidatePlanFile::from_candidate(candidate, affected_tasks);
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let bytes = serde_json::to_vec_pretty(&plan)?;
+    fs::write(path, bytes)?;
+
+    Ok(plan)
+}
+
+fn sanitize_candidate_plan_component(value: &str) -> String {
+    let mut sanitized = String::with_capacity(value.len());
+
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            sanitized.push(ch);
+        } else {
+            sanitized.push('-');
+        }
+    }
+
+    let sanitized = sanitized.trim_matches('-');
+    if sanitized.is_empty() {
+        "candidate".to_owned()
+    } else {
+        sanitized.to_owned()
     }
 }
 
@@ -818,7 +873,71 @@ impl CandidateAction {
     }
 }
 
+pub fn suggestion_from_candidate_dry_run_record(
+    candidate: &CandidateAction,
+    record: &CandidateDryRunRecord,
+    plan_path: &Path,
+    profile_path: Option<&Path>,
+    max_safety_class: SafetyClass,
+    reason: impl Into<String>,
+) -> Option<CandidateSuggestion> {
+    if !record.eligible {
+        return None;
+    }
+
+    if record.safety_class > max_safety_class {
+        return None;
+    }
+
+    if let CandidateAction::CpuAffinityProfile { .. } = candidate {
+        return cpu_affinity_suggestion_from_dry_run_record(
+            record,
+            candidate.tree_pid(),
+            profile_path,
+            max_safety_class,
+            reason,
+        );
+    }
+
+    let required_mode = required_mode_for_safety_class(&record.safety_class);
+    let policy = policy_for_required_mode(required_mode)
+        .unwrap_or_else(|| DaemonPolicy::suggest(ActionSource::Cli));
+    let commands = candidate.manual_commands(plan_path, &policy);
+
+    Some(CandidateSuggestion {
+        candidate_name: candidate.candidate_name().to_owned(),
+        action_kind: candidate.action_kind().to_owned(),
+        descriptor: candidate.descriptor(),
+        objective: candidate.objective(),
+        evidence: candidate.evidence().to_vec(),
+        affected_tasks: record.affected_tasks,
+        safety: record.safety_class.clone(),
+        reason: reason.into(),
+        dry_run_command: commands.dry_run_command,
+        manual_apply_command: commands.manual_apply_command,
+        required_mode: commands.required_mode,
+        required_safety_class: commands.required_safety_class,
+        manual_only_reason: commands.manual_only_reason,
+    })
+}
+
 pub fn suggestion_from_dry_run_record(
+    record: &CandidateDryRunRecord,
+    tree_pid: u32,
+    profile_path: Option<&Path>,
+    max_safety_class: SafetyClass,
+    reason: impl Into<String>,
+) -> Option<CandidateSuggestion> {
+    cpu_affinity_suggestion_from_dry_run_record(
+        record,
+        tree_pid,
+        profile_path,
+        max_safety_class,
+        reason,
+    )
+}
+
+fn cpu_affinity_suggestion_from_dry_run_record(
     record: &CandidateDryRunRecord,
     tree_pid: u32,
     profile_path: Option<&Path>,
@@ -937,6 +1056,41 @@ fn apply_profile_command(
     command
 }
 
+pub fn suggestions_from_candidates_and_dry_run_records(
+    candidates: &[CandidateAction],
+    records: &[CandidateDryRunRecord],
+    plan_dir: &Path,
+    profile_path: Option<&Path>,
+    max_safety_class: SafetyClass,
+    reason: &str,
+) -> anyhow::Result<Vec<CandidateSuggestion>> {
+    let mut suggestions = Vec::new();
+
+    for (candidate, record) in candidates.iter().zip(records.iter()) {
+        let plan_path = candidate_plan_path(candidate, plan_dir);
+
+        if !matches!(candidate, CandidateAction::CpuAffinityProfile { .. })
+            && record.eligible
+            && record.safety_class <= max_safety_class
+        {
+            write_candidate_plan_file(&plan_path, candidate, Some(record.affected_tasks))?;
+        }
+
+        if let Some(suggestion) = suggestion_from_candidate_dry_run_record(
+            candidate,
+            record,
+            &plan_path,
+            profile_path,
+            max_safety_class.clone(),
+            reason.to_owned(),
+        ) {
+            suggestions.push(suggestion);
+        }
+    }
+
+    Ok(suggestions)
+}
+
 pub fn suggestions_from_dry_run_records(
     records: &[CandidateDryRunRecord],
     tree_pid: u32,
@@ -1003,16 +1157,6 @@ pub fn apply_candidate_plan_file(path: &Path, dry_run: bool) -> anyhow::Result<C
         );
     }
 
-    if plan.descriptor.safety_class == SafetyClass::HighRisk
-        || plan.descriptor.touches_system_wide_state
-    {
-        anyhow::bail!(
-            "manual_only_high_risk: candidate '{}' action_kind={} cannot be applied by this command",
-            plan.candidate.candidate_name,
-            plan.candidate.action_kind
-        );
-    }
-
     if dry_run {
         if let Some(executable) = plan.executable.clone() {
             let candidate = executable.into_candidate();
@@ -1030,6 +1174,16 @@ pub fn apply_candidate_plan_file(path: &Path, dry_run: bool) -> anyhow::Result<C
             }
         }
         return Ok(plan);
+    }
+
+    if plan.descriptor.safety_class == SafetyClass::HighRisk
+        || plan.descriptor.touches_system_wide_state
+    {
+        anyhow::bail!(
+            "manual_only_high_risk: candidate '{}' action_kind={} cannot be applied by this command",
+            plan.candidate.candidate_name,
+            plan.candidate.action_kind
+        );
     }
 
     let Some(executable) = plan.executable.clone() else {
@@ -2036,12 +2190,13 @@ fn check_profile_for_candidate(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, fs};
 
     use super::*;
     use crate::{
         actions::{
             TaskIdentity,
+            irq_affinity::{IrqAffinityAction, IrqAffinityEvidence, IrqAffinityRisk},
             nice::{NiceAction, NicePolicy},
         },
         affinity::CpuMask,
@@ -2699,6 +2854,212 @@ mod tests {
     }
 
     #[test]
+    fn generic_candidate_suggestion_writes_plan_file_and_uses_apply_candidate_command() {
+        let plan_dir = temp_candidate_plan_dir("generic-nice");
+        let candidate = CandidateAction::Nice {
+            plan: NiceActionPlan {
+                name: "nice-browser-helper".to_owned(),
+                action: NiceAction {
+                    targets: vec![TaskIdentity {
+                        tid: 1234,
+                        process_pid: Some(1234),
+                        comm: Some("browser".to_owned()),
+                        starttime_ticks: Some(77),
+                    }],
+                    nice: 5,
+                    policy: NicePolicy::default(),
+                },
+                target_root_pid: Some(1234),
+                evidence: vec![CandidateEvidence::new("cpu_pressure", "high", 0.9)],
+                objective: ObjectiveKind::DesktopInteractivity,
+            },
+        };
+        let records = vec![CandidateDryRunRecord {
+            candidate_name: candidate.candidate_name().to_owned(),
+            affected_tasks: 1,
+            warnings: Vec::new(),
+            safety_class: candidate.safety_class(),
+            eligible: true,
+            reason: None,
+        }];
+
+        let suggestions = suggestions_from_candidates_and_dry_run_records(
+            std::slice::from_ref(&candidate),
+            &records,
+            &plan_dir,
+            None,
+            SafetyClass::ReversibleMediumRisk,
+            "compile CPU pressure",
+        )
+        .unwrap();
+
+        assert_eq!(suggestions.len(), 1);
+        let suggestion = &suggestions[0];
+        let plan_path = candidate_plan_path(&candidate, &plan_dir);
+
+        assert!(plan_path.exists());
+        assert_eq!(suggestion.candidate_name, "nice-browser-helper");
+        assert_eq!(suggestion.action_kind, "nice");
+        assert_eq!(suggestion.objective, ObjectiveKind::DesktopInteractivity);
+        assert_eq!(suggestion.evidence.len(), 1);
+        assert_eq!(suggestion.required_mode, DaemonMode::ApplyMediumRisk);
+        assert_eq!(
+            suggestion.required_safety_class,
+            SafetyClass::ReversibleMediumRisk
+        );
+        assert_eq!(
+            suggestion.dry_run_command.as_deref(),
+            Some(format!(
+                "stutter autotune apply-candidate --candidate-json {} --dry-run",
+                plan_path.display()
+            ))
+            .as_deref()
+        );
+        assert_eq!(
+            suggestion.manual_apply_command.as_deref(),
+            Some(format!(
+                "stutter autotune apply-candidate --candidate-json {}",
+                plan_path.display()
+            ))
+            .as_deref()
+        );
+
+        let decoded: CandidatePlanFile =
+            serde_json::from_slice(&fs::read(&plan_path).unwrap()).unwrap();
+        assert_eq!(decoded.candidate.candidate_name, "nice-browser-helper");
+        assert_eq!(decoded.candidate.action_kind, "nice");
+        assert!(decoded.executable.is_some());
+
+        let rendered = render_candidate_suggestion(suggestion);
+        assert!(rendered.contains("action=nice"));
+        assert!(rendered.contains("action_kind=nice"));
+        assert!(rendered.contains("dry_run_command=\"stutter autotune apply-candidate"));
+        assert!(rendered.contains("manual_apply_command=\"stutter autotune apply-candidate"));
+    }
+
+    #[test]
+    fn high_risk_system_candidate_suggestion_is_dry_run_only() {
+        let plan_dir = temp_candidate_plan_dir("high-risk-irq");
+        let candidate = CandidateAction::IrqAffinity {
+            plan: IrqAffinityActionPlan {
+                name: "irq-affinity-44-high-risk".to_owned(),
+                action: IrqAffinityAction::new(
+                    44,
+                    "gpu".to_owned(),
+                    "2".to_owned(),
+                    IrqAffinityRisk::HighRisk,
+                    IrqAffinityEvidence {
+                        strong_irq_evidence: true,
+                        stable_irq_identity: false,
+                        known_device_mapping: true,
+                        observed_irq: Some(44),
+                        observed_device_hint: Some("gpu".to_owned()),
+                        reason: "test IRQ pressure".to_owned(),
+                    },
+                ),
+                evidence: vec![CandidateEvidence::new("irq", "gpu", 0.8)],
+                objective: ObjectiveKind::IrqOverlapReduction,
+            },
+        };
+        let records = vec![CandidateDryRunRecord {
+            candidate_name: candidate.candidate_name().to_owned(),
+            affected_tasks: 1,
+            warnings: Vec::new(),
+            safety_class: candidate.safety_class(),
+            eligible: true,
+            reason: None,
+        }];
+
+        let suggestions = suggestions_from_candidates_and_dry_run_records(
+            std::slice::from_ref(&candidate),
+            &records,
+            &plan_dir,
+            None,
+            SafetyClass::HighRisk,
+            "IRQ overlap detected",
+        )
+        .unwrap();
+
+        assert_eq!(suggestions.len(), 1);
+        let suggestion = &suggestions[0];
+        let plan_path = candidate_plan_path(&candidate, &plan_dir);
+
+        assert!(plan_path.exists());
+        assert_eq!(suggestion.action_kind, "irq_affinity");
+        assert_eq!(suggestion.required_mode, DaemonMode::ApplyHighRisk);
+        assert_eq!(suggestion.required_safety_class, SafetyClass::HighRisk);
+        assert!(suggestion.dry_run_command.is_some());
+        assert_eq!(suggestion.manual_apply_command, None);
+        assert!(
+            suggestion
+                .manual_only_reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("manual-only high-risk/system-adjacent")
+        );
+
+        let dry_run_plan = apply_candidate_plan_file(&plan_path, true).unwrap();
+        assert_eq!(
+            dry_run_plan.candidate.candidate_name,
+            "irq-affinity-44-high-risk"
+        );
+        assert!(dry_run_plan.executable.is_none());
+
+        let err = apply_candidate_plan_file(&plan_path, false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("manual_only_high_risk"));
+    }
+
+    #[test]
+    fn cpu_affinity_suggestion_preserves_apply_profile_and_does_not_write_plan_file() {
+        let plan_dir = temp_candidate_plan_dir("cpu-affinity-preserve-apply-profile");
+        let profile = Profile {
+            name: "game".to_owned(),
+            rules: Vec::new(),
+        };
+        let candidate = CandidateAction::CpuAffinityProfile {
+            plan: CpuAffinityProfilePlan {
+                profile_name: "game".to_owned(),
+                profile,
+                tree_pid: 1234,
+            },
+        };
+        let records = vec![CandidateDryRunRecord {
+            candidate_name: candidate.candidate_name().to_owned(),
+            affected_tasks: 1,
+            warnings: Vec::new(),
+            safety_class: candidate.safety_class(),
+            eligible: true,
+            reason: None,
+        }];
+        let profile_path = Path::new("/tmp/profile.toml");
+
+        let suggestions = suggestions_from_candidates_and_dry_run_records(
+            std::slice::from_ref(&candidate),
+            &records,
+            &plan_dir,
+            Some(profile_path),
+            SafetyClass::ReversibleMediumRisk,
+            "scheduler pressure",
+        )
+        .unwrap();
+
+        assert_eq!(suggestions.len(), 1);
+        let suggestion = &suggestions[0];
+        assert_eq!(suggestion.action_kind, "cpu_affinity_profile");
+        assert_eq!(
+            suggestion.dry_run_command.as_deref(),
+            Some("stutter apply-profile --tree-pid 1234 --profile /tmp/profile.toml --dry-run")
+        );
+        assert_eq!(
+            suggestion.manual_apply_command.as_deref(),
+            Some("stutter apply-profile --tree-pid 1234 --profile /tmp/profile.toml")
+        );
+        assert!(!candidate_plan_path(&candidate, &plan_dir).exists());
+    }
+
+    #[test]
     fn candidate_plan_file_can_embed_executable_process_local_payload() {
         let candidate = CandidateAction::Nice {
             plan: NiceActionPlan {
@@ -2823,6 +3184,15 @@ mod tests {
         assert!(rendered.contains("reason=\"scheduler \\\"pressure\\\"\\nnext\""));
         assert!(rendered.contains("dry_run_command=\"stutter apply-profile --tree-pid 1234 --profile /tmp/profile \\\"quoted\\\".toml --dry-run\""));
         assert!(rendered.contains("manual_apply_command=\"stutter apply-profile --tree-pid 1234 --profile /tmp/profile \\\"quoted\\\".toml\""));
+    }
+
+    fn temp_candidate_plan_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "stutter-candidate-plan-{name}-{}",
+            crate::audit::unix_nanos_now()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     fn eligible_record(name: &str, affected_tasks: usize) -> CandidateDryRunRecord {
