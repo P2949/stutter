@@ -443,9 +443,11 @@ mod tests {
 
     #[test]
     fn unknown_focus_does_not_invent_candidate_situation() {
-        let mut observation = AutotuneObservation::default();
-        observation.focus_kind = Some(FocusGroupKind::Unknown);
-        observation.focus_confidence = 0.2;
+        let observation = AutotuneObservation {
+            focus_kind: Some(FocusGroupKind::Unknown),
+            focus_confidence: 0.2,
+            ..AutotuneObservation::default()
+        };
 
         let classification = classify_situation(&observation);
 
