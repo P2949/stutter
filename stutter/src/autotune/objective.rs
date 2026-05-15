@@ -7,9 +7,10 @@ use crate::autotune::{
     experiment::WindowScore,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObjectiveKind {
+    #[default]
     StutterScore,
     GameFramePacing,
     GameRunnableLatency,
@@ -19,12 +20,6 @@ pub enum ObjectiveKind {
     IoLatency,
     IrqOverlapReduction,
     ThermalRecovery,
-}
-
-impl Default for ObjectiveKind {
-    fn default() -> Self {
-        Self::StutterScore
-    }
 }
 
 #[derive(Clone, Debug)]

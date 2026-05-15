@@ -42,7 +42,7 @@ pub enum DaemonRuntimeEvent {
     Initialized,
     RecoveryCompleted,
     MonitorEvent(MonitorEvent),
-    Decision(AutotuneDecisionStreamEntry),
+    Decision(Box<AutotuneDecisionStreamEntry>),
     Lifecycle(DaemonLifecycleEvent),
     ShutdownRequested,
     Fault(String),
@@ -220,7 +220,7 @@ impl DaemonRuntime {
                 "startup recovery complete",
             )),
             DaemonRuntimeEvent::MonitorEvent(event) => self.handle_monitor_event(event),
-            DaemonRuntimeEvent::Decision(decision) => self.handle_decision_event(decision),
+            DaemonRuntimeEvent::Decision(decision) => self.handle_decision_event(*decision),
             DaemonRuntimeEvent::Lifecycle(event) => {
                 let from = self.phase;
                 let transition = self.handle_lifecycle_event(event);
@@ -723,27 +723,29 @@ mod tests {
         let mut runtime = DaemonRuntime::new(runtime_config());
 
         let transition = runtime
-            .handle_event(DaemonRuntimeEvent::Decision(AutotuneDecisionStreamEntry {
-                unix_nanos: 42,
-                phase: "Measuring".to_owned(),
-                mode: "ApplyLowRisk".to_owned(),
-                focus_kind: Some("Game".to_owned()),
-                focus_confidence: 0.9,
-                target_root_pid: Some(1234),
-                active_target_count: 3,
-                situation: "GameCpuSchedulerPressure".to_owned(),
-                situation_confidence: 0.9,
-                situation_evidence: Vec::new(),
-                situation_blockers: Vec::new(),
-                protected_tasks_count: 0,
-                candidate_count: 0,
-                top_denied_reason: None,
-                score_total: 900,
-                data_quality: "High".to_owned(),
-                data_quality_reason_codes: Vec::new(),
-                decision: "start_experiment".to_owned(),
-                reason: "candidate evidence is strong".to_owned(),
-            }))
+            .handle_event(DaemonRuntimeEvent::Decision(Box::new(
+                AutotuneDecisionStreamEntry {
+                    unix_nanos: 42,
+                    phase: "Measuring".to_owned(),
+                    mode: "ApplyLowRisk".to_owned(),
+                    focus_kind: Some("Game".to_owned()),
+                    focus_confidence: 0.9,
+                    target_root_pid: Some(1234),
+                    active_target_count: 3,
+                    situation: "GameCpuSchedulerPressure".to_owned(),
+                    situation_confidence: 0.9,
+                    situation_evidence: Vec::new(),
+                    situation_blockers: Vec::new(),
+                    protected_tasks_count: 0,
+                    candidate_count: 0,
+                    top_denied_reason: None,
+                    score_total: 900,
+                    data_quality: "High".to_owned(),
+                    data_quality_reason_codes: Vec::new(),
+                    decision: "start_experiment".to_owned(),
+                    reason: "candidate evidence is strong".to_owned(),
+                },
+            )))
             .unwrap();
 
         assert_eq!(transition.from, DaemonPhase::Init);

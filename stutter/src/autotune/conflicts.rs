@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActionConflictGroup {
     CpuPlacement,
@@ -12,13 +12,8 @@ pub enum ActionConflictGroup {
     GpuPower,
     VmMemory,
     ThermalRecovery,
+    #[default]
     None,
-}
-
-impl Default for ActionConflictGroup {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl ActionConflictGroup {
