@@ -14,6 +14,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::{
     actions::{RollbackToken, SafetyClass, runner::ActionRunPolicy},
     autotune::{
+        active_config::{ActiveConfigCollectorInput, collect_active_config},
         apply::executor_for_candidate,
         apply_low_risk::apply_candidate_with_audit,
         candidate::{CandidateAction, CandidateDryRunRecord},
@@ -40,8 +41,8 @@ use crate::{
         kept::{ActiveProfileState, KeptCandidateState},
         objective::{ObjectiveComparisonInput, compare_for_objective},
         observation::{
-            ActiveConfigSnapshot, ActiveTaskSnapshot, AutotuneObservation, ProtectedTask,
-            WorkloadIdentity, is_protected_task_class, protected_task_reason,
+            ActiveTaskSnapshot, AutotuneObservation, ProtectedTask, WorkloadIdentity,
+            is_protected_task_class, protected_task_reason,
         },
         planner::{CandidatePlanner, PlanResult, PlannerInput},
         quality::{OnlineDataQuality, OnlineDataQualityPolicy},
@@ -856,6 +857,13 @@ impl AutotuneRuntime {
             focus_kind,
             &self.target_state.active_tasks,
         );
+        let active_config_snapshot = collect_active_config(ActiveConfigCollectorInput {
+            proc_root: Path::new("/proc"),
+            sys_root: Path::new("/sys"),
+            active_tasks: &active_tasks,
+            capabilities: &capabilities,
+            inventory: &inventory,
+        });
 
         let mut observation = AutotuneObservation {
             now_unix_nanos: crate::audit::unix_nanos_now(),
@@ -884,7 +892,7 @@ impl AutotuneRuntime {
             workload_identity,
             active_tasks,
             protected_tasks,
-            active_config_snapshot: Some(ActiveConfigSnapshot::default()),
+            active_config_snapshot: Some(active_config_snapshot),
             frame_count: window_score.frame_count,
             frame_p99_ms: window_score.frame_p99_ms,
             frame_max_ms: window_score.frame_max_ms,

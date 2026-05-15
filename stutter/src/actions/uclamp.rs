@@ -46,7 +46,7 @@ impl Default for SchedAttr {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UclampValues {
     pub sched_util_min: Option<u32>,
     pub sched_util_max: Option<u32>,
