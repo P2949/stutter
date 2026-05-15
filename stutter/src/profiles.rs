@@ -725,6 +725,32 @@ fn anyhow_raw_os_error(err: &anyhow::Error) -> Option<i32> {
         .and_then(io::Error::raw_os_error)
 }
 
+pub fn profile_matched_task_count_from_snapshots(
+    tasks: &[crate::autotune::observation::ActiveTaskSnapshot],
+    profile: &Profile,
+) -> usize {
+    tasks
+        .iter()
+        .filter(|task| {
+            let info = TaskInfo {
+                tid: task.tid,
+                process_pid: task.process_pid,
+                process_ppid: 0,
+                comm: task.comm.clone(),
+                process_comm: task.comm.clone().into(),
+                process_starttime_ticks: task.process_starttime_ticks,
+                task_starttime_ticks: task.task_starttime_ticks,
+                exe_dev: None,
+                exe_ino: None,
+                class: task.class,
+                sched_policy: None,
+                from_cgroup: task.cgroup_path.is_some(),
+            };
+            profile_matches_task(&info, profile)
+        })
+        .count()
+}
+
 fn matching_profile_rule<'a>(task: &TaskInfo, profile: &'a Profile) -> Option<&'a ProfileRule> {
     for rule in &profile.rules {
         if !rule.match_class.is_empty() && !rule.match_class.contains(&task.class) {

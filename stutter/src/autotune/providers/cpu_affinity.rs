@@ -1,7 +1,7 @@
 use crate::{
     autotune::{
         candidate::{
-            CandidateAction, generate_profile_candidates,
+            CandidateAction, generate_profile_candidates_for_observation,
             generate_topology_aware_profile_candidates,
         },
         objective::ObjectiveKind,
@@ -29,7 +29,7 @@ impl CandidateProvider for CpuAffinityProvider {
                 .map(|topology| generate_topology_aware_profile_candidates(&topology, tree_pid))
                 .unwrap_or_default()
         } else {
-            generate_profile_candidates(input.profiles, tree_pid, None)
+            generate_profile_candidates_for_observation(input.profiles, input.observation)
         };
 
         candidates
