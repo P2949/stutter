@@ -90,6 +90,7 @@ impl AutotuneObservationBuilder {
             scored_samples: window_score.scored_samples,
             score: stutter_score_from_runtime_window_score(&window_score),
             data_quality: window_score.data_quality.clone(),
+            objective_signals: input.window.objective_signals(),
             primary_situation: input.primary_situation,
             situation: Default::default(),
             focus_kind: input.focus_kind,

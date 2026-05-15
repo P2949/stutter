@@ -451,6 +451,21 @@ impl AutotuneRuntime {
             MonitorEvent::Frame { event } => {
                 self.controller.window.push_frame(*event);
             }
+            MonitorEvent::IrqEvent { event } => {
+                self.controller.window.push_irq_event(*event);
+            }
+            MonitorEvent::IoEvent { event } => {
+                self.controller.window.push_block_io_event(*event);
+            }
+            MonitorEvent::GpuSample { sample } => {
+                self.controller.window.push_gpu_sample(*sample);
+            }
+            MonitorEvent::CpuFreqSample { event } => {
+                self.controller.window.push_cpu_freq_event(*event);
+            }
+            MonitorEvent::ForegroundEvent { event } => {
+                self.controller.window.push_foreground_event(*event);
+            }
             MonitorEvent::LiveDiagnosis { entry } => {
                 self.push_diagnosis(*entry);
             }
@@ -503,13 +518,8 @@ impl AutotuneRuntime {
             }
             MonitorEvent::Alert { .. }
             | MonitorEvent::MigrationEvent { .. }
-            | MonitorEvent::CpuFreqSample { .. }
-            | MonitorEvent::ForegroundEvent { .. }
             | MonitorEvent::SchedulerSample { .. }
             | MonitorEvent::Spike { .. }
-            | MonitorEvent::GpuSample { .. }
-            | MonitorEvent::IrqEvent { .. }
-            | MonitorEvent::IoEvent { .. }
             | MonitorEvent::ScxEvent { .. }
             | MonitorEvent::Exec { .. } => {}
         }
@@ -1062,6 +1072,7 @@ impl AutotuneRuntime {
             experiment_id,
             candidate,
             baseline_score: baseline_score.clone(),
+            baseline_signals: observation.objective_signals.clone(),
             applied_unix_nanos: observation.now_unix_nanos,
             washout_until_unix_nanos,
             measure_until_unix_nanos,
@@ -2071,6 +2082,7 @@ fn history_situation(situation: SituationKind) -> HistorySituationKind {
 mod tests {
     use super::*;
     use crate::{
+        autotune::objective::ObjectiveSignals,
         diagnosis::{Confidence, StutterCause},
         ebpf_loader::DropCountersSnapshot,
         process_tree::TaskClass,
@@ -2291,6 +2303,7 @@ mod tests {
             experiment_id: ExperimentId::new("experiment-active"),
             candidate,
             baseline_score,
+            baseline_signals: ObjectiveSignals::default(),
             applied_unix_nanos: 1_000,
             washout_until_unix_nanos: 2_000,
             measure_until_unix_nanos: 3_000,
@@ -2326,6 +2339,7 @@ mod tests {
             experiment_id: ExperimentId::new("experiment-active"),
             candidate,
             baseline_score,
+            baseline_signals: ObjectiveSignals::default(),
             applied_unix_nanos: 1_000,
             washout_until_unix_nanos: 2_000,
             measure_until_unix_nanos: 3_000,
@@ -2428,6 +2442,7 @@ mod tests {
             experiment_id: ExperimentId::new("experiment-1"),
             candidate,
             baseline_score,
+            baseline_signals: ObjectiveSignals::default(),
             applied_unix_nanos: 1_000,
             washout_until_unix_nanos: 2_000,
             measure_until_unix_nanos: 3_000,

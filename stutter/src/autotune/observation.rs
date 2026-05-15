@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{
+    objective::ObjectiveSignals,
     quality::OnlineDataQuality,
     situation::{SituationClassification, SituationKind, classify_situation},
     system_context::SystemContextSnapshot,
@@ -135,6 +136,7 @@ pub struct AutotuneObservation {
 
     pub score: StutterScore,
     pub data_quality: OnlineDataQuality,
+    pub objective_signals: ObjectiveSignals,
 
     pub primary_situation: SituationKind,
     pub situation: SituationClassification,
@@ -172,6 +174,7 @@ impl Default for AutotuneObservation {
             scored_samples: 0,
             score: StutterScore::default(),
             data_quality: OnlineDataQuality::default(),
+            objective_signals: ObjectiveSignals::default(),
             primary_situation: SituationKind::Unknown,
             situation: SituationClassification::default(),
             focus_kind: None,
