@@ -2,23 +2,23 @@ use std::{
     collections::{BTreeMap, VecDeque},
     fs::{self, OpenOptions},
     io::Write,
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     time::Duration,
 };
 
+use anyhow::Context;
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    actions::{RollbackToken, SafetyClass, TuningAction},
+    actions::{RollbackToken, SafetyClass, runner::ActionRunPolicy},
     autotune::{
-        apply_low_risk::{action_from_candidate, apply_candidate_with_audit},
-        candidate::{
-            CandidateAction, CandidateDryRunRecord, dry_run_candidates,
-            generate_profile_candidates, generate_topology_aware_profile_candidates,
-        },
+        apply::executor_for_candidate,
+        apply_low_risk::apply_candidate_with_audit,
+        candidate::{CandidateAction, CandidateDryRunRecord},
         candidate_memory::CandidateMemoryResult,
-        comparison::{ExperimentDataQuality, ExperimentResult, compare_experiment},
+        comparison::{ExperimentDataQuality, ExperimentResult},
         controller::{
             ActiveExperiment as ControllerActiveExperiment, ControllerPolicy,
             ControllerRuntimeState, decide_autotune_transition,
@@ -38,7 +38,12 @@ use crate::{
             default_autotune_history_path,
         },
         kept::{ActiveProfileState, KeptCandidateState},
-        observation::AutotuneObservation,
+        objective::{ObjectiveComparisonInput, compare_for_objective},
+        observation::{
+            ActiveConfigSnapshot, ActiveTaskSnapshot, AutotuneObservation, ProtectedTask,
+            WorkloadIdentity, is_protected_task_class, protected_task_reason,
+        },
+        planner::{CandidatePlanner, PlanResult, PlannerInput},
         quality::{OnlineDataQuality, OnlineDataQualityPolicy},
         rolling_window::{RollingWindow, WindowScore as RuntimeWindowScore},
         state::{ControllerPhase, SituationKind},
@@ -63,7 +68,6 @@ use crate::{
     profiles::Profile,
     scorer::StutterScore,
     session_events::MonitorEvent,
-    topology::TopologyModel,
 };
 
 pub const DEFAULT_RUNTIME_WINDOW_SECONDS: u64 = 30;
@@ -263,6 +267,12 @@ pub struct AutotuneDecisionStreamEntry {
     pub target_root_pid: Option<u32>,
     pub active_target_count: usize,
     pub situation: String,
+    pub situation_confidence: f32,
+    pub situation_evidence: Vec<String>,
+    pub situation_blockers: Vec<String>,
+    pub protected_tasks_count: usize,
+    pub candidate_count: usize,
+    pub top_denied_reason: Option<String>,
     pub score_total: u64,
     pub data_quality: String,
     pub data_quality_reason_codes: Vec<String>,
@@ -361,6 +371,7 @@ pub struct RuntimeTargetState {
     pub root_pid: Option<u32>,
     pub active_targets: usize,
     pub target_comm: Option<String>,
+    pub active_tasks: BTreeMap<u32, TaskInfo>,
 }
 
 impl RuntimeTargetState {
@@ -369,6 +380,7 @@ impl RuntimeTargetState {
             root_pid,
             active_targets: 0,
             target_comm: None,
+            active_tasks: BTreeMap::new(),
         }
     }
 }
@@ -384,6 +396,7 @@ pub struct AutotuneRuntime {
     live_low_risk_experiment: Option<LiveLowRiskExperiment>,
     last_observation: AutotuneObservation,
     last_decision: Option<AutotuneDecisionStreamEntry>,
+    last_plan_result: Option<PlanResult>,
     pending_history_context: Option<RuntimeHistoryContext>,
 }
 
@@ -402,6 +415,7 @@ impl AutotuneRuntime {
             live_low_risk_experiment: None,
             last_observation: AutotuneObservation::default(),
             last_decision: None,
+            last_plan_result: None,
             pending_history_context: None,
             config,
         }
@@ -556,6 +570,10 @@ impl AutotuneRuntime {
                     reason: decision.reason.clone(),
                     unix_nanos: Some(decision.unix_nanos),
                     score_total: Some(decision.score_total),
+                    candidate_count: Some(decision.candidate_count),
+                    top_denied_reason: decision.top_denied_reason.clone(),
+                    situation: Some(decision.situation.clone()),
+                    focus_kind: decision.focus_kind.clone(),
                 }),
             health: self.daemon_health_snapshot(),
             degraded: self.daemon_degraded_statuses(),
@@ -717,6 +735,7 @@ impl AutotuneRuntime {
 
     fn update_target_snapshot(&mut self, active_targets: &BTreeMap<u32, TaskInfo>) {
         self.target_state.active_targets = active_targets.len();
+        self.target_state.active_tasks = active_targets.clone();
 
         if self.target_state.root_pid.is_none() {
             self.target_state.root_pid = self
@@ -825,8 +844,20 @@ impl AutotuneRuntime {
         let primary_situation = focus
             .map(|focus| focus.situation)
             .unwrap_or(SituationKind::Unknown);
+        let system_health = self.daemon_health_snapshot();
+        let capabilities = crate::daemon::capabilities::CapabilityProbe::default().probe();
+        let inventory = crate::system_inventory::SystemInventory::probe();
+        let active_tasks = active_task_snapshots_from_active_tasks(&self.target_state.active_tasks);
+        let protected_tasks = protected_tasks_from_active_tasks(&self.target_state.active_tasks);
+        let workload_identity = workload_identity_from_runtime_context(
+            self.target_state
+                .root_pid
+                .or_else(|| focus_roots.first().copied()),
+            focus_kind,
+            &self.target_state.active_tasks,
+        );
 
-        AutotuneObservation {
+        let mut observation = AutotuneObservation {
             now_unix_nanos: crate::audit::unix_nanos_now(),
             elapsed_ms: self.controller.window.latest_elapsed_ms().unwrap_or(0),
             target_present: self.target_present(&window_score),
@@ -841,16 +872,26 @@ impl AutotuneRuntime {
             score: stutter_score_from_runtime_window_score(&window_score),
             data_quality: window_score.data_quality.clone(),
             primary_situation,
+            situation: Default::default(),
             focus_kind,
             focus_confidence,
             focus_roots,
             focus_reasons,
             recent_diagnoses: self.recent_diagnoses.iter().cloned().collect(),
+            system_health,
+            capabilities,
+            topology_signature: Some(inventory.inventory_hash),
+            workload_identity,
+            active_tasks,
+            protected_tasks,
+            active_config_snapshot: Some(ActiveConfigSnapshot::default()),
             frame_count: window_score.frame_count,
             frame_p99_ms: window_score.frame_p99_ms,
             frame_max_ms: window_score.frame_max_ms,
             drop_counter_total: self.latest_drop_counters.total(),
-        }
+        };
+        observation.refresh_situation_classification();
+        observation
     }
 
     fn target_present(&self, score: &RuntimeWindowScore) -> bool {
@@ -858,14 +899,26 @@ impl AutotuneRuntime {
     }
 
     fn select_candidate_for_observation(
-        &self,
+        &mut self,
         observation: &AutotuneObservation,
     ) -> Option<CandidateAction> {
         if self.config.mode() == DaemonMode::Observe {
+            self.last_plan_result = Some(PlanResult {
+                selected: None,
+                evaluations: Vec::new(),
+                no_action_reason: Some("observe mode does not suggest or apply".to_owned()),
+            });
             return None;
         }
 
         if self.config.daemon_policy.allow_system_wide_actions {
+            self.last_plan_result = Some(PlanResult {
+                selected: None,
+                evaluations: Vec::new(),
+                no_action_reason: Some(
+                    "system-wide actions are blocked in live planner".to_owned(),
+                ),
+            });
             return None;
         }
 
@@ -874,6 +927,13 @@ impl AutotuneRuntime {
             || observation.focus_has_critical_realtime_warning()
             || observation.focus_confidence < self.controller.policy.min_focus_confidence
         {
+            self.last_plan_result = Some(PlanResult {
+                selected: None,
+                evaluations: Vec::new(),
+                no_action_reason: Some(
+                    "quality, focus, realtime, or confidence gate blocked planning".to_owned(),
+                ),
+            });
             return None;
         }
 
@@ -882,37 +942,40 @@ impl AutotuneRuntime {
         if !self.config.simulated_candidates.is_empty() {
             let candidates = self.config.simulated_candidates.clone();
             let records = simulated_dry_run_records(&candidates, observation.active_target_count);
-            return select_best_candidate_for_situation(
+            let selected = select_best_candidate_for_situation(
                 &candidates,
                 &records,
                 observation,
                 self.controller.policy.max_safety_class.clone(),
                 &self.controller.state,
             );
+            self.last_plan_result = Some(PlanResult {
+                selected: selected.clone(),
+                evaluations: Vec::new(),
+                no_action_reason: selected
+                    .is_none()
+                    .then(|| "no simulated candidate selected".to_owned()),
+            });
+            return selected;
         }
 
-        let candidates = self.candidates_for_tree(tree_pid);
-        let records = dry_run_candidates(&candidates);
-
-        select_best_candidate_for_situation(
-            &candidates,
-            &records,
-            observation,
-            self.controller.policy.max_safety_class.clone(),
-            &self.controller.state,
-        )
-    }
-
-    fn candidates_for_tree(&self, tree_pid: u32) -> Vec<CandidateAction> {
-        if !self.config.profiles.is_empty() {
-            return generate_profile_candidates(&self.config.profiles, tree_pid, None);
+        let mut observation = observation.clone();
+        if observation.target_root_pid.is_none() {
+            observation.target_root_pid = Some(tree_pid);
         }
-
-        let Ok(topology) = TopologyModel::read() else {
-            return Vec::new();
-        };
-
-        generate_topology_aware_profile_candidates(&topology, tree_pid)
+        let planner = CandidatePlanner::default_for_policy(&self.config.daemon_policy);
+        let result = planner.plan(PlannerInput {
+            observation: &observation,
+            daemon_policy: &self.config.daemon_policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            controller_state: &self.controller.state,
+            active_profile_state: Some(&self.controller.active_profile_state),
+            profiles: &self.config.profiles,
+        });
+        let selected = result.selected.clone();
+        self.last_plan_result = Some(result);
+        selected
     }
 
     fn apply_decision_side_effects(
@@ -923,7 +986,7 @@ impl AutotuneRuntime {
     ) -> anyhow::Result<()> {
         match decision {
             AutotuneDecision::StartExperiment { candidate, .. } => {
-                self.start_low_risk_experiment(observation, candidate.clone(), reason)?;
+                self.start_live_experiment(observation, candidate.clone(), reason)?;
             }
             AutotuneDecision::KeepCurrent { .. } => {
                 self.keep_live_experiment(observation, reason)?;
@@ -967,33 +1030,45 @@ impl AutotuneRuntime {
         (washout_until_unix_nanos, measure_until_unix_nanos)
     }
 
-    fn start_low_risk_experiment(
+    fn start_live_experiment(
         &mut self,
         observation: &AutotuneObservation,
         candidate: CandidateAction,
         reason: &str,
     ) -> anyhow::Result<()> {
-        if self.config.mode() != DaemonMode::ApplyLowRisk {
-            return Ok(());
-        }
-
-        if candidate.safety_class() != SafetyClass::ReversibleLowRisk {
-            anyhow::bail!(
-                "live apply-low-risk rejected non-low-risk candidate {} safety={:?}",
-                candidate.profile_name(),
-                candidate.safety_class()
-            );
+        match self.config.mode() {
+            DaemonMode::ApplyLowRisk => {
+                if candidate.safety_class() != SafetyClass::ReversibleLowRisk {
+                    anyhow::bail!(
+                        "live apply-low-risk rejected non-low-risk candidate {} safety={:?}",
+                        candidate.profile_name(),
+                        candidate.safety_class()
+                    );
+                }
+            }
+            DaemonMode::ApplyMediumRisk => {
+                if candidate.safety_class() > SafetyClass::ReversibleMediumRisk {
+                    anyhow::bail!(
+                        "live apply-medium-risk rejected non-medium-risk candidate {} safety={:?}",
+                        candidate.profile_name(),
+                        candidate.safety_class()
+                    );
+                }
+            }
+            _ => return Ok(()),
         }
 
         let baseline_score = window_score_from_observation(observation);
         validate_window_score_for_apply("baseline", &baseline_score)?;
 
         let experiment_id = ExperimentId::new(format!(
-            "live-low-risk:{}:{}",
+            "live-{}:{}:{}",
+            self.config.mode().as_str(),
             candidate.profile_name(),
             observation.now_unix_nanos
         ));
         let action_id = candidate.action_id().0;
+        let action_kind = candidate.action_kind().to_owned();
         let rollback = self.apply_candidate_for_runtime(
             &candidate,
             experiment_id.as_str(),
@@ -1057,7 +1132,7 @@ impl AutotuneRuntime {
                 .as_ref()
                 .map(|experiment| experiment.candidate.profile_name().to_owned())
                 .unwrap_or_else(|| "unknown-candidate".to_owned()),
-            action_kind: "cpu_affinity_profile".to_owned(),
+            action_kind,
             score_before: Some(baseline_score.clone()),
             score_after: None,
             rollback_performed: false,
@@ -1066,7 +1141,11 @@ impl AutotuneRuntime {
             manual_restore_command: Some(DAEMON_EMERGENCY_RESTORE_COMMAND.to_owned()),
         });
 
-        log::info!("autotune_live_low_risk_started reason={reason}");
+        log::info!(
+            "autotune_live_experiment_started mode={} action_kind={} reason={reason}",
+            self.config.mode(),
+            action_id
+        );
 
         Ok(())
     }
@@ -1100,21 +1179,42 @@ impl AutotuneRuntime {
                 "pending_apply",
             ),
         )?;
-        let applied = apply_candidate_with_audit(candidate.clone())?;
+        let applied_rollback = if self.config.mode() == DaemonMode::ApplyMediumRisk {
+            let executor = executor_for_candidate(candidate.clone())?;
+            let result = executor
+                .apply_with_audit(ActionRunPolicy::apply_medium_risk(
+                    ActionSource::AutotuneRuntime,
+                    false,
+                ))
+                .with_context(|| {
+                    format!(
+                        "audited apply failed for autotune candidate '{}'",
+                        candidate.candidate_name()
+                    )
+                })?;
+            result.rollback.with_context(|| {
+                format!(
+                    "audited apply for autotune candidate '{}' succeeded without rollback token",
+                    candidate.candidate_name()
+                )
+            })?
+        } else {
+            apply_candidate_with_audit(candidate.clone())?.rollback
+        };
         write_controller_journal_applied_with_metadata(
             &journal_path,
             experiment_id,
             action_id,
-            applied.rollback.clone(),
+            applied_rollback.clone(),
             self.controller_journal_metadata_for_candidate(
                 candidate,
                 observation,
-                Some(applied.affected_tasks),
+                Some(applied_rollback.affected_tasks()),
                 "applied_pending_verify",
             ),
         )?;
 
-        Ok(applied.rollback)
+        Ok(applied_rollback)
     }
 
     fn controller_journal_metadata_for_candidate(
@@ -1158,7 +1258,8 @@ impl AutotuneRuntime {
         let candidate_score = window_score_from_observation(observation);
         validate_window_score_for_apply("candidate", &candidate_score)?;
 
-        let result = compare_experiment(crate::autotune::comparison::ExperimentComparisonInput {
+        let result = compare_for_objective(ObjectiveComparisonInput {
+            objective: experiment.candidate.objective(),
             baseline: &experiment.baseline_score,
             candidate: &candidate_score,
             data_quality: experiment_data_quality(&observation.data_quality),
@@ -1353,8 +1454,8 @@ impl AutotuneRuntime {
             return Ok(());
         }
 
-        let (_, action) = action_from_candidate(experiment.candidate.clone())?;
-        action.rollback(&experiment.rollback)?;
+        let executor = executor_for_candidate(experiment.candidate.clone())?;
+        executor.rollback(&experiment.rollback)?;
 
         Ok(())
     }
@@ -1374,6 +1475,38 @@ impl AutotuneRuntime {
             target_root_pid: observation.target_root_pid,
             active_target_count: observation.active_target_count,
             situation: format!("{:?}", observation.primary_situation),
+            situation_confidence: observation.situation.confidence,
+            situation_evidence: observation
+                .situation
+                .evidence
+                .iter()
+                .take(5)
+                .map(|evidence| {
+                    format!(
+                        "{}={} weight={:.2}",
+                        evidence.signal, evidence.value, evidence.weight
+                    )
+                })
+                .collect(),
+            situation_blockers: observation
+                .situation
+                .blockers
+                .iter()
+                .map(|blocker| format!("{blocker:?}"))
+                .collect(),
+            protected_tasks_count: observation.protected_tasks.len(),
+            candidate_count: self
+                .last_plan_result
+                .as_ref()
+                .map(|plan| plan.evaluations.len())
+                .unwrap_or(0),
+            top_denied_reason: self.last_plan_result.as_ref().and_then(|plan| {
+                plan.evaluations
+                    .iter()
+                    .find(|evaluation| !evaluation.eligible)
+                    .and_then(|evaluation| evaluation.deny_messages.first().cloned())
+                    .or_else(|| plan.no_action_reason.clone())
+            }),
             score_total: observation.score.total,
             data_quality: data_quality_label(&observation.data_quality),
             data_quality_reason_codes: observation.data_quality.reason_code_strings(),
@@ -1999,28 +2132,111 @@ fn history_mode(mode: DaemonMode) -> HistoryAutotuneMode {
 }
 
 fn history_situation(situation: SituationKind) -> HistorySituationKind {
-    match situation {
-        SituationKind::Unknown => HistorySituationKind::Unknown,
-        SituationKind::Idle => HistorySituationKind::Idle,
-        SituationKind::GameFocused => HistorySituationKind::GameFocused,
-        SituationKind::GameCpuSchedulerPressure => HistorySituationKind::GameCpuSchedulerPressure,
-        SituationKind::GameGpuBound => HistorySituationKind::GameGpuBound,
-        SituationKind::CompositorPressure => HistorySituationKind::CompositorPressure,
-        SituationKind::CpuPressure => HistorySituationKind::CpuPressure,
-        SituationKind::IoPressure => HistorySituationKind::IoPressure,
-        SituationKind::IrqPressure => HistorySituationKind::IrqPressure,
-        SituationKind::ThermalOrPowerLimit => HistorySituationKind::ThermalOrPowerLimit,
-        SituationKind::CompileLoad
-        | SituationKind::BrowserFocused
-        | SituationKind::BrowserCpuPressure
-        | SituationKind::BrowserGpuVideo
-        | SituationKind::BrowserIoPressure
-        | SituationKind::CompileCpuBound
-        | SituationKind::CompileLinkerPressure
-        | SituationKind::MediaPlayback
-        | SituationKind::Recording
-        | SituationKind::VirtualMachineLoad => HistorySituationKind::CompileLoad,
+    situation
+}
+
+fn protected_tasks_from_active_tasks(active_tasks: &BTreeMap<u32, TaskInfo>) -> Vec<ProtectedTask> {
+    active_tasks
+        .values()
+        .filter(|task| is_protected_task_class(task.class))
+        .map(|task| ProtectedTask {
+            tid: task.tid,
+            process_pid: task.process_pid,
+            comm: task.comm.clone(),
+            class: task.class,
+            reason: protected_task_reason(task.class).to_owned(),
+        })
+        .collect()
+}
+
+fn active_task_snapshots_from_active_tasks(
+    active_tasks: &BTreeMap<u32, TaskInfo>,
+) -> Vec<ActiveTaskSnapshot> {
+    active_tasks
+        .values()
+        .map(|task| ActiveTaskSnapshot {
+            tid: task.tid,
+            process_pid: task.process_pid,
+            comm: task.comm.clone(),
+            class: task.class,
+            process_starttime_ticks: task.process_starttime_ticks,
+            task_starttime_ticks: task.task_starttime_ticks,
+            cgroup_path: read_proc_cgroup_path(task.tid),
+        })
+        .collect()
+}
+
+fn workload_identity_from_runtime_context(
+    root_pid: Option<u32>,
+    focus_kind: Option<FocusGroupKind>,
+    active_tasks: &BTreeMap<u32, TaskInfo>,
+) -> Option<WorkloadIdentity> {
+    let root_pid = root_pid?;
+    let root_task = active_tasks
+        .values()
+        .find(|task| task.process_pid == root_pid || task.tid == root_pid);
+    let process_starttime_ticks = root_task
+        .and_then(|task| task.process_starttime_ticks)
+        .or_else(|| crate::process_tree::process_starttime_at(Path::new("/proc"), root_pid));
+    let (exe_dev, exe_ino) = root_task
+        .and_then(|task| Some((task.exe_dev?, task.exe_ino?)))
+        .map(|(dev, ino)| (Some(dev), Some(ino)))
+        .unwrap_or_else(|| exe_identity_for_pid(root_pid));
+    let cgroup_path = read_proc_cgroup_path(root_pid);
+    let class_distribution = class_distribution_from_tasks(active_tasks);
+    let stable_hash = crate::daemon::state::daemon_profile_stable_hash([
+        root_pid.to_string().as_str(),
+        process_starttime_ticks
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_owned())
+            .as_str(),
+        exe_dev
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_owned())
+            .as_str(),
+        exe_ino
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_owned())
+            .as_str(),
+        cgroup_path.as_deref().unwrap_or(""),
+        &format!("{focus_kind:?}"),
+    ]);
+
+    Some(WorkloadIdentity {
+        root_pid,
+        process_starttime_ticks,
+        exe_dev,
+        exe_ino,
+        cgroup_path,
+        focus_kind,
+        class_distribution,
+        stable_hash,
+    })
+}
+
+fn exe_identity_for_pid(pid: u32) -> (Option<u64>, Option<u64>) {
+    fs::metadata(Path::new("/proc").join(pid.to_string()).join("exe"))
+        .map(|metadata| (Some(metadata.dev()), Some(metadata.ino())))
+        .unwrap_or((None, None))
+}
+
+fn read_proc_cgroup_path(pid: u32) -> Option<String> {
+    let text = fs::read_to_string(Path::new("/proc").join(pid.to_string()).join("cgroup")).ok()?;
+    text.lines()
+        .filter_map(|line| line.rsplit_once(':').map(|(_, path)| path.trim()))
+        .filter(|path| !path.is_empty())
+        .max_by_key(|path| path.len())
+        .map(str::to_owned)
+}
+
+fn class_distribution_from_tasks(
+    active_tasks: &BTreeMap<u32, TaskInfo>,
+) -> BTreeMap<String, usize> {
+    let mut classes = BTreeMap::new();
+    for task in active_tasks.values() {
+        *classes.entry(task.class.as_str().to_owned()).or_insert(0) += 1;
     }
+    classes
 }
 
 #[cfg(test)]
@@ -2048,6 +2264,39 @@ mod tests {
         assert_eq!(observation.target_root_pid, None);
         assert_eq!(observation.score.total, 0);
         assert!(observation.data_quality.blocks_action());
+    }
+
+    #[test]
+    fn apply_medium_runtime_can_start_reversible_medium_experiment_in_simulation() {
+        let daemon_config = daemon_config_for_runtime_mode(
+            DaemonMode::ApplyMediumRisk,
+            ActionSource::AutotuneRuntime,
+            Some(1234),
+            None,
+        );
+        let mut config = AutotuneRuntimeConfig::from_daemon_config(daemon_config, None)
+            .with_simulated_action_effects();
+        config.history_log = None;
+        let mut runtime = AutotuneRuntime::new(config);
+        let observation = high_quality_game_observation_with_focus_confidence(0.95);
+        let candidate = CandidateAction::Fake {
+            action_id: crate::actions::ActionId("fake-medium".to_owned()),
+            safety_class: SafetyClass::ReversibleMediumRisk,
+        };
+
+        runtime
+            .start_live_experiment(&observation, candidate, "test medium start")
+            .unwrap();
+
+        assert!(runtime.has_active_experiment());
+        assert_eq!(runtime.controller.state.phase, ControllerPhase::Measuring);
+        assert_eq!(
+            runtime
+                .pending_history_context
+                .as_ref()
+                .map(|context| context.action_kind.as_str()),
+            Some("fake")
+        );
     }
 
     fn low_risk_profile() -> crate::profiles::Profile {
@@ -2084,11 +2333,19 @@ mod tests {
             },
             data_quality: OnlineDataQuality::High,
             primary_situation: SituationKind::GameCpuSchedulerPressure,
+            situation: Default::default(),
             focus_kind: Some(FocusGroupKind::Game),
             focus_confidence,
             focus_roots: vec![1234],
             focus_reasons: vec!["game focus selected".to_owned()],
             recent_diagnoses: Vec::new(),
+            system_health: Default::default(),
+            capabilities: Default::default(),
+            topology_signature: None,
+            workload_identity: None,
+            active_tasks: Vec::new(),
+            protected_tasks: Vec::new(),
+            active_config_snapshot: None,
             frame_count: 100,
             frame_p99_ms: 12.0,
             frame_max_ms: 20.0,
@@ -2279,6 +2536,7 @@ mod tests {
             root_pid: Some(1234),
             active_targets: 2,
             target_comm: Some("game".to_owned()),
+            active_tasks: BTreeMap::new(),
         };
         runtime.latest_focus = Some(RuntimeFocusState {
             kind: FocusGroupKind::Game,
@@ -2329,6 +2587,12 @@ mod tests {
             target_root_pid: Some(1234),
             active_target_count: 2,
             situation: "GameCpuSchedulerPressure".to_owned(),
+            situation_confidence: 0.95,
+            situation_evidence: Vec::new(),
+            situation_blockers: Vec::new(),
+            protected_tasks_count: 0,
+            candidate_count: 0,
+            top_denied_reason: None,
             score_total: 999,
             data_quality: "Low: low scored samples".to_owned(),
             data_quality_reason_codes: vec!["measurement_uncertain".to_owned()],
@@ -2462,7 +2726,7 @@ mod tests {
 
     #[test]
     fn candidate_selection_blocks_focus_confidence_below_policy_threshold() {
-        let runtime = AutotuneRuntime::new(
+        let mut runtime = AutotuneRuntime::new(
             AutotuneRuntimeConfig::apply_low_risk(None, Some(1234), None)
                 .with_profiles(vec![low_risk_profile()]),
         );

@@ -53,6 +53,24 @@ impl DaemonCapabilities {
     }
 }
 
+impl Default for DaemonCapabilities {
+    fn default() -> Self {
+        Self {
+            kernel_release: None,
+            btf_available: false,
+            sched_tracepoints_available: false,
+            perf_permissions_likely: false,
+            perf_event_paranoid: None,
+            cgroup_v2_available: false,
+            sched_ext_available: false,
+            uclamp_available: false,
+            ionice_available: false,
+            irq_affinity_available: false,
+            gpu_sysfs_available: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapabilityProbeRoot {
     pub proc_root: PathBuf,

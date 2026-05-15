@@ -106,6 +106,10 @@ Done when:
 
 - A new contributor can tell where to add an observer, where to add a provider, and where mutation is allowed.
 
+Implementation status:
+
+- [x] 2026-05-15: Added `docs/FULL_SYSTEM_WATCHER_ARCHITECTURE.md` with the final watcher loop, boundary rules, no-direct-mutation/suggest-first rules, and action family/mode compatibility table.
+
 ## 1.2 Unify `SituationKind`
 
 Current problem:
@@ -149,6 +153,10 @@ Steps:
 Done when:
 
 - No situation variant is silently collapsed into the wrong workload class.
+
+Implementation status:
+
+- [x] 2026-05-15: Added `stutter/src/autotune/situation.rs` as the shared `SituationKind` source of truth, re-exported it from state/history, widened decision labels, removed the history collapse path, and added history/decision JSON round-trip regression coverage including `BrowserFocused`.
 
 ## 1.3 Add a real situation classifier
 
@@ -233,6 +241,10 @@ Done when:
 
 - Situation selection is no longer a simple focus-group mapping plus profile-name ranking.
 
+Implementation status:
+
+- [x] 2026-05-15: Added pure `classify_situation` with `SituationClassification`, evidence, blockers, reason codes, and deterministic diagnosis/focus/health rules with tests for game CPU, game GPU, browser CPU, linker pressure, low quality, and unknown focus behavior.
+
 ## 1.4 Enrich `AutotuneObservation`
 
 Current fields are good but too narrow for a full watcher.
@@ -289,6 +301,10 @@ Tests:
 Done when:
 
 - Candidate providers do not need to re-probe random global state to know basic context.
+
+Implementation status:
+
+- [x] 2026-05-15: Enriched `AutotuneObservation` with situation classification, system health, daemon capabilities, workload identity, protected tasks, topology/config placeholders, defaults, and runtime population from target snapshots.
 
 ## 1.5 Harden focus detection
 
@@ -426,6 +442,10 @@ Done when:
 
 - In observe mode, users can understand exactly why no action was taken.
 
+Implementation status:
+
+- [x] 2026-05-15: Extended runtime JSON decision stream with situation confidence, top evidence, blockers, protected-task count, candidate count, and top denied/no-action reason from the planner.
+
 ## 1.8 Build observer replay fixtures
 
 Files:
@@ -530,6 +550,10 @@ Done when:
 
 - A new candidate family can be represented without pretending to be a CPU profile.
 
+Implementation status:
+
+- [x] 2026-05-15: Added generic `CandidateAction` variants and plan structs for nice, ionice, uclamp, cgroup, IRQ, CPU/GPU power, and VM knobs, plus `candidate_name`, `target_root_pid`, descriptors, evidence, cooldown keys, conflict groups, and objectives while keeping CPU-affinity compatibility helpers.
+
 ## 2.2 Add `CandidateProvider` trait and registry
 
 Files:
@@ -580,6 +604,10 @@ Steps:
 Done when:
 
 - `AutotuneRuntime::select_candidate_for_observation()` asks providers instead of hardcoding profile generation.
+
+Implementation status:
+
+- [x] 2026-05-15: Added `CandidateProvider`, `CandidateProviderInput`, `CandidateProposal`, and a registry with CPU-affinity, nice, ionice, and uclamp providers; live runtime now plans through the registry for non-simulated candidates.
 
 ## 2.3 Add candidate evaluation and denial records
 
@@ -636,6 +664,10 @@ Done when:
 
 - The daemon can say “I saw a candidate, but it was blocked because X.”
 
+Implementation status:
+
+- [x] 2026-05-15: Added `CandidateEvaluation`, `CandidateDenyReason`, dry-run state capture, policy-context denial mapping, evidence, objectives, and provider/rank metadata in `autotune/planner.rs`.
+
 ## 2.4 Build a real `CandidatePlanner`
 
 Files:
@@ -680,6 +712,10 @@ Done when:
 
 - Runtime no longer contains planner-specific hardcoded candidate ranking.
 
+Implementation status:
+
+- [x] 2026-05-15: Added `CandidatePlanner` and `PlanResult`; runtime stores the last plan result and uses planner/provider ranking for live candidate selection, with legacy simulation ranking retained only for simulation candidates.
+
 ## 2.5 Keep low-risk apply CPU-affinity-only until planner is solid
 
 Files:
@@ -702,6 +738,10 @@ Steps:
 Done when:
 
 - General candidates can exist without accidentally being applied by low-risk mode.
+
+Implementation status:
+
+- [x] 2026-05-15: Renamed the low-risk executor to `CpuAffinityLowRiskExecutor`, added `executor_for_low_risk_candidate`, and made unsupported generic variants return structured low-risk rejection text instead of entering apply.
 
 ## 2.6 Make objective scoring workload-aware
 
@@ -754,6 +794,10 @@ Tests:
 Done when:
 
 - “Improved” means improved for the actual focused task, not just a global score drop.
+
+Implementation status:
+
+- [x] 2026-05-15: Added `ObjectiveKind` and `compare_for_objective`, wired live keep/revert comparison through candidate objectives, and added regression tests for game frame pacing, desktop interactivity, and default score behavior.
 
 ## 2.7 Strengthen baseline and measurement windows
 
@@ -870,6 +914,10 @@ Done when:
 
 - Nice candidates are visible and auditable but not automatically applied in low-risk mode.
 
+Implementation status:
+
+- [x] 2026-05-15: Added `NiceProvider` and `CandidateAction::Nice` suggestion support with target identity, evidence, descriptor metadata, medium-risk safety, and protected-root exclusion.
+
 ## 3.2 Add `IoPrioProvider`
 
 Existing action:
@@ -909,6 +957,10 @@ Tests:
 Done when:
 
 - I/O priority is controlled by workload evidence, not guesswork.
+
+Implementation status:
+
+- [x] 2026-05-15: Added `IoPrioProvider` and `CandidateAction::IoPrio` suggestion support gated on I/O-related situations and ionice capability, with idle I/O priority plans and objective metadata.
 
 ## 3.3 Add `UclampProvider`
 
@@ -954,6 +1006,10 @@ Tests:
 Done when:
 
 - Uclamp is a precise per-task/cgroup tool, not a global boost hammer.
+
+Implementation status:
+
+- [x] 2026-05-15: Added `UclampProvider` and `CandidateAction::Uclamp` suggestion support gated on uclamp capability, health, and workload situation, with modest per-target min/max plans.
 
 ## 3.4 Add `CgroupProvider`
 
@@ -1001,6 +1057,10 @@ Done when:
 
 - Cgroup tuning is explicit, reversible, and not silently system-wide.
 
+Implementation status:
+
+- [x] 2026-05-15: Added named cgroup target config/validation, policy allowlist propagation, `CgroupProvider`, active-task snapshots in observations, planner denial for non-allowlisted cgroup targets, and tests for no-allowlist, protected-task filtering, missing cgroup v2 capability denial, and invalid config paths.
+
 ## 3.5 Add protected-task and mutation exclusion layer
 
 Files:
@@ -1046,6 +1106,10 @@ Done when:
 
 - Providers cannot accidentally target critical desktop/audio/input components.
 
+Implementation status:
+
+- [x] 2026-05-15: Added centralized `autotune/protection.rs` with `ProtectionDecision` and `mutation_allowed_for_pid`, plus provider integration for nice, ionice, and uclamp process-scoped suggestions.
+
 ## 3.6 Implement generic medium-risk executor path
 
 Files:
@@ -1089,6 +1153,10 @@ Done when:
 
 - Medium-risk local tuning is possible without weakening low-risk mode.
 
+Implementation status:
+
+- [x] 2026-05-15: Added generic `autotune/apply.rs` with `CandidateActionExecutor`, runner-backed executor adapters for CPU affinity, nice, ionice, uclamp, and cgroup candidates, medium-risk policy checks, rollback guard, and `run_apply_medium_risk_candidate`; updated daemon policy to allow explicit cgroup scope in apply-medium-risk; added a simulated runtime apply-medium-risk start path while keeping apply-low-risk CPU-affinity-only.
+
 ## 3.7 Add medium-risk rollback and crash recovery coverage
 
 Files:
@@ -1122,6 +1190,10 @@ Tests:
 Done when:
 
 - Medium-risk actions are as recoverable as CPU-affinity actions.
+
+Implementation status:
+
+- [x] 2026-05-15: Verified medium-risk rollback tokens flow through startup recovery/manual emergency restore, switched cgroup rollback token safety classification from high-risk to reversible medium-risk to match `CgroupPlacementAction`, and added regression coverage for rollback-token safety mapping plus the existing all-token manual restore command test.
 
 ---
 
@@ -1169,6 +1241,10 @@ Done when:
 
 - System-wide providers have a reliable map of what they are about to touch.
 
+Implementation status:
+
+- [x] 2026-05-15: Added `stutter/src/system_inventory.rs` with CPU cpufreq policy, DRM/render/hwmon, IRQ default affinity, sched_ext, VM knob snapshotting, stable inventory hashing, runtime observation signature wiring, and fake sysfs/DRM tests.
+
 ## 4.2 Add `IrqAffinityProvider`
 
 Existing action:
@@ -1211,6 +1287,10 @@ Tests:
 Done when:
 
 - IRQ tuning is evidence-driven and hard to accidentally apply.
+
+Implementation status:
+
+- [x] 2026-05-15: Added suggest-first `IrqAffinityProvider` that only proposes on `IrqPressure` with IRQ evidence and capability present; generated actions remain high-risk/policy-gated and non-autonomous by default.
 
 ## 4.3 Add `CpuPowerProvider`
 
@@ -1257,6 +1337,10 @@ Done when:
 
 - CPU power tuning is visible and reversible but never silent.
 
+Implementation status:
+
+- [x] 2026-05-15: Added suggest-first `CpuPowerProvider` using system inventory CPU policies and workload/health gates; high-risk CPU power candidates are routed through planner policy/dry-run denials by default.
+
 ## 4.4 Add `GpuPowerProvider`
 
 Existing action:
@@ -1299,6 +1383,10 @@ Done when:
 
 - GPU tuning is tied to real GPU-bound evidence.
 
+Implementation status:
+
+- [x] 2026-05-15: Added suggest-first `GpuPowerProvider` gated on GPU-bound situations, health, and DRM inventory; generated GPU power candidates remain high-risk/manual by default.
+
 ## 4.5 Add `VmKnobProvider`
 
 Existing action:
@@ -1336,6 +1424,10 @@ Tests:
 Done when:
 
 - VM knobs are treated as dangerous experiments, not routine tuning.
+
+Implementation status:
+
+- [x] 2026-05-15: Added suggest-first `VmKnobProvider` for I/O pressure situations with exact reversible knob plan metadata; default policy still denies autonomous high-risk mutation.
 
 ## 4.6 Add scheduler/scx provider
 
@@ -1445,6 +1537,10 @@ Tests:
 Done when:
 
 - The daemon does not stack contradictory optimizations.
+
+Implementation status:
+
+- [x] 2026-05-15: Extended `ActionConflictGroup` with symmetric conflict rules, added `CandidateAction::conflicts_with`, and made the planner deny candidates that conflict with active experiments or kept actions, with conflict denial messages/tests covering CPU placement vs cgroup placement, thermal recovery vs power groups, and independent nice vs kept CPU placement.
 
 ---
 
@@ -1561,6 +1657,10 @@ Done when:
 
 - The watcher learns conservatively without becoming sticky across incompatible environments.
 
+Implementation status:
+
+- [x] 2026-05-15: Candidate memory context now consumes observation workload identity, executable dev/ino, class distribution, and inventory/topology signature so learned outcomes are partitioned by workload/environment compatibility.
+
 ## 5.4 Add full workload policy matrix
 
 Files:
@@ -1659,6 +1759,10 @@ Tests:
 Done when:
 
 - The watcher behaves differently for different tasks instead of treating everything like a game.
+
+Implementation status:
+
+- [x] 2026-05-15: Added `autotune/workload_policy.rs` as a data matrix mapping situations to allowed action families, objectives, and autonomous families; integrated it into planner candidate evaluation; and added tests for game provider enablement, recording blocking game-only actions, idle no-op behavior through the existing planner gate, and browser foreground blocking compile-throughput cgroup optimization.
 
 ## 5.5 Add steady-state kept-action management
 
