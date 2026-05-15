@@ -37,6 +37,7 @@ pub enum CandidateDenyReason {
     CgroupTargetNotAllowlisted,
     WorkloadPolicyBlocked,
     NotAutonomousForWorkload,
+    ProviderConfidenceTooLow,
     ObjectiveNotAllowedForWorkload,
     ObjectiveSignalMissing,
     DryRunFailed,
@@ -50,6 +51,7 @@ pub struct CandidateEvaluation {
     pub action_kind: String,
     pub descriptor: ActionDescriptor,
     pub provider: String,
+    pub confidence: f32,
     pub eligible: bool,
     pub deny_reasons: Vec<CandidateDenyReason>,
     pub deny_messages: Vec<String>,
@@ -108,13 +110,7 @@ impl CandidatePlanner {
         let proposals = self.registry.propose(&provider_input);
         let mut evaluations = evaluate_proposals(input, proposals);
 
-        evaluations.sort_by_key(|evaluation| {
-            (
-                !evaluation.eligible,
-                evaluation.rank.unwrap_or(u32::MAX),
-                evaluation.candidate_name.clone(),
-            )
-        });
+        sort_candidate_evaluations(&mut evaluations);
 
         let selected = evaluations
             .iter()
@@ -140,6 +136,20 @@ impl CandidatePlanner {
             no_action_reason,
         }
     }
+}
+
+fn sort_candidate_evaluations(evaluations: &mut [CandidateEvaluation]) {
+    evaluations.sort_by(|left, right| {
+        (!left.eligible)
+            .cmp(&(!right.eligible))
+            .then_with(|| {
+                left.rank
+                    .unwrap_or(u32::MAX)
+                    .cmp(&right.rank.unwrap_or(u32::MAX))
+            })
+            .then_with(|| right.confidence.total_cmp(&left.confidence))
+            .then_with(|| left.candidate_name.cmp(&right.candidate_name))
+    });
 }
 
 #[derive(Clone, Copy)]
@@ -174,7 +184,8 @@ fn evaluate_proposals_with_dry_runs(
     proposals
         .into_iter()
         .map(|proposal| {
-            let descriptor = proposal.candidate.descriptor();
+            let mut descriptor = proposal.candidate.descriptor();
+            descriptor.confidence = Some(proposal.confidence);
             let dry_run = dry_runs
                 .iter()
                 .find(|record| record.candidate_name == proposal.candidate.candidate_name());
@@ -196,6 +207,21 @@ fn evaluate_proposals_with_dry_runs(
                 deny_messages.push(format!(
                     "focus confidence {:.3} below policy minimum {:.3}",
                     input.observation.focus_confidence, input.daemon_policy.min_confidence
+                ));
+            }
+
+            let provider_confidence_threshold =
+                input.daemon_policy.provider_confidence_threshold(&descriptor);
+            if !proposal.confidence.is_finite() || proposal.confidence < provider_confidence_threshold
+            {
+                deny_reasons.push(CandidateDenyReason::ProviderConfidenceTooLow);
+                deny_messages.push(format!(
+                    "provider confidence {:.3} below policy minimum {:.3} for mode {} action_kind={} safety={:?}",
+                    proposal.confidence,
+                    provider_confidence_threshold,
+                    input.daemon_policy.mode,
+                    descriptor.action_kind,
+                    descriptor.safety_class
                 ));
             }
 
@@ -325,6 +351,7 @@ fn evaluate_proposals_with_dry_runs(
                 action_kind: proposal.candidate.action_kind().to_owned(),
                 descriptor,
                 provider: proposal.provider.to_owned(),
+                confidence: proposal.confidence,
                 eligible: deny_reasons.is_empty(),
                 deny_reasons,
                 deny_messages,
@@ -378,7 +405,7 @@ fn deny_reason_from_policy(reason_code: &str) -> CandidateDenyReason {
         "data_quality_blocked" => CandidateDenyReason::DataQualityLow,
         "system_health_blocked" => CandidateDenyReason::HealthDegraded,
         "explicit_target_required" => CandidateDenyReason::NoExplicitTarget,
-        "confidence_too_low" => CandidateDenyReason::FocusLowConfidence,
+        "confidence_too_low" => CandidateDenyReason::ProviderConfidenceTooLow,
         "cooldown_active" => CandidateDenyReason::CooldownActive,
         _ => CandidateDenyReason::PolicyRejected,
     }
@@ -391,6 +418,7 @@ mod tests {
         actions::{
             RollbackToken, SafetyClass, TaskIdentity,
             cgroup::{CgroupPlacementAction, CgroupPlacementTarget},
+            cpu_power::CpuPowerAction,
             ioprio::{IoPrioAction, IoPrioPolicy, IoPrioValue},
             irq_affinity::{IrqAffinityAction, IrqAffinityEvidence, IrqAffinityRisk},
             nice::{NiceAction, NicePolicy},
@@ -399,8 +427,8 @@ mod tests {
         affinity::CpuMask,
         autotune::{
             candidate::{
-                CgroupPlacementActionPlan, IoPrioActionPlan, IrqAffinityActionPlan, NiceActionPlan,
-                UclampActionPlan,
+                CgroupPlacementActionPlan, CpuPowerActionPlan, IoPrioActionPlan,
+                IrqAffinityActionPlan, NiceActionPlan, UclampActionPlan,
             },
             controller::ActiveExperiment,
             experiment::{ExperimentId, WindowScore},
@@ -631,6 +659,22 @@ mod tests {
         }
     }
 
+    fn cpu_power_candidate(name: &str) -> CandidateAction {
+        CandidateAction::CpuPower {
+            plan: CpuPowerActionPlan {
+                name: name.to_owned(),
+                action: CpuPowerAction {
+                    sysfs_root: std::path::PathBuf::from("/sys"),
+                    cpus: vec![0],
+                    scaling_governor: Some("performance".to_owned()),
+                    energy_performance_preference: Some("performance".to_owned()),
+                },
+                evidence: Vec::new(),
+                objective: ObjectiveKind::GameRunnableLatency,
+            },
+        }
+    }
+
     fn observation_for_situation(
         situation: SituationKind,
         focus_kind: FocusGroupKind,
@@ -671,6 +715,16 @@ mod tests {
         focus_kind: FocusGroupKind,
         candidate: CandidateAction,
     ) -> CandidateEvaluation {
+        evaluate_static_candidate_with_confidence(mode, situation, focus_kind, candidate, 1.0)
+    }
+
+    fn evaluate_static_candidate_with_confidence(
+        mode: DaemonMode,
+        situation: SituationKind,
+        focus_kind: FocusGroupKind,
+        candidate: CandidateAction,
+        confidence: f32,
+    ) -> CandidateEvaluation {
         let policy = policy(mode);
         let mut observation = observation_for_situation(situation, focus_kind);
         enable_capability_for_candidate(&mut observation, &candidate);
@@ -678,7 +732,7 @@ mod tests {
         let proposals = vec![CandidateProposal {
             candidate: candidate.clone(),
             provider: candidate.action_kind(),
-            confidence: 1.0,
+            confidence,
             deny_reasons: Vec::new(),
             objective: candidate.objective(),
             rank_hint: 1,
@@ -743,6 +797,143 @@ mod tests {
             path: std::path::PathBuf::from("/tmp/stutter-restore.json"),
             affected_tasks: 1,
         }
+    }
+
+    #[test]
+    fn low_confidence_suggest_candidate_is_denied_by_provider_threshold() {
+        let evaluation = evaluate_static_candidate_with_confidence(
+            DaemonMode::Suggest,
+            SituationKind::GameCpuSchedulerPressure,
+            FocusGroupKind::Game,
+            cpu_affinity_candidate("low-confidence-suggest"),
+            0.49,
+        );
+
+        assert_eq!(evaluation.confidence, 0.49);
+        assert_eq!(evaluation.descriptor.confidence, Some(0.49));
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ProviderConfidenceTooLow)
+        );
+        assert!(
+            !evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::WorkloadPolicyBlocked)
+        );
+        assert!(
+            !evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ObjectiveNotAllowedForWorkload)
+        );
+    }
+
+    #[test]
+    fn low_confidence_high_risk_suggestion_is_denied_even_when_workload_allows_it() {
+        let evaluation = evaluate_static_candidate_with_confidence(
+            DaemonMode::Suggest,
+            SituationKind::GameCpuSchedulerPressure,
+            FocusGroupKind::Game,
+            cpu_power_candidate("low-confidence-cpu-power"),
+            0.89,
+        );
+
+        assert_eq!(evaluation.confidence, 0.89);
+        assert_eq!(evaluation.descriptor.confidence, Some(0.89));
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ProviderConfidenceTooLow)
+        );
+        assert!(
+            !evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::WorkloadPolicyBlocked)
+        );
+        assert!(
+            !evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ObjectiveNotAllowedForWorkload)
+        );
+    }
+
+    #[test]
+    fn low_confidence_medium_risk_candidate_is_denied_even_when_family_and_objective_allowed() {
+        let evaluation = evaluate_static_candidate_with_confidence(
+            DaemonMode::ApplyMediumRisk,
+            SituationKind::GameCpuSchedulerPressure,
+            FocusGroupKind::Game,
+            uclamp_candidate("low-confidence-uclamp"),
+            0.84,
+        );
+
+        assert_eq!(evaluation.confidence, 0.84);
+        assert_eq!(evaluation.descriptor.confidence, Some(0.84));
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ProviderConfidenceTooLow)
+        );
+        assert!(
+            !evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::WorkloadPolicyBlocked)
+        );
+        assert!(
+            !evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ObjectiveNotAllowedForWorkload)
+        );
+    }
+
+    #[test]
+    fn equal_rank_candidates_sort_by_higher_confidence_before_candidate_name() {
+        let low_confidence = cpu_affinity_candidate("aaa-low-confidence");
+        let high_confidence = cpu_affinity_candidate("zzz-high-confidence");
+        let policy = policy(DaemonMode::Suggest);
+        let observation = observation();
+        let dry_runs = vec![
+            eligible_dry_run(&low_confidence),
+            eligible_dry_run(&high_confidence),
+        ];
+        let proposals = vec![
+            CandidateProposal {
+                candidate: low_confidence.clone(),
+                provider: low_confidence.action_kind(),
+                confidence: 0.80,
+                deny_reasons: Vec::new(),
+                objective: low_confidence.objective(),
+                rank_hint: 1,
+            },
+            CandidateProposal {
+                candidate: high_confidence.clone(),
+                provider: high_confidence.action_kind(),
+                confidence: 0.90,
+                deny_reasons: Vec::new(),
+                objective: high_confidence.objective(),
+                rank_hint: 1,
+            },
+        ];
+
+        let mut evaluations = evaluate_proposals_with_dry_runs(
+            PlannerInput {
+                observation: &observation,
+                daemon_policy: &policy,
+                capabilities: &observation.capabilities,
+                system_health: &observation.system_health,
+                controller_state: &ControllerRuntimeState::default(),
+                active_profile_state: None,
+                profiles: &[],
+            },
+            proposals,
+            &dry_runs,
+        );
+        sort_candidate_evaluations(&mut evaluations);
+
+        assert_eq!(evaluations[0].candidate_name, "zzz-high-confidence");
+        assert_eq!(evaluations[0].confidence, 0.90);
+        assert_eq!(evaluations[1].candidate_name, "aaa-low-confidence");
+        assert_eq!(evaluations[1].confidence, 0.80);
     }
 
     #[test]

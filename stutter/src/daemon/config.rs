@@ -417,11 +417,31 @@ impl Default for DaemonRemoteConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DaemonCandidateConfidenceConfig {
+    pub min_suggest_confidence: f32,
+    pub min_apply_low_risk_confidence: f32,
+    pub min_apply_medium_risk_confidence: f32,
+    pub min_high_risk_suggestion_confidence: f32,
+}
+
+impl Default for DaemonCandidateConfidenceConfig {
+    fn default() -> Self {
+        Self {
+            min_suggest_confidence: 0.50,
+            min_apply_low_risk_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
+            min_apply_medium_risk_confidence: 0.85,
+            min_high_risk_suggestion_confidence: 0.90,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DaemonAutotuneConfig {
     pub candidate_window_seconds: u64,
     pub washout_seconds: u64,
     pub rollback_on_crash_recovery: bool,
+    pub confidence: DaemonCandidateConfidenceConfig,
 }
 
 impl Default for DaemonAutotuneConfig {
@@ -430,6 +450,7 @@ impl Default for DaemonAutotuneConfig {
             candidate_window_seconds: 30,
             washout_seconds: 10,
             rollback_on_crash_recovery: true,
+            confidence: DaemonCandidateConfidenceConfig::default(),
         }
     }
 }
@@ -478,6 +499,22 @@ mod tests {
         assert_eq!(config.retention.max_state_snapshots, 4);
         assert!(config.remote.allow_remote_apply);
         assert_eq!(config.autotune.candidate_window_seconds, 60);
+        assert_eq!(config.autotune.confidence.min_suggest_confidence, 0.50);
+        assert_eq!(
+            config.autotune.confidence.min_apply_low_risk_confidence,
+            crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE
+        );
+        assert_eq!(
+            config.autotune.confidence.min_apply_medium_risk_confidence,
+            0.85
+        );
+        assert_eq!(
+            config
+                .autotune
+                .confidence
+                .min_high_risk_suggestion_confidence,
+            0.90
+        );
     }
 
     #[test]

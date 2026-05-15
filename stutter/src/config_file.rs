@@ -50,6 +50,10 @@ pub struct UserConfigFile {
     pub daemon_game_cgroup: Option<PathBuf>,
     pub daemon_compile_cgroup: Option<PathBuf>,
     pub daemon_min_confidence: Option<f32>,
+    pub daemon_min_suggest_confidence: Option<f32>,
+    pub daemon_min_apply_low_risk_confidence: Option<f32>,
+    pub daemon_min_apply_medium_risk_confidence: Option<f32>,
+    pub daemon_min_high_risk_suggestion_confidence: Option<f32>,
     pub daemon_max_cpu_temp_celsius: Option<u32>,
     pub daemon_max_gpu_temp_celsius: Option<u32>,
     pub daemon_min_disk_available_bytes: Option<u64>,
@@ -264,6 +268,27 @@ pub fn apply_daemon_user_config_overrides(
     if let Some(min_confidence) = user_config.daemon_min_confidence {
         daemon_config.safety.min_confidence = min_confidence;
     }
+    if let Some(min_confidence) = user_config.daemon_min_suggest_confidence {
+        daemon_config.autotune.confidence.min_suggest_confidence = min_confidence;
+    }
+    if let Some(min_confidence) = user_config.daemon_min_apply_low_risk_confidence {
+        daemon_config
+            .autotune
+            .confidence
+            .min_apply_low_risk_confidence = min_confidence;
+    }
+    if let Some(min_confidence) = user_config.daemon_min_apply_medium_risk_confidence {
+        daemon_config
+            .autotune
+            .confidence
+            .min_apply_medium_risk_confidence = min_confidence;
+    }
+    if let Some(min_confidence) = user_config.daemon_min_high_risk_suggestion_confidence {
+        daemon_config
+            .autotune
+            .confidence
+            .min_high_risk_suggestion_confidence = min_confidence;
+    }
     if let Some(cpu_temp) = user_config.daemon_max_cpu_temp_celsius {
         daemon_config.health.max_cpu_temp_celsius = cpu_temp;
     }
@@ -307,11 +332,23 @@ pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
     }
     .validate()?;
 
-    if let Some(confidence) = config.daemon_min_confidence
-        && (!confidence.is_finite() || !(0.0..=1.0).contains(&confidence))
-    {
-        anyhow::bail!("daemon_min_confidence must be a finite value between 0.0 and 1.0");
-    }
+    validate_optional_confidence("daemon_min_confidence", config.daemon_min_confidence)?;
+    validate_optional_confidence(
+        "daemon_min_suggest_confidence",
+        config.daemon_min_suggest_confidence,
+    )?;
+    validate_optional_confidence(
+        "daemon_min_apply_low_risk_confidence",
+        config.daemon_min_apply_low_risk_confidence,
+    )?;
+    validate_optional_confidence(
+        "daemon_min_apply_medium_risk_confidence",
+        config.daemon_min_apply_medium_risk_confidence,
+    )?;
+    validate_optional_confidence(
+        "daemon_min_high_risk_suggestion_confidence",
+        config.daemon_min_high_risk_suggestion_confidence,
+    )?;
     if let Some(cpu_temp) = config.daemon_max_cpu_temp_celsius
         && !(40..=120).contains(&cpu_temp)
     {
@@ -343,6 +380,16 @@ pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
     }
     if config.daemon_allow_high_risk == Some(true) && !experimental {
         anyhow::bail!("daemon_allow_high_risk requires experimental = true in the user config");
+    }
+
+    Ok(())
+}
+
+fn validate_optional_confidence(field: &str, confidence: Option<f32>) -> Result<()> {
+    if let Some(confidence) = confidence
+        && (!confidence.is_finite() || !(0.0..=1.0).contains(&confidence))
+    {
+        anyhow::bail!("{field} must be a finite value between 0.0 and 1.0");
     }
 
     Ok(())
@@ -566,6 +613,10 @@ fn known_top_level_user_config_field(field: &str) -> bool {
             | "daemon_game_cgroup"
             | "daemon_compile_cgroup"
             | "daemon_min_confidence"
+            | "daemon_min_suggest_confidence"
+            | "daemon_min_apply_low_risk_confidence"
+            | "daemon_min_apply_medium_risk_confidence"
+            | "daemon_min_high_risk_suggestion_confidence"
             | "daemon_max_cpu_temp_celsius"
             | "daemon_max_gpu_temp_celsius"
             | "daemon_min_disk_available_bytes"
@@ -718,6 +769,10 @@ mod tests {
             daemon_background_cgroup = "/user.slice/stutter-background.slice"
             daemon_compile_cgroup = "/user.slice/stutter-compile.slice"
             daemon_min_confidence = 0.91
+            daemon_min_suggest_confidence = 0.55
+            daemon_min_apply_low_risk_confidence = 0.82
+            daemon_min_apply_medium_risk_confidence = 0.87
+            daemon_min_high_risk_suggestion_confidence = 0.93
             daemon_max_cpu_temp_celsius = 83
             daemon_max_gpu_temp_celsius = 84
             daemon_min_disk_available_bytes = 1073741824
@@ -754,6 +809,13 @@ mod tests {
             Some(PathBuf::from("/user.slice/stutter-compile.slice").as_path())
         );
         assert_eq!(config.daemon_min_confidence, Some(0.91));
+        assert_eq!(config.daemon_min_suggest_confidence, Some(0.55));
+        assert_eq!(config.daemon_min_apply_low_risk_confidence, Some(0.82));
+        assert_eq!(config.daemon_min_apply_medium_risk_confidence, Some(0.87));
+        assert_eq!(
+            config.daemon_min_high_risk_suggestion_confidence,
+            Some(0.93)
+        );
         assert_eq!(config.daemon_max_cpu_temp_celsius, Some(83));
         assert_eq!(config.daemon_max_gpu_temp_celsius, Some(84));
         assert_eq!(config.daemon_min_disk_available_bytes, Some(1_073_741_824));
@@ -775,6 +837,17 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("daemon_min_confidence")
+        );
+
+        let invalid_provider_confidence = UserConfigFile {
+            daemon_min_apply_medium_risk_confidence: Some(-0.01),
+            ..Default::default()
+        };
+        assert!(
+            validate_daemon_user_config(&invalid_provider_confidence)
+                .unwrap_err()
+                .to_string()
+                .contains("daemon_min_apply_medium_risk_confidence")
         );
 
         let invalid_family = UserConfigFile {
