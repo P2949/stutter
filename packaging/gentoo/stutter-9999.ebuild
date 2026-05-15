@@ -1,5 +1,17 @@
 # Copyright 2026 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
+#
+# Packaging skeleton only.
+#
+# This ebuild is intentionally not production-ready yet. The upstream project
+# still builds its eBPF object through the Rust nightly/bpfel build path, which
+# does not cleanly fit Gentoo's offline cargo.eclass flow today.
+#
+# Supported install path for now:
+#   scripts/install-local.sh
+#
+# Revisit this ebuild once stutter has stable tagged releases, a stable eBPF
+# object build/install story, and production-ready service packaging.
 
 EAPI=8
 

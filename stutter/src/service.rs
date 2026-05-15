@@ -550,6 +550,50 @@ mod tests {
     }
 
     #[test]
+    fn gentoo_ebuild_and_install_docs_mark_portage_packaging_as_skeleton_only() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("stutter crate should live under the repository root")
+            .to_path_buf();
+        let ebuild_path = root
+            .join("packaging")
+            .join("gentoo")
+            .join("stutter-9999.ebuild");
+        let install_doc_path = root.join("docs").join("INSTALL.md");
+        let ebuild = std::fs::read_to_string(ebuild_path).unwrap();
+        let install_doc = std::fs::read_to_string(install_doc_path).unwrap();
+
+        assert!(
+            ebuild.contains("# Packaging skeleton only."),
+            "Gentoo ebuild should declare that it is a packaging skeleton"
+        );
+        assert!(
+            ebuild.contains("This ebuild is intentionally not production-ready yet."),
+            "Gentoo ebuild should not present itself as production-ready"
+        );
+        assert!(
+            ebuild.contains("#   scripts/install-local.sh"),
+            "Gentoo ebuild should point users at the supported local install path"
+        );
+        assert!(
+            install_doc.contains("There is no production-ready distro package yet."),
+            "install docs should warn that distro packaging is not production-ready"
+        );
+        assert!(
+            install_doc.contains("the supported install path for now"),
+            "install docs should identify local install scripts as the current supported path"
+        );
+        assert!(
+            install_doc.contains("scripts/install-local.sh"),
+            "install docs should point users at scripts/install-local.sh"
+        );
+        assert!(
+            install_doc.contains("skeleton only"),
+            "install docs should describe Gentoo packaging as a skeleton"
+        );
+    }
+
+    #[test]
     fn gentoo_ebuild_does_not_depend_on_stutter_account_services() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()

@@ -266,4 +266,25 @@ cat /sys/devices/system/cpu/online
 
 ## Packaging Status
 
-There is no distro package yet. The local scripts are intentionally small and conservative so you can inspect exactly what they do.
+There is no production-ready distro package yet. The local install scripts are
+the supported install path for now.
+
+The Gentoo ebuild/overlay files, when present, should be treated as a packaging
+skeleton only. They are useful for documenting the intended Portage shape, USE
+flag direction, service-file layout, and dependency model, but they are not yet
+expected to provide a fully automated production build.
+
+In particular, the eBPF build path currently depends on Rust nightly,
+`rust-src`, `bpfel-unknown-none`, and `-Z build-std=core`. That interacts poorly
+with offline Cargo vendoring in distro package managers. Until the core project
+is closer to production-ready, Gentoo packaging may require a manually prebuilt
+eBPF object or local developer adjustments.
+
+For now, prefer:
+
+```bash
+scripts/install-local.sh
+```
+
+A proper ebuild should be revisited once the runtime interface, eBPF object
+layout, release process, and service model are stable.
