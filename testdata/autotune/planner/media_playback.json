@@ -1,1 +1,1 @@
-{"situation":"media_playback","focus_kind":"Media","mode":"suggest","candidate_action_kind":"uclamp","expected_selected_action_kind":"uclamp","expected_denials":[]}
+{"situation":"media_playback","focus_kind":"Media","policy":{"mode":"suggest","enabled_action_families":["uclamp"]},"expected_selected_action_kind":null,"expected_total_proposals":0,"expected_eligible_proposals":0,"expected_evaluations":[]}

@@ -2080,6 +2080,43 @@ pub fn generate_profile_candidates(
     generate_profile_candidate_plan(profiles, tree_pid, current_profile).optimization_candidates
 }
 
+pub fn generate_profile_candidates_for_observation(
+    profiles: &[Profile],
+    observation: &crate::autotune::observation::AutotuneObservation,
+) -> Vec<CandidateAction> {
+    generate_profile_candidate_plan_for_observation(profiles, observation).optimization_candidates
+}
+
+pub fn generate_profile_candidate_plan_for_observation(
+    profiles: &[Profile],
+    observation: &crate::autotune::observation::AutotuneObservation,
+) -> GeneratedProfileCandidatePlan {
+    let Some(tree_pid) = observation.target_root_pid else {
+        return GeneratedProfileCandidatePlan {
+            optimization_candidates: Vec::new(),
+            recovery_fallback: None,
+            rejected: Vec::new(),
+        };
+    };
+    let recently_failed_profiles = BTreeSet::new();
+    generate_profile_candidate_plan_with_checker(
+        profiles,
+        tree_pid,
+        None,
+        &recently_failed_profiles,
+        |profile| {
+            let matched_tasks = crate::profiles::profile_matched_task_count_from_snapshots(
+                &observation.active_tasks,
+                profile,
+            );
+            Ok(CandidateProfileStatus {
+                matched_tasks,
+                dry_run_tasks: matched_tasks,
+            })
+        },
+    )
+}
+
 pub fn generate_profile_candidate_plan(
     profiles: &[Profile],
     tree_pid: u32,
@@ -3193,6 +3230,40 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn generate_profile_candidates_for_observation_without_target_pid_returns_no_candidates() {
+        let profiles = vec![Profile {
+            name: "fixture-game-helper".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: Some(CpuMask::parse("0").unwrap()),
+                nice: None,
+                ionice: None,
+                match_class: vec![TaskClass::Game],
+                match_comm: Vec::new(),
+            }],
+        }];
+
+        let observation = crate::autotune::observation::AutotuneObservation {
+            target_root_pid: None,
+            active_tasks: vec![crate::autotune::observation::ActiveTaskSnapshot {
+                tid: 1234,
+                process_pid: 1234,
+                comm: "game-main".to_owned(),
+                class: TaskClass::Game,
+                process_starttime_ticks: Some(10),
+                task_starttime_ticks: Some(1234),
+                cgroup_path: Some("/user.slice/fixture.scope".to_owned()),
+            }],
+            ..crate::autotune::observation::AutotuneObservation::default()
+        };
+
+        let plan = generate_profile_candidate_plan_for_observation(&profiles, &observation);
+
+        assert!(plan.optimization_candidates.is_empty());
+        assert!(plan.recovery_fallback.is_none());
+        assert!(plan.rejected.is_empty());
     }
 
     fn eligible_record(name: &str, affected_tasks: usize) -> CandidateDryRunRecord {

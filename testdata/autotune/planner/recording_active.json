@@ -1,1 +1,1 @@
-{"situation":"recording","focus_kind":"Recording","mode":"suggest","candidate_action_kind":"nice","expected_selected_action_kind":"nice","expected_denials":[]}
+{"situation":"recording","focus_kind":"Recording","policy":{"mode":"suggest","enabled_action_families":["nice"]},"expected_selected_action_kind":null,"expected_total_proposals":0,"expected_eligible_proposals":0,"expected_evaluations":[]}
