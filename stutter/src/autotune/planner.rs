@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     actions::ActionState,
     autotune::{
-        candidate::{CandidateAction, CandidateEvidence, dry_run_candidates},
+        candidate::{
+            CandidateAction, CandidateDryRunRecord, CandidateEvidence, dry_run_candidates,
+        },
         controller::ControllerRuntimeState,
         kept::ActiveProfileState,
         objective::ObjectiveKind,
@@ -11,7 +13,7 @@ use crate::{
         providers::{CandidateProposal, CandidateProviderInput, CandidateProviderRegistry},
         workload_policy::workload_policy_for_situation,
     },
-    daemon::{DaemonCapabilities, DaemonPolicy, SystemHealthSnapshot},
+    daemon::{DaemonCapabilities, DaemonMode, DaemonPolicy, SystemHealthSnapshot},
     daemon_policy::{ActionDescriptor, DaemonPolicyContext, PolicyIntent},
     profiles::Profile,
 };
@@ -34,6 +36,7 @@ pub enum CandidateDenyReason {
     ConflictWithKeptAction,
     CgroupTargetNotAllowlisted,
     WorkloadPolicyBlocked,
+    NotAutonomousForWorkload,
     ObjectiveNotAllowedForWorkload,
     ObjectiveSignalMissing,
     DryRunFailed,
@@ -160,6 +163,14 @@ fn evaluate_proposals(
         .collect::<Vec<_>>();
     let dry_runs = dry_run_candidates(&candidates);
 
+    evaluate_proposals_with_dry_runs(input, proposals, &dry_runs)
+}
+
+fn evaluate_proposals_with_dry_runs(
+    input: PlannerInput<'_>,
+    proposals: Vec<CandidateProposal>,
+    dry_runs: &[CandidateDryRunRecord],
+) -> Vec<CandidateEvaluation> {
     proposals
         .into_iter()
         .map(|proposal| {
@@ -201,6 +212,17 @@ fn evaluate_proposals(
                     "workload policy for {:?} does not allow action family {}",
                     input.observation.primary_situation,
                     proposal.candidate.action_kind()
+                ));
+            }
+            if mode_requires_autonomous_workload_family(input.daemon_policy.mode)
+                && !workload_policy.allows_autonomous_candidate(&proposal.candidate)
+            {
+                deny_reasons.push(CandidateDenyReason::NotAutonomousForWorkload);
+                deny_messages.push(format!(
+                    "workload policy for {:?} does not allow autonomous apply for action family {}; autonomous_families={:?}",
+                    input.observation.primary_situation,
+                    proposal.candidate.action_kind(),
+                    workload_policy.autonomous_families
                 ));
             }
             if !workload_policy.allows_objective(proposal.objective) {
@@ -316,6 +338,13 @@ fn evaluate_proposals(
         .collect()
 }
 
+fn mode_requires_autonomous_workload_family(mode: DaemonMode) -> bool {
+    matches!(
+        mode,
+        DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk | DaemonMode::ApplyHighRisk
+    )
+}
+
 fn policy_context_for_input(input: PlannerInput<'_>) -> DaemonPolicyContext {
     DaemonPolicyContext {
         data_quality_ok: !input.observation.data_quality.blocks_action(),
@@ -362,11 +391,17 @@ mod tests {
         actions::{
             RollbackToken, SafetyClass, TaskIdentity,
             cgroup::{CgroupPlacementAction, CgroupPlacementTarget},
+            ioprio::{IoPrioAction, IoPrioPolicy, IoPrioValue},
+            irq_affinity::{IrqAffinityAction, IrqAffinityEvidence, IrqAffinityRisk},
             nice::{NiceAction, NicePolicy},
+            uclamp::{UclampAction, UclampValues},
         },
         affinity::CpuMask,
         autotune::{
-            candidate::{CgroupPlacementActionPlan, NiceActionPlan},
+            candidate::{
+                CgroupPlacementActionPlan, IoPrioActionPlan, IrqAffinityActionPlan, NiceActionPlan,
+                UclampActionPlan,
+            },
             controller::ActiveExperiment,
             experiment::{ExperimentId, WindowScore},
             kept::{ActiveProfileState, KeptCandidateState},
@@ -520,6 +555,173 @@ mod tests {
                 objective: ObjectiveKind::DesktopInteractivity,
             },
         }
+    }
+
+    fn task_identity() -> TaskIdentity {
+        TaskIdentity {
+            tid: 1234,
+            process_pid: Some(1234),
+            comm: Some("stutter-test".to_owned()),
+            starttime_ticks: None,
+        }
+    }
+
+    fn uclamp_candidate(name: &str) -> CandidateAction {
+        CandidateAction::Uclamp {
+            plan: UclampActionPlan {
+                name: name.to_owned(),
+                action: UclampAction {
+                    targets: vec![task_identity()],
+                    values: UclampValues {
+                        sched_util_min: Some(128),
+                        sched_util_max: Some(1024),
+                    },
+                },
+                target_root_pid: Some(1234),
+                evidence: Vec::new(),
+                objective: ObjectiveKind::DesktopInteractivity,
+            },
+        }
+    }
+
+    fn ioprio_candidate(name: &str) -> CandidateAction {
+        CandidateAction::IoPrio {
+            plan: IoPrioActionPlan {
+                name: name.to_owned(),
+                action: IoPrioAction {
+                    targets: vec![task_identity()],
+                    ioprio: IoPrioValue::idle(),
+                    policy: IoPrioPolicy {
+                        allow_ioprio_changes: true,
+                        require_strong_block_io_evidence: false,
+                        strong_block_io_evidence: true,
+                        ..IoPrioPolicy::default()
+                    },
+                },
+                target_root_pid: Some(1234),
+                evidence: Vec::new(),
+                objective: ObjectiveKind::IoLatency,
+            },
+        }
+    }
+
+    fn irq_affinity_candidate(name: &str) -> CandidateAction {
+        let evidence = IrqAffinityEvidence {
+            strong_irq_evidence: true,
+            stable_irq_identity: true,
+            known_device_mapping: true,
+            observed_irq: Some(42),
+            observed_device_hint: Some("test-device".to_owned()),
+            reason: "test IRQ evidence".to_owned(),
+        };
+
+        CandidateAction::IrqAffinity {
+            plan: IrqAffinityActionPlan {
+                name: name.to_owned(),
+                action: IrqAffinityAction::new(
+                    42,
+                    "test-device".to_owned(),
+                    "1".to_owned(),
+                    IrqAffinityRisk::ReversibleMediumRisk,
+                    evidence,
+                ),
+                evidence: Vec::new(),
+                objective: ObjectiveKind::IrqOverlapReduction,
+            },
+        }
+    }
+
+    fn observation_for_situation(
+        situation: SituationKind,
+        focus_kind: FocusGroupKind,
+    ) -> AutotuneObservation {
+        let mut observation = observation();
+        observation.primary_situation = situation;
+        observation.focus_kind = Some(focus_kind);
+        observation
+    }
+
+    fn enable_capability_for_candidate(
+        observation: &mut AutotuneObservation,
+        candidate: &CandidateAction,
+    ) {
+        match candidate.action_kind() {
+            "uclamp" => observation.capabilities.uclamp_available = true,
+            "ionice" => observation.capabilities.ionice_available = true,
+            "irq_affinity" => observation.capabilities.irq_affinity_available = true,
+            "gpu_power" => observation.capabilities.gpu_sysfs_available = true,
+            _ => {}
+        }
+    }
+
+    fn eligible_dry_run(candidate: &CandidateAction) -> CandidateDryRunRecord {
+        CandidateDryRunRecord {
+            candidate_name: candidate.candidate_name().to_owned(),
+            affected_tasks: 1,
+            warnings: Vec::new(),
+            safety_class: candidate.safety_class(),
+            eligible: true,
+            reason: None,
+        }
+    }
+
+    fn evaluate_static_candidate(
+        mode: DaemonMode,
+        situation: SituationKind,
+        focus_kind: FocusGroupKind,
+        candidate: CandidateAction,
+    ) -> CandidateEvaluation {
+        let policy = policy(mode);
+        let mut observation = observation_for_situation(situation, focus_kind);
+        enable_capability_for_candidate(&mut observation, &candidate);
+        let dry_runs = vec![eligible_dry_run(&candidate)];
+        let proposals = vec![CandidateProposal {
+            candidate: candidate.clone(),
+            provider: candidate.action_kind(),
+            confidence: 1.0,
+            deny_reasons: Vec::new(),
+            objective: candidate.objective(),
+            rank_hint: 1,
+        }];
+
+        let mut evaluations = evaluate_proposals_with_dry_runs(
+            PlannerInput {
+                observation: &observation,
+                daemon_policy: &policy,
+                capabilities: &observation.capabilities,
+                system_health: &observation.system_health,
+                controller_state: &ControllerRuntimeState::default(),
+                active_profile_state: None,
+                profiles: &[],
+            },
+            proposals,
+            &dry_runs,
+        );
+
+        assert_eq!(evaluations.len(), 1);
+        evaluations.remove(0)
+    }
+
+    fn assert_autonomous_denial_mentions_context(
+        evaluation: &CandidateEvaluation,
+        situation: SituationKind,
+        action_kind: &str,
+    ) {
+        assert!(!evaluation.eligible);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::NotAutonomousForWorkload)
+        );
+        assert!(
+            evaluation.deny_messages.iter().any(|message| {
+                message.contains(&format!("{situation:?}"))
+                    && message.contains(action_kind)
+                    && message.contains("autonomous_families=")
+            }),
+            "missing autonomous denial context in {:?}",
+            evaluation.deny_messages
+        );
     }
 
     fn window_score(total: u64) -> WindowScore {
@@ -746,6 +948,138 @@ mod tests {
                 .deny_reasons
                 .contains(&CandidateDenyReason::WorkloadPolicyBlocked)
         );
+    }
+
+    #[test]
+    fn game_cpu_affinity_profile_stays_apply_low_risk_eligible() {
+        let evaluation = evaluate_static_candidate(
+            DaemonMode::ApplyLowRisk,
+            SituationKind::GameCpuSchedulerPressure,
+            FocusGroupKind::Game,
+            cpu_affinity_candidate("game-main"),
+        );
+
+        assert!(
+            evaluation.eligible,
+            "expected cpu_affinity_profile to remain apply-low-risk eligible; deny_reasons={:?} deny_messages={:?}",
+            evaluation.deny_reasons, evaluation.deny_messages
+        );
+        assert!(
+            !evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::NotAutonomousForWorkload)
+        );
+    }
+
+    #[test]
+    fn game_uclamp_is_suggest_eligible_but_not_autonomous_for_apply() {
+        let candidate = uclamp_candidate("game-uclamp");
+        let suggest = evaluate_static_candidate(
+            DaemonMode::Suggest,
+            SituationKind::GameCpuSchedulerPressure,
+            FocusGroupKind::Game,
+            candidate.clone(),
+        );
+
+        assert!(
+            suggest.eligible,
+            "expected game uclamp to remain suggest eligible; deny_reasons={:?} deny_messages={:?}",
+            suggest.deny_reasons, suggest.deny_messages
+        );
+
+        let apply = evaluate_static_candidate(
+            DaemonMode::ApplyMediumRisk,
+            SituationKind::GameCpuSchedulerPressure,
+            FocusGroupKind::Game,
+            candidate,
+        );
+
+        assert_autonomous_denial_mentions_context(
+            &apply,
+            SituationKind::GameCpuSchedulerPressure,
+            "uclamp",
+        );
+    }
+
+    #[test]
+    fn compile_nice_is_suggest_eligible_but_not_autonomous_for_apply() {
+        let candidate = nice_candidate();
+        let suggest = evaluate_static_candidate(
+            DaemonMode::Suggest,
+            SituationKind::CompileCpuBound,
+            FocusGroupKind::Compile,
+            candidate.clone(),
+        );
+
+        assert!(
+            suggest.eligible,
+            "expected compile nice candidate to remain suggest eligible; deny_reasons={:?} deny_messages={:?}",
+            suggest.deny_reasons, suggest.deny_messages
+        );
+
+        let apply = evaluate_static_candidate(
+            DaemonMode::ApplyMediumRisk,
+            SituationKind::CompileCpuBound,
+            FocusGroupKind::Compile,
+            candidate,
+        );
+
+        assert_autonomous_denial_mentions_context(&apply, SituationKind::CompileCpuBound, "nice");
+    }
+
+    #[test]
+    fn empty_autonomous_families_block_browser_recording_irq_and_io_apply() {
+        let cases = vec![
+            (
+                "browser nice",
+                SituationKind::BrowserCpuPressure,
+                FocusGroupKind::Browser,
+                nice_candidate(),
+            ),
+            (
+                "recording uclamp",
+                SituationKind::Recording,
+                FocusGroupKind::Recording,
+                uclamp_candidate("recording-uclamp"),
+            ),
+            (
+                "irq affinity",
+                SituationKind::IrqPressure,
+                FocusGroupKind::Desktop,
+                irq_affinity_candidate("irq-affinity"),
+            ),
+            (
+                "io ionice",
+                SituationKind::IoPressure,
+                FocusGroupKind::Desktop,
+                ioprio_candidate("io-ionice"),
+            ),
+        ];
+
+        for (label, situation, focus_kind, candidate) in cases {
+            let action_kind = candidate.action_kind();
+            let suggest = evaluate_static_candidate(
+                DaemonMode::Suggest,
+                situation,
+                focus_kind,
+                candidate.clone(),
+            );
+
+            assert!(
+                suggest.eligible,
+                "expected {label} to remain suggest eligible; deny_reasons={:?} deny_messages={:?}",
+                suggest.deny_reasons, suggest.deny_messages
+            );
+
+            let apply = evaluate_static_candidate(
+                DaemonMode::ApplyMediumRisk,
+                situation,
+                focus_kind,
+                candidate,
+            );
+
+            assert_autonomous_denial_mentions_context(&apply, situation, action_kind);
+        }
     }
 
     #[test]
