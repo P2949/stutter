@@ -12,6 +12,8 @@ use crate::{
     remote::RemoteMonitorRequest,
 };
 
+const DAEMON_EMERGENCY_RESTORE_COMMAND: &str = "stutter daemon emergency-restore";
+
 pub struct StartupRecoveryDaemonStateInput<'a> {
     pub phase: DaemonPhase,
     pub decision: &'a str,
@@ -51,7 +53,7 @@ pub fn daemon_state_for_agent_fault(
         }],
         faulted: Some(DaemonFaultState {
             reason,
-            manual_restore_command: Some("stutter autotune restore".to_owned()),
+            manual_restore_command: Some(DAEMON_EMERGENCY_RESTORE_COMMAND.to_owned()),
         }),
         ..DaemonState::default()
     }
@@ -137,7 +139,7 @@ pub fn daemon_state_from_startup_recovery(outcome: &StartupRecoveryOutcome) -> D
             }],
             faulted: Some(DaemonFaultState {
                 reason: "startup recovery found applying journal without rollback token".to_owned(),
-                manual_restore_command: Some("stutter autotune restore".to_owned()),
+                manual_restore_command: Some(DAEMON_EMERGENCY_RESTORE_COMMAND.to_owned()),
             }),
             ..DaemonState::default()
         },
@@ -196,7 +198,7 @@ pub fn daemon_state_for_startup_recovery_snapshot(
     let manual_restore_command = input
         .manual_restore_command
         .map(str::to_owned)
-        .unwrap_or_else(|| "stutter autotune restore".to_owned());
+        .unwrap_or_else(|| DAEMON_EMERGENCY_RESTORE_COMMAND.to_owned());
     let safety_class = input
         .rollback_token
         .map(safety_class_for_rollback_token)
@@ -357,7 +359,7 @@ mod tests {
                 .faulted
                 .as_ref()
                 .and_then(|fault| fault.manual_restore_command.as_deref()),
-            Some("stutter autotune restore")
+            Some("stutter daemon emergency-restore")
         );
     }
 
@@ -413,6 +415,42 @@ mod tests {
                 .as_ref()
                 .map(|decision| decision.reason.as_str()),
             Some("remote recording run_id=run-1 target_count=3")
+        );
+    }
+
+    #[test]
+    fn startup_recovery_snapshot_builder_defaults_to_daemon_emergency_restore_command() {
+        let rollback_token = RollbackToken::CpuAffinityRestoreFile {
+            path: PathBuf::from("/tmp/stutter-restore.json"),
+            affected_tasks: 31,
+        };
+
+        let state = daemon_state_for_startup_recovery_snapshot(StartupRecoveryDaemonStateInput {
+            phase: DaemonPhase::Faulted,
+            decision: "faulted",
+            reason: "startup crash recovery rollback failed".to_owned(),
+            experiment_id: "experiment-1",
+            action_id: "cpu-affinity-profile:game-main",
+            rollback_token: Some(&rollback_token),
+            rollback_available: true,
+            include_active_experiment: true,
+            faulted: true,
+            manual_restore_command: None,
+        });
+
+        assert_eq!(
+            state
+                .active_rollback
+                .as_ref()
+                .and_then(|rollback| rollback.manual_restore_command.as_deref()),
+            Some("stutter daemon emergency-restore")
+        );
+        assert_eq!(
+            state
+                .faulted
+                .as_ref()
+                .and_then(|fault| fault.manual_restore_command.as_deref()),
+            Some("stutter daemon emergency-restore")
         );
     }
 

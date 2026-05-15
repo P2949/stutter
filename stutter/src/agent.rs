@@ -1650,7 +1650,7 @@ async fn autotune_status_handler(
             last_fault: disk_status
                 .as_ref()
                 .and_then(|status| status.last_fault.clone()),
-            manual_restore_command: Some("stutter autotune restore".to_owned()),
+            manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
             daemon_state: daemon_state.clone(),
             message: format!("autotune {} controller active", handle.mode),
         },
@@ -1686,7 +1686,7 @@ async fn autotune_status_handler(
             last_fault: disk_status
                 .as_ref()
                 .and_then(|status| status.last_fault.clone()),
-            manual_restore_command: Some("stutter autotune restore".to_owned()),
+            manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
             daemon_state,
             message: "no autotune session active".to_owned(),
         },
@@ -1935,11 +1935,16 @@ async fn autotune_start_handler(
         ),
     );
 
+    let message = if mode == "apply-low-risk" {
+        "remote autotune apply-low-risk controller started; apply modes are enabled".to_owned()
+    } else {
+        "remote autotune observe/suggest controller started; apply modes remain disabled".to_owned()
+    };
+
     Json(AutotuneStartResponse {
         status: "started".to_owned(),
         mode,
-        message: "remote autotune observe/suggest controller started; apply modes remain disabled"
-            .to_owned(),
+        message,
     })
     .into_response()
 }
@@ -3697,7 +3702,7 @@ mod tests {
                 action_id: "remote-autotune-start:apply-low-risk".to_owned(),
                 rollback_available: false,
                 token: None,
-                manual_restore_command: Some("stutter autotune restore".to_owned()),
+                manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
             }),
             ..DaemonState::default()
         };
@@ -3717,7 +3722,7 @@ mod tests {
             cooldown_remaining_seconds: None,
             data_quality: None,
             last_fault: None,
-            manual_restore_command: Some("stutter autotune restore".to_owned()),
+            manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
             daemon_state: state.daemon_state.lock().await.clone(),
             message: "test".to_owned(),
         };

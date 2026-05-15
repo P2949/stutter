@@ -69,6 +69,8 @@ use crate::{
 pub const DEFAULT_RUNTIME_WINDOW_SECONDS: u64 = 30;
 pub const DEFAULT_RECENT_DIAGNOSIS_LIMIT: usize = 16;
 
+const DAEMON_EMERGENCY_RESTORE_COMMAND: &str = "stutter daemon emergency-restore";
+
 #[derive(Clone, Debug)]
 pub struct AutotuneRuntimeConfig {
     pub daemon_config: DaemonConfig,
@@ -532,7 +534,7 @@ impl AutotuneRuntime {
                     action_id: experiment.action_id(),
                     rollback_available: true,
                     token: Some(experiment.rollback.clone()),
-                    manual_restore_command: Some("stutter autotune restore".to_owned()),
+                    manual_restore_command: Some(DAEMON_EMERGENCY_RESTORE_COMMAND.to_owned()),
                 });
 
         let active_target = self.daemon_active_target_snapshot();
@@ -709,7 +711,7 @@ impl AutotuneRuntime {
                 .map(|decision| decision.reason.clone())
                 .filter(|reason| !reason.trim().is_empty())
                 .unwrap_or_else(|| "controller is faulted".to_owned()),
-            manual_restore_command: Some("stutter autotune restore".to_owned()),
+            manual_restore_command: Some(DAEMON_EMERGENCY_RESTORE_COMMAND.to_owned()),
         })
     }
 
@@ -1061,7 +1063,7 @@ impl AutotuneRuntime {
             rollback_performed: false,
             rollback_policy: "rollback-on-restore".to_owned(),
             cooldown_until_unix_nanos: None,
-            manual_restore_command: Some("stutter autotune restore".to_owned()),
+            manual_restore_command: Some(DAEMON_EMERGENCY_RESTORE_COMMAND.to_owned()),
         });
 
         log::info!("autotune_live_low_risk_started reason={reason}");
@@ -1139,7 +1141,7 @@ impl AutotuneRuntime {
                 starttime_ticks,
                 active_task_count,
             ))
-            .with_restore_command("stutter autotune restore")
+            .with_restore_command(DAEMON_EMERGENCY_RESTORE_COMMAND)
             .with_verify_result(verify_result)
             .with_safety_class(candidate.safety_class())
     }
@@ -1218,7 +1220,7 @@ impl AutotuneRuntime {
                     rollback_performed: false,
                     rollback_policy: "rollback-on-restore".to_owned(),
                     cooldown_until_unix_nanos: Some(cooldown_until_unix_nanos),
-                    manual_restore_command: Some("stutter autotune restore".to_owned()),
+                    manual_restore_command: Some(DAEMON_EMERGENCY_RESTORE_COMMAND.to_owned()),
                 });
 
                 self.controller
@@ -1291,7 +1293,7 @@ impl AutotuneRuntime {
             rollback_performed: true,
             rollback_policy: "rollback-performed".to_owned(),
             cooldown_until_unix_nanos: Some(cooldown_until_unix_nanos),
-            manual_restore_command: Some("stutter autotune restore".to_owned()),
+            manual_restore_command: Some(DAEMON_EMERGENCY_RESTORE_COMMAND.to_owned()),
         });
 
         self.controller
@@ -2434,8 +2436,12 @@ mod tests {
         );
         assert_eq!(value["last_decision"]["score_total"].as_u64(), Some(999));
         assert_eq!(
+            value["active_rollback"]["manual_restore_command"],
+            "stutter daemon emergency-restore"
+        );
+        assert_eq!(
             value["faulted"]["manual_restore_command"],
-            "stutter autotune restore"
+            "stutter daemon emergency-restore"
         );
         assert_eq!(snapshot.profile_memory.profiles.len(), 1);
         assert_eq!(
