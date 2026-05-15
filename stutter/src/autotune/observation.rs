@@ -47,15 +47,76 @@ pub struct ActiveTaskSnapshot {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveAffinitySnapshot {
+    pub per_tid: BTreeMap<u32, String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveNiceSnapshot {
+    pub per_tid: BTreeMap<u32, i32>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveIoPrioSnapshot {
+    pub per_tid: BTreeMap<u32, String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveUclampSnapshot {
+    pub per_tid: BTreeMap<u32, crate::actions::uclamp::UclampValues>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveCgroupSnapshot {
+    pub per_tid: BTreeMap<u32, String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveIrqSnapshot {
+    pub per_irq: BTreeMap<u32, String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CpuPolicyRuntimeState {
+    pub policy: String,
+    pub scaling_governor: Option<String>,
+    pub energy_performance_preference: Option<String>,
+    pub related_cpus: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveCpuPowerSnapshot {
+    pub policies: Vec<CpuPolicyRuntimeState>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GpuPowerRuntimeState {
+    pub device: String,
+    pub power_dpm_force_performance_level: Option<String>,
+    pub pp_power_profile_mode: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveGpuPowerSnapshot {
+    pub devices: Vec<GpuPowerRuntimeState>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveVmSnapshot {
+    pub knobs: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActiveConfigSnapshot {
-    pub affinity: Option<String>,
-    pub nice: Option<String>,
-    pub uclamp: Option<String>,
-    pub cgroup: Option<String>,
-    pub irq: Option<String>,
-    pub cpu_power: Option<String>,
-    pub gpu_power: Option<String>,
-    pub vm: Option<String>,
+    pub affinity: ActiveAffinitySnapshot,
+    pub nice: ActiveNiceSnapshot,
+    pub ionice: ActiveIoPrioSnapshot,
+    pub uclamp: ActiveUclampSnapshot,
+    pub cgroup: ActiveCgroupSnapshot,
+    pub irq: ActiveIrqSnapshot,
+    pub cpu_power: ActiveCpuPowerSnapshot,
+    pub gpu_power: ActiveGpuPowerSnapshot,
+    pub vm: ActiveVmSnapshot,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

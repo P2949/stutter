@@ -1,3 +1,4 @@
+pub mod active_config;
 pub mod apply;
 pub mod apply_low_risk;
 pub mod baseline;
