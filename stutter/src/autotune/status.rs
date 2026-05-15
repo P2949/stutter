@@ -784,6 +784,10 @@ mod tests {
                 reason: "candidate is being measured".to_owned(),
                 unix_nanos: Some(200),
                 score_total: Some(818),
+                candidate_count: None,
+                top_denied_reason: None,
+                situation: None,
+                focus_kind: None,
             }),
             degraded: vec![DaemonDegradedStatus {
                 category: "data_quality".to_owned(),
@@ -884,6 +888,10 @@ mod tests {
                 reason: "snapshot fault wins over history".to_owned(),
                 unix_nanos: Some(300),
                 score_total: Some(42),
+                candidate_count: None,
+                top_denied_reason: None,
+                situation: None,
+                focus_kind: None,
             }),
             faulted: Some(DaemonFaultState {
                 reason: "snapshot fault wins over history".to_owned(),

@@ -723,6 +723,10 @@ mod tests {
                 reason: "candidate passed gates".to_owned(),
                 unix_nanos: Some(200),
                 score_total: Some(300),
+                candidate_count: None,
+                top_denied_reason: None,
+                situation: None,
+                focus_kind: None,
             }),
             degraded: vec![DaemonDegradedStatus {
                 category: "data_quality".to_owned(),

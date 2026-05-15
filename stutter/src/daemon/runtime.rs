@@ -98,6 +98,10 @@ impl DaemonRuntime {
             reason: reason.clone(),
             unix_nanos: Some(unix_nanos),
             score_total: None,
+            candidate_count: None,
+            top_denied_reason: None,
+            situation: None,
+            focus_kind: None,
         });
         self.state.faulted = if next == DaemonPhase::Faulted {
             Some(DaemonFaultState {
@@ -157,6 +161,10 @@ impl DaemonRuntime {
             reason: transition.reason.clone(),
             unix_nanos: Some(unix_nanos),
             score_total: None,
+            candidate_count: None,
+            top_denied_reason: None,
+            situation: None,
+            focus_kind: None,
         });
         replace_degraded_status(
             &mut self.state.degraded,
@@ -324,6 +332,10 @@ impl DaemonRuntime {
             reason: decision.reason.clone(),
             unix_nanos: Some(unix_nanos),
             score_total: Some(decision.score_total),
+            candidate_count: Some(decision.candidate_count),
+            top_denied_reason: decision.top_denied_reason.clone(),
+            situation: Some(decision.situation.clone()),
+            focus_kind: decision.focus_kind.clone(),
         });
 
         if next_phase == DaemonPhase::Faulted {

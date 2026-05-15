@@ -901,6 +901,10 @@ fn daemon_state_for_autotune_stop(
             reason: format!("stopped: {}; last_reason={}", exit.reason, decision.reason),
             unix_nanos: Some(decision.unix_nanos),
             score_total: Some(decision.score_total),
+            candidate_count: Some(decision.candidate_count),
+            top_denied_reason: decision.top_denied_reason.clone(),
+            situation: Some(decision.situation.clone()),
+            focus_kind: decision.focus_kind.clone(),
         })
         .unwrap_or_else(|| daemon_decision_state("autotune_stopped", exit.reason.clone()));
 
@@ -3124,6 +3128,10 @@ mod tests {
                 reason: "insufficient data".to_owned(),
                 unix_nanos: Some(1),
                 score_total: None,
+                candidate_count: None,
+                top_denied_reason: None,
+                situation: None,
+                focus_kind: None,
             }),
             ..DaemonState::default()
         };

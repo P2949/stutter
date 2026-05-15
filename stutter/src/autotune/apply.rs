@@ -4,7 +4,7 @@ use anyhow::Context;
 
 use crate::{
     actions::{
-        ActionOutcome, ActionState, RollbackToken, SafetyClass, TuningAction,
+        RollbackToken, SafetyClass, TuningAction,
         cpu_affinity::CpuAffinityProfileAction,
         runner::{
             ActionHooks, ActionRunPolicy, AuditedActionResult, run_audited_action_with_hooks,
@@ -340,7 +340,7 @@ fn action_kind_static(action_kind: &str) -> &'static str {
 mod tests {
     use super::*;
     use crate::{
-        actions::{ActionId, ActionWarning},
+        actions::{ActionId, ActionOutcome, ActionState, ActionWarning},
         daemon_policy::{ActionEffectScope, RollbackRequirement},
     };
 
