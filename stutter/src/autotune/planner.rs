@@ -4,7 +4,7 @@ use crate::{
     actions::ActionState,
     autotune::{
         candidate::{
-            CandidateAction, CandidateDryRunRecord, CandidateEvidence, dry_run_candidates,
+            CandidateAction, CandidateDryRunner, CandidateEvidence, RealCandidateDryRunner,
         },
         controller::ControllerRuntimeState,
         kept::ActiveProfileState,
@@ -60,6 +60,21 @@ pub struct CandidateEvaluation {
     pub rank: Option<u32>,
     pub dry_run: Option<ActionState>,
     pub candidate: CandidateAction,
+}
+
+#[derive(Clone, Debug)]
+struct CandidateEvaluationDraft {
+    candidate_name: String,
+    action_kind: String,
+    descriptor: ActionDescriptor,
+    provider: String,
+    confidence: f32,
+    deny_reasons: Vec<CandidateDenyReason>,
+    deny_messages: Vec<String>,
+    evidence: Vec<CandidateEvidence>,
+    objective: ObjectiveKind,
+    rank: Option<u32>,
+    candidate: CandidateAction,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -167,202 +182,292 @@ fn evaluate_proposals(
     input: PlannerInput<'_>,
     proposals: Vec<CandidateProposal>,
 ) -> Vec<CandidateEvaluation> {
-    let candidates = proposals
-        .iter()
-        .map(|proposal| proposal.candidate.clone())
-        .collect::<Vec<_>>();
-    let dry_runs = dry_run_candidates(&candidates);
-
-    evaluate_proposals_with_dry_runs(input, proposals, &dry_runs)
+    let mut dry_runner = RealCandidateDryRunner;
+    evaluate_proposals_with_runner(input, proposals, &mut dry_runner)
 }
 
-fn evaluate_proposals_with_dry_runs(
+fn evaluate_proposals_with_runner<R: CandidateDryRunner>(
     input: PlannerInput<'_>,
     proposals: Vec<CandidateProposal>,
-    dry_runs: &[CandidateDryRunRecord],
+    dry_runner: &mut R,
 ) -> Vec<CandidateEvaluation> {
     proposals
         .into_iter()
         .map(|proposal| {
-            let mut descriptor = proposal.candidate.descriptor();
-            descriptor.confidence = Some(proposal.confidence);
-            let dry_run = dry_runs
-                .iter()
-                .find(|record| record.candidate_name == proposal.candidate.candidate_name());
-            let mut deny_reasons = Vec::new();
-            let mut deny_messages = proposal.deny_reasons.clone();
-
-            let policy_context = policy_context_for_input(input);
-            if let Err(rejection) = input.daemon_policy.check_action_with_context(
-                PolicyIntent::Suggest,
-                &descriptor,
-                &policy_context,
-            ) {
-                deny_reasons.push(deny_reason_from_policy(rejection.reason_code()));
-                deny_messages.push(rejection.to_string());
-            }
-
-            if input.observation.focus_confidence < input.daemon_policy.min_confidence {
-                deny_reasons.push(CandidateDenyReason::FocusLowConfidence);
-                deny_messages.push(format!(
-                    "focus confidence {:.3} below policy minimum {:.3}",
-                    input.observation.focus_confidence, input.daemon_policy.min_confidence
-                ));
-            }
-
-            let provider_confidence_threshold =
-                input.daemon_policy.provider_confidence_threshold(&descriptor);
-            if !proposal.confidence.is_finite() || proposal.confidence < provider_confidence_threshold
-            {
-                deny_reasons.push(CandidateDenyReason::ProviderConfidenceTooLow);
-                deny_messages.push(format!(
-                    "provider confidence {:.3} below policy minimum {:.3} for mode {} action_kind={} safety={:?}",
-                    proposal.confidence,
-                    provider_confidence_threshold,
-                    input.daemon_policy.mode,
-                    descriptor.action_kind,
-                    descriptor.safety_class
-                ));
-            }
-
-            if input.observation.focus_has_critical_realtime_warning() {
-                deny_reasons.push(CandidateDenyReason::CriticalRealtimeWarning);
-                deny_messages.push("critical realtime focus warning blocks mutation".to_owned());
-            }
-
-            let workload_policy =
-                workload_policy_for_situation(input.observation.primary_situation);
-            if !workload_policy.allows_candidate(&proposal.candidate) {
-                deny_reasons.push(CandidateDenyReason::WorkloadPolicyBlocked);
-                deny_messages.push(format!(
-                    "workload policy for {:?} does not allow action family {}",
-                    input.observation.primary_situation,
-                    proposal.candidate.action_kind()
-                ));
-            }
-            if mode_requires_autonomous_workload_family(input.daemon_policy.mode)
-                && !workload_policy.allows_autonomous_candidate(&proposal.candidate)
-            {
-                deny_reasons.push(CandidateDenyReason::NotAutonomousForWorkload);
-                deny_messages.push(format!(
-                    "workload policy for {:?} does not allow autonomous apply for action family {}; autonomous_families={:?}",
-                    input.observation.primary_situation,
-                    proposal.candidate.action_kind(),
-                    workload_policy.autonomous_families
-                ));
-            }
-            if !workload_policy.allows_objective(proposal.objective) {
-                deny_reasons.push(CandidateDenyReason::ObjectiveNotAllowedForWorkload);
-                deny_messages.push(format!(
-                    "workload policy for {:?} does not allow objective {:?}",
-                    input.observation.primary_situation, proposal.objective
-                ));
-            }
-
-            if input
-                .controller_state
-                .candidate_memory
-                .cooldown_remaining_for_action(
-                    &proposal.candidate.action_id(),
-                    input.observation.now_unix_nanos,
-                )
-                .is_some()
-            {
-                deny_reasons.push(CandidateDenyReason::CooldownActive);
-                deny_messages.push("candidate action is cooling down".to_owned());
-            }
-
-            if let Some(active_experiment) = input.controller_state.active_experiment.as_ref()
-                && proposal
-                    .candidate
-                    .conflicts_with(&active_experiment.candidate)
-            {
-                deny_reasons.push(CandidateDenyReason::ConflictWithActiveAction);
-                deny_messages.push(format!(
-                    "candidate conflict group {:?} conflicts with active experiment {} ({:?})",
-                    proposal.candidate.conflict_group(),
-                    active_experiment.candidate.candidate_name(),
-                    active_experiment.candidate.conflict_group()
-                ));
-            }
-
-            if let Some(kept) = input
-                .active_profile_state
-                .and_then(|state| state.current.as_ref())
-                && proposal.candidate.conflicts_with(&kept.candidate)
-            {
-                deny_reasons.push(CandidateDenyReason::ConflictWithKeptAction);
-                deny_messages.push(format!(
-                    "candidate conflict group {:?} conflicts with kept action {} ({:?})",
-                    proposal.candidate.conflict_group(),
-                    kept.candidate.candidate_name(),
-                    kept.candidate.conflict_group()
-                ));
-            }
-
-            if let Some(cgroup_target) = proposal.candidate.cgroup_target_path()
-                && !input
-                    .daemon_policy
-                    .cgroup_targets
-                    .contains_path(cgroup_target)
-            {
-                deny_reasons.push(CandidateDenyReason::CgroupTargetNotAllowlisted);
-                deny_messages.push(format!(
-                    "cgroup target {} is not allowlisted by daemon policy",
-                    cgroup_target.display()
-                ));
-            }
-
-            let dry_run_state = dry_run.map(|record| ActionState {
-                applied: false,
-                affected_tasks: record.affected_tasks,
-                checked_tasks: record.affected_tasks,
-                pending_changes: record.affected_tasks,
-                warnings: record.warnings.clone(),
-            });
-
-            if let Some(record) = dry_run {
-                if !record.eligible {
-                    deny_reasons.push(if record.affected_tasks == 0 {
-                        CandidateDenyReason::DryRunMatchedZeroTasks
-                    } else {
-                        CandidateDenyReason::DryRunFailed
-                    });
-                    if let Some(reason) = &record.reason {
-                        deny_messages.push(reason.clone());
-                    }
-                }
-                if record.safety_class > input.daemon_policy.max_safety_class {
-                    deny_reasons.push(CandidateDenyReason::SafetyClassTooHigh);
-                    deny_messages.push(format!(
-                        "candidate safety {:?} exceeds mode maximum {:?}",
-                        record.safety_class, input.daemon_policy.max_safety_class
-                    ));
-                }
-            }
-
-            deny_reasons.sort_by_key(|reason| format!("{reason:?}"));
-            deny_reasons.dedup();
-            deny_messages.sort();
-            deny_messages.dedup();
-
-            CandidateEvaluation {
-                candidate_name: proposal.candidate.candidate_name().to_owned(),
-                action_kind: proposal.candidate.action_kind().to_owned(),
-                descriptor,
-                provider: proposal.provider.to_owned(),
-                confidence: proposal.confidence,
-                eligible: deny_reasons.is_empty(),
-                deny_reasons,
-                deny_messages,
-                evidence: proposal.candidate.evidence().to_vec(),
-                objective: proposal.objective,
-                rank: Some(proposal.rank_hint),
-                dry_run: dry_run_state,
-                candidate: proposal.candidate,
-            }
+            let draft = evaluate_proposal_static(input, proposal);
+            dry_run_candidate_if_still_eligible(input, draft, dry_runner)
         })
         .collect()
+}
+
+fn evaluate_proposal_static(
+    input: PlannerInput<'_>,
+    proposal: CandidateProposal,
+) -> CandidateEvaluationDraft {
+    let mut descriptor = proposal.candidate.descriptor();
+    descriptor.confidence = Some(proposal.confidence);
+
+    let mut deny_reasons = Vec::new();
+    let mut deny_messages = proposal.deny_reasons.clone();
+
+    if !policy_family_enabled(input.daemon_policy, &descriptor.action_kind) {
+        deny_reasons.push(CandidateDenyReason::DisabledFamily);
+        deny_messages.push(format!(
+            "action family is not enabled by daemon policy: {}",
+            descriptor.action_kind
+        ));
+    }
+
+    if policy_family_denied(input.daemon_policy, &descriptor.action_kind) {
+        deny_reasons.push(CandidateDenyReason::DeniedFamily);
+        deny_messages.push(format!(
+            "action family is denied by daemon policy: {}",
+            descriptor.action_kind
+        ));
+    }
+
+    let policy_context = policy_context_for_input(input);
+    if let Err(rejection) = input.daemon_policy.check_action_with_context(
+        policy_intent_for_mode(input.daemon_policy.mode),
+        &descriptor,
+        &policy_context,
+    ) {
+        deny_reasons.push(deny_reason_from_policy(rejection.reason_code()));
+        deny_messages.push(rejection.to_string());
+    }
+
+    if input.observation.focus_confidence < input.daemon_policy.min_confidence {
+        deny_reasons.push(CandidateDenyReason::FocusLowConfidence);
+        deny_messages.push(format!(
+            "focus confidence {:.3} below policy minimum {:.3}",
+            input.observation.focus_confidence, input.daemon_policy.min_confidence
+        ));
+    }
+
+    let provider_confidence_threshold = input
+        .daemon_policy
+        .provider_confidence_threshold(&descriptor);
+    if !proposal.confidence.is_finite() || proposal.confidence < provider_confidence_threshold {
+        deny_reasons.push(CandidateDenyReason::ProviderConfidenceTooLow);
+        deny_messages.push(format!(
+            "provider confidence {:.3} below policy minimum {:.3} for mode {} action_kind={} safety={:?}",
+            proposal.confidence,
+            provider_confidence_threshold,
+            input.daemon_policy.mode,
+            descriptor.action_kind,
+            descriptor.safety_class
+        ));
+    }
+
+    if input.observation.focus_has_critical_realtime_warning() {
+        deny_reasons.push(CandidateDenyReason::CriticalRealtimeWarning);
+        deny_messages.push("critical realtime focus warning blocks mutation".to_owned());
+    }
+
+    let workload_policy = workload_policy_for_situation(input.observation.primary_situation);
+    if !workload_policy.allows_candidate(&proposal.candidate) {
+        deny_reasons.push(CandidateDenyReason::WorkloadPolicyBlocked);
+        deny_messages.push(format!(
+            "workload policy for {:?} does not allow action family {}",
+            input.observation.primary_situation,
+            proposal.candidate.action_kind()
+        ));
+    }
+
+    if mode_requires_autonomous_workload_family(input.daemon_policy.mode)
+        && !workload_policy.allows_autonomous_candidate(&proposal.candidate)
+    {
+        deny_reasons.push(CandidateDenyReason::NotAutonomousForWorkload);
+        deny_messages.push(format!(
+            "workload policy for {:?} does not allow autonomous apply for action family {}; autonomous_families={:?}",
+            input.observation.primary_situation,
+            proposal.candidate.action_kind(),
+            workload_policy.autonomous_families
+        ));
+    }
+
+    if !workload_policy.allows_objective(proposal.objective) {
+        deny_reasons.push(CandidateDenyReason::ObjectiveNotAllowedForWorkload);
+        deny_messages.push(format!(
+            "workload policy for {:?} does not allow objective {:?}",
+            input.observation.primary_situation, proposal.objective
+        ));
+    }
+
+    if input
+        .controller_state
+        .candidate_memory
+        .cooldown_remaining_for_action(
+            &proposal.candidate.action_id(),
+            input.observation.now_unix_nanos,
+        )
+        .is_some()
+    {
+        deny_reasons.push(CandidateDenyReason::CooldownActive);
+        deny_messages.push("candidate action is cooling down".to_owned());
+    }
+
+    if let Some(active_experiment) = input.controller_state.active_experiment.as_ref()
+        && proposal
+            .candidate
+            .conflicts_with(&active_experiment.candidate)
+    {
+        deny_reasons.push(CandidateDenyReason::ConflictWithActiveAction);
+        deny_messages.push(format!(
+            "candidate conflict group {:?} conflicts with active experiment {} ({:?})",
+            proposal.candidate.conflict_group(),
+            active_experiment.candidate.candidate_name(),
+            active_experiment.candidate.conflict_group()
+        ));
+    }
+
+    if let Some(kept) = input
+        .active_profile_state
+        .and_then(|state| state.current.as_ref())
+        && proposal.candidate.conflicts_with(&kept.candidate)
+    {
+        deny_reasons.push(CandidateDenyReason::ConflictWithKeptAction);
+        deny_messages.push(format!(
+            "candidate conflict group {:?} conflicts with kept action {} ({:?})",
+            proposal.candidate.conflict_group(),
+            kept.candidate.candidate_name(),
+            kept.candidate.conflict_group()
+        ));
+    }
+
+    if let Some(cgroup_target) = proposal.candidate.cgroup_target_path()
+        && !input
+            .daemon_policy
+            .cgroup_targets
+            .contains_path(cgroup_target)
+    {
+        deny_reasons.push(CandidateDenyReason::CgroupTargetNotAllowlisted);
+        deny_messages.push(format!(
+            "cgroup target {} is not allowlisted by daemon policy",
+            cgroup_target.display()
+        ));
+    }
+
+    normalize_evaluation_denials(&mut deny_reasons, &mut deny_messages);
+
+    let candidate_name = proposal.candidate.candidate_name().to_owned();
+    let action_kind = proposal.candidate.action_kind().to_owned();
+    let evidence = proposal.candidate.evidence().to_vec();
+
+    CandidateEvaluationDraft {
+        candidate_name,
+        action_kind,
+        descriptor,
+        provider: proposal.provider.to_owned(),
+        confidence: proposal.confidence,
+        deny_reasons,
+        deny_messages,
+        evidence,
+        objective: proposal.objective,
+        rank: Some(proposal.rank_hint),
+        candidate: proposal.candidate,
+    }
+}
+
+fn dry_run_candidate_if_still_eligible<R: CandidateDryRunner>(
+    input: PlannerInput<'_>,
+    draft: CandidateEvaluationDraft,
+    dry_runner: &mut R,
+) -> CandidateEvaluation {
+    let mut deny_reasons = draft.deny_reasons;
+    let mut deny_messages = draft.deny_messages;
+    let mut dry_run_state = None;
+
+    if deny_reasons.is_empty() {
+        let record = dry_runner.dry_run(&draft.candidate);
+        dry_run_state = Some(ActionState {
+            applied: false,
+            affected_tasks: record.affected_tasks,
+            checked_tasks: record.affected_tasks,
+            pending_changes: record.affected_tasks,
+            warnings: record.warnings.clone(),
+        });
+
+        if !record.eligible {
+            deny_reasons.push(if record.affected_tasks == 0 {
+                CandidateDenyReason::DryRunMatchedZeroTasks
+            } else {
+                CandidateDenyReason::DryRunFailed
+            });
+            if let Some(reason) = &record.reason {
+                deny_messages.push(reason.clone());
+            }
+        }
+
+        if record.safety_class > input.daemon_policy.max_safety_class {
+            deny_reasons.push(CandidateDenyReason::SafetyClassTooHigh);
+            deny_messages.push(format!(
+                "candidate safety {:?} exceeds mode maximum {:?}",
+                record.safety_class, input.daemon_policy.max_safety_class
+            ));
+        }
+    }
+
+    normalize_evaluation_denials(&mut deny_reasons, &mut deny_messages);
+
+    CandidateEvaluation {
+        candidate_name: draft.candidate_name,
+        action_kind: draft.action_kind,
+        descriptor: draft.descriptor,
+        provider: draft.provider,
+        confidence: draft.confidence,
+        eligible: deny_reasons.is_empty(),
+        deny_reasons,
+        deny_messages,
+        evidence: draft.evidence,
+        objective: draft.objective,
+        rank: draft.rank,
+        dry_run: dry_run_state,
+        candidate: draft.candidate,
+    }
+}
+
+fn normalize_evaluation_denials(
+    deny_reasons: &mut Vec<CandidateDenyReason>,
+    deny_messages: &mut Vec<String>,
+) {
+    deny_reasons.sort_by_key(|reason| format!("{reason:?}"));
+    deny_reasons.dedup();
+    deny_messages.sort();
+    deny_messages.dedup();
+}
+
+fn policy_intent_for_mode(mode: DaemonMode) -> PolicyIntent {
+    if mode.supports_apply() {
+        PolicyIntent::Apply
+    } else {
+        PolicyIntent::Suggest
+    }
+}
+
+fn policy_family_enabled(policy: &DaemonPolicy, action_kind: &str) -> bool {
+    policy.enabled_action_families.is_empty()
+        || policy
+            .enabled_action_families
+            .iter()
+            .any(|family| policy_family_matches(action_kind, family))
+}
+
+fn policy_family_denied(policy: &DaemonPolicy, action_kind: &str) -> bool {
+    policy
+        .denied_action_families
+        .iter()
+        .any(|family| policy_family_matches(action_kind, family))
+}
+
+fn policy_family_matches(action_kind: &str, family: &str) -> bool {
+    action_kind == family
+        || action_kind.strip_prefix(family).is_some_and(|suffix| {
+            matches!(
+                suffix.as_bytes().first(),
+                Some(b':') | Some(b'-') | Some(b'_')
+            )
+        })
 }
 
 fn mode_requires_autonomous_workload_family(mode: DaemonMode) -> bool {
@@ -427,13 +532,14 @@ mod tests {
         affinity::CpuMask,
         autotune::{
             candidate::{
-                CgroupPlacementActionPlan, CpuPowerActionPlan, IoPrioActionPlan,
-                IrqAffinityActionPlan, NiceActionPlan, UclampActionPlan,
+                CandidateDryRunRecord, CgroupPlacementActionPlan, CpuPowerActionPlan,
+                IoPrioActionPlan, IrqAffinityActionPlan, NiceActionPlan, UclampActionPlan,
             },
+            candidate_memory::CandidateContextHashInput,
             controller::ActiveExperiment,
             experiment::{ExperimentId, WindowScore},
             kept::{ActiveProfileState, KeptCandidateState},
-            observation::{ActiveTaskSnapshot, AutotuneObservation},
+            observation::{ActiveTaskSnapshot, AutotuneObservation, WorkloadIdentity},
             providers::{CandidateProvider, CandidateProviderInput, CandidateProviderRegistry},
             quality::OnlineDataQuality,
             state::SituationKind,
@@ -494,6 +600,16 @@ mod tests {
             focus_kind: Some(FocusGroupKind::Game),
             focus_confidence: 0.95,
             focus_roots: vec![1234],
+            workload_identity: Some(WorkloadIdentity {
+                root_pid: 1234,
+                process_starttime_ticks: Some(10),
+                exe_dev: Some(1),
+                exe_ino: Some(2),
+                cgroup_path: Some("/user.slice/app.scope".to_owned()),
+                focus_kind: Some(FocusGroupKind::Game),
+                class_distribution: std::collections::BTreeMap::from([("game".to_owned(), 1)]),
+                stable_hash: "test-workload".to_owned(),
+            }),
             ..AutotuneObservation::default()
         };
         observation.refresh_situation_classification();
@@ -709,6 +825,57 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct CountingDryRunner {
+        calls: usize,
+    }
+
+    impl CandidateDryRunner for CountingDryRunner {
+        fn dry_run(&mut self, candidate: &CandidateAction) -> CandidateDryRunRecord {
+            self.calls += 1;
+            eligible_dry_run(candidate)
+        }
+    }
+
+    fn proposal_for_candidate(candidate: CandidateAction, confidence: f32) -> CandidateProposal {
+        CandidateProposal {
+            candidate: candidate.clone(),
+            provider: candidate.action_kind(),
+            confidence,
+            deny_reasons: Vec::new(),
+            objective: candidate.objective(),
+            rank_hint: 1,
+        }
+    }
+
+    fn evaluate_candidate_with_runner(
+        policy: &DaemonPolicy,
+        observation: &AutotuneObservation,
+        capabilities: &crate::daemon::DaemonCapabilities,
+        controller_state: &ControllerRuntimeState,
+        candidate: CandidateAction,
+        confidence: f32,
+        dry_runner: &mut CountingDryRunner,
+    ) -> CandidateEvaluation {
+        let proposals = vec![proposal_for_candidate(candidate, confidence)];
+        let mut evaluations = evaluate_proposals_with_runner(
+            PlannerInput {
+                observation,
+                daemon_policy: policy,
+                capabilities,
+                system_health: &observation.system_health,
+                controller_state,
+                active_profile_state: None,
+                profiles: &[],
+            },
+            proposals,
+            dry_runner,
+        );
+
+        assert_eq!(evaluations.len(), 1);
+        evaluations.remove(0)
+    }
+
     fn evaluate_static_candidate(
         mode: DaemonMode,
         situation: SituationKind,
@@ -728,32 +895,17 @@ mod tests {
         let policy = policy(mode);
         let mut observation = observation_for_situation(situation, focus_kind);
         enable_capability_for_candidate(&mut observation, &candidate);
-        let dry_runs = vec![eligible_dry_run(&candidate)];
-        let proposals = vec![CandidateProposal {
-            candidate: candidate.clone(),
-            provider: candidate.action_kind(),
+        let mut dry_runner = CountingDryRunner::default();
+
+        evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
             confidence,
-            deny_reasons: Vec::new(),
-            objective: candidate.objective(),
-            rank_hint: 1,
-        }];
-
-        let mut evaluations = evaluate_proposals_with_dry_runs(
-            PlannerInput {
-                observation: &observation,
-                daemon_policy: &policy,
-                capabilities: &observation.capabilities,
-                system_health: &observation.system_health,
-                controller_state: &ControllerRuntimeState::default(),
-                active_profile_state: None,
-                profiles: &[],
-            },
-            proposals,
-            &dry_runs,
-        );
-
-        assert_eq!(evaluations.len(), 1);
-        evaluations.remove(0)
+            &mut dry_runner,
+        )
     }
 
     fn assert_autonomous_denial_mentions_context(
@@ -892,10 +1044,7 @@ mod tests {
         let high_confidence = cpu_affinity_candidate("zzz-high-confidence");
         let policy = policy(DaemonMode::Suggest);
         let observation = observation();
-        let dry_runs = vec![
-            eligible_dry_run(&low_confidence),
-            eligible_dry_run(&high_confidence),
-        ];
+        let mut dry_runner = CountingDryRunner::default();
         let proposals = vec![
             CandidateProposal {
                 candidate: low_confidence.clone(),
@@ -915,7 +1064,7 @@ mod tests {
             },
         ];
 
-        let mut evaluations = evaluate_proposals_with_dry_runs(
+        let mut evaluations = evaluate_proposals_with_runner(
             PlannerInput {
                 observation: &observation,
                 daemon_policy: &policy,
@@ -926,14 +1075,163 @@ mod tests {
                 profiles: &[],
             },
             proposals,
-            &dry_runs,
+            &mut dry_runner,
         );
         sort_candidate_evaluations(&mut evaluations);
 
+        assert_eq!(dry_runner.calls, 2);
         assert_eq!(evaluations[0].candidate_name, "zzz-high-confidence");
         assert_eq!(evaluations[0].confidence, 0.90);
         assert_eq!(evaluations[1].candidate_name, "aaa-low-confidence");
         assert_eq!(evaluations[1].confidence, 0.80);
+    }
+
+    #[test]
+    fn policy_denied_candidate_does_not_call_dry_run() {
+        let candidate = cpu_affinity_candidate("policy-denied-no-dry-run");
+        let mut policy = policy(DaemonMode::Suggest);
+        policy
+            .denied_action_families
+            .insert("cpu_affinity_profile".to_owned());
+        let observation = observation();
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(evaluation.dry_run.is_none());
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::DeniedFamily)
+        );
+    }
+
+    #[test]
+    fn low_confidence_candidate_does_not_call_dry_run() {
+        let candidate = cpu_affinity_candidate("low-confidence-no-dry-run");
+        let policy = policy(DaemonMode::Suggest);
+        let observation = observation();
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
+            0.49,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(evaluation.dry_run.is_none());
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ProviderConfidenceTooLow)
+        );
+    }
+
+    #[test]
+    fn non_autonomous_apply_candidate_does_not_call_dry_run() {
+        let candidate = uclamp_candidate("non-autonomous-no-dry-run");
+        let policy = policy(DaemonMode::ApplyMediumRisk);
+        let mut observation = observation_for_situation(
+            SituationKind::GameCpuSchedulerPressure,
+            FocusGroupKind::Game,
+        );
+        enable_capability_for_candidate(&mut observation, &candidate);
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(evaluation.dry_run.is_none());
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::NotAutonomousForWorkload)
+        );
+    }
+
+    #[test]
+    fn cooldown_blocked_candidate_does_not_call_dry_run() {
+        let candidate = cpu_affinity_candidate("cooldown-no-dry-run");
+        let policy = policy(DaemonMode::Suggest);
+        let observation = observation();
+        let mut controller_state = ControllerRuntimeState::default();
+        controller_state.candidate_memory.record_attempt(
+            &candidate,
+            &CandidateContextHashInput::for_candidate(&candidate),
+            observation.now_unix_nanos,
+            Some(observation.now_unix_nanos + 1_000_000_000),
+        );
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &controller_state,
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(evaluation.dry_run.is_none());
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::CooldownActive)
+        );
+    }
+
+    #[test]
+    fn cgroup_not_allowlisted_candidate_does_not_call_dry_run() {
+        let candidate = cgroup_candidate("/user.slice/not-allowlisted.slice");
+        let policy = policy(DaemonMode::Suggest);
+        let mut observation =
+            observation_for_situation(SituationKind::CompileCpuBound, FocusGroupKind::Compile);
+        enable_capability_for_candidate(&mut observation, &candidate);
+        let mut capabilities = observation.capabilities.clone();
+        capabilities.cgroup_v2_available = true;
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(evaluation.dry_run.is_none());
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::CgroupTargetNotAllowlisted)
+        );
     }
 
     #[test]
