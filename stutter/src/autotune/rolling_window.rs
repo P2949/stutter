@@ -273,18 +273,23 @@ impl RollingWindow {
             .map(|event| event.duration_ns)
             .max()
             .unwrap_or(0);
+        let dirty_writeback_events = self
+            .block_io_events
+            .iter()
+            .filter(|event| event.rwbs.contains('W') || event.rwbs.contains('F'))
+            .count() as u64;
 
+        let irq_worst_event = self
+            .irq_events
+            .iter()
+            .filter(|event| event.duration_ns > 0)
+            .max_by_key(|event| event.duration_ns);
         let irq_overlap_count = self
             .irq_events
             .iter()
             .filter(|event| event.duration_ns > 0)
             .count() as u64;
-        let irq_worst_overlap_ns = self
-            .irq_events
-            .iter()
-            .map(|event| event.duration_ns)
-            .max()
-            .unwrap_or(0);
+        let irq_worst_overlap_ns = irq_worst_event.map(|event| event.duration_ns).unwrap_or(0);
 
         let thermal_samples = self
             .gpu_samples
@@ -297,9 +302,14 @@ impl RollingWindow {
             .count() as u64;
         let thermal_degraded = (!thermal_samples.is_empty()).then_some(thermal_throttle_count > 0);
 
-        let cpu_power_limited = (!self.cpu_freq_events.is_empty())
-            .then_some(self.cpu_freq_events.iter().any(|event| event.freq_khz == 0));
+        let cpu_power_limited_event = self
+            .cpu_freq_events
+            .iter()
+            .find(|event| event.freq_khz == 0);
+        let cpu_power_limited =
+            (!self.cpu_freq_events.is_empty()).then_some(cpu_power_limited_event.is_some());
 
+        let latest_gpu = self.gpu_samples.back();
         let gpu_power_limited =
             (!self.gpu_samples.is_empty()).then_some(self.gpu_samples.iter().any(|sample| {
                 sample.gpu_busy_percent.unwrap_or(0) >= GPU_POWER_LIMIT_BUSY_PERCENT
@@ -308,16 +318,27 @@ impl RollingWindow {
 
         let has_block_io_events = !self.block_io_events.is_empty();
         let has_irq_events = !self.irq_events.is_empty();
+        let has_dirty_writeback = dirty_writeback_events > 0;
 
         ObjectiveSignals {
             block_io_overlap_count: has_block_io_events.then_some(block_io_overlap_count),
             block_io_worst_latency_ns: has_block_io_events.then_some(block_io_worst_latency_ns),
             irq_overlap_count: has_irq_events.then_some(irq_overlap_count),
             irq_worst_overlap_ns: has_irq_events.then_some(irq_worst_overlap_ns),
+            irq_hot_irq: irq_worst_event.map(|event| event.irq),
+            irq_hot_cpu: irq_worst_event.map(|event| event.cpu),
             thermal_degraded,
             thermal_throttle_count: thermal_degraded.map(|_| thermal_throttle_count),
             cpu_power_limited,
+            cpu_power_limited_cpu: cpu_power_limited_event.map(|event| event.cpu),
             gpu_power_limited,
+            gpu_busy_percent: latest_gpu.and_then(|sample| sample.gpu_busy_percent),
+            gpu_clock_mhz: latest_gpu.and_then(|sample| sample.gpu_clock_mhz),
+            gpu_temp_millidegrees: latest_gpu.and_then(|sample| sample.temp_millidegrees),
+            gpu_active_render_node: None,
+            memory_pressure_some_avg10_percent: None,
+            swap_activity_events: None,
+            dirty_writeback_events: has_dirty_writeback.then_some(dirty_writeback_events),
             frame_p99_ms: Some(self.frame_p99_ms()),
             foreground_over_5ms: Some(
                 self.intervals
@@ -895,6 +916,13 @@ mod tests {
         assert_eq!(signals.block_io_worst_latency_ns, None);
         assert_eq!(signals.irq_overlap_count, None);
         assert_eq!(signals.irq_worst_overlap_ns, None);
+        assert_eq!(signals.irq_hot_irq, None);
+        assert_eq!(signals.irq_hot_cpu, None);
+        assert_eq!(signals.cpu_power_limited_cpu, None);
+        assert_eq!(signals.gpu_busy_percent, None);
+        assert_eq!(signals.gpu_clock_mhz, None);
+        assert_eq!(signals.gpu_temp_millidegrees, None);
+        assert_eq!(signals.dirty_writeback_events, None);
     }
 
     #[test]
@@ -917,9 +945,15 @@ mod tests {
         assert_eq!(signals.block_io_worst_latency_ns, Some(8_000_000));
         assert_eq!(signals.irq_overlap_count, Some(1));
         assert_eq!(signals.irq_worst_overlap_ns, Some(3_000_000));
+        assert_eq!(signals.irq_hot_irq, Some(44));
+        assert_eq!(signals.irq_hot_cpu, Some(2));
         assert_eq!(signals.thermal_degraded, Some(true));
         assert_eq!(signals.thermal_throttle_count, Some(1));
         assert_eq!(signals.cpu_power_limited, Some(true));
+        assert_eq!(signals.cpu_power_limited_cpu, Some(0));
         assert_eq!(signals.gpu_power_limited, Some(true));
+        assert_eq!(signals.gpu_busy_percent, Some(96));
+        assert_eq!(signals.gpu_clock_mhz, Some(250));
+        assert_eq!(signals.gpu_temp_millidegrees, Some(90_000));
     }
 }

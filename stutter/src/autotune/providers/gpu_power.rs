@@ -36,52 +36,35 @@ impl CandidateProvider for GpuPowerProvider {
             return Vec::new();
         }
 
-        let inventory = &input.system_context.inventory;
-        if inventory.drm_devices.len() != 1 {
+        let Some(structured_evidence) = gpu_power_evidence(input) else {
             return Vec::new();
-        }
-        let card = &inventory.drm_devices[0];
-        let runtime_state =
-            input
-                .observation
-                .active_config_snapshot
-                .as_ref()
-                .and_then(|snapshot| {
-                    snapshot
-                        .gpu_power
-                        .devices
-                        .iter()
-                        .find(|device| device.device == card.name)
-                });
-        let structured_evidence = GpuPowerCandidateEvidence {
-            drm_card: card.name.clone(),
-            render_node: card.render_node.clone(),
-            pci_id: None,
-            vendor: None,
-            current_dpm: runtime_state
-                .and_then(|state| state.power_dpm_force_performance_level.clone()),
-            current_profile: runtime_state.and_then(|state| state.pp_power_profile_mode.clone()),
-            active_for_focus: true,
         };
+
+        let confidence = gpu_power_confidence(input, &structured_evidence);
         let candidate = CandidateAction::GpuPower {
             plan: GpuPowerActionPlan {
-                name: format!("gpu-power-{}-high", card.name),
+                name: format!("gpu-power-{}-high", structured_evidence.drm_card),
                 action: GpuPowerAction {
                     sysfs_root: std::path::PathBuf::from("/sys"),
-                    drm_card: card.name.clone(),
+                    drm_card: structured_evidence.drm_card.clone(),
                     power_dpm_force_performance_level: Some("high".to_owned()),
                     pp_power_profile_mode: None,
                 },
                 evidence: vec![CandidateEvidence::new(
-                    "inventory",
+                    "gpu_power_structured",
                     format!(
-                        "drm_card={} render_node={:?} current_dpm={:?} current_profile={:?}",
+                        "drm_card={} render_node={:?} pci_id={:?} vendor={:?} current_dpm={:?} current_profile={:?} active_for_focus={} busy={:?} clock_mhz={:?}",
                         structured_evidence.drm_card,
                         structured_evidence.render_node,
+                        structured_evidence.pci_id,
+                        structured_evidence.vendor,
                         structured_evidence.current_dpm,
-                        structured_evidence.current_profile
+                        structured_evidence.current_profile,
+                        structured_evidence.active_for_focus,
+                        input.observation.objective_signals.gpu_busy_percent,
+                        input.observation.objective_signals.gpu_clock_mhz
                     ),
-                    0.7,
+                    confidence,
                 )],
                 objective: ObjectiveKind::GameFramePacing,
             },
@@ -90,12 +73,98 @@ impl CandidateProvider for GpuPowerProvider {
         vec![CandidateProposal {
             candidate,
             provider: self.family(),
-            confidence: input.observation.situation.confidence,
+            confidence,
             deny_reasons: Vec::new(),
             objective: ObjectiveKind::GameFramePacing,
             rank_hint: 85,
         }]
     }
+}
+
+fn gpu_power_evidence(input: &CandidateProviderInput<'_>) -> Option<GpuPowerCandidateEvidence> {
+    let signals = &input.observation.objective_signals;
+    if signals.gpu_power_limited != Some(true) && signals.gpu_busy_percent.unwrap_or(0) < 90 {
+        return None;
+    }
+
+    let card = selected_gpu(input)?;
+    let runtime_state = input
+        .observation
+        .active_config_snapshot
+        .as_ref()
+        .or(Some(&input.system_context.active_config))
+        .and_then(|snapshot| {
+            snapshot
+                .gpu_power
+                .devices
+                .iter()
+                .find(|device| device.device == card.name)
+        });
+
+    if runtime_state.and_then(|state| state.power_dpm_force_performance_level.as_deref())
+        == Some("high")
+    {
+        return None;
+    }
+
+    Some(GpuPowerCandidateEvidence {
+        drm_card: card.name.clone(),
+        render_node: card.render_node.clone(),
+        pci_id: card.pci_id.clone(),
+        vendor: card.vendor.clone(),
+        current_dpm: runtime_state
+            .and_then(|state| state.power_dpm_force_performance_level.clone()),
+        current_profile: runtime_state.and_then(|state| state.pp_power_profile_mode.clone()),
+        active_for_focus: true,
+    })
+}
+
+fn selected_gpu<'a>(
+    input: &'a CandidateProviderInput<'_>,
+) -> Option<&'a crate::system_inventory::DrmDeviceInventory> {
+    if let Some(render_node) = input
+        .observation
+        .objective_signals
+        .gpu_active_render_node
+        .as_deref()
+    {
+        return input
+            .system_context
+            .inventory
+            .drm_devices
+            .iter()
+            .find(|device| device.render_node.as_deref() == Some(render_node));
+    }
+
+    match input.system_context.inventory.drm_devices.as_slice() {
+        [single] => Some(single),
+        _ => None,
+    }
+}
+
+fn gpu_power_confidence(
+    input: &CandidateProviderInput<'_>,
+    evidence: &GpuPowerCandidateEvidence,
+) -> f32 {
+    let completeness = [
+        true,
+        evidence.render_node.is_some(),
+        evidence.pci_id.is_some(),
+        evidence.vendor.is_some(),
+        evidence.current_dpm.is_some(),
+        input
+            .observation
+            .objective_signals
+            .gpu_busy_percent
+            .is_some(),
+        input.observation.objective_signals.gpu_clock_mhz.is_some(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count() as f32
+        / 7.0;
+
+    (input.observation.situation.confidence * completeness).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
@@ -113,6 +182,141 @@ mod tests {
         focus::FocusGroupKind,
         system_inventory::{DrmDeviceInventory, SystemInventory},
     };
+
+    #[test]
+    fn gpu_power_provider_rejects_ambiguous_multiple_gpus_without_focus_render_node() {
+        let provider = GpuPowerProvider;
+        let mut observation = AutotuneObservation {
+            target_present: true,
+            target_root_pid: Some(1234),
+            primary_situation: SituationKind::GameGpuBound,
+            focus_kind: Some(FocusGroupKind::Game),
+            focus_confidence: 0.95,
+            ..AutotuneObservation::default()
+        };
+        observation.refresh_situation_classification();
+        observation.primary_situation = SituationKind::GameGpuBound;
+        observation.objective_signals.gpu_power_limited = Some(true);
+        observation.objective_signals.gpu_busy_percent = Some(96);
+        observation.objective_signals.gpu_clock_mhz = Some(250);
+
+        let policy = policy();
+        let system_context = SystemContextSnapshot {
+            capabilities: DaemonCapabilities::default(),
+            health: SystemHealthSnapshot::default(),
+            inventory: SystemInventory {
+                cpu_policies: Vec::new(),
+                drm_devices: vec![
+                    DrmDeviceInventory {
+                        name: "card0".to_owned(),
+                        path: PathBuf::from("/fake/sys/class/drm/card0"),
+                        render_node: Some("renderD128".to_owned()),
+                        pci_id: Some("1002:1111".to_owned()),
+                        vendor: Some("amd".to_owned()),
+                        hwmon_paths: Vec::new(),
+                    },
+                    DrmDeviceInventory {
+                        name: "card1".to_owned(),
+                        path: PathBuf::from("/fake/sys/class/drm/card1"),
+                        render_node: Some("renderD129".to_owned()),
+                        pci_id: Some("8086:2222".to_owned()),
+                        vendor: Some("intel".to_owned()),
+                        hwmon_paths: Vec::new(),
+                    },
+                ],
+                irq_default_smp_affinity: None,
+                irq_lines: Vec::new(),
+                sched_ext_available: false,
+                vm_knobs: Default::default(),
+                inventory_hash: "fake-gpu-inventory".to_owned(),
+            },
+            active_config: Default::default(),
+            sampled_at_unix_nanos: 10,
+        };
+
+        let proposals = provider.propose(&CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            system_context: &system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        });
+
+        assert!(proposals.is_empty());
+    }
+
+    #[test]
+    fn gpu_power_provider_selects_gpu_by_focus_render_node_when_multiple_gpus_exist() {
+        let provider = GpuPowerProvider;
+        let mut observation = AutotuneObservation {
+            target_present: true,
+            target_root_pid: Some(1234),
+            primary_situation: SituationKind::GameGpuBound,
+            focus_kind: Some(FocusGroupKind::Game),
+            focus_confidence: 0.95,
+            ..AutotuneObservation::default()
+        };
+        observation.refresh_situation_classification();
+        observation.primary_situation = SituationKind::GameGpuBound;
+        observation.objective_signals.gpu_power_limited = Some(true);
+        observation.objective_signals.gpu_busy_percent = Some(96);
+        observation.objective_signals.gpu_clock_mhz = Some(250);
+        observation.objective_signals.gpu_active_render_node = Some("renderD129".to_owned());
+
+        let policy = policy();
+        let system_context = SystemContextSnapshot {
+            capabilities: DaemonCapabilities::default(),
+            health: SystemHealthSnapshot::default(),
+            inventory: SystemInventory {
+                cpu_policies: Vec::new(),
+                drm_devices: vec![
+                    DrmDeviceInventory {
+                        name: "card0".to_owned(),
+                        path: PathBuf::from("/fake/sys/class/drm/card0"),
+                        render_node: Some("renderD128".to_owned()),
+                        pci_id: Some("1002:1111".to_owned()),
+                        vendor: Some("amd".to_owned()),
+                        hwmon_paths: Vec::new(),
+                    },
+                    DrmDeviceInventory {
+                        name: "card1".to_owned(),
+                        path: PathBuf::from("/fake/sys/class/drm/card1"),
+                        render_node: Some("renderD129".to_owned()),
+                        pci_id: Some("8086:2222".to_owned()),
+                        vendor: Some("intel".to_owned()),
+                        hwmon_paths: Vec::new(),
+                    },
+                ],
+                irq_default_smp_affinity: None,
+                irq_lines: Vec::new(),
+                sched_ext_available: false,
+                vm_knobs: Default::default(),
+                inventory_hash: "fake-gpu-focused-inventory".to_owned(),
+            },
+            active_config: Default::default(),
+            sampled_at_unix_nanos: 10,
+        };
+
+        let proposals = provider.propose(&CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            system_context: &system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        });
+
+        assert_eq!(proposals.len(), 1);
+        let CandidateAction::GpuPower { plan } = &proposals[0].candidate else {
+            panic!("expected gpu power candidate");
+        };
+        assert_eq!(plan.name, "gpu-power-card1-high");
+        assert_eq!(plan.action.drm_card, "card1");
+        assert!(proposals[0].confidence > 0.0);
+    }
 
     #[test]
     fn gpu_power_provider_uses_system_context_inventory() {
@@ -138,9 +342,12 @@ mod tests {
                     name: "card77".to_owned(),
                     path: PathBuf::from("/fake/sys/class/drm/card77"),
                     render_node: Some("renderD777".to_owned()),
+                    pci_id: Some("1002:744c".to_owned()),
+                    vendor: Some("amd".to_owned()),
                     hwmon_paths: Vec::new(),
                 }],
                 irq_default_smp_affinity: None,
+                irq_lines: Vec::new(),
                 sched_ext_available: false,
                 vm_knobs: Default::default(),
                 inventory_hash: "fake-gpu-inventory".to_owned(),
@@ -148,6 +355,10 @@ mod tests {
             active_config: Default::default(),
             sampled_at_unix_nanos: 10,
         };
+
+        observation.objective_signals.gpu_power_limited = Some(true);
+        observation.objective_signals.gpu_busy_percent = Some(96);
+        observation.objective_signals.gpu_clock_mhz = Some(250);
 
         let proposals = provider.propose(&CandidateProviderInput {
             observation: &observation,
