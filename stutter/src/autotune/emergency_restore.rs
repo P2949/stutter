@@ -895,9 +895,9 @@ fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyClass {
         RollbackToken::NiceRestore { .. }
         | RollbackToken::IoPrioRestore { .. }
         | RollbackToken::UclampRestore { .. }
-        | RollbackToken::IrqAffinityRestore { .. } => SafetyClass::ReversibleMediumRisk,
-        RollbackToken::CgroupRestore { .. }
-        | RollbackToken::CpuPowerRestore { .. }
+        | RollbackToken::IrqAffinityRestore { .. }
+        | RollbackToken::CgroupRestore { .. } => SafetyClass::ReversibleMediumRisk,
+        RollbackToken::CpuPowerRestore { .. }
         | RollbackToken::VmKnobRestore { .. }
         | RollbackToken::GpuPowerRestore { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,

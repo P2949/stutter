@@ -6,7 +6,7 @@ use crate::{
     actions::{ActionId, SafetyClass},
     daemon::{
         capabilities::DaemonCapabilities,
-        config::DaemonConfig,
+        config::{DaemonCgroupTargetsConfig, DaemonConfig},
         explain::{PolicyDecisionKind, PolicyExplanation, PolicyRuleEvaluation},
         health::SystemHealthSnapshot,
     },
@@ -87,7 +87,10 @@ impl ActionEffectScope {
     }
 
     fn is_explicit_target_scope(self) -> bool {
-        matches!(self, Self::LocalProcess | Self::LocalProcessTree)
+        matches!(
+            self,
+            Self::LocalProcess | Self::LocalProcessTree | Self::Cgroup
+        )
     }
 }
 
@@ -200,6 +203,7 @@ pub struct DaemonPolicy {
     pub allowed_effect_scopes: BTreeSet<ActionEffectScope>,
     pub enabled_action_families: BTreeSet<String>,
     pub denied_action_families: BTreeSet<String>,
+    pub cgroup_targets: DaemonCgroupTargetsConfig,
     pub rollback_required_before_apply: bool,
     pub allow_system_wide_actions: bool,
     pub allow_high_risk: bool,
@@ -530,6 +534,7 @@ pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
         allowed_effect_scopes: allowed_effect_scopes_for_mode(config.mode),
         enabled_action_families: config.safety.enabled_action_families.clone(),
         denied_action_families: config.safety.denied_action_families.clone(),
+        cgroup_targets: config.safety.cgroup_targets.clone(),
         rollback_required_before_apply: config.mode.supports_apply(),
         allow_system_wide_actions,
         allow_high_risk,
@@ -551,9 +556,14 @@ fn max_safety_class_for_mode(mode: DaemonMode) -> SafetyClass {
 
 fn allowed_effect_scopes_for_mode(mode: DaemonMode) -> BTreeSet<ActionEffectScope> {
     match mode {
-        DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk => BTreeSet::from([
+        DaemonMode::ApplyLowRisk => BTreeSet::from([
             ActionEffectScope::LocalProcess,
             ActionEffectScope::LocalProcessTree,
+        ]),
+        DaemonMode::ApplyMediumRisk => BTreeSet::from([
+            ActionEffectScope::LocalProcess,
+            ActionEffectScope::LocalProcessTree,
+            ActionEffectScope::Cgroup,
         ]),
         DaemonMode::Observe | DaemonMode::Suggest | DaemonMode::ApplyHighRisk => BTreeSet::from([
             ActionEffectScope::ObserveOnly,
@@ -633,9 +643,12 @@ fn remote_target_count_for_config(config: &DaemonConfig) -> usize {
 
 fn action_kind_matches_family(action_kind: &str, family: &str) -> bool {
     action_kind == family
-        || action_kind
-            .strip_prefix(family)
-            .is_some_and(|suffix| matches!(suffix.as_bytes().first(), Some(b':') | Some(b'-')))
+        || action_kind.strip_prefix(family).is_some_and(|suffix| {
+            matches!(
+                suffix.as_bytes().first(),
+                Some(b':') | Some(b'-') | Some(b'_')
+            )
+        })
 }
 
 fn unavailable_capability_for_action(

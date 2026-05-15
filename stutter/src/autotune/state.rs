@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub use super::situation::SituationKind;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ControllerPhase {
     Disabled,
@@ -20,28 +22,4 @@ pub enum AutotuneMode {
     ApplyLowRisk,
     ApplyMediumRisk,
     ApplyHighRisk,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SituationKind {
-    Unknown,
-    Idle,
-    GameFocused,
-    GameCpuSchedulerPressure,
-    GameGpuBound,
-    CompositorPressure,
-    CpuPressure,
-    IoPressure,
-    IrqPressure,
-    ThermalOrPowerLimit,
-    CompileLoad,
-    BrowserFocused,
-    BrowserCpuPressure,
-    BrowserGpuVideo,
-    BrowserIoPressure,
-    CompileCpuBound,
-    CompileLinkerPressure,
-    MediaPlayback,
-    Recording,
-    VirtualMachineLoad,
 }

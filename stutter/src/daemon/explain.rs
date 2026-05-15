@@ -578,6 +578,10 @@ mod tests {
                 reason: "insufficient data".to_owned(),
                 unix_nanos: Some(1),
                 score_total: None,
+                candidate_count: None,
+                top_denied_reason: None,
+                situation: None,
+                focus_kind: None,
             }),
             ..DaemonState::default()
         };

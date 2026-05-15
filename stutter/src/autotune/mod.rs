@@ -1,7 +1,9 @@
+pub mod apply;
 pub mod apply_low_risk;
 pub mod baseline;
 pub mod candidate;
 pub mod comparison;
+pub mod conflicts;
 pub mod controller_journal;
 pub mod emergency_restore;
 pub mod experiment;
@@ -12,11 +14,15 @@ pub mod human_output;
 pub mod kept;
 pub mod measurement;
 pub mod profiles;
+pub mod protection;
+pub mod providers;
 pub mod replay;
 pub mod resolution;
 pub mod shutdown;
+pub mod situation;
 pub mod status;
 pub mod washout;
+pub mod workload_policy;
 
 pub const DEFAULT_MIN_FOCUS_CONFIDENCE: f32 = 0.70;
 
@@ -25,7 +31,9 @@ pub mod context_segment;
 pub mod controller;
 pub mod decision;
 pub mod decision_log;
+pub mod objective;
 pub mod observation;
+pub mod planner;
 pub mod prometheus_metrics;
 pub mod quality;
 pub mod report_overlay;

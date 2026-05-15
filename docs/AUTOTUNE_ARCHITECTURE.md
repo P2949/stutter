@@ -2,6 +2,10 @@
 
 `stutter` does not currently provide a broad autonomous optimizer. This document defines the controller contract that any future limited auto-tuner must follow before it is allowed to change system state autonomously.
 
+See [FULL_SYSTEM_WATCHER_ARCHITECTURE.md](FULL_SYSTEM_WATCHER_ARCHITECTURE.md)
+for the always-on watcher loop, provider boundary, and mode compatibility
+matrix.
+
 ## Controller State Machine
 
 ```text

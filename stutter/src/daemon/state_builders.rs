@@ -33,6 +33,10 @@ pub fn daemon_decision_state(decision: &str, reason: impl Into<String>) -> Daemo
         reason: reason.into(),
         unix_nanos: Some(crate::audit::unix_nanos_now()),
         score_total: None,
+        candidate_count: None,
+        top_denied_reason: None,
+        situation: None,
+        focus_kind: None,
     }
 }
 
@@ -248,6 +252,10 @@ pub fn daemon_state_for_startup_recovery_snapshot(
             reason: input.reason,
             unix_nanos: Some(crate::audit::unix_nanos_now()),
             score_total: None,
+            candidate_count: None,
+            top_denied_reason: None,
+            situation: None,
+            focus_kind: None,
         }),
         degraded,
         faulted: faulted_state,
@@ -281,9 +289,9 @@ pub fn safety_class_for_rollback_token(token: &RollbackToken) -> SafetyClass {
         RollbackToken::NiceRestore { .. }
         | RollbackToken::IoPrioRestore { .. }
         | RollbackToken::UclampRestore { .. }
-        | RollbackToken::IrqAffinityRestore { .. } => SafetyClass::ReversibleMediumRisk,
-        RollbackToken::CgroupRestore { .. }
-        | RollbackToken::CpuPowerRestore { .. }
+        | RollbackToken::IrqAffinityRestore { .. }
+        | RollbackToken::CgroupRestore { .. } => SafetyClass::ReversibleMediumRisk,
+        RollbackToken::CpuPowerRestore { .. }
         | RollbackToken::VmKnobRestore { .. }
         | RollbackToken::GpuPowerRestore { .. }
         | RollbackToken::SysfsRestore { .. } => SafetyClass::HighRisk,
@@ -451,6 +459,26 @@ mod tests {
                 .as_ref()
                 .and_then(|fault| fault.manual_restore_command.as_deref()),
             Some("stutter daemon emergency-restore")
+        );
+    }
+
+    #[test]
+    fn rollback_token_safety_class_marks_cgroup_as_medium_risk() {
+        let cgroup = RollbackToken::CgroupRestore {
+            records: vec![crate::actions::CgroupRestoreRecord {
+                pid: 1234,
+                original_cgroup: PathBuf::from("/user.slice/app.scope"),
+            }],
+        };
+        let cpu_power = RollbackToken::CpuPowerRestore { records: vec![] };
+
+        assert_eq!(
+            safety_class_for_rollback_token(&cgroup),
+            SafetyClass::ReversibleMediumRisk
+        );
+        assert_eq!(
+            safety_class_for_rollback_token(&cpu_power),
+            SafetyClass::HighRisk
         );
     }
 

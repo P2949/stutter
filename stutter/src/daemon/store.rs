@@ -41,6 +41,10 @@ impl DaemonStateStore {
             reason: transition.reason,
             unix_nanos: Some(transition.unix_nanos),
             score_total: None,
+            candidate_count: None,
+            top_denied_reason: None,
+            situation: None,
+            focus_kind: None,
         });
 
         if !transition.to.is_faulted() {
@@ -64,6 +68,10 @@ impl DaemonStateStore {
             reason: reason.clone(),
             unix_nanos: Some(crate::audit::unix_nanos_now()),
             score_total: None,
+            candidate_count: None,
+            top_denied_reason: None,
+            situation: None,
+            focus_kind: None,
         });
         state.degraded = vec![DaemonDegradedStatus {
             category: "daemon_state_store".to_owned(),
@@ -90,6 +98,10 @@ impl DaemonStateStore {
             reason,
             unix_nanos: Some(crate::audit::unix_nanos_now()),
             score_total: None,
+            candidate_count: None,
+            top_denied_reason: None,
+            situation: None,
+            focus_kind: None,
         });
         state.faulted = None;
 
@@ -109,6 +121,10 @@ impl DaemonStateStore {
             reason,
             unix_nanos: Some(crate::audit::unix_nanos_now()),
             score_total: None,
+            candidate_count: None,
+            top_denied_reason: None,
+            situation: None,
+            focus_kind: None,
         });
 
         self.replace(state)
@@ -128,6 +144,10 @@ impl DaemonStateStore {
             reason,
             unix_nanos: Some(crate::audit::unix_nanos_now()),
             score_total: None,
+            candidate_count: None,
+            top_denied_reason: None,
+            situation: None,
+            focus_kind: None,
         });
 
         self.replace(state)

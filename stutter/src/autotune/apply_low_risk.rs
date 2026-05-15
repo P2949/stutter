@@ -59,12 +59,12 @@ pub trait LowRiskActionExecutor {
     fn rollback(&mut self, token: &RollbackToken) -> anyhow::Result<()>;
 }
 
-pub struct CpuAffinityCandidateExecutor {
+pub struct CpuAffinityLowRiskExecutor {
     candidate_name: String,
     action: CpuAffinityProfileAction,
 }
 
-impl CpuAffinityCandidateExecutor {
+impl CpuAffinityLowRiskExecutor {
     pub fn from_candidate(candidate: CandidateAction) -> anyhow::Result<Self> {
         match candidate {
             CandidateAction::CpuAffinityProfile {
@@ -79,14 +79,12 @@ impl CpuAffinityCandidateExecutor {
                     force_restore_overwrite: false,
                 },
             }),
-            CandidateAction::Fake { .. } => {
-                anyhow::bail!("apply-low-risk currently supports CPU-affinity profile actions only")
-            }
+            other => unsupported_low_risk_candidate(&other),
         }
     }
 }
 
-impl LowRiskActionExecutor for CpuAffinityCandidateExecutor {
+impl LowRiskActionExecutor for CpuAffinityLowRiskExecutor {
     fn candidate_name(&self) -> &str {
         &self.candidate_name
     }
@@ -116,6 +114,24 @@ impl LowRiskActionExecutor for CpuAffinityCandidateExecutor {
     fn rollback(&mut self, token: &RollbackToken) -> anyhow::Result<()> {
         self.action.rollback(token)
     }
+}
+
+pub fn executor_for_low_risk_candidate(
+    candidate: CandidateAction,
+) -> anyhow::Result<Box<dyn LowRiskActionExecutor>> {
+    Ok(Box::new(CpuAffinityLowRiskExecutor::from_candidate(
+        candidate,
+    )?))
+}
+
+fn unsupported_low_risk_candidate<T>(candidate: &CandidateAction) -> anyhow::Result<T> {
+    anyhow::bail!(
+        "apply-low-risk supports CPU-affinity profile actions only; candidate '{}' action_kind={} safety={:?} required_mode={}",
+        candidate.candidate_name(),
+        candidate.action_kind(),
+        candidate.safety_class(),
+        crate::daemon_policy::DaemonMode::ApplyMediumRisk
+    )
 }
 
 pub struct AuditedRollbackGuard<'a, A: TuningAction + ?Sized> {
@@ -227,9 +243,7 @@ pub fn action_from_candidate(
                 force_restore_overwrite: false,
             },
         )),
-        CandidateAction::Fake { .. } => {
-            anyhow::bail!("apply-low-risk currently supports CPU-affinity profile actions only")
-        }
+        other => unsupported_low_risk_candidate(&other),
     }
 }
 
@@ -341,8 +355,8 @@ pub async fn run_apply_low_risk_candidate(
     candidate: CandidateAction,
     duration: Duration,
 ) -> anyhow::Result<ApplyLowRiskOutcome> {
-    let mut executor = CpuAffinityCandidateExecutor::from_candidate(candidate)?;
-    run_apply_low_risk_with_executor(&mut executor, duration).await
+    let mut executor = executor_for_low_risk_candidate(candidate)?;
+    run_apply_low_risk_with_executor(executor.as_mut(), duration).await
 }
 
 pub async fn run_apply_low_risk_with_executor<E: LowRiskActionExecutor + ?Sized>(
