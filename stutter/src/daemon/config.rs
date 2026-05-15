@@ -228,7 +228,8 @@ pub struct DaemonSafetyConfig {
     pub enabled_action_families: BTreeSet<String>,
     pub denied_action_families: BTreeSet<String>,
     pub cgroup_targets: DaemonCgroupTargetsConfig,
-    pub allow_system_wide_actions: bool,
+    pub allow_system_wide_suggestions: bool,
+    pub allow_system_wide_apply: bool,
     pub allow_high_risk: bool,
     pub allow_persistent_effects: bool,
     pub min_confidence: f32,
@@ -245,7 +246,8 @@ impl Default for DaemonSafetyConfig {
             enabled_action_families: BTreeSet::new(),
             denied_action_families: BTreeSet::new(),
             cgroup_targets: DaemonCgroupTargetsConfig::default(),
-            allow_system_wide_actions: false,
+            allow_system_wide_suggestions: false,
+            allow_system_wide_apply: false,
             allow_high_risk: false,
             allow_persistent_effects: false,
             min_confidence: 0.0,
@@ -482,7 +484,8 @@ mod tests {
         config.target.tree_pids.push(1234);
         config.target.require_explicit_target = true;
         config.safety.max_safety_class = SafetyClass::ReversibleLowRisk;
-        config.safety.allow_system_wide_actions = false;
+        config.safety.allow_system_wide_suggestions = true;
+        config.safety.allow_system_wide_apply = false;
         config.retention.max_state_snapshots = 4;
         config.remote.allow_remote_apply = true;
         config.autotune.candidate_window_seconds = 60;
@@ -496,6 +499,8 @@ mod tests {
             config.safety.max_safety_class,
             SafetyClass::ReversibleLowRisk
         );
+        assert!(config.safety.allow_system_wide_suggestions);
+        assert!(!config.safety.allow_system_wide_apply);
         assert_eq!(config.retention.max_state_snapshots, 4);
         assert!(config.remote.allow_remote_apply);
         assert_eq!(config.autotune.candidate_window_seconds, 60);
@@ -536,7 +541,8 @@ mod tests {
                 .enabled_action_families
                 .contains("cpu_affinity_profile")
         );
-        assert!(!gaming.safety.allow_system_wide_actions);
+        assert!(!gaming.safety.allow_system_wide_suggestions);
+        assert!(!gaming.safety.allow_system_wide_apply);
         assert!(gaming.safety.min_confidence >= 0.85);
 
         let laptop = DaemonConfig::from_preset(DaemonPreset::GamingLaptopSafe, ActionSource::Cli);

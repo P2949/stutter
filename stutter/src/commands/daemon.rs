@@ -1605,8 +1605,12 @@ fn render_config_explain_text(output: &DaemonConfigExplainOutput) -> String {
         output.policy.rollback_required_before_apply
     ));
     text.push_str(&format!(
-        "allow_system_wide_actions: {}\n",
-        output.policy.allow_system_wide_actions
+        "allow_system_wide_suggestions: {}\n",
+        output.policy.allow_system_wide_suggestions
+    ));
+    text.push_str(&format!(
+        "allow_system_wide_apply: {}\n",
+        output.policy.allow_system_wide_apply
     ));
     text.push_str(&format!(
         "allow_high_risk: {}\n",
@@ -2388,7 +2392,8 @@ mod tests {
     fn daemon_config_explain_rejects_unguarded_experimental_policy_overrides() {
         let user_config = UserConfigFile {
             daemon_preset: Some("gaming-low-risk".to_owned()),
-            daemon_allow_system_wide_actions: Some(true),
+            daemon_allow_system_wide_suggestions: Some(true),
+            daemon_allow_system_wide_apply: Some(true),
             ..Default::default()
         };
 

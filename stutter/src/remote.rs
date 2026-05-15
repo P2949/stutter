@@ -141,7 +141,8 @@ pub struct AgentAutotuneLimits {
     pub allow_high_risk: bool,
     pub max_candidate_window_seconds: u64,
     pub max_targets: usize,
-    pub allow_system_wide_actions: bool,
+    pub allow_system_wide_suggestions: bool,
+    pub allow_system_wide_apply: bool,
 }
 
 impl Default for AgentAutotuneLimits {
@@ -153,7 +154,8 @@ impl Default for AgentAutotuneLimits {
             allow_high_risk: false,
             max_candidate_window_seconds: 120,
             max_targets: 1,
-            allow_system_wide_actions: false,
+            allow_system_wide_suggestions: false,
+            allow_system_wide_apply: false,
         }
     }
 }
@@ -173,7 +175,9 @@ struct AgentAutotuneLimitsCompat {
     #[serde(default = "default_max_targets")]
     max_targets: usize,
     #[serde(default)]
-    allow_system_wide_actions: bool,
+    allow_system_wide_suggestions: bool,
+    #[serde(default)]
+    allow_system_wide_apply: bool,
 }
 
 fn default_max_active_controllers() -> usize {
@@ -233,7 +237,8 @@ impl<'de> Deserialize<'de> for AgentAutotuneLimits {
             allow_high_risk: compat.allow_high_risk,
             max_candidate_window_seconds: compat.max_candidate_window_seconds,
             max_targets: compat.max_targets,
-            allow_system_wide_actions: compat.allow_system_wide_actions,
+            allow_system_wide_suggestions: compat.allow_system_wide_suggestions,
+            allow_system_wide_apply: compat.allow_system_wide_apply,
         })
     }
 }
@@ -328,7 +333,8 @@ pub struct AutotuneConfigResponse {
     pub history_path: String,
     pub autotune_limits: AgentAutotuneLimits,
     pub daemon_scope: String,
-    pub allow_system_wide_actions: bool,
+    pub allow_system_wide_suggestions: bool,
+    pub allow_system_wide_apply: bool,
     pub minimum_focus_confidence: f32,
     pub required_stable_focus_polls: u32,
 }
@@ -586,7 +592,8 @@ mod tests {
         assert_eq!(limits.max_mode, DaemonMode::ApplyLowRisk);
         assert_eq!(limits.max_safety_class, SafetyClass::ReversibleLowRisk);
         assert!(!limits.allow_high_risk);
-        assert!(!limits.allow_system_wide_actions);
+        assert!(!limits.allow_system_wide_suggestions);
+        assert!(!limits.allow_system_wide_apply);
     }
 
     #[test]
@@ -596,7 +603,8 @@ mod tests {
                "max_safety_class": "ReversibleLowRisk",
                "max_candidate_window_seconds": 120,
                "max_targets": 1,
-               "allow_system_wide_actions": false
+               "allow_system_wide_suggestions": false,
+               "allow_system_wide_apply": false
            }"#;
 
         let limits: AgentAutotuneLimits = serde_json::from_str(json).unwrap();
@@ -615,7 +623,8 @@ mod tests {
                "allow_high_risk": false,
                "max_candidate_window_seconds": 120,
                "max_targets": 1,
-               "allow_system_wide_actions": false
+               "allow_system_wide_suggestions": false,
+               "allow_system_wide_apply": false
            }"#;
 
         let limits: AgentAutotuneLimits = serde_json::from_str(json).unwrap();

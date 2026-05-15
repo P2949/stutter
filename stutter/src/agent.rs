@@ -662,7 +662,9 @@ fn daemon_policy_for_remote_mode(
     config.remote.allow_remote_apply = mode.supports_apply();
     config.safety.allow_high_risk =
         state.autotune_limits.allow_high_risk && mode == DaemonMode::ApplyHighRisk;
-    config.safety.allow_system_wide_actions = state.autotune_limits.allow_system_wide_actions;
+    config.safety.allow_system_wide_suggestions =
+        state.autotune_limits.allow_system_wide_suggestions;
+    config.safety.allow_system_wide_apply = state.autotune_limits.allow_system_wide_apply;
 
     build_daemon_policy(DaemonPolicyBuildInput {
         config: &config,
@@ -711,8 +713,8 @@ fn validate_autotune_start_limits(
         anyhow::bail!("remote autotune supports exactly one active controller");
     }
 
-    if limits.allow_system_wide_actions {
-        anyhow::bail!("remote autotune system-wide actions are disabled by default");
+    if limits.allow_system_wide_apply {
+        anyhow::bail!("remote autotune system-wide apply is disabled by default");
     }
 
     let requested_target_count =
@@ -1816,7 +1818,7 @@ async fn autotune_start_handler(
         washout_verify_interval_ms: request
             .washout_verify_interval_ms
             .unwrap_or(crate::autotune::washout::DEFAULT_WASHOUT_VERIFY_INTERVAL_MS),
-        allow_system_wide_actions: false,
+        allow_system_wide_suggestions: false,
     };
 
     let monitor_config = match crate::cli::autotune_monitor_config(&input) {
@@ -1885,7 +1887,8 @@ async fn autotune_start_handler(
         );
         daemon_config.remote.allow_remote_apply = policy.mode.supports_apply();
         daemon_config.safety.allow_high_risk = policy.allow_high_risk;
-        daemon_config.safety.allow_system_wide_actions = policy.allow_system_wide_actions;
+        daemon_config.safety.allow_system_wide_suggestions = policy.allow_system_wide_suggestions;
+        daemon_config.safety.allow_system_wide_apply = policy.allow_system_wide_apply;
 
         let mut runtime_config = AutotuneRuntimeConfig::from_daemon_parts(
             daemon_config,
@@ -1929,12 +1932,13 @@ async fn autotune_start_handler(
         true,
         0,
         format!(
-            "daemon_mode={} action_source={:?} allow_system_wide_actions={} allow_high_risk={} watch_process={:?} tree_pid={:?}",
-            policy.mode,
+            "daemon_mode={} action_source={:?} allow_system_wide_suggestions={} allow_system_wide_apply={} allow_high_risk={} watch_process={:?} tree_pid={:?}",
+            policy.mode.as_str(),
             policy.source,
-            policy.allow_system_wide_actions,
+            policy.allow_system_wide_suggestions,
+            policy.allow_system_wide_apply,
             policy.allow_high_risk,
-            request.watch_process,
+            request.watch_process.as_deref().unwrap_or("none"),
             request.tree_pid
         ),
     );
@@ -2165,7 +2169,8 @@ async fn autotune_config_handler(
             .to_string(),
         autotune_limits: state.autotune_limits.clone(),
         daemon_scope: "remote-agent".to_owned(),
-        allow_system_wide_actions: state.autotune_limits.allow_system_wide_actions,
+        allow_system_wide_suggestions: state.autotune_limits.allow_system_wide_suggestions,
+        allow_system_wide_apply: state.autotune_limits.allow_system_wide_apply,
         minimum_focus_confidence: 0.70,
         required_stable_focus_polls: 3,
     })
@@ -3360,7 +3365,8 @@ mod tests {
 
         assert_eq!(policy.mode, DaemonMode::ApplyLowRisk);
         assert_eq!(policy.source, ActionSource::RemoteAgent);
-        assert!(!policy.allow_system_wide_actions);
+        assert!(!policy.allow_system_wide_suggestions);
+        assert!(!policy.allow_system_wide_apply);
         assert!(!policy.allow_high_risk);
     }
 
@@ -4170,7 +4176,8 @@ mod tests {
                 .to_string(),
             autotune_limits: state.autotune_limits.clone(),
             daemon_scope: "focused".to_owned(),
-            allow_system_wide_actions: false,
+            allow_system_wide_suggestions: false,
+            allow_system_wide_apply: false,
             minimum_focus_confidence: 0.70,
             required_stable_focus_polls: 3,
         };
@@ -4183,7 +4190,8 @@ mod tests {
         );
         assert_eq!(response.autotune_limits.max_candidate_window_seconds, 120);
         assert_eq!(response.autotune_limits.max_targets, 1);
-        assert!(!response.autotune_limits.allow_system_wide_actions);
+        assert!(!response.autotune_limits.allow_system_wide_suggestions);
+        assert!(!response.autotune_limits.allow_system_wide_apply);
     }
 
     #[tokio::test]
@@ -4213,9 +4221,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn autotune_start_rejects_system_wide_actions_by_default() {
+    async fn autotune_start_accepts_system_wide_suggestions_by_default() {
         let mut state_value = test_agent_state("127.0.0.1:0".parse().unwrap(), None);
-        state_value.autotune_limits.allow_system_wide_actions = true; // but the validator rejects it for remote
+        state_value.autotune_limits.allow_system_wide_suggestions = true;
+        state_value.autotune_limits.allow_system_wide_apply = false;
+        let state = Arc::new(state_value);
+
+        let response = autotune_start_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Json(autotune_request("observe")),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn autotune_start_rejects_system_wide_apply_by_default() {
+        let mut state_value = test_agent_state("127.0.0.1:0".parse().unwrap(), None);
+        state_value.autotune_limits.allow_system_wide_suggestions = false;
+        state_value.autotune_limits.allow_system_wide_apply = true;
         let state = Arc::new(state_value);
 
         let response = autotune_start_handler(
@@ -4227,7 +4254,6 @@ mod tests {
         .into_response();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        // The error comes from validate_autotune_start_limits
     }
 
     #[test]
@@ -4870,7 +4896,8 @@ mod remote_policy_tests {
                 allow_high_risk: false,
                 max_candidate_window_seconds: 60,
                 max_targets: 10,
-                allow_system_wide_actions: false,
+                allow_system_wide_suggestions: false,
+                allow_system_wide_apply: false,
             },
             health_thresholds: SystemHealthThresholds::default(),
         }
