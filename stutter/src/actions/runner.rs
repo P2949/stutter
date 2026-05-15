@@ -23,6 +23,58 @@ pub struct AuditedActionResult {
     pub outcome: ActionOutcome,
 }
 
+type ActionHookResult = anyhow::Result<()>;
+type AfterApplyHook<'a> = dyn FnMut(&RollbackToken) -> ActionHookResult + 'a;
+type RollbackHook<'a> = dyn FnMut(&RollbackToken) -> ActionHookResult + 'a;
+
+pub(crate) struct ActionHooks<'a> {
+    after_apply: Option<Box<AfterApplyHook<'a>>>,
+    after_rollback: Option<Box<RollbackHook<'a>>>,
+}
+
+impl<'a> ActionHooks<'a> {
+    pub(crate) fn none() -> Self {
+        Self {
+            after_apply: None,
+            after_rollback: None,
+        }
+    }
+
+    pub(crate) fn after_apply<F>(after_apply: F) -> Self
+    where
+        F: FnMut(&RollbackToken) -> ActionHookResult + 'a,
+    {
+        Self {
+            after_apply: Some(Box::new(after_apply)),
+            after_rollback: None,
+        }
+    }
+
+    pub(crate) fn with_after_rollback<F>(mut self, after_rollback: F) -> Self
+    where
+        F: FnMut(&RollbackToken) -> ActionHookResult + 'a,
+    {
+        self.after_rollback = Some(Box::new(after_rollback));
+        self
+    }
+
+    fn run_after_apply(&mut self, rollback: &RollbackToken) -> ActionHookResult {
+        if let Some(after_apply) = self.after_apply.as_mut() {
+            after_apply(rollback)?;
+        }
+
+        Ok(())
+    }
+
+    fn run_after_rollback(&mut self, rollback: &RollbackToken) -> ActionHookResult {
+        if let Some(after_rollback) = self.after_rollback.as_mut() {
+            after_rollback(rollback)?;
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ActionRunPolicy {
     pub policy: DaemonPolicy,
@@ -192,6 +244,7 @@ fn rollback_after_timeout<A>(
     timeout_error: ActionError,
     audit_path: &Path,
     audit_event: &AuditEvent,
+    hooks: &mut ActionHooks<'_>,
 ) -> ActionError
 where
     A: TuningAction,
@@ -207,6 +260,25 @@ where
 
     match action.rollback(rollback) {
         Ok(()) => {
+            if let Err(hook_err) = hooks.run_after_rollback(rollback) {
+                append_runner_audit_event(
+                    audit_path,
+                    audit_event,
+                    RunnerAuditEventUpdate::new(
+                        Some(ActionPhase::Rollback),
+                        false,
+                        rollback.affected_tasks(),
+                        rollback.restore_path().cloned(),
+                        Some("RollbackHookFailed".to_owned()),
+                        "rollback completed after action timeout, but after-rollback hook failed",
+                    ),
+                );
+
+                return ActionError::rollback(format!(
+                    "rollback completed after action timeout, but after-rollback hook failed: {hook_err:#}"
+                ));
+            }
+
             append_runner_audit_event(
                 audit_path,
                 audit_event,
@@ -219,11 +291,34 @@ where
                     "rollback completed after action timeout",
                 ),
             );
+
             ActionError::timeout_rollback_completed(phase, elapsed_ms, timeout_ms)
         }
         Err(rollback_error) => {
             ActionError::timeout_rollback_failure(phase, elapsed_ms, timeout_ms, rollback_error)
         }
+    }
+}
+
+fn rollback_after_apply_hook_failure<A>(
+    action: &A,
+    rollback: &RollbackToken,
+    hook_error: anyhow::Error,
+    hooks: &mut ActionHooks<'_>,
+) -> ActionError
+where
+    A: TuningAction,
+{
+    let hook_message = format!("after-apply hook failed after mutation: {hook_error:#}");
+
+    match action.rollback(rollback) {
+        Ok(()) => match hooks.run_after_rollback(rollback) {
+            Ok(()) => ActionError::apply(format!("{hook_message}; rollback completed")),
+            Err(rollback_hook_error) => ActionError::rollback(format!(
+                "{hook_message}; rollback completed; after-rollback hook failed: {rollback_hook_error:#}"
+            )),
+        },
+        Err(rollback_error) => ActionError::emergency_rollback(hook_message, rollback_error),
     }
 }
 
@@ -243,11 +338,48 @@ where
     )
 }
 
+pub(crate) fn run_audited_action_with_hooks<A>(
+    command: &str,
+    action: &A,
+    run_policy: ActionRunPolicy,
+    hooks: ActionHooks<'_>,
+) -> Result<AuditedActionResult, ActionError>
+where
+    A: TuningAction,
+{
+    run_audited_action_with_audit_path_and_hooks(
+        command,
+        action,
+        run_policy,
+        &crate::audit::default_audit_log_path(),
+        hooks,
+    )
+}
+
 pub fn run_audited_action_with_audit_path<A>(
     command: &str,
     action: &A,
     run_policy: ActionRunPolicy,
     audit_path: &Path,
+) -> Result<AuditedActionResult, ActionError>
+where
+    A: TuningAction,
+{
+    run_audited_action_with_audit_path_and_hooks(
+        command,
+        action,
+        run_policy,
+        audit_path,
+        ActionHooks::none(),
+    )
+}
+
+pub(crate) fn run_audited_action_with_audit_path_and_hooks<A>(
+    command: &str,
+    action: &A,
+    run_policy: ActionRunPolicy,
+    audit_path: &Path,
+    mut hooks: ActionHooks<'_>,
 ) -> Result<AuditedActionResult, ActionError>
 where
     A: TuningAction,
@@ -395,6 +527,14 @@ where
             let rollback = action.apply().map_err(ActionError::apply)?;
             audit_event.affected_tasks = rollback.affected_tasks();
             audit_event.restore_path = rollback.restore_path().cloned();
+
+            if let Err(hook_err) = hooks.run_after_apply(&rollback) {
+                audit_event.action_phase = Some(crate::actions::ActionPhase::Rollback);
+                return Err(rollback_after_apply_hook_failure(
+                    action, &rollback, hook_err, &mut hooks,
+                ));
+            }
+
             append_runner_audit_event(
                 audit_path,
                 &audit_event,
@@ -407,6 +547,7 @@ where
                     "apply successful",
                 ),
             );
+
             if let Some(timeout) = total_timeout_error(
                 started_instant,
                 run_policy.max_total_duration,
@@ -419,6 +560,7 @@ where
                     timeout,
                     audit_path,
                     &audit_event,
+                    &mut hooks,
                 ));
             }
 
@@ -449,6 +591,7 @@ where
                             timeout,
                             audit_path,
                             &audit_event,
+                            &mut hooks,
                         ));
                     }
                     state
@@ -457,6 +600,12 @@ where
                     audit_event.action_phase = Some(crate::actions::ActionPhase::Rollback);
                     match action.rollback(&rollback) {
                         Ok(()) => {
+                            if let Err(hook_err) = hooks.run_after_rollback(&rollback) {
+                                return Err(ActionError::rollback(format!(
+                                    "after-rollback hook failed after verify failure rollback completed: verify error: {verify_err}; hook error: {hook_err:#}"
+                                )));
+                            }
+
                             append_runner_audit_event(
                                 audit_path,
                                 &audit_event,
@@ -709,6 +858,143 @@ mod tests {
         events: &[crate::audit::AuditEvent],
     ) -> Vec<Option<crate::actions::ActionPhase>> {
         events.iter().map(|event| event.action_phase).collect()
+    }
+
+    #[test]
+    fn after_apply_hook_runs_before_verify() {
+        let dir = temp_dir("after-apply-hook-order");
+        let audit_path = dir.join("audit.jsonl");
+        let log = TestActionLog::default();
+        let action = TestAction::new(&log).with_affected_tasks(5);
+        let mut hook_called = false;
+
+        let result = run_audited_action_with_audit_path_and_hooks(
+            "test-cmd",
+            &action,
+            apply_policy(),
+            &audit_path,
+            ActionHooks::after_apply(|rollback| {
+                assert_eq!(rollback.affected_tasks(), 5);
+                log.events.borrow_mut().push("after_apply_hook");
+                hook_called = true;
+                Ok(())
+            }),
+        )
+        .unwrap();
+
+        assert!(hook_called);
+        assert_eq!(result.state.affected_tasks, 5);
+        assert_eq!(
+            *log.events.borrow(),
+            vec![
+                "preflight",
+                "dry_run",
+                "apply",
+                "after_apply_hook",
+                "verify"
+            ]
+        );
+        assert!(log.mutated.get());
+        assert!(!log.rolled_back.get());
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn after_rollback_hook_runs_after_verify_failure_rollback() {
+        let dir = temp_dir("after-rollback-hook-order");
+        let audit_path = dir.join("audit.jsonl");
+        let log = TestActionLog::default();
+        let action = TestAction::new(&log).with_verify_failure();
+        let mut after_apply_called = false;
+        let mut after_rollback_called = false;
+
+        let result = run_audited_action_with_audit_path_and_hooks(
+            "test-cmd",
+            &action,
+            apply_policy(),
+            &audit_path,
+            ActionHooks::after_apply(|rollback| {
+                assert_eq!(rollback.affected_tasks(), 5);
+                log.events.borrow_mut().push("after_apply_hook");
+                after_apply_called = true;
+                Ok(())
+            })
+            .with_after_rollback(|rollback| {
+                assert_eq!(rollback.affected_tasks(), 5);
+                log.events.borrow_mut().push("after_rollback_hook");
+                after_rollback_called = true;
+                Ok(())
+            }),
+        );
+
+        assert!(result.is_err());
+        assert!(after_apply_called);
+        assert!(after_rollback_called);
+        assert_eq!(
+            *log.events.borrow(),
+            vec![
+                "preflight",
+                "dry_run",
+                "apply",
+                "after_apply_hook",
+                "verify",
+                "rollback",
+                "after_rollback_hook"
+            ]
+        );
+        assert!(!log.mutated.get());
+        assert!(log.rolled_back.get());
+
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("verify failed"));
+        assert!(err.contains("rollback completed"));
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn after_rollback_hook_runs_after_apply_timeout_rollback() {
+        let dir = temp_dir("after-rollback-hook-apply-timeout");
+        let audit_path = dir.join("audit.jsonl");
+        let action = FakeAction::new()
+            .with_slow_apply()
+            .with_slow_apply_duration(Duration::from_millis(25));
+        let mut after_apply_called = false;
+        let mut after_rollback_called = false;
+
+        let result = run_audited_action_with_audit_path_and_hooks(
+            "fake-controller",
+            &action,
+            apply_policy().with_max_total_duration(Duration::from_millis(1)),
+            &audit_path,
+            ActionHooks::after_apply(|rollback| {
+                assert_eq!(rollback.affected_tasks(), 5);
+                after_apply_called = true;
+                Ok(())
+            })
+            .with_after_rollback(|rollback| {
+                assert_eq!(rollback.affected_tasks(), 5);
+                after_rollback_called = true;
+                Ok(())
+            }),
+        );
+
+        assert!(result.is_err());
+        assert!(after_apply_called);
+        assert!(after_rollback_called);
+        assert_eq!(
+            action.events(),
+            vec!["preflight", "dry_run", "apply", "slow_apply", "rollback"]
+        );
+        assert!(!action.applied());
+        assert!(action.rolled_back());
+
+        let err = result.unwrap_err();
+        assert!(matches!(err, ActionError::TimeoutRollbackCompleted { .. }));
+        assert!(err.to_string().contains("rollback completed"));
+
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]
