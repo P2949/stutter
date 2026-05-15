@@ -45,6 +45,10 @@ pub struct UserConfigFile {
     pub daemon_preset: Option<String>,
     pub daemon_enabled_action_families: Option<Vec<String>>,
     pub daemon_denied_action_families: Option<Vec<String>>,
+    pub daemon_interactive_cgroup: Option<PathBuf>,
+    pub daemon_background_cgroup: Option<PathBuf>,
+    pub daemon_game_cgroup: Option<PathBuf>,
+    pub daemon_compile_cgroup: Option<PathBuf>,
     pub daemon_min_confidence: Option<f32>,
     pub daemon_max_cpu_temp_celsius: Option<u32>,
     pub daemon_max_gpu_temp_celsius: Option<u32>,
@@ -245,6 +249,18 @@ pub fn apply_daemon_user_config_overrides(
     if let Some(families) = user_config.daemon_denied_action_families.as_ref() {
         daemon_config.safety.denied_action_families = families.iter().cloned().collect();
     }
+    if let Some(path) = user_config.daemon_interactive_cgroup.as_ref() {
+        daemon_config.safety.cgroup_targets.interactive_cgroup = Some(path.clone());
+    }
+    if let Some(path) = user_config.daemon_background_cgroup.as_ref() {
+        daemon_config.safety.cgroup_targets.background_cgroup = Some(path.clone());
+    }
+    if let Some(path) = user_config.daemon_game_cgroup.as_ref() {
+        daemon_config.safety.cgroup_targets.game_cgroup = Some(path.clone());
+    }
+    if let Some(path) = user_config.daemon_compile_cgroup.as_ref() {
+        daemon_config.safety.cgroup_targets.compile_cgroup = Some(path.clone());
+    }
     if let Some(min_confidence) = user_config.daemon_min_confidence {
         daemon_config.safety.min_confidence = min_confidence;
     }
@@ -283,6 +299,13 @@ pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
         "daemon_denied_action_families",
         config.daemon_denied_action_families.as_deref(),
     )?;
+    crate::daemon::DaemonCgroupTargetsConfig {
+        interactive_cgroup: config.daemon_interactive_cgroup.clone(),
+        background_cgroup: config.daemon_background_cgroup.clone(),
+        game_cgroup: config.daemon_game_cgroup.clone(),
+        compile_cgroup: config.daemon_compile_cgroup.clone(),
+    }
+    .validate()?;
 
     if let Some(confidence) = config.daemon_min_confidence
         && (!confidence.is_finite() || !(0.0..=1.0).contains(&confidence))
@@ -538,6 +561,10 @@ fn known_top_level_user_config_field(field: &str) -> bool {
             | "daemon_preset"
             | "daemon_enabled_action_families"
             | "daemon_denied_action_families"
+            | "daemon_interactive_cgroup"
+            | "daemon_background_cgroup"
+            | "daemon_game_cgroup"
+            | "daemon_compile_cgroup"
             | "daemon_min_confidence"
             | "daemon_max_cpu_temp_celsius"
             | "daemon_max_gpu_temp_celsius"
@@ -688,6 +715,8 @@ mod tests {
             daemon_preset = "gaming-low-risk"
             daemon_enabled_action_families = ["cpu_affinity_profile"]
             daemon_denied_action_families = ["gpu-power"]
+            daemon_background_cgroup = "/user.slice/stutter-background.slice"
+            daemon_compile_cgroup = "/user.slice/stutter-compile.slice"
             daemon_min_confidence = 0.91
             daemon_max_cpu_temp_celsius = 83
             daemon_max_gpu_temp_celsius = 84
@@ -715,6 +744,14 @@ mod tests {
         assert_eq!(
             config.daemon_denied_action_families.as_deref(),
             Some(&["gpu-power".to_owned()][..])
+        );
+        assert_eq!(
+            config.daemon_background_cgroup.as_deref(),
+            Some(PathBuf::from("/user.slice/stutter-background.slice").as_path())
+        );
+        assert_eq!(
+            config.daemon_compile_cgroup.as_deref(),
+            Some(PathBuf::from("/user.slice/stutter-compile.slice").as_path())
         );
         assert_eq!(config.daemon_min_confidence, Some(0.91));
         assert_eq!(config.daemon_max_cpu_temp_celsius, Some(83));
@@ -794,6 +831,7 @@ mod tests {
             daemon_preset: Some("gaming-low-risk".to_owned()),
             daemon_enabled_action_families: Some(vec!["cpu_affinity_profile".to_owned()]),
             daemon_denied_action_families: Some(vec!["ionice".to_owned()]),
+            daemon_background_cgroup: Some(PathBuf::from("/user.slice/stutter-background.slice")),
             daemon_min_confidence: Some(0.92),
             daemon_max_cpu_temp_celsius: Some(76),
             daemon_max_gpu_temp_celsius: Some(77),
@@ -817,6 +855,14 @@ mod tests {
                 .safety
                 .denied_action_families
                 .contains("ionice")
+        );
+        assert_eq!(
+            daemon_config
+                .safety
+                .cgroup_targets
+                .background_cgroup
+                .as_deref(),
+            Some(PathBuf::from("/user.slice/stutter-background.slice").as_path())
         );
         assert_eq!(daemon_config.safety.min_confidence, 0.92);
         assert_eq!(daemon_config.health.max_cpu_temp_celsius, 76);
@@ -849,6 +895,31 @@ mod tests {
             ..Default::default()
         };
         validate_daemon_user_config(&allowed).unwrap();
+    }
+
+    #[test]
+    fn daemon_user_config_validation_rejects_invalid_cgroup_targets() {
+        let relative = UserConfigFile {
+            daemon_background_cgroup: Some(PathBuf::from("stutter-background.slice")),
+            ..Default::default()
+        };
+        assert!(
+            validate_daemon_user_config(&relative)
+                .unwrap_err()
+                .to_string()
+                .contains("cgroup")
+        );
+
+        let traversal = UserConfigFile {
+            daemon_compile_cgroup: Some(PathBuf::from("/user.slice/../bad.slice")),
+            ..Default::default()
+        };
+        assert!(
+            validate_daemon_user_config(&traversal)
+                .unwrap_err()
+                .to_string()
+                .contains("parent traversal")
+        );
     }
 
     #[test]

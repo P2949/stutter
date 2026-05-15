@@ -1,7 +1,62 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
-use super::{quality::OnlineDataQuality, state::SituationKind};
-use crate::{diagnosis::LiveDiagnosisEntry, scorer::StutterScore};
+use super::{
+    quality::OnlineDataQuality,
+    situation::{SituationClassification, SituationKind, classify_situation},
+};
+use crate::{
+    daemon::{capabilities::DaemonCapabilities, health::SystemHealthSnapshot},
+    diagnosis::LiveDiagnosisEntry,
+    focus::FocusGroupKind,
+    process_tree::TaskClass,
+    scorer::StutterScore,
+};
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkloadIdentity {
+    pub root_pid: u32,
+    pub process_starttime_ticks: Option<u64>,
+    pub exe_dev: Option<u64>,
+    pub exe_ino: Option<u64>,
+    pub cgroup_path: Option<String>,
+    pub focus_kind: Option<FocusGroupKind>,
+    pub class_distribution: BTreeMap<String, usize>,
+    pub stable_hash: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProtectedTask {
+    pub tid: u32,
+    pub process_pid: u32,
+    pub comm: String,
+    pub class: TaskClass,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveTaskSnapshot {
+    pub tid: u32,
+    pub process_pid: u32,
+    pub comm: String,
+    pub class: TaskClass,
+    pub process_starttime_ticks: Option<u64>,
+    pub task_starttime_ticks: Option<u64>,
+    pub cgroup_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ActiveConfigSnapshot {
+    pub affinity: Option<String>,
+    pub nice: Option<String>,
+    pub uclamp: Option<String>,
+    pub cgroup: Option<String>,
+    pub irq: Option<String>,
+    pub cpu_power: Option<String>,
+    pub gpu_power: Option<String>,
+    pub vm: Option<String>,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AutotuneObservation {
@@ -20,11 +75,19 @@ pub struct AutotuneObservation {
     pub data_quality: OnlineDataQuality,
 
     pub primary_situation: SituationKind,
+    pub situation: SituationClassification,
     pub focus_kind: Option<crate::focus::FocusGroupKind>,
     pub focus_confidence: f32,
     pub focus_roots: Vec<u32>,
     pub focus_reasons: Vec<String>,
     pub recent_diagnoses: Vec<LiveDiagnosisEntry>,
+    pub system_health: SystemHealthSnapshot,
+    pub capabilities: DaemonCapabilities,
+    pub topology_signature: Option<String>,
+    pub workload_identity: Option<WorkloadIdentity>,
+    pub active_tasks: Vec<ActiveTaskSnapshot>,
+    pub protected_tasks: Vec<ProtectedTask>,
+    pub active_config_snapshot: Option<ActiveConfigSnapshot>,
 
     pub frame_count: usize,
     pub frame_p99_ms: f64,
@@ -47,11 +110,19 @@ impl Default for AutotuneObservation {
             score: StutterScore::default(),
             data_quality: OnlineDataQuality::default(),
             primary_situation: SituationKind::Unknown,
+            situation: SituationClassification::default(),
             focus_kind: None,
             focus_confidence: 0.0,
             focus_roots: Vec::new(),
             focus_reasons: Vec::new(),
             recent_diagnoses: Vec::new(),
+            system_health: SystemHealthSnapshot::default(),
+            capabilities: DaemonCapabilities::default(),
+            topology_signature: None,
+            workload_identity: None,
+            active_tasks: Vec::new(),
+            protected_tasks: Vec::new(),
+            active_config_snapshot: None,
             frame_count: 0,
             frame_p99_ms: 0.0,
             frame_max_ms: 0.0,
@@ -68,13 +139,20 @@ impl AutotuneObservation {
             self.focus_roots = focus.group.root_pids.clone();
             self.focus_reasons = focus.group.reasons.clone();
             self.primary_situation = focus.situation;
+            self.refresh_situation_classification();
         } else {
             self.focus_kind = None;
             self.focus_confidence = 0.0;
             self.focus_roots.clear();
             self.focus_reasons.clear();
             self.primary_situation = SituationKind::Unknown;
+            self.refresh_situation_classification();
         }
+    }
+
+    pub fn refresh_situation_classification(&mut self) {
+        self.situation = classify_situation(self);
+        self.primary_situation = self.situation.primary;
     }
 
     pub fn focus_is_idle_or_unknown(&self) -> bool {
@@ -96,6 +174,38 @@ impl AutotuneObservation {
                 || lower.contains("audio realtime")
                 || lower.contains("input process")
         })
+    }
+}
+
+pub fn is_protected_task_class(class: TaskClass) -> bool {
+    matches!(
+        class,
+        TaskClass::AudioRealtime
+            | TaskClass::Input
+            | TaskClass::Compositor
+            | TaskClass::GameScope
+            | TaskClass::Media
+            | TaskClass::Recorder
+            | TaskClass::KernelThread
+            | TaskClass::IrqThread
+            | TaskClass::Service
+            | TaskClass::NetworkDaemon
+            | TaskClass::StorageDaemon
+    )
+}
+
+pub fn protected_task_reason(class: TaskClass) -> &'static str {
+    match class {
+        TaskClass::AudioRealtime => "audio realtime task",
+        TaskClass::Input => "input task",
+        TaskClass::Compositor | TaskClass::GameScope => "display/compositor task",
+        TaskClass::Media => "media playback task",
+        TaskClass::Recorder => "recording task",
+        TaskClass::KernelThread | TaskClass::IrqThread => "kernel/irq helper task",
+        TaskClass::Service | TaskClass::NetworkDaemon | TaskClass::StorageDaemon => {
+            "system service task"
+        }
+        _ => "protected task",
     }
 }
 

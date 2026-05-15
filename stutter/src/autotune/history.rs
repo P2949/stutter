@@ -8,6 +8,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use super::experiment::WindowScore;
+pub use super::situation::SituationKind;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ControllerPhase {
@@ -29,21 +30,6 @@ pub enum AutotuneMode {
     ApplyLowRisk,
     ApplyMediumRisk,
     ApplyHighRisk,
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum SituationKind {
-    Unknown,
-    Idle,
-    GameFocused,
-    GameCpuSchedulerPressure,
-    GameGpuBound,
-    CompositorPressure,
-    CpuPressure,
-    IoPressure,
-    IrqPressure,
-    ThermalOrPowerLimit,
-    CompileLoad,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -400,6 +386,81 @@ mod tests {
         assert!(!events[0].rollback_performed);
 
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn all_situation_kinds_round_trip_through_history_json() {
+        let variants = [
+            SituationKind::Unknown,
+            SituationKind::Idle,
+            SituationKind::GameFocused,
+            SituationKind::GameCpuSchedulerPressure,
+            SituationKind::GameGpuBound,
+            SituationKind::CompositorPressure,
+            SituationKind::CpuPressure,
+            SituationKind::IoPressure,
+            SituationKind::IrqPressure,
+            SituationKind::ThermalOrPowerLimit,
+            SituationKind::CompileLoad,
+            SituationKind::BrowserFocused,
+            SituationKind::BrowserCpuPressure,
+            SituationKind::BrowserGpuVideo,
+            SituationKind::BrowserIoPressure,
+            SituationKind::CompileCpuBound,
+            SituationKind::CompileLinkerPressure,
+            SituationKind::MediaPlayback,
+            SituationKind::Recording,
+            SituationKind::VirtualMachineLoad,
+        ];
+
+        for situation in variants {
+            let event = AutotuneHistoryEvent::new(
+                "controller-1",
+                ControllerPhase::Observing,
+                AutotuneMode::Observe,
+                None,
+                situation,
+                observation_summary_from_window_score(true, 1, 0, "High", &window_score(143)),
+                AutotuneDecisionSummary {
+                    decision: "Noop".to_owned(),
+                    candidate_name: None,
+                    action_kind: None,
+                    eligible: false,
+                    rollback_policy: "none".to_owned(),
+                },
+                "observe mode",
+            );
+
+            let json = serde_json::to_string(&event).unwrap();
+            let parsed: AutotuneHistoryEvent = serde_json::from_str(&json).unwrap();
+
+            assert_eq!(parsed.situation, situation);
+        }
+    }
+
+    #[test]
+    fn browser_focused_does_not_serialize_as_compile_load() {
+        let event = AutotuneHistoryEvent::new(
+            "controller-1",
+            ControllerPhase::Observing,
+            AutotuneMode::Observe,
+            None,
+            SituationKind::BrowserFocused,
+            observation_summary_from_window_score(true, 1, 0, "High", &window_score(143)),
+            AutotuneDecisionSummary {
+                decision: "Noop".to_owned(),
+                candidate_name: None,
+                action_kind: None,
+                eligible: false,
+                rollback_policy: "none".to_owned(),
+            },
+            "observe mode",
+        );
+
+        let json = serde_json::to_string(&event).unwrap();
+
+        assert!(json.contains("\"situation\":\"BrowserFocused\""));
+        assert!(!json.contains("\"situation\":\"CompileLoad\""));
     }
 
     #[test]
