@@ -2,7 +2,7 @@
 
 This document records the daemon/product contract enforced by the central policy code in `stutter/src/daemon_policy.rs`.
 
-The source of truth for policy enforcement is `DaemonMode`, `DaemonPolicy`, `ActionDescriptor`, `ActionEffectScope`, and `RollbackRequirement`. This document does not enable any unsupported runtime mode. Live `stutter autotune --mode` currently supports `observe`, `suggest`, and `apply-low-risk`; `apply-medium-risk` and `apply-high-risk` are policy labels for explicitly unlocked future apply paths.
+The source of truth for policy enforcement is `DaemonMode`, `DaemonPolicy`, `ActionDescriptor`, `ActionEffectScope`, and `RollbackRequirement`. This document does not enable unsupported runtime modes. Live `stutter autotune --mode` currently supports `observe`, `suggest`, `apply-low-risk`, and `apply-medium-risk` when explicitly unlocked with `--allow-medium-risk` or `autotune.allow_medium_risk_apply = true`; `apply-high-risk` remains a policy label for future high-risk apply work.
 
 ## Modes
 
@@ -11,7 +11,7 @@ The source of truth for policy enforcement is `DaemonMode`, `DaemonPolicy`, `Act
 | `observe` | Never changes system state. Permits monitoring, reports, dry-run/preflight checks, verify steps, and rollback operations. It does not emit suggestions as controller decisions and it does not apply actions. |
 | `suggest` | Proposes changes and may emit candidate actions. It never applies changes. Suggestion output must state that suggest mode did not apply the change and must separate dry-run commands from policy-gated manual apply commands. |
 | `apply-low-risk` | Applies only `SafetyClass::ReversibleLowRisk` actions whose `ActionEffectScope` is `LocalProcess` or `LocalProcessTree`, with rollback available before apply. This is the default apply ceiling. The currently implemented low-risk apply family is CPU-affinity candidates for explicit target process trees. |
-| `apply-medium-risk` | Opt-in policy mode for reversible but more invasive local/process-scoped changes. It allows at most `SafetyClass::ReversibleMediumRisk` and still requires explicit target scope, rollback before apply, sufficient confidence, and non-persistent/non-system-wide defaults. |
+| `apply-medium-risk` | Opt-in live/policy mode for reversible but more invasive process-local or cgroup-scoped changes. It requires explicit medium-risk unlock, allows at most `SafetyClass::ReversibleMediumRisk`, and is limited to `Nice`, `IoPrio`, `Uclamp`, `CgroupPlacement`, and CPU-affinity profiles that become medium-risk through priority actions. It still requires explicit target scope, rollback before apply, sufficient confidence, non-persistent effects, and non-system-wide state. It rejects IRQ, CPU power, GPU power, VM knob, system-wide, persistent, and high-risk candidates. |
 | `apply-high-risk` | Never default. High-risk actions require explicit high-risk unlock through `DaemonPolicy::allow_high_risk`. Remote high-risk support is not available by default and must not be exposed as a default remote mode. |
 
 ## Suggestion output contract
