@@ -304,6 +304,8 @@ fn rollback_after_apply_hook_failure<A>(
     action: &A,
     rollback: &RollbackToken,
     hook_error: anyhow::Error,
+    audit_path: &Path,
+    audit_event: &AuditEvent,
     hooks: &mut ActionHooks<'_>,
 ) -> ActionError
 where
@@ -313,10 +315,40 @@ where
 
     match action.rollback(rollback) {
         Ok(()) => match hooks.run_after_rollback(rollback) {
-            Ok(()) => ActionError::apply(format!("{hook_message}; rollback completed")),
-            Err(rollback_hook_error) => ActionError::rollback(format!(
-                "{hook_message}; rollback completed; after-rollback hook failed: {rollback_hook_error:#}"
-            )),
+            Ok(()) => {
+                append_runner_audit_event(
+                    audit_path,
+                    audit_event,
+                    RunnerAuditEventUpdate::new(
+                        Some(ActionPhase::Rollback),
+                        true,
+                        rollback.affected_tasks(),
+                        rollback.restore_path().cloned(),
+                        None,
+                        "rollback completed after after-apply hook failure",
+                    ),
+                );
+
+                ActionError::apply(format!("{hook_message}; rollback completed"))
+            }
+            Err(rollback_hook_error) => {
+                append_runner_audit_event(
+                    audit_path,
+                    audit_event,
+                    RunnerAuditEventUpdate::new(
+                        Some(ActionPhase::Rollback),
+                        false,
+                        rollback.affected_tasks(),
+                        rollback.restore_path().cloned(),
+                        Some("RollbackHookFailed".to_owned()),
+                        "rollback completed after after-apply hook failure, but after-rollback hook failed",
+                    ),
+                );
+
+                ActionError::rollback(format!(
+                    "{hook_message}; rollback completed; after-rollback hook failed: {rollback_hook_error:#}"
+                ))
+            }
         },
         Err(rollback_error) => ActionError::emergency_rollback(hook_message, rollback_error),
     }
@@ -531,7 +563,12 @@ where
             if let Err(hook_err) = hooks.run_after_apply(&rollback) {
                 audit_event.action_phase = Some(crate::actions::ActionPhase::Rollback);
                 return Err(rollback_after_apply_hook_failure(
-                    action, &rollback, hook_err, &mut hooks,
+                    action,
+                    &rollback,
+                    hook_err,
+                    audit_path,
+                    &audit_event,
+                    &mut hooks,
                 ));
             }
 
@@ -896,6 +933,93 @@ mod tests {
         );
         assert!(log.mutated.get());
         assert!(!log.rolled_back.get());
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn after_apply_hook_failure_rolls_back_and_writes_rollback_audit_event() {
+        let dir = temp_dir("after-apply-hook-failure-rollback-audit");
+        let audit_path = dir.join("audit.jsonl");
+        let log = TestActionLog::default();
+        let action = TestAction::new(&log).with_affected_tasks(5);
+
+        let result = run_audited_action_with_audit_path_and_hooks(
+            "test-cmd",
+            &action,
+            apply_policy(),
+            &audit_path,
+            ActionHooks::after_apply(|_rollback| {
+                anyhow::bail!("intentional after-apply hook failure");
+            }),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            *log.events.borrow(),
+            vec!["preflight", "dry_run", "apply", "rollback"]
+        );
+        assert!(!log.mutated.get());
+        assert!(log.rolled_back.get());
+
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("after-apply hook failed"));
+        assert!(err.contains("rollback completed"));
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| event.action_phase == Some(ActionPhase::Rollback)
+                    && event.success
+                    && event.affected_tasks == 5
+                    && event.message == "rollback completed after after-apply hook failure")
+        );
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn after_apply_hook_failure_records_failed_rollback_hook_audit_event() {
+        let dir = temp_dir("after-apply-hook-failure-rollback-hook-audit");
+        let audit_path = dir.join("audit.jsonl");
+        let log = TestActionLog::default();
+        let action = TestAction::new(&log).with_affected_tasks(5);
+
+        let result = run_audited_action_with_audit_path_and_hooks(
+            "test-cmd",
+            &action,
+            apply_policy(),
+            &audit_path,
+            ActionHooks::after_apply(|_rollback| {
+                anyhow::bail!("intentional after-apply hook failure");
+            })
+            .with_after_rollback(|_rollback| {
+                anyhow::bail!("intentional after-rollback hook failure");
+            }),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            *log.events.borrow(),
+            vec!["preflight", "dry_run", "apply", "rollback"]
+        );
+        assert!(!log.mutated.get());
+        assert!(log.rolled_back.get());
+
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("after-rollback hook failed"));
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert!(events.iter().any(|event| {
+            event.action_phase == Some(ActionPhase::Rollback)
+                && !event.success
+                && event.affected_tasks == 5
+                && event.error_category.as_deref() == Some("RollbackHookFailed")
+                && event
+                    .message
+                    .contains("rollback completed after after-apply hook failure")
+        }));
 
         fs::remove_dir_all(dir).ok();
     }
