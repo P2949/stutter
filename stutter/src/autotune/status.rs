@@ -237,10 +237,22 @@ fn active_candidate_from_daemon_state(state: &DaemonState) -> Option<String> {
 fn last_decision_from_daemon_state(state: &DaemonState) -> String {
     if let Some(decision) = state.last_decision.as_ref() {
         let normalized = normalized_decision(&decision.decision);
-        if decision.reason.trim().is_empty() {
-            return normalized;
-        }
-        return format!("{normalized}: {}", decision.reason);
+        let reason = decision.reason.trim();
+        let top_denied_reason = decision
+            .top_denied_reason
+            .as_deref()
+            .filter(|value| !value.trim().is_empty());
+
+        return match (reason.is_empty(), top_denied_reason) {
+            (true, Some(top_denied_reason)) => {
+                format!("{normalized}: top_denied_reason={top_denied_reason}")
+            }
+            (true, None) => normalized,
+            (false, Some(top_denied_reason)) => {
+                format!("{normalized}: {reason}; top_denied_reason={top_denied_reason}")
+            }
+            (false, None) => format!("{normalized}: {reason}"),
+        };
     }
 
     if let Some(fault) = state.faulted.as_ref() {
@@ -868,6 +880,38 @@ mod tests {
             assert_eq!(status.active_profile.as_deref(), expected_profile);
             assert_eq!(status.active_candidate.as_deref(), expected_candidate);
         }
+    }
+
+    #[test]
+    fn status_from_daemon_state_includes_top_denied_reason() {
+        let state = DaemonState {
+            mode: DaemonMode::Suggest,
+            phase: DaemonPhase::Decide,
+            last_decision: Some(DaemonDecisionState {
+                decision: "observed".to_owned(),
+                reason: "no candidate selected".to_owned(),
+                unix_nanos: Some(200),
+                score_total: Some(818),
+                candidate_count: Some(1),
+                top_denied_reason: Some("NoEffectiveChange".to_owned()),
+                situation: Some("CompileCpuBound".to_owned()),
+                focus_kind: Some("Compile".to_owned()),
+            }),
+            ..DaemonState::default()
+        };
+
+        let status = status_from_daemon_state(PathBuf::from("/tmp/daemon_state.json"), &state);
+
+        assert_eq!(
+            status.last_decision,
+            "observed: no candidate selected; top_denied_reason=NoEffectiveChange"
+        );
+
+        let rendered = render_autotune_status_text(&status);
+        assert!(rendered.contains("top_denied_reason=NoEffectiveChange"));
+
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("top_denied_reason=NoEffectiveChange"));
     }
 
     #[test]
