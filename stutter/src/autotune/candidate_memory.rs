@@ -290,11 +290,9 @@ impl CandidateMemory {
         self.record_workload_action(
             candidate,
             context,
-            now_unix_nanos,
-            record.result.clone(),
+            &record,
             baseline_score_total,
             current_score_total,
-            cooldown_expires_unix_nanos,
         );
         self.enforce_bounds();
 
@@ -380,11 +378,9 @@ impl CandidateMemory {
         &mut self,
         candidate: &CandidateAction,
         context: &CandidateContextHashInput,
-        now_unix_nanos: u128,
-        result: CandidateMemoryResult,
+        record: &CandidateMemoryRecord,
         baseline_score_total: Option<u64>,
         current_score_total: Option<u64>,
-        cooldown_until_unix_nanos: Option<u128>,
     ) {
         let context = context.clone().normalized();
         let Some(workload_hash) = context.workload_hash.clone() else {
@@ -399,10 +395,10 @@ impl CandidateMemory {
             action_kind,
             objective: candidate.objective(),
             situation: context.situation,
-            last_result: result,
+            last_result: record.result.clone(),
             score_delta,
-            last_seen_unix_nanos: now_unix_nanos,
-            cooldown_until_unix_nanos,
+            last_seen_unix_nanos: record.last_tried_unix_nanos,
+            cooldown_until_unix_nanos: record.cooldown_expires_unix_nanos,
             exe_dev: context.target_exe_dev,
             exe_ino: context.target_exe_ino,
             cgroup_path: context.cgroup_path.clone(),
