@@ -56,25 +56,23 @@ impl DaemonStateStore {
         reason: String,
         manual_restore_command: Option<String>,
     ) -> anyhow::Result<()> {
-        let state = DaemonState {
-            mode,
-            phase: DaemonPhase::Faulted,
-            last_decision: Some(DaemonDecisionState {
-                decision: "daemon_fault".to_owned(),
-                reason: reason.clone(),
-                unix_nanos: Some(crate::audit::unix_nanos_now()),
-                score_total: None,
-            }),
-            degraded: vec![DaemonDegradedStatus {
-                category: "daemon_state_store".to_owned(),
-                message: reason.clone(),
-            }],
-            faulted: Some(DaemonFaultState {
-                reason,
-                manual_restore_command,
-            }),
-            ..DaemonState::default()
-        };
+        let mut state = self.state.clone();
+        state.mode = mode;
+        state.phase = DaemonPhase::Faulted;
+        state.last_decision = Some(DaemonDecisionState {
+            decision: "daemon_fault".to_owned(),
+            reason: reason.clone(),
+            unix_nanos: Some(crate::audit::unix_nanos_now()),
+            score_total: None,
+        });
+        state.degraded = vec![DaemonDegradedStatus {
+            category: "daemon_state_store".to_owned(),
+            message: reason.clone(),
+        }];
+        state.faulted = Some(DaemonFaultState {
+            reason,
+            manual_restore_command,
+        });
 
         self.replace(state)
     }
@@ -215,7 +213,106 @@ mod tests {
     }
 
     #[test]
-    fn mark_fault_replaces_state_with_faulted_snapshot() {
+    fn mark_fault_preserves_active_recovery_context_and_profile_memory() {
+        let rollback_token = crate::actions::RollbackToken::CpuAffinityRestoreFile {
+            path: std::path::PathBuf::from("/tmp/stutter-restore.json"),
+            affected_tasks: 31,
+        };
+        let mut store = DaemonStateStore::new(
+            DaemonState {
+                mode: DaemonMode::ApplyLowRisk,
+                phase: DaemonPhase::Apply,
+                active_target: Some(crate::daemon::DaemonTargetState {
+                    root_pid: Some(1234),
+                    active_targets: 7,
+                    comm: Some("game".to_owned()),
+                }),
+                active_experiment: Some(crate::daemon::DaemonExperimentState {
+                    experiment_id: "experiment-1".to_owned(),
+                    action_id: "cpu-affinity-profile:game-main".to_owned(),
+                    candidate_name: Some("game-main".to_owned()),
+                    safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
+                    started_unix_nanos: Some(100),
+                }),
+                active_rollback: Some(crate::daemon::DaemonRollbackState {
+                    action_id: "cpu-affinity-profile:game-main".to_owned(),
+                    rollback_available: true,
+                    token: Some(rollback_token.clone()),
+                    manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
+                }),
+                profile_memory: crate::daemon::DaemonProfileMemory {
+                    profiles: vec![crate::daemon::DaemonWorkloadProfile {
+                        workload_identity_hash: "workload-abc".to_owned(),
+                        workload_label: Some("game".to_owned()),
+                        candidate_name: "game-main".to_owned(),
+                        action_id: "cpu-affinity-profile:game-main".to_owned(),
+                        action_kind: "cpu_affinity_profile".to_owned(),
+                        safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
+                        kept_unix_nanos: 200,
+                        last_validated_unix_nanos: Some(200),
+                        baseline_score_total: Some(1000),
+                        candidate_score_total: Some(850),
+                        score_delta: -150,
+                        confidence_milli: 900,
+                        environment: crate::daemon::DaemonProfileEnvironment::default(),
+                        partition: crate::daemon::DaemonProfilePartition::default(),
+                    }],
+                },
+                ..DaemonState::default()
+            },
+            None,
+        );
+
+        store
+            .mark_fault(
+                DaemonMode::ApplyLowRisk,
+                "restore did not complete safely".to_owned(),
+                Some("stutter daemon emergency-restore --dry-run".to_owned()),
+            )
+            .unwrap();
+
+        assert_eq!(store.state().phase, DaemonPhase::Faulted);
+        assert_eq!(
+            store
+                .state()
+                .faulted
+                .as_ref()
+                .map(|fault| fault.reason.as_str()),
+            Some("restore did not complete safely")
+        );
+        assert_eq!(
+            store
+                .state()
+                .active_target
+                .as_ref()
+                .and_then(|target| target.root_pid),
+            Some(1234)
+        );
+        assert_eq!(
+            store
+                .state()
+                .active_experiment
+                .as_ref()
+                .map(|experiment| experiment.experiment_id.as_str()),
+            Some("experiment-1")
+        );
+        assert_eq!(
+            store
+                .state()
+                .active_rollback
+                .as_ref()
+                .and_then(|rollback| rollback.token.as_ref()),
+            Some(&rollback_token)
+        );
+        assert_eq!(store.state().profile_memory.profiles.len(), 1);
+        assert_eq!(
+            store.state().profile_memory.profiles[0].workload_identity_hash,
+            "workload-abc"
+        );
+    }
+
+    #[test]
+    fn mark_fault_marks_state_with_faulted_snapshot() {
         let mut store = DaemonStateStore::new(DaemonState::default(), None);
 
         store
