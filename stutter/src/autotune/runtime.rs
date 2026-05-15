@@ -6,27 +6,15 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Context;
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    actions::{RollbackToken, SafetyClass},
+    actions::SafetyClass,
     autotune::{
-        apply_low_risk::apply_candidate_with_audit,
         candidate::{CandidateAction, CandidateDryRunRecord},
         candidate_memory::CandidateMemoryResult,
-        comparison::ExperimentResult,
-        controller::{
-            ActiveExperiment as ControllerActiveExperiment, ControllerPolicy,
-            ControllerRuntimeState, decide_autotune_transition,
-        },
-        controller_journal::{
-            ControllerJournalActionMetadata, ControllerJournalRecord, ControllerJournalState,
-            default_controller_journal_path, journal_process_identity,
-            write_controller_journal_applied_with_metadata,
-            write_controller_journal_applying_with_metadata, write_controller_journal_record,
-        },
+        controller::{ControllerPolicy, ControllerRuntimeState, decide_autotune_transition},
         decision::AutotuneDecision,
         experiment::{ExperimentId, WindowScore},
         history::{
@@ -35,8 +23,10 @@ use crate::{
             SituationKind as HistorySituationKind, TargetIdentity, append_autotune_history_event,
             default_autotune_history_path,
         },
-        kept::{ActiveProfileState, KeptCandidateState},
-        live_experiment::{LiveExperimentManager, LiveLowRiskExperiment},
+        kept::ActiveProfileState,
+        live_experiment::{
+            LiveExperimentHistoryContext, LiveExperimentManager, LiveExperimentManagerInput,
+        },
         observation::AutotuneObservation,
         observation_builder::{
             AutotuneObservationBuilder, AutotuneObservationBuilderInput, AutotuneObservationFocus,
@@ -50,14 +40,10 @@ use crate::{
     config::model::MonitorConfig,
     daemon::{
         ActionSource, DAEMON_STATE_SCHEMA_VERSION, DaemonConfig, DaemonDecisionState,
-        DaemonDegradedStatus, DaemonExperimentState, DaemonFaultState, DaemonMode, DaemonPhase,
-        DaemonPolicy, DaemonPolicyBuildInput, DaemonPolicyContext, DaemonRollbackState,
-        DaemonState, DaemonTargetState, DaemonWorkloadProfile, SystemHealthInputs,
-        SystemHealthSnapshot, SystemHealthThresholds, build_daemon_policy, evaluate_system_health,
-        privilege::{
-            CandidateApplyRequest, CandidatePlanRequest, InProcessPrivilegedActionService,
-            PrivilegedActionService, RollbackRequest,
-        },
+        DaemonDegradedStatus, DaemonFaultState, DaemonMode, DaemonPhase, DaemonPolicy,
+        DaemonPolicyBuildInput, DaemonState, DaemonTargetState, DaemonWorkloadProfile,
+        SystemHealthInputs, SystemHealthSnapshot, SystemHealthThresholds, build_daemon_policy,
+        evaluate_system_health,
         state::{
             DaemonProfileEnvironment, DaemonProfileMemory, DaemonProfilePartition,
             daemon_profile_stable_hash,
@@ -335,6 +321,23 @@ impl RuntimeHistoryContext {
     }
 }
 
+impl From<LiveExperimentHistoryContext> for RuntimeHistoryContext {
+    fn from(context: LiveExperimentHistoryContext) -> Self {
+        Self {
+            experiment_id: context.experiment_id,
+            action_id: context.action_id,
+            candidate_name: context.candidate_name,
+            action_kind: context.action_kind,
+            score_before: context.score_before,
+            score_after: context.score_after,
+            rollback_performed: context.rollback_performed,
+            rollback_policy: context.rollback_policy,
+            cooldown_until_unix_nanos: context.cooldown_until_unix_nanos,
+            manual_restore_command: context.manual_restore_command,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RuntimeTargetState {
     pub root_pid: Option<u32>,
@@ -362,7 +365,7 @@ pub struct AutotuneRuntime {
     target_state: RuntimeTargetState,
     latest_drop_counters: DropCountersSnapshot,
     recent_diagnoses: VecDeque<LiveDiagnosisEntry>,
-    live_low_risk_experiment: Option<LiveLowRiskExperiment>,
+    live_experiments: LiveExperimentManager,
     last_observation: AutotuneObservation,
     last_decision: Option<AutotuneDecisionStreamEntry>,
     last_plan_result: Option<PlanResult>,
@@ -383,23 +386,6 @@ fn top_denied_reason_for_plan(plan: &PlanResult) -> Option<String> {
         .or_else(|| plan.no_action_reason.clone())
 }
 
-fn policy_context_for_runtime_apply(observation: &AutotuneObservation) -> DaemonPolicyContext {
-    DaemonPolicyContext {
-        data_quality_ok: !observation.data_quality.blocks_action(),
-        data_quality_reason_code: observation
-            .data_quality
-            .reason_code_strings()
-            .first()
-            .cloned(),
-        system_health_ok: observation.system_health.ok_for_apply,
-        system_health_reason_code: observation.system_health.reason_code.clone(),
-        workload_stable: observation.workload_identity.is_some(),
-        cooldown_active: false,
-        rollback_pending: false,
-        capabilities: Some(observation.capabilities.clone()),
-    }
-}
-
 impl AutotuneRuntime {
     pub fn new(config: AutotuneRuntimeConfig) -> Self {
         let daemon_policy = config.daemon_policy.clone();
@@ -412,7 +398,7 @@ impl AutotuneRuntime {
             latest_focus: None,
             latest_drop_counters: DropCountersSnapshot::default(),
             recent_diagnoses: VecDeque::new(),
-            live_low_risk_experiment: None,
+            live_experiments: LiveExperimentManager::new(),
             last_observation: AutotuneObservation::default(),
             last_decision: None,
             last_plan_result: None,
@@ -470,7 +456,7 @@ impl AutotuneRuntime {
                 ..
             } => {
                 self.controller.window.clear();
-                if self.live_low_risk_experiment.is_some() {
+                if self.live_experiments.has_active_experiment() {
                     self.rollback_live_experiment(
                         crate::audit::unix_nanos_now(),
                         "focus changed during active low-risk experiment",
@@ -490,7 +476,7 @@ impl AutotuneRuntime {
             }
             MonitorEvent::FocusCleared { reason, .. } => {
                 self.controller.window.clear();
-                if self.live_low_risk_experiment.is_some() {
+                if self.live_experiments.has_active_experiment() {
                     self.rollback_live_experiment(
                         crate::audit::unix_nanos_now(),
                         "focus cleared during active low-risk experiment",
@@ -526,7 +512,7 @@ impl AutotuneRuntime {
     }
 
     pub fn has_active_experiment(&self) -> bool {
-        self.live_low_risk_experiment.is_some()
+        self.live_experiments.has_active_experiment()
     }
 
     pub fn rollback_on_stop(&mut self, reason: &str) -> anyhow::Result<Option<DaemonState>> {
@@ -540,26 +526,11 @@ impl AutotuneRuntime {
     }
 
     pub fn daemon_state_snapshot(&self) -> DaemonState {
-        let active_experiment =
-            self.live_low_risk_experiment
-                .as_ref()
-                .map(|experiment| DaemonExperimentState {
-                    experiment_id: experiment.experiment_id.as_str().to_owned(),
-                    action_id: experiment.action_id(),
-                    candidate_name: Some(experiment.candidate_name().to_owned()),
-                    safety_class: experiment.candidate.safety_class(),
-                    started_unix_nanos: Some(experiment.applied_unix_nanos),
-                });
+        let active_experiment = self.live_experiments.daemon_experiment_state();
 
-        let active_rollback =
-            self.live_low_risk_experiment
-                .as_ref()
-                .map(|experiment| DaemonRollbackState {
-                    action_id: experiment.action_id(),
-                    rollback_available: true,
-                    token: Some(experiment.rollback.clone()),
-                    manual_restore_command: Some(DAEMON_EMERGENCY_RESTORE_COMMAND.to_owned()),
-                });
+        let active_rollback = self
+            .live_experiments
+            .daemon_rollback_state(DAEMON_EMERGENCY_RESTORE_COMMAND);
 
         let active_target = self.daemon_active_target_snapshot();
         let profile_memory = self.daemon_profile_memory_snapshot(active_target.as_ref());
@@ -788,38 +759,25 @@ impl AutotuneRuntime {
         let observation = self.build_observation();
         self.last_observation = observation.clone();
 
-        let decision = if let Some(experiment) = &self.live_low_risk_experiment {
-            if observation.now_unix_nanos < experiment.washout_until_unix_nanos {
-                AutotuneDecision::Noop {
-                    reason: format!(
-                        "candidate '{}' washout window is still stabilizing",
-                        experiment.candidate_name()
-                    ),
-                }
-            } else if observation.now_unix_nanos < experiment.measure_until_unix_nanos {
-                AutotuneDecision::Noop {
-                    reason: format!(
-                        "candidate '{}' measurement window is still collecting",
-                        experiment.candidate_name()
-                    ),
-                }
-            } else {
+        let decision =
+            if let Some(decision) = self.live_experiments.active_window_decision(&observation) {
+                decision
+            } else if self.live_experiments.has_active_experiment() {
                 decide_autotune_transition(
                     &self.controller.policy,
                     &self.controller.state,
                     &observation,
                     None,
                 )
-            }
-        } else {
-            let candidate = self.select_candidate_for_observation(&observation);
-            decide_autotune_transition(
-                &self.controller.policy,
-                &self.controller.state,
-                &observation,
-                candidate,
-            )
-        };
+            } else {
+                let candidate = self.select_candidate_for_observation(&observation);
+                decide_autotune_transition(
+                    &self.controller.policy,
+                    &self.controller.state,
+                    &observation,
+                    candidate,
+                )
+            };
 
         let reason = forced_reason
             .map(str::to_owned)
@@ -950,330 +908,33 @@ impl AutotuneRuntime {
         decision: &AutotuneDecision,
         reason: &str,
     ) -> anyhow::Result<()> {
-        match decision {
-            AutotuneDecision::StartExperiment { candidate, .. } => {
-                self.start_live_experiment(observation, candidate.clone(), reason)?;
-            }
-            AutotuneDecision::KeepCurrent { .. } => {
-                self.keep_live_experiment(observation, reason)?;
-            }
-            AutotuneDecision::Revert { .. } => {
-                self.rollback_live_experiment(observation.now_unix_nanos, reason)?;
-            }
-            AutotuneDecision::EnterCooldown { duration, .. } => {
-                self.controller.state.phase = ControllerPhase::Cooldown;
-                self.controller.state.cooldown_until_unix_nanos = Some(
-                    observation
-                        .now_unix_nanos
-                        .saturating_add(duration.as_nanos()),
-                );
-            }
-            AutotuneDecision::Fault { .. } => {
-                if self.live_low_risk_experiment.is_some() {
-                    self.rollback_live_experiment(observation.now_unix_nanos, reason)?;
-                }
-                self.controller.state.enter_cooldown_after_fault(
-                    &self.controller.policy,
-                    observation.now_unix_nanos,
-                );
-            }
-            AutotuneDecision::Noop { .. } | AutotuneDecision::Suggest { .. } => {}
-        }
-
-        Ok(())
-    }
-
-    fn start_live_experiment(
-        &mut self,
-        observation: &AutotuneObservation,
-        candidate: CandidateAction,
-        reason: &str,
-    ) -> anyhow::Result<()> {
-        if !LiveExperimentManager::validate_start_candidate(
-            self.config.mode(),
-            &self.config.daemon_policy,
-            &candidate,
-        )? {
-            return Ok(());
-        }
-
-        let baseline_score = window_score_from_observation(observation);
-        validate_window_score_for_apply("baseline", &baseline_score)?;
-
-        let experiment_id = ExperimentId::new(format!(
-            "live-{}:{}:{}",
-            self.config.mode().as_str(),
-            candidate.profile_name(),
-            observation.now_unix_nanos
-        ));
-        let action_id = candidate.action_id().0;
-        let action_kind = candidate.action_kind().to_owned();
-        let rollback = self.apply_candidate_for_runtime(
-            &candidate,
-            experiment_id.as_str(),
-            &action_id,
-            observation,
-        )?;
-
-        self.controller.state.record_candidate_attempt(
-            &candidate,
-            observation,
-            None,
-            Some(
-                observation.now_unix_nanos.saturating_add(
-                    self.controller
-                        .policy
-                        .minimum_time_between_same_action
-                        .as_nanos(),
-                ),
-            ),
-        );
-
-        self.controller.state.phase = ControllerPhase::Measuring;
-        self.controller.state.active_experiment = Some(ControllerActiveExperiment {
-            experiment_id: experiment_id.clone(),
-            candidate: candidate.clone(),
-            baseline_score_total: baseline_score.score.total,
-        });
-
-        let (washout_until_unix_nanos, measure_until_unix_nanos) =
-            LiveExperimentManager::deadlines_from_now(
-                self.config.simulate_action_effects,
-                &self.config.washout,
-                self.config.candidate_window_seconds,
-                observation.now_unix_nanos,
-            );
-
-        self.live_low_risk_experiment = Some(LiveLowRiskExperiment {
-            experiment_id,
-            candidate,
-            baseline_score: baseline_score.clone(),
-            baseline_signals: observation.objective_signals.clone(),
-            applied_unix_nanos: observation.now_unix_nanos,
-            washout_until_unix_nanos,
-            measure_until_unix_nanos,
-            rollback,
-        });
-        if let Some(experiment) = self.live_low_risk_experiment.as_ref() {
-            self.write_controller_journal_phase_for_live_experiment(
-                experiment,
-                observation,
-                ControllerJournalState::Measuring,
-                "measurement_window_collecting",
-            )?;
-        }
-
-        self.controller.window.clear();
-
-        self.pending_history_context = Some(RuntimeHistoryContext {
-            experiment_id: self
-                .live_low_risk_experiment
-                .as_ref()
-                .map(|experiment| experiment.experiment_id.as_str().to_owned())
-                .unwrap_or_else(|| "unknown-experiment".to_owned()),
-            action_id: action_id.clone(),
-            candidate_name: self
-                .live_low_risk_experiment
-                .as_ref()
-                .map(|experiment| experiment.candidate.profile_name().to_owned())
-                .unwrap_or_else(|| "unknown-candidate".to_owned()),
-            action_kind,
-            score_before: Some(baseline_score.clone()),
-            score_after: None,
-            rollback_performed: false,
-            rollback_policy: "rollback-on-restore".to_owned(),
-            cooldown_until_unix_nanos: None,
-            manual_restore_command: Some(DAEMON_EMERGENCY_RESTORE_COMMAND.to_owned()),
-        });
-
-        log::info!(
-            "autotune_live_experiment_started mode={} action_kind={} reason={reason}",
-            self.config.mode(),
-            action_id
-        );
-
-        Ok(())
-    }
-
-    fn apply_candidate_for_runtime(
-        &self,
-        candidate: &CandidateAction,
-        experiment_id: &str,
-        action_id: &str,
-        observation: &AutotuneObservation,
-    ) -> anyhow::Result<RollbackToken> {
-        if self.config.simulate_action_effects {
-            return Ok(RollbackToken::CpuAffinityRestoreFile {
-                path: PathBuf::from(format!(
-                    "/tmp/stutter-simulated-rollback-{experiment_id}.json"
-                )),
-                affected_tasks: observation.active_target_count.max(1),
-            });
-        }
-
-        let journal_path = default_controller_journal_path();
-
-        write_controller_journal_applying_with_metadata(
-            &journal_path,
-            experiment_id,
-            action_id,
-            self.controller_journal_metadata_for_candidate(
-                candidate,
-                observation,
-                None,
-                "pending_apply",
-            ),
-        )?;
-        let applied_rollback = if self.config.mode() == DaemonMode::ApplyMediumRisk {
-            let service = InProcessPrivilegedActionService;
-            let result = service
-                .apply_candidate(CandidateApplyRequest {
-                    plan: CandidatePlanRequest::from_candidate(
-                        candidate.clone(),
-                        observation.now_unix_nanos,
-                    ),
-                    policy: self.config.daemon_policy.clone(),
-                    context: policy_context_for_runtime_apply(observation),
-                    max_plan_age_nanos: Duration::from_secs(30).as_nanos(),
-                })
-                .with_context(|| {
-                    format!(
-                        "privileged apply failed for autotune candidate '{}'",
-                        candidate.candidate_name()
-                    )
-                })?;
-            result.rollback
-        } else {
-            apply_candidate_with_audit(candidate.clone())?.rollback
-        };
-        write_controller_journal_applied_with_metadata(
-            &journal_path,
-            experiment_id,
-            action_id,
-            applied_rollback.clone(),
-            self.controller_journal_metadata_for_candidate(
-                candidate,
-                observation,
-                Some(applied_rollback.affected_tasks()),
-                "applied_pending_verify",
-            ),
-        )?;
-
-        Ok(applied_rollback)
-    }
-
-    fn controller_journal_metadata_for_candidate(
-        &self,
-        candidate: &CandidateAction,
-        observation: &AutotuneObservation,
-        affected_tasks: Option<usize>,
-        verify_result: &'static str,
-    ) -> ControllerJournalActionMetadata {
-        let pid = observation
-            .target_root_pid
-            .filter(|pid| *pid != 0)
-            .unwrap_or_else(|| candidate.tree_pid());
-        let starttime_ticks = (pid != 0)
-            .then(|| crate::process_tree::process_starttime_at(Path::new("/proc"), pid))
-            .flatten();
-        let active_task_count = affected_tasks.or(Some(observation.active_target_count));
-
-        ControllerJournalActionMetadata::default()
-            .with_candidate(candidate.profile_name().to_owned())
-            .with_workload_identity(journal_process_identity(pid, starttime_ticks, None))
-            .with_target_identity(journal_process_identity(
-                pid,
-                starttime_ticks,
-                active_task_count,
-            ))
-            .with_restore_command(DAEMON_EMERGENCY_RESTORE_COMMAND)
-            .with_verify_result(verify_result)
-            .with_safety_class(candidate.safety_class())
-    }
-
-    fn keep_live_experiment(
-        &mut self,
-        observation: &AutotuneObservation,
-        reason: &str,
-    ) -> anyhow::Result<()> {
-        let Some(experiment) = self.live_low_risk_experiment.take() else {
-            return Ok(());
+        let input = LiveExperimentManagerInput {
+            mode: self.config.mode(),
+            daemon_policy: self.config.daemon_policy.clone(),
+            controller_policy: self.controller.policy.clone(),
+            simulate_action_effects: self.config.simulate_action_effects,
+            washout: self.config.washout.clone(),
+            candidate_window_seconds: self.config.candidate_window_seconds,
+            manual_restore_command: DAEMON_EMERGENCY_RESTORE_COMMAND,
+            controller_journal_path: None,
+            exit_rollback_registry: None,
         };
 
-        let candidate_score = window_score_from_observation(observation);
-        validate_window_score_for_apply("candidate", &candidate_score)?;
-        let result =
-            LiveExperimentManager::compare_keep_result(&experiment, &candidate_score, observation);
+        let outcome = self.live_experiments.apply_decision_side_effects(
+            input,
+            &mut self.controller.state,
+            &mut self.controller.active_profile_state,
+            observation,
+            decision,
+            reason,
+        )?;
 
-        match result {
-            ExperimentResult::Improved { .. } => {
-                if let Err(err) = self.write_controller_journal_phase_for_live_experiment(
-                    &experiment,
-                    observation,
-                    ControllerJournalState::Keeping,
-                    "kept_pending_manual_restore",
-                ) {
-                    self.live_low_risk_experiment = Some(experiment);
-                    return Err(err);
-                }
+        if outcome.clear_measurement_window {
+            self.controller.window.clear();
+        }
 
-                let kept = KeptCandidateState::new(
-                    experiment.experiment_id.clone(),
-                    experiment.candidate.clone(),
-                    experiment.baseline_score.clone(),
-                    candidate_score.clone(),
-                    experiment.rollback.clone(),
-                    observation.now_unix_nanos,
-                    reason.to_owned(),
-                );
-
-                self.controller
-                    .active_profile_state
-                    .record_kept_candidate(kept, result.clone());
-
-                self.controller.state.record_candidate_result(
-                    &experiment.candidate,
-                    observation,
-                    None,
-                    CandidateMemoryResult::Kept,
-                    Some(experiment.baseline_score.score.total),
-                    Some(candidate_score.score.total),
-                    None,
-                    Some(
-                        observation
-                            .now_unix_nanos
-                            .saturating_add(self.controller.policy.cooldown_after_keep.as_nanos()),
-                    ),
-                );
-
-                let cooldown_until_unix_nanos = observation
-                    .now_unix_nanos
-                    .saturating_add(self.controller.policy.cooldown_after_keep.as_nanos());
-
-                self.pending_history_context = Some(RuntimeHistoryContext {
-                    experiment_id: experiment.experiment_id.as_str().to_owned(),
-                    action_id: experiment.action_id(),
-                    candidate_name: experiment.candidate.profile_name().to_owned(),
-                    action_kind: experiment.candidate.action_kind().to_owned(),
-                    score_before: Some(experiment.baseline_score.clone()),
-                    score_after: Some(candidate_score.clone()),
-                    rollback_performed: false,
-                    rollback_policy: "rollback-on-restore".to_owned(),
-                    cooldown_until_unix_nanos: Some(cooldown_until_unix_nanos),
-                    manual_restore_command: Some(DAEMON_EMERGENCY_RESTORE_COMMAND.to_owned()),
-                });
-
-                self.controller
-                    .state
-                    .enter_cooldown_after_keep(&self.controller.policy, observation.now_unix_nanos);
-            }
-            other => {
-                self.live_low_risk_experiment = Some(experiment);
-                self.rollback_live_experiment(
-                    observation.now_unix_nanos,
-                    &format!("candidate was not improved at keep point: {other:?}"),
-                )?;
-            }
+        if let Some(context) = outcome.history_context {
+            self.pending_history_context = Some(context.into());
         }
 
         Ok(())
@@ -1284,124 +945,17 @@ impl AutotuneRuntime {
         now_unix_nanos: u128,
         reason: &str,
     ) -> anyhow::Result<()> {
-        let Some(experiment) = self.live_low_risk_experiment.take() else {
-            return Ok(());
+        let experiment_id = self
+            .live_experiments
+            .current_experiment_id()
+            .unwrap_or_else(|| ExperimentId::new("unknown-active-experiment"));
+        let mut observation = self.last_observation.clone();
+        observation.now_unix_nanos = now_unix_nanos;
+        let decision = AutotuneDecision::Revert {
+            experiment_id,
+            reason: reason.to_owned(),
         };
-
-        if let Err(err) = self.write_controller_journal_phase_for_live_experiment(
-            &experiment,
-            &self.last_observation,
-            ControllerJournalState::Reverting,
-            "rollback_in_progress",
-        ) {
-            self.live_low_risk_experiment = Some(experiment);
-            return Err(err);
-        }
-
-        self.rollback_experiment_for_runtime(&experiment)?;
-        self.write_controller_journal_phase_for_live_experiment(
-            &experiment,
-            &self.last_observation,
-            ControllerJournalState::Reverted,
-            "rollback_verified",
-        )?;
-
-        self.controller.state.record_candidate_result(
-            &experiment.candidate,
-            &self.last_observation,
-            None,
-            CandidateMemoryResult::Reverted,
-            Some(experiment.baseline_score.score.total),
-            Some(self.last_observation.score.total),
-            Some(reason.to_owned()),
-            Some(
-                now_unix_nanos
-                    .saturating_add(self.controller.policy.cooldown_after_revert.as_nanos()),
-            ),
-        );
-
-        let cooldown_until_unix_nanos =
-            now_unix_nanos.saturating_add(self.controller.policy.cooldown_after_revert.as_nanos());
-
-        self.pending_history_context = Some(RuntimeHistoryContext {
-            experiment_id: experiment.experiment_id.as_str().to_owned(),
-            action_id: experiment.action_id(),
-            candidate_name: experiment.candidate.profile_name().to_owned(),
-            action_kind: experiment.candidate.action_kind().to_owned(),
-            score_before: Some(experiment.baseline_score.clone()),
-            score_after: Some(window_score_from_observation(&self.last_observation)),
-            rollback_performed: true,
-            rollback_policy: "rollback-performed".to_owned(),
-            cooldown_until_unix_nanos: Some(cooldown_until_unix_nanos),
-            manual_restore_command: Some(DAEMON_EMERGENCY_RESTORE_COMMAND.to_owned()),
-        });
-
-        self.controller
-            .state
-            .enter_cooldown_after_revert(&self.controller.policy, now_unix_nanos);
-
-        Ok(())
-    }
-
-    fn controller_journal_record_for_live_experiment(
-        &self,
-        experiment: &LiveLowRiskExperiment,
-        observation: &AutotuneObservation,
-        state: ControllerJournalState,
-        verify_result: &'static str,
-    ) -> ControllerJournalRecord {
-        let action_id = experiment.action_id();
-        ControllerJournalRecord::for_phase(
-            state,
-            experiment.experiment_id.as_str(),
-            action_id,
-            Some(experiment.rollback.clone()),
-        )
-        .with_metadata(self.controller_journal_metadata_for_candidate(
-            &experiment.candidate,
-            observation,
-            Some(experiment.rollback.affected_tasks()),
-            verify_result,
-        ))
-    }
-
-    fn write_controller_journal_phase_for_live_experiment(
-        &self,
-        experiment: &LiveLowRiskExperiment,
-        observation: &AutotuneObservation,
-        state: ControllerJournalState,
-        verify_result: &'static str,
-    ) -> anyhow::Result<()> {
-        if self.config.simulate_action_effects {
-            return Ok(());
-        }
-
-        let record = self.controller_journal_record_for_live_experiment(
-            experiment,
-            observation,
-            state,
-            verify_result,
-        );
-        write_controller_journal_record(&default_controller_journal_path(), &record)
-    }
-
-    fn rollback_experiment_for_runtime(
-        &self,
-        experiment: &LiveLowRiskExperiment,
-    ) -> anyhow::Result<()> {
-        if self.config.simulate_action_effects {
-            return Ok(());
-        }
-
-        let service = InProcessPrivilegedActionService;
-        service.rollback(RollbackRequest {
-            candidate: experiment.candidate.clone(),
-            token: experiment.rollback.clone(),
-            policy: self.config.daemon_policy.clone(),
-            context: policy_context_for_runtime_apply(&self.last_observation),
-        })?;
-
-        Ok(())
+        self.apply_decision_side_effects(&observation, &decision, reason)
     }
 
     fn stream_entry_from_decision(
@@ -1850,33 +1404,6 @@ fn candidate_situation_rank(profile_name: &str, situation: SituationKind) -> Opt
     }
 }
 
-fn window_score_from_observation(observation: &AutotuneObservation) -> WindowScore {
-    WindowScore {
-        started_unix_nanos: observation.now_unix_nanos,
-        finished_unix_nanos: observation.now_unix_nanos,
-        interval_count: observation.interval_count,
-        scored_samples: observation.scored_samples,
-        scored_task_count: observation.scored_task_count,
-        score: observation.score.clone(),
-    }
-}
-
-fn validate_window_score_for_apply(label: &str, score: &WindowScore) -> anyhow::Result<()> {
-    if score.interval_count == 0 {
-        anyhow::bail!("{label} window has zero intervals");
-    }
-
-    if score.scored_samples == 0 {
-        anyhow::bail!("{label} window has zero scored samples");
-    }
-
-    if score.scored_task_count == 0 {
-        anyhow::bail!("{label} window has zero scored tasks");
-    }
-
-    Ok(())
-}
-
 fn simulated_dry_run_records(
     candidates: &[CandidateAction],
     active_target_count: usize,
@@ -2058,7 +1585,8 @@ fn history_situation(situation: SituationKind) -> HistorySituationKind {
 mod tests {
     use super::*;
     use crate::{
-        autotune::objective::ObjectiveSignals,
+        actions::RollbackToken,
+        autotune::{live_experiment::LiveLowRiskExperiment, objective::ObjectiveSignals},
         diagnosis::{Confidence, StutterCause},
         ebpf_loader::DropCountersSnapshot,
         focus::FocusGroupKind,
@@ -2105,7 +1633,14 @@ mod tests {
         };
 
         runtime
-            .start_live_experiment(&observation, candidate, "test medium start")
+            .apply_decision_side_effects(
+                &observation,
+                &AutotuneDecision::StartExperiment {
+                    candidate,
+                    reason: "test medium start".to_owned(),
+                },
+                "test medium start",
+            )
             .unwrap();
 
         assert!(runtime.has_active_experiment());
@@ -2276,80 +1811,23 @@ mod tests {
             },
         };
 
-        runtime.live_low_risk_experiment = Some(LiveLowRiskExperiment {
-            experiment_id: ExperimentId::new("experiment-active"),
-            candidate,
-            baseline_score,
-            baseline_signals: ObjectiveSignals::default(),
-            applied_unix_nanos: 1_000,
-            washout_until_unix_nanos: 2_000,
-            measure_until_unix_nanos: 3_000,
-            rollback: RollbackToken::CpuAffinityRestoreFile {
-                path: PathBuf::from("/tmp/stutter-active-restore.json"),
-                affected_tasks: 1,
-            },
-        });
+        runtime
+            .live_experiments
+            .set_current_for_tests(LiveLowRiskExperiment {
+                experiment_id: ExperimentId::new("experiment-active"),
+                candidate,
+                baseline_score,
+                baseline_signals: ObjectiveSignals::default(),
+                applied_unix_nanos: 1_000,
+                washout_until_unix_nanos: 2_000,
+                measure_until_unix_nanos: 3_000,
+                rollback: RollbackToken::CpuAffinityRestoreFile {
+                    path: PathBuf::from("/tmp/stutter-active-restore.json"),
+                    affected_tasks: 1,
+                },
+            });
 
         assert!(runtime.has_active_experiment());
-    }
-
-    #[test]
-    fn live_experiment_journal_record_carries_phase_metadata_and_rollback() {
-        let runtime = runtime();
-        let observation = high_quality_game_observation_with_focus_confidence(0.95);
-        let candidate = CandidateAction::cpu_affinity_profile(low_risk_profile(), 1234);
-        let baseline_score = WindowScore {
-            started_unix_nanos: 100,
-            finished_unix_nanos: 200,
-            interval_count: 1,
-            scored_samples: 100,
-            scored_task_count: 1,
-            score: StutterScore {
-                total: 500,
-                over_1ms: 10,
-                over_2ms: 5,
-                over_5ms: 1,
-                ..StutterScore::default()
-            },
-        };
-        let experiment = LiveLowRiskExperiment {
-            experiment_id: ExperimentId::new("experiment-active"),
-            candidate,
-            baseline_score,
-            baseline_signals: ObjectiveSignals::default(),
-            applied_unix_nanos: 1_000,
-            washout_until_unix_nanos: 2_000,
-            measure_until_unix_nanos: 3_000,
-            rollback: RollbackToken::CpuAffinityRestoreFile {
-                path: PathBuf::from("/tmp/stutter-active-restore.json"),
-                affected_tasks: 2,
-            },
-        };
-
-        let record = runtime.controller_journal_record_for_live_experiment(
-            &experiment,
-            &observation,
-            ControllerJournalState::Reverting,
-            "rollback_in_progress",
-        );
-
-        assert_eq!(record.state(), ControllerJournalState::Reverting);
-        assert_eq!(
-            record.experiment_action(),
-            Some(("experiment-active", "cpu-affinity-profile:game-low-risk"))
-        );
-        assert_eq!(record.candidate.as_deref(), Some("game-low-risk"));
-        assert_eq!(
-            record.target_identity.as_deref(),
-            Some("pid:1234:starttime:unknown:active_tasks:2")
-        );
-        assert_eq!(
-            record.verify_result.as_deref(),
-            Some("rollback_in_progress")
-        );
-        assert_eq!(record.safety_class, Some(SafetyClass::ReversibleLowRisk));
-        assert!(record.rollback_token().is_some());
-        assert!(record.may_have_mutated_system());
     }
 
     #[test]
@@ -2415,16 +1893,18 @@ mod tests {
             anchor_comm: "game".to_owned(),
             evidence: vec!["gpu busy".to_owned()],
         });
-        runtime.live_low_risk_experiment = Some(LiveLowRiskExperiment {
-            experiment_id: ExperimentId::new("experiment-1"),
-            candidate,
-            baseline_score,
-            baseline_signals: ObjectiveSignals::default(),
-            applied_unix_nanos: 1_000,
-            washout_until_unix_nanos: 2_000,
-            measure_until_unix_nanos: 3_000,
-            rollback,
-        });
+        runtime
+            .live_experiments
+            .set_current_for_tests(LiveLowRiskExperiment {
+                experiment_id: ExperimentId::new("experiment-1"),
+                candidate,
+                baseline_score,
+                baseline_signals: ObjectiveSignals::default(),
+                applied_unix_nanos: 1_000,
+                washout_until_unix_nanos: 2_000,
+                measure_until_unix_nanos: 3_000,
+                rollback,
+            });
         runtime.controller.state.phase = ControllerPhase::Faulted;
         runtime.controller.state.cooldown_until_unix_nanos = Some(9_000);
 
