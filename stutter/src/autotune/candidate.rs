@@ -2,9 +2,12 @@ use std::{collections::BTreeSet, path::Path};
 
 use crate::{
     actions::{
-        ActionState, ActionWarning, SafetyClass, TuningAction,
-        cpu_affinity::CpuAffinityProfileAction,
+        ActionState, ActionWarning, SafetyClass, TuningAction, cgroup::CgroupPlacementAction,
+        cpu_affinity::CpuAffinityProfileAction, cpu_power::CpuPowerAction,
+        gpu_power::GpuPowerAction, ioprio::IoPrioAction, irq_affinity::IrqAffinityAction,
+        nice::NiceAction, uclamp::UclampAction, vm_knobs::VmKnobAction,
     },
+    autotune::{conflicts::ActionConflictGroup, objective::ObjectiveKind},
     daemon_policy::{
         ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicy, PolicyIntent,
         RollbackRequirement,
@@ -21,6 +24,30 @@ pub enum CandidateAction {
         profile: Profile,
         tree_pid: u32,
     },
+    Nice {
+        plan: NiceActionPlan,
+    },
+    IoPrio {
+        plan: IoPrioActionPlan,
+    },
+    Uclamp {
+        plan: UclampActionPlan,
+    },
+    CgroupPlacement {
+        plan: CgroupPlacementActionPlan,
+    },
+    IrqAffinity {
+        plan: IrqAffinityActionPlan,
+    },
+    CpuPower {
+        plan: CpuPowerActionPlan,
+    },
+    GpuPower {
+        plan: GpuPowerActionPlan,
+    },
+    VmKnob {
+        plan: VmKnobActionPlan,
+    },
     Fake {
         action_id: crate::actions::ActionId,
         safety_class: crate::actions::SafetyClass,
@@ -36,23 +63,55 @@ impl CandidateAction {
         }
     }
 
-    pub fn profile_name(&self) -> &str {
+    pub fn candidate_name(&self) -> &str {
         match self {
             Self::CpuAffinityProfile { profile_name, .. } => profile_name,
+            Self::Nice { plan } => &plan.name,
+            Self::IoPrio { plan } => &plan.name,
+            Self::Uclamp { plan } => &plan.name,
+            Self::CgroupPlacement { plan } => &plan.name,
+            Self::IrqAffinity { plan } => &plan.name,
+            Self::CpuPower { plan } => &plan.name,
+            Self::GpuPower { plan } => &plan.name,
+            Self::VmKnob { plan } => &plan.name,
             Self::Fake { .. } => "fake-profile",
         }
     }
 
-    pub fn tree_pid(&self) -> u32 {
+    pub fn profile_name(&self) -> &str {
+        self.candidate_name()
+    }
+
+    pub fn target_root_pid(&self) -> Option<u32> {
         match self {
-            Self::CpuAffinityProfile { tree_pid, .. } => *tree_pid,
-            Self::Fake { .. } => 0,
+            Self::CpuAffinityProfile { tree_pid, .. } => Some(*tree_pid),
+            Self::Nice { plan } => plan.target_root_pid,
+            Self::IoPrio { plan } => plan.target_root_pid,
+            Self::Uclamp { plan } => plan.target_root_pid,
+            Self::CgroupPlacement { plan } => plan.target_root_pid,
+            Self::IrqAffinity { .. }
+            | Self::CpuPower { .. }
+            | Self::GpuPower { .. }
+            | Self::VmKnob { .. }
+            | Self::Fake { .. } => None,
         }
+    }
+
+    pub fn tree_pid(&self) -> u32 {
+        self.target_root_pid().unwrap_or(0)
     }
 
     pub fn action_kind(&self) -> &'static str {
         match self {
             Self::CpuAffinityProfile { .. } => "cpu_affinity_profile",
+            Self::Nice { .. } => "nice",
+            Self::IoPrio { .. } => "ionice",
+            Self::Uclamp { .. } => "uclamp",
+            Self::CgroupPlacement { .. } => "cgroup_placement",
+            Self::IrqAffinity { .. } => "irq_affinity",
+            Self::CpuPower { .. } => "cpu_power",
+            Self::GpuPower { .. } => "gpu_power",
+            Self::VmKnob { .. } => "vm_knob",
             Self::Fake { .. } => "fake",
         }
     }
@@ -66,6 +125,14 @@ impl CandidateAction {
                     crate::actions::SafetyClass::ReversibleLowRisk
                 }
             }
+            Self::Nice { plan } => plan.action.safety_class(),
+            Self::IoPrio { plan } => plan.action.safety_class(),
+            Self::Uclamp { plan } => plan.action.safety_class(),
+            Self::CgroupPlacement { plan } => plan.action.safety_class(),
+            Self::IrqAffinity { plan } => plan.action.safety_class(),
+            Self::CpuPower { plan } => plan.action.safety_class(),
+            Self::GpuPower { plan } => plan.action.safety_class(),
+            Self::VmKnob { plan } => plan.action.safety_class(),
             Self::Fake { safety_class, .. } => safety_class.clone(),
         }
     }
@@ -75,7 +142,109 @@ impl CandidateAction {
             Self::CpuAffinityProfile { profile_name, .. } => {
                 crate::actions::ActionId(format!("cpu-affinity-profile:{}", profile_name))
             }
+            Self::Nice { plan } => plan.action.id(),
+            Self::IoPrio { plan } => plan.action.id(),
+            Self::Uclamp { plan } => plan.action.id(),
+            Self::CgroupPlacement { plan } => plan.action.id(),
+            Self::IrqAffinity { plan } => plan.action.id(),
+            Self::CpuPower { plan } => plan.action.id(),
+            Self::GpuPower { plan } => plan.action.id(),
+            Self::VmKnob { plan } => plan.action.id(),
             Self::Fake { action_id, .. } => action_id.clone(),
+        }
+    }
+
+    pub fn descriptor(&self) -> ActionDescriptor {
+        ActionDescriptor {
+            action_id: self.action_id(),
+            action_kind: self.action_kind().to_owned(),
+            safety_class: self.safety_class(),
+            effect_scope: self.effect_scope(),
+            rollback: RollbackRequirement::RequiredBeforeApply,
+            persistent_effect: false,
+            touches_system_wide_state: matches!(
+                self.effect_scope(),
+                ActionEffectScope::Irq
+                    | ActionEffectScope::Sysfs
+                    | ActionEffectScope::CpuPower
+                    | ActionEffectScope::GpuPower
+                    | ActionEffectScope::VmKnob
+                    | ActionEffectScope::SystemWide
+            ),
+            requires_explicit_target: self.target_root_pid().is_some(),
+            confidence: None,
+        }
+    }
+
+    pub fn effect_scope(&self) -> ActionEffectScope {
+        match self {
+            Self::CpuAffinityProfile { .. } => ActionEffectScope::LocalProcessTree,
+            Self::Nice { .. } | Self::IoPrio { .. } | Self::Uclamp { .. } => {
+                ActionEffectScope::LocalProcessTree
+            }
+            Self::CgroupPlacement { .. } => ActionEffectScope::Cgroup,
+            Self::IrqAffinity { .. } => ActionEffectScope::Irq,
+            Self::CpuPower { .. } => ActionEffectScope::CpuPower,
+            Self::GpuPower { .. } => ActionEffectScope::GpuPower,
+            Self::VmKnob { .. } => ActionEffectScope::VmKnob,
+            Self::Fake { .. } => ActionEffectScope::ObserveOnly,
+        }
+    }
+
+    pub fn evidence(&self) -> &[CandidateEvidence] {
+        match self {
+            Self::CpuAffinityProfile { .. } | Self::Fake { .. } => &[],
+            Self::Nice { plan } => &plan.evidence,
+            Self::IoPrio { plan } => &plan.evidence,
+            Self::Uclamp { plan } => &plan.evidence,
+            Self::CgroupPlacement { plan } => &plan.evidence,
+            Self::IrqAffinity { plan } => &plan.evidence,
+            Self::CpuPower { plan } => &plan.evidence,
+            Self::GpuPower { plan } => &plan.evidence,
+            Self::VmKnob { plan } => &plan.evidence,
+        }
+    }
+
+    pub fn cooldown_key(&self) -> String {
+        format!("{}:{}", self.action_kind(), self.candidate_name())
+    }
+
+    pub fn conflict_group(&self) -> ActionConflictGroup {
+        match self {
+            Self::CpuAffinityProfile { .. } => ActionConflictGroup::CpuPlacement,
+            Self::Nice { .. } | Self::Uclamp { .. } => ActionConflictGroup::CpuPriority,
+            Self::IoPrio { .. } => ActionConflictGroup::IoPriority,
+            Self::CgroupPlacement { .. } => ActionConflictGroup::CgroupPlacement,
+            Self::IrqAffinity { .. } => ActionConflictGroup::IrqPlacement,
+            Self::CpuPower { .. } => ActionConflictGroup::CpuPower,
+            Self::GpuPower { .. } => ActionConflictGroup::GpuPower,
+            Self::VmKnob { .. } => ActionConflictGroup::VmMemory,
+            Self::Fake { .. } => ActionConflictGroup::None,
+        }
+    }
+
+    pub fn conflicts_with(&self, other: &CandidateAction) -> bool {
+        self.conflict_group().conflicts_with(other.conflict_group())
+    }
+
+    pub fn cgroup_target_path(&self) -> Option<&Path> {
+        match self {
+            Self::CgroupPlacement { plan } => Some(plan.action.target_cgroup.as_path()),
+            _ => None,
+        }
+    }
+
+    pub fn objective(&self) -> ObjectiveKind {
+        match self {
+            Self::CpuAffinityProfile { .. } | Self::Fake { .. } => ObjectiveKind::StutterScore,
+            Self::Nice { plan } => plan.objective,
+            Self::IoPrio { plan } => plan.objective,
+            Self::Uclamp { plan } => plan.objective,
+            Self::CgroupPlacement { plan } => plan.objective,
+            Self::IrqAffinity { plan } => plan.objective,
+            Self::CpuPower { plan } => plan.objective,
+            Self::GpuPower { plan } => plan.objective,
+            Self::VmKnob { plan } => plan.objective,
         }
     }
 
@@ -91,9 +260,102 @@ impl CandidateAction {
                     profile_name, tree_pid
                 )
             }
+            Self::Nice { plan } => plan.action.describe(),
+            Self::IoPrio { plan } => plan.action.describe(),
+            Self::Uclamp { plan } => plan.action.describe(),
+            Self::CgroupPlacement { plan } => plan.action.describe(),
+            Self::IrqAffinity { plan } => plan.action.describe(),
+            Self::CpuPower { plan } => plan.action.describe(),
+            Self::GpuPower { plan } => plan.action.describe(),
+            Self::VmKnob { plan } => plan.action.describe(),
             Self::Fake { action_id, .. } => format!("fake action {}", action_id.0),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CandidateEvidence {
+    pub signal: String,
+    pub value: String,
+    pub weight: f32,
+}
+
+impl CandidateEvidence {
+    pub fn new(signal: impl Into<String>, value: impl Into<String>, weight: f32) -> Self {
+        Self {
+            signal: signal.into(),
+            value: value.into(),
+            weight: weight.clamp(0.0, 1.0),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct NiceActionPlan {
+    pub name: String,
+    pub action: NiceAction,
+    pub target_root_pid: Option<u32>,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
+}
+
+#[derive(Clone, Debug)]
+pub struct IoPrioActionPlan {
+    pub name: String,
+    pub action: IoPrioAction,
+    pub target_root_pid: Option<u32>,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
+}
+
+#[derive(Clone, Debug)]
+pub struct UclampActionPlan {
+    pub name: String,
+    pub action: UclampAction,
+    pub target_root_pid: Option<u32>,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
+}
+
+#[derive(Clone, Debug)]
+pub struct CgroupPlacementActionPlan {
+    pub name: String,
+    pub action: CgroupPlacementAction,
+    pub target_root_pid: Option<u32>,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
+}
+
+#[derive(Clone, Debug)]
+pub struct IrqAffinityActionPlan {
+    pub name: String,
+    pub action: IrqAffinityAction,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
+}
+
+#[derive(Clone, Debug)]
+pub struct CpuPowerActionPlan {
+    pub name: String,
+    pub action: CpuPowerAction,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
+}
+
+#[derive(Clone, Debug)]
+pub struct GpuPowerActionPlan {
+    pub name: String,
+    pub action: GpuPowerAction,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
+}
+
+#[derive(Clone, Debug)]
+pub struct VmKnobActionPlan {
+    pub name: String,
+    pub action: VmKnobAction,
+    pub evidence: Vec<CandidateEvidence>,
+    pub objective: ObjectiveKind,
 }
 
 #[derive(Clone, Debug)]
@@ -442,9 +704,51 @@ pub fn dry_run_candidate(candidate: &CandidateAction) -> CandidateDryRunRecord {
                 },
             }
         }
+        CandidateAction::Nice { plan } => {
+            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
+        }
+        CandidateAction::IoPrio { plan } => {
+            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
+        }
+        CandidateAction::Uclamp { plan } => {
+            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
+        }
+        CandidateAction::CgroupPlacement { plan } => {
+            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
+        }
+        CandidateAction::IrqAffinity { plan } => {
+            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
+        }
+        CandidateAction::CpuPower { plan } => {
+            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
+        }
+        CandidateAction::GpuPower { plan } => {
+            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
+        }
+        CandidateAction::VmKnob { plan } => {
+            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
+        }
         CandidateAction::Fake { .. } => {
             panic!("dry-run not implemented for Fake candidate");
         }
+    }
+}
+
+fn dry_run_planned_action<A: TuningAction>(
+    candidate_name: String,
+    safety_class: SafetyClass,
+    action: &A,
+) -> CandidateDryRunRecord {
+    match action.dry_run() {
+        Ok(state) => dry_run_record_from_action_state(candidate_name, safety_class, state),
+        Err(err) => CandidateDryRunRecord {
+            candidate_name,
+            affected_tasks: 0,
+            warnings: Vec::new(),
+            safety_class,
+            eligible: false,
+            reason: Some(format!("dry-run failed: {err:#}")),
+        },
     }
 }
 
@@ -2173,10 +2477,51 @@ mod tests {
     fn candidate_helpers_return_stable_metadata() {
         let candidate = CandidateAction::cpu_affinity_profile(profile("game-main"), 1234);
 
-        assert_eq!(candidate.profile_name(), "game-main");
-        assert_eq!(candidate.tree_pid(), 1234);
+        assert_eq!(candidate.candidate_name(), "game-main");
+        assert_eq!(candidate.target_root_pid(), Some(1234));
         assert_eq!(candidate.action_kind(), "cpu_affinity_profile");
         assert_eq!(candidate.safety_class(), SafetyClass::ReversibleLowRisk);
+        assert_eq!(
+            candidate.descriptor().effect_scope,
+            ActionEffectScope::LocalProcessTree
+        );
+        assert_eq!(
+            candidate.conflict_group(),
+            ActionConflictGroup::CpuPlacement
+        );
+    }
+
+    #[test]
+    fn generic_candidate_variant_reports_descriptor_scope_and_objective() {
+        let candidate = CandidateAction::Nice {
+            plan: NiceActionPlan {
+                name: "nice-root-1234-to-5".to_owned(),
+                action: crate::actions::nice::NiceAction {
+                    targets: vec![crate::actions::TaskIdentity {
+                        tid: 1234,
+                        process_pid: Some(1234),
+                        comm: None,
+                        starttime_ticks: None,
+                    }],
+                    nice: 5,
+                    policy: crate::actions::nice::NicePolicy::default(),
+                },
+                target_root_pid: Some(1234),
+                evidence: vec![CandidateEvidence::new("situation", "CompileCpuBound", 0.8)],
+                objective: ObjectiveKind::DesktopInteractivity,
+            },
+        };
+
+        assert_eq!(candidate.candidate_name(), "nice-root-1234-to-5");
+        assert_eq!(candidate.action_kind(), "nice");
+        assert_eq!(candidate.safety_class(), SafetyClass::ReversibleMediumRisk);
+        assert_eq!(
+            candidate.effect_scope(),
+            ActionEffectScope::LocalProcessTree
+        );
+        assert_eq!(candidate.target_root_pid(), Some(1234));
+        assert_eq!(candidate.conflict_group(), ActionConflictGroup::CpuPriority);
+        assert_eq!(candidate.objective(), ObjectiveKind::DesktopInteractivity);
     }
 
     #[test]

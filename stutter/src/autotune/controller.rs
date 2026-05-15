@@ -478,7 +478,15 @@ fn candidate_looks_like_game_cpu_isolation_profile(candidate: &CandidateAction) 
                     })
                 })
         }
-        CandidateAction::Fake { .. } => false,
+        CandidateAction::Fake { .. }
+        | CandidateAction::Nice { .. }
+        | CandidateAction::IoPrio { .. }
+        | CandidateAction::Uclamp { .. }
+        | CandidateAction::CgroupPlacement { .. }
+        | CandidateAction::IrqAffinity { .. }
+        | CandidateAction::CpuPower { .. }
+        | CandidateAction::GpuPower { .. }
+        | CandidateAction::VmKnob { .. } => false,
     }
 }
 
@@ -557,11 +565,19 @@ mod tests {
             },
             data_quality: OnlineDataQuality::High,
             primary_situation: SituationKind::GameCpuSchedulerPressure,
+            situation: Default::default(),
             focus_kind: Some(FocusGroupKind::Game),
             focus_confidence: 0.80,
             focus_roots: vec![1234],
             focus_reasons: vec!["game focus selected".to_owned()],
             recent_diagnoses: Vec::new(),
+            system_health: Default::default(),
+            capabilities: Default::default(),
+            topology_signature: None,
+            workload_identity: None,
+            active_tasks: Vec::new(),
+            protected_tasks: Vec::new(),
+            active_config_snapshot: None,
             frame_count: 100,
             frame_p99_ms: 12.0,
             frame_max_ms: 20.0,

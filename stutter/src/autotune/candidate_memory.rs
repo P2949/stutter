@@ -53,7 +53,7 @@ impl CandidateContextHashInput {
             target_exe_dev: None,
             target_exe_ino: None,
             cpu_topology_signature: None,
-            profile_name: candidate.profile_name().to_owned(),
+            profile_name: candidate.candidate_name().to_owned(),
             situation: SituationKind::Unknown,
             active_task_class_distribution: Vec::new(),
         }
@@ -65,12 +65,20 @@ impl CandidateContextHashInput {
         cpu_topology_signature: Option<&str>,
     ) -> Self {
         Self {
-            target_exe_dev: None,
-            target_exe_ino: None,
-            cpu_topology_signature: normalize_optional_string(cpu_topology_signature),
-            profile_name: candidate.profile_name().to_owned(),
+            target_exe_dev: observation
+                .workload_identity
+                .as_ref()
+                .and_then(|identity| identity.exe_dev),
+            target_exe_ino: observation
+                .workload_identity
+                .as_ref()
+                .and_then(|identity| identity.exe_ino),
+            cpu_topology_signature: normalize_optional_string(
+                cpu_topology_signature.or(observation.topology_signature.as_deref()),
+            ),
+            profile_name: candidate.candidate_name().to_owned(),
             situation: observation.primary_situation,
-            active_task_class_distribution: Vec::new(),
+            active_task_class_distribution: class_distribution_from_workload_identity(observation),
         }
     }
 
@@ -86,8 +94,10 @@ impl CandidateContextHashInput {
         Self {
             target_exe_dev,
             target_exe_ino,
-            cpu_topology_signature: normalize_optional_string(cpu_topology_signature),
-            profile_name: candidate.profile_name().to_owned(),
+            cpu_topology_signature: normalize_optional_string(
+                cpu_topology_signature.or(observation.topology_signature.as_deref()),
+            ),
+            profile_name: candidate.candidate_name().to_owned(),
             situation: observation.primary_situation,
             active_task_class_distribution: class_distribution_from_snapshot(snapshot),
         }
@@ -189,7 +199,7 @@ impl CandidateMemory {
         let action_id = candidate.action_id();
         let record = CandidateMemoryRecord {
             action_id: action_id.clone(),
-            candidate_name: candidate.profile_name().to_owned(),
+            candidate_name: candidate.candidate_name().to_owned(),
             last_tried_unix_nanos: now_unix_nanos,
             result,
             context_hash: context_hash.clone(),
@@ -238,6 +248,27 @@ impl CandidateMemory {
             cooldown_expires.saturating_sub(now_unix_nanos),
         ))
     }
+}
+
+fn class_distribution_from_workload_identity(
+    observation: &AutotuneObservation,
+) -> Vec<CandidateClassCount> {
+    observation
+        .workload_identity
+        .as_ref()
+        .map(|identity| {
+            identity
+                .class_distribution
+                .iter()
+                .filter_map(|(class, count)| {
+                    TaskClass::from_str_opt(class).map(|class| CandidateClassCount {
+                        class,
+                        count: *count,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn target_executable_inode_from_snapshot(
@@ -349,7 +380,11 @@ mod tests {
     use super::*;
     use crate::{
         actions::{ActionId, SafetyClass},
-        autotune::state::SituationKind,
+        autotune::{
+            observation::{AutotuneObservation, WorkloadIdentity},
+            state::SituationKind,
+        },
+        focus::FocusGroupKind,
     };
 
     fn fake_candidate() -> CandidateAction {
@@ -509,6 +544,52 @@ mod tests {
         assert_eq!(
             memory.cooldown_remaining_for_action(&action_id, 301_000_000_000),
             None
+        );
+    }
+
+    #[test]
+    fn observation_context_uses_workload_identity_and_inventory_signature() {
+        let candidate = fake_candidate();
+        let observation = AutotuneObservation {
+            primary_situation: SituationKind::BrowserCpuPressure,
+            topology_signature: Some("inventory-a".to_owned()),
+            workload_identity: Some(WorkloadIdentity {
+                root_pid: 1234,
+                process_starttime_ticks: Some(77),
+                exe_dev: Some(8),
+                exe_ino: Some(99),
+                cgroup_path: Some("/user.slice/app.scope".to_owned()),
+                focus_kind: Some(FocusGroupKind::Browser),
+                class_distribution: BTreeMap::from([
+                    ("BrowserForeground".to_owned(), 1),
+                    ("BrowserRenderer".to_owned(), 3),
+                ]),
+                stable_hash: "workload-a".to_owned(),
+            }),
+            ..AutotuneObservation::default()
+        };
+
+        let context = CandidateContextHashInput::from_observation(&candidate, &observation, None);
+
+        assert_eq!(context.target_exe_dev, Some(8));
+        assert_eq!(context.target_exe_ino, Some(99));
+        assert_eq!(
+            context.cpu_topology_signature.as_deref(),
+            Some("inventory-a")
+        );
+        assert_eq!(context.situation, SituationKind::BrowserCpuPressure);
+        assert_eq!(
+            context.normalized().active_task_class_distribution,
+            vec![
+                CandidateClassCount {
+                    class: TaskClass::BrowserForeground,
+                    count: 1,
+                },
+                CandidateClassCount {
+                    class: TaskClass::BrowserRenderer,
+                    count: 3,
+                },
+            ]
         );
     }
 }

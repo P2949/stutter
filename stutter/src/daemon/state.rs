@@ -169,6 +169,14 @@ pub struct DaemonDecisionState {
     pub reason: String,
     pub unix_nanos: Option<u128>,
     pub score_total: Option<u64>,
+    #[serde(default)]
+    pub candidate_count: Option<usize>,
+    #[serde(default)]
+    pub top_denied_reason: Option<String>,
+    #[serde(default)]
+    pub situation: Option<String>,
+    #[serde(default)]
+    pub focus_kind: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -715,6 +723,10 @@ mod tests {
                 reason: "candidate passed gates".to_owned(),
                 unix_nanos: Some(200),
                 score_total: Some(300),
+                candidate_count: None,
+                top_denied_reason: None,
+                situation: None,
+                focus_kind: None,
             }),
             degraded: vec![DaemonDegradedStatus {
                 category: "data_quality".to_owned(),

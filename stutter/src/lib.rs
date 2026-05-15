@@ -56,6 +56,7 @@ pub(crate) mod scx;
 pub(crate) mod service;
 pub(crate) mod spike;
 pub(crate) mod summary;
+pub(crate) mod system_inventory;
 pub(crate) mod target_snapshot;
 pub(crate) mod task_class;
 pub(crate) mod task_filter;

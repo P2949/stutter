@@ -22,8 +22,9 @@ pub use acceptance::{
 pub use autotune::{AutotuneSubsystem, AutotuneSubsystemEvent};
 pub use capabilities::{CapabilityProbe, CapabilityProbeRoot, DaemonCapabilities};
 pub use config::{
-    DaemonAutotuneConfig, DaemonConfig, DaemonHealthConfig, DaemonPreset, DaemonRemoteConfig,
-    DaemonRetentionConfig, DaemonSafetyConfig, DaemonTargetConfig,
+    CgroupTargetRole, DaemonAutotuneConfig, DaemonCgroupTargetsConfig, DaemonConfig,
+    DaemonHealthConfig, DaemonPreset, DaemonRemoteConfig, DaemonRetentionConfig,
+    DaemonSafetyConfig, DaemonTargetConfig,
 };
 pub use explain::{
     DaemonPolicyExplanation, DaemonStatusExplanation, PolicyDecisionKind, PolicyExplainLine,

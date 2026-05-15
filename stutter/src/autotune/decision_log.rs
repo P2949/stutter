@@ -42,6 +42,15 @@ pub enum SituationKindLabel {
     IrqPressure,
     ThermalOrPowerLimit,
     CompileLoad,
+    BrowserFocused,
+    BrowserCpuPressure,
+    BrowserGpuVideo,
+    BrowserIoPressure,
+    CompileCpuBound,
+    CompileLinkerPressure,
+    MediaPlayback,
+    Recording,
+    VirtualMachineLoad,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -267,6 +276,47 @@ mod tests {
         assert_eq!(parsed_second, second);
 
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn all_situation_labels_round_trip_through_decision_jsonl() {
+        let variants = [
+            SituationKindLabel::Unknown,
+            SituationKindLabel::Idle,
+            SituationKindLabel::GameFocused,
+            SituationKindLabel::GameCpuSchedulerPressure,
+            SituationKindLabel::GameGpuBound,
+            SituationKindLabel::CompositorPressure,
+            SituationKindLabel::CpuPressure,
+            SituationKindLabel::IoPressure,
+            SituationKindLabel::IrqPressure,
+            SituationKindLabel::ThermalOrPowerLimit,
+            SituationKindLabel::CompileLoad,
+            SituationKindLabel::BrowserFocused,
+            SituationKindLabel::BrowserCpuPressure,
+            SituationKindLabel::BrowserGpuVideo,
+            SituationKindLabel::BrowserIoPressure,
+            SituationKindLabel::CompileCpuBound,
+            SituationKindLabel::CompileLinkerPressure,
+            SituationKindLabel::MediaPlayback,
+            SituationKindLabel::Recording,
+            SituationKindLabel::VirtualMachineLoad,
+        ];
+
+        for situation in variants {
+            let entry = DecisionJsonlEntry::observe_noop(
+                true,
+                situation,
+                143,
+                OnlineDataQualityLabel::High,
+                "observe mode",
+            );
+
+            let json = serde_json::to_string(&entry).unwrap();
+            let parsed: DecisionJsonlEntry = serde_json::from_str(&json).unwrap();
+
+            assert_eq!(parsed.situation, situation);
+        }
     }
 
     #[test]
