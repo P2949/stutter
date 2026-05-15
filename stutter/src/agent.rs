@@ -2881,6 +2881,17 @@ mod tests {
         }
     }
 
+    fn test_health_thresholds_allow_apply() -> SystemHealthThresholds {
+        SystemHealthThresholds {
+            max_cpu_temp_millidegrees: i64::MAX,
+            max_gpu_temp_millidegrees: i64::MAX,
+            min_disk_available_bytes: 0,
+            max_memory_pressure_some_avg10_millipercent: u32::MAX,
+            max_load_per_cpu_milli: u32::MAX,
+            max_ebpf_dropped_events: u64::MAX,
+        }
+    }
+
     fn test_agent_state_custom(bind: SocketAddr, bearer_token: Option<String>) -> AgentState {
         AgentState {
             active_run: Mutex::new(None),
@@ -2900,7 +2911,7 @@ mod tests {
                 max_concurrent_recordings: DEFAULT_AGENT_MAX_CONCURRENT_RECORDINGS,
             },
             autotune_limits: AgentAutotuneLimits::default(),
-            health_thresholds: SystemHealthThresholds::default(),
+            health_thresholds: test_health_thresholds_allow_apply(),
         }
     }
 
@@ -2923,7 +2934,7 @@ mod tests {
                 max_concurrent_recordings: DEFAULT_AGENT_MAX_CONCURRENT_RECORDINGS,
             },
             autotune_limits: AgentAutotuneLimits::default(),
-            health_thresholds: SystemHealthThresholds::default(),
+            health_thresholds: test_health_thresholds_allow_apply(),
         }
     }
 
@@ -2965,6 +2976,23 @@ mod tests {
             washout_seconds: None,
             washout_verify_interval_ms: None,
         }
+    }
+
+    #[test]
+    fn test_agent_state_uses_permissive_health_thresholds() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
+        let monitor = system_health_monitor_for_agent_state(&state);
+        let thresholds = monitor.thresholds();
+
+        assert_eq!(thresholds.max_cpu_temp_millidegrees, i64::MAX);
+        assert_eq!(thresholds.max_gpu_temp_millidegrees, i64::MAX);
+        assert_eq!(thresholds.min_disk_available_bytes, 0);
+        assert_eq!(
+            thresholds.max_memory_pressure_some_avg10_millipercent,
+            u32::MAX
+        );
+        assert_eq!(thresholds.max_load_per_cpu_milli, u32::MAX);
+        assert_eq!(thresholds.max_ebpf_dropped_events, u64::MAX);
     }
 
     #[test]

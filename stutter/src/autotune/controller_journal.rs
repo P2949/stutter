@@ -333,34 +333,26 @@ pub fn write_controller_journal_record(
         })?;
     }
 
-    let temporary_path = temporary_journal_path(path);
-    {
-        let mut file = fs::File::create(&temporary_path).with_context(|| {
-            format!(
-                "failed to create autotune controller journal temp file {}",
-                temporary_path.display()
-            )
-        })?;
-
-        serde_json::to_writer_pretty(&mut file, record).with_context(|| {
-            format!(
-                "failed to serialize autotune controller journal {}",
-                temporary_path.display()
-            )
-        })?;
-        file.write_all(b"\n").with_context(|| {
-            format!(
-                "failed to terminate autotune controller journal {}",
-                temporary_path.display()
-            )
-        })?;
-        file.sync_all().with_context(|| {
-            format!(
-                "failed to sync autotune controller journal temp file {}",
-                temporary_path.display()
-            )
-        })?;
-    }
+    let (temporary_path, mut file) = create_unique_journal_temp_file(path)?;
+    serde_json::to_writer_pretty(&mut file, record).with_context(|| {
+        format!(
+            "failed to serialize autotune controller journal {}",
+            temporary_path.display()
+        )
+    })?;
+    file.write_all(b"\n").with_context(|| {
+        format!(
+            "failed to terminate autotune controller journal {}",
+            temporary_path.display()
+        )
+    })?;
+    file.sync_all().with_context(|| {
+        format!(
+            "failed to sync autotune controller journal temp file {}",
+            temporary_path.display()
+        )
+    })?;
+    drop(file);
 
     fs::rename(&temporary_path, path).with_context(|| {
         format!(
@@ -369,6 +361,8 @@ pub fn write_controller_journal_record(
             temporary_path.display()
         )
     })?;
+
+    sync_parent_directory(path)?;
 
     Ok(())
 }
@@ -503,14 +497,64 @@ pub fn write_default_controller_journal_clean() -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
-fn temporary_journal_path(path: &Path) -> PathBuf {
+fn create_unique_journal_temp_file(path: &Path) -> anyhow::Result<(PathBuf, fs::File)> {
+    for _ in 0..16 {
+        let temporary_path = unique_temporary_journal_path(path);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)
+        {
+            Ok(file) => return Ok((temporary_path, file)),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!(
+                        "failed to create autotune controller journal temp file {}",
+                        temporary_path.display()
+                    )
+                });
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "failed to create a unique autotune controller journal temp file for {} after repeated collisions",
+        path.display()
+    );
+}
+
+fn unique_temporary_journal_path(path: &Path) -> PathBuf {
     let mut temporary_path = path.to_path_buf();
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("controller_journal.json");
-    temporary_path.set_file_name(format!("{file_name}.tmp"));
+    temporary_path.set_file_name(format!(
+        "{file_name}.{}.{}.tmp",
+        std::process::id(),
+        crate::audit::unix_nanos_now()
+    ));
     temporary_path
+}
+
+fn sync_parent_directory(path: &Path) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        let directory = fs::File::open(parent).with_context(|| {
+            format!(
+                "failed to open autotune controller journal directory {} for sync",
+                parent.display()
+            )
+        })?;
+        directory.sync_all().with_context(|| {
+            format!(
+                "failed to sync autotune controller journal directory {}",
+                parent.display()
+            )
+        })?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -533,6 +577,14 @@ mod tests {
             path: PathBuf::from("/tmp/stutter-restore.json"),
             affected_tasks: 31,
         }
+    }
+
+    fn temporary_files_in(dir: &Path) -> Vec<PathBuf> {
+        fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("tmp"))
+            .collect()
     }
 
     #[test]
@@ -681,7 +733,31 @@ mod tests {
 
         let clean = write_controller_journal_clean(&path).unwrap();
         assert_eq!(read_controller_journal(&path).unwrap(), clean);
-        assert!(!temporary_journal_path(&path).exists());
+        assert!(temporary_files_in(&dir).is_empty());
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn journal_writer_does_not_use_fixed_temp_path() {
+        let dir = temp_dir("fixed-temp-sentinel");
+        let path = dir.join("controller_journal.json");
+        let fixed_temp_path = dir.join("controller_journal.json.tmp");
+        fs::write(&fixed_temp_path, "sentinel").unwrap();
+
+        write_controller_journal_applied(
+            &path,
+            "experiment-1",
+            "cpu-affinity-profile:game-main",
+            rollback_token(),
+        )
+        .unwrap();
+
+        assert_eq!(fs::read_to_string(&fixed_temp_path).unwrap(), "sentinel");
+        assert_eq!(
+            read_controller_journal(&path).unwrap().state(),
+            ControllerJournalState::Applied
+        );
 
         fs::remove_dir_all(dir).ok();
     }
