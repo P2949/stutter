@@ -784,6 +784,27 @@ fn policy_rejection_status(
     }
 }
 
+fn remote_autotune_apply_auth_rejection(
+    mode: DaemonMode,
+    status: StatusCode,
+    response_message: &'static str,
+) -> AutotuneStartSecurityRejection {
+    AutotuneStartSecurityRejection {
+        status,
+        audit_message: format!("rejected remote autotune mode={mode}: {response_message}"),
+        response_message: response_message.to_owned(),
+    }
+}
+
+fn remote_autotune_mode_limit_rejection(mode: DaemonMode) -> AutotuneStartSecurityRejection {
+    let reason = PolicyRejection::RemoteModeNotAllowed { mode }.to_string();
+    AutotuneStartSecurityRejection {
+        status: StatusCode::BAD_REQUEST,
+        audit_message: format!("rejected remote autotune mode={mode}: {reason}"),
+        response_message: reason,
+    }
+}
+
 fn rejection_from_policy_explanation(
     mode: DaemonMode,
     explanation: crate::daemon::PolicyExplanation,
@@ -992,9 +1013,27 @@ fn policy_for_remote_autotune_start_with_safety_context(
     let auth_result = authorize_remote_autotune_start(headers, state);
     let auth_error = auth_result.as_ref().err().copied();
 
-    if !mode.supports_apply()
-        && let Err(status) = auth_result
-    {
+    if mode.supports_apply() {
+        if !state.auth.apply_token_configured() {
+            return Err(remote_autotune_apply_auth_rejection(
+                mode,
+                StatusCode::UNAUTHORIZED,
+                "remote autotune apply mode requires a configured bearer token",
+            ));
+        }
+
+        if let Err(status) = auth_result {
+            return Err(remote_autotune_apply_auth_rejection(
+                mode,
+                status,
+                "remote autotune apply mode requires a valid bearer token",
+            ));
+        }
+
+        if !remote_mode_supported(&state.autotune_limits, mode) {
+            return Err(remote_autotune_mode_limit_rejection(mode));
+        }
+    } else if let Err(status) = auth_result {
         return Err(AutotuneStartSecurityRejection {
             status,
             audit_message: format!("rejected remote autotune mode={mode}: unauthorized"),
