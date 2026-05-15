@@ -21,6 +21,12 @@ impl WorkloadPolicyRule {
             .any(|family| family_matches(candidate.action_kind(), family))
     }
 
+    pub fn allows_autonomous_candidate(&self, candidate: &CandidateAction) -> bool {
+        self.autonomous_families
+            .iter()
+            .any(|family| family_matches(candidate.action_kind(), family))
+    }
+
     pub fn allows_objective(&self, objective: ObjectiveKind) -> bool {
         self.allowed_objectives.is_empty() || self.allowed_objectives.contains(&objective)
     }
@@ -247,6 +253,30 @@ mod tests {
         assert!(!rule.allowed_families.contains("gpu_power"));
         assert!(!rule.allowed_families.contains("cpu_affinity_profile"));
         assert!(rule.allowed_families.contains("uclamp"));
+    }
+
+    #[test]
+    fn autonomous_policy_uses_autonomous_families_not_allowed_families() {
+        let candidate = CandidateAction::Fake {
+            action_id: crate::actions::ActionId("fake-autonomous-test".to_owned()),
+            safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
+        };
+        let allowed_only = WorkloadPolicyRule {
+            situation: SituationKind::Unknown,
+            allowed_families: std::collections::BTreeSet::from(["fake".to_owned()]),
+            allowed_objectives: std::collections::BTreeSet::new(),
+            autonomous_families: std::collections::BTreeSet::new(),
+        };
+
+        assert!(allowed_only.allows_candidate(&candidate));
+        assert!(!allowed_only.allows_autonomous_candidate(&candidate));
+
+        let autonomous = WorkloadPolicyRule {
+            autonomous_families: std::collections::BTreeSet::from(["fake".to_owned()]),
+            ..allowed_only
+        };
+
+        assert!(autonomous.allows_autonomous_candidate(&candidate));
     }
 
     #[test]
