@@ -4,9 +4,15 @@ use std::{
 };
 
 use crate::{
-    autotune::quality::{OnlineDataQuality, OnlineDataQualityInput, OnlineDataQualityPolicy},
+    autotune::{
+        objective::ObjectiveSignals,
+        quality::{OnlineDataQuality, OnlineDataQualityInput, OnlineDataQualityPolicy},
+    },
     diagnosis::LiveDiagnosisEntry,
-    recorder::{FrameEvent, IntervalRecord},
+    recorder::{
+        BlockIoRecord, CpuFreqRecord, ForegroundEvent, FrameEvent, GpuSample, IntervalRecord,
+        IrqEventRecord,
+    },
 };
 
 #[allow(dead_code)]
@@ -27,6 +33,10 @@ pub struct WindowScore {
     pub data_quality: OnlineDataQuality,
 }
 
+const GPU_THERMAL_DEGRADED_MILLIDEGREES: u32 = 85_000;
+const GPU_POWER_LIMIT_BUSY_PERCENT: u32 = 95;
+const GPU_POWER_LIMIT_LOW_CLOCK_MHZ: u32 = 300;
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RollingWindow {
@@ -34,6 +44,11 @@ pub struct RollingWindow {
     pub intervals: VecDeque<IntervalRecord>,
     pub frames: VecDeque<FrameEvent>,
     pub diagnoses: VecDeque<LiveDiagnosisEntry>,
+    pub irq_events: VecDeque<IrqEventRecord>,
+    pub block_io_events: VecDeque<BlockIoRecord>,
+    pub gpu_samples: VecDeque<GpuSample>,
+    pub cpu_freq_events: VecDeque<CpuFreqRecord>,
+    pub foreground_events: VecDeque<ForegroundEvent>,
 }
 
 #[allow(dead_code)]
@@ -44,6 +59,11 @@ impl RollingWindow {
             intervals: VecDeque::new(),
             frames: VecDeque::new(),
             diagnoses: VecDeque::new(),
+            irq_events: VecDeque::new(),
+            block_io_events: VecDeque::new(),
+            gpu_samples: VecDeque::new(),
+            cpu_freq_events: VecDeque::new(),
+            foreground_events: VecDeque::new(),
         }
     }
 
@@ -52,13 +72,25 @@ impl RollingWindow {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.intervals.is_empty() && self.frames.is_empty() && self.diagnoses.is_empty()
+        self.intervals.is_empty()
+            && self.frames.is_empty()
+            && self.diagnoses.is_empty()
+            && self.irq_events.is_empty()
+            && self.block_io_events.is_empty()
+            && self.gpu_samples.is_empty()
+            && self.cpu_freq_events.is_empty()
+            && self.foreground_events.is_empty()
     }
 
     pub fn clear(&mut self) {
         self.intervals.clear();
         self.frames.clear();
         self.diagnoses.clear();
+        self.irq_events.clear();
+        self.block_io_events.clear();
+        self.gpu_samples.clear();
+        self.cpu_freq_events.clear();
+        self.foreground_events.clear();
     }
 
     pub fn latest_elapsed_ms(&self) -> Option<u64> {
@@ -66,6 +98,11 @@ impl RollingWindow {
             self.intervals.back().map(|record| record.elapsed_ms),
             self.frames.back().map(|frame| frame.elapsed_ms),
             self.diagnoses.back().map(|diagnosis| diagnosis.elapsed_ms),
+            self.irq_events.back().and_then(|event| event.elapsed_ms),
+            self.block_io_events.back().map(|event| event.elapsed_ms),
+            self.gpu_samples.back().map(|sample| sample.elapsed_ms),
+            self.cpu_freq_events.back().map(|event| event.elapsed_ms),
+            self.foreground_events.back().map(|event| event.elapsed_ms),
         ]
         .into_iter()
         .flatten()
@@ -104,6 +141,38 @@ impl RollingWindow {
         self.prune_to(elapsed_ms);
     }
 
+    pub fn push_irq_event(&mut self, event: IrqEventRecord) {
+        let elapsed_ms = event.elapsed_ms;
+        self.irq_events.push_back(event);
+        if let Some(elapsed_ms) = elapsed_ms {
+            self.prune_to(elapsed_ms);
+        }
+    }
+
+    pub fn push_block_io_event(&mut self, event: BlockIoRecord) {
+        let elapsed_ms = event.elapsed_ms;
+        self.block_io_events.push_back(event);
+        self.prune_to(elapsed_ms);
+    }
+
+    pub fn push_gpu_sample(&mut self, sample: GpuSample) {
+        let elapsed_ms = sample.elapsed_ms;
+        self.gpu_samples.push_back(sample);
+        self.prune_to(elapsed_ms);
+    }
+
+    pub fn push_cpu_freq_event(&mut self, event: CpuFreqRecord) {
+        let elapsed_ms = event.elapsed_ms;
+        self.cpu_freq_events.push_back(event);
+        self.prune_to(elapsed_ms);
+    }
+
+    pub fn push_foreground_event(&mut self, event: ForegroundEvent) {
+        let elapsed_ms = event.elapsed_ms;
+        self.foreground_events.push_back(event);
+        self.prune_to(elapsed_ms);
+    }
+
     pub fn push_diagnosis(&mut self, diagnosis: LiveDiagnosisEntry) {
         let elapsed_ms = diagnosis.elapsed_ms;
         self.diagnoses.push_back(diagnosis);
@@ -117,6 +186,19 @@ impl RollingWindow {
         prune_front_by_elapsed(&mut self.frames, start_ms, |frame| frame.elapsed_ms);
         prune_front_by_elapsed(&mut self.diagnoses, start_ms, |diagnosis| {
             diagnosis.elapsed_ms
+        });
+        prune_front_by_elapsed(&mut self.irq_events, start_ms, |event| {
+            event.elapsed_ms.unwrap_or(0)
+        });
+        prune_front_by_elapsed(&mut self.block_io_events, start_ms, |event| {
+            event.elapsed_ms
+        });
+        prune_front_by_elapsed(&mut self.gpu_samples, start_ms, |sample| sample.elapsed_ms);
+        prune_front_by_elapsed(&mut self.cpu_freq_events, start_ms, |event| {
+            event.elapsed_ms
+        });
+        prune_front_by_elapsed(&mut self.foreground_events, start_ms, |event| {
+            event.elapsed_ms
         });
     }
 
@@ -142,6 +224,11 @@ impl RollingWindow {
         self.interval_count()
             .saturating_add(self.frame_count())
             .saturating_add(self.diagnosis_count())
+            .saturating_add(self.irq_events.len())
+            .saturating_add(self.block_io_events.len())
+            .saturating_add(self.gpu_samples.len())
+            .saturating_add(self.cpu_freq_events.len())
+            .saturating_add(self.foreground_events.len())
     }
 
     pub fn frame_p99_ms(&self) -> f64 {
@@ -172,6 +259,73 @@ impl RollingWindow {
 
     pub fn recent_diagnoses_vec(&self) -> Vec<LiveDiagnosisEntry> {
         self.diagnoses.iter().cloned().collect()
+    }
+
+    pub fn objective_signals(&self) -> ObjectiveSignals {
+        let block_io_overlap_count = self
+            .block_io_events
+            .iter()
+            .filter(|event| event.duration_ns > 0)
+            .count() as u64;
+        let block_io_worst_latency_ns = self
+            .block_io_events
+            .iter()
+            .map(|event| event.duration_ns)
+            .max()
+            .unwrap_or(0);
+
+        let irq_overlap_count = self
+            .irq_events
+            .iter()
+            .filter(|event| event.duration_ns > 0)
+            .count() as u64;
+        let irq_worst_overlap_ns = self
+            .irq_events
+            .iter()
+            .map(|event| event.duration_ns)
+            .max()
+            .unwrap_or(0);
+
+        let thermal_samples = self
+            .gpu_samples
+            .iter()
+            .filter_map(|sample| sample.temp_millidegrees)
+            .collect::<Vec<_>>();
+        let thermal_throttle_count = thermal_samples
+            .iter()
+            .filter(|temp| **temp >= GPU_THERMAL_DEGRADED_MILLIDEGREES)
+            .count() as u64;
+        let thermal_degraded = (!thermal_samples.is_empty()).then_some(thermal_throttle_count > 0);
+
+        let cpu_power_limited = (!self.cpu_freq_events.is_empty())
+            .then_some(self.cpu_freq_events.iter().any(|event| event.freq_khz == 0));
+
+        let gpu_power_limited =
+            (!self.gpu_samples.is_empty()).then_some(self.gpu_samples.iter().any(|sample| {
+                sample.gpu_busy_percent.unwrap_or(0) >= GPU_POWER_LIMIT_BUSY_PERCENT
+                    && sample.gpu_clock_mhz.unwrap_or(u32::MAX) <= GPU_POWER_LIMIT_LOW_CLOCK_MHZ
+            }));
+
+        let has_block_io_events = !self.block_io_events.is_empty();
+        let has_irq_events = !self.irq_events.is_empty();
+
+        ObjectiveSignals {
+            block_io_overlap_count: has_block_io_events.then_some(block_io_overlap_count),
+            block_io_worst_latency_ns: has_block_io_events.then_some(block_io_worst_latency_ns),
+            irq_overlap_count: has_irq_events.then_some(irq_overlap_count),
+            irq_worst_overlap_ns: has_irq_events.then_some(irq_worst_overlap_ns),
+            thermal_degraded,
+            thermal_throttle_count: thermal_degraded.map(|_| thermal_throttle_count),
+            cpu_power_limited,
+            gpu_power_limited,
+            frame_p99_ms: Some(self.frame_p99_ms()),
+            foreground_over_5ms: Some(
+                self.intervals
+                    .iter()
+                    .map(|record| record.over_5ms)
+                    .fold(0_u64, u64::saturating_add),
+            ),
+        }
     }
 
     pub fn score(&self) -> WindowScore {
@@ -312,6 +466,41 @@ mod tests {
         FrameEvent {
             elapsed_ms,
             frametime_ms,
+        }
+    }
+
+    fn irq_event(elapsed_ms: u64, duration_ns: u64) -> IrqEventRecord {
+        IrqEventRecord {
+            elapsed_ms: Some(elapsed_ms),
+            irq: 44,
+            cpu: 2,
+            enter_ns: 1_000,
+            exit_ns: 1_000 + duration_ns,
+            duration_ns,
+        }
+    }
+
+    fn block_io_event(elapsed_ms: u64, duration_ns: u64) -> BlockIoRecord {
+        BlockIoRecord {
+            elapsed_ms,
+            tid: 77,
+            dev: 1,
+            nr_sector: 8,
+            sector: 99,
+            duration_ns,
+            timestamp_ns: 2_000 + duration_ns,
+            rwbs: "R".to_owned(),
+            ..BlockIoRecord::default()
+        }
+    }
+
+    fn gpu_sample(elapsed_ms: u64, temp_millidegrees: u32) -> GpuSample {
+        GpuSample {
+            elapsed_ms,
+            temp_millidegrees: Some(temp_millidegrees),
+            gpu_busy_percent: Some(96),
+            gpu_clock_mhz: Some(250),
+            ..GpuSample::default()
         }
     }
 
@@ -694,5 +883,43 @@ mod tests {
 
         assert!(window.is_empty());
         assert_eq!(window.total_event_count(), 0);
+    }
+
+    #[test]
+    fn objective_signals_mark_missing_io_and_irq_evidence_as_none() {
+        let window = RollingWindow::new(Duration::from_secs(30));
+
+        let signals = window.objective_signals();
+
+        assert_eq!(signals.block_io_overlap_count, None);
+        assert_eq!(signals.block_io_worst_latency_ns, None);
+        assert_eq!(signals.irq_overlap_count, None);
+        assert_eq!(signals.irq_worst_overlap_ns, None);
+    }
+
+    #[test]
+    fn objective_signals_collect_io_irq_thermal_and_power_indicators() {
+        let mut window = RollingWindow::new(Duration::from_secs(30));
+        window.push_interval(interval(1_000, 10));
+        window.push_irq_event(irq_event(1_100, 3_000_000));
+        window.push_block_io_event(block_io_event(1_200, 8_000_000));
+        window.push_gpu_sample(gpu_sample(1_300, 90_000));
+        window.push_cpu_freq_event(CpuFreqRecord {
+            elapsed_ms: 1_400,
+            cpu: 0,
+            freq_khz: 0,
+            timestamp_ns: 123,
+        });
+
+        let signals = window.objective_signals();
+
+        assert_eq!(signals.block_io_overlap_count, Some(1));
+        assert_eq!(signals.block_io_worst_latency_ns, Some(8_000_000));
+        assert_eq!(signals.irq_overlap_count, Some(1));
+        assert_eq!(signals.irq_worst_overlap_ns, Some(3_000_000));
+        assert_eq!(signals.thermal_degraded, Some(true));
+        assert_eq!(signals.thermal_throttle_count, Some(1));
+        assert_eq!(signals.cpu_power_limited, Some(true));
+        assert_eq!(signals.gpu_power_limited, Some(true));
     }
 }

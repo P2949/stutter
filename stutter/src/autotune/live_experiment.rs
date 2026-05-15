@@ -18,6 +18,7 @@ pub struct LiveLowRiskExperiment {
     pub experiment_id: ExperimentId,
     pub candidate: CandidateAction,
     pub baseline_score: WindowScore,
+    pub baseline_signals: ObjectiveSignals,
     pub applied_unix_nanos: u128,
     pub washout_until_unix_nanos: u128,
     pub measure_until_unix_nanos: u128,
@@ -100,15 +101,12 @@ impl LiveExperimentManager {
         candidate_score: &WindowScore,
         observation: &AutotuneObservation,
     ) -> ExperimentResult {
-        let baseline_signals = ObjectiveSignals::from_window_score(&experiment.baseline_score);
-        let candidate_signals = ObjectiveSignals::from_window_score(candidate_score);
-
         compare_for_objective(ObjectiveComparisonInput {
             objective: experiment.candidate.objective(),
             baseline: &experiment.baseline_score,
             candidate: candidate_score,
-            baseline_signals: &baseline_signals,
-            candidate_signals: &candidate_signals,
+            baseline_signals: &experiment.baseline_signals,
+            candidate_signals: &observation.objective_signals,
             data_quality: experiment_data_quality(&observation.data_quality),
             target_disappeared: !observation.target_present,
         })
@@ -122,5 +120,99 @@ fn experiment_data_quality(
         crate::autotune::quality::OnlineDataQuality::High => ExperimentDataQuality::High,
         crate::autotune::quality::OnlineDataQuality::Medium { .. } => ExperimentDataQuality::Medium,
         crate::autotune::quality::OnlineDataQuality::Low { .. } => ExperimentDataQuality::Low,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        actions::{
+            RollbackToken, TaskIdentity,
+            nice::{NiceAction, NicePolicy},
+        },
+        autotune::{
+            candidate::NiceActionPlan, comparison::ExperimentResult, objective::ObjectiveKind,
+        },
+        scorer::StutterScore,
+    };
+
+    fn score(total: u64) -> WindowScore {
+        WindowScore {
+            started_unix_nanos: 1,
+            finished_unix_nanos: 2,
+            interval_count: 10,
+            scored_samples: 100,
+            scored_task_count: 1,
+            score: StutterScore {
+                total,
+                frame_p99_ms: 12.0,
+                frame_max_ms: 12.0,
+                over_5ms: 1,
+                ..StutterScore::default()
+            },
+        }
+    }
+
+    fn io_candidate() -> CandidateAction {
+        CandidateAction::Nice {
+            plan: NiceActionPlan {
+                name: "io-objective-test".to_owned(),
+                action: NiceAction {
+                    targets: vec![TaskIdentity {
+                        tid: 42,
+                        process_pid: Some(42),
+                        comm: Some("worker".to_owned()),
+                        starttime_ticks: Some(1),
+                    }],
+                    nice: 5,
+                    policy: NicePolicy::default(),
+                },
+                target_root_pid: Some(42),
+                evidence: Vec::new(),
+                objective: ObjectiveKind::IoLatency,
+            },
+        }
+    }
+
+    fn rollback() -> RollbackToken {
+        RollbackToken::CpuAffinityRestoreFile {
+            path: "/tmp/stutter-test-rollback.json".into(),
+            affected_tasks: 1,
+        }
+    }
+
+    #[test]
+    fn compare_keep_result_rejects_io_candidate_when_live_io_signal_regresses() {
+        let experiment = LiveLowRiskExperiment {
+            experiment_id: ExperimentId::new("io-test"),
+            candidate: io_candidate(),
+            baseline_score: score(1_000),
+            baseline_signals: ObjectiveSignals {
+                block_io_overlap_count: Some(1),
+                block_io_worst_latency_ns: Some(2_000_000),
+                ..ObjectiveSignals::from_window_score(&score(1_000))
+            },
+            applied_unix_nanos: 10,
+            washout_until_unix_nanos: 20,
+            measure_until_unix_nanos: 30,
+            rollback: rollback(),
+        };
+        let candidate_score = score(800);
+        let observation = AutotuneObservation {
+            target_present: true,
+            data_quality: crate::autotune::quality::OnlineDataQuality::High,
+            objective_signals: ObjectiveSignals {
+                block_io_overlap_count: Some(2),
+                block_io_worst_latency_ns: Some(3_000_000),
+                ..ObjectiveSignals::from_window_score(&candidate_score)
+            },
+            ..AutotuneObservation::default()
+        };
+
+        let result =
+            LiveExperimentManager::compare_keep_result(&experiment, &candidate_score, &observation);
+
+        assert!(matches!(result, ExperimentResult::Regressed { .. }));
     }
 }

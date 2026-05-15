@@ -48,6 +48,18 @@ pub struct ObjectiveSignals {
 }
 
 impl ObjectiveSignals {
+    pub fn has_block_io_signal(&self) -> bool {
+        self.block_io_overlap_count.is_some() && self.block_io_worst_latency_ns.is_some()
+    }
+
+    pub fn has_irq_signal(&self) -> bool {
+        self.irq_overlap_count.is_some() && self.irq_worst_overlap_ns.is_some()
+    }
+
+    pub fn has_thermal_signal(&self) -> bool {
+        self.thermal_degraded.is_some() && self.thermal_throttle_count.is_some()
+    }
+
     pub fn from_window_score(score: &WindowScore) -> Self {
         Self {
             frame_p99_ms: Some(score.score.frame_p99_ms),
@@ -75,6 +87,10 @@ pub fn compare_for_objective(input: ObjectiveComparisonInput<'_>) -> ExperimentR
         };
     }
 
+    if let Some(result) = reject_if_power_or_thermal_regressed(input.clone()) {
+        return result;
+    }
+
     match input.objective {
         ObjectiveKind::GameFramePacing | ObjectiveKind::GameRunnableLatency => {
             reject_if_frame_pacing_regressed(input.baseline, input.candidate).unwrap_or(base)
@@ -98,13 +114,25 @@ fn compare_io_latency(input: ObjectiveComparisonInput<'_>) -> Option<ExperimentR
     let baseline_worst = input.baseline_signals.block_io_worst_latency_ns?;
     let candidate_worst = input.candidate_signals.block_io_worst_latency_ns?;
 
-    if candidate_count > baseline_count || candidate_worst > baseline_worst {
-        Some(ExperimentResult::Regressed {
+    if baseline_count == 0 && baseline_worst == 0 {
+        return Some(ExperimentResult::Regressed {
             regression_percent: 0.0,
-        })
-    } else {
-        None
+        });
     }
+
+    if candidate_count > baseline_count || candidate_worst > baseline_worst {
+        return Some(ExperimentResult::Regressed {
+            regression_percent: 0.0,
+        });
+    }
+
+    if candidate_count >= baseline_count && candidate_worst >= baseline_worst {
+        return Some(ExperimentResult::Regressed {
+            regression_percent: 0.0,
+        });
+    }
+
+    None
 }
 
 fn compare_irq_overlap_reduction(input: ObjectiveComparisonInput<'_>) -> Option<ExperimentResult> {
@@ -134,11 +162,52 @@ fn compare_thermal_recovery(input: ObjectiveComparisonInput<'_>) -> Option<Exper
         });
     }
 
-    if input.candidate_signals.cpu_power_limited.unwrap_or(false)
-        && !input.baseline_signals.cpu_power_limited.unwrap_or(false)
-        || input.candidate_signals.gpu_power_limited.unwrap_or(false)
-            && !input.baseline_signals.gpu_power_limited.unwrap_or(false)
+    if baseline_degraded && !candidate_degraded {
+        return None;
+    }
+
+    if candidate_throttles < baseline_throttles {
+        return None;
+    }
+
+    None
+}
+
+fn reject_if_power_or_thermal_regressed(
+    input: ObjectiveComparisonInput<'_>,
+) -> Option<ExperimentResult> {
+    if let (Some(false), Some(true)) = (
+        input.baseline_signals.thermal_degraded,
+        input.candidate_signals.thermal_degraded,
+    ) {
+        return Some(ExperimentResult::Regressed {
+            regression_percent: 0.0,
+        });
+    }
+
+    if let (Some(baseline), Some(candidate)) = (
+        input.baseline_signals.thermal_throttle_count,
+        input.candidate_signals.thermal_throttle_count,
+    ) && candidate > baseline
     {
+        return Some(ExperimentResult::Regressed {
+            regression_percent: 0.0,
+        });
+    }
+
+    if let (Some(false), Some(true)) = (
+        input.baseline_signals.cpu_power_limited,
+        input.candidate_signals.cpu_power_limited,
+    ) {
+        return Some(ExperimentResult::Regressed {
+            regression_percent: 0.0,
+        });
+    }
+
+    if let (Some(false), Some(true)) = (
+        input.baseline_signals.gpu_power_limited,
+        input.candidate_signals.gpu_power_limited,
+    ) {
         return Some(ExperimentResult::Regressed {
             regression_percent: 0.0,
         });
@@ -308,6 +377,32 @@ mod tests {
     }
 
     #[test]
+    fn io_objective_rejects_generic_improvement_when_io_signal_does_not_improve() {
+        let baseline = score(1_000, 12.0, 1);
+        let candidate = score(800, 12.0, 1);
+        let baseline_signals = ObjectiveSignals {
+            block_io_overlap_count: Some(1),
+            block_io_worst_latency_ns: Some(2_000_000),
+            ..ObjectiveSignals::from_window_score(&baseline)
+        };
+        let candidate_signals = ObjectiveSignals {
+            block_io_overlap_count: Some(1),
+            block_io_worst_latency_ns: Some(2_000_000),
+            ..ObjectiveSignals::from_window_score(&candidate)
+        };
+
+        let result = compare(
+            ObjectiveKind::IoLatency,
+            &baseline,
+            &candidate,
+            &baseline_signals,
+            &candidate_signals,
+        );
+
+        assert!(matches!(result, ExperimentResult::Regressed { .. }));
+    }
+
+    #[test]
     fn io_objective_rejects_generic_improvement_when_io_signal_regresses() {
         let baseline = score(1_000, 12.0, 1);
         let candidate = score(800, 12.0, 1);
@@ -352,6 +447,32 @@ mod tests {
     }
 
     #[test]
+    fn irq_objective_allows_generic_improvement_when_irq_overlap_decreases() {
+        let baseline = score(1_000, 12.0, 1);
+        let candidate = score(800, 12.0, 1);
+        let baseline_signals = ObjectiveSignals {
+            irq_overlap_count: Some(3),
+            irq_worst_overlap_ns: Some(5_000_000),
+            ..ObjectiveSignals::from_window_score(&baseline)
+        };
+        let candidate_signals = ObjectiveSignals {
+            irq_overlap_count: Some(1),
+            irq_worst_overlap_ns: Some(4_000_000),
+            ..ObjectiveSignals::from_window_score(&candidate)
+        };
+
+        let result = compare(
+            ObjectiveKind::IrqOverlapReduction,
+            &baseline,
+            &candidate,
+            &baseline_signals,
+            &candidate_signals,
+        );
+
+        assert!(matches!(result, ExperimentResult::Improved { .. }));
+    }
+
+    #[test]
     fn thermal_objective_rejects_new_power_limit() {
         let baseline = score(1_000, 12.0, 1);
         let candidate = score(800, 12.0, 1);
@@ -370,6 +491,34 @@ mod tests {
 
         let result = compare(
             ObjectiveKind::ThermalRecovery,
+            &baseline,
+            &candidate,
+            &baseline_signals,
+            &candidate_signals,
+        );
+
+        assert!(matches!(result, ExperimentResult::Regressed { .. }));
+    }
+
+    #[test]
+    fn power_or_thermal_regression_rejects_frame_pacing_improvement() {
+        let baseline = score(1_000, 12.0, 1);
+        let candidate = score(800, 11.0, 1);
+        let baseline_signals = ObjectiveSignals {
+            thermal_degraded: Some(false),
+            thermal_throttle_count: Some(0),
+            gpu_power_limited: Some(false),
+            ..ObjectiveSignals::from_window_score(&baseline)
+        };
+        let candidate_signals = ObjectiveSignals {
+            thermal_degraded: Some(true),
+            thermal_throttle_count: Some(1),
+            gpu_power_limited: Some(true),
+            ..ObjectiveSignals::from_window_score(&candidate)
+        };
+
+        let result = compare(
+            ObjectiveKind::GameFramePacing,
             &baseline,
             &candidate,
             &baseline_signals,
