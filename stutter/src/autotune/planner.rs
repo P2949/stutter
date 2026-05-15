@@ -509,9 +509,7 @@ fn evaluate_proposal_static(
         ));
     }
 
-    if proposal.candidate.is_high_risk_system_adjacent()
-        && input.daemon_policy.mode != DaemonMode::Suggest
-    {
+    if proposal.candidate.is_high_risk_system_adjacent() {
         deny_reasons.push(CandidateDenyReason::ManualOnlyHighRisk);
         deny_messages.push(proposal.candidate.manual_only_reason().unwrap_or_else(|| {
             "manual-only high-risk/system-adjacent candidate cannot be selected for live apply"
@@ -1460,6 +1458,41 @@ mod tests {
     }
 
     #[test]
+    fn suggest_manual_only_high_risk_candidate_is_not_eligible_and_does_not_dry_run() {
+        let candidate = irq_affinity_candidate("suggest-irq-manual-only");
+        let policy = policy(DaemonMode::Suggest);
+        let mut observation =
+            observation_for_situation(SituationKind::IrqPressure, FocusGroupKind::Game);
+        enable_capability_for_candidate(&mut observation, &candidate);
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(evaluation.dry_run.is_none());
+        assert!(!evaluation.eligible);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ManualOnlyHighRisk)
+        );
+        assert!(
+            evaluation
+                .deny_messages
+                .iter()
+                .any(|message| message.contains("manual-only high-risk/system-adjacent"))
+        );
+    }
+
+    #[test]
     fn low_confidence_medium_risk_candidate_is_denied_even_when_family_and_objective_allowed() {
         let evaluation = evaluate_static_candidate_with_confidence(
             DaemonMode::ApplyMediumRisk,
@@ -2082,6 +2115,50 @@ mod tests {
     }
 
     #[test]
+    fn manual_only_high_risk_candidate_is_never_selected_for_apply_modes() {
+        for mode in [DaemonMode::ApplyLowRisk, DaemonMode::ApplyMediumRisk] {
+            let candidate_name = format!("irq-manual-{}", mode.as_str());
+            let policy = policy(mode);
+            let mut registry = CandidateProviderRegistry::default();
+            registry.register(Box::new(StaticProvider {
+                candidate: irq_affinity_candidate(&candidate_name),
+            }));
+            let planner = CandidatePlanner::new(registry);
+            let mut observation = observation();
+            observation.primary_situation = SituationKind::IrqPressure;
+            observation.focus_kind = Some(FocusGroupKind::Game);
+            observation.capabilities.irq_affinity_available = true;
+            observation.refresh_situation_classification();
+
+            let result = planner.plan(PlannerInput {
+                observation: &observation,
+                daemon_policy: &policy,
+                capabilities: &observation.capabilities,
+                system_health: &observation.system_health,
+                controller_state: &ControllerRuntimeState::default(),
+                active_profile_state: None,
+                workload_policy: &WorkloadPolicyMatrix::default_rules(),
+                profiles: &[],
+            });
+            let summary = result.summary();
+
+            assert!(
+                result.selected.is_none(),
+                "manual-only candidate was selected in mode {mode}"
+            );
+            assert_eq!(summary.total_proposals, 1);
+            assert_eq!(summary.eligible_proposals, 0);
+            assert_eq!(summary.manual_only_suggestions, vec![candidate_name]);
+            assert!(
+                summary
+                    .grouped_denials
+                    .iter()
+                    .any(|denial| denial.reason_code == "manual_only_high_risk")
+            );
+        }
+    }
+
+    #[test]
     fn workload_memory_cools_down_same_workload_without_blocking_other_workload() {
         let policy = policy(DaemonMode::Suggest);
         let candidate = nice_candidate();
@@ -2257,11 +2334,20 @@ mod tests {
                 candidate.clone(),
             );
 
-            assert!(
-                suggest.eligible,
-                "expected {label} to remain suggest eligible; deny_reasons={:?} deny_messages={:?}",
-                suggest.deny_reasons, suggest.deny_messages
-            );
+            if candidate.is_high_risk_system_adjacent() {
+                assert!(!suggest.eligible);
+                assert!(
+                    suggest
+                        .deny_reasons
+                        .contains(&CandidateDenyReason::ManualOnlyHighRisk)
+                );
+            } else {
+                assert!(
+                    suggest.eligible,
+                    "expected {label} to remain suggest eligible; deny_reasons={:?} deny_messages={:?}",
+                    suggest.deny_reasons, suggest.deny_messages
+                );
+            }
 
             let apply = evaluate_static_candidate(
                 DaemonMode::ApplyMediumRisk,
@@ -2424,7 +2510,7 @@ mod tests {
             history: Vec::new(),
         });
 
-        let proposals = vec![proposal_for_candidate(candidate, 1.0)];
+        let proposals = vec![proposal_for_candidate(candidate.clone(), 1.0)];
         let mut dry_runner = CountingDryRunner::default();
         let mut evaluations = evaluate_proposals_with_runner(
             PlannerInput {
@@ -2446,9 +2532,16 @@ mod tests {
             .find(|evaluation| evaluation.eligible)
             .map(|evaluation| evaluation.action_kind.clone());
 
+        let expected_selected =
+            if mode == DaemonMode::Suggest && candidate.is_high_risk_system_adjacent() {
+                None
+            } else {
+                case.expected_selected_action_kind.clone()
+            };
+
         assert_eq!(
             selected,
-            case.expected_selected_action_kind,
+            expected_selected,
             "fixture {} selected action mismatch; evaluations={evaluations:#?}",
             path.display()
         );
