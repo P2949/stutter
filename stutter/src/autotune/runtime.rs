@@ -38,7 +38,9 @@ use crate::{
         kept::{ActiveProfileState, KeptCandidateState},
         live_experiment::{LiveExperimentManager, LiveLowRiskExperiment},
         observation::AutotuneObservation,
-        observation_builder::{AutotuneObservationBuilder, AutotuneObservationBuilderInput},
+        observation_builder::{
+            AutotuneObservationBuilder, AutotuneObservationBuilderInput, AutotuneObservationFocus,
+        },
         planner::{CandidatePlanner, PlanResult, PlannerInput, PlannerSummary},
         quality::{OnlineDataQuality, OnlineDataQualityPolicy},
         rolling_window::RollingWindow,
@@ -63,7 +65,6 @@ use crate::{
     },
     diagnosis::LiveDiagnosisEntry,
     ebpf_loader::DropCountersSnapshot,
-    focus::FocusGroupKind,
     process_tree::TaskInfo,
     profiles::Profile,
     session_events::MonitorEvent,
@@ -281,17 +282,6 @@ pub struct AutotuneDecisionStreamEntry {
 }
 
 #[derive(Clone, Debug)]
-pub struct RuntimeFocusState {
-    pub kind: FocusGroupKind,
-    pub root_pids: Vec<u32>,
-    pub member_pids: Vec<u32>,
-    pub confidence: f32,
-    pub score: f32,
-    pub situation: SituationKind,
-    pub reasons: Vec<String>,
-}
-
-#[derive(Clone, Debug)]
 pub struct OnlineAutotuneController {
     pub policy: ControllerPolicy,
     pub state: ControllerRuntimeState,
@@ -368,7 +358,7 @@ impl RuntimeTargetState {
 pub struct AutotuneRuntime {
     config: AutotuneRuntimeConfig,
     controller: OnlineAutotuneController,
-    latest_focus: Option<RuntimeFocusState>,
+    latest_focus: Option<AutotuneObservationFocus>,
     target_state: RuntimeTargetState,
     latest_drop_counters: DropCountersSnapshot,
     recent_diagnoses: VecDeque<LiveDiagnosisEntry>,
@@ -486,7 +476,7 @@ impl AutotuneRuntime {
                         "focus changed during active low-risk experiment",
                     )?;
                 }
-                self.latest_focus = Some(RuntimeFocusState {
+                self.latest_focus = Some(AutotuneObservationFocus {
                     kind: new_kind,
                     root_pids: root_pids.clone(),
                     member_pids,
@@ -850,24 +840,10 @@ impl AutotuneRuntime {
     }
 
     fn build_observation(&self) -> AutotuneObservation {
-        let focus = self.latest_focus.as_ref();
-        let focus_kind = focus.map(|focus| focus.kind);
-        let focus_confidence = focus.map(|focus| focus.confidence).unwrap_or(0.0);
-        let focus_roots = focus
-            .map(|focus| focus.root_pids.clone())
-            .unwrap_or_default();
-        let focus_reasons = focus.map(|focus| focus.reasons.clone()).unwrap_or_default();
-        let primary_situation = focus
-            .map(|focus| focus.situation)
-            .unwrap_or(SituationKind::Unknown);
         AutotuneObservationBuilder::build(AutotuneObservationBuilderInput {
             window: &self.controller.window,
             online_data_quality_policy: &self.config.online_data_quality_policy,
-            focus_kind,
-            focus_confidence,
-            focus_roots,
-            focus_reasons,
-            primary_situation,
+            focus: self.latest_focus.as_ref(),
             root_pid: self.target_state.root_pid,
             active_target_count: self.target_state.active_targets,
             active_tasks: &self.target_state.active_tasks,
@@ -2085,6 +2061,7 @@ mod tests {
         autotune::objective::ObjectiveSignals,
         diagnosis::{Confidence, StutterCause},
         ebpf_loader::DropCountersSnapshot,
+        focus::FocusGroupKind,
         process_tree::TaskClass,
         recorder::IntervalRecord,
         scorer::StutterScore,
@@ -2417,7 +2394,7 @@ mod tests {
             target_comm: Some("game".to_owned()),
             active_tasks: BTreeMap::new(),
         };
-        runtime.latest_focus = Some(RuntimeFocusState {
+        runtime.latest_focus = Some(AutotuneObservationFocus {
             kind: FocusGroupKind::Game,
             root_pids: vec![1234],
             member_pids: vec![1234, 1235],

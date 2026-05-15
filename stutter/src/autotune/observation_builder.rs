@@ -20,14 +20,21 @@ use crate::{
 
 pub struct AutotuneObservationBuilder;
 
+#[derive(Clone, Debug)]
+pub struct AutotuneObservationFocus {
+    pub kind: FocusGroupKind,
+    pub root_pids: Vec<u32>,
+    pub member_pids: Vec<u32>,
+    pub confidence: f32,
+    pub score: f32,
+    pub situation: SituationKind,
+    pub reasons: Vec<String>,
+}
+
 pub struct AutotuneObservationBuilderInput<'a> {
     pub window: &'a RollingWindow,
     pub online_data_quality_policy: &'a OnlineDataQualityPolicy,
-    pub focus_kind: Option<FocusGroupKind>,
-    pub focus_confidence: f32,
-    pub focus_roots: Vec<u32>,
-    pub focus_reasons: Vec<String>,
-    pub primary_situation: SituationKind,
+    pub focus: Option<&'a AutotuneObservationFocus>,
     pub root_pid: Option<u32>,
     pub active_target_count: usize,
     pub active_tasks: &'a BTreeMap<u32, TaskInfo>,
@@ -47,6 +54,16 @@ impl AutotuneObservationBuilder {
         let window_score = input
             .window
             .score_with_quality_policy(input.online_data_quality_policy);
+        let focus = input.focus;
+        let focus_kind = focus.map(|focus| focus.kind);
+        let focus_confidence = focus.map(|focus| focus.confidence).unwrap_or(0.0);
+        let focus_roots = focus
+            .map(|focus| focus.root_pids.clone())
+            .unwrap_or_default();
+        let focus_reasons = focus.map(|focus| focus.reasons.clone()).unwrap_or_default();
+        let primary_situation = focus
+            .map(|focus| focus.situation)
+            .unwrap_or(SituationKind::Unknown);
         let system_health = crate::daemon::evaluate_system_health(
             crate::daemon::SystemHealthInputs {
                 ebpf_dropped_events: input.drop_counters.total(),
@@ -70,13 +87,11 @@ impl AutotuneObservationBuilder {
         let capabilities = system_context.capabilities.clone();
         let topology_signature = system_context.inventory.inventory_hash.clone();
         let active_config_snapshot = system_context.active_config.clone();
-        let target_root_pid = input
-            .root_pid
-            .or_else(|| input.focus_roots.first().copied());
+        let target_root_pid = input.root_pid.or_else(|| focus_roots.first().copied());
         let workload_identity = workload_identity_from_runtime_context(
             input.proc_root,
             target_root_pid,
-            input.focus_kind,
+            focus_kind,
             input.active_tasks,
         );
         let mut observation = AutotuneObservation {
@@ -91,12 +106,12 @@ impl AutotuneObservationBuilder {
             score: stutter_score_from_runtime_window_score(&window_score),
             data_quality: window_score.data_quality.clone(),
             objective_signals: input.window.objective_signals(),
-            primary_situation: input.primary_situation,
+            primary_situation,
             situation: Default::default(),
-            focus_kind: input.focus_kind,
-            focus_confidence: input.focus_confidence,
-            focus_roots: input.focus_roots,
-            focus_reasons: input.focus_reasons,
+            focus_kind,
+            focus_confidence,
+            focus_roots,
+            focus_reasons,
             recent_diagnoses: input.recent_diagnoses,
             system_health: system_context.health.clone(),
             capabilities,
@@ -235,5 +250,187 @@ fn stutter_score_from_runtime_window_score(score: &RuntimeWindowScore) -> Stutte
         frame_over_16ms: 0,
         frame_over_33ms: 0,
         frame_over_50ms: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc, time::Duration};
+
+    use super::*;
+    use crate::{
+        ebpf_loader::DropCountersSnapshot,
+        process_tree::TaskClass,
+        recorder::{IntervalRecord, IrqEventRecord},
+        test_support::TestRoot,
+    };
+
+    #[test]
+    fn builder_extracts_focus_target_tasks_workload_identity_and_system_context() {
+        let (_root, proc_root, sys_root) = temp_proc_sys_roots("observation-builder-context");
+        write_cgroup(&proc_root, 1234, "/user.slice/game.scope");
+        write_cgroup(&proc_root, 1235, "/user.slice/input.scope");
+
+        let mut window = RollingWindow::new(Duration::from_secs(30));
+        window.push_interval(IntervalRecord {
+            elapsed_ms: 1_000,
+            task: 1234,
+            samples: 50,
+            over_1ms: 2,
+            over_2ms: 1,
+            over_5ms: 0,
+            max_ns: 2_000_000,
+            ..IntervalRecord::default()
+        });
+        window.push_irq_event(IrqEventRecord {
+            elapsed_ms: Some(1_050),
+            irq: 44,
+            cpu: 2,
+            enter_ns: 10,
+            exit_ns: 20,
+            duration_ns: 10,
+        });
+
+        let focus = AutotuneObservationFocus {
+            kind: FocusGroupKind::Desktop,
+            root_pids: vec![1234],
+            member_pids: vec![1234, 1235],
+            confidence: 0.95,
+            score: 0.99,
+            situation: SituationKind::IoPressure,
+            reasons: vec!["desktop focus selected".to_owned()],
+        };
+
+        let active_tasks = BTreeMap::from([
+            (
+                1234,
+                task_info(1234, 1234, "game-main", TaskClass::Game, Some(10)),
+            ),
+            (
+                1235,
+                task_info(1235, 1235, "input", TaskClass::Input, Some(11)),
+            ),
+        ]);
+
+        let output = AutotuneObservationBuilder::build(AutotuneObservationBuilderInput {
+            window: &window,
+            online_data_quality_policy: &OnlineDataQualityPolicy::default(),
+            focus: Some(&focus),
+            root_pid: None,
+            active_target_count: active_tasks.len(),
+            active_tasks: &active_tasks,
+            recent_diagnoses: Vec::new(),
+            drop_counters: DropCountersSnapshot::default(),
+            proc_root: &proc_root,
+            sys_root: &sys_root,
+        });
+        let observation = output.observation;
+
+        assert_eq!(observation.focus_kind, Some(FocusGroupKind::Desktop));
+        assert_eq!(observation.focus_confidence, 0.95);
+        assert_eq!(observation.focus_roots, vec![1234]);
+        assert_eq!(observation.focus_reasons, vec!["desktop focus selected"]);
+        assert_eq!(observation.primary_situation, SituationKind::IoPressure);
+        assert_eq!(observation.target_root_pid, Some(1234));
+        assert_eq!(observation.active_target_count, 2);
+        assert_eq!(observation.active_tasks.len(), 2);
+        assert_eq!(
+            observation
+                .active_tasks
+                .iter()
+                .find(|task| task.tid == 1234)
+                .and_then(|task| task.cgroup_path.as_deref()),
+            Some("/user.slice/game.scope")
+        );
+        assert_eq!(observation.protected_tasks.len(), 1);
+        assert_eq!(observation.protected_tasks[0].tid, 1235);
+        assert!(observation.workload_identity.is_some());
+        assert!(observation.system_context.is_some());
+        assert!(observation.active_config_snapshot.is_some());
+        assert_eq!(observation.objective_signals.irq_hot_irq, Some(44));
+        assert_eq!(observation.drop_counter_total, 0);
+    }
+
+    #[test]
+    fn builder_uses_configured_online_data_quality_policy() {
+        let (_root, proc_root, sys_root) = temp_proc_sys_roots("observation-builder-quality");
+        let mut window = RollingWindow::new(Duration::from_secs(30));
+
+        for elapsed_ms in [1_000, 2_000, 3_000, 4_000, 5_000] {
+            window.push_interval(IntervalRecord {
+                elapsed_ms,
+                task: 42,
+                samples: 20,
+                over_1ms: 1,
+                max_ns: 2_000_000,
+                ..IntervalRecord::default()
+            });
+        }
+
+        let active_tasks = BTreeMap::new();
+        let output = AutotuneObservationBuilder::build(AutotuneObservationBuilderInput {
+            window: &window,
+            online_data_quality_policy: &OnlineDataQualityPolicy {
+                min_scored_samples: 200,
+                ..OnlineDataQualityPolicy::default()
+            },
+            focus: None,
+            root_pid: Some(1234),
+            active_target_count: 0,
+            active_tasks: &active_tasks,
+            recent_diagnoses: Vec::new(),
+            drop_counters: DropCountersSnapshot::default(),
+            proc_root: &proc_root,
+            sys_root: &sys_root,
+        });
+        let observation = output.observation;
+
+        assert_eq!(observation.scored_samples, 100);
+        assert!(observation.data_quality.is_low());
+        assert!(
+            observation
+                .data_quality
+                .reasons()
+                .iter()
+                .any(|reason| reason.contains("fewer than min_scored_samples"))
+        );
+    }
+
+    fn temp_proc_sys_roots(prefix: &str) -> (TestRoot, PathBuf, PathBuf) {
+        let root = TestRoot::new(prefix);
+        let proc_root = root.join("proc");
+        let sys_root = root.join("sys");
+        fs::create_dir_all(&proc_root).unwrap();
+        fs::create_dir_all(&sys_root).unwrap();
+        (root, proc_root, sys_root)
+    }
+
+    fn write_cgroup(proc_root: &std::path::Path, pid: u32, cgroup_path: &str) {
+        let task_root = proc_root.join(pid.to_string());
+        fs::create_dir_all(&task_root).unwrap();
+        fs::write(task_root.join("cgroup"), format!("0::{cgroup_path}\n")).unwrap();
+    }
+
+    fn task_info(
+        tid: u32,
+        process_pid: u32,
+        comm: &str,
+        class: TaskClass,
+        process_starttime_ticks: Option<u64>,
+    ) -> TaskInfo {
+        TaskInfo {
+            tid,
+            process_pid,
+            process_ppid: 0,
+            comm: comm.to_owned(),
+            process_comm: Arc::<str>::from(comm),
+            process_starttime_ticks,
+            task_starttime_ticks: Some(u64::from(tid)),
+            exe_dev: None,
+            exe_ino: None,
+            class,
+            sched_policy: None,
+            from_cgroup: true,
+        }
     }
 }
