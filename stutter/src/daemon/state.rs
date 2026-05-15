@@ -479,34 +479,26 @@ impl DaemonStateSnapshotWriter {
             })?;
         }
 
-        let temporary_path = temporary_daemon_state_snapshot_path(&self.path);
-        {
-            let mut file = fs::File::create(&temporary_path).with_context(|| {
-                format!(
-                    "failed to create daemon state snapshot temp file {}",
-                    temporary_path.display()
-                )
-            })?;
-
-            serde_json::to_writer_pretty(&mut file, state).with_context(|| {
-                format!(
-                    "failed to serialize daemon state snapshot {}",
-                    temporary_path.display()
-                )
-            })?;
-            file.write_all(b"\n").with_context(|| {
-                format!(
-                    "failed to terminate daemon state snapshot {}",
-                    temporary_path.display()
-                )
-            })?;
-            file.sync_all().with_context(|| {
-                format!(
-                    "failed to sync daemon state snapshot temp file {}",
-                    temporary_path.display()
-                )
-            })?;
-        }
+        let (temporary_path, mut file) = create_unique_daemon_state_snapshot_temp_file(&self.path)?;
+        serde_json::to_writer_pretty(&mut file, state).with_context(|| {
+            format!(
+                "failed to serialize daemon state snapshot {}",
+                temporary_path.display()
+            )
+        })?;
+        file.write_all(b"\n").with_context(|| {
+            format!(
+                "failed to terminate daemon state snapshot {}",
+                temporary_path.display()
+            )
+        })?;
+        file.sync_all().with_context(|| {
+            format!(
+                "failed to sync daemon state snapshot temp file {}",
+                temporary_path.display()
+            )
+        })?;
+        drop(file);
 
         fs::rename(&temporary_path, &self.path).with_context(|| {
             format!(
@@ -516,18 +508,72 @@ impl DaemonStateSnapshotWriter {
             )
         })?;
 
+        sync_parent_directory(&self.path)?;
+
         Ok(())
     }
 }
 
-fn temporary_daemon_state_snapshot_path(path: &Path) -> PathBuf {
+fn create_unique_daemon_state_snapshot_temp_file(
+    path: &Path,
+) -> anyhow::Result<(PathBuf, fs::File)> {
+    for _ in 0..16 {
+        let temporary_path = unique_temporary_daemon_state_snapshot_path(path);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)
+        {
+            Ok(file) => return Ok((temporary_path, file)),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!(
+                        "failed to create daemon state snapshot temp file {}",
+                        temporary_path.display()
+                    )
+                });
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "failed to create a unique daemon state snapshot temp file for {} after repeated collisions",
+        path.display()
+    );
+}
+
+fn unique_temporary_daemon_state_snapshot_path(path: &Path) -> PathBuf {
     let mut temporary_path = path.to_path_buf();
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("daemon_state.json");
-    temporary_path.set_file_name(format!("{file_name}.tmp"));
+    temporary_path.set_file_name(format!(
+        "{file_name}.{}.{}.tmp",
+        std::process::id(),
+        crate::audit::unix_nanos_now()
+    ));
     temporary_path
+}
+
+fn sync_parent_directory(path: &Path) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        let directory = fs::File::open(parent).with_context(|| {
+            format!(
+                "failed to open daemon state snapshot directory {} for sync",
+                parent.display()
+            )
+        })?;
+        directory.sync_all().with_context(|| {
+            format!(
+                "failed to sync daemon state snapshot directory {}",
+                parent.display()
+            )
+        })?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -543,6 +589,14 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn temporary_files_in(dir: &Path) -> Vec<PathBuf> {
+        fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("tmp"))
+            .collect()
     }
 
     #[test]
@@ -893,7 +947,32 @@ mod tests {
         assert_eq!(decoded.phase, DaemonPhase::Cooldown);
         assert_eq!(decoded.cooldown_until_unix_nanos, Some(9_000));
         assert_eq!(decoded.degraded[0].category, "data_quality");
-        assert!(!temporary_daemon_state_snapshot_path(&path).exists());
+        assert!(temporary_files_in(&dir).is_empty());
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn daemon_state_snapshot_writer_does_not_use_fixed_temp_path() {
+        let dir = temp_dir("fixed-temp-sentinel");
+        let path = dir.join("daemon_state.json");
+        let fixed_temp_path = dir.join("daemon_state.json.tmp");
+        fs::write(&fixed_temp_path, "sentinel").unwrap();
+
+        let writer = DaemonStateSnapshotWriter::new(&path);
+        let state = DaemonState {
+            mode: DaemonMode::ApplyLowRisk,
+            phase: DaemonPhase::Cooldown,
+            ..DaemonState::default()
+        };
+
+        writer.write(&state).unwrap();
+
+        assert_eq!(fs::read_to_string(&fixed_temp_path).unwrap(), "sentinel");
+        assert_eq!(
+            load_daemon_state(&path).unwrap().phase,
+            DaemonPhase::Cooldown
+        );
 
         fs::remove_dir_all(dir).ok();
     }
