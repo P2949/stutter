@@ -69,92 +69,386 @@ pub fn collect_active_config(input: ActiveConfigCollectorInput<'_>) -> ActiveCon
     ActiveConfigCollector.collect(input)
 }
 
-pub fn candidate_is_noop(candidate: &CandidateAction, snapshot: &ActiveConfigSnapshot) -> bool {
-    match candidate {
-        CandidateAction::CpuAffinityProfile { .. } => false,
-        CandidateAction::Nice { plan } => plan.action.targets.iter().all(|target| {
-            snapshot
-                .nice
-                .per_tid
-                .get(&target.tid)
-                .is_some_and(|current| *current == plan.action.nice)
-        }),
-        CandidateAction::IoPrio { plan } => {
-            let requested = plan.action.ioprio.label();
-            plan.action.targets.iter().all(|target| {
-                snapshot
-                    .ionice
-                    .per_tid
-                    .get(&target.tid)
-                    .is_some_and(|current| current == &requested)
-            })
-        }
-        CandidateAction::Uclamp { plan } => plan.action.targets.iter().all(|target| {
-            snapshot
-                .uclamp
-                .per_tid
-                .get(&target.tid)
-                .is_some_and(|current| uclamp_matches_request(*current, plan.action.values))
-        }),
-        CandidateAction::CgroupPlacement { plan } => {
-            let requested = normalize_cgroup_path(&plan.action.target_cgroup);
-            plan.action.targets.iter().all(|target| {
-                snapshot
-                    .cgroup
-                    .per_tid
-                    .get(&target.identity.tid)
-                    .is_some_and(|current| normalize_cgroup_str(current) == requested)
-            })
-        }
-        CandidateAction::IrqAffinity { plan } => snapshot
-            .irq
-            .per_irq
-            .get(&plan.action.irq)
-            .is_some_and(|current| current.trim() == plan.action.smp_affinity.trim()),
-        CandidateAction::CpuPower { plan } => plan.action.cpus.iter().all(|cpu| {
-            let Some(policy) = cpu_policy_for_cpu(&snapshot.cpu_power.policies, *cpu) else {
-                return false;
-            };
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ActiveConfigMatch {
+    Matches { summary: String },
+    Differs { expected: String, actual: String },
+    Unknown { summary: String },
+}
 
-            plan.action
-                .scaling_governor
-                .as_ref()
-                .is_none_or(|requested| policy.scaling_governor.as_ref() == Some(requested))
-                && plan
-                    .action
-                    .energy_performance_preference
-                    .as_ref()
-                    .is_none_or(|requested| {
-                        policy.energy_performance_preference.as_ref() == Some(requested)
-                    })
-        }),
-        CandidateAction::GpuPower { plan } => snapshot
-            .gpu_power
-            .devices
-            .iter()
-            .find(|device| device.device == plan.action.drm_card)
-            .is_some_and(|device| {
-                plan.action
-                    .power_dpm_force_performance_level
-                    .as_ref()
-                    .is_none_or(|requested| {
-                        device.power_dpm_force_performance_level.as_ref() == Some(requested)
-                    })
-                    && plan
-                        .action
-                        .pp_power_profile_mode
-                        .as_ref()
-                        .is_none_or(|requested| {
-                            device.pp_power_profile_mode.as_ref() == Some(requested)
-                        })
-            }),
-        CandidateAction::VmKnob { plan } => plan.action.changes.iter().all(|change| {
-            vm_knob_keys_for_change(&plan.action.root, &change.path)
-                .into_iter()
-                .any(|key| snapshot.vm.knobs.get(&key) == Some(&change.value))
-        }),
-        CandidateAction::Fake { .. } => false,
+impl ActiveConfigMatch {
+    pub fn is_match(&self) -> bool {
+        matches!(self, Self::Matches { .. })
     }
+
+    pub fn is_differs(&self) -> bool {
+        matches!(self, Self::Differs { .. })
+    }
+}
+
+impl CandidateAction {
+    pub fn planned_state_summary(&self) -> String {
+        match self {
+            CandidateAction::CpuAffinityProfile {
+                profile_name,
+                tree_pid,
+                ..
+            } => format!("cpu_affinity_profile profile={profile_name} tree_pid={tree_pid}"),
+            CandidateAction::Nice { plan } => format!(
+                "nice value={} targets={}",
+                plan.action.nice,
+                plan.action.targets.len()
+            ),
+            CandidateAction::IoPrio { plan } => format!(
+                "ionice value={} targets={}",
+                plan.action.ioprio.label(),
+                plan.action.targets.len()
+            ),
+            CandidateAction::Uclamp { plan } => format!(
+                "uclamp min={:?} max={:?} targets={}",
+                plan.action.values.sched_util_min,
+                plan.action.values.sched_util_max,
+                plan.action.targets.len()
+            ),
+            CandidateAction::CgroupPlacement { plan } => format!(
+                "cgroup target={} targets={}",
+                plan.action.target_cgroup.display(),
+                plan.action.targets.len()
+            ),
+            CandidateAction::IrqAffinity { plan } => format!(
+                "irq_affinity irq={} smp_affinity={}",
+                plan.action.irq, plan.action.smp_affinity
+            ),
+            CandidateAction::CpuPower { plan } => format!(
+                "cpu_power cpus={:?} governor={:?} epp={:?}",
+                plan.action.cpus,
+                plan.action.scaling_governor,
+                plan.action.energy_performance_preference
+            ),
+            CandidateAction::GpuPower { plan } => format!(
+                "gpu_power drm_card={} dpm={:?} profile={:?}",
+                plan.action.drm_card,
+                plan.action.power_dpm_force_performance_level,
+                plan.action.pp_power_profile_mode
+            ),
+            CandidateAction::VmKnob { plan } => {
+                format!("vm_knob changes={}", plan.action.changes.len())
+            }
+            CandidateAction::Fake { action_id, .. } => {
+                format!("fake action_id={}", action_id.0)
+            }
+        }
+    }
+
+    pub fn matches_active_config(&self, snapshot: &ActiveConfigSnapshot) -> ActiveConfigMatch {
+        match self {
+            CandidateAction::CpuAffinityProfile { .. } => ActiveConfigMatch::Unknown {
+                summary: format!(
+                    "{}: active per-profile CPU affinity matching is not implemented",
+                    self.planned_state_summary()
+                ),
+            },
+            CandidateAction::Nice { plan } => {
+                if plan.action.targets.is_empty() {
+                    return ActiveConfigMatch::Unknown {
+                        summary: "nice candidate has no target tasks".to_owned(),
+                    };
+                }
+
+                for target in &plan.action.targets {
+                    match snapshot.nice.per_tid.get(&target.tid) {
+                        Some(current) if *current == plan.action.nice => {}
+                        Some(current) => {
+                            return ActiveConfigMatch::Differs {
+                                expected: format!("tid={} nice={}", target.tid, plan.action.nice),
+                                actual: format!("tid={} nice={current}", target.tid),
+                            };
+                        }
+                        None => {
+                            return ActiveConfigMatch::Unknown {
+                                summary: format!("tid={} active nice value missing", target.tid),
+                            };
+                        }
+                    }
+                }
+
+                ActiveConfigMatch::Matches {
+                    summary: self.planned_state_summary(),
+                }
+            }
+            CandidateAction::IoPrio { plan } => {
+                if plan.action.targets.is_empty() {
+                    return ActiveConfigMatch::Unknown {
+                        summary: "ionice candidate has no target tasks".to_owned(),
+                    };
+                }
+
+                let requested = plan.action.ioprio.label();
+                for target in &plan.action.targets {
+                    match snapshot.ionice.per_tid.get(&target.tid) {
+                        Some(current) if current == &requested => {}
+                        Some(current) => {
+                            return ActiveConfigMatch::Differs {
+                                expected: format!("tid={} ionice={requested}", target.tid),
+                                actual: format!("tid={} ionice={current}", target.tid),
+                            };
+                        }
+                        None => {
+                            return ActiveConfigMatch::Unknown {
+                                summary: format!("tid={} active ionice value missing", target.tid),
+                            };
+                        }
+                    }
+                }
+
+                ActiveConfigMatch::Matches {
+                    summary: self.planned_state_summary(),
+                }
+            }
+            CandidateAction::Uclamp { plan } => {
+                if plan.action.targets.is_empty() {
+                    return ActiveConfigMatch::Unknown {
+                        summary: "uclamp candidate has no target tasks".to_owned(),
+                    };
+                }
+
+                for target in &plan.action.targets {
+                    match snapshot.uclamp.per_tid.get(&target.tid) {
+                        Some(current) if uclamp_matches_request(*current, plan.action.values) => {}
+                        Some(current) => {
+                            return ActiveConfigMatch::Differs {
+                                expected: format!(
+                                    "tid={} uclamp_min={:?} uclamp_max={:?}",
+                                    target.tid,
+                                    plan.action.values.sched_util_min,
+                                    plan.action.values.sched_util_max
+                                ),
+                                actual: format!(
+                                    "tid={} uclamp_min={:?} uclamp_max={:?}",
+                                    target.tid, current.sched_util_min, current.sched_util_max
+                                ),
+                            };
+                        }
+                        None => {
+                            return ActiveConfigMatch::Unknown {
+                                summary: format!("tid={} active uclamp value missing", target.tid),
+                            };
+                        }
+                    }
+                }
+
+                ActiveConfigMatch::Matches {
+                    summary: self.planned_state_summary(),
+                }
+            }
+            CandidateAction::CgroupPlacement { plan } => {
+                if plan.action.targets.is_empty() {
+                    return ActiveConfigMatch::Unknown {
+                        summary: "cgroup candidate has no target tasks".to_owned(),
+                    };
+                }
+
+                let requested = normalize_cgroup_path(&plan.action.target_cgroup);
+                for target in &plan.action.targets {
+                    match snapshot.cgroup.per_tid.get(&target.identity.tid) {
+                        Some(current) if normalize_cgroup_str(current) == requested => {}
+                        Some(current) => {
+                            return ActiveConfigMatch::Differs {
+                                expected: format!("tid={} cgroup={requested}", target.identity.tid),
+                                actual: format!(
+                                    "tid={} cgroup={}",
+                                    target.identity.tid,
+                                    normalize_cgroup_str(current)
+                                ),
+                            };
+                        }
+                        None => {
+                            return ActiveConfigMatch::Unknown {
+                                summary: format!(
+                                    "tid={} active cgroup value missing",
+                                    target.identity.tid
+                                ),
+                            };
+                        }
+                    }
+                }
+
+                ActiveConfigMatch::Matches {
+                    summary: self.planned_state_summary(),
+                }
+            }
+            CandidateAction::IrqAffinity { plan } => {
+                match snapshot.irq.per_irq.get(&plan.action.irq) {
+                    Some(current) if current.trim() == plan.action.smp_affinity.trim() => {
+                        ActiveConfigMatch::Matches {
+                            summary: self.planned_state_summary(),
+                        }
+                    }
+                    Some(current) => ActiveConfigMatch::Differs {
+                        expected: format!(
+                            "irq={} smp_affinity={}",
+                            plan.action.irq, plan.action.smp_affinity
+                        ),
+                        actual: format!("irq={} smp_affinity={}", plan.action.irq, current.trim()),
+                    },
+                    None => ActiveConfigMatch::Unknown {
+                        summary: format!("irq={} active smp_affinity missing", plan.action.irq),
+                    },
+                }
+            }
+            CandidateAction::CpuPower { plan } => {
+                if plan.action.cpus.is_empty() {
+                    return ActiveConfigMatch::Unknown {
+                        summary: "cpu_power candidate has no CPUs".to_owned(),
+                    };
+                }
+
+                if plan.action.scaling_governor.is_none()
+                    && plan.action.energy_performance_preference.is_none()
+                {
+                    return ActiveConfigMatch::Unknown {
+                        summary: "cpu_power candidate has no requested runtime state".to_owned(),
+                    };
+                }
+
+                for cpu in &plan.action.cpus {
+                    let Some(policy) = cpu_policy_for_cpu(&snapshot.cpu_power.policies, *cpu)
+                    else {
+                        return ActiveConfigMatch::Unknown {
+                            summary: format!("cpu={cpu} active CPU policy missing"),
+                        };
+                    };
+
+                    if let Some(requested) = &plan.action.scaling_governor
+                        && policy.scaling_governor.as_ref() != Some(requested)
+                    {
+                        return ActiveConfigMatch::Differs {
+                            expected: format!("cpu={cpu} scaling_governor={requested}"),
+                            actual: format!(
+                                "cpu={cpu} scaling_governor={:?}",
+                                policy.scaling_governor
+                            ),
+                        };
+                    }
+
+                    if let Some(requested) = &plan.action.energy_performance_preference
+                        && policy.energy_performance_preference.as_ref() != Some(requested)
+                    {
+                        return ActiveConfigMatch::Differs {
+                            expected: format!(
+                                "cpu={cpu} energy_performance_preference={requested}"
+                            ),
+                            actual: format!(
+                                "cpu={cpu} energy_performance_preference={:?}",
+                                policy.energy_performance_preference
+                            ),
+                        };
+                    }
+                }
+
+                ActiveConfigMatch::Matches {
+                    summary: self.planned_state_summary(),
+                }
+            }
+            CandidateAction::GpuPower { plan } => {
+                let Some(device) = snapshot
+                    .gpu_power
+                    .devices
+                    .iter()
+                    .find(|device| device.device == plan.action.drm_card)
+                else {
+                    return ActiveConfigMatch::Unknown {
+                        summary: format!("gpu={} active power state missing", plan.action.drm_card),
+                    };
+                };
+
+                if plan.action.power_dpm_force_performance_level.is_none()
+                    && plan.action.pp_power_profile_mode.is_none()
+                {
+                    return ActiveConfigMatch::Unknown {
+                        summary: "gpu_power candidate has no requested runtime state".to_owned(),
+                    };
+                }
+
+                if let Some(requested) = &plan.action.power_dpm_force_performance_level
+                    && device.power_dpm_force_performance_level.as_ref() != Some(requested)
+                {
+                    return ActiveConfigMatch::Differs {
+                        expected: format!(
+                            "gpu={} power_dpm_force_performance_level={requested}",
+                            plan.action.drm_card
+                        ),
+                        actual: format!(
+                            "gpu={} power_dpm_force_performance_level={:?}",
+                            plan.action.drm_card, device.power_dpm_force_performance_level
+                        ),
+                    };
+                }
+
+                if let Some(requested) = &plan.action.pp_power_profile_mode
+                    && device.pp_power_profile_mode.as_ref() != Some(requested)
+                {
+                    return ActiveConfigMatch::Differs {
+                        expected: format!(
+                            "gpu={} pp_power_profile_mode={requested}",
+                            plan.action.drm_card
+                        ),
+                        actual: format!(
+                            "gpu={} pp_power_profile_mode={:?}",
+                            plan.action.drm_card, device.pp_power_profile_mode
+                        ),
+                    };
+                }
+
+                ActiveConfigMatch::Matches {
+                    summary: self.planned_state_summary(),
+                }
+            }
+            CandidateAction::VmKnob { plan } => {
+                if plan.action.changes.is_empty() {
+                    return ActiveConfigMatch::Unknown {
+                        summary: "vm_knob candidate has no changes".to_owned(),
+                    };
+                }
+
+                for change in &plan.action.changes {
+                    let keys = vm_knob_keys_for_change(&plan.action.root, &change.path);
+                    match vm_knob_active_value(&snapshot.vm.knobs, &keys) {
+                        Some(current) if current == &change.value => {}
+                        Some(current) => {
+                            return ActiveConfigMatch::Differs {
+                                expected: format!(
+                                    "vm_knob {}={}",
+                                    change.path.display(),
+                                    change.value
+                                ),
+                                actual: format!("vm_knob {}={current}", change.path.display()),
+                            };
+                        }
+                        None => {
+                            return ActiveConfigMatch::Unknown {
+                                summary: format!(
+                                    "vm_knob {} active value missing",
+                                    change.path.display()
+                                ),
+                            };
+                        }
+                    }
+                }
+
+                ActiveConfigMatch::Matches {
+                    summary: self.planned_state_summary(),
+                }
+            }
+            CandidateAction::Fake { .. } => ActiveConfigMatch::Unknown {
+                summary: self.planned_state_summary(),
+            },
+        }
+    }
+}
+
+pub fn candidate_is_noop(candidate: &CandidateAction, snapshot: &ActiveConfigSnapshot) -> bool {
+    candidate.matches_active_config(snapshot).is_match()
 }
 
 fn sorted_active_tids(active_tasks: &[ActiveTaskSnapshot]) -> Vec<u32> {
@@ -460,6 +754,13 @@ fn vm_knob_keys_for_change(root: &Path, path: &Path) -> Vec<String> {
     keys.into_iter().collect()
 }
 
+fn vm_knob_active_value<'a>(
+    knobs: &'a BTreeMap<String, String>,
+    keys: &[String],
+) -> Option<&'a String> {
+    keys.iter().find_map(|key| knobs.get(key))
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, path::Path};
@@ -562,6 +863,70 @@ mod tests {
         assert!(json.contains("\"cpu_power\""));
         assert!(json.contains("\"gpu_power\""));
         assert!(json.contains("\"sched_util_min\":128"));
+    }
+
+    #[test]
+    fn candidate_active_config_match_reports_difference_for_task_actions() {
+        let root = TestRoot::new("active-config-diff");
+        let proc_root = root.join("proc");
+        let sys_root = root.join("sys");
+        fs::create_dir_all(&proc_root).unwrap();
+        fs::create_dir_all(&sys_root).unwrap();
+
+        write_task_fixture(
+            &proc_root,
+            77,
+            "worker",
+            "2",
+            0,
+            "idle",
+            64,
+            512,
+            "/compile.slice",
+        );
+
+        let inventory = SystemInventory::probe_root(&SystemInventoryRoot {
+            proc_root: proc_root.clone(),
+            sys_root: sys_root.clone(),
+        });
+        let capabilities = DaemonCapabilities {
+            ionice_available: true,
+            uclamp_available: true,
+            ..DaemonCapabilities::default()
+        };
+        let active_tasks = vec![active_task(77)];
+        let snapshot = collect_active_config(ActiveConfigCollectorInput {
+            proc_root: &proc_root,
+            sys_root: &sys_root,
+            active_tasks: &active_tasks,
+            capabilities: &capabilities,
+            inventory: &inventory,
+        });
+
+        let candidate = CandidateAction::Nice {
+            plan: crate::autotune::candidate::NiceActionPlan {
+                name: "nice-diff".to_owned(),
+                action: crate::actions::nice::NiceAction {
+                    targets: vec![crate::actions::TaskIdentity {
+                        tid: 77,
+                        process_pid: Some(77),
+                        comm: Some("worker".to_owned()),
+                        starttime_ticks: Some(1),
+                    }],
+                    nice: 10,
+                    policy: crate::actions::nice::NicePolicy::default(),
+                },
+                target_root_pid: Some(77),
+                evidence: Vec::new(),
+                objective: crate::autotune::objective::ObjectiveKind::DesktopInteractivity,
+            },
+        };
+
+        let active_match = candidate.matches_active_config(&snapshot);
+
+        assert!(active_match.is_differs());
+        assert!(matches!(active_match, ActiveConfigMatch::Differs { .. }));
+        assert!(!candidate_is_noop(&candidate, &snapshot));
     }
 
     #[test]

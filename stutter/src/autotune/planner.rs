@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     actions::ActionState,
     autotune::{
+        active_config::ActiveConfigMatch,
         candidate::{
             CandidateAction, CandidateDryRunner, CandidateEvidence, RealCandidateDryRunner,
         },
@@ -38,6 +39,9 @@ pub enum CandidateDenyReason {
     WorkloadPolicyBlocked,
     NotAutonomousForWorkload,
     ProviderConfidenceTooLow,
+    NoEffectiveChange,
+    ExternalMutationDetected,
+    KeptActionNoLongerActive,
     ObjectiveNotAllowedForWorkload,
     ObjectiveSignalMissing,
     DryRunFailed,
@@ -348,6 +352,48 @@ fn evaluate_proposal_static(
         ));
     }
 
+    if let Some(snapshot) = input.observation.active_config_snapshot.as_ref() {
+        if let ActiveConfigMatch::Matches { summary } =
+            proposal.candidate.matches_active_config(snapshot)
+        {
+            deny_reasons.push(CandidateDenyReason::NoEffectiveChange);
+            deny_messages.push(format!(
+                "candidate would not change active configuration: {summary}"
+            ));
+        }
+
+        if let Some(active_experiment) = input.controller_state.active_experiment.as_ref()
+            && proposal
+                .candidate
+                .conflicts_with(&active_experiment.candidate)
+            && let ActiveConfigMatch::Differs { expected, actual } =
+                active_experiment.candidate.matches_active_config(snapshot)
+        {
+            deny_reasons.push(CandidateDenyReason::ExternalMutationDetected);
+            deny_messages.push(format!(
+                "active experiment no longer matches live state for conflict group {:?}; expected {}; actual {}; restore or resync before applying another conflicting action",
+                active_experiment.candidate.conflict_group(),
+                expected,
+                actual
+            ));
+        }
+
+        if let Some(kept) = input
+            .active_profile_state
+            .and_then(|state| state.current.as_ref())
+            && let ActiveConfigMatch::Differs { expected, actual } =
+                kept.candidate.matches_active_config(snapshot)
+        {
+            deny_reasons.push(CandidateDenyReason::KeptActionNoLongerActive);
+            deny_messages.push(format!(
+                "kept action {} no longer matches live state; expected {}; actual {}; restore or resync before planning new candidates",
+                kept.candidate.candidate_name(),
+                expected,
+                actual
+            ));
+        }
+    }
+
     normalize_evaluation_denials(&mut deny_reasons, &mut deny_messages);
 
     let candidate_name = proposal.candidate.candidate_name().to_owned();
@@ -539,7 +585,10 @@ mod tests {
             controller::ActiveExperiment,
             experiment::{ExperimentId, WindowScore},
             kept::{ActiveProfileState, KeptCandidateState},
-            observation::{ActiveTaskSnapshot, AutotuneObservation, WorkloadIdentity},
+            observation::{
+                ActiveConfigSnapshot, ActiveNiceSnapshot, ActiveTaskSnapshot, AutotuneObservation,
+                WorkloadIdentity,
+            },
             providers::{CandidateProvider, CandidateProviderInput, CandidateProviderRegistry},
             quality::OnlineDataQuality,
             state::SituationKind,
@@ -564,6 +613,33 @@ mod tests {
             config: &config,
             remote_context: None,
         })
+    }
+
+    fn rollback_token() -> RollbackToken {
+        RollbackToken::CpuAffinityRestoreFile {
+            path: std::path::PathBuf::from("/tmp/stutter-restore.json"),
+            affected_tasks: 1,
+        }
+    }
+
+    fn active_nice_snapshot(tid: u32, nice: i32) -> ActiveConfigSnapshot {
+        ActiveConfigSnapshot {
+            nice: ActiveNiceSnapshot {
+                per_tid: std::collections::BTreeMap::from([(tid, nice)]),
+            },
+            ..ActiveConfigSnapshot::default()
+        }
+    }
+
+    fn observation_with_active_nice(
+        situation: SituationKind,
+        focus_kind: FocusGroupKind,
+        tid: u32,
+        nice: i32,
+    ) -> AutotuneObservation {
+        let mut observation = observation_for_situation(situation, focus_kind);
+        observation.active_config_snapshot = Some(active_nice_snapshot(tid, nice));
+        observation
     }
 
     fn suggest_policy_with_compile_cgroup() -> DaemonPolicy {
@@ -945,13 +1021,6 @@ mod tests {
         }
     }
 
-    fn rollback_token() -> RollbackToken {
-        RollbackToken::CpuAffinityRestoreFile {
-            path: std::path::PathBuf::from("/tmp/stutter-restore.json"),
-            affected_tasks: 1,
-        }
-    }
-
     #[test]
     fn low_confidence_suggest_candidate_is_denied_by_provider_threshold() {
         let evaluation = evaluate_static_candidate_with_confidence(
@@ -1085,6 +1154,148 @@ mod tests {
         assert_eq!(evaluations[0].confidence, 0.90);
         assert_eq!(evaluations[1].candidate_name, "aaa-low-confidence");
         assert_eq!(evaluations[1].confidence, 0.80);
+    }
+
+    #[test]
+    fn no_effective_change_candidate_is_denied_before_dry_run() {
+        let candidate = nice_candidate();
+        let policy = policy(DaemonMode::Suggest);
+        let observation = observation_with_active_nice(
+            SituationKind::CompileCpuBound,
+            FocusGroupKind::Compile,
+            1234,
+            5,
+        );
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(evaluation.dry_run.is_none());
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::NoEffectiveChange)
+        );
+        assert!(
+            evaluation
+                .deny_messages
+                .iter()
+                .any(|message| message.contains("would not change active configuration"))
+        );
+    }
+
+    #[test]
+    fn active_experiment_external_mutation_blocks_conflicting_candidate_before_dry_run() {
+        let active_candidate = nice_candidate();
+        let candidate = uclamp_candidate("external-mutation-uclamp");
+        let policy = policy(DaemonMode::Suggest);
+        let mut observation = observation_with_active_nice(
+            SituationKind::GameCpuSchedulerPressure,
+            FocusGroupKind::Game,
+            1234,
+            0,
+        );
+        enable_capability_for_candidate(&mut observation, &candidate);
+
+        let controller_state = ControllerRuntimeState {
+            active_experiment: Some(ActiveExperiment {
+                experiment_id: ExperimentId::new("external-mutation"),
+                candidate: active_candidate,
+                baseline_score_total: 1_000,
+            }),
+            ..ControllerRuntimeState::default()
+        };
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &controller_state,
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(evaluation.dry_run.is_none());
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ExternalMutationDetected)
+        );
+        assert!(
+            evaluation
+                .deny_messages
+                .iter()
+                .any(|message| message.contains("restore or resync"))
+        );
+    }
+
+    #[test]
+    fn kept_action_no_longer_active_blocks_new_candidates_before_dry_run() {
+        let kept_candidate = nice_candidate();
+        let candidate = cpu_affinity_candidate("kept-no-longer-active-cpu-placement");
+        let policy = policy(DaemonMode::Suggest);
+        let observation = observation_with_active_nice(
+            SituationKind::GameCpuSchedulerPressure,
+            FocusGroupKind::Game,
+            1234,
+            0,
+        );
+        let active_profile_state = ActiveProfileState {
+            current: Some(KeptCandidateState::new(
+                ExperimentId::new("kept-no-longer-active"),
+                kept_candidate,
+                window_score(1_000),
+                window_score(800),
+                rollback_token(),
+                observation.now_unix_nanos,
+                "kept for test",
+            )),
+            history: Vec::new(),
+        };
+        let mut dry_runner = CountingDryRunner::default();
+        let proposals = vec![proposal_for_candidate(candidate, 1.0)];
+
+        let mut evaluations = evaluate_proposals_with_runner(
+            PlannerInput {
+                observation: &observation,
+                daemon_policy: &policy,
+                capabilities: &observation.capabilities,
+                system_health: &observation.system_health,
+                controller_state: &ControllerRuntimeState::default(),
+                active_profile_state: Some(&active_profile_state),
+                profiles: &[],
+            },
+            proposals,
+            &mut dry_runner,
+        );
+
+        assert_eq!(evaluations.len(), 1);
+        let evaluation = evaluations.remove(0);
+        assert_eq!(dry_runner.calls, 0);
+        assert!(evaluation.dry_run.is_none());
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::KeptActionNoLongerActive)
+        );
+        assert!(
+            evaluation
+                .deny_messages
+                .iter()
+                .any(|message| message.contains("restore or resync"))
+        );
     }
 
     #[test]

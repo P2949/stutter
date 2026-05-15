@@ -401,6 +401,20 @@ pub struct AutotuneRuntime {
     pending_history_context: Option<RuntimeHistoryContext>,
 }
 
+fn top_denied_reason_for_plan(plan: &PlanResult) -> Option<String> {
+    plan.evaluations
+        .iter()
+        .find(|evaluation| !evaluation.eligible)
+        .and_then(|evaluation| {
+            evaluation
+                .deny_reasons
+                .first()
+                .map(|reason| format!("{reason:?}"))
+                .or_else(|| evaluation.deny_messages.first().cloned())
+        })
+        .or_else(|| plan.no_action_reason.clone())
+}
+
 impl AutotuneRuntime {
     pub fn new(config: AutotuneRuntimeConfig) -> Self {
         let daemon_policy = config.daemon_policy.clone();
@@ -1497,13 +1511,10 @@ impl AutotuneRuntime {
                 .as_ref()
                 .map(|plan| plan.evaluations.len())
                 .unwrap_or(0),
-            top_denied_reason: self.last_plan_result.as_ref().and_then(|plan| {
-                plan.evaluations
-                    .iter()
-                    .find(|evaluation| !evaluation.eligible)
-                    .and_then(|evaluation| evaluation.deny_messages.first().cloned())
-                    .or_else(|| plan.no_action_reason.clone())
-            }),
+            top_denied_reason: self
+                .last_plan_result
+                .as_ref()
+                .and_then(top_denied_reason_for_plan),
             score_total: observation.score.total,
             data_quality: data_quality_label(&observation.data_quality),
             data_quality_reason_codes: observation.data_quality.reason_code_strings(),
@@ -2370,6 +2381,40 @@ mod tests {
                 expected_daemon_phase
             );
         }
+    }
+
+    #[test]
+    fn top_denied_reason_for_plan_prefers_deny_reason_enum() {
+        let candidate = CandidateAction::Fake {
+            action_id: crate::actions::ActionId("fake-noop".to_owned()),
+            safety_class: SafetyClass::ObserveOnly,
+        };
+        let descriptor = candidate.descriptor();
+        let evaluation = crate::autotune::planner::CandidateEvaluation {
+            candidate_name: "fake-noop".to_owned(),
+            action_kind: "fake".to_owned(),
+            descriptor,
+            provider: "test".to_owned(),
+            confidence: 1.0,
+            eligible: false,
+            deny_reasons: vec![crate::autotune::planner::CandidateDenyReason::NoEffectiveChange],
+            deny_messages: vec!["candidate would not change active configuration".to_owned()],
+            evidence: Vec::new(),
+            objective: crate::autotune::objective::ObjectiveKind::DesktopInteractivity,
+            rank: Some(1),
+            dry_run: None,
+            candidate,
+        };
+        let plan = PlanResult {
+            selected: None,
+            evaluations: vec![evaluation],
+            no_action_reason: None,
+        };
+
+        assert_eq!(
+            top_denied_reason_for_plan(&plan).as_deref(),
+            Some("NoEffectiveChange")
+        );
     }
 
     #[test]
