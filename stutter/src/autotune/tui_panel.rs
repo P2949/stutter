@@ -130,13 +130,9 @@ fn current_profile_from_events(events: &[AutotuneHistoryEvent]) -> Option<String
 }
 
 fn current_profile_from_journal(record: Option<&ControllerJournalRecord>) -> Option<String> {
-    match record {
-        Some(ControllerJournalRecord::Applied { action_id, .. })
-        | Some(ControllerJournalRecord::Applying { action_id, .. }) => {
-            candidate_name_from_action_id(Some(action_id.as_str()))
-        }
-        _ => None,
-    }
+    record
+        .filter(|record| record.is_active_experiment_state())
+        .and_then(|record| candidate_name_from_action_id(record.action_id.as_deref()))
 }
 
 fn latest_baseline_score(events: &[AutotuneHistoryEvent]) -> Option<u64> {
@@ -178,7 +174,9 @@ fn rollback_available_from_events(events: &[AutotuneHistoryEvent]) -> bool {
 }
 
 fn journal_record_has_active_rollback(record: Option<&ControllerJournalRecord>) -> bool {
-    matches!(record, Some(ControllerJournalRecord::Applied { .. }))
+    record.is_some_and(|record| {
+        record.is_active_experiment_state() && record.rollback_token().is_some()
+    })
 }
 
 fn decision_in_seconds_from_event(

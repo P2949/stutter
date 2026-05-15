@@ -1,8 +1,14 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use crate::{
-    autotune, cli::RulesCommand, config::model::MonitorConfig, doctor::DoctorInput,
+    autotune,
+    cli::RulesCommand,
+    config::model::MonitorConfig,
+    daemon::DaemonSoakConfig,
+    doctor::DoctorInput,
     process_tree::TaskClass,
+    release::{ReleaseChannel, ReleaseReadinessInputs},
+    service::ServiceCommandRequest,
 };
 
 #[derive(Debug)]
@@ -20,6 +26,11 @@ pub struct BenchCommandInput {
 #[derive(Debug)]
 pub struct RestoreCommandInput {
     pub dry_run: bool,
+}
+
+#[derive(Debug)]
+pub struct VersionCommandInput {
+    pub features: bool,
 }
 
 #[derive(Debug)]
@@ -94,6 +105,14 @@ pub struct RecommendCommandInput {
 }
 
 #[derive(Debug)]
+pub struct ReleaseCheckCommandInput {
+    pub channel: ReleaseChannel,
+    pub inputs: ReleaseReadinessInputs,
+    pub json: bool,
+    pub enforce: bool,
+}
+
+#[derive(Debug)]
 pub struct CheckCommandInput {
     pub baseline: PathBuf,
     pub current: PathBuf,
@@ -102,6 +121,11 @@ pub struct CheckCommandInput {
     pub json: bool,
     pub top: usize,
     pub filter_class: Option<TaskClass>,
+}
+
+#[derive(Debug)]
+pub struct ConfigCheckCommandInput {
+    pub json: bool,
 }
 
 #[derive(Debug)]
@@ -188,15 +212,132 @@ pub struct InspectIrqsCommandInput {
 #[derive(Debug)]
 pub struct DaemonConfigExplainCommandInput {
     pub json: bool,
+    pub preset: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct DaemonPolicyExplainCommandInput {
+    pub json: bool,
+    pub preset: Option<String>,
+}
+
+#[derive(Debug)]
+pub enum DaemonProfilesCommandInput {
+    List(DaemonProfilesListCommandInput),
+    Forget(DaemonProfilesForgetCommandInput),
+    Explain(DaemonProfilesExplainCommandInput),
+}
+
+#[derive(Debug)]
+pub struct DaemonProfilesListCommandInput {
+    pub json: bool,
+}
+
+#[derive(Debug)]
+pub struct DaemonProfilesForgetCommandInput {
+    pub workload_identity_hash: Option<String>,
+    pub candidate: Option<String>,
+    pub all: bool,
+    pub dry_run: bool,
+    pub json: bool,
+}
+
+#[derive(Debug)]
+pub struct DaemonProfilesExplainCommandInput {
+    pub workload_identity_hash: Option<String>,
+    pub json: bool,
+}
+
+#[derive(Debug)]
+pub struct DaemonExplainCommandInput {
+    pub json: bool,
+    pub explain_last: usize,
+}
+
+#[derive(Debug)]
+pub struct DaemonWhyNotOptimizeCommandInput {
+    pub json: bool,
+    pub explain_last: usize,
+}
+
+#[derive(Debug)]
+pub struct DaemonWhatChangedCommandInput {
+    pub json: bool,
+    pub explain_last: usize,
+}
+
+#[derive(Debug)]
+pub struct DaemonStatusCommandInput {
+    pub json: bool,
+    pub explain_last: usize,
+}
+
+#[derive(Debug)]
+pub struct DaemonWatchCommandInput {
+    pub interval_ms: u64,
+    pub iterations: Option<u64>,
+    pub verbose: bool,
+    pub explain_last: usize,
+}
+
+#[derive(Debug)]
+pub struct DaemonDoctorCommandInput {
+    pub json: bool,
+}
+
+#[derive(Debug)]
+pub struct DaemonResetStateCommandInput {
+    pub dry_run: bool,
+    pub json: bool,
+}
+
+#[derive(Debug)]
+pub struct DaemonBenchOverheadCommandInput {
+    pub json: bool,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug)]
+pub struct DaemonSoakCommandInput {
+    pub config: DaemonSoakConfig,
+    pub json: bool,
+}
+
+#[derive(Debug)]
+pub struct DaemonAcceptanceCommandInput {
+    pub json: bool,
+}
+
+#[derive(Debug)]
+pub struct DaemonPauseCommandInput;
+
+#[derive(Debug)]
+pub struct DaemonResumeCommandInput;
+
+#[derive(Debug)]
+pub struct DaemonRestoreCommandInput {
+    pub dry_run: bool,
+    pub emergency: bool,
+}
+
+#[derive(Debug)]
+pub struct ServiceCommandInput {
+    pub request: ServiceCommandRequest,
+    pub json: bool,
 }
 
 #[derive(Debug)]
 pub struct AgentCommandInput {
     pub bind: SocketAddr,
+    pub unix_socket: Option<PathBuf>,
     pub runs_dir: Option<PathBuf>,
     pub allow_unsafe_bind: bool,
     pub bearer_token_env: String,
     pub bearer_token_file: Option<PathBuf>,
+    pub read_token_env: String,
+    pub read_token_file: Option<PathBuf>,
+    pub apply_token_env: String,
+    pub apply_token_file: Option<PathBuf>,
     pub max_duration_seconds: u64,
     pub max_targets: usize,
     pub max_concurrent_recordings: usize,

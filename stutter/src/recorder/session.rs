@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 use super::{
     LiveRecorder, SESSION_SCHEMA_VERSION,
     event_types::FrameEvent,
+    retention::{
+        RecordingRetentionPolicy, apply_recording_retention, ensure_min_free_space_for_path,
+    },
     session_files::{
         MetadataFile, RecordedConfig, RecordedCpuSnapshot, RecordedLatency, RecordedSpike,
         RecordedTime, SessionFile, SessionMetadataCore, SessionSpike, SessionTask, WakerEntry,
@@ -76,6 +79,18 @@ pub fn prepare_recording(config: &MonitorConfig) -> anyhow::Result<Option<Record
 
     let started_at = SystemTime::now();
     let run_dir = resolve_run_dir(recording, started_at, env::var_os("HOME"));
+    let retention_policy = RecordingRetentionPolicy::from_recording_config(recording);
+
+    if recording.output_dir.is_none()
+        && let Some(run_root) = run_dir.parent()
+    {
+        apply_recording_retention(run_root, &retention_policy, None, started_at)?;
+    }
+
+    if let Some(min_free_bytes) = retention_policy.min_free_bytes {
+        ensure_min_free_space_for_path(&run_dir, min_free_bytes)?;
+    }
+
     if let Err(err) = ensure_empty_dir(&run_dir) {
         return Err(err.context("record write failed"));
     }
@@ -478,6 +493,23 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     if !input.config.outputs.json_stream {
         println!("recording written to {}", recording.run_dir.display());
     }
+
+    let retention_policy = RecordingRetentionPolicy::from_recording_config(&config.recording);
+    if config.recording.output_dir.is_none()
+        && let Some(run_root) = recording.run_dir.parent()
+        && let Err(err) = apply_recording_retention(
+            run_root,
+            &retention_policy,
+            Some(&recording.run_dir),
+            SystemTime::now(),
+        )
+    {
+        log::warn!(
+            "recording_retention_finalize_failed run_root={} err={err:#}",
+            run_root.display()
+        );
+    }
+
     Ok(())
 }
 

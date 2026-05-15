@@ -6,6 +6,7 @@ After=network.target
 [Service]
 Type=simple
 EnvironmentFile=-/etc/stutter/autotune-observe.env
+Environment=HOME=/var/lib/stutter
 Environment=STUTTER_AUTOTUNE_MODE=observe
 Environment=STUTTER_AUTOTUNE_PRESET=diagnosis
 Environment=STUTTER_AUTOTUNE_SUMMARY_MS=1000
@@ -31,9 +32,18 @@ fi; \
 if [ -n "$tree_pid" ]; then \
   exec /usr/bin/stutter autotune --mode observe --tree-pid "$tree_pid" --preset "$preset" --summary-ms "$summary_ms" --foreground-window --focus-source "$focus_source"; \
 fi; \
-exec /usr/bin/stutter autotune --mode observe --auto-focus --focus-source "$focus_source" --preset "$preset" --summary-ms "$summary_ms"'
+exec /usr/bin/stutter autotune --mode observe --auto-focus --foreground-window --focus-source "$focus_source" --preset "$preset" --summary-ms "$summary_ms"'
 Restart=on-failure
 RestartSec=5s
+StateDirectory=stutter
+LogsDirectory=stutter
+RuntimeDirectory=stutter
+PrivateTmp=true
+ProtectSystem=full
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/stutter /var/log/stutter /run
 
 [Install]
 WantedBy=multi-user.target

@@ -76,6 +76,7 @@ Rollback is part of the product contract, not a best-effort comment.
 - `stutter restore` restores managed profile state from the normal restore files.
 - `stutter restore --dry-run` previews pending restore work without changing live state.
 - `stutter autotune restore` restores autotune controller state from `controller_journal.json`.
+- `stutter daemon restore` and `stutter daemon emergency-restore` run both restore paths and report combined restored/skipped/error counts.
 - The audit log at `~/.local/state/stutter/audit/actions.jsonl` records system-changing action events.
 - The controller journal at `~/.local/state/stutter/autotune/controller_journal.json` records in-flight and applied autotune actions with rollback tokens.
 - Startup recovery must inspect the controller journal before planning new actions.
@@ -88,8 +89,8 @@ To disable daemon/autotune behavior:
 
 1. Run `observe` mode, for example `stutter autotune --mode observe ...`.
 2. Stop any active remote/autotune controller.
-3. Run `stutter restore`.
-4. If the autotune controller journal contains an applied action, run `stutter autotune restore`.
+3. Run `stutter daemon emergency-restore --dry-run`.
+4. Run `stutter daemon emergency-restore`.
 5. Remove, disable, or ignore any installed agent service if one was installed.
 
 ## Developer rules

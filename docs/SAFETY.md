@@ -10,6 +10,37 @@ Recording and live tracing require privileges on most systems because `stutter` 
 
 Use `sudo` or `doas` only for commands that actually need live tracing.
 
+The daemon privilege model separates three roles:
+
+- `privileged_worker`: the small process role that may load eBPF, attach probes, apply actions, rollback actions, and write protected state
+- `control_plane`: the local agent/API role that may request allowlisted privileged work over local control transport
+- `ui_client`: an unprivileged status/reporting client
+
+Privileged worker operations are represented by a typed allowlist in
+`daemon::privilege`. Local Unix sockets are the preferred control transport.
+Loopback TCP requires apply/control authorization for state-changing requests.
+Non-loopback TCP is not allowed to request privileged worker operations, even
+when a bearer token is present.
+
+Every privileged operation has a stable audit action id, for example
+`privilege-start-recording`, `privilege-apply-action`, and
+`privilege-rollback-action`.
+
+## Lifecycle Boundaries
+
+The daemon treats suspend/resume, target restart or exit, cgroup movement, GPU
+reset, compositor restart, and CPU topology changes as measurement boundaries.
+These events flow through `daemon::lifecycle`, which turns them into explicit
+daemon actions such as pausing experiments, clearing measurement windows,
+refreshing target identity, refreshing eBPF maps, waiting for stabilization, or
+scheduling rollback of the active experiment.
+
+When a boundary invalidates an active experiment and no trusted rollback is
+available, the daemon drops back to observe-only mode and clears active
+experiment state rather than continuing to apply stale tuning. Resume events are
+also surfaced through system health as `suspend_resume_stabilizing`, which blocks
+new apply work until the runtime has stabilized.
+
 ## Restore Files
 
 Managed profile application records original task state before changing affinity, nice, or ionice values. The current managed profile restore file is:

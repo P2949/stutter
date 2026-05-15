@@ -1,18 +1,69 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
     actions::SafetyClass,
-    daemon::policy::{ActionSource, DaemonMode},
+    daemon::{
+        health::SystemHealthThresholds,
+        policy::{ActionSource, DaemonMode},
+    },
 };
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DaemonPreset {
+    #[default]
+    ObserveOnly,
+    GamingLowRisk,
+    GamingLaptopSafe,
+    WorkstationLowRisk,
+    DebugAggressive,
+}
+
+impl DaemonPreset {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ObserveOnly => "observe-only",
+            Self::GamingLowRisk => "gaming-low-risk",
+            Self::GamingLaptopSafe => "gaming-laptop-safe",
+            Self::WorkstationLowRisk => "workstation-low-risk",
+            Self::DebugAggressive => "debug-aggressive",
+        }
+    }
+}
+
+impl fmt::Display for DaemonPreset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for DaemonPreset {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "observe-only" => Ok(Self::ObserveOnly),
+            "gaming-low-risk" => Ok(Self::GamingLowRisk),
+            "gaming-laptop-safe" => Ok(Self::GamingLaptopSafe),
+            "workstation-low-risk" => Ok(Self::WorkstationLowRisk),
+            "debug-aggressive" => Ok(Self::DebugAggressive),
+            other => anyhow::bail!(
+                "invalid daemon preset {other:?}; valid values are observe-only, gaming-low-risk, gaming-laptop-safe, workstation-low-risk, debug-aggressive"
+            ),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DaemonConfig {
+    pub preset: DaemonPreset,
     pub mode: DaemonMode,
     pub source: ActionSource,
     pub target: DaemonTargetConfig,
     pub safety: DaemonSafetyConfig,
+    pub health: DaemonHealthConfig,
     pub retention: DaemonRetentionConfig,
     pub remote: DaemonRemoteConfig,
     pub autotune: DaemonAutotuneConfig,
@@ -20,14 +71,139 @@ pub struct DaemonConfig {
 
 impl Default for DaemonConfig {
     fn default() -> Self {
-        Self {
+        Self::from_preset(DaemonPreset::ObserveOnly, ActionSource::Cli)
+    }
+}
+
+impl DaemonConfig {
+    pub fn from_preset(preset: DaemonPreset, source: ActionSource) -> Self {
+        let mut config = Self {
+            preset,
             mode: DaemonMode::Observe,
-            source: ActionSource::Cli,
+            source,
             target: DaemonTargetConfig::default(),
             safety: DaemonSafetyConfig::default(),
+            health: DaemonHealthConfig::default(),
             retention: DaemonRetentionConfig::default(),
             remote: DaemonRemoteConfig::default(),
             autotune: DaemonAutotuneConfig::default(),
+        };
+
+        config.apply_preset(preset);
+        config
+    }
+
+    pub fn apply_preset(&mut self, preset: DaemonPreset) {
+        self.preset = preset;
+        self.safety = DaemonSafetyConfig::default();
+        self.health = DaemonHealthConfig::default();
+        self.retention = DaemonRetentionConfig::default();
+        self.remote = DaemonRemoteConfig::default();
+        self.autotune = DaemonAutotuneConfig::default();
+
+        match preset {
+            DaemonPreset::ObserveOnly => {
+                self.mode = DaemonMode::Observe;
+                self.safety.max_safety_class = SafetyClass::ObserveOnly;
+                self.safety.allowed_action_classes = safety_classes_up_to(SafetyClass::ObserveOnly);
+                self.safety.min_confidence = 0.0;
+            }
+            DaemonPreset::GamingLowRisk => {
+                self.mode = DaemonMode::ApplyLowRisk;
+                self.safety.max_safety_class = SafetyClass::ReversibleLowRisk;
+                self.safety.allowed_action_classes =
+                    safety_classes_up_to(SafetyClass::ReversibleLowRisk);
+                self.safety
+                    .enabled_action_families
+                    .insert("cpu_affinity_profile".to_owned());
+                self.safety.min_confidence = 0.85;
+                self.autotune.candidate_window_seconds = 30;
+                self.autotune.washout_seconds = 10;
+                self.retention.max_history_events = 20_000;
+            }
+            DaemonPreset::GamingLaptopSafe => {
+                self.mode = DaemonMode::ApplyLowRisk;
+                self.safety.max_safety_class = SafetyClass::ReversibleLowRisk;
+                self.safety.allowed_action_classes =
+                    safety_classes_up_to(SafetyClass::ReversibleLowRisk);
+                self.safety
+                    .enabled_action_families
+                    .insert("cpu_affinity_profile".to_owned());
+                self.safety.min_confidence = 0.92;
+                self.health.max_cpu_temp_celsius = 82;
+                self.health.max_gpu_temp_celsius = 84;
+                self.autotune.candidate_window_seconds = 45;
+                self.autotune.washout_seconds = 15;
+                self.retention.max_history_events = 12_000;
+            }
+            DaemonPreset::WorkstationLowRisk => {
+                self.mode = DaemonMode::ApplyLowRisk;
+                self.safety.max_safety_class = SafetyClass::ReversibleLowRisk;
+                self.safety.allowed_action_classes =
+                    safety_classes_up_to(SafetyClass::ReversibleLowRisk);
+                self.safety
+                    .enabled_action_families
+                    .insert("cpu_affinity_profile".to_owned());
+                self.safety.min_confidence = 0.88;
+                self.autotune.candidate_window_seconds = 60;
+                self.autotune.washout_seconds = 15;
+                self.retention.max_history_events = 30_000;
+            }
+            DaemonPreset::DebugAggressive => {
+                self.mode = DaemonMode::ApplyMediumRisk;
+                self.safety.max_safety_class = SafetyClass::ReversibleMediumRisk;
+                self.safety.allowed_action_classes =
+                    safety_classes_up_to(SafetyClass::ReversibleMediumRisk);
+                self.safety.enabled_action_families.extend(
+                    ["cpu_affinity_profile", "nice", "ionice", "uclamp"].map(str::to_owned),
+                );
+                self.safety.min_confidence = 0.75;
+                self.autotune.candidate_window_seconds = 20;
+                self.autotune.washout_seconds = 5;
+                self.retention.max_history_events = 50_000;
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DaemonHealthConfig {
+    pub max_cpu_temp_celsius: u32,
+    pub max_gpu_temp_celsius: u32,
+    pub min_disk_available_bytes: u64,
+    pub max_memory_pressure_some_avg10_percent: f32,
+}
+
+impl Default for DaemonHealthConfig {
+    fn default() -> Self {
+        let thresholds = SystemHealthThresholds::default();
+
+        Self {
+            max_cpu_temp_celsius: (thresholds.max_cpu_temp_millidegrees / 1000) as u32,
+            max_gpu_temp_celsius: (thresholds.max_gpu_temp_millidegrees / 1000) as u32,
+            min_disk_available_bytes: thresholds.min_disk_available_bytes,
+            max_memory_pressure_some_avg10_percent: thresholds
+                .max_memory_pressure_some_avg10_millipercent
+                as f32
+                / 1000.0,
+        }
+    }
+}
+
+impl DaemonHealthConfig {
+    pub fn thresholds(&self) -> SystemHealthThresholds {
+        let defaults = SystemHealthThresholds::default();
+
+        SystemHealthThresholds {
+            max_cpu_temp_millidegrees: i64::from(self.max_cpu_temp_celsius) * 1000,
+            max_gpu_temp_millidegrees: i64::from(self.max_gpu_temp_celsius) * 1000,
+            min_disk_available_bytes: self.min_disk_available_bytes,
+            max_memory_pressure_some_avg10_millipercent: (self
+                .max_memory_pressure_some_avg10_percent
+                * 1000.0)
+                .round() as u32,
+            max_load_per_cpu_milli: defaults.max_load_per_cpu_milli,
+            max_ebpf_dropped_events: defaults.max_ebpf_dropped_events,
         }
     }
 }
@@ -44,6 +220,7 @@ pub struct DaemonTargetConfig {
 pub struct DaemonSafetyConfig {
     pub max_safety_class: SafetyClass,
     pub allowed_action_classes: BTreeSet<SafetyClass>,
+    pub enabled_action_families: BTreeSet<String>,
     pub denied_action_families: BTreeSet<String>,
     pub allow_system_wide_actions: bool,
     pub allow_high_risk: bool,
@@ -59,6 +236,7 @@ impl Default for DaemonSafetyConfig {
         Self {
             max_safety_class: SafetyClass::ObserveOnly,
             allowed_action_classes,
+            enabled_action_families: BTreeSet::new(),
             denied_action_families: BTreeSet::new(),
             allow_system_wide_actions: false,
             allow_high_risk: false,
@@ -66,6 +244,18 @@ impl Default for DaemonSafetyConfig {
             min_confidence: 0.0,
         }
     }
+}
+
+fn safety_classes_up_to(max: SafetyClass) -> BTreeSet<SafetyClass> {
+    [
+        SafetyClass::ObserveOnly,
+        SafetyClass::ReversibleLowRisk,
+        SafetyClass::ReversibleMediumRisk,
+        SafetyClass::HighRisk,
+    ]
+    .into_iter()
+    .filter(|class| class <= &max)
+    .collect()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -130,6 +320,7 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
 
         assert!(json.contains("\"mode\":\"observe\""));
+        assert!(json.contains("\"preset\":\"observe-only\""));
         assert!(json.contains("\"source\":\"cli\""));
         assert!(json.contains("\"retain_crash_diagnostics\":true"));
     }
@@ -137,6 +328,7 @@ mod tests {
     #[test]
     fn daemon_config_owns_user_intent_fields() {
         let mut config = DaemonConfig {
+            preset: DaemonPreset::GamingLowRisk,
             mode: DaemonMode::ApplyLowRisk,
             source: ActionSource::RemoteAgent,
             ..DaemonConfig::default()
@@ -150,6 +342,7 @@ mod tests {
         config.autotune.candidate_window_seconds = 60;
 
         assert_eq!(config.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(config.preset, DaemonPreset::GamingLowRisk);
         assert_eq!(config.source, ActionSource::RemoteAgent);
         assert_eq!(config.target.tree_pids, vec![1234]);
         assert!(config.target.require_explicit_target);
@@ -160,5 +353,75 @@ mod tests {
         assert_eq!(config.retention.max_state_snapshots, 4);
         assert!(config.remote.allow_remote_apply);
         assert_eq!(config.autotune.candidate_window_seconds, 60);
+    }
+
+    #[test]
+    fn daemon_presets_map_to_expected_safe_policy_defaults() {
+        let observe = DaemonConfig::from_preset(DaemonPreset::ObserveOnly, ActionSource::Cli);
+        assert_eq!(observe.mode, DaemonMode::Observe);
+        assert_eq!(observe.safety.max_safety_class, SafetyClass::ObserveOnly);
+        assert!(observe.safety.enabled_action_families.is_empty());
+
+        let gaming = DaemonConfig::from_preset(DaemonPreset::GamingLowRisk, ActionSource::Cli);
+        assert_eq!(gaming.mode, DaemonMode::ApplyLowRisk);
+        assert_eq!(
+            gaming.safety.max_safety_class,
+            SafetyClass::ReversibleLowRisk
+        );
+        assert!(
+            gaming
+                .safety
+                .enabled_action_families
+                .contains("cpu_affinity_profile")
+        );
+        assert!(!gaming.safety.allow_system_wide_actions);
+        assert!(gaming.safety.min_confidence >= 0.85);
+
+        let laptop = DaemonConfig::from_preset(DaemonPreset::GamingLaptopSafe, ActionSource::Cli);
+        assert_eq!(laptop.mode, DaemonMode::ApplyLowRisk);
+        assert!(laptop.safety.min_confidence > gaming.safety.min_confidence);
+        assert!(laptop.health.max_cpu_temp_celsius < gaming.health.max_cpu_temp_celsius);
+
+        let debug = DaemonConfig::from_preset(DaemonPreset::DebugAggressive, ActionSource::Cli);
+        assert_eq!(debug.mode, DaemonMode::ApplyMediumRisk);
+        assert_eq!(
+            debug.safety.max_safety_class,
+            SafetyClass::ReversibleMediumRisk
+        );
+        assert!(!debug.safety.allow_high_risk);
+        assert!(debug.safety.enabled_action_families.contains("uclamp"));
+    }
+
+    #[test]
+    fn daemon_health_config_maps_to_system_health_thresholds() {
+        let config = DaemonHealthConfig {
+            max_cpu_temp_celsius: 80,
+            max_gpu_temp_celsius: 81,
+            min_disk_available_bytes: 1_000_000_000,
+            max_memory_pressure_some_avg10_percent: 12.5,
+        };
+
+        let thresholds = config.thresholds();
+
+        assert_eq!(thresholds.max_cpu_temp_millidegrees, 80_000);
+        assert_eq!(thresholds.max_gpu_temp_millidegrees, 81_000);
+        assert_eq!(thresholds.min_disk_available_bytes, 1_000_000_000);
+        assert_eq!(
+            thresholds.max_memory_pressure_some_avg10_millipercent,
+            12_500
+        );
+    }
+
+    #[test]
+    fn daemon_preset_parser_accepts_documented_names() {
+        assert_eq!(
+            "observe-only".parse::<DaemonPreset>().unwrap(),
+            DaemonPreset::ObserveOnly
+        );
+        assert_eq!(
+            DaemonPreset::DebugAggressive.to_string(),
+            "debug-aggressive"
+        );
+        assert!("risky".parse::<DaemonPreset>().is_err());
     }
 }

@@ -31,6 +31,7 @@ pub mod quality;
 pub mod report_overlay;
 pub mod rolling_window;
 pub mod runtime;
+pub mod simulation;
 pub mod startup_recovery;
 pub mod state;
 pub mod tui_panel;

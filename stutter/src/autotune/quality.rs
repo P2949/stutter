@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::tune::comparability::{
@@ -37,6 +39,36 @@ pub enum OnlineDataQuality {
     Low { reasons: Vec<String> },
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum OnlineDataQualityReasonCode {
+    InsufficientSamples,
+    TargetMissing,
+    FocusLowConfidence,
+    DropCountersHigh,
+    WorkloadChanged,
+    ThermalDegraded,
+    FrameDataInvalid,
+    FrameCountMismatch,
+    MeasurementUncertain,
+}
+
+impl OnlineDataQualityReasonCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InsufficientSamples => "insufficient_samples",
+            Self::TargetMissing => "target_missing",
+            Self::FocusLowConfidence => "focus_low_confidence",
+            Self::DropCountersHigh => "drop_counters_high",
+            Self::WorkloadChanged => "workload_changed",
+            Self::ThermalDegraded => "thermal_degraded",
+            Self::FrameDataInvalid => "frame_data_invalid",
+            Self::FrameCountMismatch => "frame_count_mismatch",
+            Self::MeasurementUncertain => "measurement_uncertain",
+        }
+    }
+}
+
 impl OnlineDataQuality {
     pub fn reasons(&self) -> &[String] {
         match self {
@@ -59,6 +91,28 @@ impl OnlineDataQuality {
 
     pub fn blocks_action(&self) -> bool {
         self.is_low()
+    }
+
+    pub fn reason_codes(&self) -> Vec<OnlineDataQualityReasonCode> {
+        self.reasons()
+            .iter()
+            .map(|reason| data_quality_reason_code_for_reason(reason))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    pub fn reason_code_strings(&self) -> Vec<String> {
+        self.reason_codes()
+            .into_iter()
+            .map(|code| code.as_str().to_owned())
+            .collect()
+    }
+
+    pub fn primary_reason_code(&self) -> Option<OnlineDataQualityReasonCode> {
+        self.reasons()
+            .first()
+            .map(|reason| data_quality_reason_code_for_reason(reason))
     }
 
     pub fn evaluate(input: OnlineDataQualityInput<'_>) -> Self {
@@ -299,6 +353,40 @@ fn frame_count_pair(
     match (baseline_frame_count, candidate_frame_count) {
         (Some(baseline), Some(candidate)) => Some((baseline, candidate)),
         _ => None,
+    }
+}
+
+fn data_quality_reason_code_for_reason(reason: &str) -> OnlineDataQualityReasonCode {
+    let lower = reason.to_ascii_lowercase();
+
+    if lower.contains("fewer than min_scored_intervals")
+        || lower.contains("fewer than min_scored_samples")
+        || lower.contains("zero scored tasks")
+        || lower.contains("insufficient")
+    {
+        OnlineDataQualityReasonCode::InsufficientSamples
+    } else if lower.contains("target disappeared") || lower.contains("target missing") {
+        OnlineDataQualityReasonCode::TargetMissing
+    } else if lower.contains("focus") && lower.contains("confidence") {
+        OnlineDataQualityReasonCode::FocusLowConfidence
+    } else if lower.contains("drop counters") || lower.contains("dropped events") {
+        OnlineDataQualityReasonCode::DropCountersHigh
+    } else if lower.contains("target identity shifted")
+        || lower.contains("workload changed")
+        || lower.contains("scored identity overlap")
+    {
+        OnlineDataQualityReasonCode::WorkloadChanged
+    } else if lower.contains("thermal") || lower.contains("overheat") {
+        OnlineDataQualityReasonCode::ThermalDegraded
+    } else if lower.contains("no frame data")
+        || lower.contains("one window has frames and the other has none")
+        || lower.contains("frame data mismatch")
+    {
+        OnlineDataQualityReasonCode::FrameDataInvalid
+    } else if lower.contains("frame count differs") {
+        OnlineDataQualityReasonCode::FrameCountMismatch
+    } else {
+        OnlineDataQualityReasonCode::MeasurementUncertain
     }
 }
 
@@ -560,6 +648,67 @@ mod tests {
                 .reasons()
                 .iter()
                 .any(|reason| reason.contains("frame count differs"))
+        );
+    }
+
+    #[test]
+    fn reason_codes_are_stable_and_deduplicated_for_low_quality() {
+        let mut input = high_input();
+        input.scored_intervals = 0;
+        input.scored_samples = 0;
+        input.drop_counter_total = 7;
+        input.target_present = false;
+
+        let quality = OnlineDataQuality::evaluate(input);
+
+        assert_eq!(
+            quality.reason_code_strings(),
+            vec![
+                "insufficient_samples".to_owned(),
+                "target_missing".to_owned(),
+                "drop_counters_high".to_owned()
+            ]
+        );
+        assert_eq!(
+            quality.primary_reason_code(),
+            Some(OnlineDataQualityReasonCode::InsufficientSamples)
+        );
+    }
+
+    #[test]
+    fn reason_codes_cover_workload_frame_focus_and_thermal_reasons() {
+        let quality = OnlineDataQuality::Low {
+            reasons: vec![
+                "target identity shifted during candidate measurement".to_owned(),
+                "frame data mismatch when frame-based scoring is required: no frame data"
+                    .to_owned(),
+                "focus confidence below policy threshold".to_owned(),
+                "thermal degraded".to_owned(),
+            ],
+        };
+
+        assert_eq!(
+            quality.reason_code_strings(),
+            vec![
+                "focus_low_confidence".to_owned(),
+                "workload_changed".to_owned(),
+                "thermal_degraded".to_owned(),
+                "frame_data_invalid".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn medium_quality_reason_codes_include_frame_count_mismatch() {
+        let mut input = high_input();
+        input.baseline_frame_count = Some(100);
+        input.candidate_frame_count = Some(130);
+
+        let quality = OnlineDataQuality::evaluate(input);
+
+        assert_eq!(
+            quality.reason_code_strings(),
+            vec!["frame_count_mismatch".to_owned()]
         );
     }
 }

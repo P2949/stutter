@@ -1,0 +1,59 @@
+#!/sbin/openrc-run
+
+name="stutter autotune low-risk"
+description="Stutter low-risk autotune daemon with emergency restore on stop"
+
+: "${stutter_home:=/var/lib/stutter}"
+export HOME="${stutter_home}"
+
+command="${stutter_command:-/usr/bin/stutter}"
+command_background="yes"
+pidfile="${stutter_pidfile:-/run/${RC_SVCNAME}.pid}"
+
+: "${stutter_mode:=apply-low-risk}"
+: "${stutter_preset:=diagnosis}"
+: "${stutter_summary_ms:=1000}"
+: "${stutter_focus_source:=hybrid}"
+: "${stutter_candidate_seconds:=30}"
+
+depend() {
+	need localmount
+	after net
+}
+
+start_pre() {
+	if [ "${stutter_mode}" != "apply-low-risk" ]; then
+		eerror "stutter-autotune-low-risk only supports stutter_mode=apply-low-risk"
+		return 64
+	fi
+	if [ -n "${stutter_watch_process:-}" ] && [ -n "${stutter_tree_pid:-}" ]; then
+		eerror "set only one of stutter_watch_process or stutter_tree_pid"
+		return 64
+	fi
+	checkpath --directory --mode 0755 "${stutter_home}"
+	checkpath --directory --mode 0755 /run
+}
+
+start() {
+	local args="autotune --mode apply-low-risk --preset ${stutter_preset} --summary-ms ${stutter_summary_ms} --duration-seconds ${stutter_candidate_seconds} --foreground-window --focus-source ${stutter_focus_source}"
+
+	if [ -n "${stutter_profiles:-}" ]; then
+		args="${args} --profiles ${stutter_profiles}"
+	fi
+	if [ -n "${stutter_watch_process:-}" ]; then
+		args="${args} --watch-process ${stutter_watch_process}"
+	elif [ -n "${stutter_tree_pid:-}" ]; then
+		args="${args} --tree-pid ${stutter_tree_pid}"
+	else
+		args="${args} --auto-focus"
+	fi
+
+	command_args="${args} ${stutter_extra_args:-}"
+	default_start
+}
+
+stop_pre() {
+	ebegin "Restoring active stutter daemon actions"
+	"${command}" daemon emergency-restore
+	eend $?
+}

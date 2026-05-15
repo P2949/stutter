@@ -1,36 +1,59 @@
 use std::{
+    collections::VecDeque,
     net::SocketAddr,
+    os::unix::fs::{FileTypeExt, PermissionsExt},
     path::{Path as StdPath, PathBuf},
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Context;
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    body::Body,
+    extract::{DefaultBodyLimit, Path, Request, State},
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
+};
+use hyper::body::Incoming;
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto::Builder as HyperConnectionBuilder,
+    service::TowerToHyperService,
 };
 use serde::Serialize;
 use tokio::{
     sync::{Mutex, oneshot},
     task::JoinHandle,
 };
+use tower::{Service, ServiceExt as _};
 
 use crate::{
     actions::{ActionId, SafetyClass},
-    autotune::runtime::{
-        AutotuneRuntimeConfig, daemon_config_for_runtime_mode, run_autotune_controller_session,
+    autotune::{
+        emergency_restore::{
+            AutotuneRestoreCommandInput, AutotuneRestoreStatus, restore_known_autotune_actions,
+        },
+        runtime::{
+            AutotuneRuntimeConfig, daemon_config_for_runtime_mode, run_autotune_controller_session,
+        },
     },
+    commands::restore,
     config::{FocusSource, ForegroundSource, model::MonitorConfig},
     daemon::{
-        ActionDescriptor, ActionEffectScope, ActionSource, DaemonDecisionState,
-        DaemonDegradedStatus, DaemonExperimentState, DaemonFaultState, DaemonMode, DaemonPhase,
-        DaemonPolicy, DaemonPolicyBuildInput, DaemonRollbackState, DaemonState, DaemonTargetState,
-        PolicyDecisionKind, PolicyIntent, PolicyRejection, RemotePolicyContext,
-        RollbackRequirement, build_daemon_policy,
+        ActionDescriptor, ActionEffectScope, ActionSource, CapabilityProbe, DaemonCapabilities,
+        DaemonDecisionState, DaemonExperimentState, DaemonMode, DaemonPhase, DaemonPolicy,
+        DaemonPolicyBuildInput, DaemonPolicyExplanation, DaemonRollbackState, DaemonState,
+        DaemonStatusExplanation, DaemonTargetState, DaemonWatchdogConfig, DaemonWatchdogInputs,
+        DaemonWatchdogReport, PolicyDecisionKind, PolicyExplanation, PolicyIntent, PolicyRejection,
+        PrivilegeCommandAllowlist, PrivilegeCommandRequest, PrivilegeProcessRole,
+        PrivilegeTransport, PrivilegedOperation, RemotePolicyContext, RollbackRequirement,
+        SystemHealthMonitor, SystemHealthProbeRoot, SystemHealthSnapshot, SystemHealthThresholds,
+        build_daemon_policy, daemon_decision_state, daemon_state_for_agent_fault,
+        daemon_state_for_record_start, daemon_state_from_startup_recovery,
+        evaluate_daemon_watchdog, policy_context_from_daemon_status,
     },
     remote::{
         AgentAutotuneLimits, AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
@@ -44,6 +67,9 @@ use crate::{
 pub const DEFAULT_AGENT_MAX_DURATION_SECONDS: u64 = 300;
 pub const DEFAULT_AGENT_MAX_TARGETS: usize = 128;
 pub const DEFAULT_AGENT_MAX_CONCURRENT_RECORDINGS: usize = 1;
+pub const DEFAULT_AGENT_MAX_REQUEST_BYTES: usize = 64 * 1024;
+pub const DEFAULT_AGENT_RATE_LIMIT_REQUESTS: usize = 120;
+pub const DEFAULT_AGENT_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 
 pub(crate) const AGENT_ARTIFACT_ALLOWLIST: &[&str] = &[
     "metadata.json",
@@ -66,13 +92,17 @@ pub(crate) const AGENT_ARTIFACT_ALLOWLIST: &[&str] = &[
 #[derive(Clone, Debug)]
 pub struct AgentConfig {
     pub bind: SocketAddr,
+    pub unix_socket: Option<PathBuf>,
     pub runs_dir: PathBuf,
     pub allow_unsafe_bind: bool,
     pub bearer_token: Option<String>,
+    pub read_token: Option<String>,
+    pub apply_token: Option<String>,
     pub max_duration_seconds: u64,
     pub max_targets: usize,
     pub max_concurrent_recordings: usize,
     pub autotune_limits: AgentAutotuneLimits,
+    pub health_thresholds: SystemHealthThresholds,
     pub rollback_on_crash_recovery: bool,
 }
 
@@ -83,9 +113,11 @@ pub struct AgentLimits {
     pub max_concurrent_recordings: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct AgentAuth {
     pub bearer_token: Option<String>,
+    pub read_token: Option<String>,
+    pub apply_token: Option<String>,
 }
 
 pub struct AgentState {
@@ -95,8 +127,10 @@ pub struct AgentState {
     pub runs_dir: PathBuf,
     pub auth: AgentAuth,
     pub bind: SocketAddr,
+    pub unix_socket: Option<PathBuf>,
     pub limits: AgentLimits,
     pub autotune_limits: AgentAutotuneLimits,
+    pub health_thresholds: SystemHealthThresholds,
 }
 
 pub struct AutotuneControllerHandle {
@@ -114,13 +148,114 @@ pub struct RunHandle {
     pub join: JoinHandle<anyhow::Result<String>>,
 }
 
+#[derive(Debug)]
+struct AgentRateLimiter {
+    max_requests: usize,
+    window: Duration,
+    accepted: Mutex<VecDeque<Instant>>,
+}
+
+impl Default for AgentRateLimiter {
+    fn default() -> Self {
+        Self {
+            max_requests: DEFAULT_AGENT_RATE_LIMIT_REQUESTS,
+            window: DEFAULT_AGENT_RATE_LIMIT_WINDOW,
+            accepted: Mutex::new(VecDeque::new()),
+        }
+    }
+}
+
+impl AgentRateLimiter {
+    #[cfg(test)]
+    fn new(max_requests: usize, window: Duration) -> Self {
+        Self {
+            max_requests,
+            window,
+            accepted: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    async fn accept(&self, now: Instant) -> bool {
+        let mut accepted = self.accepted.lock().await;
+        while accepted
+            .front()
+            .is_some_and(|previous| now.duration_since(*previous) >= self.window)
+        {
+            accepted.pop_front();
+        }
+
+        if accepted.len() >= self.max_requests {
+            return false;
+        }
+
+        accepted.push_back(now);
+        true
+    }
+}
+
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct DaemonStatusResponse {
+    active_recording: bool,
+    active_autotune: bool,
+    daemon_state: DaemonState,
+    capabilities: DaemonCapabilities,
+    health: SystemHealthSnapshot,
+    watchdog: DaemonWatchdogReport,
+    manual_restore_command: String,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DaemonHealthResponse {
+    ok: bool,
+    phase: DaemonPhase,
+    health: SystemHealthSnapshot,
+    degraded: Vec<crate::daemon::DaemonDegradedStatus>,
+    faulted: Option<crate::daemon::DaemonFaultState>,
+    unavailable_features: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DaemonPolicyResponse {
+    policy: DaemonPolicy,
+    explanation: PolicyExplanation,
+    policy_explanation: DaemonPolicyExplanation,
+    capabilities: DaemonCapabilities,
+    health: SystemHealthSnapshot,
+    watchdog: DaemonWatchdogReport,
+    manual_restore_command: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DaemonExplainResponse {
+    daemon_state: DaemonState,
+    policy: DaemonPolicy,
+    explanation: PolicyExplanation,
+    policy_explanation: DaemonPolicyExplanation,
+    capabilities: DaemonCapabilities,
+    health: SystemHealthSnapshot,
+    watchdog: DaemonWatchdogReport,
+    why_no_optimize: Vec<String>,
+    what_changed: Vec<String>,
+    manual_restore_command: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DaemonControlResponse {
+    ok: bool,
+    phase: DaemonPhase,
+    message: String,
+    manual_restore_command: String,
+    restore_messages: Vec<String>,
+}
+
 pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
-    if !is_local_bind(&config.bind) && !config.allow_unsafe_bind {
+    if config.unix_socket.is_none() && !is_local_bind(&config.bind) && !config.allow_unsafe_bind {
         anyhow::bail!(
             "refusing to bind stutter agent to non-loopback address {}; \
              pass --allow-unsafe-bind only on trusted networks",
@@ -192,8 +327,11 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
         crate::autotune::startup_recovery::StartupRecoveryOutcome::Clean => {}
     }
 
-    if !is_local_bind(&config.bind) {
-        if config.bearer_token.is_none() {
+    if config.unix_socket.is_none() && !is_local_bind(&config.bind) {
+        if config.bearer_token.is_none()
+            && config.read_token.is_none()
+            && config.apply_token.is_none()
+        {
             println!(
                 "WARNING: stutter agent is listening on a non-loopback address without authentication because --allow-unsafe-bind was passed."
             );
@@ -204,31 +342,32 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
         }
     }
 
-    let auth_enabled = config.bearer_token.is_some();
+    let auth = AgentAuth {
+        bearer_token: config.bearer_token.clone(),
+        read_token: config.read_token.clone(),
+        apply_token: config.apply_token.clone(),
+    };
+    let auth_enabled = auth.any_token_configured();
 
     audit_agent_event(
         "remote-agent-listen",
         true,
         0,
-        format!(
-            "bind={} auth_enabled={} allow_unsafe_bind={} runs_dir={}",
-            config.bind,
-            auth_enabled,
-            config.allow_unsafe_bind,
-            config.runs_dir.display()
-        ),
+        agent_listen_audit_message(&config, auth_enabled),
     );
 
+    let listen_bind = config.bind;
+    let listen_unix_socket = config.unix_socket.clone();
     let state = Arc::new(AgentState {
         active_run: Mutex::new(None),
         active_autotune: Mutex::new(None),
         daemon_state: Mutex::new(initial_daemon_state),
         runs_dir: config.runs_dir,
-        bind: config.bind,
-        auth: AgentAuth {
-            bearer_token: config.bearer_token,
-        },
+        bind: listen_bind,
+        unix_socket: listen_unix_socket.clone(),
+        auth,
         autotune_limits: config.autotune_limits,
+        health_thresholds: config.health_thresholds,
         limits: AgentLimits {
             max_duration_seconds: config.max_duration_seconds,
             max_targets: config.max_targets,
@@ -236,6 +375,7 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
         },
     });
 
+    let request_rate_limiter = Arc::new(AgentRateLimiter::default());
     let app = Router::new()
         .route("/health", get(health_handler))
         .route("/version", get(version_handler))
@@ -249,22 +389,185 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
         .route("/autotune/restore", post(autotune_restore_handler))
         .route("/autotune/history", get(autotune_history_handler))
         .route("/autotune/config", get(autotune_config_handler))
+        .route("/daemon/status", get(daemon_status_handler))
+        .route("/daemon/health", get(daemon_health_handler))
+        .route("/daemon/policy", get(daemon_policy_handler))
+        .route("/daemon/explain", get(daemon_explain_handler))
+        .route("/daemon/pause", post(daemon_pause_handler))
+        .route("/daemon/resume", post(daemon_resume_handler))
+        .route("/daemon/restore", post(daemon_restore_handler))
         .route("/runs", get(list_runs_handler))
         .route("/runs/:id/session.json", get(get_session_handler))
         .route("/runs/:id/artifact/:name", get(get_artifact_handler))
+        .route_layer(middleware::from_fn_with_state(
+            request_rate_limiter,
+            agent_request_guard,
+        ))
+        .layer(DefaultBodyLimit::max(DEFAULT_AGENT_MAX_REQUEST_BYTES))
         .with_state(state);
 
-    println!("stutter agent listening on http://{}", config.bind);
-    let listener = tokio::net::TcpListener::bind(config.bind).await?;
-    axum::serve(listener, app).await?;
+    if let Some(path) = listen_unix_socket {
+        println!("stutter agent listening on unix://{}", path.display());
+        serve_unix_socket(path, app).await?;
+    } else {
+        println!("stutter agent listening on http://{}", listen_bind);
+        let listener = tokio::net::TcpListener::bind(listen_bind).await?;
+        axum::serve(listener, app).await?;
+    }
 
     Ok(())
+}
+
+async fn serve_unix_socket(path: PathBuf, app: Router) -> anyhow::Result<()> {
+    prepare_unix_socket_path(&path)?;
+    let listener = tokio::net::UnixListener::bind(&path)
+        .with_context(|| format!("failed to bind agent unix socket {}", path.display()))?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).with_context(|| {
+        format!(
+            "failed to set permissions on agent socket {}",
+            path.display()
+        )
+    })?;
+
+    let mut make_service = app.into_make_service();
+    loop {
+        let (socket, _) = listener
+            .accept()
+            .await
+            .with_context(|| format!("failed to accept connection on {}", path.display()))?;
+        let socket = TokioIo::new(socket);
+
+        let tower_service = make_service
+            .call(())
+            .await
+            .unwrap_or_else(|err| match err {})
+            .map_request(|request: Request<Incoming>| request.map(Body::new));
+        let hyper_service = TowerToHyperService::new(tower_service);
+
+        tokio::spawn(async move {
+            if let Err(err) = HyperConnectionBuilder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(socket, hyper_service)
+                .await
+            {
+                log::debug!("agent_unix_connection_failed err={err:#}");
+            }
+        });
+    }
+}
+
+async fn agent_request_guard(
+    State(rate_limiter): State<Arc<AgentRateLimiter>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let request_id = agent_request_id(&request);
+    let method = request.method().to_string();
+    let path = request.uri().path().to_owned();
+
+    if !rate_limiter.accept(Instant::now()).await {
+        audit_agent_event(
+            "remote-agent-request",
+            false,
+            0,
+            format!("request_id={request_id} method={method} path={path} status=429"),
+        );
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    }
+
+    let response = next.run(request).await;
+    let status = response.status();
+    audit_agent_event(
+        "remote-agent-request",
+        status.is_success(),
+        0,
+        format!("request_id={request_id} method={method} path={path} status={status}"),
+    );
+    response
+}
+
+fn agent_request_id(request: &Request) -> String {
+    if let Some(value) = request
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+    {
+        return value.to_owned();
+    }
+
+    format!("generated-{}", crate::audit::unix_nanos_now())
+}
+
+fn prepare_unix_socket_path(path: &StdPath) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create agent unix socket directory {}",
+                parent.display()
+            )
+        })?;
+    }
+
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let metadata = std::fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect existing agent socket {}", path.display()))?;
+    if !metadata.file_type().is_socket() {
+        anyhow::bail!(
+            "refusing to replace non-socket path for agent unix socket {}",
+            path.display()
+        );
+    }
+
+    std::fs::remove_file(path)
+        .with_context(|| format!("failed to remove stale agent socket {}", path.display()))?;
+    Ok(())
+}
+
+fn agent_listen_audit_message(config: &AgentConfig, auth_enabled: bool) -> String {
+    match config.unix_socket.as_ref() {
+        Some(path) => format!(
+            "bind=unix:{} auth_enabled={} allow_unsafe_bind={} runs_dir={}",
+            path.display(),
+            auth_enabled,
+            config.allow_unsafe_bind,
+            config.runs_dir.display()
+        ),
+        None => format!(
+            "bind={} auth_enabled={} allow_unsafe_bind={} runs_dir={}",
+            config.bind,
+            auth_enabled,
+            config.allow_unsafe_bind,
+            config.runs_dir.display()
+        ),
+    }
 }
 
 pub fn default_runs_dir() -> PathBuf {
     let mut p = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     p.push("stutter-runs");
     p
+}
+
+pub fn default_agent_unix_socket_path() -> anyhow::Result<PathBuf> {
+    if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+        return Ok(PathBuf::from(runtime_dir).join("stutter-agent.sock"));
+    }
+
+    let Some(home) = std::env::var_os("HOME") else {
+        anyhow::bail!(
+            "cannot choose default agent unix socket path without XDG_RUNTIME_DIR or HOME"
+        );
+    };
+
+    Ok(PathBuf::from(home)
+        .join(".local")
+        .join("state")
+        .join("stutter")
+        .join("agent.sock"))
 }
 
 pub fn load_bearer_token(
@@ -372,8 +675,8 @@ fn remote_policy_context_for_request(
     request_authorized: bool,
 ) -> RemotePolicyContext {
     RemotePolicyContext {
-        bind_is_loopback: is_local_bind(&state.bind),
-        auth_configured: state.auth.bearer_token.is_some(),
+        bind_is_loopback: agent_state_is_local(state),
+        auth_configured: state.auth.any_token_configured(),
         request_authorized,
         limits: state.autotune_limits.clone(),
     }
@@ -498,15 +801,6 @@ fn rejection_from_policy_explanation(
     }
 }
 
-fn daemon_decision_state(decision: &str, reason: impl Into<String>) -> DaemonDecisionState {
-    DaemonDecisionState {
-        decision: decision.to_owned(),
-        reason: reason.into(),
-        unix_nanos: Some(crate::audit::unix_nanos_now()),
-        score_total: None,
-    }
-}
-
 fn daemon_state_for_agent_decision(
     mode: DaemonMode,
     phase: DaemonPhase,
@@ -521,29 +815,6 @@ fn daemon_state_for_agent_decision(
     }
 }
 
-fn daemon_state_for_agent_fault(
-    mode: DaemonMode,
-    decision: &str,
-    reason: impl Into<String>,
-) -> DaemonState {
-    let reason = reason.into();
-
-    DaemonState {
-        mode,
-        phase: DaemonPhase::Faulted,
-        last_decision: Some(daemon_decision_state(decision, reason.clone())),
-        degraded: vec![DaemonDegradedStatus {
-            category: "agent".to_owned(),
-            message: reason.clone(),
-        }],
-        faulted: Some(DaemonFaultState {
-            reason,
-            manual_restore_command: Some("stutter autotune restore".to_owned()),
-        }),
-        ..DaemonState::default()
-    }
-}
-
 fn daemon_mode_from_agent_mode(value: &str) -> DaemonMode {
     match value {
         "suggest" => DaemonMode::Suggest,
@@ -551,161 +822,6 @@ fn daemon_mode_from_agent_mode(value: &str) -> DaemonMode {
         "apply-medium-risk" => DaemonMode::ApplyMediumRisk,
         "apply-high-risk" => DaemonMode::ApplyHighRisk,
         _ => DaemonMode::Observe,
-    }
-}
-
-fn daemon_state_from_startup_recovery(
-    outcome: &crate::autotune::startup_recovery::StartupRecoveryOutcome,
-) -> DaemonState {
-    match outcome {
-        crate::autotune::startup_recovery::StartupRecoveryOutcome::Clean => DaemonState::default(),
-        crate::autotune::startup_recovery::StartupRecoveryOutcome::Recovered {
-            experiment_id,
-            action_id,
-            affected_tasks,
-            manual_restore_command,
-        } => DaemonState {
-            mode: DaemonMode::ApplyLowRisk,
-            phase: DaemonPhase::Cooldown,
-            last_decision: Some(daemon_decision_state(
-                "startup_recovery_recovered",
-                format!(
-                    "recovered experiment_id={experiment_id} action_id={action_id} affected_tasks={affected_tasks} manual_restore_command=\"{manual_restore_command}\""
-                ),
-            )),
-            ..DaemonState::default()
-        },
-        crate::autotune::startup_recovery::StartupRecoveryOutcome::RollbackDisabled {
-            experiment_id,
-            action_id,
-            manual_restore_command,
-        } => DaemonState {
-            mode: DaemonMode::ApplyLowRisk,
-            phase: DaemonPhase::Faulted,
-            active_experiment: Some(DaemonExperimentState {
-                experiment_id: experiment_id.clone(),
-                action_id: action_id.clone(),
-                candidate_name: None,
-                safety_class: SafetyClass::ReversibleLowRisk,
-                started_unix_nanos: None,
-            }),
-            active_rollback: Some(DaemonRollbackState {
-                action_id: action_id.clone(),
-                rollback_available: true,
-                token: None,
-                manual_restore_command: Some(manual_restore_command.clone()),
-            }),
-            last_decision: Some(daemon_decision_state(
-                "startup_recovery_rollback_disabled",
-                format!(
-                    "rollback disabled for experiment_id={experiment_id} action_id={action_id} manual_restore_command=\"{manual_restore_command}\""
-                ),
-            )),
-            degraded: vec![DaemonDegradedStatus {
-                category: "startup_recovery".to_owned(),
-                message: "rollback disabled".to_owned(),
-            }],
-            faulted: Some(DaemonFaultState {
-                reason: "startup recovery rollback disabled".to_owned(),
-                manual_restore_command: Some(manual_restore_command.clone()),
-            }),
-            ..DaemonState::default()
-        },
-        crate::autotune::startup_recovery::StartupRecoveryOutcome::ApplyingWithoutRollback {
-            experiment_id,
-            action_id,
-        } => DaemonState {
-            mode: DaemonMode::ApplyLowRisk,
-            phase: DaemonPhase::Faulted,
-            active_experiment: Some(DaemonExperimentState {
-                experiment_id: experiment_id.clone(),
-                action_id: action_id.clone(),
-                candidate_name: None,
-                safety_class: SafetyClass::ReversibleLowRisk,
-                started_unix_nanos: None,
-            }),
-            last_decision: Some(daemon_decision_state(
-                "startup_recovery_applying_without_rollback",
-                format!(
-                    "applying journal without rollback token experiment_id={experiment_id} action_id={action_id}"
-                ),
-            )),
-            degraded: vec![DaemonDegradedStatus {
-                category: "startup_recovery".to_owned(),
-                message: "applying journal without rollback token".to_owned(),
-            }],
-            faulted: Some(DaemonFaultState {
-                reason: "startup recovery found applying journal without rollback token".to_owned(),
-                manual_restore_command: Some("stutter autotune restore".to_owned()),
-            }),
-            ..DaemonState::default()
-        },
-        crate::autotune::startup_recovery::StartupRecoveryOutcome::Faulted {
-            experiment_id,
-            action_id,
-            manual_restore_command,
-            reason,
-        } => DaemonState {
-            mode: DaemonMode::ApplyLowRisk,
-            phase: DaemonPhase::Faulted,
-            active_experiment: Some(DaemonExperimentState {
-                experiment_id: experiment_id.clone(),
-                action_id: action_id.clone(),
-                candidate_name: None,
-                safety_class: SafetyClass::ReversibleLowRisk,
-                started_unix_nanos: None,
-            }),
-            last_decision: Some(daemon_decision_state(
-                "startup_recovery_faulted",
-                reason.clone(),
-            )),
-            degraded: vec![DaemonDegradedStatus {
-                category: "startup_recovery".to_owned(),
-                message: reason.clone(),
-            }],
-            faulted: Some(DaemonFaultState {
-                reason: reason.clone(),
-                manual_restore_command: Some(manual_restore_command.clone()),
-            }),
-            ..DaemonState::default()
-        },
-    }
-}
-
-fn daemon_target_from_record_request(request: &RemoteMonitorRequest) -> Option<DaemonTargetState> {
-    let root_pid = request
-        .tree_pids
-        .first()
-        .copied()
-        .or_else(|| request.target_pids.first().copied());
-    let active_targets = request.target_pids.len() + request.tree_pids.len();
-    let comm = request.include_comm.first().cloned();
-
-    if root_pid.is_none() && active_targets == 0 && comm.is_none() {
-        return None;
-    }
-
-    Some(DaemonTargetState {
-        root_pid,
-        active_targets,
-        comm,
-    })
-}
-
-fn daemon_state_for_record_start(
-    request: &RemoteMonitorRequest,
-    run_id: &str,
-    target_count: usize,
-) -> DaemonState {
-    DaemonState {
-        mode: DaemonMode::Observe,
-        phase: DaemonPhase::Observe,
-        active_target: daemon_target_from_record_request(request),
-        last_decision: Some(daemon_decision_state(
-            "record_started",
-            format!("remote recording run_id={run_id} target_count={target_count}"),
-        )),
-        ..DaemonState::default()
     }
 }
 
@@ -763,7 +879,7 @@ fn daemon_state_for_autotune_start(
             action_id,
             rollback_available: false,
             token: None,
-            manual_restore_command: Some("stutter autotune restore".to_owned()),
+            manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
         }),
         last_decision: Some(daemon_decision_state(
             "autotune_started",
@@ -809,10 +925,52 @@ async fn mark_agent_daemon_fault(
     replace_agent_daemon_state(state, daemon_state_for_agent_fault(mode, decision, reason)).await;
 }
 
+async fn mark_agent_daemon_policy_rejection(
+    state: &AgentState,
+    mode: DaemonMode,
+    decision: &str,
+    reason: impl Into<String>,
+) {
+    let reason = reason.into();
+    let mut daemon_state = state.daemon_state.lock().await;
+    daemon_state.mode = mode;
+    daemon_state.phase = DaemonPhase::Faulted;
+    daemon_state.last_decision = Some(daemon_decision_state(decision, reason.clone()));
+    daemon_state
+        .degraded
+        .push(crate::daemon::DaemonDegradedStatus {
+            category: "agent".to_owned(),
+            message: reason.clone(),
+        });
+    daemon_state.faulted = Some(crate::daemon::DaemonFaultState {
+        reason,
+        manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
+    });
+}
+
+#[cfg(test)]
 fn policy_for_remote_autotune_start(
     headers: &HeaderMap,
     state: &AgentState,
     request: &AutotuneStartRequest,
+) -> Result<DaemonPolicy, AutotuneStartSecurityRejection> {
+    policy_for_remote_autotune_start_with_safety_context(
+        headers,
+        state,
+        request,
+        &DaemonState::default(),
+        &SystemHealthSnapshot::default(),
+        &CapabilityProbe::default().probe(),
+    )
+}
+
+fn policy_for_remote_autotune_start_with_safety_context(
+    headers: &HeaderMap,
+    state: &AgentState,
+    request: &AutotuneStartRequest,
+    daemon_state: &DaemonState,
+    health: &SystemHealthSnapshot,
+    capabilities: &DaemonCapabilities,
 ) -> Result<DaemonPolicy, AutotuneStartSecurityRejection> {
     let raw_mode = request.mode.trim();
     let mode = raw_mode
@@ -825,7 +983,7 @@ fn policy_for_remote_autotune_start(
                     .to_owned(),
         })?;
 
-    let auth_result = authorize(headers, &state.auth);
+    let auth_result = authorize_remote_autotune_start(headers, state);
     let auth_error = auth_result.as_ref().err().copied();
 
     if !mode.supports_apply()
@@ -854,7 +1012,13 @@ fn policy_for_remote_autotune_start(
             PolicyIntent::Apply
         }
     };
-    let explanation = policy.explain_action(intent, &descriptor);
+    let explanation = policy.explain_action(intent.clone(), &descriptor);
+    if let Some(rejection) = rejection_from_policy_explanation(mode, explanation, auth_error) {
+        return Err(rejection);
+    }
+
+    let policy_context = policy_context_from_daemon_status(daemon_state, health, capabilities);
+    let explanation = policy.explain_action_with_context(intent, &descriptor, &policy_context);
     if let Some(rejection) = rejection_from_policy_explanation(mode, explanation, auth_error) {
         return Err(rejection);
     }
@@ -862,8 +1026,112 @@ fn policy_for_remote_autotune_start(
     Ok(policy)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AgentAuthScope {
+    Read,
+    Apply,
+}
+
+impl AgentAuth {
+    fn any_token_configured(&self) -> bool {
+        self.bearer_token.is_some() || self.read_token.is_some() || self.apply_token.is_some()
+    }
+
+    fn apply_token_configured(&self) -> bool {
+        self.bearer_token.is_some() || self.apply_token.is_some()
+    }
+}
+
 fn authorize(headers: &HeaderMap, auth: &AgentAuth) -> Result<(), StatusCode> {
-    let Some(expected) = auth.bearer_token.as_deref() else {
+    authorize_with_scope(headers, auth, AgentAuthScope::Read)
+}
+
+fn authorize_apply(headers: &HeaderMap, auth: &AgentAuth) -> Result<(), StatusCode> {
+    authorize_with_scope(headers, auth, AgentAuthScope::Apply)
+}
+
+#[cfg(test)]
+fn authorize_state_change(headers: &HeaderMap, state: &AgentState) -> Result<(), StatusCode> {
+    authorize_agent_privileged_operation(headers, state, PrivilegedOperation::ControlDaemon)
+}
+
+fn authorize_remote_autotune_start(
+    headers: &HeaderMap,
+    state: &AgentState,
+) -> Result<(), StatusCode> {
+    if state.unix_socket.is_none() && !state.auth.apply_token_configured() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    authorize_apply(headers, &state.auth)
+}
+
+fn authorize_agent_privileged_operation(
+    headers: &HeaderMap,
+    state: &AgentState,
+    operation: PrivilegedOperation,
+) -> Result<(), StatusCode> {
+    let transport = agent_privilege_transport(state);
+    let socket_authorized =
+        matches!(transport, PrivilegeTransport::UnixSocket) && !state.auth.any_token_configured();
+
+    if !socket_authorized
+        && operation.requires_apply_authorization()
+        && !state.auth.apply_token_configured()
+    {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let apply_result = if socket_authorized {
+        Ok(())
+    } else {
+        authorize_apply(headers, &state.auth)
+    };
+
+    if operation.requires_apply_authorization()
+        && let Err(status) = apply_result
+    {
+        return Err(status);
+    }
+
+    let request = PrivilegeCommandRequest {
+        caller_role: PrivilegeProcessRole::ControlPlane,
+        operation,
+        transport,
+        authenticated: socket_authorized || authorize(headers, &state.auth).is_ok(),
+        apply_authorized: socket_authorized || apply_result.is_ok(),
+    };
+    let decision = PrivilegeCommandAllowlist.check(&request);
+    if decision.allowed {
+        Ok(())
+    } else {
+        Err(status_for_privilege_decision(&decision.reason_code))
+    }
+}
+
+fn agent_privilege_transport(state: &AgentState) -> PrivilegeTransport {
+    if state.unix_socket.is_some() {
+        PrivilegeTransport::UnixSocket
+    } else if state.bind.ip().is_loopback() {
+        PrivilegeTransport::LoopbackTcp
+    } else {
+        PrivilegeTransport::RemoteTcp
+    }
+}
+
+fn status_for_privilege_decision(reason_code: &str) -> StatusCode {
+    match reason_code {
+        "missing_authentication" | "missing_apply_authorization" => StatusCode::UNAUTHORIZED,
+        _ => StatusCode::FORBIDDEN,
+    }
+}
+
+fn authorize_with_scope(
+    headers: &HeaderMap,
+    auth: &AgentAuth,
+    scope: AgentAuthScope,
+) -> Result<(), StatusCode> {
+    if !auth.any_token_configured() {
         return Ok(());
     };
 
@@ -879,11 +1147,19 @@ fn authorize(headers: &HeaderMap, auth: &AgentAuth) -> Result<(), StatusCode> {
         return Err(StatusCode::UNAUTHORIZED);
     };
 
-    if constant_time_eq(token.as_bytes(), expected.as_bytes()) {
-        Ok(())
-    } else {
-        Err(StatusCode::FORBIDDEN)
+    let legacy_match = token_matches(token, auth.bearer_token.as_deref());
+    let apply_match = token_matches(token, auth.apply_token.as_deref());
+    let read_match = token_matches(token, auth.read_token.as_deref());
+
+    match scope {
+        AgentAuthScope::Read if legacy_match || apply_match || read_match => Ok(()),
+        AgentAuthScope::Apply if legacy_match || apply_match => Ok(()),
+        _ => Err(StatusCode::FORBIDDEN),
     }
+}
+
+fn token_matches(token: &str, expected: Option<&str>) -> bool {
+    expected.is_some_and(|expected| constant_time_eq(token.as_bytes(), expected.as_bytes()))
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -939,6 +1215,10 @@ fn is_local_bind(addr: &SocketAddr) -> bool {
     addr.ip().is_loopback()
 }
 
+fn agent_state_is_local(state: &AgentState) -> bool {
+    state.unix_socket.is_some() || is_local_bind(&state.bind)
+}
+
 async fn health_handler() -> impl IntoResponse {
     Json(HealthResponse {
         ok: true,
@@ -951,7 +1231,9 @@ async fn start_record_handler(
     headers: HeaderMap,
     Json(request): Json<RemoteMonitorRequest>,
 ) -> impl IntoResponse {
-    if let Err(status) = authorize(&headers, &state.auth) {
+    if let Err(status) =
+        authorize_agent_privileged_operation(&headers, &state, PrivilegedOperation::StartRecording)
+    {
         audit_agent_event("remote-record-start", false, 0, "unauthorized".to_owned());
         mark_agent_daemon_fault(
             &state,
@@ -1116,7 +1398,9 @@ async fn stop_record_handler(
     State(state): State<Arc<AgentState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if let Err(status) = authorize(&headers, &state.auth) {
+    if let Err(status) =
+        authorize_agent_privileged_operation(&headers, &state, PrivilegedOperation::StopRecording)
+    {
         return status.into_response();
     }
 
@@ -1366,7 +1650,7 @@ async fn autotune_status_handler(
             last_fault: disk_status
                 .as_ref()
                 .and_then(|status| status.last_fault.clone()),
-            manual_restore_command: Some("stutter autotune restore".to_owned()),
+            manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
             daemon_state: daemon_state.clone(),
             message: format!("autotune {} controller active", handle.mode),
         },
@@ -1402,7 +1686,7 @@ async fn autotune_status_handler(
             last_fault: disk_status
                 .as_ref()
                 .and_then(|status| status.last_fault.clone()),
-            manual_restore_command: Some("stutter autotune restore".to_owned()),
+            manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
             daemon_state,
             message: "no autotune session active".to_owned(),
         },
@@ -1416,7 +1700,17 @@ async fn autotune_start_handler(
     headers: HeaderMap,
     Json(request): Json<AutotuneStartRequest>,
 ) -> impl IntoResponse {
-    let policy = match policy_for_remote_autotune_start(&headers, &state, &request) {
+    let daemon_state = state.daemon_state.lock().await.clone();
+    let capabilities = CapabilityProbe::default().probe();
+    let health = system_health_monitor_for_agent_state(&state).probe();
+    let policy = match policy_for_remote_autotune_start_with_safety_context(
+        &headers,
+        &state,
+        &request,
+        &daemon_state,
+        &health,
+        &capabilities,
+    ) {
         Ok(policy) => policy,
         Err(rejection) => {
             audit_agent_event(
@@ -1425,7 +1719,7 @@ async fn autotune_start_handler(
                 0,
                 rejection.audit_message.clone(),
             );
-            mark_agent_daemon_fault(
+            mark_agent_daemon_policy_rejection(
                 &state,
                 daemon_mode_from_agent_mode(&request.mode),
                 "autotune_policy_rejected",
@@ -1641,11 +1935,16 @@ async fn autotune_start_handler(
         ),
     );
 
+    let message = if mode == "apply-low-risk" {
+        "remote autotune apply-low-risk controller started; apply modes are enabled".to_owned()
+    } else {
+        "remote autotune observe/suggest controller started; apply modes remain disabled".to_owned()
+    };
+
     Json(AutotuneStartResponse {
         status: "started".to_owned(),
         mode,
-        message: "remote autotune observe/suggest controller started; apply modes remain disabled"
-            .to_owned(),
+        message,
     })
     .into_response()
 }
@@ -1654,7 +1953,9 @@ async fn autotune_stop_handler(
     State(state): State<Arc<AgentState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if let Err(status) = authorize(&headers, &state.auth) {
+    if let Err(status) =
+        authorize_agent_privileged_operation(&headers, &state, PrivilegedOperation::ControlDaemon)
+    {
         return status.into_response();
     }
 
@@ -1765,7 +2066,9 @@ async fn autotune_restore_handler(
     State(state): State<Arc<AgentState>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    if let Err(status) = authorize(&headers, &state.auth) {
+    if let Err(status) =
+        authorize_agent_privileged_operation(&headers, &state, PrivilegedOperation::RollbackAction)
+    {
         audit_agent_event(
             "remote-autotune-restore",
             false,
@@ -1865,6 +2168,419 @@ async fn autotune_config_handler(
     .into_response()
 }
 
+async fn daemon_status_handler(
+    State(state): State<Arc<AgentState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(status) = authorize(&headers, &state.auth) {
+        return status.into_response();
+    }
+
+    let active_recording = state.active_run.lock().await.is_some();
+    let active_autotune = state.active_autotune.lock().await.is_some();
+    let daemon_state = state.daemon_state.lock().await.clone();
+
+    Json(daemon_status_response(
+        active_recording,
+        active_autotune,
+        daemon_state,
+        CapabilityProbe::default().probe(),
+        system_health_monitor_for_agent_state(&state).probe(),
+    ))
+    .into_response()
+}
+
+async fn daemon_health_handler(
+    State(state): State<Arc<AgentState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(status) = authorize(&headers, &state.auth) {
+        return status.into_response();
+    }
+
+    let daemon_state = state.daemon_state.lock().await.clone();
+    let capabilities = CapabilityProbe::default().probe();
+    let health = system_health_monitor_for_agent_state(&state).probe();
+
+    Json(DaemonHealthResponse {
+        ok: daemon_state.faulted.is_none() && health.ok_for_apply,
+        phase: daemon_state.phase,
+        health,
+        degraded: daemon_state.degraded.clone(),
+        faulted: daemon_state.faulted.clone(),
+        unavailable_features: capabilities.unavailable_features(),
+    })
+    .into_response()
+}
+
+async fn daemon_policy_handler(
+    State(state): State<Arc<AgentState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    daemon_policy_response_handler(state, headers).await
+}
+
+async fn daemon_explain_handler(
+    State(state): State<Arc<AgentState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(status) = authorize(&headers, &state.auth) {
+        return status.into_response();
+    }
+
+    let daemon_state = state.daemon_state.lock().await.clone();
+    let capabilities = CapabilityProbe::default().probe();
+    let health = system_health_monitor_for_agent_state(&state).probe();
+
+    Json(daemon_explain_response(daemon_state, capabilities, health)).into_response()
+}
+
+async fn daemon_pause_handler(
+    State(state): State<Arc<AgentState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(status) =
+        authorize_agent_privileged_operation(&headers, &state, PrivilegedOperation::ControlDaemon)
+    {
+        return status.into_response();
+    }
+
+    let mut daemon_state = state.daemon_state.lock().await;
+    daemon_state.phase = DaemonPhase::Paused;
+    daemon_state.faulted = None;
+    daemon_state.last_decision = Some(daemon_decision_state(
+        "daemon_paused",
+        "operator requested daemon pause",
+    ));
+
+    Json(DaemonControlResponse {
+        ok: true,
+        phase: daemon_state.phase,
+        message: "daemon paused".to_owned(),
+        manual_restore_command: "stutter daemon emergency-restore".to_owned(),
+        restore_messages: Vec::new(),
+    })
+    .into_response()
+}
+
+async fn daemon_resume_handler(
+    State(state): State<Arc<AgentState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(status) =
+        authorize_agent_privileged_operation(&headers, &state, PrivilegedOperation::ControlDaemon)
+    {
+        return status.into_response();
+    }
+
+    let mut daemon_state = state.daemon_state.lock().await;
+    if daemon_state.faulted.is_some() {
+        return (
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: "cannot resume a faulted daemon state; restore first".to_owned(),
+            }),
+        )
+            .into_response();
+    }
+
+    daemon_state.phase = DaemonPhase::Observe;
+    daemon_state.last_decision = Some(daemon_decision_state(
+        "daemon_resumed",
+        "operator requested daemon resume",
+    ));
+
+    Json(DaemonControlResponse {
+        ok: true,
+        phase: daemon_state.phase,
+        message: "daemon resumed".to_owned(),
+        manual_restore_command: "stutter daemon emergency-restore".to_owned(),
+        restore_messages: Vec::new(),
+    })
+    .into_response()
+}
+
+async fn daemon_restore_handler(
+    State(state): State<Arc<AgentState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(status) =
+        authorize_agent_privileged_operation(&headers, &state, PrivilegedOperation::RollbackAction)
+    {
+        return status.into_response();
+    }
+
+    let outcome = match restore_known_autotune_actions(AutotuneRestoreCommandInput {
+        journal_path: None,
+        audit_path: None,
+        history_path: None,
+        dry_run: false,
+    }) {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            mark_agent_daemon_fault(
+                &state,
+                DaemonMode::ApplyLowRisk,
+                "daemon_restore_failed",
+                format!("daemon restore failed: {err:#}"),
+            )
+            .await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("daemon restore failed: {err:#}"),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let profile_outcome = match restore::restore_profile_state_default(false) {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            mark_agent_daemon_fault(
+                &state,
+                DaemonMode::ApplyLowRisk,
+                "daemon_restore_failed",
+                format!("daemon profile restore failed: {err:#}"),
+            )
+            .await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("daemon profile restore failed: {err:#}"),
+                }),
+            )
+                .into_response();
+        }
+    };
+    let restore_summary = daemon_restore_summary_fields(&outcome, &profile_outcome);
+    let restore_messages = daemon_restore_messages(&outcome, &profile_outcome);
+
+    let mut daemon_state = state.daemon_state.lock().await;
+    let ok = matches!(
+        outcome.status,
+        AutotuneRestoreStatus::Clean | AutotuneRestoreStatus::Restored
+    );
+    if ok {
+        daemon_state.phase = DaemonPhase::Observe;
+        daemon_state.active_experiment = None;
+        daemon_state.active_rollback = None;
+        daemon_state.faulted = None;
+        daemon_state.degraded.clear();
+        daemon_state.last_decision = Some(daemon_decision_state(
+            "daemon_restored",
+            format!("daemon restore completed {restore_summary}"),
+        ));
+    } else {
+        daemon_state.phase = DaemonPhase::Faulted;
+        daemon_state.faulted = Some(crate::daemon::DaemonFaultState {
+            reason: format!(
+                "daemon restore did not complete safely status={:?}",
+                outcome.status
+            ),
+            manual_restore_command: Some("stutter daemon emergency-restore --dry-run".to_owned()),
+        });
+        daemon_state.last_decision = Some(daemon_decision_state(
+            "daemon_restore_failed",
+            format!(
+                "daemon restore did not complete safely status={:?} failed_actions={} skipped_actions={}",
+                outcome.status, outcome.failed_actions, outcome.skipped_actions
+            ),
+        ));
+    }
+
+    let status = if ok {
+        StatusCode::OK
+    } else {
+        StatusCode::CONFLICT
+    };
+    (
+        status,
+        Json(DaemonControlResponse {
+            ok,
+            phase: daemon_state.phase,
+            message: format!("daemon restore status={:?}", outcome.status),
+            manual_restore_command: "stutter daemon emergency-restore".to_owned(),
+            restore_messages,
+        }),
+    )
+        .into_response()
+}
+
+fn daemon_restore_messages(
+    outcome: &crate::autotune::emergency_restore::AutotuneRestoreOutcome,
+    profile_outcome: &restore::ProfileRestoreCommandOutcome,
+) -> Vec<String> {
+    let mut messages = outcome.messages.clone();
+    messages.extend(profile_outcome.messages.clone());
+    messages.push(format!(
+        "daemon restore summary: {}",
+        daemon_restore_summary_fields(outcome, profile_outcome)
+    ));
+    messages
+}
+
+fn daemon_restore_summary_fields(
+    outcome: &crate::autotune::emergency_restore::AutotuneRestoreOutcome,
+    profile_outcome: &restore::ProfileRestoreCommandOutcome,
+) -> String {
+    restore::RestoreSummaryFields::from_profile(
+        format!("{:?}", outcome.status),
+        outcome.restored_actions,
+        outcome.failed_actions,
+        outcome.skipped_actions,
+        profile_outcome,
+    )
+    .render_fields()
+}
+
+async fn daemon_policy_response_handler(
+    state: Arc<AgentState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(status) = authorize(&headers, &state.auth) {
+        return status.into_response();
+    }
+
+    let daemon_state = state.daemon_state.lock().await.clone();
+    let capabilities = CapabilityProbe::default().probe();
+    let health = system_health_monitor_for_agent_state(&state).probe();
+
+    Json(daemon_policy_response(daemon_state, capabilities, health)).into_response()
+}
+
+fn daemon_policy_response(
+    daemon_state: DaemonState,
+    capabilities: DaemonCapabilities,
+    health: SystemHealthSnapshot,
+) -> DaemonPolicyResponse {
+    let policy = daemon_policy_from_state(&daemon_state);
+    let descriptor = daemon_control_plane_descriptor();
+    let policy_context = policy_context_from_daemon_status(&daemon_state, &health, &capabilities);
+    let explanation =
+        policy.explain_action_with_context(PolicyIntent::Observe, &descriptor, &policy_context);
+    let policy_explanation =
+        DaemonPolicyExplanation::from_policy_with_context(&policy, &policy_context);
+    let watchdog = evaluate_daemon_watchdog(
+        DaemonWatchdogInputs::from_state_and_health(&daemon_state, &health),
+        &DaemonWatchdogConfig::default(),
+    );
+
+    DaemonPolicyResponse {
+        policy,
+        explanation,
+        policy_explanation,
+        capabilities,
+        health,
+        watchdog,
+        manual_restore_command: "stutter daemon emergency-restore".to_owned(),
+    }
+}
+
+fn daemon_explain_response(
+    daemon_state: DaemonState,
+    capabilities: DaemonCapabilities,
+    health: SystemHealthSnapshot,
+) -> DaemonExplainResponse {
+    let policy = daemon_policy_from_state(&daemon_state);
+    let descriptor = daemon_control_plane_descriptor();
+    let explanation = policy.explain_action(PolicyIntent::Observe, &descriptor);
+    let policy_context = policy_context_from_daemon_status(&daemon_state, &health, &capabilities);
+    let policy_explanation =
+        DaemonPolicyExplanation::from_policy_with_context(&policy, &policy_context);
+    let watchdog = evaluate_daemon_watchdog(
+        DaemonWatchdogInputs::from_state_and_health(&daemon_state, &health),
+        &DaemonWatchdogConfig::default(),
+    );
+    let status_explanation =
+        DaemonStatusExplanation::from_state_health_watchdog(&daemon_state, &health, &watchdog);
+
+    DaemonExplainResponse {
+        daemon_state,
+        policy,
+        explanation,
+        policy_explanation,
+        capabilities,
+        health,
+        watchdog,
+        why_no_optimize: status_explanation.why_no_optimize,
+        what_changed: status_explanation.what_changed,
+        manual_restore_command: "stutter daemon emergency-restore".to_owned(),
+    }
+}
+
+fn daemon_status_response(
+    active_recording: bool,
+    active_autotune: bool,
+    daemon_state: DaemonState,
+    capabilities: DaemonCapabilities,
+    health: SystemHealthSnapshot,
+) -> DaemonStatusResponse {
+    let watchdog = evaluate_daemon_watchdog(
+        DaemonWatchdogInputs::from_state_and_health(&daemon_state, &health),
+        &DaemonWatchdogConfig::default(),
+    );
+    let message = if daemon_state.phase.is_faulted() {
+        "daemon is faulted; run the manual restore command before applying more changes".to_owned()
+    } else if active_autotune {
+        "autotune controller active".to_owned()
+    } else if active_recording {
+        "recording active".to_owned()
+    } else {
+        "daemon control plane idle".to_owned()
+    };
+
+    DaemonStatusResponse {
+        active_recording,
+        active_autotune,
+        daemon_state,
+        capabilities,
+        health,
+        watchdog,
+        manual_restore_command: "stutter daemon emergency-restore".to_owned(),
+        message,
+    }
+}
+
+fn system_health_monitor_for_agent_state(state: &AgentState) -> SystemHealthMonitor {
+    SystemHealthMonitor::new(
+        SystemHealthProbeRoot::default(),
+        state.health_thresholds.clone(),
+    )
+}
+
+fn daemon_policy_from_state(state: &DaemonState) -> DaemonPolicy {
+    let config = daemon_config_for_runtime_mode(
+        state.mode,
+        ActionSource::RemoteAgent,
+        state
+            .active_target
+            .as_ref()
+            .and_then(|target| target.root_pid),
+        None,
+    );
+
+    build_daemon_policy(DaemonPolicyBuildInput {
+        config: &config,
+        remote_context: None,
+    })
+}
+
+fn daemon_control_plane_descriptor() -> ActionDescriptor {
+    ActionDescriptor {
+        action_id: ActionId("daemon-control-plane".to_owned()),
+        action_kind: "daemon-control-plane".to_owned(),
+        safety_class: SafetyClass::ObserveOnly,
+        effect_scope: ActionEffectScope::ObserveOnly,
+        rollback: RollbackRequirement::NotRequiredForDryRun,
+        persistent_effect: false,
+        touches_system_wide_state: false,
+        requires_explicit_target: false,
+        confidence: None,
+    }
+}
+
 async fn version_handler() -> impl IntoResponse {
     Json(version_response())
 }
@@ -1884,7 +2600,7 @@ fn version_response() -> VersionResponse {
 fn capabilities_response(state: &AgentState) -> CapabilitiesResponse {
     CapabilitiesResponse {
         version: env!("CARGO_PKG_VERSION").to_owned(),
-        auth_required: state.auth.bearer_token.is_some(),
+        auth_required: state.auth.any_token_configured(),
         max_duration_seconds: state.limits.max_duration_seconds,
         max_targets: state.limits.max_targets,
         max_concurrent_recordings: state.limits.max_concurrent_recordings,
@@ -1901,6 +2617,13 @@ fn capabilities_response(state: &AgentState) -> CapabilitiesResponse {
             "/autotune/restore".to_owned(),
             "/autotune/history".to_owned(),
             "/autotune/config".to_owned(),
+            "/daemon/status".to_owned(),
+            "/daemon/health".to_owned(),
+            "/daemon/policy".to_owned(),
+            "/daemon/explain".to_owned(),
+            "/daemon/pause".to_owned(),
+            "/daemon/resume".to_owned(),
+            "/daemon/restore".to_owned(),
             "/runs".to_owned(),
             "/runs/:id/session.json".to_owned(),
             "/runs/:id/artifact/:name".to_owned(),
@@ -2013,15 +2736,15 @@ fn validate_foreground_title_capture_security(
         return Ok(());
     }
 
-    if is_local_bind(&state.bind) {
+    if agent_state_is_local(state) {
         return Ok(());
     }
 
-    if state.auth.bearer_token.is_none() {
+    if !state.auth.apply_token_configured() {
         return Err(StatusCode::FORBIDDEN);
     }
 
-    authorize(headers, &state.auth)
+    authorize_apply(headers, &state.auth)
 }
 
 fn validate_remote_request_limits(
@@ -2163,20 +2886,37 @@ mod tests {
         }
     }
 
+    fn test_health_thresholds_allow_apply() -> SystemHealthThresholds {
+        SystemHealthThresholds {
+            max_cpu_temp_millidegrees: i64::MAX,
+            max_gpu_temp_millidegrees: i64::MAX,
+            min_disk_available_bytes: 0,
+            max_memory_pressure_some_avg10_millipercent: u32::MAX,
+            max_load_per_cpu_milli: u32::MAX,
+            max_ebpf_dropped_events: u64::MAX,
+        }
+    }
+
     fn test_agent_state_custom(bind: SocketAddr, bearer_token: Option<String>) -> AgentState {
         AgentState {
             active_run: Mutex::new(None),
             active_autotune: Mutex::new(None),
             daemon_state: Mutex::new(DaemonState::default()),
             runs_dir: std::env::temp_dir(),
-            auth: AgentAuth { bearer_token },
+            auth: AgentAuth {
+                bearer_token,
+                ..AgentAuth::default()
+            },
             bind,
+            unix_socket: is_local_bind(&bind)
+                .then(|| PathBuf::from("/tmp/stutter-agent-test.sock")),
             limits: AgentLimits {
                 max_duration_seconds: DEFAULT_AGENT_MAX_DURATION_SECONDS,
                 max_targets: DEFAULT_AGENT_MAX_TARGETS,
                 max_concurrent_recordings: DEFAULT_AGENT_MAX_CONCURRENT_RECORDINGS,
             },
             autotune_limits: AgentAutotuneLimits::default(),
+            health_thresholds: test_health_thresholds_allow_apply(),
         }
     }
 
@@ -2188,14 +2928,34 @@ mod tests {
             runs_dir: PathBuf::from("."),
             auth: AgentAuth {
                 bearer_token: token.map(str::to_owned),
+                ..AgentAuth::default()
             },
             bind,
+            unix_socket: is_local_bind(&bind)
+                .then(|| PathBuf::from("/tmp/stutter-agent-test.sock")),
             limits: AgentLimits {
                 max_duration_seconds: DEFAULT_AGENT_MAX_DURATION_SECONDS,
                 max_targets: DEFAULT_AGENT_MAX_TARGETS,
                 max_concurrent_recordings: DEFAULT_AGENT_MAX_CONCURRENT_RECORDINGS,
             },
             autotune_limits: AgentAutotuneLimits::default(),
+            health_thresholds: test_health_thresholds_allow_apply(),
+        }
+    }
+
+    fn test_capabilities() -> DaemonCapabilities {
+        DaemonCapabilities {
+            kernel_release: Some("6.9.1-test".to_owned()),
+            btf_available: true,
+            sched_tracepoints_available: true,
+            perf_permissions_likely: true,
+            perf_event_paranoid: Some(1),
+            cgroup_v2_available: true,
+            sched_ext_available: false,
+            uclamp_available: true,
+            ionice_available: true,
+            irq_affinity_available: false,
+            gpu_sysfs_available: false,
         }
     }
 
@@ -2221,6 +2981,289 @@ mod tests {
             washout_seconds: None,
             washout_verify_interval_ms: None,
         }
+    }
+
+    #[test]
+    fn test_agent_state_uses_permissive_health_thresholds() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
+        let monitor = system_health_monitor_for_agent_state(&state);
+        let thresholds = monitor.thresholds();
+
+        assert_eq!(thresholds.max_cpu_temp_millidegrees, i64::MAX);
+        assert_eq!(thresholds.max_gpu_temp_millidegrees, i64::MAX);
+        assert_eq!(thresholds.min_disk_available_bytes, 0);
+        assert_eq!(
+            thresholds.max_memory_pressure_some_avg10_millipercent,
+            u32::MAX
+        );
+        assert_eq!(thresholds.max_load_per_cpu_milli, u32::MAX);
+        assert_eq!(thresholds.max_ebpf_dropped_events, u64::MAX);
+    }
+
+    #[test]
+    fn daemon_status_response_exposes_state_capabilities_and_restore_command() {
+        let state = DaemonState {
+            mode: DaemonMode::ApplyLowRisk,
+            phase: DaemonPhase::Observe,
+            ..DaemonState::default()
+        };
+
+        let response = daemon_status_response(
+            false,
+            true,
+            state,
+            test_capabilities(),
+            SystemHealthSnapshot::default(),
+        );
+
+        assert!(!response.active_recording);
+        assert!(response.active_autotune);
+        assert_eq!(response.daemon_state.mode, DaemonMode::ApplyLowRisk);
+        assert!(response.health.ok_for_apply);
+        assert!(response.watchdog.ok);
+        assert_eq!(
+            response.capabilities.kernel_release.as_deref(),
+            Some("6.9.1-test")
+        );
+        assert_eq!(
+            response.manual_restore_command,
+            "stutter daemon emergency-restore"
+        );
+        assert_eq!(response.message, "autotune controller active");
+    }
+
+    #[test]
+    fn daemon_policy_from_faulted_state_keeps_mode_policy_explainable() {
+        let state = DaemonState {
+            mode: DaemonMode::ApplyLowRisk,
+            phase: DaemonPhase::Faulted,
+            ..DaemonState::default()
+        };
+
+        let policy = daemon_policy_from_state(&state);
+        let explanation =
+            policy.explain_action(PolicyIntent::Observe, &daemon_control_plane_descriptor());
+
+        assert_eq!(policy.mode, DaemonMode::ApplyLowRisk);
+        assert!(matches!(explanation.decision, PolicyDecisionKind::Allowed));
+        assert_eq!(explanation.action_kind, "daemon-control-plane");
+    }
+
+    #[test]
+    fn daemon_policy_response_reports_live_safety_context() {
+        let health = SystemHealthSnapshot {
+            ok_for_apply: false,
+            reason_code: Some("cpu_overheated".to_owned()),
+            ..SystemHealthSnapshot::default()
+        };
+        let state = DaemonState {
+            mode: DaemonMode::ApplyLowRisk,
+            phase: DaemonPhase::Decide,
+            cooldown_until_unix_nanos: Some(crate::audit::unix_nanos_now() + 3_600_000_000_000),
+            degraded: vec![crate::daemon::DaemonDegradedStatus {
+                category: "data_quality".to_owned(),
+                message: "insufficient samples".to_owned(),
+            }],
+            ..DaemonState::default()
+        };
+
+        let response = daemon_policy_response(state, test_capabilities(), health);
+
+        assert_eq!(response.policy.mode, DaemonMode::ApplyLowRisk);
+        assert!(matches!(
+            response.explanation.decision,
+            PolicyDecisionKind::Allowed
+        ));
+        assert!(!response.health.ok_for_apply);
+        assert_eq!(
+            response.health.reason_code.as_deref(),
+            Some("cpu_overheated")
+        );
+        assert!(!response.watchdog.ok);
+        assert_eq!(
+            response.capabilities.kernel_release.as_deref(),
+            Some("6.9.1-test")
+        );
+        assert_eq!(
+            response.manual_restore_command,
+            "stutter daemon emergency-restore"
+        );
+        assert!(response.policy_explanation.lines.iter().any(|line| {
+            line.rule == "action:apply_low_risk_cpu_affinity:data_quality_gate"
+                && line.outcome == "failed"
+                && line.reason.contains("insufficient samples")
+        }));
+        assert!(response.policy_explanation.lines.iter().any(|line| {
+            line.rule == "action:apply_low_risk_cpu_affinity:system_health_gate"
+                && line.outcome == "failed"
+                && line.reason.contains("cpu_overheated")
+        }));
+        assert!(response.policy_explanation.lines.iter().any(|line| {
+            line.rule == "action:apply_low_risk_cpu_affinity:cooldown_gate"
+                && line.outcome == "failed"
+        }));
+    }
+
+    #[test]
+    fn daemon_explain_response_reports_no_optimize_reasons_and_changes() {
+        let state = DaemonState {
+            mode: DaemonMode::Observe,
+            phase: DaemonPhase::Paused,
+            cooldown_until_unix_nanos: Some(42),
+            active_target: Some(DaemonTargetState {
+                root_pid: Some(1234),
+                active_targets: 2,
+                comm: Some("game".to_owned()),
+            }),
+            degraded: vec![crate::daemon::DaemonDegradedStatus {
+                category: "data_quality".to_owned(),
+                message: "insufficient samples".to_owned(),
+            }],
+            last_decision: Some(DaemonDecisionState {
+                decision: "noop".to_owned(),
+                reason: "insufficient data".to_owned(),
+                unix_nanos: Some(1),
+                score_total: None,
+            }),
+            ..DaemonState::default()
+        };
+
+        let response =
+            daemon_explain_response(state, test_capabilities(), SystemHealthSnapshot::default());
+
+        assert!(
+            response
+                .why_no_optimize
+                .iter()
+                .any(|reason| reason == "observe_only_mode")
+        );
+        assert!(
+            response
+                .why_no_optimize
+                .iter()
+                .any(|reason| reason == "daemon_paused")
+        );
+        assert!(
+            response
+                .why_no_optimize
+                .iter()
+                .any(|reason| reason.contains("insufficient samples"))
+        );
+        assert!(
+            response
+                .what_changed
+                .iter()
+                .any(|change| change == "phase:paused")
+        );
+        assert!(
+            response
+                .what_changed
+                .iter()
+                .any(|change| change.contains("active_workload:root_pid=1234"))
+        );
+        assert!(
+            response
+                .policy_explanation
+                .lines
+                .iter()
+                .any(|line| line.rule == "action:observe_status")
+        );
+        assert!(response.policy_explanation.lines.iter().any(|line| {
+            line.rule == "action:apply_low_risk_cpu_affinity:data_quality_gate"
+                && line.outcome == "failed"
+                && line.reason.contains("insufficient samples")
+        }));
+        assert_eq!(
+            response.manual_restore_command,
+            "stutter daemon emergency-restore"
+        );
+    }
+
+    #[test]
+    fn capabilities_response_lists_daemon_control_routes() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), None);
+
+        let response = capabilities_response(&state);
+
+        assert!(
+            response
+                .supported_routes
+                .contains(&"/daemon/status".to_owned())
+        );
+        assert!(
+            response
+                .supported_routes
+                .contains(&"/daemon/health".to_owned())
+        );
+        assert!(
+            response
+                .supported_routes
+                .contains(&"/daemon/policy".to_owned())
+        );
+        assert!(
+            response
+                .supported_routes
+                .contains(&"/daemon/explain".to_owned())
+        );
+        assert!(
+            response
+                .supported_routes
+                .contains(&"/daemon/pause".to_owned())
+        );
+        assert!(
+            response
+                .supported_routes
+                .contains(&"/daemon/resume".to_owned())
+        );
+        assert!(
+            response
+                .supported_routes
+                .contains(&"/daemon/restore".to_owned())
+        );
+    }
+
+    #[tokio::test]
+    async fn daemon_pause_and_resume_handlers_update_in_memory_state() {
+        let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
+
+        let pause_response = daemon_pause_handler(State(state.clone()), HeaderMap::new())
+            .await
+            .into_response();
+        assert_eq!(pause_response.status(), StatusCode::OK);
+        assert_eq!(state.daemon_state.lock().await.phase, DaemonPhase::Paused);
+
+        let resume_response = daemon_resume_handler(State(state.clone()), HeaderMap::new())
+            .await
+            .into_response();
+        assert_eq!(resume_response.status(), StatusCode::OK);
+        assert_eq!(state.daemon_state.lock().await.phase, DaemonPhase::Observe);
+    }
+
+    #[test]
+    fn daemon_restore_messages_include_autotune_and_profile_restore_results() {
+        let autotune = crate::autotune::emergency_restore::AutotuneRestoreOutcome {
+            status: AutotuneRestoreStatus::Clean,
+            restored_actions: 0,
+            failed_actions: 0,
+            skipped_actions: 0,
+            messages: vec!["autotune restore: no active autotune action".to_owned()],
+        };
+        let profile = restore::ProfileRestoreCommandOutcome {
+            messages: vec!["found profile restore state: affinity=0 nice=1 ionice=0".to_owned()],
+            profile_nice_records: 1,
+            ..restore::ProfileRestoreCommandOutcome::default()
+        };
+
+        let messages = daemon_restore_messages(&autotune, &profile);
+
+        assert_eq!(messages.len(), 3);
+        assert!(messages[0].contains("autotune restore"));
+        assert!(messages[1].contains("profile restore state"));
+        assert!(messages[2].contains("daemon restore summary"));
+        assert!(messages[2].contains("status=Clean"));
+        assert!(messages[2].contains("profile_found=true"));
+        assert!(messages[2].contains("profile_restored=0"));
+        assert!(messages[2].contains("profile_skipped_total=0"));
     }
 
     #[test]
@@ -2311,6 +3354,35 @@ mod tests {
         assert_eq!(policy.source, ActionSource::RemoteAgent);
         assert!(!policy.allow_system_wide_actions);
         assert!(!policy.allow_high_risk);
+    }
+
+    #[test]
+    fn remote_autotune_apply_rejects_when_system_health_blocks_apply() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer secret"),
+        );
+        let health = SystemHealthSnapshot {
+            ok_for_apply: false,
+            reason_code: Some("cpu_overheated".to_owned()),
+            ..SystemHealthSnapshot::default()
+        };
+
+        let rejection = policy_for_remote_autotune_start_with_safety_context(
+            &headers,
+            &state,
+            &autotune_request("apply-low-risk"),
+            &DaemonState::default(),
+            &health,
+            &test_capabilities(),
+        )
+        .unwrap_err();
+
+        assert_eq!(rejection.status, StatusCode::BAD_REQUEST);
+        assert!(rejection.response_message.contains("cpu_overheated"));
+        assert!(rejection.audit_message.contains("cpu_overheated"));
     }
 
     #[test]
@@ -2526,6 +3598,7 @@ mod tests {
         let mut state_value = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
         state_value.auth = AgentAuth {
             bearer_token: Some("secret".to_owned()),
+            ..AgentAuth::default()
         };
         let state = Arc::new(state_value);
         let response = autotune_start_handler(
@@ -2555,7 +3628,14 @@ mod tests {
         )
         .await
         .into_response();
-        assert_eq!(response.status(), StatusCode::OK);
+
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+
+        assert_eq!(status, StatusCode::OK, "body={body}");
         assert!(state.active_autotune.lock().await.is_some());
     }
 
@@ -2622,7 +3702,7 @@ mod tests {
                 action_id: "remote-autotune-start:apply-low-risk".to_owned(),
                 rollback_available: false,
                 token: None,
-                manual_restore_command: Some("stutter autotune restore".to_owned()),
+                manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
             }),
             ..DaemonState::default()
         };
@@ -2642,7 +3722,7 @@ mod tests {
             cooldown_remaining_seconds: None,
             data_quality: None,
             last_fault: None,
-            manual_restore_command: Some("stutter autotune restore".to_owned()),
+            manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
             daemon_state: state.daemon_state.lock().await.clone(),
             message: "test".to_owned(),
         };
@@ -2662,6 +3742,7 @@ mod tests {
         let mut state_value = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
         state_value.auth = AgentAuth {
             bearer_token: Some("secret".to_owned()),
+            ..AgentAuth::default()
         };
         let state = Arc::new(state_value);
 
@@ -2693,7 +3774,13 @@ mod tests {
         .await
         .into_response();
 
-        assert_eq!(response.status(), StatusCode::OK);
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+
+        assert_eq!(status, StatusCode::OK, "body={body}");
 
         let daemon_state = state.daemon_state.lock().await.clone();
         assert_eq!(daemon_state.mode, DaemonMode::ApplyLowRisk);
@@ -2718,6 +3805,13 @@ mod tests {
                 .as_ref()
                 .map(|rollback| rollback.rollback_available),
             Some(false)
+        );
+        assert_eq!(
+            daemon_state
+                .active_rollback
+                .as_ref()
+                .and_then(|rollback| rollback.manual_restore_command.as_deref()),
+            Some("stutter daemon emergency-restore")
         );
         assert!(daemon_state.faulted.is_none());
     }
@@ -2769,6 +3863,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn autotune_policy_rejection_preserves_active_rollback_state() {
+        let state = Arc::new(test_agent_state(
+            "127.0.0.1:0".parse().unwrap(),
+            Some("secret"),
+        ));
+        {
+            let mut daemon_state = state.daemon_state.lock().await;
+            daemon_state.mode = DaemonMode::ApplyLowRisk;
+            daemon_state.phase = DaemonPhase::Rollback;
+            daemon_state.active_rollback = Some(DaemonRollbackState {
+                action_id: "cpu-affinity:game".to_owned(),
+                rollback_available: true,
+                token: None,
+                manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
+            });
+        }
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer secret"),
+        );
+
+        let response = autotune_start_handler(
+            State(state.clone()),
+            headers,
+            Json(AutotuneStartRequest {
+                mode: "apply-low-risk".to_owned(),
+                watch_process: Some("Game.exe".to_owned()),
+                tree_pid: None,
+                profiles: None,
+                config: None,
+                duration_seconds: Some(30),
+                decision_log: None,
+                summary_ms: None,
+                preset: None,
+                hwmon: false,
+                mangohud_log: None,
+                auto_focus: false,
+                focus_source: None,
+                foreground_window: false,
+                foreground_source: None,
+                foreground_poll_ms: None,
+                foreground_max_stale_ms: None,
+                washout_seconds: None,
+                washout_verify_interval_ms: None,
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let daemon_state = state.daemon_state.lock().await.clone();
+        assert_eq!(daemon_state.phase, DaemonPhase::Faulted);
+        assert_eq!(
+            daemon_state
+                .active_rollback
+                .as_ref()
+                .map(|rollback| rollback.action_id.as_str()),
+            Some("cpu-affinity:game")
+        );
+        assert!(
+            daemon_state
+                .faulted
+                .as_ref()
+                .and_then(|fault| fault.manual_restore_command.as_deref())
+                .is_some_and(|command| command.contains("emergency-restore"))
+        );
+    }
+
+    #[tokio::test]
     async fn autotune_start_apply_low_risk_without_auth_is_rejected_before_mode_validation() {
         let state = Arc::new(test_agent_state("127.0.0.1:0".parse().unwrap(), None));
         let response = autotune_start_handler(
@@ -2808,6 +3973,7 @@ mod tests {
         let mut state_value = test_agent_state("0.0.0.0:9899".parse().unwrap(), Some("secret"));
         state_value.auth = AgentAuth {
             bearer_token: Some("secret".to_owned()),
+            ..AgentAuth::default()
         };
         state_value.bind = "0.0.0.0:9899".parse().unwrap();
         let state = Arc::new(state_value);
@@ -3099,6 +4265,38 @@ mod tests {
         assert!(validate_agent_bind_policy(addr, true).is_ok());
     }
 
+    #[test]
+    fn unix_socket_state_counts_as_local() {
+        let mut state = test_agent_state("0.0.0.0:9899".parse().unwrap(), None);
+        assert!(!agent_state_is_local(&state));
+
+        state.unix_socket = Some(PathBuf::from("/tmp/stutter-agent.sock"));
+        assert!(agent_state_is_local(&state));
+    }
+
+    #[test]
+    fn listen_audit_message_reports_unix_socket() {
+        let config = AgentConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            unix_socket: Some(PathBuf::from("/tmp/stutter-agent.sock")),
+            runs_dir: PathBuf::from("/tmp/stutter-runs"),
+            allow_unsafe_bind: false,
+            bearer_token: None,
+            read_token: None,
+            apply_token: None,
+            max_duration_seconds: DEFAULT_AGENT_MAX_DURATION_SECONDS,
+            max_targets: DEFAULT_AGENT_MAX_TARGETS,
+            max_concurrent_recordings: DEFAULT_AGENT_MAX_CONCURRENT_RECORDINGS,
+            autotune_limits: AgentAutotuneLimits::default(),
+            health_thresholds: SystemHealthThresholds::default(),
+            rollback_on_crash_recovery: true,
+        };
+
+        let message = agent_listen_audit_message(&config, false);
+        assert!(message.contains("bind=unix:/tmp/stutter-agent.sock"));
+        assert!(message.contains("auth_enabled=false"));
+    }
+
     fn validate_agent_bind_policy(bind: SocketAddr, allow_unsafe_bind: bool) -> anyhow::Result<()> {
         if !is_local_bind(&bind) && !allow_unsafe_bind {
             anyhow::bail!("refusing to bind");
@@ -3121,7 +4319,7 @@ mod tests {
 
     #[test]
     fn authorize_allows_without_configured_token() {
-        let auth = AgentAuth { bearer_token: None };
+        let auth = AgentAuth::default();
         let headers = HeaderMap::new();
         assert!(authorize(&headers, &auth).is_ok());
     }
@@ -3130,6 +4328,7 @@ mod tests {
     fn authorize_rejects_missing_bearer_token() {
         let auth = AgentAuth {
             bearer_token: Some("secret".to_owned()),
+            ..AgentAuth::default()
         };
         let headers = HeaderMap::new();
         assert_eq!(authorize(&headers, &auth), Err(StatusCode::UNAUTHORIZED));
@@ -3139,6 +4338,7 @@ mod tests {
     fn authorize_rejects_wrong_bearer_token() {
         let auth = AgentAuth {
             bearer_token: Some("secret".to_owned()),
+            ..AgentAuth::default()
         };
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -3152,6 +4352,7 @@ mod tests {
     fn authorize_accepts_correct_bearer_token() {
         let auth = AgentAuth {
             bearer_token: Some("secret".to_owned()),
+            ..AgentAuth::default()
         };
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -3159,6 +4360,142 @@ mod tests {
             "Bearer secret".parse().unwrap(),
         );
         assert!(authorize(&headers, &auth).is_ok());
+    }
+
+    #[test]
+    fn read_token_can_read_but_cannot_apply() {
+        let auth = AgentAuth {
+            read_token: Some("read-secret".to_owned()),
+            apply_token: Some("apply-secret".to_owned()),
+            ..AgentAuth::default()
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer read-secret".parse().unwrap(),
+        );
+
+        assert!(authorize(&headers, &auth).is_ok());
+        assert_eq!(authorize_apply(&headers, &auth), Err(StatusCode::FORBIDDEN));
+    }
+
+    #[test]
+    fn apply_token_can_read_and_apply() {
+        let auth = AgentAuth {
+            read_token: Some("read-secret".to_owned()),
+            apply_token: Some("apply-secret".to_owned()),
+            ..AgentAuth::default()
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer apply-secret".parse().unwrap(),
+        );
+
+        assert!(authorize(&headers, &auth).is_ok());
+        assert!(authorize_apply(&headers, &auth).is_ok());
+    }
+
+    #[test]
+    fn tcp_state_change_requires_apply_token() {
+        let mut state = test_agent_state("127.0.0.1:9899".parse().unwrap(), None);
+        state.unix_socket = None;
+
+        assert_eq!(
+            authorize_state_change(&HeaderMap::new(), &state),
+            Err(StatusCode::UNAUTHORIZED)
+        );
+    }
+
+    #[test]
+    fn unix_socket_state_change_allows_socket_credentials_without_token() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), None);
+
+        assert!(state.unix_socket.is_some());
+        assert!(authorize_state_change(&HeaderMap::new(), &state).is_ok());
+    }
+
+    #[test]
+    fn unix_socket_state_change_respects_configured_apply_token() {
+        let state = test_agent_state("127.0.0.1:0".parse().unwrap(), Some("secret"));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer secret".parse().unwrap(),
+        );
+
+        assert!(state.unix_socket.is_some());
+        assert_eq!(
+            authorize_state_change(&HeaderMap::new(), &state),
+            Err(StatusCode::UNAUTHORIZED)
+        );
+        assert!(authorize_state_change(&headers, &state).is_ok());
+    }
+
+    #[test]
+    fn remote_tcp_privileged_operation_is_rejected_even_with_apply_token() {
+        let state = test_agent_state("0.0.0.0:9899".parse().unwrap(), Some("secret"));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer secret".parse().unwrap(),
+        );
+
+        assert_eq!(
+            authorize_agent_privileged_operation(
+                &headers,
+                &state,
+                PrivilegedOperation::StartRecording
+            ),
+            Err(StatusCode::FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn loopback_tcp_privileged_operation_requires_apply_scope() {
+        let mut state = test_agent_state("127.0.0.1:9899".parse().unwrap(), None);
+        state.unix_socket = None;
+        state.auth = AgentAuth {
+            read_token: Some("read-secret".to_owned()),
+            apply_token: Some("apply-secret".to_owned()),
+            ..AgentAuth::default()
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer read-secret".parse().unwrap(),
+        );
+
+        assert_eq!(
+            authorize_agent_privileged_operation(
+                &headers,
+                &state,
+                PrivilegedOperation::ControlDaemon
+            ),
+            Err(StatusCode::FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn agent_privilege_transport_prefers_unix_socket_when_configured() {
+        let mut state = test_agent_state("0.0.0.0:9899".parse().unwrap(), None);
+        state.unix_socket = Some(PathBuf::from("/tmp/stutter-agent-test.sock"));
+
+        assert_eq!(
+            agent_privilege_transport(&state),
+            PrivilegeTransport::UnixSocket
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_rate_limiter_drops_until_window_expires() {
+        let limiter = AgentRateLimiter::new(2, Duration::from_secs(10));
+        let now = Instant::now();
+
+        assert!(limiter.accept(now).await);
+        assert!(limiter.accept(now + Duration::from_secs(1)).await);
+        assert!(!limiter.accept(now + Duration::from_secs(2)).await);
+        assert!(limiter.accept(now + Duration::from_secs(11)).await);
     }
 
     #[test]
@@ -3255,14 +4592,16 @@ mod tests {
             active_autotune: Mutex::new(None),
             daemon_state: Mutex::new(DaemonState::default()),
             runs_dir: PathBuf::from("."),
-            auth: AgentAuth { bearer_token: None },
+            auth: AgentAuth::default(),
             bind: "127.0.0.1:9899".parse().unwrap(),
+            unix_socket: None,
             limits: AgentLimits {
                 max_duration_seconds: 123,
                 max_targets: 456,
                 max_concurrent_recordings: 1,
             },
             autotune_limits: AgentAutotuneLimits::default(),
+            health_thresholds: SystemHealthThresholds::default(),
         };
         let resp = capabilities_response(&state);
         assert_eq!(resp.max_duration_seconds, 123);
@@ -3270,6 +4609,44 @@ mod tests {
         assert!(
             resp.supported_artifacts
                 .contains(&"session.json".to_owned())
+        );
+    }
+
+    #[test]
+    fn agent_health_monitor_uses_configured_thresholds() {
+        let state = AgentState {
+            active_run: Mutex::new(None),
+            active_autotune: Mutex::new(None),
+            daemon_state: Mutex::new(DaemonState::default()),
+            runs_dir: PathBuf::from("."),
+            auth: AgentAuth::default(),
+            bind: "127.0.0.1:9899".parse().unwrap(),
+            unix_socket: None,
+            limits: AgentLimits {
+                max_duration_seconds: 123,
+                max_targets: 456,
+                max_concurrent_recordings: 1,
+            },
+            autotune_limits: AgentAutotuneLimits::default(),
+            health_thresholds: SystemHealthThresholds {
+                max_cpu_temp_millidegrees: 70_000,
+                max_gpu_temp_millidegrees: 71_000,
+                min_disk_available_bytes: 3_000_000_000,
+                max_memory_pressure_some_avg10_millipercent: 12_250,
+                ..SystemHealthThresholds::default()
+            },
+        };
+
+        let monitor = system_health_monitor_for_agent_state(&state);
+
+        assert_eq!(monitor.thresholds().max_cpu_temp_millidegrees, 70_000);
+        assert_eq!(monitor.thresholds().max_gpu_temp_millidegrees, 71_000);
+        assert_eq!(monitor.thresholds().min_disk_available_bytes, 3_000_000_000);
+        assert_eq!(
+            monitor
+                .thresholds()
+                .max_memory_pressure_some_avg10_millipercent,
+            12_250
         );
     }
 
@@ -3465,12 +4842,14 @@ mod remote_policy_tests {
             runs_dir: PathBuf::from("/tmp"),
             auth: AgentAuth {
                 bearer_token: token.map(str::to_owned),
+                ..AgentAuth::default()
             },
             bind: if bind_loopback {
                 "127.0.0.1:0".parse().unwrap()
             } else {
                 "0.0.0.0:0".parse().unwrap()
             },
+            unix_socket: None,
             limits: AgentLimits {
                 max_duration_seconds: 300,
                 max_targets: 128,
@@ -3485,6 +4864,7 @@ mod remote_policy_tests {
                 max_targets: 10,
                 allow_system_wide_actions: false,
             },
+            health_thresholds: SystemHealthThresholds::default(),
         }
     }
 

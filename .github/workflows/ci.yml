@@ -75,3 +75,75 @@ jobs:
 
       - name: Run minimal recording smoke
         run: sudo -E env RUSTUP_TOOLCHAIN=nightly RUST_LOG=info scripts/smoke/record_minimal.sh
+
+  daemon-safety:
+    name: daemon safety gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly with rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src, rustfmt, clippy
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install bpf-linker
+        run: cargo install bpf-linker --locked
+
+      - name: Fake daemon simulation
+        run: cargo test -p stutter autotune::simulation
+
+      - name: Fault-injection action runner tests
+        run: cargo test -p stutter actions::runner::tests
+
+      - name: Policy rejection tests
+        run: cargo test -p stutter daemon::policy::tests
+
+      - name: Watchdog, soak, service, and release gates
+        run: |
+          cargo test -p stutter watchdog
+          cargo test -p stutter soak
+          cargo test -p stutter service
+          cargo test -p stutter release
+          cargo test -p stutter acceptance
+
+      - name: Architecture boundary tests
+        run: cargo test -p stutter architecture_tests
+
+  schema-snapshots:
+    name: schema and fixture gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly with rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install bpf-linker
+        run: cargo install bpf-linker --locked
+
+      - name: Artifact contract tests
+        run: cargo test -p stutter artifact_contract_tests
+
+      - name: Validation corpus tests
+        run: cargo test -p stutter validation_corpus
