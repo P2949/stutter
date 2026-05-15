@@ -8,6 +8,17 @@ use crate::{
     },
 };
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct IrqCandidateEvidence {
+    pub irq: u32,
+    pub device: String,
+    pub current_mask: String,
+    pub suggested_mask: String,
+    pub overlap_score: f32,
+    pub stable_identity: bool,
+    pub known_device_mapping: bool,
+}
+
 #[derive(Default)]
 pub struct IrqAffinityProvider;
 
@@ -23,39 +34,41 @@ impl CandidateProvider for IrqAffinityProvider {
             return Vec::new();
         }
 
-        let Some((irq, hint)) = observed_irq(input) else {
+        let Some(evidence_model) = observed_irq(input) else {
             return Vec::new();
         };
 
-        let default_smp_affinity = input
-            .system_context
-            .inventory
-            .irq_default_smp_affinity
-            .as_deref()
-            .unwrap_or("unknown");
         let evidence = IrqAffinityEvidence {
             strong_irq_evidence: true,
-            stable_irq_identity: false,
-            known_device_mapping: !hint.is_empty() || default_smp_affinity != "unknown",
-            observed_irq: Some(irq),
-            observed_device_hint: Some(hint.clone()),
+            stable_irq_identity: evidence_model.stable_identity,
+            known_device_mapping: evidence_model.known_device_mapping,
+            observed_irq: Some(evidence_model.irq),
+            observed_device_hint: Some(evidence_model.device.clone()),
             reason: format!(
-                "IRQ pressure classified from live diagnosis; default_smp_affinity={default_smp_affinity}"
+                "IRQ pressure classified from structured active IRQ state; current_mask={} suggested_mask={}",
+                evidence_model.current_mask, evidence_model.suggested_mask
             ),
         };
         let candidate = CandidateAction::IrqAffinity {
             plan: IrqAffinityActionPlan {
-                name: format!("irq-{irq}-investigate-affinity"),
+                name: format!("irq-{}-investigate-affinity", evidence_model.irq),
                 action: IrqAffinityAction::new(
-                    irq,
-                    hint.clone(),
-                    "1".to_owned(),
+                    evidence_model.irq,
+                    evidence_model.device.clone(),
+                    evidence_model.suggested_mask.clone(),
                     IrqAffinityRisk::HighRisk,
                     evidence,
                 ),
                 evidence: vec![CandidateEvidence::new(
                     "irq",
-                    format!("{hint}; default_smp_affinity={default_smp_affinity}"),
+                    format!(
+                        "irq={} device={} current_mask={} suggested_mask={} overlap_score={:.3}",
+                        evidence_model.irq,
+                        evidence_model.device,
+                        evidence_model.current_mask,
+                        evidence_model.suggested_mask,
+                        evidence_model.overlap_score
+                    ),
                     0.8,
                 )],
                 objective: ObjectiveKind::IrqOverlapReduction,
@@ -73,22 +86,41 @@ impl CandidateProvider for IrqAffinityProvider {
     }
 }
 
-fn observed_irq(input: &CandidateProviderInput<'_>) -> Option<(u32, String)> {
-    for diagnosis in &input.observation.recent_diagnoses {
-        for evidence in &diagnosis.evidence {
-            let lower = evidence.to_ascii_lowercase();
-            if !lower.contains("irq") {
-                continue;
-            }
-            let irq = lower
-                .split(|ch: char| !ch.is_ascii_digit())
-                .find_map(|part| {
-                    (!part.is_empty())
-                        .then(|| part.parse::<u32>().ok())
-                        .flatten()
-                })?;
-            return Some((irq, diagnosis.anchor_comm.clone()));
-        }
+fn observed_irq(input: &CandidateProviderInput<'_>) -> Option<IrqCandidateEvidence> {
+    let active_irq = &input
+        .observation
+        .active_config_snapshot
+        .as_ref()?
+        .irq
+        .per_irq;
+    let (&irq, current_mask) = active_irq.iter().next()?;
+    if active_irq.len() != 1 {
+        return None;
     }
-    None
+    let default_mask = input
+        .system_context
+        .inventory
+        .irq_default_smp_affinity
+        .clone()
+        .unwrap_or_else(|| current_mask.clone());
+    let suggested_mask = suggested_irq_mask(&default_mask)?;
+
+    Some(IrqCandidateEvidence {
+        irq,
+        device: format!("irq-{irq}"),
+        current_mask: current_mask.clone(),
+        suggested_mask,
+        overlap_score: input.observation.situation.confidence,
+        stable_identity: true,
+        known_device_mapping: false,
+    })
+}
+
+fn suggested_irq_mask(default_mask: &str) -> Option<String> {
+    let trimmed = default_mask.trim();
+    if trimmed.is_empty() || trimmed == "unknown" {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
 }

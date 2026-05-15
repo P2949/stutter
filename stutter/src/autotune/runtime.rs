@@ -2,7 +2,6 @@ use std::{
     collections::{BTreeMap, VecDeque},
     fs::{self, OpenOptions},
     io::Write,
-    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -12,13 +11,12 @@ use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
-    actions::{RollbackToken, SafetyClass, runner::ActionRunPolicy},
+    actions::{RollbackToken, SafetyClass},
     autotune::{
-        apply::executor_for_candidate,
         apply_low_risk::apply_candidate_with_audit,
         candidate::{CandidateAction, CandidateDryRunRecord},
         candidate_memory::CandidateMemoryResult,
-        comparison::{ExperimentDataQuality, ExperimentResult},
+        comparison::ExperimentResult,
         controller::{
             ActiveExperiment as ControllerActiveExperiment, ControllerPolicy,
             ControllerRuntimeState, decide_autotune_transition,
@@ -38,25 +36,26 @@ use crate::{
             default_autotune_history_path,
         },
         kept::{ActiveProfileState, KeptCandidateState},
-        objective::{ObjectiveComparisonInput, compare_for_objective},
-        observation::{
-            ActiveTaskSnapshot, AutotuneObservation, ProtectedTask, WorkloadIdentity,
-            is_protected_task_class, protected_task_reason,
-        },
-        planner::{CandidatePlanner, PlanResult, PlannerInput},
+        live_experiment::{LiveExperimentManager, LiveLowRiskExperiment},
+        observation::AutotuneObservation,
+        observation_builder::{AutotuneObservationBuilder, AutotuneObservationBuilderInput},
+        planner::{CandidatePlanner, PlanResult, PlannerInput, PlannerSummary},
         quality::{OnlineDataQuality, OnlineDataQualityPolicy},
-        rolling_window::{RollingWindow, WindowScore as RuntimeWindowScore},
+        rolling_window::RollingWindow,
         state::{ControllerPhase, SituationKind},
-        system_context::{SystemContextSnapshotInput, collect_system_context},
         washout::WashoutWindowConfig,
     },
     config::model::MonitorConfig,
     daemon::{
         ActionSource, DAEMON_STATE_SCHEMA_VERSION, DaemonConfig, DaemonDecisionState,
         DaemonDegradedStatus, DaemonExperimentState, DaemonFaultState, DaemonMode, DaemonPhase,
-        DaemonPolicy, DaemonPolicyBuildInput, DaemonRollbackState, DaemonState, DaemonTargetState,
-        DaemonWorkloadProfile, SystemHealthInputs, SystemHealthSnapshot, SystemHealthThresholds,
-        build_daemon_policy, evaluate_system_health,
+        DaemonPolicy, DaemonPolicyBuildInput, DaemonPolicyContext, DaemonRollbackState,
+        DaemonState, DaemonTargetState, DaemonWorkloadProfile, SystemHealthInputs,
+        SystemHealthSnapshot, SystemHealthThresholds, build_daemon_policy, evaluate_system_health,
+        privilege::{
+            CandidateApplyRequest, CandidatePlanRequest, InProcessPrivilegedActionService,
+            PrivilegedActionService, RollbackRequest,
+        },
         state::{
             DaemonProfileEnvironment, DaemonProfileMemory, DaemonProfilePartition,
             daemon_profile_stable_hash,
@@ -67,7 +66,6 @@ use crate::{
     focus::FocusGroupKind,
     process_tree::TaskInfo,
     profiles::Profile,
-    scorer::StutterScore,
     session_events::MonitorEvent,
 };
 
@@ -274,6 +272,7 @@ pub struct AutotuneDecisionStreamEntry {
     pub protected_tasks_count: usize,
     pub candidate_count: usize,
     pub top_denied_reason: Option<String>,
+    pub planner: Option<PlannerSummary>,
     pub score_total: u64,
     pub data_quality: String,
     pub data_quality_reason_codes: Vec<String>,
@@ -347,27 +346,6 @@ impl RuntimeHistoryContext {
 }
 
 #[derive(Clone, Debug)]
-pub struct LiveLowRiskExperiment {
-    pub experiment_id: ExperimentId,
-    pub candidate: CandidateAction,
-    pub baseline_score: WindowScore,
-    pub applied_unix_nanos: u128,
-    pub washout_until_unix_nanos: u128,
-    pub measure_until_unix_nanos: u128,
-    pub rollback: RollbackToken,
-}
-
-impl LiveLowRiskExperiment {
-    pub fn candidate_name(&self) -> &str {
-        self.candidate.profile_name()
-    }
-
-    pub fn action_id(&self) -> String {
-        self.candidate.action_id().0
-    }
-}
-
-#[derive(Clone, Debug)]
 pub struct RuntimeTargetState {
     pub root_pid: Option<u32>,
     pub active_targets: usize,
@@ -413,6 +391,23 @@ fn top_denied_reason_for_plan(plan: &PlanResult) -> Option<String> {
                 .or_else(|| evaluation.deny_messages.first().cloned())
         })
         .or_else(|| plan.no_action_reason.clone())
+}
+
+fn policy_context_for_runtime_apply(observation: &AutotuneObservation) -> DaemonPolicyContext {
+    DaemonPolicyContext {
+        data_quality_ok: !observation.data_quality.blocks_action(),
+        data_quality_reason_code: observation
+            .data_quality
+            .reason_code_strings()
+            .first()
+            .cloned(),
+        system_health_ok: observation.system_health.ok_for_apply,
+        system_health_reason_code: observation.system_health.reason_code.clone(),
+        workload_stable: observation.workload_identity.is_some(),
+        cooldown_active: false,
+        rollback_pending: false,
+        capabilities: Some(observation.capabilities.clone()),
+    }
 }
 
 impl AutotuneRuntime {
@@ -845,10 +840,6 @@ impl AutotuneRuntime {
     }
 
     fn build_observation(&self) -> AutotuneObservation {
-        let window_score = self
-            .controller
-            .window
-            .score_with_quality_policy(&self.config.online_data_quality_policy);
         let focus = self.latest_focus.as_ref();
         let focus_kind = focus.map(|focus| focus.kind);
         let focus_confidence = focus.map(|focus| focus.confidence).unwrap_or(0.0);
@@ -859,66 +850,23 @@ impl AutotuneRuntime {
         let primary_situation = focus
             .map(|focus| focus.situation)
             .unwrap_or(SituationKind::Unknown);
-        let system_health = self.daemon_health_snapshot();
-        let active_tasks = active_task_snapshots_from_active_tasks(&self.target_state.active_tasks);
-        let protected_tasks = protected_tasks_from_active_tasks(&self.target_state.active_tasks);
-        let system_context = collect_system_context(SystemContextSnapshotInput {
-            proc_root: Path::new("/proc"),
-            sys_root: Path::new("/sys"),
-            active_tasks: &active_tasks,
-            health: system_health,
-            sampled_at_unix_nanos: crate::audit::unix_nanos_now(),
-        });
-        let capabilities = system_context.capabilities.clone();
-        let topology_signature = system_context.inventory.inventory_hash.clone();
-        let active_config_snapshot = system_context.active_config.clone();
-        let workload_identity = workload_identity_from_runtime_context(
-            self.target_state
-                .root_pid
-                .or_else(|| focus_roots.first().copied()),
-            focus_kind,
-            &self.target_state.active_tasks,
-        );
-        let mut observation = AutotuneObservation {
-            now_unix_nanos: system_context.sampled_at_unix_nanos,
-            elapsed_ms: self.controller.window.latest_elapsed_ms().unwrap_or(0),
-            target_present: self.target_present(&window_score),
-            target_root_pid: self
-                .target_state
-                .root_pid
-                .or_else(|| focus_roots.first().copied()),
-            active_target_count: self.target_state.active_targets,
-            scored_task_count: window_score.scored_task_count,
-            interval_count: window_score.interval_count,
-            scored_samples: window_score.scored_samples,
-            score: stutter_score_from_runtime_window_score(&window_score),
-            data_quality: window_score.data_quality.clone(),
-            primary_situation,
-            situation: Default::default(),
+        AutotuneObservationBuilder::build(AutotuneObservationBuilderInput {
+            window: &self.controller.window,
+            online_data_quality_policy: &self.config.online_data_quality_policy,
             focus_kind,
             focus_confidence,
             focus_roots,
             focus_reasons,
+            primary_situation,
+            root_pid: self.target_state.root_pid,
+            active_target_count: self.target_state.active_targets,
+            active_tasks: &self.target_state.active_tasks,
             recent_diagnoses: self.recent_diagnoses.iter().cloned().collect(),
-            system_health: system_context.health.clone(),
-            capabilities,
-            topology_signature: Some(topology_signature),
-            workload_identity,
-            active_tasks,
-            protected_tasks,
-            active_config_snapshot: Some(active_config_snapshot),
-            system_context: Some(system_context),
-            frame_count: window_score.frame_count,
-            frame_p99_ms: window_score.frame_p99_ms,
-            frame_max_ms: window_score.frame_max_ms,
-            drop_counter_total: self.latest_drop_counters.total(),
-        };
-        observation.refresh_situation_classification();
-        observation
-    }
-
-    fn target_present(&self, score: &RuntimeWindowScore) -> bool {
-        self.target_state.active_targets > 0 || score.scored_samples > 0
+            drop_counters: self.latest_drop_counters.clone(),
+            proc_root: Path::new("/proc"),
+            sys_root: Path::new("/sys"),
+        })
+        .observation
     }
 
     fn select_candidate_for_observation(
@@ -976,6 +924,25 @@ impl AutotuneRuntime {
             observation.target_root_pid = Some(tree_pid);
         }
         let planner = CandidatePlanner::default_for_policy(&self.config.daemon_policy);
+        let workload_policy = match self
+            .config
+            .daemon_config
+            .autotune
+            .workload_policy
+            .resolved_matrix()
+        {
+            Ok(workload_policy) => workload_policy,
+            Err(err) => {
+                self.last_plan_result = Some(PlanResult {
+                    selected: None,
+                    evaluations: Vec::new(),
+                    no_action_reason: Some(format!(
+                        "invalid workload policy configuration: {err:#}"
+                    )),
+                });
+                return None;
+            }
+        };
         let result = planner.plan(PlannerInput {
             observation: &observation,
             daemon_policy: &self.config.daemon_policy,
@@ -983,6 +950,7 @@ impl AutotuneRuntime {
             system_health: &observation.system_health,
             controller_state: &self.controller.state,
             active_profile_state: Some(&self.controller.active_profile_state),
+            workload_policy: &workload_policy,
             profiles: &self.config.profiles,
         });
         let selected = result.selected.clone();
@@ -1029,45 +997,18 @@ impl AutotuneRuntime {
         Ok(())
     }
 
-    fn experiment_deadlines_from_now(&self, applied_unix_nanos: u128) -> (u128, u128) {
-        if self.config.simulate_action_effects {
-            return (applied_unix_nanos, applied_unix_nanos);
-        }
-
-        let washout_until_unix_nanos =
-            applied_unix_nanos.saturating_add(self.config.washout.washout_duration().as_nanos());
-        let measure_until_unix_nanos = washout_until_unix_nanos
-            .saturating_add(Duration::from_secs(self.config.candidate_window_seconds).as_nanos());
-
-        (washout_until_unix_nanos, measure_until_unix_nanos)
-    }
-
     fn start_live_experiment(
         &mut self,
         observation: &AutotuneObservation,
         candidate: CandidateAction,
         reason: &str,
     ) -> anyhow::Result<()> {
-        match self.config.mode() {
-            DaemonMode::ApplyLowRisk => {
-                if candidate.safety_class() != SafetyClass::ReversibleLowRisk {
-                    anyhow::bail!(
-                        "live apply-low-risk rejected non-low-risk candidate {} safety={:?}",
-                        candidate.profile_name(),
-                        candidate.safety_class()
-                    );
-                }
-            }
-            DaemonMode::ApplyMediumRisk => {
-                if candidate.safety_class() > SafetyClass::ReversibleMediumRisk {
-                    anyhow::bail!(
-                        "live apply-medium-risk rejected non-medium-risk candidate {} safety={:?}",
-                        candidate.profile_name(),
-                        candidate.safety_class()
-                    );
-                }
-            }
-            _ => return Ok(()),
+        if !LiveExperimentManager::validate_start_candidate(
+            self.config.mode(),
+            &self.config.daemon_policy,
+            &candidate,
+        )? {
+            return Ok(());
         }
 
         let baseline_score = window_score_from_observation(observation);
@@ -1110,7 +1051,12 @@ impl AutotuneRuntime {
         });
 
         let (washout_until_unix_nanos, measure_until_unix_nanos) =
-            self.experiment_deadlines_from_now(observation.now_unix_nanos);
+            LiveExperimentManager::deadlines_from_now(
+                self.config.simulate_action_effects,
+                &self.config.washout,
+                self.config.candidate_window_seconds,
+                observation.now_unix_nanos,
+            );
 
         self.live_low_risk_experiment = Some(LiveLowRiskExperiment {
             experiment_id,
@@ -1192,24 +1138,24 @@ impl AutotuneRuntime {
             ),
         )?;
         let applied_rollback = if self.config.mode() == DaemonMode::ApplyMediumRisk {
-            let executor = executor_for_candidate(candidate.clone())?;
-            let result = executor
-                .apply_with_audit(ActionRunPolicy::apply_medium_risk(
-                    ActionSource::AutotuneRuntime,
-                    false,
-                ))
+            let service = InProcessPrivilegedActionService;
+            let result = service
+                .apply_candidate(CandidateApplyRequest {
+                    plan: CandidatePlanRequest::from_candidate(
+                        candidate.clone(),
+                        observation.now_unix_nanos,
+                    ),
+                    policy: self.config.daemon_policy.clone(),
+                    context: policy_context_for_runtime_apply(observation),
+                    max_plan_age_nanos: Duration::from_secs(30).as_nanos(),
+                })
                 .with_context(|| {
                     format!(
-                        "audited apply failed for autotune candidate '{}'",
+                        "privileged apply failed for autotune candidate '{}'",
                         candidate.candidate_name()
                     )
                 })?;
-            result.rollback.with_context(|| {
-                format!(
-                    "audited apply for autotune candidate '{}' succeeded without rollback token",
-                    candidate.candidate_name()
-                )
-            })?
+            result.rollback
         } else {
             apply_candidate_with_audit(candidate.clone())?.rollback
         };
@@ -1269,14 +1215,8 @@ impl AutotuneRuntime {
 
         let candidate_score = window_score_from_observation(observation);
         validate_window_score_for_apply("candidate", &candidate_score)?;
-
-        let result = compare_for_objective(ObjectiveComparisonInput {
-            objective: experiment.candidate.objective(),
-            baseline: &experiment.baseline_score,
-            candidate: &candidate_score,
-            data_quality: experiment_data_quality(&observation.data_quality),
-            target_disappeared: !observation.target_present,
-        });
+        let result =
+            LiveExperimentManager::compare_keep_result(&experiment, &candidate_score, observation);
 
         match result {
             ExperimentResult::Improved { .. } => {
@@ -1466,8 +1406,13 @@ impl AutotuneRuntime {
             return Ok(());
         }
 
-        let executor = executor_for_candidate(experiment.candidate.clone())?;
-        executor.rollback(&experiment.rollback)?;
+        let service = InProcessPrivilegedActionService;
+        service.rollback(RollbackRequest {
+            candidate: experiment.candidate.clone(),
+            token: experiment.rollback.clone(),
+            policy: self.config.daemon_policy.clone(),
+            context: policy_context_for_runtime_apply(&self.last_observation),
+        })?;
 
         Ok(())
     }
@@ -1516,6 +1461,7 @@ impl AutotuneRuntime {
                 .last_plan_result
                 .as_ref()
                 .and_then(top_denied_reason_for_plan),
+            planner: self.last_plan_result.as_ref().map(PlanResult::summary),
             score_total: observation.score.total,
             data_quality: data_quality_label(&observation.data_quality),
             data_quality_reason_codes: observation.data_quality.reason_code_strings(),
@@ -1944,29 +1890,6 @@ fn validate_window_score_for_apply(label: &str, score: &WindowScore) -> anyhow::
     Ok(())
 }
 
-fn experiment_data_quality(quality: &OnlineDataQuality) -> ExperimentDataQuality {
-    match quality {
-        OnlineDataQuality::High => ExperimentDataQuality::High,
-        OnlineDataQuality::Medium { .. } => ExperimentDataQuality::Medium,
-        OnlineDataQuality::Low { .. } => ExperimentDataQuality::Low,
-    }
-}
-
-fn stutter_score_from_runtime_window_score(score: &RuntimeWindowScore) -> StutterScore {
-    StutterScore {
-        total: score.score_total,
-        over_1ms: score.over_1ms,
-        over_2ms: score.over_2ms,
-        over_5ms: score.over_5ms,
-        max_latency_ns: score.max_latency_ns,
-        frame_max_ms: score.frame_max_ms,
-        frame_p99_ms: score.frame_p99_ms,
-        frame_over_16ms: 0,
-        frame_over_33ms: 0,
-        frame_over_50ms: 0,
-    }
-}
-
 fn simulated_dry_run_records(
     candidates: &[CandidateAction],
     active_target_count: usize,
@@ -2144,110 +2067,6 @@ fn history_situation(situation: SituationKind) -> HistorySituationKind {
     situation
 }
 
-fn protected_tasks_from_active_tasks(active_tasks: &BTreeMap<u32, TaskInfo>) -> Vec<ProtectedTask> {
-    active_tasks
-        .values()
-        .filter(|task| is_protected_task_class(task.class))
-        .map(|task| ProtectedTask {
-            tid: task.tid,
-            process_pid: task.process_pid,
-            comm: task.comm.clone(),
-            class: task.class,
-            reason: protected_task_reason(task.class).to_owned(),
-        })
-        .collect()
-}
-
-fn active_task_snapshots_from_active_tasks(
-    active_tasks: &BTreeMap<u32, TaskInfo>,
-) -> Vec<ActiveTaskSnapshot> {
-    active_tasks
-        .values()
-        .map(|task| ActiveTaskSnapshot {
-            tid: task.tid,
-            process_pid: task.process_pid,
-            comm: task.comm.clone(),
-            class: task.class,
-            process_starttime_ticks: task.process_starttime_ticks,
-            task_starttime_ticks: task.task_starttime_ticks,
-            cgroup_path: read_proc_cgroup_path(task.tid),
-        })
-        .collect()
-}
-
-fn workload_identity_from_runtime_context(
-    root_pid: Option<u32>,
-    focus_kind: Option<FocusGroupKind>,
-    active_tasks: &BTreeMap<u32, TaskInfo>,
-) -> Option<WorkloadIdentity> {
-    let root_pid = root_pid?;
-    let root_task = active_tasks
-        .values()
-        .find(|task| task.process_pid == root_pid || task.tid == root_pid);
-    let process_starttime_ticks = root_task
-        .and_then(|task| task.process_starttime_ticks)
-        .or_else(|| crate::process_tree::process_starttime_at(Path::new("/proc"), root_pid));
-    let (exe_dev, exe_ino) = root_task
-        .and_then(|task| Some((task.exe_dev?, task.exe_ino?)))
-        .map(|(dev, ino)| (Some(dev), Some(ino)))
-        .unwrap_or_else(|| exe_identity_for_pid(root_pid));
-    let cgroup_path = read_proc_cgroup_path(root_pid);
-    let class_distribution = class_distribution_from_tasks(active_tasks);
-    let stable_hash = crate::daemon::state::daemon_profile_stable_hash([
-        root_pid.to_string().as_str(),
-        process_starttime_ticks
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "unknown".to_owned())
-            .as_str(),
-        exe_dev
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "unknown".to_owned())
-            .as_str(),
-        exe_ino
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "unknown".to_owned())
-            .as_str(),
-        cgroup_path.as_deref().unwrap_or(""),
-        &format!("{focus_kind:?}"),
-    ]);
-
-    Some(WorkloadIdentity {
-        root_pid,
-        process_starttime_ticks,
-        exe_dev,
-        exe_ino,
-        cgroup_path,
-        focus_kind,
-        class_distribution,
-        stable_hash,
-    })
-}
-
-fn exe_identity_for_pid(pid: u32) -> (Option<u64>, Option<u64>) {
-    fs::metadata(Path::new("/proc").join(pid.to_string()).join("exe"))
-        .map(|metadata| (Some(metadata.dev()), Some(metadata.ino())))
-        .unwrap_or((None, None))
-}
-
-fn read_proc_cgroup_path(pid: u32) -> Option<String> {
-    let text = fs::read_to_string(Path::new("/proc").join(pid.to_string()).join("cgroup")).ok()?;
-    text.lines()
-        .filter_map(|line| line.rsplit_once(':').map(|(_, path)| path.trim()))
-        .filter(|path| !path.is_empty())
-        .max_by_key(|path| path.len())
-        .map(str::to_owned)
-}
-
-fn class_distribution_from_tasks(
-    active_tasks: &BTreeMap<u32, TaskInfo>,
-) -> BTreeMap<String, usize> {
-    let mut classes = BTreeMap::new();
-    for task in active_tasks.values() {
-        *classes.entry(task.class.as_str().to_owned()).or_insert(0) += 1;
-    }
-    classes
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2256,6 +2075,7 @@ mod tests {
         ebpf_loader::DropCountersSnapshot,
         process_tree::TaskClass,
         recorder::IntervalRecord,
+        scorer::StutterScore,
     };
 
     fn runtime() -> AutotuneRuntime {
@@ -2283,6 +2103,8 @@ mod tests {
             Some(1234),
             None,
         );
+        let mut daemon_config = daemon_config;
+        daemon_config.autotune.allow_medium_risk_apply = true;
         let mut config = AutotuneRuntimeConfig::from_daemon_config(daemon_config, None)
             .with_simulated_action_effects();
         config.history_log = None;
@@ -2636,6 +2458,7 @@ mod tests {
             protected_tasks_count: 0,
             candidate_count: 0,
             top_denied_reason: None,
+            planner: None,
             score_total: 999,
             data_quality: "Low: low scored samples".to_owned(),
             data_quality_reason_codes: vec!["measurement_uncertain".to_owned()],
@@ -2911,15 +2734,18 @@ mod tests {
 
     #[test]
     fn runtime_washout_policy_delays_live_measurement_deadline() {
-        let runtime = AutotuneRuntime::new(
-            AutotuneRuntimeConfig::observe(None, Some(1234), None)
-                .with_candidate_window_seconds(30)
-                .with_washout(20, 2_000),
-        );
+        let config = AutotuneRuntimeConfig::observe(None, Some(1234), None)
+            .with_candidate_window_seconds(30)
+            .with_washout(20, 2_000);
         let applied_unix_nanos = 1_000_000_000_u128;
 
         let (washout_until_unix_nanos, measure_until_unix_nanos) =
-            runtime.experiment_deadlines_from_now(applied_unix_nanos);
+            LiveExperimentManager::deadlines_from_now(
+                config.simulate_action_effects,
+                &config.washout,
+                config.candidate_window_seconds,
+                applied_unix_nanos,
+            );
 
         let expected_washout_until =
             applied_unix_nanos.saturating_add(Duration::from_secs(20).as_nanos());

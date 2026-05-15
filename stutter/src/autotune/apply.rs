@@ -156,17 +156,21 @@ impl<A: TuningAction + 'static> CandidateActionExecutor for DescribedActionExecu
 pub fn executor_for_candidate(
     candidate: CandidateAction,
 ) -> anyhow::Result<Box<dyn CandidateActionExecutor>> {
+    if candidate.is_high_risk_system_adjacent() {
+        anyhow::bail!(
+            "high_risk_apply_not_implemented: candidate '{}' action_kind={} is manual-only",
+            candidate.candidate_name(),
+            candidate.action_kind()
+        );
+    }
+
     match candidate {
-        CandidateAction::CpuAffinityProfile {
-            profile_name,
-            profile,
-            tree_pid,
-        } => Ok(Box::new(PlannedActionExecutor::new(
-            profile_name,
+        CandidateAction::CpuAffinityProfile { plan } => Ok(Box::new(PlannedActionExecutor::new(
+            plan.profile_name,
             "cpu_affinity_profile",
             CpuAffinityProfileAction {
-                tree_pid,
-                profile,
+                tree_pid: plan.tree_pid,
+                profile: plan.profile,
                 force_restore_overwrite: false,
             },
         ))),

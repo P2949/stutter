@@ -1,0 +1,1 @@
+{"name":"repeated_candidate_cooldown","profile":"apply-low-risk-fake","duration_seconds":180,"expect_actions":true,"expect_rollbacks":true,"forbid_high_risk_apply":true}

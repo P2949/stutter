@@ -1,14 +1,12 @@
 use crate::{
-    actions::{
-        TaskIdentity,
-        ioprio::{IoPrioAction, IoPrioPolicy, IoPrioValue},
-    },
+    actions::ioprio::{IoPrioAction, IoPrioPolicy, IoPrioValue},
     autotune::{
         candidate::{CandidateAction, CandidateEvidence, IoPrioActionPlan},
         objective::ObjectiveKind,
         protection::mutation_allowed_for_pid,
         providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
         situation::SituationKind,
+        target_selection::{TaskTargetSelector, mutable_task_targets_for_observation},
     },
 };
 
@@ -39,17 +37,18 @@ impl CandidateProvider for IoPrioProvider {
             return Vec::new();
         }
 
+        let selector = match input.observation.primary_situation {
+            SituationKind::CompileLinkerPressure => TaskTargetSelector::CompilerAndLinker,
+            SituationKind::BrowserIoPressure => TaskTargetSelector::BrowserRenderersAndHelpers,
+            _ => TaskTargetSelector::FullTargetTree,
+        };
+        let targets = mutable_task_targets_for_observation(input.observation, selector);
+        if targets.is_empty() {
+            return Vec::new();
+        }
+
         let action = IoPrioAction {
-            targets: vec![TaskIdentity {
-                tid: root_pid,
-                process_pid: Some(root_pid),
-                comm: None,
-                starttime_ticks: input
-                    .observation
-                    .workload_identity
-                    .as_ref()
-                    .and_then(|identity| identity.process_starttime_ticks),
-            }],
+            targets,
             ioprio: IoPrioValue::idle(),
             policy: IoPrioPolicy {
                 allow_ioprio_changes: true,

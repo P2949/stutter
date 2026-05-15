@@ -5,10 +5,11 @@ use clap::{ArgAction, ArgMatches, Args, CommandFactory, Parser, Subcommand, pars
 use crate::{
     commands::input::{
         AdvisorCommandInput, AgentCommandInput, ApplyProfileCommandInput, AuditCommandInput,
-        AutotuneCommandInput as AutotuneCommandDto, AutotuneGenerateProfilesCommandInput,
-        AutotuneReplayCommandInput, AutotuneReplayHistoryCommandInput, AutotuneRestoreCommandInput,
-        AutotuneStatusCommandInput, BenchCommandInput, CheckCommandInput, CompletionsCommandInput,
-        ConfigCheckCommandInput, DaemonAcceptanceCommandInput, DaemonBenchOverheadCommandInput,
+        AutotuneApplyCandidateCommandInput, AutotuneCommandInput as AutotuneCommandDto,
+        AutotuneGenerateProfilesCommandInput, AutotuneReplayCommandInput,
+        AutotuneReplayHistoryCommandInput, AutotuneRestoreCommandInput, AutotuneStatusCommandInput,
+        BenchCommandInput, CheckCommandInput, CompletionsCommandInput, ConfigCheckCommandInput,
+        DaemonAcceptanceCommandInput, DaemonBenchOverheadCommandInput,
         DaemonConfigExplainCommandInput, DaemonDoctorCommandInput, DaemonExplainCommandInput,
         DaemonPauseCommandInput, DaemonPolicyExplainCommandInput, DaemonProfilesCommandInput,
         DaemonProfilesExplainCommandInput, DaemonProfilesForgetCommandInput,
@@ -587,17 +588,34 @@ pub struct AutotuneArgs {
         help = "Allow autotune to suggest system-wide candidates when in suggest mode"
     )]
     pub allow_system_wide_suggestions: bool,
+
+    #[arg(
+        long = "allow-medium-risk",
+        help = "Explicitly unlock live apply-medium-risk for reversible process-local candidates"
+    )]
+    pub allow_medium_risk: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum AutotuneCommand {
     #[command(name = "generate-profiles")]
     GenerateProfiles(AutotuneGenerateProfilesArgs),
+    #[command(name = "apply-candidate")]
+    ApplyCandidate(AutotuneApplyCandidateArgs),
     Replay(AutotuneReplayArgs),
 
     ReplayHistory(AutotuneReplayHistoryArgs),
 
     Restore(AutotuneRestoreArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct AutotuneApplyCandidateArgs {
+    #[arg(long = "candidate-json", value_name = "FILE")]
+    pub candidate_json: PathBuf,
+
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -1988,6 +2006,7 @@ pub enum AppCommand {
     ConfigCheck(ConfigCheckCommandInput),
     ConfigExplain(DaemonConfigExplainCommandInput),
     AutotuneGenerateProfiles(AutotuneGenerateProfilesCommandInput),
+    AutotuneApplyCandidate(AutotuneApplyCandidateCommandInput),
     Autotune(AutotuneCommandDto),
     AutotuneStatus(AutotuneStatusCommandInput),
     AutotuneReplayHistory(AutotuneReplayHistoryCommandInput),
@@ -2054,11 +2073,16 @@ impl ForegroundSource {
     }
 }
 
-fn validate_autotune_mode(mode: &str) -> anyhow::Result<()> {
+fn validate_autotune_mode(mode: &str, allow_medium_risk: bool) -> anyhow::Result<()> {
     match mode {
         "observe" | "suggest" | "apply-low-risk" => Ok(()),
+        "apply-medium-risk" if allow_medium_risk => Ok(()),
+        "apply-medium-risk" => anyhow::bail!(
+            "apply-medium-risk requires --allow-medium-risk and only applies reversible process-local candidates"
+        ),
+        "apply-high-risk" => anyhow::bail!("high-risk apply is not implemented"),
         _ => anyhow::bail!(
-            "apply mode is not implemented yet; use --mode observe, --mode suggest, or --mode apply-low-risk"
+            "unsupported autotune mode; use observe, suggest, apply-low-risk, or apply-medium-risk with --allow-medium-risk"
         ),
     }
 }
@@ -2433,6 +2457,12 @@ where
                             },
                         ))
                     }
+                    AutotuneCommand::ApplyCandidate(args) => Ok(
+                        AppCommand::AutotuneApplyCandidate(AutotuneApplyCandidateCommandInput {
+                            candidate_json: args.candidate_json,
+                            dry_run: args.dry_run,
+                        }),
+                    ),
                     AutotuneCommand::Replay(replay) => {
                         Ok(AppCommand::AutotuneReplay(AutotuneReplayCommandInput {
                             run: replay.run,
@@ -2457,7 +2487,7 @@ where
                 // System-wide suggestions are allowed if the flag is set.
                 // System-wide apply is not yet supported via CLI flags.
 
-                validate_autotune_mode(&args.mode)?;
+                validate_autotune_mode(&args.mode, args.allow_medium_risk)?;
                 Ok(AppCommand::Autotune(AutotuneCommandDto {
                     input: crate::autotune::AutotuneCommandInput {
                         config: args.config,
@@ -2481,6 +2511,7 @@ where
                         foreground_poll_ms: args.foreground_poll_ms,
                         foreground_max_stale_ms: args.foreground_max_stale_ms,
                         allow_system_wide_suggestions: args.allow_system_wide_suggestions,
+                        allow_medium_risk: args.allow_medium_risk,
                     },
                 }))
             }

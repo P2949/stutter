@@ -13,6 +13,7 @@ pub mod history;
 pub mod history_replay;
 pub mod human_output;
 pub mod kept;
+pub mod live_experiment;
 pub mod measurement;
 pub mod profiles;
 pub mod protection;
@@ -23,6 +24,7 @@ pub mod shutdown;
 pub mod situation;
 pub mod status;
 pub mod system_context;
+pub mod target_selection;
 pub mod washout;
 pub mod workload_policy;
 
@@ -35,6 +37,7 @@ pub mod decision;
 pub mod decision_log;
 pub mod objective;
 pub mod observation;
+pub mod observation_builder;
 pub mod planner;
 pub mod prometheus_metrics;
 pub mod quality;
@@ -73,29 +76,40 @@ pub struct AutotuneCommandInput {
     pub foreground_poll_ms: u64,
     pub foreground_max_stale_ms: u64,
     pub allow_system_wide_suggestions: bool,
+    pub allow_medium_risk: bool,
 }
 
 fn unsupported_live_autotune_mode_error(mode: impl std::fmt::Display) -> anyhow::Error {
     anyhow::anyhow!(
-        "mode '{}' is not supported; use --mode observe, --mode suggest, or --mode apply-low-risk. apply-low-risk currently applies CPU-affinity candidates only",
+        "mode '{}' is not supported; use --mode observe, --mode suggest, --mode apply-low-risk, or --mode apply-medium-risk with --allow-medium-risk",
         mode
     )
 }
 
-fn ensure_supported_live_autotune_mode(mode: DaemonMode) -> anyhow::Result<()> {
+fn ensure_supported_live_autotune_mode(
+    mode: DaemonMode,
+    allow_medium_risk: bool,
+) -> anyhow::Result<()> {
     match mode {
         DaemonMode::Observe | DaemonMode::Suggest | DaemonMode::ApplyLowRisk => Ok(()),
-        DaemonMode::ApplyMediumRisk | DaemonMode::ApplyHighRisk => {
-            Err(unsupported_live_autotune_mode_error(mode))
+        DaemonMode::ApplyMediumRisk if allow_medium_risk => Ok(()),
+        DaemonMode::ApplyMediumRisk => {
+            anyhow::bail!(
+                "apply-medium-risk requires --allow-medium-risk and only applies reversible process-local candidates"
+            )
         }
+        DaemonMode::ApplyHighRisk => anyhow::bail!("high-risk apply is not implemented"),
     }
 }
 
-fn parse_supported_live_autotune_mode(raw_mode: &str) -> anyhow::Result<DaemonMode> {
+fn parse_supported_live_autotune_mode(
+    raw_mode: &str,
+    allow_medium_risk: bool,
+) -> anyhow::Result<DaemonMode> {
     let mode = raw_mode
         .parse::<DaemonMode>()
         .map_err(|_| unsupported_live_autotune_mode_error(raw_mode))?;
-    ensure_supported_live_autotune_mode(mode)?;
+    ensure_supported_live_autotune_mode(mode, allow_medium_risk)?;
     Ok(mode)
 }
 
@@ -114,8 +128,9 @@ fn runtime_config_for_command(
     daemon_config.safety.min_confidence = input.min_focus_confidence;
     daemon_config.autotune.washout_seconds = input.washout_seconds;
     daemon_config.safety.allow_system_wide_suggestions = input.allow_system_wide_suggestions;
+    daemon_config.autotune.allow_medium_risk_apply = input.allow_medium_risk;
 
-    if mode == DaemonMode::ApplyLowRisk {
+    if matches!(mode, DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk) {
         daemon_config.autotune.candidate_window_seconds = input.duration_seconds.unwrap_or(30);
     }
 
@@ -130,17 +145,17 @@ fn runtime_config_for_command(
 }
 
 pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()> {
-    let mode = parse_supported_live_autotune_mode(&input.mode)?;
+    let mode = parse_supported_live_autotune_mode(&input.mode, input.allow_medium_risk)?;
 
-    if mode == DaemonMode::ApplyLowRisk {
+    if matches!(mode, DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk) {
         if input.auto_focus {
             anyhow::bail!(
-                "apply-low-risk does not support --auto-focus yet; pass --tree-pid or --watch-process"
+                "{mode} does not support --auto-focus yet; pass --tree-pid or --watch-process"
             );
         }
 
         if input.tree_pid.is_none() && input.watch_process.is_none() {
-            anyhow::bail!("apply-low-risk requires --tree-pid or --watch-process");
+            anyhow::bail!("{mode} requires --tree-pid or --watch-process");
         }
     }
 
@@ -184,7 +199,7 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
 
     let runtime_config = runtime_config_for_command(&input, mode, profile_list)?;
 
-    let duration = if mode == DaemonMode::ApplyLowRisk {
+    let duration = if matches!(mode, DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk) {
         None
     } else {
         input.duration_seconds.map(Duration::from_secs)
@@ -232,6 +247,7 @@ mod tests {
             foreground_poll_ms: 1000,
             foreground_max_stale_ms: 2500,
             allow_system_wide_suggestions: false,
+            allow_medium_risk: false,
         }
     }
 
@@ -239,7 +255,8 @@ mod tests {
     fn runtime_config_builder_accepts_all_controller_modes() {
         for raw_mode in ["observe", "suggest", "apply-low-risk"] {
             let input = base_autotune_input(raw_mode);
-            let mode = parse_supported_live_autotune_mode(raw_mode).unwrap();
+            let mode =
+                parse_supported_live_autotune_mode(raw_mode, input.allow_medium_risk).unwrap();
             runtime_config_for_command(&input, mode, Vec::new()).unwrap();
         }
     }
@@ -266,17 +283,19 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_medium_and_high_live_modes_are_rejected_by_central_gate() {
-        for raw_mode in ["apply-medium-risk", "apply-high-risk"] {
-            let err = parse_supported_live_autotune_mode(raw_mode)
-                .unwrap_err()
-                .to_string();
+    fn medium_live_mode_requires_unlock_and_high_live_mode_is_rejected() {
+        let err = parse_supported_live_autotune_mode("apply-medium-risk", false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("requires --allow-medium-risk"));
 
-            assert!(err.contains(&format!("mode '{raw_mode}' is not supported")));
-            assert!(err.contains("--mode observe"));
-            assert!(err.contains("--mode suggest"));
-            assert!(err.contains("--mode apply-low-risk"));
-        }
+        let mode = parse_supported_live_autotune_mode("apply-medium-risk", true).unwrap();
+        assert_eq!(mode, DaemonMode::ApplyMediumRisk);
+
+        let err = parse_supported_live_autotune_mode("apply-high-risk", true)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("high-risk apply is not implemented"));
     }
 
     #[tokio::test]
@@ -303,6 +322,7 @@ mod tests {
             foreground_poll_ms: 1000,
             foreground_max_stale_ms: 2500,
             allow_system_wide_suggestions: false,
+            allow_medium_risk: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();
@@ -333,6 +353,7 @@ mod tests {
             foreground_poll_ms: 1000,
             foreground_max_stale_ms: 2500,
             allow_system_wide_suggestions: false,
+            allow_medium_risk: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();
@@ -366,6 +387,7 @@ mod tests {
             foreground_poll_ms: 1000,
             foreground_max_stale_ms: 2500,
             allow_system_wide_suggestions: false,
+            allow_medium_risk: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();

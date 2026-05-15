@@ -1819,6 +1819,7 @@ async fn autotune_start_handler(
             .washout_verify_interval_ms
             .unwrap_or(crate::autotune::washout::DEFAULT_WASHOUT_VERIFY_INTERVAL_MS),
         allow_system_wide_suggestions: false,
+        allow_medium_risk: policy.mode == DaemonMode::ApplyMediumRisk,
     };
 
     let monitor_config = match crate::cli::autotune_monitor_config(&input) {

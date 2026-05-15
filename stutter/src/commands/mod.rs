@@ -32,6 +32,7 @@ pub async fn dispatch(command: AppCommand) -> anyhow::Result<()> {
         AppCommand::AutotuneGenerateProfiles(input) => {
             autotune::run_generate_profiles_command(input)
         }
+        AppCommand::AutotuneApplyCandidate(input) => autotune::run_apply_candidate_command(input),
         AppCommand::Autotune(input) => autotune::run_autotune_command(input).await,
         AppCommand::AutotuneStatus(input) => autotune::run_status_command(input),
         AppCommand::AutotuneReplayHistory(input) => autotune::run_replay_history_command(input),

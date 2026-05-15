@@ -21,6 +21,23 @@ pub async fn run_autotune_command(input: input::AutotuneCommandInput) -> anyhow:
     autotune::autotune_command(input.input).await
 }
 
+pub fn run_apply_candidate_command(
+    input: input::AutotuneApplyCandidateCommandInput,
+) -> anyhow::Result<()> {
+    let plan =
+        autotune::candidate::apply_candidate_plan_file(&input.candidate_json, input.dry_run)?;
+    if input.dry_run {
+        println!(
+            "candidate_plan_dry_run candidate={} action_kind={} safety={:?} objective={:?}",
+            plan.candidate.candidate_name,
+            plan.candidate.action_kind,
+            plan.descriptor.safety_class,
+            plan.objective
+        );
+    }
+    Ok(())
+}
+
 pub fn run_status_command(input: input::AutotuneStatusCommandInput) -> anyhow::Result<()> {
     autotune::status::autotune_status_command(autotune::status::AutotuneStatusCommandInput {
         json: input.json,

@@ -89,11 +89,10 @@ impl ActiveConfigMatch {
 impl CandidateAction {
     pub fn planned_state_summary(&self) -> String {
         match self {
-            CandidateAction::CpuAffinityProfile {
-                profile_name,
-                tree_pid,
-                ..
-            } => format!("cpu_affinity_profile profile={profile_name} tree_pid={tree_pid}"),
+            CandidateAction::CpuAffinityProfile { plan } => format!(
+                "cpu_affinity_profile profile={} tree_pid={}",
+                plan.profile_name, plan.tree_pid
+            ),
             CandidateAction::Nice { plan } => format!(
                 "nice value={} targets={}",
                 plan.action.nice,

@@ -2,7 +2,10 @@ use std::{collections::BTreeMap, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
-use super::{candidate::CandidateAction, observation::AutotuneObservation, state::SituationKind};
+use super::{
+    candidate::CandidateAction, objective::ObjectiveKind, observation::AutotuneObservation,
+    state::SituationKind,
+};
 use crate::{
     actions::ActionId,
     process_tree::{TargetSnapshot, TaskClass},
@@ -39,8 +42,10 @@ pub struct CandidateClassCount {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CandidateContextHashInput {
+    pub workload_hash: Option<String>,
     pub target_exe_dev: Option<u64>,
     pub target_exe_ino: Option<u64>,
+    pub cgroup_path: Option<String>,
     pub cpu_topology_signature: Option<String>,
     pub profile_name: String,
     pub situation: SituationKind,
@@ -50,8 +55,10 @@ pub struct CandidateContextHashInput {
 impl CandidateContextHashInput {
     pub fn for_candidate(candidate: &CandidateAction) -> Self {
         Self {
+            workload_hash: None,
             target_exe_dev: None,
             target_exe_ino: None,
+            cgroup_path: None,
             cpu_topology_signature: None,
             profile_name: candidate.candidate_name().to_owned(),
             situation: SituationKind::Unknown,
@@ -65,6 +72,10 @@ impl CandidateContextHashInput {
         cpu_topology_signature: Option<&str>,
     ) -> Self {
         Self {
+            workload_hash: observation
+                .workload_identity
+                .as_ref()
+                .map(|identity| identity.stable_hash.clone()),
             target_exe_dev: observation
                 .workload_identity
                 .as_ref()
@@ -73,6 +84,10 @@ impl CandidateContextHashInput {
                 .workload_identity
                 .as_ref()
                 .and_then(|identity| identity.exe_ino),
+            cgroup_path: observation
+                .workload_identity
+                .as_ref()
+                .and_then(|identity| normalize_optional_string(identity.cgroup_path.as_deref())),
             cpu_topology_signature: normalize_optional_string(
                 cpu_topology_signature.or(observation.topology_signature.as_deref()),
             ),
@@ -92,8 +107,16 @@ impl CandidateContextHashInput {
             target_executable_inode_from_snapshot(observation, snapshot);
 
         Self {
+            workload_hash: observation
+                .workload_identity
+                .as_ref()
+                .map(|identity| identity.stable_hash.clone()),
             target_exe_dev,
             target_exe_ino,
+            cgroup_path: observation
+                .workload_identity
+                .as_ref()
+                .and_then(|identity| normalize_optional_string(identity.cgroup_path.as_deref())),
             cpu_topology_signature: normalize_optional_string(
                 cpu_topology_signature.or(observation.topology_signature.as_deref()),
             ),
@@ -108,6 +131,14 @@ impl CandidateContextHashInput {
             .cpu_topology_signature
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty());
+        self.workload_hash = self
+            .workload_hash
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+        self.cgroup_path = self
+            .cgroup_path
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
 
         self.active_task_class_distribution =
             normalize_class_distribution(self.active_task_class_distribution);
@@ -120,6 +151,10 @@ impl CandidateContextHashInput {
         let mut parts = Vec::new();
 
         parts.push(format!(
+            "workload_hash={}",
+            normalized.workload_hash.as_deref().unwrap_or("-")
+        ));
+        parts.push(format!(
             "target_exe={}:{}",
             normalized
                 .target_exe_dev
@@ -131,6 +166,10 @@ impl CandidateContextHashInput {
                 .unwrap_or_else(|| "-".to_owned())
         ));
 
+        parts.push(format!(
+            "cgroup={}",
+            normalized.cgroup_path.as_deref().unwrap_or("-")
+        ));
         parts.push(format!(
             "cpu_topology={}",
             normalized.cpu_topology_signature.as_deref().unwrap_or("-")
@@ -158,9 +197,41 @@ pub struct CandidateMemoryRecord {
     pub cooldown_expires_unix_nanos: Option<u128>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct WorkloadActionMemory {
+    pub workload_hash: String,
+    pub action_id: ActionId,
+    pub action_kind: String,
+    pub objective: ObjectiveKind,
+    pub situation: SituationKind,
+    pub last_result: CandidateMemoryResult,
+    pub score_delta: Option<f64>,
+    pub last_seen_unix_nanos: u128,
+    pub cooldown_until_unix_nanos: Option<u128>,
+    pub exe_dev: Option<u64>,
+    pub exe_ino: Option<u64>,
+    pub cgroup_path: Option<String>,
+}
+
+impl WorkloadActionMemory {
+    pub fn matches_context(&self, context: &CandidateContextHashInput) -> bool {
+        let normalized = context.clone().normalized();
+        normalized
+            .workload_hash
+            .as_ref()
+            .is_some_and(|hash| hash == &self.workload_hash)
+            && normalized.target_exe_dev == self.exe_dev
+            && normalized.target_exe_ino == self.exe_ino
+            && normalized.cgroup_path == self.cgroup_path
+            && normalized.situation == self.situation
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct CandidateMemory {
     pub records: Vec<CandidateMemoryRecord>,
+    #[serde(default)]
+    pub workload_actions: Vec<WorkloadActionMemory>,
 }
 
 impl CandidateMemory {
@@ -216,6 +287,17 @@ impl CandidateMemory {
             self.records.push(record.clone());
         }
 
+        self.record_workload_action(
+            candidate,
+            context,
+            now_unix_nanos,
+            record.result.clone(),
+            baseline_score_total,
+            current_score_total,
+            cooldown_expires_unix_nanos,
+        );
+        self.enforce_bounds();
+
         record
     }
 
@@ -247,6 +329,110 @@ impl CandidateMemory {
         Some(duration_from_remaining_nanos(
             cooldown_expires.saturating_sub(now_unix_nanos),
         ))
+    }
+
+    pub fn last_for_workload_action(
+        &self,
+        candidate: &CandidateAction,
+        context: &CandidateContextHashInput,
+    ) -> Option<&WorkloadActionMemory> {
+        let action_id = candidate.action_id();
+        self.workload_actions
+            .iter()
+            .filter(|memory| memory.action_id == action_id && memory.matches_context(context))
+            .max_by_key(|memory| memory.last_seen_unix_nanos)
+    }
+
+    pub fn cooldown_remaining_for_workload_action(
+        &self,
+        candidate: &CandidateAction,
+        context: &CandidateContextHashInput,
+        now_unix_nanos: u128,
+    ) -> Option<Duration> {
+        let memory = self.last_for_workload_action(candidate, context)?;
+        let cooldown_until = memory.cooldown_until_unix_nanos?;
+        if now_unix_nanos >= cooldown_until {
+            return None;
+        }
+
+        Some(duration_from_remaining_nanos(
+            cooldown_until.saturating_sub(now_unix_nanos),
+        ))
+    }
+
+    pub fn workload_rank_hint(
+        &self,
+        candidate: &CandidateAction,
+        context: &CandidateContextHashInput,
+    ) -> Option<i32> {
+        let memory = self.last_for_workload_action(candidate, context)?;
+        match memory.last_result {
+            CandidateMemoryResult::Kept => Some(-100),
+            CandidateMemoryResult::Reverted
+            | CandidateMemoryResult::Faulted
+            | CandidateMemoryResult::Rejected => Some(100),
+            CandidateMemoryResult::Inconclusive => Some(20),
+            CandidateMemoryResult::Tried => Some(0),
+        }
+    }
+
+    fn record_workload_action(
+        &mut self,
+        candidate: &CandidateAction,
+        context: &CandidateContextHashInput,
+        now_unix_nanos: u128,
+        result: CandidateMemoryResult,
+        baseline_score_total: Option<u64>,
+        current_score_total: Option<u64>,
+        cooldown_until_unix_nanos: Option<u128>,
+    ) {
+        let context = context.clone().normalized();
+        let Some(workload_hash) = context.workload_hash.clone() else {
+            return;
+        };
+        let action_id = candidate.action_id();
+        let action_kind = candidate.action_kind().to_owned();
+        let score_delta = score_delta_f64(baseline_score_total, current_score_total).or(Some(0.0));
+        let memory = WorkloadActionMemory {
+            workload_hash,
+            action_id: action_id.clone(),
+            action_kind,
+            objective: candidate.objective(),
+            situation: context.situation,
+            last_result: result,
+            score_delta,
+            last_seen_unix_nanos: now_unix_nanos,
+            cooldown_until_unix_nanos,
+            exe_dev: context.target_exe_dev,
+            exe_ino: context.target_exe_ino,
+            cgroup_path: context.cgroup_path.clone(),
+        };
+
+        if let Some(existing) = self
+            .workload_actions
+            .iter_mut()
+            .find(|existing| existing.action_id == action_id && existing.matches_context(&context))
+        {
+            *existing = memory;
+        } else {
+            self.workload_actions.push(memory);
+        }
+    }
+
+    fn enforce_bounds(&mut self) {
+        const MAX_RECORDS: usize = 512;
+        const MAX_WORKLOAD_ACTIONS: usize = 512;
+
+        if self.records.len() > MAX_RECORDS {
+            self.records
+                .sort_by_key(|record| std::cmp::Reverse(record.last_tried_unix_nanos));
+            self.records.truncate(MAX_RECORDS);
+        }
+        if self.workload_actions.len() > MAX_WORKLOAD_ACTIONS {
+            self.workload_actions
+                .sort_by_key(|memory| std::cmp::Reverse(memory.last_seen_unix_nanos));
+            self.workload_actions.truncate(MAX_WORKLOAD_ACTIONS);
+        }
     }
 }
 
@@ -347,6 +533,17 @@ fn score_delta_i64(baseline_score_total: Option<u64>, current_score_total: Optio
     }
 }
 
+fn score_delta_f64(
+    baseline_score_total: Option<u64>,
+    current_score_total: Option<u64>,
+) -> Option<f64> {
+    let (Some(baseline), Some(current)) = (baseline_score_total, current_score_total) else {
+        return None;
+    };
+
+    Some(current as f64 - baseline as f64)
+}
+
 fn duration_from_remaining_nanos(remaining_nanos: u128) -> Duration {
     Duration::from_nanos(remaining_nanos.min(u64::MAX as u128) as u64)
 }
@@ -398,8 +595,10 @@ mod tests {
         distribution: Vec<CandidateClassCount>,
     ) -> CandidateContextHashInput {
         CandidateContextHashInput {
+            workload_hash: Some("workload-a".to_owned()),
             target_exe_dev: Some(8),
             target_exe_ino: Some(99),
+            cgroup_path: Some("/user.slice/app.scope".to_owned()),
             cpu_topology_signature: Some("cpu0-7:smt:on".to_owned()),
             profile_name: "fake-profile".to_owned(),
             situation: SituationKind::GameCpuSchedulerPressure,
@@ -522,6 +721,12 @@ mod tests {
             memory.records[0].cooldown_expires_unix_nanos,
             Some(62_000_000_000)
         );
+        assert_eq!(memory.workload_actions.len(), 1);
+        assert_eq!(
+            memory.workload_actions[0].last_result,
+            CandidateMemoryResult::Kept
+        );
+        assert_eq!(memory.workload_actions[0].score_delta, Some(-200.0));
     }
 
     #[test]
@@ -544,6 +749,41 @@ mod tests {
         assert_eq!(
             memory.cooldown_remaining_for_action(&action_id, 301_000_000_000),
             None
+        );
+    }
+
+    #[test]
+    fn workload_action_memory_is_scoped_to_stable_workload_identity() {
+        let candidate = fake_candidate();
+        let context = context_with_distribution(vec![CandidateClassCount {
+            class: TaskClass::Game,
+            count: 4,
+        }]);
+        let mut other_context = context.clone();
+        other_context.workload_hash = Some("workload-b".to_owned());
+        other_context.target_exe_ino = Some(100);
+        let mut memory = CandidateMemory::default();
+
+        memory.record_result(
+            &candidate,
+            &context,
+            1_000,
+            CandidateMemoryResult::Reverted,
+            Some(100),
+            Some(120),
+            None,
+            Some(10_000),
+        );
+
+        assert!(
+            memory
+                .cooldown_remaining_for_workload_action(&candidate, &context, 2_000)
+                .is_some()
+        );
+        assert!(
+            memory
+                .cooldown_remaining_for_workload_action(&candidate, &other_context, 2_000)
+                .is_none()
         );
     }
 
@@ -573,6 +813,11 @@ mod tests {
 
         assert_eq!(context.target_exe_dev, Some(8));
         assert_eq!(context.target_exe_ino, Some(99));
+        assert_eq!(context.workload_hash.as_deref(), Some("workload-a"));
+        assert_eq!(
+            context.cgroup_path.as_deref(),
+            Some("/user.slice/app.scope")
+        );
         assert_eq!(
             context.cpu_topology_signature.as_deref(),
             Some("inventory-a")

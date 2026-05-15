@@ -455,16 +455,12 @@ fn focus_policy_block_reason(
 
 fn candidate_looks_like_game_cpu_isolation_profile(candidate: &CandidateAction) -> bool {
     match candidate {
-        CandidateAction::CpuAffinityProfile {
-            profile_name,
-            profile,
-            ..
-        } => {
-            let lower_name = profile_name.to_ascii_lowercase();
+        CandidateAction::CpuAffinityProfile { plan } => {
+            let lower_name = plan.profile_name.to_ascii_lowercase();
             lower_name.contains("game")
                 || lower_name.contains("gaming")
                 || lower_name.contains("isolation")
-                || profile.rules.iter().any(|rule| {
+                || plan.profile.rules.iter().any(|rule| {
                     rule.match_class.iter().any(|class| {
                         matches!(
                             class,

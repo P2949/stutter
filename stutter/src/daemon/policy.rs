@@ -13,6 +13,8 @@ use crate::{
     remote::AgentAutotuneLimits,
 };
 
+pub const HIGH_RISK_APPLY_IMPLEMENTED: bool = false;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DaemonMode {
@@ -205,6 +207,7 @@ pub struct DaemonPolicy {
     pub denied_action_families: BTreeSet<String>,
     pub cgroup_targets: DaemonCgroupTargetsConfig,
     pub rollback_required_before_apply: bool,
+    pub allow_medium_risk_apply: bool,
     pub allow_system_wide_suggestions: bool,
     pub allow_system_wide_apply: bool,
     pub allow_high_risk: bool,
@@ -287,6 +290,8 @@ pub enum PolicyRejection {
     },
     ExplicitTargetRequired,
     HighRiskRequiresExplicitOptIn,
+    HighRiskApplyNotImplemented,
+    MediumRiskApplyRequiresExplicitUnlock,
     ConfidenceTooLow {
         confidence: f32,
         min_confidence: f32,
@@ -371,6 +376,10 @@ impl fmt::Display for PolicyRejection {
             Self::HighRiskRequiresExplicitOptIn => {
                 f.write_str("high-risk apply requires explicit high-risk opt-in")
             }
+            Self::HighRiskApplyNotImplemented => f.write_str("high-risk apply is not implemented"),
+            Self::MediumRiskApplyRequiresExplicitUnlock => {
+                f.write_str("apply-medium-risk requires explicit medium-risk unlock")
+            }
             Self::ConfidenceTooLow {
                 confidence,
                 min_confidence,
@@ -435,6 +444,7 @@ impl PolicyRejection {
             | Self::WorkloadUnstable
             | Self::ConfidenceTooLow { .. } => DaemonPolicyVerdict::RequireObserveOnly,
             Self::HighRiskRequiresExplicitOptIn
+            | Self::HighRiskApplyNotImplemented
             | Self::SystemWideActionBlocked
             | Self::PersistentEffectBlocked
             | Self::SafetyClassTooHigh {
@@ -451,6 +461,7 @@ impl PolicyRejection {
             | Self::ActionFamilyDenied { .. }
             | Self::CapabilityUnavailable { .. }
             | Self::ExplicitTargetRequired
+            | Self::MediumRiskApplyRequiresExplicitUnlock
             | Self::RollbackPending
             | Self::RemoteApplyDisabled
             | Self::RemoteModeNotAllowed { .. }
@@ -476,6 +487,10 @@ impl PolicyRejection {
             Self::CapabilityUnavailable { .. } => "capability_unavailable",
             Self::ExplicitTargetRequired => "explicit_target_required",
             Self::HighRiskRequiresExplicitOptIn => "high_risk_requires_explicit_opt_in",
+            Self::HighRiskApplyNotImplemented => "high_risk_apply_not_implemented",
+            Self::MediumRiskApplyRequiresExplicitUnlock => {
+                "medium_risk_apply_requires_explicit_unlock"
+            }
             Self::ConfidenceTooLow { .. } => "confidence_too_low",
             Self::DataQualityBlocked { .. } => "data_quality_blocked",
             Self::SystemHealthBlocked { .. } => "system_health_blocked",
@@ -523,11 +538,15 @@ pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
     let min_confidence = min_confidence_for_config(config);
     let confidence = confidence_thresholds_for_config(config, min_confidence);
 
-    let mut allow_high_risk =
-        config.mode == DaemonMode::ApplyHighRisk && config.safety.allow_high_risk;
+    let mut allow_high_risk = HIGH_RISK_APPLY_IMPLEMENTED
+        && config.mode == DaemonMode::ApplyHighRisk
+        && config.safety.allow_high_risk;
+    let allow_medium_risk_apply =
+        config.mode == DaemonMode::ApplyMediumRisk && config.autotune.allow_medium_risk_apply;
     let mut allow_system_wide_suggestions =
         config.mode != DaemonMode::Observe && config.safety.allow_system_wide_suggestions;
-    let mut allow_system_wide_apply = config.mode == DaemonMode::ApplyHighRisk
+    let mut allow_system_wide_apply = HIGH_RISK_APPLY_IMPLEMENTED
+        && config.mode == DaemonMode::ApplyHighRisk
         && config.safety.allow_high_risk
         && config.safety.allow_system_wide_apply;
 
@@ -546,6 +565,7 @@ pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
         denied_action_families: config.safety.denied_action_families.clone(),
         cgroup_targets: config.safety.cgroup_targets.clone(),
         rollback_required_before_apply: config.mode.supports_apply(),
+        allow_medium_risk_apply,
         allow_system_wide_suggestions,
         allow_system_wide_apply,
         allow_high_risk,
@@ -661,7 +681,8 @@ fn remote_mode_supported_by_context(mode: DaemonMode, context: &RemotePolicyCont
 
     mode <= context.limits.max_mode
         && mode_max_safety_class <= context.limits.max_safety_class
-        && (mode != DaemonMode::ApplyHighRisk || context.limits.allow_high_risk)
+        && (mode != DaemonMode::ApplyHighRisk
+            || (HIGH_RISK_APPLY_IMPLEMENTED && context.limits.allow_high_risk))
 }
 
 fn remote_target_count_for_config(config: &DaemonConfig) -> usize {
@@ -727,6 +748,7 @@ fn config_for_constructor(
     };
     config.safety.max_safety_class = max_safety_class_for_mode(mode);
     config.safety.allow_high_risk = allow_high_risk;
+    config.autotune.allow_medium_risk_apply = mode == DaemonMode::ApplyMediumRisk;
     config.safety.min_confidence = min_confidence_for_config(&config);
     config
 }
@@ -1059,6 +1081,39 @@ impl DaemonPolicy {
                         descriptor,
                         evaluated_rules,
                         first_rejection,
+                    );
+                }
+
+                if self.mode == DaemonMode::ApplyMediumRisk {
+                    record_policy_rule(
+                        &mut evaluated_rules,
+                        &mut first_rejection,
+                        "medium_risk_apply_unlock",
+                        self.allow_medium_risk_apply,
+                        if self.allow_medium_risk_apply {
+                            "apply-medium-risk explicit unlock is present".to_owned()
+                        } else {
+                            "apply-medium-risk requires explicit medium-risk unlock".to_owned()
+                        },
+                        (!self.allow_medium_risk_apply)
+                            .then_some(PolicyRejection::MediumRiskApplyRequiresExplicitUnlock),
+                    );
+                }
+
+                if self.mode == DaemonMode::ApplyHighRisk {
+                    record_policy_rule(
+                        &mut evaluated_rules,
+                        &mut first_rejection,
+                        "high_risk_apply_support",
+                        HIGH_RISK_APPLY_IMPLEMENTED,
+                        if HIGH_RISK_APPLY_IMPLEMENTED {
+                            "high-risk apply support is implemented".to_owned()
+                        } else {
+                            "high-risk apply is disabled until future support is implemented"
+                                .to_owned()
+                        },
+                        (!HIGH_RISK_APPLY_IMPLEMENTED)
+                            .then_some(PolicyRejection::HighRiskApplyNotImplemented),
                     );
                 }
             }
@@ -2133,18 +2188,21 @@ mod tests {
     }
 
     #[test]
-    fn apply_high_risk_rejects_without_explicit_high_risk_unlock() {
+    fn apply_high_risk_is_disabled_even_with_explicit_high_risk_unlock() {
         let mut policy = DaemonPolicy::apply_high_risk_explicit(ActionSource::Test);
         policy.allow_high_risk = false;
         let high = descriptor(SafetyClass::HighRisk);
 
         assert!(matches!(
             policy.check_action(PolicyIntent::Apply, &high),
-            Err(PolicyRejection::HighRiskRequiresExplicitOptIn)
+            Err(PolicyRejection::HighRiskApplyNotImplemented)
         ));
 
         let explicit = DaemonPolicy::apply_high_risk_explicit(ActionSource::Test);
-        assert!(explicit.check_action(PolicyIntent::Apply, &high).is_ok());
+        assert!(matches!(
+            explicit.check_action(PolicyIntent::Apply, &high),
+            Err(PolicyRejection::HighRiskApplyNotImplemented)
+        ));
     }
 
     #[test]
@@ -2468,7 +2526,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_apply_explanation_reports_auth_before_mode_limit() {
+    fn remote_apply_high_risk_reports_disabled_before_remote_auth() {
         let mut config = crate::daemon::config::DaemonConfig {
             mode: DaemonMode::ApplyHighRisk,
             source: ActionSource::RemoteAgent,
@@ -2494,7 +2552,7 @@ mod tests {
         assert!(matches!(
             explanation.decision,
             PolicyDecisionKind::Rejected {
-                rejection: PolicyRejection::RemoteApplyRequiresConfiguredAuth
+                rejection: PolicyRejection::HighRiskApplyNotImplemented
             }
         ));
         let first_failed_rule = explanation
@@ -2502,8 +2560,12 @@ mod tests {
             .iter()
             .find(|rule| !rule.passed)
             .expect("expected a failing remote policy rule");
-        assert_eq!(first_failed_rule.rule, "remote_auth_configured");
-        assert!(explanation.final_reason.contains("configured bearer token"));
+        assert_eq!(first_failed_rule.rule, "high_risk_apply_support");
+        assert!(
+            explanation
+                .final_reason
+                .contains("high-risk apply is not implemented")
+        );
     }
 
     #[test]
@@ -2533,21 +2595,19 @@ mod tests {
         assert!(matches!(
             explanation.decision,
             PolicyDecisionKind::Rejected {
-                rejection: PolicyRejection::RemoteModeNotAllowed {
-                    mode: DaemonMode::ApplyHighRisk
-                }
+                rejection: PolicyRejection::HighRiskApplyNotImplemented
             }
         ));
         assert!(
             explanation
                 .evaluated_rules
                 .iter()
-                .any(|rule| rule.rule == "remote_mode_supported" && !rule.passed)
+                .any(|rule| rule.rule == "high_risk_apply_support" && !rule.passed)
         );
         assert!(
             explanation
                 .final_reason
-                .contains("configured remote limits")
+                .contains("high-risk apply is not implemented")
         );
     }
 

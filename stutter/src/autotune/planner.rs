@@ -1,26 +1,29 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    actions::ActionState,
+    actions::{ActionState, SafetyClass},
     autotune::{
         active_config::ActiveConfigMatch,
         candidate::{
             CandidateAction, CandidateDryRunner, CandidateEvidence, RealCandidateDryRunner,
         },
+        candidate_memory::CandidateContextHashInput,
         controller::ControllerRuntimeState,
         kept::ActiveProfileState,
         objective::ObjectiveKind,
         observation::AutotuneObservation,
         providers::{CandidateProposal, CandidateProviderInput, CandidateProviderRegistry},
         system_context::SystemContextSnapshot,
-        workload_policy::workload_policy_for_situation,
+        workload_policy::WorkloadPolicyMatrix,
     },
     daemon::{DaemonCapabilities, DaemonMode, DaemonPolicy, SystemHealthSnapshot},
     daemon_policy::{ActionDescriptor, DaemonPolicyContext, PolicyIntent},
     profiles::Profile,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum CandidateDenyReason {
     DisabledFamily,
@@ -45,6 +48,7 @@ pub enum CandidateDenyReason {
     KeptActionNoLongerActive,
     ObjectiveNotAllowedForWorkload,
     ObjectiveSignalMissing,
+    ManualOnlyHighRisk,
     DryRunFailed,
     DryRunMatchedZeroTasks,
     PolicyRejected,
@@ -87,6 +91,209 @@ pub struct PlanResult {
     pub selected: Option<CandidateAction>,
     pub evaluations: Vec<CandidateEvaluation>,
     pub no_action_reason: Option<String>,
+}
+
+impl PlanResult {
+    pub fn summary(&self) -> PlannerSummary {
+        PlannerSummary::from_plan(self)
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct PlannerSummary {
+    pub total_proposals: usize,
+    pub eligible_proposals: usize,
+    pub selected: Option<PlannerSelectedSummary>,
+    pub top_denied_candidates: Vec<PlannerEvaluationSummary>,
+    pub grouped_denials: Vec<PlannerDenySummary>,
+    pub missing_capabilities: Vec<String>,
+    pub workload_blocked: Vec<String>,
+    pub manual_only_suggestions: Vec<String>,
+    pub no_action: Option<PlannerNoActionSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PlannerSelectedSummary {
+    pub candidate_name: String,
+    pub action_kind: String,
+    pub objective: ObjectiveKind,
+    pub safety_class: SafetyClass,
+    pub confidence: f32,
+    pub rank: Option<u32>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PlannerEvaluationSummary {
+    pub candidate_name: String,
+    pub action_kind: String,
+    pub provider: String,
+    pub objective: ObjectiveKind,
+    pub safety_class: SafetyClass,
+    pub effect_scope: crate::daemon_policy::ActionEffectScope,
+    pub confidence: f32,
+    pub eligible: bool,
+    pub rank: Option<u32>,
+    pub deny_reasons: Vec<CandidateDenyReason>,
+    pub deny_reason_codes: Vec<String>,
+    pub deny_messages: Vec<String>,
+    pub dry_run_affected_tasks: Option<usize>,
+    pub manual_only_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlannerDenySummary {
+    pub reason: CandidateDenyReason,
+    pub reason_code: String,
+    pub count: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlannerNoActionSummary {
+    pub reason: String,
+    pub total_proposals: usize,
+    pub eligible_proposals: usize,
+    pub grouped_denials: Vec<PlannerDenySummary>,
+}
+
+impl PlannerSummary {
+    pub fn from_plan(plan: &PlanResult) -> Self {
+        let total_proposals = plan.evaluations.len();
+        let eligible_proposals = plan
+            .evaluations
+            .iter()
+            .filter(|evaluation| evaluation.eligible)
+            .count();
+        let selected = plan
+            .selected
+            .as_ref()
+            .and_then(|selected| {
+                plan.evaluations
+                    .iter()
+                    .find(|evaluation| evaluation.candidate.action_id() == selected.action_id())
+            })
+            .or_else(|| {
+                plan.evaluations
+                    .iter()
+                    .find(|evaluation| evaluation.eligible)
+            })
+            .map(PlannerSelectedSummary::from_evaluation);
+        let grouped_denials = grouped_denials(&plan.evaluations);
+        let top_denied_candidates = plan
+            .evaluations
+            .iter()
+            .filter(|evaluation| !evaluation.eligible)
+            .take(8)
+            .map(PlannerEvaluationSummary::from_evaluation)
+            .collect::<Vec<_>>();
+        let missing_capabilities =
+            names_for_reason(&plan.evaluations, CandidateDenyReason::CapabilityMissing);
+        let workload_blocked = names_for_any_reason(
+            &plan.evaluations,
+            &[
+                CandidateDenyReason::WorkloadPolicyBlocked,
+                CandidateDenyReason::NotAutonomousForWorkload,
+                CandidateDenyReason::ObjectiveNotAllowedForWorkload,
+            ],
+        );
+        let manual_only_suggestions =
+            names_for_reason(&plan.evaluations, CandidateDenyReason::ManualOnlyHighRisk);
+        let no_action = plan
+            .no_action_reason
+            .as_ref()
+            .map(|reason| PlannerNoActionSummary {
+                reason: reason.clone(),
+                total_proposals,
+                eligible_proposals,
+                grouped_denials: grouped_denials.clone(),
+            });
+
+        Self {
+            total_proposals,
+            eligible_proposals,
+            selected,
+            top_denied_candidates,
+            grouped_denials,
+            missing_capabilities,
+            workload_blocked,
+            manual_only_suggestions,
+            no_action,
+        }
+    }
+}
+
+impl PlannerSelectedSummary {
+    fn from_evaluation(evaluation: &CandidateEvaluation) -> Self {
+        Self {
+            candidate_name: evaluation.candidate_name.clone(),
+            action_kind: evaluation.action_kind.clone(),
+            objective: evaluation.objective,
+            safety_class: evaluation.descriptor.safety_class.clone(),
+            confidence: evaluation.confidence,
+            rank: evaluation.rank,
+        }
+    }
+}
+
+impl PlannerEvaluationSummary {
+    fn from_evaluation(evaluation: &CandidateEvaluation) -> Self {
+        Self {
+            candidate_name: evaluation.candidate_name.clone(),
+            action_kind: evaluation.action_kind.clone(),
+            provider: evaluation.provider.clone(),
+            objective: evaluation.objective,
+            safety_class: evaluation.descriptor.safety_class.clone(),
+            effect_scope: evaluation.descriptor.effect_scope,
+            confidence: evaluation.confidence,
+            eligible: evaluation.eligible,
+            rank: evaluation.rank,
+            deny_reasons: evaluation.deny_reasons.clone(),
+            deny_reason_codes: evaluation
+                .deny_reasons
+                .iter()
+                .map(CandidateDenyReason::reason_code)
+                .map(str::to_owned)
+                .collect(),
+            deny_messages: evaluation.deny_messages.clone(),
+            dry_run_affected_tasks: evaluation
+                .dry_run
+                .as_ref()
+                .map(|state| state.affected_tasks),
+            manual_only_reason: evaluation.candidate.manual_only_reason(),
+        }
+    }
+}
+
+impl CandidateDenyReason {
+    pub fn reason_code(&self) -> &'static str {
+        match self {
+            Self::DisabledFamily => "disabled_family",
+            Self::DeniedFamily => "denied_family",
+            Self::SafetyClassTooHigh => "safety_class_too_high",
+            Self::EffectScopeTooBroad => "effect_scope_too_broad",
+            Self::CapabilityMissing => "capability_missing",
+            Self::DataQualityLow => "data_quality_low",
+            Self::HealthDegraded => "health_degraded",
+            Self::NoExplicitTarget => "no_explicit_target",
+            Self::FocusLowConfidence => "focus_low_confidence",
+            Self::CriticalRealtimeWarning => "critical_realtime_warning",
+            Self::CooldownActive => "cooldown_active",
+            Self::ConflictWithActiveAction => "conflict_with_active_action",
+            Self::ConflictWithKeptAction => "conflict_with_kept_action",
+            Self::CgroupTargetNotAllowlisted => "cgroup_target_not_allowlisted",
+            Self::WorkloadPolicyBlocked => "workload_policy_blocked",
+            Self::NotAutonomousForWorkload => "not_autonomous_for_workload",
+            Self::ProviderConfidenceTooLow => "provider_confidence_too_low",
+            Self::NoEffectiveChange => "no_effective_change",
+            Self::ExternalMutationDetected => "external_mutation_detected",
+            Self::KeptActionNoLongerActive => "kept_action_no_longer_active",
+            Self::ObjectiveNotAllowedForWorkload => "objective_not_allowed_for_workload",
+            Self::ObjectiveSignalMissing => "objective_signal_missing",
+            Self::ManualOnlyHighRisk => "manual_only_high_risk",
+            Self::DryRunFailed => "dry_run_failed",
+            Self::DryRunMatchedZeroTasks => "dry_run_matched_zero_tasks",
+            Self::PolicyRejected => "policy_rejected",
+        }
+    }
 }
 
 pub struct CandidatePlanner {
@@ -148,14 +355,7 @@ impl CandidatePlanner {
             .map(|evaluation| evaluation.candidate.clone());
 
         let no_action_reason = if selected.is_none() {
-            Some(
-                evaluations
-                    .first()
-                    .and_then(|evaluation| evaluation.deny_messages.first().cloned())
-                    .unwrap_or_else(|| {
-                        "no candidate providers produced an eligible candidate".to_owned()
-                    }),
-            )
+            Some(no_action_reason_for_evaluations(&evaluations))
         } else {
             None
         };
@@ -166,6 +366,32 @@ impl CandidatePlanner {
             no_action_reason,
         }
     }
+}
+
+fn no_action_reason_for_evaluations(evaluations: &[CandidateEvaluation]) -> String {
+    if evaluations.is_empty() {
+        return "no candidate providers produced an eligible candidate".to_owned();
+    }
+
+    let grouped = grouped_denials(evaluations);
+    if grouped.is_empty() {
+        return "candidate providers produced no eligible candidate".to_owned();
+    }
+
+    let reason_counts = grouped
+        .iter()
+        .take(4)
+        .map(|summary| format!("{}={}", summary.reason_code, summary.count))
+        .collect::<Vec<_>>()
+        .join(",");
+    let top_message = evaluations
+        .iter()
+        .find(|evaluation| !evaluation.eligible)
+        .and_then(|evaluation| evaluation.deny_messages.first())
+        .cloned()
+        .unwrap_or_else(|| "all candidates were denied".to_owned());
+
+    format!("{top_message}; deny_reason_counts={reason_counts}")
 }
 
 fn sort_candidate_evaluations(evaluations: &mut [CandidateEvaluation]) {
@@ -182,6 +408,47 @@ fn sort_candidate_evaluations(evaluations: &mut [CandidateEvaluation]) {
     });
 }
 
+fn grouped_denials(evaluations: &[CandidateEvaluation]) -> Vec<PlannerDenySummary> {
+    let mut counts = BTreeMap::<CandidateDenyReason, usize>::new();
+
+    for evaluation in evaluations {
+        for reason in &evaluation.deny_reasons {
+            *counts.entry(reason.clone()).or_default() += 1;
+        }
+    }
+
+    counts
+        .into_iter()
+        .map(|(reason, count)| PlannerDenySummary {
+            reason_code: reason.reason_code().to_owned(),
+            reason,
+            count,
+        })
+        .collect()
+}
+
+fn names_for_reason(
+    evaluations: &[CandidateEvaluation],
+    reason: CandidateDenyReason,
+) -> Vec<String> {
+    names_for_any_reason(evaluations, &[reason])
+}
+
+fn names_for_any_reason(
+    evaluations: &[CandidateEvaluation],
+    reasons: &[CandidateDenyReason],
+) -> Vec<String> {
+    evaluations
+        .iter()
+        .filter(|evaluation| {
+            reasons
+                .iter()
+                .any(|reason| evaluation.deny_reasons.contains(reason))
+        })
+        .map(|evaluation| evaluation.candidate_name.clone())
+        .collect()
+}
+
 #[derive(Clone, Copy)]
 pub struct PlannerInput<'a> {
     pub observation: &'a AutotuneObservation,
@@ -190,6 +457,7 @@ pub struct PlannerInput<'a> {
     pub system_health: &'a SystemHealthSnapshot,
     pub controller_state: &'a ControllerRuntimeState,
     pub active_profile_state: Option<&'a ActiveProfileState>,
+    pub workload_policy: &'a WorkloadPolicyMatrix,
     pub profiles: &'a [Profile],
 }
 
@@ -241,6 +509,16 @@ fn evaluate_proposal_static(
         ));
     }
 
+    if proposal.candidate.is_high_risk_system_adjacent()
+        && input.daemon_policy.mode != DaemonMode::Suggest
+    {
+        deny_reasons.push(CandidateDenyReason::ManualOnlyHighRisk);
+        deny_messages.push(proposal.candidate.manual_only_reason().unwrap_or_else(|| {
+            "manual-only high-risk/system-adjacent candidate cannot be selected for live apply"
+                .to_owned()
+        }));
+    }
+
     let policy_context = policy_context_for_input(input);
     if let Err(rejection) = input.daemon_policy.check_action_with_context(
         policy_intent_for_mode(input.daemon_policy.mode),
@@ -279,7 +557,9 @@ fn evaluate_proposal_static(
         deny_messages.push("critical realtime focus warning blocks mutation".to_owned());
     }
 
-    let workload_policy = workload_policy_for_situation(input.observation.primary_situation);
+    let workload_policy = input
+        .workload_policy
+        .rule_for(input.observation.primary_situation);
     if !workload_policy.allows_candidate(&proposal.candidate) {
         deny_reasons.push(CandidateDenyReason::WorkloadPolicyBlocked);
         deny_messages.push(format!(
@@ -309,17 +589,36 @@ fn evaluate_proposal_static(
         ));
     }
 
+    let memory_context =
+        CandidateContextHashInput::from_observation(&proposal.candidate, input.observation, None);
+
+    if memory_context.workload_hash.is_none()
+        && input
+            .controller_state
+            .candidate_memory
+            .cooldown_remaining_for_action(
+                &proposal.candidate.action_id(),
+                input.observation.now_unix_nanos,
+            )
+            .is_some()
+    {
+        deny_reasons.push(CandidateDenyReason::CooldownActive);
+        deny_messages.push("candidate action is cooling down".to_owned());
+    }
+
     if input
         .controller_state
         .candidate_memory
-        .cooldown_remaining_for_action(
-            &proposal.candidate.action_id(),
+        .cooldown_remaining_for_workload_action(
+            &proposal.candidate,
+            &memory_context,
             input.observation.now_unix_nanos,
         )
         .is_some()
     {
         deny_reasons.push(CandidateDenyReason::CooldownActive);
-        deny_messages.push("candidate action is cooling down".to_owned());
+        deny_messages
+            .push("candidate action is cooling down for this workload identity".to_owned());
     }
 
     if let Some(active_experiment) = input.controller_state.active_experiment.as_ref()
@@ -421,9 +720,20 @@ fn evaluate_proposal_static(
         deny_messages,
         evidence,
         objective: proposal.objective,
-        rank: Some(proposal.rank_hint),
+        rank: Some(rank_with_workload_memory(
+            proposal.rank_hint,
+            input
+                .controller_state
+                .candidate_memory
+                .workload_rank_hint(&proposal.candidate, &memory_context),
+        )),
         candidate: proposal.candidate,
     }
+}
+
+fn rank_with_workload_memory(rank_hint: u32, memory_adjustment: Option<i32>) -> u32 {
+    let adjusted = rank_hint as i64 + i64::from(memory_adjustment.unwrap_or(0));
+    adjusted.clamp(0, u32::MAX as i64) as u32
 }
 
 fn dry_run_candidate_if_still_eligible<R: CandidateDryRunner>(
@@ -435,7 +745,10 @@ fn dry_run_candidate_if_still_eligible<R: CandidateDryRunner>(
     let mut deny_messages = draft.deny_messages;
     let mut dry_run_state = None;
 
-    if deny_reasons.is_empty() {
+    if deny_reasons.is_empty()
+        && !(input.daemon_policy.mode == DaemonMode::Suggest
+            && draft.candidate.is_high_risk_system_adjacent())
+    {
         let record = dry_runner.dry_run(&draft.candidate);
         dry_run_state = Some(ActionState {
             applied: false,
@@ -569,22 +882,29 @@ fn deny_reason_from_policy(reason_code: &str) -> CandidateDenyReason {
         "explicit_target_required" => CandidateDenyReason::NoExplicitTarget,
         "confidence_too_low" => CandidateDenyReason::ProviderConfidenceTooLow,
         "cooldown_active" => CandidateDenyReason::CooldownActive,
+        "high_risk_apply_not_implemented" | "medium_risk_apply_requires_explicit_unlock" => {
+            CandidateDenyReason::ManualOnlyHighRisk
+        }
         _ => CandidateDenyReason::PolicyRejected,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use serde::Deserialize;
+
     use super::*;
     use crate::{
         actions::{
             RollbackToken, SafetyClass, TaskIdentity,
             cgroup::{CgroupPlacementAction, CgroupPlacementTarget},
             cpu_power::CpuPowerAction,
+            gpu_power::GpuPowerAction,
             ioprio::{IoPrioAction, IoPrioPolicy, IoPrioValue},
             irq_affinity::{IrqAffinityAction, IrqAffinityEvidence, IrqAffinityRisk},
             nice::{NiceAction, NicePolicy},
             uclamp::{UclampAction, UclampValues},
+            vm_knobs::{VmKnobAction, VmKnobChange},
         },
         affinity::CpuMask,
         autotune::{
@@ -592,7 +912,7 @@ mod tests {
                 CandidateDryRunRecord, CgroupPlacementActionPlan, CpuPowerActionPlan,
                 IoPrioActionPlan, IrqAffinityActionPlan, NiceActionPlan, UclampActionPlan,
             },
-            candidate_memory::CandidateContextHashInput,
+            candidate_memory::CandidateMemoryResult,
             controller::ActiveExperiment,
             experiment::{ExperimentId, WindowScore},
             kept::{ActiveProfileState, KeptCandidateState},
@@ -879,6 +1199,54 @@ mod tests {
         }
     }
 
+    fn gpu_power_candidate(name: &str) -> CandidateAction {
+        CandidateAction::GpuPower {
+            plan: crate::autotune::candidate::GpuPowerActionPlan {
+                name: name.to_owned(),
+                action: GpuPowerAction {
+                    sysfs_root: std::path::PathBuf::from("/sys"),
+                    drm_card: "card0".to_owned(),
+                    power_dpm_force_performance_level: Some("high".to_owned()),
+                    pp_power_profile_mode: None,
+                },
+                evidence: vec![CandidateEvidence::new("gpu_bound", "true", 0.9)],
+                objective: ObjectiveKind::ThermalRecovery,
+            },
+        }
+    }
+
+    fn vm_knob_candidate(name: &str) -> CandidateAction {
+        CandidateAction::VmKnob {
+            plan: crate::autotune::candidate::VmKnobActionPlan {
+                name: name.to_owned(),
+                action: VmKnobAction {
+                    root: std::path::PathBuf::from("/proc/sys"),
+                    changes: vec![VmKnobChange {
+                        path: std::path::PathBuf::from("vm/swappiness"),
+                        value: "10".to_owned(),
+                    }],
+                },
+                evidence: vec![CandidateEvidence::new("swap_activity", "high", 0.9)],
+                objective: ObjectiveKind::IoLatency,
+            },
+        }
+    }
+
+    fn candidate_for_action_kind(action_kind: &str) -> CandidateAction {
+        match action_kind {
+            "cpu_affinity_profile" => cpu_affinity_candidate("fixture-cpu-affinity"),
+            "nice" => nice_candidate(),
+            "ionice" => ioprio_candidate("fixture-ionice"),
+            "uclamp" => uclamp_candidate("fixture-uclamp"),
+            "cgroup_placement" => cgroup_candidate("/user.slice/stutter-compile.slice"),
+            "irq_affinity" => irq_affinity_candidate("fixture-irq"),
+            "cpu_power" => cpu_power_candidate("fixture-cpu-power"),
+            "gpu_power" => gpu_power_candidate("fixture-gpu-power"),
+            "vm_knob" => vm_knob_candidate("fixture-vm-knob"),
+            other => panic!("unsupported fixture action_kind {other}"),
+        }
+    }
+
     fn observation_for_situation(
         situation: SituationKind,
         focus_kind: FocusGroupKind,
@@ -954,6 +1322,7 @@ mod tests {
                 system_health: &observation.system_health,
                 controller_state,
                 active_profile_state: None,
+                workload_policy: &WorkloadPolicyMatrix::default_rules(),
                 profiles: &[],
             },
             proposals,
@@ -1153,6 +1522,7 @@ mod tests {
                 system_health: &observation.system_health,
                 controller_state: &ControllerRuntimeState::default(),
                 active_profile_state: None,
+                workload_policy: &WorkloadPolicyMatrix::default_rules(),
                 profiles: &[],
             },
             proposals,
@@ -1286,6 +1656,7 @@ mod tests {
                 system_health: &observation.system_health,
                 controller_state: &ControllerRuntimeState::default(),
                 active_profile_state: Some(&active_profile_state),
+                workload_policy: &WorkloadPolicyMatrix::default_rules(),
                 profiles: &[],
             },
             proposals,
@@ -1400,10 +1771,14 @@ mod tests {
         let policy = policy(DaemonMode::Suggest);
         let observation = observation();
         let mut controller_state = ControllerRuntimeState::default();
-        controller_state.candidate_memory.record_attempt(
+        controller_state.record_candidate_result(
             &candidate,
-            &CandidateContextHashInput::for_candidate(&candidate),
-            observation.now_unix_nanos,
+            &observation,
+            None,
+            CandidateMemoryResult::Tried,
+            None,
+            None,
+            None,
             Some(observation.now_unix_nanos + 1_000_000_000),
         );
         let mut dry_runner = CountingDryRunner::default();
@@ -1470,6 +1845,7 @@ mod tests {
             system_health: &observation.system_health,
             controller_state: &ControllerRuntimeState::default(),
             active_profile_state: None,
+            workload_policy: &WorkloadPolicyMatrix::default_rules(),
             profiles: &[],
         });
 
@@ -1513,6 +1889,7 @@ mod tests {
             system_health: &observation.system_health,
             controller_state: &ControllerRuntimeState::default(),
             active_profile_state: None,
+            workload_policy: &WorkloadPolicyMatrix::default_rules(),
             profiles: &[],
         });
 
@@ -1545,6 +1922,7 @@ mod tests {
             system_health: &observation.system_health,
             controller_state: &ControllerRuntimeState::default(),
             active_profile_state: None,
+            workload_policy: &WorkloadPolicyMatrix::default_rules(),
             profiles: &[],
         });
 
@@ -1582,6 +1960,7 @@ mod tests {
             system_health: &observation.system_health,
             controller_state: &controller_state,
             active_profile_state: None,
+            workload_policy: &WorkloadPolicyMatrix::default_rules(),
             profiles: &[],
         });
 
@@ -1622,6 +2001,7 @@ mod tests {
             system_health: &observation.system_health,
             controller_state: &ControllerRuntimeState::default(),
             active_profile_state: Some(&active_profile_state),
+            workload_policy: &WorkloadPolicyMatrix::default_rules(),
             profiles: &[],
         });
 
@@ -1652,6 +2032,7 @@ mod tests {
             system_health: &observation.system_health,
             controller_state: &ControllerRuntimeState::default(),
             active_profile_state: None,
+            workload_policy: &WorkloadPolicyMatrix::default_rules(),
             profiles: &[],
         });
 
@@ -1659,6 +2040,105 @@ mod tests {
             result.evaluations[0]
                 .deny_reasons
                 .contains(&CandidateDenyReason::WorkloadPolicyBlocked)
+        );
+    }
+
+    #[test]
+    fn planner_summary_groups_denials_and_manual_only_suggestions() {
+        let policy = policy(DaemonMode::ApplyLowRisk);
+        let mut registry = CandidateProviderRegistry::default();
+        registry.register(Box::new(StaticProvider {
+            candidate: irq_affinity_candidate("irq-manual"),
+        }));
+        let planner = CandidatePlanner::new(registry);
+        let mut observation = observation();
+        observation.primary_situation = SituationKind::IrqPressure;
+        observation.focus_kind = Some(FocusGroupKind::Game);
+        observation.capabilities.irq_affinity_available = true;
+        observation.refresh_situation_classification();
+
+        let result = planner.plan(PlannerInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            controller_state: &ControllerRuntimeState::default(),
+            active_profile_state: None,
+            workload_policy: &WorkloadPolicyMatrix::default_rules(),
+            profiles: &[],
+        });
+        let summary = result.summary();
+
+        assert_eq!(summary.total_proposals, 1);
+        assert_eq!(summary.eligible_proposals, 0);
+        assert!(
+            summary
+                .grouped_denials
+                .iter()
+                .any(|denial| denial.reason_code == "manual_only_high_risk")
+        );
+        assert_eq!(summary.manual_only_suggestions, vec!["irq-manual"]);
+        assert!(summary.no_action.is_some());
+    }
+
+    #[test]
+    fn workload_memory_cools_down_same_workload_without_blocking_other_workload() {
+        let policy = policy(DaemonMode::Suggest);
+        let candidate = nice_candidate();
+        let mut controller_state = ControllerRuntimeState::default();
+        let mut same_workload = observation();
+        same_workload.primary_situation = SituationKind::CompileCpuBound;
+        same_workload.focus_kind = Some(FocusGroupKind::Compile);
+        same_workload.refresh_situation_classification();
+        controller_state.record_candidate_result(
+            &candidate,
+            &same_workload,
+            None,
+            CandidateMemoryResult::Reverted,
+            Some(100),
+            Some(120),
+            Some("regressed".to_owned()),
+            Some(same_workload.now_unix_nanos + 10_000),
+        );
+
+        let mut dry_runner = CountingDryRunner::default();
+        let same_eval = evaluate_candidate_with_runner(
+            &policy,
+            &same_workload,
+            &same_workload.capabilities,
+            &controller_state,
+            candidate.clone(),
+            1.0,
+            &mut dry_runner,
+        );
+        assert!(
+            same_eval
+                .deny_reasons
+                .contains(&CandidateDenyReason::CooldownActive)
+        );
+
+        let mut other_workload = same_workload.clone();
+        other_workload
+            .workload_identity
+            .as_mut()
+            .unwrap()
+            .stable_hash = "different-workload".to_owned();
+        other_workload.workload_identity.as_mut().unwrap().exe_ino = Some(99);
+        let mut dry_runner = CountingDryRunner::default();
+        let other_eval = evaluate_candidate_with_runner(
+            &policy,
+            &other_workload,
+            &other_workload.capabilities,
+            &controller_state,
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert!(
+            !other_eval
+                .deny_reasons
+                .contains(&CandidateDenyReason::CooldownActive)
         );
     }
 
@@ -1816,6 +2296,7 @@ mod tests {
             system_health: &observation.system_health,
             controller_state: &ControllerRuntimeState::default(),
             active_profile_state: None,
+            workload_policy: &WorkloadPolicyMatrix::default_rules(),
             profiles: &[],
         });
 
@@ -1829,5 +2310,193 @@ mod tests {
                 .deny_reasons
                 .contains(&CandidateDenyReason::ObjectiveNotAllowedForWorkload)
         );
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct PlannerGoldenCase {
+        situation: String,
+        focus_kind: String,
+        mode: String,
+        candidate_action_kind: String,
+        expected_selected_action_kind: Option<String>,
+        #[serde(default)]
+        expected_denials: Vec<ExpectedDenial>,
+        #[serde(default)]
+        low_data_quality: bool,
+        #[serde(default)]
+        critical_realtime: bool,
+        #[serde(default)]
+        cooldown_active: bool,
+        #[serde(default)]
+        kept_conflict: bool,
+        #[serde(default)]
+        external_mutation: bool,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ExpectedDenial {
+        action_kind: String,
+        reason: String,
+    }
+
+    #[test]
+    fn planner_golden_cases() {
+        let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("testdata/autotune/planner");
+        let mut paths = std::fs::read_dir(&fixture_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+            .collect::<Vec<_>>();
+        paths.sort();
+
+        assert_eq!(paths.len(), 20);
+
+        for path in paths {
+            let text = std::fs::read_to_string(&path).unwrap();
+            let case: PlannerGoldenCase = serde_json::from_str(&text)
+                .unwrap_or_else(|err| panic!("failed to parse {}: {err}", path.display()));
+            run_planner_golden_case(&path, case);
+        }
+    }
+
+    fn run_planner_golden_case(path: &std::path::Path, case: PlannerGoldenCase) {
+        let mode = case.mode.parse::<DaemonMode>().unwrap();
+        let mut policy = policy(mode);
+        policy.cgroup_targets.compile_cgroup = Some(std::path::PathBuf::from(
+            "/user.slice/stutter-compile.slice",
+        ));
+        let candidate = candidate_for_action_kind(&case.candidate_action_kind);
+        let mut observation = observation_for_situation(
+            parse_fixture_situation(&case.situation),
+            parse_fixture_focus_kind(&case.focus_kind),
+        );
+        observation.capabilities.uclamp_available = true;
+        observation.capabilities.ionice_available = true;
+        observation.capabilities.cgroup_v2_available = true;
+        observation.capabilities.irq_affinity_available = true;
+        observation.capabilities.gpu_sysfs_available = true;
+        if case.low_data_quality {
+            observation.data_quality = OnlineDataQuality::Low {
+                reasons: vec!["fixture low data quality".to_owned()],
+            };
+        }
+        if case.critical_realtime {
+            observation
+                .focus_reasons
+                .push("critical realtime input process present".to_owned());
+        }
+        observation.refresh_situation_classification();
+
+        let mut controller_state = ControllerRuntimeState::default();
+        if case.cooldown_active {
+            controller_state.record_candidate_result(
+                &candidate,
+                &observation,
+                None,
+                CandidateMemoryResult::Reverted,
+                Some(100),
+                Some(120),
+                Some("fixture cooldown".to_owned()),
+                Some(observation.now_unix_nanos + 10_000),
+            );
+        }
+        if case.external_mutation {
+            controller_state.active_experiment = Some(ActiveExperiment {
+                experiment_id: ExperimentId::new("fixture-external-mutation"),
+                candidate: candidate.clone(),
+                baseline_score_total: 100,
+            });
+            observation.active_config_snapshot = Some(active_nice_snapshot(1234, 0));
+        }
+        let active_profile_state = case.kept_conflict.then(|| ActiveProfileState {
+            current: Some(KeptCandidateState::new(
+                ExperimentId::new("fixture-kept-conflict"),
+                candidate.clone(),
+                window_score(100),
+                window_score(90),
+                rollback_token(),
+                observation.now_unix_nanos,
+                "fixture kept conflict",
+            )),
+            history: Vec::new(),
+        });
+
+        let proposals = vec![proposal_for_candidate(candidate, 1.0)];
+        let mut dry_runner = CountingDryRunner::default();
+        let mut evaluations = evaluate_proposals_with_runner(
+            PlannerInput {
+                observation: &observation,
+                daemon_policy: &policy,
+                capabilities: &observation.capabilities,
+                system_health: &observation.system_health,
+                controller_state: &controller_state,
+                active_profile_state: active_profile_state.as_ref(),
+                workload_policy: &WorkloadPolicyMatrix::default_rules(),
+                profiles: &[],
+            },
+            proposals,
+            &mut dry_runner,
+        );
+        sort_candidate_evaluations(&mut evaluations);
+        let selected = evaluations
+            .iter()
+            .find(|evaluation| evaluation.eligible)
+            .map(|evaluation| evaluation.action_kind.clone());
+
+        assert_eq!(
+            selected,
+            case.expected_selected_action_kind,
+            "fixture {} selected action mismatch; evaluations={evaluations:#?}",
+            path.display()
+        );
+
+        for expected in case.expected_denials {
+            let expected_reason = CandidateDenyReason::from_reason_code(&expected.reason)
+                .unwrap_or_else(|| panic!("unknown expected reason {}", expected.reason));
+            assert!(
+                evaluations.iter().any(|evaluation| {
+                    evaluation.action_kind == expected.action_kind
+                        && evaluation.deny_reasons.contains(&expected_reason)
+                }),
+                "fixture {} missing denial {:?} for {}; evaluations={evaluations:#?}",
+                path.display(),
+                expected_reason,
+                expected.action_kind
+            );
+        }
+    }
+
+    impl CandidateDenyReason {
+        fn from_reason_code(value: &str) -> Option<Self> {
+            [
+                CandidateDenyReason::DataQualityLow,
+                CandidateDenyReason::CriticalRealtimeWarning,
+                CandidateDenyReason::CooldownActive,
+                CandidateDenyReason::ConflictWithKeptAction,
+                CandidateDenyReason::ExternalMutationDetected,
+            ]
+            .into_iter()
+            .find(|reason| reason.reason_code() == value)
+        }
+    }
+
+    fn parse_fixture_situation(value: &str) -> SituationKind {
+        crate::autotune::workload_policy::parse_situation_kind(value).unwrap()
+    }
+
+    fn parse_fixture_focus_kind(value: &str) -> FocusGroupKind {
+        match value {
+            "Game" => FocusGroupKind::Game,
+            "Desktop" => FocusGroupKind::Desktop,
+            "Browser" => FocusGroupKind::Browser,
+            "Compile" => FocusGroupKind::Compile,
+            "Recording" => FocusGroupKind::Recording,
+            "Media" => FocusGroupKind::Media,
+            "VirtualMachine" => FocusGroupKind::VirtualMachine,
+            other => panic!("unsupported focus kind {other}"),
+        }
     }
 }

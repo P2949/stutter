@@ -1,14 +1,12 @@
 use crate::{
-    actions::{
-        TaskIdentity,
-        uclamp::{UclampAction, UclampValues},
-    },
+    actions::uclamp::{UclampAction, UclampValues},
     autotune::{
         candidate::{CandidateAction, CandidateEvidence, UclampActionPlan},
         objective::ObjectiveKind,
         protection::mutation_allowed_for_pid,
         providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
         situation::SituationKind,
+        target_selection::{TaskTargetSelector, mutable_task_targets_for_observation},
     },
 };
 
@@ -51,19 +49,20 @@ impl CandidateProvider for UclampProvider {
             _ => return Vec::new(),
         };
 
-        let action = UclampAction {
-            targets: vec![TaskIdentity {
-                tid: root_pid,
-                process_pid: Some(root_pid),
-                comm: None,
-                starttime_ticks: input
-                    .observation
-                    .workload_identity
-                    .as_ref()
-                    .and_then(|identity| identity.process_starttime_ticks),
-            }],
-            values,
+        let selector = match input.observation.primary_situation {
+            SituationKind::GameCpuSchedulerPressure => TaskTargetSelector::GameRenderAndWorkers,
+            SituationKind::CompositorPressure => TaskTargetSelector::FullTargetTree,
+            SituationKind::CompileLoad | SituationKind::CompileCpuBound => {
+                TaskTargetSelector::CompilerAndLinker
+            }
+            _ => TaskTargetSelector::ForegroundRootOnly,
         };
+        let targets = mutable_task_targets_for_observation(input.observation, selector);
+        if targets.is_empty() {
+            return Vec::new();
+        }
+
+        let action = UclampAction { targets, values };
         let candidate = CandidateAction::Uclamp {
             plan: UclampActionPlan {
                 name: format!("uclamp-root-{root_pid}-{name_suffix}"),

@@ -116,7 +116,7 @@ impl IoPrioValue {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IoPrioPolicy {
     pub allow_ioprio_changes: bool,
     pub allow_realtime_class: bool,
@@ -139,7 +139,7 @@ impl Default for IoPrioPolicy {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IoPrioAction {
     pub targets: Vec<TaskIdentity>,
     pub ioprio: IoPrioValue,

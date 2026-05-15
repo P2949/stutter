@@ -1,0 +1,1 @@
+{"name":"compile_background_browser","profile":"apply-low-risk-fake","duration_seconds":90,"expect_actions":true,"expect_rollbacks":true,"forbid_high_risk_apply":true}

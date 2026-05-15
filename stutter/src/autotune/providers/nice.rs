@@ -1,14 +1,12 @@
 use crate::{
-    actions::{
-        TaskIdentity,
-        nice::{NiceAction, NicePolicy},
-    },
+    actions::nice::{NiceAction, NicePolicy},
     autotune::{
         candidate::{CandidateAction, CandidateEvidence, NiceActionPlan},
         objective::ObjectiveKind,
         protection::mutation_allowed_for_pid,
         providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
         situation::SituationKind,
+        target_selection::{TaskTargetSelector, mutable_task_targets_for_observation},
     },
 };
 
@@ -44,17 +42,22 @@ impl CandidateProvider for NiceProvider {
             _ => return Vec::new(),
         };
 
+        let selector = match input.observation.primary_situation {
+            SituationKind::CompileLoad
+            | SituationKind::CompileCpuBound
+            | SituationKind::CompileLinkerPressure => TaskTargetSelector::CompilerAndLinker,
+            SituationKind::BrowserCpuPressure | SituationKind::BrowserFocused => {
+                TaskTargetSelector::BrowserRenderersAndHelpers
+            }
+            _ => TaskTargetSelector::ForegroundRootOnly,
+        };
+        let targets = mutable_task_targets_for_observation(input.observation, selector);
+        if targets.is_empty() {
+            return Vec::new();
+        }
+
         let action = NiceAction {
-            targets: vec![TaskIdentity {
-                tid: root_pid,
-                process_pid: Some(root_pid),
-                comm: None,
-                starttime_ticks: input
-                    .observation
-                    .workload_identity
-                    .as_ref()
-                    .and_then(|identity| identity.process_starttime_ticks),
-            }],
+            targets,
             nice,
             policy: NicePolicy {
                 allow_nice_changes: true,

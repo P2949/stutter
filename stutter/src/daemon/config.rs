@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     actions::SafetyClass,
+    autotune::workload_policy::DaemonWorkloadPolicyConfig,
     daemon::{
         health::SystemHealthThresholds,
         policy::{ActionSource, DaemonMode},
@@ -443,6 +444,8 @@ pub struct DaemonAutotuneConfig {
     pub candidate_window_seconds: u64,
     pub washout_seconds: u64,
     pub rollback_on_crash_recovery: bool,
+    pub allow_medium_risk_apply: bool,
+    pub workload_policy: DaemonWorkloadPolicyConfig,
     pub confidence: DaemonCandidateConfidenceConfig,
 }
 
@@ -452,6 +455,8 @@ impl Default for DaemonAutotuneConfig {
             candidate_window_seconds: 30,
             washout_seconds: 10,
             rollback_on_crash_recovery: true,
+            allow_medium_risk_apply: false,
+            workload_policy: DaemonWorkloadPolicyConfig::default(),
             confidence: DaemonCandidateConfidenceConfig::default(),
         }
     }

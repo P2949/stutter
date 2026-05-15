@@ -1,5 +1,7 @@
 use std::{collections::BTreeSet, path::Path};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     actions::{
         ActionState, ActionWarning, SafetyClass, TuningAction, cgroup::CgroupPlacementAction,
@@ -20,9 +22,7 @@ use crate::{
 #[derive(Clone, Debug)]
 pub enum CandidateAction {
     CpuAffinityProfile {
-        profile_name: String,
-        profile: Profile,
-        tree_pid: u32,
+        plan: CpuAffinityProfilePlan,
     },
     Nice {
         plan: NiceActionPlan,
@@ -57,25 +57,18 @@ pub enum CandidateAction {
 impl CandidateAction {
     pub fn cpu_affinity_profile(profile: Profile, tree_pid: u32) -> Self {
         Self::CpuAffinityProfile {
-            profile_name: profile.name.clone(),
-            profile,
-            tree_pid,
+            plan: CpuAffinityProfilePlan {
+                profile_name: profile.name.clone(),
+                profile,
+                tree_pid,
+            },
         }
     }
 
     pub fn candidate_name(&self) -> &str {
-        match self {
-            Self::CpuAffinityProfile { profile_name, .. } => profile_name,
-            Self::Nice { plan } => &plan.name,
-            Self::IoPrio { plan } => &plan.name,
-            Self::Uclamp { plan } => &plan.name,
-            Self::CgroupPlacement { plan } => &plan.name,
-            Self::IrqAffinity { plan } => &plan.name,
-            Self::CpuPower { plan } => &plan.name,
-            Self::GpuPower { plan } => &plan.name,
-            Self::VmKnob { plan } => &plan.name,
-            Self::Fake { .. } => "fake-profile",
-        }
+        self.plan_metadata()
+            .map(CandidatePlan::candidate_name)
+            .unwrap_or("fake-profile")
     }
 
     pub fn profile_name(&self) -> &str {
@@ -83,18 +76,8 @@ impl CandidateAction {
     }
 
     pub fn target_root_pid(&self) -> Option<u32> {
-        match self {
-            Self::CpuAffinityProfile { tree_pid, .. } => Some(*tree_pid),
-            Self::Nice { plan } => plan.target_root_pid,
-            Self::IoPrio { plan } => plan.target_root_pid,
-            Self::Uclamp { plan } => plan.target_root_pid,
-            Self::CgroupPlacement { plan } => plan.target_root_pid,
-            Self::IrqAffinity { .. }
-            | Self::CpuPower { .. }
-            | Self::GpuPower { .. }
-            | Self::VmKnob { .. }
-            | Self::Fake { .. } => None,
-        }
+        self.plan_metadata()
+            .and_then(CandidatePlan::target_root_pid)
     }
 
     pub fn tree_pid(&self) -> u32 {
@@ -102,56 +85,27 @@ impl CandidateAction {
     }
 
     pub fn action_kind(&self) -> &'static str {
-        match self {
-            Self::CpuAffinityProfile { .. } => "cpu_affinity_profile",
-            Self::Nice { .. } => "nice",
-            Self::IoPrio { .. } => "ionice",
-            Self::Uclamp { .. } => "uclamp",
-            Self::CgroupPlacement { .. } => "cgroup_placement",
-            Self::IrqAffinity { .. } => "irq_affinity",
-            Self::CpuPower { .. } => "cpu_power",
-            Self::GpuPower { .. } => "gpu_power",
-            Self::VmKnob { .. } => "vm_knob",
-            Self::Fake { .. } => "fake",
-        }
+        self.plan_metadata()
+            .map(CandidatePlan::action_kind)
+            .unwrap_or("fake")
     }
 
     pub fn safety_class(&self) -> crate::actions::SafetyClass {
-        match self {
-            Self::CpuAffinityProfile { profile, .. } => {
-                if crate::profiles::profile_uses_priority_actions(profile) {
-                    crate::actions::SafetyClass::ReversibleMediumRisk
-                } else {
-                    crate::actions::SafetyClass::ReversibleLowRisk
-                }
-            }
-            Self::Nice { plan } => plan.action.safety_class(),
-            Self::IoPrio { plan } => plan.action.safety_class(),
-            Self::Uclamp { plan } => plan.action.safety_class(),
-            Self::CgroupPlacement { plan } => plan.action.safety_class(),
-            Self::IrqAffinity { plan } => plan.action.safety_class(),
-            Self::CpuPower { plan } => plan.action.safety_class(),
-            Self::GpuPower { plan } => plan.action.safety_class(),
-            Self::VmKnob { plan } => plan.action.safety_class(),
-            Self::Fake { safety_class, .. } => safety_class.clone(),
-        }
+        self.plan_metadata()
+            .map(CandidatePlan::safety_class)
+            .unwrap_or_else(|| match self {
+                Self::Fake { safety_class, .. } => safety_class.clone(),
+                _ => SafetyClass::ObserveOnly,
+            })
     }
 
     pub fn action_id(&self) -> crate::actions::ActionId {
-        match self {
-            Self::CpuAffinityProfile { profile_name, .. } => {
-                crate::actions::ActionId(format!("cpu-affinity-profile:{}", profile_name))
-            }
-            Self::Nice { plan } => plan.action.id(),
-            Self::IoPrio { plan } => plan.action.id(),
-            Self::Uclamp { plan } => plan.action.id(),
-            Self::CgroupPlacement { plan } => plan.action.id(),
-            Self::IrqAffinity { plan } => plan.action.id(),
-            Self::CpuPower { plan } => plan.action.id(),
-            Self::GpuPower { plan } => plan.action.id(),
-            Self::VmKnob { plan } => plan.action.id(),
-            Self::Fake { action_id, .. } => action_id.clone(),
-        }
+        self.plan_metadata()
+            .map(CandidatePlan::action_id)
+            .unwrap_or_else(|| match self {
+                Self::Fake { action_id, .. } => action_id.clone(),
+                _ => crate::actions::ActionId("unknown".to_owned()),
+            })
     }
 
     pub fn descriptor(&self) -> ActionDescriptor {
@@ -177,32 +131,15 @@ impl CandidateAction {
     }
 
     pub fn effect_scope(&self) -> ActionEffectScope {
-        match self {
-            Self::CpuAffinityProfile { .. } => ActionEffectScope::LocalProcessTree,
-            Self::Nice { .. } | Self::IoPrio { .. } | Self::Uclamp { .. } => {
-                ActionEffectScope::LocalProcessTree
-            }
-            Self::CgroupPlacement { .. } => ActionEffectScope::Cgroup,
-            Self::IrqAffinity { .. } => ActionEffectScope::Irq,
-            Self::CpuPower { .. } => ActionEffectScope::CpuPower,
-            Self::GpuPower { .. } => ActionEffectScope::GpuPower,
-            Self::VmKnob { .. } => ActionEffectScope::VmKnob,
-            Self::Fake { .. } => ActionEffectScope::ObserveOnly,
-        }
+        self.plan_metadata()
+            .map(CandidatePlan::effect_scope)
+            .unwrap_or(ActionEffectScope::ObserveOnly)
     }
 
     pub fn evidence(&self) -> &[CandidateEvidence] {
-        match self {
-            Self::CpuAffinityProfile { .. } | Self::Fake { .. } => &[],
-            Self::Nice { plan } => &plan.evidence,
-            Self::IoPrio { plan } => &plan.evidence,
-            Self::Uclamp { plan } => &plan.evidence,
-            Self::CgroupPlacement { plan } => &plan.evidence,
-            Self::IrqAffinity { plan } => &plan.evidence,
-            Self::CpuPower { plan } => &plan.evidence,
-            Self::GpuPower { plan } => &plan.evidence,
-            Self::VmKnob { plan } => &plan.evidence,
-        }
+        self.plan_metadata()
+            .map(CandidatePlan::evidence)
+            .unwrap_or(&[])
     }
 
     pub fn cooldown_key(&self) -> String {
@@ -210,17 +147,9 @@ impl CandidateAction {
     }
 
     pub fn conflict_group(&self) -> ActionConflictGroup {
-        match self {
-            Self::CpuAffinityProfile { .. } => ActionConflictGroup::CpuPlacement,
-            Self::Nice { .. } | Self::Uclamp { .. } => ActionConflictGroup::CpuPriority,
-            Self::IoPrio { .. } => ActionConflictGroup::IoPriority,
-            Self::CgroupPlacement { .. } => ActionConflictGroup::CgroupPlacement,
-            Self::IrqAffinity { .. } => ActionConflictGroup::IrqPlacement,
-            Self::CpuPower { .. } => ActionConflictGroup::CpuPower,
-            Self::GpuPower { .. } => ActionConflictGroup::GpuPower,
-            Self::VmKnob { .. } => ActionConflictGroup::VmMemory,
-            Self::Fake { .. } => ActionConflictGroup::None,
-        }
+        self.plan_metadata()
+            .map(CandidatePlan::conflict_group)
+            .unwrap_or(ActionConflictGroup::None)
     }
 
     pub fn conflicts_with(&self, other: &CandidateAction) -> bool {
@@ -235,49 +164,115 @@ impl CandidateAction {
     }
 
     pub fn objective(&self) -> ObjectiveKind {
-        match self {
-            Self::CpuAffinityProfile { .. } | Self::Fake { .. } => ObjectiveKind::StutterScore,
-            Self::Nice { plan } => plan.objective,
-            Self::IoPrio { plan } => plan.objective,
-            Self::Uclamp { plan } => plan.objective,
-            Self::CgroupPlacement { plan } => plan.objective,
-            Self::IrqAffinity { plan } => plan.objective,
-            Self::CpuPower { plan } => plan.objective,
-            Self::GpuPower { plan } => plan.objective,
-            Self::VmKnob { plan } => plan.objective,
-        }
+        self.plan_metadata()
+            .map(CandidatePlan::objective)
+            .unwrap_or(ObjectiveKind::StutterScore)
     }
 
     pub fn describe(&self) -> String {
+        self.plan_metadata()
+            .map(CandidatePlan::describe)
+            .unwrap_or_else(|| match self {
+                Self::Fake { action_id, .. } => format!("fake action {}", action_id.0),
+                _ => "unknown candidate".to_owned(),
+            })
+    }
+
+    fn plan_metadata(&self) -> Option<&dyn CandidatePlan> {
         match self {
-            Self::CpuAffinityProfile {
-                profile_name,
-                tree_pid,
-                ..
-            } => {
-                format!(
-                    "apply CPU affinity profile '{}' to process tree {}",
-                    profile_name, tree_pid
-                )
-            }
-            Self::Nice { plan } => plan.action.describe(),
-            Self::IoPrio { plan } => plan.action.describe(),
-            Self::Uclamp { plan } => plan.action.describe(),
-            Self::CgroupPlacement { plan } => plan.action.describe(),
-            Self::IrqAffinity { plan } => plan.action.describe(),
-            Self::CpuPower { plan } => plan.action.describe(),
-            Self::GpuPower { plan } => plan.action.describe(),
-            Self::VmKnob { plan } => plan.action.describe(),
-            Self::Fake { action_id, .. } => format!("fake action {}", action_id.0),
+            Self::CpuAffinityProfile { plan } => Some(plan),
+            Self::Nice { plan } => Some(plan),
+            Self::IoPrio { plan } => Some(plan),
+            Self::Uclamp { plan } => Some(plan),
+            Self::CgroupPlacement { plan } => Some(plan),
+            Self::IrqAffinity { plan } => Some(plan),
+            Self::CpuPower { plan } => Some(plan),
+            Self::GpuPower { plan } => Some(plan),
+            Self::VmKnob { plan } => Some(plan),
+            Self::Fake { .. } => None,
         }
+    }
+
+    pub fn is_high_risk_system_adjacent(&self) -> bool {
+        matches!(
+            self,
+            Self::IrqAffinity { .. }
+                | Self::CpuPower { .. }
+                | Self::GpuPower { .. }
+                | Self::VmKnob { .. }
+        ) || self.descriptor().touches_system_wide_state
+            || self.safety_class() == SafetyClass::HighRisk
+    }
+
+    pub fn manual_only_reason(&self) -> Option<String> {
+        self.is_high_risk_system_adjacent().then(|| {
+            format!(
+                "manual-only high-risk/system-adjacent candidate; autonomous apply is disabled for action_kind={}",
+                self.action_kind()
+            )
+        })
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CandidateEvidence {
     pub signal: String,
     pub value: String,
     pub weight: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CandidatePlanFile {
+    pub schema_version: u32,
+    pub candidate: CandidatePlanSummary,
+    pub descriptor: ActionDescriptor,
+    pub objective: ObjectiveKind,
+    pub evidence: Vec<CandidateEvidence>,
+    pub executable: Option<CandidateExecutablePlan>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CandidatePlanSummary {
+    pub candidate_name: String,
+    pub action_kind: String,
+    pub affected_tasks: Option<usize>,
+    pub reason: Option<String>,
+}
+
+impl CandidatePlanFile {
+    pub const SCHEMA_VERSION: u32 = 1;
+
+    pub fn from_suggestion(suggestion: &CandidateSuggestion) -> Self {
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            candidate: CandidatePlanSummary {
+                candidate_name: suggestion.candidate_name.clone(),
+                action_kind: suggestion.action_kind.clone(),
+                affected_tasks: Some(suggestion.affected_tasks),
+                reason: Some(suggestion.reason.clone()),
+            },
+            descriptor: suggestion.descriptor.clone(),
+            objective: suggestion.objective,
+            evidence: suggestion.evidence.clone(),
+            executable: None,
+        }
+    }
+
+    pub fn from_candidate(candidate: &CandidateAction, affected_tasks: Option<usize>) -> Self {
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            candidate: CandidatePlanSummary {
+                candidate_name: candidate.candidate_name().to_owned(),
+                action_kind: candidate.action_kind().to_owned(),
+                affected_tasks,
+                reason: Some(candidate.describe()),
+            },
+            descriptor: candidate.descriptor(),
+            objective: candidate.objective(),
+            evidence: candidate.evidence().to_vec(),
+            executable: CandidateExecutablePlan::from_candidate(candidate),
+        }
+    }
 }
 
 impl CandidateEvidence {
@@ -290,7 +285,64 @@ impl CandidateEvidence {
     }
 }
 
+pub trait CandidatePlan {
+    fn candidate_name(&self) -> &str;
+    fn action_kind(&self) -> &'static str;
+    fn target_root_pid(&self) -> Option<u32>;
+    fn action_id(&self) -> crate::actions::ActionId;
+    fn safety_class(&self) -> SafetyClass;
+    fn effect_scope(&self) -> ActionEffectScope;
+    fn evidence(&self) -> &[CandidateEvidence];
+    fn objective(&self) -> ObjectiveKind;
+    fn conflict_group(&self) -> ActionConflictGroup;
+    fn describe(&self) -> String;
+}
+
 #[derive(Clone, Debug)]
+pub struct CpuAffinityProfilePlan {
+    pub profile_name: String,
+    pub profile: Profile,
+    pub tree_pid: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CandidateExecutablePlan {
+    Nice { plan: NiceActionPlan },
+    IoPrio { plan: IoPrioActionPlan },
+    Uclamp { plan: UclampActionPlan },
+    CgroupPlacement { plan: CgroupPlacementActionPlan },
+}
+
+impl CandidateExecutablePlan {
+    pub fn from_candidate(candidate: &CandidateAction) -> Option<Self> {
+        match candidate {
+            CandidateAction::Nice { plan } => Some(Self::Nice { plan: plan.clone() }),
+            CandidateAction::IoPrio { plan } => Some(Self::IoPrio { plan: plan.clone() }),
+            CandidateAction::Uclamp { plan } => Some(Self::Uclamp { plan: plan.clone() }),
+            CandidateAction::CgroupPlacement { plan } => {
+                Some(Self::CgroupPlacement { plan: plan.clone() })
+            }
+            CandidateAction::CpuAffinityProfile { .. }
+            | CandidateAction::IrqAffinity { .. }
+            | CandidateAction::CpuPower { .. }
+            | CandidateAction::GpuPower { .. }
+            | CandidateAction::VmKnob { .. }
+            | CandidateAction::Fake { .. } => None,
+        }
+    }
+
+    pub fn into_candidate(self) -> CandidateAction {
+        match self {
+            Self::Nice { plan } => CandidateAction::Nice { plan },
+            Self::IoPrio { plan } => CandidateAction::IoPrio { plan },
+            Self::Uclamp { plan } => CandidateAction::Uclamp { plan },
+            Self::CgroupPlacement { plan } => CandidateAction::CgroupPlacement { plan },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NiceActionPlan {
     pub name: String,
     pub action: NiceAction,
@@ -299,7 +351,7 @@ pub struct NiceActionPlan {
     pub objective: ObjectiveKind,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IoPrioActionPlan {
     pub name: String,
     pub action: IoPrioAction,
@@ -308,7 +360,7 @@ pub struct IoPrioActionPlan {
     pub objective: ObjectiveKind,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UclampActionPlan {
     pub name: String,
     pub action: UclampAction,
@@ -317,7 +369,7 @@ pub struct UclampActionPlan {
     pub objective: ObjectiveKind,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CgroupPlacementActionPlan {
     pub name: String,
     pub action: CgroupPlacementAction,
@@ -357,6 +409,294 @@ pub struct VmKnobActionPlan {
     pub evidence: Vec<CandidateEvidence>,
     pub objective: ObjectiveKind,
 }
+
+impl CandidatePlan for CpuAffinityProfilePlan {
+    fn candidate_name(&self) -> &str {
+        &self.profile_name
+    }
+
+    fn action_kind(&self) -> &'static str {
+        "cpu_affinity_profile"
+    }
+
+    fn target_root_pid(&self) -> Option<u32> {
+        Some(self.tree_pid)
+    }
+
+    fn action_id(&self) -> crate::actions::ActionId {
+        crate::actions::ActionId(format!("cpu-affinity-profile:{}", self.profile_name))
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        if crate::profiles::profile_uses_priority_actions(&self.profile) {
+            SafetyClass::ReversibleMediumRisk
+        } else {
+            SafetyClass::ReversibleLowRisk
+        }
+    }
+
+    fn effect_scope(&self) -> ActionEffectScope {
+        ActionEffectScope::LocalProcessTree
+    }
+
+    fn evidence(&self) -> &[CandidateEvidence] {
+        &[]
+    }
+
+    fn objective(&self) -> ObjectiveKind {
+        ObjectiveKind::StutterScore
+    }
+
+    fn conflict_group(&self) -> ActionConflictGroup {
+        ActionConflictGroup::CpuPlacement
+    }
+
+    fn describe(&self) -> String {
+        format!(
+            "apply CPU affinity profile '{}' to process tree {}",
+            self.profile_name, self.tree_pid
+        )
+    }
+}
+
+impl CandidatePlan for NiceActionPlan {
+    fn candidate_name(&self) -> &str {
+        &self.name
+    }
+
+    fn action_kind(&self) -> &'static str {
+        "nice"
+    }
+
+    fn target_root_pid(&self) -> Option<u32> {
+        self.target_root_pid
+    }
+
+    fn action_id(&self) -> crate::actions::ActionId {
+        self.action.id()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.action.safety_class()
+    }
+
+    fn effect_scope(&self) -> ActionEffectScope {
+        ActionEffectScope::LocalProcessTree
+    }
+
+    fn evidence(&self) -> &[CandidateEvidence] {
+        &self.evidence
+    }
+
+    fn objective(&self) -> ObjectiveKind {
+        self.objective
+    }
+
+    fn conflict_group(&self) -> ActionConflictGroup {
+        ActionConflictGroup::CpuPriority
+    }
+
+    fn describe(&self) -> String {
+        self.action.describe()
+    }
+}
+
+impl CandidatePlan for IoPrioActionPlan {
+    fn candidate_name(&self) -> &str {
+        &self.name
+    }
+
+    fn action_kind(&self) -> &'static str {
+        "ionice"
+    }
+
+    fn target_root_pid(&self) -> Option<u32> {
+        self.target_root_pid
+    }
+
+    fn action_id(&self) -> crate::actions::ActionId {
+        self.action.id()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.action.safety_class()
+    }
+
+    fn effect_scope(&self) -> ActionEffectScope {
+        ActionEffectScope::LocalProcessTree
+    }
+
+    fn evidence(&self) -> &[CandidateEvidence] {
+        &self.evidence
+    }
+
+    fn objective(&self) -> ObjectiveKind {
+        self.objective
+    }
+
+    fn conflict_group(&self) -> ActionConflictGroup {
+        ActionConflictGroup::IoPriority
+    }
+
+    fn describe(&self) -> String {
+        self.action.describe()
+    }
+}
+
+impl CandidatePlan for UclampActionPlan {
+    fn candidate_name(&self) -> &str {
+        &self.name
+    }
+
+    fn action_kind(&self) -> &'static str {
+        "uclamp"
+    }
+
+    fn target_root_pid(&self) -> Option<u32> {
+        self.target_root_pid
+    }
+
+    fn action_id(&self) -> crate::actions::ActionId {
+        self.action.id()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.action.safety_class()
+    }
+
+    fn effect_scope(&self) -> ActionEffectScope {
+        ActionEffectScope::LocalProcessTree
+    }
+
+    fn evidence(&self) -> &[CandidateEvidence] {
+        &self.evidence
+    }
+
+    fn objective(&self) -> ObjectiveKind {
+        self.objective
+    }
+
+    fn conflict_group(&self) -> ActionConflictGroup {
+        ActionConflictGroup::CpuPriority
+    }
+
+    fn describe(&self) -> String {
+        self.action.describe()
+    }
+}
+
+impl CandidatePlan for CgroupPlacementActionPlan {
+    fn candidate_name(&self) -> &str {
+        &self.name
+    }
+
+    fn action_kind(&self) -> &'static str {
+        "cgroup_placement"
+    }
+
+    fn target_root_pid(&self) -> Option<u32> {
+        self.target_root_pid
+    }
+
+    fn action_id(&self) -> crate::actions::ActionId {
+        self.action.id()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.action.safety_class()
+    }
+
+    fn effect_scope(&self) -> ActionEffectScope {
+        ActionEffectScope::Cgroup
+    }
+
+    fn evidence(&self) -> &[CandidateEvidence] {
+        &self.evidence
+    }
+
+    fn objective(&self) -> ObjectiveKind {
+        self.objective
+    }
+
+    fn conflict_group(&self) -> ActionConflictGroup {
+        ActionConflictGroup::CgroupPlacement
+    }
+
+    fn describe(&self) -> String {
+        self.action.describe()
+    }
+}
+
+macro_rules! impl_system_candidate_plan {
+    ($ty:ty, $kind:literal, $scope:expr, $conflict:expr) => {
+        impl CandidatePlan for $ty {
+            fn candidate_name(&self) -> &str {
+                &self.name
+            }
+
+            fn action_kind(&self) -> &'static str {
+                $kind
+            }
+
+            fn target_root_pid(&self) -> Option<u32> {
+                None
+            }
+
+            fn action_id(&self) -> crate::actions::ActionId {
+                self.action.id()
+            }
+
+            fn safety_class(&self) -> SafetyClass {
+                self.action.safety_class()
+            }
+
+            fn effect_scope(&self) -> ActionEffectScope {
+                $scope
+            }
+
+            fn evidence(&self) -> &[CandidateEvidence] {
+                &self.evidence
+            }
+
+            fn objective(&self) -> ObjectiveKind {
+                self.objective
+            }
+
+            fn conflict_group(&self) -> ActionConflictGroup {
+                $conflict
+            }
+
+            fn describe(&self) -> String {
+                self.action.describe()
+            }
+        }
+    };
+}
+
+impl_system_candidate_plan!(
+    IrqAffinityActionPlan,
+    "irq_affinity",
+    ActionEffectScope::Irq,
+    ActionConflictGroup::IrqPlacement
+);
+impl_system_candidate_plan!(
+    CpuPowerActionPlan,
+    "cpu_power",
+    ActionEffectScope::CpuPower,
+    ActionConflictGroup::CpuPower
+);
+impl_system_candidate_plan!(
+    GpuPowerActionPlan,
+    "gpu_power",
+    ActionEffectScope::GpuPower,
+    ActionConflictGroup::GpuPower
+);
+impl_system_candidate_plan!(
+    VmKnobActionPlan,
+    "vm_knob",
+    ActionEffectScope::VmKnob,
+    ActionConflictGroup::VmMemory
+);
 
 #[derive(Clone, Debug)]
 pub struct GeneratedProfileCandidatePlan {
@@ -416,17 +756,66 @@ pub struct CandidateDryRunRecord {
     pub reason: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct CandidateSuggestion {
-    pub candidate: String,
-    pub action: String,
+    pub candidate_name: String,
+    pub action_kind: String,
+    pub descriptor: ActionDescriptor,
+    pub objective: ObjectiveKind,
+    pub evidence: Vec<CandidateEvidence>,
     pub affected_tasks: usize,
     pub safety: SafetyClass,
     pub reason: String,
-    pub dry_run_command: String,
+    pub dry_run_command: Option<String>,
     pub manual_apply_command: Option<String>,
     pub required_mode: DaemonMode,
     pub required_safety_class: SafetyClass,
+    pub manual_only_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CandidateManualCommands {
+    pub dry_run_command: Option<String>,
+    pub manual_apply_command: Option<String>,
+    pub required_mode: DaemonMode,
+    pub required_safety_class: SafetyClass,
+    pub manual_only_reason: Option<String>,
+}
+
+impl CandidateAction {
+    pub fn manual_commands(
+        &self,
+        plan_path: &Path,
+        policy: &DaemonPolicy,
+    ) -> CandidateManualCommands {
+        let required_mode = required_mode_for_safety_class(&self.safety_class());
+        let descriptor = self.descriptor();
+        let manual_only_reason = self.manual_only_reason();
+        let dry_run_command = Some(format!(
+            "stutter autotune apply-candidate --candidate-json {} --dry-run",
+            plan_path.display()
+        ));
+        let manual_apply_command = if manual_only_reason.is_none()
+            && policy
+                .check_action(PolicyIntent::Apply, &descriptor)
+                .is_ok()
+        {
+            Some(format!(
+                "stutter autotune apply-candidate --candidate-json {}",
+                plan_path.display()
+            ))
+        } else {
+            None
+        };
+
+        CandidateManualCommands {
+            dry_run_command,
+            manual_apply_command,
+            required_mode,
+            required_safety_class: self.safety_class(),
+            manual_only_reason,
+        }
+    }
 }
 
 pub fn suggestion_from_dry_run_record(
@@ -449,13 +838,21 @@ pub fn suggestion_from_dry_run_record(
         .unwrap_or_else(|| "<generated-or-existing-profile>".to_owned());
     let required_mode = required_mode_for_safety_class(&record.safety_class);
     let descriptor = suggestion_action_descriptor(record, required_mode);
-    let dry_run_command = apply_profile_command(tree_pid, &profile_arg, true, false);
-    let manual_apply_command =
-        manual_apply_command_if_policy_allows(tree_pid, &profile_arg, required_mode, &descriptor);
+    let manual_only_reason = (required_mode == DaemonMode::ApplyHighRisk)
+        .then(|| "high-risk apply is not implemented; manual investigation only".to_owned());
+    let dry_run_command = Some(apply_profile_command(tree_pid, &profile_arg, true, false));
+    let manual_apply_command = if manual_only_reason.is_some() {
+        None
+    } else {
+        manual_apply_command_if_policy_allows(tree_pid, &profile_arg, required_mode, &descriptor)
+    };
 
     Some(CandidateSuggestion {
-        candidate: record.candidate_name.clone(),
-        action: "cpu-affinity-profile".to_owned(),
+        candidate_name: record.candidate_name.clone(),
+        action_kind: "cpu_affinity_profile".to_owned(),
+        descriptor,
+        objective: ObjectiveKind::StutterScore,
+        evidence: Vec::new(),
         affected_tasks: record.affected_tasks,
         safety: record.safety_class.clone(),
         reason: reason.into(),
@@ -463,6 +860,7 @@ pub fn suggestion_from_dry_run_record(
         manual_apply_command,
         required_mode,
         required_safety_class: record.safety_class.clone(),
+        manual_only_reason,
     })
 }
 
@@ -562,16 +960,20 @@ pub fn suggestions_from_dry_run_records(
 
 pub fn render_candidate_suggestion(suggestion: &CandidateSuggestion) -> String {
     format!(
-        "autotune suggestion:\n  candidate={}\n  action={}\n  affected_tasks={}\n  safety={:?}\n  reason=\"{}\"\n  note=\"suggest mode did not apply this change\"\n  required_mode={}\n  required_safety_class={:?}\n  rollback=\"stutter restore\"\n  dry_run_command=\"{}\"\n  manual_apply_command={}",
-        shell_safe_value(&suggestion.candidate),
-        shell_safe_value(&suggestion.action),
+        "autotune suggestion:\n  candidate={}\n  action={}\n  action_kind={}\n  action_id={}\n  objective={:?}\n  affected_tasks={}\n  safety={:?}\n  reason=\"{}\"\n  note=\"suggest mode did not apply this change\"\n  required_mode={}\n  required_safety_class={:?}\n  rollback=\"stutter restore\"\n  dry_run_command={}\n  manual_apply_command={}\n  manual_only_reason={}",
+        shell_safe_value(&suggestion.candidate_name),
+        shell_safe_value(&suggestion.action_kind.replace('_', "-")),
+        shell_safe_value(&suggestion.action_kind),
+        shell_safe_value(&suggestion.descriptor.action_id.0),
+        suggestion.objective,
         suggestion.affected_tasks,
         suggestion.safety,
         escape_quoted_value(&suggestion.reason),
         suggestion.required_mode,
         suggestion.required_safety_class,
-        escape_quoted_value(&suggestion.dry_run_command),
-        render_optional_command(&suggestion.manual_apply_command)
+        render_optional_command(&suggestion.dry_run_command),
+        render_optional_command(&suggestion.manual_apply_command),
+        render_optional_command(&suggestion.manual_only_reason)
     )
 }
 
@@ -587,6 +989,99 @@ pub fn print_candidate_suggestions(suggestions: &[CandidateSuggestion]) {
     for suggestion in suggestions {
         println!("{}", render_candidate_suggestion(suggestion));
     }
+}
+
+pub fn apply_candidate_plan_file(path: &Path, dry_run: bool) -> anyhow::Result<CandidatePlanFile> {
+    let bytes = std::fs::read(path)?;
+    let plan: CandidatePlanFile = serde_json::from_slice(&bytes)?;
+
+    if plan.schema_version != CandidatePlanFile::SCHEMA_VERSION {
+        anyhow::bail!(
+            "unsupported_candidate_plan_schema: got {} expected {}",
+            plan.schema_version,
+            CandidatePlanFile::SCHEMA_VERSION
+        );
+    }
+
+    if plan.descriptor.safety_class == SafetyClass::HighRisk
+        || plan.descriptor.touches_system_wide_state
+    {
+        anyhow::bail!(
+            "manual_only_high_risk: candidate '{}' action_kind={} cannot be applied by this command",
+            plan.candidate.candidate_name,
+            plan.candidate.action_kind
+        );
+    }
+
+    if dry_run {
+        if let Some(executable) = plan.executable.clone() {
+            let candidate = executable.into_candidate();
+            let record = dry_run_candidate(&candidate);
+            if !record.eligible {
+                anyhow::bail!(
+                    "candidate_plan_dry_run_failed: candidate '{}' action_kind={} reason={}",
+                    plan.candidate.candidate_name,
+                    plan.candidate.action_kind,
+                    record
+                        .reason
+                        .as_deref()
+                        .unwrap_or("dry-run did not produce an eligible candidate")
+                );
+            }
+        }
+        return Ok(plan);
+    }
+
+    let Some(executable) = plan.executable.clone() else {
+        anyhow::bail!(
+            "candidate_plan_payload_not_executable: candidate '{}' action_kind={} requires an executable candidate payload",
+            plan.candidate.candidate_name,
+            plan.candidate.action_kind
+        );
+    };
+
+    let candidate = executable.into_candidate();
+    if candidate.descriptor().action_id != plan.descriptor.action_id
+        || candidate.action_kind() != plan.descriptor.action_kind
+    {
+        anyhow::bail!(
+            "candidate_plan_descriptor_mismatch: candidate '{}' executable payload does not match descriptor",
+            plan.candidate.candidate_name
+        );
+    }
+
+    let policy = match plan.descriptor.safety_class {
+        SafetyClass::ObserveOnly | SafetyClass::ReversibleLowRisk => {
+            DaemonPolicy::apply_low_risk(ActionSource::Cli)
+        }
+        SafetyClass::ReversibleMediumRisk => DaemonPolicy::apply_medium_risk(ActionSource::Cli),
+        SafetyClass::HighRisk => {
+            anyhow::bail!(
+                "manual_only_high_risk: candidate '{}' action_kind={} cannot be applied by this command",
+                plan.candidate.candidate_name,
+                plan.candidate.action_kind
+            );
+        }
+    };
+    policy.check_action(PolicyIntent::Apply, &plan.descriptor)?;
+
+    let executor = crate::autotune::apply::executor_for_candidate(candidate)?;
+    let result = executor.apply_with_audit(crate::actions::runner::ActionRunPolicy {
+        policy,
+        context: crate::daemon_policy::DaemonPolicyContext::default(),
+        max_affected_tasks: None,
+        max_total_duration: None,
+        dry_run: false,
+    })?;
+    if result.rollback.is_none() {
+        anyhow::bail!(
+            "candidate_plan_apply_missing_rollback: candidate '{}' action_kind={} applied without rollback token",
+            plan.candidate.candidate_name,
+            plan.candidate.action_kind
+        );
+    }
+
+    Ok(plan)
 }
 
 fn render_optional_command(command: &Option<String>) -> String {
@@ -678,24 +1173,20 @@ pub fn dry_run_record_from_action_state(
 
 pub fn dry_run_candidate(candidate: &CandidateAction) -> CandidateDryRunRecord {
     match candidate {
-        CandidateAction::CpuAffinityProfile {
-            profile_name,
-            profile,
-            tree_pid,
-        } => {
+        CandidateAction::CpuAffinityProfile { plan } => {
             let action = CpuAffinityProfileAction {
-                tree_pid: *tree_pid,
-                profile: profile.clone(),
+                tree_pid: plan.tree_pid,
+                profile: plan.profile.clone(),
                 force_restore_overwrite: false,
             };
             let safety_class = action.safety_class();
 
             match action.dry_run() {
                 Ok(state) => {
-                    dry_run_record_from_action_state(profile_name.clone(), safety_class, state)
+                    dry_run_record_from_action_state(plan.profile_name.clone(), safety_class, state)
                 }
                 Err(err) => CandidateDryRunRecord {
-                    candidate_name: profile_name.clone(),
+                    candidate_name: plan.profile_name.clone(),
                     affected_tasks: 0,
                     warnings: Vec::new(),
                     safety_class,
@@ -1549,6 +2040,10 @@ mod tests {
 
     use super::*;
     use crate::{
+        actions::{
+            TaskIdentity,
+            nice::{NiceAction, NicePolicy},
+        },
         affinity::CpuMask,
         process_tree::TaskClass,
         profiles::ProfileRule,
@@ -2204,6 +2699,37 @@ mod tests {
     }
 
     #[test]
+    fn candidate_plan_file_can_embed_executable_process_local_payload() {
+        let candidate = CandidateAction::Nice {
+            plan: NiceActionPlan {
+                name: "nice-browser-helper".to_owned(),
+                action: NiceAction {
+                    targets: vec![TaskIdentity {
+                        tid: 1234,
+                        process_pid: Some(1234),
+                        comm: Some("browser".to_owned()),
+                        starttime_ticks: Some(77),
+                    }],
+                    nice: 5,
+                    policy: NicePolicy::default(),
+                },
+                target_root_pid: Some(1234),
+                evidence: vec![CandidateEvidence::new("cpu_pressure", "high", 0.9)],
+                objective: ObjectiveKind::DesktopInteractivity,
+            },
+        };
+
+        let plan = CandidatePlanFile::from_candidate(&candidate, Some(1));
+        let json = serde_json::to_string(&plan).unwrap();
+        let decoded: CandidatePlanFile = serde_json::from_str(&json).unwrap();
+
+        assert!(decoded.executable.is_some());
+        let decoded_candidate = decoded.executable.unwrap().into_candidate();
+        assert_eq!(decoded_candidate.action_kind(), "nice");
+        assert_eq!(decoded_candidate.candidate_name(), "nice-browser-helper");
+    }
+
+    #[test]
     fn suggestion_from_dry_run_record_uses_existing_profile_path_when_available() {
         let record = CandidateDryRunRecord {
             candidate_name: "game-main-suggested".to_owned(),
@@ -2224,8 +2750,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            suggestion.dry_run_command,
-            "stutter apply-profile --tree-pid 1234 --profile /tmp/profiles.toml --dry-run"
+            suggestion.dry_run_command.as_deref(),
+            Some("stutter apply-profile --tree-pid 1234 --profile /tmp/profiles.toml --dry-run")
         );
         assert_eq!(
             suggestion.manual_apply_command.as_deref(),
@@ -2258,20 +2784,37 @@ mod tests {
     #[test]
     fn render_candidate_suggestion_escapes_reason_and_commands() {
         let suggestion = CandidateSuggestion {
-            candidate: "candidate with space".to_owned(),
-            action: "cpu-affinity-profile".to_owned(),
+            candidate_name: "candidate with space".to_owned(),
+            action_kind: "cpu_affinity_profile".to_owned(),
+            descriptor: ActionDescriptor {
+                action_id: crate::actions::ActionId(
+                    "cpu-affinity-profile:candidate with space".to_owned(),
+                ),
+                action_kind: "cpu_affinity_profile".to_owned(),
+                safety_class: SafetyClass::ReversibleLowRisk,
+                effect_scope: ActionEffectScope::LocalProcessTree,
+                rollback: RollbackRequirement::RequiredBeforeApply,
+                persistent_effect: false,
+                touches_system_wide_state: false,
+                requires_explicit_target: true,
+                confidence: None,
+            },
+            objective: ObjectiveKind::StutterScore,
+            evidence: Vec::new(),
             affected_tasks: 31,
             safety: SafetyClass::ReversibleLowRisk,
             reason: "scheduler \"pressure\"\nnext".to_owned(),
-            dry_run_command:
+            dry_run_command: Some(
                 "stutter apply-profile --tree-pid 1234 --profile /tmp/profile \"quoted\".toml --dry-run"
                     .to_owned(),
+            ),
             manual_apply_command: Some(
                 "stutter apply-profile --tree-pid 1234 --profile /tmp/profile \"quoted\".toml"
                     .to_owned(),
             ),
             required_mode: DaemonMode::ApplyLowRisk,
             required_safety_class: SafetyClass::ReversibleLowRisk,
+            manual_only_reason: None,
         };
 
         let rendered = render_candidate_suggestion(&suggestion);
@@ -2571,8 +3114,8 @@ mod tests {
             SafetyClass::ReversibleLowRisk
         );
         assert_eq!(
-            suggestion.dry_run_command,
-            "stutter apply-profile --tree-pid 1234 --profile profiles.toml --dry-run"
+            suggestion.dry_run_command.as_deref(),
+            Some("stutter apply-profile --tree-pid 1234 --profile profiles.toml --dry-run")
         );
         assert_eq!(
             suggestion.manual_apply_command.as_deref(),
@@ -2635,8 +3178,8 @@ mod tests {
         assert_eq!(suggestion.required_mode, DaemonMode::ApplyHighRisk);
         assert_eq!(suggestion.required_safety_class, SafetyClass::HighRisk);
         assert_eq!(
-            suggestion.dry_run_command,
-            "stutter apply-profile --tree-pid 1234 --profile profiles.toml --dry-run"
+            suggestion.dry_run_command.as_deref(),
+            Some("stutter apply-profile --tree-pid 1234 --profile profiles.toml --dry-run")
         );
         assert_eq!(suggestion.manual_apply_command, None);
 

@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::Context;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     actions::{
@@ -14,7 +15,7 @@ use crate::{
     process_tree::TaskClass,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CgroupPlacementPolicy {
     pub allow_cgroup_moves: bool,
     pub allow_cpuset_changes: bool,
@@ -31,13 +32,13 @@ impl Default for CgroupPlacementPolicy {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CgroupPlacementTarget {
     pub identity: TaskIdentity,
     pub class: TaskClass,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CgroupPlacementAction {
     pub cgroup_root: PathBuf,
     pub target_cgroup: PathBuf,

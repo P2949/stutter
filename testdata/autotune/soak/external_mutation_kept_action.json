@@ -1,0 +1,1 @@
+{"name":"external_mutation_kept_action","profile":"apply-low-risk-fake","duration_seconds":120,"expect_actions":true,"expect_rollbacks":true,"forbid_high_risk_apply":true}

@@ -304,6 +304,8 @@ fn check_budget(
 
 #[cfg(test)]
 mod tests {
+    use serde::Deserialize;
+
     use super::*;
 
     #[test]
@@ -357,5 +359,82 @@ mod tests {
             "low-risk-fake".parse::<DaemonSoakProfile>().unwrap(),
             DaemonSoakProfile::ApplyLowRiskFake
         );
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct SoakFixture {
+        name: String,
+        profile: DaemonSoakProfile,
+        duration_seconds: u64,
+        expect_actions: bool,
+        expect_rollbacks: bool,
+        forbid_high_risk_apply: bool,
+    }
+
+    #[test]
+    fn autonomous_watcher_soak_fixtures_preserve_safety_invariants() {
+        let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("testdata/autotune/soak");
+        let mut paths = std::fs::read_dir(&fixture_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+            .collect::<Vec<_>>();
+        paths.sort();
+
+        assert_eq!(paths.len(), 10);
+
+        for path in paths {
+            let text = std::fs::read_to_string(&path).unwrap();
+            let fixture: SoakFixture = serde_json::from_str(&text)
+                .unwrap_or_else(|err| panic!("failed to parse {}: {err}", path.display()));
+            let report = run_fake_daemon_soak(&DaemonSoakConfig {
+                profile: fixture.profile,
+                duration_seconds: fixture.duration_seconds,
+                ..DaemonSoakConfig::default()
+            });
+
+            assert!(
+                report.passed,
+                "{} failed: {:?}",
+                fixture.name, report.failures
+            );
+            assert_eq!(report.metrics.event_drops, 0, "{}", fixture.name);
+            assert!(
+                report.metrics.max_event_queue_len
+                    <= DaemonSoakBudget::default().max_event_queue_len,
+                "{} queue accounting should stay bounded",
+                fixture.name
+            );
+            assert_eq!(
+                report.metrics.fake_actions_started > 0,
+                fixture.expect_actions,
+                "{} action expectation mismatch",
+                fixture.name
+            );
+            assert_eq!(
+                report.metrics.fake_rollbacks > 0,
+                fixture.expect_rollbacks,
+                "{} rollback expectation mismatch",
+                fixture.name
+            );
+            if fixture.expect_actions {
+                assert!(
+                    report.metrics.fake_rollbacks <= report.metrics.fake_actions_started,
+                    "{} rollbacks cannot exceed started actions",
+                    fixture.name
+                );
+            }
+            if fixture.forbid_high_risk_apply {
+                assert_ne!(
+                    report.profile.as_str(),
+                    "apply-high-risk",
+                    "{}",
+                    fixture.name
+                );
+            }
+        }
     }
 }

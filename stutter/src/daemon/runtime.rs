@@ -739,6 +739,7 @@ mod tests {
                     protected_tasks_count: 0,
                     candidate_count: 0,
                     top_denied_reason: None,
+                    planner: None,
                     score_total: 900,
                     data_quality: "High".to_owned(),
                     data_quality_reason_codes: Vec::new(),

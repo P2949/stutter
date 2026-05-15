@@ -1,0 +1,1 @@
+{"situation":"game_cpu_scheduler_pressure","focus_kind":"Game","mode":"apply-low-risk","candidate_action_kind":"cpu_affinity_profile","low_data_quality":true,"expected_selected_action_kind":null,"expected_denials":[{"action_kind":"cpu_affinity_profile","reason":"data_quality_low"}]}

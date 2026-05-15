@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::{
+    autotune::workload_policy::{WorkloadPolicyRuleConfigFile, parse_workload_policy_rule_configs},
     config::{
         FocusSource, ForegroundSource,
         schema::{CURRENT_CONFIG_VERSION, ConfigDiagnostic, ParsedUserConfigFile, RawConfigFile},
@@ -61,12 +62,20 @@ pub struct UserConfigFile {
     pub daemon_allow_system_wide_suggestions: Option<bool>,
     pub daemon_allow_system_wide_apply: Option<bool>,
     pub daemon_allow_high_risk: Option<bool>,
+    pub daemon_allow_medium_risk_apply: Option<bool>,
+    pub autotune: Option<AutotuneConfigFile>,
     #[allow(dead_code)]
     pub community_rules: Option<CommunityRulesConfigFile>,
     pub agent: Option<AgentConfigFile>,
 
     #[serde(skip)]
     pub diagnostics: Vec<ConfigDiagnostic>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct AutotuneConfigFile {
+    pub allow_medium_risk_apply: Option<bool>,
+    pub workload_policy_rules: Option<Vec<WorkloadPolicyRuleConfigFile>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -315,6 +324,22 @@ pub fn apply_daemon_user_config_overrides(
     if let Some(allow_high_risk) = user_config.daemon_allow_high_risk {
         daemon_config.safety.allow_high_risk = allow_high_risk;
     }
+    if let Some(allow_medium_risk_apply) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.allow_medium_risk_apply)
+        .or(user_config.daemon_allow_medium_risk_apply)
+    {
+        daemon_config.autotune.allow_medium_risk_apply = allow_medium_risk_apply;
+    }
+    if let Some(rules) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.workload_policy_rules.as_ref())
+        && let Ok(workload_policy) = parse_workload_policy_rule_configs(rules)
+    {
+        daemon_config.autotune.workload_policy = workload_policy;
+    }
 }
 
 pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
@@ -379,6 +404,14 @@ pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
             "daemon_max_memory_pressure_some_avg10_percent must be a finite value between 0.0 and 100.0"
         );
     }
+    if let Some(rules) = config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.workload_policy_rules.as_ref())
+    {
+        parse_workload_policy_rule_configs(rules)
+            .context("invalid autotune.workload_policy_rules")?;
+    }
 
     let experimental = config.experimental.unwrap_or(false);
     if config.daemon_allow_system_wide_apply == Some(true) && !experimental {
@@ -389,7 +422,6 @@ pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
     if config.daemon_allow_high_risk == Some(true) && !experimental {
         anyhow::bail!("daemon_allow_high_risk requires experimental = true in the user config");
     }
-
     Ok(())
 }
 
@@ -632,6 +664,8 @@ fn known_top_level_user_config_field(field: &str) -> bool {
             | "daemon_allow_system_wide_suggestions"
             | "daemon_allow_system_wide_apply"
             | "daemon_allow_high_risk"
+            | "daemon_allow_medium_risk_apply"
+            | "autotune"
             | "community_rules"
             | "agent"
     )
@@ -954,6 +988,58 @@ mod tests {
                 .thresholds()
                 .max_memory_pressure_some_avg10_millipercent,
             18_500
+        );
+    }
+
+    #[test]
+    fn daemon_config_from_user_config_applies_workload_policy_overrides() {
+        let toml = r#"
+            [autotune]
+            allow_medium_risk_apply = true
+
+            [[autotune.workload_policy_rules]]
+            situation = "browser_focused"
+            allowed_families = ["nice"]
+            allowed_objectives = ["browser_interactivity"]
+            autonomous_families = []
+        "#;
+        let config = parse_user_config_toml(toml).unwrap();
+        validate_daemon_user_config(&config).unwrap();
+
+        let daemon_config =
+            daemon_config_from_user_config(Some(&config), None, ActionSource::Cli).unwrap();
+        let matrix = daemon_config
+            .autotune
+            .workload_policy
+            .resolved_matrix()
+            .unwrap();
+        let rule = matrix.rule_for(crate::autotune::situation::SituationKind::BrowserFocused);
+
+        assert!(daemon_config.autotune.allow_medium_risk_apply);
+        assert_eq!(
+            rule.allowed_families,
+            ["nice"].into_iter().map(str::to_owned).collect()
+        );
+    }
+
+    #[test]
+    fn daemon_user_config_validation_rejects_invalid_workload_policy_rules() {
+        let toml = r#"
+            [autotune]
+
+            [[autotune.workload_policy_rules]]
+            situation = "browser_focused"
+            allowed_families = ["not_real"]
+            allowed_objectives = ["browser_interactivity"]
+            autonomous_families = []
+        "#;
+        let config = parse_user_config_toml(toml).unwrap();
+
+        assert!(
+            validate_daemon_user_config(&config)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid autotune.workload_policy_rules")
         );
     }
 
