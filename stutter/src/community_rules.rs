@@ -10,7 +10,7 @@ use std::{
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::{cli::RulesCommand, process_tree::TaskClass};
+use crate::{commands::input, process_tree::TaskClass};
 
 pub mod import;
 pub mod importer;
@@ -237,15 +237,15 @@ pub fn default_community_rules_dir() -> Option<PathBuf> {
     default_user_rules_dir()
 }
 
-pub fn rules_command(command: RulesCommand) -> anyhow::Result<()> {
+pub fn rules_command(command: input::RulesCommand) -> anyhow::Result<()> {
     match command {
-        RulesCommand::Import(args) => rules_import_command(args),
-        RulesCommand::Check(args) => rules_check_command(args),
-        RulesCommand::List(_) => rules_list_command(),
-        RulesCommand::Status(_) => rules_status_command(),
-        RulesCommand::Enable(args) => rules_enable_command(&args.name),
-        RulesCommand::Disable(_) => rules_disable_command(),
-        RulesCommand::Remove(args) => rules_remove_command(&args.name, args.dry_run),
+        input::RulesCommand::Import(args) => rules_import_command(args),
+        input::RulesCommand::Check(args) => rules_check_command(args),
+        input::RulesCommand::List => rules_list_command(),
+        input::RulesCommand::Status => rules_status_command(),
+        input::RulesCommand::Enable(args) => rules_enable_command(&args.name),
+        input::RulesCommand::Disable => rules_disable_command(),
+        input::RulesCommand::Remove(args) => rules_remove_command(&args.name, args.dry_run),
     }
 }
 
@@ -268,7 +268,7 @@ struct RulesCheckReport {
     warnings: Vec<String>,
 }
 
-fn rules_check_command(args: crate::cli::RulesCheckArgs) -> anyhow::Result<()> {
+fn rules_check_command(args: input::RulesCheckArgs) -> anyhow::Result<()> {
     let report = match (args.source, args.generated) {
         (Some(source), None) => rules_check_source_command(&source)?,
         (None, Some(generated)) => rules_check_generated_command(&generated)?,
@@ -472,7 +472,7 @@ fn print_rules_check_report(report: &RulesCheckReport) {
     }
 }
 
-fn rules_import_command(args: crate::cli::RulesImportArgs) -> anyhow::Result<()> {
+fn rules_import_command(args: input::RulesImportArgs) -> anyhow::Result<()> {
     let generated_at = generated_at_now();
     let source_display = args.source.display().to_string();
     let input = ImportInput {
