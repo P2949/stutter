@@ -739,6 +739,7 @@ fn write_emergency_restore_audit_event(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_emergency_restore_history_event(
     history_path: &Path,
     phase: ControllerPhase,

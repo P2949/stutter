@@ -418,6 +418,7 @@ fn write_startup_recovery_audit_event(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_startup_recovery_history_event(
     history_path: &Path,
     phase: ControllerPhase,

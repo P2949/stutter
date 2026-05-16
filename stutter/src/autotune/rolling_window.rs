@@ -649,7 +649,6 @@ mod tests {
             duration_ns,
             timestamp_ns: 2_000 + duration_ns,
             rwbs: "R".to_owned(),
-            ..BlockIoRecord::default()
         }
     }
 
