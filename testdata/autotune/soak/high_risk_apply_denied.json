@@ -1,0 +1,15 @@
+{
+  "name": "high_risk_apply_denied",
+  "mode": "apply-medium-risk",
+  "candidate_safety_class": "HighRisk",
+  "ticks": [
+    { "kind": "focus_game", "confidence": 0.95 },
+    { "kind": "target_present" },
+    { "kind": "interval", "score_total": 500, "samples": 100 }
+  ],
+  "assertions": [
+    "one_active_experiment_maximum",
+    "no_high_risk_autonomous_apply",
+    "high_risk_manual_only"
+  ]
+}

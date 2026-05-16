@@ -44,6 +44,10 @@ use crate::{
         DaemonPolicyBuildInput, DaemonState, DaemonTargetState, DaemonWorkloadProfile,
         SystemHealthInputs, SystemHealthSnapshot, SystemHealthThresholds, build_daemon_policy,
         evaluate_system_health,
+        privilege::{
+            InProcessPrivilegedActionService, UnixSocketPrivilegedActionService,
+            default_privileged_worker_socket_path,
+        },
         state::{
             DaemonProfileEnvironment, DaemonProfileMemory, DaemonProfilePartition,
             daemon_profile_stable_hash,
@@ -68,6 +72,7 @@ pub struct AutotuneRuntimeConfig {
     pub controller_id: String,
     pub decision_log: Option<PathBuf>,
     pub history_log: Option<PathBuf>,
+    pub controller_journal_path: Option<PathBuf>,
     pub window_seconds: u64,
     pub candidate_window_seconds: u64,
     pub profiles: Vec<Profile>,
@@ -163,6 +168,7 @@ impl AutotuneRuntimeConfig {
             controller_id: "local-autotune".to_owned(),
             decision_log,
             history_log: Some(default_autotune_history_path()),
+            controller_journal_path: None,
             window_seconds: DEFAULT_RUNTIME_WINDOW_SECONDS,
             candidate_window_seconds,
             profiles: Vec::new(),
@@ -292,6 +298,8 @@ struct RuntimeHistoryContext {
     action_id: String,
     candidate_name: String,
     action_kind: String,
+    mode: DaemonMode,
+    safety_class: SafetyClass,
     score_before: Option<WindowScore>,
     score_after: Option<WindowScore>,
     rollback_performed: bool,
@@ -328,6 +336,8 @@ impl From<LiveExperimentHistoryContext> for RuntimeHistoryContext {
             action_id: context.action_id,
             candidate_name: context.candidate_name,
             action_kind: context.action_kind,
+            mode: context.mode,
+            safety_class: context.safety_class,
             score_before: context.score_before,
             score_after: context.score_after,
             rollback_performed: context.rollback_performed,
@@ -509,6 +519,14 @@ impl AutotuneRuntime {
 
     pub fn last_decision(&self) -> Option<&AutotuneDecisionStreamEntry> {
         self.last_decision.as_ref()
+    }
+
+    pub fn controller_state(&self) -> &ControllerRuntimeState {
+        &self.controller.state
+    }
+
+    pub fn active_profile_state(&self) -> &ActiveProfileState {
+        &self.controller.active_profile_state
     }
 
     pub fn has_active_experiment(&self) -> bool {
@@ -908,6 +926,42 @@ impl AutotuneRuntime {
         decision: &AutotuneDecision,
         reason: &str,
     ) -> anyhow::Result<()> {
+        let use_privileged_service = self.config.mode() == DaemonMode::ApplyMediumRisk
+            && !self.config.simulate_action_effects;
+        let socket_service = if use_privileged_service
+            && !self
+                .config
+                .daemon_config
+                .autotune
+                .unsafe_in_process_privileged_worker
+        {
+            let socket_path = self
+                .config
+                .daemon_config
+                .autotune
+                .privileged_worker_socket
+                .clone()
+                .map(Ok)
+                .unwrap_or_else(default_privileged_worker_socket_path)?;
+            Some(UnixSocketPrivilegedActionService::new(socket_path))
+        } else {
+            None
+        };
+        let in_process_service = (use_privileged_service
+            && self
+                .config
+                .daemon_config
+                .autotune
+                .unsafe_in_process_privileged_worker)
+            .then(InProcessPrivilegedActionService::default);
+        let privileged_action_service = socket_service
+            .as_ref()
+            .map(|service| service as &dyn crate::daemon::privilege::PrivilegedActionService)
+            .or_else(|| {
+                in_process_service.as_ref().map(|service| {
+                    service as &dyn crate::daemon::privilege::PrivilegedActionService
+                })
+            });
         let input = LiveExperimentManagerInput {
             mode: self.config.mode(),
             daemon_policy: self.config.daemon_policy.clone(),
@@ -916,8 +970,9 @@ impl AutotuneRuntime {
             washout: self.config.washout.clone(),
             candidate_window_seconds: self.config.candidate_window_seconds,
             manual_restore_command: DAEMON_EMERGENCY_RESTORE_COMMAND,
-            controller_journal_path: None,
+            controller_journal_path: self.config.controller_journal_path.clone(),
             exit_rollback_registry: None,
+            privileged_action_service,
         };
 
         let outcome = self.live_experiments.apply_decision_side_effects(
@@ -1065,11 +1120,19 @@ impl AutotuneRuntime {
             .as_ref()
             .map(RuntimeHistoryContext::rollback_policy_with_metadata)
             .unwrap_or_else(|| rollback_policy_for_decision(decision).to_owned());
+        let event_mode = context
+            .as_ref()
+            .map(|context| context.mode)
+            .unwrap_or_else(|| self.config.mode());
+        let safety_class = context
+            .as_ref()
+            .map(|context| context.safety_class.clone())
+            .or_else(|| decision_safety_class(decision));
 
         let mut history = AutotuneHistoryEvent::new(
             self.config.controller_id.clone(),
             history_phase(self.controller.state.phase),
-            history_mode(self.config.mode()),
+            history_mode(event_mode),
             target,
             history_situation(observation.primary_situation),
             ObservationSummary {
@@ -1091,6 +1154,7 @@ impl AutotuneRuntime {
                 decision: decision_label(decision),
                 candidate_name,
                 action_kind,
+                safety_class,
                 eligible: decision_is_eligible(decision),
                 rollback_policy,
             },
@@ -1211,7 +1275,7 @@ impl AutotuneRuntime {
         AutotuneHistoryEvent::new(
             self.config.controller_id.clone(),
             history_phase(phase),
-            history_mode(self.config.mode()),
+            history_mode(context.mode),
             self.target_identity_from_observation(observation),
             history_situation(observation.primary_situation),
             ObservationSummary {
@@ -1233,6 +1297,7 @@ impl AutotuneRuntime {
                 decision: decision.to_owned(),
                 candidate_name: Some(context.candidate_name.clone()),
                 action_kind: Some(context.action_kind.clone()),
+                safety_class: Some(context.safety_class.clone()),
                 eligible,
                 rollback_policy: context.rollback_policy_with_metadata(),
             },
@@ -1495,6 +1560,18 @@ fn decision_action_kind(decision: &AutotuneDecision) -> Option<String> {
     }
 }
 
+fn decision_safety_class(decision: &AutotuneDecision) -> Option<SafetyClass> {
+    match decision {
+        AutotuneDecision::Suggest { candidate, .. }
+        | AutotuneDecision::StartExperiment { candidate, .. } => Some(candidate.safety_class()),
+        AutotuneDecision::Noop { .. }
+        | AutotuneDecision::KeepCurrent { .. }
+        | AutotuneDecision::Revert { .. }
+        | AutotuneDecision::EnterCooldown { .. }
+        | AutotuneDecision::Fault { .. } => None,
+    }
+}
+
 fn data_quality_label(quality: &OnlineDataQuality) -> String {
     match quality {
         OnlineDataQuality::High => "High".to_owned(),
@@ -1586,7 +1663,7 @@ mod tests {
     use super::*;
     use crate::{
         actions::RollbackToken,
-        autotune::{live_experiment::LiveLowRiskExperiment, objective::ObjectiveSignals},
+        autotune::{live_experiment::LiveExperiment, objective::ObjectiveSignals},
         diagnosis::{Confidence, StutterCause},
         ebpf_loader::DropCountersSnapshot,
         focus::FocusGroupKind,
@@ -1813,8 +1890,10 @@ mod tests {
 
         runtime
             .live_experiments
-            .set_current_for_tests(LiveLowRiskExperiment {
+            .set_current_for_tests(LiveExperiment {
                 experiment_id: ExperimentId::new("experiment-active"),
+                safety_class: candidate.safety_class(),
+                mode: DaemonMode::ApplyLowRisk,
                 candidate,
                 baseline_score,
                 baseline_signals: ObjectiveSignals::default(),
@@ -1895,8 +1974,10 @@ mod tests {
         });
         runtime
             .live_experiments
-            .set_current_for_tests(LiveLowRiskExperiment {
+            .set_current_for_tests(LiveExperiment {
                 experiment_id: ExperimentId::new("experiment-1"),
+                safety_class: candidate.safety_class(),
+                mode: DaemonMode::ApplyLowRisk,
                 candidate,
                 baseline_score,
                 baseline_signals: ObjectiveSignals::default(),

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::experiment::WindowScore;
 pub use super::situation::SituationKind;
+use crate::actions::SafetyClass;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ControllerPhase {
@@ -64,6 +65,8 @@ pub struct AutotuneDecisionSummary {
     pub decision: String,
     pub candidate_name: Option<String>,
     pub action_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safety_class: Option<SafetyClass>,
     pub eligible: bool,
     pub rollback_policy: String,
 }
@@ -296,6 +299,7 @@ mod tests {
             decision: "KeepCurrent".to_owned(),
             candidate_name: Some("game-main".to_owned()),
             action_kind: Some("cpu_affinity_profile".to_owned()),
+            safety_class: Some(SafetyClass::ReversibleLowRisk),
             eligible: true,
             rollback_policy: "rollback-on-exit".to_owned(),
         }
@@ -370,6 +374,10 @@ mod tests {
             Some("cpu-affinity-profile:game-main")
         );
         assert_eq!(
+            events[0].decision.safety_class,
+            Some(SafetyClass::ReversibleLowRisk)
+        );
+        assert_eq!(
             events[0]
                 .score_before
                 .as_ref()
@@ -425,6 +433,7 @@ mod tests {
                     decision: "Noop".to_owned(),
                     candidate_name: None,
                     action_kind: None,
+                    safety_class: None,
                     eligible: false,
                     rollback_policy: "none".to_owned(),
                 },
@@ -451,6 +460,7 @@ mod tests {
                 decision: "Noop".to_owned(),
                 candidate_name: None,
                 action_kind: None,
+                safety_class: None,
                 eligible: false,
                 rollback_policy: "none".to_owned(),
             },
@@ -478,6 +488,7 @@ mod tests {
                 decision: "Noop".to_owned(),
                 candidate_name: None,
                 action_kind: None,
+                safety_class: None,
                 eligible: false,
                 rollback_policy: "none".to_owned(),
             },

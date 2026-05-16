@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 #[cfg(test)]
 use std::sync::OnceLock;
 use std::{
@@ -66,6 +64,7 @@ pub struct CommunityRule {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // TODO: wire into community_rules import pipeline.
 pub enum CommunityRulesSourceKind {
     BuiltinFixture,
     UserData,
@@ -153,6 +152,7 @@ impl CommunityRulesStatus {
         }
     }
 
+    #[allow(dead_code)] // TODO: wire into community_rules import/status pipeline.
     pub fn label(&self) -> &'static str {
         match self {
             Self::Loaded { .. } => "loaded",
@@ -185,6 +185,7 @@ pub fn load_community_rules(config: &CommunityRulesConfig) -> anyhow::Result<Com
     })
 }
 
+#[allow(dead_code)] // TODO: wire into community_rules import pipeline.
 pub fn load_community_rules_file(
     source: CommunityRulesSourceKind,
 ) -> anyhow::Result<CommunityRulesFile> {
@@ -225,6 +226,7 @@ pub fn load_community_rules_file(
     }
 }
 
+#[allow(dead_code)] // TODO: wire into community_rules import pipeline.
 pub fn load_community_rules_db(
     source: CommunityRulesSourceKind,
 ) -> anyhow::Result<CommunityRulesDb> {

@@ -22,6 +22,19 @@ Loopback TCP requires apply/control authorization for state-changing requests.
 Non-loopback TCP is not allowed to request privileged worker operations, even
 when a bearer token is present.
 
+Medium-risk autotune apply uses a separate privileged worker instead of an
+in-process mutator. Start it with:
+
+```bash
+stutter privileged-worker --socket /run/stutter/privileged-worker.sock
+```
+
+The worker listens on a Unix domain socket with mode `0600`; that filesystem
+permission is the authentication boundary for the local control plane. The
+unsafe in-process mutator is reserved for tests and explicit development config
+(`autotune.unsafe_in_process_privileged_worker = true` with
+`experimental = true`).
+
 Every privileged operation has a stable audit action id, for example
 `privilege-start-recording`, `privilege-apply-action`, and
 `privilege-rollback-action`.

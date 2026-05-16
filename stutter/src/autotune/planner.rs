@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     actions::{ActionState, SafetyClass},
     autotune::{
-        active_config::ActiveConfigMatch,
+        active_config::{ActiveConfigMatch, ActiveConfigMatchInput},
         candidate::{
             CandidateAction, CandidateDryRunner, CandidateEvidence, RealCandidateDryRunner,
         },
@@ -48,6 +48,7 @@ pub enum CandidateDenyReason {
     KeptActionNoLongerActive,
     ObjectiveNotAllowedForWorkload,
     ObjectiveSignalMissing,
+    TargetSnapshotMissing,
     ManualOnlyHighRisk,
     DryRunFailed,
     DryRunMatchedZeroTasks,
@@ -288,6 +289,7 @@ impl CandidateDenyReason {
             Self::KeptActionNoLongerActive => "kept_action_no_longer_active",
             Self::ObjectiveNotAllowedForWorkload => "objective_not_allowed_for_workload",
             Self::ObjectiveSignalMissing => "objective_signal_missing",
+            Self::TargetSnapshotMissing => "target_snapshot_missing",
             Self::ManualOnlyHighRisk => "manual_only_high_risk",
             Self::DryRunFailed => "dry_run_failed",
             Self::DryRunMatchedZeroTasks => "dry_run_matched_zero_tasks",
@@ -494,6 +496,13 @@ fn evaluate_proposal_static(
     let mut deny_reasons = Vec::new();
     let mut deny_messages = proposal.deny_reasons.clone();
 
+    if proposal.deny_reasons.iter().any(|reason| {
+        reason.contains("target_selection_fallback_root")
+            || reason.contains("target_snapshot_missing")
+    }) {
+        deny_reasons.push(CandidateDenyReason::TargetSnapshotMissing);
+    }
+
     if !policy_family_enabled(input.daemon_policy, &descriptor.action_kind) {
         deny_reasons.push(CandidateDenyReason::DisabledFamily);
         deny_messages.push(format!(
@@ -636,7 +645,7 @@ fn evaluate_proposal_static(
 
     if let Some(kept) = input
         .active_profile_state
-        .and_then(|state| state.current.as_ref())
+        .and_then(|state| state.conflicting_kept_action(&proposal.candidate))
         && proposal.candidate.conflicts_with(&kept.candidate)
     {
         deny_reasons.push(CandidateDenyReason::ConflictWithKeptAction);
@@ -662,8 +671,13 @@ fn evaluate_proposal_static(
     }
 
     if let Some(snapshot) = input.observation.active_config_snapshot.as_ref() {
-        if let ActiveConfigMatch::Matches { summary } =
-            proposal.candidate.matches_active_config(snapshot)
+        let active_config_input = ActiveConfigMatchInput {
+            snapshot,
+            active_tasks: &input.observation.active_tasks,
+        };
+        if let ActiveConfigMatch::Matches { summary } = proposal
+            .candidate
+            .matches_active_config(active_config_input)
         {
             deny_reasons.push(CandidateDenyReason::NoEffectiveChange);
             deny_messages.push(format!(
@@ -675,8 +689,9 @@ fn evaluate_proposal_static(
             && proposal
                 .candidate
                 .conflicts_with(&active_experiment.candidate)
-            && let ActiveConfigMatch::Differs { expected, actual } =
-                active_experiment.candidate.matches_active_config(snapshot)
+            && let ActiveConfigMatch::Differs { expected, actual } = active_experiment
+                .candidate
+                .matches_active_config(active_config_input)
         {
             deny_reasons.push(CandidateDenyReason::ExternalMutationDetected);
             deny_messages.push(format!(
@@ -687,19 +702,20 @@ fn evaluate_proposal_static(
             ));
         }
 
-        if let Some(kept) = input
-            .active_profile_state
-            .and_then(|state| state.current.as_ref())
-            && let ActiveConfigMatch::Differs { expected, actual } =
-                kept.candidate.matches_active_config(snapshot)
-        {
-            deny_reasons.push(CandidateDenyReason::KeptActionNoLongerActive);
-            deny_messages.push(format!(
-                "kept action {} no longer matches live state; expected {}; actual {}; restore or resync before planning new candidates",
-                kept.candidate.candidate_name(),
-                expected,
-                actual
-            ));
+        if let Some(state) = input.active_profile_state {
+            for kept in state.kept_actions.values() {
+                if let ActiveConfigMatch::Differs { expected, actual } =
+                    kept.candidate.matches_active_config(active_config_input)
+                {
+                    deny_reasons.push(CandidateDenyReason::KeptActionNoLongerActive);
+                    deny_messages.push(format!(
+                        "kept action {} no longer matches live state; expected {}; actual {}; restore or resync before planning new candidates",
+                        kept.candidate.candidate_name(),
+                        expected,
+                        actual
+                    ));
+                }
+            }
         }
     }
 
@@ -915,9 +931,10 @@ mod tests {
             controller::ActiveExperiment,
             experiment::{ExperimentId, WindowScore},
             kept::{ActiveProfileState, KeptCandidateState},
+            objective::{ObjectiveSignalQuality, ObjectiveSignals},
             observation::{
-                ActiveConfigSnapshot, ActiveNiceSnapshot, ActiveTaskSnapshot, AutotuneObservation,
-                WorkloadIdentity,
+                ActiveAffinitySnapshot, ActiveConfigSnapshot, ActiveNiceSnapshot,
+                ActiveTaskSnapshot, AutotuneObservation, WorkloadIdentity,
             },
             providers::{CandidateProvider, CandidateProviderInput, CandidateProviderRegistry},
             quality::OnlineDataQuality,
@@ -952,6 +969,19 @@ mod tests {
         }
     }
 
+    fn active_profile_state_with_kept(kept: KeptCandidateState) -> ActiveProfileState {
+        let mut state = ActiveProfileState::default();
+        state
+            .record_kept_candidate(
+                kept,
+                crate::autotune::comparison::ExperimentResult::Improved {
+                    improvement_percent: 10.0,
+                },
+            )
+            .unwrap();
+        state
+    }
+
     fn active_nice_snapshot(tid: u32, nice: i32) -> ActiveConfigSnapshot {
         ActiveConfigSnapshot {
             nice: ActiveNiceSnapshot {
@@ -969,6 +999,29 @@ mod tests {
     ) -> AutotuneObservation {
         let mut observation = observation_for_situation(situation, focus_kind);
         observation.active_config_snapshot = Some(active_nice_snapshot(tid, nice));
+        observation
+    }
+
+    fn observation_with_cpu_affinity(mask: &str) -> AutotuneObservation {
+        let mut observation = observation_for_situation(
+            SituationKind::GameCpuSchedulerPressure,
+            FocusGroupKind::Game,
+        );
+        observation.active_tasks = vec![ActiveTaskSnapshot {
+            tid: 1234,
+            process_pid: 1234,
+            comm: "game-main".to_owned(),
+            class: TaskClass::Game,
+            process_starttime_ticks: Some(10),
+            task_starttime_ticks: Some(10),
+            cgroup_path: Some("/user.slice/game.scope".to_owned()),
+        }];
+        observation.active_config_snapshot = Some(ActiveConfigSnapshot {
+            affinity: ActiveAffinitySnapshot {
+                per_tid: std::collections::BTreeMap::from([(1234, mask.to_owned())]),
+            },
+            ..ActiveConfigSnapshot::default()
+        });
         observation
     }
 
@@ -1609,6 +1662,107 @@ mod tests {
     }
 
     #[test]
+    fn cpu_affinity_no_effective_change_is_denied_before_dry_run() {
+        let candidate = cpu_affinity_candidate("cpu-affinity-noop");
+        let policy = policy(DaemonMode::Suggest);
+        let observation = observation_with_cpu_affinity("0");
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::NoEffectiveChange)
+        );
+    }
+
+    #[test]
+    fn cpu_affinity_external_mutation_is_detected_before_dry_run() {
+        let active_candidate = cpu_affinity_candidate("active-cpu-affinity");
+        let candidate = cpu_affinity_candidate("new-cpu-affinity");
+        let policy = policy(DaemonMode::Suggest);
+        let observation = observation_with_cpu_affinity("1");
+        let controller_state = ControllerRuntimeState {
+            active_experiment: Some(ActiveExperiment {
+                experiment_id: ExperimentId::new("external-cpu-affinity"),
+                candidate: active_candidate,
+                baseline_score_total: 1_000,
+            }),
+            ..ControllerRuntimeState::default()
+        };
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &controller_state,
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ExternalMutationDetected)
+        );
+    }
+
+    #[test]
+    fn cpu_affinity_kept_action_drift_is_detected_before_dry_run() {
+        let kept_candidate = cpu_affinity_candidate("kept-cpu-affinity");
+        let candidate = nice_candidate();
+        let policy = policy(DaemonMode::Suggest);
+        let observation = observation_with_cpu_affinity("1");
+        let active_profile_state = active_profile_state_with_kept(KeptCandidateState::new(
+            ExperimentId::new("kept-cpu-affinity-drift"),
+            kept_candidate,
+            window_score(1_000),
+            window_score(800),
+            rollback_token(),
+            observation.now_unix_nanos,
+            "kept for CPU affinity drift test",
+        ));
+        let mut dry_runner = CountingDryRunner::default();
+        let proposals = vec![proposal_for_candidate(candidate, 1.0)];
+
+        let mut evaluations = evaluate_proposals_with_runner(
+            PlannerInput {
+                observation: &observation,
+                daemon_policy: &policy,
+                capabilities: &observation.capabilities,
+                system_health: &observation.system_health,
+                controller_state: &ControllerRuntimeState::default(),
+                active_profile_state: Some(&active_profile_state),
+                workload_policy: &WorkloadPolicyMatrix::default_rules(),
+                profiles: &[],
+            },
+            proposals,
+            &mut dry_runner,
+        );
+
+        let evaluation = evaluations.remove(0);
+        assert_eq!(dry_runner.calls, 0);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::KeptActionNoLongerActive)
+        );
+    }
+
+    #[test]
     fn active_experiment_external_mutation_blocks_conflicting_candidate_before_dry_run() {
         let active_candidate = nice_candidate();
         let candidate = uclamp_candidate("external-mutation-uclamp");
@@ -1667,18 +1821,15 @@ mod tests {
             1234,
             0,
         );
-        let active_profile_state = ActiveProfileState {
-            current: Some(KeptCandidateState::new(
-                ExperimentId::new("kept-no-longer-active"),
-                kept_candidate,
-                window_score(1_000),
-                window_score(800),
-                rollback_token(),
-                observation.now_unix_nanos,
-                "kept for test",
-            )),
-            history: Vec::new(),
-        };
+        let active_profile_state = active_profile_state_with_kept(KeptCandidateState::new(
+            ExperimentId::new("kept-no-longer-active"),
+            kept_candidate,
+            window_score(1_000),
+            window_score(800),
+            rollback_token(),
+            observation.now_unix_nanos,
+            "kept for test",
+        ));
         let mut dry_runner = CountingDryRunner::default();
         let proposals = vec![proposal_for_candidate(candidate, 1.0)];
 
@@ -2023,10 +2174,7 @@ mod tests {
             10,
             "kept test candidate",
         );
-        let active_profile_state = ActiveProfileState {
-            current: Some(kept),
-            history: Vec::new(),
-        };
+        let active_profile_state = active_profile_state_with_kept(kept);
 
         let result = planner.plan(PlannerInput {
             observation: &observation,
@@ -2043,6 +2191,78 @@ mod tests {
             !result.evaluations[0]
                 .deny_reasons
                 .contains(&CandidateDenyReason::ConflictWithKeptAction)
+        );
+    }
+
+    #[test]
+    fn planner_checks_new_candidate_against_every_kept_action() {
+        let policy = policy(DaemonMode::Suggest);
+        let mut observation = observation();
+        let candidate = cgroup_candidate("/user.slice/stutter-compile.slice");
+        enable_capability_for_candidate(&mut observation, &candidate);
+        let mut active_profile_state = ActiveProfileState::default();
+        active_profile_state
+            .record_kept_candidate(
+                KeptCandidateState::new(
+                    ExperimentId::new("kept-io-priority"),
+                    ioprio_candidate("kept-io"),
+                    window_score(100),
+                    window_score(90),
+                    rollback_token(),
+                    10,
+                    "kept compatible io priority",
+                ),
+                crate::autotune::comparison::ExperimentResult::Improved {
+                    improvement_percent: 10.0,
+                },
+            )
+            .unwrap();
+        active_profile_state
+            .record_kept_candidate(
+                KeptCandidateState::new(
+                    ExperimentId::new("kept-cpu-priority"),
+                    nice_candidate(),
+                    window_score(100),
+                    window_score(90),
+                    rollback_token(),
+                    20,
+                    "kept conflicting cpu priority",
+                ),
+                crate::autotune::comparison::ExperimentResult::Improved {
+                    improvement_percent: 10.0,
+                },
+            )
+            .unwrap();
+        let mut dry_runner = CountingDryRunner::default();
+
+        let mut evaluations = evaluate_proposals_with_runner(
+            PlannerInput {
+                observation: &observation,
+                daemon_policy: &policy,
+                capabilities: &observation.capabilities,
+                system_health: &observation.system_health,
+                controller_state: &ControllerRuntimeState::default(),
+                active_profile_state: Some(&active_profile_state),
+                workload_policy: &WorkloadPolicyMatrix::default_rules(),
+                profiles: &[],
+            },
+            vec![proposal_for_candidate(candidate, 1.0)],
+            &mut dry_runner,
+        );
+
+        let evaluation = evaluations.remove(0);
+        assert_eq!(active_profile_state.kept_action_count(), 2);
+        assert_eq!(dry_runner.calls, 0);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ConflictWithKeptAction)
+        );
+        assert!(
+            evaluation
+                .deny_messages
+                .iter()
+                .any(|message| message.contains("nice-background-compile"))
         );
     }
 
@@ -2428,6 +2648,10 @@ mod tests {
         vm_evidence: bool,
         #[serde(default)]
         thermal_degraded: bool,
+        // Optional ObjectiveSignals override for fixtures that exercise the
+        // rolling-window/observation signal path directly.
+        #[serde(default)]
+        hardware_signals: Option<serde_json::Value>,
     }
 
     #[derive(Debug, Default, Deserialize)]
@@ -2477,6 +2701,7 @@ mod tests {
             "browser_focused.json",
             "browser_gpu_video.json",
             "browser_io_pressure.json",
+            "browser_memory_pressure.json",
             "compile_cpu_bound.json",
             "compile_linker_pressure.json",
             "compositor_pressure.json",
@@ -2485,6 +2710,8 @@ mod tests {
             "external_mutation_detected.json",
             "game_cpu_scheduler_pressure.json",
             "game_gpu_bound.json",
+            "game_gpu_power_limited.json",
+            "game_irq_pressure_signals_present.json",
             "io_pressure.json",
             "irq_pressure.json",
             "kept_action_conflict.json",
@@ -2540,8 +2767,8 @@ mod tests {
             observation.active_config_snapshot = Some(active_nice_snapshot(1234, 0));
         }
 
-        let active_profile_state = case.kept_conflict.then(|| ActiveProfileState {
-            current: Some(KeptCandidateState::new(
+        let active_profile_state = case.kept_conflict.then(|| {
+            active_profile_state_with_kept(KeptCandidateState::new(
                 ExperimentId::new("fixture-kept-conflict"),
                 state_candidate.clone(),
                 window_score(100),
@@ -2549,8 +2776,7 @@ mod tests {
                 rollback_token(),
                 observation.now_unix_nanos,
                 "fixture kept conflict",
-            )),
-            history: Vec::new(),
+            ))
         });
 
         let mut dry_runner = CountingDryRunner::default();
@@ -2793,6 +3019,7 @@ mod tests {
         if case.thermal_degraded {
             observation.objective_signals.thermal_degraded = Some(true);
             observation.objective_signals.thermal_throttle_count = Some(1);
+            observation.objective_signals.signal_quality.thermal = ObjectiveSignalQuality::Direct;
         }
 
         let mut inventory = crate::system_inventory::SystemInventory {
@@ -2800,6 +3027,11 @@ mod tests {
             drm_devices: Vec::new(),
             irq_default_smp_affinity: Some("f".to_owned()),
             irq_lines: Vec::new(),
+            power_source: crate::system_inventory::PowerSourceSnapshot {
+                ac_online: Some(true),
+                battery_present: false,
+                battery_discharging: None,
+            },
             sched_ext_available: true,
             vm_knobs: std::collections::BTreeMap::new(),
             inventory_hash: format!("fixture-{}", case.situation),
@@ -2809,8 +3041,11 @@ mod tests {
         if case.cpu_power_evidence {
             observation.objective_signals.cpu_power_limited = Some(true);
             observation.objective_signals.cpu_power_limited_cpu = Some(0);
+            observation.objective_signals.signal_quality.cpu_power =
+                ObjectiveSignalQuality::Derived;
             observation.objective_signals.thermal_degraded = Some(false);
             observation.objective_signals.thermal_throttle_count = Some(0);
+            observation.objective_signals.signal_quality.thermal = ObjectiveSignalQuality::Direct;
             inventory
                 .cpu_policies
                 .push(crate::system_inventory::CpuPolicyInventory {
@@ -2832,6 +3067,11 @@ mod tests {
             observation.objective_signals.gpu_clock_mhz = Some(250);
             observation.objective_signals.gpu_temp_millidegrees = Some(70_000);
             observation.objective_signals.gpu_active_render_node = Some("renderD128".to_owned());
+            observation.objective_signals.signal_quality.gpu_power = ObjectiveSignalQuality::Direct;
+            observation
+                .objective_signals
+                .signal_quality
+                .gpu_active_render_node = ObjectiveSignalQuality::Direct;
             inventory
                 .drm_devices
                 .push(crate::system_inventory::DrmDeviceInventory {
@@ -2849,6 +3089,8 @@ mod tests {
             observation.objective_signals.irq_worst_overlap_ns = Some(4_000_000);
             observation.objective_signals.irq_hot_irq = Some(146);
             observation.objective_signals.irq_hot_cpu = Some(2);
+            observation.objective_signals.signal_quality.irq_overlap =
+                ObjectiveSignalQuality::Direct;
             active_config.irq.per_irq.insert(146, "4".to_owned());
             inventory.irq_lines.push(crate::irq_inspect::IrqLine {
                 irq: "146".to_owned(),
@@ -2861,13 +3103,105 @@ mod tests {
         }
 
         if case.vm_evidence {
+            observation.objective_signals.swap_activity_events = Some(3);
+            observation.objective_signals.signal_quality.swap_activity =
+                ObjectiveSignalQuality::Approximate;
             observation.objective_signals.dirty_writeback_events = Some(5);
+            observation.objective_signals.signal_quality.dirty_writeback =
+                ObjectiveSignalQuality::Direct;
             observation
                 .objective_signals
                 .memory_pressure_some_avg10_percent = Some(12.5);
+            observation.objective_signals.signal_quality.memory_pressure =
+                ObjectiveSignalQuality::Direct;
             inventory
                 .vm_knobs
                 .insert("proc/sys/vm/swappiness".to_owned(), "60".to_owned());
+        }
+
+        if let Some(value) = case.hardware_signals.clone() {
+            let mut signals: ObjectiveSignals = serde_json::from_value(value)
+                .unwrap_or_else(|err| panic!("invalid hardware_signals fixture: {err}"));
+            if signals.irq_overlap_count.is_some() || signals.irq_worst_overlap_ns.is_some() {
+                signals.signal_quality.irq_overlap = ObjectiveSignalQuality::Direct;
+            }
+            if signals.block_io_overlap_count.is_some()
+                || signals.block_io_worst_latency_ns.is_some()
+            {
+                signals.signal_quality.block_io_overlap = ObjectiveSignalQuality::Direct;
+            }
+            if signals.thermal_degraded.is_some() || signals.thermal_throttle_count.is_some() {
+                signals.signal_quality.thermal = ObjectiveSignalQuality::Direct;
+            }
+            if signals.cpu_power_limited.is_some() || signals.cpu_power_limited_cpu.is_some() {
+                signals.signal_quality.cpu_power = ObjectiveSignalQuality::Derived;
+            }
+            if signals.gpu_power_limited.is_some()
+                || signals.gpu_busy_percent.is_some()
+                || signals.gpu_clock_mhz.is_some()
+                || signals.gpu_temp_millidegrees.is_some()
+            {
+                signals.signal_quality.gpu_power = ObjectiveSignalQuality::Direct;
+            }
+            if signals.gpu_active_render_node.is_some() {
+                signals.signal_quality.gpu_active_render_node = ObjectiveSignalQuality::Direct;
+            }
+            if signals.memory_pressure_some_avg10_percent.is_some() {
+                signals.signal_quality.memory_pressure = ObjectiveSignalQuality::Direct;
+            }
+            if signals.swap_activity_events.is_some() {
+                signals.signal_quality.swap_activity = ObjectiveSignalQuality::Approximate;
+            }
+            if signals.dirty_writeback_events.is_some() {
+                signals.signal_quality.dirty_writeback = ObjectiveSignalQuality::Direct;
+            }
+
+            if let Some(irq) = signals.irq_hot_irq {
+                active_config.irq.per_irq.insert(irq, "4".to_owned());
+                inventory.irq_lines.push(crate::irq_inspect::IrqLine {
+                    irq: irq.to_string(),
+                    counts_by_cpu: vec![10_000, 2, 20_000, 30_000],
+                    total: 60_002,
+                    kind: "PCI-MSI".to_owned(),
+                    name: "amdgpu".to_owned(),
+                    raw: format!("{irq}: 10000 2 20000 30000 PCI-MSI amdgpu"),
+                });
+            }
+
+            if signals.gpu_power_limited == Some(true)
+                || signals.gpu_busy_percent.is_some()
+                || signals.gpu_active_render_node.is_some()
+            {
+                let render_node = signals
+                    .gpu_active_render_node
+                    .clone()
+                    .unwrap_or_else(|| "renderD128".to_owned());
+                inventory
+                    .drm_devices
+                    .push(crate::system_inventory::DrmDeviceInventory {
+                        name: "card0".to_owned(),
+                        path: std::path::PathBuf::from("/fake/sys/class/drm/card0"),
+                        render_node: Some(render_node),
+                        pci_id: Some("1002:744c".to_owned()),
+                        vendor: Some("amd".to_owned()),
+                        hwmon_paths: Vec::new(),
+                    });
+            }
+
+            if signals
+                .memory_pressure_some_avg10_percent
+                .is_some_and(|value| value > 0.0)
+                || signals.swap_activity_events.is_some_and(|value| value > 0)
+                || signals
+                    .dirty_writeback_events
+                    .is_some_and(|value| value > 0)
+            {
+                inventory
+                    .vm_knobs
+                    .insert("proc/sys/vm/swappiness".to_owned(), "60".to_owned());
+            }
+
+            observation.objective_signals = signals;
         }
 
         let system_context = SystemContextSnapshot {

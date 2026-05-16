@@ -3,6 +3,8 @@
 description="stutter scheduler latency monitor"
 command="${STUTTER_BIN:-/usr/bin/stutter}"
 command_args="${STUTTER_ARGS:-monitor --watch-process KingdomCome.exe --persistent --run-name daemon}"
+# For the privileged mutator, set:
+# STUTTER_ARGS="privileged-worker --socket /run/stutter/privileged-worker.sock"
 command_background=true
 pidfile="${STUTTER_PIDFILE:-/run/stutter.pid}"
 output_log="${STUTTER_LOG:-/var/log/stutter.log}"
@@ -12,4 +14,3 @@ depend() {
     need localmount
     after bootmisc
 }
-

@@ -151,6 +151,8 @@ pub struct DaemonExperimentState {
     pub experiment_id: String,
     pub action_id: String,
     pub candidate_name: Option<String>,
+    #[serde(default = "default_active_autotune_mode")]
+    pub mode: DaemonMode,
     pub safety_class: SafetyClass,
     pub started_unix_nanos: Option<u128>,
 }
@@ -158,9 +160,21 @@ pub struct DaemonExperimentState {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DaemonRollbackState {
     pub action_id: String,
+    #[serde(default = "default_active_autotune_mode")]
+    pub mode: DaemonMode,
+    #[serde(default = "default_active_autotune_safety_class")]
+    pub safety_class: SafetyClass,
     pub rollback_available: bool,
     pub token: Option<RollbackToken>,
     pub manual_restore_command: Option<String>,
+}
+
+fn default_active_autotune_mode() -> DaemonMode {
+    DaemonMode::ApplyLowRisk
+}
+
+fn default_active_autotune_safety_class() -> SafetyClass {
+    SafetyClass::ReversibleLowRisk
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -709,11 +723,14 @@ mod tests {
                 experiment_id: "experiment-1".to_owned(),
                 action_id: "cpu-affinity-profile:game".to_owned(),
                 candidate_name: Some("game".to_owned()),
+                mode: DaemonMode::ApplyLowRisk,
                 safety_class: SafetyClass::ReversibleLowRisk,
                 started_unix_nanos: Some(100),
             }),
             active_rollback: Some(DaemonRollbackState {
                 action_id: "cpu-affinity-profile:game".to_owned(),
+                mode: DaemonMode::ApplyLowRisk,
+                safety_class: SafetyClass::ReversibleLowRisk,
                 rollback_available: true,
                 token: None,
                 manual_restore_command: Some("stutter autotune restore".to_owned()),

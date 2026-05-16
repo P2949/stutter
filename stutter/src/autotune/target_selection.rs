@@ -14,47 +14,131 @@ pub enum TaskTargetSelector {
     BrowserRenderersAndHelpers,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetSelectionMode {
+    Suggest,
+    ApplyCapable,
+}
+
+impl TargetSelectionMode {
+    pub fn from_daemon_mode(mode: crate::daemon::DaemonMode) -> Self {
+        if mode == crate::daemon::DaemonMode::Suggest {
+            Self::Suggest
+        } else {
+            Self::ApplyCapable
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MutableTaskSelection<T> {
+    pub items: Vec<T>,
+    pub used_fallback_root: bool,
+    pub missing_active_snapshots: bool,
+}
+
+impl<T> MutableTaskSelection<T> {
+    pub fn deny_reasons(&self) -> Vec<String> {
+        if self.used_fallback_root {
+            vec![
+                "target_selection_fallback_root: active task snapshots missing; using root PID only for suggest-mode display".to_owned(),
+            ]
+        } else if self.missing_active_snapshots {
+            vec!["target_snapshot_missing: active task snapshots missing; no mutable targets selected".to_owned()]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
 pub fn mutable_task_targets_for_observation(
     observation: &AutotuneObservation,
     selector: TaskTargetSelector,
 ) -> Vec<TaskIdentity> {
-    let mut snapshots = if observation.active_tasks.is_empty() {
-        fallback_root_snapshot(observation).into_iter().collect()
-    } else {
-        observation.active_tasks.clone()
-    };
+    mutable_task_targets_for_observation_with_mode(
+        observation,
+        selector,
+        TargetSelectionMode::ApplyCapable,
+    )
+    .items
+}
 
-    snapshots.sort_by_key(|task| task.tid);
-    snapshots.dedup_by_key(|task| task.tid);
+pub fn mutable_task_targets_for_observation_with_mode(
+    observation: &AutotuneObservation,
+    selector: TaskTargetSelector,
+    mode: TargetSelectionMode,
+) -> MutableTaskSelection<TaskIdentity> {
+    let selection = mutable_task_snapshots_for_observation_with_mode(observation, selector, mode);
 
-    snapshots
-        .into_iter()
-        .filter(|task| mutable_task_allowed(task, selector))
-        .map(task_identity_from_snapshot)
-        .collect()
+    MutableTaskSelection {
+        items: selection
+            .items
+            .into_iter()
+            .map(task_identity_from_snapshot)
+            .collect(),
+        used_fallback_root: selection.used_fallback_root,
+        missing_active_snapshots: selection.missing_active_snapshots,
+    }
 }
 
 pub fn mutable_task_snapshots_for_observation(
     observation: &AutotuneObservation,
     selector: TaskTargetSelector,
 ) -> Vec<ActiveTaskSnapshot> {
-    let mut snapshots = if observation.active_tasks.is_empty() {
-        fallback_root_snapshot(observation).into_iter().collect()
+    mutable_task_snapshots_for_observation_with_mode(
+        observation,
+        selector,
+        TargetSelectionMode::ApplyCapable,
+    )
+    .items
+}
+
+pub fn mutable_task_snapshots_for_observation_with_mode(
+    observation: &AutotuneObservation,
+    selector: TaskTargetSelector,
+    mode: TargetSelectionMode,
+) -> MutableTaskSelection<ActiveTaskSnapshot> {
+    let missing_active_snapshots = observation.active_tasks.is_empty();
+    let used_fallback_root = missing_active_snapshots && mode == TargetSelectionMode::Suggest;
+    let mut snapshots = if missing_active_snapshots {
+        if used_fallback_root {
+            fallback_root_snapshot(observation).into_iter().collect()
+        } else {
+            Vec::new()
+        }
     } else {
         observation.active_tasks.clone()
     };
 
     snapshots.sort_by_key(|task| task.tid);
     snapshots.dedup_by_key(|task| task.tid);
-    snapshots
+
+    let items = snapshots
         .into_iter()
-        .filter(|task| mutable_task_allowed(task, selector))
-        .collect()
+        .filter(|task| mutable_task_allowed(task, selector, used_fallback_root))
+        .collect();
+
+    MutableTaskSelection {
+        items,
+        used_fallback_root,
+        missing_active_snapshots,
+    }
 }
 
-fn mutable_task_allowed(task: &ActiveTaskSnapshot, selector: TaskTargetSelector) -> bool {
+fn mutable_task_allowed(
+    task: &ActiveTaskSnapshot,
+    selector: TaskTargetSelector,
+    allow_unknown_fallback_root: bool,
+) -> bool {
     if task.tid == 0 || is_protected_task_class(task.class) {
         return false;
+    }
+
+    if allow_unknown_fallback_root
+        && task.class == TaskClass::Unknown
+        && task.tid == task.process_pid
+    {
+        return true;
     }
 
     match selector {
@@ -111,7 +195,7 @@ fn fallback_root_snapshot(observation: &AutotuneObservation) -> Option<ActiveTas
             .as_ref()
             .map(|identity| format!("pid-{}", identity.root_pid))
             .unwrap_or_else(|| format!("pid-{root_pid}")),
-        class: TaskClass::Helper,
+        class: TaskClass::Unknown,
         process_starttime_ticks: observation
             .workload_identity
             .as_ref()
@@ -200,6 +284,50 @@ mod tests {
         assert_eq!(
             targets.iter().map(|target| target.tid).collect::<Vec<_>>(),
             vec![10, 11, 12]
+        );
+    }
+
+    #[test]
+    fn apply_capable_selection_does_not_use_fallback_root() {
+        let observation = AutotuneObservation {
+            target_root_pid: Some(10),
+            active_tasks: Vec::new(),
+            ..AutotuneObservation::default()
+        };
+
+        let selection = mutable_task_targets_for_observation_with_mode(
+            &observation,
+            TaskTargetSelector::CompilerAndLinker,
+            TargetSelectionMode::ApplyCapable,
+        );
+
+        assert!(selection.items.is_empty());
+        assert!(!selection.used_fallback_root);
+        assert!(selection.missing_active_snapshots);
+    }
+
+    #[test]
+    fn suggest_selection_marks_unknown_fallback_root() {
+        let observation = AutotuneObservation {
+            target_root_pid: Some(10),
+            active_tasks: Vec::new(),
+            ..AutotuneObservation::default()
+        };
+
+        let selection = mutable_task_snapshots_for_observation_with_mode(
+            &observation,
+            TaskTargetSelector::CompilerAndLinker,
+            TargetSelectionMode::Suggest,
+        );
+
+        assert_eq!(selection.items.len(), 1);
+        assert!(selection.used_fallback_root);
+        assert_eq!(selection.items[0].class, TaskClass::Unknown);
+        assert!(
+            selection
+                .deny_reasons()
+                .iter()
+                .any(|reason| reason.contains("target_selection_fallback_root"))
         );
     }
 }

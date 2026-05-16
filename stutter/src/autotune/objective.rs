@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::autotune::{
     comparison::{
         ExperimentComparisonInput, ExperimentDataQuality, ExperimentResult, compare_experiment,
+        regression_percent,
     },
     experiment::WindowScore,
 };
@@ -33,28 +34,90 @@ pub struct ObjectiveComparisonInput<'a> {
     pub target_disappeared: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum ObjectiveSignalQuality {
+    Direct,
+    Derived,
+    Approximate,
+    #[default]
+    Missing,
+}
+
+impl ObjectiveSignalQuality {
+    pub fn is_missing(self) -> bool {
+        self == Self::Missing
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::Derived => "derived",
+            Self::Approximate => "approximate",
+            Self::Missing => "missing",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ObjectiveSignalQualitySnapshot {
+    pub block_io_overlap: ObjectiveSignalQuality,
+    pub irq_overlap: ObjectiveSignalQuality,
+    pub thermal: ObjectiveSignalQuality,
+    pub cpu_power: ObjectiveSignalQuality,
+    pub gpu_power: ObjectiveSignalQuality,
+    pub gpu_active_render_node: ObjectiveSignalQuality,
+    pub memory_pressure: ObjectiveSignalQuality,
+    pub swap_activity: ObjectiveSignalQuality,
+    pub dirty_writeback: ObjectiveSignalQuality,
+    pub frame_pacing: ObjectiveSignalQuality,
+    pub foreground_latency: ObjectiveSignalQuality,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct ObjectiveSignals {
     pub block_io_overlap_count: Option<u64>,
     pub block_io_worst_latency_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_io_overlap_basis: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_io_overlap_trust: Option<String>,
     pub irq_overlap_count: Option<u64>,
     pub irq_worst_overlap_ns: Option<u64>,
     pub irq_hot_irq: Option<u32>,
     pub irq_hot_cpu: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub irq_overlap_basis: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub irq_overlap_trust: Option<String>,
     pub thermal_degraded: Option<bool>,
     pub thermal_throttle_count: Option<u64>,
     pub cpu_power_limited: Option<bool>,
     pub cpu_power_limited_cpu: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_power_limit_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_power_limited_policy: Option<String>,
     pub gpu_power_limited: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_power_limit_reason: Option<String>,
     pub gpu_busy_percent: Option<u32>,
     pub gpu_clock_mhz: Option<u32>,
     pub gpu_temp_millidegrees: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_drm_card: Option<String>,
     pub gpu_active_render_node: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_focus_confidence: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_focus_source: Option<String>,
     pub memory_pressure_some_avg10_percent: Option<f32>,
     pub swap_activity_events: Option<u64>,
     pub dirty_writeback_events: Option<u64>,
     pub frame_p99_ms: Option<f64>,
     pub foreground_over_5ms: Option<u64>,
+    #[serde(default)]
+    pub signal_quality: ObjectiveSignalQualitySnapshot,
 }
 
 impl ObjectiveSignals {
@@ -70,10 +133,49 @@ impl ObjectiveSignals {
         self.thermal_degraded.is_some() && self.thermal_throttle_count.is_some()
     }
 
+    pub fn missing_required_signals_for(&self, objective: ObjectiveKind) -> Vec<&'static str> {
+        let mut missing = Vec::new();
+
+        match objective {
+            ObjectiveKind::IoLatency => {
+                if self.block_io_overlap_count.is_none() {
+                    missing.push("block_io_overlap_count");
+                }
+                if self.block_io_worst_latency_ns.is_none() {
+                    missing.push("block_io_worst_latency_ns");
+                }
+            }
+            ObjectiveKind::IrqOverlapReduction => {
+                if self.irq_overlap_count.is_none() {
+                    missing.push("irq_overlap_count");
+                }
+                if self.irq_worst_overlap_ns.is_none() {
+                    missing.push("irq_worst_overlap_ns");
+                }
+            }
+            ObjectiveKind::ThermalRecovery => {
+                if self.thermal_degraded.is_none() {
+                    missing.push("thermal_degraded");
+                }
+                if self.thermal_throttle_count.is_none() {
+                    missing.push("thermal_throttle_count");
+                }
+            }
+            _ => {}
+        }
+
+        missing
+    }
+
     pub fn from_window_score(score: &WindowScore) -> Self {
         Self {
             frame_p99_ms: Some(score.score.frame_p99_ms),
             foreground_over_5ms: Some(score.score.over_5ms),
+            signal_quality: ObjectiveSignalQualitySnapshot {
+                frame_pacing: ObjectiveSignalQuality::Derived,
+                foreground_latency: ObjectiveSignalQuality::Derived,
+                ..ObjectiveSignalQualitySnapshot::default()
+            },
             ..Self::default()
         }
     }
@@ -91,10 +193,8 @@ pub fn compare_for_objective(input: ObjectiveComparisonInput<'_>) -> ExperimentR
         return base;
     }
 
-    if missing_objective_signals(input.clone()) {
-        return ExperimentResult::Regressed {
-            regression_percent: 0.0,
-        };
+    if let Some(result) = missing_objective_signals(input.clone()) {
+        return result;
     }
 
     if let Some(result) = reject_if_power_or_thermal_regressed(input.clone()) {
@@ -118,6 +218,30 @@ pub fn compare_for_objective(input: ObjectiveComparisonInput<'_>) -> ExperimentR
     }
 }
 
+fn missing_objective_signals(input: ObjectiveComparisonInput<'_>) -> Option<ExperimentResult> {
+    let mut missing = input
+        .baseline_signals
+        .missing_required_signals_for(input.objective)
+        .into_iter()
+        .map(|signal| format!("baseline.{signal}"))
+        .collect::<Vec<_>>();
+    missing.extend(
+        input
+            .candidate_signals
+            .missing_required_signals_for(input.objective)
+            .into_iter()
+            .map(|signal| format!("candidate.{signal}")),
+    );
+
+    (!missing.is_empty()).then(|| ExperimentResult::Inconclusive {
+        reason: format!(
+            "missing required objective signal(s) for {:?}: {}",
+            input.objective,
+            missing.join(", ")
+        ),
+    })
+}
+
 fn compare_io_latency(input: ObjectiveComparisonInput<'_>) -> Option<ExperimentResult> {
     let baseline_count = input.baseline_signals.block_io_overlap_count?;
     let candidate_count = input.candidate_signals.block_io_overlap_count?;
@@ -126,19 +250,19 @@ fn compare_io_latency(input: ObjectiveComparisonInput<'_>) -> Option<ExperimentR
 
     if baseline_count == 0 && baseline_worst == 0 {
         return Some(ExperimentResult::Regressed {
-            regression_percent: 0.0,
+            regression_percent: objective_regression_percent(input.baseline, input.candidate),
         });
     }
 
     if candidate_count > baseline_count || candidate_worst > baseline_worst {
         return Some(ExperimentResult::Regressed {
-            regression_percent: 0.0,
+            regression_percent: objective_regression_percent(input.baseline, input.candidate),
         });
     }
 
     if candidate_count >= baseline_count && candidate_worst >= baseline_worst {
         return Some(ExperimentResult::Regressed {
-            regression_percent: 0.0,
+            regression_percent: objective_regression_percent(input.baseline, input.candidate),
         });
     }
 
@@ -153,7 +277,7 @@ fn compare_irq_overlap_reduction(input: ObjectiveComparisonInput<'_>) -> Option<
 
     if candidate_count >= baseline_count || candidate_worst > baseline_worst {
         Some(ExperimentResult::Regressed {
-            regression_percent: 0.0,
+            regression_percent: objective_regression_percent(input.baseline, input.candidate),
         })
     } else {
         None
@@ -168,7 +292,7 @@ fn compare_thermal_recovery(input: ObjectiveComparisonInput<'_>) -> Option<Exper
 
     if candidate_degraded && !baseline_degraded || candidate_throttles > baseline_throttles {
         return Some(ExperimentResult::Regressed {
-            regression_percent: 0.0,
+            regression_percent: objective_regression_percent(input.baseline, input.candidate),
         });
     }
 
@@ -191,7 +315,7 @@ fn reject_if_power_or_thermal_regressed(
         input.candidate_signals.thermal_degraded,
     ) {
         return Some(ExperimentResult::Regressed {
-            regression_percent: 0.0,
+            regression_percent: objective_regression_percent(input.baseline, input.candidate),
         });
     }
 
@@ -201,7 +325,7 @@ fn reject_if_power_or_thermal_regressed(
     ) && candidate > baseline
     {
         return Some(ExperimentResult::Regressed {
-            regression_percent: 0.0,
+            regression_percent: objective_regression_percent(input.baseline, input.candidate),
         });
     }
 
@@ -210,7 +334,7 @@ fn reject_if_power_or_thermal_regressed(
         input.candidate_signals.cpu_power_limited,
     ) {
         return Some(ExperimentResult::Regressed {
-            regression_percent: 0.0,
+            regression_percent: objective_regression_percent(input.baseline, input.candidate),
         });
     }
 
@@ -219,35 +343,11 @@ fn reject_if_power_or_thermal_regressed(
         input.candidate_signals.gpu_power_limited,
     ) {
         return Some(ExperimentResult::Regressed {
-            regression_percent: 0.0,
+            regression_percent: objective_regression_percent(input.baseline, input.candidate),
         });
     }
 
     None
-}
-
-fn missing_objective_signals(input: ObjectiveComparisonInput<'_>) -> bool {
-    match input.objective {
-        ObjectiveKind::IoLatency => {
-            input.baseline_signals.block_io_overlap_count.is_none()
-                || input.candidate_signals.block_io_overlap_count.is_none()
-                || input.baseline_signals.block_io_worst_latency_ns.is_none()
-                || input.candidate_signals.block_io_worst_latency_ns.is_none()
-        }
-        ObjectiveKind::IrqOverlapReduction => {
-            input.baseline_signals.irq_overlap_count.is_none()
-                || input.candidate_signals.irq_overlap_count.is_none()
-                || input.baseline_signals.irq_worst_overlap_ns.is_none()
-                || input.candidate_signals.irq_worst_overlap_ns.is_none()
-        }
-        ObjectiveKind::ThermalRecovery => {
-            input.baseline_signals.thermal_degraded.is_none()
-                || input.candidate_signals.thermal_degraded.is_none()
-                || input.baseline_signals.thermal_throttle_count.is_none()
-                || input.candidate_signals.thermal_throttle_count.is_none()
-        }
-        _ => false,
-    }
 }
 
 fn reject_if_frame_pacing_regressed(
@@ -256,12 +356,12 @@ fn reject_if_frame_pacing_regressed(
 ) -> Option<ExperimentResult> {
     if candidate.score.frame_p99_ms > baseline.score.frame_p99_ms + 1.0 {
         return Some(ExperimentResult::Regressed {
-            regression_percent: 0.0,
+            regression_percent: objective_regression_percent(baseline, candidate),
         });
     }
     if candidate.score.over_5ms > baseline.score.over_5ms {
         return Some(ExperimentResult::Regressed {
-            regression_percent: 0.0,
+            regression_percent: objective_regression_percent(baseline, candidate),
         });
     }
     None
@@ -273,7 +373,7 @@ fn reject_if_interactivity_regressed(
 ) -> Option<ExperimentResult> {
     if candidate.score.over_5ms > baseline.score.over_5ms {
         return Some(ExperimentResult::Regressed {
-            regression_percent: 0.0,
+            regression_percent: objective_regression_percent(baseline, candidate),
         });
     }
     None
@@ -287,10 +387,14 @@ fn reject_if_foreground_regressed(
         || candidate.score.over_5ms > baseline.score.over_5ms
     {
         return Some(ExperimentResult::Regressed {
-            regression_percent: 0.0,
+            regression_percent: objective_regression_percent(baseline, candidate),
         });
     }
     None
+}
+
+fn objective_regression_percent(baseline: &WindowScore, candidate: &WindowScore) -> f64 {
+    regression_percent(baseline.score.total, candidate.score.total)
 }
 
 #[cfg(test)]
@@ -453,7 +557,7 @@ mod tests {
             &candidate_signals,
         );
 
-        assert!(matches!(result, ExperimentResult::Regressed { .. }));
+        assert!(matches!(result, ExperimentResult::Inconclusive { .. }));
     }
 
     #[test]

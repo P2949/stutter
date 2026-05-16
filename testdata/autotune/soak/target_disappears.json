@@ -1,1 +1,16 @@
-{"name":"target_disappears","profile":"apply-low-risk-fake","duration_seconds":120,"expect_actions":true,"expect_rollbacks":true,"forbid_high_risk_apply":true}
+{
+  "name": "target_disappears",
+  "mode": "apply-low-risk",
+  "ticks": [
+    { "kind": "focus_game", "confidence": 0.95 },
+    { "kind": "target_present" },
+    { "kind": "interval", "score_total": 500, "samples": 100 },
+    { "kind": "target_missing" },
+    { "kind": "evaluation_tick", "reason": "target disappeared" }
+  ],
+  "assertions": [
+    "one_active_experiment_maximum",
+    "rollback_token_before_apply",
+    "shutdown_restores_active_actions"
+  ]
+}

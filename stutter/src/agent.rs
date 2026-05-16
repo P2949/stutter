@@ -895,11 +895,14 @@ fn daemon_state_for_autotune_start(
                 .watch_process
                 .clone()
                 .or_else(|| Some(policy.mode.as_str().to_owned())),
+            mode: policy.mode,
             safety_class: safety_class_for_daemon_mode(policy.mode),
             started_unix_nanos: Some(started_unix_nanos),
         }),
         active_rollback: policy.mode.supports_apply().then(|| DaemonRollbackState {
             action_id,
+            mode: policy.mode,
+            safety_class: safety_class_for_daemon_mode(policy.mode),
             rollback_available: false,
             token: None,
             manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
@@ -3749,11 +3752,14 @@ mod tests {
                 experiment_id: "experiment-1".to_owned(),
                 action_id: "remote-autotune-start:apply-low-risk".to_owned(),
                 candidate_name: Some("Game.exe".to_owned()),
+                mode: DaemonMode::ApplyLowRisk,
                 safety_class: SafetyClass::ReversibleLowRisk,
                 started_unix_nanos: Some(100),
             }),
             active_rollback: Some(DaemonRollbackState {
                 action_id: "remote-autotune-start:apply-low-risk".to_owned(),
+                mode: DaemonMode::ApplyLowRisk,
+                safety_class: SafetyClass::ReversibleLowRisk,
                 rollback_available: false,
                 token: None,
                 manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
@@ -3928,6 +3934,8 @@ mod tests {
             daemon_state.phase = DaemonPhase::Rollback;
             daemon_state.active_rollback = Some(DaemonRollbackState {
                 action_id: "cpu-affinity:game".to_owned(),
+                mode: DaemonMode::ApplyLowRisk,
+                safety_class: SafetyClass::ReversibleLowRisk,
                 rollback_available: true,
                 token: None,
                 manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),

@@ -6,7 +6,9 @@ use crate::{
         protection::mutation_allowed_for_pid,
         providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
         situation::SituationKind,
-        target_selection::{TaskTargetSelector, mutable_task_targets_for_observation},
+        target_selection::{
+            TargetSelectionMode, TaskTargetSelector, mutable_task_targets_for_observation_with_mode,
+        },
     },
 };
 
@@ -57,7 +59,14 @@ impl CandidateProvider for UclampProvider {
             }
             _ => TaskTargetSelector::ForegroundRootOnly,
         };
-        let targets = mutable_task_targets_for_observation(input.observation, selector);
+        let selection = mutable_task_targets_for_observation_with_mode(
+            input.observation,
+            selector,
+            TargetSelectionMode::from_daemon_mode(input.daemon_policy.mode),
+        );
+        let target_selection_denies = selection.deny_reasons();
+        let used_fallback_root = selection.used_fallback_root;
+        let targets = selection.items;
         if targets.is_empty() {
             return Vec::new();
         }
@@ -68,11 +77,21 @@ impl CandidateProvider for UclampProvider {
                 name: format!("uclamp-root-{root_pid}-{name_suffix}"),
                 action,
                 target_root_pid: Some(root_pid),
-                evidence: vec![CandidateEvidence::new(
-                    "situation",
-                    format!("{:?}", input.observation.primary_situation),
-                    input.observation.situation.confidence,
-                )],
+                evidence: {
+                    let mut evidence = vec![CandidateEvidence::new(
+                        "situation",
+                        format!("{:?}", input.observation.primary_situation),
+                        input.observation.situation.confidence,
+                    )];
+                    if used_fallback_root {
+                        evidence.push(CandidateEvidence::new(
+                            "target_selection_fallback_root",
+                            format!("root_pid={root_pid} active_task_snapshots=missing"),
+                            0.0,
+                        ));
+                    }
+                    evidence
+                },
                 objective,
             },
         };
@@ -81,7 +100,7 @@ impl CandidateProvider for UclampProvider {
             candidate,
             provider: self.family(),
             confidence: input.observation.situation.confidence,
-            deny_reasons: Vec::new(),
+            deny_reasons: target_selection_denies,
             objective,
             rank_hint: 25,
         }]

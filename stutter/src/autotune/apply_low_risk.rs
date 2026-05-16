@@ -247,7 +247,7 @@ pub fn append_low_risk_history_event(
 }
 
 pub fn register_audited_low_risk_outcome_for_exit_rollback(
-    registry: &crate::autotune::shutdown::ActiveLowRiskActionRegistry,
+    registry: &crate::autotune::shutdown::ActiveAutotuneActionRegistry,
     outcome: &AuditedCandidateApplyOutcome,
 ) {
     crate::autotune::shutdown::register_cpu_affinity_rollback(
@@ -654,6 +654,7 @@ fn controller_journal_metadata_for_cpu_affinity_action(
         ))
         .with_restore_command("stutter autotune restore")
         .with_verify_result(verify_result)
+        .with_mode(crate::daemon_policy::DaemonMode::ApplyLowRisk)
         .with_safety_class(action.safety_class())
 }
 
@@ -1298,6 +1299,7 @@ mod tests {
                 decision: "Revert".to_owned(),
                 candidate_name: Some("game-main".to_owned()),
                 action_kind: Some("cpu_affinity_profile".to_owned()),
+                safety_class: Some(SafetyClass::ReversibleLowRisk),
                 eligible: true,
                 rollback_policy: "rollback-on-exit".to_owned(),
             },
@@ -1317,7 +1319,7 @@ mod tests {
 
     #[test]
     fn audited_low_risk_outcome_registers_exit_rollback() {
-        let registry = crate::autotune::shutdown::ActiveLowRiskActionRegistry::new();
+        let registry = crate::autotune::shutdown::ActiveAutotuneActionRegistry::new();
         let outcome = AuditedCandidateApplyOutcome {
             candidate_name: "game-main".to_owned(),
             action_kind: "cpu_affinity_profile".to_owned(),
@@ -1754,6 +1756,7 @@ mod tests {
                 .with_target_identity("pid:1234:starttime:unknown:active_tasks:31")
                 .with_restore_command("stutter autotune restore")
                 .with_verify_result("applied_pending_verify")
+                .with_mode(crate::daemon_policy::DaemonMode::ApplyLowRisk)
                 .with_safety_class(SafetyClass::ReversibleLowRisk),
         )
         .unwrap();

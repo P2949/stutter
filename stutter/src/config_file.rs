@@ -75,6 +75,9 @@ pub struct UserConfigFile {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AutotuneConfigFile {
     pub allow_medium_risk_apply: Option<bool>,
+    pub allow_cpu_power_on_battery: Option<bool>,
+    pub privileged_worker_socket: Option<PathBuf>,
+    pub unsafe_in_process_privileged_worker: Option<bool>,
     pub workload_policy_rules: Option<Vec<WorkloadPolicyRuleConfigFile>>,
 }
 
@@ -332,6 +335,27 @@ pub fn apply_daemon_user_config_overrides(
     {
         daemon_config.autotune.allow_medium_risk_apply = allow_medium_risk_apply;
     }
+    if let Some(allow_cpu_power_on_battery) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.allow_cpu_power_on_battery)
+    {
+        daemon_config.autotune.allow_cpu_power_on_battery = allow_cpu_power_on_battery;
+    }
+    if let Some(socket) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.privileged_worker_socket.clone())
+    {
+        daemon_config.autotune.privileged_worker_socket = Some(socket);
+    }
+    if let Some(unsafe_in_process) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.unsafe_in_process_privileged_worker)
+    {
+        daemon_config.autotune.unsafe_in_process_privileged_worker = unsafe_in_process;
+    }
     if let Some(rules) = user_config
         .autotune
         .as_ref()
@@ -421,6 +445,17 @@ pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
     }
     if config.daemon_allow_high_risk == Some(true) && !experimental {
         anyhow::bail!("daemon_allow_high_risk requires experimental = true in the user config");
+    }
+    if config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.unsafe_in_process_privileged_worker)
+        == Some(true)
+        && !experimental
+    {
+        anyhow::bail!(
+            "autotune.unsafe_in_process_privileged_worker requires experimental = true in the user config"
+        );
     }
     Ok(())
 }
@@ -820,6 +855,9 @@ mod tests {
             daemon_max_gpu_temp_celsius = 84
             daemon_min_disk_available_bytes = 1073741824
             daemon_max_memory_pressure_some_avg10_percent = 25.5
+
+            [autotune]
+            allow_cpu_power_on_battery = true
         "#;
         let config = parse_user_config_toml(toml).unwrap();
         assert_eq!(config.summary_ms, Some(500));
@@ -865,6 +903,13 @@ mod tests {
         assert_eq!(
             config.daemon_max_memory_pressure_some_avg10_percent,
             Some(25.5)
+        );
+        assert_eq!(
+            config
+                .autotune
+                .as_ref()
+                .and_then(|autotune| autotune.allow_cpu_power_on_battery),
+            Some(true)
         );
         validate_daemon_user_config(&config).unwrap();
     }

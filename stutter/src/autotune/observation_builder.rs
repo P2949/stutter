@@ -2,12 +2,14 @@ use std::{collections::BTreeMap, fs, os::unix::fs::MetadataExt, path::Path};
 
 use crate::{
     autotune::{
+        gpu_focus::{FocusGpuResolver, FocusGpuResolverInput, FocusGpuSource},
+        objective::ObjectiveSignalQuality,
         observation::{
             ActiveTaskSnapshot, AutotuneObservation, ProtectedTask, WorkloadIdentity,
             is_protected_task_class, protected_task_reason,
         },
         quality::OnlineDataQualityPolicy,
-        rolling_window::{RollingWindow, WindowScore as RuntimeWindowScore},
+        rolling_window::{RollingWindow, RollingWindowScore as RuntimeWindowScore},
         state::SituationKind,
         system_context::{SystemContextSnapshotInput, collect_system_context},
     },
@@ -94,6 +96,15 @@ impl AutotuneObservationBuilder {
             focus_kind,
             input.active_tasks,
         );
+        let mut objective_signals = input.window.objective_signals();
+        apply_focus_gpu_resolution(
+            &mut objective_signals,
+            input.proc_root,
+            target_root_pid,
+            &active_tasks,
+            &system_context.inventory,
+        );
+
         let mut observation = AutotuneObservation {
             now_unix_nanos: system_context.sampled_at_unix_nanos,
             elapsed_ms: input.window.latest_elapsed_ms().unwrap_or(0),
@@ -105,7 +116,7 @@ impl AutotuneObservationBuilder {
             scored_samples: window_score.scored_samples,
             score: stutter_score_from_runtime_window_score(&window_score),
             data_quality: window_score.data_quality.clone(),
-            objective_signals: input.window.objective_signals(),
+            objective_signals,
             primary_situation,
             situation: Default::default(),
             focus_kind,
@@ -253,12 +264,63 @@ fn stutter_score_from_runtime_window_score(score: &RuntimeWindowScore) -> Stutte
     }
 }
 
+fn apply_focus_gpu_resolution(
+    signals: &mut crate::autotune::objective::ObjectiveSignals,
+    proc_root: &Path,
+    target_root_pid: Option<u32>,
+    active_tasks: &[ActiveTaskSnapshot],
+    inventory: &crate::system_inventory::SystemInventory,
+) {
+    let target_pids = focus_gpu_target_pids(target_root_pid, active_tasks);
+    let resolution = FocusGpuResolver::resolve(FocusGpuResolverInput {
+        proc_root,
+        target_pids: &target_pids,
+        inventory,
+        observed_render_node: signals.gpu_active_render_node.as_deref(),
+        observed_drm_card: signals.gpu_drm_card.as_deref(),
+        explicit_render_node: None,
+        explicit_drm_card: None,
+    });
+
+    if resolution.source == FocusGpuSource::Unresolved {
+        return;
+    }
+
+    signals.gpu_active_render_node = resolution.render_node;
+    signals.gpu_drm_card = resolution.drm_card;
+    signals.gpu_focus_confidence = Some(resolution.confidence);
+    signals.gpu_focus_source = Some(resolution.source.as_str().to_owned());
+    signals.signal_quality.gpu_active_render_node = match resolution.source {
+        FocusGpuSource::TargetProcessFd
+        | FocusGpuSource::ExplicitOverride
+        | FocusGpuSource::GpuSample
+        | FocusGpuSource::HwmonSelection => ObjectiveSignalQuality::Direct,
+        FocusGpuSource::SingleGpuFallback => ObjectiveSignalQuality::Derived,
+        FocusGpuSource::Unresolved => ObjectiveSignalQuality::Missing,
+    };
+}
+
+fn focus_gpu_target_pids(
+    target_root_pid: Option<u32>,
+    active_tasks: &[ActiveTaskSnapshot],
+) -> Vec<u32> {
+    let mut pids = target_root_pid.into_iter().collect::<Vec<_>>();
+    pids.extend(active_tasks.iter().map(|task| task.process_pid));
+    pids.extend(active_tasks.iter().map(|task| task.tid));
+    pids.sort_unstable();
+    pids.dedup();
+    pids
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc, time::Duration};
+    use std::{
+        collections::BTreeMap, fs, os::unix::fs::symlink, path::PathBuf, sync::Arc, time::Duration,
+    };
 
     use super::*;
     use crate::{
+        diagnosis::{Confidence, StutterCause},
         ebpf_loader::DropCountersSnapshot,
         process_tree::TaskClass,
         recorder::{IntervalRecord, IrqEventRecord},
@@ -378,7 +440,14 @@ mod tests {
             root_pid: Some(1234),
             active_target_count: 0,
             active_tasks: &active_tasks,
-            recent_diagnoses: Vec::new(),
+            recent_diagnoses: vec![LiveDiagnosisEntry {
+                elapsed_ms: 1_000,
+                cause: StutterCause::GameThreadSchedulerDelay,
+                confidence: Confidence::High,
+                anchor_class: TaskClass::Game,
+                anchor_comm: "game-main".to_owned(),
+                evidence: vec!["synthetic runnable latency above 5ms".to_owned()],
+            }],
             drop_counters: DropCountersSnapshot::default(),
             proc_root: &proc_root,
             sys_root: &sys_root,
@@ -396,6 +465,242 @@ mod tests {
         );
     }
 
+    #[test]
+    fn observation_from_game_window_with_high_cpu_latency() {
+        let (_root, proc_root, sys_root) =
+            temp_proc_sys_roots("observation-builder-game-cpu-pressure");
+        let mut window = RollingWindow::new(Duration::from_secs(30));
+        window.push_interval(IntervalRecord {
+            elapsed_ms: 1_000,
+            task: 4_242,
+            samples: 120,
+            over_1ms: 30,
+            over_2ms: 18,
+            over_5ms: 9,
+            max_ns: 7_500_000,
+            ..IntervalRecord::default()
+        });
+
+        let focus = AutotuneObservationFocus {
+            kind: FocusGroupKind::Game,
+            root_pids: vec![4_242],
+            member_pids: vec![4_242],
+            confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
+            score: 0.95,
+            situation: SituationKind::GameCpuSchedulerPressure,
+            reasons: vec!["game runnable latency above 5ms".to_owned()],
+        };
+        let active_tasks = BTreeMap::from([(
+            4_242,
+            task_info(4_242, 4_242, "game-main", TaskClass::Game, Some(42)),
+        )]);
+
+        let observation = AutotuneObservationBuilder::build(AutotuneObservationBuilderInput {
+            window: &window,
+            online_data_quality_policy: &OnlineDataQualityPolicy::default(),
+            focus: Some(&focus),
+            root_pid: None,
+            active_target_count: active_tasks.len(),
+            active_tasks: &active_tasks,
+            recent_diagnoses: vec![LiveDiagnosisEntry {
+                elapsed_ms: 1_000,
+                cause: StutterCause::GameThreadSchedulerDelay,
+                confidence: Confidence::High,
+                anchor_class: TaskClass::Game,
+                anchor_comm: "game-main".to_owned(),
+                evidence: vec!["synthetic runnable latency above 5ms".to_owned()],
+            }],
+            drop_counters: DropCountersSnapshot::default(),
+            proc_root: &proc_root,
+            sys_root: &sys_root,
+        })
+        .observation;
+
+        assert!(observation.focus_confidence >= crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE);
+        assert_eq!(
+            observation.primary_situation,
+            SituationKind::GameCpuSchedulerPressure
+        );
+        assert_eq!(observation.score.over_5ms, 9);
+    }
+
+    #[test]
+    fn observation_preserves_irq_signals() {
+        let (_root, proc_root, sys_root) = temp_proc_sys_roots("observation-builder-irq-signals");
+        let mut window = RollingWindow::new(Duration::from_secs(30));
+        window.push_interval(IntervalRecord {
+            elapsed_ms: 1_000,
+            task: 1234,
+            samples: 100,
+            ..IntervalRecord::default()
+        });
+        window.push_irq_event(IrqEventRecord {
+            elapsed_ms: Some(1_010),
+            irq: 44,
+            cpu: 2,
+            enter_ns: 10,
+            exit_ns: 3_000_010,
+            duration_ns: 3_000_000,
+        });
+        window.push_irq_event(IrqEventRecord {
+            elapsed_ms: Some(1_020),
+            irq: 45,
+            cpu: 3,
+            enter_ns: 20,
+            exit_ns: 5_000_020,
+            duration_ns: 5_000_000,
+        });
+
+        let active_tasks = BTreeMap::new();
+        let observation = AutotuneObservationBuilder::build(AutotuneObservationBuilderInput {
+            window: &window,
+            online_data_quality_policy: &OnlineDataQualityPolicy::default(),
+            focus: None,
+            root_pid: Some(1234),
+            active_target_count: 0,
+            active_tasks: &active_tasks,
+            recent_diagnoses: Vec::new(),
+            drop_counters: DropCountersSnapshot::default(),
+            proc_root: &proc_root,
+            sys_root: &sys_root,
+        })
+        .observation;
+
+        assert_eq!(observation.objective_signals.irq_overlap_count, Some(2));
+        assert_eq!(
+            observation.objective_signals.irq_worst_overlap_ns,
+            Some(5_000_000)
+        );
+        assert_eq!(observation.objective_signals.irq_hot_irq, Some(45));
+        assert_eq!(observation.objective_signals.irq_hot_cpu, Some(3));
+    }
+
+    #[test]
+    fn observation_builder_focus_falls_back_to_unknown_when_confidence_below_threshold() {
+        let (_root, proc_root, sys_root) =
+            temp_proc_sys_roots("observation-builder-low-confidence");
+        let mut window = RollingWindow::new(Duration::from_secs(30));
+        window.push_interval(IntervalRecord {
+            elapsed_ms: 1_000,
+            task: 9_001,
+            samples: 20,
+            ..IntervalRecord::default()
+        });
+        let active_tasks = BTreeMap::from([(
+            9_001,
+            task_info(9_001, 9_001, "service", TaskClass::Service, Some(9)),
+        )]);
+
+        let observation = AutotuneObservationBuilder::build(AutotuneObservationBuilderInput {
+            window: &window,
+            online_data_quality_policy: &OnlineDataQualityPolicy::default(),
+            focus: None,
+            root_pid: Some(9_001),
+            active_target_count: active_tasks.len(),
+            active_tasks: &active_tasks,
+            recent_diagnoses: Vec::new(),
+            drop_counters: DropCountersSnapshot::default(),
+            proc_root: &proc_root,
+            sys_root: &sys_root,
+        })
+        .observation;
+
+        assert!(observation.focus_is_idle_or_unknown());
+    }
+
+    #[test]
+    fn observation_builder_protected_tasks_exclude_compositor() {
+        let (_root, proc_root, sys_root) =
+            temp_proc_sys_roots("observation-builder-protected-compositor");
+        let mut window = RollingWindow::new(Duration::from_secs(30));
+        window.push_interval(IntervalRecord {
+            elapsed_ms: 1_000,
+            task: 77,
+            samples: 20,
+            ..IntervalRecord::default()
+        });
+        let active_tasks = BTreeMap::from([(
+            77,
+            task_info(77, 77, "kwin_wayland", TaskClass::Compositor, Some(77)),
+        )]);
+
+        let observation = AutotuneObservationBuilder::build(AutotuneObservationBuilderInput {
+            window: &window,
+            online_data_quality_policy: &OnlineDataQualityPolicy::default(),
+            focus: None,
+            root_pid: Some(77),
+            active_target_count: active_tasks.len(),
+            active_tasks: &active_tasks,
+            recent_diagnoses: Vec::new(),
+            drop_counters: DropCountersSnapshot::default(),
+            proc_root: &proc_root,
+            sys_root: &sys_root,
+        })
+        .observation;
+
+        assert_eq!(observation.protected_tasks.len(), 1);
+        assert_eq!(observation.protected_tasks[0].class, TaskClass::Compositor);
+    }
+
+    #[test]
+    fn observation_builder_resolves_focused_gpu_from_target_fd() {
+        let (_root, proc_root, sys_root) = temp_proc_sys_roots("observation-builder-gpu-focus");
+        write_cgroup(&proc_root, 1234, "/game.scope");
+        write_drm_device(&sys_root, "card0", "renderD128");
+        write_drm_device(&sys_root, "card1", "renderD129");
+        let fd_dir = proc_root.join("1234/fd");
+        fs::create_dir_all(&fd_dir).unwrap();
+        symlink("/dev/dri/renderD129", fd_dir.join("8")).unwrap();
+
+        let mut window = RollingWindow::new(Duration::from_secs(30));
+        window.push_interval(IntervalRecord {
+            elapsed_ms: 1_000,
+            task: 1234,
+            samples: 20,
+            ..IntervalRecord::default()
+        });
+        let active_tasks = BTreeMap::from([(
+            1234,
+            task_info(1234, 1234, "game", TaskClass::Game, Some(1234)),
+        )]);
+
+        let observation = AutotuneObservationBuilder::build(AutotuneObservationBuilderInput {
+            window: &window,
+            online_data_quality_policy: &OnlineDataQualityPolicy::default(),
+            focus: None,
+            root_pid: Some(1234),
+            active_target_count: active_tasks.len(),
+            active_tasks: &active_tasks,
+            recent_diagnoses: Vec::new(),
+            drop_counters: DropCountersSnapshot::default(),
+            proc_root: &proc_root,
+            sys_root: &sys_root,
+        })
+        .observation;
+
+        assert_eq!(
+            observation
+                .objective_signals
+                .gpu_active_render_node
+                .as_deref(),
+            Some("renderD129")
+        );
+        assert_eq!(
+            observation.objective_signals.gpu_drm_card.as_deref(),
+            Some("card1")
+        );
+        assert_eq!(
+            observation.objective_signals.gpu_focus_source.as_deref(),
+            Some("target_process_fd")
+        );
+        assert!(
+            observation
+                .objective_signals
+                .gpu_focus_confidence
+                .is_some_and(|confidence| confidence >= 0.90)
+        );
+    }
+
     fn temp_proc_sys_roots(prefix: &str) -> (TestRoot, PathBuf, PathBuf) {
         let root = TestRoot::new(prefix);
         let proc_root = root.join("proc");
@@ -409,6 +714,13 @@ mod tests {
         let task_root = proc_root.join(pid.to_string());
         fs::create_dir_all(&task_root).unwrap();
         fs::write(task_root.join("cgroup"), format!("0::{cgroup_path}\n")).unwrap();
+    }
+
+    fn write_drm_device(sys_root: &std::path::Path, card: &str, render_node: &str) {
+        let device_root = sys_root.join("class/drm").join(card).join("device");
+        fs::create_dir_all(device_root.join("drm").join(render_node)).unwrap();
+        fs::write(device_root.join("vendor"), "0x1002\n").unwrap();
+        fs::write(device_root.join("device"), "0x744c\n").unwrap();
     }
 
     fn task_info(

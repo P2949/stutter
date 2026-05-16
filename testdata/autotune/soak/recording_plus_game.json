@@ -1,1 +1,14 @@
-{"name":"recording_plus_game","profile":"observe-only","duration_seconds":60,"expect_actions":false,"expect_rollbacks":false,"forbid_high_risk_apply":true}
+{
+  "name": "recording_plus_game",
+  "mode": "apply-low-risk",
+  "ticks": [
+    { "kind": "focus_game", "confidence": 0.96 },
+    { "kind": "target_present" },
+    { "kind": "evaluation_tick", "reason": "recording active; wait for stable data" }
+  ],
+  "assertions": [
+    "one_active_experiment_maximum",
+    "rollback_token_before_apply",
+    "no_high_risk_autonomous_apply"
+  ]
+}

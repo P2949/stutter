@@ -14,6 +14,8 @@ use crate::recorder::GpuSample;
 
 #[derive(Debug)]
 pub struct HwmonReader {
+    drm_card: Option<String>,
+    render_node: Option<String>,
     gpu_busy: Option<fs::File>,
     vram_used: Option<fs::File>,
     vram_total: Option<fs::File>,
@@ -196,7 +198,14 @@ impl HwmonReader {
         };
 
         if let Some(root) = root {
-            Some(Self::from_hwmon_root(root))
+            Some(Self::from_hwmon_root_with_identity(
+                root,
+                drm_card.map(str::to_owned),
+                render_node
+                    .and_then(|node| node.file_name())
+                    .and_then(|name| name.to_str())
+                    .map(str::to_owned),
+            ))
         } else if has_nvidia_pci_device() {
             let mut reader = Self::empty();
             reader.nvidia_state = Some(start_nvidia_smi_thread());
@@ -208,6 +217,8 @@ impl HwmonReader {
 
     fn empty() -> Self {
         Self {
+            drm_card: None,
+            render_node: None,
             gpu_busy: None,
             vram_used: None,
             vram_total: None,
@@ -221,7 +232,11 @@ impl HwmonReader {
         }
     }
 
-    fn from_hwmon_root(root: PathBuf) -> Self {
+    fn from_hwmon_root_with_identity(
+        root: PathBuf,
+        drm_card: Option<String>,
+        render_node: Option<String>,
+    ) -> Self {
         let (freq1_input, freq1_is_mhz) = if let Ok(f) = fs::File::open(root.join("freq1_input")) {
             (Some(f), false)
         } else if let Ok(f) = fs::File::open(root.join("device/tile0/gt0/freq0/cur_freq_mhz")) {
@@ -231,6 +246,8 @@ impl HwmonReader {
         };
 
         let mut reader = Self {
+            drm_card,
+            render_node,
             gpu_busy: fs::File::open(root.join("device/gpu_busy_percent"))
                 .or_else(|_| fs::File::open(root.join("gpu_busy_percent")))
                 .ok(),
@@ -285,6 +302,8 @@ impl HwmonReader {
 
         GpuSample {
             elapsed_ms,
+            drm_card: self.drm_card.clone(),
+            render_node: self.render_node.clone(),
             gpu_busy_percent,
             vram_used_bytes,
             vram_total_bytes,
@@ -294,12 +313,15 @@ impl HwmonReader {
                 .map(|khz| khz / 1_000),
             temp_millidegrees: read_u32_cached(&mut self.temp1_input, &mut self.buf),
             power_microwatts: read_u64_cached(&mut self.power1_average, &mut self.buf),
+            power_limit_reason: None,
         }
     }
 
     #[cfg(test)]
     fn from_root(root: PathBuf) -> Self {
         Self {
+            drm_card: None,
+            render_node: None,
             gpu_busy: fs::File::open(root.join("gpu_busy_percent")).ok(),
             vram_used: None,
             vram_total: None,

@@ -62,7 +62,17 @@ impl FakeDaemonSimulationReport {
 pub fn run_fake_daemon_scenario(
     scenario: FakeDaemonScenario,
 ) -> anyhow::Result<FakeDaemonSimulationReport> {
-    let mut runtime = AutotuneRuntime::new(simulation_runtime_config(scenario.mode));
+    run_fake_daemon_scenario_with_safety(scenario, SafetyClass::ReversibleLowRisk)
+}
+
+pub fn run_fake_daemon_scenario_with_safety(
+    scenario: FakeDaemonScenario,
+    candidate_safety_class: SafetyClass,
+) -> anyhow::Result<FakeDaemonSimulationReport> {
+    let mut runtime = AutotuneRuntime::new(simulation_runtime_config(
+        scenario.mode,
+        candidate_safety_class,
+    ));
     let mut elapsed_ms = 0_u64;
     let mut decisions = Vec::new();
 
@@ -96,7 +106,10 @@ pub fn assert_no_apply_without_rollback(report: &FakeDaemonSimulationReport) {
     }
 }
 
-fn simulation_runtime_config(mode: DaemonMode) -> AutotuneRuntimeConfig {
+fn simulation_runtime_config(
+    mode: DaemonMode,
+    candidate_safety_class: SafetyClass,
+) -> AutotuneRuntimeConfig {
     let mut base = AutotuneRuntimeConfig::from_daemon_config(
         daemon_config_for_runtime_mode(mode, ActionSource::Test, Some(1234), None),
         None,
@@ -112,7 +125,7 @@ fn simulation_runtime_config(mode: DaemonMode) -> AutotuneRuntimeConfig {
     .with_min_focus_confidence(0.70)
     .with_simulated_candidates(vec![CandidateAction::Fake {
         action_id: ActionId("cpu-affinity-profile:simulation-low-risk".to_owned()),
-        safety_class: SafetyClass::ReversibleLowRisk,
+        safety_class: candidate_safety_class,
     }])
     .with_simulated_action_effects()
 }

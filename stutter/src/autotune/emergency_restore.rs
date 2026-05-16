@@ -303,6 +303,7 @@ fn restore_applied_journal_record(
                 "restored",
                 experiment_id,
                 action_id,
+                rollback_token,
                 true,
                 format!(
                     "autotune emergency restore succeeded rollback_kind={} restored_items={} skipped_items={}",
@@ -345,6 +346,7 @@ fn restore_applied_journal_record(
                 "EmergencyRestoreFault",
                 experiment_id,
                 action_id,
+                rollback_token,
                 false,
                 format!(
                     "autotune emergency restore failed rollback_kind={} error={} manual_restore_command=\"{}\"",
@@ -743,6 +745,7 @@ fn write_emergency_restore_history_event(
     decision: &str,
     experiment_id: &str,
     action_id: &str,
+    rollback_token: &RollbackToken,
     rollback_performed: bool,
     reason: String,
 ) -> anyhow::Result<()> {
@@ -757,6 +760,7 @@ fn write_emergency_restore_history_event(
             decision: decision.to_owned(),
             candidate_name: candidate_name_from_action_id(action_id),
             action_kind: Some(action_kind_from_action_id(action_id)),
+            safety_class: Some(safety_class_for_rollback_token(rollback_token)),
             eligible: rollback_performed,
             rollback_policy: "emergency-restore".to_owned(),
         },

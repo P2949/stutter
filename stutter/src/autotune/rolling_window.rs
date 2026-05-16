@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     autotune::{
-        objective::ObjectiveSignals,
+        objective::{ObjectiveSignalQuality, ObjectiveSignalQualitySnapshot, ObjectiveSignals},
         quality::{OnlineDataQuality, OnlineDataQualityInput, OnlineDataQualityPolicy},
     },
     diagnosis::LiveDiagnosisEntry,
@@ -17,7 +17,7 @@ use crate::{
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub struct WindowScore {
+pub struct RollingWindowScore {
     pub duration_ms: u64,
     pub interval_count: usize,
     pub scored_task_count: usize,
@@ -278,6 +278,13 @@ impl RollingWindow {
             .iter()
             .filter(|event| event.rwbs.contains('W') || event.rwbs.contains('F'))
             .count() as u64;
+        let block_io_overlap_basis = overlap_basis_label(
+            self.block_io_events
+                .iter()
+                .map(|event| event.correlation_basis.as_ref()),
+        );
+        let block_io_quality = source_quality_for_block_io_basis(block_io_overlap_basis.as_deref());
+        let has_block_io_events = !self.block_io_events.is_empty();
 
         let irq_worst_event = self
             .irq_events
@@ -290,6 +297,7 @@ impl RollingWindow {
             .filter(|event| event.duration_ns > 0)
             .count() as u64;
         let irq_worst_overlap_ns = irq_worst_event.map(|event| event.duration_ns).unwrap_or(0);
+        let has_irq_events = !self.irq_events.is_empty();
 
         let thermal_samples = self
             .gpu_samples
@@ -310,35 +318,142 @@ impl RollingWindow {
             (!self.cpu_freq_events.is_empty()).then_some(cpu_power_limited_event.is_some());
 
         let latest_gpu = self.gpu_samples.back();
+        let gpu_power_limited_event = self.gpu_samples.iter().find(|sample| {
+            sample.gpu_busy_percent.unwrap_or(0) >= GPU_POWER_LIMIT_BUSY_PERCENT
+                && sample.gpu_clock_mhz.unwrap_or(u32::MAX) <= GPU_POWER_LIMIT_LOW_CLOCK_MHZ
+        });
         let gpu_power_limited =
-            (!self.gpu_samples.is_empty()).then_some(self.gpu_samples.iter().any(|sample| {
-                sample.gpu_busy_percent.unwrap_or(0) >= GPU_POWER_LIMIT_BUSY_PERCENT
-                    && sample.gpu_clock_mhz.unwrap_or(u32::MAX) <= GPU_POWER_LIMIT_LOW_CLOCK_MHZ
-            }));
+            (!self.gpu_samples.is_empty()).then_some(gpu_power_limited_event.is_some());
+        let gpu_power_limit_reason = gpu_power_limited_event
+            .and_then(|sample| sample.power_limit_reason.clone())
+            .or_else(|| {
+                gpu_power_limited_event
+                    .is_some()
+                    .then(|| "busy_high_clock_low".to_owned())
+            });
+        let gpu_power_quality = if self.gpu_samples.iter().any(|sample| {
+            sample.gpu_busy_percent.is_some()
+                || sample.gpu_clock_mhz.is_some()
+                || sample.temp_millidegrees.is_some()
+                || sample.power_microwatts.is_some()
+        }) {
+            ObjectiveSignalQuality::Direct
+        } else {
+            ObjectiveSignalQuality::Missing
+        };
 
-        let has_block_io_events = !self.block_io_events.is_empty();
-        let has_irq_events = !self.irq_events.is_empty();
-        let has_dirty_writeback = dirty_writeback_events > 0;
+        let memory_pressure_some_avg10_percent = (!self.intervals.is_empty()).then(|| {
+            let total = self
+                .intervals
+                .iter()
+                .map(|record| record.mem_psi_some.max(0.0))
+                .sum::<f64>();
+            (total / self.intervals.len() as f64) as f32
+        });
+        let swap_activity_events = (!self.intervals.is_empty()).then(|| {
+            self.intervals
+                .iter()
+                .map(|record| record.major_faults)
+                .fold(0_u64, u64::saturating_add)
+        });
+
+        let gpu_active_render_node = latest_gpu.and_then(|sample| sample.render_node.clone());
+        let gpu_drm_card = latest_gpu.and_then(|sample| sample.drm_card.clone());
+
+        let signal_quality = ObjectiveSignalQualitySnapshot {
+            block_io_overlap: block_io_quality,
+            irq_overlap: if has_irq_events {
+                ObjectiveSignalQuality::Direct
+            } else {
+                ObjectiveSignalQuality::Missing
+            },
+            thermal: if thermal_degraded.is_some() {
+                ObjectiveSignalQuality::Direct
+            } else {
+                ObjectiveSignalQuality::Missing
+            },
+            cpu_power: if cpu_power_limited.is_some() {
+                ObjectiveSignalQuality::Derived
+            } else {
+                ObjectiveSignalQuality::Missing
+            },
+            gpu_power: gpu_power_quality,
+            gpu_active_render_node: if gpu_active_render_node.is_some() {
+                ObjectiveSignalQuality::Direct
+            } else {
+                ObjectiveSignalQuality::Missing
+            },
+            memory_pressure: if memory_pressure_some_avg10_percent.is_some() {
+                ObjectiveSignalQuality::Direct
+            } else {
+                ObjectiveSignalQuality::Missing
+            },
+            swap_activity: if swap_activity_events.is_some() {
+                ObjectiveSignalQuality::Approximate
+            } else {
+                ObjectiveSignalQuality::Missing
+            },
+            dirty_writeback: if has_block_io_events {
+                ObjectiveSignalQuality::Direct
+            } else {
+                ObjectiveSignalQuality::Missing
+            },
+            frame_pacing: if self.frames.is_empty() {
+                ObjectiveSignalQuality::Missing
+            } else {
+                ObjectiveSignalQuality::Direct
+            },
+            foreground_latency: if self.intervals.is_empty() {
+                ObjectiveSignalQuality::Missing
+            } else {
+                ObjectiveSignalQuality::Derived
+            },
+        };
+
+        let irq_quality = if has_irq_events {
+            ObjectiveSignalQuality::Direct
+        } else {
+            ObjectiveSignalQuality::Missing
+        };
+        let block_io_overlap_trust =
+            has_block_io_events.then(|| block_io_quality.as_str().to_owned());
+        let irq_overlap_trust = has_irq_events.then(|| irq_quality.as_str().to_owned());
+        let irq_overlap_basis = has_irq_events.then(|| "irq-duration".to_owned());
 
         ObjectiveSignals {
             block_io_overlap_count: has_block_io_events.then_some(block_io_overlap_count),
             block_io_worst_latency_ns: has_block_io_events.then_some(block_io_worst_latency_ns),
+            block_io_overlap_basis,
+            block_io_overlap_trust,
             irq_overlap_count: has_irq_events.then_some(irq_overlap_count),
             irq_worst_overlap_ns: has_irq_events.then_some(irq_worst_overlap_ns),
             irq_hot_irq: irq_worst_event.map(|event| event.irq),
             irq_hot_cpu: irq_worst_event.map(|event| event.cpu),
+            irq_overlap_basis,
+            irq_overlap_trust,
             thermal_degraded,
             thermal_throttle_count: thermal_degraded.map(|_| thermal_throttle_count),
             cpu_power_limited,
             cpu_power_limited_cpu: cpu_power_limited_event.map(|event| event.cpu),
+            cpu_power_limit_source: cpu_power_limited_event.map(|_| "cpu_freq_zero_khz".to_owned()),
+            cpu_power_limited_policy: cpu_power_limited_event
+                .map(|event| format!("cpu{}", event.cpu)),
             gpu_power_limited,
+            gpu_power_limit_reason,
             gpu_busy_percent: latest_gpu.and_then(|sample| sample.gpu_busy_percent),
             gpu_clock_mhz: latest_gpu.and_then(|sample| sample.gpu_clock_mhz),
             gpu_temp_millidegrees: latest_gpu.and_then(|sample| sample.temp_millidegrees),
-            gpu_active_render_node: None,
-            memory_pressure_some_avg10_percent: None,
-            swap_activity_events: None,
-            dirty_writeback_events: has_dirty_writeback.then_some(dirty_writeback_events),
+            gpu_drm_card,
+            gpu_active_render_node,
+            gpu_focus_confidence: latest_gpu
+                .and_then(|sample| sample.render_node.as_ref())
+                .map(|_| 0.85),
+            gpu_focus_source: latest_gpu
+                .and_then(|sample| sample.render_node.as_ref())
+                .map(|_| "gpu_sample".to_owned()),
+            memory_pressure_some_avg10_percent,
+            swap_activity_events,
+            dirty_writeback_events: has_block_io_events.then_some(dirty_writeback_events),
             frame_p99_ms: Some(self.frame_p99_ms()),
             foreground_over_5ms: Some(
                 self.intervals
@@ -346,17 +461,18 @@ impl RollingWindow {
                     .map(|record| record.over_5ms)
                     .fold(0_u64, u64::saturating_add),
             ),
+            signal_quality,
         }
     }
 
-    pub fn score(&self) -> WindowScore {
+    pub fn score(&self) -> RollingWindowScore {
         self.score_with_quality_policy(&OnlineDataQualityPolicy::default())
     }
 
     pub(crate) fn score_with_quality_policy(
         &self,
         quality_policy: &OnlineDataQualityPolicy,
-    ) -> WindowScore {
+    ) -> RollingWindowScore {
         let interval_count = self.interval_count();
         let scored_samples = self.scored_samples();
         let over_1ms = self
@@ -418,7 +534,7 @@ impl RollingWindow {
         }
         .evaluate_with_policy(quality_policy);
 
-        WindowScore {
+        RollingWindowScore {
             duration_ms: self.duration_ms(),
             interval_count,
             scored_task_count,
@@ -439,6 +555,27 @@ impl RollingWindow {
 impl Default for RollingWindow {
     fn default() -> Self {
         Self::new(Duration::from_secs(30))
+    }
+}
+
+fn overlap_basis_label<'a>(bases: impl Iterator<Item = &'a str>) -> Option<String> {
+    let unique = bases
+        .filter(|basis| !basis.trim().is_empty())
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+
+    if unique.is_empty() {
+        return None;
+    }
+
+    Some(unique.into_iter().collect::<Vec<_>>().join("+"))
+}
+
+fn source_quality_for_block_io_basis(basis: Option<&str>) -> ObjectiveSignalQuality {
+    match basis {
+        Some("request-pointer") => ObjectiveSignalQuality::Direct,
+        Some(_) => ObjectiveSignalQuality::Approximate,
+        None => ObjectiveSignalQuality::Missing,
     }
 }
 
@@ -507,6 +644,7 @@ mod tests {
             tid: 77,
             dev: 1,
             nr_sector: 8,
+            correlation_basis: "dev-sector".into(),
             sector: 99,
             duration_ns,
             timestamp_ns: 2_000 + duration_ns,
@@ -923,6 +1061,14 @@ mod tests {
         assert_eq!(signals.gpu_clock_mhz, None);
         assert_eq!(signals.gpu_temp_millidegrees, None);
         assert_eq!(signals.dirty_writeback_events, None);
+        assert_eq!(
+            signals.signal_quality.memory_pressure,
+            ObjectiveSignalQuality::Missing
+        );
+        assert_eq!(
+            signals.signal_quality.block_io_overlap,
+            ObjectiveSignalQuality::Missing
+        );
     }
 
     #[test]
@@ -943,17 +1089,75 @@ mod tests {
 
         assert_eq!(signals.block_io_overlap_count, Some(1));
         assert_eq!(signals.block_io_worst_latency_ns, Some(8_000_000));
+        assert_eq!(
+            signals.block_io_overlap_basis.as_deref(),
+            Some("dev-sector")
+        );
+        assert_eq!(
+            signals.block_io_overlap_trust.as_deref(),
+            Some("approximate")
+        );
         assert_eq!(signals.irq_overlap_count, Some(1));
         assert_eq!(signals.irq_worst_overlap_ns, Some(3_000_000));
         assert_eq!(signals.irq_hot_irq, Some(44));
         assert_eq!(signals.irq_hot_cpu, Some(2));
+        assert_eq!(signals.irq_overlap_basis.as_deref(), Some("irq-duration"));
+        assert_eq!(signals.irq_overlap_trust.as_deref(), Some("direct"));
         assert_eq!(signals.thermal_degraded, Some(true));
         assert_eq!(signals.thermal_throttle_count, Some(1));
         assert_eq!(signals.cpu_power_limited, Some(true));
         assert_eq!(signals.cpu_power_limited_cpu, Some(0));
+        assert_eq!(
+            signals.cpu_power_limit_source.as_deref(),
+            Some("cpu_freq_zero_khz")
+        );
+        assert_eq!(signals.cpu_power_limited_policy.as_deref(), Some("cpu0"));
         assert_eq!(signals.gpu_power_limited, Some(true));
+        assert_eq!(
+            signals.gpu_power_limit_reason.as_deref(),
+            Some("busy_high_clock_low")
+        );
         assert_eq!(signals.gpu_busy_percent, Some(96));
         assert_eq!(signals.gpu_clock_mhz, Some(250));
         assert_eq!(signals.gpu_temp_millidegrees, Some(90_000));
+        assert_eq!(signals.memory_pressure_some_avg10_percent, Some(0.0));
+        assert_eq!(signals.swap_activity_events, Some(0));
+        assert_eq!(signals.dirty_writeback_events, Some(0));
+        assert_eq!(
+            signals.signal_quality.block_io_overlap,
+            ObjectiveSignalQuality::Approximate
+        );
+        assert_eq!(
+            signals.signal_quality.irq_overlap,
+            ObjectiveSignalQuality::Direct
+        );
+        assert_eq!(
+            signals.signal_quality.memory_pressure,
+            ObjectiveSignalQuality::Direct
+        );
+    }
+
+    #[test]
+    fn objective_signals_preserve_gpu_identity_when_sample_has_it() {
+        let mut window = RollingWindow::new(Duration::from_secs(30));
+        window.push_gpu_sample(GpuSample {
+            elapsed_ms: 1_000,
+            drm_card: Some("card1".to_owned()),
+            render_node: Some("renderD129".to_owned()),
+            gpu_busy_percent: Some(55),
+            ..GpuSample::default()
+        });
+
+        let signals = window.objective_signals();
+
+        assert_eq!(signals.gpu_drm_card.as_deref(), Some("card1"));
+        assert_eq!(
+            signals.gpu_active_render_node.as_deref(),
+            Some("renderD129")
+        );
+        assert_eq!(
+            signals.signal_quality.gpu_active_render_node,
+            ObjectiveSignalQuality::Direct
+        );
     }
 }

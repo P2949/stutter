@@ -771,6 +771,7 @@ mod tests {
             experiment_id: "experiment-1".to_owned(),
             action_id: "action-1".to_owned(),
             candidate_name: Some("game-candidate".to_owned()),
+            mode: DaemonMode::ApplyLowRisk,
             safety_class: SafetyClass::ReversibleLowRisk,
             started_unix_nanos: Some(100),
         }
@@ -779,6 +780,8 @@ mod tests {
     fn active_rollback(rollback_available: bool) -> DaemonRollbackState {
         DaemonRollbackState {
             action_id: "action-1".to_owned(),
+            mode: DaemonMode::ApplyLowRisk,
+            safety_class: SafetyClass::ReversibleLowRisk,
             rollback_available,
             token: None,
             manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),

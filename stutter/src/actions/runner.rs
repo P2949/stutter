@@ -150,14 +150,6 @@ impl ActionRunPolicy {
         self.max_total_duration = Some(max_total_duration);
         self
     }
-
-    fn policy_intent(&self) -> PolicyIntent {
-        if self.dry_run {
-            PolicyIntent::DryRun
-        } else {
-            PolicyIntent::Apply
-        }
-    }
 }
 
 fn check_action_with_explanation(

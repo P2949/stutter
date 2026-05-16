@@ -3,7 +3,10 @@ use crate::{
     autotune::{
         candidate::{CandidateAction, CandidateEvidence, GpuPowerActionPlan},
         objective::ObjectiveKind,
-        providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
+        providers::{
+            CandidateProposal, CandidateProvider, CandidateProviderInput,
+            signal_quality_confidence_weight,
+        },
         situation::SituationKind,
     },
 };
@@ -21,6 +24,8 @@ pub struct GpuPowerCandidateEvidence {
 
 #[derive(Default)]
 pub struct GpuPowerProvider;
+
+const MIN_MULTI_GPU_FOCUS_CONFIDENCE: f32 = 0.70;
 
 impl CandidateProvider for GpuPowerProvider {
     fn family(&self) -> &'static str {
@@ -128,6 +133,17 @@ fn selected_gpu<'a>(
         .gpu_active_render_node
         .as_deref()
     {
+        if input.system_context.inventory.drm_devices.len() > 1 {
+            let confidence = input
+                .observation
+                .objective_signals
+                .gpu_focus_confidence
+                .unwrap_or(1.0);
+            if confidence < MIN_MULTI_GPU_FOCUS_CONFIDENCE {
+                return None;
+            }
+        }
+
         return input
             .system_context
             .inventory
@@ -164,7 +180,11 @@ fn gpu_power_confidence(
     .count() as f32
         / 7.0;
 
-    (input.observation.situation.confidence * completeness).clamp(0.0, 1.0)
+    let signal_weight = signal_quality_confidence_weight(
+        input.observation.objective_signals.signal_quality.gpu_power,
+    );
+
+    (input.observation.situation.confidence * completeness * signal_weight).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
@@ -226,6 +246,7 @@ mod tests {
                 ],
                 irq_default_smp_affinity: None,
                 irq_lines: Vec::new(),
+                power_source: Default::default(),
                 sched_ext_available: false,
                 vm_knobs: Default::default(),
                 inventory_hash: "fake-gpu-inventory".to_owned(),
@@ -291,6 +312,7 @@ mod tests {
                 ],
                 irq_default_smp_affinity: None,
                 irq_lines: Vec::new(),
+                power_source: Default::default(),
                 sched_ext_available: false,
                 vm_knobs: Default::default(),
                 inventory_hash: "fake-gpu-focused-inventory".to_owned(),
@@ -348,6 +370,7 @@ mod tests {
                 }],
                 irq_default_smp_affinity: None,
                 irq_lines: Vec::new(),
+                power_source: Default::default(),
                 sched_ext_available: false,
                 vm_knobs: Default::default(),
                 inventory_hash: "fake-gpu-inventory".to_owned(),

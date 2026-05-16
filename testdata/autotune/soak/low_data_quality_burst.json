@@ -1,1 +1,15 @@
-{"name":"low_data_quality_burst","profile":"observe-only","duration_seconds":45,"expect_actions":false,"expect_rollbacks":false,"forbid_high_risk_apply":true}
+{
+  "name": "low_data_quality_burst",
+  "mode": "apply-low-risk",
+  "ticks": [
+    { "kind": "focus_game", "confidence": 0.95 },
+    { "kind": "target_present" },
+    { "kind": "dropped_interval", "dropped_events": 1 },
+    { "kind": "evaluation_tick", "reason": "low data quality burst" }
+  ],
+  "assertions": [
+    "one_active_experiment_maximum",
+    "no_apply_during_low_data_quality",
+    "rollback_token_before_apply"
+  ]
+}

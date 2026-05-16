@@ -671,6 +671,10 @@ Remote autotune uses the same mode labels, but remote apply support is bounded b
 
 `suggest` mode does not apply candidate changes. Candidate suggestion text always includes a dry-run command, `required_mode`, `required_safety_class`, and `rollback=stutter restore`. A manual apply command is shown only when the central CLI daemon policy would allow that candidate; high-risk candidates do not get direct apply commands. CPU-affinity-profile suggestions preserve the existing `stutter apply-profile ...` command. Generic candidate suggestions write stable plan files under `$HOME/.local/state/stutter/autotune/candidate_plans/<action_kind>-<candidate_name>.json` and use `stutter autotune apply-candidate --candidate-json <file> --dry-run`; reversible process-local plans may also show `stutter autotune apply-candidate --candidate-json <file>` when policy allows manual apply.
 
+CPU power suggestions also require power and thermal headroom. They are suppressed while a battery is discharging unless `[autotune].allow_cpu_power_on_battery = true` is explicitly configured; battery apply-time guards remain in force for actual governor/EPP writes.
+
+VM knob suggestions are policy-table driven and remain high-risk/manual-only. Current suggestions are limited to `vm.swappiness` for swap activity and dirty writeback ratio knobs when direct writeback evidence is present; ratio suggestions are skipped when the corresponding bytes knob is active.
+
 Daemon status and watch commands are intended to answer "what is it doing?"
 without reading logs:
 

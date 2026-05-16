@@ -5,15 +5,15 @@ use stutter_common::SchedulerEvent;
 use crate::{
     alert::AlertPayload,
     diagnosis::LiveDiagnosisEntry,
-    ebpf_loader::DropCountersSnapshot,
     focus::FocusGroupKind,
     process_tree::TaskInfo,
     recorder::{
         BlockIoRecord, CpuFreqRecord, FocusEvent, ForegroundEvent, FrameEvent, GpuSample,
-        IntervalRecord, IrqEventRecord, MigrationEventRecord, SpikeEvent,
+        IrqEventRecord, MigrationEventRecord, SpikeEvent,
     },
     scx::ScxEvent,
 };
+pub use crate::{ebpf_loader::DropCountersSnapshot, recorder::IntervalRecord};
 
 pub type DaemonEvent = MonitorEvent;
 

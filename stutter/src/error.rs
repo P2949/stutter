@@ -20,6 +20,8 @@ pub enum StutterError {
     Action(#[from] crate::actions::ActionError),
     #[error("remote error: {0}")]
     Remote(#[from] RemoteError),
+    #[error("command error: {0:#}")]
+    Command(#[from] anyhow::Error),
 }
 
 #[derive(Debug, Error)]

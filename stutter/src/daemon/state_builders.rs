@@ -93,11 +93,14 @@ pub fn daemon_state_from_startup_recovery(outcome: &StartupRecoveryOutcome) -> D
                 experiment_id: experiment_id.clone(),
                 action_id: action_id.clone(),
                 candidate_name: None,
+                mode: DaemonMode::ApplyLowRisk,
                 safety_class: SafetyClass::ReversibleLowRisk,
                 started_unix_nanos: None,
             }),
             active_rollback: Some(DaemonRollbackState {
                 action_id: action_id.clone(),
+                mode: DaemonMode::ApplyLowRisk,
+                safety_class: SafetyClass::ReversibleLowRisk,
                 rollback_available: true,
                 token: None,
                 manual_restore_command: Some(manual_restore_command.clone()),
@@ -128,6 +131,7 @@ pub fn daemon_state_from_startup_recovery(outcome: &StartupRecoveryOutcome) -> D
                 experiment_id: experiment_id.clone(),
                 action_id: action_id.clone(),
                 candidate_name: None,
+                mode: DaemonMode::ApplyLowRisk,
                 safety_class: SafetyClass::ReversibleLowRisk,
                 started_unix_nanos: None,
             }),
@@ -159,6 +163,7 @@ pub fn daemon_state_from_startup_recovery(outcome: &StartupRecoveryOutcome) -> D
                 experiment_id: experiment_id.clone(),
                 action_id: action_id.clone(),
                 candidate_name: None,
+                mode: DaemonMode::ApplyLowRisk,
                 safety_class: SafetyClass::ReversibleLowRisk,
                 started_unix_nanos: None,
             }),
@@ -212,7 +217,8 @@ pub fn daemon_state_for_startup_recovery_snapshot(
             experiment_id: input.experiment_id.to_owned(),
             action_id: input.action_id.to_owned(),
             candidate_name: candidate_name_from_action_id(input.action_id),
-            safety_class,
+            mode: DaemonMode::ApplyLowRisk,
+            safety_class: safety_class.clone(),
             started_unix_nanos: None,
         })
     } else {
@@ -220,6 +226,8 @@ pub fn daemon_state_for_startup_recovery_snapshot(
     };
     let active_rollback = input.rollback_token.map(|token| DaemonRollbackState {
         action_id: input.action_id.to_owned(),
+        mode: DaemonMode::ApplyLowRisk,
+        safety_class: safety_class.clone(),
         rollback_available: input.rollback_available,
         token: Some(token.clone()),
         manual_restore_command: Some(manual_restore_command.clone()),

@@ -5,6 +5,9 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+// TODO: DiagnosisCandidate::evidence_details and LiveDiagnosisEntry::raw_latencies are not yet
+// consumed here. When implementing specific actionable recommendations, read these fields to
+// produce per-IRQ/per-process evidence strings.
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 
