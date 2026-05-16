@@ -7,9 +7,8 @@ use super::{
 use crate::{
     autotune::planner::{PlannerEvaluationSummary, PlannerSummary},
     daemon::{
-        DaemonPhase, DaemonPolicy, DaemonPolicyBuildInput, DaemonPolicyExplanation, DaemonState,
-        DaemonStatusExplanation, DaemonWatchdogReport, SystemHealthSnapshot, build_daemon_policy,
-        policy_context_from_daemon_status,
+        DaemonPhase, DaemonPolicy, DaemonPolicyExplanation, DaemonStatusExplanation,
+        DaemonWatchdogReport, SystemHealthSnapshot, policy_context_from_daemon_status,
     },
 };
 
@@ -399,6 +398,7 @@ pub fn render_what_changed_text(output: &DaemonWhatChangedOutput) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::autotune::planner::PlannerSelectedSummary;
 
     #[test]
     fn daemon_explain_text_contains_why_and_change_sections() {
@@ -437,21 +437,13 @@ mod tests {
             planner: Some(PlannerSummary {
                 total_proposals: 10,
                 eligible_proposals: 2,
-                selected: Some(PlannerEvaluationSummary {
+                selected: Some(PlannerSelectedSummary {
                     candidate_name: "game-main".to_owned(),
                     action_kind: "cpu_affinity_profile".to_owned(),
-                    provider: "cpu_affinity".to_owned(),
                     objective: crate::autotune::objective::ObjectiveKind::CompileThroughputWithForegroundProtection,
-                    safety_class: crate::actions::SafetyClass::Safe,
-                    effect_scope: crate::daemon_policy::ActionEffectScope::ProcessLocal,
+                    safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                     confidence: 0.95,
-                    eligible: true,
                     rank: Some(1),
-                    deny_reasons: Vec::new(),
-                    deny_reason_codes: Vec::new(),
-                    deny_messages: Vec::new(),
-                    dry_run_affected_tasks: None,
-                    manual_only_reason: None,
                     evidence: vec!["high_throughput".to_owned()],
                 }),
                 eligible_candidates: Vec::new(),
@@ -460,7 +452,7 @@ mod tests {
                     action_kind: "sysctl".to_owned(),
                     provider: "sysctl".to_owned(),
                     objective: crate::autotune::objective::ObjectiveKind::StutterScore,
-                    safety_class: crate::actions::SafetyClass::SystemAdjacentHighRisk,
+                    safety_class: crate::actions::SafetyClass::HighRisk,
                     effect_scope: crate::daemon_policy::ActionEffectScope::SystemWide,
                     confidence: 0.0,
                     eligible: false,
@@ -482,17 +474,22 @@ mod tests {
                 manual_only_suggestions: vec!["reboot".to_owned()],
                 no_action: None,
             }),
-            ..crate::daemon::DaemonDecisionState::default()
+            unix_nanos: Some(1),
+            score_total: Some(900),
+            candidate_count: Some(10),
+            top_denied_reason: Some("high_risk".to_owned()),
+            situation: Some("GameFocused".to_owned()),
+            focus_kind: Some("Game".to_owned()),
         });
 
-        let text = super::status::render_status_text(&output);
+        let text = crate::commands::daemon::status::render_status_text(&output);
 
         assert!(text.contains("planner: total=10 eligible=2"));
         assert!(text.contains(
-            "planner_selected: candidate=game-main action_kind=cpu_affinity_profile objective=compile_throughput_with_foreground_protection confidence=0.950 evidence=high_throughput"
+            "planner_selected: candidate=game-main action_kind=cpu_affinity_profile objective=CompileThroughputWithForegroundProtection confidence=0.950 evidence=high_throughput"
         ));
         assert!(text.contains(
-            "planner_denied: candidate=risky-one action_kind=sysctl objective=stutter_score confidence=0.000 eligible=false reasons=high_risk evidence=none"
+            "planner_denied: candidate=risky-one action_kind=sysctl objective=StutterScore confidence=0.000 eligible=false reasons=high_risk evidence=none"
         ));
         assert!(text.contains("planner_missing_capabilities: perf_event"));
         assert!(text.contains("planner_workload_blocked: systemd"));

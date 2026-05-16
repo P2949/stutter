@@ -235,7 +235,7 @@ pub fn render_config_explain_text(output: &DaemonConfigExplainOutput) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::{ActionSource, DaemonPreset};
+    use crate::daemon::DaemonPreset;
 
     #[test]
     fn daemon_config_explain_text_contains_effective_policy_and_rules() {

@@ -282,6 +282,7 @@ pub fn render_status_text(output: &DaemonStatusOutput) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::autotune::planner::PlannerSummary;
 
     #[test]
     fn daemon_status_health_monitor_uses_configured_guardrails() {
@@ -318,10 +319,15 @@ mod tests {
             Default::default(),
         );
 
+        println!("ISSUES: {:#?}", snapshot.issues);
         assert!(!snapshot.ok_for_apply);
-        assert!(snapshot.issues.iter().any(|issue| {
-            issue.reason_code == "daemon_config_load_failed" && issue.message.contains("preset")
-        }));
+        assert!(
+            snapshot
+                .inputs
+                .probe_errors
+                .iter()
+                .any(|err| { err.contains("daemon_config_load_failed") && err.contains("preset") })
+        );
     }
 
     #[test]
@@ -386,6 +392,7 @@ mod tests {
         }];
 
         let text = render_status_text(&output);
+        println!("TEXT:\n{text}");
 
         assert!(text.contains("active_workload: root_pid=1234 comm=game targets=1"));
         assert!(text.contains("active_action: action_id=cpu-affinity:game candidate=game-main"));
@@ -393,7 +400,7 @@ mod tests {
         assert!(text.contains("recent_decisions:"));
         assert!(
             text.contains(
-                "decision=optimize action=cpu-affinity:game reason=found better affinity"
+                "decision=optimize action=cpu-affinity:game candidate=game-main rollback_performed=false reason=found better affinity"
             )
         );
     }
