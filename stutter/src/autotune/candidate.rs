@@ -158,14 +158,8 @@ impl CandidateAction {
     }
 
     pub fn is_high_risk_system_adjacent(&self) -> bool {
-        matches!(
-            self,
-            Self::IrqAffinity { .. }
-                | Self::CpuPower { .. }
-                | Self::GpuPower { .. }
-                | Self::VmKnob { .. }
-        ) || self.descriptor().touches_system_wide_state
-            || self.safety_class() == SafetyClass::HighRisk
+        let descriptor = self.descriptor();
+        descriptor.touches_system_wide_state || descriptor.safety_class == SafetyClass::HighRisk
     }
 
     pub fn manual_only_reason(&self) -> Option<String> {
@@ -3589,6 +3583,41 @@ mod tests {
         assert_eq!(candidate.target_root_pid(), Some(1234));
         assert_eq!(candidate.conflict_group(), ActionConflictGroup::CpuPriority);
         assert_eq!(candidate.objective(), ObjectiveKind::DesktopInteractivity);
+    }
+
+    #[test]
+    fn fake_candidate_uses_candidate_plan_metadata() {
+        let candidate = CandidateAction::fake(
+            crate::actions::ActionId("fake-plan".to_owned()),
+            SafetyClass::ReversibleMediumRisk,
+        );
+
+        assert_eq!(candidate.candidate_name(), "fake-profile");
+        assert_eq!(candidate.action_kind(), "fake");
+        assert_eq!(candidate.target_root_pid(), None);
+        assert_eq!(candidate.action_id().0, "fake-plan");
+        assert_eq!(candidate.safety_class(), SafetyClass::ReversibleMediumRisk);
+        assert_eq!(candidate.effect_scope(), ActionEffectScope::ObserveOnly);
+        assert!(candidate.evidence().is_empty());
+        assert_eq!(candidate.objective(), ObjectiveKind::StutterScore);
+        assert_eq!(candidate.conflict_group(), ActionConflictGroup::None);
+        assert_eq!(candidate.describe(), "fake action fake-plan");
+        assert!(!candidate.is_high_risk_system_adjacent());
+        assert!(candidate.manual_only_reason().is_none());
+
+        let high_risk_candidate = CandidateAction::fake(
+            crate::actions::ActionId("fake-high-risk".to_owned()),
+            SafetyClass::HighRisk,
+        );
+
+        assert!(high_risk_candidate.is_high_risk_system_adjacent());
+        assert_eq!(
+            high_risk_candidate.manual_only_reason(),
+            Some(
+                "manual-only high-risk/system-adjacent candidate; autonomous apply is disabled for action_kind=fake"
+                    .to_owned()
+            )
+        );
     }
 
     #[test]
