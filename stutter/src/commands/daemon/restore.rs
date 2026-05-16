@@ -10,6 +10,7 @@ use crate::{
     profile_restore,
 };
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct DaemonRestoreCommandOutcome {
     pub autotune: AutotuneRestoreOutcome,
