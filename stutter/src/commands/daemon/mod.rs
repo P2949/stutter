@@ -6,6 +6,7 @@ pub mod helpers;
 pub mod lifecycle;
 pub mod overhead;
 pub mod policy;
+pub mod privileged_worker;
 pub mod profiles;
 pub mod reset;
 pub mod restore;
@@ -28,7 +29,7 @@ pub fn run_policy_explain_command(
 pub fn run_privileged_worker_command(
     input: crate::commands::input::PrivilegedWorkerCommandInput,
 ) -> anyhow::Result<()> {
-    crate::daemon::privilege::run_privileged_worker(&input.socket)
+    privileged_worker::run_privileged_worker_command(input)
 }
 
 pub fn run_profiles_command(
