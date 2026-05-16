@@ -120,6 +120,7 @@ pub struct HumanDecisionWindow {
     pub situation: HumanSituationKind,
     pub decision: HumanDecisionKind,
     pub reason: String,
+    pub planner_summary: Option<String>,
 }
 
 impl HumanDecisionWindow {
@@ -137,12 +138,13 @@ impl HumanDecisionWindow {
             situation,
             decision: HumanDecisionKind::Noop,
             reason: reason.into(),
+            planner_summary: None,
         }
     }
 }
 
 pub fn render_human_decision_window(window: &HumanDecisionWindow) -> String {
-    format!(
+    let mut line = format!(
         "autotune phase={} mode={} target={} score={} situation={} decision={} reason=\"{}\"",
         window.phase,
         window.mode,
@@ -151,7 +153,13 @@ pub fn render_human_decision_window(window: &HumanDecisionWindow) -> String {
         window.situation,
         window.decision.as_human_str(),
         escape_reason(&window.reason)
-    )
+    );
+
+    if let Some(planner_summary) = window.planner_summary.as_ref() {
+        line.push_str(&format!(" planner=\"{}\"", escape_reason(planner_summary)));
+    }
+
+    line
 }
 
 pub fn print_human_decision_window(window: &HumanDecisionWindow) {
@@ -246,6 +254,25 @@ mod tests {
     }
 
     #[test]
+    fn renders_planner_summary_when_present() {
+        let mut window = HumanDecisionWindow::observe_noop(
+            "Game.exe",
+            143,
+            HumanSituationKind::GameCpuSchedulerPressure,
+            "no candidate selected",
+        );
+        window.planner_summary = Some(
+            "total=3 eligible=0 grouped=capability_missing=2 denied=nice-candidate".to_owned(),
+        );
+
+        let line = render_human_decision_window(&window);
+
+        assert!(line.contains(
+            "planner=\"total=3 eligible=0 grouped=capability_missing=2 denied=nice-candidate\""
+        ));
+    }
+
+    #[test]
     fn renders_non_noop_decisions_in_kebab_case() {
         let window = HumanDecisionWindow {
             phase: HumanControllerPhase::Cooldown,
@@ -255,6 +282,7 @@ mod tests {
             situation: HumanSituationKind::CpuPressure,
             decision: HumanDecisionKind::EnterCooldown,
             reason: "cooldown blocks repeated action".to_owned(),
+            planner_summary: None,
         };
 
         let line = render_human_decision_window(&window);

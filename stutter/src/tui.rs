@@ -685,6 +685,10 @@ mod tests {
             history_path: std::path::PathBuf::from("/tmp/history.jsonl"),
             journal_path: std::path::PathBuf::from("/tmp/controller_journal.json"),
             warning: None,
+            planner_selected: None,
+            planner_eligible: Vec::new(),
+            planner_top_denied: Vec::new(),
+            planner_grouped_denials: Vec::new(),
         };
 
         let rendered = autotune_panel_lines(Some(&snapshot))
