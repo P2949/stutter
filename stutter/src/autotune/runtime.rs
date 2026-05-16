@@ -1366,7 +1366,36 @@ pub async fn run_autotune_controller_session(
     }
 
     let monitor_result = monitor_task.await?;
-    let reason = monitor_result?;
+    finish_autotune_controller_session(&mut runtime, monitor_result)
+}
+
+fn finish_autotune_controller_session(
+    runtime: &mut AutotuneRuntime,
+    monitor_result: anyhow::Result<String>,
+) -> anyhow::Result<AutotuneControllerExit> {
+    let reason = match monitor_result {
+        Ok(reason) => reason,
+        Err(err) => {
+            if let Err(rollback_err) =
+                runtime.rollback_on_stop("autotune controller session failed before clean shutdown")
+            {
+                return Err(anyhow::anyhow!(
+                    "monitor failed with {err:#}; additionally failed to rollback active experiment: {rollback_err:#}"
+                ));
+            }
+            return Err(err);
+        }
+    };
+
+    if let Some(snapshot) =
+        runtime.rollback_on_stop(&format!("autotune controller session stopped: {reason}"))?
+    {
+        log::info!(
+            "autotune_controller_session_exit_rollback_complete phase={:?} active_experiment={}",
+            snapshot.phase,
+            snapshot.active_experiment.is_some()
+        );
+    }
 
     Ok(AutotuneControllerExit {
         reason,
@@ -1917,6 +1946,43 @@ mod tests {
 
         assert!(snapshot.is_none());
         assert!(!runtime.has_active_experiment());
+    }
+
+    #[test]
+    fn controller_session_finish_rolls_back_active_experiment_on_clean_stop() {
+        let mut config = AutotuneRuntimeConfig::apply_low_risk(None, Some(1234), None)
+            .with_simulated_action_effects();
+        config.history_log = None;
+        let mut runtime = AutotuneRuntime::new(config);
+        let observation = high_quality_game_observation_with_focus_confidence(0.95);
+        runtime.last_observation = observation.clone();
+
+        let candidate = CandidateAction::Fake {
+            action_id: crate::actions::ActionId("fake-low-risk-stop".to_owned()),
+            safety_class: SafetyClass::ReversibleLowRisk,
+        };
+
+        runtime
+            .apply_decision_side_effects(
+                &observation,
+                &AutotuneDecision::StartExperiment {
+                    candidate,
+                    reason: "test start".to_owned(),
+                },
+                "test start",
+            )
+            .unwrap();
+
+        assert!(runtime.has_active_experiment());
+
+        let exit =
+            finish_autotune_controller_session(&mut runtime, Ok("stop requested".to_owned()))
+                .unwrap();
+
+        assert_eq!(exit.reason, "stop requested");
+        assert!(!runtime.has_active_experiment());
+        assert_eq!(runtime.controller.state.phase, ControllerPhase::Cooldown);
+        assert!(runtime.controller.state.active_experiment.is_none());
     }
 
     #[test]
