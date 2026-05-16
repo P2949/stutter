@@ -581,10 +581,10 @@ mod tests {
     };
 
     fn fake_candidate() -> CandidateAction {
-        CandidateAction::Fake {
-            action_id: ActionId("cpu-affinity-profile:test".to_owned()),
-            safety_class: SafetyClass::ReversibleLowRisk,
-        }
+        CandidateAction::fake(
+            ActionId("cpu-affinity-profile:test".to_owned()),
+            SafetyClass::ReversibleLowRisk,
+        )
     }
 
     fn context_with_distribution(

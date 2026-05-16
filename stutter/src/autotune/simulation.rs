@@ -123,10 +123,10 @@ fn simulation_runtime_config(
         ..OnlineDataQualityPolicy::default()
     })
     .with_min_focus_confidence(0.70)
-    .with_simulated_candidates(vec![CandidateAction::Fake {
-        action_id: ActionId("cpu-affinity-profile:simulation-low-risk".to_owned()),
-        safety_class: candidate_safety_class,
-    }])
+    .with_simulated_candidates(vec![CandidateAction::fake(
+        ActionId("cpu-affinity-profile:simulation-low-risk".to_owned()),
+        candidate_safety_class,
+    )])
     .with_simulated_action_effects()
 }
 

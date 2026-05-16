@@ -463,10 +463,10 @@ mod tests {
 
     #[test]
     fn autonomous_policy_uses_autonomous_families_not_allowed_families() {
-        let candidate = CandidateAction::Fake {
-            action_id: crate::actions::ActionId("fake-autonomous-test".to_owned()),
-            safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
-        };
+        let candidate = CandidateAction::fake(
+            crate::actions::ActionId("fake-autonomous-test".to_owned()),
+            crate::actions::SafetyClass::ReversibleLowRisk,
+        );
         let allowed_only = WorkloadPolicyRule {
             situation: SituationKind::Unknown,
             allowed_families: std::collections::BTreeSet::from(["fake".to_owned()]),

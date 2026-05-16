@@ -1733,10 +1733,10 @@ mod tests {
         config.history_log = None;
         let mut runtime = AutotuneRuntime::new(config);
         let observation = high_quality_game_observation_with_focus_confidence(0.95);
-        let candidate = CandidateAction::Fake {
-            action_id: crate::actions::ActionId("fake-medium".to_owned()),
-            safety_class: SafetyClass::ReversibleMediumRisk,
-        };
+        let candidate = CandidateAction::fake(
+            crate::actions::ActionId("fake-medium".to_owned()),
+            SafetyClass::ReversibleMediumRisk,
+        );
 
         runtime
             .apply_decision_side_effects(
@@ -1838,10 +1838,10 @@ mod tests {
 
     #[test]
     fn top_denied_reason_for_plan_prefers_deny_reason_enum() {
-        let candidate = CandidateAction::Fake {
-            action_id: crate::actions::ActionId("fake-noop".to_owned()),
-            safety_class: SafetyClass::ObserveOnly,
-        };
+        let candidate = CandidateAction::fake(
+            crate::actions::ActionId("fake-noop".to_owned()),
+            SafetyClass::ObserveOnly,
+        );
         let descriptor = candidate.descriptor();
         let evaluation = crate::autotune::planner::CandidateEvaluation {
             candidate_name: "fake-noop".to_owned(),
@@ -1957,10 +1957,10 @@ mod tests {
         let observation = high_quality_game_observation_with_focus_confidence(0.95);
         runtime.last_observation = observation.clone();
 
-        let candidate = CandidateAction::Fake {
-            action_id: crate::actions::ActionId("fake-low-risk-stop".to_owned()),
-            safety_class: SafetyClass::ReversibleLowRisk,
-        };
+        let candidate = CandidateAction::fake(
+            crate::actions::ActionId("fake-low-risk-stop".to_owned()),
+            SafetyClass::ReversibleLowRisk,
+        );
 
         runtime
             .apply_decision_side_effects(

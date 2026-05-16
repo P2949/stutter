@@ -1844,10 +1844,10 @@ mod tests {
     }
 
     fn fake_apply_request() -> CandidateApplyRequest {
-        let candidate = CandidateAction::Fake {
-            action_id: crate::actions::ActionId("fake:privilege".to_owned()),
-            safety_class: SafetyClass::ReversibleLowRisk,
-        };
+        let candidate = CandidateAction::fake(
+            crate::actions::ActionId("fake:privilege".to_owned()),
+            SafetyClass::ReversibleLowRisk,
+        );
         CandidateApplyRequest {
             plan: CandidatePlanRequest::from_candidate(candidate, crate::audit::unix_nanos_now()),
             policy: DaemonPolicy::apply_low_risk(crate::daemon_policy::ActionSource::Test),

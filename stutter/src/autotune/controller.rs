@@ -539,10 +539,7 @@ mod tests {
     }
 
     fn candidate_with_safety_class(safety_class: SafetyClass) -> CandidateAction {
-        CandidateAction::Fake {
-            action_id: ActionId("test".to_owned()),
-            safety_class,
-        }
+        CandidateAction::fake(ActionId("test".to_owned()), safety_class)
     }
 
     fn high_quality_observation(score_total: u64) -> AutotuneObservation {

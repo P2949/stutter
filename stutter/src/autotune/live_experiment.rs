@@ -1118,10 +1118,10 @@ mod tests {
     }
 
     fn low_risk_candidate() -> CandidateAction {
-        CandidateAction::Fake {
-            action_id: ActionId("fake-low-risk".to_owned()),
-            safety_class: SafetyClass::ReversibleLowRisk,
-        }
+        CandidateAction::fake(
+            ActionId("fake-low-risk".to_owned()),
+            SafetyClass::ReversibleLowRisk,
+        )
     }
 
     fn medium_risk_candidate() -> CandidateAction {
