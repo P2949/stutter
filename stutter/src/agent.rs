@@ -929,6 +929,7 @@ fn daemon_state_for_autotune_stop(
             score_total: Some(decision.score_total),
             candidate_count: Some(decision.candidate_count),
             top_denied_reason: decision.top_denied_reason.clone(),
+            planner: decision.planner.clone(),
             situation: Some(decision.situation.clone()),
             focus_kind: decision.focus_kind.clone(),
         })
@@ -3178,6 +3179,7 @@ mod tests {
                 score_total: None,
                 candidate_count: None,
                 top_denied_reason: None,
+                planner: None,
                 situation: None,
                 focus_kind: None,
             }),

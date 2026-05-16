@@ -7,8 +7,8 @@ use std::{
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use super::experiment::WindowScore;
 pub use super::situation::SituationKind;
+use super::{experiment::WindowScore, planner::PlannerSummary};
 use crate::actions::SafetyClass;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -88,6 +88,8 @@ pub struct AutotuneHistoryEvent {
     pub score_after: Option<WindowScore>,
     pub rollback_performed: bool,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planner: Option<PlannerSummary>,
 }
 
 impl AutotuneHistoryEvent {
@@ -118,6 +120,7 @@ impl AutotuneHistoryEvent {
             score_after: None,
             rollback_performed: false,
             reason: reason.into(),
+            planner: None,
         }
     }
 
@@ -143,6 +146,11 @@ impl AutotuneHistoryEvent {
 
     pub fn with_rollback_performed(mut self, rollback_performed: bool) -> Self {
         self.rollback_performed = rollback_performed;
+        self
+    }
+
+    pub fn with_planner(mut self, planner: Option<PlannerSummary>) -> Self {
+        self.planner = planner;
         self
     }
 }

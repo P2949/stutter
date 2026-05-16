@@ -413,6 +413,7 @@ mod tests {
             action_id: Some("cpu-affinity-profile:game-main-suggested".to_owned()),
             score_before: Some(score(412)),
             score_after: Some(score(330)),
+            planner: None,
             rollback_performed,
             reason: reason.to_owned(),
         }

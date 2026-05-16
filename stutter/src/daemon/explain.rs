@@ -582,6 +582,7 @@ mod tests {
                 score_total: None,
                 candidate_count: None,
                 top_denied_reason: None,
+                planner: None,
                 situation: None,
                 focus_kind: None,
             }),

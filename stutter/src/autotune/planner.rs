@@ -105,6 +105,8 @@ pub struct PlannerSummary {
     pub total_proposals: usize,
     pub eligible_proposals: usize,
     pub selected: Option<PlannerSelectedSummary>,
+    #[serde(default)]
+    pub eligible_candidates: Vec<PlannerEvaluationSummary>,
     pub top_denied_candidates: Vec<PlannerEvaluationSummary>,
     pub grouped_denials: Vec<PlannerDenySummary>,
     pub missing_capabilities: Vec<String>,
@@ -121,6 +123,8 @@ pub struct PlannerSelectedSummary {
     pub safety_class: SafetyClass,
     pub confidence: f32,
     pub rank: Option<u32>,
+    #[serde(default)]
+    pub evidence: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -139,6 +143,8 @@ pub struct PlannerEvaluationSummary {
     pub deny_messages: Vec<String>,
     pub dry_run_affected_tasks: Option<usize>,
     pub manual_only_reason: Option<String>,
+    #[serde(default)]
+    pub evidence: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -148,12 +154,20 @@ pub struct PlannerDenySummary {
     pub count: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PlannerNoActionSummary {
     pub reason: String,
     pub total_proposals: usize,
     pub eligible_proposals: usize,
     pub grouped_denials: Vec<PlannerDenySummary>,
+    #[serde(default)]
+    pub top_denied_candidates: Vec<PlannerEvaluationSummary>,
+    #[serde(default)]
+    pub missing_capabilities: Vec<String>,
+    #[serde(default)]
+    pub workload_blocked: Vec<String>,
+    #[serde(default)]
+    pub manual_only_suggestions: Vec<String>,
 }
 
 impl PlannerSummary {
@@ -179,6 +193,12 @@ impl PlannerSummary {
             })
             .map(PlannerSelectedSummary::from_evaluation);
         let grouped_denials = grouped_denials(&plan.evaluations);
+        let eligible_candidates = plan
+            .evaluations
+            .iter()
+            .filter(|evaluation| evaluation.eligible)
+            .map(PlannerEvaluationSummary::from_evaluation)
+            .collect::<Vec<_>>();
         let top_denied_candidates = plan
             .evaluations
             .iter()
@@ -206,12 +226,17 @@ impl PlannerSummary {
                 total_proposals,
                 eligible_proposals,
                 grouped_denials: grouped_denials.clone(),
+                top_denied_candidates: top_denied_candidates.clone(),
+                missing_capabilities: missing_capabilities.clone(),
+                workload_blocked: workload_blocked.clone(),
+                manual_only_suggestions: manual_only_suggestions.clone(),
             });
 
         Self {
             total_proposals,
             eligible_proposals,
             selected,
+            eligible_candidates,
             top_denied_candidates,
             grouped_denials,
             missing_capabilities,
@@ -231,6 +256,7 @@ impl PlannerSelectedSummary {
             safety_class: evaluation.descriptor.safety_class.clone(),
             confidence: evaluation.confidence,
             rank: evaluation.rank,
+            evidence: planner_evidence_summary(&evaluation.evidence),
         }
     }
 }
@@ -260,8 +286,22 @@ impl PlannerEvaluationSummary {
                 .as_ref()
                 .map(|state| state.affected_tasks),
             manual_only_reason: evaluation.candidate.manual_only_reason(),
+            evidence: planner_evidence_summary(&evaluation.evidence),
         }
     }
+}
+
+fn planner_evidence_summary(evidence: &[CandidateEvidence]) -> Vec<String> {
+    evidence
+        .iter()
+        .take(8)
+        .map(|evidence| {
+            format!(
+                "{}={} weight={:.2}",
+                evidence.signal, evidence.value, evidence.weight
+            )
+        })
+        .collect()
 }
 
 impl CandidateDenyReason {
@@ -723,7 +763,12 @@ fn evaluate_proposal_static(
 
     let candidate_name = proposal.candidate.candidate_name().to_owned();
     let action_kind = proposal.candidate.action_kind().to_owned();
-    let evidence = proposal.candidate.evidence().to_vec();
+    let mut evidence = proposal.candidate.evidence().to_vec();
+    evidence.push(crate::autotune::candidate::CandidateEvidence::new(
+        "situation",
+        format!("{:?}", input.observation.primary_situation),
+        input.observation.situation.confidence,
+    ));
 
     CandidateEvaluationDraft {
         candidate_name,
@@ -2325,6 +2370,14 @@ mod tests {
 
         assert_eq!(summary.total_proposals, 1);
         assert_eq!(summary.eligible_proposals, 0);
+        assert!(summary.eligible_candidates.is_empty());
+        assert_eq!(summary.top_denied_candidates.len(), 1);
+        assert!(
+            summary.top_denied_candidates[0]
+                .evidence
+                .iter()
+                .any(|evidence| evidence.contains("situation="))
+        );
         assert!(
             summary
                 .grouped_denials

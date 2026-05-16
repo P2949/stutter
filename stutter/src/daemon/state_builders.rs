@@ -35,6 +35,7 @@ pub fn daemon_decision_state(decision: &str, reason: impl Into<String>) -> Daemo
         score_total: None,
         candidate_count: None,
         top_denied_reason: None,
+        planner: None,
         situation: None,
         focus_kind: None,
     }
@@ -262,6 +263,7 @@ pub fn daemon_state_for_startup_recovery_snapshot(
             score_total: None,
             candidate_count: None,
             top_denied_reason: None,
+            planner: None,
             situation: None,
             focus_kind: None,
         }),

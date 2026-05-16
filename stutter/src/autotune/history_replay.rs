@@ -288,6 +288,7 @@ mod tests {
             action_id: candidate.map(|name| format!("cpu-affinity-profile:{name}")),
             score_before: None,
             score_after: None,
+            planner: None,
             rollback_performed: false,
             reason: reason.to_owned(),
         }
