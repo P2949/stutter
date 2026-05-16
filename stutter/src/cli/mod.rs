@@ -973,4 +973,57 @@ mod split_smoke_tests {
         let command = parse_app_command_from(["stutter", "rules", "list"]).unwrap();
         assert!(matches!(command, AppCommand::Rules(_)));
     }
+
+    #[test]
+    #[allow(clippy::type_complexity)]
+    fn cli_split_review_guard_covers_all_split_cli_modules() {
+        let cases: &[(&[&str], fn(AppCommand) -> bool)] = &[
+            (&["stutter", "monitor", "--pid", "1234"], |command| {
+                matches!(command, AppCommand::Monitor(_))
+            }),
+            (
+                &[
+                    "stutter",
+                    "autotune",
+                    "--tree-pid",
+                    "1234",
+                    "--mode",
+                    "observe",
+                ],
+                |command| matches!(command, AppCommand::Autotune(_)),
+            ),
+            (&["stutter", "daemon", "status", "--json"], |command| {
+                matches!(command, AppCommand::DaemonStatus(_))
+            }),
+            (&["stutter", "agent"], |command| {
+                matches!(command, AppCommand::Agent(_))
+            }),
+            (&["stutter", "report", "/tmp/run"], |command| {
+                matches!(command, AppCommand::Report(_))
+            }),
+            (&["stutter", "config", "check"], |command| {
+                matches!(command, AppCommand::ConfigCheck(_))
+            }),
+            (
+                &["stutter", "service", "doctor", "--mode", "user-observe"],
+                |command| matches!(command, AppCommand::Service(_)),
+            ),
+            (&["stutter", "validate", "/tmp/run"], |command| {
+                matches!(command, AppCommand::Validate(_))
+            }),
+        ];
+
+        for (argv, is_expected_command) in cases {
+            Cli::try_parse_from(*argv)
+                .unwrap_or_else(|err| panic!("Cli::try_parse_from failed for {argv:?}: {err}"));
+
+            let command = parse_app_command_from(*argv)
+                .unwrap_or_else(|err| panic!("parse_app_command_from failed for {argv:?}: {err}"));
+
+            assert!(
+                is_expected_command(command),
+                "parsed command did not match expected AppCommand variant for {argv:?}"
+            );
+        }
+    }
 }
