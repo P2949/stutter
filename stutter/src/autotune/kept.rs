@@ -232,10 +232,7 @@ mod tests {
     }
 
     fn fake_candidate(name: &str) -> CandidateAction {
-        CandidateAction::Fake {
-            action_id: ActionId(name.to_owned()),
-            safety_class: SafetyClass::ReversibleLowRisk,
-        }
+        CandidateAction::fake(ActionId(name.to_owned()), SafetyClass::ReversibleLowRisk)
     }
 
     fn window_score(total: u64) -> WindowScore {

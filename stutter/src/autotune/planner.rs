@@ -2041,10 +2041,10 @@ mod tests {
     #[test]
     fn low_risk_policy_denies_medium_risk_fake_candidate() {
         let policy = policy(DaemonMode::ApplyLowRisk);
-        let candidate = CandidateAction::Fake {
-            action_id: crate::actions::ActionId("fake-medium".to_owned()),
-            safety_class: SafetyClass::ReversibleMediumRisk,
-        };
+        let candidate = CandidateAction::fake(
+            crate::actions::ActionId("fake-medium".to_owned()),
+            SafetyClass::ReversibleMediumRisk,
+        );
 
         assert!(candidate.safety_class() > policy.max_safety_class);
     }

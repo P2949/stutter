@@ -25,37 +25,16 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub enum CandidateAction {
-    CpuAffinityProfile {
-        plan: CpuAffinityProfilePlan,
-    },
-    Nice {
-        plan: NiceActionPlan,
-    },
-    IoPrio {
-        plan: IoPrioActionPlan,
-    },
-    Uclamp {
-        plan: UclampActionPlan,
-    },
-    CgroupPlacement {
-        plan: CgroupPlacementActionPlan,
-    },
-    IrqAffinity {
-        plan: IrqAffinityActionPlan,
-    },
-    CpuPower {
-        plan: CpuPowerActionPlan,
-    },
-    GpuPower {
-        plan: GpuPowerActionPlan,
-    },
-    VmKnob {
-        plan: VmKnobActionPlan,
-    },
-    Fake {
-        action_id: crate::actions::ActionId,
-        safety_class: crate::actions::SafetyClass,
-    },
+    CpuAffinityProfile { plan: CpuAffinityProfilePlan },
+    Nice { plan: NiceActionPlan },
+    IoPrio { plan: IoPrioActionPlan },
+    Uclamp { plan: UclampActionPlan },
+    CgroupPlacement { plan: CgroupPlacementActionPlan },
+    IrqAffinity { plan: IrqAffinityActionPlan },
+    CpuPower { plan: CpuPowerActionPlan },
+    GpuPower { plan: GpuPowerActionPlan },
+    VmKnob { plan: VmKnobActionPlan },
+    Fake { plan: FakeCandidatePlan },
 }
 
 impl CandidateAction {
@@ -69,10 +48,17 @@ impl CandidateAction {
         }
     }
 
+    pub fn fake(action_id: crate::actions::ActionId, safety_class: SafetyClass) -> Self {
+        Self::Fake {
+            plan: FakeCandidatePlan {
+                action_id,
+                safety_class,
+            },
+        }
+    }
+
     pub fn candidate_name(&self) -> &str {
-        self.plan_metadata()
-            .map(CandidatePlan::candidate_name)
-            .unwrap_or("fake-profile")
+        self.plan().candidate_name()
     }
 
     pub fn profile_name(&self) -> &str {
@@ -80,8 +66,7 @@ impl CandidateAction {
     }
 
     pub fn target_root_pid(&self) -> Option<u32> {
-        self.plan_metadata()
-            .and_then(CandidatePlan::target_root_pid)
+        self.plan().target_root_pid()
     }
 
     pub fn tree_pid(&self) -> u32 {
@@ -89,27 +74,15 @@ impl CandidateAction {
     }
 
     pub fn action_kind(&self) -> &'static str {
-        self.plan_metadata()
-            .map(CandidatePlan::action_kind)
-            .unwrap_or("fake")
+        self.plan().action_kind()
     }
 
     pub fn safety_class(&self) -> crate::actions::SafetyClass {
-        self.plan_metadata()
-            .map(CandidatePlan::safety_class)
-            .unwrap_or_else(|| match self {
-                Self::Fake { safety_class, .. } => safety_class.clone(),
-                _ => SafetyClass::ObserveOnly,
-            })
+        self.plan().safety_class()
     }
 
     pub fn action_id(&self) -> crate::actions::ActionId {
-        self.plan_metadata()
-            .map(CandidatePlan::action_id)
-            .unwrap_or_else(|| match self {
-                Self::Fake { action_id, .. } => action_id.clone(),
-                _ => crate::actions::ActionId("unknown".to_owned()),
-            })
+        self.plan().action_id()
     }
 
     pub fn descriptor(&self) -> ActionDescriptor {
@@ -135,15 +108,11 @@ impl CandidateAction {
     }
 
     pub fn effect_scope(&self) -> ActionEffectScope {
-        self.plan_metadata()
-            .map(CandidatePlan::effect_scope)
-            .unwrap_or(ActionEffectScope::ObserveOnly)
+        self.plan().effect_scope()
     }
 
     pub fn evidence(&self) -> &[CandidateEvidence] {
-        self.plan_metadata()
-            .map(CandidatePlan::evidence)
-            .unwrap_or(&[])
+        self.plan().evidence()
     }
 
     pub fn cooldown_key(&self) -> String {
@@ -151,9 +120,7 @@ impl CandidateAction {
     }
 
     pub fn conflict_group(&self) -> ActionConflictGroup {
-        self.plan_metadata()
-            .map(CandidatePlan::conflict_group)
-            .unwrap_or(ActionConflictGroup::None)
+        self.plan().conflict_group()
     }
 
     pub fn conflicts_with(&self, other: &CandidateAction) -> bool {
@@ -168,32 +135,25 @@ impl CandidateAction {
     }
 
     pub fn objective(&self) -> ObjectiveKind {
-        self.plan_metadata()
-            .map(CandidatePlan::objective)
-            .unwrap_or(ObjectiveKind::StutterScore)
+        self.plan().objective()
     }
 
     pub fn describe(&self) -> String {
-        self.plan_metadata()
-            .map(CandidatePlan::describe)
-            .unwrap_or_else(|| match self {
-                Self::Fake { action_id, .. } => format!("fake action {}", action_id.0),
-                _ => "unknown candidate".to_owned(),
-            })
+        self.plan().describe()
     }
 
-    fn plan_metadata(&self) -> Option<&dyn CandidatePlan> {
+    fn plan(&self) -> &dyn CandidatePlan {
         match self {
-            Self::CpuAffinityProfile { plan } => Some(plan),
-            Self::Nice { plan } => Some(plan),
-            Self::IoPrio { plan } => Some(plan),
-            Self::Uclamp { plan } => Some(plan),
-            Self::CgroupPlacement { plan } => Some(plan),
-            Self::IrqAffinity { plan } => Some(plan),
-            Self::CpuPower { plan } => Some(plan),
-            Self::GpuPower { plan } => Some(plan),
-            Self::VmKnob { plan } => Some(plan),
-            Self::Fake { .. } => None,
+            Self::CpuAffinityProfile { plan } => plan,
+            Self::Nice { plan } => plan,
+            Self::IoPrio { plan } => plan,
+            Self::Uclamp { plan } => plan,
+            Self::CgroupPlacement { plan } => plan,
+            Self::IrqAffinity { plan } => plan,
+            Self::CpuPower { plan } => plan,
+            Self::GpuPower { plan } => plan,
+            Self::VmKnob { plan } => plan,
+            Self::Fake { plan } => plan,
         }
     }
 
@@ -485,6 +445,54 @@ pub struct VmKnobActionPlan {
     pub action: VmKnobAction,
     pub evidence: Vec<CandidateEvidence>,
     pub objective: ObjectiveKind,
+}
+
+#[derive(Clone, Debug)]
+pub struct FakeCandidatePlan {
+    pub action_id: crate::actions::ActionId,
+    pub safety_class: SafetyClass,
+}
+
+impl CandidatePlan for FakeCandidatePlan {
+    fn candidate_name(&self) -> &str {
+        "fake-profile"
+    }
+
+    fn action_kind(&self) -> &'static str {
+        "fake"
+    }
+
+    fn target_root_pid(&self) -> Option<u32> {
+        None
+    }
+
+    fn action_id(&self) -> crate::actions::ActionId {
+        self.action_id.clone()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.safety_class.clone()
+    }
+
+    fn effect_scope(&self) -> ActionEffectScope {
+        ActionEffectScope::ObserveOnly
+    }
+
+    fn evidence(&self) -> &[CandidateEvidence] {
+        &[]
+    }
+
+    fn objective(&self) -> ObjectiveKind {
+        ObjectiveKind::StutterScore
+    }
+
+    fn conflict_group(&self) -> ActionConflictGroup {
+        ActionConflictGroup::None
+    }
+
+    fn describe(&self) -> String {
+        format!("fake action {}", self.action_id.0)
+    }
 }
 
 impl CandidatePlan for CpuAffinityProfilePlan {
