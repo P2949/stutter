@@ -11,27 +11,25 @@ mod report;
 mod service;
 mod validate;
 
-pub use agent::{AgentArgs, PrivilegedWorkerArgs, agent_listen_args};
-pub use autotune::{AutotuneArgs, AutotuneCommand, AutotuneStatusArgs, validate_autotune_mode};
-pub use config::{ConfigArgs, ConfigCommand};
-pub use daemon::{DaemonArgs, DaemonCommand, DaemonPolicyCommand, DaemonProfilesCommand};
-pub use monitor::{
+use agent::{AgentArgs, PrivilegedWorkerArgs, agent_listen_args};
+use autotune::{AutotuneArgs, AutotuneCommand, AutotuneStatusArgs, validate_autotune_mode};
+use config::{ConfigArgs, ConfigCommand};
+use daemon::{DaemonArgs, DaemonCommand, DaemonPolicyCommand, DaemonProfilesCommand};
+use monitor::{
     BenchArgs, MonitorArgPresence, MonitorArgs, RecordArgs, RecordingMode,
     monitor_arg_presence_from_matches, monitor_config_from_monitor_args_with_presence,
 };
-pub use report::{
+use report::{
     AdvisorArgs, ApplyProfileArgs, AuditArgs, CheckArgs, CompletionsArgs, DoctorArgs,
     InspectIrqsArgs, InspectTreeArgs, ManArgs, ProbesArgs, ProfileTemplateArgs, RecommendArgs,
     ReleaseArgs, ReleaseCommand, ReportArgs, RestoreArgs, RulesArgs, RulesCommand, ScenarioArgs,
     ScenarioCommand, SummaryArgs, TuneArgs,
 };
-pub use service::{ServiceArgs, ServiceCommand, build_service_command_request};
-pub use validate::{
-    ValidateArgs, parse_optional_task_class, validate_comm_patterns, validate_pids,
-};
+use service::{ServiceArgs, ServiceCommand, build_service_command_request};
+use validate::{ValidateArgs, parse_optional_task_class, validate_comm_patterns, validate_pids};
 
 #[cfg(test)]
-pub use crate::commands::input::RulesImportArgs;
+pub(crate) use crate::commands::input::RulesImportArgs;
 use crate::{
     commands::input::{
         AdvisorCommandInput, AgentCommandInput, AppCommand, ApplyProfileCommandInput,
@@ -147,7 +145,7 @@ enum Command {
     Scenario(ScenarioArgs),
 }
 
-pub fn autotune_monitor_config(
+pub(crate) fn autotune_monitor_config(
     input: &crate::autotune::AutotuneCommandInput,
 ) -> anyhow::Result<Arc<MonitorConfig>> {
     let has_target = input.tree_pid.is_some() || input.watch_process.is_some();
@@ -197,11 +195,11 @@ pub fn autotune_monitor_config(
     )?))
 }
 
-pub fn parse_app_command() -> anyhow::Result<AppCommand> {
+pub(crate) fn parse_app_command() -> anyhow::Result<AppCommand> {
     parse_app_command_from(std::env::args_os())
 }
 
-pub fn parse_app_command_from<I, T>(args: I) -> anyhow::Result<AppCommand>
+pub(crate) fn parse_app_command_from<I, T>(args: I) -> anyhow::Result<AppCommand>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,

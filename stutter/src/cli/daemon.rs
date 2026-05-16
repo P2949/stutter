@@ -1,13 +1,13 @@
 use super::*;
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonArgs {
+pub(super) struct DaemonArgs {
     #[command(subcommand)]
-    pub command: DaemonCommand,
+    pub(super) command: DaemonCommand,
 }
 
 #[derive(Subcommand, Debug, Clone)]
-pub enum DaemonCommand {
+pub(super) enum DaemonCommand {
     Config(DaemonConfigArgs),
     Policy(DaemonPolicyArgs),
     Profiles(DaemonProfilesArgs),
@@ -33,192 +33,192 @@ pub enum DaemonCommand {
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonPolicyArgs {
+pub(super) struct DaemonPolicyArgs {
     #[command(subcommand)]
-    pub command: DaemonPolicyCommand,
+    pub(super) command: DaemonPolicyCommand,
 }
 
 #[derive(Subcommand, Debug, Clone)]
-pub enum DaemonPolicyCommand {
+pub(super) enum DaemonPolicyCommand {
     Explain(DaemonPolicyExplainArgs),
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonPolicyExplainArgs {
+pub(super) struct DaemonPolicyExplainArgs {
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long = "preset", value_name = "NAME")]
-    pub preset: Option<String>,
+    pub(super) preset: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonProfilesArgs {
+pub(super) struct DaemonProfilesArgs {
     #[command(subcommand)]
-    pub command: DaemonProfilesCommand,
+    pub(super) command: DaemonProfilesCommand,
 }
 
 #[derive(Subcommand, Debug, Clone)]
-pub enum DaemonProfilesCommand {
+pub(super) enum DaemonProfilesCommand {
     List(DaemonProfilesListArgs),
     Forget(DaemonProfilesForgetArgs),
     Explain(DaemonProfilesExplainArgs),
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonProfilesListArgs {
+pub(super) struct DaemonProfilesListArgs {
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonProfilesForgetArgs {
+pub(super) struct DaemonProfilesForgetArgs {
     #[arg(long = "workload-hash", value_name = "HASH")]
-    pub workload_identity_hash: Option<String>,
+    pub(super) workload_identity_hash: Option<String>,
 
     #[arg(long = "candidate", value_name = "NAME_OR_ACTION_ID")]
-    pub candidate: Option<String>,
+    pub(super) candidate: Option<String>,
 
     #[arg(long = "all")]
-    pub all: bool,
+    pub(super) all: bool,
 
     #[arg(long = "dry-run")]
-    pub dry_run: bool,
+    pub(super) dry_run: bool,
 
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonProfilesExplainArgs {
+pub(super) struct DaemonProfilesExplainArgs {
     #[arg(long = "workload-hash", value_name = "HASH")]
-    pub workload_identity_hash: Option<String>,
+    pub(super) workload_identity_hash: Option<String>,
 
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonExplainArgs {
+pub(super) struct DaemonExplainArgs {
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long = "explain-last", default_value_t = 10)]
-    pub explain_last: usize,
+    pub(super) explain_last: usize,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonWhyNotOptimizeArgs {
+pub(super) struct DaemonWhyNotOptimizeArgs {
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long = "explain-last", default_value_t = 10)]
-    pub explain_last: usize,
+    pub(super) explain_last: usize,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonWhatChangedArgs {
+pub(super) struct DaemonWhatChangedArgs {
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long = "explain-last", default_value_t = 10)]
-    pub explain_last: usize,
+    pub(super) explain_last: usize,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonConfigArgs {
+pub(super) struct DaemonConfigArgs {
     #[arg(long = "explain")]
-    pub explain: bool,
+    pub(super) explain: bool,
 
     #[arg(long = "json", requires = "explain")]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long = "preset", value_name = "NAME")]
-    pub preset: Option<String>,
+    pub(super) preset: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonStatusArgs {
+pub(super) struct DaemonStatusArgs {
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long = "explain-last", default_value_t = 10)]
-    pub explain_last: usize,
+    pub(super) explain_last: usize,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonWatchArgs {
+pub(super) struct DaemonWatchArgs {
     #[arg(long = "interval-ms", default_value_t = 1_000)]
-    pub interval_ms: u64,
+    pub(super) interval_ms: u64,
 
     #[arg(long = "iterations", value_name = "N")]
-    pub iterations: Option<u64>,
+    pub(super) iterations: Option<u64>,
 
     #[arg(long = "verbose")]
-    pub verbose: bool,
+    pub(super) verbose: bool,
 
     #[arg(long = "explain-last", default_value_t = 10)]
-    pub explain_last: usize,
+    pub(super) explain_last: usize,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonDoctorArgs {
+pub(super) struct DaemonDoctorArgs {
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonResetStateArgs {
+pub(super) struct DaemonResetStateArgs {
     #[arg(long = "dry-run")]
-    pub dry_run: bool,
+    pub(super) dry_run: bool,
 
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonBenchOverheadArgs {
+pub(super) struct DaemonBenchOverheadArgs {
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long = "duration-ms", default_value_t = 1_000)]
-    pub duration_ms: u64,
+    pub(super) duration_ms: u64,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonSoakArgs {
+pub(super) struct DaemonSoakArgs {
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long = "duration-seconds", default_value_t = 60)]
-    pub duration_seconds: u64,
+    pub(super) duration_seconds: u64,
 
     #[arg(long = "tick-ms", default_value_t = 1_000)]
-    pub tick_ms: u64,
+    pub(super) tick_ms: u64,
 
     #[arg(long = "profile", default_value = "observe-only")]
-    pub profile: String,
+    pub(super) profile: String,
 
     #[arg(long = "max-disk-growth-bytes")]
-    pub max_disk_growth_bytes: Option<u64>,
+    pub(super) max_disk_growth_bytes: Option<u64>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonAcceptanceArgs {
+pub(super) struct DaemonAcceptanceArgs {
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonPauseArgs {}
+pub(super) struct DaemonPauseArgs {}
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonResumeArgs {}
+pub(super) struct DaemonResumeArgs {}
 
 #[derive(Args, Debug, Clone)]
-pub struct DaemonRestoreArgs {
+pub(super) struct DaemonRestoreArgs {
     #[arg(long = "dry-run")]
-    pub dry_run: bool,
+    pub(super) dry_run: bool,
 }
 
 #[cfg(test)]

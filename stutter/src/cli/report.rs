@@ -1,37 +1,37 @@
 use super::*;
 
 #[derive(Args, Debug, Clone)]
-pub struct ManArgs {
+pub(super) struct ManArgs {
     #[arg(long = "output", short = 'o', value_name = "PATH")]
-    pub output: Option<std::path::PathBuf>,
+    pub(super) output: Option<std::path::PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct CompletionsArgs {
+pub(super) struct CompletionsArgs {
     #[arg(value_enum)]
-    pub shell: clap_complete::Shell,
+    pub(super) shell: clap_complete::Shell,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ProbesArgs {
+pub(super) struct ProbesArgs {
     #[arg(long)]
-    pub json: bool,
+    pub(super) json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct InspectTreeArgs {
+pub(super) struct InspectTreeArgs {
     #[arg(long = "tree-pid", value_name = "PID")]
-    pub tree_pid: u32,
+    pub(super) tree_pid: u32,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ReportArgs {
+pub(super) struct ReportArgs {
     #[arg(
         long,
         help = "Output raw session JSON",
         conflicts_with_all = ["analysis_json", "json_summary", "html"]
     )]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(
         long = "flamegraph",
@@ -39,21 +39,21 @@ pub struct ReportArgs {
         value_name = "SVG",
         help = "Write a latency attribution flamegraph SVG"
     )]
-    pub flamegraph: Option<PathBuf>,
+    pub(super) flamegraph: Option<PathBuf>,
 
     #[arg(
         long = "analysis-json",
         help = "Output full analysis JSON (clusters, diagnoses, artifacts)",
         conflicts_with_all = ["json", "json_summary", "html", "batch"]
     )]
-    pub analysis_json: bool,
+    pub(super) analysis_json: bool,
 
     #[arg(
         long = "json-summary",
         help = "Output compact summary JSON",
         conflicts_with_all = ["json", "analysis_json", "html"]
     )]
-    pub json_summary: bool,
+    pub(super) json_summary: bool,
 
     #[arg(
         long = "html",
@@ -61,7 +61,7 @@ pub struct ReportArgs {
         help = "Generate HTML report",
         conflicts_with_all = ["json", "analysis_json", "json_summary", "batch"]
     )]
-    pub html: Option<PathBuf>,
+    pub(super) html: Option<PathBuf>,
 
     #[arg(
         long = "batch",
@@ -69,79 +69,79 @@ pub struct ReportArgs {
         help = "Run report on all sessions in DIR; outputs text summary or JSON summary if --json or --json-summary is set",
         conflicts_with_all = ["analysis_json", "html"]
     )]
-    pub batch: Option<PathBuf>,
+    pub(super) batch: Option<PathBuf>,
 
     #[arg(long, default_value_t = 10, value_name = "N")]
-    pub top: usize,
+    pub(super) top: usize,
 
     #[arg(long = "cluster-ms", default_value_t = 5, value_name = "MS")]
-    pub cluster_window_ms: u64,
+    pub(super) cluster_window_ms: u64,
 
     #[arg(
         long = "diff",
         value_name = "PATH",
         help = "Compare session(s) against baseline session at PATH"
     )]
-    pub diff: Option<PathBuf>,
+    pub(super) diff: Option<PathBuf>,
 
     #[arg(long, value_name = "CLASS")]
-    pub filter_class: Option<String>,
+    pub(super) filter_class: Option<String>,
 
     #[arg(
         help = "Path to session directory or session.json",
         conflicts_with = "batch"
     )]
-    pub path: Option<PathBuf>,
+    pub(super) path: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct SummaryArgs {
+pub(super) struct SummaryArgs {
     #[arg(long)]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long, default_value_t = 10, value_name = "N")]
-    pub top: usize,
+    pub(super) top: usize,
 
     #[arg(long, value_name = "CLASS")]
-    pub filter_class: Option<String>,
+    pub(super) filter_class: Option<String>,
 
-    pub path: PathBuf,
+    pub(super) path: PathBuf,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct RestoreArgs {
+pub(super) struct RestoreArgs {
     #[arg(long = "dry-run")]
-    pub dry_run: bool,
+    pub(super) dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ApplyProfileArgs {
+pub(super) struct ApplyProfileArgs {
     #[arg(long = "tree-pid", value_name = "PID")]
-    pub tree_pid: u32,
+    pub(super) tree_pid: u32,
 
     #[arg(long = "profile", value_name = "FILE")]
-    pub profile: PathBuf,
+    pub(super) profile: PathBuf,
 
     #[arg(long)]
-    pub force: bool,
+    pub(super) force: bool,
 
     #[arg(long = "dry-run")]
-    pub dry_run: bool,
+    pub(super) dry_run: bool,
 
     #[arg(long = "allow-medium-risk")]
-    pub allow_medium_risk: bool,
+    pub(super) allow_medium_risk: bool,
 
     #[arg(long)]
-    pub watch: bool,
+    pub(super) watch: bool,
 
     #[arg(long = "keep-applied")]
-    pub keep_applied: bool,
+    pub(super) keep_applied: bool,
 
     #[arg(long = "refresh-ms", default_value_t = 1_000)]
-    pub refresh_ms: u64,
+    pub(super) refresh_ms: u64,
 
     #[arg(long)]
-    pub enforce: bool,
+    pub(super) enforce: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -152,210 +152,210 @@ pub struct ApplyProfileArgs {
                   across epochs and will reject profiles with major scored-sample or frame-count mismatches. \
                   Use --runs 3 or higher for reliable results."
 )]
-pub struct TuneArgs {
+pub(super) struct TuneArgs {
     #[arg(long = "tree-pid", value_name = "PID")]
-    pub tree_pid: u32,
+    pub(super) tree_pid: u32,
 
     #[arg(long = "profiles", value_name = "FILE")]
-    pub profiles: PathBuf,
+    pub(super) profiles: PathBuf,
 
     #[arg(long = "epoch-seconds", default_value_t = 120)]
-    pub epoch_seconds: u64,
+    pub(super) epoch_seconds: u64,
 
     #[arg(long = "warmup-seconds", default_value_t = 30)]
-    pub warmup_seconds: u64,
+    pub(super) warmup_seconds: u64,
 
     #[arg(long = "keep-best")]
-    pub keep_best: bool,
+    pub(super) keep_best: bool,
 
     #[arg(long = "baseline-profile", value_name = "NAME")]
-    pub baseline_profile: Option<String>,
+    pub(super) baseline_profile: Option<String>,
 
     #[arg(long = "out-dir", value_name = "PATH")]
-    pub out_dir: Option<PathBuf>,
+    pub(super) out_dir: Option<PathBuf>,
 
     #[arg(long = "mangohud-log", value_name = "PATH")]
-    pub mangohud_log: Option<PathBuf>,
+    pub(super) mangohud_log: Option<PathBuf>,
 
     #[arg(long, short = 'n', default_value_t = 3, value_name = "N")]
-    pub runs: u32,
+    pub(super) runs: u32,
 
     #[arg(long)]
-    pub enforce: bool,
+    pub(super) enforce: bool,
 
     #[arg(long = "hwmon", id = "hwmon")]
-    pub hwmon: bool,
+    pub(super) hwmon: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct CheckArgs {
+pub(super) struct CheckArgs {
     #[arg(long = "baseline", value_name = "PATH")]
-    pub baseline: PathBuf,
+    pub(super) baseline: PathBuf,
 
     #[arg(long = "current", value_name = "PATH")]
-    pub current: PathBuf,
+    pub(super) current: PathBuf,
 
     #[arg(long = "max-regression-p99-ms", value_name = "MS")]
-    pub max_regression_p99_ms: Option<f64>,
+    pub(super) max_regression_p99_ms: Option<f64>,
 
     #[arg(long = "max-max-regression-ms", value_name = "MS")]
-    pub max_max_regression_ms: Option<f64>,
+    pub(super) max_max_regression_ms: Option<f64>,
 
     #[arg(long)]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long, default_value_t = 10, value_name = "N")]
-    pub top: usize,
+    pub(super) top: usize,
 
     #[arg(long, value_name = "CLASS")]
-    pub filter_class: Option<String>,
+    pub(super) filter_class: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct RecommendArgs {
+pub(super) struct RecommendArgs {
     #[arg(long = "baseline", value_name = "PATH")]
-    pub baseline: PathBuf,
+    pub(super) baseline: PathBuf,
 
     #[arg(long = "tune", value_name = "PATH")]
-    pub tune: PathBuf,
+    pub(super) tune: PathBuf,
 
     #[arg(long)]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long, value_name = "PATH")]
-    pub markdown: Option<PathBuf>,
+    pub(super) markdown: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ReleaseArgs {
+pub(super) struct ReleaseArgs {
     #[command(subcommand)]
-    pub command: ReleaseCommand,
+    pub(super) command: ReleaseCommand,
 }
 
 #[derive(Subcommand, Debug, Clone)]
-pub enum ReleaseCommand {
+pub(super) enum ReleaseCommand {
     Check(ReleaseCheckArgs),
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ReleaseCheckArgs {
+pub(super) struct ReleaseCheckArgs {
     #[arg(long = "channel", default_value = "experimental")]
-    pub channel: String,
+    pub(super) channel: String,
 
     #[arg(long = "apply-actions-enabled")]
-    pub apply_actions_enabled: bool,
+    pub(super) apply_actions_enabled: bool,
 
     #[arg(long = "soak-tests")]
-    pub soak_tests: bool,
+    pub(super) soak_tests: bool,
 
     #[arg(long = "stronger-tests")]
-    pub stronger_tests: bool,
+    pub(super) stronger_tests: bool,
 
     #[arg(long)]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long)]
-    pub enforce: bool,
+    pub(super) enforce: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct AuditArgs {
+pub(super) struct AuditArgs {
     #[arg(long = "path", value_name = "PATH")]
-    pub path: Option<PathBuf>,
+    pub(super) path: Option<PathBuf>,
 
     #[arg(long, default_value_t = 20)]
-    pub tail: usize,
+    pub(super) tail: usize,
 
     #[arg(long)]
-    pub json: bool,
+    pub(super) json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct AdvisorArgs {
+pub(super) struct AdvisorArgs {
     #[arg(long = "run", value_name = "PATH")]
-    pub run: Option<PathBuf>,
+    pub(super) run: Option<PathBuf>,
 
     #[arg(long = "profiles", value_name = "PATH")]
-    pub profiles: Option<PathBuf>,
+    pub(super) profiles: Option<PathBuf>,
 
     #[arg(long)]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long = "watch-runs")]
-    pub watch_runs: bool,
+    pub(super) watch_runs: bool,
 
     #[arg(long = "runs-dir", value_name = "PATH")]
-    pub runs_dir: Option<PathBuf>,
+    pub(super) runs_dir: Option<PathBuf>,
 
     #[arg(long = "poll-seconds", default_value_t = 10)]
-    pub poll_seconds: u64,
+    pub(super) poll_seconds: u64,
 
     #[arg(long)]
-    pub once: bool,
+    pub(super) once: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct DoctorArgs {
+pub(super) struct DoctorArgs {
     #[arg(long)]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long = "hwmon", id = "hwmon")]
-    pub hwmon: bool,
+    pub(super) hwmon: bool,
 
     #[arg(long = "hwmon-root", value_name = "PATH", requires = "hwmon")]
-    pub hwmon_root: Option<PathBuf>,
+    pub(super) hwmon_root: Option<PathBuf>,
 
     #[arg(long = "hwmon-drm-card", value_name = "CARD", requires = "hwmon")]
-    pub hwmon_drm_card: Option<String>,
+    pub(super) hwmon_drm_card: Option<String>,
 
     #[arg(long = "hwmon-render-node", value_name = "NODE", requires = "hwmon")]
-    pub hwmon_render_node: Option<PathBuf>,
+    pub(super) hwmon_render_node: Option<PathBuf>,
 
     #[arg(long = "irq-latency")]
-    pub irq_latency: bool,
+    pub(super) irq_latency: bool,
 
     #[arg(long = "irq", value_name = "IRQ")]
-    pub irqs: Vec<u32>,
+    pub(super) irqs: Vec<u32>,
 
     #[arg(long = "block-io")]
-    pub block_io: bool,
+    pub(super) block_io: bool,
 
     #[arg(long = "faults")]
-    pub faults: bool,
+    pub(super) faults: bool,
 
     #[arg(long = "cpu-perf")]
-    pub cpu_perf: bool,
+    pub(super) cpu_perf: bool,
 
     #[arg(long = "mangohud-log", value_name = "PATH")]
-    pub mangohud_log: Option<PathBuf>,
+    pub(super) mangohud_log: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ProfileTemplateArgs {
+pub(super) struct ProfileTemplateArgs {
     #[arg(long = "topology")]
-    pub topology: bool,
+    pub(super) topology: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct InspectIrqsArgs {
+pub(super) struct InspectIrqsArgs {
     #[arg(long)]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long = "filter", value_name = "TEXT")]
-    pub filter: Vec<String>,
+    pub(super) filter: Vec<String>,
 
     #[arg(long, default_value_t = 30)]
-    pub top: usize,
+    pub(super) top: usize,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct RulesArgs {
+pub(super) struct RulesArgs {
     #[command(subcommand)]
-    pub command: RulesCommand,
+    pub(super) command: RulesCommand,
 }
 
 #[derive(Subcommand, Debug, Clone)]
-pub enum RulesCommand {
+pub(super) enum RulesCommand {
     Import(CliRulesImportArgs),
     List(RulesListArgs),
     Status(RulesStatusArgs),
@@ -371,70 +371,70 @@ pub enum RulesCommand {
         .required(true)
         .args(["source", "generated"])
 ))]
-pub struct RulesCheckArgs {
+pub(super) struct RulesCheckArgs {
     #[arg(long = "source", value_name = "PATH", conflicts_with = "generated")]
-    pub source: Option<PathBuf>,
+    pub(super) source: Option<PathBuf>,
 
     #[arg(long = "generated", value_name = "PATH", conflicts_with = "source")]
-    pub generated: Option<PathBuf>,
+    pub(super) generated: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub(crate) struct CliRulesImportArgs {
+pub(super) struct CliRulesImportArgs {
     #[arg(long = "source", value_name = "PATH")]
-    pub source: PathBuf,
+    pub(super) source: PathBuf,
 
     #[arg(long, default_value = "ananicy")]
-    pub name: String,
+    pub(super) name: String,
 
     #[arg(long, default_value = "GPL-3.0-only")]
-    pub license: String,
+    pub(super) license: String,
 
     #[arg(long = "source-repo")]
-    pub source_repo: Option<String>,
+    pub(super) source_repo: Option<String>,
 
     #[arg(long = "source-commit")]
-    pub source_commit: Option<String>,
+    pub(super) source_commit: Option<String>,
 
     #[arg(long = "out", value_name = "PATH")]
-    pub out: Option<PathBuf>,
+    pub(super) out: Option<PathBuf>,
 
     #[arg(long = "dry-run")]
-    pub dry_run: bool,
+    pub(super) dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct RulesListArgs {}
+pub(super) struct RulesListArgs {}
 
 #[derive(Args, Debug, Clone)]
-pub struct RulesStatusArgs {}
+pub(super) struct RulesStatusArgs {}
 
 #[derive(Args, Debug, Clone)]
-pub struct RulesEnableArgs {
+pub(super) struct RulesEnableArgs {
     #[arg(long = "name", default_value = "ananicy")]
-    pub name: String,
+    pub(super) name: String,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct RulesDisableArgs {}
+pub(super) struct RulesDisableArgs {}
 
 #[derive(Args, Debug, Clone)]
-pub struct RulesRemoveArgs {
+pub(super) struct RulesRemoveArgs {
     #[arg(long = "name", default_value = "ananicy")]
-    pub name: String,
+    pub(super) name: String,
 
     #[arg(long = "dry-run")]
-    pub dry_run: bool,
+    pub(super) dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ScenarioArgs {
+pub(super) struct ScenarioArgs {
     #[command(subcommand)]
-    pub command: ScenarioCommand,
+    pub(super) command: ScenarioCommand,
 }
 
 #[derive(Subcommand, Debug, Clone)]
-pub enum ScenarioCommand {
+pub(super) enum ScenarioCommand {
     Create(ScenarioCreateArgs),
     Run(ScenarioRunArgs),
     Compare(ScenarioCompareArgs),
@@ -443,68 +443,68 @@ pub enum ScenarioCommand {
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ScenarioCreateArgs {
-    pub name: String,
+pub(super) struct ScenarioCreateArgs {
+    pub(super) name: String,
 
     #[arg(long = "force")]
-    pub force: bool,
+    pub(super) force: bool,
 
     #[arg(long = "watch-process", value_name = "COMM")]
-    pub watch_process: Option<String>,
+    pub(super) watch_process: Option<String>,
 
     #[arg(long = "duration", default_value_t = 180)]
-    pub duration: u64,
+    pub(super) duration: u64,
 
     #[arg(long = "preset", default_value = "diagnosis")]
-    pub preset: String,
+    pub(super) preset: String,
 
     #[arg(long = "mangohud-log", value_name = "PATH")]
-    pub mangohud_log: Option<PathBuf>,
+    pub(super) mangohud_log: Option<PathBuf>,
 
     #[arg(long = "notes")]
-    pub notes: Option<String>,
+    pub(super) notes: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ScenarioRunArgs {
-    pub name: String,
+pub(super) struct ScenarioRunArgs {
+    pub(super) name: String,
 
     #[arg(long = "role", value_name = "baseline|current")]
-    pub role: String,
+    pub(super) role: String,
 
     #[arg(long = "dry-run")]
-    pub dry_run: bool,
+    pub(super) dry_run: bool,
 
     #[arg(long = "out-dir", value_name = "PATH")]
-    pub out_dir: Option<PathBuf>,
+    pub(super) out_dir: Option<PathBuf>,
 
     #[arg(long = "mangohud-log", value_name = "PATH")]
-    pub mangohud_log_override: Option<PathBuf>,
+    pub(super) mangohud_log_override: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ScenarioCompareArgs {
-    pub name: String,
+pub(super) struct ScenarioCompareArgs {
+    pub(super) name: String,
 
     #[arg(long = "baseline", value_name = "RUN_DIR")]
-    pub baseline: Option<PathBuf>,
+    pub(super) baseline: Option<PathBuf>,
 
     #[arg(long = "current", value_name = "RUN_DIR")]
-    pub current: Option<PathBuf>,
+    pub(super) current: Option<PathBuf>,
 
     #[arg(long, default_value_t = 10)]
-    pub top: usize,
+    pub(super) top: usize,
 
     #[arg(long = "json-summary")]
-    pub json_summary: bool,
+    pub(super) json_summary: bool,
 
     #[arg(long = "validate")]
-    pub validate: bool,
+    pub(super) validate: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ScenarioPathArgs {
-    pub name: String,
+pub(super) struct ScenarioPathArgs {
+    pub(super) name: String,
 }
 
 #[cfg(test)]

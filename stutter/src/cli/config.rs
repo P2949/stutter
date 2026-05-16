@@ -1,30 +1,30 @@
 use super::*;
 
 #[derive(Args, Debug, Clone)]
-pub struct ConfigArgs {
+pub(super) struct ConfigArgs {
     #[command(subcommand)]
-    pub command: ConfigCommand,
+    pub(super) command: ConfigCommand,
 }
 
 #[derive(Subcommand, Debug, Clone)]
-pub enum ConfigCommand {
+pub(super) enum ConfigCommand {
     Check(ConfigCheckArgs),
     Explain(ConfigExplainArgs),
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ConfigCheckArgs {
+pub(super) struct ConfigCheckArgs {
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ConfigExplainArgs {
+pub(super) struct ConfigExplainArgs {
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 
     #[arg(long = "preset", value_name = "NAME")]
-    pub preset: Option<String>,
+    pub(super) preset: Option<String>,
 }
 
 #[cfg(test)]

@@ -1,143 +1,143 @@
 use super::*;
 
 #[derive(Args, Debug, Clone)]
-pub struct ServiceArgs {
+pub(super) struct ServiceArgs {
     #[command(subcommand)]
-    pub command: ServiceCommand,
+    pub(super) command: ServiceCommand,
 }
 
 #[derive(Subcommand, Debug, Clone)]
-pub enum ServiceCommand {
+pub(super) enum ServiceCommand {
     Install(ServiceInstallArgs),
     Uninstall(ServiceUninstallArgs),
     Doctor(ServiceDoctorArgs),
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ServiceInstallArgs {
+pub(super) struct ServiceInstallArgs {
     #[arg(long = "mode", default_value = "system-observe")]
-    pub mode: String,
+    pub(super) mode: String,
 
     #[arg(long = "manager", default_value = "systemd-system")]
-    pub manager: String,
+    pub(super) manager: String,
 
     #[arg(long = "unit-dir", value_name = "DIR")]
-    pub unit_dir: Option<PathBuf>,
+    pub(super) unit_dir: Option<PathBuf>,
 
     #[arg(
         long = "config-dir",
         value_name = "DIR",
         default_value = "/etc/stutter"
     )]
-    pub config_dir: PathBuf,
+    pub(super) config_dir: PathBuf,
 
     #[arg(
         long = "state-dir",
         value_name = "DIR",
         default_value = "/var/lib/stutter"
     )]
-    pub state_dir: PathBuf,
+    pub(super) state_dir: PathBuf,
 
     #[arg(
         long = "log-dir",
         value_name = "DIR",
         default_value = "/var/log/stutter"
     )]
-    pub log_dir: PathBuf,
+    pub(super) log_dir: PathBuf,
 
     #[arg(long = "binary", value_name = "PATH")]
-    pub binary: Option<PathBuf>,
+    pub(super) binary: Option<PathBuf>,
 
     #[arg(long = "dry-run")]
-    pub dry_run: bool,
+    pub(super) dry_run: bool,
 
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ServiceUninstallArgs {
+pub(super) struct ServiceUninstallArgs {
     #[arg(long = "mode", default_value = "system-observe")]
-    pub mode: String,
+    pub(super) mode: String,
 
     #[arg(long = "manager", default_value = "systemd-system")]
-    pub manager: String,
+    pub(super) manager: String,
 
     #[arg(long = "unit-dir", value_name = "DIR")]
-    pub unit_dir: Option<PathBuf>,
+    pub(super) unit_dir: Option<PathBuf>,
 
     #[arg(
         long = "config-dir",
         value_name = "DIR",
         default_value = "/etc/stutter"
     )]
-    pub config_dir: PathBuf,
+    pub(super) config_dir: PathBuf,
 
     #[arg(
         long = "state-dir",
         value_name = "DIR",
         default_value = "/var/lib/stutter"
     )]
-    pub state_dir: PathBuf,
+    pub(super) state_dir: PathBuf,
 
     #[arg(
         long = "log-dir",
         value_name = "DIR",
         default_value = "/var/log/stutter"
     )]
-    pub log_dir: PathBuf,
+    pub(super) log_dir: PathBuf,
 
     #[arg(long = "binary", value_name = "PATH")]
-    pub binary: Option<PathBuf>,
+    pub(super) binary: Option<PathBuf>,
 
     #[arg(long = "dry-run")]
-    pub dry_run: bool,
+    pub(super) dry_run: bool,
 
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct ServiceDoctorArgs {
+pub(super) struct ServiceDoctorArgs {
     #[arg(long = "mode", default_value = "system-observe")]
-    pub mode: String,
+    pub(super) mode: String,
 
     #[arg(long = "manager", default_value = "systemd-system")]
-    pub manager: String,
+    pub(super) manager: String,
 
     #[arg(long = "unit-dir", value_name = "DIR")]
-    pub unit_dir: Option<PathBuf>,
+    pub(super) unit_dir: Option<PathBuf>,
 
     #[arg(
         long = "config-dir",
         value_name = "DIR",
         default_value = "/etc/stutter"
     )]
-    pub config_dir: PathBuf,
+    pub(super) config_dir: PathBuf,
 
     #[arg(
         long = "state-dir",
         value_name = "DIR",
         default_value = "/var/lib/stutter"
     )]
-    pub state_dir: PathBuf,
+    pub(super) state_dir: PathBuf,
 
     #[arg(
         long = "log-dir",
         value_name = "DIR",
         default_value = "/var/log/stutter"
     )]
-    pub log_dir: PathBuf,
+    pub(super) log_dir: PathBuf,
 
     #[arg(long = "binary", value_name = "PATH")]
-    pub binary: Option<PathBuf>,
+    pub(super) binary: Option<PathBuf>,
 
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn build_service_command_request(
+pub(super) fn build_service_command_request(
     action: ServiceAction,
     manager: String,
     mode: String,
