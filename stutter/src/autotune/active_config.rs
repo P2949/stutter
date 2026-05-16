@@ -6,8 +6,9 @@ use std::{
 
 use crate::{
     actions::uclamp::UclampValues,
+    affinity::CpuMask,
     autotune::{
-        candidate::CandidateAction,
+        candidate::{CandidateAction, CpuAffinityProfilePlan},
         observation::{
             ActiveAffinitySnapshot, ActiveCgroupSnapshot, ActiveConfigSnapshot,
             ActiveCpuPowerSnapshot, ActiveGpuPowerSnapshot, ActiveIoPrioSnapshot,
@@ -16,6 +17,7 @@ use crate::{
         },
     },
     daemon::capabilities::DaemonCapabilities,
+    profiles::{ProfileEvaluationInput, evaluate_profile_for_tasks},
     system_inventory::SystemInventory,
 };
 
@@ -86,6 +88,12 @@ impl ActiveConfigMatch {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ActiveConfigMatchInput<'a> {
+    pub snapshot: &'a ActiveConfigSnapshot,
+    pub active_tasks: &'a [ActiveTaskSnapshot],
+}
+
 impl CandidateAction {
     pub fn planned_state_summary(&self) -> String {
         match self {
@@ -139,14 +147,12 @@ impl CandidateAction {
         }
     }
 
-    pub fn matches_active_config(&self, snapshot: &ActiveConfigSnapshot) -> ActiveConfigMatch {
+    pub fn matches_active_config(&self, input: ActiveConfigMatchInput<'_>) -> ActiveConfigMatch {
+        let snapshot = input.snapshot;
         match self {
-            CandidateAction::CpuAffinityProfile { .. } => ActiveConfigMatch::Unknown {
-                summary: format!(
-                    "{}: active per-profile CPU affinity matching is not implemented",
-                    self.planned_state_summary()
-                ),
-            },
+            CandidateAction::CpuAffinityProfile { plan } => {
+                cpu_affinity_profile_match(plan, snapshot, input.active_tasks)
+            }
             CandidateAction::Nice { plan } => {
                 if plan.action.targets.is_empty() {
                     return ActiveConfigMatch::Unknown {
@@ -447,7 +453,85 @@ impl CandidateAction {
 }
 
 pub fn candidate_is_noop(candidate: &CandidateAction, snapshot: &ActiveConfigSnapshot) -> bool {
-    candidate.matches_active_config(snapshot).is_match()
+    candidate
+        .matches_active_config(ActiveConfigMatchInput {
+            snapshot,
+            active_tasks: &[],
+        })
+        .is_match()
+}
+
+pub fn candidate_is_noop_with_tasks(
+    candidate: &CandidateAction,
+    snapshot: &ActiveConfigSnapshot,
+    active_tasks: &[ActiveTaskSnapshot],
+) -> bool {
+    candidate
+        .matches_active_config(ActiveConfigMatchInput {
+            snapshot,
+            active_tasks,
+        })
+        .is_match()
+}
+
+pub fn cpu_affinity_profile_match(
+    plan: &CpuAffinityProfilePlan,
+    snapshot: &ActiveConfigSnapshot,
+    active_tasks: &[ActiveTaskSnapshot],
+) -> ActiveConfigMatch {
+    if active_tasks.is_empty() {
+        return ActiveConfigMatch::Unknown {
+            summary: format!(
+                "cpu_affinity_profile profile={} tree_pid={}: active task snapshots missing",
+                plan.profile_name, plan.tree_pid
+            ),
+        };
+    }
+
+    let planned_tasks = evaluate_profile_for_tasks(ProfileEvaluationInput {
+        profile: &plan.profile,
+        active_tasks,
+        topology: None,
+    });
+
+    if planned_tasks.is_empty() {
+        return ActiveConfigMatch::Unknown {
+            summary: format!(
+                "cpu_affinity_profile profile={} tree_pid={}: no active tasks matched profile rules",
+                plan.profile_name, plan.tree_pid
+            ),
+        };
+    }
+
+    for task in &planned_tasks {
+        let Some(current) = snapshot.affinity.per_tid.get(&task.tid) else {
+            return ActiveConfigMatch::Unknown {
+                summary: format!("tid={} active CPU affinity missing", task.tid),
+            };
+        };
+
+        if !cpu_mask_strings_match(current, &task.requested_mask) {
+            return ActiveConfigMatch::Differs {
+                expected: format!("tid={} cpu_affinity={}", task.tid, task.requested_mask),
+                actual: format!("tid={} cpu_affinity={current}", task.tid),
+            };
+        }
+    }
+
+    ActiveConfigMatch::Matches {
+        summary: format!(
+            "cpu_affinity_profile profile={} matched_tasks={}",
+            plan.profile_name,
+            planned_tasks.len()
+        ),
+    }
+}
+
+fn cpu_mask_strings_match(current: &str, requested: &str) -> bool {
+    match (CpuMask::parse(current), CpuMask::parse(requested)) {
+        (Ok(current), Ok(requested)) => current == requested,
+        _ => current.trim() == requested.trim(),
+    }
 }
 
 fn sorted_active_tids(active_tasks: &[ActiveTaskSnapshot]) -> Vec<u32> {
@@ -766,9 +850,11 @@ mod tests {
 
     use super::*;
     use crate::{
+        affinity::CpuMask,
         autotune::observation::ActiveTaskSnapshot,
         daemon::capabilities::DaemonCapabilities,
         process_tree::TaskClass,
+        profiles::{Profile, ProfileRule},
         system_inventory::{SystemInventory, SystemInventoryRoot},
         test_support::TestRoot,
     };
@@ -921,7 +1007,10 @@ mod tests {
             },
         };
 
-        let active_match = candidate.matches_active_config(&snapshot);
+        let active_match = candidate.matches_active_config(ActiveConfigMatchInput {
+            snapshot: &snapshot,
+            active_tasks: &active_tasks,
+        });
 
         assert!(active_match.is_differs());
         assert!(matches!(active_match, ActiveConfigMatch::Differs { .. }));
@@ -988,15 +1077,147 @@ mod tests {
         assert!(candidate_is_noop(&candidate, &snapshot));
     }
 
+    #[test]
+    fn cpu_affinity_profile_match_reports_exact_match() {
+        let profile = profile_for_class(TaskClass::Game, "0-1");
+        let candidate = CandidateAction::cpu_affinity_profile(profile, 11);
+        let snapshot = affinity_snapshot([(11, "0-1")]);
+        let active_tasks = vec![active_task_with_class(11, TaskClass::Game)];
+
+        let active_match = candidate.matches_active_config(ActiveConfigMatchInput {
+            snapshot: &snapshot,
+            active_tasks: &active_tasks,
+        });
+
+        assert!(active_match.is_match());
+        assert!(candidate_is_noop_with_tasks(
+            &candidate,
+            &snapshot,
+            &active_tasks
+        ));
+    }
+
+    #[test]
+    fn cpu_affinity_profile_match_reports_one_differing_tid() {
+        let profile = profile_for_class(TaskClass::Game, "0-1");
+        let candidate = CandidateAction::cpu_affinity_profile(profile, 11);
+        let snapshot = affinity_snapshot([(11, "2")]);
+        let active_tasks = vec![active_task_with_class(11, TaskClass::Game)];
+
+        let active_match = candidate.matches_active_config(ActiveConfigMatchInput {
+            snapshot: &snapshot,
+            active_tasks: &active_tasks,
+        });
+
+        assert!(matches!(active_match, ActiveConfigMatch::Differs { .. }));
+    }
+
+    #[test]
+    fn cpu_affinity_profile_match_is_unknown_when_affinity_data_missing() {
+        let profile = profile_for_class(TaskClass::Game, "0-1");
+        let candidate = CandidateAction::cpu_affinity_profile(profile, 11);
+        let active_tasks = vec![active_task_with_class(11, TaskClass::Game)];
+
+        let active_match = candidate.matches_active_config(ActiveConfigMatchInput {
+            snapshot: &ActiveConfigSnapshot::default(),
+            active_tasks: &active_tasks,
+        });
+
+        assert!(matches!(active_match, ActiveConfigMatch::Unknown { .. }));
+    }
+
+    #[test]
+    fn cpu_affinity_profile_match_is_unknown_when_no_tasks_match_rules() {
+        let profile = profile_for_class(TaskClass::Game, "0-1");
+        let candidate = CandidateAction::cpu_affinity_profile(profile, 11);
+        let snapshot = affinity_snapshot([(11, "0-1")]);
+        let active_tasks = vec![active_task_with_class(11, TaskClass::Service)];
+
+        let active_match = candidate.matches_active_config(ActiveConfigMatchInput {
+            snapshot: &snapshot,
+            active_tasks: &active_tasks,
+        });
+
+        assert!(matches!(active_match, ActiveConfigMatch::Unknown { .. }));
+    }
+
+    #[test]
+    fn cpu_affinity_profile_match_does_not_target_protected_tasks_unless_rule_matches() {
+        let profile = profile_for_class(TaskClass::Game, "0-1");
+        let candidate = CandidateAction::cpu_affinity_profile(profile, 11);
+        let snapshot = affinity_snapshot([(11, "0-1")]);
+        let active_tasks = vec![active_task_with_class(11, TaskClass::Compositor)];
+
+        let active_match = candidate.matches_active_config(ActiveConfigMatchInput {
+            snapshot: &snapshot,
+            active_tasks: &active_tasks,
+        });
+
+        assert!(matches!(active_match, ActiveConfigMatch::Unknown { .. }));
+    }
+
+    #[test]
+    fn cpu_affinity_profile_match_supports_broad_fallback_rules() {
+        let profile = Profile {
+            name: "fallback".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: Some(CpuMask::parse("3").unwrap()),
+                nice: None,
+                ionice: None,
+                match_class: Vec::new(),
+                match_comm: Vec::new(),
+            }],
+        };
+        let candidate = CandidateAction::cpu_affinity_profile(profile, 11);
+        let snapshot = affinity_snapshot([(11, "3")]);
+        let active_tasks = vec![active_task_with_class(11, TaskClass::Unknown)];
+
+        let active_match = candidate.matches_active_config(ActiveConfigMatchInput {
+            snapshot: &snapshot,
+            active_tasks: &active_tasks,
+        });
+
+        assert!(active_match.is_match());
+    }
+
     fn active_task(tid: u32) -> ActiveTaskSnapshot {
+        active_task_with_class(tid, TaskClass::Unknown)
+    }
+
+    fn active_task_with_class(tid: u32, class: TaskClass) -> ActiveTaskSnapshot {
         ActiveTaskSnapshot {
             tid,
             process_pid: tid,
             comm: format!("task-{tid}"),
-            class: TaskClass::Unknown,
+            class,
             process_starttime_ticks: Some(1),
             task_starttime_ticks: Some(1),
             cgroup_path: Some("/game.slice".to_owned()),
+        }
+    }
+
+    fn profile_for_class(class: TaskClass, mask: &str) -> Profile {
+        Profile {
+            name: format!("profile-{class:?}"),
+            rules: vec![ProfileRule {
+                affinity: Some(CpuMask::parse(mask).unwrap()),
+                nice: None,
+                ionice: None,
+                match_class: vec![class],
+                match_comm: Vec::new(),
+            }],
+        }
+    }
+
+    fn affinity_snapshot<const N: usize>(entries: [(u32, &str); N]) -> ActiveConfigSnapshot {
+        ActiveConfigSnapshot {
+            affinity: ActiveAffinitySnapshot {
+                per_tid: entries
+                    .into_iter()
+                    .map(|(tid, mask)| (tid, mask.to_owned()))
+                    .collect(),
+            },
+            ..ActiveConfigSnapshot::default()
         }
     }
 

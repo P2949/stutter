@@ -83,6 +83,15 @@ defaults to a Unix socket under `XDG_RUNTIME_DIR` when available. Use
 `stutter agent --bind 127.0.0.1:9899` only when an HTTP TCP listener is needed
 for compatibility with an existing local client.
 
+For apply-medium-risk autotune, run the privileged mutator separately:
+
+```bash
+stutter privileged-worker --socket /run/stutter/privileged-worker.sock
+```
+
+The socket is created with mode `0600`. Point the daemon at a non-default path
+with `[autotune].privileged_worker_socket = "/run/stutter/privileged-worker.sock"`.
+
 Agent auth supports a legacy full-access token through `STUTTER_AGENT_TOKEN`
 or `--bearer-token-file`, plus split tokens for safer clients. The packaged
 systemd unit reads `/etc/stutter/agent.env` if present:

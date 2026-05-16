@@ -251,11 +251,14 @@ mod tests {
                     experiment_id: "experiment-1".to_owned(),
                     action_id: "cpu-affinity-profile:game-main".to_owned(),
                     candidate_name: Some("game-main".to_owned()),
+                    mode: DaemonMode::ApplyLowRisk,
                     safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                     started_unix_nanos: Some(100),
                 }),
                 active_rollback: Some(crate::daemon::DaemonRollbackState {
                     action_id: "cpu-affinity-profile:game-main".to_owned(),
+                    mode: DaemonMode::ApplyLowRisk,
+                    safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                     rollback_available: true,
                     token: Some(rollback_token.clone()),
                     manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
@@ -427,6 +430,8 @@ mod tests {
                 phase: DaemonPhase::Faulted,
                 active_rollback: Some(crate::daemon::DaemonRollbackState {
                     action_id: "action-1".to_owned(),
+                    mode: DaemonMode::ApplyLowRisk,
+                    safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                     rollback_available: true,
                     token: None,
                     manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),

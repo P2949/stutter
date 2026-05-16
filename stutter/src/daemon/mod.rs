@@ -58,7 +58,8 @@ pub use privilege::{
 pub use runtime::{DaemonRuntime, DaemonRuntimeConfig, DaemonRuntimeEvent, DaemonTransition};
 pub use soak::{
     DaemonSoakBudget, DaemonSoakConfig, DaemonSoakFailure, DaemonSoakMetrics, DaemonSoakProfile,
-    DaemonSoakReport, run_fake_daemon_soak,
+    DaemonSoakReport, DaemonSoakScenarioReport, SoakAssertion, SoakScenario, SoakTick,
+    run_fake_daemon_soak, run_scenario_daemon_soak,
 };
 pub use state::{
     DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus, DaemonExperimentState,

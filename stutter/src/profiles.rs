@@ -82,6 +82,47 @@ pub struct PlannedAffinityChange {
     pub record: AffinityRecord,
 }
 
+pub struct ProfileEvaluationInput<'a> {
+    pub profile: &'a Profile,
+    pub active_tasks: &'a [crate::autotune::observation::ActiveTaskSnapshot],
+    pub topology: Option<&'a crate::topology::TopologyModel>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProfileTaskPlan {
+    pub tid: u32,
+    pub process_pid: u32,
+    pub comm: String,
+    pub class: TaskClass,
+    pub requested_mask: String,
+    pub matched_rule_index: usize,
+    pub matched_rule_name: Option<String>,
+}
+
+pub fn evaluate_profile_for_tasks(input: ProfileEvaluationInput<'_>) -> Vec<ProfileTaskPlan> {
+    let _topology = input.topology;
+
+    input
+        .active_tasks
+        .iter()
+        .filter_map(|task| {
+            let info = task_info_from_active_snapshot(task);
+            let (rule_index, rule) = matching_profile_rule_with_index(&info, input.profile)?;
+            let requested_mask = rule.affinity.as_ref()?.to_range_string();
+
+            Some(ProfileTaskPlan {
+                tid: task.tid,
+                process_pid: task.process_pid,
+                comm: task.comm.clone(),
+                class: task.class,
+                requested_mask,
+                matched_rule_index: rule_index,
+                matched_rule_name: None,
+            })
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ProfileApplyPlan {
     pub affinity_changes: Vec<PlannedAffinityChange>,
@@ -732,27 +773,40 @@ pub fn profile_matched_task_count_from_snapshots(
     tasks
         .iter()
         .filter(|task| {
-            let info = TaskInfo {
-                tid: task.tid,
-                process_pid: task.process_pid,
-                process_ppid: 0,
-                comm: task.comm.clone(),
-                process_comm: task.comm.clone().into(),
-                process_starttime_ticks: task.process_starttime_ticks,
-                task_starttime_ticks: task.task_starttime_ticks,
-                exe_dev: None,
-                exe_ino: None,
-                class: task.class,
-                sched_policy: None,
-                from_cgroup: task.cgroup_path.is_some(),
-            };
+            let info = task_info_from_active_snapshot(task);
             profile_matches_task(&info, profile)
         })
         .count()
 }
 
+fn task_info_from_active_snapshot(
+    task: &crate::autotune::observation::ActiveTaskSnapshot,
+) -> TaskInfo {
+    TaskInfo {
+        tid: task.tid,
+        process_pid: task.process_pid,
+        process_ppid: 0,
+        comm: task.comm.clone(),
+        process_comm: task.comm.clone().into(),
+        process_starttime_ticks: task.process_starttime_ticks,
+        task_starttime_ticks: task.task_starttime_ticks,
+        exe_dev: None,
+        exe_ino: None,
+        class: task.class,
+        sched_policy: None,
+        from_cgroup: task.cgroup_path.is_some(),
+    }
+}
+
 fn matching_profile_rule<'a>(task: &TaskInfo, profile: &'a Profile) -> Option<&'a ProfileRule> {
-    for rule in &profile.rules {
+    matching_profile_rule_with_index(task, profile).map(|(_, rule)| rule)
+}
+
+fn matching_profile_rule_with_index<'a>(
+    task: &TaskInfo,
+    profile: &'a Profile,
+) -> Option<(usize, &'a ProfileRule)> {
+    for (index, rule) in profile.rules.iter().enumerate() {
         if !rule.match_class.is_empty() && !rule.match_class.contains(&task.class) {
             continue;
         }
@@ -773,7 +827,7 @@ fn matching_profile_rule<'a>(task: &TaskInfo, profile: &'a Profile) -> Option<&'
             }
         }
 
-        return Some(rule);
+        return Some((index, rule));
     }
 
     None

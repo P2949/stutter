@@ -445,6 +445,9 @@ pub struct DaemonAutotuneConfig {
     pub washout_seconds: u64,
     pub rollback_on_crash_recovery: bool,
     pub allow_medium_risk_apply: bool,
+    pub allow_cpu_power_on_battery: bool,
+    pub privileged_worker_socket: Option<PathBuf>,
+    pub unsafe_in_process_privileged_worker: bool,
     pub workload_policy: DaemonWorkloadPolicyConfig,
     pub confidence: DaemonCandidateConfidenceConfig,
 }
@@ -456,6 +459,9 @@ impl Default for DaemonAutotuneConfig {
             washout_seconds: 10,
             rollback_on_crash_recovery: true,
             allow_medium_risk_apply: false,
+            allow_cpu_power_on_battery: false,
+            privileged_worker_socket: None,
+            unsafe_in_process_privileged_worker: false,
             workload_policy: DaemonWorkloadPolicyConfig::default(),
             confidence: DaemonCandidateConfidenceConfig::default(),
         }

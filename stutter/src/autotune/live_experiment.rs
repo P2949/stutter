@@ -33,16 +33,17 @@ use crate::{
     daemon::{
         DaemonExperimentState, DaemonMode, DaemonPolicy, DaemonPolicyContext, DaemonRollbackState,
         privilege::{
-            CandidateApplyRequest, CandidatePlanRequest, InProcessPrivilegedActionService,
-            PrivilegedActionService, RollbackRequest,
+            CandidateApplyRequest, CandidatePlanRequest, PrivilegedActionService, RollbackRequest,
         },
     },
 };
 
 #[derive(Clone, Debug)]
-pub struct LiveLowRiskExperiment {
+pub struct LiveExperiment {
     pub experiment_id: ExperimentId,
     pub candidate: CandidateAction,
+    pub safety_class: SafetyClass,
+    pub mode: DaemonMode,
     pub baseline_score: WindowScore,
     pub baseline_signals: ObjectiveSignals,
     pub applied_unix_nanos: u128,
@@ -51,7 +52,7 @@ pub struct LiveLowRiskExperiment {
     pub rollback: RollbackToken,
 }
 
-impl LiveLowRiskExperiment {
+impl LiveExperiment {
     pub fn candidate_name(&self) -> &str {
         self.candidate.profile_name()
     }
@@ -71,7 +72,8 @@ pub struct LiveExperimentManagerInput<'a> {
     pub candidate_window_seconds: u64,
     pub manual_restore_command: &'static str,
     pub controller_journal_path: Option<PathBuf>,
-    pub exit_rollback_registry: Option<&'a crate::autotune::shutdown::ActiveLowRiskActionRegistry>,
+    pub exit_rollback_registry: Option<&'a crate::autotune::shutdown::ActiveAutotuneActionRegistry>,
+    pub privileged_action_service: Option<&'a dyn PrivilegedActionService>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +92,8 @@ pub struct LiveExperimentHistoryContext {
     pub action_id: String,
     pub candidate_name: String,
     pub action_kind: String,
+    pub mode: DaemonMode,
+    pub safety_class: SafetyClass,
     pub score_before: Option<WindowScore>,
     pub score_after: Option<WindowScore>,
     pub rollback_performed: bool,
@@ -141,7 +145,7 @@ impl LiveExperimentOutcome {
 
 #[derive(Debug, Default)]
 pub struct LiveExperimentManager {
-    current: Option<LiveLowRiskExperiment>,
+    current: Option<LiveExperiment>,
 }
 
 trait LiveExperimentActionExecutor {
@@ -156,7 +160,7 @@ trait LiveExperimentActionExecutor {
     fn rollback_candidate(
         &mut self,
         input: &LiveExperimentManagerInput<'_>,
-        experiment: &LiveLowRiskExperiment,
+        experiment: &LiveExperiment,
         observation: &AutotuneObservation,
     ) -> anyhow::Result<()>;
 }
@@ -171,8 +175,12 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
         _experiment_id: &str,
         observation: &AutotuneObservation,
     ) -> anyhow::Result<RollbackToken> {
-        if input.mode == DaemonMode::ApplyMediumRisk {
-            let service = InProcessPrivilegedActionService;
+        if input.mode == DaemonMode::ApplyMediumRisk
+            && candidate.safety_class() > SafetyClass::ReversibleLowRisk
+        {
+            let service = input
+                .privileged_action_service
+                .ok_or_else(|| anyhow::anyhow!("privileged_worker_required: apply-medium-risk requires a privileged action service"))?;
             let result = service
                 .apply_candidate(CandidateApplyRequest {
                     plan: CandidatePlanRequest::from_candidate(
@@ -198,16 +206,26 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
     fn rollback_candidate(
         &mut self,
         input: &LiveExperimentManagerInput<'_>,
-        experiment: &LiveLowRiskExperiment,
+        experiment: &LiveExperiment,
         observation: &AutotuneObservation,
     ) -> anyhow::Result<()> {
-        let service = InProcessPrivilegedActionService;
-        service.rollback(RollbackRequest {
-            candidate: experiment.candidate.clone(),
-            token: experiment.rollback.clone(),
-            policy: input.daemon_policy.clone(),
-            context: policy_context_for_runtime_apply(observation),
-        })?;
+        if experiment.mode == DaemonMode::ApplyMediumRisk
+            && experiment.safety_class > SafetyClass::ReversibleLowRisk
+        {
+            let service = input
+                .privileged_action_service
+                .ok_or_else(|| anyhow::anyhow!("privileged_worker_required: apply-medium-risk rollback requires a privileged action service"))?;
+            service.rollback(RollbackRequest {
+                candidate: experiment.candidate.clone(),
+                token: experiment.rollback.clone(),
+                policy: input.daemon_policy.clone(),
+                context: policy_context_for_runtime_apply(observation),
+            })?;
+        } else {
+            let executor =
+                crate::autotune::apply::executor_for_candidate(experiment.candidate.clone())?;
+            executor.rollback(&experiment.rollback)?;
+        }
 
         Ok(())
     }
@@ -227,7 +245,7 @@ impl LiveExperimentManager {
         self.current.is_some()
     }
 
-    pub fn current_experiment(&self) -> Option<&LiveLowRiskExperiment> {
+    pub fn current_experiment(&self) -> Option<&LiveExperiment> {
         self.current.as_ref()
     }
 
@@ -238,7 +256,7 @@ impl LiveExperimentManager {
     }
 
     #[cfg(test)]
-    pub fn set_current_for_tests(&mut self, experiment: LiveLowRiskExperiment) {
+    pub fn set_current_for_tests(&mut self, experiment: LiveExperiment) {
         self.current = Some(experiment);
     }
 
@@ -249,7 +267,8 @@ impl LiveExperimentManager {
                 experiment_id: experiment.experiment_id.as_str().to_owned(),
                 action_id: experiment.action_id(),
                 candidate_name: Some(experiment.candidate_name().to_owned()),
-                safety_class: experiment.candidate.safety_class(),
+                mode: experiment.mode,
+                safety_class: experiment.safety_class.clone(),
                 started_unix_nanos: Some(experiment.applied_unix_nanos),
             })
     }
@@ -260,6 +279,8 @@ impl LiveExperimentManager {
     ) -> Option<DaemonRollbackState> {
         self.current.as_ref().map(|experiment| DaemonRollbackState {
             action_id: experiment.action_id(),
+            mode: experiment.mode,
+            safety_class: experiment.safety_class.clone(),
             rollback_available: true,
             token: Some(experiment.rollback.clone()),
             manual_restore_command: Some(manual_restore_command.to_owned()),
@@ -352,7 +373,7 @@ impl LiveExperimentManager {
     }
 
     pub fn compare_keep_result(
-        experiment: &LiveLowRiskExperiment,
+        experiment: &LiveExperiment,
         candidate_score: &WindowScore,
         observation: &AutotuneObservation,
     ) -> ExperimentResult {
@@ -491,6 +512,7 @@ impl LiveExperimentManager {
         ));
         let action_id = candidate.action_id().0;
         let action_kind = candidate.action_kind().to_owned();
+        let safety_class = candidate.safety_class();
 
         let rollback = self.apply_candidate_for_runtime_with_executor(
             input,
@@ -529,9 +551,11 @@ impl LiveExperimentManager {
             observation.now_unix_nanos,
         );
 
-        self.current = Some(LiveLowRiskExperiment {
+        self.current = Some(LiveExperiment {
             experiment_id,
             candidate,
+            safety_class: safety_class.clone(),
+            mode: input.mode,
             baseline_score: baseline_score.clone(),
             baseline_signals: observation.objective_signals.clone(),
             applied_unix_nanos: observation.now_unix_nanos,
@@ -563,6 +587,8 @@ impl LiveExperimentManager {
                 .map(|experiment| experiment.candidate.profile_name().to_owned())
                 .unwrap_or_else(|| "unknown-candidate".to_owned()),
             action_kind,
+            mode: input.mode,
+            safety_class,
             score_before: Some(baseline_score),
             score_after: None,
             rollback_performed: false,
@@ -592,6 +618,12 @@ impl LiveExperimentManager {
         action_id: &str,
         observation: &AutotuneObservation,
     ) -> anyhow::Result<RollbackToken> {
+        if input.simulate_action_effects && matches!(candidate, CandidateAction::Fake { .. }) {
+            return Ok(RollbackToken::NiceRestore {
+                records: Vec::new(),
+            });
+        }
+
         if input.simulate_action_effects {
             return Ok(RollbackToken::CpuAffinityRestoreFile {
                 path: PathBuf::from(format!(
@@ -649,7 +681,7 @@ impl LiveExperimentManager {
     pub fn controller_journal_record_for_live_experiment(
         &self,
         input: &LiveExperimentManagerInput<'_>,
-        experiment: &LiveLowRiskExperiment,
+        experiment: &LiveExperiment,
         observation: &AutotuneObservation,
         state: ControllerJournalState,
         verify_result: &'static str,
@@ -668,17 +700,19 @@ impl LiveExperimentManager {
             Some(experiment.rollback.affected_tasks()),
             verify_result,
         ))
+        .with_mode(experiment.mode)
+        .with_safety_class(experiment.safety_class.clone())
     }
 
     fn write_controller_journal_phase_for_live_experiment(
         &self,
         input: &LiveExperimentManagerInput<'_>,
-        experiment: &LiveLowRiskExperiment,
+        experiment: &LiveExperiment,
         observation: &AutotuneObservation,
         state: ControllerJournalState,
         verify_result: &'static str,
     ) -> anyhow::Result<()> {
-        if input.simulate_action_effects {
+        if input.simulate_action_effects && input.controller_journal_path.is_none() {
             return Ok(());
         }
 
@@ -719,6 +753,7 @@ impl LiveExperimentManager {
             ))
             .with_restore_command(input.manual_restore_command)
             .with_verify_result(verify_result)
+            .with_mode(input.mode)
             .with_safety_class(candidate.safety_class())
     }
 
@@ -762,7 +797,10 @@ impl LiveExperimentManager {
                     reason.to_owned(),
                 );
 
-                active_profile_state.record_kept_candidate(kept, result.clone());
+                if let Err(err) = active_profile_state.record_kept_candidate(kept, result.clone()) {
+                    self.current = Some(experiment);
+                    return Err(err);
+                }
 
                 controller_state.record_candidate_result(
                     &experiment.candidate,
@@ -788,6 +826,8 @@ impl LiveExperimentManager {
                     action_id: experiment.action_id(),
                     candidate_name: experiment.candidate.profile_name().to_owned(),
                     action_kind: experiment.candidate.action_kind().to_owned(),
+                    mode: experiment.mode,
+                    safety_class: experiment.safety_class.clone(),
                     score_before: Some(experiment.baseline_score.clone()),
                     score_after: Some(candidate_score),
                     rollback_performed: false,
@@ -882,6 +922,8 @@ impl LiveExperimentManager {
             action_id: experiment.action_id(),
             candidate_name: experiment.candidate.profile_name().to_owned(),
             action_kind: experiment.candidate.action_kind().to_owned(),
+            mode: experiment.mode,
+            safety_class: experiment.safety_class.clone(),
             score_before: Some(experiment.baseline_score.clone()),
             score_after: Some(window_score_from_observation(observation)),
             rollback_performed: true,
@@ -962,11 +1004,16 @@ fn experiment_data_quality(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
     use crate::{
-        actions::{ActionId, RollbackToken},
+        actions::{ActionId, ActionState, RollbackToken, TaskIdentity},
         autotune::{
-            comparison::ExperimentResult, objective::ObjectiveKind, quality::OnlineDataQuality,
+            candidate::{CandidateDryRunRecord, CandidateEvidence, NiceActionPlan},
+            comparison::ExperimentResult,
+            objective::ObjectiveKind,
+            quality::OnlineDataQuality,
         },
         daemon_policy::ActionSource,
         scorer::StutterScore,
@@ -1000,7 +1047,7 @@ mod tests {
         fn rollback_candidate(
             &mut self,
             _input: &LiveExperimentManagerInput<'_>,
-            _experiment: &LiveLowRiskExperiment,
+            _experiment: &LiveExperiment,
             _observation: &AutotuneObservation,
         ) -> anyhow::Result<()> {
             self.rollback_calls += 1;
@@ -1013,10 +1060,88 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Default)]
+    struct FakePrivilegedService {
+        apply_calls: Mutex<usize>,
+        rollback_calls: Mutex<usize>,
+    }
+
+    impl FakePrivilegedService {
+        fn apply_calls(&self) -> usize {
+            *self.apply_calls.lock().unwrap()
+        }
+    }
+
+    impl PrivilegedActionService for FakePrivilegedService {
+        fn dry_run_candidate(
+            &self,
+            request: CandidateApplyRequest,
+        ) -> anyhow::Result<CandidateDryRunRecord> {
+            Ok(CandidateDryRunRecord {
+                candidate_name: request.plan.candidate.candidate_name().to_owned(),
+                affected_tasks: 1,
+                warnings: Vec::new(),
+                safety_class: request.plan.candidate.safety_class(),
+                eligible: true,
+                reason: None,
+            })
+        }
+
+        fn apply_candidate(
+            &self,
+            _request: CandidateApplyRequest,
+        ) -> anyhow::Result<crate::daemon::privilege::ApplyResult> {
+            *self.apply_calls.lock().unwrap() += 1;
+            Ok(crate::daemon::privilege::ApplyResult {
+                state: ActionState {
+                    applied: true,
+                    affected_tasks: 1,
+                    checked_tasks: 1,
+                    pending_changes: 1,
+                    warnings: Vec::new(),
+                },
+                rollback: RollbackToken::NiceRestore {
+                    records: Vec::new(),
+                },
+            })
+        }
+
+        fn rollback(
+            &self,
+            request: RollbackRequest,
+        ) -> anyhow::Result<crate::daemon::privilege::RollbackResult> {
+            *self.rollback_calls.lock().unwrap() += 1;
+            Ok(crate::daemon::privilege::RollbackResult {
+                affected_tasks: request.token.affected_tasks(),
+            })
+        }
+    }
+
     fn low_risk_candidate() -> CandidateAction {
         CandidateAction::Fake {
             action_id: ActionId("fake-low-risk".to_owned()),
             safety_class: SafetyClass::ReversibleLowRisk,
+        }
+    }
+
+    fn medium_risk_candidate() -> CandidateAction {
+        CandidateAction::Nice {
+            plan: NiceActionPlan {
+                name: "medium-nice".to_owned(),
+                action: crate::actions::nice::NiceAction {
+                    targets: vec![TaskIdentity {
+                        tid: 42,
+                        process_pid: Some(42),
+                        comm: Some("game".to_owned()),
+                        starttime_ticks: Some(1),
+                    }],
+                    nice: 5,
+                    policy: crate::actions::nice::NicePolicy::default(),
+                },
+                target_root_pid: Some(42),
+                evidence: vec![CandidateEvidence::new("test", "medium risk", 1.0)],
+                objective: ObjectiveKind::DesktopInteractivity,
+            },
         }
     }
 
@@ -1066,10 +1191,12 @@ mod tests {
         }
     }
 
-    fn live_experiment() -> LiveLowRiskExperiment {
-        LiveLowRiskExperiment {
+    fn live_experiment() -> LiveExperiment {
+        LiveExperiment {
             experiment_id: ExperimentId::new("experiment-active"),
             candidate: low_risk_candidate(),
+            safety_class: SafetyClass::ReversibleLowRisk,
+            mode: DaemonMode::ApplyLowRisk,
             baseline_score: score(1_000),
             baseline_signals: ObjectiveSignals::from_window_score(&score(1_000)),
             applied_unix_nanos: 100,
@@ -1102,13 +1229,74 @@ mod tests {
             manual_restore_command: "stutter daemon emergency-restore",
             controller_journal_path: Some(journal_path),
             exit_rollback_registry: None,
+            privileged_action_service: None,
         }
+    }
+
+    fn medium_input<'a>(
+        journal_path: PathBuf,
+        service: Option<&'a dyn PrivilegedActionService>,
+    ) -> LiveExperimentManagerInput<'a> {
+        let daemon_policy = DaemonPolicy::apply_medium_risk(ActionSource::Test);
+        LiveExperimentManagerInput {
+            mode: DaemonMode::ApplyMediumRisk,
+            controller_policy: ControllerPolicy::from_daemon_policy(&daemon_policy),
+            daemon_policy,
+            simulate_action_effects: false,
+            washout: WashoutWindowConfig::default(),
+            candidate_window_seconds: 30,
+            manual_restore_command: "stutter daemon emergency-restore",
+            controller_journal_path: Some(journal_path),
+            exit_rollback_registry: None,
+            privileged_action_service: service,
+        }
+    }
+
+    #[test]
+    fn runtime_executor_uses_injected_privileged_service_for_medium_risk_apply() {
+        let journal_path = temp_journal_path("medium-injected");
+        let service = FakePrivilegedService::default();
+        let input = medium_input(journal_path, Some(&service));
+        let observation = observation(1_000, 1_000_000_000);
+        let mut executor = RuntimeLiveExperimentActionExecutor;
+
+        let rollback = executor
+            .apply_candidate(
+                &input,
+                &medium_risk_candidate(),
+                "medium-experiment",
+                &observation,
+            )
+            .unwrap();
+
+        assert!(matches!(rollback, RollbackToken::NiceRestore { .. }));
+        assert_eq!(service.apply_calls(), 1);
+    }
+
+    #[test]
+    fn runtime_executor_requires_privileged_service_for_medium_risk_apply() {
+        let journal_path = temp_journal_path("medium-missing-service");
+        let input = medium_input(journal_path, None);
+        let observation = observation(1_000, 1_000_000_000);
+        let mut executor = RuntimeLiveExperimentActionExecutor;
+
+        let err = executor
+            .apply_candidate(
+                &input,
+                &medium_risk_candidate(),
+                "medium-experiment",
+                &observation,
+            )
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("privileged_worker_required"));
     }
 
     #[test]
     fn start_candidate_applies_action_writes_journal_registers_rollback_and_clears_window() {
         let journal_path = temp_journal_path("start");
-        let registry = crate::autotune::shutdown::ActiveLowRiskActionRegistry::new();
+        let registry = crate::autotune::shutdown::ActiveAutotuneActionRegistry::new();
         let daemon_policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
         let input = LiveExperimentManagerInput {
             mode: DaemonMode::ApplyLowRisk,
@@ -1120,6 +1308,7 @@ mod tests {
             manual_restore_command: "stutter daemon emergency-restore",
             controller_journal_path: Some(journal_path),
             exit_rollback_registry: Some(&registry),
+            privileged_action_service: None,
         };
         let mut manager = LiveExperimentManager::new();
         let mut controller_state = ControllerRuntimeState::default();
@@ -1157,6 +1346,74 @@ mod tests {
                 .as_ref()
                 .map(|context| context.action_id.as_str()),
             Some("fake-low-risk")
+        );
+    }
+
+    #[test]
+    fn medium_risk_experiment_state_uses_actual_mode_and_safety_class() {
+        let journal_path = temp_journal_path("medium-state");
+        let input = medium_input(journal_path.clone(), None);
+        let mut manager = LiveExperimentManager::new();
+        let mut controller_state = ControllerRuntimeState::default();
+        let mut active_profile_state = ActiveProfileState::default();
+        let mut executor = FakeLiveExecutor::default();
+        let observation = observation(1_000, 1_000_000_000);
+
+        let outcome = manager
+            .apply_decision_side_effects_with_executor(
+                input,
+                LiveExperimentRuntimeState {
+                    controller_state: &mut controller_state,
+                    active_profile_state: &mut active_profile_state,
+                },
+                &observation,
+                &AutotuneDecision::StartExperiment {
+                    candidate: medium_risk_candidate(),
+                    reason: "medium candidate passed gate".to_owned(),
+                },
+                "medium candidate passed gate",
+                &mut executor,
+            )
+            .unwrap();
+
+        let experiment = manager.current_experiment().unwrap();
+        assert_eq!(experiment.mode, DaemonMode::ApplyMediumRisk);
+        assert_eq!(experiment.safety_class, SafetyClass::ReversibleMediumRisk);
+        assert_eq!(
+            manager
+                .daemon_experiment_state()
+                .map(|state| (state.mode, state.safety_class)),
+            Some((
+                DaemonMode::ApplyMediumRisk,
+                SafetyClass::ReversibleMediumRisk
+            ))
+        );
+        assert_eq!(
+            manager
+                .daemon_rollback_state("stutter daemon emergency-restore")
+                .map(|state| (state.mode, state.safety_class)),
+            Some((
+                DaemonMode::ApplyMediumRisk,
+                SafetyClass::ReversibleMediumRisk
+            ))
+        );
+        assert_eq!(
+            outcome
+                .history_context
+                .as_ref()
+                .map(|context| (context.mode, context.safety_class.clone())),
+            Some((
+                DaemonMode::ApplyMediumRisk,
+                SafetyClass::ReversibleMediumRisk
+            ))
+        );
+
+        let journal =
+            crate::autotune::controller_journal::read_controller_journal(&journal_path).unwrap();
+        assert_eq!(journal.mode, Some(DaemonMode::ApplyMediumRisk));
+        assert_eq!(
+            journal.safety_class,
+            Some(SafetyClass::ReversibleMediumRisk)
         );
     }
 
@@ -1222,7 +1479,7 @@ mod tests {
         assert!(!manager.has_active_experiment());
         assert_eq!(controller_state.phase, ControllerPhase::Cooldown);
         assert!(controller_state.active_experiment.is_none());
-        assert!(active_profile_state.current.is_some());
+        assert_eq!(active_profile_state.kept_action_count(), 1);
         assert_eq!(executor.rollback_calls, 0);
         assert_eq!(
             outcome
@@ -1318,8 +1575,10 @@ mod tests {
 
     #[test]
     fn compare_keep_result_rejects_io_candidate_when_live_io_signal_regresses() {
-        let experiment = LiveLowRiskExperiment {
+        let experiment = LiveExperiment {
             experiment_id: ExperimentId::new("io-test"),
+            safety_class: SafetyClass::ReversibleMediumRisk,
+            mode: DaemonMode::ApplyMediumRisk,
             candidate: CandidateAction::IoPrio {
                 plan: crate::autotune::candidate::IoPrioActionPlan {
                     name: "fake-io".to_owned(),
@@ -1403,6 +1662,7 @@ mod tests {
             record.verify_result.as_deref(),
             Some("rollback_in_progress")
         );
+        assert_eq!(record.mode, Some(DaemonMode::ApplyLowRisk));
         assert_eq!(record.safety_class, Some(SafetyClass::ReversibleLowRisk));
         assert!(record.rollback_token().is_some());
         assert!(record.may_have_mutated_system());

@@ -298,6 +298,7 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
                 "restored",
                 &experiment_id,
                 &action_id,
+                &rollback_token,
                 true,
                 format!(
                     "startup crash recovery rollback succeeded; manual_restore_command=\"{}\"",
@@ -352,6 +353,7 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
                 "CrashRecoveryFault",
                 &experiment_id,
                 &action_id,
+                &rollback_token,
                 false,
                 format!(
                     "{}; manual_restore_command=\"{}\"",
@@ -422,6 +424,7 @@ fn write_startup_recovery_history_event(
     decision: &str,
     experiment_id: &str,
     action_id: &str,
+    rollback_token: &RollbackToken,
     rollback_performed: bool,
     reason: String,
 ) -> anyhow::Result<()> {
@@ -436,6 +439,7 @@ fn write_startup_recovery_history_event(
             decision: decision.to_owned(),
             candidate_name: candidate_name_from_action_id(action_id),
             action_kind: Some(action_kind_from_action_id(action_id)),
+            safety_class: Some(safety_class_for_rollback_token(rollback_token)),
             eligible: rollback_performed,
             rollback_policy: "rollback-on-crash-recovery".to_owned(),
         },

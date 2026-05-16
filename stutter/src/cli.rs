@@ -17,12 +17,12 @@ use crate::{
         DaemonResumeCommandInput, DaemonSoakCommandInput, DaemonStatusCommandInput,
         DaemonWatchCommandInput, DaemonWhatChangedCommandInput, DaemonWhyNotOptimizeCommandInput,
         DoctorCommandInput, InspectIrqsCommandInput, InspectTreeCommandInput, ManCommandInput,
-        MonitorCommandInput, ProbesCommandInput, ProfileTemplateCommandInput,
-        RecommendCommandInput, ReleaseCheckCommandInput, ReportCommandInput, RestoreCommandInput,
-        RulesCommandInput, ScenarioCompareCommandInput, ScenarioCreateCommandInput,
-        ScenarioListCommandInput, ScenarioPathCommandInput, ScenarioRunCommandInput,
-        ServiceCommandInput, SummaryCommandInput, TuneCommandInput, ValidateCommandInput,
-        VersionCommandInput,
+        MonitorCommandInput, PrivilegedWorkerCommandInput, ProbesCommandInput,
+        ProfileTemplateCommandInput, RecommendCommandInput, ReleaseCheckCommandInput,
+        ReportCommandInput, RestoreCommandInput, RulesCommandInput, ScenarioCompareCommandInput,
+        ScenarioCreateCommandInput, ScenarioListCommandInput, ScenarioPathCommandInput,
+        ScenarioRunCommandInput, ServiceCommandInput, SummaryCommandInput, TuneCommandInput,
+        ValidateCommandInput, VersionCommandInput,
     },
     config::{
         CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX,
@@ -140,6 +140,8 @@ enum Command {
     #[command(name = "autotune-status")]
     AutotuneStatus(AutotuneStatusArgs),
     Agent(AgentArgs),
+    #[command(name = "privileged-worker")]
+    PrivilegedWorker(PrivilegedWorkerArgs),
     Daemon(DaemonArgs),
     Service(ServiceArgs),
     #[command(name = "completions")]
@@ -1143,6 +1145,16 @@ pub struct AgentArgs {
     pub max_concurrent_recordings: usize,
 }
 
+#[derive(Args, Debug, Clone)]
+pub struct PrivilegedWorkerArgs {
+    #[arg(
+        long = "socket",
+        value_name = "PATH",
+        help = "Unix domain socket used by the local control plane"
+    )]
+    pub socket: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct MonitorArgPresence {
     watch_poll_ms: bool,
@@ -2019,6 +2031,7 @@ pub enum AppCommand {
     ProfileTemplate(ProfileTemplateCommandInput),
     InspectIrqs(InspectIrqsCommandInput),
     Agent(AgentCommandInput),
+    PrivilegedWorker(PrivilegedWorkerCommandInput),
     DaemonConfigExplain(DaemonConfigExplainCommandInput),
     DaemonPolicyExplain(DaemonPolicyExplainCommandInput),
     DaemonProfiles(DaemonProfilesCommandInput),
@@ -2612,6 +2625,15 @@ where
                 max_duration_seconds: args.max_duration_seconds,
                 max_targets: args.max_targets,
                 max_concurrent_recordings: args.max_concurrent_recordings,
+            }))
+        }
+        Some(Command::PrivilegedWorker(args)) => {
+            let socket = match args.socket {
+                Some(socket) => socket,
+                None => crate::daemon::privilege::default_privileged_worker_socket_path()?,
+            };
+            Ok(AppCommand::PrivilegedWorker(PrivilegedWorkerCommandInput {
+                socket,
             }))
         }
         Some(Command::Daemon(args)) => match args.command {
@@ -5533,6 +5555,22 @@ mod tests {
 
         assert!(input.unix_socket.is_some());
         assert_eq!(input.bind.port(), 0);
+    }
+
+    #[test]
+    fn privileged_worker_parses_socket_path() {
+        let command = parse_app_command_from([
+            "stutter",
+            "privileged-worker",
+            "--socket",
+            "/tmp/stutter-worker.sock",
+        ])
+        .unwrap();
+        let AppCommand::PrivilegedWorker(input) = command else {
+            panic!("expected privileged worker command");
+        };
+
+        assert_eq!(input.socket, PathBuf::from("/tmp/stutter-worker.sock"));
     }
 
     #[test]

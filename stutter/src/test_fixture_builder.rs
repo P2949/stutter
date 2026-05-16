@@ -441,6 +441,7 @@ fn real_gpu_bound_looking_fixture() -> (SessionFile, FixtureArtifacts) {
             mem_clock_mhz: Some(9700),
             temp_millidegrees: Some(70_000),
             power_microwatts: Some(205_000_000),
+            ..GpuSample::default()
         },
         GpuSample {
             elapsed_ms: 100,
@@ -452,6 +453,7 @@ fn real_gpu_bound_looking_fixture() -> (SessionFile, FixtureArtifacts) {
             mem_clock_mhz: Some(9750),
             temp_millidegrees: Some(71_000),
             power_microwatts: Some(215_000_000),
+            ..GpuSample::default()
         },
         GpuSample {
             elapsed_ms: 117,
@@ -463,6 +465,7 @@ fn real_gpu_bound_looking_fixture() -> (SessionFile, FixtureArtifacts) {
             mem_clock_mhz: Some(9750),
             temp_millidegrees: Some(72_000),
             power_microwatts: Some(218_000_000),
+            ..GpuSample::default()
         },
     ];
     let frame_events = vec![
@@ -889,6 +892,7 @@ fn gpu_bound_clean_cpu_fixture() -> (SessionFile, FixtureArtifacts) {
         mem_clock_mhz: Some(9500),
         temp_millidegrees: Some(62_000),
         power_microwatts: Some(120_000_000),
+        ..GpuSample::default()
     }];
     let frame_events = vec![
         FrameEvent {
@@ -1075,6 +1079,7 @@ fn game_thread_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) {
         mem_clock_mhz: Some(7000),
         temp_millidegrees: Some(57_000),
         power_microwatts: Some(78_000_000),
+        ..GpuSample::default()
     }];
     let frame_events = vec![
         FrameEvent {
@@ -1154,6 +1159,7 @@ fn compositor_scheduler_delay_fixture() -> (SessionFile, FixtureArtifacts) {
         mem_clock_mhz: Some(6500),
         temp_millidegrees: Some(54_000),
         power_microwatts: Some(62_000_000),
+        ..GpuSample::default()
     }];
     let frame_events = vec![
         FrameEvent {

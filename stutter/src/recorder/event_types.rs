@@ -173,6 +173,10 @@ pub struct IrqEventRecord {
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct GpuSample {
     pub elapsed_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drm_card: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_node: Option<String>,
     pub gpu_busy_percent: Option<u32>,
     pub vram_used_bytes: Option<u64>,
     pub vram_total_bytes: Option<u64>,
@@ -181,6 +185,8 @@ pub struct GpuSample {
     pub mem_clock_mhz: Option<u32>,
     pub temp_millidegrees: Option<u32>,
     pub power_microwatts: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_limit_reason: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]

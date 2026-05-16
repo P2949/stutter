@@ -65,7 +65,6 @@ impl Default for DiagnosisConfig {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct DiagnosisThresholdDoc {
     pub key: &'static str,
@@ -75,7 +74,6 @@ pub struct DiagnosisThresholdDoc {
 }
 
 impl DiagnosisConfig {
-    #[allow(dead_code)]
     pub fn threshold_table(&self) -> Vec<DiagnosisThresholdDoc> {
         vec![
             DiagnosisThresholdDoc {
@@ -250,7 +248,6 @@ impl Confidence {
     }
 }
 
-#[allow(dead_code)]
 fn confidence_threshold_value(confidence: Confidence) -> f64 {
     match confidence {
         Confidence::Low => 1.0,
@@ -260,7 +257,6 @@ fn confidence_threshold_value(confidence: Confidence) -> f64 {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum EvidenceKind {
     SchedulerDelay,
     IrqOverlap,

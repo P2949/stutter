@@ -425,6 +425,8 @@ mod tests {
             cooldown_until_unix_nanos: Some(crate::audit::unix_nanos_now() + 3_600_000_000_000),
             active_rollback: Some(crate::daemon::DaemonRollbackState {
                 action_id: "action-1".to_owned(),
+                mode: crate::daemon::DaemonMode::ApplyLowRisk,
+                safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                 rollback_available: true,
                 token: None,
                 manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),

@@ -153,7 +153,7 @@ fn keep_improved_experiment(
         reason.clone(),
     );
 
-    active_profile_state.record_kept_candidate(kept, result);
+    active_profile_state.record_kept_candidate(kept, result)?;
     experiment.phase = ExperimentPhase::Cooldown;
 
     Ok(ExperimentResolution::Kept {
@@ -477,7 +477,7 @@ mod tests {
 
         assert_eq!(err, "cannot keep experiment without candidate score");
         assert_eq!(rollback_executor.calls, 0);
-        assert!(active_profile_state.current.is_none());
+        assert!(active_profile_state.kept_actions.is_empty());
         assert!(experiment.has_rollback());
     }
 
@@ -502,7 +502,7 @@ mod tests {
 
         assert_eq!(err, "cannot keep experiment without rollback token");
         assert_eq!(rollback_executor.calls, 0);
-        assert!(active_profile_state.current.is_none());
+        assert!(active_profile_state.kept_actions.is_empty());
     }
 
     #[test]

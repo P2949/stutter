@@ -232,6 +232,10 @@ pub struct CandidatePlanFile {
     pub descriptor: ActionDescriptor,
     pub objective: ObjectiveKind,
     pub evidence: Vec<CandidateEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manual_apply_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manual_only_reason: Option<String>,
     pub executable: Option<CandidateExecutablePlan>,
 }
 
@@ -258,11 +262,14 @@ impl CandidatePlanFile {
             descriptor: suggestion.descriptor.clone(),
             objective: suggestion.objective,
             evidence: suggestion.evidence.clone(),
+            manual_apply_command: suggestion.manual_apply_command.clone(),
+            manual_only_reason: suggestion.manual_only_reason.clone(),
             executable: None,
         }
     }
 
     pub fn from_candidate(candidate: &CandidateAction, affected_tasks: Option<usize>) -> Self {
+        let (manual_apply_command, manual_only_reason) = candidate_plan_manual_metadata(candidate);
         Self {
             schema_version: Self::SCHEMA_VERSION,
             candidate: CandidatePlanSummary {
@@ -274,8 +281,23 @@ impl CandidatePlanFile {
             descriptor: candidate.descriptor(),
             objective: candidate.objective(),
             evidence: candidate.evidence().to_vec(),
+            manual_apply_command,
+            manual_only_reason,
             executable: CandidateExecutablePlan::from_candidate(candidate),
         }
+    }
+}
+
+fn candidate_plan_manual_metadata(candidate: &CandidateAction) -> (Option<String>, Option<String>) {
+    match candidate {
+        CandidateAction::CpuAffinityProfile { plan } => (
+            Some(format!(
+                "stutter apply-profile --tree-pid {} --profile <generated-or-existing-profile>",
+                plan.tree_pid
+            )),
+            Some("cpu-affinity profiles use apply-profile, not candidate-plan apply".to_owned()),
+        ),
+        _ => (None, candidate.manual_only_reason()),
     }
 }
 
@@ -801,7 +823,7 @@ pub struct CandidateProfileStatus {
     pub dry_run_tasks: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CandidateDryRunRecord {
     pub candidate_name: String,
     pub affected_tasks: usize,
@@ -1187,6 +1209,15 @@ pub fn apply_candidate_plan_file(path: &Path, dry_run: bool) -> anyhow::Result<C
     }
 
     let Some(executable) = plan.executable.clone() else {
+        if let Some(reason) = plan.manual_only_reason.as_deref() {
+            anyhow::bail!(
+                "candidate_plan_manual_only: candidate '{}' action_kind={} reason={} manual_apply_command={}",
+                plan.candidate.candidate_name,
+                plan.candidate.action_kind,
+                reason,
+                plan.manual_apply_command.as_deref().unwrap_or("none")
+            );
+        }
         anyhow::bail!(
             "candidate_plan_payload_not_executable: candidate '{}' action_kind={} requires an executable candidate payload",
             plan.candidate.candidate_name,
@@ -3125,6 +3156,50 @@ mod tests {
         let decoded_candidate = decoded.executable.unwrap().into_candidate();
         assert_eq!(decoded_candidate.action_kind(), "nice");
         assert_eq!(decoded_candidate.candidate_name(), "nice-browser-helper");
+    }
+
+    #[test]
+    fn cpu_affinity_candidate_plan_file_is_manual_only_with_stable_rejection() {
+        let plan_dir = temp_candidate_plan_dir("cpu-affinity-plan-manual-only");
+        let candidate = CandidateAction::CpuAffinityProfile {
+            plan: CpuAffinityProfilePlan {
+                profile_name: "game".to_owned(),
+                profile: Profile {
+                    name: "game".to_owned(),
+                    rules: vec![ProfileRule {
+                        affinity: Some(CpuMask::parse("0").unwrap()),
+                        nice: None,
+                        ionice: None,
+                        match_class: vec![TaskClass::Game],
+                        match_comm: Vec::new(),
+                    }],
+                },
+                tree_pid: 1234,
+            },
+        };
+        let plan_path = candidate_plan_path(&candidate, &plan_dir);
+
+        let plan = write_candidate_plan_file(&plan_path, &candidate, Some(1)).unwrap();
+        assert!(plan.executable.is_none());
+        assert_eq!(
+            plan.manual_apply_command.as_deref(),
+            Some("stutter apply-profile --tree-pid 1234 --profile <generated-or-existing-profile>")
+        );
+        assert_eq!(
+            plan.manual_only_reason.as_deref(),
+            Some("cpu-affinity profiles use apply-profile, not candidate-plan apply")
+        );
+
+        let decoded: CandidatePlanFile =
+            serde_json::from_slice(&std::fs::read(&plan_path).unwrap()).unwrap();
+        assert!(decoded.executable.is_none());
+        assert_eq!(decoded.manual_only_reason, plan.manual_only_reason);
+
+        let err = apply_candidate_plan_file(&plan_path, false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("candidate_plan_manual_only"));
+        assert!(err.contains("apply-profile"));
     }
 
     #[test]

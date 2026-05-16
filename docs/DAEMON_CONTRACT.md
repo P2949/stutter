@@ -37,6 +37,8 @@ A daemon action may be treated as "free performance" only when all of these inva
 - no changes without a rollback path;
 - no action when confidence is low;
 - no system-wide mutation by default (suggestions allowed with `allow_system_wide_suggestions`, apply requires `allow_system_wide_apply`).
+- no CPU governor/EPP suggestion while a battery is discharging unless `autotune.allow_cpu_power_on_battery = true` is explicitly configured; provider-side thermal headroom is also required.
+- no VM knob autonomous apply; VM candidates stay high-risk/manual-only and require direct swap or dirty-writeback evidence before they are suggested.
 
 `DaemonPolicy::check_action` enforces the policy-side parts of this contract by rejecting system-wide suggestions without explicit suggestion permission, low-confidence apply actions, missing rollback, unavailable rollback, persistent effects without explicit permission, system-wide apply without explicit `allow_system_wide_apply`, and effect scopes outside the selected mode.
 
@@ -79,6 +81,7 @@ Rollback is part of the product contract, not a best-effort comment.
 - `stutter daemon restore` and `stutter daemon emergency-restore` run both restore paths and report combined restored/skipped/error counts.
 - The audit log at `~/.local/state/stutter/audit/actions.jsonl` records system-changing action events.
 - The controller journal at `~/.local/state/stutter/autotune/controller_journal.json` records in-flight and applied autotune actions with rollback tokens.
+- Apply-medium-risk process-local changes are sent to `stutter privileged-worker --socket <path>` over a local Unix socket. Configure `[autotune].privileged_worker_socket` when the worker does not use the default runtime path.
 - Startup recovery must inspect the controller journal before planning new actions.
 - If target tasks exit before rollback, restore reports skipped/dead tasks instead of treating task exit as corruption.
 - If task identity no longer matches, restore skips the task to avoid TID reuse damage.

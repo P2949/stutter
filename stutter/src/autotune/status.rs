@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -27,6 +30,7 @@ pub struct AutotuneStatus {
     pub current_score: Option<u64>,
     pub active_profile: Option<String>,
     pub active_candidate: Option<String>,
+    pub kept_actions: Vec<StatusKeptAction>,
     pub last_decision: String,
     pub rollback_available: bool,
     pub last_rollback_path: Option<String>,
@@ -41,6 +45,15 @@ pub struct AutotuneStatus {
 pub struct StatusTarget {
     pub comm: String,
     pub pid: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StatusKeptAction {
+    pub candidate_name: String,
+    pub action_id: String,
+    pub action_kind: String,
+    pub safety_class: String,
+    pub kept_unix_nanos: u128,
 }
 
 pub fn autotune_status_command(input: AutotuneStatusCommandInput) -> anyhow::Result<()> {
@@ -90,6 +103,7 @@ pub fn status_from_history_events(
             current_score: None,
             active_profile: None,
             active_candidate: None,
+            kept_actions: Vec::new(),
             last_decision: "no autotune history found".to_owned(),
             rollback_available: false,
             last_rollback_path: None,
@@ -109,6 +123,7 @@ pub fn status_from_history_events(
         current_score: Some(last.observation_summary.score_total),
         active_profile: active_profile_from_events(events),
         active_candidate: active_candidate_from_events(events),
+        kept_actions: kept_actions_from_events(events),
         last_decision: format_last_decision(last),
         rollback_available: rollback_available_from_events(events),
         last_rollback_path: last_rollback_path_from_events(events),
@@ -135,6 +150,7 @@ pub fn status_from_daemon_state(path: PathBuf, state: &DaemonState) -> AutotuneS
             .and_then(|decision| decision.score_total),
         active_profile: active_profile_from_daemon_state(state),
         active_candidate: active_candidate_from_daemon_state(state),
+        kept_actions: kept_actions_from_daemon_state(state),
         last_decision: last_decision_from_daemon_state(state),
         rollback_available: state
             .active_rollback
@@ -159,7 +175,7 @@ pub fn render_autotune_status_text(status: &AutotuneStatus) -> String {
     };
 
     format!(
-        "phase: {}\nmode: {}\ntarget: {}\nfocus_group: {}\ncurrent_score: {}\nactive_profile: {}\nactive_candidate: {}\nlast_decision: {}\nrollback_available: {}\nlast_rollback_path: {}\ncooldown_remaining_seconds: {}\ndata_quality: {}\nlast_fault: {}\nmanual_restore_command: {}\n",
+        "phase: {}\nmode: {}\ntarget: {}\nfocus_group: {}\ncurrent_score: {}\nactive_profile: {}\nactive_candidate: {}\nkept_actions: {}\nlast_decision: {}\nrollback_available: {}\nlast_rollback_path: {}\ncooldown_remaining_seconds: {}\ndata_quality: {}\nlast_fault: {}\nmanual_restore_command: {}\n",
         status.phase,
         status.mode,
         target,
@@ -170,6 +186,7 @@ pub fn render_autotune_status_text(status: &AutotuneStatus) -> String {
             .unwrap_or_else(|| "none".to_owned()),
         status.active_profile.as_deref().unwrap_or("none"),
         status.active_candidate.as_deref().unwrap_or("none"),
+        format_kept_actions(&status.kept_actions),
         status.last_decision,
         if status.rollback_available {
             "yes"
@@ -232,6 +249,21 @@ fn active_candidate_from_daemon_state(state: &DaemonState) -> Option<String> {
     }
 
     None
+}
+
+fn kept_actions_from_daemon_state(state: &DaemonState) -> Vec<StatusKeptAction> {
+    state
+        .profile_memory
+        .sorted_profiles()
+        .into_iter()
+        .map(|profile| StatusKeptAction {
+            candidate_name: profile.candidate_name,
+            action_id: profile.action_id,
+            action_kind: profile.action_kind,
+            safety_class: format!("{:?}", profile.safety_class),
+            kept_unix_nanos: profile.kept_unix_nanos,
+        })
+        .collect()
 }
 
 fn last_decision_from_daemon_state(state: &DaemonState) -> String {
@@ -383,6 +415,63 @@ fn active_candidate_from_events(events: &[AutotuneHistoryEvent]) -> Option<Strin
     None
 }
 
+fn kept_actions_from_events(events: &[AutotuneHistoryEvent]) -> Vec<StatusKeptAction> {
+    let mut kept = BTreeMap::<String, StatusKeptAction>::new();
+
+    for event in events {
+        let decision = normalized_decision(&event.decision.decision);
+
+        if decision == "restored" {
+            kept.clear();
+            continue;
+        }
+
+        if event.rollback_performed || decision == "candidate_reverted" {
+            if let Some(action_id) = event.action_id.as_ref() {
+                kept.remove(action_id);
+            } else {
+                kept.clear();
+            }
+            continue;
+        }
+
+        if decision == "candidate_kept" {
+            let action_id = event.action_id.clone().unwrap_or_else(|| {
+                event
+                    .decision
+                    .candidate_name
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_owned())
+            });
+            kept.insert(
+                action_id.clone(),
+                StatusKeptAction {
+                    candidate_name: event
+                        .decision
+                        .candidate_name
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_owned()),
+                    action_id,
+                    action_kind: event
+                        .decision
+                        .action_kind
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_owned()),
+                    safety_class: event
+                        .decision
+                        .safety_class
+                        .as_ref()
+                        .map(|safety_class| format!("{safety_class:?}"))
+                        .unwrap_or_else(|| "unknown".to_owned()),
+                    kept_unix_nanos: event.unix_nanos,
+                },
+            );
+        }
+    }
+
+    kept.into_values().collect()
+}
+
 fn rollback_available_from_events(events: &[AutotuneHistoryEvent]) -> bool {
     for event in events.iter().rev() {
         let decision = normalized_decision(&event.decision.decision);
@@ -451,6 +540,23 @@ fn restore_path_display(path: &Path) -> String {
         Ok(stripped) => format!("~/{}", stripped.display()),
         Err(_) => path.display().to_string(),
     }
+}
+
+fn format_kept_actions(actions: &[StatusKeptAction]) -> String {
+    if actions.is_empty() {
+        return "none".to_owned();
+    }
+
+    actions
+        .iter()
+        .map(|action| {
+            format!(
+                "{} action_id={} action_kind={} safety_class={}",
+                action.candidate_name, action.action_id, action.action_kind, action.safety_class
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn format_last_decision(event: &AutotuneHistoryEvent) -> String {
@@ -610,6 +716,7 @@ mod tests {
                 decision: "KeepCurrent".to_owned(),
                 candidate_name: Some("game-main-suggested".to_owned()),
                 action_kind: Some("cpu_affinity_profile".to_owned()),
+                safety_class: Some(SafetyClass::ReversibleLowRisk),
                 eligible: true,
                 rollback_policy: "rollback-on-exit".to_owned(),
             },
@@ -640,6 +747,11 @@ mod tests {
             status.active_profile.as_deref(),
             Some("game-main-suggested")
         );
+        assert_eq!(status.kept_actions.len(), 1);
+        assert_eq!(
+            status.kept_actions[0].action_id,
+            "cpu-affinity-profile:game-main-suggested"
+        );
         assert_eq!(status.last_decision, "candidate_kept, improvement=18.2%");
         assert!(status.rollback_available);
         assert!(status.last_rollback_path.is_some());
@@ -649,9 +761,38 @@ mod tests {
         assert!(rendered.contains("mode: ApplyLowRisk"));
         assert!(rendered.contains("target: KingdomCome.exe pid=1234"));
         assert!(rendered.contains("active_profile: game-main-suggested"));
+        assert!(rendered.contains("kept_actions: game-main-suggested"));
         assert!(rendered.contains("last_decision: candidate_kept, improvement=18.2%"));
         assert!(rendered.contains("rollback_available: yes"));
         assert!(rendered.contains("last_rollback_path: "));
+    }
+
+    #[test]
+    fn status_from_history_lists_multiple_kept_actions() {
+        let mut second = kept_event();
+        second.unix_nanos = 2;
+        second.decision.candidate_name = Some("io-priority".to_owned());
+        second.decision.action_kind = Some("ionice".to_owned());
+        second.action_id = Some("ionice:io-priority".to_owned());
+
+        let status = status_from_history_events(
+            PathBuf::from("/tmp/history.jsonl"),
+            &[kept_event(), second],
+        );
+
+        assert_eq!(status.kept_actions.len(), 2);
+        assert!(
+            status
+                .kept_actions
+                .iter()
+                .any(|action| action.action_id == "cpu-affinity-profile:game-main-suggested")
+        );
+        assert!(
+            status
+                .kept_actions
+                .iter()
+                .any(|action| action.action_id == "ionice:io-priority")
+        );
     }
 
     #[test]
@@ -664,6 +805,7 @@ mod tests {
         assert!(json.contains("\"phase\": \"Cooldown\""));
         assert!(json.contains("\"mode\": \"ApplyLowRisk\""));
         assert!(json.contains("\"active_profile\": \"game-main-suggested\""));
+        assert!(json.contains("\"kept_actions\""));
         assert!(json.contains("\"rollback_available\": true"));
     }
 
@@ -779,11 +921,14 @@ mod tests {
                 experiment_id: "experiment-1".to_owned(),
                 action_id: "cpu-affinity-profile:game-main".to_owned(),
                 candidate_name: Some("game-main".to_owned()),
+                mode: DaemonMode::ApplyLowRisk,
                 safety_class: SafetyClass::ReversibleLowRisk,
                 started_unix_nanos: Some(100),
             }),
             active_rollback: Some(DaemonRollbackState {
                 action_id: "cpu-affinity-profile:game-main".to_owned(),
+                mode: DaemonMode::ApplyLowRisk,
+                safety_class: SafetyClass::ReversibleLowRisk,
                 rollback_available: true,
                 token: Some(RollbackToken::CpuAffinityRestoreFile {
                     path: PathBuf::from("/tmp/stutter-restore.json"),
@@ -841,6 +986,55 @@ mod tests {
     }
 
     #[test]
+    fn status_from_daemon_state_lists_all_profile_memory_kept_actions() {
+        let profile =
+            |candidate_name: &str, action_id: &str| crate::daemon::DaemonWorkloadProfile {
+                workload_identity_hash: "workload-a".to_owned(),
+                workload_label: Some("KingdomCome.exe".to_owned()),
+                candidate_name: candidate_name.to_owned(),
+                action_id: action_id.to_owned(),
+                action_kind: action_id
+                    .split_once(':')
+                    .map(|(kind, _)| kind.replace('-', "_"))
+                    .unwrap_or_else(|| "unknown".to_owned()),
+                safety_class: SafetyClass::ReversibleLowRisk,
+                kept_unix_nanos: 100,
+                last_validated_unix_nanos: Some(100),
+                baseline_score_total: Some(1_000),
+                candidate_score_total: Some(800),
+                score_delta: -200,
+                confidence_milli: 900,
+                environment: crate::daemon::DaemonProfileEnvironment::default(),
+                partition: crate::daemon::DaemonProfilePartition::default(),
+            };
+        let state = DaemonState {
+            profile_memory: crate::daemon::DaemonProfileMemory {
+                profiles: vec![
+                    profile("game-main", "cpu-affinity-profile:game-main"),
+                    profile("io-priority", "ionice:io-priority"),
+                ],
+            },
+            ..DaemonState::default()
+        };
+
+        let status = status_from_daemon_state(PathBuf::from("/tmp/daemon_state.json"), &state);
+
+        assert_eq!(status.kept_actions.len(), 2);
+        assert!(
+            status
+                .kept_actions
+                .iter()
+                .any(|action| action.action_id == "cpu-affinity-profile:game-main")
+        );
+        assert!(
+            status
+                .kept_actions
+                .iter()
+                .any(|action| action.action_id == "ionice:io-priority")
+        );
+    }
+
+    #[test]
     fn status_from_daemon_state_renders_daemon_lifecycle_labels_and_candidates() {
         let base_state = DaemonState {
             mode: DaemonMode::ApplyLowRisk,
@@ -848,6 +1042,7 @@ mod tests {
                 experiment_id: "experiment-1".to_owned(),
                 action_id: "cpu-affinity-profile:game-main".to_owned(),
                 candidate_name: Some("game-main".to_owned()),
+                mode: DaemonMode::ApplyLowRisk,
                 safety_class: SafetyClass::ReversibleLowRisk,
                 started_unix_nanos: Some(100),
             }),

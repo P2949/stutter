@@ -280,6 +280,7 @@ mod tests {
                 decision: decision.to_owned(),
                 candidate_name: candidate.map(str::to_owned),
                 action_kind: Some("cpu_affinity_profile".to_owned()),
+                safety_class: candidate.map(|_| crate::actions::SafetyClass::ReversibleLowRisk),
                 eligible: true,
                 rollback_policy: "rollback-on-exit".to_owned(),
             },

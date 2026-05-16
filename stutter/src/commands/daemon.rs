@@ -214,6 +214,12 @@ pub fn run_policy_explain_command(
     Ok(())
 }
 
+pub fn run_privileged_worker_command(
+    input: input::PrivilegedWorkerCommandInput,
+) -> anyhow::Result<()> {
+    crate::daemon::privilege::run_privileged_worker(&input.socket)
+}
+
 pub fn run_profiles_command(input: input::DaemonProfilesCommandInput) -> anyhow::Result<()> {
     match input {
         input::DaemonProfilesCommandInput::List(input) => run_profiles_list_command(input),
@@ -1375,12 +1381,20 @@ fn render_bench_overhead_text(report: &DaemonOverheadReport) -> String {
 fn render_soak_text(report: &DaemonSoakReport) -> String {
     let mut text = String::new();
 
-    text.push_str("Daemon fake soak\n");
-    text.push_str("================\n");
+    text.push_str("Daemon scenario soak\n");
+    text.push_str("====================\n");
     text.push_str(&format!("profile: {}\n", report.profile));
     text.push_str(&format!("duration_seconds: {}\n", report.duration_seconds));
     text.push_str(&format!("ticks: {}\n", report.ticks));
     text.push_str(&format!("passed: {}\n", report.passed));
+    text.push_str(&format!(
+        "scenario_count: {}\n",
+        report.metrics.scenario_count
+    ));
+    text.push_str(&format!(
+        "planner_decisions: {}\n",
+        report.metrics.planner_decisions
+    ));
     text.push_str(&format!(
         "memory_growth_bytes: {}\n",
         report.metrics.memory_growth_bytes
@@ -1415,6 +1429,20 @@ fn render_soak_text(report: &DaemonSoakReport) -> String {
         "fake_rollbacks: {}\n",
         report.metrics.fake_rollbacks
     ));
+    text.push_str(&format!(
+        "max_active_experiments: {}\n",
+        report.metrics.max_active_experiments
+    ));
+    for scenario in &report.scenarios {
+        text.push_str(&format!(
+            "scenario: {} mode={} ticks={} passed={} decisions={}\n",
+            scenario.name,
+            scenario.mode,
+            scenario.ticks,
+            scenario.passed,
+            scenario.decisions.join(",")
+        ));
+    }
     for failure in &report.failures {
         text.push_str(&format!(
             "failure: {} - {}\n",
@@ -1621,6 +1649,10 @@ fn render_config_explain_text(output: &DaemonConfigExplainOutput) -> String {
         output.policy.allow_persistent_effects
     ));
     text.push_str(&format!(
+        "allow_cpu_power_on_battery: {}\n",
+        output.policy.allow_cpu_power_on_battery
+    ));
+    text.push_str(&format!(
         "enabled_action_families: {}\n",
         if output.policy.enabled_action_families.is_empty() {
             "none".to_owned()
@@ -1775,9 +1807,10 @@ fn render_status_text(output: &DaemonStatusOutput) -> String {
     }
     if let Some(experiment) = output.state.active_experiment.as_ref() {
         text.push_str(&format!(
-            "active_action: action_id={} candidate={} safety_class={:?}\n",
+            "active_action: action_id={} candidate={} mode={} safety_class={:?}\n",
             experiment.action_id,
             experiment.candidate_name.as_deref().unwrap_or("unknown"),
+            experiment.mode,
             experiment.safety_class
         ));
     } else {
@@ -1785,8 +1818,10 @@ fn render_status_text(output: &DaemonStatusOutput) -> String {
     }
     if let Some(rollback) = output.state.active_rollback.as_ref() {
         text.push_str(&format!(
-            "rollback_status: action_id={} available={} manual_restore_command={}\n",
+            "rollback_status: action_id={} mode={} safety_class={:?} available={} manual_restore_command={}\n",
             rollback.action_id,
+            rollback.mode,
+            rollback.safety_class,
             rollback.rollback_available,
             rollback
                 .manual_restore_command
@@ -2707,11 +2742,14 @@ mod tests {
                 experiment_id: "experiment-1".to_owned(),
                 action_id: "cpu-affinity:game".to_owned(),
                 candidate_name: Some("game-affinity".to_owned()),
+                mode: crate::daemon::DaemonMode::ApplyLowRisk,
                 safety_class: SafetyClass::ReversibleLowRisk,
                 started_unix_nanos: Some(1),
             }),
             active_rollback: Some(crate::daemon::DaemonRollbackState {
                 action_id: "cpu-affinity:game".to_owned(),
+                mode: crate::daemon::DaemonMode::ApplyLowRisk,
+                safety_class: SafetyClass::ReversibleLowRisk,
                 rollback_available: true,
                 token: None,
                 manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
@@ -2759,7 +2797,8 @@ mod tests {
 
         assert!(text.contains("active_workload: root_pid=4242 comm=Game.exe targets=3"));
         assert!(text.contains("active_action: action_id=cpu-affinity:game"));
-        assert!(text.contains("rollback_status: action_id=cpu-affinity:game available=true"));
+        assert!(text.contains("active_action: action_id=cpu-affinity:game candidate=game-affinity mode=apply-low-risk safety_class=ReversibleLowRisk"));
+        assert!(text.contains("rollback_status: action_id=cpu-affinity:game mode=apply-low-risk safety_class=ReversibleLowRisk available=true"));
         assert!(text.contains("current_score: 42"));
         assert!(text.contains("recent_decisions:"));
         assert!(text.contains("decision=candidate_applied"));
@@ -2785,6 +2824,7 @@ mod tests {
             experiment_id: "experiment-1".to_owned(),
             action_id: "cpu-affinity:game".to_owned(),
             candidate_name: Some("game-affinity".to_owned()),
+            mode: crate::daemon::DaemonMode::ApplyLowRisk,
             safety_class: SafetyClass::ReversibleLowRisk,
             started_unix_nanos: Some(1),
         });

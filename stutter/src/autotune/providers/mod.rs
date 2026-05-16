@@ -1,7 +1,10 @@
 use crate::{
     autotune::{
-        candidate::CandidateAction, controller::ControllerRuntimeState, objective::ObjectiveKind,
-        observation::AutotuneObservation, system_context::SystemContextSnapshot,
+        candidate::CandidateAction,
+        controller::ControllerRuntimeState,
+        objective::{ObjectiveKind, ObjectiveSignalQuality},
+        observation::AutotuneObservation,
+        system_context::SystemContextSnapshot,
     },
     daemon::{DaemonCapabilities, DaemonPolicy, SystemHealthSnapshot},
     profiles::Profile,
@@ -40,6 +43,15 @@ pub struct CandidateProviderInput<'a> {
     pub system_context: &'a SystemContextSnapshot,
     pub controller_state: &'a ControllerRuntimeState,
     pub profiles: &'a [Profile],
+}
+
+pub(crate) fn signal_quality_confidence_weight(quality: ObjectiveSignalQuality) -> f32 {
+    match quality {
+        ObjectiveSignalQuality::Direct => 1.0,
+        ObjectiveSignalQuality::Derived => 1.0,
+        ObjectiveSignalQuality::Approximate => 0.85,
+        ObjectiveSignalQuality::Missing => 0.50,
+    }
 }
 
 #[derive(Default)]
@@ -126,7 +138,7 @@ mod tests {
             quality::OnlineDataQuality,
             state::SituationKind,
         },
-        daemon::{ActionSource, DaemonMode},
+        daemon::{ActionSource, DaemonMode, SystemHealthSnapshot},
         daemon_policy::{DaemonPolicyBuildInput, build_daemon_policy},
         focus::FocusGroupKind,
         process_tree::TaskClass,
@@ -166,6 +178,23 @@ mod tests {
             Some(1234),
             None,
         );
+        config.safety.cgroup_targets.compile_cgroup = Some(std::path::PathBuf::from(
+            "/user.slice/stutter-compile.slice",
+        ));
+        build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        })
+    }
+
+    fn apply_medium_policy_with_compile_cgroup() -> DaemonPolicy {
+        let mut config = crate::autotune::runtime::daemon_config_for_runtime_mode(
+            DaemonMode::ApplyMediumRisk,
+            ActionSource::AutotuneRuntime,
+            Some(1234),
+            None,
+        );
+        config.autotune.allow_medium_risk_apply = true;
         config.safety.cgroup_targets.compile_cgroup = Some(std::path::PathBuf::from(
             "/user.slice/stutter-compile.slice",
         ));
@@ -331,5 +360,101 @@ mod tests {
             .map(|target| target.identity.tid)
             .collect::<Vec<_>>();
         assert_eq!(tids, vec![1234, 1235]);
+    }
+
+    #[test]
+    fn process_local_providers_do_not_fallback_without_active_snapshots_in_apply_modes() {
+        let policy = apply_medium_policy_with_compile_cgroup();
+        let mut observation =
+            provider_observation(SituationKind::CompileCpuBound, FocusGroupKind::Compile);
+        observation.capabilities.ionice_available = true;
+        observation.capabilities.uclamp_available = true;
+        let system_context = system_context_for_observation(&observation);
+        let input = CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            system_context: &system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        };
+
+        assert!(nice::NiceProvider.propose(&input).is_empty());
+        assert!(uclamp::UclampProvider.propose(&input).is_empty());
+        assert!(cgroup::CgroupProvider.propose(&input).is_empty());
+
+        let mut io_observation =
+            provider_observation(SituationKind::IoPressure, FocusGroupKind::Desktop);
+        io_observation.capabilities.ionice_available = true;
+        let io_system_context = system_context_for_observation(&io_observation);
+        let io_input = CandidateProviderInput {
+            observation: &io_observation,
+            daemon_policy: &policy,
+            capabilities: &io_observation.capabilities,
+            system_health: &io_observation.system_health,
+            system_context: &io_system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        };
+
+        assert!(ioprio::IoPrioProvider.propose(&io_input).is_empty());
+    }
+
+    #[test]
+    fn suggest_mode_marks_fallback_root_target_selection() {
+        let policy = policy(DaemonMode::Suggest);
+        let observation =
+            provider_observation(SituationKind::CompileCpuBound, FocusGroupKind::Compile);
+        let system_context = system_context_for_observation(&observation);
+        let input = CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            system_context: &system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        };
+
+        let proposals = nice::NiceProvider.propose(&input);
+
+        assert_eq!(proposals.len(), 1);
+        assert!(
+            proposals[0]
+                .deny_reasons
+                .iter()
+                .any(|reason| reason.contains("target_selection_fallback_root"))
+        );
+        let CandidateAction::Nice { plan } = &proposals[0].candidate else {
+            panic!("expected nice candidate");
+        };
+        assert!(
+            plan.evidence
+                .iter()
+                .any(|evidence| evidence.signal == "target_selection_fallback_root")
+        );
+    }
+
+    fn provider_observation(
+        situation: SituationKind,
+        focus_kind: FocusGroupKind,
+    ) -> AutotuneObservation {
+        let mut observation = AutotuneObservation {
+            target_present: true,
+            target_root_pid: Some(1234),
+            active_target_count: 1,
+            primary_situation: situation,
+            focus_kind: Some(focus_kind),
+            focus_confidence: 0.95,
+            system_health: SystemHealthSnapshot {
+                ok_for_apply: true,
+                ..SystemHealthSnapshot::default()
+            },
+            ..AutotuneObservation::default()
+        };
+        observation.refresh_situation_classification();
+        observation.primary_situation = situation;
+        observation
     }
 }

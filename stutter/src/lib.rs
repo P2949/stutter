@@ -67,7 +67,7 @@ pub(crate) mod tune;
 pub(crate) mod validate;
 pub(crate) mod watch;
 
-pub async fn run_cli() -> anyhow::Result<()> {
+pub async fn run_cli() -> Result<(), error::StutterError> {
     let command = cli::parse_app_command()?;
     commands::dispatch(command).await
 }

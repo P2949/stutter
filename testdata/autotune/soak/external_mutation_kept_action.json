@@ -1,1 +1,18 @@
-{"name":"external_mutation_kept_action","profile":"apply-low-risk-fake","duration_seconds":120,"expect_actions":true,"expect_rollbacks":true,"forbid_high_risk_apply":true}
+{
+  "name": "external_mutation_kept_action",
+  "mode": "apply-low-risk",
+  "ticks": [
+    { "kind": "focus_game", "confidence": 0.95 },
+    { "kind": "target_present" },
+    { "kind": "interval", "score_total": 1000, "samples": 100 },
+    { "kind": "target_present" },
+    { "kind": "interval", "score_total": 10, "samples": 100 },
+    { "kind": "evaluation_tick", "reason": "external mutation check" }
+  ],
+  "assertions": [
+    "one_active_experiment_maximum",
+    "rollback_token_before_apply",
+    "shutdown_restores_active_actions",
+    "cooldown_respected"
+  ]
+}

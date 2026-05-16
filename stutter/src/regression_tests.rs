@@ -1547,6 +1547,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
             mem_clock_mhz: Some(1000),
             temp_millidegrees: Some(61000),
             power_microwatts: Some(120_000_000),
+            ..GpuSample::default()
         }],
         frame_events: vec![FrameEvent {
             elapsed_ms: 11,

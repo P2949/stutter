@@ -9,6 +9,7 @@ pub mod controller_journal;
 pub mod emergency_restore;
 pub mod experiment;
 pub mod generate_profiles;
+pub mod gpu_focus;
 pub mod history;
 pub mod history_replay;
 pub mod human_output;

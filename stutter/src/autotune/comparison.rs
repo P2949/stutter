@@ -48,6 +48,59 @@ pub(crate) const DEFAULT_SCORE_COMPARISON_CONFIG: ScoreComparisonConfig = ScoreC
     max_over_5ms_regression: 0,
 };
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThresholdTier {
+    pub min_scored_samples: u64,
+    pub min_improvement_percent: f64,
+    pub max_regression_percent: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThresholdPolicy {
+    pub tiers: Vec<ThresholdTier>,
+}
+
+impl ThresholdPolicy {
+    pub fn default_tiers() -> Self {
+        Self {
+            tiers: vec![
+                ThresholdTier {
+                    min_scored_samples: 0,
+                    min_improvement_percent: 15.0,
+                    max_regression_percent: 5.0,
+                },
+                ThresholdTier {
+                    min_scored_samples: 200,
+                    min_improvement_percent: 12.5,
+                    max_regression_percent: 7.5,
+                },
+                ThresholdTier {
+                    min_scored_samples: 1_000,
+                    min_improvement_percent: 10.0,
+                    max_regression_percent: 8.5,
+                },
+            ],
+        }
+    }
+
+    pub fn config_for_samples(&self, scored_samples: u64) -> ScoreComparisonConfig {
+        let tier = self
+            .tiers
+            .iter()
+            .filter(|tier| tier.min_scored_samples <= scored_samples)
+            .max_by_key(|tier| tier.min_scored_samples);
+
+        match tier {
+            Some(tier) => ScoreComparisonConfig {
+                min_improvement_percent: tier.min_improvement_percent,
+                max_regression_percent: tier.max_regression_percent,
+                ..DEFAULT_SCORE_COMPARISON_CONFIG
+            },
+            None => DEFAULT_SCORE_COMPARISON_CONFIG,
+        }
+    }
+}
+
 impl Default for ScoreComparisonConfig {
     fn default() -> Self {
         DEFAULT_SCORE_COMPARISON_CONFIG
@@ -111,17 +164,24 @@ pub fn compare_experiment_with_policy(
             target_disappeared: input.target_disappeared,
         },
         &policy.as_score_comparison_config(),
+        None,
     )
 }
 
 pub fn compare_scores(input: ScoreComparisonInput<'_>) -> ExperimentResult {
-    compare_scores_with_config(input, &ScoreComparisonConfig::default())
+    compare_scores_with_config(input, &ScoreComparisonConfig::default(), None)
 }
 
 pub fn compare_scores_with_config(
     input: ScoreComparisonInput<'_>,
     config: &ScoreComparisonConfig,
+    threshold_policy: Option<&ThresholdPolicy>,
 ) -> ExperimentResult {
+    let effective_config = threshold_policy
+        .map(|policy| policy.config_for_samples(input.baseline.scored_samples))
+        .unwrap_or(*config);
+    let config = &effective_config;
+
     if let Err(reason) = validate_score_comparison_config(config) {
         return ExperimentResult::Invalid { reason };
     }
@@ -263,7 +323,7 @@ fn improvement_percent(baseline_total: u64, candidate_total: u64) -> f64 {
     }
 }
 
-fn regression_percent(baseline_total: u64, candidate_total: u64) -> f64 {
+pub(crate) fn regression_percent(baseline_total: u64, candidate_total: u64) -> f64 {
     if candidate_total <= baseline_total {
         0.0
     } else if baseline_total == 0 {
@@ -548,6 +608,7 @@ mod tests {
                 max_frame_p99_regression_ms: 2.0,
                 max_over_5ms_regression: 0,
             },
+            None,
         );
 
         match result {
@@ -576,6 +637,7 @@ mod tests {
                 max_frame_p99_regression_ms: 2.0,
                 max_over_5ms_regression: 0,
             },
+            None,
         );
 
         match result {
@@ -605,6 +667,7 @@ mod tests {
                 max_frame_p99_regression_ms: 2.0,
                 max_over_5ms_regression: 0,
             },
+            None,
         );
 
         match result {
@@ -633,6 +696,7 @@ mod tests {
                 max_frame_p99_regression_ms: 2.0,
                 max_over_5ms_regression: 0,
             },
+            None,
         );
 
         assert!(matches!(result, ExperimentResult::Regressed { .. }));
@@ -656,6 +720,7 @@ mod tests {
                 max_frame_p99_regression_ms: 2.0,
                 max_over_5ms_regression: 1,
             },
+            None,
         );
 
         assert!(matches!(result, ExperimentResult::Regressed { .. }));
@@ -680,6 +745,7 @@ mod tests {
                 max_frame_p99_regression_ms: 2.0,
                 max_over_5ms_regression: 1,
             },
+            None,
         );
 
         assert!(matches!(result, ExperimentResult::Inconclusive { .. }));
@@ -703,6 +769,7 @@ mod tests {
                 max_frame_p99_regression_ms: 2.0,
                 max_over_5ms_regression: 0,
             },
+            None,
         );
 
         match result {
@@ -731,5 +798,47 @@ mod tests {
             }
             other => panic!("expected Invalid, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn threshold_policy_selects_sample_count_tiers() {
+        let policy = ThresholdPolicy::default_tiers();
+
+        let low = policy.config_for_samples(199);
+        assert_eq!(low.min_improvement_percent, 15.0);
+        assert_eq!(low.max_regression_percent, 5.0);
+
+        let medium = policy.config_for_samples(200);
+        assert_eq!(medium.min_improvement_percent, 12.5);
+        assert_eq!(medium.max_regression_percent, 7.5);
+
+        let high = policy.config_for_samples(1_000);
+        assert_eq!(high.min_improvement_percent, 10.0);
+        assert_eq!(high.max_regression_percent, 8.5);
+    }
+
+    #[test]
+    fn compare_scores_can_use_threshold_policy() {
+        let mut baseline = window(1_000, 10, 12.0);
+        baseline.scored_samples = 1_000;
+        let candidate = window(890, 10, 12.0);
+
+        let result = compare_scores_with_config(
+            ScoreComparisonInput {
+                baseline: &baseline,
+                candidate: &candidate,
+                data_quality: ExperimentDataQuality::High,
+                target_disappeared: false,
+            },
+            &ScoreComparisonConfig {
+                min_improvement_percent: 12.5,
+                max_regression_percent: 7.5,
+                max_frame_p99_regression_ms: 2.0,
+                max_over_5ms_regression: 0,
+            },
+            Some(&ThresholdPolicy::default_tiers()),
+        );
+
+        assert!(matches!(result, ExperimentResult::Improved { .. }));
     }
 }

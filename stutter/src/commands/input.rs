@@ -151,6 +151,11 @@ pub struct AutotuneStatusCommandInput {
 }
 
 #[derive(Debug)]
+pub struct PrivilegedWorkerCommandInput {
+    pub socket: PathBuf,
+}
+
+#[derive(Debug)]
 pub struct AutotuneReplayHistoryCommandInput {
     pub history: PathBuf,
 }

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
@@ -193,6 +191,7 @@ pub fn redact_title_unless_allowed(title: Option<String>, include_title: bool) -
     if include_title { title } else { None }
 }
 
+#[allow(dead_code)] // TODO: expose foreground polling cadence through daemon/session config.
 pub const DEFAULT_FOREGROUND_POLL_MS: u64 = 1_000;
 pub const DEFAULT_FOREGROUND_MAX_STALE_MS: u64 = 2_500;
 pub const DEFAULT_FOREGROUND_MIN_CONFIDENCE: f32 = 0.75;
@@ -228,6 +227,7 @@ impl UnsupportedForegroundProvider {
         Self::new(GENERIC_WAYLAND_UNSUPPORTED_REASON)
     }
 
+    #[allow(dead_code)] // TODO: surface unsupported foreground provider reasons in status output.
     pub fn reason(&self) -> &str {
         &self.reason
     }
@@ -268,6 +268,7 @@ pub fn auto_foreground_provider() -> Box<dyn ForegroundProvider + Send> {
     ))
 }
 
+#[allow(dead_code)] // TODO: use once session construction no longer injects providers directly.
 pub fn auto_foreground_resolver() -> ForegroundResolver {
     ForegroundResolver::new(auto_foreground_provider())
 }
@@ -288,6 +289,7 @@ fn is_generic_wayland_without_supported_foreground_api() -> bool {
     true
 }
 
+#[allow(dead_code)] // TODO: use when adding explicit GNOME/KDE foreground provider diagnostics.
 fn current_desktop_looks_like_gnome_or_kde() -> bool {
     let desktop = std::env::var("XDG_CURRENT_DESKTOP")
         .or_else(|_| std::env::var("DESKTOP_SESSION"))
@@ -298,6 +300,7 @@ fn current_desktop_looks_like_gnome_or_kde() -> bool {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // TODO: wire Hyprland foreground provider once hyprctl sampling is enabled.
 struct HyprlandActiveWindow {
     address: Option<String>,
     class: Option<String>,
@@ -309,10 +312,12 @@ struct HyprlandActiveWindow {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // TODO: wire Hyprland foreground provider once hyprctl sampling is enabled.
 struct HyprlandWorkspace {
     name: Option<String>,
 }
 
+#[allow(dead_code)] // TODO: wire Hyprland foreground provider once hyprctl sampling is enabled.
 fn hyprland_snapshot_from_activewindow_json(
     elapsed_ms: u64,
     active_window_json: &str,
@@ -376,6 +381,7 @@ impl SwayForegroundProvider {
         }
     }
 
+    #[allow(dead_code)] // Test helper until provider command injection is promoted.
     pub fn with_swaymsg(mut self, swaymsg: impl Into<String>) -> Self {
         self.swaymsg = swaymsg.into();
         self
@@ -603,6 +609,7 @@ impl X11ForegroundProvider {
         }
     }
 
+    #[allow(dead_code)] // Test helper until provider command injection is promoted.
     pub fn with_xprop(mut self, xprop: impl Into<String>) -> Self {
         self.xprop = xprop.into();
         self

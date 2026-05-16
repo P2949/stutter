@@ -7,7 +7,10 @@ use std::{
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::actions::{RollbackToken, SafetyClass};
+use crate::{
+    actions::{RollbackToken, SafetyClass},
+    daemon::DaemonMode,
+};
 
 pub const CONTROLLER_JOURNAL_SCHEMA_VERSION: u32 = 1;
 
@@ -64,6 +67,8 @@ pub struct ControllerJournalRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verify_result: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<DaemonMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub safety_class: Option<SafetyClass>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rollback_token: Option<RollbackToken>,
@@ -87,6 +92,8 @@ pub struct ControllerJournalActionMetadata {
     pub restore_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verify_result: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<DaemonMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub safety_class: Option<SafetyClass>,
 }
@@ -114,6 +121,11 @@ impl ControllerJournalActionMetadata {
 
     pub fn with_verify_result(mut self, verify_result: impl Into<String>) -> Self {
         self.verify_result = Some(verify_result.into());
+        self
+    }
+
+    pub fn with_mode(mut self, mode: DaemonMode) -> Self {
+        self.mode = Some(mode);
         self
     }
 
@@ -157,6 +169,7 @@ impl ControllerJournalRecord {
             target_identity: None,
             restore_command: None,
             verify_result: None,
+            mode: None,
             safety_class: None,
             rollback_token: None,
             phase_started_unix_nanos: None,
@@ -181,6 +194,7 @@ impl ControllerJournalRecord {
             target_identity: None,
             restore_command: None,
             verify_result: None,
+            mode: None,
             safety_class: None,
             rollback_token,
             phase_started_unix_nanos: Some(crate::audit::unix_nanos_now()),
@@ -214,6 +228,11 @@ impl ControllerJournalRecord {
         self
     }
 
+    pub fn with_mode(mut self, mode: DaemonMode) -> Self {
+        self.mode = Some(mode);
+        self
+    }
+
     pub fn with_safety_class(mut self, safety_class: SafetyClass) -> Self {
         self.safety_class = Some(safety_class);
         self
@@ -239,6 +258,9 @@ impl ControllerJournalRecord {
         }
         if metadata.verify_result.is_some() {
             self.verify_result = metadata.verify_result;
+        }
+        if metadata.mode.is_some() {
+            self.mode = metadata.mode;
         }
         if metadata.safety_class.is_some() {
             self.safety_class = metadata.safety_class;
@@ -692,6 +714,7 @@ mod tests {
             .with_target_identity("pid:1234:start:99")
             .with_restore_command("stutter daemon emergency-restore")
             .with_verify_result("pending")
+            .with_mode(DaemonMode::ApplyLowRisk)
             .with_safety_class(SafetyClass::ReversibleLowRisk);
 
             let value = serde_json::to_value(&record).unwrap();
@@ -706,6 +729,8 @@ mod tests {
                 Some("stutter daemon emergency-restore")
             );
             assert_eq!(record.verify_result.as_deref(), Some("pending"));
+            assert_eq!(record.mode, Some(DaemonMode::ApplyLowRisk));
+            assert_eq!(record.safety_class, Some(SafetyClass::ReversibleLowRisk));
         }
     }
 
@@ -772,6 +797,7 @@ mod tests {
             .with_target_identity("pid:1234:starttime:99:active_tasks:31")
             .with_restore_command("stutter autotune restore")
             .with_verify_result("applied_pending_verify")
+            .with_mode(DaemonMode::ApplyLowRisk)
             .with_safety_class(SafetyClass::ReversibleLowRisk);
 
         let written = write_controller_journal_applied_with_metadata(
@@ -802,6 +828,7 @@ mod tests {
             read.verify_result.as_deref(),
             Some("applied_pending_verify")
         );
+        assert_eq!(read.mode, Some(DaemonMode::ApplyLowRisk));
         assert_eq!(read.safety_class, Some(SafetyClass::ReversibleLowRisk));
         fs::remove_dir_all(dir).ok();
     }

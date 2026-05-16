@@ -10,9 +10,9 @@ pub mod restore;
 pub mod scenario;
 pub mod service;
 
-use crate::cli::AppCommand;
+use crate::{cli::AppCommand, error::StutterError};
 
-pub async fn dispatch(command: AppCommand) -> anyhow::Result<()> {
+pub async fn dispatch(command: AppCommand) -> Result<(), StutterError> {
     match command {
         AppCommand::Monitor(input) => monitor::run_monitor_command(input).await,
         AppCommand::Bench(input) => monitor::run_bench_command(input).await,
@@ -45,6 +45,7 @@ pub async fn dispatch(command: AppCommand) -> anyhow::Result<()> {
         AppCommand::ProfileTemplate(input) => misc::run_profile_template_command(input),
         AppCommand::InspectIrqs(input) => misc::run_inspect_irqs_command(input),
         AppCommand::Agent(input) => agent::run_agent_command(input).await,
+        AppCommand::PrivilegedWorker(input) => daemon::run_privileged_worker_command(input),
         AppCommand::DaemonConfigExplain(input) => daemon::run_config_explain_command(input),
         AppCommand::DaemonPolicyExplain(input) => daemon::run_policy_explain_command(input),
         AppCommand::DaemonProfiles(input) => daemon::run_profiles_command(input),
@@ -70,5 +71,6 @@ pub async fn dispatch(command: AppCommand) -> anyhow::Result<()> {
         AppCommand::ScenarioPath(input) => scenario::run_path_command(input),
         AppCommand::ScenarioList(input) => scenario::run_list_command(input),
         AppCommand::Service(input) => service::run_service_command(input),
-    }
+    }?;
+    Ok(())
 }
