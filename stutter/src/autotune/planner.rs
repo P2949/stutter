@@ -3258,13 +3258,20 @@ mod tests {
     }
 
     fn fixture_task(tid: u32, comm: &str, class: TaskClass) -> ActiveTaskSnapshot {
+        let process_starttime_ticks = Some(10);
+        let task_starttime_ticks = if tid == 1234 {
+            process_starttime_ticks
+        } else {
+            Some(u64::from(tid))
+        };
+
         ActiveTaskSnapshot {
             tid,
             process_pid: 1234,
             comm: comm.to_owned(),
             class,
-            process_starttime_ticks: Some(10),
-            task_starttime_ticks: Some(u64::from(tid)),
+            process_starttime_ticks,
+            task_starttime_ticks,
             cgroup_path: Some("/user.slice/fixture.scope".to_owned()),
         }
     }
