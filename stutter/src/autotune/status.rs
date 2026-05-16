@@ -21,7 +21,7 @@ pub struct AutotuneStatusCommandInput {
     pub history_path: Option<PathBuf>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AutotuneStatus {
     pub phase: String,
     pub mode: String,
@@ -35,6 +35,7 @@ pub struct AutotuneStatus {
     pub rollback_available: bool,
     pub last_rollback_path: Option<String>,
     pub cooldown_remaining_seconds: Option<u64>,
+    pub planner: Option<super::planner::PlannerSummary>,
     pub data_quality: Option<String>,
     pub last_fault: Option<String>,
     pub manual_restore_command: String,
@@ -111,6 +112,7 @@ pub fn status_from_history_events(
             data_quality: None,
             last_fault: None,
             manual_restore_command: "stutter autotune restore".to_owned(),
+            planner: None,
             history_path,
         };
     };
@@ -131,6 +133,7 @@ pub fn status_from_history_events(
         data_quality: Some(last.observation_summary.data_quality.clone()),
         last_fault: last_fault_from_events(events),
         manual_restore_command: "stutter autotune restore".to_owned(),
+        planner: last.planner.clone(),
         history_path,
     }
 }
@@ -164,6 +167,7 @@ pub fn status_from_daemon_state(path: PathBuf, state: &DaemonState) -> AutotuneS
         data_quality: data_quality_from_daemon_state(state),
         last_fault: state.faulted.as_ref().map(|fault| fault.reason.clone()),
         manual_restore_command: manual_restore_command_from_daemon_state(state),
+        planner: state.last_decision.as_ref().and_then(|d| d.planner.clone()),
         history_path: path,
     }
 }
@@ -724,6 +728,7 @@ mod tests {
             action_id: Some("cpu-affinity-profile:game-main-suggested".to_owned()),
             score_before: Some(score(1_000)),
             score_after: Some(score(818)),
+            planner: None,
             rollback_performed: false,
             reason: "candidate improved by 18.20%; kept as current active profile".to_owned(),
         }
@@ -943,6 +948,7 @@ mod tests {
                 score_total: Some(818),
                 candidate_count: None,
                 top_denied_reason: None,
+                planner: None,
                 situation: None,
                 focus_kind: None,
             }),
@@ -1089,6 +1095,7 @@ mod tests {
                 score_total: Some(818),
                 candidate_count: Some(1),
                 top_denied_reason: Some("NoEffectiveChange".to_owned()),
+                planner: None,
                 situation: Some("CompileCpuBound".to_owned()),
                 focus_kind: Some("Compile".to_owned()),
             }),
@@ -1107,6 +1114,91 @@ mod tests {
 
         let json = serde_json::to_string(&status).unwrap();
         assert!(json.contains("top_denied_reason=NoEffectiveChange"));
+    }
+
+    #[test]
+    fn status_from_daemon_state_includes_structured_planner_summary() {
+        use crate::{
+            actions::SafetyClass,
+            autotune::{
+                objective::ObjectiveKind,
+                planner::{PlannerEvaluationSummary, PlannerSummary},
+            },
+            daemon_policy::ActionEffectScope,
+        };
+
+        let state = DaemonState {
+            last_decision: Some(DaemonDecisionState {
+                decision: "no_action".to_owned(),
+                reason: "no eligible candidates".to_owned(),
+                unix_nanos: Some(200),
+                candidate_count: None,
+                top_denied_reason: None,
+                situation: None,
+                focus_kind: None,
+                planner: Some(PlannerSummary {
+                    selected: None,
+                    eligible_candidates: Vec::new(),
+                    eligible_proposals: 0,
+                    total_proposals: 1,
+                    grouped_denials: Vec::new(),
+                    missing_capabilities: Vec::new(),
+                    workload_blocked: Vec::new(),
+                    manual_only_suggestions: Vec::new(),
+                    top_denied_candidates: Vec::new(),
+                    no_action: Some(crate::autotune::planner::PlannerNoActionSummary {
+                        reason: "all candidates denied".to_owned(),
+                        total_proposals: 1,
+                        eligible_proposals: 0,
+                        grouped_denials: Vec::new(),
+                        top_denied_candidates: vec![PlannerEvaluationSummary {
+                            candidate_name: "test-candidate".to_owned(),
+                            action_kind: "test-kind".to_owned(),
+                            provider: "test-provider".to_owned(),
+                            objective: ObjectiveKind::StutterScore,
+                            safety_class: SafetyClass::ReversibleLowRisk,
+                            effect_scope: ActionEffectScope::LocalProcessTree,
+                            confidence: 0.8,
+                            eligible: false,
+                            rank: Some(10),
+                            deny_reasons: vec![
+                                crate::autotune::planner::CandidateDenyReason::NoEffectiveChange,
+                            ],
+                            deny_reason_codes: vec!["no_effective_change".to_owned()],
+                            deny_messages: vec!["no change".to_owned()],
+                            dry_run_affected_tasks: None,
+                            manual_only_reason: None,
+                            evidence: vec!["test_signal=1.0 weight=1.00".to_owned()],
+                        }],
+                        missing_capabilities: Vec::new(),
+                        workload_blocked: Vec::new(),
+                        manual_only_suggestions: Vec::new(),
+                    }),
+                }),
+                score_total: None,
+            }),
+            ..DaemonState::default()
+        };
+
+        let status = status_from_daemon_state(PathBuf::from("/tmp/daemon_state.json"), &state);
+
+        let planner = status
+            .planner
+            .as_ref()
+            .expect("planner summary should be present");
+        let no_action = planner
+            .no_action
+            .as_ref()
+            .expect("no_action summary should be present");
+        assert_eq!(no_action.top_denied_candidates.len(), 1);
+        assert_eq!(
+            no_action.top_denied_candidates[0].candidate_name,
+            "test-candidate"
+        );
+        assert_eq!(
+            no_action.top_denied_candidates[0].evidence[0],
+            "test_signal=1.0 weight=1.00"
+        );
     }
 
     #[test]
@@ -1129,6 +1221,7 @@ mod tests {
                 score_total: Some(42),
                 candidate_count: None,
                 top_denied_reason: None,
+                planner: None,
                 situation: None,
                 focus_kind: None,
             }),

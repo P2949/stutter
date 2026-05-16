@@ -334,6 +334,7 @@ mod tests {
             action_id: Some("cpu-affinity-profile:game-main-suggested".to_owned()),
             score_before: Some(score(412)),
             score_after: None,
+            planner: None,
             rollback_performed: false,
             reason: "candidate measurement window not complete: elapsed_ms=18000 required_ms=30000"
                 .to_owned(),

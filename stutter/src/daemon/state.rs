@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     actions::{RollbackToken, SafetyClass},
+    autotune::planner::PlannerSummary,
     daemon::{health::SystemHealthSnapshot, policy::DaemonMode},
     metadata::SystemMetadata,
 };
@@ -101,7 +102,7 @@ impl DaemonPhase {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DaemonState {
     pub schema_version: u32,
     pub mode: DaemonMode,
@@ -177,7 +178,7 @@ fn default_active_autotune_safety_class() -> SafetyClass {
     SafetyClass::ReversibleLowRisk
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DaemonDecisionState {
     pub decision: String,
     pub reason: String,
@@ -187,6 +188,8 @@ pub struct DaemonDecisionState {
     pub candidate_count: Option<usize>,
     #[serde(default)]
     pub top_denied_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planner: Option<PlannerSummary>,
     #[serde(default)]
     pub situation: Option<String>,
     #[serde(default)]
@@ -742,6 +745,7 @@ mod tests {
                 score_total: Some(300),
                 candidate_count: None,
                 top_denied_reason: None,
+                planner: None,
                 situation: None,
                 focus_kind: None,
             }),

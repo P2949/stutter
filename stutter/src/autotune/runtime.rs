@@ -590,6 +590,7 @@ impl AutotuneRuntime {
                     score_total: Some(decision.score_total),
                     candidate_count: Some(decision.candidate_count),
                     top_denied_reason: decision.top_denied_reason.clone(),
+                    planner: decision.planner.clone(),
                     situation: Some(decision.situation.clone()),
                     focus_kind: decision.focus_kind.clone(),
                 }),
@@ -1137,6 +1138,8 @@ impl AutotuneRuntime {
             .map(|context| context.safety_class.clone())
             .or_else(|| decision_safety_class(decision));
 
+        let planner_summary = self.last_plan_result.as_ref().map(PlanResult::summary);
+
         let mut history = AutotuneHistoryEvent::new(
             self.config.controller_id.clone(),
             history_phase(self.controller.state.phase),
@@ -1167,7 +1170,8 @@ impl AutotuneRuntime {
                 rollback_policy,
             },
             reason.to_owned(),
-        );
+        )
+        .with_planner(planner_summary);
 
         if let Some(context) = context.as_ref() {
             history = history
