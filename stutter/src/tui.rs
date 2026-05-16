@@ -587,6 +587,8 @@ fn autotune_panel_lines(snapshot: Option<&AutotuneTuiPanelSnapshot>) -> Vec<Line
         ),
     ];
 
+    append_autotune_planner_lines(&mut lines, snapshot);
+
     if let Some(warning) = snapshot.warning.as_ref()
         && !warning.trim().is_empty()
     {
@@ -597,6 +599,43 @@ fn autotune_panel_lines(snapshot: Option<&AutotuneTuiPanelSnapshot>) -> Vec<Line
     }
 
     lines
+}
+
+fn append_autotune_planner_lines(
+    lines: &mut Vec<Line<'static>>,
+    snapshot: &AutotuneTuiPanelSnapshot,
+) {
+    if let Some(selected) = snapshot.planner_selected.as_ref() {
+        lines.push(label_value_line(
+            "planner selected",
+            selected,
+            Style::default().fg(Color::Green),
+        ));
+    }
+
+    for eligible in snapshot.planner_eligible.iter().take(3) {
+        lines.push(label_value_line(
+            "planner eligible",
+            eligible,
+            Style::default().fg(Color::White),
+        ));
+    }
+
+    for denied in snapshot.planner_top_denied.iter().take(3) {
+        lines.push(label_value_line(
+            "planner denied",
+            denied,
+            Style::default().fg(Color::Red),
+        ));
+    }
+
+    if !snapshot.planner_grouped_denials.is_empty() {
+        lines.push(label_value_line(
+            "planner denials",
+            &snapshot.planner_grouped_denials.join(","),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
 }
 
 fn label_value_line(label: &str, value: &str, value_style: Style) -> Line<'static> {
@@ -705,6 +744,53 @@ mod tests {
         assert!(rendered.contains("candidate score: \n330"));
         assert!(rendered.contains("decision in: \n12s"));
         assert!(rendered.contains("rollback available: \nyes"));
+    }
+
+    #[test]
+    fn autotune_panel_lines_render_planner_summary_fields() {
+        let snapshot = AutotuneTuiPanelSnapshot {
+            mode: "Suggest".to_owned(),
+            phase: "Observing".to_owned(),
+            current_profile: None,
+            baseline_score: None,
+            candidate_score: None,
+            decision_in_seconds: None,
+            rollback_available: false,
+            history_path: std::path::PathBuf::from("/tmp/history.jsonl"),
+            journal_path: std::path::PathBuf::from("/tmp/controller_journal.json"),
+            warning: None,
+            planner_selected: Some(
+                "cpu_affinity_profile game-main objective=StutterScore confidence=0.920 evidence=situation=GameFocused weight=0.95"
+                    .to_owned(),
+            ),
+            planner_eligible: vec![
+                "cpu_affinity_profile game-main objective=StutterScore confidence=0.920 evidence=situation=GameFocused weight=0.95"
+                    .to_owned(),
+            ],
+            planner_top_denied: vec![
+                "nice nice-denied objective=DesktopInteractivity confidence=0.610 reasons=capability_missing evidence=capability=nice weight=1.00"
+                    .to_owned(),
+            ],
+            planner_grouped_denials: vec!["capability_missing=1".to_owned()],
+        };
+
+        let rendered = autotune_panel_lines(Some(&snapshot))
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("planner selected:"));
+        assert!(rendered.contains("planner eligible:"));
+        assert!(rendered.contains("planner denied:"));
+        assert!(rendered.contains("planner denials:"));
+        assert!(rendered.contains("objective=StutterScore"));
+        assert!(rendered.contains("confidence=0.920"));
+        assert!(rendered.contains("evidence=situation=GameFocused weight=0.95"));
+        assert!(rendered.contains("reasons=capability_missing"));
+        assert!(rendered.contains("evidence=capability=nice weight=1.00"));
+        assert!(rendered.contains("capability_missing=1"));
     }
 
     #[test]

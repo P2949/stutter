@@ -127,11 +127,12 @@ fn planner_selected_from_summary(planner: Option<&PlannerSummary>) -> Option<Str
         .and_then(|planner| planner.selected.as_ref())
         .map(|selected| {
             format!(
-                "{} {} objective={:?} confidence={:.3}",
+                "{} {} objective={:?} confidence={:.3} evidence={}",
                 selected.action_kind,
                 selected.candidate_name,
                 selected.objective,
-                selected.confidence
+                selected.confidence,
+                format_planner_evidence(&selected.evidence)
             )
         })
 }
@@ -144,11 +145,12 @@ fn planner_eligible_from_summary(planner: Option<&PlannerSummary>) -> Vec<String
                 .iter()
                 .map(|candidate| {
                     format!(
-                        "{} {} objective={:?} confidence={:.3}",
+                        "{} {} objective={:?} confidence={:.3} evidence={}",
                         candidate.action_kind,
                         candidate.candidate_name,
                         candidate.objective,
-                        candidate.confidence
+                        candidate.confidence,
+                        format_planner_evidence(&candidate.evidence)
                     )
                 })
                 .collect()
@@ -164,7 +166,7 @@ fn planner_top_denied_from_summary(planner: Option<&PlannerSummary>) -> Vec<Stri
                 .iter()
                 .map(|denied| {
                     format!(
-                        "{} {} objective={:?} confidence={:.3} reasons={}",
+                        "{} {} objective={:?} confidence={:.3} reasons={} evidence={}",
                         denied.action_kind,
                         denied.candidate_name,
                         denied.objective,
@@ -173,7 +175,8 @@ fn planner_top_denied_from_summary(planner: Option<&PlannerSummary>) -> Vec<Stri
                             "none".to_owned()
                         } else {
                             denied.deny_reason_codes.join(",")
-                        }
+                        },
+                        format_planner_evidence(&denied.evidence)
                     )
                 })
                 .collect()
@@ -191,6 +194,14 @@ fn planner_grouped_denials_from_summary(planner: Option<&PlannerSummary>) -> Vec
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn format_planner_evidence(evidence: &[String]) -> String {
+    if evidence.is_empty() {
+        "none".to_owned()
+    } else {
+        evidence.join("|")
+    }
 }
 
 fn current_profile_from_events(events: &[AutotuneHistoryEvent]) -> Option<String> {
@@ -577,18 +588,21 @@ mod tests {
 
         assert_eq!(
             snapshot.planner_selected.as_deref(),
-            Some("cpu_affinity_profile game-main objective=StutterScore confidence=0.920")
+            Some(
+                "cpu_affinity_profile game-main objective=StutterScore confidence=0.920 evidence=situation=GameFocused weight=0.95"
+            )
         );
         assert_eq!(
             snapshot.planner_eligible,
             vec![
-                "cpu_affinity_profile game-main objective=StutterScore confidence=0.920".to_owned()
+                "cpu_affinity_profile game-main objective=StutterScore confidence=0.920 evidence=situation=GameFocused weight=0.95"
+                    .to_owned()
             ]
         );
         assert_eq!(
             snapshot.planner_top_denied,
             vec![
-                "nice nice-denied objective=DesktopInteractivity confidence=0.610 reasons=capability_missing"
+                "nice nice-denied objective=DesktopInteractivity confidence=0.610 reasons=capability_missing evidence=capability=nice weight=1.00"
                     .to_owned()
             ]
         );
