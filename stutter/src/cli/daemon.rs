@@ -1,239 +1,222 @@
-use std::path::PathBuf;
+use super::*;
 
-use clap::{Args, Subcommand};
-use serde::Serialize;
-
-#[derive(Args, Clone, Debug, Serialize)]
+#[derive(Args, Debug, Clone)]
 pub struct DaemonArgs {
     #[command(subcommand)]
-    pub command: Option<DaemonCommand>,
+    pub command: DaemonCommand,
 }
 
-#[derive(Subcommand, Clone, Debug, Serialize)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum DaemonCommand {
     Config(DaemonConfigArgs),
     Policy(DaemonPolicyArgs),
     Profiles(DaemonProfilesArgs),
     Explain(DaemonExplainArgs),
+    #[command(name = "why-not-optimize")]
     WhyNotOptimize(DaemonWhyNotOptimizeArgs),
+    #[command(name = "what-changed")]
     WhatChanged(DaemonWhatChangedArgs),
     Status(DaemonStatusArgs),
     Watch(DaemonWatchArgs),
     Doctor(DaemonDoctorArgs),
+    #[command(name = "reset-state")]
     ResetState(DaemonResetStateArgs),
+    #[command(name = "bench-overhead")]
     BenchOverhead(DaemonBenchOverheadArgs),
     Soak(DaemonSoakArgs),
     Acceptance(DaemonAcceptanceArgs),
     Pause(DaemonPauseArgs),
     Resume(DaemonResumeArgs),
+    Restore(DaemonRestoreArgs),
+    #[command(name = "emergency-restore")]
     EmergencyRestore(DaemonRestoreArgs),
 }
 
-#[derive(Args, Clone, Debug, Serialize)]
-pub struct DaemonConfigArgs {
-    #[command(subcommand)]
-    pub command: DaemonConfigCommand,
-}
-
-#[derive(Subcommand, Clone, Debug, Serialize)]
-pub enum DaemonConfigCommand {
-    Explain(DaemonConfigExplainArgs),
-}
-
-#[derive(Args, Clone, Debug, Serialize)]
-pub struct DaemonConfigExplainArgs {
-    #[arg(long)]
-    pub json: bool,
-
-    #[arg(long)]
-    pub preset: Option<String>,
-}
-
-#[derive(Args, Clone, Debug, Serialize)]
+#[derive(Args, Debug, Clone)]
 pub struct DaemonPolicyArgs {
     #[command(subcommand)]
     pub command: DaemonPolicyCommand,
 }
 
-#[derive(Subcommand, Clone, Debug, Serialize)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum DaemonPolicyCommand {
     Explain(DaemonPolicyExplainArgs),
 }
 
-#[derive(Args, Clone, Debug, Serialize)]
+#[derive(Args, Debug, Clone)]
 pub struct DaemonPolicyExplainArgs {
-    #[arg(long)]
+    #[arg(long = "json")]
     pub json: bool,
 
-    #[arg(long)]
+    #[arg(long = "preset", value_name = "NAME")]
     pub preset: Option<String>,
 }
 
-#[derive(Args, Clone, Debug, Serialize)]
+#[derive(Args, Debug, Clone)]
 pub struct DaemonProfilesArgs {
     #[command(subcommand)]
     pub command: DaemonProfilesCommand,
 }
 
-#[derive(Subcommand, Clone, Debug, Serialize)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum DaemonProfilesCommand {
     List(DaemonProfilesListArgs),
     Forget(DaemonProfilesForgetArgs),
     Explain(DaemonProfilesExplainArgs),
 }
 
-#[derive(Args, Clone, Debug, Serialize)]
+#[derive(Args, Debug, Clone)]
 pub struct DaemonProfilesListArgs {
-    #[arg(long)]
+    #[arg(long = "json")]
     pub json: bool,
 }
 
-#[derive(Args, Clone, Debug, Serialize)]
+#[derive(Args, Debug, Clone)]
 pub struct DaemonProfilesForgetArgs {
-    #[arg(long)]
-    pub json: bool,
-
-    #[arg(long = "workload-identity-hash")]
+    #[arg(long = "workload-hash", value_name = "HASH")]
     pub workload_identity_hash: Option<String>,
 
-    #[arg(long)]
+    #[arg(long = "candidate", value_name = "NAME_OR_ACTION_ID")]
     pub candidate: Option<String>,
 
-    #[arg(long)]
+    #[arg(long = "all")]
     pub all: bool,
 
-    #[arg(long)]
+    #[arg(long = "dry-run")]
     pub dry_run: bool,
+
+    #[arg(long = "json")]
+    pub json: bool,
 }
 
-#[derive(Args, Clone, Debug, Serialize)]
+#[derive(Args, Debug, Clone)]
 pub struct DaemonProfilesExplainArgs {
-    #[arg(long)]
-    pub json: bool,
-
-    #[arg(long = "workload-identity-hash")]
+    #[arg(long = "workload-hash", value_name = "HASH")]
     pub workload_identity_hash: Option<String>,
+
+    #[arg(long = "json")]
+    pub json: bool,
 }
 
-#[derive(Args, Clone, Debug, Serialize)]
+#[derive(Args, Debug, Clone)]
 pub struct DaemonExplainArgs {
-    #[arg(long)]
+    #[arg(long = "json")]
     pub json: bool,
 
-    #[arg(long, default_value = "10")]
+    #[arg(long = "explain-last", default_value_t = 10)]
     pub explain_last: usize,
 }
 
-#[derive(Args, Clone, Debug, Serialize)]
+#[derive(Args, Debug, Clone)]
 pub struct DaemonWhyNotOptimizeArgs {
-    #[arg(long)]
+    #[arg(long = "json")]
     pub json: bool,
 
-    #[arg(long, default_value = "10")]
+    #[arg(long = "explain-last", default_value_t = 10)]
     pub explain_last: usize,
 }
 
-#[derive(Args, Clone, Debug, Serialize)]
+#[derive(Args, Debug, Clone)]
 pub struct DaemonWhatChangedArgs {
-    #[arg(long)]
+    #[arg(long = "json")]
     pub json: bool,
 
-    #[arg(long, default_value = "10")]
+    #[arg(long = "explain-last", default_value_t = 10)]
     pub explain_last: usize,
 }
 
-#[derive(Args, Clone, Debug, Serialize)]
-pub struct DaemonStatusArgs {
-    #[arg(long)]
+#[derive(Args, Debug, Clone)]
+pub struct DaemonConfigArgs {
+    #[arg(long = "explain")]
+    pub explain: bool,
+
+    #[arg(long = "json", requires = "explain")]
     pub json: bool,
 
-    #[arg(long, default_value = "10")]
-    pub explain_last: usize,
-}
-
-#[derive(Args, Clone, Debug, Serialize)]
-pub struct DaemonWatchArgs {
-    #[arg(long)]
-    pub verbose: bool,
-
-    #[arg(long, default_value = "1000")]
-    pub interval_ms: u64,
-
-    #[arg(long)]
-    pub iterations: Option<u64>,
-
-    #[arg(long, default_value = "10")]
-    pub explain_last: usize,
-}
-
-#[derive(Args, Clone, Debug, Serialize)]
-pub struct DaemonDoctorArgs {
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(Args, Clone, Debug, Serialize)]
-pub struct DaemonResetStateArgs {
-    #[arg(long)]
-    pub json: bool,
-
-    #[arg(long)]
-    pub dry_run: bool,
-}
-
-#[derive(Args, Clone, Debug, Serialize)]
-pub struct DaemonBenchOverheadArgs {
-    #[arg(long)]
-    pub json: bool,
-
-    #[arg(long, default_value = "5000")]
-    pub duration_ms: u64,
-}
-
-#[derive(Args, Clone, Debug, Serialize)]
-pub struct DaemonSoakArgs {
-    #[arg(long)]
-    pub json: bool,
-
-    #[arg(long, default_value = "300000")]
-    pub duration_ms: u64,
-
-    #[arg(long)]
+    #[arg(long = "preset", value_name = "NAME")]
     pub preset: Option<String>,
 }
 
-#[derive(Args, Clone, Debug, Serialize)]
-pub struct DaemonAcceptanceArgs {
-    #[arg(long)]
+#[derive(Args, Debug, Clone)]
+pub struct DaemonStatusArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "explain-last", default_value_t = 10)]
+    pub explain_last: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonWatchArgs {
+    #[arg(long = "interval-ms", default_value_t = 1_000)]
+    pub interval_ms: u64,
+
+    #[arg(long = "iterations", value_name = "N")]
+    pub iterations: Option<u64>,
+
+    #[arg(long = "verbose")]
+    pub verbose: bool,
+
+    #[arg(long = "explain-last", default_value_t = 10)]
+    pub explain_last: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonDoctorArgs {
+    #[arg(long = "json")]
     pub json: bool,
 }
 
-#[derive(Args, Clone, Debug, Serialize)]
-pub struct DaemonPauseArgs {}
-
-#[derive(Args, Clone, Debug, Serialize)]
-pub struct DaemonResumeArgs {}
-
-#[derive(Args, Clone, Debug, Serialize)]
-pub struct DaemonRestoreArgs {
-    #[arg(long)]
+#[derive(Args, Debug, Clone)]
+pub struct DaemonResetStateArgs {
+    #[arg(long = "dry-run")]
     pub dry_run: bool,
-    #[arg(long)]
-    pub emergency: bool,
+
+    #[arg(long = "json")]
+    pub json: bool,
 }
 
-pub fn daemon_config_from_soak_args(
-    args: DaemonSoakArgs,
-) -> anyhow::Result<crate::daemon::DaemonSoakConfig> {
-    let profile = args
-        .preset
-        .as_deref()
-        .unwrap_or("observe")
-        .parse::<crate::daemon::DaemonSoakProfile>()?;
-    Ok(crate::daemon::DaemonSoakConfig {
-        profile,
-        duration_seconds: args.duration_ms / 1000,
-        tick_millis: 1000,
-        budget: crate::daemon::DaemonSoakBudget::default(),
-    })
+#[derive(Args, Debug, Clone)]
+pub struct DaemonBenchOverheadArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "duration-ms", default_value_t = 1_000)]
+    pub duration_ms: u64,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonSoakArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+
+    #[arg(long = "duration-seconds", default_value_t = 60)]
+    pub duration_seconds: u64,
+
+    #[arg(long = "tick-ms", default_value_t = 1_000)]
+    pub tick_ms: u64,
+
+    #[arg(long = "profile", default_value = "observe-only")]
+    pub profile: String,
+
+    #[arg(long = "max-disk-growth-bytes")]
+    pub max_disk_growth_bytes: Option<u64>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonAcceptanceArgs {
+    #[arg(long = "json")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonPauseArgs {}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonResumeArgs {}
+
+#[derive(Args, Debug, Clone)]
+pub struct DaemonRestoreArgs {
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
 }
