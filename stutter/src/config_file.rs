@@ -1220,6 +1220,68 @@ mod tests {
     }
 
     #[test]
+    fn user_config_diagnostics_report_unknown_workload_policy_family() {
+        let toml = r#"
+            [autotune]
+
+            [[autotune.workload_policy.rules]]
+            situation = "browser_focused"
+            allowed_families = ["mystery_knob"]
+            allowed_objectives = ["browser_interactivity"]
+            autonomous_families = []
+        "#;
+        let parsed = parse_user_config_toml_versioned(toml).unwrap();
+
+        assert!(parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic.level == crate::config::schema::ConfigDiagnosticLevel::Error
+                && diagnostic.field.as_deref() == Some("autotune.workload_policy.rules")
+                && diagnostic
+                    .message
+                    .contains("unknown workload policy action family")
+        }));
+        assert!(
+            validate_daemon_user_config(&parsed.file)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid autotune.workload_policy.rules")
+        );
+    }
+
+    #[test]
+    fn user_config_diagnostics_report_conflicting_workload_policy_locations() {
+        let toml = r#"
+            [autotune]
+
+            [[autotune.workload_policy.rules]]
+            situation = "browser_focused"
+            allowed_families = ["nice"]
+            allowed_objectives = ["browser_interactivity"]
+            autonomous_families = []
+
+            [[autotune.workload_policy_rules]]
+            situation = "browser_focused"
+            allowed_families = ["ionice"]
+            allowed_objectives = ["io_latency"]
+            autonomous_families = []
+        "#;
+        let parsed = parse_user_config_toml_versioned(toml).unwrap();
+
+        assert!(parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic.level == crate::config::schema::ConfigDiagnosticLevel::Error
+                && diagnostic.field.as_deref() == Some("autotune.workload_policy")
+                && diagnostic.message.contains(
+                    "configure either autotune.workload_policy.rules or autotune.workload_policy_rules, not both",
+                )
+        }));
+        assert!(
+            validate_daemon_user_config(&parsed.file)
+                .unwrap_err()
+                .to_string()
+                .contains("configure either autotune.workload_policy.rules or autotune.workload_policy_rules, not both")
+        );
+    }
+
+    #[test]
     fn daemon_user_config_validation_rejects_invalid_workload_policy_rules() {
         let toml = r#"
             [autotune]
