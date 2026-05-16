@@ -446,6 +446,7 @@ impl InProcessPrivilegedActionService {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn audit_candidate_boundary(
         &self,
         stage: &'static str,

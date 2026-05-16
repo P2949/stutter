@@ -2881,7 +2881,7 @@ mod tests {
 
         let text = render_soak_text(&report);
 
-        assert!(text.contains("Daemon fake soak"));
+        assert!(text.contains("Daemon scenario soak"));
         assert!(text.contains("passed: true"));
         assert!(text.contains("disk_growth_bytes:"));
         assert!(text.contains("event_drops: 0"));

@@ -71,24 +71,16 @@ pub struct FocusGpuResolverInput<'a> {
 
 impl FocusGpuResolver {
     pub fn resolve(input: FocusGpuResolverInput<'_>) -> FocusGpuResolution {
-        if let Some(render_node) = input.explicit_render_node {
-            if let Some(device) = device_for_render_node(input.inventory, render_node) {
-                return FocusGpuResolution::from_device(
-                    device,
-                    1.0,
-                    FocusGpuSource::ExplicitOverride,
-                );
-            }
+        if let Some(render_node) = input.explicit_render_node
+            && let Some(device) = device_for_render_node(input.inventory, render_node)
+        {
+            return FocusGpuResolution::from_device(device, 1.0, FocusGpuSource::ExplicitOverride);
         }
 
-        if let Some(drm_card) = input.explicit_drm_card {
-            if let Some(device) = device_for_drm_card(input.inventory, drm_card) {
-                return FocusGpuResolution::from_device(
-                    device,
-                    1.0,
-                    FocusGpuSource::ExplicitOverride,
-                );
-            }
+        if let Some(drm_card) = input.explicit_drm_card
+            && let Some(device) = device_for_drm_card(input.inventory, drm_card)
+        {
+            return FocusGpuResolution::from_device(device, 1.0, FocusGpuSource::ExplicitOverride);
         }
 
         if let Some(render_node) = focused_render_node_from_proc(input.proc_root, input.target_pids)
@@ -97,20 +89,16 @@ impl FocusGpuResolver {
             return FocusGpuResolution::from_device(device, 0.95, FocusGpuSource::TargetProcessFd);
         }
 
-        if let Some(render_node) = input.observed_render_node {
-            if let Some(device) = device_for_render_node(input.inventory, render_node) {
-                return FocusGpuResolution::from_device(device, 0.85, FocusGpuSource::GpuSample);
-            }
+        if let Some(render_node) = input.observed_render_node
+            && let Some(device) = device_for_render_node(input.inventory, render_node)
+        {
+            return FocusGpuResolution::from_device(device, 0.85, FocusGpuSource::GpuSample);
         }
 
-        if let Some(drm_card) = input.observed_drm_card {
-            if let Some(device) = device_for_drm_card(input.inventory, drm_card) {
-                return FocusGpuResolution::from_device(
-                    device,
-                    0.80,
-                    FocusGpuSource::HwmonSelection,
-                );
-            }
+        if let Some(drm_card) = input.observed_drm_card
+            && let Some(device) = device_for_drm_card(input.inventory, drm_card)
+        {
+            return FocusGpuResolution::from_device(device, 0.80, FocusGpuSource::HwmonSelection);
         }
 
         match input.inventory.drm_devices.as_slice() {
