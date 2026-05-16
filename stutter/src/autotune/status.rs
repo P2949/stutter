@@ -6,9 +6,12 @@ use std::{
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use super::history::{
-    AutotuneHistoryEvent, AutotuneMode, ControllerPhase, TargetIdentity,
-    default_autotune_history_path, read_autotune_history_events,
+use super::{
+    history::{
+        AutotuneHistoryEvent, AutotuneMode, ControllerPhase, TargetIdentity,
+        default_autotune_history_path, read_autotune_history_events,
+    },
+    planner::{PlannerEvaluationSummary, PlannerSummary},
 };
 use crate::daemon::{
     DaemonMode, DaemonPhase, DaemonState, DaemonTargetState, default_daemon_state_snapshot_path,
@@ -35,7 +38,7 @@ pub struct AutotuneStatus {
     pub rollback_available: bool,
     pub last_rollback_path: Option<String>,
     pub cooldown_remaining_seconds: Option<u64>,
-    pub planner: Option<super::planner::PlannerSummary>,
+    pub planner: Option<PlannerSummary>,
     pub data_quality: Option<String>,
     pub last_fault: Option<String>,
     pub manual_restore_command: String,
@@ -178,7 +181,7 @@ pub fn render_autotune_status_text(status: &AutotuneStatus) -> String {
         None => "none".to_owned(),
     };
 
-    format!(
+    let mut text = format!(
         "phase: {}\nmode: {}\ntarget: {}\nfocus_group: {}\ncurrent_score: {}\nactive_profile: {}\nactive_candidate: {}\nkept_actions: {}\nlast_decision: {}\nrollback_available: {}\nlast_rollback_path: {}\ncooldown_remaining_seconds: {}\ndata_quality: {}\nlast_fault: {}\nmanual_restore_command: {}\n",
         status.phase,
         status.mode,
@@ -205,7 +208,123 @@ pub fn render_autotune_status_text(status: &AutotuneStatus) -> String {
         status.data_quality.as_deref().unwrap_or("none"),
         status.last_fault.as_deref().unwrap_or("none"),
         status.manual_restore_command
-    )
+    );
+
+    append_planner_status_text(&mut text, status.planner.as_ref());
+
+    text
+}
+
+fn append_planner_status_text(text: &mut String, planner: Option<&PlannerSummary>) {
+    let Some(planner) = planner else {
+        text.push_str("planner: none\n");
+        return;
+    };
+
+    text.push_str(&format!(
+        "planner: total={} eligible={}\n",
+        planner.total_proposals, planner.eligible_proposals
+    ));
+
+    if let Some(selected) = planner.selected.as_ref() {
+        text.push_str(&format!(
+            "planner_selected: candidate={} action_kind={} objective={:?} confidence={:.3} evidence={}\n",
+            selected.candidate_name,
+            selected.action_kind,
+            selected.objective,
+            selected.confidence,
+            format_planner_evidence(&selected.evidence)
+        ));
+    } else {
+        text.push_str("planner_selected: none\n");
+    }
+
+    if planner.eligible_candidates.is_empty() {
+        text.push_str("planner_eligible: none\n");
+    } else {
+        for eligible in &planner.eligible_candidates {
+            append_planner_evaluation_text(text, "planner_eligible", eligible);
+        }
+    }
+
+    if planner.top_denied_candidates.is_empty() {
+        text.push_str("planner_denied: none\n");
+    } else {
+        for denied in &planner.top_denied_candidates {
+            append_planner_evaluation_text(text, "planner_denied", denied);
+        }
+    }
+
+    if planner.grouped_denials.is_empty() {
+        text.push_str("planner_grouped_denials: none\n");
+    } else {
+        text.push_str(&format!(
+            "planner_grouped_denials: {}\n",
+            planner
+                .grouped_denials
+                .iter()
+                .map(|denial| format!("{}={}", denial.reason_code, denial.count))
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
+
+    if !planner.missing_capabilities.is_empty() {
+        text.push_str(&format!(
+            "planner_missing_capabilities: {}\n",
+            planner.missing_capabilities.join(",")
+        ));
+    }
+
+    if !planner.workload_blocked.is_empty() {
+        text.push_str(&format!(
+            "planner_workload_blocked: {}\n",
+            planner.workload_blocked.join(",")
+        ));
+    }
+
+    if !planner.manual_only_suggestions.is_empty() {
+        text.push_str(&format!(
+            "planner_manual_only: {}\n",
+            planner.manual_only_suggestions.join(",")
+        ));
+    }
+
+    if let Some(no_action) = planner.no_action.as_ref() {
+        text.push_str(&format!(
+            "planner_no_action: reason={} total={} eligible={}\n",
+            no_action.reason, no_action.total_proposals, no_action.eligible_proposals
+        ));
+    }
+}
+
+fn append_planner_evaluation_text(
+    text: &mut String,
+    prefix: &str,
+    evaluation: &PlannerEvaluationSummary,
+) {
+    text.push_str(&format!(
+        "{prefix}: candidate={} action_kind={} objective={:?} confidence={:.3} eligible={} reasons={} evidence={}\n",
+        evaluation.candidate_name,
+        evaluation.action_kind,
+        evaluation.objective,
+        evaluation.confidence,
+        evaluation.eligible,
+        if evaluation.deny_reason_codes.is_empty() {
+            "none".to_owned()
+        } else {
+            evaluation.deny_reason_codes.join(",")
+        },
+        format_planner_evidence(&evaluation.evidence)
+    ));
+}
+
+fn format_planner_evidence(evidence: &[String]) -> String {
+    if evidence.is_empty() {
+        "none".to_owned()
+    } else {
+        evidence.join("|")
+    }
 }
 
 fn daemon_state_path_for_history_path(history_path: &Path) -> PathBuf {
@@ -1145,7 +1264,25 @@ mod tests {
                     missing_capabilities: Vec::new(),
                     workload_blocked: Vec::new(),
                     manual_only_suggestions: Vec::new(),
-                    top_denied_candidates: Vec::new(),
+                    top_denied_candidates: vec![PlannerEvaluationSummary {
+                        candidate_name: "test-candidate".to_owned(),
+                        action_kind: "test-kind".to_owned(),
+                        provider: "test-provider".to_owned(),
+                        objective: ObjectiveKind::StutterScore,
+                        safety_class: SafetyClass::ReversibleLowRisk,
+                        effect_scope: ActionEffectScope::LocalProcessTree,
+                        confidence: 0.8,
+                        eligible: false,
+                        rank: Some(10),
+                        deny_reasons: vec![
+                            crate::autotune::planner::CandidateDenyReason::NoEffectiveChange,
+                        ],
+                        deny_reason_codes: vec!["no_effective_change".to_owned()],
+                        deny_messages: vec!["no change".to_owned()],
+                        dry_run_affected_tasks: None,
+                        manual_only_reason: None,
+                        evidence: vec!["test_signal=1.0 weight=1.00".to_owned()],
+                    }],
                     no_action: Some(crate::autotune::planner::PlannerNoActionSummary {
                         reason: "all candidates denied".to_owned(),
                         total_proposals: 1,
@@ -1181,6 +1318,16 @@ mod tests {
         };
 
         let status = status_from_daemon_state(PathBuf::from("/tmp/daemon_state.json"), &state);
+        let rendered = render_autotune_status_text(&status);
+        let json = serde_json::to_string(&status).unwrap();
+
+        assert!(rendered.contains("planner: total=1 eligible=0"));
+        assert!(rendered.contains("planner_denied: candidate=test-candidate"));
+        assert!(rendered.contains("objective=StutterScore"));
+        assert!(rendered.contains("confidence=0.800"));
+        assert!(rendered.contains("evidence=test_signal=1.0 weight=1.00"));
+        assert!(json.contains("\"planner\""));
+        assert!(json.contains("test_signal=1.0 weight=1.00"));
 
         let planner = status
             .planner

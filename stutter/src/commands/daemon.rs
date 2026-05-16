@@ -5,9 +5,12 @@ use serde::Serialize;
 use crate::{
     actions::{ActionId, SafetyClass},
     affinity,
-    autotune::emergency_restore::{
-        AutotuneRestoreCommandInput, AutotuneRestoreOutcome, AutotuneRestoreStatus,
-        restore_known_autotune_actions,
+    autotune::{
+        emergency_restore::{
+            AutotuneRestoreCommandInput, AutotuneRestoreOutcome, AutotuneRestoreStatus,
+            restore_known_autotune_actions,
+        },
+        planner::{PlannerEvaluationSummary, PlannerSummary},
     },
     commands::{input, restore},
     config_file::{self, UserConfigFile},
@@ -92,6 +95,7 @@ struct DaemonWhyNotOptimizeOutput {
     health: SystemHealthSnapshot,
     watchdog: DaemonWatchdogReport,
     why_no_optimize: Vec<String>,
+    planner: Option<PlannerSummary>,
     recent_decisions: Vec<DaemonRecentDecision>,
     manual_restore_command: String,
 }
@@ -823,6 +827,12 @@ fn why_not_optimize_output_from_explain(
         health: explain.status.current_health.clone(),
         watchdog: explain.status.watchdog.clone(),
         why_no_optimize: explain.status_explanation.why_no_optimize.clone(),
+        planner: explain
+            .status
+            .state
+            .last_decision
+            .as_ref()
+            .and_then(|decision| decision.planner.clone()),
         recent_decisions: explain.status.recent_decisions.clone(),
         manual_restore_command: explain.status.manual_restore_command.clone(),
     }
@@ -1291,6 +1301,8 @@ fn render_why_not_optimize_text(output: &DaemonWhyNotOptimizeOutput) -> String {
         text.push_str(&format!("- {reason}\n"));
     }
 
+    append_daemon_planner_text(&mut text, output.planner.as_ref());
+
     if !output.recent_decisions.is_empty() {
         text.push_str("recent_decisions:\n");
         for decision in &output.recent_decisions {
@@ -1302,6 +1314,117 @@ fn render_why_not_optimize_text(output: &DaemonWhyNotOptimizeOutput) -> String {
     }
 
     text
+}
+
+fn append_daemon_planner_text(text: &mut String, planner: Option<&PlannerSummary>) {
+    let Some(planner) = planner else {
+        return;
+    };
+
+    text.push_str(&format!(
+        "planner: total={} eligible={}\n",
+        planner.total_proposals, planner.eligible_proposals
+    ));
+
+    if let Some(selected) = planner.selected.as_ref() {
+        text.push_str(&format!(
+            "planner_selected: candidate={} action_kind={} objective={:?} confidence={:.3} evidence={}\n",
+            selected.candidate_name,
+            selected.action_kind,
+            selected.objective,
+            selected.confidence,
+            format_daemon_planner_evidence(&selected.evidence)
+        ));
+    } else {
+        text.push_str("planner_selected: none\n");
+    }
+
+    if planner.eligible_candidates.is_empty() {
+        text.push_str("planner_eligible: none\n");
+    } else {
+        for candidate in &planner.eligible_candidates {
+            append_daemon_planner_candidate_text(text, "planner_eligible", candidate);
+        }
+    }
+
+    if planner.top_denied_candidates.is_empty() {
+        text.push_str("planner_denied: none\n");
+    } else {
+        for candidate in &planner.top_denied_candidates {
+            append_daemon_planner_candidate_text(text, "planner_denied", candidate);
+        }
+    }
+
+    if planner.grouped_denials.is_empty() {
+        text.push_str("planner_grouped_denials: none\n");
+    } else {
+        text.push_str(&format!(
+            "planner_grouped_denials: {}\n",
+            planner
+                .grouped_denials
+                .iter()
+                .map(|denial| format!("{}={}", denial.reason_code, denial.count))
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
+
+    if !planner.missing_capabilities.is_empty() {
+        text.push_str(&format!(
+            "planner_missing_capabilities: {}\n",
+            planner.missing_capabilities.join(",")
+        ));
+    }
+
+    if !planner.workload_blocked.is_empty() {
+        text.push_str(&format!(
+            "planner_workload_blocked: {}\n",
+            planner.workload_blocked.join(",")
+        ));
+    }
+
+    if !planner.manual_only_suggestions.is_empty() {
+        text.push_str(&format!(
+            "planner_manual_only: {}\n",
+            planner.manual_only_suggestions.join(",")
+        ));
+    }
+
+    if let Some(no_action) = planner.no_action.as_ref() {
+        text.push_str(&format!(
+            "planner_no_action: reason={} total={} eligible={}\n",
+            no_action.reason, no_action.total_proposals, no_action.eligible_proposals
+        ));
+    }
+}
+
+fn append_daemon_planner_candidate_text(
+    text: &mut String,
+    prefix: &str,
+    candidate: &PlannerEvaluationSummary,
+) {
+    text.push_str(&format!(
+        "{prefix}: candidate={} action_kind={} objective={:?} confidence={:.3} eligible={} reasons={} evidence={}\n",
+        candidate.candidate_name,
+        candidate.action_kind,
+        candidate.objective,
+        candidate.confidence,
+        candidate.eligible,
+        if candidate.deny_reason_codes.is_empty() {
+            "none".to_owned()
+        } else {
+            candidate.deny_reason_codes.join(",")
+        },
+        format_daemon_planner_evidence(&candidate.evidence)
+    ));
+}
+
+fn format_daemon_planner_evidence(evidence: &[String]) -> String {
+    if evidence.is_empty() {
+        "none".to_owned()
+    } else {
+        evidence.join("|")
+    }
 }
 
 fn render_what_changed_text(output: &DaemonWhatChangedOutput) -> String {
@@ -1879,6 +2002,7 @@ fn render_status_text(output: &DaemonStatusOutput) -> String {
         if let Some(score) = decision.score_total {
             text.push_str(&format!("current_score: {score}\n"));
         }
+        append_daemon_planner_text(&mut text, decision.planner.as_ref());
     }
     if let Some(fault) = output.state.faulted.as_ref() {
         text.push_str(&format!("fault: {}\n", fault.reason));
@@ -2727,6 +2851,155 @@ mod tests {
         assert!(what_text.contains("Daemon what-changed"));
         assert!(what_text.contains("phase:paused"));
         assert!(what_text.contains("active_workload:root_pid=4242"));
+    }
+
+    fn daemon_test_planner_summary() -> PlannerSummary {
+        PlannerSummary {
+            total_proposals: 2,
+            eligible_proposals: 1,
+            selected: Some(crate::autotune::planner::PlannerSelectedSummary {
+                candidate_name: "game-main".to_owned(),
+                action_kind: "cpu_affinity_profile".to_owned(),
+                objective: crate::autotune::objective::ObjectiveKind::StutterScore,
+                safety_class: SafetyClass::ReversibleLowRisk,
+                confidence: 0.92,
+                rank: Some(1),
+                evidence: vec!["situation=GameFocused weight=0.95".to_owned()],
+            }),
+            eligible_candidates: vec![PlannerEvaluationSummary {
+                candidate_name: "game-main".to_owned(),
+                action_kind: "cpu_affinity_profile".to_owned(),
+                provider: "profile".to_owned(),
+                objective: crate::autotune::objective::ObjectiveKind::StutterScore,
+                safety_class: SafetyClass::ReversibleLowRisk,
+                effect_scope: ActionEffectScope::LocalProcessTree,
+                confidence: 0.92,
+                eligible: true,
+                rank: Some(1),
+                deny_reasons: Vec::new(),
+                deny_reason_codes: Vec::new(),
+                deny_messages: Vec::new(),
+                dry_run_affected_tasks: Some(3),
+                manual_only_reason: None,
+                evidence: vec!["situation=GameFocused weight=0.95".to_owned()],
+            }],
+            top_denied_candidates: vec![PlannerEvaluationSummary {
+                candidate_name: "nice-denied".to_owned(),
+                action_kind: "nice".to_owned(),
+                provider: "nice".to_owned(),
+                objective: crate::autotune::objective::ObjectiveKind::DesktopInteractivity,
+                safety_class: SafetyClass::ReversibleMediumRisk,
+                effect_scope: ActionEffectScope::LocalProcessTree,
+                confidence: 0.61,
+                eligible: false,
+                rank: Some(2),
+                deny_reasons: vec![
+                    crate::autotune::planner::CandidateDenyReason::CapabilityMissing,
+                ],
+                deny_reason_codes: vec!["capability_missing".to_owned()],
+                deny_messages: vec!["missing nice capability".to_owned()],
+                dry_run_affected_tasks: None,
+                manual_only_reason: None,
+                evidence: vec!["capability=nice weight=1.00".to_owned()],
+            }],
+            grouped_denials: vec![crate::autotune::planner::PlannerDenySummary {
+                reason: crate::autotune::planner::CandidateDenyReason::CapabilityMissing,
+                reason_code: "capability_missing".to_owned(),
+                count: 1,
+            }],
+            missing_capabilities: vec!["nice-denied".to_owned()],
+            workload_blocked: vec!["uclamp-blocked".to_owned()],
+            manual_only_suggestions: vec!["vm-knob".to_owned()],
+            no_action: Some(crate::autotune::planner::PlannerNoActionSummary {
+                reason: "all candidates denied".to_owned(),
+                total_proposals: 2,
+                eligible_proposals: 1,
+                grouped_denials: vec![crate::autotune::planner::PlannerDenySummary {
+                    reason: crate::autotune::planner::CandidateDenyReason::CapabilityMissing,
+                    reason_code: "capability_missing".to_owned(),
+                    count: 1,
+                }],
+                top_denied_candidates: Vec::new(),
+                missing_capabilities: vec!["nice-denied".to_owned()],
+                workload_blocked: vec!["uclamp-blocked".to_owned()],
+                manual_only_suggestions: vec!["vm-knob".to_owned()],
+            }),
+        }
+    }
+
+    #[test]
+    fn daemon_status_and_why_text_render_planner_summary() {
+        let planner = daemon_test_planner_summary();
+        let state = DaemonState {
+            mode: crate::daemon::DaemonMode::Suggest,
+            phase: DaemonPhase::Decide,
+            last_decision: Some(crate::daemon::DaemonDecisionState {
+                decision: "observed".to_owned(),
+                reason: "no eligible candidate selected".to_owned(),
+                unix_nanos: Some(2),
+                score_total: Some(42),
+                candidate_count: Some(2),
+                top_denied_reason: Some("CapabilityMissing".to_owned()),
+                planner: Some(planner.clone()),
+                situation: Some("GameFocused".to_owned()),
+                focus_kind: Some("Game".to_owned()),
+            }),
+            ..DaemonState::default()
+        };
+        let output = DaemonStatusOutput {
+            state_path: "/tmp/daemon_state.json".to_owned(),
+            state_loaded: true,
+            watchdog: evaluate_daemon_watchdog(
+                DaemonWatchdogInputs::from_state_and_health(
+                    &state,
+                    &SystemHealthSnapshot::default(),
+                ),
+                &DaemonWatchdogConfig::default(),
+            ),
+            state,
+            capabilities: CapabilityProbe::default().probe(),
+            current_health: SystemHealthSnapshot::default(),
+            manual_restore_command: "stutter daemon emergency-restore".to_owned(),
+            recent_decisions: Vec::new(),
+        };
+
+        let status_text = render_status_text(&output);
+
+        assert!(status_text.contains("planner: total=2 eligible=1"));
+        assert!(status_text.contains("planner_selected: candidate=game-main"));
+        assert!(status_text.contains("objective=StutterScore"));
+        assert!(status_text.contains("confidence=0.920"));
+        assert!(status_text.contains("planner_eligible: candidate=game-main"));
+        assert!(status_text.contains("planner_denied: candidate=nice-denied"));
+        assert!(status_text.contains("planner_grouped_denials: capability_missing=1"));
+        assert!(status_text.contains("planner_missing_capabilities: nice-denied"));
+        assert!(status_text.contains("planner_workload_blocked: uclamp-blocked"));
+        assert!(status_text.contains("planner_manual_only: vm-knob"));
+        assert!(status_text.contains("evidence=situation=GameFocused weight=0.95"));
+
+        let why = DaemonWhyNotOptimizeOutput {
+            state_path: "/tmp/daemon_state.json".to_owned(),
+            state_loaded: true,
+            mode: crate::daemon::DaemonMode::Suggest,
+            phase: DaemonPhase::Decide,
+            health: SystemHealthSnapshot::default(),
+            watchdog: DaemonWatchdogReport {
+                ok: true,
+                phase: DaemonPhase::Decide,
+                issues: Vec::new(),
+                recommended_actions: Vec::new(),
+            },
+            why_no_optimize: vec!["no eligible candidates".to_owned()],
+            planner: Some(planner),
+            recent_decisions: Vec::new(),
+            manual_restore_command: "stutter daemon emergency-restore".to_owned(),
+        };
+
+        let why_text = render_why_not_optimize_text(&why);
+
+        assert!(why_text.contains("planner: total=2 eligible=1"));
+        assert!(why_text.contains("planner_denied: candidate=nice-denied"));
+        assert!(why_text.contains("planner_grouped_denials: capability_missing=1"));
     }
 
     #[test]
