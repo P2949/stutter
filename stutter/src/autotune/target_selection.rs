@@ -148,7 +148,14 @@ pub fn mutable_task_snapshots_for_observation_with_mode(
         .filter(|task| {
             mutable_task_matches_workload_starttime(task, expected_process_starttime_ticks)
         })
-        .filter(|task| mutable_task_allowed(task, selector, used_fallback_root))
+        .filter(|task| {
+            mutable_task_allowed(
+                task,
+                selector,
+                used_fallback_root,
+                observation.target_root_pid,
+            )
+        })
         .collect();
 
     MutableTaskSelection {
@@ -186,6 +193,7 @@ fn mutable_task_allowed(
     task: &ActiveTaskSnapshot,
     selector: TaskTargetSelector,
     allow_unknown_fallback_root: bool,
+    target_root_pid: Option<u32>,
 ) -> bool {
     if task.tid == 0 || is_protected_task_class(task.class) {
         return false;
@@ -199,7 +207,9 @@ fn mutable_task_allowed(
     }
 
     match selector {
-        TaskTargetSelector::ForegroundRootOnly => task.tid == task.process_pid,
+        TaskTargetSelector::ForegroundRootOnly => {
+            Some(task.tid) == target_root_pid && task.tid == task.process_pid
+        }
         TaskTargetSelector::FullTargetTree => !matches!(task.class, TaskClass::Unknown),
         TaskTargetSelector::CompilerAndLinker => matches!(
             task.class,
@@ -345,6 +355,53 @@ mod tests {
         assert_eq!(
             targets.iter().map(|target| target.tid).collect::<Vec<_>>(),
             vec![10, 11, 12]
+        );
+    }
+
+    #[test]
+    fn foreground_root_selector_keeps_only_target_root_pid() {
+        let observation = AutotuneObservation {
+            target_root_pid: Some(10),
+            active_tasks: vec![
+                ActiveTaskSnapshot {
+                    tid: 10,
+                    process_pid: 10,
+                    comm: "foreground-root".to_owned(),
+                    class: TaskClass::Game,
+                    process_starttime_ticks: Some(100),
+                    task_starttime_ticks: Some(100),
+                    cgroup_path: None,
+                },
+                ActiveTaskSnapshot {
+                    tid: 11,
+                    process_pid: 11,
+                    comm: "child-process-main-thread".to_owned(),
+                    class: TaskClass::GameWorkerThread,
+                    process_starttime_ticks: Some(101),
+                    task_starttime_ticks: Some(101),
+                    cgroup_path: None,
+                },
+                ActiveTaskSnapshot {
+                    tid: 12,
+                    process_pid: 10,
+                    comm: "foreground-worker-thread".to_owned(),
+                    class: TaskClass::GameWorkerThread,
+                    process_starttime_ticks: Some(100),
+                    task_starttime_ticks: Some(102),
+                    cgroup_path: None,
+                },
+            ],
+            ..AutotuneObservation::default()
+        };
+
+        let targets = mutable_task_targets_for_observation(
+            &observation,
+            TaskTargetSelector::ForegroundRootOnly,
+        );
+
+        assert_eq!(
+            targets.iter().map(|target| target.tid).collect::<Vec<_>>(),
+            vec![10]
         );
     }
 
