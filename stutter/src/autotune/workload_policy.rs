@@ -105,11 +105,26 @@ impl DaemonWorkloadPolicyConfig {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct DaemonWorkloadPolicyConfigFile {
+    #[serde(default)]
+    pub rules: Vec<WorkloadPolicyRuleConfigFile>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 pub struct WorkloadPolicyRuleConfigFile {
     pub situation: String,
+    #[serde(default)]
     pub allowed_families: Vec<String>,
+    #[serde(default)]
     pub allowed_objectives: Vec<String>,
+    #[serde(default)]
     pub autonomous_families: Vec<String>,
+}
+
+impl DaemonWorkloadPolicyConfigFile {
+    pub fn into_config(self) -> anyhow::Result<DaemonWorkloadPolicyConfig> {
+        parse_workload_policy_rule_configs(&self.rules)
+    }
 }
 
 impl WorkloadPolicyRuleConfigFile {
@@ -514,6 +529,24 @@ mod tests {
                 .rule_for(SituationKind::GameCpuSchedulerPressure)
                 .allowed_families
                 .contains("cpu_affinity_profile")
+        );
+    }
+
+    #[test]
+    fn config_rule_validation_rejects_unknown_objective() {
+        let unknown_objective = WorkloadPolicyRuleConfigFile {
+            situation: "browser_focused".to_owned(),
+            allowed_families: vec!["nice".to_owned()],
+            allowed_objectives: vec!["not_real".to_owned()],
+            autonomous_families: Vec::new(),
+        };
+
+        assert!(
+            unknown_objective
+                .into_rule()
+                .unwrap_err()
+                .to_string()
+                .contains("invalid workload policy objective")
         );
     }
 

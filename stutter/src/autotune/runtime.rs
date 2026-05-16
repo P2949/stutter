@@ -36,6 +36,7 @@ use crate::{
         rolling_window::RollingWindow,
         state::{ControllerPhase, SituationKind},
         washout::WashoutWindowConfig,
+        workload_policy::{DaemonWorkloadPolicyConfig, WorkloadPolicyMatrix},
     },
     config::model::MonitorConfig,
     daemon::{
@@ -77,9 +78,23 @@ pub struct AutotuneRuntimeConfig {
     pub candidate_window_seconds: u64,
     pub profiles: Vec<Profile>,
     pub online_data_quality_policy: OnlineDataQualityPolicy,
+    pub workload_policy: WorkloadPolicyMatrix,
+    pub workload_policy_error: Option<String>,
     pub washout: WashoutWindowConfig,
     pub simulated_candidates: Vec<CandidateAction>,
     pub simulate_action_effects: bool,
+}
+
+fn resolve_workload_policy_config(
+    config: &DaemonWorkloadPolicyConfig,
+) -> (WorkloadPolicyMatrix, Option<String>) {
+    match config.resolved_matrix() {
+        Ok(matrix) => (matrix, None),
+        Err(err) => (
+            WorkloadPolicyMatrix::default_rules(),
+            Some(format!("{err:#}")),
+        ),
+    }
 }
 
 pub fn daemon_config_for_runtime_mode(
@@ -161,6 +176,8 @@ impl AutotuneRuntimeConfig {
         decision_log: Option<PathBuf>,
     ) -> Self {
         let candidate_window_seconds = daemon_config.autotune.candidate_window_seconds.max(1);
+        let (workload_policy, workload_policy_error) =
+            resolve_workload_policy_config(&daemon_config.autotune.workload_policy);
 
         Self {
             daemon_config,
@@ -173,6 +190,8 @@ impl AutotuneRuntimeConfig {
             candidate_window_seconds,
             profiles: Vec::new(),
             online_data_quality_policy: OnlineDataQualityPolicy::default(),
+            workload_policy,
+            workload_policy_error,
             washout: WashoutWindowConfig::default(),
             simulated_candidates: Vec::new(),
             simulate_action_effects: false,
@@ -886,25 +905,14 @@ impl AutotuneRuntime {
             observation.target_root_pid = Some(tree_pid);
         }
         let planner = CandidatePlanner::default_for_policy(&self.config.daemon_policy);
-        let workload_policy = match self
-            .config
-            .daemon_config
-            .autotune
-            .workload_policy
-            .resolved_matrix()
-        {
-            Ok(workload_policy) => workload_policy,
-            Err(err) => {
-                self.last_plan_result = Some(PlanResult {
-                    selected: None,
-                    evaluations: Vec::new(),
-                    no_action_reason: Some(format!(
-                        "invalid workload policy configuration: {err:#}"
-                    )),
-                });
-                return None;
-            }
-        };
+        if let Some(err) = self.config.workload_policy_error.as_ref() {
+            self.last_plan_result = Some(PlanResult {
+                selected: None,
+                evaluations: Vec::new(),
+                no_action_reason: Some(format!("invalid workload policy configuration: {err}")),
+            });
+            return None;
+        }
         let result = planner.plan(PlannerInput {
             observation: &observation,
             daemon_policy: &self.config.daemon_policy,
@@ -912,7 +920,7 @@ impl AutotuneRuntime {
             system_health: &observation.system_health,
             controller_state: &self.controller.state,
             active_profile_state: Some(&self.controller.active_profile_state),
-            workload_policy: &workload_policy,
+            workload_policy: &self.config.workload_policy,
             profiles: &self.config.profiles,
         });
         let selected = result.selected.clone();
@@ -1893,6 +1901,65 @@ mod tests {
             SafetyClass::ReversibleLowRisk
         );
         assert_eq!(config.daemon_policy.min_confidence, 0.81);
+    }
+
+    #[test]
+    fn runtime_config_resolves_workload_policy_once_from_daemon_config() {
+        let mut daemon_config = daemon_config_for_runtime_mode(
+            DaemonMode::Suggest,
+            ActionSource::AutotuneRuntime,
+            Some(1234),
+            None,
+        );
+        daemon_config.autotune.workload_policy = DaemonWorkloadPolicyConfig {
+            rules: vec![crate::autotune::workload_policy::WorkloadPolicyRule {
+                situation: SituationKind::BrowserFocused,
+                allowed_families: std::collections::BTreeSet::from(["nice".to_owned()]),
+                allowed_objectives: std::collections::BTreeSet::from([
+                    crate::autotune::objective::ObjectiveKind::BrowserInteractivity,
+                ]),
+                autonomous_families: std::collections::BTreeSet::new(),
+            }],
+        };
+
+        let runtime_config = AutotuneRuntimeConfig::from_daemon_config(daemon_config, None);
+        let rule = runtime_config
+            .workload_policy
+            .rule_for(SituationKind::BrowserFocused);
+
+        assert_eq!(
+            rule.allowed_families,
+            std::collections::BTreeSet::from(["nice".to_owned()])
+        );
+        assert!(runtime_config.workload_policy_error.is_none());
+    }
+
+    #[test]
+    fn runtime_config_records_invalid_workload_policy_error_once() {
+        let mut daemon_config = daemon_config_for_runtime_mode(
+            DaemonMode::Suggest,
+            ActionSource::AutotuneRuntime,
+            Some(1234),
+            None,
+        );
+        daemon_config.autotune.workload_policy = DaemonWorkloadPolicyConfig {
+            rules: vec![crate::autotune::workload_policy::WorkloadPolicyRule {
+                situation: SituationKind::BrowserFocused,
+                allowed_families: std::collections::BTreeSet::from(["not_real".to_owned()]),
+                allowed_objectives: std::collections::BTreeSet::new(),
+                autonomous_families: std::collections::BTreeSet::new(),
+            }],
+        };
+
+        let runtime_config = AutotuneRuntimeConfig::from_daemon_config(daemon_config, None);
+
+        assert!(
+            runtime_config
+                .workload_policy_error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("unknown workload policy action family")
+        );
     }
 
     #[test]
