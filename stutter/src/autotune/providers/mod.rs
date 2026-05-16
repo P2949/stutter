@@ -436,6 +436,168 @@ mod tests {
         );
     }
 
+    #[test]
+    fn nice_provider_targets_compile_active_tasks_not_only_root_pid() {
+        let policy = apply_medium_policy_with_compile_cgroup();
+        let provider = nice::NiceProvider;
+        let mut observation =
+            provider_observation(SituationKind::CompileCpuBound, FocusGroupKind::Compile);
+        observation.active_tasks = vec![
+            provider_task(1234, 1234, "cargo", TaskClass::BuildJob),
+            provider_task(1235, 1234, "rustc", TaskClass::Compiler),
+            provider_task(1236, 1234, "ld.lld", TaskClass::Linker),
+            provider_task(1237, 1234, "pipewire", TaskClass::AudioRealtime),
+            provider_task(1238, 1234, "unknown-helper", TaskClass::Unknown),
+        ];
+        let system_context = system_context_for_observation(&observation);
+        let input = CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            system_context: &system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        };
+
+        let proposals = provider.propose(&input);
+
+        assert_eq!(proposals.len(), 1);
+        let CandidateAction::Nice { plan } = &proposals[0].candidate else {
+            panic!("expected nice candidate");
+        };
+        assert_eq!(
+            plan.action
+                .targets
+                .iter()
+                .map(|target| target.tid)
+                .collect::<Vec<_>>(),
+            vec![1234, 1235, 1236]
+        );
+        assert_eq!(
+            plan.action
+                .targets
+                .iter()
+                .map(|target| target.process_pid)
+                .collect::<Vec<_>>(),
+            vec![Some(1234), Some(1234), Some(1234)]
+        );
+        assert!(proposals[0].deny_reasons.is_empty());
+    }
+
+    #[test]
+    fn ionice_provider_targets_active_tree_and_excludes_protected_or_unknown_tasks() {
+        let policy = apply_medium_policy_with_compile_cgroup();
+        let provider = ioprio::IoPrioProvider;
+        let mut observation =
+            provider_observation(SituationKind::IoPressure, FocusGroupKind::Desktop);
+        observation.capabilities.ionice_available = true;
+        observation.active_tasks = vec![
+            provider_task(1234, 1234, "game", TaskClass::Game),
+            provider_task(1235, 1234, "game-worker", TaskClass::GameWorkerThread),
+            provider_task(1236, 1234, "helper", TaskClass::Helper),
+            provider_task(1237, 1234, "pipewire", TaskClass::AudioRealtime),
+            provider_task(1238, 1234, "compositor", TaskClass::Compositor),
+            provider_task(1239, 1234, "unknown", TaskClass::Unknown),
+        ];
+        let system_context = system_context_for_observation(&observation);
+        let input = CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            system_context: &system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        };
+
+        let proposals = provider.propose(&input);
+
+        assert_eq!(proposals.len(), 1);
+        let CandidateAction::IoPrio { plan } = &proposals[0].candidate else {
+            panic!("expected ionice candidate");
+        };
+        assert_eq!(
+            plan.action
+                .targets
+                .iter()
+                .map(|target| target.tid)
+                .collect::<Vec<_>>(),
+            vec![1234, 1235, 1236]
+        );
+        assert!(proposals[0].deny_reasons.is_empty());
+    }
+
+    #[test]
+    fn uclamp_provider_targets_game_render_and_worker_active_tasks_not_only_root_pid() {
+        let policy = apply_medium_policy_with_compile_cgroup();
+        let provider = uclamp::UclampProvider;
+        let mut observation = provider_observation(
+            SituationKind::GameCpuSchedulerPressure,
+            FocusGroupKind::Game,
+        );
+        observation.capabilities.uclamp_available = true;
+        observation.active_tasks = vec![
+            provider_task(1234, 1234, "game", TaskClass::Game),
+            provider_task(1235, 1234, "render", TaskClass::GameRenderThread),
+            provider_task(1236, 1234, "worker", TaskClass::GameWorkerThread),
+            provider_task(1237, 1234, "input", TaskClass::Input),
+            provider_task(1238, 1234, "irq", TaskClass::IrqThread),
+            provider_task(1239, 1234, "service", TaskClass::Service),
+            provider_task(1240, 1234, "unknown", TaskClass::Unknown),
+        ];
+        let system_context = system_context_for_observation(&observation);
+        let input = CandidateProviderInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            system_context: &system_context,
+            controller_state: &ControllerRuntimeState::default(),
+            profiles: &[],
+        };
+
+        let proposals = provider.propose(&input);
+
+        assert_eq!(proposals.len(), 1);
+        let CandidateAction::Uclamp { plan } = &proposals[0].candidate else {
+            panic!("expected uclamp candidate");
+        };
+        assert_eq!(
+            plan.action
+                .targets
+                .iter()
+                .map(|target| target.tid)
+                .collect::<Vec<_>>(),
+            vec![1234, 1235, 1236]
+        );
+        assert!(proposals[0].deny_reasons.is_empty());
+    }
+
+    fn provider_task(
+        tid: u32,
+        process_pid: u32,
+        comm: &str,
+        class: TaskClass,
+    ) -> ActiveTaskSnapshot {
+        let process_starttime_ticks = Some(10);
+        let task_starttime_ticks = if tid == process_pid {
+            process_starttime_ticks
+        } else {
+            Some(u64::from(tid))
+        };
+
+        ActiveTaskSnapshot {
+            tid,
+            process_pid,
+            comm: comm.to_owned(),
+            class,
+            process_starttime_ticks,
+            task_starttime_ticks,
+            cgroup_path: Some("/user.slice/provider-test.scope".to_owned()),
+        }
+    }
+
     fn provider_observation(
         situation: SituationKind,
         focus_kind: FocusGroupKind,
