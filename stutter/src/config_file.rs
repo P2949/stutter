@@ -4,7 +4,10 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::{
-    autotune::workload_policy::{WorkloadPolicyRuleConfigFile, parse_workload_policy_rule_configs},
+    autotune::workload_policy::{
+        DaemonWorkloadPolicyConfigFile, WorkloadPolicyRuleConfigFile,
+        parse_workload_policy_rule_configs,
+    },
     config::{
         FocusSource, ForegroundSource,
         schema::{CURRENT_CONFIG_VERSION, ConfigDiagnostic, ParsedUserConfigFile, RawConfigFile},
@@ -78,6 +81,7 @@ pub struct AutotuneConfigFile {
     pub allow_cpu_power_on_battery: Option<bool>,
     pub privileged_worker_socket: Option<PathBuf>,
     pub unsafe_in_process_privileged_worker: Option<bool>,
+    pub workload_policy: Option<DaemonWorkloadPolicyConfigFile>,
     pub workload_policy_rules: Option<Vec<WorkloadPolicyRuleConfigFile>>,
 }
 
@@ -356,14 +360,75 @@ pub fn apply_daemon_user_config_overrides(
     {
         daemon_config.autotune.unsafe_in_process_privileged_worker = unsafe_in_process;
     }
-    if let Some(rules) = user_config
-        .autotune
-        .as_ref()
-        .and_then(|autotune| autotune.workload_policy_rules.as_ref())
+    if let Ok(Some((_field, rules))) = workload_policy_rule_configs_from_user_config(user_config)
         && let Ok(workload_policy) = parse_workload_policy_rule_configs(rules)
     {
         daemon_config.autotune.workload_policy = workload_policy;
     }
+}
+
+const WORKLOAD_POLICY_RULES_FIELD: &str = "autotune.workload_policy.rules";
+const LEGACY_WORKLOAD_POLICY_RULES_FIELD: &str = "autotune.workload_policy_rules";
+
+fn workload_policy_rule_configs_from_user_config(
+    config: &UserConfigFile,
+) -> Result<Option<(&'static str, &[WorkloadPolicyRuleConfigFile])>> {
+    let Some(autotune) = config.autotune.as_ref() else {
+        return Ok(None);
+    };
+
+    let canonical = autotune
+        .workload_policy
+        .as_ref()
+        .map(|workload_policy| workload_policy.rules.as_slice());
+    let legacy = autotune.workload_policy_rules.as_deref();
+
+    match (canonical, legacy) {
+        (Some(_), Some(_)) => anyhow::bail!(
+            "configure either {WORKLOAD_POLICY_RULES_FIELD} or {LEGACY_WORKLOAD_POLICY_RULES_FIELD}, not both"
+        ),
+        (Some(rules), None) => Ok(Some((WORKLOAD_POLICY_RULES_FIELD, rules))),
+        (None, Some(rules)) => Ok(Some((LEGACY_WORKLOAD_POLICY_RULES_FIELD, rules))),
+        (None, None) => Ok(None),
+    }
+}
+
+fn workload_policy_config_diagnostics(config: &UserConfigFile) -> Vec<ConfigDiagnostic> {
+    let mut diagnostics = Vec::new();
+
+    let Some((field, rules)) = (match workload_policy_rule_configs_from_user_config(config) {
+        Ok(rules) => rules,
+        Err(err) => {
+            diagnostics.push(ConfigDiagnostic::error(
+                ConfigSource::UserFile,
+                Some("autotune.workload_policy".to_owned()),
+                err.to_string(),
+            ));
+            return diagnostics;
+        }
+    }) else {
+        return diagnostics;
+    };
+
+    for (idx, rule) in rules.iter().enumerate() {
+        if rule.autonomous_families.is_empty() && !rule.allowed_families.is_empty() {
+            diagnostics.push(ConfigDiagnostic::warning(
+                ConfigSource::UserFile,
+                Some(format!("{field}[{idx}].autonomous_families")),
+                "empty autonomous_families disables autonomous apply for this workload situation; suggestions remain allowed by allowed_families",
+            ));
+        }
+    }
+
+    if let Err(err) = parse_workload_policy_rule_configs(rules) {
+        diagnostics.push(ConfigDiagnostic::error(
+            ConfigSource::UserFile,
+            Some(field.to_owned()),
+            format!("invalid workload policy rules: {err:#}"),
+        ));
+    }
+
+    diagnostics
 }
 
 pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
@@ -428,13 +493,8 @@ pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
             "daemon_max_memory_pressure_some_avg10_percent must be a finite value between 0.0 and 100.0"
         );
     }
-    if let Some(rules) = config
-        .autotune
-        .as_ref()
-        .and_then(|autotune| autotune.workload_policy_rules.as_ref())
-    {
-        parse_workload_policy_rule_configs(rules)
-            .context("invalid autotune.workload_policy_rules")?;
+    if let Some((field, rules)) = workload_policy_rule_configs_from_user_config(config)? {
+        parse_workload_policy_rule_configs(rules).with_context(|| format!("invalid {field}"))?;
     }
 
     let experimental = config.experimental.unwrap_or(false);
@@ -577,7 +637,8 @@ pub fn parse_user_config_toml_versioned(
     let mut file = toml::from_str::<UserConfigFile>(contents)
         .map_err(|err| ConfigError::InvalidUserConfigToml(anyhow::Error::new(err)))?;
 
-    let diagnostics = schema_diagnostics(&raw);
+    let mut diagnostics = schema_diagnostics(&raw);
+    diagnostics.extend(workload_policy_config_diagnostics(&file));
     file.config_version = Some(version);
     file.diagnostics = diagnostics.clone();
 
@@ -1037,6 +1098,43 @@ mod tests {
     }
 
     #[test]
+    fn daemon_config_from_user_config_applies_nested_workload_policy_overrides() {
+        let toml = r#"
+            [autotune]
+            allow_medium_risk_apply = true
+
+            [[autotune.workload_policy.rules]]
+            situation = "browser_focused"
+            allowed_families = ["nice"]
+            allowed_objectives = ["browser_interactivity"]
+            autonomous_families = []
+        "#;
+        let parsed = parse_user_config_toml_versioned(toml).unwrap();
+        validate_daemon_user_config(&parsed.file).unwrap();
+
+        assert!(parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic.field.as_deref()
+                == Some("autotune.workload_policy.rules[0].autonomous_families")
+                && diagnostic.message.contains("disables autonomous apply")
+        }));
+
+        let daemon_config =
+            daemon_config_from_user_config(Some(&parsed.file), None, ActionSource::Cli).unwrap();
+        let matrix = daemon_config
+            .autotune
+            .workload_policy
+            .resolved_matrix()
+            .unwrap();
+        let rule = matrix.rule_for(crate::autotune::situation::SituationKind::BrowserFocused);
+
+        assert!(daemon_config.autotune.allow_medium_risk_apply);
+        assert_eq!(
+            rule.allowed_families,
+            ["nice"].into_iter().map(str::to_owned).collect()
+        );
+    }
+
+    #[test]
     fn daemon_config_from_user_config_applies_workload_policy_overrides() {
         let toml = r#"
             [autotune]
@@ -1065,6 +1163,60 @@ mod tests {
             rule.allowed_families,
             ["nice"].into_iter().map(str::to_owned).collect()
         );
+    }
+
+    #[test]
+    fn user_config_diagnostics_report_invalid_workload_policy_rules() {
+        let toml = r#"
+            [autotune]
+
+            [[autotune.workload_policy.rules]]
+            situation = "browser_focused"
+            allowed_families = ["nice"]
+            allowed_objectives = ["not_real"]
+            autonomous_families = []
+        "#;
+        let parsed = parse_user_config_toml_versioned(toml).unwrap();
+
+        assert!(parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic.level == crate::config::schema::ConfigDiagnosticLevel::Error
+                && diagnostic.field.as_deref() == Some("autotune.workload_policy.rules")
+                && diagnostic.message.contains("unknown objective")
+        }));
+        assert!(
+            validate_daemon_user_config(&parsed.file)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid autotune.workload_policy.rules")
+        );
+    }
+
+    #[test]
+    fn user_config_diagnostics_report_duplicate_workload_policy_rules() {
+        let toml = r#"
+            [autotune]
+
+            [[autotune.workload_policy.rules]]
+            situation = "browser_focused"
+            allowed_families = ["nice"]
+            allowed_objectives = ["browser_interactivity"]
+            autonomous_families = []
+
+            [[autotune.workload_policy.rules]]
+            situation = "browser_focused"
+            allowed_families = ["ionice"]
+            allowed_objectives = ["io_latency"]
+            autonomous_families = []
+        "#;
+        let parsed = parse_user_config_toml_versioned(toml).unwrap();
+
+        assert!(parsed.diagnostics.iter().any(|diagnostic| {
+            diagnostic.level == crate::config::schema::ConfigDiagnosticLevel::Error
+                && diagnostic.field.as_deref() == Some("autotune.workload_policy.rules")
+                && diagnostic
+                    .message
+                    .contains("duplicate workload policy rule")
+        }));
     }
 
     #[test]

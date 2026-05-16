@@ -1,8 +1,8 @@
 # Auto-tune Configuration
 
-`stutter` does not currently implement an autonomous auto-tuner. This document defines the future `[autotune]` configuration contract before parser, CLI, controller, or action-selection code is added.
+`stutter` supports daemon autotune configuration through the user config parser in `stutter/src/config_file.rs`.
 
-The current user config parser in `stutter/src/config_file.rs` only handles existing flat monitor defaults. Future implementation must add `[autotune]` parsing explicitly instead of relying on this document as active behavior.
+This document describes the active `[autotune]` configuration surface plus the policy fields used by the daemon runtime.
 
 ## Example
 
@@ -140,19 +140,50 @@ If scoring is inconclusive, the controller must revert unless an explicit future
 
 ## Action Lists
 
-`allowed_actions` is an allowlist of action identifiers the controller may consider.
+`daemon_enabled_action_families` is an allowlist of action families the daemon may consider.
 
-`denied_actions` is a denylist of action identifiers the controller must never apply.
+`daemon_denied_action_families` is a denylist of action families the daemon must never apply.
 
 The denylist wins over the allowlist.
 
-Initial action identifiers are:
+Current action family names are:
 
 ```text
 cpu_affinity_profile
+nice
+ionice
+uclamp
+cgroup_placement
 irq_affinity
-gpu_power_profile
-global_cpu_governor
+cpu_power
+gpu_power
+vm_knob
 ```
 
-Only `cpu_affinity_profile` is appropriate for the initial low-risk autonomous design. The other listed identifiers document excluded higher-risk action families and must remain denied unless their safety design is implemented explicitly.
+## Workload Policy Rules
+
+`[autotune.workload_policy]` can override the built-in workload policy matrix.
+
+Empty workload policy config means built-in defaults are used.
+
+Each rule overrides one situation. Any situation not listed keeps its built-in default.
+
+```toml
+[autotune]
+
+[[autotune.workload_policy.rules]]
+situation = "browser_focused"
+allowed_families = ["nice", "ionice", "uclamp"]
+allowed_objectives = ["browser_interactivity", "desktop_interactivity"]
+autonomous_families = []
+```
+
+`allowed_families` controls which action families may be proposed for that situation.
+
+`allowed_objectives` controls which planner objectives are allowed. An empty list means all objectives are allowed for that rule.
+
+`autonomous_families` controls which allowed families may be selected in autonomous apply modes. An empty list is valid and means the rule allows suggestions but no autonomous apply for that situation.
+
+Invalid action family names, invalid objective names, duplicate situation rules, and conflicting workload policy locations produce config diagnostics and validation errors.
+
+The legacy alias `[[autotune.workload_policy_rules]]` is still accepted, but new config should use `[[autotune.workload_policy.rules]]`.
