@@ -99,13 +99,7 @@ mod tests {
 
     #[test]
     fn daemon_soak_text_contains_budget_metrics() {
-        let config = crate::daemon::soak::DaemonSoakConfig {
-            daemon: crate::daemon::DaemonConfig::from_preset(
-                crate::daemon::DaemonPreset::ObserveOnly,
-                crate::daemon::ActionSource::Cli,
-            ),
-            ..Default::default()
-        };
+        let config = crate::daemon::soak::DaemonSoakConfig::default();
         let report = crate::daemon::run_fake_daemon_soak(&config);
 
         let text = render_soak_text(&report);

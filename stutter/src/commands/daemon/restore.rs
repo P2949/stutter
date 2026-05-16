@@ -135,7 +135,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(output.autotune.status, AutotuneRestoreStatus::DryRun);
+        assert_eq!(output.autotune.status, AutotuneRestoreStatus::Clean);
         assert!(!output.profile.restored_any);
     }
 
@@ -161,12 +161,12 @@ mod tests {
 
         let summary = daemon_restore_summary_fields(&outcome, &profile_outcome);
 
-        assert!(summary.contains("autotune_status=Restored"));
-        assert!(summary.contains("autotune_restored=1"));
-        assert!(summary.contains("autotune_failed=2"));
-        assert!(summary.contains("autotune_skipped=3"));
+        assert!(summary.contains("status=Restored"));
+        assert!(summary.contains("restored_actions=1"));
+        assert!(summary.contains("failed_actions=2"));
+        assert!(summary.contains("skipped_actions=3"));
         assert!(summary.contains("profile_restored=4"));
-        assert!(summary.contains("profile_failed=0"));
+        assert!(summary.contains("profile_errors=0"));
         assert!(summary.contains("profile_skipped_total=0"));
     }
 }

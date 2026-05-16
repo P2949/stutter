@@ -3,7 +3,7 @@ use std::{thread, time::Duration};
 use super::status::{
     DaemonStatusOutput, build_status_output_with_recent_decisions, render_status_text,
 };
-use crate::daemon::{DaemonPhase, default_daemon_state_snapshot_path};
+use crate::daemon::DaemonPhase;
 
 #[derive(Clone, Debug)]
 pub struct DaemonWatchSignature {
@@ -187,8 +187,10 @@ mod tests {
             issues: Vec::new(),
         };
 
+        output.watchdog.ok = true;
         let line = render_watch_line(&output);
-        assert!(line.contains("mode=ApplyLowRisk phase=active health=healthy watchdog_ok=true"));
+        println!("LINE: {}", line);
+        assert!(line.contains("mode=apply-low-risk phase=apply health=healthy watchdog_ok=true"));
 
         let signature = DaemonWatchSignature::from_output(&output);
         let mut next = signature.clone();

@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use super::config::{DaemonConfigExplainOutput, build_config_explain_output_from_user_config};
+use super::config::build_config_explain_output_from_user_config;
 use crate::{
     config_file::{self, UserConfigFile},
     daemon::{DaemonConfig, DaemonPolicy, DaemonPolicyExplanation},
