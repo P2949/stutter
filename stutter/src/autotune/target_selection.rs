@@ -154,6 +154,7 @@ pub fn mutable_task_snapshots_for_observation_with_mode(
                 selector,
                 used_fallback_root,
                 observation.target_root_pid,
+                observation,
             )
         })
         .collect();
@@ -189,13 +190,27 @@ fn mutable_task_matches_workload_starttime(
     true
 }
 
+fn is_explicitly_protected_task(
+    task: &ActiveTaskSnapshot,
+    observation: &AutotuneObservation,
+) -> bool {
+    observation
+        .protected_tasks
+        .iter()
+        .any(|protected| protected.tid == task.tid || protected.process_pid == task.tid)
+}
+
 fn mutable_task_allowed(
     task: &ActiveTaskSnapshot,
     selector: TaskTargetSelector,
     allow_unknown_fallback_root: bool,
     target_root_pid: Option<u32>,
+    observation: &AutotuneObservation,
 ) -> bool {
-    if task.tid == 0 || is_protected_task_class(task.class) {
+    if task.tid == 0
+        || is_protected_task_class(task.class)
+        || is_explicitly_protected_task(task, observation)
+    {
         return false;
     }
 
@@ -293,7 +308,7 @@ fn task_identity_from_snapshot(task: ActiveTaskSnapshot) -> TaskIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::autotune::observation::WorkloadIdentity;
+    use crate::autotune::observation::{ProtectedTask, WorkloadIdentity};
 
     fn task(tid: u32, class: TaskClass) -> ActiveTaskSnapshot {
         ActiveTaskSnapshot {
@@ -332,6 +347,36 @@ mod tests {
             mutable_task_targets_for_observation(&observation, TaskTargetSelector::FullTargetTree);
 
         assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn explicit_protected_tasks_are_never_selected() {
+        let observation = AutotuneObservation {
+            target_root_pid: Some(10),
+            active_tasks: vec![
+                task(10, TaskClass::Game),
+                task(11, TaskClass::GameWorkerThread),
+                task(12, TaskClass::Helper),
+            ],
+            protected_tasks: vec![ProtectedTask {
+                tid: 11,
+                process_pid: 10,
+                comm: "protected-worker".to_owned(),
+                class: TaskClass::GameWorkerThread,
+                reason: "explicit protected task".to_owned(),
+            }],
+            ..AutotuneObservation::default()
+        };
+
+        let targets = mutable_task_targets_for_observation(
+            &observation,
+            TaskTargetSelector::GameRenderAndWorkers,
+        );
+
+        assert_eq!(
+            targets.iter().map(|target| target.tid).collect::<Vec<_>>(),
+            vec![12]
+        );
     }
 
     #[test]
