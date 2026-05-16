@@ -1,24 +1,19 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    actions::{
-        TaskIdentity,
-        cgroup::{CgroupPlacementAction, CgroupPlacementTarget},
-    },
+    actions::cgroup::{CgroupPlacementAction, CgroupPlacementTarget},
     autotune::{
         candidate::{CandidateAction, CandidateEvidence, CgroupPlacementActionPlan},
         objective::ObjectiveKind,
-        observation::{ActiveTaskSnapshot, is_protected_task_class},
         protection::mutation_allowed_for_pid,
         providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
         situation::SituationKind,
         target_selection::{
             TargetSelectionMode, TaskTargetSelector,
-            mutable_task_snapshots_for_observation_with_mode,
+            mutable_cgroup_targets_for_observation_with_mode,
         },
     },
     daemon::CgroupTargetRole,
-    process_tree::TaskClass,
 };
 
 #[derive(Default)]
@@ -169,79 +164,8 @@ fn cgroup_targets_for_observation(
     let selector = match role {
         "compile" => TaskTargetSelector::CompilerAndLinker,
         "game" => TaskTargetSelector::GameRenderAndWorkers,
-        "virtual_machine" => TaskTargetSelector::BackgroundHelpers,
+        "virtual_machine" => TaskTargetSelector::VirtualMachineAndHelpers,
         _ => TaskTargetSelector::FullTargetTree,
     };
-    let selection = mutable_task_snapshots_for_observation_with_mode(observation, selector, mode);
-    let items = selection
-        .items
-        .into_iter()
-        .filter(|task| cgroup_candidate_allows_task(task, role, selection.used_fallback_root))
-        .map(|task| CgroupPlacementTarget {
-            identity: TaskIdentity {
-                tid: task.tid,
-                process_pid: Some(task.process_pid),
-                comm: Some(task.comm),
-                starttime_ticks: task.task_starttime_ticks.or(task.process_starttime_ticks),
-            },
-            class: task.class,
-        })
-        .collect();
-
-    crate::autotune::target_selection::MutableTaskSelection {
-        items,
-        used_fallback_root: selection.used_fallback_root,
-        missing_active_snapshots: selection.missing_active_snapshots,
-    }
-}
-
-fn cgroup_candidate_allows_task(
-    task: &ActiveTaskSnapshot,
-    role: &str,
-    allow_unknown_fallback_root: bool,
-) -> bool {
-    if task.tid == 0 || is_protected_task_class(task.class) {
-        return false;
-    }
-
-    if allow_unknown_fallback_root
-        && task.class == TaskClass::Unknown
-        && task.tid == task.process_pid
-    {
-        return true;
-    }
-
-    match role {
-        "compile" => matches!(
-            task.class,
-            TaskClass::BuildJob
-                | TaskClass::Compiler
-                | TaskClass::Linker
-                | TaskClass::PackageManager
-                | TaskClass::Indexer
-                | TaskClass::Helper
-        ),
-        "game" => matches!(
-            task.class,
-            TaskClass::Game
-                | TaskClass::GameHelper
-                | TaskClass::GameRenderThread
-                | TaskClass::GameWorkerThread
-                | TaskClass::WineServer
-                | TaskClass::SteamRuntime
-                | TaskClass::Helper
-        ),
-        "virtual_machine" => matches!(task.class, TaskClass::VirtualMachine | TaskClass::Helper),
-        _ => !matches!(
-            task.class,
-            TaskClass::AudioRealtime
-                | TaskClass::Input
-                | TaskClass::KernelThread
-                | TaskClass::IrqThread
-                | TaskClass::Service
-                | TaskClass::NetworkDaemon
-                | TaskClass::StorageDaemon
-                | TaskClass::Unknown
-        ),
-    }
+    mutable_cgroup_targets_for_observation_with_mode(observation, selector, mode)
 }

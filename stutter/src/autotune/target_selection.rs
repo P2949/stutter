@@ -1,5 +1,5 @@
 use crate::{
-    actions::TaskIdentity,
+    actions::{TaskIdentity, cgroup::CgroupPlacementTarget},
     autotune::observation::{ActiveTaskSnapshot, AutotuneObservation, is_protected_task_class},
     process_tree::TaskClass,
 };
@@ -10,6 +10,7 @@ pub enum TaskTargetSelector {
     FullTargetTree,
     CompilerAndLinker,
     BackgroundHelpers,
+    VirtualMachineAndHelpers,
     GameRenderAndWorkers,
     BrowserRenderersAndHelpers,
 }
@@ -93,6 +94,30 @@ pub fn mutable_task_snapshots_for_observation(
     .items
 }
 
+pub fn mutable_cgroup_targets_for_observation_with_mode(
+    observation: &AutotuneObservation,
+    selector: TaskTargetSelector,
+    mode: TargetSelectionMode,
+) -> MutableTaskSelection<CgroupPlacementTarget> {
+    let selection = mutable_task_snapshots_for_observation_with_mode(observation, selector, mode);
+
+    MutableTaskSelection {
+        items: selection
+            .items
+            .into_iter()
+            .map(|task| {
+                let class = task.class;
+                CgroupPlacementTarget {
+                    identity: task_identity_from_snapshot(task),
+                    class,
+                }
+            })
+            .collect(),
+        used_fallback_root: selection.used_fallback_root,
+        missing_active_snapshots: selection.missing_active_snapshots,
+    }
+}
+
 pub fn mutable_task_snapshots_for_observation_with_mode(
     observation: &AutotuneObservation,
     selector: TaskTargetSelector,
@@ -163,6 +188,9 @@ fn mutable_task_allowed(
                 | TaskClass::Indexer
                 | TaskClass::VirtualMachine
         ),
+        TaskTargetSelector::VirtualMachineAndHelpers => {
+            matches!(task.class, TaskClass::VirtualMachine | TaskClass::Helper)
+        }
         TaskTargetSelector::GameRenderAndWorkers => matches!(
             task.class,
             TaskClass::Game
@@ -285,6 +313,47 @@ mod tests {
             targets.iter().map(|target| target.tid).collect::<Vec<_>>(),
             vec![10, 11, 12]
         );
+    }
+
+    #[test]
+    fn cgroup_target_selection_preserves_identity_and_uses_shared_filters() {
+        let observation = AutotuneObservation {
+            target_root_pid: Some(10),
+            active_tasks: vec![
+                task(10, TaskClass::VirtualMachine),
+                task(11, TaskClass::Helper),
+                task(12, TaskClass::Compiler),
+                task(13, TaskClass::AudioRealtime),
+            ],
+            ..AutotuneObservation::default()
+        };
+
+        let selection = mutable_cgroup_targets_for_observation_with_mode(
+            &observation,
+            TaskTargetSelector::VirtualMachineAndHelpers,
+            TargetSelectionMode::ApplyCapable,
+        );
+
+        assert_eq!(
+            selection
+                .items
+                .iter()
+                .map(|target| target.identity.tid)
+                .collect::<Vec<_>>(),
+            vec![10, 11]
+        );
+        assert_eq!(
+            selection
+                .items
+                .iter()
+                .map(|target| target.class)
+                .collect::<Vec<_>>(),
+            vec![TaskClass::VirtualMachine, TaskClass::Helper]
+        );
+        assert_eq!(selection.items[0].identity.process_pid, Some(10));
+        assert_eq!(selection.items[0].identity.starttime_ticks, Some(10));
+        assert!(!selection.used_fallback_root);
+        assert!(!selection.missing_active_snapshots);
     }
 
     #[test]
