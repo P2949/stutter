@@ -138,8 +138,16 @@ pub fn mutable_task_snapshots_for_observation_with_mode(
     snapshots.sort_by_key(|task| task.tid);
     snapshots.dedup_by_key(|task| task.tid);
 
+    let expected_process_starttime_ticks = observation
+        .workload_identity
+        .as_ref()
+        .and_then(|identity| identity.process_starttime_ticks);
+
     let items = snapshots
         .into_iter()
+        .filter(|task| {
+            mutable_task_matches_workload_starttime(task, expected_process_starttime_ticks)
+        })
         .filter(|task| mutable_task_allowed(task, selector, used_fallback_root))
         .collect();
 
@@ -148,6 +156,30 @@ pub fn mutable_task_snapshots_for_observation_with_mode(
         used_fallback_root,
         missing_active_snapshots,
     }
+}
+
+fn mutable_task_matches_workload_starttime(
+    task: &ActiveTaskSnapshot,
+    expected_process_starttime_ticks: Option<u64>,
+) -> bool {
+    let Some(expected_process_starttime_ticks) = expected_process_starttime_ticks else {
+        return true;
+    };
+
+    if let Some(process_starttime_ticks) = task.process_starttime_ticks
+        && process_starttime_ticks != expected_process_starttime_ticks
+    {
+        return false;
+    }
+
+    if task.tid == task.process_pid
+        && let Some(task_starttime_ticks) = task.task_starttime_ticks
+        && task_starttime_ticks != expected_process_starttime_ticks
+    {
+        return false;
+    }
+
+    true
 }
 
 fn mutable_task_allowed(
@@ -251,6 +283,7 @@ fn task_identity_from_snapshot(task: ActiveTaskSnapshot) -> TaskIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::autotune::observation::WorkloadIdentity;
 
     fn task(tid: u32, class: TaskClass) -> ActiveTaskSnapshot {
         ActiveTaskSnapshot {
@@ -312,6 +345,81 @@ mod tests {
         assert_eq!(
             targets.iter().map(|target| target.tid).collect::<Vec<_>>(),
             vec![10, 11, 12]
+        );
+    }
+
+    #[test]
+    fn stale_process_starttime_snapshots_are_not_selected() {
+        let observation = AutotuneObservation {
+            target_root_pid: Some(10),
+            workload_identity: Some(WorkloadIdentity {
+                root_pid: 10,
+                process_starttime_ticks: Some(100),
+                exe_dev: None,
+                exe_ino: None,
+                cgroup_path: None,
+                focus_kind: None,
+                class_distribution: std::collections::BTreeMap::new(),
+                stable_hash: "test-hash".to_owned(),
+            }),
+            active_tasks: vec![
+                ActiveTaskSnapshot {
+                    tid: 10,
+                    process_pid: 10,
+                    comm: "current-root".to_owned(),
+                    class: TaskClass::Game,
+                    process_starttime_ticks: Some(100),
+                    task_starttime_ticks: Some(100),
+                    cgroup_path: None,
+                },
+                ActiveTaskSnapshot {
+                    tid: 11,
+                    process_pid: 10,
+                    comm: "current-worker".to_owned(),
+                    class: TaskClass::GameWorkerThread,
+                    process_starttime_ticks: Some(100),
+                    task_starttime_ticks: Some(101),
+                    cgroup_path: None,
+                },
+                ActiveTaskSnapshot {
+                    tid: 12,
+                    process_pid: 10,
+                    comm: "stale-worker".to_owned(),
+                    class: TaskClass::GameWorkerThread,
+                    process_starttime_ticks: Some(99),
+                    task_starttime_ticks: Some(102),
+                    cgroup_path: None,
+                },
+                ActiveTaskSnapshot {
+                    tid: 13,
+                    process_pid: 13,
+                    comm: "stale-root".to_owned(),
+                    class: TaskClass::Game,
+                    process_starttime_ticks: Some(99),
+                    task_starttime_ticks: Some(99),
+                    cgroup_path: None,
+                },
+                ActiveTaskSnapshot {
+                    tid: 14,
+                    process_pid: 10,
+                    comm: "missing-starttime-worker".to_owned(),
+                    class: TaskClass::GameWorkerThread,
+                    process_starttime_ticks: None,
+                    task_starttime_ticks: None,
+                    cgroup_path: None,
+                },
+            ],
+            ..AutotuneObservation::default()
+        };
+
+        let targets = mutable_task_targets_for_observation(
+            &observation,
+            TaskTargetSelector::GameRenderAndWorkers,
+        );
+
+        assert_eq!(
+            targets.iter().map(|target| target.tid).collect::<Vec<_>>(),
+            vec![10, 11, 14]
         );
     }
 
