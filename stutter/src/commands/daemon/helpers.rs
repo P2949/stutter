@@ -118,13 +118,15 @@ mod tests {
 
     #[test]
     fn daemon_explain_policy_uses_configured_safety_with_live_state() {
-        let mut state = DaemonState::default();
-        state.mode = DaemonMode::ApplyLowRisk;
-        state.active_target = Some(crate::daemon::DaemonTargetState {
-            root_pid: Some(1234),
-            active_targets: 1,
-            comm: Some("game".to_owned()),
-        });
+        let state = DaemonState {
+            mode: DaemonMode::ApplyLowRisk,
+            active_target: Some(crate::daemon::DaemonTargetState {
+                root_pid: Some(1234),
+                active_targets: 1,
+                comm: Some("game".to_owned()),
+            }),
+            ..Default::default()
+        };
 
         let policy = build_policy_from_daemon_state_with_user_config_result(&state, true, Ok(None));
 
@@ -148,8 +150,10 @@ mod tests {
 
     #[test]
     fn daemon_explain_policy_falls_back_to_observe_only_when_config_is_unreadable() {
-        let mut state = DaemonState::default();
-        state.mode = DaemonMode::ApplyLowRisk;
+        let state = DaemonState {
+            mode: DaemonMode::ApplyLowRisk,
+            ..Default::default()
+        };
 
         let policy = build_policy_from_daemon_state_with_user_config_result(
             &state,

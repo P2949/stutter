@@ -2,6 +2,7 @@ use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::{ArgAction, ArgMatches, Args, CommandFactory, Parser, Subcommand, parser::ValueSource};
 
+#[cfg(test)]
 pub use crate::commands::input::RulesImportArgs;
 use crate::{
     commands::input::{
