@@ -246,17 +246,6 @@ pub fn append_low_risk_history_event(
     crate::autotune::history::append_autotune_history_event(path, event)
 }
 
-pub fn register_audited_low_risk_outcome_for_exit_rollback(
-    registry: &crate::autotune::shutdown::ActiveAutotuneActionRegistry,
-    outcome: &AuditedCandidateApplyOutcome,
-) {
-    crate::autotune::shutdown::register_cpu_affinity_rollback(
-        registry,
-        format!("cpu-affinity-profile:{}", outcome.candidate_name),
-        outcome.rollback.clone(),
-    );
-}
-
 pub fn apply_candidate_with_audit(
     candidate: CandidateAction,
 ) -> anyhow::Result<AuditedCandidateApplyOutcome> {
@@ -1315,37 +1304,6 @@ mod tests {
         assert!(events[0].rollback_performed);
 
         std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn audited_low_risk_outcome_registers_exit_rollback() {
-        let registry = crate::autotune::shutdown::ActiveAutotuneActionRegistry::new();
-        let outcome = AuditedCandidateApplyOutcome {
-            candidate_name: "game-main".to_owned(),
-            action_kind: "cpu_affinity_profile".to_owned(),
-            affected_tasks: 31,
-            safety_class: SafetyClass::ReversibleLowRisk,
-            state: ActionState {
-                applied: true,
-                affected_tasks: 31,
-                checked_tasks: 31,
-                pending_changes: 0,
-                warnings: Vec::new(),
-            },
-            rollback: RollbackToken::CpuAffinityRestoreFile {
-                path: PathBuf::from("/tmp/stutter-restore.json"),
-                affected_tasks: 31,
-            },
-        };
-
-        register_audited_low_risk_outcome_for_exit_rollback(&registry, &outcome);
-
-        let actions = registry.snapshot();
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].action_id, "cpu-affinity-profile:game-main");
-        assert_eq!(actions[0].action_kind, "cpu_affinity_profile");
-        assert_eq!(actions[0].safety_class, SafetyClass::ReversibleLowRisk);
-        assert_eq!(actions[0].rollback.affected_tasks(), 31);
     }
 
     fn apply_policy() -> ActionRunPolicy {
