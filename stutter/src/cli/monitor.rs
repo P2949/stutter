@@ -1,272 +1,715 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::time::Duration;
 
-use clap::Args;
-use serde::Serialize;
+use clap::ArgMatches;
 
-use crate::{
-    cli::RecordingMode,
-    config::{
-        CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX,
-        effective::resolve_monitor_config_sources,
-        layer::MonitorConfigLayer,
-        merge::{CliOverrides, ConfigSources, DefaultConfig, PresetConfig},
-        model::MonitorConfig,
-    },
-};
+use super::*;
+use crate::config::TARGET_PIDS_MAX;
 
-#[derive(Args, Clone, Debug, Default, Serialize)]
+#[derive(Args, Debug, Clone)]
 pub struct MonitorArgs {
-    #[arg(short, long)]
-    pub pid: Vec<u32>,
+    #[arg(long = "pid", short = 'p', value_name = "PID")]
+    pub target_pids: Vec<u32>,
 
-    #[arg(short, long = "tree-pid")]
-    pub tree_pid: Vec<u32>,
+    #[arg(long = "tree-pid", value_name = "PID")]
+    pub tree_pids: Vec<u32>,
 
-    #[arg(long = "exclude-tree-pid")]
-    pub exclude_tree_pid: Vec<u32>,
+    #[arg(long = "exclude-tree-pid", value_name = "PID")]
+    pub exclude_tree_pids: Vec<u32>,
 
-    #[arg(long = "include-comm")]
-    pub include_comm: Vec<String>,
-
-    #[arg(long = "exclude-comm")]
-    pub exclude_comm: Vec<String>,
-
-    #[arg(short, long = "summary-ms")]
+    #[arg(long = "summary-ms", value_name = "MS")]
     pub summary_period_ms: Option<u64>,
 
-    #[arg(long = "epoch")]
+    #[arg(long = "epoch", value_name = "MS")]
     pub epoch_period_ms: Option<u64>,
 
-    #[arg(short, long = "spike-us")]
+    #[arg(long = "spike-us", value_name = "US")]
     pub spike_threshold_us: Option<u64>,
 
-    #[arg(long = "alert-threshold-ms")]
+    #[arg(long = "alert-threshold-ms", value_name = "MS")]
     pub alert_threshold_ms: Option<u64>,
 
-    #[arg(long = "alert-webhook-url")]
+    #[arg(long = "alert-webhook-url", value_name = "URL")]
     pub alert_webhook_url: Option<String>,
 
-    #[arg(long)]
-    pub hwmon: bool,
+    #[arg(long, short = 'v')]
+    pub verbose: bool,
 
-    #[arg(long)]
-    pub no_hwmon: bool,
+    #[arg(long = "run-name", value_name = "NAME")]
+    pub run_name: Option<String>,
 
-    #[arg(long = "hwmon-root")]
-    pub hwmon_root: Option<PathBuf>,
+    #[arg(long = "out-dir", alias = "out", value_name = "PATH")]
+    pub out_dir: Option<PathBuf>,
 
-    #[arg(long = "hwmon-drm-card")]
-    pub hwmon_drm_card: Option<String>,
+    #[arg(long = "include-comm", value_name = "PATTERN")]
+    pub include_comm: Vec<String>,
 
-    #[arg(long = "hwmon-render-node")]
-    pub hwmon_render_node: Option<PathBuf>,
+    #[arg(long = "exclude-comm", value_name = "PATTERN")]
+    pub exclude_comm: Vec<String>,
 
-    #[arg(long)]
-    pub cpu_freq: bool,
+    #[arg(long = "keep-missing-pid")]
+    pub keep_missing_pid: bool,
 
-    #[arg(long)]
-    pub no_cpu_freq: bool,
-
-    #[arg(long)]
-    pub faults: bool,
-
-    #[arg(long)]
-    pub no_faults: bool,
-
-    #[arg(long)]
-    pub stat_wait: bool,
-
-    #[arg(long)]
-    pub no_stat_wait: bool,
-
-    #[arg(long)]
-    pub block_io: bool,
-
-    #[arg(long)]
-    pub no_block_io: bool,
-
-    #[arg(long)]
-    pub runtime_slices: bool,
-
-    #[arg(long)]
-    pub no_runtime_slices: bool,
-
-    #[arg(long)]
-    pub irq_latency: bool,
-
-    #[arg(long = "irq")]
-    pub irqs: Vec<u32>,
-
-    #[arg(long)]
-    pub cpu_perf: bool,
-
-    #[arg(long)]
-    pub cpu_perf_kernel: bool,
-
-    #[arg(long)]
-    pub cpu_perf_cache_refs: bool,
-
-    #[arg(long, default_value = "1024")]
-    pub cpu_perf_max_tasks: u32,
-
-    #[arg(long, default_value = "1024")]
-    pub runtime_slices_max_tasks: u32,
-
-    #[arg(long)]
-    pub ringbuf_size_kb: Option<u32>,
-
-    #[arg(long)]
-    pub wakeup_map_factor: Option<u32>,
-
-    #[arg(long)]
-    pub otlp_endpoint: Option<String>,
-
-    #[arg(long, default_value = "stutter")]
-    pub otel_service_name: String,
-
-    #[arg(long)]
-    pub csv: Option<PathBuf>,
-
-    #[arg(long)]
-    pub stream_csv: Option<String>,
-
-    #[arg(long)]
-    pub json_stream: bool,
-
-    #[arg(long)]
-    pub tui: bool,
-
-    #[arg(long, default_value = "1024")]
-    pub max_tasks: Option<u32>,
-
-    #[arg(long)]
+    #[arg(long = "watch-process", value_name = "COMM")]
     pub watch_process: Option<String>,
-
-    #[arg(long, default_value = "1000")]
-    pub watch_poll_ms: u64,
-
-    #[arg(long)]
-    pub watch_timeout_seconds: Option<u64>,
 
     #[arg(long)]
     pub persistent: bool,
 
-    #[arg(long)]
-    pub keep_missing_pid: bool,
+    #[arg(long = "watch-poll-ms", default_value_t = 2_000)]
+    pub watch_poll_ms: u64,
 
-    #[arg(long)]
-    pub follow_exec: bool,
+    #[arg(long = "watch-timeout-seconds", value_name = "SECONDS")]
+    pub watch_timeout_seconds: Option<u64>,
 
-    #[arg(long)]
-    pub no_follow_exec: bool,
+    #[arg(long, value_name = "N")]
+    pub max_tasks: Option<usize>,
 
-    #[arg(long)]
-    pub cgroupv2: Option<PathBuf>,
+    #[arg(long = "csv", value_name = "PATH")]
+    pub csv_path: Option<PathBuf>,
 
-    #[arg(long)]
-    pub native_cgroup_filter: bool,
+    #[arg(
+        long = "stream-csv",
+        value_name = "PATH_OR_-",
+        conflicts_with = "csv_path"
+    )]
+    pub stream_csv: Option<String>,
 
-    #[arg(long)]
-    pub run_name: Option<String>,
+    #[arg(long = "irq-latency")]
+    pub irq_latency: bool,
 
-    #[arg(short, long)]
-    pub out_dir: Option<PathBuf>,
+    #[arg(long = "irq", value_name = "IRQ")]
+    pub irqs: Vec<u32>,
 
-    #[arg(long)]
-    pub no_record: bool,
+    #[arg(long = "hwmon", id = "hwmon", conflicts_with = "no_hwmon")]
+    pub hwmon: bool,
 
-    #[arg(long)]
-    pub retention_max_runs: Option<u32>,
+    #[arg(long = "no-hwmon", help = "Disable GPU hwmon telemetry")]
+    pub no_hwmon: bool,
 
-    #[arg(long)]
-    pub retention_max_bytes: Option<u64>,
+    #[arg(long = "hwmon-root", value_name = "PATH", requires = "hwmon")]
+    pub hwmon_root: Option<PathBuf>,
 
-    #[arg(long)]
-    pub retention_max_age_seconds: Option<u64>,
+    #[arg(long = "hwmon-drm-card", value_name = "CARD", requires = "hwmon")]
+    pub hwmon_drm_card: Option<String>,
 
-    #[arg(long)]
-    pub retention_min_free_bytes: Option<u64>,
+    #[arg(long = "hwmon-render-node", value_name = "NODE", requires = "hwmon")]
+    pub hwmon_render_node: Option<PathBuf>,
 
-    #[arg(long)]
-    pub preset: Option<String>,
-
-    #[arg(long)]
+    #[arg(long = "mangohud-log", value_name = "PATH")]
     pub mangohud_log: Option<PathBuf>,
 
-    #[arg(long)]
+    #[arg(long = "mangohud-log-live", requires = "mangohud_log")]
+    pub mangohud_log_live: bool,
+
+    #[arg(long = "tui")]
+    pub tui: bool,
+
+    #[arg(long = "retain-intervals", value_name = "N")]
+    pub retain_intervals: Option<usize>,
+
+    #[arg(long = "retention-max-runs", value_name = "N")]
+    pub retention_max_run_count: Option<usize>,
+
+    #[arg(long = "retention-max-bytes", value_name = "BYTES")]
+    pub retention_max_total_bytes: Option<u64>,
+
+    #[arg(long = "retention-max-age-seconds", value_name = "SECONDS")]
+    pub retention_max_age_seconds: Option<u64>,
+
+    #[arg(long = "retention-min-free-bytes", value_name = "BYTES")]
+    pub retention_min_free_bytes: Option<u64>,
+
+    #[arg(long = "no-record")]
+    pub no_record: bool,
+
+    #[arg(
+        long = "cpu-freq",
+        help = "Collect CPU frequency information (enabled by default for recording runs)",
+        conflicts_with = "no_cpu_freq"
+    )]
+    pub cpu_freq: bool,
+
+    #[arg(long = "no-cpu-freq", help = "Disable CPU frequency collection")]
+    pub no_cpu_freq: bool,
+
+    #[arg(long = "cgroupv2", value_name = "PATH")]
+    pub cgroupv2: Option<PathBuf>,
+
+    #[arg(long = "native-cgroup-filter", requires = "cgroupv2")]
+    pub native_cgroup_filter: bool,
+
+    #[arg(
+        long = "follow-exec",
+        default_value_t = true,
+        action = ArgAction::SetTrue,
+        conflicts_with = "no_follow_exec"
+    )]
+    pub follow_exec: bool,
+
+    #[arg(long = "no-follow-exec", action = ArgAction::SetTrue)]
+    pub no_follow_exec: bool,
+
+    #[arg(long = "faults", conflicts_with = "no_faults")]
+    pub faults: bool,
+
+    #[arg(long = "no-faults", help = "Disable page fault collection")]
+    pub no_faults: bool,
+
+    #[arg(
+        long = "cpu-perf",
+        help = "Collect per-task CPU hardware counters for IPC/cache-miss diagnostics"
+    )]
+    pub cpu_perf: bool,
+
+    #[arg(
+        long = "cpu-perf-kernel",
+        help = "Include kernel/hypervisor time in CPU perf counters; default is user-space only"
+    )]
+    pub cpu_perf_kernel: bool,
+
+    #[arg(
+        long = "cpu-perf-max-tasks",
+        default_value_t = 128,
+        value_name = "N",
+        help = "Maximum active target tasks to attach CPU perf counters to"
+    )]
+    pub cpu_perf_max_tasks: usize,
+
+    #[arg(
+        long = "cpu-perf-cache-refs",
+        help = "Also collect cache references so cache miss rate can be computed; otherwise only cache MPKI is computed"
+    )]
+    pub cpu_perf_cache_refs: bool,
+
+    #[arg(long = "block-io", conflicts_with = "no_block_io")]
+    pub block_io: bool,
+
+    #[arg(long = "no-block-io", help = "Disable block I/O collection")]
+    pub no_block_io: bool,
+
+    #[arg(long = "stat-wait", conflicts_with = "no_stat_wait")]
+    pub stat_wait: bool,
+
+    #[arg(long = "no-stat-wait", help = "Disable stat-wait collection")]
+    pub no_stat_wait: bool,
+
+    #[arg(
+        long = "runtime-slices",
+        conflicts_with = "no_runtime_slices",
+        help = "Collect per-thread CPU runtime/wait slices from procfs schedstat"
+    )]
+    pub runtime_slices: bool,
+
+    #[arg(
+        long = "no-runtime-slices",
+        help = "Disable per-thread runtime-slice collection"
+    )]
+    pub no_runtime_slices: bool,
+
+    #[arg(
+        long = "runtime-slices-max-tasks",
+        default_value_t = 256,
+        value_name = "N"
+    )]
+    pub runtime_slices_max_tasks: usize,
+
+    #[arg(
+        long = "json-stream",
+        help = "Emit scheduler spike events to stdout as newline-delimited JSON"
+    )]
+    pub json_stream: bool,
+
+    #[arg(long = "metrics-port", value_name = "PORT")]
+    pub metrics_port: Option<u16>,
+
+    #[arg(
+        long = "preset",
+        value_name = "NAME",
+        help = "Apply named monitor defaults: gaming, recording, diagnosis, lightweight"
+    )]
+    pub preset: Option<String>,
+
+    #[arg(long = "ringbuf-size-kb", value_name = "KB")]
+    pub ringbuf_size_kb: Option<u32>,
+
+    #[arg(long = "wakeup-map-factor", value_name = "N")]
+    pub wakeup_map_factor: Option<u32>,
+
+    #[arg(long = "otlp-endpoint", value_name = "URL")]
+    pub otlp_endpoint: Option<String>,
+
+    #[arg(long = "otel-service-name", default_value = "stutter")]
+    pub otel_service_name: String,
+
+    #[arg(long = "auto-focus")]
     pub auto_focus: bool,
 
-    #[arg(long, default_value = "1000")]
-    pub auto_focus_poll_ms: u64,
+    #[arg(
+        long = "focus-source",
+        value_enum,
+        default_value_t = FocusSource::Heuristic,
+        help = "Auto-focus source: heuristic, foreground, or hybrid"
+    )]
+    pub focus_source: FocusSource,
 
-    #[arg(long, default_value = "0.60")]
-    pub auto_focus_min_confidence: f64,
-
-    #[arg(long, default_value = "5000")]
-    pub auto_focus_switch_cooldown_ms: u64,
-
-    #[arg(long, default_value = "0.20")]
-    pub auto_focus_switch_margin: f64,
-
-    #[arg(long, default_value = "2")]
-    pub auto_focus_required_polls: u32,
-
-    #[arg(long, default_value = "4")]
-    pub auto_focus_max_roots: u32,
-
-    #[arg(long)]
+    #[arg(
+        long = "foreground-window",
+        help = "Record foreground-window events even when explicit targets are used"
+    )]
     pub foreground_window: bool,
 
-    #[arg(long, default_value = "auto")]
+    #[arg(
+        long = "foreground-source",
+        value_enum,
+        default_value_t = ForegroundSource::Auto,
+        help = "Foreground-window provider: auto, sway, hyprland, x11"
+    )]
     pub foreground_source: ForegroundSource,
 
-    #[arg(long, default_value = "1000")]
+    #[arg(long = "foreground-poll-ms", default_value_t = 1000)]
     pub foreground_poll_ms: u64,
 
-    #[arg(long, default_value = "2500")]
+    #[arg(long = "foreground-max-stale-ms", default_value_t = 2500)]
     pub foreground_max_stale_ms: u64,
 
-    #[arg(long)]
+    #[arg(long = "foreground-include-title")]
     pub foreground_include_title: bool,
 
-    #[arg(long, default_value = "heuristic")]
-    pub focus_source: FocusSource,
+    #[arg(long = "auto-focus-poll-ms", default_value_t = 1000)]
+    pub auto_focus_poll_ms: u64,
+
+    #[arg(long = "auto-focus-min-confidence", default_value_t = 0.60)]
+    pub auto_focus_min_confidence: f32,
+
+    #[arg(long = "auto-focus-switch-cooldown-ms", default_value_t = 5000)]
+    pub auto_focus_switch_cooldown_ms: u64,
+
+    #[arg(long = "auto-focus-switch-margin", default_value_t = 0.20)]
+    pub auto_focus_switch_margin: f32,
+
+    #[arg(long = "auto-focus-required-polls", default_value_t = 2)]
+    pub auto_focus_required_polls: u32,
+
+    #[arg(long = "auto-focus-max-roots", default_value_t = 4)]
+    pub auto_focus_max_roots: usize,
+
+    #[arg(long = "remote", value_name = "URL")]
+    pub remote: Option<String>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Args, Debug, Clone)]
+pub struct RecordArgs {
+    #[command(flatten)]
+    pub monitor: MonitorArgs,
+
+    #[arg(long, value_name = "SECONDS")]
+    pub duration: Option<u64>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct BenchArgs {
+    #[command(flatten)]
+    pub monitor: MonitorArgs,
+
+    #[arg(long, value_name = "SECONDS")]
+    pub duration: u64,
+
+    #[arg(long = "scenario", value_name = "NAME")]
+    pub scenario: String,
+
+    #[arg(
+        long = "role",
+        value_name = "baseline|current",
+        default_value = "baseline"
+    )]
+    pub role: String,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
 pub struct MonitorArgPresence {
-    pub summary_period_ms: bool,
-    pub spike_threshold_us: bool,
-    pub max_tasks: bool,
+    pub watch_poll_ms: bool,
     pub follow_exec: bool,
-    pub no_follow_exec: bool,
+    pub cpu_perf_max_tasks: bool,
+    pub runtime_slices_max_tasks: bool,
+    pub otel_service_name: bool,
     pub focus_source: bool,
     pub foreground_source: bool,
     pub foreground_poll_ms: bool,
     pub foreground_max_stale_ms: bool,
+    pub auto_focus_poll_ms: bool,
+    pub auto_focus_min_confidence: bool,
+    pub auto_focus_switch_cooldown_ms: bool,
+    pub auto_focus_switch_margin: bool,
+    pub auto_focus_required_polls: bool,
+    pub auto_focus_max_roots: bool,
+}
+
+impl MonitorArgPresence {
+    fn from_matches(matches: &ArgMatches) -> Self {
+        fn command_line(matches: &ArgMatches, id: &str) -> bool {
+            matches.value_source(id) == Some(ValueSource::CommandLine)
+        }
+
+        Self {
+            watch_poll_ms: command_line(matches, "watch_poll_ms"),
+            follow_exec: command_line(matches, "follow_exec"),
+            cpu_perf_max_tasks: command_line(matches, "cpu_perf_max_tasks"),
+            runtime_slices_max_tasks: command_line(matches, "runtime_slices_max_tasks"),
+            otel_service_name: command_line(matches, "otel_service_name"),
+            focus_source: command_line(matches, "focus_source"),
+            foreground_source: command_line(matches, "foreground_source"),
+            foreground_poll_ms: command_line(matches, "foreground_poll_ms"),
+            foreground_max_stale_ms: command_line(matches, "foreground_max_stale_ms"),
+            auto_focus_poll_ms: command_line(matches, "auto_focus_poll_ms"),
+            auto_focus_min_confidence: command_line(matches, "auto_focus_min_confidence"),
+            auto_focus_switch_cooldown_ms: command_line(matches, "auto_focus_switch_cooldown_ms"),
+            auto_focus_switch_margin: command_line(matches, "auto_focus_switch_margin"),
+            auto_focus_required_polls: command_line(matches, "auto_focus_required_polls"),
+            auto_focus_max_roots: command_line(matches, "auto_focus_max_roots"),
+        }
+    }
+
+    pub fn autotune_monitor_defaults() -> Self {
+        Self {
+            focus_source: true,
+            auto_focus_min_confidence: true,
+            auto_focus_required_polls: true,
+            auto_focus_max_roots: true,
+            ..Self::default()
+        }
+    }
+}
+
+impl MonitorArgs {
+    pub fn into_monitor_config_layer(self, presence: MonitorArgPresence) -> MonitorConfigLayer {
+        MonitorConfigLayer {
+            target_pids: (!self.target_pids.is_empty()).then(|| self.target_pids.clone()),
+            tree_pids: (!self.tree_pids.is_empty()).then(|| self.tree_pids.clone()),
+            exclude_tree_pids: (!self.exclude_tree_pids.is_empty())
+                .then(|| self.exclude_tree_pids.clone()),
+            summary_period_ms: self.summary_period_ms,
+            epoch_period_ms: self.epoch_period_ms.map(Some),
+            spike_threshold_ns: self
+                .spike_threshold_us
+                .map(|value| value.saturating_mul(1_000)),
+            alert_threshold_ns: self
+                .alert_threshold_ms
+                .map(|value| Some(value.saturating_mul(1_000_000))),
+            alert_webhook_url: self.alert_webhook_url.clone().map(Some),
+            verbose: self.verbose.then_some(true),
+            watch_poll_ms: presence.watch_poll_ms.then_some(self.watch_poll_ms),
+            watch_timeout: self
+                .watch_timeout_seconds
+                .map(|seconds| Some(Duration::from_secs(seconds))),
+            include_comm: (!self.include_comm.is_empty()).then(|| self.include_comm.clone()),
+            exclude_comm: (!self.exclude_comm.is_empty()).then(|| self.exclude_comm.clone()),
+            keep_missing_pid: self.keep_missing_pid.then_some(true),
+            watch_process: self.watch_process.clone().map(Some),
+            persistent: self.persistent.then_some(true),
+            max_tasks: self.max_tasks,
+            csv_stream: match (&self.csv_path, &self.stream_csv) {
+                (Some(path), None) => Some(Some(CsvStreamTarget::File(path.clone()))),
+                (None, Some(value)) if value == "-" => Some(Some(CsvStreamTarget::Stdout)),
+                (None, Some(value)) if value.trim().is_empty() => None,
+                (None, Some(value)) => Some(Some(CsvStreamTarget::File(PathBuf::from(value)))),
+                (None, None) => None,
+                (Some(_), Some(_)) => None,
+            },
+            irq_latency: self.irq_latency.then_some(true),
+            irqs: (!self.irqs.is_empty()).then(|| self.irqs.clone()),
+            hwmon: if self.no_hwmon {
+                Some(false)
+            } else if self.hwmon {
+                Some(true)
+            } else {
+                None
+            },
+            hwmon_root: self.hwmon_root.clone().map(Some),
+            hwmon_drm_card: self.hwmon_drm_card.clone().map(Some),
+            hwmon_render_node: self.hwmon_render_node.clone().map(Some),
+            cpu_freq: if self.no_cpu_freq {
+                Some(false)
+            } else if self.cpu_freq {
+                Some(true)
+            } else {
+                None
+            },
+            cgroupv2: self.cgroupv2.clone().map(Some),
+            native_cgroup_filter: self.native_cgroup_filter.then_some(true),
+            follow_exec: if self.no_follow_exec {
+                Some(false)
+            } else if presence.follow_exec {
+                Some(self.follow_exec)
+            } else {
+                None
+            },
+            faults: if self.no_faults {
+                Some(false)
+            } else if self.faults {
+                Some(true)
+            } else {
+                None
+            },
+            cpu_perf: self.cpu_perf.then_some(true),
+            cpu_perf_kernel: self.cpu_perf_kernel.then_some(true),
+            cpu_perf_max_tasks: presence
+                .cpu_perf_max_tasks
+                .then_some(self.cpu_perf_max_tasks),
+            cpu_perf_cache_refs: self.cpu_perf_cache_refs.then_some(true),
+            block_io: if self.no_block_io {
+                Some(false)
+            } else if self.block_io {
+                Some(true)
+            } else {
+                None
+            },
+            stat_wait: if self.no_stat_wait {
+                Some(false)
+            } else if self.stat_wait {
+                Some(true)
+            } else {
+                None
+            },
+            runtime_slices: if self.no_runtime_slices {
+                Some(false)
+            } else if self.runtime_slices {
+                Some(true)
+            } else {
+                None
+            },
+            runtime_slices_max_tasks: presence
+                .runtime_slices_max_tasks
+                .then_some(self.runtime_slices_max_tasks),
+            mangohud_log: self.mangohud_log.clone().map(Some),
+            mangohud_log_live: self.mangohud_log_live.then_some(true),
+            tui: self.tui.then_some(true),
+            json_stream: self.json_stream.then_some(true),
+            metrics_port: self.metrics_port.map(Some),
+            ringbuf_size_kb: self.ringbuf_size_kb.map(Some),
+            wakeup_map_factor: self.wakeup_map_factor.map(Some),
+            otlp_endpoint: self.otlp_endpoint.clone().map(Some),
+            otel_service_name: presence
+                .otel_service_name
+                .then(|| self.otel_service_name.clone()),
+            auto_focus: self.auto_focus.then_some(true),
+            focus_source: presence.focus_source.then_some(self.focus_source),
+            foreground_window: self.foreground_window.then_some(true),
+            foreground_source: presence.foreground_source.then_some(self.foreground_source),
+            foreground_poll_ms: presence
+                .foreground_poll_ms
+                .then_some(self.foreground_poll_ms),
+            foreground_max_stale_ms: presence
+                .foreground_max_stale_ms
+                .then_some(self.foreground_max_stale_ms),
+            foreground_include_title: self.foreground_include_title.then_some(true),
+            auto_focus_poll_ms: presence
+                .auto_focus_poll_ms
+                .then_some(self.auto_focus_poll_ms),
+            auto_focus_min_confidence: presence
+                .auto_focus_min_confidence
+                .then_some(self.auto_focus_min_confidence),
+            auto_focus_switch_cooldown_ms: presence
+                .auto_focus_switch_cooldown_ms
+                .then_some(self.auto_focus_switch_cooldown_ms),
+            auto_focus_switch_margin: presence
+                .auto_focus_switch_margin
+                .then_some(self.auto_focus_switch_margin),
+            auto_focus_required_polls: presence
+                .auto_focus_required_polls
+                .then_some(self.auto_focus_required_polls),
+            auto_focus_max_roots: presence
+                .auto_focus_max_roots
+                .then_some(self.auto_focus_max_roots),
+            retain_intervals: self.retain_intervals.map(Some),
+            retention_max_run_count: self.retention_max_run_count.map(Some),
+            retention_max_total_bytes: self.retention_max_total_bytes.map(Some),
+            retention_max_age_seconds: self.retention_max_age_seconds.map(Some),
+            retention_min_free_bytes: self.retention_min_free_bytes.map(Some),
+            run_name: self.run_name.clone().map(Some),
+            output_dir: self.out_dir.clone().map(Some),
+            remote: self.remote.clone().map(Some),
+            ..MonitorConfigLayer::default()
+        }
+    }
+}
+
+impl Default for MonitorArgs {
+    fn default() -> Self {
+        Self {
+            target_pids: Vec::new(),
+            tree_pids: Vec::new(),
+            exclude_tree_pids: Vec::new(),
+            summary_period_ms: None,
+            epoch_period_ms: None,
+            spike_threshold_us: None,
+            alert_threshold_ms: None,
+            alert_webhook_url: None,
+            verbose: false,
+            run_name: None,
+            out_dir: None,
+            include_comm: Vec::new(),
+            exclude_comm: Vec::new(),
+            keep_missing_pid: false,
+            watch_process: None,
+            persistent: false,
+            watch_poll_ms: 2000,
+            watch_timeout_seconds: None,
+            max_tasks: None,
+            csv_path: None,
+            stream_csv: None,
+            irq_latency: false,
+            irqs: Vec::new(),
+            hwmon: false,
+            no_hwmon: false,
+            hwmon_root: None,
+            hwmon_drm_card: None,
+            hwmon_render_node: None,
+            mangohud_log: None,
+            mangohud_log_live: false,
+            tui: false,
+            retain_intervals: None,
+            retention_max_run_count: None,
+            retention_max_total_bytes: None,
+            retention_max_age_seconds: None,
+            retention_min_free_bytes: None,
+            no_record: false,
+            cpu_freq: false,
+            no_cpu_freq: false,
+            cgroupv2: None,
+            native_cgroup_filter: false,
+            follow_exec: true,
+            no_follow_exec: false,
+            faults: false,
+            no_faults: false,
+            cpu_perf: false,
+            cpu_perf_kernel: false,
+            cpu_perf_max_tasks: 128,
+            cpu_perf_cache_refs: false,
+            block_io: false,
+            no_block_io: false,
+            stat_wait: false,
+            no_stat_wait: false,
+            runtime_slices: false,
+            no_runtime_slices: false,
+            runtime_slices_max_tasks: 256,
+            json_stream: false,
+            metrics_port: None,
+            preset: None,
+            ringbuf_size_kb: None,
+            wakeup_map_factor: None,
+            otlp_endpoint: None,
+            otel_service_name: "stutter".to_owned(),
+            auto_focus: false,
+            focus_source: FocusSource::Heuristic,
+            foreground_window: false,
+            foreground_source: ForegroundSource::Auto,
+            foreground_poll_ms: 1000,
+            foreground_max_stale_ms: 2500,
+            foreground_include_title: false,
+            auto_focus_poll_ms: 1000,
+            auto_focus_min_confidence: 0.60,
+            auto_focus_switch_cooldown_ms: 5000,
+            auto_focus_switch_margin: 0.20,
+            auto_focus_required_polls: 2,
+            auto_focus_max_roots: 4,
+            remote: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RecordingMode {
+    Monitor,
+    ForceRecording { max_duration: Option<Duration> },
+}
+
+impl RecordingMode {
+    fn force_recording(self) -> bool {
+        matches!(self, Self::ForceRecording { .. })
+    }
+
+    fn max_duration(self) -> Option<Duration> {
+        match self {
+            Self::Monitor => None,
+            Self::ForceRecording { max_duration } => max_duration,
+        }
+    }
+}
+
+impl FocusSource {
+    pub fn parse_config_value(value: &str) -> anyhow::Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "heuristic" => Ok(Self::Heuristic),
+            "foreground" => Ok(Self::Foreground),
+            "hybrid" => Ok(Self::Hybrid),
+            other => anyhow::bail!(
+                "focus_source must be heuristic, foreground, or hybrid, got {other:?}"
+            ),
+        }
+    }
+}
+
+impl ForegroundSource {
+    pub fn parse_config_value(value: &str) -> anyhow::Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "sway" => Ok(Self::Sway),
+            "hyprland" => Ok(Self::Hyprland),
+            "x11" => Ok(Self::X11),
+            other => anyhow::bail!(
+                "foreground_source must be auto, sway, hyprland, or x11, got {other:?}"
+            ),
+        }
+    }
 }
 
 pub fn monitor_arg_presence_from_matches(
-    matches: &clap::ArgMatches,
+    matches: &ArgMatches,
     subcommand: Option<&str>,
 ) -> MonitorArgPresence {
-    let matches = subcommand
-        .and_then(|s| matches.subcommand_matches(s))
-        .unwrap_or(matches);
-
-    MonitorArgPresence {
-        summary_period_ms: matches.get_one::<u64>("summary_period_ms").is_some(),
-        spike_threshold_us: matches.get_one::<u64>("spike_threshold_us").is_some(),
-        max_tasks: matches.get_one::<u32>("max_tasks").is_some(),
-        follow_exec: matches.get_flag("follow_exec"),
-        no_follow_exec: matches.get_flag("no_follow_exec"),
-        focus_source: matches.get_one::<FocusSource>("focus_source").is_some(),
-        foreground_source: matches
-            .get_one::<ForegroundSource>("foreground_source")
-            .is_some(),
-        foreground_poll_ms: matches.get_one::<u64>("foreground_poll_ms").is_some(),
-        foreground_max_stale_ms: matches.get_one::<u64>("foreground_max_stale_ms").is_some(),
+    match subcommand {
+        Some(expected) => match matches.subcommand() {
+            Some((actual, sub_matches)) if actual == expected => {
+                MonitorArgPresence::from_matches(sub_matches)
+            }
+            _ => MonitorArgPresence::default(),
+        },
+        None => MonitorArgPresence::from_matches(matches),
     }
+}
+
+fn merge_bool(
+    builtin: bool,
+    file_value: Option<bool>,
+    preset_value: Option<bool>,
+    cli_positive: bool,
+    cli_negative: bool,
+) -> bool {
+    if cli_negative {
+        false
+    } else if cli_positive {
+        true
+    } else if let Some(value) = preset_value {
+        value
+    } else if let Some(value) = file_value {
+        value
+    } else {
+        builtin
+    }
+}
+
+#[allow(dead_code)]
+pub fn monitor_config_from_monitor_args(
+    args: MonitorArgs,
+    recording_mode: RecordingMode,
+) -> anyhow::Result<MonitorConfig> {
+    let file_config = crate::config_file::load_user_config()?;
+    monitor_config_from_monitor_args_with_file_and_presence(
+        args,
+        file_config,
+        recording_mode,
+        MonitorArgPresence::default(),
+    )
 }
 
 pub fn monitor_config_from_monitor_args_with_presence(
@@ -303,6 +746,8 @@ pub fn monitor_config_from_monitor_args_with_file_and_presence(
     recording_mode: RecordingMode,
     cli_presence: MonitorArgPresence,
 ) -> anyhow::Result<MonitorConfig> {
+    // This is a very large function - the full implementation needs to be moved from mod.rs
+    // For now, let me include the full implementation from the original file
     let user_file = file_config;
     let file_config = user_file.clone().unwrap_or_default();
 
@@ -430,9 +875,9 @@ pub fn monitor_config_from_monitor_args_with_file_and_presence(
     normalize_foreground_monitor_args(&mut args);
     validate_foreground_monitor_args(&args)?;
 
-    validate_pids("--pid", &args.pid)?;
-    validate_pids("--tree-pid", &args.tree_pid)?;
-    validate_pids("--exclude-tree-pid", &args.exclude_tree_pid)?;
+    validate_pids("--pid", &args.target_pids)?;
+    validate_pids("--tree-pid", &args.tree_pids)?;
+    validate_pids("--exclude-tree-pid", &args.exclude_tree_pids)?;
 
     #[allow(clippy::collapsible_if)]
     if let Some(kb) = args.ringbuf_size_kb {
@@ -491,10 +936,10 @@ pub fn monitor_config_from_monitor_args_with_file_and_presence(
     if args.runtime_slices_max_tasks == 0 {
         anyhow::bail!("--runtime-slices-max-tasks must be greater than zero");
     }
-    if matches!(args.retention_max_runs, Some(0)) {
+    if matches!(args.retention_max_run_count, Some(0)) {
         anyhow::bail!("--retention-max-runs must be greater than zero");
     }
-    if matches!(args.retention_max_bytes, Some(0)) {
+    if matches!(args.retention_max_total_bytes, Some(0)) {
         anyhow::bail!("--retention-max-bytes must be greater than zero");
     }
     if matches!(args.retention_max_age_seconds, Some(0)) {
@@ -504,12 +949,12 @@ pub fn monitor_config_from_monitor_args_with_file_and_presence(
         anyhow::bail!("--retention-min-free-bytes must be greater than zero");
     }
 
-    args.pid.sort_unstable();
-    args.pid.dedup();
-    args.tree_pid.sort_unstable();
-    args.tree_pid.dedup();
-    args.exclude_tree_pid.sort_unstable();
-    args.exclude_tree_pid.dedup();
+    args.target_pids.sort_unstable();
+    args.target_pids.dedup();
+    args.tree_pids.sort_unstable();
+    args.tree_pids.dedup();
+    args.exclude_tree_pids.sort_unstable();
+    args.exclude_tree_pids.dedup();
     args.include_comm.sort();
     args.include_comm.dedup();
     args.exclude_comm.sort();
@@ -538,10 +983,10 @@ pub fn monitor_config_from_monitor_args_with_file_and_presence(
         anyhow::bail!("--alert-webhook-url must not be empty");
     }
 
-    if args.pid.len() > TARGET_PIDS_MAX {
+    if args.target_pids.len() > TARGET_PIDS_MAX {
         anyhow::bail!(
             "too many unique target PIDs: got {}, but TARGET_PIDS supports at most {}",
-            args.pid.len(),
+            args.target_pids.len(),
             TARGET_PIDS_MAX
         );
     }
@@ -559,7 +1004,7 @@ pub fn monitor_config_from_monitor_args_with_file_and_presence(
         })
         .transpose()?;
 
-    match (&args.csv, &args.stream_csv) {
+    match (&args.csv_path, &args.stream_csv) {
         (None, Some(value)) if value.trim().is_empty() => {
             anyhow::bail!("--stream-csv path must not be empty");
         }
@@ -640,29 +1085,13 @@ pub fn monitor_config_from_monitor_args_with_file_and_presence(
     Ok(config)
 }
 
-pub fn validate_pids(flag: &str, pids: &[u32]) -> anyhow::Result<()> {
-    if pids.contains(&0) {
-        anyhow::bail!("{flag} must be greater than zero");
-    }
-    Ok(())
-}
-
-pub fn validate_comm_patterns(flag: &str, patterns: &[String]) -> anyhow::Result<()> {
-    for pattern in patterns {
-        if pattern.is_empty() {
-            anyhow::bail!("{flag} patterns must not be empty");
-        }
-    }
-    Ok(())
-}
-
-pub fn normalize_foreground_monitor_args(args: &mut MonitorArgs) {
+fn normalize_foreground_monitor_args(args: &mut MonitorArgs) {
     if args.focus_source != FocusSource::Heuristic {
         args.foreground_window = true;
     }
 }
 
-pub fn validate_foreground_title_monitor_args(args: &MonitorArgs) -> anyhow::Result<()> {
+fn validate_foreground_title_monitor_args(args: &MonitorArgs) -> anyhow::Result<()> {
     let foreground_focus_requested = args.auto_focus
         && matches!(
             args.focus_source,
@@ -678,7 +1107,7 @@ pub fn validate_foreground_title_monitor_args(args: &MonitorArgs) -> anyhow::Res
     Ok(())
 }
 
-pub fn validate_foreground_monitor_args(args: &MonitorArgs) -> anyhow::Result<()> {
+fn validate_foreground_monitor_args(args: &MonitorArgs) -> anyhow::Result<()> {
     if args.foreground_poll_ms < 100 {
         anyhow::bail!("--foreground-poll-ms must be >= 100");
     }
@@ -692,196 +1121,21 @@ pub fn validate_foreground_monitor_args(args: &MonitorArgs) -> anyhow::Result<()
     Ok(())
 }
 
-pub fn merge_bool(
-    builtin: bool,
-    file_value: Option<bool>,
-    preset_value: Option<bool>,
-    cli_positive: bool,
-    cli_negative: bool,
-) -> bool {
-    if cli_negative {
-        false
-    } else if cli_positive {
-        true
-    } else if let Some(value) = preset_value {
-        value
-    } else if let Some(value) = file_value {
-        value
-    } else {
-        builtin
-    }
-}
-
-impl MonitorArgs {
-    pub fn into_monitor_config_layer(self, cli_presence: MonitorArgPresence) -> MonitorConfigLayer {
-        let mut layer = MonitorConfigLayer::default();
-
-        if !self.pid.is_empty() {
-            layer.target_pids = Some(self.pid);
-        }
-        if !self.tree_pid.is_empty() {
-            layer.tree_pids = Some(self.tree_pid);
-        }
-        if !self.exclude_tree_pid.is_empty() {
-            layer.exclude_tree_pids = Some(self.exclude_tree_pid);
-        }
-        if !self.include_comm.is_empty() {
-            layer.include_comm = Some(self.include_comm);
-        }
-        if !self.exclude_comm.is_empty() {
-            layer.exclude_comm = Some(self.exclude_comm);
-        }
-
-        if cli_presence.summary_period_ms {
-            layer.summary_period_ms = self.summary_period_ms;
-        }
-        if cli_presence.spike_threshold_us {
-            layer.spike_threshold_ns = self.spike_threshold_us.map(|us| us * 1000);
-        }
-        if cli_presence.max_tasks {
-            layer.max_tasks = self.max_tasks;
-        }
-
-        if self.hwmon {
-            layer.hwmon = Some(true);
-        }
-        if self.no_hwmon {
-            layer.hwmon = Some(false);
-        }
-        layer.hwmon_root = self.hwmon_root;
-        layer.hwmon_drm_card = self.hwmon_drm_card;
-        layer.hwmon_render_node = self.hwmon_render_node;
-
-        if self.cpu_freq {
-            layer.cpu_freq = Some(true);
-        }
-        if self.no_cpu_freq {
-            layer.cpu_freq = Some(false);
-        }
-
-        if self.faults {
-            layer.faults = Some(true);
-        }
-        if self.no_faults {
-            layer.faults = Some(false);
-        }
-
-        if self.stat_wait {
-            layer.stat_wait = Some(true);
-        }
-        if self.no_stat_wait {
-            layer.stat_wait = Some(false);
-        }
-
-        if self.block_io {
-            layer.block_io = Some(true);
-        }
-        if self.no_block_io {
-            layer.block_io = Some(false);
-        }
-
-        if self.runtime_slices {
-            layer.runtime_slices = Some(true);
-        }
-        if self.no_runtime_slices {
-            layer.runtime_slices = Some(false);
-        }
-
-        if self.irq_latency {
-            layer.irq_latency = Some(true);
-        }
-        if !self.irqs.is_empty() {
-            layer.irqs = Some(self.irqs);
-        }
-
-        if self.cpu_perf {
-            layer.cpu_perf = Some(true);
-        }
-        layer.cpu_perf_kernel = Some(self.cpu_perf_kernel);
-        layer.cpu_perf_cache_refs = Some(self.cpu_perf_cache_refs);
-        layer.cpu_perf_max_tasks = Some(self.cpu_perf_max_tasks);
-
-        layer.runtime_slices_max_tasks = Some(self.runtime_slices_max_tasks);
-
-        layer.ringbuf_size_kb = self.ringbuf_size_kb;
-        layer.wakeup_map_factor = self.wakeup_map_factor;
-
-        layer.otlp_endpoint = self.otlp_endpoint;
-        layer.otel_service_name = Some(self.otel_service_name);
-
-        if let Some(path) = self.csv {
-            layer.csv_path = Some(Some(path));
-        }
-        if let Some(stream) = self.stream_csv {
-            layer.stream_csv = Some(Some(stream));
-        }
-
-        if self.json_stream {
-            layer.json_stream = Some(true);
-        }
-
-        if self.tui {
-            layer.tui = Some(true);
-        }
-
-        layer.watch_process = self.watch_process;
-        layer.watch_poll_ms = Some(self.watch_poll_ms);
-        layer.watch_timeout_seconds = self.watch_timeout_seconds;
-        layer.persistent = Some(self.persistent);
-        layer.keep_missing_pid = Some(self.keep_missing_pid);
-
-        if cli_presence.follow_exec {
-            layer.follow_exec = Some(true);
-        }
-        if cli_presence.no_follow_exec {
-            layer.follow_exec = Some(false);
-        }
-
-        layer.cgroupv2 = self.cgroupv2;
-        layer.native_cgroup_filter = Some(self.native_cgroup_filter);
-
-        layer.run_name = self.run_name.map(Some);
-        layer.output_dir = self.out_dir.map(Some);
-
-        layer.retention_max_run_count = self.retention_max_runs;
-        layer.retention_max_total_bytes = self.retention_max_bytes;
-        layer.retention_max_age_seconds = self.retention_max_age_seconds;
-        layer.retention_min_free_bytes = self.retention_min_free_bytes;
-
-        layer.mangohud_log = self.mangohud_log;
-
-        layer.auto_focus = Some(self.auto_focus);
-        layer.auto_focus_poll_ms = Some(self.auto_focus_poll_ms);
-        layer.auto_focus_min_confidence = Some(self.auto_focus_min_confidence);
-        layer.auto_focus_switch_cooldown_ms = Some(self.auto_focus_switch_cooldown_ms);
-        layer.auto_focus_switch_margin = Some(self.auto_focus_switch_margin);
-        layer.auto_focus_required_polls = Some(self.auto_focus_required_polls);
-        layer.auto_focus_max_roots = Some(self.auto_focus_max_roots);
-
-        layer.foreground_window = Some(self.foreground_window);
-        if cli_presence.foreground_source {
-            layer.foreground_source = Some(self.foreground_source);
-        }
-        if cli_presence.foreground_poll_ms {
-            layer.foreground_poll_ms = Some(self.foreground_poll_ms);
-        }
-        if cli_presence.foreground_max_stale_ms {
-            layer.foreground_max_stale_ms = Some(self.foreground_max_stale_ms);
-        }
-        layer.foreground_include_title = Some(self.foreground_include_title);
-
-        if cli_presence.focus_source {
-            layer.focus_source = Some(self.focus_source);
-        }
-
-        layer
+#[cfg(test)]
+#[allow(dead_code)]
+fn parse_monitor_config_for_phase15<const N: usize>(
+    args: [&str; N],
+) -> anyhow::Result<Arc<crate::config::model::MonitorConfig>> {
+    let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+    match super::parse_app_command_from(args.iter().map(OsString::from))? {
+        AppCommand::Monitor(input) => Ok(input.config.clone()),
+        other => anyhow::bail!("expected AppCommand::Monitor, got {other:?}"),
     }
 }
 
 #[cfg(test)]
-mod tests {
+mod auto_focus_cli_tests {
     use super::*;
-    use crate::config::model::FocusSource;
 
     #[test]
     fn monitor_args_default_contains_auto_focus_defaults() {
@@ -894,5 +1148,38 @@ mod tests {
         assert_eq!(args.auto_focus_switch_margin, 0.20);
         assert_eq!(args.auto_focus_required_polls, 2);
         assert_eq!(args.auto_focus_max_roots, 4);
+    }
+
+    #[test]
+    fn monitor_cli_parses_auto_focus_fields() {
+        let cli = Cli::parse_from([
+            "stutter",
+            "monitor",
+            "--auto-focus",
+            "--auto-focus-poll-ms",
+            "250",
+            "--auto-focus-min-confidence",
+            "0.75",
+            "--auto-focus-switch-cooldown-ms",
+            "7500",
+            "--auto-focus-switch-margin",
+            "0.30",
+            "--auto-focus-required-polls",
+            "3",
+            "--auto-focus-max-roots",
+            "2",
+        ]);
+
+        let Command::Monitor(args) = cli.command.unwrap() else {
+            panic!("expected monitor command");
+        };
+
+        assert!(args.auto_focus);
+        assert_eq!(args.auto_focus_poll_ms, 250);
+        assert_eq!(args.auto_focus_min_confidence, 0.75);
+        assert_eq!(args.auto_focus_switch_cooldown_ms, 7500);
+        assert_eq!(args.auto_focus_switch_margin, 0.30);
+        assert_eq!(args.auto_focus_required_polls, 3);
+        assert_eq!(args.auto_focus_max_roots, 2);
     }
 }
