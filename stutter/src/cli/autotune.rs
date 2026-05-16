@@ -1,71 +1,71 @@
 use super::*;
 
 #[derive(Args, Debug, Clone)]
-pub struct AutotuneArgs {
+pub(super) struct AutotuneArgs {
     #[command(subcommand)]
-    pub command: Option<AutotuneCommand>,
+    pub(super) command: Option<AutotuneCommand>,
 
     #[arg(long = "config", value_name = "PATH")]
-    pub config: Option<PathBuf>,
+    pub(super) config: Option<PathBuf>,
 
     #[arg(long = "watch-process", value_name = "COMM")]
-    pub watch_process: Option<String>,
+    pub(super) watch_process: Option<String>,
 
     #[arg(long = "tree-pid", value_name = "PID")]
-    pub tree_pid: Option<u32>,
+    pub(super) tree_pid: Option<u32>,
 
     #[arg(long = "profiles", value_name = "FILE")]
-    pub profiles: Option<PathBuf>,
+    pub(super) profiles: Option<PathBuf>,
 
     #[arg(
         long = "mode",
         default_value = "observe",
         help = "Autotune mode: observe, suggest, apply-low-risk, apply-medium-risk, or apply-high-risk. Live autotune supports observe, suggest, apply-low-risk, and apply-medium-risk when --allow-medium-risk is set; apply-medium-risk is limited to reversible process-local/cgroup candidates, and apply-high-risk is not implemented."
     )]
-    pub mode: String,
+    pub(super) mode: String,
 
     #[arg(long = "decision-log", value_name = "PATH")]
-    pub decision_log: Option<PathBuf>,
+    pub(super) decision_log: Option<PathBuf>,
 
     #[arg(long = "duration-seconds")]
-    pub duration_seconds: Option<u64>,
+    pub(super) duration_seconds: Option<u64>,
 
     #[arg(
         long = "washout-seconds",
         default_value_t = crate::autotune::washout::DEFAULT_WASHOUT_SECONDS
     )]
-    pub washout_seconds: u64,
+    pub(super) washout_seconds: u64,
 
     #[arg(
         long = "washout-verify-interval-ms",
         default_value_t = crate::autotune::washout::DEFAULT_WASHOUT_VERIFY_INTERVAL_MS
     )]
-    pub washout_verify_interval_ms: u64,
+    pub(super) washout_verify_interval_ms: u64,
 
     #[arg(long = "summary-ms", default_value_t = 1000)]
-    pub summary_ms: u64,
+    pub(super) summary_ms: u64,
 
     #[arg(long = "preset", default_value = "diagnosis")]
-    pub preset: String,
+    pub(super) preset: String,
 
     #[arg(long = "hwmon")]
-    pub hwmon: bool,
+    pub(super) hwmon: bool,
 
     #[arg(long = "mangohud-log")]
-    pub mangohud_log: Option<PathBuf>,
+    pub(super) mangohud_log: Option<PathBuf>,
 
     #[arg(
         long = "auto-focus",
         help = "Allow autotune observe/suggest to classify the whole system and follow the selected focus group"
     )]
-    pub auto_focus: bool,
+    pub(super) auto_focus: bool,
 
     #[arg(
         long = "min-focus-confidence",
         default_value_t = crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
         help = "Minimum focus confidence required before live autotune can suggest or apply candidates"
     )]
-    pub min_focus_confidence: f32,
+    pub(super) min_focus_confidence: f32,
 
     #[arg(
         long = "focus-source",
@@ -73,13 +73,13 @@ pub struct AutotuneArgs {
         default_value_t = FocusSource::Hybrid,
         help = "Autotune focus source: heuristic, foreground, or hybrid"
     )]
-    pub focus_source: FocusSource,
+    pub(super) focus_source: FocusSource,
 
     #[arg(
         long = "foreground-window",
         help = "Collect foreground-window context for autotune focus classification"
     )]
-    pub foreground_window: bool,
+    pub(super) foreground_window: bool,
 
     #[arg(
         long = "foreground-source",
@@ -87,29 +87,29 @@ pub struct AutotuneArgs {
         default_value_t = ForegroundSource::Auto,
         help = "Foreground-window provider for autotune focus: auto, sway, hyprland, x11"
     )]
-    pub foreground_source: ForegroundSource,
+    pub(super) foreground_source: ForegroundSource,
 
     #[arg(long = "foreground-poll-ms", default_value_t = 1000)]
-    pub foreground_poll_ms: u64,
+    pub(super) foreground_poll_ms: u64,
 
     #[arg(long = "foreground-max-stale-ms", default_value_t = 2500)]
-    pub foreground_max_stale_ms: u64,
+    pub(super) foreground_max_stale_ms: u64,
 
     #[arg(
         long = "allow-system-wide-suggestions",
         help = "Allow autotune to suggest system-wide candidates when in suggest mode"
     )]
-    pub allow_system_wide_suggestions: bool,
+    pub(super) allow_system_wide_suggestions: bool,
 
     #[arg(
         long = "allow-medium-risk",
         help = "Explicitly unlock live apply-medium-risk for reversible process-local candidates"
     )]
-    pub allow_medium_risk: bool,
+    pub(super) allow_medium_risk: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
-pub enum AutotuneCommand {
+pub(super) enum AutotuneCommand {
     #[command(name = "generate-profiles")]
     GenerateProfiles(AutotuneGenerateProfilesArgs),
     #[command(name = "apply-candidate")]
@@ -122,90 +122,90 @@ pub enum AutotuneCommand {
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct AutotuneApplyCandidateArgs {
+pub(super) struct AutotuneApplyCandidateArgs {
     #[arg(long = "candidate-json", value_name = "FILE")]
-    pub candidate_json: PathBuf,
+    pub(super) candidate_json: PathBuf,
 
     #[arg(long = "dry-run")]
-    pub dry_run: bool,
+    pub(super) dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct AutotuneGenerateProfilesArgs {
+pub(super) struct AutotuneGenerateProfilesArgs {
     #[arg(long = "watch-process", value_name = "COMM")]
-    pub watch_process: Option<String>,
+    pub(super) watch_process: Option<String>,
 
     #[arg(long = "out", value_name = "PATH_OR_-")]
-    pub out: PathBuf,
+    pub(super) out: PathBuf,
 
     #[arg(long = "allow-cpus", value_name = "CPU_LIST")]
-    pub allow_cpus: Option<String>,
+    pub(super) allow_cpus: Option<String>,
 
     #[arg(long = "deny-cpus", value_name = "CPU_LIST")]
-    pub deny_cpus: Option<String>,
+    pub(super) deny_cpus: Option<String>,
 
     #[arg(long = "min-render-cpus", default_value_t = 1)]
-    pub min_render_cpus: usize,
+    pub(super) min_render_cpus: usize,
 
     #[arg(long = "min-game-cpus", default_value_t = 1)]
-    pub min_game_cpus: usize,
+    pub(super) min_game_cpus: usize,
 
     #[arg(long = "min-compositor-cpus", default_value_t = 1)]
-    pub min_compositor_cpus: usize,
+    pub(super) min_compositor_cpus: usize,
 
     #[arg(long = "min-background-cpus", default_value_t = 2)]
-    pub min_background_cpus: usize,
+    pub(super) min_background_cpus: usize,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct AutotuneRestoreArgs {
+pub(super) struct AutotuneRestoreArgs {
     #[arg(
         long = "journal",
         value_name = "PATH",
         help = "Path to autotune controller_journal.json; defaults to ~/.local/state/stutter/autotune/controller_journal.json"
     )]
-    pub journal: Option<PathBuf>,
+    pub(super) journal: Option<PathBuf>,
 
     #[arg(
         long = "audit",
         value_name = "PATH",
         help = "Path to audit JSONL output; defaults to the normal stutter audit log"
     )]
-    pub audit: Option<PathBuf>,
+    pub(super) audit: Option<PathBuf>,
 
     #[arg(
         long = "history",
         value_name = "PATH",
         help = "Path to autotune history JSONL output; defaults to the normal autotune history log"
     )]
-    pub history: Option<PathBuf>,
+    pub(super) history: Option<PathBuf>,
 
     #[arg(long = "dry-run")]
-    pub dry_run: bool,
+    pub(super) dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct AutotuneReplayHistoryArgs {
+pub(super) struct AutotuneReplayHistoryArgs {
     #[arg(value_name = "HISTORY_JSONL")]
-    pub history: PathBuf,
+    pub(super) history: PathBuf,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct AutotuneReplayArgs {
+pub(super) struct AutotuneReplayArgs {
     #[arg(long = "run", value_name = "RUN_DIR")]
-    pub run: PathBuf,
+    pub(super) run: PathBuf,
 
     #[arg(long = "config", value_name = "AUTOTUNE_TOML")]
-    pub config: Option<PathBuf>,
+    pub(super) config: Option<PathBuf>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct AutotuneStatusArgs {
+pub(super) struct AutotuneStatusArgs {
     #[arg(long = "json")]
-    pub json: bool,
+    pub(super) json: bool,
 }
 
-pub fn validate_autotune_mode(mode: &str, allow_medium_risk: bool) -> anyhow::Result<()> {
+pub(super) fn validate_autotune_mode(mode: &str, allow_medium_risk: bool) -> anyhow::Result<()> {
     match mode {
         "observe" | "suggest" | "apply-low-risk" => Ok(()),
         "apply-medium-risk" if allow_medium_risk => Ok(()),

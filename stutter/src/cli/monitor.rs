@@ -6,137 +6,137 @@ use super::*;
 use crate::config::TARGET_PIDS_MAX;
 
 #[derive(Args, Debug, Clone)]
-pub struct MonitorArgs {
+pub(super) struct MonitorArgs {
     #[arg(long = "pid", short = 'p', value_name = "PID")]
-    pub target_pids: Vec<u32>,
+    pub(super) target_pids: Vec<u32>,
 
     #[arg(long = "tree-pid", value_name = "PID")]
-    pub tree_pids: Vec<u32>,
+    pub(super) tree_pids: Vec<u32>,
 
     #[arg(long = "exclude-tree-pid", value_name = "PID")]
-    pub exclude_tree_pids: Vec<u32>,
+    pub(super) exclude_tree_pids: Vec<u32>,
 
     #[arg(long = "summary-ms", value_name = "MS")]
-    pub summary_period_ms: Option<u64>,
+    pub(super) summary_period_ms: Option<u64>,
 
     #[arg(long = "epoch", value_name = "MS")]
-    pub epoch_period_ms: Option<u64>,
+    pub(super) epoch_period_ms: Option<u64>,
 
     #[arg(long = "spike-us", value_name = "US")]
-    pub spike_threshold_us: Option<u64>,
+    pub(super) spike_threshold_us: Option<u64>,
 
     #[arg(long = "alert-threshold-ms", value_name = "MS")]
-    pub alert_threshold_ms: Option<u64>,
+    pub(super) alert_threshold_ms: Option<u64>,
 
     #[arg(long = "alert-webhook-url", value_name = "URL")]
-    pub alert_webhook_url: Option<String>,
+    pub(super) alert_webhook_url: Option<String>,
 
     #[arg(long, short = 'v')]
-    pub verbose: bool,
+    pub(super) verbose: bool,
 
     #[arg(long = "run-name", value_name = "NAME")]
-    pub run_name: Option<String>,
+    pub(super) run_name: Option<String>,
 
     #[arg(long = "out-dir", alias = "out", value_name = "PATH")]
-    pub out_dir: Option<PathBuf>,
+    pub(super) out_dir: Option<PathBuf>,
 
     #[arg(long = "include-comm", value_name = "PATTERN")]
-    pub include_comm: Vec<String>,
+    pub(super) include_comm: Vec<String>,
 
     #[arg(long = "exclude-comm", value_name = "PATTERN")]
-    pub exclude_comm: Vec<String>,
+    pub(super) exclude_comm: Vec<String>,
 
     #[arg(long = "keep-missing-pid")]
-    pub keep_missing_pid: bool,
+    pub(super) keep_missing_pid: bool,
 
     #[arg(long = "watch-process", value_name = "COMM")]
-    pub watch_process: Option<String>,
+    pub(super) watch_process: Option<String>,
 
     #[arg(long)]
-    pub persistent: bool,
+    pub(super) persistent: bool,
 
     #[arg(long = "watch-poll-ms", default_value_t = 2_000)]
-    pub watch_poll_ms: u64,
+    pub(super) watch_poll_ms: u64,
 
     #[arg(long = "watch-timeout-seconds", value_name = "SECONDS")]
-    pub watch_timeout_seconds: Option<u64>,
+    pub(super) watch_timeout_seconds: Option<u64>,
 
     #[arg(long, value_name = "N")]
-    pub max_tasks: Option<usize>,
+    pub(super) max_tasks: Option<usize>,
 
     #[arg(long = "csv", value_name = "PATH")]
-    pub csv_path: Option<PathBuf>,
+    pub(super) csv_path: Option<PathBuf>,
 
     #[arg(
         long = "stream-csv",
         value_name = "PATH_OR_-",
         conflicts_with = "csv_path"
     )]
-    pub stream_csv: Option<String>,
+    pub(super) stream_csv: Option<String>,
 
     #[arg(long = "irq-latency")]
-    pub irq_latency: bool,
+    pub(super) irq_latency: bool,
 
     #[arg(long = "irq", value_name = "IRQ")]
-    pub irqs: Vec<u32>,
+    pub(super) irqs: Vec<u32>,
 
     #[arg(long = "hwmon", id = "hwmon", conflicts_with = "no_hwmon")]
-    pub hwmon: bool,
+    pub(super) hwmon: bool,
 
     #[arg(long = "no-hwmon", help = "Disable GPU hwmon telemetry")]
-    pub no_hwmon: bool,
+    pub(super) no_hwmon: bool,
 
     #[arg(long = "hwmon-root", value_name = "PATH", requires = "hwmon")]
-    pub hwmon_root: Option<PathBuf>,
+    pub(super) hwmon_root: Option<PathBuf>,
 
     #[arg(long = "hwmon-drm-card", value_name = "CARD", requires = "hwmon")]
-    pub hwmon_drm_card: Option<String>,
+    pub(super) hwmon_drm_card: Option<String>,
 
     #[arg(long = "hwmon-render-node", value_name = "NODE", requires = "hwmon")]
-    pub hwmon_render_node: Option<PathBuf>,
+    pub(super) hwmon_render_node: Option<PathBuf>,
 
     #[arg(long = "mangohud-log", value_name = "PATH")]
-    pub mangohud_log: Option<PathBuf>,
+    pub(super) mangohud_log: Option<PathBuf>,
 
     #[arg(long = "mangohud-log-live", requires = "mangohud_log")]
-    pub mangohud_log_live: bool,
+    pub(super) mangohud_log_live: bool,
 
     #[arg(long = "tui")]
-    pub tui: bool,
+    pub(super) tui: bool,
 
     #[arg(long = "retain-intervals", value_name = "N")]
-    pub retain_intervals: Option<usize>,
+    pub(super) retain_intervals: Option<usize>,
 
     #[arg(long = "retention-max-runs", value_name = "N")]
-    pub retention_max_run_count: Option<usize>,
+    pub(super) retention_max_run_count: Option<usize>,
 
     #[arg(long = "retention-max-bytes", value_name = "BYTES")]
-    pub retention_max_total_bytes: Option<u64>,
+    pub(super) retention_max_total_bytes: Option<u64>,
 
     #[arg(long = "retention-max-age-seconds", value_name = "SECONDS")]
-    pub retention_max_age_seconds: Option<u64>,
+    pub(super) retention_max_age_seconds: Option<u64>,
 
     #[arg(long = "retention-min-free-bytes", value_name = "BYTES")]
-    pub retention_min_free_bytes: Option<u64>,
+    pub(super) retention_min_free_bytes: Option<u64>,
 
     #[arg(long = "no-record")]
-    pub no_record: bool,
+    pub(super) no_record: bool,
 
     #[arg(
         long = "cpu-freq",
         help = "Collect CPU frequency information (enabled by default for recording runs)",
         conflicts_with = "no_cpu_freq"
     )]
-    pub cpu_freq: bool,
+    pub(super) cpu_freq: bool,
 
     #[arg(long = "no-cpu-freq", help = "Disable CPU frequency collection")]
-    pub no_cpu_freq: bool,
+    pub(super) no_cpu_freq: bool,
 
     #[arg(long = "cgroupv2", value_name = "PATH")]
-    pub cgroupv2: Option<PathBuf>,
+    pub(super) cgroupv2: Option<PathBuf>,
 
     #[arg(long = "native-cgroup-filter", requires = "cgroupv2")]
-    pub native_cgroup_filter: bool,
+    pub(super) native_cgroup_filter: bool,
 
     #[arg(
         long = "follow-exec",
@@ -144,28 +144,28 @@ pub struct MonitorArgs {
         action = ArgAction::SetTrue,
         conflicts_with = "no_follow_exec"
     )]
-    pub follow_exec: bool,
+    pub(super) follow_exec: bool,
 
     #[arg(long = "no-follow-exec", action = ArgAction::SetTrue)]
-    pub no_follow_exec: bool,
+    pub(super) no_follow_exec: bool,
 
     #[arg(long = "faults", conflicts_with = "no_faults")]
-    pub faults: bool,
+    pub(super) faults: bool,
 
     #[arg(long = "no-faults", help = "Disable page fault collection")]
-    pub no_faults: bool,
+    pub(super) no_faults: bool,
 
     #[arg(
         long = "cpu-perf",
         help = "Collect per-task CPU hardware counters for IPC/cache-miss diagnostics"
     )]
-    pub cpu_perf: bool,
+    pub(super) cpu_perf: bool,
 
     #[arg(
         long = "cpu-perf-kernel",
         help = "Include kernel/hypervisor time in CPU perf counters; default is user-space only"
     )]
-    pub cpu_perf_kernel: bool,
+    pub(super) cpu_perf_kernel: bool,
 
     #[arg(
         long = "cpu-perf-max-tasks",
@@ -173,76 +173,76 @@ pub struct MonitorArgs {
         value_name = "N",
         help = "Maximum active target tasks to attach CPU perf counters to"
     )]
-    pub cpu_perf_max_tasks: usize,
+    pub(super) cpu_perf_max_tasks: usize,
 
     #[arg(
         long = "cpu-perf-cache-refs",
         help = "Also collect cache references so cache miss rate can be computed; otherwise only cache MPKI is computed"
     )]
-    pub cpu_perf_cache_refs: bool,
+    pub(super) cpu_perf_cache_refs: bool,
 
     #[arg(long = "block-io", conflicts_with = "no_block_io")]
-    pub block_io: bool,
+    pub(super) block_io: bool,
 
     #[arg(long = "no-block-io", help = "Disable block I/O collection")]
-    pub no_block_io: bool,
+    pub(super) no_block_io: bool,
 
     #[arg(long = "stat-wait", conflicts_with = "no_stat_wait")]
-    pub stat_wait: bool,
+    pub(super) stat_wait: bool,
 
     #[arg(long = "no-stat-wait", help = "Disable stat-wait collection")]
-    pub no_stat_wait: bool,
+    pub(super) no_stat_wait: bool,
 
     #[arg(
         long = "runtime-slices",
         conflicts_with = "no_runtime_slices",
         help = "Collect per-thread CPU runtime/wait slices from procfs schedstat"
     )]
-    pub runtime_slices: bool,
+    pub(super) runtime_slices: bool,
 
     #[arg(
         long = "no-runtime-slices",
         help = "Disable per-thread runtime-slice collection"
     )]
-    pub no_runtime_slices: bool,
+    pub(super) no_runtime_slices: bool,
 
     #[arg(
         long = "runtime-slices-max-tasks",
         default_value_t = 256,
         value_name = "N"
     )]
-    pub runtime_slices_max_tasks: usize,
+    pub(super) runtime_slices_max_tasks: usize,
 
     #[arg(
         long = "json-stream",
         help = "Emit scheduler spike events to stdout as newline-delimited JSON"
     )]
-    pub json_stream: bool,
+    pub(super) json_stream: bool,
 
     #[arg(long = "metrics-port", value_name = "PORT")]
-    pub metrics_port: Option<u16>,
+    pub(super) metrics_port: Option<u16>,
 
     #[arg(
         long = "preset",
         value_name = "NAME",
         help = "Apply named monitor defaults: gaming, recording, diagnosis, lightweight"
     )]
-    pub preset: Option<String>,
+    pub(super) preset: Option<String>,
 
     #[arg(long = "ringbuf-size-kb", value_name = "KB")]
-    pub ringbuf_size_kb: Option<u32>,
+    pub(super) ringbuf_size_kb: Option<u32>,
 
     #[arg(long = "wakeup-map-factor", value_name = "N")]
-    pub wakeup_map_factor: Option<u32>,
+    pub(super) wakeup_map_factor: Option<u32>,
 
     #[arg(long = "otlp-endpoint", value_name = "URL")]
-    pub otlp_endpoint: Option<String>,
+    pub(super) otlp_endpoint: Option<String>,
 
     #[arg(long = "otel-service-name", default_value = "stutter")]
-    pub otel_service_name: String,
+    pub(super) otel_service_name: String,
 
     #[arg(long = "auto-focus")]
-    pub auto_focus: bool,
+    pub(super) auto_focus: bool,
 
     #[arg(
         long = "focus-source",
@@ -250,13 +250,13 @@ pub struct MonitorArgs {
         default_value_t = FocusSource::Heuristic,
         help = "Auto-focus source: heuristic, foreground, or hybrid"
     )]
-    pub focus_source: FocusSource,
+    pub(super) focus_source: FocusSource,
 
     #[arg(
         long = "foreground-window",
         help = "Record foreground-window events even when explicit targets are used"
     )]
-    pub foreground_window: bool,
+    pub(super) foreground_window: bool,
 
     #[arg(
         long = "foreground-source",
@@ -264,84 +264,84 @@ pub struct MonitorArgs {
         default_value_t = ForegroundSource::Auto,
         help = "Foreground-window provider: auto, sway, hyprland, x11"
     )]
-    pub foreground_source: ForegroundSource,
+    pub(super) foreground_source: ForegroundSource,
 
     #[arg(long = "foreground-poll-ms", default_value_t = 1000)]
-    pub foreground_poll_ms: u64,
+    pub(super) foreground_poll_ms: u64,
 
     #[arg(long = "foreground-max-stale-ms", default_value_t = 2500)]
-    pub foreground_max_stale_ms: u64,
+    pub(super) foreground_max_stale_ms: u64,
 
     #[arg(long = "foreground-include-title")]
-    pub foreground_include_title: bool,
+    pub(super) foreground_include_title: bool,
 
     #[arg(long = "auto-focus-poll-ms", default_value_t = 1000)]
-    pub auto_focus_poll_ms: u64,
+    pub(super) auto_focus_poll_ms: u64,
 
     #[arg(long = "auto-focus-min-confidence", default_value_t = 0.60)]
-    pub auto_focus_min_confidence: f32,
+    pub(super) auto_focus_min_confidence: f32,
 
     #[arg(long = "auto-focus-switch-cooldown-ms", default_value_t = 5000)]
-    pub auto_focus_switch_cooldown_ms: u64,
+    pub(super) auto_focus_switch_cooldown_ms: u64,
 
     #[arg(long = "auto-focus-switch-margin", default_value_t = 0.20)]
-    pub auto_focus_switch_margin: f32,
+    pub(super) auto_focus_switch_margin: f32,
 
     #[arg(long = "auto-focus-required-polls", default_value_t = 2)]
-    pub auto_focus_required_polls: u32,
+    pub(super) auto_focus_required_polls: u32,
 
     #[arg(long = "auto-focus-max-roots", default_value_t = 4)]
-    pub auto_focus_max_roots: usize,
+    pub(super) auto_focus_max_roots: usize,
 
     #[arg(long = "remote", value_name = "URL")]
-    pub remote: Option<String>,
+    pub(super) remote: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct RecordArgs {
+pub(super) struct RecordArgs {
     #[command(flatten)]
-    pub monitor: MonitorArgs,
+    pub(super) monitor: MonitorArgs,
 
     #[arg(long, value_name = "SECONDS")]
-    pub duration: Option<u64>,
+    pub(super) duration: Option<u64>,
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct BenchArgs {
+pub(super) struct BenchArgs {
     #[command(flatten)]
-    pub monitor: MonitorArgs,
+    pub(super) monitor: MonitorArgs,
 
     #[arg(long, value_name = "SECONDS")]
-    pub duration: u64,
+    pub(super) duration: u64,
 
     #[arg(long = "scenario", value_name = "NAME")]
-    pub scenario: String,
+    pub(super) scenario: String,
 
     #[arg(
         long = "role",
         value_name = "baseline|current",
         default_value = "baseline"
     )]
-    pub role: String,
+    pub(super) role: String,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct MonitorArgPresence {
-    pub watch_poll_ms: bool,
-    pub follow_exec: bool,
-    pub cpu_perf_max_tasks: bool,
-    pub runtime_slices_max_tasks: bool,
-    pub otel_service_name: bool,
-    pub focus_source: bool,
-    pub foreground_source: bool,
-    pub foreground_poll_ms: bool,
-    pub foreground_max_stale_ms: bool,
-    pub auto_focus_poll_ms: bool,
-    pub auto_focus_min_confidence: bool,
-    pub auto_focus_switch_cooldown_ms: bool,
-    pub auto_focus_switch_margin: bool,
-    pub auto_focus_required_polls: bool,
-    pub auto_focus_max_roots: bool,
+pub(super) struct MonitorArgPresence {
+    pub(super) watch_poll_ms: bool,
+    pub(super) follow_exec: bool,
+    pub(super) cpu_perf_max_tasks: bool,
+    pub(super) runtime_slices_max_tasks: bool,
+    pub(super) otel_service_name: bool,
+    pub(super) focus_source: bool,
+    pub(super) foreground_source: bool,
+    pub(super) foreground_poll_ms: bool,
+    pub(super) foreground_max_stale_ms: bool,
+    pub(super) auto_focus_poll_ms: bool,
+    pub(super) auto_focus_min_confidence: bool,
+    pub(super) auto_focus_switch_cooldown_ms: bool,
+    pub(super) auto_focus_switch_margin: bool,
+    pub(super) auto_focus_required_polls: bool,
+    pub(super) auto_focus_max_roots: bool,
 }
 
 impl MonitorArgPresence {
@@ -369,7 +369,7 @@ impl MonitorArgPresence {
         }
     }
 
-    pub fn autotune_monitor_defaults() -> Self {
+    pub(super) fn autotune_monitor_defaults() -> Self {
         Self {
             focus_source: true,
             auto_focus_min_confidence: true,
@@ -381,7 +381,10 @@ impl MonitorArgPresence {
 }
 
 impl MonitorArgs {
-    pub fn into_monitor_config_layer(self, presence: MonitorArgPresence) -> MonitorConfigLayer {
+    pub(super) fn into_monitor_config_layer(
+        self,
+        presence: MonitorArgPresence,
+    ) -> MonitorConfigLayer {
         MonitorConfigLayer {
             target_pids: (!self.target_pids.is_empty()).then(|| self.target_pids.clone()),
             tree_pids: (!self.tree_pids.is_empty()).then(|| self.tree_pids.clone()),
@@ -618,7 +621,7 @@ impl Default for MonitorArgs {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum RecordingMode {
+pub(super) enum RecordingMode {
     Monitor,
     ForceRecording { max_duration: Option<Duration> },
 }
@@ -637,7 +640,7 @@ impl RecordingMode {
 }
 
 impl FocusSource {
-    pub fn parse_config_value(value: &str) -> anyhow::Result<Self> {
+    fn parse_config_value(value: &str) -> anyhow::Result<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "heuristic" => Ok(Self::Heuristic),
             "foreground" => Ok(Self::Foreground),
@@ -650,7 +653,7 @@ impl FocusSource {
 }
 
 impl ForegroundSource {
-    pub fn parse_config_value(value: &str) -> anyhow::Result<Self> {
+    fn parse_config_value(value: &str) -> anyhow::Result<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "auto" => Ok(Self::Auto),
             "sway" => Ok(Self::Sway),
@@ -663,7 +666,7 @@ impl ForegroundSource {
     }
 }
 
-pub fn monitor_arg_presence_from_matches(
+pub(super) fn monitor_arg_presence_from_matches(
     matches: &ArgMatches,
     subcommand: Option<&str>,
 ) -> MonitorArgPresence {
@@ -699,7 +702,7 @@ fn merge_bool(
 }
 
 #[allow(dead_code)]
-pub fn monitor_config_from_monitor_args(
+pub(super) fn monitor_config_from_monitor_args(
     args: MonitorArgs,
     recording_mode: RecordingMode,
 ) -> anyhow::Result<MonitorConfig> {
@@ -712,7 +715,7 @@ pub fn monitor_config_from_monitor_args(
     )
 }
 
-pub fn monitor_config_from_monitor_args_with_presence(
+pub(super) fn monitor_config_from_monitor_args_with_presence(
     args: MonitorArgs,
     recording_mode: RecordingMode,
     cli_presence: MonitorArgPresence,
@@ -727,7 +730,7 @@ pub fn monitor_config_from_monitor_args_with_presence(
 }
 
 #[allow(dead_code)]
-pub fn monitor_config_from_monitor_args_with_file(
+pub(super) fn monitor_config_from_monitor_args_with_file(
     args: MonitorArgs,
     file_config: Option<crate::config_file::UserConfigFile>,
     recording_mode: RecordingMode,
@@ -740,7 +743,7 @@ pub fn monitor_config_from_monitor_args_with_file(
     )
 }
 
-pub fn monitor_config_from_monitor_args_with_file_and_presence(
+pub(super) fn monitor_config_from_monitor_args_with_file_and_presence(
     mut args: MonitorArgs,
     file_config: Option<crate::config_file::UserConfigFile>,
     recording_mode: RecordingMode,
