@@ -194,10 +194,12 @@ fn is_explicitly_protected_task(
     task: &ActiveTaskSnapshot,
     observation: &AutotuneObservation,
 ) -> bool {
-    observation
-        .protected_tasks
-        .iter()
-        .any(|protected| protected.tid == task.tid || protected.process_pid == task.tid)
+    observation.protected_tasks.iter().any(|protected| {
+        protected.tid == task.tid
+            || protected.tid == task.process_pid
+            || protected.process_pid == task.tid
+            || protected.process_pid == task.process_pid
+    })
 }
 
 fn mutable_task_allowed(
@@ -354,9 +356,42 @@ mod tests {
         let observation = AutotuneObservation {
             target_root_pid: Some(10),
             active_tasks: vec![
-                task(10, TaskClass::Game),
-                task(11, TaskClass::GameWorkerThread),
-                task(12, TaskClass::Helper),
+                ActiveTaskSnapshot {
+                    tid: 10,
+                    process_pid: 10,
+                    comm: "game-root".to_owned(),
+                    class: TaskClass::Game,
+                    process_starttime_ticks: Some(100),
+                    task_starttime_ticks: Some(100),
+                    cgroup_path: None,
+                },
+                ActiveTaskSnapshot {
+                    tid: 11,
+                    process_pid: 10,
+                    comm: "protected-worker".to_owned(),
+                    class: TaskClass::GameWorkerThread,
+                    process_starttime_ticks: Some(100),
+                    task_starttime_ticks: Some(101),
+                    cgroup_path: None,
+                },
+                ActiveTaskSnapshot {
+                    tid: 12,
+                    process_pid: 10,
+                    comm: "same-process-helper".to_owned(),
+                    class: TaskClass::Helper,
+                    process_starttime_ticks: Some(100),
+                    task_starttime_ticks: Some(102),
+                    cgroup_path: None,
+                },
+                ActiveTaskSnapshot {
+                    tid: 20,
+                    process_pid: 20,
+                    comm: "unprotected-helper".to_owned(),
+                    class: TaskClass::Helper,
+                    process_starttime_ticks: Some(200),
+                    task_starttime_ticks: Some(200),
+                    cgroup_path: None,
+                },
             ],
             protected_tasks: vec![ProtectedTask {
                 tid: 11,
@@ -375,7 +410,7 @@ mod tests {
 
         assert_eq!(
             targets.iter().map(|target| target.tid).collect::<Vec<_>>(),
-            vec![12]
+            vec![20]
         );
     }
 
