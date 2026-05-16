@@ -10,7 +10,9 @@ pub mod restore;
 pub mod scenario;
 pub mod service;
 
-use crate::{cli::AppCommand, error::StutterError};
+pub use input::AppCommand;
+
+use crate::error::StutterError;
 
 pub async fn dispatch(command: AppCommand) -> Result<(), StutterError> {
     match command {
@@ -65,11 +67,21 @@ pub async fn dispatch(command: AppCommand) -> Result<(), StutterError> {
         AppCommand::Completions(input) => misc::run_completions_command(input),
         AppCommand::Man(input) => misc::run_man_command(input),
         AppCommand::Rules(input) => misc::run_rules_command(input),
-        AppCommand::ScenarioCreate(input) => scenario::run_create_command(input),
-        AppCommand::ScenarioRun(input) => scenario::run_scenario_command(input).await,
-        AppCommand::ScenarioCompare(input) => scenario::run_compare_command(input),
-        AppCommand::ScenarioPath(input) => scenario::run_path_command(input),
-        AppCommand::ScenarioList(input) => scenario::run_list_command(input),
+        AppCommand::Scenario(input) => match input.command {
+            crate::commands::input::ScenarioCommand::Create(args) => {
+                scenario::run_create_command(args)
+            }
+            crate::commands::input::ScenarioCommand::Run(args) => {
+                scenario::run_scenario_command(args).await
+            }
+            crate::commands::input::ScenarioCommand::Compare(args) => {
+                scenario::run_compare_command(args)
+            }
+            crate::commands::input::ScenarioCommand::Path(args) => scenario::run_path_command(args),
+            crate::commands::input::ScenarioCommand::List => {
+                scenario::run_list_command(crate::commands::input::ScenarioListCommandInput)
+            }
+        },
         AppCommand::Service(input) => service::run_service_command(input),
     }?;
     Ok(())

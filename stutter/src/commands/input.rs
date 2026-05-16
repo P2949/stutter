@@ -2,7 +2,6 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use crate::{
     autotune,
-    cli::RulesCommand,
     config::model::MonitorConfig,
     daemon::DaemonSoakConfig,
     doctor::DoctorInput,
@@ -10,6 +9,61 @@ use crate::{
     release::{ReleaseChannel, ReleaseReadinessInputs},
     service::ServiceCommandRequest,
 };
+
+#[derive(Debug)]
+pub enum AppCommand {
+    Monitor(MonitorCommandInput),
+    Bench(BenchCommandInput),
+    Version(VersionCommandInput),
+    Restore(RestoreCommandInput),
+    ApplyProfile(ApplyProfileCommandInput),
+    InspectTree(InspectTreeCommandInput),
+    Summary(SummaryCommandInput),
+    Validate(ValidateCommandInput),
+    Report(ReportCommandInput),
+    ReleaseCheck(ReleaseCheckCommandInput),
+    Tune(TuneCommandInput),
+    Recommend(RecommendCommandInput),
+    Check(CheckCommandInput),
+    ConfigCheck(ConfigCheckCommandInput),
+    ConfigExplain(DaemonConfigExplainCommandInput),
+    AutotuneGenerateProfiles(AutotuneGenerateProfilesCommandInput),
+    AutotuneApplyCandidate(AutotuneApplyCandidateCommandInput),
+    Autotune(AutotuneCommandInput),
+    AutotuneStatus(AutotuneStatusCommandInput),
+    AutotuneReplayHistory(AutotuneReplayHistoryCommandInput),
+    AutotuneRestore(AutotuneRestoreCommandInput),
+    Audit(AuditCommandInput),
+    AutotuneReplay(AutotuneReplayCommandInput),
+    Advisor(AdvisorCommandInput),
+    Doctor(DoctorCommandInput),
+    Probes(ProbesCommandInput),
+    ProfileTemplate(ProfileTemplateCommandInput),
+    InspectIrqs(InspectIrqsCommandInput),
+    Agent(AgentCommandInput),
+    PrivilegedWorker(PrivilegedWorkerCommandInput),
+    DaemonConfigExplain(DaemonConfigExplainCommandInput),
+    DaemonPolicyExplain(DaemonPolicyExplainCommandInput),
+    DaemonProfiles(DaemonProfilesCommandInput),
+    DaemonExplain(DaemonExplainCommandInput),
+    DaemonWhyNotOptimize(DaemonWhyNotOptimizeCommandInput),
+    DaemonWhatChanged(DaemonWhatChangedCommandInput),
+    DaemonStatus(DaemonStatusCommandInput),
+    DaemonWatch(DaemonWatchCommandInput),
+    DaemonDoctor(DaemonDoctorCommandInput),
+    DaemonResetState(DaemonResetStateCommandInput),
+    DaemonBenchOverhead(DaemonBenchOverheadCommandInput),
+    DaemonSoak(DaemonSoakCommandInput),
+    DaemonAcceptance(DaemonAcceptanceCommandInput),
+    DaemonPause(DaemonPauseCommandInput),
+    DaemonResume(DaemonResumeCommandInput),
+    DaemonRestore(DaemonRestoreCommandInput),
+    Completions(CompletionsCommandInput),
+    Man(ManCommandInput),
+    Rules(RulesCommandInput),
+    Scenario(ScenarioCommandInput),
+    Service(ServiceCommandInput),
+}
 
 #[derive(Debug)]
 pub struct MonitorCommandInput {
@@ -365,6 +419,45 @@ pub struct ManCommandInput {
 }
 
 #[derive(Debug)]
+pub enum RulesCommand {
+    Import(RulesImportArgs),
+    Check(RulesCheckArgs),
+    List,
+    Status,
+    Enable(RulesEnableArgs),
+    Disable,
+    Remove(RulesRemoveArgs),
+}
+
+#[derive(Debug)]
+pub struct RulesImportArgs {
+    pub source: PathBuf,
+    pub name: String,
+    pub source_repo: Option<String>,
+    pub source_commit: Option<String>,
+    pub license: String,
+    pub out: Option<PathBuf>,
+    pub dry_run: bool,
+}
+
+#[derive(Debug)]
+pub struct RulesCheckArgs {
+    pub source: Option<PathBuf>,
+    pub generated: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct RulesEnableArgs {
+    pub name: String,
+}
+
+#[derive(Debug)]
+pub struct RulesRemoveArgs {
+    pub name: String,
+    pub dry_run: bool,
+}
+
+#[derive(Debug)]
 pub struct RulesCommandInput {
     pub command: RulesCommand,
 }
@@ -405,7 +498,21 @@ pub struct ScenarioPathCommandInput {
 }
 
 #[derive(Debug)]
+pub enum ScenarioCommand {
+    Create(ScenarioCreateCommandInput),
+    Run(ScenarioRunCommandInput),
+    Compare(ScenarioCompareCommandInput),
+    Path(ScenarioPathCommandInput),
+    List,
+}
+
+#[derive(Debug)]
 pub struct ScenarioListCommandInput;
+
+#[derive(Debug)]
+pub struct ScenarioCommandInput {
+    pub command: ScenarioCommand,
+}
 
 #[cfg(test)]
 mod runtime_decoupling_tests {

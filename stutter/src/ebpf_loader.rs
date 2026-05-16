@@ -2575,7 +2575,7 @@ format:
         ])
         .unwrap()
         {
-            crate::cli::AppCommand::Monitor(c) => (*c.config).clone(),
+            crate::commands::AppCommand::Monitor(c) => (*c.config).clone(),
             _ => unreachable!(),
         };
 
@@ -2636,7 +2636,7 @@ format:
         let config = match crate::cli::parse_app_command_from(["stutter", "monitor", "--pid", "42"])
             .unwrap()
         {
-            crate::cli::AppCommand::Monitor(c) => (*c.config).clone(),
+            crate::commands::AppCommand::Monitor(c) => (*c.config).clone(),
             _ => unreachable!(),
         };
 
@@ -2672,7 +2672,7 @@ format:
         ])
         .unwrap()
         {
-            crate::cli::AppCommand::Monitor(c) => (*c.config).clone(),
+            crate::commands::AppCommand::Monitor(c) => (*c.config).clone(),
             _ => unreachable!(),
         };
 
@@ -2697,7 +2697,7 @@ format:
         ])
         .unwrap()
         {
-            crate::cli::AppCommand::Monitor(c) => (*c.config).clone(),
+            crate::commands::AppCommand::Monitor(c) => (*c.config).clone(),
             _ => unreachable!(),
         };
 
@@ -2718,7 +2718,7 @@ format:
         ])
         .unwrap()
         {
-            crate::cli::AppCommand::Monitor(c) => (*c.config).clone(),
+            crate::commands::AppCommand::Monitor(c) => (*c.config).clone(),
             _ => unreachable!(),
         };
         let sizing2 = map_sizing_for_config(&config2);
