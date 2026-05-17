@@ -16,6 +16,21 @@ struct ExpectedPublicModule {
     reason: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct OversizedRustFileAllowance {
+    path: &'static str,
+    max_lines: usize,
+    reason: &'static str,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RustFileLineCount {
+    path: String,
+    lines: usize,
+}
+
+const RUST_FILE_SIZE_LIMIT_LINES: usize = 1_000;
+
 const KNOWN_TOP_LEVEL_ARCHITECTURE_MODULES: &[&str] = &[
     "actions",
     "agent",
@@ -315,6 +330,219 @@ const ARCHITECTURE_DEPENDENCY_MATRIX: &[DependencyMatrixEntry] = &[
     },
 ];
 
+const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
+    OversizedRustFileAllowance {
+        path: "src/agent.rs",
+        max_lines: 5_025,
+        reason: "existing monolithic agent/control API implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/focus/mod.rs",
+        max_lines: 4_003,
+        reason: "existing focus snapshot, scoring, resolver, and classification module pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/autotune/candidate.rs",
+        max_lines: 3_744,
+        reason: "existing autotune candidate model and tests pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/autotune/planner.rs",
+        max_lines: 3_413,
+        reason: "existing autotune planner and planner tests pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/ebpf_loader.rs",
+        max_lines: 2_842,
+        reason: "existing eBPF loader implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/daemon/policy.rs",
+        max_lines: 2_657,
+        reason: "existing daemon policy implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/autotune/runtime.rs",
+        max_lines: 2_544,
+        reason: "existing autotune runtime orchestration pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/regression_tests.rs",
+        max_lines: 2_476,
+        reason: "existing broad regression test module pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/process_tree.rs",
+        max_lines: 2_355,
+        reason: "existing process tree scanner/classifier implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/diagnosis.rs",
+        max_lines: 2_351,
+        reason: "existing diagnosis engine implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/daemon/privilege.rs",
+        max_lines: 2_317,
+        reason: "existing privileged daemon worker implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/foreground.rs",
+        max_lines: 2_302,
+        reason: "existing foreground provider implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/cli/monitor.rs",
+        max_lines: 2_297,
+        reason: "existing monitor CLI argument surface pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/profiles.rs",
+        max_lines: 2_189,
+        reason: "existing profile model and profile tests pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/session.rs",
+        max_lines: 2_145,
+        reason: "existing session model and lifecycle implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/community_rules.rs",
+        max_lines: 2_132,
+        reason: "existing community rule model/import implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/test_fixture_builder.rs",
+        max_lines: 2_117,
+        reason: "existing shared test fixture builder pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/report/analysis.rs",
+        max_lines: 1_886,
+        reason: "existing report analysis implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/autotune/apply_low_risk.rs",
+        max_lines: 1_775,
+        reason: "existing low-risk autotune apply path pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/actions/runner.rs",
+        max_lines: 1_746,
+        reason: "existing audited action runner implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/autotune/live_experiment.rs",
+        max_lines: 1_682,
+        reason: "existing live experiment manager implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/report/text.rs",
+        max_lines: 1_681,
+        reason: "existing text report renderer pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/config_file.rs",
+        max_lines: 1_649,
+        reason: "existing config file parser/model implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/report/mod.rs",
+        max_lines: 1_545,
+        reason: "existing report public module and tests pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/architecture_tests.rs",
+        max_lines: 1_771,
+        reason: "existing architecture boundary test module plus this explicit file-size gate",
+    },
+    OversizedRustFileAllowance {
+        path: "src/cli/report.rs",
+        max_lines: 1_435,
+        reason: "existing report CLI argument surface pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/autotune/status.rs",
+        max_lines: 1_419,
+        reason: "existing autotune status rendering implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/validation_corpus_tests.rs",
+        max_lines: 1_396,
+        reason: "existing validation corpus test module pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/autotune/startup_recovery.rs",
+        max_lines: 1_350,
+        reason: "existing autotune startup recovery implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/autotune/emergency_restore.rs",
+        max_lines: 1_345,
+        reason: "existing autotune emergency restore implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/tune/mod.rs",
+        max_lines: 1_322,
+        reason: "existing tune module implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/autotune/active_config.rs",
+        max_lines: 1_319,
+        reason: "existing active autotune config implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/autotune/controller.rs",
+        max_lines: 1_289,
+        reason: "existing autotune controller state implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/metrics.rs",
+        max_lines: 1_257,
+        reason: "existing metrics model and tests pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/autotune/rolling_window.rs",
+        max_lines: 1_162,
+        reason: "existing autotune rolling window implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/config/effective.rs",
+        max_lines: 1_162,
+        reason: "existing effective config resolution implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/recorder/session.rs",
+        max_lines: 1_076,
+        reason: "existing recorder session writer implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/community_rules/importer.rs",
+        max_lines: 1_051,
+        reason: "existing community rules importer implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/daemon/state.rs",
+        max_lines: 1_041,
+        reason: "existing daemon state implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/actions/cgroup.rs",
+        max_lines: 1_032,
+        reason: "existing cgroup action implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/cli/mod.rs",
+        max_lines: 1_027,
+        reason: "existing top-level CLI parser implementation pending future split",
+    },
+    OversizedRustFileAllowance {
+        path: "src/doctor.rs",
+        max_lines: 1_003,
+        reason: "existing doctor diagnostics implementation pending future split",
+    },
+];
+
 const EXPECTED_ROOT_PUBLIC_MODULES: &[ExpectedPublicModule] = &[
     ExpectedPublicModule {
         name: "actions",
@@ -495,6 +723,51 @@ fn expected_root_public_module_names() -> Vec<String> {
     EXPECTED_ROOT_PUBLIC_MODULES
         .iter()
         .map(|module| module.name.to_owned())
+        .collect()
+}
+
+fn rust_source_line_count(path: &Path) -> usize {
+    fs::read_to_string(path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()))
+        .lines()
+        .count()
+}
+
+fn relative_to_crate_root(path: &Path) -> String {
+    path.strip_prefix(env!("CARGO_MANIFEST_DIR"))
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn rust_file_line_counts_under(path: &Path) -> Vec<RustFileLineCount> {
+    rust_files_under(path)
+        .into_iter()
+        .map(|file| RustFileLineCount {
+            path: relative_to_crate_root(&file),
+            lines: rust_source_line_count(&file),
+        })
+        .collect()
+}
+
+fn allowlisted_file_size(path: &str) -> Option<&'static OversizedRustFileAllowance> {
+    OVERSIZED_RUST_FILE_ALLOWLIST
+        .iter()
+        .find(|allowance| allowance.path == path)
+}
+
+fn largest_rust_files(counts: &[RustFileLineCount], limit: usize) -> Vec<String> {
+    let mut largest = counts.to_vec();
+    largest.sort_by(|left, right| {
+        right
+            .lines
+            .cmp(&left.lines)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    largest
+        .into_iter()
+        .take(limit)
+        .map(|count| format!("{} lines {}", count.lines, count.path))
         .collect()
 }
 
@@ -1107,6 +1380,52 @@ fn architecture_violation_message_includes_boundary_path_file_and_line() {
     assert!(message.contains("actions must not depend on command parsing"));
     assert!(message.contains("crate::commands"));
     assert!(message.contains("crate::commands::AppCommand"));
+}
+
+#[test]
+fn rust_source_file_sizes_do_not_grow_without_architecture_allowlist() {
+    for allowance in OVERSIZED_RUST_FILE_ALLOWLIST {
+        assert!(
+            !allowance.reason.trim().is_empty(),
+            "oversized Rust file '{}' must have an allowlist reason",
+            allowance.path
+        );
+    }
+
+    let counts = rust_file_line_counts_under(&crate_src_root());
+    let largest_files = largest_rust_files(&counts, 20).join("\n");
+    let mut violations = Vec::new();
+
+    for allowance in OVERSIZED_RUST_FILE_ALLOWLIST {
+        match counts.iter().find(|count| count.path == allowance.path) {
+            Some(count) if count.lines > allowance.max_lines => violations.push(format!(
+                "{} has {} lines, exceeding allowlisted maximum {} lines; split the file or update OVERSIZED_RUST_FILE_ALLOWLIST with an explicit reason",
+                count.path, count.lines, allowance.max_lines
+            )),
+            Some(_) => {}
+            None => violations.push(format!(
+                "allowlisted oversized Rust file '{}' no longer exists; remove or update its allowlist entry",
+                allowance.path
+            )),
+        }
+    }
+
+    for count in &counts {
+        if count.lines > RUST_FILE_SIZE_LIMIT_LINES && allowlisted_file_size(&count.path).is_none()
+        {
+            violations.push(format!(
+                "{} has {} lines, exceeding {} lines without an allowlist entry",
+                count.path, count.lines, RUST_FILE_SIZE_LIMIT_LINES
+            ));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "Rust source file size gate failed:\n{}\n\nlargest Rust files:\n{}",
+        violations.join("\n"),
+        largest_files
+    );
 }
 
 #[test]
