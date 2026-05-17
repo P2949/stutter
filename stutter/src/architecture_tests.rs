@@ -338,6 +338,66 @@ fn crate_src_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")
 }
 
+fn autotune_src_root() -> PathBuf {
+    crate_src_root().join("autotune")
+}
+
+fn autotune_non_mutation_forbidden_paths(boundary: &'static str) -> [ForbiddenRustPath; 9] {
+    [
+        ForbiddenRustPath {
+            path: "crate::actions::runner",
+            boundary,
+        },
+        ForbiddenRustPath {
+            path: "actions::runner",
+            boundary,
+        },
+        ForbiddenRustPath {
+            path: "TuningAction",
+            boundary,
+        },
+        ForbiddenRustPath {
+            path: "ActionRunPolicy",
+            boundary,
+        },
+        ForbiddenRustPath {
+            path: "AuditedActionResult",
+            boundary,
+        },
+        ForbiddenRustPath {
+            path: "ActionHooks",
+            boundary,
+        },
+        ForbiddenRustPath {
+            path: "run_audited_action",
+            boundary,
+        },
+        ForbiddenRustPath {
+            path: "run_audited_action_with_audit_path",
+            boundary,
+        },
+        ForbiddenRustPath {
+            path: "run_audited_action_with_hooks",
+            boundary,
+        },
+    ]
+}
+
+fn autotune_observation_quality_and_selection_files() -> Vec<PathBuf> {
+    let root = autotune_src_root();
+    [
+        "observation.rs",
+        "observation_builder.rs",
+        "rolling_window.rs",
+        "quality.rs",
+        "system_context.rs",
+        "target_selection.rs",
+    ]
+    .into_iter()
+    .map(|file| root.join(file))
+    .collect()
+}
+
 fn rust_files_under(path: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_rust_files(path, &mut files);
@@ -1056,6 +1116,36 @@ fn dependency_matrix_covers_known_top_level_modules() {
             "focus must encode forbidden dependency on {forbidden_dependency}"
         );
     }
+}
+
+#[test]
+fn autotune_planner_does_not_import_action_execution() {
+    let files = vec![autotune_src_root().join("planner.rs")];
+    let forbidden = autotune_non_mutation_forbidden_paths(
+        "autotune planner must not import action execution APIs",
+    );
+
+    assert_sources_do_not_reference_paths(&files, &forbidden);
+}
+
+#[test]
+fn autotune_observation_quality_and_selection_modules_do_not_import_action_execution() {
+    let files = autotune_observation_quality_and_selection_files();
+    let forbidden = autotune_non_mutation_forbidden_paths(
+        "autotune observation, quality, rolling-window, system-context, and target-selection modules must not import action execution APIs",
+    );
+
+    assert_sources_do_not_reference_paths(&files, &forbidden);
+}
+
+#[test]
+fn autotune_providers_do_not_import_action_execution() {
+    let files = rust_files_under(&autotune_src_root().join("providers"));
+    let forbidden = autotune_non_mutation_forbidden_paths(
+        "autotune providers must not import action execution APIs",
+    );
+
+    assert_sources_do_not_reference_paths(&files, &forbidden);
 }
 
 #[test]
