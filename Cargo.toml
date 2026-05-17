@@ -3,10 +3,11 @@ resolver = "2"
 members = [
     "stutter",
     "stutter-common",
+    "stutter-config",
     "stutter-core",
     "stutter-ebpf",
 ]
-default-members = ["stutter", "stutter-common", "stutter-core"]
+default-members = ["stutter", "stutter-common", "stutter-config", "stutter-core"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"
