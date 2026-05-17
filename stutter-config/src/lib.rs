@@ -15,7 +15,9 @@ mod tests {
 
     use stutter_core::paths::StutterPaths;
 
-    use super::{layer::ConfigLayer, model::ConfigModel, resolve::resolve_layers};
+    use super::{
+        error::ConfigError, layer::ConfigLayer, model::ConfigModel, resolve::resolve_layers,
+    };
 
     fn test_paths(root: &str) -> StutterPaths {
         StutterPaths::new(
@@ -54,5 +56,11 @@ mod tests {
             PathBuf::from("/override/daemon-state.json")
         );
         assert_eq!(paths.agent_socket, PathBuf::from("/override/agent.sock"));
+
+        let error = ConfigError::missing_required_field("paths.runs_dir");
+        assert_eq!(
+            error.to_string(),
+            "missing required config field 'paths.runs_dir'"
+        );
     }
 }
