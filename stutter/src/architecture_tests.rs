@@ -1150,6 +1150,41 @@ fn focus_does_not_depend_on_control_or_mutation_layers() {
 }
 
 #[test]
+fn report_does_not_depend_on_live_runtime_or_control_layers() {
+    let files = rust_files_under(&crate_src_root().join("report"));
+
+    assert_sources_do_not_reference_paths(
+        &files,
+        &[
+            ForbiddenRustPath {
+                path: "crate::agent",
+                boundary: "report must not depend on the agent control layer",
+            },
+            ForbiddenRustPath {
+                path: "crate::daemon::runtime",
+                boundary: "report must not depend on daemon live runtime",
+            },
+            ForbiddenRustPath {
+                path: "crate::autotune::runtime",
+                boundary: "report must not depend on autotune live runtime",
+            },
+            ForbiddenRustPath {
+                path: "crate::actions::runner",
+                boundary: "report must not depend on action runner mutation paths",
+            },
+            ForbiddenRustPath {
+                path: "crate::cli",
+                boundary: "report must not depend on CLI parsing",
+            },
+            ForbiddenRustPath {
+                path: "crate::commands",
+                boundary: "report must not depend on command dispatch",
+            },
+        ],
+    );
+}
+
+#[test]
 fn autotune_planner_does_not_import_action_execution() {
     let files = vec![autotune_src_root().join("planner.rs")];
     let forbidden = autotune_non_mutation_forbidden_paths(
