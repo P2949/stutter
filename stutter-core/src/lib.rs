@@ -19,6 +19,33 @@ mod tests {
         let id = ids::StableId::new("candidate/cpu-affinity");
         assert_eq!(id.as_str(), "candidate/cpu-affinity");
 
+        let pid = ids::Pid::new(1_234);
+        assert_eq!(pid.as_u32(), 1_234);
+
+        let tid = ids::Tid::from(1_235);
+        assert_eq!(u32::from(tid), 1_235);
+
+        let cpu = ids::CpuId::new(7);
+        assert_eq!(cpu.as_u32(), 7);
+
+        let irq = ids::IrqId::from(42);
+        assert_eq!(u32::from(irq), 42);
+
+        let process = ids::ProcessId::from(pid);
+        assert_eq!(process.as_u32(), 1_234);
+
+        let task = ids::TaskId::from(ids::Tid::new(1_236));
+        assert_eq!(task.as_u32(), 1_236);
+
+        let run = ids::RunId::from("run-001");
+        assert_eq!(run.as_str(), "run-001");
+
+        let action = ids::ActionId::new("action/cpu-affinity");
+        assert_eq!(action.as_str(), "action/cpu-affinity");
+
+        let experiment = ids::ExperimentId::new("experiment/live-001");
+        assert_eq!(experiment.as_str(), "experiment/live-001");
+
         let bytes = units::ByteCount::new(4096);
         assert_eq!(bytes.as_u64(), 4096);
 
