@@ -10,6 +10,12 @@ struct DependencyMatrixEntry {
     must_not_depend_on: &'static [&'static str],
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ExpectedPublicModule {
+    name: &'static str,
+    reason: &'static str,
+}
+
 const KNOWN_TOP_LEVEL_ARCHITECTURE_MODULES: &[&str] = &[
     "actions",
     "agent",
@@ -309,6 +315,81 @@ const ARCHITECTURE_DEPENDENCY_MATRIX: &[DependencyMatrixEntry] = &[
     },
 ];
 
+const EXPECTED_ROOT_PUBLIC_MODULES: &[ExpectedPublicModule] = &[
+    ExpectedPublicModule {
+        name: "actions",
+        reason: "public action descriptors, safety classes, and rollback contract types are part of the library API",
+    },
+    ExpectedPublicModule {
+        name: "agent",
+        reason: "agent control API types are exported for embedding and integration tests",
+    },
+    ExpectedPublicModule {
+        name: "alert",
+        reason: "alert records are shared with public monitoring/reporting consumers",
+    },
+    ExpectedPublicModule {
+        name: "artifacts",
+        reason: "artifact path and metadata helpers are consumed by external report/session tooling",
+    },
+    ExpectedPublicModule {
+        name: "autotune",
+        reason: "autotune command, planning, and status types are part of the supported library surface",
+    },
+    ExpectedPublicModule {
+        name: "config",
+        reason: "configuration model and effective config types are public API",
+    },
+    ExpectedPublicModule {
+        name: "daemon",
+        reason: "daemon mode, policy, state, runtime status, and control types are public API",
+    },
+    ExpectedPublicModule {
+        name: "daemon_policy",
+        reason: "daemon policy compatibility exports are kept public for existing callers",
+    },
+    ExpectedPublicModule {
+        name: "error",
+        reason: "the root error type is returned by public library entry points",
+    },
+    ExpectedPublicModule {
+        name: "events",
+        reason: "decoded event records are shared with public monitoring and session consumers",
+    },
+    ExpectedPublicModule {
+        name: "focus",
+        reason: "focus snapshots, classification, scoring, and resolver types are public API",
+    },
+    ExpectedPublicModule {
+        name: "presets",
+        reason: "preset definitions are exposed for public configuration and validation flows",
+    },
+    ExpectedPublicModule {
+        name: "probe_activation",
+        reason: "probe activation types are exported for public probe configuration flows",
+    },
+    ExpectedPublicModule {
+        name: "probe_registry",
+        reason: "probe registry types are exported for public probe discovery and validation flows",
+    },
+    ExpectedPublicModule {
+        name: "process_tree",
+        reason: "process and task snapshot types are part of public monitor/focus APIs",
+    },
+    ExpectedPublicModule {
+        name: "session",
+        reason: "session metadata and lifecycle types are public for run artifact consumers",
+    },
+    ExpectedPublicModule {
+        name: "session_events",
+        reason: "session event records are public for exported run artifacts",
+    },
+    ExpectedPublicModule {
+        name: "session_io",
+        reason: "session loading and artifact IO helpers are public for offline analysis tooling",
+    },
+];
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RustPathOccurrence {
     path: String,
@@ -396,6 +477,25 @@ fn autotune_observation_quality_and_selection_files() -> Vec<PathBuf> {
     .into_iter()
     .map(|file| root.join(file))
     .collect()
+}
+
+fn root_public_modules_from_lib_rs(source: &str) -> Vec<String> {
+    source
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let module = line.strip_prefix("pub mod ")?;
+            let module = module.strip_suffix(';')?;
+            Some(module.trim().to_owned())
+        })
+        .collect()
+}
+
+fn expected_root_public_module_names() -> Vec<String> {
+    EXPECTED_ROOT_PUBLIC_MODULES
+        .iter()
+        .map(|module| module.name.to_owned())
+        .collect()
 }
 
 fn rust_files_under(path: &Path) -> Vec<PathBuf> {
@@ -1007,6 +1107,29 @@ fn architecture_violation_message_includes_boundary_path_file_and_line() {
     assert!(message.contains("actions must not depend on command parsing"));
     assert!(message.contains("crate::commands"));
     assert!(message.contains("crate::commands::AppCommand"));
+}
+
+#[test]
+fn root_public_modules_are_intentional() {
+    for module in EXPECTED_ROOT_PUBLIC_MODULES {
+        assert!(
+            !module.reason.trim().is_empty(),
+            "public module '{}' must have a reason explaining why it is exported",
+            module.name
+        );
+    }
+
+    let lib_rs_path = crate_src_root().join("lib.rs");
+    let lib_rs = fs::read_to_string(&lib_rs_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", lib_rs_path.display()));
+
+    let actual = root_public_modules_from_lib_rs(&lib_rs);
+    let expected = expected_root_public_module_names();
+
+    assert_eq!(
+        actual, expected,
+        "root public module exports changed; update EXPECTED_ROOT_PUBLIC_MODULES with the intentional public module list and a reason for every exported module"
+    );
 }
 
 #[test]
