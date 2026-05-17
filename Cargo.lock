@@ -2678,6 +2678,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "stutter-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "stutter-ebpf"
 version = "0.1.0"
 dependencies = [
