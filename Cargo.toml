@@ -6,8 +6,9 @@ members = [
     "stutter-config",
     "stutter-core",
     "stutter-ebpf",
+    "stutter-report",
 ]
-default-members = ["stutter", "stutter-common", "stutter-config", "stutter-core"]
+default-members = ["stutter", "stutter-common", "stutter-config", "stutter-core", "stutter-report"]
 
 [workspace.package]
 license = "MIT OR Apache-2.0"
