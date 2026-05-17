@@ -52,6 +52,39 @@ mod tests {
         let duration = units::DurationNanos::new(42);
         assert_eq!(duration.as_u128(), 42);
 
+        let nanos = units::Nanoseconds::new(42);
+        assert_eq!(
+            std::time::Duration::from(nanos),
+            std::time::Duration::from_nanos(42)
+        );
+
+        let unix_nanos = units::UnixNanoseconds::new(123);
+        assert_eq!(unix_nanos.as_u128(), 123);
+
+        let millis = units::Milliseconds::new(250);
+        assert_eq!(
+            std::time::Duration::from(millis),
+            std::time::Duration::from_millis(250)
+        );
+
+        let seconds = units::Seconds::new(5);
+        assert_eq!(
+            std::time::Duration::from(seconds),
+            std::time::Duration::from_secs(5)
+        );
+
+        let confidence = match units::Confidence::new(0.95) {
+            Ok(confidence) => confidence,
+            Err(err) => panic!("expected valid confidence, got {err}"),
+        };
+        assert_eq!(confidence.as_f32(), 0.95);
+
+        let latency = units::LatencyNanoseconds::new(99);
+        assert_eq!(
+            std::time::Duration::from(latency),
+            std::time::Duration::from_nanos(99)
+        );
+
         let timestamp = clock::UnixNanos::new(123);
         assert_eq!(timestamp.as_u128(), 123);
 
