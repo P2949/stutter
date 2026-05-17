@@ -98,6 +98,24 @@ mod tests {
         let path = paths::LogicalPath::new("runs/latest");
         assert_eq!(path.as_str(), "runs/latest");
 
+        let stutter_paths = paths::StutterPaths::new(
+            "/var/lib/stutter",
+            "/etc/stutter",
+            "/var/cache/stutter",
+            "/var/lib/stutter/runs",
+            "/var/log/stutter/audit.jsonl",
+            "/var/lib/stutter/daemon-state.json",
+            "/run/stutter/agent.sock",
+        );
+        assert_eq!(
+            stutter_paths.runs_dir,
+            std::path::PathBuf::from("/var/lib/stutter/runs")
+        );
+        assert_eq!(
+            stutter_paths.agent_socket,
+            std::path::PathBuf::from("/run/stutter/agent.sock")
+        );
+
         let reason_code = match reason::ReasonCode::new("policy-denied") {
             Ok(reason) => reason,
             Err(err) => panic!("expected valid reason code, got {err}"),
