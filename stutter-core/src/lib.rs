@@ -13,6 +13,7 @@ pub mod units;
 #[cfg(test)]
 mod tests {
     use super::{clock, ids, paths, reason, units};
+    use crate::clock::Clock;
 
     #[test]
     fn skeleton_modules_expose_minimal_primitives() {
@@ -87,6 +88,12 @@ mod tests {
 
         let timestamp = clock::UnixNanos::new(123);
         assert_eq!(timestamp.as_u128(), 123);
+
+        let monotonic_timestamp = clock::MonotonicNanos::new(456);
+        assert_eq!(monotonic_timestamp.as_u128(), 456);
+
+        let manual_clock = clock::ManualClock::from_unix_time(std::time::UNIX_EPOCH);
+        assert_eq!(manual_clock.unix_time(), std::time::UNIX_EPOCH);
 
         let path = paths::LogicalPath::new("runs/latest");
         assert_eq!(path.as_str(), "runs/latest");
