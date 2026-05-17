@@ -1119,6 +1119,37 @@ fn dependency_matrix_covers_known_top_level_modules() {
 }
 
 #[test]
+fn focus_does_not_depend_on_control_or_mutation_layers() {
+    let files = rust_files_under(&crate_src_root().join("focus"));
+
+    assert_sources_do_not_reference_paths(
+        &files,
+        &[
+            ForbiddenRustPath {
+                path: "crate::agent",
+                boundary: "focus must not depend on the agent control layer",
+            },
+            ForbiddenRustPath {
+                path: "crate::daemon",
+                boundary: "focus must not depend on the daemon control layer",
+            },
+            ForbiddenRustPath {
+                path: "crate::actions",
+                boundary: "focus must not depend on action mutation layers",
+            },
+            ForbiddenRustPath {
+                path: "crate::commands",
+                boundary: "focus must not depend on command dispatch",
+            },
+            ForbiddenRustPath {
+                path: "crate::cli",
+                boundary: "focus must not depend on CLI parsing",
+            },
+        ],
+    );
+}
+
+#[test]
 fn autotune_planner_does_not_import_action_execution() {
     let files = vec![autotune_src_root().join("planner.rs")];
     let forbidden = autotune_non_mutation_forbidden_paths(
