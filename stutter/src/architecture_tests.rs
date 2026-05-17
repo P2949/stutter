@@ -29,6 +29,20 @@ struct RustFileLineCount {
     lines: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ExistingProductionUnwrapExpectAllowance {
+    path: &'static str,
+    reason: &'static str,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ProductionUnwrapExpectCall {
+    path: String,
+    line_number: usize,
+    call: &'static str,
+    line: String,
+}
+
 const RUST_FILE_SIZE_LIMIT_LINES: usize = 1_000;
 
 const KNOWN_TOP_LEVEL_ARCHITECTURE_MODULES: &[&str] = &[
@@ -453,8 +467,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/architecture_tests.rs",
-        max_lines: 1_771,
-        reason: "existing architecture boundary test module plus this explicit file-size gate",
+        max_lines: 2_110,
+        reason: "existing architecture boundary test module plus the explicit file-size and unwrap/expect guards",
     },
     OversizedRustFileAllowance {
         path: "src/cli/report.rs",
@@ -540,6 +554,122 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
         path: "src/doctor.rs",
         max_lines: 1_003,
         reason: "existing doctor diagnostics implementation pending future split",
+    },
+];
+
+const EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_ALLOWLIST:
+    &[ExistingProductionUnwrapExpectAllowance] = &[
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/actions/fake_action.rs",
+        reason: "existing fake action test-support implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/affinity.rs",
+        reason: "existing affinity implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/agent.rs",
+        reason: "existing agent implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/artifact_contract_tests.rs",
+        reason: "existing artifact contract test module contains unwrap/expect calls outside cfg-test module blocks",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/artifacts.rs",
+        reason: "existing artifact metadata implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/architecture_tests.rs",
+        reason: "architecture tests intentionally contain unwrap/expect scanner fixtures and test-only panic helpers",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/autotune/candidate.rs",
+        reason: "existing autotune candidate implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/autotune/shutdown.rs",
+        reason: "existing autotune shutdown implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/cli/mod.rs",
+        reason: "existing CLI parser tests live in source and contain unwrap/expect calls outside cfg-test module blocks",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/cli/monitor.rs",
+        reason: "existing monitor CLI tests live in source and contain unwrap/expect calls outside cfg-test module blocks",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/cli/report.rs",
+        reason: "existing report CLI tests live in source and contain unwrap/expect calls outside cfg-test module blocks",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/community_rules.rs",
+        reason: "existing community rules implementation/tests contain production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/daemon/acceptance.rs",
+        reason: "existing daemon acceptance test-support module contains unwrap/expect calls outside cfg-test module blocks",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/daemon/policy.rs",
+        reason: "existing daemon policy implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/diagnosis.rs",
+        reason: "existing diagnosis implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/ebpf_loader.rs",
+        reason: "existing eBPF loader implementation/tests contain production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/events/interpret.rs",
+        reason: "existing event interpretation implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/focus/mod.rs",
+        reason: "existing focus implementation/tests contain production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/probe_registry.rs",
+        reason: "existing probe registry implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/process_tree.rs",
+        reason: "existing process tree implementation/tests contain production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/recording_fixture_tests.rs",
+        reason: "existing recording fixture test module contains unwrap/expect calls outside cfg-test module blocks",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/regression_tests.rs",
+        reason: "existing regression test module contains unwrap/expect calls outside cfg-test module blocks",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/report/analysis.rs",
+        reason: "existing report analysis implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/report/text.rs",
+        reason: "existing text report implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/runnable_depth_tests.rs",
+        reason: "existing runnable depth test module contains unwrap/expect calls outside cfg-test module blocks",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/session.rs",
+        reason: "existing session implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/tune/mod.rs",
+        reason: "existing tune implementation contains production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/validation_corpus_tests.rs",
+        reason: "existing validation corpus test module contains unwrap/expect calls outside cfg-test module blocks",
     },
 ];
 
@@ -769,6 +899,107 @@ fn largest_rust_files(counts: &[RustFileLineCount], limit: usize) -> Vec<String>
         .take(limit)
         .map(|count| format!("{} lines {}", count.lines, count.path))
         .collect()
+}
+
+fn allowlisted_existing_production_unwrap_expect_file(
+    path: &str,
+) -> Option<&'static ExistingProductionUnwrapExpectAllowance> {
+    EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_ALLOWLIST
+        .iter()
+        .find(|allowance| allowance.path == path)
+}
+
+fn production_unwrap_expect_calls_in_file(path: &Path) -> Vec<ProductionUnwrapExpectCall> {
+    let source = fs::read_to_string(path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+    let relative_path = relative_to_crate_root(path);
+    production_unwrap_expect_calls_in_source(&source, &relative_path)
+}
+
+fn production_unwrap_expect_calls_in_source(
+    source: &str,
+    path: &str,
+) -> Vec<ProductionUnwrapExpectCall> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut calls = Vec::new();
+
+    for (line_number, line) in production_code_lines_outside_cfg_test_modules(source) {
+        let preceding_line_has_invariant = line_number
+            .checked_sub(2)
+            .and_then(|index| lines.get(index))
+            .is_some_and(|line| line.contains("// invariant:"));
+
+        for call in [".unwrap()", ".expect("] {
+            if line.contains(call) && !preceding_line_has_invariant {
+                calls.push(ProductionUnwrapExpectCall {
+                    path: path.to_owned(),
+                    line_number,
+                    call,
+                    line: line.trim().to_owned(),
+                });
+            }
+        }
+    }
+
+    calls
+}
+
+fn production_code_lines_outside_cfg_test_modules(source: &str) -> Vec<(usize, &str)> {
+    let mut lines = Vec::new();
+    let mut cfg_test_pending = false;
+    let mut skipped_test_module_brace_depth: Option<isize> = None;
+
+    for (zero_based_line_number, line) in source.lines().enumerate() {
+        let line_number = zero_based_line_number + 1;
+        let trimmed = line.trim_start();
+
+        if let Some(depth) = skipped_test_module_brace_depth {
+            let next_depth = depth + brace_delta(line);
+            if next_depth <= 0 {
+                skipped_test_module_brace_depth = None;
+            } else {
+                skipped_test_module_brace_depth = Some(next_depth);
+            }
+            continue;
+        }
+
+        if trimmed.starts_with("#[cfg(test)]") {
+            cfg_test_pending = true;
+            if trimmed.contains("mod tests") && trimmed.contains('{') {
+                let depth = brace_delta(line);
+                if depth > 0 {
+                    skipped_test_module_brace_depth = Some(depth);
+                }
+            }
+            continue;
+        }
+
+        if cfg_test_pending && trimmed.starts_with("mod tests") && trimmed.contains('{') {
+            cfg_test_pending = false;
+            let depth = brace_delta(line);
+            if depth > 0 {
+                skipped_test_module_brace_depth = Some(depth);
+            }
+            continue;
+        }
+
+        if cfg_test_pending
+            && !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+            && !trimmed.starts_with("//")
+        {
+            cfg_test_pending = false;
+        }
+
+        lines.push((line_number, line));
+    }
+
+    lines
+}
+
+fn brace_delta(line: &str) -> isize {
+    line.chars().filter(|ch| *ch == '{').count() as isize
+        - line.chars().filter(|ch| *ch == '}').count() as isize
 }
 
 fn rust_files_under(path: &Path) -> Vec<PathBuf> {
@@ -1380,6 +1611,91 @@ fn architecture_violation_message_includes_boundary_path_file_and_line() {
     assert!(message.contains("actions must not depend on command parsing"));
     assert!(message.contains("crate::commands"));
     assert!(message.contains("crate::commands::AppCommand"));
+}
+
+#[test]
+fn production_unwrap_expect_scanner_ignores_cfg_test_modules_and_invariant_comments() {
+    let source = r#"
+fn bad_unwrap(value: Option<u8>) -> u8 {
+    value.unwrap()
+}
+
+fn bad_expect(value: Option<u8>) -> u8 {
+    value.expect("value must exist")
+}
+
+fn documented_unwrap(value: Option<u8>) -> u8 {
+    // invariant: value was checked by the caller
+    value.unwrap()
+}
+
+fn documented_expect(value: Option<u8>) -> u8 {
+    // invariant: value was checked by the caller
+    value.expect("value must exist")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_unwraps_are_ignored() {
+        Some(1).unwrap();
+        Some(1).expect("present");
+    }
+}
+"#;
+
+    let calls = production_unwrap_expect_calls_in_source(source, "src/new_module.rs");
+
+    assert_eq!(
+        calls,
+        vec![
+            ProductionUnwrapExpectCall {
+                path: "src/new_module.rs".to_owned(),
+                line_number: 3,
+                call: ".unwrap()",
+                line: "value.unwrap()".to_owned(),
+            },
+            ProductionUnwrapExpectCall {
+                path: "src/new_module.rs".to_owned(),
+                line_number: 7,
+                call: ".expect(",
+                line: "value.expect(\"value must exist\")".to_owned(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn new_production_unwrap_expect_calls_require_invariant_or_allowlist() {
+    for allowance in EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_ALLOWLIST {
+        assert!(
+            !allowance.reason.trim().is_empty(),
+            "existing production unwrap/expect allowlist entry '{}' must have a reason",
+            allowance.path
+        );
+    }
+
+    let mut violations = Vec::new();
+
+    for file in rust_files_under(&crate_src_root()) {
+        let relative_path = relative_to_crate_root(&file);
+        if allowlisted_existing_production_unwrap_expect_file(&relative_path).is_some() {
+            continue;
+        }
+
+        for call in production_unwrap_expect_calls_in_file(&file) {
+            violations.push(format!(
+                "{}:{} uses {} without preceding '// invariant:' comment: {}",
+                call.path, call.line_number, call.call, call.line
+            ));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "production unwrap/expect guard failed:\n{}",
+        violations.join("\n")
+    );
 }
 
 #[test]
