@@ -91,15 +91,26 @@ mod tests {
         let path = paths::LogicalPath::new("runs/latest");
         assert_eq!(path.as_str(), "runs/latest");
 
-        let reason = match reason::ReasonCode::new("policy-denied") {
+        let reason_code = match reason::ReasonCode::new("policy-denied") {
             Ok(reason) => reason,
             Err(err) => panic!("expected valid reason code, got {err}"),
         };
-        assert_eq!(reason.as_str(), "policy-denied");
+        assert_eq!(reason_code.as_str(), "policy-denied");
+
+        let reason = match reason::Reason::from_code(reason_code, "policy denied the candidate") {
+            Ok(reason) => reason,
+            Err(err) => panic!("expected valid reason, got {err}"),
+        };
+        assert_eq!(reason.code(), "policy-denied");
+        assert_eq!(reason.message(), "policy denied the candidate");
 
         assert_eq!(
             reason::ReasonCode::new(" "),
             Err(reason::ReasonCodeError::Empty)
+        );
+        assert_eq!(
+            reason::Reason::new("policy-denied", " "),
+            Err(reason::ReasonError::EmptyMessage)
         );
     }
 }
