@@ -1,0 +1,15 @@
+[package]
+name = "stutter-report"
+version = "0.1.0"
+edition.workspace = true
+
+license.workspace = true
+
+[dependencies]
+stutter-core = { path = "../stutter-core" }
+
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[lib]
+path = "src/lib.rs"

@@ -2704,6 +2704,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "stutter-report"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "stutter-core",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
