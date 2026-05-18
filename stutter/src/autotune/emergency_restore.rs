@@ -8,7 +8,8 @@ use anyhow::Context;
 use crate::{
     actions::{
         CgroupRestoreRecord, CpuPowerRestoreRecord, GpuPowerRestoreRecord, IoPrioRestoreRecord,
-        IrqAffinityRestoreRecord, NiceRestoreRecord, RollbackToken, SafetyClass,
+        IrqAffinityRestoreRecord, NiceRestoreRecord, RollbackCandidate, RollbackHandler,
+        RollbackPreview, RollbackRegistry, RollbackResult, RollbackToken, SafetyClass,
         UclampRestoreRecord, VmKnobRestoreRecord,
     },
     audit::{AuditEvent, append_audit_event_to_path},
@@ -110,6 +111,78 @@ impl RollbackRestoreSummary {
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
         self.messages.push(message.into());
         self
+    }
+}
+
+#[derive(Default)]
+struct AutotuneRollbackTokenHandler;
+
+impl RollbackHandler for AutotuneRollbackTokenHandler {
+    fn id(&self) -> &'static str {
+        "autotune-rollback-token"
+    }
+
+    fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>> {
+        Ok(Vec::new())
+    }
+
+    fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
+        anyhow::bail!("autotune rollback token handler requires an explicit rollback token")
+    }
+
+    fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
+        anyhow::bail!("autotune rollback token handler requires an explicit rollback token")
+    }
+
+    fn supports_token(&self, _: &RollbackToken) -> bool {
+        true
+    }
+
+    fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
+        Ok(RollbackPreview {
+            handler_id: self.id(),
+            restore_path: token.restore_path().cloned().unwrap_or_default(),
+            affected_tasks: token.affected_tasks(),
+            message: format!(
+                "would restore rollback_kind={} manual_restore_command=\"{}\"",
+                rollback_token_kind(token),
+                manual_restore_command_for_token(token)
+            ),
+        })
+    }
+
+    fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+        let summary = restore_rollback_token_direct(token)?;
+        Ok(RollbackResult {
+            handler_id: self.id(),
+            restore_path: token.restore_path().cloned().unwrap_or_default(),
+            restored: summary.restored_items,
+            skipped_dead: summary.skipped_items,
+            skipped_identity_mismatch: 0,
+            legacy_unverified: 0,
+            errors: 0,
+            messages: summary.messages,
+        })
+    }
+}
+
+pub fn default_autotune_rollback_registry() -> RollbackRegistry {
+    let mut registry = RollbackRegistry::new();
+    registry.register(AutotuneRollbackTokenHandler);
+    registry
+}
+
+fn rollback_restore_summary_from_registry_result(
+    token: &RollbackToken,
+    result: RollbackResult,
+) -> RollbackRestoreSummary {
+    RollbackRestoreSummary {
+        rollback_kind: rollback_token_kind(token).to_owned(),
+        restored_items: result.restored,
+        skipped_items: result.skipped_dead
+            + result.skipped_identity_mismatch
+            + result.legacy_unverified,
+        messages: result.messages,
     }
 }
 
@@ -251,10 +324,12 @@ fn restore_applied_journal_record(
     rollback_token: &RollbackToken,
     dry_run: bool,
 ) -> anyhow::Result<AutotuneRestoreOutcome> {
+    let registry = default_autotune_rollback_registry();
     let manual_command = manual_restore_command_for_token(rollback_token);
     let rollback_kind = rollback_token_kind(rollback_token);
 
     if dry_run {
+        let preview = registry.preview_token(rollback_token)?;
         return Ok(AutotuneRestoreOutcome {
             status: AutotuneRestoreStatus::DryRun,
             restored_actions: 0,
@@ -262,16 +337,17 @@ fn restore_applied_journal_record(
             skipped_actions: 1,
             messages: vec![
                 format!(
-                    "autotune restore dry-run: would restore experiment_id={} action_id={} rollback_kind={}",
-                    experiment_id, action_id, rollback_kind
+                    "autotune restore dry-run: would restore experiment_id={} action_id={} rollback_kind={} affected_tasks={}",
+                    experiment_id, action_id, rollback_kind, preview.affected_tasks
                 ),
-                format!("manual_restore_command=\"{}\"", manual_command),
+                preview.message,
             ],
         });
     }
 
-    match restore_rollback_token(rollback_token) {
-        Ok(summary) => {
+    match registry.restore_token(rollback_token) {
+        Ok(result) => {
+            let summary = rollback_restore_summary_from_registry_result(rollback_token, result);
             write_controller_journal_clean(journal_path).with_context(|| {
                 format!(
                     "failed to clear controller journal after emergency restore {}",
@@ -372,6 +448,11 @@ fn restore_applied_journal_record(
 }
 
 pub fn restore_rollback_token(token: &RollbackToken) -> anyhow::Result<RollbackRestoreSummary> {
+    let result = default_autotune_rollback_registry().restore_token(token)?;
+    Ok(rollback_restore_summary_from_registry_result(token, result))
+}
+
+fn restore_rollback_token_direct(token: &RollbackToken) -> anyhow::Result<RollbackRestoreSummary> {
     match token {
         RollbackToken::CpuAffinityRestoreFile { path, .. } => {
             if crate::profile_restore::load_restore_state(path).is_ok() {
@@ -1127,6 +1208,34 @@ mod tests {
             assert!(!read_controller_journal(&journal_path).unwrap().is_clean());
             fs::remove_dir_all(dir).ok();
         }
+    }
+
+    #[test]
+    fn default_rollback_registry_previews_and_restores_sysfs_token() {
+        let dir = temp_dir("registry-sysfs-token");
+        let target = dir.join("sysfs-knob");
+        fs::write(&target, "changed").unwrap();
+
+        let token = RollbackToken::SysfsRestore {
+            path: target.clone(),
+            original_value: "original".to_owned(),
+        };
+        let registry = default_autotune_rollback_registry();
+
+        let preview = registry.preview_token(&token).unwrap();
+        assert_eq!(preview.handler_id, "autotune-rollback-token");
+        assert_eq!(preview.restore_path, target);
+        assert_eq!(preview.affected_tasks, 1);
+        assert!(preview.message.contains("rollback_kind=sysfs-restore"));
+        assert!(preview.message.contains("manual_restore_command"));
+
+        let result = registry.restore_token(&token).unwrap();
+        assert_eq!(result.handler_id, "autotune-rollback-token");
+        assert_eq!(result.restored, 1);
+        assert_eq!(result.errors, 0);
+        assert_eq!(fs::read_to_string(&target).unwrap(), "original");
+
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]

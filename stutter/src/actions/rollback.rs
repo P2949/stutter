@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::actions::token::RollbackToken;
+
 pub struct RollbackRegistry {
     handlers: Vec<Box<dyn RollbackHandler>>,
 }
@@ -95,6 +97,22 @@ impl RollbackRegistry {
 
         summary
     }
+
+    pub fn preview_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
+        self.handler_for_token(token)?.dry_run_token(token)
+    }
+
+    pub fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+        self.handler_for_token(token)?.restore_token(token)
+    }
+
+    fn handler_for_token(&self, token: &RollbackToken) -> anyhow::Result<&dyn RollbackHandler> {
+        self.handlers
+            .iter()
+            .map(|handler| handler.as_ref())
+            .find(|handler| handler.supports_token(token))
+            .ok_or_else(|| anyhow::anyhow!("no rollback handler registered for token {token:?}"))
+    }
 }
 
 impl Default for RollbackRegistry {
@@ -108,6 +126,24 @@ pub trait RollbackHandler {
     fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>>;
     fn dry_run(&self, candidate: &RollbackCandidate) -> anyhow::Result<RollbackPreview>;
     fn restore(&self, candidate: RollbackCandidate) -> anyhow::Result<RollbackResult>;
+
+    fn supports_token(&self, _token: &RollbackToken) -> bool {
+        false
+    }
+
+    fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
+        anyhow::bail!(
+            "rollback handler {} does not support token preview for {token:?}",
+            self.id()
+        )
+    }
+
+    fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+        anyhow::bail!(
+            "rollback handler {} does not support token restore for {token:?}",
+            self.id()
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +169,7 @@ pub struct RollbackResult {
     pub skipped_identity_mismatch: usize,
     pub legacy_unverified: usize,
     pub errors: usize,
+    pub messages: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -154,6 +191,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::actions::token::RollbackToken;
 
     struct TestRollbackHandler {
         id: &'static str,
@@ -177,6 +215,7 @@ mod tests {
                     skipped_identity_mismatch: 0,
                     legacy_unverified: 0,
                     errors: 0,
+                    messages: Vec::new(),
                 },
                 fail_discover: false,
                 fail_dry_run: false,
@@ -247,6 +286,52 @@ mod tests {
         }
     }
 
+    struct TokenRollbackHandler;
+
+    impl RollbackHandler for TokenRollbackHandler {
+        fn id(&self) -> &'static str {
+            "token"
+        }
+
+        fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>> {
+            Ok(Vec::new())
+        }
+
+        fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
+            anyhow::bail!("path dry-run is not supported by token test handler")
+        }
+
+        fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
+            anyhow::bail!("path restore is not supported by token test handler")
+        }
+
+        fn supports_token(&self, token: &RollbackToken) -> bool {
+            matches!(token, RollbackToken::SysfsRestore { .. })
+        }
+
+        fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
+            Ok(RollbackPreview {
+                handler_id: self.id(),
+                restore_path: token.restore_path().cloned().unwrap_or_default(),
+                affected_tasks: token.affected_tasks(),
+                message: "would restore sysfs token".to_owned(),
+            })
+        }
+
+        fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+            Ok(RollbackResult {
+                handler_id: self.id(),
+                restore_path: token.restore_path().cloned().unwrap_or_default(),
+                restored: token.affected_tasks(),
+                skipped_dead: 0,
+                skipped_identity_mismatch: 0,
+                legacy_unverified: 0,
+                errors: 0,
+                messages: vec!["restored sysfs token".to_owned()],
+            })
+        }
+    }
+
     #[test]
     fn rollback_registry_discovers_and_previews_all_handlers() {
         let mut registry = RollbackRegistry::new();
@@ -284,6 +369,7 @@ mod tests {
                     skipped_identity_mismatch: 2,
                     legacy_unverified: 4,
                     errors: 5,
+                    messages: Vec::new(),
                 },
             ),
         );
@@ -317,5 +403,25 @@ mod tests {
         assert_eq!(summary.restored_total, 4);
         assert_eq!(summary.errors, 1);
         assert_eq!(summary.skipped_dead, 0);
+    }
+
+    #[test]
+    fn rollback_registry_routes_token_preview_and_restore_to_registered_handler() {
+        let mut registry = RollbackRegistry::new();
+        registry.register(TokenRollbackHandler);
+        let token = RollbackToken::SysfsRestore {
+            path: PathBuf::from("/tmp/test-knob"),
+            original_value: "original".to_owned(),
+        };
+
+        let preview = registry.preview_token(&token).unwrap();
+        let result = registry.restore_token(&token).unwrap();
+
+        assert_eq!(preview.handler_id, "token");
+        assert_eq!(preview.restore_path, PathBuf::from("/tmp/test-knob"));
+        assert_eq!(preview.affected_tasks, 1);
+        assert_eq!(result.handler_id, "token");
+        assert_eq!(result.restored, 1);
+        assert_eq!(result.messages, vec!["restored sysfs token"]);
     }
 }

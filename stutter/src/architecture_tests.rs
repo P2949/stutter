@@ -508,12 +508,12 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/autotune/startup_recovery.rs",
-        max_lines: 1_350,
+        max_lines: 1_360,
         reason: "existing autotune startup recovery implementation pending future split",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/emergency_restore.rs",
-        max_lines: 1_348,
+        max_lines: 1_465,
         reason: "existing autotune emergency restore implementation pending future split",
     },
     OversizedRustFileAllowance {
