@@ -40,6 +40,7 @@ pub(crate) mod soak;
 pub(crate) mod state;
 pub(crate) mod state_builders;
 pub(crate) mod store;
+pub(crate) mod testing;
 pub(crate) mod watchdog;
 
 pub(crate) use config::{CgroupTargetRole, DaemonCgroupTargetsConfig, DaemonConfig, DaemonPreset};

@@ -1,4 +1,4 @@
-use crate::daemon::acceptance::{DaemonAcceptanceReport, run_fake_daemon_acceptance_suite};
+use crate::daemon::testing::{DaemonAcceptanceReport, run_fake_daemon_acceptance_suite};
 
 pub fn run_acceptance_command(
     input: crate::commands::input::DaemonAcceptanceCommandInput,
@@ -45,7 +45,7 @@ mod tests {
 
     #[test]
     fn daemon_acceptance_text_lists_final_boss_steps() {
-        let report = crate::daemon::acceptance::run_fake_daemon_acceptance_suite();
+        let report = crate::daemon::testing::run_fake_daemon_acceptance_suite();
 
         let text = render_acceptance_text(&report);
 

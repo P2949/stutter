@@ -609,7 +609,7 @@ mod tests {
         assert_eq!(input.config.tick_millis, 500);
         assert_eq!(
             input.config.profile,
-            crate::daemon::soak::DaemonSoakProfile::ApplyLowRiskFake
+            crate::daemon::testing::DaemonSoakProfile::ApplyLowRiskFake
         );
         assert_eq!(input.config.budget.max_disk_growth_bytes, 1024);
     }
