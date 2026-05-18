@@ -232,9 +232,14 @@ impl DaemonRuntime {
                     unix_nanos: crate::audit::unix_nanos_now(),
                 })
             }
-            DaemonRuntimeEvent::ShutdownRequested => {
-                Some(self.transition_to(DaemonPhase::Shutdown, "shutdown requested"))
-            }
+            DaemonRuntimeEvent::ShutdownRequested => Some(self.transition_to(
+                DaemonPhase::Shutdown,
+                if self.config.rollback_on_stop {
+                    "shutdown requested; rollback_on_stop enabled"
+                } else {
+                    "shutdown requested; rollback_on_stop disabled"
+                },
+            )),
             DaemonRuntimeEvent::Fault(reason) => {
                 Some(self.transition_to(DaemonPhase::Faulted, reason))
             }

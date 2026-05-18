@@ -264,9 +264,7 @@ pub struct PrivilegeAuditSink {
 
 impl Default for PrivilegeAuditSink {
     fn default() -> Self {
-        Self {
-            path: crate::audit::default_audit_log_path(),
-        }
+        Self::to_path(crate::audit::default_audit_log_path())
     }
 }
 
@@ -414,10 +412,7 @@ pub struct InProcessPrivilegedActionService {
 
 impl Default for InProcessPrivilegedActionService {
     fn default() -> Self {
-        Self {
-            proc_root: PathBuf::from("/proc"),
-            audit_sink: PrivilegeAuditSink::default(),
-        }
+        Self::with_proc_root_and_audit_path("/proc", crate::audit::default_audit_log_path())
     }
 }
 
@@ -433,6 +428,7 @@ struct CandidateBoundaryAuditInput<'a> {
 }
 
 impl InProcessPrivilegedActionService {
+    #[cfg(test)]
     pub fn with_proc_root(proc_root: impl Into<PathBuf>) -> Self {
         Self {
             proc_root: proc_root.into(),
@@ -440,6 +436,7 @@ impl InProcessPrivilegedActionService {
         }
     }
 
+    #[cfg(test)]
     pub fn with_audit_path(audit_path: impl Into<PathBuf>) -> Self {
         Self {
             audit_sink: PrivilegeAuditSink::to_path(audit_path),
@@ -986,10 +983,10 @@ impl UnixSocketPrivilegedActionService {
         &self,
         request: PrivilegedWorkerRequest,
     ) -> anyhow::Result<PrivilegedWorkerResponse> {
-        let mut stream = UnixStream::connect(&self.socket_path).with_context(|| {
+        let mut stream = UnixStream::connect(self.socket_path()).with_context(|| {
             format!(
                 "failed to connect to privileged worker socket {}",
-                self.socket_path.display()
+                self.socket_path().display()
             )
         })?;
         serde_json::to_writer(&mut stream, &request)?;
@@ -1001,13 +998,13 @@ impl UnixSocketPrivilegedActionService {
         reader.read_line(&mut line).with_context(|| {
             format!(
                 "failed to read privileged worker response from {}",
-                self.socket_path.display()
+                self.socket_path().display()
             )
         })?;
         if line.trim().is_empty() {
             anyhow::bail!(
                 "privileged_worker_empty_response: {} returned no response",
-                self.socket_path.display()
+                self.socket_path().display()
             );
         }
 

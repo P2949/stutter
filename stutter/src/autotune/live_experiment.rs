@@ -105,16 +105,27 @@ pub struct LiveExperimentHistoryContext {
 
 #[derive(Clone, Debug)]
 pub struct LiveExperimentOutcome {
-    #[cfg(test)]
     pub event: LiveExperimentEvent,
     pub history_context: Option<LiveExperimentHistoryContext>,
     pub clear_measurement_window: bool,
 }
 
+impl LiveExperimentEvent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Noop => "noop",
+            Self::Started => "started",
+            Self::Kept => "kept",
+            Self::Reverted => "reverted",
+            Self::CooldownEntered => "cooldown_entered",
+            Self::Faulted => "faulted",
+        }
+    }
+}
+
 impl LiveExperimentOutcome {
     fn noop() -> Self {
         Self {
-            #[cfg(test)]
             event: LiveExperimentEvent::Noop,
             history_context: None,
             clear_measurement_window: false,
@@ -122,11 +133,7 @@ impl LiveExperimentOutcome {
     }
 
     fn event(event: LiveExperimentEvent) -> Self {
-        #[cfg(not(test))]
-        let _ = event;
-
         Self {
-            #[cfg(test)]
             event,
             history_context: None,
             clear_measurement_window: false,
@@ -137,11 +144,7 @@ impl LiveExperimentOutcome {
         event: LiveExperimentEvent,
         history_context: LiveExperimentHistoryContext,
     ) -> Self {
-        #[cfg(not(test))]
-        let _ = event;
-
         Self {
-            #[cfg(test)]
             event,
             history_context: Some(history_context),
             clear_measurement_window: false,
@@ -210,7 +213,16 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
                 })?;
             Ok(result.rollback)
         } else {
-            Ok(apply_candidate_with_audit(candidate.clone())?.rollback)
+            let outcome = apply_candidate_with_audit(candidate.clone())?;
+            log::info!(
+                "autotune_candidate_applied candidate={} action_kind={} affected_tasks={} safety_class={:?} state={:?}",
+                &outcome.candidate_name,
+                &outcome.action_kind,
+                outcome.affected_tasks,
+                &outcome.safety_class,
+                &outcome.state
+            );
+            Ok(outcome.rollback)
         }
     }
 
