@@ -1130,10 +1130,10 @@ mod tests {
                 score_delta: -200,
                 confidence_milli: 900,
                 environment: crate::daemon::DaemonProfileEnvironment::default(),
-                partition: crate::daemon::DaemonProfilePartition::default(),
+                partition: crate::daemon::state::DaemonProfilePartition::default(),
             };
         let state = DaemonState {
-            profile_memory: crate::daemon::DaemonProfileMemory {
+            profile_memory: crate::daemon::state::DaemonProfileMemory {
                 profiles: vec![
                     profile("game-main", "cpu-affinity-profile:game-main"),
                     profile("io-priority", "ionice:io-priority"),

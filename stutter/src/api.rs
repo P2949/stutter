@@ -290,40 +290,71 @@ pub mod daemon {
     //! Public daemon policy, state, health, lifecycle, and runtime contracts.
 
     pub use crate::daemon::{
-        ActionDescriptor, ActionEffectScope, ActionSource, AutotuneSubsystem,
-        AutotuneSubsystemEvent, CapabilityProbe, CapabilityProbeRoot, CgroupTargetRole,
-        DAEMON_STATE_SCHEMA_VERSION, DaemonAcceptanceReport, DaemonAcceptanceStep,
-        DaemonAutotuneConfig, DaemonCapabilities, DaemonCgroupTargetsConfig, DaemonConfig,
-        DaemonDecisionState, DaemonDegradedStatus, DaemonExperimentState, DaemonFaultState,
-        DaemonHealthConfig, DaemonLifecycleAction, DaemonLifecycleEvent, DaemonLifecycleInputs,
-        DaemonLifecyclePolicy, DaemonLifecycleTransition, DaemonMode, DaemonOverheadBudget,
-        DaemonOverheadIssue, DaemonOverheadMonitor, DaemonOverheadReport, DaemonOverheadSnapshot,
-        DaemonPhase, DaemonPolicy, DaemonPolicyBuildInput, DaemonPolicyContext,
-        DaemonPolicyExplanation, DaemonPolicyVerdict, DaemonPreset, DaemonProfileEnvironment,
-        DaemonProfileMemory, DaemonProfilePartition, DaemonProfileValidation, DaemonRemoteConfig,
-        DaemonRetentionConfig, DaemonRollbackState, DaemonRuntime, DaemonRuntimeConfig,
-        DaemonRuntimeEvent, DaemonSafetyConfig, DaemonSelfHealingAction, DaemonSoakBudget,
-        DaemonSoakConfig, DaemonSoakFailure, DaemonSoakMetrics, DaemonSoakProfile,
-        DaemonSoakReport, DaemonSoakScenarioReport, DaemonState, DaemonStateSnapshotWriter,
-        DaemonStateStore, DaemonStatusExplanation, DaemonTargetConfig, DaemonTargetState,
-        DaemonTransition, DaemonWatchdogConfig, DaemonWatchdogInputs, DaemonWatchdogIssue,
-        DaemonWatchdogReport, DaemonWorkloadProfile, MonitorShutdownSummary, MonitorSubsystem,
-        MonitorSubsystemConfig, PolicyDecisionKind, PolicyExplainLine, PolicyExplanation,
-        PolicyIntent, PolicyRejection, PolicyRuleEvaluation, PrivilegeCommandAllowlist,
-        PrivilegeCommandRequest, PrivilegeDecision, PrivilegeProcessRole, PrivilegeTransport,
-        PrivilegedOperation, RemoteApplyPolicy, RemotePolicyContext, RollbackRequirement,
-        SoakAssertion, SoakScenario, SoakTick, StartupRecoveryDaemonStateInput,
-        SuspendResumeDetector, SystemHealthInputs, SystemHealthIssue, SystemHealthMonitor,
-        SystemHealthProbeRoot, SystemHealthSnapshot, SystemHealthState, SystemHealthThresholds,
-        build_daemon_policy,
-        config::{DaemonCandidateConfidenceConfig, normalize_cgroup_target_path},
-        daemon_decision_state, daemon_state_for_agent_fault, daemon_state_for_record_start,
-        daemon_state_for_startup_recovery_snapshot, daemon_state_from_startup_recovery,
-        default_daemon_state_snapshot_path, evaluate_daemon_lifecycle_event,
-        evaluate_daemon_overhead, evaluate_daemon_watchdog, evaluate_system_health,
-        load_daemon_state, policy_context_from_daemon_status, policy_context_from_daemon_status_at,
-        privileged_operation_audit_event, run_fake_daemon_acceptance_suite, run_fake_daemon_soak,
-        run_scenario_daemon_soak, safety_class_for_rollback_token,
+        acceptance::{
+            DaemonAcceptanceReport, DaemonAcceptanceStep, run_fake_daemon_acceptance_suite,
+        },
+        autotune::{AutotuneSubsystem, AutotuneSubsystemEvent},
+        capabilities::{CapabilityProbe, CapabilityProbeRoot, DaemonCapabilities},
+        config::{
+            CgroupTargetRole, DaemonAutotuneConfig, DaemonCandidateConfidenceConfig,
+            DaemonCgroupTargetsConfig, DaemonConfig, DaemonHealthConfig, DaemonPreset,
+            DaemonRemoteConfig, DaemonRetentionConfig, DaemonSafetyConfig, DaemonTargetConfig,
+            normalize_cgroup_target_path,
+        },
+        explain::{
+            DaemonPolicyExplanation, DaemonStatusExplanation, PolicyDecisionKind,
+            PolicyExplainLine, PolicyExplanation, PolicyRuleEvaluation,
+            policy_context_from_daemon_status, policy_context_from_daemon_status_at,
+        },
+        health::{
+            SystemHealthInputs, SystemHealthIssue, SystemHealthMonitor, SystemHealthProbeRoot,
+            SystemHealthSnapshot, SystemHealthState, SystemHealthThresholds,
+            evaluate_system_health,
+        },
+        lifecycle::{
+            DaemonLifecycleAction, DaemonLifecycleEvent, DaemonLifecycleInputs,
+            DaemonLifecyclePolicy, DaemonLifecycleTransition, SuspendResumeDetector,
+            evaluate_daemon_lifecycle_event,
+        },
+        monitor::{MonitorShutdownSummary, MonitorSubsystem, MonitorSubsystemConfig},
+        overhead::{
+            DaemonOverheadBudget, DaemonOverheadIssue, DaemonOverheadMonitor, DaemonOverheadReport,
+            DaemonOverheadSnapshot, evaluate_daemon_overhead,
+        },
+        policy::{
+            ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicy,
+            DaemonPolicyBuildInput, DaemonPolicyContext, DaemonPolicyVerdict, PolicyIntent,
+            PolicyRejection, RemoteApplyPolicy, RemotePolicyContext, RollbackRequirement,
+            build_daemon_policy,
+        },
+        privilege::{
+            PrivilegeCommandAllowlist, PrivilegeCommandRequest, PrivilegeDecision,
+            PrivilegeProcessRole, PrivilegeTransport, PrivilegedOperation,
+            privileged_operation_audit_event,
+        },
+        runtime::{DaemonRuntime, DaemonRuntimeConfig, DaemonRuntimeEvent, DaemonTransition},
+        soak::{
+            DaemonSoakBudget, DaemonSoakConfig, DaemonSoakFailure, DaemonSoakMetrics,
+            DaemonSoakProfile, DaemonSoakReport, DaemonSoakScenarioReport, SoakAssertion,
+            SoakScenario, SoakTick, run_fake_daemon_soak, run_scenario_daemon_soak,
+        },
+        state::{
+            DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus,
+            DaemonExperimentState, DaemonFaultState, DaemonPhase, DaemonProfileEnvironment,
+            DaemonProfileMemory, DaemonProfilePartition, DaemonProfileValidation,
+            DaemonRollbackState, DaemonState, DaemonStateSnapshotWriter, DaemonTargetState,
+            DaemonWorkloadProfile, default_daemon_state_snapshot_path, load_daemon_state,
+        },
+        state_builders::{
+            StartupRecoveryDaemonStateInput, daemon_decision_state, daemon_state_for_agent_fault,
+            daemon_state_for_record_start, daemon_state_for_startup_recovery_snapshot,
+            daemon_state_from_startup_recovery, safety_class_for_rollback_token,
+        },
+        store::DaemonStateStore,
+        watchdog::{
+            DaemonSelfHealingAction, DaemonWatchdogConfig, DaemonWatchdogInputs,
+            DaemonWatchdogIssue, DaemonWatchdogReport, evaluate_daemon_watchdog,
+        },
     };
 }
 
@@ -374,12 +405,23 @@ pub mod events {
 pub mod focus {
     //! Public focus snapshot, classification, scoring, and resolution contracts.
 
-    pub use crate::focus::{
-        Classification, FocusCache, FocusCounters, FocusDecision, FocusGroup, FocusGroupKind,
-        FocusPolicy, FocusProcess, FocusResolver, FocusScoreBreakdown, FocusSnapshot, PriorityBand,
-        ProcessIdentity, ResolvedFocus, SafetyWarning, SystemTaskClass, ThreadIdentity,
-        build_focus_snapshot_from_processes, classify_process, classify_thread, focus_snapshot_at,
-        priority_band_for_class, safety_warnings_for_group, situation_for_group,
+    pub use crate::{
+        focus::{
+            classify::{
+                Classification, PriorityBand, ProcessIdentity, ThreadIdentity, classify_process,
+                classify_thread, priority_band_for_class,
+            },
+            groups::{
+                FocusGroup, FocusGroupKind, FocusScoreBreakdown, SafetyWarning,
+                safety_warnings_for_group, situation_for_group,
+            },
+            resolve::{FocusDecision, FocusPolicy, FocusResolver, ResolvedFocus},
+            snapshot::{
+                FocusCache, FocusCounters, FocusProcess, FocusSnapshot,
+                build_focus_snapshot_from_processes, focus_snapshot_at,
+            },
+        },
+        process_tree::TaskClass as SystemTaskClass,
     };
 }
 

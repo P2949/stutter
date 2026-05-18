@@ -268,7 +268,7 @@ mod tests {
                     token: Some(rollback_token.clone()),
                     manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
                 }),
-                profile_memory: crate::daemon::DaemonProfileMemory {
+                profile_memory: crate::daemon::state::DaemonProfileMemory {
                     profiles: vec![crate::daemon::DaemonWorkloadProfile {
                         workload_identity_hash: "workload-abc".to_owned(),
                         workload_label: Some("game".to_owned()),
@@ -283,7 +283,7 @@ mod tests {
                         score_delta: -150,
                         confidence_milli: 900,
                         environment: crate::daemon::DaemonProfileEnvironment::default(),
-                        partition: crate::daemon::DaemonProfilePartition::default(),
+                        partition: crate::daemon::state::DaemonProfilePartition::default(),
                     }],
                 },
                 ..DaemonState::default()
