@@ -63,8 +63,7 @@ pub use health::{
 };
 pub use lifecycle::{
     DaemonLifecycleAction, DaemonLifecycleEvent, DaemonLifecycleInputs, DaemonLifecyclePolicy,
-    DaemonLifecycleTransition, LifecycleClockSample, SuspendResumeDetector,
-    evaluate_daemon_lifecycle_event,
+    DaemonLifecycleTransition, SuspendResumeDetector, evaluate_daemon_lifecycle_event,
 };
 pub use monitor::{MonitorShutdownSummary, MonitorSubsystem, MonitorSubsystemConfig};
 pub use overhead::{
