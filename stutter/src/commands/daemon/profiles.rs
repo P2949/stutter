@@ -322,10 +322,10 @@ mod tests {
                 scx_ops: Some("scx_lavd".to_owned()),
                 ..DaemonProfileEnvironment::default()
             },
-            partition: crate::daemon::DaemonProfilePartition {
+            partition: crate::daemon::state::DaemonProfilePartition {
                 power_source: Some("ac".to_owned()),
                 scheduler_label: Some("scx_lavd".to_owned()),
-                ..crate::daemon::DaemonProfilePartition::default()
+                ..crate::daemon::state::DaemonProfilePartition::default()
             },
         }
     }
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn daemon_profiles_list_text_reports_persistent_profiles() {
         let state = DaemonState {
-            profile_memory: crate::daemon::DaemonProfileMemory {
+            profile_memory: crate::daemon::state::DaemonProfileMemory {
                 profiles: vec![daemon_test_profile("workload-a", "game-main")],
             },
             ..DaemonState::default()
@@ -351,7 +351,7 @@ mod tests {
     #[test]
     fn daemon_profiles_explain_text_reports_invalidation_reasons() {
         let state = DaemonState {
-            profile_memory: crate::daemon::DaemonProfileMemory {
+            profile_memory: crate::daemon::state::DaemonProfileMemory {
                 profiles: vec![daemon_test_profile("workload-a", "game-main")],
             },
             ..DaemonState::default()
