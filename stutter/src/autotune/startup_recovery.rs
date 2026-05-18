@@ -99,7 +99,8 @@ impl StartupRecoveryRollbackExecutor for RealStartupRecoveryRollbackExecutor {
         &mut self,
         token: &RollbackToken,
     ) -> anyhow::Result<StartupRecoveryRollbackSummary> {
-        let summary = crate::autotune::emergency_restore::restore_rollback_token(token)
+        let result = crate::autotune::emergency_restore::default_autotune_rollback_registry()
+            .restore_token(token)
             .with_context(|| {
                 format!(
                     "startup crash recovery failed to restore rollback token_kind={}",
@@ -107,20 +108,34 @@ impl StartupRecoveryRollbackExecutor for RealStartupRecoveryRollbackExecutor {
                 )
             })?;
 
-        let mut message = format!(
-            "rollback_kind={} restored_items={} skipped_items={}",
-            summary.rollback_kind, summary.restored_items, summary.skipped_items
-        );
-        if !summary.messages.is_empty() {
-            message.push_str(" messages=\"");
-            message.push_str(&summary.messages.join("; "));
-            message.push('"');
-        }
+        Ok(startup_recovery_summary_from_rollback_result(token, result))
+    }
+}
 
-        Ok(StartupRecoveryRollbackSummary {
-            affected_tasks: summary.restored_items,
-            message,
-        })
+fn startup_recovery_summary_from_rollback_result(
+    token: &RollbackToken,
+    result: crate::actions::RollbackResult,
+) -> StartupRecoveryRollbackSummary {
+    let skipped_items =
+        result.skipped_dead + result.skipped_identity_mismatch + result.legacy_unverified;
+    let mut message = format!(
+        "rollback_kind={} restored_items={} skipped_items={}",
+        rollback_token_kind(token),
+        result.restored,
+        skipped_items
+    );
+    if result.errors > 0 {
+        message.push_str(&format!(" errors={}", result.errors));
+    }
+    if !result.messages.is_empty() {
+        message.push_str(" messages=\"");
+        message.push_str(&result.messages.join("; "));
+        message.push('"');
+    }
+
+    StartupRecoveryRollbackSummary {
+        affected_tasks: result.restored,
+        message,
     }
 }
 
@@ -1220,7 +1235,7 @@ mod tests {
     }
 
     #[test]
-    fn real_startup_recovery_executor_uses_universal_restore_for_sysfs_tokens() {
+    fn real_startup_recovery_executor_uses_registry_restore_for_sysfs_tokens() {
         let dir = temp_dir("sysfs-token");
         let path = dir.join("knob");
         fs::write(&path, "performance\n").unwrap();
@@ -1234,6 +1249,8 @@ mod tests {
 
         assert_eq!(summary.affected_tasks, 1);
         assert!(summary.message.contains("rollback_kind=sysfs-restore"));
+        assert!(summary.message.contains("restored_items=1"));
+        assert!(summary.message.contains("skipped_items=0"));
         assert_eq!(fs::read_to_string(&path).unwrap(), "powersave\n");
 
         fs::remove_dir_all(dir).ok();
