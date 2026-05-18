@@ -7,14 +7,15 @@ use std::{
 use anyhow::Context;
 
 #[cfg(test)]
+use crate::actions::runner::run_audited_action_with_audit_path;
+#[cfg(test)]
 use crate::actions::{ActionId, ActionWarning};
 use crate::{
     actions::{
         ActionState, RollbackToken, SafetyClass, TuningAction,
         cpu_affinity::CpuAffinityProfileAction,
         runner::{
-            ActionHooks, ActionRunPolicy, AuditedActionResult, run_audited_action_with_audit_path,
-            run_audited_action_with_hooks,
+            ActionHooks, ActionRunPolicy, AuditedActionResult, run_audited_action_with_hooks,
         },
     },
     autotune::{
@@ -296,6 +297,7 @@ fn apply_cpu_affinity_candidate_with_audit_hooks(
     })
 }
 
+#[cfg(test)]
 pub fn apply_cpu_affinity_candidate_with_audit_path_for_tests(
     candidate_name: String,
     action: &CpuAffinityProfileAction,

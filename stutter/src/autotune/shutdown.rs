@@ -337,6 +337,7 @@ pub fn rollback_active_low_risk_actions_on_exit_with_executor<E: ExitRollbackExe
     summary
 }
 
+#[cfg(test)]
 pub fn rollback_active_low_risk_actions_on_exit_with_audit_path_for_tests<
     E: ExitRollbackExecutor + ?Sized,
 >(

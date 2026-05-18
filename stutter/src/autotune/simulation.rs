@@ -92,6 +92,7 @@ pub fn run_fake_daemon_scenario_with_safety(
     })
 }
 
+#[cfg(test)]
 pub fn assert_no_apply_without_rollback(report: &FakeDaemonSimulationReport) {
     if report.contains_decision("candidate_started") {
         assert!(
