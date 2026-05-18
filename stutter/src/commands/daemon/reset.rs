@@ -2,7 +2,7 @@ use std::fs;
 
 use serde::Serialize;
 
-use crate::daemon::{
+use crate::daemon::state::{
     DaemonPhase, DaemonState, DaemonStateSnapshotWriter, default_daemon_state_snapshot_path,
 };
 
@@ -57,9 +57,9 @@ pub fn reset_daemon_state(dry_run: bool) -> anyhow::Result<DaemonResetStateRepor
 
 pub fn safe_reset_daemon_state() -> DaemonState {
     DaemonState {
-        mode: crate::daemon::DaemonMode::Observe,
+        mode: crate::daemon::policy::DaemonMode::Observe,
         phase: DaemonPhase::Disabled,
-        last_decision: Some(crate::daemon::DaemonDecisionState {
+        last_decision: Some(crate::daemon::state::DaemonDecisionState {
             decision: "daemon_state_reset".to_owned(),
             reason: "operator reset daemon state to safe observe-only defaults".to_owned(),
             unix_nanos: Some(crate::audit::unix_nanos_now()),
@@ -132,7 +132,7 @@ mod tests {
     fn safe_reset_daemon_state_clears_active_state_and_disables_apply() {
         let state = safe_reset_daemon_state();
 
-        assert_eq!(state.mode, crate::daemon::DaemonMode::Observe);
+        assert_eq!(state.mode, crate::daemon::policy::DaemonMode::Observe);
         assert_eq!(state.phase, DaemonPhase::Disabled);
         assert!(state.active_experiment.is_none());
         assert!(state.active_target.is_none());

@@ -11,7 +11,10 @@ use crate::{
         },
         state::SituationKind,
     },
-    daemon::{ActionSource, DaemonMode, DaemonState},
+    daemon::{
+        policy::{ActionSource, DaemonMode},
+        state::DaemonState,
+    },
     ebpf_loader::DropCountersSnapshot,
     focus::FocusGroupKind,
     process_tree::{TaskClass, TaskInfo},
@@ -247,7 +250,7 @@ fn interval_record_with_drops(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::DaemonPhase;
+    use crate::daemon::state::DaemonPhase;
 
     fn standard_prefix() -> Vec<FakeDaemonStep> {
         vec![

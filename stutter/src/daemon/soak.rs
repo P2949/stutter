@@ -8,7 +8,7 @@ use crate::{
         FakeDaemonScenario, FakeDaemonSimulationReport, FakeDaemonStep,
         run_fake_daemon_scenario_with_safety,
     },
-    daemon::{DaemonMode, DaemonPhase},
+    daemon::{DaemonPhase, policy::DaemonMode},
 };
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

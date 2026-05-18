@@ -17,9 +17,13 @@ use crate::{
         },
     },
     daemon::{
-        DaemonPhase, DaemonState, DaemonStateSnapshotWriter, DaemonStateStore,
-        StartupRecoveryDaemonStateInput, daemon_state_for_startup_recovery_snapshot,
-        default_daemon_state_snapshot_path, safety_class_for_rollback_token,
+        DaemonPhase, DaemonState,
+        state::{DaemonStateSnapshotWriter, default_daemon_state_snapshot_path},
+        state_builders::{
+            StartupRecoveryDaemonStateInput, daemon_state_for_startup_recovery_snapshot,
+            safety_class_for_rollback_token,
+        },
+        store::DaemonStateStore,
     },
 };
 
@@ -604,7 +608,7 @@ mod tests {
     }
 
     fn read_daemon_state_snapshot(path: &Path) -> DaemonState {
-        crate::daemon::load_daemon_state(path).unwrap()
+        crate::daemon::state::load_daemon_state(path).unwrap()
     }
 
     #[test]

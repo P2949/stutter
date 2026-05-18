@@ -819,7 +819,7 @@ mod tests {
 
         assert_eq!(
             decoded.health.state,
-            crate::daemon::SystemHealthState::Healthy
+            crate::daemon::health::SystemHealthState::Healthy
         );
         assert!(decoded.health.ok_for_apply);
         assert!(decoded.profile_memory.profiles.is_empty());

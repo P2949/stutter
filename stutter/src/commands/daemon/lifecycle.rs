@@ -1,4 +1,4 @@
-use crate::daemon::default_daemon_state_snapshot_path;
+use crate::daemon::state::default_daemon_state_snapshot_path;
 
 pub fn run_pause_command(_: crate::commands::input::DaemonPauseCommandInput) -> anyhow::Result<()> {
     let state_path = default_daemon_state_snapshot_path();

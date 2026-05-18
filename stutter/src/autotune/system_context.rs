@@ -8,8 +8,8 @@ use crate::{
         observation::{ActiveConfigSnapshot, ActiveTaskSnapshot, AutotuneObservation},
     },
     daemon::{
-        DaemonCapabilities, SystemHealthSnapshot,
-        capabilities::{CapabilityProbe, CapabilityProbeRoot},
+        capabilities::{CapabilityProbe, CapabilityProbeRoot, DaemonCapabilities},
+        health::SystemHealthSnapshot,
     },
     system_inventory::{DrmDeviceInventory, SystemInventory, SystemInventoryRoot},
 };
@@ -96,7 +96,7 @@ mod tests {
     use super::*;
     use crate::{
         autotune::observation::ActiveTaskSnapshot,
-        daemon::{SystemHealthSnapshot, SystemHealthState},
+        daemon::health::{SystemHealthSnapshot, SystemHealthState},
         process_tree::TaskClass,
         test_support::TestRoot,
     };

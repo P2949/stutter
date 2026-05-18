@@ -4,10 +4,13 @@ use super::helpers::load_recent_daemon_decisions;
 use crate::{
     config_file,
     daemon::{
-        CapabilityProbe, DaemonCapabilities, DaemonState, DaemonWatchdogConfig,
-        DaemonWatchdogInputs, DaemonWatchdogReport, SystemHealthMonitor, SystemHealthProbeRoot,
-        SystemHealthSnapshot, default_daemon_state_snapshot_path, evaluate_daemon_watchdog,
-        load_daemon_state,
+        capabilities::{CapabilityProbe, DaemonCapabilities},
+        health::{SystemHealthMonitor, SystemHealthProbeRoot, SystemHealthSnapshot},
+        state::{DaemonState, default_daemon_state_snapshot_path, load_daemon_state},
+        watchdog::{
+            DaemonWatchdogConfig, DaemonWatchdogInputs, DaemonWatchdogReport,
+            evaluate_daemon_watchdog,
+        },
     },
 };
 
@@ -128,7 +131,7 @@ pub fn system_health_monitor_from_user_config_with_root(
     let thresholds = config_file::daemon_health_thresholds_from_user_config(
         user_config,
         None,
-        crate::daemon::ActionSource::Cli,
+        crate::daemon::policy::ActionSource::Cli,
     )?;
     Ok(SystemHealthMonitor::new(root, thresholds))
 }
@@ -244,7 +247,7 @@ pub fn render_status_text(output: &DaemonStatusOutput) -> String {
     if let Some(fault) = output.state.faulted.as_ref() {
         text.push_str(&format!("fault: {}\n", fault.reason));
     }
-    if output.state.phase == crate::daemon::DaemonPhase::Paused {
+    if output.state.phase == crate::daemon::state::DaemonPhase::Paused {
         text.push_str("pause_state: operator_paused\n");
     }
     let unavailable = output.capabilities.unavailable_features();
@@ -313,7 +316,7 @@ mod tests {
             config_file::daemon_config_from_user_config(
                 Some(&user_config),
                 None,
-                crate::daemon::ActionSource::Cli,
+                crate::daemon::policy::ActionSource::Cli,
             )
             .map(|_| Some(user_config)),
             Default::default(),
@@ -345,20 +348,20 @@ mod tests {
     #[test]
     fn daemon_status_text_contains_active_workload_action_score_and_recent_decisions() {
         let mut output = build_status_output_with_recent_decisions(0);
-        output.state.active_target = Some(crate::daemon::DaemonTargetState {
+        output.state.active_target = Some(crate::daemon::state::DaemonTargetState {
             root_pid: Some(1234),
             comm: Some("game".to_owned()),
             active_targets: 1,
         });
-        output.state.active_experiment = Some(crate::daemon::DaemonExperimentState {
+        output.state.active_experiment = Some(crate::daemon::state::DaemonExperimentState {
             experiment_id: "test-experiment".to_owned(),
             action_id: "cpu-affinity:game".to_owned(),
             candidate_name: Some("game-main".to_owned()),
-            mode: crate::daemon::DaemonMode::ApplyLowRisk,
+            mode: crate::daemon::policy::DaemonMode::ApplyLowRisk,
             safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
             started_unix_nanos: Some(1_000),
         });
-        output.state.last_decision = Some(crate::daemon::DaemonDecisionState {
+        output.state.last_decision = Some(crate::daemon::state::DaemonDecisionState {
             decision: "optimize".to_owned(),
             reason: "found better affinity".to_owned(),
             unix_nanos: Some(1_000),

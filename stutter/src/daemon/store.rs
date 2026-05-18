@@ -164,7 +164,7 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::daemon::{ActionSource, DaemonConfig, load_daemon_state};
+    use crate::daemon::{DaemonConfig, policy::ActionSource, state::load_daemon_state};
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let mut dir = std::env::temp_dir();
@@ -247,12 +247,12 @@ mod tests {
             DaemonState {
                 mode: DaemonMode::ApplyLowRisk,
                 phase: DaemonPhase::Apply,
-                active_target: Some(crate::daemon::DaemonTargetState {
+                active_target: Some(crate::daemon::state::DaemonTargetState {
                     root_pid: Some(1234),
                     active_targets: 7,
                     comm: Some("game".to_owned()),
                 }),
-                active_experiment: Some(crate::daemon::DaemonExperimentState {
+                active_experiment: Some(crate::daemon::state::DaemonExperimentState {
                     experiment_id: "experiment-1".to_owned(),
                     action_id: "cpu-affinity-profile:game-main".to_owned(),
                     candidate_name: Some("game-main".to_owned()),
@@ -260,7 +260,7 @@ mod tests {
                     safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                     started_unix_nanos: Some(100),
                 }),
-                active_rollback: Some(crate::daemon::DaemonRollbackState {
+                active_rollback: Some(crate::daemon::state::DaemonRollbackState {
                     action_id: "cpu-affinity-profile:game-main".to_owned(),
                     mode: DaemonMode::ApplyLowRisk,
                     safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
@@ -269,7 +269,7 @@ mod tests {
                     manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
                 }),
                 profile_memory: crate::daemon::state::DaemonProfileMemory {
-                    profiles: vec![crate::daemon::DaemonWorkloadProfile {
+                    profiles: vec![crate::daemon::state::DaemonWorkloadProfile {
                         workload_identity_hash: "workload-abc".to_owned(),
                         workload_label: Some("game".to_owned()),
                         candidate_name: "game-main".to_owned(),
@@ -282,7 +282,7 @@ mod tests {
                         candidate_score_total: Some(850),
                         score_delta: -150,
                         confidence_milli: 900,
-                        environment: crate::daemon::DaemonProfileEnvironment::default(),
+                        environment: crate::daemon::state::DaemonProfileEnvironment::default(),
                         partition: crate::daemon::state::DaemonProfilePartition::default(),
                     }],
                 },
@@ -433,7 +433,7 @@ mod tests {
         let mut store = DaemonStateStore::new(
             DaemonState {
                 phase: DaemonPhase::Faulted,
-                active_rollback: Some(crate::daemon::DaemonRollbackState {
+                active_rollback: Some(crate::daemon::state::DaemonRollbackState {
                     action_id: "action-1".to_owned(),
                     mode: DaemonMode::ApplyLowRisk,
                     safety_class: crate::actions::SafetyClass::ReversibleLowRisk,

@@ -21,8 +21,8 @@ pub enum TargetSelectionMode {
 }
 
 impl TargetSelectionMode {
-    pub fn from_daemon_mode(mode: crate::daemon::DaemonMode) -> Self {
-        if mode == crate::daemon::DaemonMode::Suggest {
+    pub fn from_daemon_mode(mode: crate::daemon::policy::DaemonMode) -> Self {
+        if mode == crate::daemon::policy::DaemonMode::Suggest {
             Self::Suggest
         } else {
             Self::ApplyCapable

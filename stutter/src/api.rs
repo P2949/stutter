@@ -290,6 +290,8 @@ pub mod daemon {
     //! Public daemon policy, state, health, lifecycle, and runtime contracts.
 
     pub use crate::daemon::{
+        DaemonPolicyVerdict, DaemonRuntime, DaemonRuntimeConfig, DaemonRuntimeEvent,
+        DaemonTransition,
         acceptance::{
             DaemonAcceptanceReport, DaemonAcceptanceStep, run_fake_daemon_acceptance_suite,
         },
@@ -323,16 +325,14 @@ pub mod daemon {
         },
         policy::{
             ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicy,
-            DaemonPolicyBuildInput, DaemonPolicyContext, DaemonPolicyVerdict, PolicyIntent,
-            PolicyRejection, RemoteApplyPolicy, RemotePolicyContext, RollbackRequirement,
-            build_daemon_policy,
+            DaemonPolicyBuildInput, DaemonPolicyContext, PolicyIntent, PolicyRejection,
+            RemoteApplyPolicy, RemotePolicyContext, RollbackRequirement, build_daemon_policy,
         },
         privilege::{
             PrivilegeCommandAllowlist, PrivilegeCommandRequest, PrivilegeDecision,
             PrivilegeProcessRole, PrivilegeTransport, PrivilegedOperation,
             privileged_operation_audit_event,
         },
-        runtime::{DaemonRuntime, DaemonRuntimeConfig, DaemonRuntimeEvent, DaemonTransition},
         soak::{
             DaemonSoakBudget, DaemonSoakConfig, DaemonSoakFailure, DaemonSoakMetrics,
             DaemonSoakProfile, DaemonSoakReport, DaemonSoakScenarioReport, SoakAssertion,

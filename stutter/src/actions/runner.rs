@@ -130,7 +130,10 @@ impl ActionRunPolicy {
     }
 
     #[cfg(test)]
-    pub fn with_capabilities(mut self, capabilities: crate::daemon::DaemonCapabilities) -> Self {
+    pub fn with_capabilities(
+        mut self,
+        capabilities: crate::daemon::capabilities::DaemonCapabilities,
+    ) -> Self {
         self.context.capabilities = Some(capabilities);
         self
     }
@@ -846,8 +849,8 @@ mod tests {
         dir
     }
 
-    fn all_capabilities_available() -> crate::daemon::DaemonCapabilities {
-        crate::daemon::DaemonCapabilities {
+    fn all_capabilities_available() -> crate::daemon::capabilities::DaemonCapabilities {
+        crate::daemon::capabilities::DaemonCapabilities {
             kernel_release: Some("6.9.1-test".to_owned()),
             btf_available: true,
             sched_tracepoints_available: true,

@@ -34,7 +34,7 @@ pub fn run_config_check_command(input: input::ConfigCheckCommandInput) -> anyhow
         .as_ref()
         .and_then(|config| config.daemon_preset.as_deref())
         .unwrap_or("observe-only")
-        .parse::<crate::daemon::DaemonPreset>()?;
+        .parse::<crate::daemon::config::DaemonPreset>()?;
     let diagnostics = user_config
         .as_ref()
         .map(|config| {

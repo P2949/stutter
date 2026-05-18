@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::daemon::{
+use crate::daemon::state::{
     DaemonProfileEnvironment, DaemonProfileValidation, DaemonState, DaemonStateSnapshotWriter,
     DaemonWorkloadProfile, default_daemon_state_snapshot_path, load_daemon_state,
 };

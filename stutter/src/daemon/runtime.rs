@@ -4,11 +4,17 @@ use crate::{
     autotune::runtime::{AutotuneDecisionStreamEntry, AutotuneRuntimeConfig},
     config::model::MonitorConfig,
     daemon::{
-        DAEMON_STATE_SCHEMA_VERSION, DaemonConfig, DaemonDecisionState, DaemonDegradedStatus,
-        DaemonFaultState, DaemonLifecycleAction, DaemonLifecycleEvent, DaemonLifecycleInputs,
-        DaemonLifecyclePolicy, DaemonLifecycleTransition, DaemonPhase, DaemonState,
-        DaemonTargetState, SystemHealthInputs, SystemHealthThresholds, daemon_decision_state,
-        evaluate_daemon_lifecycle_event, evaluate_system_health,
+        DaemonConfig,
+        health::{SystemHealthInputs, SystemHealthThresholds, evaluate_system_health},
+        lifecycle::{
+            DaemonLifecycleAction, DaemonLifecycleEvent, DaemonLifecycleInputs,
+            DaemonLifecyclePolicy, DaemonLifecycleTransition, evaluate_daemon_lifecycle_event,
+        },
+        state::{
+            DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus,
+            DaemonFaultState, DaemonPhase, DaemonState, DaemonTargetState,
+        },
+        state_builders::daemon_decision_state,
     },
     session_events::MonitorEvent,
 };
@@ -193,7 +199,7 @@ impl DaemonRuntime {
             .actions
             .contains(&DaemonLifecycleAction::EnterObserveOnly)
         {
-            self.state.mode = crate::daemon::DaemonMode::Observe;
+            self.state.mode = crate::daemon::policy::DaemonMode::Observe;
             self.state.active_experiment = None;
             self.state.active_rollback = None;
         }
@@ -372,13 +378,13 @@ impl DaemonRuntime {
     }
 }
 
-fn recovered_phase_for_mode(mode: crate::daemon::DaemonMode) -> DaemonPhase {
+fn recovered_phase_for_mode(mode: crate::daemon::policy::DaemonMode) -> DaemonPhase {
     match mode {
-        crate::daemon::DaemonMode::Observe => DaemonPhase::Observe,
-        crate::daemon::DaemonMode::Suggest => DaemonPhase::Decide,
-        crate::daemon::DaemonMode::ApplyLowRisk
-        | crate::daemon::DaemonMode::ApplyMediumRisk
-        | crate::daemon::DaemonMode::ApplyHighRisk => DaemonPhase::Observe,
+        crate::daemon::policy::DaemonMode::Observe => DaemonPhase::Observe,
+        crate::daemon::policy::DaemonMode::Suggest => DaemonPhase::Decide,
+        crate::daemon::policy::DaemonMode::ApplyLowRisk
+        | crate::daemon::policy::DaemonMode::ApplyMediumRisk
+        | crate::daemon::policy::DaemonMode::ApplyHighRisk => DaemonPhase::Observe,
     }
 }
 
@@ -427,13 +433,17 @@ fn daemon_phase_from_decision_label(value: &str) -> Option<DaemonPhase> {
     }
 }
 
-fn daemon_mode_from_decision_label(value: &str) -> Option<crate::daemon::DaemonMode> {
+fn daemon_mode_from_decision_label(value: &str) -> Option<crate::daemon::policy::DaemonMode> {
     match value {
-        "Observe" | "observe" => Some(crate::daemon::DaemonMode::Observe),
-        "Suggest" | "suggest" => Some(crate::daemon::DaemonMode::Suggest),
-        "ApplyLowRisk" | "apply-low-risk" => Some(crate::daemon::DaemonMode::ApplyLowRisk),
-        "ApplyMediumRisk" | "apply-medium-risk" => Some(crate::daemon::DaemonMode::ApplyMediumRisk),
-        "ApplyHighRisk" | "apply-high-risk" => Some(crate::daemon::DaemonMode::ApplyHighRisk),
+        "Observe" | "observe" => Some(crate::daemon::policy::DaemonMode::Observe),
+        "Suggest" | "suggest" => Some(crate::daemon::policy::DaemonMode::Suggest),
+        "ApplyLowRisk" | "apply-low-risk" => Some(crate::daemon::policy::DaemonMode::ApplyLowRisk),
+        "ApplyMediumRisk" | "apply-medium-risk" => {
+            Some(crate::daemon::policy::DaemonMode::ApplyMediumRisk)
+        }
+        "ApplyHighRisk" | "apply-high-risk" => {
+            Some(crate::daemon::policy::DaemonMode::ApplyHighRisk)
+        }
         _ => None,
     }
 }
@@ -481,7 +491,9 @@ mod tests {
         actions::SafetyClass,
         autotune::runtime::AutotuneDecisionStreamEntry,
         daemon::{
-            ActionSource, DaemonExperimentState, DaemonMode, DaemonRollbackState, SystemHealthState,
+            health::SystemHealthState,
+            policy::{ActionSource, DaemonMode},
+            state::{DaemonExperimentState, DaemonRollbackState},
         },
         process_tree::{TaskClass, TaskInfo},
     };

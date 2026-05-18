@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::daemon::{DaemonOverheadMonitor, DaemonOverheadReport};
+use crate::daemon::overhead::{DaemonOverheadMonitor, DaemonOverheadReport};
 
 pub fn run_bench_overhead_command(
     input: crate::commands::input::DaemonBenchOverheadCommandInput,
@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn daemon_bench_overhead_text_contains_budget_status() {
-        let report = crate::daemon::DaemonOverheadMonitor::default()
+        let report = crate::daemon::overhead::DaemonOverheadMonitor::default()
             .sample_over_duration(Duration::from_millis(10));
 
         let text = render_bench_overhead_text(&report);

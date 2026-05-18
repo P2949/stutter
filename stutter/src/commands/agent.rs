@@ -15,7 +15,7 @@ pub async fn run_agent_command(input: AgentCommandInput) -> anyhow::Result<()> {
     let health_thresholds = config_file::daemon_health_thresholds_from_user_config(
         user_config.as_ref(),
         None,
-        crate::daemon::ActionSource::RemoteAgent,
+        crate::daemon::policy::ActionSource::RemoteAgent,
     )?;
 
     agent::run_agent(agent::AgentConfig {

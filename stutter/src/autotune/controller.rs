@@ -14,8 +14,8 @@ use super::{
 use crate::{
     actions::SafetyClass,
     daemon::{
-        ActionSource, DaemonConfig, DaemonMode, DaemonPolicy, DaemonPolicyBuildInput,
-        build_daemon_policy,
+        DaemonConfig, DaemonPolicy,
+        policy::{ActionSource, DaemonMode, DaemonPolicyBuildInput, build_daemon_policy},
     },
     focus::FocusGroupKind,
     process_tree::TaskClass,
