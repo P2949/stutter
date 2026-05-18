@@ -201,23 +201,6 @@ pub fn apply_profile_to_tree(
     .map(|result| result.affinity_records)
 }
 
-pub fn apply_profile_to_tree_cached(
-    tree_pid: u32,
-    profile: &Profile,
-    force_restore_overwrite: bool,
-    dry_run: bool,
-    cache: &mut ProfileApplyCache,
-) -> anyhow::Result<Vec<AffinityRecord>> {
-    apply_managed_profile_to_tree_with_cache(
-        tree_pid,
-        profile,
-        force_restore_overwrite,
-        dry_run,
-        Some(cache),
-    )
-    .map(|result| result.affinity_records)
-}
-
 pub fn apply_managed_profile_to_tree(
     tree_pid: u32,
     profile: &Profile,
@@ -543,6 +526,7 @@ fn profile_apply_summary(
     )
 }
 
+#[cfg(test)]
 fn profile_apply_summary_with_reader<F>(
     tasks: &BTreeMap<u32, TaskInfo>,
     profile: &Profile,

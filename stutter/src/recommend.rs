@@ -9,10 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     artifacts::ArtifactSelection,
     scorer, session_io,
-    tune::{
-        self, RankingConfidence, TuneSummary,
-        recommendation::{TuneRecommendationVerdict, render_tune_recommendation_markdown},
-    },
+    tune::{self, RankingConfidence, TuneSummary, recommendation::TuneRecommendationVerdict},
 };
 
 #[derive(Debug, Clone)]
@@ -393,10 +390,11 @@ pub fn render_baseline_tune_recommendation_markdown(rec: &BaselineTuneRecommenda
     out
 }
 
+#[cfg(test)]
 fn render_tune_recommendation_for_summary(summary: &TuneSummary) -> String {
-    render_tune_recommendation_markdown(&tune::recommendation::build_tune_recommendation(
-        summary, None,
-    ))
+    tune::recommendation::render_tune_recommendation_markdown(
+        &tune::recommendation::build_tune_recommendation(summary, None),
+    )
 }
 
 fn pushln(out: &mut String, line: impl AsRef<str>) {
@@ -775,7 +773,10 @@ mod tests {
         .unwrap();
 
         let rec = build_baseline_tune_recommendation(&baseline, &tune).unwrap();
+        let tune_only_markdown = render_tune_recommendation_for_summary(&summary);
 
+        assert!(tune_only_markdown.contains("# stutter tuning recommendation"));
+        assert!(tune_only_markdown.contains("Best profile: best"));
         assert_eq!(rec.baseline_frame_p99_ms, Some(17.0));
         assert_eq!(rec.best_median_frame_p99_ms, Some(15.0));
         assert_eq!(rec.frame_p99_delta_ms, Some(-2.0));

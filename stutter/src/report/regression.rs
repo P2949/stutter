@@ -131,6 +131,7 @@ pub fn check_regression(
     Ok(())
 }
 
+#[cfg(test)]
 pub fn check_percentile_regression(
     path_baseline: &Path,
     path_current: &Path,
