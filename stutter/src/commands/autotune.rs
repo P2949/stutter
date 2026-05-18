@@ -18,7 +18,7 @@ pub fn run_generate_profiles_command(
 }
 
 pub async fn run_autotune_command(input: input::AutotuneCommandInput) -> anyhow::Result<()> {
-    autotune::autotune_command(input.input).await
+    autotune::commands::live::autotune_command(input.input).await
 }
 
 pub fn run_apply_candidate_command(

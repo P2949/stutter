@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use crate::{
-    autotune,
+    autotune::commands::live::AutotuneCommandInput as LiveAutotuneCommandInput,
     config::model::MonitorConfig,
     daemon::testing::DaemonSoakConfig,
     doctor::DoctorInput,
@@ -196,7 +196,7 @@ pub struct AutotuneGenerateProfilesCommandInput {
 
 #[derive(Debug)]
 pub struct AutotuneCommandInput {
-    pub input: autotune::AutotuneCommandInput,
+    pub input: LiveAutotuneCommandInput,
 }
 
 #[derive(Debug)]

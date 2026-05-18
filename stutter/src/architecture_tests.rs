@@ -750,24 +750,6 @@ const EXISTING_DIRECT_PRINT_ALLOWLIST: &[ExistingDirectPrintAllowance] = &[
         reason: "existing agent TCP listener startup output pending conversion to structured status/logging",
     },
     ExistingDirectPrintAllowance {
-        path: "src/autotune/mod.rs",
-        line_number: 216,
-        macro_name: "println!",
-        reason: "existing autotune profile output pending conversion to command/rendering layer output",
-    },
-    ExistingDirectPrintAllowance {
-        path: "src/autotune/mod.rs",
-        line_number: 243,
-        macro_name: "println!",
-        reason: "existing autotune runtime start output pending conversion to command/rendering layer output",
-    },
-    ExistingDirectPrintAllowance {
-        path: "src/autotune/mod.rs",
-        line_number: 248,
-        macro_name: "println!",
-        reason: "existing autotune runtime finish output pending conversion to command/rendering layer output",
-    },
-    ExistingDirectPrintAllowance {
         path: "src/autotune/runtime.rs",
         line_number: 842,
         macro_name: "println!",
