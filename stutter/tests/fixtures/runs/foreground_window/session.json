@@ -62,8 +62,10 @@
   "alert_channel_closed_count": 0,
   "first_event_stream_write_error": null,
   "block_io_correlation_basis": "dev+sector",
+  "block_io_correlation_confidence": "",
   "drop_counters": {
-    "wakeup_data_insert_failed": 0,
+    "lost_wakeup_timestamp_inserts": 0,
+    "wakeup_data_stale_entries": 0,
     "ringbuf_reserve_failed": 0,
     "irq_start_times_insert_failed": 0,
     "block_start_insert_failed": 0
