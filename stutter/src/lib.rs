@@ -1,21 +1,21 @@
-pub mod actions;
-pub mod agent;
-pub mod alert;
-pub mod artifacts;
-pub mod autotune;
-pub mod config;
-pub mod daemon;
-pub mod daemon_policy;
-pub mod error;
-pub mod events;
-pub mod focus;
-pub mod presets;
-pub mod probe_activation;
-pub mod probe_registry;
-pub mod process_tree;
-pub mod session;
-pub mod session_events;
-pub mod session_io;
+pub(crate) mod actions;
+pub(crate) mod agent;
+pub(crate) mod alert;
+pub(crate) mod artifacts;
+pub(crate) mod autotune;
+pub(crate) mod config;
+pub(crate) mod daemon;
+pub(crate) mod daemon_policy;
+pub(crate) mod error;
+pub(crate) mod events;
+pub(crate) mod focus;
+pub(crate) mod presets;
+pub(crate) mod probe_activation;
+pub(crate) mod probe_registry;
+pub(crate) mod process_tree;
+pub(crate) mod session;
+pub(crate) mod session_events;
+pub(crate) mod session_io;
 
 pub(crate) mod advisor;
 pub(crate) mod affinity;
@@ -67,7 +67,9 @@ pub(crate) mod tune;
 pub(crate) mod validate;
 pub(crate) mod watch;
 
-pub async fn run_cli() -> Result<(), error::StutterError> {
+pub use error::StutterError;
+
+pub async fn run_cli() -> Result<(), StutterError> {
     let command = cli::parse_app_command()?;
     commands::dispatch(command).await
 }
@@ -76,6 +78,8 @@ pub async fn run_cli() -> Result<(), error::StutterError> {
 mod architecture_tests;
 #[cfg(test)]
 mod artifact_contract_tests;
+#[cfg(test)]
+mod autotune_lifecycle_tests;
 #[cfg(test)]
 mod recording_fixture_tests;
 #[cfg(test)]
