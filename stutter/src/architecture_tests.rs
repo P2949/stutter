@@ -775,6 +775,89 @@ const EXPECTED_ROOT_PUBLIC_MODULES: &[ExpectedPublicModule] = &[ExpectedPublicMo
     reason: "single intentional public façade replacing direct public subsystem modules",
 }];
 
+const EXPECTED_API_PUBLIC_MODULES: &[ExpectedPublicModule] = &[
+    ExpectedPublicModule {
+        name: "error",
+        reason: "public error and warning contracts returned by stable crate entry points",
+    },
+    ExpectedPublicModule {
+        name: "actions",
+        reason: "public action descriptors, safety classes, outcomes, and rollback contracts",
+    },
+    ExpectedPublicModule {
+        name: "agent",
+        reason: "public agent embedding and remote-control entry points",
+    },
+    ExpectedPublicModule {
+        name: "alert",
+        reason: "public alert payload and sender contracts",
+    },
+    ExpectedPublicModule {
+        name: "artifacts",
+        reason: "public artifact kind, selection, path, and stream metadata contracts",
+    },
+    ExpectedPublicModule {
+        name: "autotune",
+        reason: "public autotune command, planning, status, and data contracts",
+    },
+    ExpectedPublicModule {
+        name: "config",
+        reason: "public configuration model, source, and merge contracts",
+    },
+    ExpectedPublicModule {
+        name: "daemon",
+        reason: "public daemon policy, state, health, lifecycle, and runtime contracts",
+    },
+    ExpectedPublicModule {
+        name: "daemon_policy",
+        reason: "compatibility facade for daemon policy and explanation contracts",
+    },
+    ExpectedPublicModule {
+        name: "events",
+        reason: "public event decoding and interpretation contracts",
+    },
+    ExpectedPublicModule {
+        name: "focus",
+        reason: "public focus snapshot, classification, scoring, and resolution contracts",
+    },
+    ExpectedPublicModule {
+        name: "presets",
+        reason: "public preset names and default configuration contracts",
+    },
+    ExpectedPublicModule {
+        name: "probe_activation",
+        reason: "public probe activation planning contracts",
+    },
+    ExpectedPublicModule {
+        name: "probe_registry",
+        reason: "public probe registry contracts",
+    },
+    ExpectedPublicModule {
+        name: "process_tree",
+        reason: "public process tree snapshot, classifier, target diff, and scan contracts",
+    },
+    ExpectedPublicModule {
+        name: "recorder",
+        reason: "public recording artifact schema, live recorder, retention, and writer contracts",
+    },
+    ExpectedPublicModule {
+        name: "report",
+        reason: "public report loading, analysis, rendering, diffing, and regression contracts",
+    },
+    ExpectedPublicModule {
+        name: "session",
+        reason: "public monitor session runtime entry points",
+    },
+    ExpectedPublicModule {
+        name: "session_events",
+        reason: "public monitor event stream data contracts",
+    },
+    ExpectedPublicModule {
+        name: "session_io",
+        reason: "public offline session artifact loading and validation contracts",
+    },
+];
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RustPathOccurrence {
     path: String,
@@ -864,20 +947,33 @@ fn autotune_observation_quality_and_selection_files() -> Vec<PathBuf> {
     .collect()
 }
 
-fn root_public_modules_from_lib_rs(source: &str) -> Vec<String> {
+fn public_modules_from_source(source: &str) -> Vec<String> {
     source
         .lines()
         .filter_map(|line| {
-            let line = line.trim();
             let module = line.strip_prefix("pub mod ")?;
-            let module = module.strip_suffix(';')?;
+            let module = module.trim();
+            let module = module
+                .strip_suffix(';')
+                .or_else(|| module.strip_suffix('{'))?;
             Some(module.trim().to_owned())
         })
         .collect()
 }
 
+fn root_public_modules_from_lib_rs(source: &str) -> Vec<String> {
+    public_modules_from_source(source)
+}
+
 fn expected_root_public_module_names() -> Vec<String> {
     EXPECTED_ROOT_PUBLIC_MODULES
+        .iter()
+        .map(|module| module.name.to_owned())
+        .collect()
+}
+
+fn expected_api_public_module_names() -> Vec<String> {
+    EXPECTED_API_PUBLIC_MODULES
         .iter()
         .map(|module| module.name.to_owned())
         .collect()
@@ -1977,6 +2073,29 @@ fn root_public_modules_are_intentional() {
     assert_eq!(
         actual, expected,
         "root public module exports changed; update EXPECTED_ROOT_PUBLIC_MODULES with the intentional public module list and a reason for every exported module"
+    );
+}
+
+#[test]
+fn api_public_modules_are_intentional() {
+    for module in EXPECTED_API_PUBLIC_MODULES {
+        assert!(
+            !module.reason.trim().is_empty(),
+            "api public module '{}' must have a reason explaining why it is exported",
+            module.name
+        );
+    }
+
+    let api_rs_path = crate_src_root().join("api.rs");
+    let api_rs = fs::read_to_string(&api_rs_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", api_rs_path.display()));
+
+    let actual = public_modules_from_source(&api_rs);
+    let expected = expected_api_public_module_names();
+
+    assert_eq!(
+        actual, expected,
+        "api public module exports changed; update EXPECTED_API_PUBLIC_MODULES with the intentional public facade module list and a reason for every exported section"
     );
 }
 
