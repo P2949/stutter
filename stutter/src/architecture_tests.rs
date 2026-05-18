@@ -438,7 +438,7 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/session.rs",
-        max_lines: 2_171,
+        max_lines: 2_200,
         reason: "existing session model and lifecycle implementation pending future split, plus module-level line additions",
     },
     OversizedRustFileAllowance {

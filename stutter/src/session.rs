@@ -67,22 +67,22 @@ use crate::{
 };
 
 #[path = "session/event_bus.rs"]
-pub mod event_bus;
+pub(crate) mod event_bus;
 #[path = "session/live_telemetry.rs"]
-pub mod live_telemetry;
+pub(crate) mod live_telemetry;
 #[path = "session/outputs.rs"]
-pub mod outputs;
+pub(crate) mod outputs;
 #[path = "session/probes.rs"]
-pub mod probes;
+pub(crate) mod probes;
 #[path = "session/runtime.rs"]
-pub mod runtime;
+pub(crate) mod runtime;
 #[path = "session/sinks.rs"]
-pub mod sinks;
+pub(crate) mod sinks;
 #[path = "session/targeting.rs"]
-pub mod targeting;
+pub(crate) mod targeting;
 
 #[path = "session/ui.rs"]
-pub mod ui;
+pub(crate) mod ui;
 
 const LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS: u64 = 5;
 // Keep this aligned with the report default unless live diagnosis gets
@@ -2133,6 +2133,22 @@ pub fn configure_target_irqs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_child_modules_are_not_public_submodules() {
+        let source = include_str!("session.rs");
+
+        let public_child_modules: Vec<&str> = source
+            .lines()
+            .map(str::trim_start)
+            .filter(|line| line.starts_with("pub mod "))
+            .collect();
+
+        assert!(
+            public_child_modules.is_empty(),
+            "session child modules must stay crate-private and be exposed intentionally through api::session: {public_child_modules:?}"
+        );
+    }
 
     #[test]
     fn tree_tick_not_needed_for_direct_pid_only() {

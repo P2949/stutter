@@ -24,23 +24,23 @@
 //!   than silently continuing;
 //! - this facade should re-export subsystem contracts without embedding CLI-only behavior.
 
-pub mod acceptance;
-pub mod autotune;
-pub mod capabilities;
-pub mod config;
-pub mod explain;
-pub mod health;
-pub mod lifecycle;
-pub mod monitor;
-pub mod overhead;
-pub mod policy;
-pub mod privilege;
-pub mod runtime;
-pub mod soak;
-pub mod state;
-pub mod state_builders;
-pub mod store;
-pub mod watchdog;
+pub(crate) mod acceptance;
+pub(crate) mod autotune;
+pub(crate) mod capabilities;
+pub(crate) mod config;
+pub(crate) mod explain;
+pub(crate) mod health;
+pub(crate) mod lifecycle;
+pub(crate) mod monitor;
+pub(crate) mod overhead;
+pub(crate) mod policy;
+pub(crate) mod privilege;
+pub(crate) mod runtime;
+pub(crate) mod soak;
+pub(crate) mod state;
+pub(crate) mod state_builders;
+pub(crate) mod store;
+pub(crate) mod watchdog;
 
 pub(crate) use acceptance::{DaemonAcceptanceReport, run_fake_daemon_acceptance_suite};
 pub(crate) use capabilities::{CapabilityProbe, DaemonCapabilities};
@@ -85,3 +85,22 @@ pub(crate) use store::DaemonStateStore;
 pub(crate) use watchdog::{
     DaemonWatchdogConfig, DaemonWatchdogInputs, DaemonWatchdogReport, evaluate_daemon_watchdog,
 };
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn daemon_child_modules_are_not_public_submodules() {
+        let source = include_str!("mod.rs");
+
+        let public_child_modules: Vec<&str> = source
+            .lines()
+            .map(str::trim_start)
+            .filter(|line| line.starts_with("pub mod "))
+            .collect();
+
+        assert!(
+            public_child_modules.is_empty(),
+            "daemon child modules must stay crate-private and be exposed intentionally through api::daemon: {public_child_modules:?}"
+        );
+    }
+}
