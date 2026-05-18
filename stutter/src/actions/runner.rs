@@ -429,6 +429,19 @@ where
     let result = (|| -> Result<AuditedActionResult, ActionError> {
         audit_event.action_phase = Some(crate::actions::ActionPhase::Preflight);
         let preflight_warnings = action.preflight().map_err(ActionError::preflight)?;
+        let preflight_message = if preflight_warnings.is_empty() {
+            "preflight successful".to_owned()
+        } else {
+            format!(
+                "preflight successful with {} warning{}",
+                preflight_warnings.len(),
+                if preflight_warnings.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            )
+        };
         append_runner_audit_event(
             audit_path,
             &audit_event,
@@ -438,7 +451,7 @@ where
                 0,
                 None,
                 None,
-                "preflight successful",
+                preflight_message,
             ),
         );
         if let Some(timeout) = total_timeout_error(
