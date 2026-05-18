@@ -934,6 +934,179 @@ mod tests {
         assert_eq!(metadata.safety_class, Some(SafetyClass::ReversibleLowRisk));
     }
 
+    #[test]
+    fn low_risk_candidate_executor_wraps_cpu_affinity_profile_candidates() {
+        let profile = Profile {
+            name: "game-main".to_owned(),
+            rules: Vec::new(),
+        };
+        let candidate = CandidateAction::cpu_affinity_profile(profile, 4_242);
+
+        let executor = CpuAffinityLowRiskExecutor::from_candidate(candidate.clone()).unwrap();
+        assert_eq!(executor.candidate_name(), "game-main");
+        assert_eq!(executor.action_kind(), "cpu_affinity_profile");
+        assert_eq!(executor.safety_class(), SafetyClass::ReversibleLowRisk);
+
+        let boxed = executor_for_low_risk_candidate(candidate).unwrap();
+        assert_eq!(boxed.candidate_name(), "game-main");
+        assert_eq!(boxed.action_kind(), "cpu_affinity_profile");
+        assert_eq!(boxed.safety_class(), SafetyClass::ReversibleLowRisk);
+    }
+
+    #[test]
+    fn low_risk_planner_selects_first_eligible_record_and_documents_empty_profiles() {
+        let skipped = CandidateAction::cpu_affinity_profile(
+            Profile {
+                name: "background".to_owned(),
+                rules: Vec::new(),
+            },
+            4_242,
+        );
+        let selected = CandidateAction::cpu_affinity_profile(
+            Profile {
+                name: "game-main".to_owned(),
+                rules: Vec::new(),
+            },
+            4_242,
+        );
+        let records = vec![
+            CandidateDryRunRecord {
+                candidate_name: "background".to_owned(),
+                affected_tasks: 0,
+                warnings: Vec::new(),
+                safety_class: SafetyClass::ReversibleLowRisk,
+                eligible: false,
+                reason: Some("no matching tasks".to_owned()),
+            },
+            CandidateDryRunRecord {
+                candidate_name: "game-main".to_owned(),
+                affected_tasks: 31,
+                warnings: Vec::new(),
+                safety_class: SafetyClass::ReversibleLowRisk,
+                eligible: true,
+                reason: None,
+            },
+        ];
+
+        let chosen = select_first_eligible_low_risk_candidate(
+            &[skipped.clone(), selected.clone()],
+            &records,
+        )
+        .unwrap();
+        assert_eq!(chosen.profile_name(), "game-main");
+
+        let plan = ApplyLowRiskPlan {
+            tree_pid: 4_242,
+            profiles_path: PathBuf::from("/tmp/profiles.toml"),
+            candidate: chosen,
+            dry_run_record: records[1].clone(),
+            duration: Duration::from_secs(3),
+        };
+        assert_eq!(plan.tree_pid, 4_242);
+        assert_eq!(plan.profiles_path, PathBuf::from("/tmp/profiles.toml"));
+        assert_eq!(plan.candidate.profile_name(), "game-main");
+        assert_eq!(plan.dry_run_record.affected_tasks, 31);
+        assert_eq!(plan.duration, Duration::from_secs(3));
+
+        let err = plan_apply_low_risk_from_profiles(
+            4_242,
+            Path::new("/tmp/profiles.toml"),
+            &[],
+            Duration::ZERO,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("no CPU affinity profile candidates were generated"));
+    }
+
+    #[test]
+    fn audited_rollback_guard_rolls_back_explicitly() {
+        let action = TestAction {
+            id: "rollback-guard",
+            safety_class: SafetyClass::ReversibleLowRisk,
+            should_fail_apply: false,
+            should_fail_verify: false,
+            affected_tasks: 7,
+        };
+        let token = RollbackToken::CpuAffinityRestoreFile {
+            path: PathBuf::from("/tmp/stutter-test-restore.json"),
+            affected_tasks: 7,
+        };
+
+        let mut guard = AuditedRollbackGuard::new(&action, token);
+        assert!(!guard.rollback_performed());
+        guard.rollback_now().unwrap();
+        assert!(guard.rollback_performed());
+    }
+
+    #[test]
+    fn audit_path_helper_routes_cpu_affinity_preflight_errors_through_runner() {
+        let dir = temp_dir("audit-path-helper-preflight");
+        let audit_path = dir.join("audit.jsonl");
+        let action = test_cpu_affinity_profile_action();
+
+        let err = apply_cpu_affinity_candidate_with_audit_path_for_tests(
+            "game-main".to_owned(),
+            &action,
+            &audit_path,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("tree pid must be greater than zero"));
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn run_apply_low_risk_candidate_rejects_non_profile_candidates() {
+        let err = run_apply_low_risk_candidate(
+            CandidateAction::fake(
+                ActionId("fake-low-risk".to_owned()),
+                SafetyClass::ReversibleLowRisk,
+            ),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("supports CPU-affinity profile actions only"));
+    }
+
+    #[tokio::test]
+    async fn apply_low_risk_command_requires_a_target_selector_before_loading_profiles() {
+        let input = crate::autotune::AutotuneCommandInput {
+            config: None,
+            watch_process: None,
+            tree_pid: None,
+            profiles: None,
+            mode: "apply-low-risk".to_owned(),
+            decision_log: None,
+            duration_seconds: Some(0),
+            washout_seconds: 0,
+            washout_verify_interval_ms: 1,
+            summary_ms: 1_000,
+            preset: "game".to_owned(),
+            hwmon: false,
+            mangohud_log: None,
+            auto_focus: false,
+            min_focus_confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
+            focus_source: crate::config::FocusSource::Heuristic,
+            foreground_window: false,
+            foreground_source: crate::config::ForegroundSource::Auto,
+            foreground_poll_ms: 1_000,
+            foreground_max_stale_ms: 5_000,
+            allow_system_wide_suggestions: false,
+            allow_medium_risk: false,
+        };
+
+        let err = apply_low_risk_command(&input)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("exactly one target selector"));
+    }
+
     #[tokio::test]
     async fn autotune_apply_low_risk_cannot_apply_medium_candidate() {
         let mut executor = FakeExecutor::low_risk();

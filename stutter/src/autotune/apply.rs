@@ -457,8 +457,26 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(outcome.candidate_name, "uclamp");
         assert_eq!(outcome.action_kind, "uclamp");
         assert_eq!(outcome.affected_tasks, 0);
+        assert_eq!(outcome.safety_class, SafetyClass::ReversibleMediumRisk);
         assert!(outcome.rollback_performed);
+    }
+
+    #[tokio::test]
+    async fn run_apply_medium_risk_candidate_rejects_unsupported_candidate_kind() {
+        let err = run_apply_medium_risk_candidate(
+            crate::autotune::candidate::CandidateAction::fake(
+                ActionId("fake-medium-risk".to_owned()),
+                SafetyClass::ReversibleMediumRisk,
+            ),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("generic apply executor does not support candidate"));
     }
 }
