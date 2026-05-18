@@ -1,0 +1,50 @@
+stutter report
+==============
+file: snapshot/session.json
+schema: 21
+expected_schema: 21
+run: -
+duration_ms: 1000
+stop_reason: test
+manual_pids: []
+tree_roots: []
+include_comm: []
+exclude_comm: []
+watch_process: -
+persistent: false
+csv_stream: -
+active_tasks_at_end: 1
+
+data quality
+------------
+level: High
+schema: 21 expected=21
+event_stream_write_errors: 0
+spike_events: retained=0 dropped=0 truncated=false
+interval_records: 1
+active_target_pids: 1
+drop_counters_nonzero: false
+percentile_scope_counts: {}
+block_io_correlation_basis: request-pointer (confidence: high)
+frame_timestamp_alignment: none
+cpu_perf: requested=false open_errors=0 read_errors=0 skipped_tasks=0
+reason: no data-quality problems detected
+
+top tasks by max latency
+------------------------
+
+top tasks by threshold counters
+-------------------------------
+
+top spikes
+----------
+
+spike clusters
+--------------
+source=top_spikes fallback count=0 window_ms=5 min_tasks=3
+observed_runnable_depth is an approximation of runnable pressure on the CPU reconstructed
+from sched tracepoints. target_pending_wakeups is diagnostic-only monitored-target backlog.
+It is not kernel runqueue depth and must not be used for scoring or tuning decisions.
+
+none min_tasks=3 window_ms=5
+
