@@ -23,57 +23,57 @@
 //!   state until they are verified restored;
 //! - unsupported live modes must fail before constructing a mutating runtime configuration.
 
-pub mod active_config;
-pub mod apply;
-pub mod apply_low_risk;
-pub mod baseline;
-pub mod candidate;
-pub mod comparison;
-pub mod conflicts;
-pub mod controller_journal;
-pub mod emergency_restore;
-pub mod experiment;
-pub mod generate_profiles;
-pub mod gpu_focus;
-pub mod history;
-pub mod history_replay;
-pub mod human_output;
-pub mod kept;
-pub mod live_experiment;
-pub mod measurement;
-pub mod profiles;
-pub mod protection;
-pub mod providers;
-pub mod replay;
-pub mod resolution;
-pub mod shutdown;
-pub mod situation;
-pub mod status;
-pub mod system_context;
-pub mod target_selection;
-pub mod washout;
-pub mod workload_policy;
+pub(crate) mod active_config;
+pub(crate) mod apply;
+pub(crate) mod apply_low_risk;
+pub(crate) mod baseline;
+pub(crate) mod candidate;
+pub(crate) mod comparison;
+pub(crate) mod conflicts;
+pub(crate) mod controller_journal;
+pub(crate) mod emergency_restore;
+pub(crate) mod experiment;
+pub(crate) mod generate_profiles;
+pub(crate) mod gpu_focus;
+pub(crate) mod history;
+pub(crate) mod history_replay;
+pub(crate) mod human_output;
+pub(crate) mod kept;
+pub(crate) mod live_experiment;
+pub(crate) mod measurement;
+pub(crate) mod profiles;
+pub(crate) mod protection;
+pub(crate) mod providers;
+pub(crate) mod replay;
+pub(crate) mod resolution;
+pub(crate) mod shutdown;
+pub(crate) mod situation;
+pub(crate) mod status;
+pub(crate) mod system_context;
+pub(crate) mod target_selection;
+pub(crate) mod washout;
+pub(crate) mod workload_policy;
 
 pub const DEFAULT_MIN_FOCUS_CONFIDENCE: f32 = 0.70;
 
-pub mod candidate_memory;
-pub mod context_segment;
-pub mod controller;
-pub mod decision;
-pub mod decision_log;
-pub mod objective;
-pub mod observation;
-pub mod observation_builder;
-pub mod planner;
-pub mod prometheus_metrics;
-pub mod quality;
-pub mod report_overlay;
-pub mod rolling_window;
-pub mod runtime;
-pub mod simulation;
-pub mod startup_recovery;
-pub mod state;
-pub mod tui_panel;
+pub(crate) mod candidate_memory;
+pub(crate) mod context_segment;
+pub(crate) mod controller;
+pub(crate) mod decision;
+pub(crate) mod decision_log;
+pub(crate) mod objective;
+pub(crate) mod observation;
+pub(crate) mod observation_builder;
+pub(crate) mod planner;
+pub(crate) mod prometheus_metrics;
+pub(crate) mod quality;
+pub(crate) mod report_overlay;
+pub(crate) mod rolling_window;
+pub(crate) mod runtime;
+pub(crate) mod simulation;
+pub(crate) mod startup_recovery;
+pub(crate) mod state;
+pub(crate) mod tui_panel;
 
 use std::{path::PathBuf, time::Duration};
 
@@ -251,6 +251,22 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn autotune_child_modules_are_not_public_submodules() {
+        let source = include_str!("mod.rs");
+
+        let public_child_modules: Vec<&str> = source
+            .lines()
+            .map(str::trim_start)
+            .filter(|line| line.starts_with("pub mod "))
+            .collect();
+
+        assert!(
+            public_child_modules.is_empty(),
+            "autotune child modules must stay crate-private and be exposed intentionally through api::autotune: {public_child_modules:?}"
+        );
+    }
 
     fn base_autotune_input(mode: &str) -> AutotuneCommandInput {
         AutotuneCommandInput {

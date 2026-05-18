@@ -47,14 +47,14 @@ use crate::{
     summary::{self, format_latency_signed},
 };
 
-pub mod analysis;
-pub mod diff;
-pub mod html;
+pub(crate) mod analysis;
+pub(crate) mod diff;
+pub(crate) mod html;
 pub(crate) mod load;
 mod model;
-pub mod regression;
+pub(crate) mod regression;
 pub(crate) mod render;
-pub mod text;
+pub(crate) mod text;
 
 pub use analysis::build_report_analysis;
 #[cfg(test)]
@@ -119,6 +119,22 @@ const MAX_PRESSURE_PEAK_WINDOWS: usize = 8;
 mod tests {
     use super::*;
     use crate::sched_state::classify_switch_prev_state;
+
+    #[test]
+    fn report_child_modules_are_not_public_submodules() {
+        let source = include_str!("mod.rs");
+
+        let public_child_modules: Vec<&str> = source
+            .lines()
+            .map(str::trim_start)
+            .filter(|line| line.starts_with("pub mod "))
+            .collect();
+
+        assert!(
+            public_child_modules.is_empty(),
+            "report child modules must stay crate-private and be exposed intentionally through api::report: {public_child_modules:?}"
+        );
+    }
 
     fn foreground_event(
         elapsed_ms: u64,

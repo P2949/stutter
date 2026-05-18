@@ -24,20 +24,20 @@
 //!   undeclared state or bypass rollback accounting.
 
 #[cfg(test)]
-pub mod fake_action;
+pub(crate) mod fake_action;
 
-pub mod cgroup;
-pub mod cpu_affinity;
-pub mod cpu_power;
-pub mod gpu_power;
-pub mod nice;
+pub(crate) mod cgroup;
+pub(crate) mod cpu_affinity;
+pub(crate) mod cpu_power;
+pub(crate) mod gpu_power;
+pub(crate) mod nice;
 
-pub mod ioprio;
-pub mod irq_affinity;
-pub mod uclamp;
-pub mod vm_knobs;
+pub(crate) mod ioprio;
+pub(crate) mod irq_affinity;
+pub(crate) mod uclamp;
+pub(crate) mod vm_knobs;
 
-pub mod runner;
+pub(crate) mod runner;
 
 use std::path::PathBuf;
 
@@ -679,6 +679,22 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    #[test]
+    fn action_child_modules_are_not_public_submodules() {
+        let source = include_str!("mod.rs");
+
+        let public_child_modules: Vec<&str> = source
+            .lines()
+            .map(str::trim_start)
+            .filter(|line| line.starts_with("pub mod "))
+            .collect();
+
+        assert!(
+            public_child_modules.is_empty(),
+            "actions child modules must stay crate-private and be exposed intentionally through api::actions: {public_child_modules:?}"
+        );
+    }
 
     struct TestRollbackHandler {
         id: &'static str,

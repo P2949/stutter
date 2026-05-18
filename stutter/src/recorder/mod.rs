@@ -85,3 +85,22 @@ pub use writers::{
 };
 
 pub use crate::{foreground::ForegroundEvent, scx::ScxEvent};
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn recorder_child_modules_are_not_public_submodules() {
+        let source = include_str!("mod.rs");
+
+        let public_child_modules: Vec<&str> = source
+            .lines()
+            .map(str::trim_start)
+            .filter(|line| line.starts_with("pub mod "))
+            .collect();
+
+        assert!(
+            public_child_modules.is_empty(),
+            "recorder child modules must stay private and be exposed intentionally through api::recorder: {public_child_modules:?}"
+        );
+    }
+}
