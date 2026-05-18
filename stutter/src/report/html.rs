@@ -1,4 +1,8 @@
-use super::{analysis::*, text::*, *};
+use super::{
+    analysis::{block_io_correlation_basis, text_report_correlation_sections, *},
+    render::{html::render_html_report, text::render_report},
+    *,
+};
 
 pub fn build_html_report_model(
     session: &SessionFile,
@@ -45,42 +49,6 @@ pub fn build_html_report_model(
     })
 }
 
-pub fn render_html_report(model: &HtmlReportModel) -> anyhow::Result<String> {
-    let model_json = escape_json_for_script_tag(
-        &serde_json::to_string(model).context("failed to serialize HTML report model")?,
-    );
-    let session_json = escape_json_for_script_tag(
-        &serde_json::to_string(&model.session).context("failed to serialize HTML session data")?,
-    );
-    let spike_events_json = escape_json_for_script_tag(
-        &serde_json::to_string(&model.spike_events)
-            .context("failed to serialize HTML spike event data")?,
-    );
-    let spike_density_json = escape_json_for_script_tag(
-        &serde_json::to_string(&model.spike_density)
-            .context("failed to serialize HTML spike density data")?,
-    );
-    let artifacts_json = escape_json_for_script_tag(
-        &serde_json::to_string(&model.chart_artifacts)
-            .context("failed to serialize HTML chart artifact data")?,
-    );
-    let cluster_analysis_json = escape_json_for_script_tag(
-        &serde_json::to_string(&model.cluster_analysis)
-            .context("failed to serialize HTML cluster data")?,
-    );
-
-    let template = include_str!("../report_template.html");
-
-    Ok(template
-        .replace("{html_report_model_json}", &model_json)
-        .replace("{session_json}", &session_json)
-        .replace("{spike_events_json}", &spike_events_json)
-        .replace("{spike_density_json}", &spike_density_json)
-        .replace("{artifacts_json}", &artifacts_json)
-        .replace("{cluster_analysis_json}", &cluster_analysis_json)
-        .replace("{top}", &model.top_limit.to_string()))
-}
-
 pub fn write_html_report(
     path: &Path,
     html_path: &Path,
@@ -94,12 +62,23 @@ pub fn write_html_report(
         artifacts,
     } = build_report_analysis_from_input(input, top, cluster_window_ms, filter_class)?;
 
+    let correlation_sections = text_report_correlation_sections(
+        &analysis.cluster_analysis.clusters,
+        &artifacts,
+        block_io_correlation_basis(&analysis.session),
+        cluster_window_ms.saturating_mul(1_000_000),
+        top,
+    );
+
     let text_report = render_report(
         path,
         &analysis.session,
         &analysis.cluster_analysis,
         &analysis.frame_diagnoses,
-        &artifacts,
+        &analysis.data_quality,
+        &analysis.pressure_timeline,
+        &analysis.runtime_slices,
+        &correlation_sections,
         &analysis.focus_summary,
         &analysis.foreground_summary,
         top,
