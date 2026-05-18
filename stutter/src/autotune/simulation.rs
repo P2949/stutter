@@ -45,6 +45,10 @@ pub struct FakeDaemonSimulationReport {
 }
 
 impl FakeDaemonSimulationReport {
+    pub fn scenario_name(&self) -> &str {
+        &self.name
+    }
+
     pub fn decision_labels(&self) -> Vec<&str> {
         self.decisions
             .iter()

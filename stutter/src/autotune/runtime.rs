@@ -1002,6 +1002,13 @@ impl AutotuneRuntime {
             reason,
         )?;
 
+        log::debug!(
+            "autotune_live_experiment_outcome event={} clear_measurement_window={} history_context={}",
+            outcome.event.as_str(),
+            outcome.clear_measurement_window,
+            outcome.history_context.is_some()
+        );
+
         if outcome.clear_measurement_window {
             self.controller.window.clear();
         }
