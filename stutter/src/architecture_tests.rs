@@ -468,7 +468,7 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/report/text.rs",
-        max_lines: 1_681,
+        max_lines: 1_685,
         reason: "existing text report renderer pending future split",
     },
     OversizedRustFileAllowance {

@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    artifacts::{ArtifactKind, ArtifactSelection, artifact_file_name},
+    artifacts::{ArtifactKind, artifact_file_name},
     sched_state::classify_switch_prev_state,
 };
 
@@ -10,19 +10,17 @@ pub fn build_report_analysis(
     cluster_window_ms: u64,
     filter_class: Option<TaskClass>,
 ) -> anyhow::Result<ReportAnalysisJson> {
-    Ok(build_report_analysis_with_artifacts(path, top, cluster_window_ms, filter_class)?.analysis)
+    let input = load_report_input(path)?;
+    Ok(build_report_analysis_from_input(input, top, cluster_window_ms, filter_class)?.analysis)
 }
 
-pub(crate) fn build_report_analysis_with_artifacts(
-    path: &Path,
+pub(crate) fn build_report_analysis_from_input(
+    input: ReportInputModel,
     top: usize,
     cluster_window_ms: u64,
     filter_class: Option<TaskClass>,
 ) -> anyhow::Result<ReportBuildResult> {
-    let validation = session_io::validate_run_dir_shallow(path)?;
-    log_run_validation(path, &validation);
-
-    let mut artifacts = session_io::load_run_artifacts(path, ArtifactSelection::report())?;
+    let mut artifacts = input.into_artifacts();
     let session = artifacts.session.clone();
 
     let median_frametime = calculate_median_frametime(&artifacts.frame_events);
@@ -252,20 +250,6 @@ pub(crate) fn artifacts_summary_from_session(session: &SessionFile) -> Artifacts
         scx_event_count: session.core.scx_event_count,
         focus_event_count: session.core.focus_event_count,
         foreground_event_count: session.core.foreground_event_count,
-    }
-}
-
-pub(crate) fn log_run_validation(path: &Path, validation: &session_io::RunValidationReport) {
-    if !validation.is_ok() {
-        for err in &validation.errors {
-            log::error!("run_dir_validation_error path={} err={err}", path.display());
-        }
-    }
-    for warning in &validation.warnings {
-        log::warn!(
-            "run_dir_validation_warning path={} warn={warning}",
-            path.display()
-        );
     }
 }
 

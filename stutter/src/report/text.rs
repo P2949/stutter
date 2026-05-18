@@ -1,4 +1,4 @@
-use super::{analysis::*, *};
+use super::{analysis::*, build_report_analysis_from_input, *};
 use crate::sched_state::classify_switch_prev_state;
 
 #[allow(clippy::too_many_arguments)]
@@ -13,9 +13,7 @@ pub fn print_report(
     flamegraph: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     if json {
-        let validation = session_io::validate_run_dir_shallow(path)?;
-        log_run_validation(path, &validation);
-        let session = session_io::load_session(path)?;
+        let session = load_report_session(path)?;
         println!("{}", serde_json::to_string_pretty(&session)?);
         return Ok(());
     }
@@ -27,15 +25,18 @@ pub fn print_report(
     }
 
     if analysis_json {
-        let analysis = build_report_analysis(path, top, cluster_window_ms, filter_class)?;
+        let input = load_report_input(path)?;
+        let analysis =
+            build_report_analysis_from_input(input, top, cluster_window_ms, filter_class)?.analysis;
         println!("{}", serde_json::to_string_pretty(&analysis)?);
         return Ok(());
     }
 
+    let input = load_report_input(path)?;
     let ReportBuildResult {
         analysis,
         artifacts,
-    } = build_report_analysis_with_artifacts(path, top, cluster_window_ms, filter_class)?;
+    } = build_report_analysis_from_input(input, top, cluster_window_ms, filter_class)?;
 
     if let Some(flamegraph_path) = flamegraph {
         crate::flamegraph::write_latency_flamegraph_svg(&artifacts.spikes, &flamegraph_path)?;
