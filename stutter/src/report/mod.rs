@@ -20,7 +20,7 @@ use crate::{
         DiagnosisCandidateView, DiagnosisEvidenceView, DiagnosisExplanation, SpikeCluster,
         SpikePoint, WakeGraphEdge,
     },
-    summary::{self, RunDiffSummary, TaskDeltaSummary, format_latency_signed},
+    summary::{self, format_latency_signed},
 };
 
 pub mod analysis;
@@ -48,6 +48,9 @@ pub(crate) use analysis::{
     build_report_analysis_from_input, data_quality_summary, event_stream_warning, ms_to_ns_i64,
     violation_from_delta,
 };
+#[cfg(test)]
+pub use diff::render_diff_report;
+pub(crate) use diff::{RunDiffSummary, TaskDeltaSummary, build_run_diff_summary};
 pub use diff::{print_batch_report, print_diff_report};
 #[cfg(test)]
 pub use html::build_html_report_model;
@@ -77,8 +80,6 @@ pub(crate) use render::text::{
     render_cluster, render_focus_summary_text, render_foreground_summary_text, render_report,
 };
 pub use text::print_report;
-#[cfg(test)]
-pub use text::render_diff_report;
 
 const MIN_CLUSTER_TASKS: usize = 3;
 const MAX_INLINE_CLUSTER_POINTS: usize = 8;
