@@ -246,7 +246,7 @@ impl ForegroundProvider for UnsupportedForegroundProvider {
             source: Some(ForegroundSource::Unsupported),
             status: ForegroundProviderStatus::Unsupported,
             confidence: 0.0,
-            reason: self.reason.clone(),
+            reason: self.reason().to_owned(),
             ..ForegroundWindowSnapshot::default()
         }
     }
@@ -257,7 +257,16 @@ pub fn auto_foreground_provider() -> Box<dyn ForegroundProvider + Send> {
         return Box::new(SwayForegroundProvider::new());
     }
 
+    if HyprlandForegroundProvider::is_detected() {
+        return Box::new(HyprlandForegroundProvider::new());
+    }
+
     if is_generic_wayland_without_supported_foreground_api() {
+        if current_desktop_looks_like_gnome_or_kde() {
+            return Box::new(UnsupportedForegroundProvider::new(
+                "GNOME/KDE Wayland session detected, but no safe generic Wayland foreground-window API is available",
+            ));
+        }
         return Box::new(UnsupportedForegroundProvider::generic_wayland());
     }
 
@@ -361,6 +370,94 @@ fn hyprland_snapshot_from_activewindow_json(
 }
 
 #[derive(Debug, Clone)]
+pub struct HyprlandForegroundProvider {
+    hyprctl: String,
+}
+
+impl Default for HyprlandForegroundProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HyprlandForegroundProvider {
+    pub fn new() -> Self {
+        Self {
+            hyprctl: "hyprctl".to_owned(),
+        }
+    }
+
+    pub fn is_detected() -> bool {
+        std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok()
+    }
+}
+
+impl ForegroundProvider for HyprlandForegroundProvider {
+    fn source(&self) -> ForegroundSource {
+        ForegroundSource::Hyprland
+    }
+
+    fn sample(&mut self, elapsed_ms: u64) -> ForegroundWindowSnapshot {
+        if !Self::is_detected() {
+            return ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::Hyprland),
+                status: ForegroundProviderStatus::Unavailable,
+                confidence: 0.0,
+                reason: "HYPRLAND_INSTANCE_SIGNATURE is not set; Hyprland foreground provider is unavailable".to_owned(),
+                ..ForegroundWindowSnapshot::default()
+            };
+        }
+
+        let output = match Command::new(&self.hyprctl)
+            .args(["activewindow", "-j"])
+            .output()
+        {
+            Ok(output) => output,
+            Err(err) => {
+                return ForegroundWindowSnapshot {
+                    elapsed_ms,
+                    source: Some(ForegroundSource::Hyprland),
+                    status: ForegroundProviderStatus::Error,
+                    confidence: 0.0,
+                    reason: format!("failed to run {} activewindow -j: {err}", self.hyprctl),
+                    ..ForegroundWindowSnapshot::default()
+                };
+            }
+        };
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::Hyprland),
+                status: ForegroundProviderStatus::Error,
+                confidence: 0.0,
+                reason: format!(
+                    "{} activewindow -j exited with status {}; stderr={}",
+                    self.hyprctl,
+                    output.status,
+                    stderr.trim()
+                ),
+                ..ForegroundWindowSnapshot::default()
+            };
+        }
+
+        match String::from_utf8(output.stdout) {
+            Ok(stdout) => hyprland_snapshot_from_activewindow_json(elapsed_ms, &stdout),
+            Err(err) => ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::Hyprland),
+                status: ForegroundProviderStatus::Error,
+                confidence: 0.0,
+                reason: format!("hyprctl activewindow JSON output was not valid UTF-8: {err}"),
+                ..ForegroundWindowSnapshot::default()
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SwayForegroundProvider {
     swaymsg: String,
 }
@@ -374,8 +471,9 @@ impl Default for SwayForegroundProvider {
 impl SwayForegroundProvider {
     pub fn new() -> Self {
         Self {
-            swaymsg: "swaymsg".to_owned(),
+            swaymsg: String::new(),
         }
+        .with_swaymsg("swaymsg")
     }
 
     pub fn with_swaymsg(mut self, swaymsg: impl Into<String>) -> Self {
@@ -601,8 +699,9 @@ impl Default for X11ForegroundProvider {
 impl X11ForegroundProvider {
     pub fn new() -> Self {
         Self {
-            xprop: "xprop".to_owned(),
+            xprop: String::new(),
         }
+        .with_xprop("xprop")
     }
 
     pub fn with_xprop(mut self, xprop: impl Into<String>) -> Self {

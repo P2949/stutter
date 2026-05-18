@@ -101,25 +101,23 @@ fn foreground_capture_enabled(config: &MonitorConfig) -> bool {
         || (config.focus.auto_focus && config.focus.focus_source != FocusSource::Heuristic)
 }
 
-fn foreground_provider_for_config(
-    config: &MonitorConfig,
-) -> Box<dyn crate::foreground::ForegroundProvider + Send> {
-    match config.focus.foreground_source {
-        ForegroundSource::Auto => crate::foreground::auto_foreground_provider(),
-        ForegroundSource::Sway => Box::new(crate::foreground::SwayForegroundProvider::new()),
-        ForegroundSource::Hyprland => {
-            Box::new(crate::foreground::UnsupportedForegroundProvider::new(
-                "Hyprland foreground provider is not implemented yet; no safe generic Wayland foreground-window API detected",
-            ))
-        }
-        ForegroundSource::X11 => Box::new(crate::foreground::X11ForegroundProvider::new()),
-    }
-}
-
 fn foreground_resolver_from_config(
     config: &MonitorConfig,
 ) -> crate::foreground::ForegroundResolver {
-    crate::foreground::ForegroundResolver::new(foreground_provider_for_config(config))
+    let resolver = match config.focus.foreground_source {
+        ForegroundSource::Auto => crate::foreground::auto_foreground_resolver(),
+        ForegroundSource::Sway => crate::foreground::ForegroundResolver::new(Box::new(
+            crate::foreground::SwayForegroundProvider::new(),
+        )),
+        ForegroundSource::Hyprland => crate::foreground::ForegroundResolver::new(Box::new(
+            crate::foreground::HyprlandForegroundProvider::new(),
+        )),
+        ForegroundSource::X11 => crate::foreground::ForegroundResolver::new(Box::new(
+            crate::foreground::X11ForegroundProvider::new(),
+        )),
+    };
+
+    resolver
         .with_include_title(config.focus.foreground_include_title)
         .with_max_stale_ms(config.focus.foreground_max_stale_ms)
 }

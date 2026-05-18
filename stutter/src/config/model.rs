@@ -145,7 +145,7 @@ impl Default for FocusConfig {
             focus_source: FocusSource::Heuristic,
             foreground_window: false,
             foreground_source: ForegroundSource::Auto,
-            foreground_poll_ms: 1_000,
+            foreground_poll_ms: crate::foreground::DEFAULT_FOREGROUND_POLL_MS,
             foreground_max_stale_ms: 2_500,
             foreground_include_title: false,
             auto_focus_poll_ms: 1_000,

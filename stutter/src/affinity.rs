@@ -1,5 +1,6 @@
+#[cfg(test)]
+use std::collections::BTreeMap;
 use std::{
-    collections::BTreeMap,
     env, fmt, fs, io,
     path::{Path, PathBuf},
 };
@@ -34,6 +35,7 @@ pub struct RestoreState {
     pub records: Vec<AffinityRecord>,
 }
 
+#[cfg(test)]
 pub const RESTORE_SCHEMA_VERSION: u32 = 3;
 
 impl CpuMask {
@@ -410,6 +412,7 @@ pub(crate) fn restore_identity_status_at(
     Ok(RestoreRecordStatus::Verified)
 }
 
+#[cfg(test)]
 impl AffinityRecord {
     fn has_identity(&self) -> bool {
         self.process_pid.is_some()
@@ -434,6 +437,7 @@ pub fn default_restore_path() -> PathBuf {
     base
 }
 
+#[cfg(test)]
 pub fn save_restore_state(path: &Path, records: &[AffinityRecord]) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -449,6 +453,7 @@ pub fn save_restore_state(path: &Path, records: &[AffinityRecord]) -> anyhow::Re
     Ok(())
 }
 
+#[cfg(test)]
 pub fn save_merged_restore_state(
     path: &Path,
     records: &[AffinityRecord],
@@ -497,6 +502,7 @@ pub fn save_merged_restore_state(
     save_restore_state(path, &records)
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct RestoreMergeKey {
     tid: u32,
@@ -505,6 +511,7 @@ struct RestoreMergeKey {
     task_starttime_ticks: Option<u64>,
 }
 
+#[cfg(test)]
 fn restore_merge_key(record: &AffinityRecord) -> RestoreMergeKey {
     RestoreMergeKey {
         tid: record.tid,

@@ -423,8 +423,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/foreground.rs",
-        max_lines: 2_302,
-        reason: "existing foreground provider implementation pending future split",
+        max_lines: 2_395,
+        reason: "existing foreground provider implementation pending future split; Hyprland provider wiring added while cleanup removes dead foreground code",
     },
     OversizedRustFileAllowance {
         path: "src/cli/monitor.rs",
