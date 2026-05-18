@@ -13,17 +13,6 @@ use crate::{
     test_fixture_builder,
 };
 
-#[derive(Debug)]
-struct ExpectedFixture<'a> {
-    name: &'a str,
-    expected_primary: Option<StutterCause>,
-    accepted_confidence: &'a [Confidence],
-    expected_quality: DataQualityLevel,
-    evidence_substrings: &'a [&'a str],
-    expected_artifacts: ExpectedArtifacts,
-    require_json_shape: bool,
-}
-
 #[derive(Debug, Default, Clone, Copy)]
 struct ExpectedArtifacts {
     spikes: Option<u64>,
@@ -274,34 +263,6 @@ fn assert_data_quality(analysis: &ReportAnalysisJson, spec: &FixtureExpectationF
     }
 }
 
-fn assert_data_quality_hard_coded(
-    name: &str,
-    analysis: &ReportAnalysisJson,
-    expected_quality: DataQualityLevel,
-) {
-    assert_eq!(
-        analysis.data_quality.level,
-        expected_quality,
-        "wrong data quality for {name}: reasons={:?} validation_errors={:?} validation_warnings={:?}",
-        analysis.data_quality.reasons,
-        analysis.data_quality.validation_errors,
-        analysis.data_quality.validation_warnings,
-    );
-
-    if expected_quality == DataQualityLevel::High {
-        assert!(
-            analysis.data_quality.validation_errors.is_empty(),
-            "{name} expected no validation errors: {:?}",
-            analysis.data_quality.validation_errors
-        );
-        assert!(
-            analysis.data_quality.validation_warnings.is_empty(),
-            "{name} expected no validation warnings: {:?}",
-            analysis.data_quality.validation_warnings
-        );
-    }
-}
-
 fn assert_diagnosis(analysis: &ReportAnalysisJson, spec: &FixtureExpectationFile) {
     let name = spec.name.as_str();
 
@@ -368,53 +329,6 @@ fn assert_diagnosis(analysis: &ReportAnalysisJson, spec: &FixtureExpectationFile
                 cause,
                 needle,
                 evidence_text,
-            );
-        }
-    }
-}
-
-fn assert_diagnosis_hard_coded(expected: &ExpectedFixture<'_>, analysis: &ReportAnalysisJson) {
-    match expected.expected_primary {
-        Some(expected_cause) => {
-            let diagnosis = primary_diagnosis(analysis)
-                .unwrap_or_else(|| panic!("{} expected a primary diagnosis", expected.name));
-            assert_eq!(
-                diagnosis.cause, expected_cause,
-                "wrong cause for {}",
-                expected.name
-            );
-
-            if !expected.accepted_confidence.is_empty() {
-                assert!(
-                    expected.accepted_confidence.contains(&diagnosis.confidence),
-                    "{} confidence {:?} not in accepted set {:?}",
-                    expected.name,
-                    diagnosis.confidence,
-                    expected.accepted_confidence,
-                );
-            }
-
-            let evidence_text = diagnosis.evidence.join("\n");
-            for needle in expected.evidence_substrings {
-                assert!(
-                    evidence_text.contains(needle),
-                    "{} missing evidence substring {:?}; evidence was:\n{}",
-                    expected.name,
-                    needle,
-                    evidence_text,
-                );
-            }
-        }
-        None => {
-            assert!(
-                primary_diagnosis(analysis).is_none()
-                    || matches!(
-                        primary_diagnosis(analysis).unwrap().cause,
-                        StutterCause::Unknown
-                    ),
-                "{} expected no strong diagnosis, got {:?}",
-                expected.name,
-                primary_diagnosis(analysis).map(|diagnosis| &diagnosis.cause),
             );
         }
     }
@@ -637,20 +551,6 @@ fn assert_fixture_from_metadata(name: &str) -> ReportAnalysisJson {
     assert_artifacts(&analysis, &spec);
     assert_analysis_json_shape(&analysis);
     assert_privacy(&analysis, &spec);
-
-    analysis
-}
-
-fn assert_fixture_hard_coded(expected: ExpectedFixture<'_>) -> ReportAnalysisJson {
-    let analysis = build_fixture_analysis(expected.name);
-
-    assert_data_quality_hard_coded(expected.name, &analysis, expected.expected_quality);
-    assert_diagnosis_hard_coded(&expected, &analysis);
-    assert_expected_artifacts_values(expected.name, expected.expected_artifacts, &analysis);
-
-    if expected.require_json_shape {
-        assert_analysis_json_shape(&analysis);
-    }
 
     analysis
 }

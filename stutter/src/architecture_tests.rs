@@ -462,6 +462,11 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
         reason: "existing low-risk autotune apply path pending future split; helper APIs now have no-allow regression coverage, including audit-path failure coverage",
     },
     OversizedRustFileAllowance {
+        path: "src/autotune/shutdown.rs",
+        max_lines: 1_015,
+        reason: "existing autotune shutdown and rollback-on-exit tests pending future split; exit rollback helpers now have no-allow regression coverage",
+    },
+    OversizedRustFileAllowance {
         path: "src/actions/runner.rs",
         max_lines: 1_746,
         reason: "existing audited action runner implementation pending future split",
