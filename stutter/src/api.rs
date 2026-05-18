@@ -292,9 +292,6 @@ pub mod daemon {
     pub use crate::daemon::{
         DaemonPolicyVerdict, DaemonRuntime, DaemonRuntimeConfig, DaemonRuntimeEvent,
         DaemonTransition,
-        acceptance::{
-            DaemonAcceptanceReport, DaemonAcceptanceStep, run_fake_daemon_acceptance_suite,
-        },
         autotune::{AutotuneSubsystem, AutotuneSubsystemEvent},
         capabilities::{CapabilityProbe, CapabilityProbeRoot, DaemonCapabilities},
         config::{
@@ -332,11 +329,6 @@ pub mod daemon {
             PrivilegeCommandAllowlist, PrivilegeCommandRequest, PrivilegeDecision,
             PrivilegeProcessRole, PrivilegeTransport, PrivilegedOperation,
             privileged_operation_audit_event,
-        },
-        soak::{
-            DaemonSoakBudget, DaemonSoakConfig, DaemonSoakFailure, DaemonSoakMetrics,
-            DaemonSoakProfile, DaemonSoakReport, DaemonSoakScenarioReport, SoakAssertion,
-            SoakScenario, SoakTick, run_fake_daemon_soak, run_scenario_daemon_soak,
         },
         state::{
             DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus,
