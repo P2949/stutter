@@ -1875,7 +1875,7 @@ async fn autotune_start_handler(
             .into_response();
     }
 
-    let input = crate::autotune::AutotuneCommandInput {
+    let input = crate::autotune::commands::live::AutotuneCommandInput {
         config: request.config.as_deref().map(PathBuf::from),
         watch_process: request.watch_process.clone(),
         tree_pid: request.tree_pid,

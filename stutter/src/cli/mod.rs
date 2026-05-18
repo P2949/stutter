@@ -148,7 +148,7 @@ enum Command {
 }
 
 pub(crate) fn autotune_monitor_config(
-    input: &crate::autotune::AutotuneCommandInput,
+    input: &crate::autotune::commands::live::AutotuneCommandInput,
 ) -> anyhow::Result<Arc<MonitorConfig>> {
     let has_target = input.tree_pid.is_some() || input.watch_process.is_some();
     if !has_target && !input.auto_focus {
@@ -478,7 +478,7 @@ where
             } else {
                 validate_autotune_mode(&args.mode, args.allow_medium_risk)?;
                 Ok(AppCommand::Autotune(AutotuneCommandDto {
-                    input: crate::autotune::AutotuneCommandInput {
+                    input: crate::autotune::commands::live::AutotuneCommandInput {
                         config: args.config,
                         watch_process: args.watch_process,
                         tree_pid: args.tree_pid,

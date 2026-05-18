@@ -727,7 +727,7 @@ fn controller_journal_hooks_for_low_risk_action<'a>(
 
 #[cfg(test)]
 pub async fn apply_low_risk_command(
-    input: &crate::autotune::AutotuneCommandInput,
+    input: &crate::autotune::commands::live::AutotuneCommandInput,
 ) -> anyhow::Result<ApplyLowRiskOutcome> {
     let tree_pid = resolve_one_target_tree_pid(input.tree_pid, input.watch_process.as_deref())?;
 
@@ -1075,7 +1075,7 @@ mod tests {
 
     #[tokio::test]
     async fn apply_low_risk_command_requires_a_target_selector_before_loading_profiles() {
-        let input = crate::autotune::AutotuneCommandInput {
+        let input = crate::autotune::commands::live::AutotuneCommandInput {
             config: None,
             watch_process: None,
             tree_pid: None,

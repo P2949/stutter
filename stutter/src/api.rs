@@ -63,7 +63,8 @@ pub mod autotune {
     //! Public autotune command, planning, status, and data contract façade.
 
     pub use crate::autotune::{
-        AutotuneCommandInput, DEFAULT_MIN_FOCUS_CONFIDENCE, autotune_command,
+        DEFAULT_MIN_FOCUS_CONFIDENCE,
+        commands::live::{AutotuneCommandInput, autotune_command},
     };
 
     pub mod candidate {
