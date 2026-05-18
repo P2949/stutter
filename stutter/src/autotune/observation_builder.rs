@@ -357,7 +357,6 @@ mod tests {
             root_pids: vec![1234],
             member_pids: vec![1234, 1235],
             confidence: 0.95,
-            score: 0.99,
             situation: SituationKind::IoPressure,
             reasons: vec!["desktop focus selected".to_owned()],
         };
@@ -485,7 +484,6 @@ mod tests {
             root_pids: vec![4_242],
             member_pids: vec![4_242],
             confidence: crate::autotune::DEFAULT_MIN_FOCUS_CONFIDENCE,
-            score: 0.95,
             situation: SituationKind::GameCpuSchedulerPressure,
             reasons: vec!["game runnable latency above 5ms".to_owned()],
         };

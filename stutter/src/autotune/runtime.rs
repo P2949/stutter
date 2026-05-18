@@ -489,7 +489,6 @@ impl AutotuneRuntime {
                 root_pids,
                 member_pids,
                 confidence,
-                score,
                 situation,
                 reasons,
                 ..
@@ -506,7 +505,6 @@ impl AutotuneRuntime {
                     root_pids: root_pids.clone(),
                     member_pids,
                     confidence,
-                    score,
                     situation,
                     reasons,
                 });
@@ -2100,7 +2098,6 @@ mod tests {
             root_pids: vec![1234],
             member_pids: vec![1234, 1235],
             confidence: 0.95,
-            score: 0.99,
             situation: SituationKind::GameCpuSchedulerPressure,
             reasons: vec!["game focus selected".to_owned()],
         });

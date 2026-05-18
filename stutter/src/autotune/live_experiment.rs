@@ -122,6 +122,9 @@ impl LiveExperimentOutcome {
     }
 
     fn event(event: LiveExperimentEvent) -> Self {
+        #[cfg(not(test))]
+        let _ = event;
+
         Self {
             #[cfg(test)]
             event,
@@ -134,7 +137,11 @@ impl LiveExperimentOutcome {
         event: LiveExperimentEvent,
         history_context: LiveExperimentHistoryContext,
     ) -> Self {
+        #[cfg(not(test))]
+        let _ = event;
+
         Self {
+            #[cfg(test)]
             event,
             history_context: Some(history_context),
             clear_measurement_window: false,
