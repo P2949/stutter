@@ -45,7 +45,10 @@ pub(crate) mod rollback;
 pub(crate) mod token;
 pub(crate) mod traits;
 
-pub use error::{ActionError, ActionResult};
+pub use error::{
+    ActionError, ActionFailure, ActionResult, ActionTimeout, PhaseFailure, RollbackOutcome,
+    ScopeLimitExceeded,
+};
 pub use model::{
     ActionId, ActionOutcome, ActionPhase, ActionState, ActionWarning, CgroupRestoreRecord,
     CpuPowerRestoreRecord, GpuPowerRestoreRecord, IoPrioRestoreRecord, IrqAffinityRestoreRecord,

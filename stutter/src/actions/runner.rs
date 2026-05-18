@@ -240,14 +240,12 @@ fn rollback_after_timeout<A>(
 where
     A: TuningAction,
 {
-    let ActionError::Timeout {
-        phase,
-        elapsed_ms,
-        timeout_ms,
-    } = timeout_error
-    else {
+    let Some(timeout) = timeout_error.timeout_details() else {
         return timeout_error;
     };
+    let phase = timeout.phase;
+    let elapsed_ms = timeout.elapsed_ms;
+    let timeout_ms = timeout.timeout_ms;
 
     match action.rollback(rollback) {
         Ok(()) => {
@@ -701,7 +699,8 @@ mod tests {
 
     use super::*;
     use crate::actions::{
-        ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
+        ActionFailure, ActionId, ActionState, ActionWarning, RollbackOutcome, RollbackToken,
+        SafetyClass, TuningAction,
         fake_action::{FakeAction, FakeActionSwitches},
     };
 
@@ -1093,7 +1092,10 @@ mod tests {
         assert!(action.rolled_back());
 
         let err = result.unwrap_err();
-        assert!(matches!(err, ActionError::TimeoutRollbackCompleted { .. }));
+        assert!(matches!(
+            err.failure(),
+            ActionFailure::Rollback(RollbackOutcome::TimeoutRollbackCompleted { .. })
+        ));
         assert!(err.to_string().contains("rollback completed"));
 
         fs::remove_dir_all(dir).ok();
@@ -1136,7 +1138,10 @@ mod tests {
         assert!(!action.rolled_back());
 
         let err = result.unwrap_err();
-        assert!(matches!(err, ActionError::PolicyRejected { .. }));
+        assert!(matches!(
+            err.failure(),
+            ActionFailure::PolicyRejected { .. }
+        ));
         assert!(err.to_string().contains("policy rejected"));
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
@@ -1182,7 +1187,10 @@ mod tests {
         assert!(!action.rolled_back());
 
         let err = result.unwrap_err();
-        assert!(matches!(err, ActionError::PolicyRejected { .. }));
+        assert!(matches!(
+            err.failure(),
+            ActionFailure::PolicyRejected { .. }
+        ));
         assert!(err.to_string().contains("uclamp"));
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
@@ -1214,7 +1222,10 @@ mod tests {
         assert!(!action.rolled_back());
 
         let err = result.unwrap_err();
-        assert!(matches!(err, ActionError::ScopeLimitExceeded { .. }));
+        assert!(matches!(
+            err.failure(),
+            ActionFailure::ScopeLimitExceeded { .. }
+        ));
         assert!(err.to_string().contains("exceeding scope limit 3"));
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
@@ -1463,7 +1474,10 @@ mod tests {
         assert!(action.rolled_back());
 
         let err = result.unwrap_err();
-        assert!(matches!(err, ActionError::TimeoutRollbackCompleted { .. }));
+        assert!(matches!(
+            err.failure(),
+            ActionFailure::Rollback(RollbackOutcome::TimeoutRollbackCompleted { .. })
+        ));
         assert!(err.to_string().contains("rollback completed"));
 
         let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
