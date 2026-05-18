@@ -17,12 +17,13 @@ pub mod actions {
     //! Public action descriptors, safety classes, outcomes, and rollback contracts.
 
     pub use crate::actions::{
-        ActionError, ActionId, ActionOutcome, ActionPhase, ActionResult, ActionState,
-        ActionWarning, CgroupRestoreRecord, CpuPowerRestoreRecord, GpuPowerRestoreRecord,
-        IoPrioRestoreRecord, IrqAffinityRestoreRecord, NiceRestoreRecord, RestoreAllInput,
-        RestoreAllSummary, RollbackCandidate, RollbackHandler, RollbackPreview, RollbackRegistry,
-        RollbackResult, RollbackToken, SafetyClass, TaskIdentity, TuningAction,
-        UclampRestoreRecord, VmKnobRestoreRecord,
+        ActionError, ActionFailure, ActionId, ActionOutcome, ActionPhase, ActionResult,
+        ActionState, ActionTimeout, ActionWarning, CgroupRestoreRecord, CpuPowerRestoreRecord,
+        GpuPowerRestoreRecord, IoPrioRestoreRecord, IrqAffinityRestoreRecord, NiceRestoreRecord,
+        PhaseFailure, RestoreAllInput, RestoreAllSummary, RollbackCandidate, RollbackHandler,
+        RollbackOutcome, RollbackPreview, RollbackRegistry, RollbackResult, RollbackToken,
+        SafetyClass, ScopeLimitExceeded, TaskIdentity, TuningAction, UclampRestoreRecord,
+        VmKnobRestoreRecord,
     };
 }
 
