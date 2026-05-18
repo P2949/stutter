@@ -187,8 +187,8 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
     }
 
     let candidate_order = tune_candidate_order(&profiles, runs);
-    let results = collect_tune_results(
-        &profiles,
+    let results = collect_tune_results(TuneCollectionInput {
+        profiles: &profiles,
         tree_pid,
         epoch_seconds,
         warmup_seconds,
@@ -196,8 +196,8 @@ pub async fn tune_command(input: TuneCommandInput) -> anyhow::Result<()> {
         mangohud_log,
         enforce,
         hwmon,
-        &tune_output_dir,
-    )
+        tune_output_dir: &tune_output_dir,
+    })
     .await?;
 
     let mut grouped: BTreeMap<String, Vec<TuneCandidateSummary>> = BTreeMap::new();
@@ -296,9 +296,8 @@ fn tune_candidate_order(profiles: &[profiles::Profile], runs: u32) -> Vec<TuneIt
         .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn collect_tune_results(
-    profiles: &[profiles::Profile],
+struct TuneCollectionInput<'a> {
+    profiles: &'a [profiles::Profile],
     tree_pid: u32,
     epoch_seconds: u64,
     warmup_seconds: u64,
@@ -306,11 +305,23 @@ async fn collect_tune_results(
     mangohud_log: Option<PathBuf>,
     enforce: bool,
     hwmon: bool,
-    tune_output_dir: &Path,
+    tune_output_dir: &'a Path,
+}
+
+async fn collect_tune_results(
+    input: TuneCollectionInput<'_>,
 ) -> anyhow::Result<Vec<TuneCandidateSummary>> {
+    let profiles = input.profiles;
+    let tree_pid = input.tree_pid;
+    let epoch_seconds = input.epoch_seconds;
+    let warmup_seconds = input.warmup_seconds;
+    let runs = input.runs;
+    let mangohud_log = input.mangohud_log;
+    let enforce = input.enforce;
+    let tune_output_dir = input.tune_output_dir;
     let measure_seconds = epoch_seconds.saturating_sub(warmup_seconds);
     let mut results = Vec::new();
-    let shared_hwmon = if hwmon {
+    let shared_hwmon = if input.hwmon {
         hwmon::HwmonReader::discover_with_options(None, None, None)
             .map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)))
     } else {
@@ -354,7 +365,7 @@ async fn collect_tune_results(
                         ..Default::default()
                     },
                     probes: crate::config::model::ProbeConfig {
-                        hwmon,
+                        hwmon: input.hwmon,
                         cpu_freq: true,
                         ..Default::default()
                     },

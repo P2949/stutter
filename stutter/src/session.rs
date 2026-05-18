@@ -597,28 +597,31 @@ struct UiTickContext {
 mod foreground_session_tests {
     use super::*;
 
-    #[allow(clippy::too_many_arguments)]
-    fn foreground_snapshot(
+    struct ForegroundSnapshotTestInput<'a> {
         elapsed_ms: u64,
         status: crate::foreground::ForegroundProviderStatus,
         pid: Option<u32>,
-        app_id: Option<&str>,
-        class: Option<&str>,
-        window_id: Option<&str>,
-        workspace: Option<&str>,
+        app_id: Option<&'a str>,
+        class: Option<&'a str>,
+        window_id: Option<&'a str>,
+        workspace: Option<&'a str>,
         confidence: f32,
+    }
+
+    fn foreground_snapshot(
+        input: ForegroundSnapshotTestInput<'_>,
     ) -> crate::foreground::ForegroundWindowSnapshot {
         crate::foreground::ForegroundWindowSnapshot {
-            elapsed_ms,
+            elapsed_ms: input.elapsed_ms,
             source: Some(crate::foreground::ForegroundSource::Sway),
-            status,
-            pid,
-            app_id: app_id.map(str::to_owned),
-            class: class.map(str::to_owned),
+            status: input.status,
+            pid: input.pid,
+            app_id: input.app_id.map(str::to_owned),
+            class: input.class.map(str::to_owned),
             title: None,
-            window_id: window_id.map(str::to_owned),
-            workspace: workspace.map(str::to_owned),
-            confidence,
+            window_id: input.window_id.map(str::to_owned),
+            workspace: input.workspace.map(str::to_owned),
+            confidence: input.confidence,
             stale_ms: None,
             reason: "test foreground snapshot".to_owned(),
         }
@@ -626,68 +629,68 @@ mod foreground_session_tests {
 
     #[test]
     fn foreground_identity_records_first_sample() {
-        let snapshot = foreground_snapshot(
-            100,
-            crate::foreground::ForegroundProviderStatus::Available,
-            Some(4242),
-            Some("steam"),
-            Some("Steam"),
-            Some("7"),
-            Some("games"),
-            0.95,
-        );
+        let snapshot = foreground_snapshot(ForegroundSnapshotTestInput {
+            elapsed_ms: 100,
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid: Some(4242),
+            app_id: Some("steam"),
+            class: Some("Steam"),
+            window_id: Some("7"),
+            workspace: Some("games"),
+            confidence: 0.95,
+        });
 
         assert!(foreground_identity_changed(None, &snapshot));
     }
 
     #[test]
     fn foreground_identity_changes_on_provider_status_transition() {
-        let old = foreground_snapshot(
-            100,
-            crate::foreground::ForegroundProviderStatus::Available,
-            Some(4242),
-            Some("steam"),
-            Some("Steam"),
-            Some("7"),
-            Some("games"),
-            0.95,
-        );
-        let new = foreground_snapshot(
-            200,
-            crate::foreground::ForegroundProviderStatus::Error,
-            Some(4242),
-            Some("steam"),
-            Some("Steam"),
-            Some("7"),
-            Some("games"),
-            0.0,
-        );
+        let old = foreground_snapshot(ForegroundSnapshotTestInput {
+            elapsed_ms: 100,
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid: Some(4242),
+            app_id: Some("steam"),
+            class: Some("Steam"),
+            window_id: Some("7"),
+            workspace: Some("games"),
+            confidence: 0.95,
+        });
+        let new = foreground_snapshot(ForegroundSnapshotTestInput {
+            elapsed_ms: 200,
+            status: crate::foreground::ForegroundProviderStatus::Error,
+            pid: Some(4242),
+            app_id: Some("steam"),
+            class: Some("Steam"),
+            window_id: Some("7"),
+            workspace: Some("games"),
+            confidence: 0.0,
+        });
 
         assert!(foreground_identity_changed(Some(&old), &new));
     }
 
     #[test]
     fn foreground_identity_changes_on_window_identity_transition() {
-        let old = foreground_snapshot(
-            100,
-            crate::foreground::ForegroundProviderStatus::Available,
-            Some(4242),
-            Some("steam"),
-            Some("Steam"),
-            Some("7"),
-            Some("games"),
-            0.95,
-        );
-        let new = foreground_snapshot(
-            200,
-            crate::foreground::ForegroundProviderStatus::Available,
-            Some(9000),
-            Some("firefox"),
-            Some("Firefox"),
-            Some("8"),
-            Some("web"),
-            0.95,
-        );
+        let old = foreground_snapshot(ForegroundSnapshotTestInput {
+            elapsed_ms: 100,
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid: Some(4242),
+            app_id: Some("steam"),
+            class: Some("Steam"),
+            window_id: Some("7"),
+            workspace: Some("games"),
+            confidence: 0.95,
+        });
+        let new = foreground_snapshot(ForegroundSnapshotTestInput {
+            elapsed_ms: 200,
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid: Some(9000),
+            app_id: Some("firefox"),
+            class: Some("Firefox"),
+            window_id: Some("8"),
+            workspace: Some("web"),
+            confidence: 0.95,
+        });
 
         assert!(foreground_identity_changed(Some(&old), &new));
     }
@@ -1346,13 +1349,17 @@ impl MonitorSession {
                     {
                         let update = crate::events::handle_event_with_runtime_config(
                             &event,
-                            &self.runtime.event_runtime_config,
-                            self.started,
-                            &mut self.runtime.targeting.tasks,
-                            recording_monotonic_start_ns,
-                            current_scx.ops.as_deref(),
-                            current_scx.state.as_deref(),
-                            current_scx.enable_seq.as_deref(),
+                            crate::events::EventHandlingContext {
+                                config: &self.runtime.event_runtime_config,
+                                started: self.started,
+                                tasks: &mut self.runtime.targeting.tasks,
+                                monotonic_start_ns: recording_monotonic_start_ns,
+                                diagnostics: crate::events::interpret::SchedulerEventDiagnostics {
+                                    scx_ops: current_scx.ops.as_deref(),
+                                    scx_state: current_scx.state.as_deref(),
+                                    scx_enable_seq: current_scx.enable_seq.as_deref(),
+                                },
+                            },
                         );
                         let crate::events::interpret::SchedulerSampleUpdate {
                             events,
@@ -1644,17 +1651,19 @@ impl MonitorSession {
                 term.draw(move |f| {
                     crate::tui::render_tui(
                         f,
-                        &snapshot.tui_state,
-                        &snapshot.active_targets,
-                        &snapshot.stats_by_task,
-                        &snapshot.interval_records,
-                        &snapshot.recent_diagnoses,
-                        snapshot.elapsed_ms.into(),
-                        &snapshot.drop_counters,
-                        snapshot.current_focus.as_ref(),
-                        snapshot.current_foreground.as_ref(),
-                        snapshot.focus_switch_count,
-                        snapshot.foreground_include_title,
+                        crate::tui::TuiRenderInput {
+                            state: &snapshot.tui_state,
+                            active_targets: &snapshot.active_targets,
+                            stats_by_task: &snapshot.stats_by_task,
+                            interval_records: &snapshot.interval_records,
+                            recent_diagnoses: &snapshot.recent_diagnoses,
+                            elapsed_ms: snapshot.elapsed_ms.into(),
+                            drop_counters: &snapshot.drop_counters,
+                            current_focus: snapshot.current_focus.as_ref(),
+                            current_foreground: snapshot.current_foreground.as_ref(),
+                            focus_switch_count: snapshot.focus_switch_count,
+                            foreground_include_title: snapshot.foreground_include_title,
+                        },
                     );
                 })
             }));

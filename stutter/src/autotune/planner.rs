@@ -2002,14 +2002,16 @@ mod tests {
         let observation = observation();
         let mut controller_state = ControllerRuntimeState::default();
         controller_state.record_candidate_result(
-            &candidate,
-            &observation,
-            None,
-            CandidateMemoryResult::Tried,
-            None,
-            None,
-            None,
-            Some(observation.now_unix_nanos + 1_000_000_000),
+            crate::autotune::controller::ControllerCandidateResultInput {
+                candidate: &candidate,
+                observation: &observation,
+                cpu_topology_signature: None,
+                result: CandidateMemoryResult::Tried,
+                baseline_score_total: None,
+                current_score_total: None,
+                rollback_reason: None,
+                cooldown_expires_unix_nanos: Some(observation.now_unix_nanos + 1_000_000_000),
+            },
         );
         let mut dry_runner = CountingDryRunner::default();
 
@@ -2442,14 +2444,16 @@ mod tests {
         same_workload.focus_kind = Some(FocusGroupKind::Compile);
         same_workload.refresh_situation_classification();
         controller_state.record_candidate_result(
-            &candidate,
-            &same_workload,
-            None,
-            CandidateMemoryResult::Reverted,
-            Some(100),
-            Some(120),
-            Some("regressed".to_owned()),
-            Some(same_workload.now_unix_nanos + 10_000),
+            crate::autotune::controller::ControllerCandidateResultInput {
+                candidate: &candidate,
+                observation: &same_workload,
+                cpu_topology_signature: None,
+                result: CandidateMemoryResult::Reverted,
+                baseline_score_total: Some(100),
+                current_score_total: Some(120),
+                rollback_reason: Some("regressed".to_owned()),
+                cooldown_expires_unix_nanos: Some(same_workload.now_unix_nanos + 10_000),
+            },
         );
 
         let mut dry_runner = CountingDryRunner::default();
@@ -2800,14 +2804,16 @@ mod tests {
 
         if case.cooldown_active {
             controller_state.record_candidate_result(
-                &state_candidate,
-                &observation,
-                None,
-                CandidateMemoryResult::Reverted,
-                Some(100),
-                Some(120),
-                Some("fixture cooldown".to_owned()),
-                Some(observation.now_unix_nanos + 10_000),
+                crate::autotune::controller::ControllerCandidateResultInput {
+                    candidate: &state_candidate,
+                    observation: &observation,
+                    cpu_topology_signature: None,
+                    result: CandidateMemoryResult::Reverted,
+                    baseline_score_total: Some(100),
+                    current_score_total: Some(120),
+                    rollback_reason: Some("fixture cooldown".to_owned()),
+                    cooldown_expires_unix_nanos: Some(observation.now_unix_nanos + 10_000),
+                },
             );
         }
 

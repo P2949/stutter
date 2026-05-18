@@ -421,7 +421,6 @@ pub struct ActionOutcome {
     pub finished_unix_nanos: u128,
 }
 
-#[allow(dead_code)] // TODO: replace emergency_restore direct dispatch with RollbackRegistry.
 pub struct RollbackRegistry {
     handlers: Vec<Box<dyn RollbackHandler>>,
 }
@@ -444,7 +443,6 @@ impl RollbackRegistry {
         &self.handlers
     }
 
-    #[allow(dead_code)] // TODO: replace emergency_restore direct dispatch with RollbackRegistry.
     pub fn discover_all(&self) -> anyhow::Result<Vec<RollbackCandidate>> {
         let mut candidates = Vec::new();
         for handler in &self.handlers {
@@ -453,7 +451,6 @@ impl RollbackRegistry {
         Ok(candidates)
     }
 
-    #[allow(dead_code)] // TODO: replace emergency_restore direct dispatch with RollbackRegistry.
     pub fn preview_all(&self) -> anyhow::Result<Vec<RollbackPreview>> {
         let mut previews = Vec::new();
         for handler in &self.handlers {
@@ -464,7 +461,6 @@ impl RollbackRegistry {
         Ok(previews)
     }
 
-    #[allow(dead_code)] // TODO: replace emergency_restore direct dispatch with RollbackRegistry.
     pub fn restore_all(&self, input: RestoreAllInput) -> RestoreAllSummary {
         let mut summary = RestoreAllSummary::default();
 
@@ -528,7 +524,6 @@ impl Default for RollbackRegistry {
     }
 }
 
-#[allow(dead_code)] // TODO: replace emergency_restore direct dispatch with RollbackRegistry.
 pub trait RollbackHandler {
     fn id(&self) -> &'static str;
     fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>>;
@@ -537,7 +532,6 @@ pub trait RollbackHandler {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // TODO: replace emergency_restore direct dispatch with RollbackRegistry.
 pub struct RollbackCandidate {
     pub handler_id: &'static str,
     pub restore_path: PathBuf,

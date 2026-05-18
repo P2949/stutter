@@ -63,7 +63,6 @@ impl ScanBudget {
         }
     }
 
-    #[allow(dead_code)]
     pub fn with_max_proc_entries(mut self, max_proc_entries: usize) -> Self {
         self.max_proc_entries = Some(max_proc_entries);
         self
@@ -627,12 +626,11 @@ pub fn scan_processes_at(
 
         budget_report.proc_entries_seen += 1;
 
-        #[allow(clippy::collapsible_if)]
-        if let Some(max_proc_entries) = budget.max_proc_entries() {
-            if budget_report.proc_entries_seen > max_proc_entries {
-                budget_report.proc_entries_skipped += 1;
-                break;
-            }
+        if let Some(max_proc_entries) = budget.max_proc_entries()
+            && budget_report.proc_entries_seen > max_proc_entries
+        {
+            budget_report.proc_entries_skipped += 1;
+            break;
         }
 
         let file_name = entry.file_name();

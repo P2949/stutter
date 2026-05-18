@@ -12,13 +12,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{commands::input, process_tree::TaskClass};
 
-pub mod import;
 pub mod importer;
 pub mod loader;
 pub mod paths;
 
-#[allow(unused_imports)]
-pub use importer::{ImportInput, ImportReport, ImportedCommunityRules, import_ananicy_rules};
+use importer::{ImportInput, ImportReport, import_ananicy_rules};
 pub use loader::{LoadCommunityRulesInput, load_rules_db, load_rules_dir, load_rules_file};
 pub use paths::{default_system_rules_dirs, default_user_rules_dir};
 
@@ -64,7 +62,6 @@ pub struct CommunityRule {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // TODO: wire into community_rules import pipeline.
 pub enum CommunityRulesSourceKind {
     BuiltinFixture,
     UserData,
@@ -152,7 +149,6 @@ impl CommunityRulesStatus {
         }
     }
 
-    #[allow(dead_code)] // TODO: wire into community_rules import/status pipeline.
     pub fn label(&self) -> &'static str {
         match self {
             Self::Loaded { .. } => "loaded",
@@ -185,7 +181,6 @@ pub fn load_community_rules(config: &CommunityRulesConfig) -> anyhow::Result<Com
     })
 }
 
-#[allow(dead_code)] // TODO: wire into community_rules import pipeline.
 pub fn load_community_rules_file(
     source: CommunityRulesSourceKind,
 ) -> anyhow::Result<CommunityRulesFile> {
@@ -226,7 +221,6 @@ pub fn load_community_rules_file(
     }
 }
 
-#[allow(dead_code)] // TODO: wire into community_rules import pipeline.
 pub fn load_community_rules_db(
     source: CommunityRulesSourceKind,
 ) -> anyhow::Result<CommunityRulesDb> {

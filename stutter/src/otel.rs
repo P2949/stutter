@@ -149,7 +149,6 @@ mod disabled {
     use crate::recorder::SpikeEvent;
 
     #[derive(Debug, Clone)]
-    #[allow(dead_code)]
     pub struct OtelConfig {
         pub endpoint: String,
         pub service_name: String,
@@ -182,7 +181,6 @@ pub use disabled::*;
 #[cfg(feature = "otel")]
 pub use enabled::*;
 
-#[allow(dead_code)]
 pub fn monotonic_ns_to_system_time(
     started_at: SystemTime,
     monotonic_start_ns: u64,

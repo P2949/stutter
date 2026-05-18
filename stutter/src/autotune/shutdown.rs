@@ -9,7 +9,7 @@ use tokio::signal;
 
 use super::decision_log::{
     AutotuneDecisionLabel, AutotuneModeLabel, ControllerPhaseLabel, DecisionJsonlEntry,
-    OnlineDataQualityLabel, SituationKindLabel, append_decision_jsonl,
+    DecisionJsonlEntryInput, OnlineDataQualityLabel, SituationKindLabel, append_decision_jsonl,
 };
 use crate::{
     actions::{RollbackToken, SafetyClass},
@@ -524,24 +524,24 @@ fn write_exit_decision_event(
         AutotuneDecisionLabel::Noop
     };
 
-    let entry = DecisionJsonlEntry::new(
-        if summary.failed_actions > 0 {
+    let entry = DecisionJsonlEntry::new(DecisionJsonlEntryInput {
+        phase: if summary.failed_actions > 0 {
             ControllerPhaseLabel::Faulted
         } else {
             ControllerPhaseLabel::Cooldown
         },
-        AutotuneModeLabel::ApplyLowRisk,
-        false,
-        SituationKindLabel::Unknown,
-        0,
-        if summary.failed_actions > 0 {
+        mode: AutotuneModeLabel::ApplyLowRisk,
+        target_present: false,
+        situation: SituationKindLabel::Unknown,
+        score_total: 0,
+        data_quality: if summary.failed_actions > 0 {
             OnlineDataQualityLabel::Low
         } else {
             OnlineDataQualityLabel::High
         },
         decision,
-        reason.to_owned(),
-    );
+        reason: reason.to_owned(),
+    });
 
     if let Err(err) = append_decision_jsonl(path, &entry) {
         log::warn!("autotune_exit_decision_log_write_failed err={err:#}");

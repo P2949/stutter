@@ -30,7 +30,6 @@ pub struct DaemonHealthModel {
 
 #[derive(Debug)]
 pub struct DaemonRuntime {
-    #[allow(dead_code)]
     config: DaemonRuntimeConfig,
     phase: DaemonPhase,
     state: DaemonState,

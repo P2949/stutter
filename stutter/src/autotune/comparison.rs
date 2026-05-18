@@ -61,6 +61,7 @@ pub struct ThresholdPolicy {
 }
 
 impl ThresholdPolicy {
+    #[cfg(test)]
     pub fn default_tiers() -> Self {
         Self {
             tiers: vec![
@@ -119,7 +120,6 @@ pub struct ScoreComparisonInput<'a> {
 pub struct ExperimentComparisonPolicy {
     pub min_improvement_ratio: f64,
     pub max_regression_ratio: f64,
-    pub improved_frame_p99_slack_ms: f64,
     pub regressed_frame_p99_slack_ms: f64,
 }
 
@@ -130,7 +130,6 @@ impl Default for ExperimentComparisonPolicy {
                 - (DEFAULT_SCORE_COMPARISON_CONFIG.min_improvement_percent / 100.0),
             max_regression_ratio: 1.0
                 + (DEFAULT_SCORE_COMPARISON_CONFIG.max_regression_percent / 100.0),
-            improved_frame_p99_slack_ms: 1.0,
             regressed_frame_p99_slack_ms: DEFAULT_SCORE_COMPARISON_CONFIG
                 .max_frame_p99_regression_ms,
         }
@@ -166,10 +165,6 @@ pub fn compare_experiment_with_policy(
         &policy.as_score_comparison_config(),
         None,
     )
-}
-
-pub fn compare_scores(input: ScoreComparisonInput<'_>) -> ExperimentResult {
-    compare_scores_with_config(input, &ScoreComparisonConfig::default(), None)
 }
 
 pub fn compare_scores_with_config(

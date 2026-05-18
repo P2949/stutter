@@ -1,5 +1,8 @@
-use std::{collections::BTreeSet, path::Path, time::Duration};
+use std::time::Duration;
+#[cfg(test)]
+use std::{collections::BTreeSet, path::Path};
 
+#[cfg(test)]
 use crate::{
     actions::{ActionState, TuningAction},
     process_tree::{TargetSnapshot, TargetSnapshotInput, TaskClass, TaskInfo, target_snapshot},
@@ -55,6 +58,7 @@ impl WashoutWindowConfig {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WashoutTargetSnapshot {
     pub target_present: bool,
@@ -63,6 +67,7 @@ pub struct WashoutTargetSnapshot {
     pub identities: BTreeSet<WashoutTaskIdentity>,
 }
 
+#[cfg(test)]
 impl WashoutTargetSnapshot {
     pub fn absent(root_pid: u32) -> Self {
         Self {
@@ -107,6 +112,7 @@ impl WashoutTargetSnapshot {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WashoutTaskIdentity {
     pub tid: u32,
@@ -120,6 +126,7 @@ pub struct WashoutTaskIdentity {
     pub class: TaskClass,
 }
 
+#[cfg(test)]
 impl WashoutTaskIdentity {
     pub fn from_task_info(task: &TaskInfo) -> Self {
         Self {
@@ -136,6 +143,7 @@ impl WashoutTaskIdentity {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub enum WashoutWindowStatus {
     WashingOut {
@@ -153,6 +161,7 @@ pub enum WashoutWindowStatus {
     },
 }
 
+#[cfg(test)]
 impl WashoutWindowStatus {
     pub fn is_complete(&self) -> bool {
         matches!(self, Self::Complete { .. })
@@ -170,6 +179,7 @@ impl WashoutWindowStatus {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub struct WashoutWindowState {
     config: WashoutWindowConfig,
@@ -177,6 +187,7 @@ pub struct WashoutWindowState {
     initial_target: WashoutTargetSnapshot,
 }
 
+#[cfg(test)]
 impl WashoutWindowState {
     pub fn new(
         config: WashoutWindowConfig,
@@ -267,10 +278,12 @@ impl WashoutWindowState {
     }
 }
 
+#[cfg(test)]
 pub fn unix_nanos_now() -> u128 {
     crate::audit::unix_nanos_now()
 }
 
+#[cfg(test)]
 pub async fn run_washout_for_action<A: TuningAction>(
     action: &A,
     tree_pid: u32,

@@ -18,8 +18,8 @@ use crate::{
             read_controller_journal, write_controller_journal_clean,
         },
         history::{
-            AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneMode, ControllerPhase,
-            ObservationSummary, SituationKind, append_autotune_history_event,
+            AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneHistoryEventInput, AutotuneMode,
+            ControllerPhase, ObservationSummary, SituationKind, append_autotune_history_event,
             default_autotune_history_path,
         },
     },
@@ -297,19 +297,19 @@ fn restore_applied_journal_record(
                 ),
             )?;
 
-            write_emergency_restore_history_event(
+            write_emergency_restore_history_event(EmergencyRestoreHistoryEventInput {
                 history_path,
-                ControllerPhase::Cooldown,
-                "restored",
+                phase: ControllerPhase::Cooldown,
+                decision: "restored",
                 experiment_id,
                 action_id,
                 rollback_token,
-                true,
-                format!(
+                rollback_performed: true,
+                reason: format!(
                     "autotune emergency restore succeeded rollback_kind={} restored_items={} skipped_items={}",
                     summary.rollback_kind, summary.restored_items, summary.skipped_items
                 ),
-            )?;
+            })?;
 
             Ok(AutotuneRestoreOutcome {
                 status: AutotuneRestoreStatus::Restored,
@@ -340,19 +340,19 @@ fn restore_applied_journal_record(
                 ),
             )?;
 
-            write_emergency_restore_history_event(
+            write_emergency_restore_history_event(EmergencyRestoreHistoryEventInput {
                 history_path,
-                ControllerPhase::Faulted,
-                "EmergencyRestoreFault",
+                phase: ControllerPhase::Faulted,
+                decision: "EmergencyRestoreFault",
                 experiment_id,
                 action_id,
                 rollback_token,
-                false,
-                format!(
+                rollback_performed: false,
+                reason: format!(
                     "autotune emergency restore failed rollback_kind={} error={} manual_restore_command=\"{}\"",
                     rollback_kind, reason, manual_command
                 ),
-            )?;
+            })?;
 
             Ok(AutotuneRestoreOutcome {
                 status: AutotuneRestoreStatus::Faulted,
@@ -739,42 +739,45 @@ fn write_emergency_restore_audit_event(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn write_emergency_restore_history_event(
-    history_path: &Path,
+struct EmergencyRestoreHistoryEventInput<'a> {
+    history_path: &'a Path,
     phase: ControllerPhase,
-    decision: &str,
-    experiment_id: &str,
-    action_id: &str,
-    rollback_token: &RollbackToken,
+    decision: &'a str,
+    experiment_id: &'a str,
+    action_id: &'a str,
+    rollback_token: &'a RollbackToken,
     rollback_performed: bool,
     reason: String,
+}
+
+fn write_emergency_restore_history_event(
+    input: EmergencyRestoreHistoryEventInput<'_>,
 ) -> anyhow::Result<()> {
-    let event = AutotuneHistoryEvent::new(
-        "emergency-restore",
-        phase,
-        AutotuneMode::ApplyLowRisk,
-        None,
-        SituationKind::Unknown,
-        empty_observation_summary(),
-        AutotuneDecisionSummary {
-            decision: decision.to_owned(),
-            candidate_name: candidate_name_from_action_id(action_id),
-            action_kind: Some(action_kind_from_action_id(action_id)),
-            safety_class: Some(safety_class_for_rollback_token(rollback_token)),
-            eligible: rollback_performed,
+    let event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+        controller_id: "emergency-restore".to_owned(),
+        phase: input.phase,
+        mode: AutotuneMode::ApplyLowRisk,
+        target: None,
+        situation: SituationKind::Unknown,
+        observation_summary: empty_observation_summary(),
+        decision: AutotuneDecisionSummary {
+            decision: input.decision.to_owned(),
+            candidate_name: candidate_name_from_action_id(input.action_id),
+            action_kind: Some(action_kind_from_action_id(input.action_id)),
+            safety_class: Some(safety_class_for_rollback_token(input.rollback_token)),
+            eligible: input.rollback_performed,
             rollback_policy: "emergency-restore".to_owned(),
         },
-        reason,
-    )
-    .with_experiment_id(experiment_id.to_owned())
-    .with_action_id(action_id.to_owned())
-    .with_rollback_performed(rollback_performed);
+        reason: input.reason,
+    })
+    .with_experiment_id(input.experiment_id.to_owned())
+    .with_action_id(input.action_id.to_owned())
+    .with_rollback_performed(input.rollback_performed);
 
-    append_autotune_history_event(history_path, &event).with_context(|| {
+    append_autotune_history_event(input.history_path, &event).with_context(|| {
         format!(
             "failed to write emergency restore history event to {}",
-            history_path.display()
+            input.history_path.display()
         )
     })
 }

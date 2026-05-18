@@ -461,7 +461,16 @@ fn report_rejects_missing_required_artifacts() {
     fs::create_dir_all(&temp).unwrap();
 
     // Call the report loading helper. It should fail because the directory is empty.
-    let result = report::print_report(&temp, false, false, false, 10, 500, None, None);
+    let result = report::print_report(report::PrintReportInput {
+        path: &temp,
+        json: false,
+        analysis_json: false,
+        json_summary: false,
+        top: 10,
+        cluster_window_ms: 500,
+        filter_class: None,
+        flamegraph: None,
+    });
 
     assert!(result.is_err());
     let err_msg = format!("{:?}", result.err().unwrap()).to_lowercase();
@@ -507,25 +516,25 @@ fn minimal_recording_report_text_does_not_panic() {
     // Call the report rendering helper.
     // We use default/empty values for clusters and artifacts to keep it minimal.
     let correlation_sections = report::TextReportCorrelationSections::new();
-    let output = report::render_report(
-        &temp,
-        &session,
-        &SpikeClusterAnalysis {
+    let output = report::render_report(report::TextReportRenderInput {
+        path: &temp,
+        session: &session,
+        cluster_analysis: &SpikeClusterAnalysis {
             source: SpikeClusterSource::TopSpikesFallback,
             source_count: 0,
             clusters: vec![],
         },
-        &[],
-        &data_quality,
-        &pressure_timeline,
-        &runtime_slices,
-        &correlation_sections,
-        &report::FocusReportSummary::default(),
-        &report::ForegroundReportSummary::default(),
-        10,
-        500,
-        None,
-    );
+        frame_diagnoses: &[],
+        data_quality: &data_quality,
+        pressure_timeline: &pressure_timeline,
+        runtime_slice_summary: &runtime_slices,
+        correlation_sections: &correlation_sections,
+        focus_summary: &report::FocusReportSummary::default(),
+        foreground_summary: &report::ForegroundReportSummary::default(),
+        top: 10,
+        cluster_window_ms: 500,
+        filter_class: None,
+    });
 
     // Assert rendered text contains stable words from report.rs
     assert!(output.contains("stutter report"));

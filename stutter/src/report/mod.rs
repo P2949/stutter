@@ -101,9 +101,10 @@ pub(crate) use render::html::render_html_report;
 pub(crate) use render::text::render_check_summary;
 #[cfg(test)]
 pub(crate) use render::text::{
-    render_cluster, render_focus_summary_text, render_foreground_summary_text, render_report,
+    TextReportRenderInput, render_cluster, render_focus_summary_text,
+    render_foreground_summary_text, render_report,
 };
-pub use text::print_report;
+pub use text::{PrintReportInput, print_report};
 
 const MIN_CLUSTER_TASKS: usize = 3;
 const MAX_INLINE_CLUSTER_POINTS: usize = 8;
@@ -796,7 +797,10 @@ mod tests {
 
     #[test]
     fn renderers_accept_report_model_values_without_loading_or_analysis() {
-        use super::render::{json::render_json_pretty, text::render_report};
+        use super::render::{
+            json::render_json_pretty,
+            text::{TextReportRenderInput, render_report},
+        };
 
         let session = minimal_session_for_report_test();
         let focus = FocusReportSummary::default();
@@ -811,25 +815,25 @@ mod tests {
         let runtime_slices = RuntimeSliceAnalysisSummary::default();
 
         let correlation_sections = TextReportCorrelationSections::new();
-        let rendered = render_report(
-            Path::new("runs/example"),
-            &session,
-            &SpikeClusterAnalysis {
+        let rendered = render_report(TextReportRenderInput {
+            path: Path::new("runs/example"),
+            session: &session,
+            cluster_analysis: &SpikeClusterAnalysis {
                 source: SpikeClusterSource::TopSpikesFallback,
                 source_count: 0,
                 clusters: Vec::new(),
             },
-            &[],
-            &data_quality,
-            &pressure_timeline,
-            &runtime_slices,
-            &correlation_sections,
-            &focus,
-            &foreground,
-            10,
-            5,
-            None,
-        );
+            frame_diagnoses: &[],
+            data_quality: &data_quality,
+            pressure_timeline: &pressure_timeline,
+            runtime_slice_summary: &runtime_slices,
+            correlation_sections: &correlation_sections,
+            focus_summary: &focus,
+            foreground_summary: &foreground,
+            top: 10,
+            cluster_window_ms: 5,
+            filter_class: None,
+        });
 
         assert!(rendered.contains("file: runs/example"));
         assert!(
@@ -853,21 +857,21 @@ mod tests {
         let runtime_slices = RuntimeSliceAnalysisSummary::default();
         let correlation_sections = TextReportCorrelationSections::new();
 
-        let rendered = render_report(
-            Path::new("snapshot/session.json"),
-            &session,
-            &cluster_analysis,
-            &[],
-            &data_quality,
-            &pressure_timeline,
-            &runtime_slices,
-            &correlation_sections,
-            &FocusReportSummary::default(),
-            &ForegroundReportSummary::default(),
-            10,
-            5,
-            None,
-        );
+        let rendered = render_report(TextReportRenderInput {
+            path: Path::new("snapshot/session.json"),
+            session: &session,
+            cluster_analysis: &cluster_analysis,
+            frame_diagnoses: &[],
+            data_quality: &data_quality,
+            pressure_timeline: &pressure_timeline,
+            runtime_slice_summary: &runtime_slices,
+            correlation_sections: &correlation_sections,
+            focus_summary: &FocusReportSummary::default(),
+            foreground_summary: &ForegroundReportSummary::default(),
+            top: 10,
+            cluster_window_ms: 5,
+            filter_class: None,
+        });
 
         assert_eq!(rendered, include_str!("snapshots/text_report_minimal.snap"));
     }
@@ -966,25 +970,25 @@ mod tests {
         let runtime_slices = RuntimeSliceAnalysisSummary::default();
 
         let correlation_sections = TextReportCorrelationSections::new();
-        let output = render_report(
-            Path::new("session.json"),
-            &session,
-            &SpikeClusterAnalysis {
+        let output = render_report(TextReportRenderInput {
+            path: Path::new("session.json"),
+            session: &session,
+            cluster_analysis: &SpikeClusterAnalysis {
                 source: SpikeClusterSource::TopSpikesFallback,
                 source_count: 0,
                 clusters: vec![],
             },
-            &[],
-            &data_quality,
-            &pressure_timeline,
-            &runtime_slices,
-            &correlation_sections,
-            &FocusReportSummary::default(),
-            &ForegroundReportSummary::default(),
-            10,
-            500,
-            None,
-        );
+            frame_diagnoses: &[],
+            data_quality: &data_quality,
+            pressure_timeline: &pressure_timeline,
+            runtime_slice_summary: &runtime_slices,
+            correlation_sections: &correlation_sections,
+            focus_summary: &FocusReportSummary::default(),
+            foreground_summary: &ForegroundReportSummary::default(),
+            top: 10,
+            cluster_window_ms: 500,
+            filter_class: None,
+        });
 
         assert!(output.contains("data quality"));
         assert!(output.contains("level: High"));
@@ -1080,21 +1084,21 @@ mod tests {
         let runtime_slices = RuntimeSliceAnalysisSummary::default();
 
         let correlation_sections = TextReportCorrelationSections::new();
-        let output = render_report(
-            Path::new("session.json"),
-            &session,
-            &cluster_analysis,
-            &[],
-            &data_quality,
-            &pressure_timeline,
-            &runtime_slices,
-            &correlation_sections,
-            &FocusReportSummary::default(),
-            &ForegroundReportSummary::default(),
-            10,
-            5,
-            None,
-        );
+        let output = render_report(TextReportRenderInput {
+            path: Path::new("session.json"),
+            session: &session,
+            cluster_analysis: &cluster_analysis,
+            frame_diagnoses: &[],
+            data_quality: &data_quality,
+            pressure_timeline: &pressure_timeline,
+            runtime_slice_summary: &runtime_slices,
+            correlation_sections: &correlation_sections,
+            focus_summary: &FocusReportSummary::default(),
+            foreground_summary: &ForegroundReportSummary::default(),
+            top: 10,
+            cluster_window_ms: 5,
+            filter_class: None,
+        });
 
         assert!(output.contains("pressure timeline"));
         assert!(output.contains("samples=1"));

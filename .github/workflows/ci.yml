@@ -37,6 +37,9 @@ jobs:
       - name: Install dependency hygiene tools
         run: cargo install cargo-deny --locked
 
+      - name: Enforce lint policy
+        run: cargo run -p xtask -- no-allow-attrs
+
       - name: Run dependency hygiene
         run: cargo run -p xtask -- dependency-hygiene
 

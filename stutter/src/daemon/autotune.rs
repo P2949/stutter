@@ -9,10 +9,9 @@ pub struct AutotuneSubsystem {
 }
 
 #[derive(Clone, Debug)]
-#[allow(clippy::large_enum_variant)]
 pub enum AutotuneSubsystemEvent {
-    Decision(AutotuneDecisionStreamEntry),
-    StateSnapshot(DaemonState),
+    Decision(Box<AutotuneDecisionStreamEntry>),
+    StateSnapshot(Box<DaemonState>),
 }
 
 impl AutotuneSubsystem {
@@ -30,12 +29,12 @@ impl AutotuneSubsystem {
         let mut events = Vec::new();
 
         if let Some(decision) = decision {
-            events.push(AutotuneSubsystemEvent::Decision(decision));
+            events.push(AutotuneSubsystemEvent::Decision(Box::new(decision)));
         }
 
-        events.push(AutotuneSubsystemEvent::StateSnapshot(
+        events.push(AutotuneSubsystemEvent::StateSnapshot(Box::new(
             self.runtime.daemon_state_snapshot(),
-        ));
+        )));
 
         Ok(events)
     }

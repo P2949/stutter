@@ -92,34 +92,35 @@ pub struct AutotuneHistoryEvent {
     pub planner: Option<PlannerSummary>,
 }
 
+pub struct AutotuneHistoryEventInput {
+    pub controller_id: String,
+    pub phase: ControllerPhase,
+    pub mode: AutotuneMode,
+    pub target: Option<TargetIdentity>,
+    pub situation: SituationKind,
+    pub observation_summary: ObservationSummary,
+    pub decision: AutotuneDecisionSummary,
+    pub reason: String,
+}
+
 impl AutotuneHistoryEvent {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        controller_id: impl Into<String>,
-        phase: ControllerPhase,
-        mode: AutotuneMode,
-        target: Option<TargetIdentity>,
-        situation: SituationKind,
-        observation_summary: ObservationSummary,
-        decision: AutotuneDecisionSummary,
-        reason: impl Into<String>,
-    ) -> Self {
+    pub fn new(input: AutotuneHistoryEventInput) -> Self {
         Self {
             schema_version: 1,
             unix_nanos: crate::audit::unix_nanos_now(),
-            controller_id: controller_id.into(),
-            phase,
-            mode,
-            target,
-            situation,
-            observation_summary,
-            decision,
+            controller_id: input.controller_id,
+            phase: input.phase,
+            mode: input.mode,
+            target: input.target,
+            situation: input.situation,
+            observation_summary: input.observation_summary,
+            decision: input.decision,
             experiment_id: None,
             action_id: None,
             score_before: None,
             score_after: None,
             rollback_performed: false,
-            reason: reason.into(),
+            reason: input.reason,
             planner: None,
         }
     }
@@ -348,16 +349,16 @@ mod tests {
         let path = dir.join("history.jsonl");
         let before = window_score(1_000);
         let after = window_score(850);
-        let event = AutotuneHistoryEvent::new(
-            "controller-1",
-            ControllerPhase::Cooldown,
-            AutotuneMode::ApplyLowRisk,
-            Some(target()),
-            SituationKind::GameCpuSchedulerPressure,
-            observation_summary_from_window_score(true, 31, 0, "High", &after),
-            decision(),
-            "candidate improved by 15.00%; kept as current active profile",
-        )
+        let event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+            controller_id: "controller-1".to_owned(),
+            phase: ControllerPhase::Cooldown,
+            mode: AutotuneMode::ApplyLowRisk,
+            target: Some(target()),
+            situation: SituationKind::GameCpuSchedulerPressure,
+            observation_summary: observation_summary_from_window_score(true, 31, 0, "High", &after),
+            decision: decision(),
+            reason: "candidate improved by 15.00%; kept as current active profile".to_owned(),
+        })
         .with_experiment_id("experiment-1")
         .with_action_id("cpu-affinity-profile:game-main")
         .with_scores(Some(before), Some(after))
@@ -430,14 +431,20 @@ mod tests {
         ];
 
         for situation in variants {
-            let event = AutotuneHistoryEvent::new(
-                "controller-1",
-                ControllerPhase::Observing,
-                AutotuneMode::Observe,
-                None,
+            let event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+                controller_id: "controller-1".to_owned(),
+                phase: ControllerPhase::Observing,
+                mode: AutotuneMode::Observe,
+                target: None,
                 situation,
-                observation_summary_from_window_score(true, 1, 0, "High", &window_score(143)),
-                AutotuneDecisionSummary {
+                observation_summary: observation_summary_from_window_score(
+                    true,
+                    1,
+                    0,
+                    "High",
+                    &window_score(143),
+                ),
+                decision: AutotuneDecisionSummary {
                     decision: "Noop".to_owned(),
                     candidate_name: None,
                     action_kind: None,
@@ -445,8 +452,8 @@ mod tests {
                     eligible: false,
                     rollback_policy: "none".to_owned(),
                 },
-                "observe mode",
-            );
+                reason: "observe mode".to_owned(),
+            });
 
             let json = serde_json::to_string(&event).unwrap();
             let parsed: AutotuneHistoryEvent = serde_json::from_str(&json).unwrap();
@@ -457,14 +464,20 @@ mod tests {
 
     #[test]
     fn browser_focused_does_not_serialize_as_compile_load() {
-        let event = AutotuneHistoryEvent::new(
-            "controller-1",
-            ControllerPhase::Observing,
-            AutotuneMode::Observe,
-            None,
-            SituationKind::BrowserFocused,
-            observation_summary_from_window_score(true, 1, 0, "High", &window_score(143)),
-            AutotuneDecisionSummary {
+        let event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+            controller_id: "controller-1".to_owned(),
+            phase: ControllerPhase::Observing,
+            mode: AutotuneMode::Observe,
+            target: None,
+            situation: SituationKind::BrowserFocused,
+            observation_summary: observation_summary_from_window_score(
+                true,
+                1,
+                0,
+                "High",
+                &window_score(143),
+            ),
+            decision: AutotuneDecisionSummary {
                 decision: "Noop".to_owned(),
                 candidate_name: None,
                 action_kind: None,
@@ -472,8 +485,8 @@ mod tests {
                 eligible: false,
                 rollback_policy: "none".to_owned(),
             },
-            "observe mode",
-        );
+            reason: "observe mode".to_owned(),
+        });
 
         let json = serde_json::to_string(&event).unwrap();
 
@@ -485,14 +498,20 @@ mod tests {
     fn history_reader_ignores_blank_lines() {
         let dir = temp_dir("blank-lines");
         let path = dir.join("history.jsonl");
-        let event = AutotuneHistoryEvent::new(
-            "controller-1",
-            ControllerPhase::Observing,
-            AutotuneMode::Observe,
-            None,
-            SituationKind::Unknown,
-            observation_summary_from_window_score(true, 1, 0, "High", &window_score(143)),
-            AutotuneDecisionSummary {
+        let event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+            controller_id: "controller-1".to_owned(),
+            phase: ControllerPhase::Observing,
+            mode: AutotuneMode::Observe,
+            target: None,
+            situation: SituationKind::Unknown,
+            observation_summary: observation_summary_from_window_score(
+                true,
+                1,
+                0,
+                "High",
+                &window_score(143),
+            ),
+            decision: AutotuneDecisionSummary {
                 decision: "Noop".to_owned(),
                 candidate_name: None,
                 action_kind: None,
@@ -500,8 +519,8 @@ mod tests {
                 eligible: false,
                 rollback_policy: "none".to_owned(),
             },
-            "observe mode",
-        );
+            reason: "observe mode".to_owned(),
+        });
 
         fs::write(&path, "\n").unwrap();
         append_autotune_history_event(&path, &event).unwrap();

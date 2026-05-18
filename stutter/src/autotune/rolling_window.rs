@@ -15,7 +15,6 @@ use crate::{
     },
 };
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RollingWindowScore {
     pub duration_ms: u64,
@@ -37,7 +36,6 @@ const GPU_THERMAL_DEGRADED_MILLIDEGREES: u32 = 85_000;
 const GPU_POWER_LIMIT_BUSY_PERCENT: u32 = 95;
 const GPU_POWER_LIMIT_LOW_CLOCK_MHZ: u32 = 300;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RollingWindow {
     pub duration: Duration,
@@ -51,7 +49,6 @@ pub struct RollingWindow {
     pub foreground_events: VecDeque<ForegroundEvent>,
 }
 
-#[allow(dead_code)]
 impl RollingWindow {
     pub fn new(duration: Duration) -> Self {
         Self {
@@ -579,7 +576,6 @@ fn source_quality_for_block_io_basis(basis: Option<&str>) -> ObjectiveSignalQual
     }
 }
 
-#[allow(dead_code)]
 fn prune_front_by_elapsed<T, F>(items: &mut VecDeque<T>, start_ms: u64, elapsed_ms: F)
 where
     F: Fn(&T) -> u64,
@@ -592,7 +588,6 @@ where
     }
 }
 
-#[allow(dead_code)]
 fn percentile_f64(mut values: Vec<f64>, percentile: f64) -> f64 {
     if values.is_empty() {
         return 0.0;

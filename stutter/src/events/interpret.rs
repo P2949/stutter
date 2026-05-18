@@ -24,6 +24,22 @@ pub struct SpikeConfig {
     pub cgroupv2_active: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SchedulerEventDiagnostics<'a> {
+    pub scx_ops: Option<&'a str>,
+    pub scx_state: Option<&'a str>,
+    pub scx_enable_seq: Option<&'a str>,
+}
+
+pub struct SchedulerEventInput<'a> {
+    pub event: &'a SchedulerEvent,
+    pub config: &'a SpikeConfig,
+    pub started: Instant,
+    pub tasks: &'a mut TaskTracker,
+    pub monotonic_start_ns: Option<u64>,
+    pub diagnostics: SchedulerEventDiagnostics<'a>,
+}
+
 const IMMEDIATE_CAUSE_TAG_PRIORITY: &[&str] = &[
     "major_page_fault",
     "minor_page_fault",
@@ -108,21 +124,15 @@ fn primary_from_tags(tags: &[String]) -> Option<String> {
         .map(|cause| cause.to_string())
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn interpret_scheduler_event(
-    event: &SchedulerEvent,
-    config: &SpikeConfig,
-    started: Instant,
-    tasks: &mut TaskTracker,
-    monotonic_start_ns: Option<u64>,
-    scx_ops: Option<&str>,
-    scx_state: Option<&str>,
-    scx_enable_seq: Option<&str>,
-) -> SchedulerSampleUpdate {
+pub fn interpret_scheduler_event(input: SchedulerEventInput<'_>) -> SchedulerSampleUpdate {
+    let event = input.event;
+    let config = input.config;
+    let tasks = input.tasks;
+    let diagnostics = input.diagnostics;
     debug_assert_eq!(event.kind, EVENT_RUNNABLE_LATENCY);
 
     let comm = metrics::comm_to_string(&event.comm);
-    let elapsed_ms = started.elapsed().as_millis() as u64;
+    let elapsed_ms = input.started.elapsed().as_millis() as u64;
 
     let task_info = tasks
         .active_targets
@@ -179,9 +189,9 @@ pub fn interpret_scheduler_event(
             .as_ref()
             .map(
                 |(cause_tags, primary_cause)| metrics::SpikeRecordDiagnostics {
-                    scx_ops: scx_ops.map(str::to_owned),
-                    scx_state: scx_state.map(str::to_owned),
-                    scx_enable_seq: scx_enable_seq.map(str::to_owned),
+                    scx_ops: diagnostics.scx_ops.map(str::to_owned),
+                    scx_state: diagnostics.scx_state.map(str::to_owned),
+                    scx_enable_seq: diagnostics.scx_enable_seq.map(str::to_owned),
                     cause_tags: cause_tags.clone(),
                     primary_cause: primary_cause.clone(),
                 },
@@ -216,14 +226,14 @@ pub fn interpret_scheduler_event(
             .expect("spike cause tags must be computed for spike events");
 
         let event_record = recorder::SpikeEvent::from_task_stats(
-            monotonic_start_ns,
+            input.monotonic_start_ns,
             stats,
             event,
             fault_deltas,
             recorder::SpikeDiagnosticContext {
-                scx_ops: scx_ops.map(str::to_owned),
-                scx_state: scx_state.map(str::to_owned),
-                scx_enable_seq: scx_enable_seq.map(str::to_owned),
+                scx_ops: diagnostics.scx_ops.map(str::to_owned),
+                scx_state: diagnostics.scx_state.map(str::to_owned),
+                scx_enable_seq: diagnostics.scx_enable_seq.map(str::to_owned),
                 cause_tags,
                 primary_cause,
                 waker_tid: event.waker_tid,
@@ -239,9 +249,9 @@ pub fn interpret_scheduler_event(
                     stats,
                     event,
                     elapsed_ms,
-                    scx_ops,
-                    scx_state,
-                    scx_enable_seq,
+                    diagnostics.scx_ops,
+                    diagnostics.scx_state,
+                    diagnostics.scx_enable_seq,
                 )),
             });
         }
@@ -290,6 +300,21 @@ mod tests {
             switch_prev_pid: 0,
             switch_prev_state: 0,
         }
+    }
+
+    fn interpret_test_event(
+        event: &SchedulerEvent,
+        config: &SpikeConfig,
+        tasks: &mut TaskTracker,
+    ) -> SchedulerSampleUpdate {
+        interpret_scheduler_event(SchedulerEventInput {
+            event,
+            config,
+            started: Instant::now(),
+            tasks,
+            monotonic_start_ns: None,
+            diagnostics: Default::default(),
+        })
     }
 
     #[test]
@@ -462,16 +487,7 @@ mod tests {
         let config = config();
         let mut tasks = TaskTracker::default();
 
-        let update = interpret_scheduler_event(
-            &scheduler_event(10),
-            &config,
-            Instant::now(),
-            &mut tasks,
-            None,
-            None,
-            None,
-            None,
-        );
+        let update = interpret_test_event(&scheduler_event(10), &config, &mut tasks);
 
         assert_eq!(update.events.len(), 1);
         assert!(matches!(
@@ -486,16 +502,7 @@ mod tests {
         let config = config();
         let mut tasks = TaskTracker::default();
 
-        let update = interpret_scheduler_event(
-            &scheduler_event(2_000_000),
-            &config,
-            Instant::now(),
-            &mut tasks,
-            None,
-            None,
-            None,
-            None,
-        );
+        let update = interpret_test_event(&scheduler_event(2_000_000), &config, &mut tasks);
 
         assert_eq!(update.events.len(), 2);
         assert!(matches!(
@@ -512,16 +519,7 @@ mod tests {
         config.alert_threshold_ns = Some(1_500_000);
         let mut tasks = TaskTracker::default();
 
-        let update = interpret_scheduler_event(
-            &scheduler_event(2_000_000),
-            &config,
-            Instant::now(),
-            &mut tasks,
-            None,
-            None,
-            None,
-            None,
-        );
+        let update = interpret_test_event(&scheduler_event(2_000_000), &config, &mut tasks);
 
         assert!(
             update

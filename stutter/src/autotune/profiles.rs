@@ -20,6 +20,7 @@ impl LoadedAutotuneProfiles {
         self.profiles.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.profiles.is_empty()
     }

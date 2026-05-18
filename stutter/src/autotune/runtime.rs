@@ -18,10 +18,10 @@ use crate::{
         decision::AutotuneDecision,
         experiment::{ExperimentId, WindowScore},
         history::{
-            AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneMode as HistoryAutotuneMode,
-            ControllerPhase as HistoryControllerPhase, ObservationSummary,
-            SituationKind as HistorySituationKind, TargetIdentity, append_autotune_history_event,
-            default_autotune_history_path,
+            AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneHistoryEventInput,
+            AutotuneMode as HistoryAutotuneMode, ControllerPhase as HistoryControllerPhase,
+            ObservationSummary, SituationKind as HistorySituationKind, TargetIdentity,
+            append_autotune_history_event, default_autotune_history_path,
         },
         kept::ActiveProfileState,
         live_experiment::{
@@ -365,6 +365,16 @@ impl From<LiveExperimentHistoryContext> for RuntimeHistoryContext {
             manual_restore_command: context.manual_restore_command,
         }
     }
+}
+
+struct LifecycleHistoryEventInput<'a> {
+    observation: &'a AutotuneObservation,
+    context: &'a RuntimeHistoryContext,
+    phase: ControllerPhase,
+    decision: &'a str,
+    eligible: bool,
+    rollback_performed: bool,
+    reason: &'a str,
 }
 
 #[derive(Clone, Debug)]
@@ -980,6 +990,7 @@ impl AutotuneRuntime {
             candidate_window_seconds: self.config.candidate_window_seconds,
             manual_restore_command: DAEMON_EMERGENCY_RESTORE_COMMAND,
             controller_journal_path: self.config.controller_journal_path.clone(),
+            #[cfg(test)]
             exit_rollback_registry: None,
             privileged_action_service,
         };
@@ -1140,13 +1151,13 @@ impl AutotuneRuntime {
 
         let planner_summary = self.last_plan_result.as_ref().map(PlanResult::summary);
 
-        let mut history = AutotuneHistoryEvent::new(
-            self.config.controller_id.clone(),
-            history_phase(self.controller.state.phase),
-            history_mode(event_mode),
+        let mut history = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+            controller_id: self.config.controller_id.clone(),
+            phase: history_phase(self.controller.state.phase),
+            mode: history_mode(event_mode),
             target,
-            history_situation(observation.primary_situation),
-            ObservationSummary {
+            situation: history_situation(observation.primary_situation),
+            observation_summary: ObservationSummary {
                 target_present: observation.target_present,
                 active_target_count: observation.active_target_count,
                 scored_task_count: observation.scored_task_count,
@@ -1161,7 +1172,7 @@ impl AutotuneRuntime {
                 drop_counter_total: observation.drop_counter_total,
                 data_quality: data_quality_label(&observation.data_quality),
             },
-            AutotuneDecisionSummary {
+            decision: AutotuneDecisionSummary {
                 decision: decision_label(decision),
                 candidate_name,
                 action_kind,
@@ -1169,8 +1180,8 @@ impl AutotuneRuntime {
                 eligible: decision_is_eligible(decision),
                 rollback_policy,
             },
-            reason.to_owned(),
-        )
+            reason: reason.to_owned(),
+        })
         .with_planner(planner_summary);
 
         if let Some(context) = context.as_ref() {
@@ -1224,15 +1235,15 @@ impl AutotuneRuntime {
         context: Option<&RuntimeHistoryContext>,
     ) -> anyhow::Result<()> {
         if let (AutotuneDecision::StartExperiment { .. }, Some(context)) = (decision, context) {
-            let applied = self.lifecycle_history_event(
+            let applied = self.lifecycle_history_event(LifecycleHistoryEventInput {
                 observation,
                 context,
-                ControllerPhase::Measuring,
-                "candidate_applied",
-                true,
-                false,
-                "candidate was applied and rollback token was written to controller journal",
-            );
+                phase: ControllerPhase::Measuring,
+                decision: "candidate_applied",
+                eligible: true,
+                rollback_performed: false,
+                reason: "candidate was applied and rollback token was written to controller journal",
+            });
             append_autotune_history_event(path, &applied)?;
         }
 
@@ -1243,82 +1254,78 @@ impl AutotuneRuntime {
                 | AutotuneDecision::EnterCooldown { .. }
         ) && let Some(context) = context
         {
-            let cooldown = self.lifecycle_history_event(
+            let cooldown = self.lifecycle_history_event(LifecycleHistoryEventInput {
                 observation,
                 context,
-                ControllerPhase::Cooldown,
-                "cooldown_entered",
-                true,
-                context.rollback_performed,
+                phase: ControllerPhase::Cooldown,
+                decision: "cooldown_entered",
+                eligible: true,
+                rollback_performed: context.rollback_performed,
                 reason,
-            );
+            });
             append_autotune_history_event(path, &cooldown)?;
         }
 
         if matches!(decision, AutotuneDecision::Fault { .. })
             && let Some(context) = context
         {
-            let faulted = self.lifecycle_history_event(
+            let faulted = self.lifecycle_history_event(LifecycleHistoryEventInput {
                 observation,
                 context,
-                ControllerPhase::Faulted,
-                "faulted",
-                false,
-                context.rollback_performed,
+                phase: ControllerPhase::Faulted,
+                decision: "faulted",
+                eligible: false,
+                rollback_performed: context.rollback_performed,
                 reason,
-            );
+            });
             append_autotune_history_event(path, &faulted)?;
         }
 
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn lifecycle_history_event(
         &self,
-        observation: &AutotuneObservation,
-        context: &RuntimeHistoryContext,
-        phase: ControllerPhase,
-        decision: &str,
-        eligible: bool,
-        rollback_performed: bool,
-        reason: &str,
+        input: LifecycleHistoryEventInput<'_>,
     ) -> AutotuneHistoryEvent {
-        AutotuneHistoryEvent::new(
-            self.config.controller_id.clone(),
-            history_phase(phase),
-            history_mode(context.mode),
-            self.target_identity_from_observation(observation),
-            history_situation(observation.primary_situation),
-            ObservationSummary {
-                target_present: observation.target_present,
-                active_target_count: observation.active_target_count,
-                scored_task_count: observation.scored_task_count,
-                interval_count: observation.interval_count,
-                scored_samples: observation.scored_samples,
-                score_total: observation.score.total,
-                over_1ms: observation.score.over_1ms,
-                over_2ms: observation.score.over_2ms,
-                over_5ms: observation.score.over_5ms,
-                frame_p99_ms: observation.frame_p99_ms,
-                frame_max_ms: observation.frame_max_ms,
-                drop_counter_total: observation.drop_counter_total,
-                data_quality: data_quality_label(&observation.data_quality),
+        AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+            controller_id: self.config.controller_id.clone(),
+            phase: history_phase(input.phase),
+            mode: history_mode(input.context.mode),
+            target: self.target_identity_from_observation(input.observation),
+            situation: history_situation(input.observation.primary_situation),
+            observation_summary: ObservationSummary {
+                target_present: input.observation.target_present,
+                active_target_count: input.observation.active_target_count,
+                scored_task_count: input.observation.scored_task_count,
+                interval_count: input.observation.interval_count,
+                scored_samples: input.observation.scored_samples,
+                score_total: input.observation.score.total,
+                over_1ms: input.observation.score.over_1ms,
+                over_2ms: input.observation.score.over_2ms,
+                over_5ms: input.observation.score.over_5ms,
+                frame_p99_ms: input.observation.frame_p99_ms,
+                frame_max_ms: input.observation.frame_max_ms,
+                drop_counter_total: input.observation.drop_counter_total,
+                data_quality: data_quality_label(&input.observation.data_quality),
             },
-            AutotuneDecisionSummary {
-                decision: decision.to_owned(),
-                candidate_name: Some(context.candidate_name.clone()),
-                action_kind: Some(context.action_kind.clone()),
-                safety_class: Some(context.safety_class.clone()),
-                eligible,
-                rollback_policy: context.rollback_policy_with_metadata(),
+            decision: AutotuneDecisionSummary {
+                decision: input.decision.to_owned(),
+                candidate_name: Some(input.context.candidate_name.clone()),
+                action_kind: Some(input.context.action_kind.clone()),
+                safety_class: Some(input.context.safety_class.clone()),
+                eligible: input.eligible,
+                rollback_policy: input.context.rollback_policy_with_metadata(),
             },
-            reason.to_owned(),
+            reason: input.reason.to_owned(),
+        })
+        .with_experiment_id(input.context.experiment_id.clone())
+        .with_action_id(input.context.action_id.clone())
+        .with_scores(
+            input.context.score_before.clone(),
+            input.context.score_after.clone(),
         )
-        .with_experiment_id(context.experiment_id.clone())
-        .with_action_id(context.action_id.clone())
-        .with_scores(context.score_before.clone(), context.score_after.clone())
-        .with_rollback_performed(rollback_performed)
+        .with_rollback_performed(input.rollback_performed)
     }
 }
 
@@ -2157,14 +2164,16 @@ mod tests {
         });
         let kept_candidate = CandidateAction::cpu_affinity_profile(low_risk_profile(), 1234);
         runtime.controller.state.record_candidate_result(
-            &kept_candidate,
-            &runtime.last_observation,
-            None,
-            CandidateMemoryResult::Kept,
-            Some(500),
-            Some(400),
-            None,
-            None,
+            crate::autotune::controller::ControllerCandidateResultInput {
+                candidate: &kept_candidate,
+                observation: &runtime.last_observation,
+                cpu_topology_signature: None,
+                result: CandidateMemoryResult::Kept,
+                baseline_score_total: Some(500),
+                current_score_total: Some(400),
+                rollback_reason: None,
+                cooldown_expires_unix_nanos: None,
+            },
         );
 
         let snapshot = runtime.daemon_state_snapshot();

@@ -67,7 +67,6 @@ pub struct UserConfigFile {
     pub daemon_allow_high_risk: Option<bool>,
     pub daemon_allow_medium_risk_apply: Option<bool>,
     pub autotune: Option<AutotuneConfigFile>,
-    #[allow(dead_code)]
     pub community_rules: Option<CommunityRulesConfigFile>,
     pub agent: Option<AgentConfigFile>,
 
@@ -768,30 +767,27 @@ fn known_top_level_user_config_field(field: &str) -> bool {
 }
 
 pub fn resolve_user_config_path() -> Option<PathBuf> {
-    #[allow(clippy::collapsible_if)]
-    if let Ok(path) = std::env::var("STUTTER_CONFIG") {
-        if !path.trim().is_empty() {
-            return Some(PathBuf::from(path));
-        }
+    if let Ok(path) = std::env::var("STUTTER_CONFIG")
+        && !path.trim().is_empty()
+    {
+        return Some(PathBuf::from(path));
     }
 
-    #[allow(clippy::collapsible_if)]
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.trim().is_empty() {
-            return Some(PathBuf::from(xdg).join("stutter").join("config.toml"));
-        }
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
+        && !xdg.trim().is_empty()
+    {
+        return Some(PathBuf::from(xdg).join("stutter").join("config.toml"));
     }
 
-    #[allow(clippy::collapsible_if)]
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.trim().is_empty() {
-            return Some(
-                PathBuf::from(home)
-                    .join(".config")
-                    .join("stutter")
-                    .join("config.toml"),
-            );
-        }
+    if let Ok(home) = std::env::var("HOME")
+        && !home.trim().is_empty()
+    {
+        return Some(
+            PathBuf::from(home)
+                .join(".config")
+                .join("stutter")
+                .join("config.toml"),
+        );
     }
 
     None

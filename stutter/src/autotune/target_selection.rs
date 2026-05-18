@@ -9,7 +9,6 @@ pub enum TaskTargetSelector {
     ForegroundRootOnly,
     FullTargetTree,
     CompilerAndLinker,
-    BackgroundHelpers,
     VirtualMachineAndHelpers,
     GameRenderAndWorkers,
     BrowserRenderersAndHelpers,
@@ -52,6 +51,7 @@ impl<T> MutableTaskSelection<T> {
     }
 }
 
+#[cfg(test)]
 pub fn mutable_task_targets_for_observation(
     observation: &AutotuneObservation,
     selector: TaskTargetSelector,
@@ -82,6 +82,7 @@ pub fn mutable_task_targets_for_observation_with_mode(
     }
 }
 
+#[cfg(test)]
 pub fn mutable_task_snapshots_for_observation(
     observation: &AutotuneObservation,
     selector: TaskTargetSelector,
@@ -236,16 +237,6 @@ fn mutable_task_allowed(
                 | TaskClass::PackageManager
                 | TaskClass::Indexer
                 | TaskClass::Helper
-        ),
-        TaskTargetSelector::BackgroundHelpers => matches!(
-            task.class,
-            TaskClass::Helper
-                | TaskClass::BuildJob
-                | TaskClass::Compiler
-                | TaskClass::Linker
-                | TaskClass::PackageManager
-                | TaskClass::Indexer
-                | TaskClass::VirtualMachine
         ),
         TaskTargetSelector::VirtualMachineAndHelpers => {
             matches!(task.class, TaskClass::VirtualMachine | TaskClass::Helper)

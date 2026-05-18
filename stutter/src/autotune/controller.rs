@@ -3,6 +3,7 @@ use std::time::Duration;
 use super::{
     candidate_memory::{
         CandidateContextHashInput, CandidateMemory, CandidateMemoryRecord, CandidateMemoryResult,
+        CandidateResultRecordInput,
     },
     comparison::DEFAULT_SCORE_COMPARISON_CONFIG,
     decision::{AutotuneDecision, CandidateAction, ExperimentId},
@@ -107,6 +108,17 @@ impl Default for ControllerRuntimeState {
     }
 }
 
+pub struct ControllerCandidateResultInput<'a> {
+    pub candidate: &'a CandidateAction,
+    pub observation: &'a AutotuneObservation,
+    pub cpu_topology_signature: Option<&'a str>,
+    pub result: CandidateMemoryResult,
+    pub baseline_score_total: Option<u64>,
+    pub current_score_total: Option<u64>,
+    pub rollback_reason: Option<String>,
+    pub cooldown_expires_unix_nanos: Option<u128>,
+}
+
 impl ControllerRuntimeState {
     pub fn mark_candidate_action_attempted(
         &mut self,
@@ -139,34 +151,27 @@ impl ControllerRuntimeState {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn record_candidate_result(
         &mut self,
-        candidate: &CandidateAction,
-        observation: &AutotuneObservation,
-        cpu_topology_signature: Option<&str>,
-        result: CandidateMemoryResult,
-        baseline_score_total: Option<u64>,
-        current_score_total: Option<u64>,
-        rollback_reason: Option<String>,
-        cooldown_expires_unix_nanos: Option<u128>,
+        input: ControllerCandidateResultInput<'_>,
     ) -> CandidateMemoryRecord {
         let context = CandidateContextHashInput::from_observation(
-            candidate,
-            observation,
-            cpu_topology_signature,
+            input.candidate,
+            input.observation,
+            input.cpu_topology_signature,
         );
 
-        self.candidate_memory.record_result(
-            candidate,
-            &context,
-            observation.now_unix_nanos,
-            result,
-            baseline_score_total,
-            current_score_total,
-            rollback_reason,
-            cooldown_expires_unix_nanos,
-        )
+        self.candidate_memory
+            .record_result(CandidateResultRecordInput {
+                candidate: input.candidate,
+                context: &context,
+                now_unix_nanos: input.observation.now_unix_nanos,
+                result: input.result,
+                baseline_score_total: input.baseline_score_total,
+                current_score_total: input.current_score_total,
+                rollback_reason: input.rollback_reason,
+                cooldown_expires_unix_nanos: input.cooldown_expires_unix_nanos,
+            })
     }
 
     pub fn enter_cooldown_after_keep(&mut self, policy: &ControllerPolicy, now_unix_nanos: u128) {
@@ -1232,16 +1237,16 @@ mod tests {
         observation.now_unix_nanos = 9_000;
         let candidate = candidate_with_safety_class(SafetyClass::ReversibleLowRisk);
 
-        let record = state.record_candidate_result(
-            &candidate,
-            &observation,
-            Some("cpu0-7:smt:on"),
-            CandidateMemoryResult::Reverted,
-            Some(1_000),
-            Some(1_125),
-            Some("candidate regressed score".to_owned()),
-            Some(309_000_000_000),
-        );
+        let record = state.record_candidate_result(ControllerCandidateResultInput {
+            candidate: &candidate,
+            observation: &observation,
+            cpu_topology_signature: Some("cpu0-7:smt:on"),
+            result: CandidateMemoryResult::Reverted,
+            baseline_score_total: Some(1_000),
+            current_score_total: Some(1_125),
+            rollback_reason: Some("candidate regressed score".to_owned()),
+            cooldown_expires_unix_nanos: Some(309_000_000_000),
+        });
 
         assert_eq!(record.candidate_name, "fake-profile");
         assert_eq!(record.result, CandidateMemoryResult::Reverted);
@@ -1262,16 +1267,16 @@ mod tests {
         let mut observation = high_quality_observation(100);
         observation.now_unix_nanos = 1_000_000_000;
 
-        state.record_candidate_result(
-            &candidate,
-            &observation,
-            Some("cpu0-7:smt:on"),
-            CandidateMemoryResult::Reverted,
-            Some(1_000),
-            Some(1_200),
-            Some("candidate regressed score".to_owned()),
-            Some(401_000_000_000),
-        );
+        state.record_candidate_result(ControllerCandidateResultInput {
+            candidate: &candidate,
+            observation: &observation,
+            cpu_topology_signature: Some("cpu0-7:smt:on"),
+            result: CandidateMemoryResult::Reverted,
+            baseline_score_total: Some(1_000),
+            current_score_total: Some(1_200),
+            rollback_reason: Some("candidate regressed score".to_owned()),
+            cooldown_expires_unix_nanos: Some(401_000_000_000),
+        });
 
         observation.now_unix_nanos = 350_000_000_000;
         let decision = decide_autotune_transition(&policy, &state, &observation, Some(candidate));

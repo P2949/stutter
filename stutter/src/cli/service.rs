@@ -136,28 +136,31 @@ pub(super) struct ServiceDoctorArgs {
     pub(super) json: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct ServiceCommandRequestInput {
+    pub action: ServiceAction,
+    pub manager: String,
+    pub mode: String,
+    pub dry_run: bool,
+    pub unit_dir: Option<PathBuf>,
+    pub config_dir: PathBuf,
+    pub state_dir: PathBuf,
+    pub log_dir: PathBuf,
+    pub binary: Option<PathBuf>,
+}
+
 pub(super) fn build_service_command_request(
-    action: ServiceAction,
-    manager: String,
-    mode: String,
-    dry_run: bool,
-    unit_dir: Option<PathBuf>,
-    config_dir: PathBuf,
-    state_dir: PathBuf,
-    log_dir: PathBuf,
-    binary: Option<PathBuf>,
+    input: ServiceCommandRequestInput,
 ) -> anyhow::Result<ServiceCommandRequest> {
     Ok(ServiceCommandRequest {
-        action,
-        manager: manager.parse::<ServiceManager>()?,
-        mode: mode.parse::<ServiceMode>()?,
-        dry_run,
-        unit_dir,
-        config_dir,
-        state_dir,
-        log_dir,
-        binary_path: binary.unwrap_or_else(default_service_binary_path),
+        action: input.action,
+        manager: input.manager.parse::<ServiceManager>()?,
+        mode: input.mode.parse::<ServiceMode>()?,
+        dry_run: input.dry_run,
+        unit_dir: input.unit_dir,
+        config_dir: input.config_dir,
+        state_dir: input.state_dir,
+        log_dir: input.log_dir,
+        binary_path: input.binary.unwrap_or_else(default_service_binary_path),
     })
 }
 

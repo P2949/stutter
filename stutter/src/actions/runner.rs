@@ -4,10 +4,7 @@ use std::{
 };
 
 use crate::{
-    actions::{
-        ActionError, ActionOutcome, ActionPhase, ActionState, RollbackToken, SafetyClass,
-        TuningAction,
-    },
+    actions::{ActionError, ActionPhase, ActionState, RollbackToken, SafetyClass, TuningAction},
     audit::{AuditEvent, append_audit_event_to_path, unix_nanos_now},
     daemon::DaemonConfig,
     daemon_policy::{
@@ -20,7 +17,6 @@ use crate::{
 pub struct AuditedActionResult {
     pub state: ActionState,
     pub rollback: Option<RollbackToken>,
-    pub outcome: ActionOutcome,
 }
 
 type ActionHookResult = anyhow::Result<()>;
@@ -40,6 +36,7 @@ impl<'a> ActionHooks<'a> {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn after_apply<F>(after_apply: F) -> Self
     where
         F: FnMut(&RollbackToken) -> ActionHookResult + 'a,
@@ -50,6 +47,7 @@ impl<'a> ActionHooks<'a> {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn with_after_rollback<F>(mut self, after_rollback: F) -> Self
     where
         F: FnMut(&RollbackToken) -> ActionHookResult + 'a,
@@ -131,21 +129,19 @@ impl ActionRunPolicy {
         }
     }
 
-    pub fn with_context(mut self, context: DaemonPolicyContext) -> Self {
-        self.context = context;
-        self
-    }
-
+    #[cfg(test)]
     pub fn with_capabilities(mut self, capabilities: crate::daemon::DaemonCapabilities) -> Self {
         self.context.capabilities = Some(capabilities);
         self
     }
 
+    #[cfg(test)]
     pub fn with_max_affected_tasks(mut self, max_affected_tasks: usize) -> Self {
         self.max_affected_tasks = Some(max_affected_tasks);
         self
     }
 
+    #[cfg(test)]
     pub fn with_max_total_duration(mut self, max_total_duration: Duration) -> Self {
         self.max_total_duration = Some(max_total_duration);
         self
@@ -487,22 +483,9 @@ where
             audit_event.error_category = None;
             audit_event.message = "dry run successful".to_owned();
 
-            let finished_unix_nanos = unix_nanos_now();
-            let outcome = ActionOutcome {
-                action_id: action_id.clone(),
-                safety_class: safety_class.clone(),
-                dry_run,
-                preflight_warnings,
-                state: state.clone(),
-                rollback: None,
-                started_unix_nanos,
-                finished_unix_nanos,
-            };
-
             Ok(AuditedActionResult {
                 state,
                 rollback: None,
-                outcome,
             })
         } else {
             audit_event.action_phase = Some(crate::actions::ActionPhase::DryRun);
@@ -662,22 +645,9 @@ where
             audit_event.error_category = None;
             audit_event.message = "action applied and verified".to_owned();
 
-            let finished_unix_nanos = unix_nanos_now();
-            let outcome = ActionOutcome {
-                action_id: action_id.clone(),
-                safety_class: safety_class.clone(),
-                dry_run,
-                preflight_warnings,
-                state: state.clone(),
-                rollback: Some(rollback.clone()),
-                started_unix_nanos,
-                finished_unix_nanos,
-            };
-
             Ok(AuditedActionResult {
                 state,
                 rollback: Some(rollback),
-                outcome,
             })
         }
     })();

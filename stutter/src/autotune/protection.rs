@@ -16,6 +16,7 @@ impl ProtectionDecision {
         matches!(self, Self::Allowed)
     }
 
+    #[cfg(test)]
     pub fn reason(&self) -> Option<&str> {
         match self {
             Self::Allowed => None,

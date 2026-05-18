@@ -131,7 +131,6 @@ pub fn check_regression(
     Ok(())
 }
 
-#[allow(dead_code)]
 pub fn check_percentile_regression(
     path_baseline: &Path,
     path_current: &Path,
