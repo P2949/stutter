@@ -363,13 +363,13 @@ const ARCHITECTURE_DEPENDENCY_MATRIX: &[DependencyMatrixEntry] = &[
 const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     OversizedRustFileAllowance {
         path: "src/agent.rs",
-        max_lines: 5_025,
-        reason: "existing monolithic agent/control API implementation pending future split",
+        max_lines: 5_049,
+        reason: "existing monolithic agent/control API implementation pending future split, plus module-level line additions",
     },
     OversizedRustFileAllowance {
         path: "src/focus/mod.rs",
-        max_lines: 4_003,
-        reason: "existing focus snapshot, scoring, resolver, and classification module pending future split",
+        max_lines: 4_030,
+        reason: "existing focus snapshot, scoring, resolver, and classification module pending future split, plus module-level line additions",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/candidate.rs",
@@ -403,8 +403,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/process_tree.rs",
-        max_lines: 2_355,
-        reason: "existing process tree scanner/classifier implementation pending future split",
+        max_lines: 2_381,
+        reason: "existing process tree scanner/classifier implementation pending future split, plus module-level line additions",
     },
     OversizedRustFileAllowance {
         path: "src/diagnosis.rs",
@@ -433,8 +433,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/session.rs",
-        max_lines: 2_145,
-        reason: "existing session model and lifecycle implementation pending future split",
+        max_lines: 2_171,
+        reason: "existing session model and lifecycle implementation pending future split, plus module-level line additions",
     },
     OversizedRustFileAllowance {
         path: "src/community_rules.rs",
@@ -692,73 +692,73 @@ const EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_ALLOWLIST:
 const EXISTING_DIRECT_PRINT_ALLOWLIST: &[ExistingDirectPrintAllowance] = &[
     ExistingDirectPrintAllowance {
         path: "src/agent.rs",
-        line_number: 287,
-        macro_name: "println!",
-        reason: "existing agent startup recovery status output pending conversion to structured status/logging",
-    },
-    ExistingDirectPrintAllowance {
-        path: "src/agent.rs",
-        line_number: 298,
-        macro_name: "eprintln!",
-        reason: "existing agent startup recovery warning output pending conversion to structured status/logging",
-    },
-    ExistingDirectPrintAllowance {
-        path: "src/agent.rs",
-        line_number: 302,
-        macro_name: "eprintln!",
-        reason: "existing agent manual restore warning output pending conversion to structured status/logging",
-    },
-    ExistingDirectPrintAllowance {
-        path: "src/agent.rs",
-        line_number: 313,
+        line_number: 311,
         macro_name: "println!",
         reason: "existing agent startup recovery status output pending conversion to structured status/logging",
     },
     ExistingDirectPrintAllowance {
         path: "src/agent.rs",
         line_number: 322,
+        macro_name: "eprintln!",
+        reason: "existing agent startup recovery warning output pending conversion to structured status/logging",
+    },
+    ExistingDirectPrintAllowance {
+        path: "src/agent.rs",
+        line_number: 326,
+        macro_name: "eprintln!",
+        reason: "existing agent manual restore warning output pending conversion to structured status/logging",
+    },
+    ExistingDirectPrintAllowance {
+        path: "src/agent.rs",
+        line_number: 337,
         macro_name: "println!",
         reason: "existing agent startup recovery status output pending conversion to structured status/logging",
     },
     ExistingDirectPrintAllowance {
         path: "src/agent.rs",
-        line_number: 335,
+        line_number: 346,
+        macro_name: "println!",
+        reason: "existing agent startup recovery status output pending conversion to structured status/logging",
+    },
+    ExistingDirectPrintAllowance {
+        path: "src/agent.rs",
+        line_number: 359,
         macro_name: "println!",
         reason: "existing agent non-loopback bind warning output pending conversion to structured status/logging",
     },
     ExistingDirectPrintAllowance {
         path: "src/agent.rs",
-        line_number: 339,
+        line_number: 363,
         macro_name: "println!",
         reason: "existing agent non-loopback bind warning output pending conversion to structured status/logging",
     },
     ExistingDirectPrintAllowance {
         path: "src/agent.rs",
-        line_number: 410,
+        line_number: 434,
         macro_name: "println!",
         reason: "existing agent Unix listener startup output pending conversion to structured status/logging",
     },
     ExistingDirectPrintAllowance {
         path: "src/agent.rs",
-        line_number: 413,
+        line_number: 437,
         macro_name: "println!",
         reason: "existing agent TCP listener startup output pending conversion to structured status/logging",
     },
     ExistingDirectPrintAllowance {
         path: "src/autotune/mod.rs",
-        line_number: 188,
+        line_number: 213,
         macro_name: "println!",
         reason: "existing autotune profile output pending conversion to command/rendering layer output",
     },
     ExistingDirectPrintAllowance {
         path: "src/autotune/mod.rs",
-        line_number: 215,
+        line_number: 240,
         macro_name: "println!",
         reason: "existing autotune runtime start output pending conversion to command/rendering layer output",
     },
     ExistingDirectPrintAllowance {
         path: "src/autotune/mod.rs",
-        line_number: 220,
+        line_number: 245,
         macro_name: "println!",
         reason: "existing autotune runtime finish output pending conversion to command/rendering layer output",
     },

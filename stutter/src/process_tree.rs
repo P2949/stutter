@@ -1,3 +1,29 @@
+//! Procfs process tree scanning, task classification, and target expansion.
+//!
+//! Owns:
+//! - bounded `/proc` scans, process/thread snapshots, cached process identity, task classes,
+//!   target diffs, cgroup PID collection, render-tree output, and auto-target discovery.
+//!
+//! Does not own:
+//! - action execution, daemon runtime policy, remote API handling, report rendering, live recorder
+//!   buffers, or autotune controller state.
+//!
+//! Allowed dependencies:
+//! - community rules, process/task config, procfs parsing helpers, task filters, task expansion
+//!   helpers, and task-class definitions needed for classification.
+//!
+//! Main entry points:
+//! - `ScanBudget`, `ProcessCache`, `ProcInfo`, `TaskInfo`, `TaskClass`, `TargetSnapshot`,
+//!   `scan_processes_at`, `target_snapshot`, `diff_tasks_ref`, `find_auto_target_pids`,
+//!   `expand_tasks_at`, `classify_task_with_context`, `render_tree_at`, and
+//!   `collect_cgroup_pids_at`.
+//!
+//! Safety, mutation, and persistence invariants:
+//! - scans must obey budget and thread limits before returning partial snapshots;
+//! - task identity comparisons must use pid/tid/starttime to avoid stale target reuse;
+//! - classification is advisory and must not mutate host state;
+//! - filesystem reads must stay rooted in explicit proc/cgroup paths supplied by callers.
+
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     fmt, fs,

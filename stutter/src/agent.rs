@@ -1,3 +1,27 @@
+//! Agent HTTP service, remote command endpoints, and session controllers.
+//!
+//! Owns:
+//! - Axum router registration, rate limiting, request token auth, startup journal recovery, runs
+//!   directory queries, active recorder handles, and remote autotune controllers.
+//!
+//! Does not own:
+//! - low-level system/PSI probes, eBPF attachment, CLI parsing, rendering local HTML/text reports, or
+//!   applying autotune actions directly (actions are delegated to the daemon state).
+//!
+//! Allowed dependencies:
+//! - actions safety classes, autotune controllers, config models, daemon policy logic, remote API
+//!   data structures, and standard network/tokio utilities.
+//!
+//! Main entry points:
+//! - `AgentConfig`, `AgentState`, `run_agent`, version/capabilities endpoints, recording start/stop
+//!   handlers, autotune start/stop/restore endpoints, and daemon status endpoints.
+//!
+//! Safety, mutation, and persistence invariants:
+//! - binding to non-loopback addresses requires explicit config authorization or bearer auth;
+//! - all remote-triggered tuning must route through startup recovery validation and daemon policy;
+//! - rate limiters and maximum request sizes must protect endpoints from memory exhaustion;
+//! - inactive or aborted session resources must be cleaned up and their background joins polled.
+
 use std::{
     collections::VecDeque,
     net::SocketAddr,

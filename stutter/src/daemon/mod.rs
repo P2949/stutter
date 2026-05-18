@@ -1,3 +1,29 @@
+//! Daemon policy, state, privilege, health, and lifecycle facade.
+//!
+//! Owns:
+//! - daemon state models, policy verdicts, capability and health probes, lifecycle decisions,
+//!   watchdog/overhead/soak checks, state persistence, and privileged operation mediation.
+//!
+//! Does not own:
+//! - CLI parsing, command dispatch, direct remote request handling, report rendering, or direct
+//!   action mutation outside daemon policy and privilege boundaries.
+//!
+//! Allowed dependencies:
+//! - actions, autotune coordination, config, process tree data, recorder/session models, and
+//!   system probes needed to evaluate safe daemon behavior.
+//!
+//! Main entry points:
+//! - `DaemonRuntime`, `DaemonPolicy`, `build_daemon_policy`, `DaemonState`,
+//!   `DaemonStateStore`, capability/health/lifecycle/watchdog types, and the public re-exports
+//!   from this module.
+//!
+//! Safety, mutation, and persistence invariants:
+//! - every daemon-authorized mutation must pass through `DaemonPolicy` and privilege checks;
+//! - persistent state must use the daemon state schema/versioned store types;
+//! - health, watchdog, and lifecycle transitions must degrade or reject unsafe operations rather
+//!   than silently continuing;
+//! - this facade should re-export subsystem contracts without embedding CLI-only behavior.
+
 pub mod acceptance;
 pub mod autotune;
 pub mod capabilities;

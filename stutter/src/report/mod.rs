@@ -1,3 +1,27 @@
+//! Report loading, analysis, rendering, diffing, and regression checks.
+//!
+//! Owns:
+//! - conversion from recorded artifacts into report input models, spike/pressure/focus analysis,
+//!   HTML/text rendering, run diffs, regression summaries, and report-facing data models.
+//!
+//! Does not own:
+//! - live recording, daemon/runtime mutation, action execution, remote authorization, or raw probe
+//!   collection.
+//!
+//! Allowed dependencies:
+//! - diagnosis, metrics formatting, recorder event/session types, runtime slice models,
+//!   session I/O, spike analysis, summary helpers, and autotune report overlays.
+//!
+//! Main entry points:
+//! - `print_report`, `write_html_report`, `build_report_analysis`, `print_diff_report`,
+//!   `print_batch_report`, `check_regression`, and the exported report model types.
+//!
+//! Safety, mutation, and persistence invariants:
+//! - report code reads existing artifacts and writes requested report outputs only;
+//! - schema-version expectations must come from recorder/session artifacts, not ad-hoc guesses;
+//! - analysis must preserve data-quality warnings rather than hiding missing or stale evidence;
+//! - renderers must not trigger host tuning actions or daemon state transitions.
+
 use std::{
     collections::{BTreeMap, BTreeSet, BinaryHeap},
     fs,

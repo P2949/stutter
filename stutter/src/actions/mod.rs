@@ -1,3 +1,28 @@
+//! Action model and audited host mutation primitives.
+//!
+//! Owns:
+//! - the shared action lifecycle types, safety classes, warnings, outcomes, rollback tokens,
+//!   rollback registry, and `TuningAction` trait used by concrete action submodules.
+//!
+//! Does not own:
+//! - daemon policy decisions, autotune planning, CLI parsing, live recording, or report rendering.
+//!
+//! Allowed dependencies:
+//! - low-level system helpers and safety support such as affinity, audit, hwmon, irq inspection,
+//!   process tree data, procfs helpers, profile restore records, system inventory, task classes,
+//!   task expansion, topology, and daemon policy metadata needed to describe safety.
+//!
+//! Main entry points:
+//! - `ActionPhase`, `ActionError`, `ActionId`, `SafetyClass`, `RollbackRegistry`,
+//!   `RollbackToken`, `TuningAction`, `RollbackHandler`, and the concrete action submodules.
+//!
+//! Safety, mutation, and persistence invariants:
+//! - every mutating action must support preflight/dry-run/apply/verify/rollback sequencing;
+//! - rollback state must be represented as explicit restore records or rollback tokens;
+//! - scope limits and daemon policy rejections must be surfaced as `ActionError` values;
+//! - this module may describe and execute host mutations, but it must not silently persist
+//!   undeclared state or bypass rollback accounting.
+
 #[cfg(test)]
 pub mod fake_action;
 

@@ -1,3 +1,29 @@
+//! Monitor session runtime orchestration.
+//!
+//! Owns:
+//! - monitor runtime construction, target/probe/output/UI scheduling, foreground and focus ticks,
+//!   live diagnosis timing, recorder lifecycle integration, and high-level `run_monitor` flow.
+//!
+//! Does not own:
+//! - CLI parsing, remote API serving, low-level action application, report rendering, or daemon
+//!   policy authorization.
+//!
+//! Allowed dependencies:
+//! - config models, eBPF loading, focus/foreground resolution, hwmon/MangoHud/system probes,
+//!   metrics summaries, process-tree targeting, recorder artifacts, runtime slices, event buses,
+//!   watch-process helpers, and session output sinks.
+//!
+//! Main entry points:
+//! - `MonitorSession`, `run_monitor`, `configure_target_irqs`, and the `session/*` runtime,
+//!   targeting, probe, sink, output, telemetry, and UI submodules declared from this file.
+//!
+//! Safety, mutation, and persistence invariants:
+//! - target changes must flow through `TargetController`/`TargetPolicy` and retain start-time
+//!   checks for stale process trees;
+//! - recorder setup/finalize must bracket probe collection and preserve warning output;
+//! - live diagnosis must use bounded tick windows and must not persist report-only conclusions;
+//! - optional foreground/focus providers must degrade to safe behavior when unavailable or stale.
+
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     fs,
