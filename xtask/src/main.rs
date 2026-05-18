@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     env,
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
@@ -26,6 +27,11 @@ enum XtaskCommand {
     Clippy,
     #[command(about = "Run non-root smoke workflow scripts")]
     Smoke,
+    #[command(
+        name = "dependency-hygiene",
+        about = "Run dependency advisory, license, source, and duplicate dependency checks"
+    )]
+    DependencyHygiene,
     #[command(
         name = "schema-check",
         about = "Validate generated artifact schema/example contracts"
@@ -117,6 +123,44 @@ const SMOKE_COMMANDS: &[CommandSpec] = &[
     },
 ];
 
+const DEPENDENCY_HYGIENE_COMMANDS: &[CommandSpec] = &[CommandSpec {
+    program: "cargo",
+    args: &["deny", "check"],
+}];
+
+const DUPLICATE_DEPENDENCY_COMMAND: CommandSpec = CommandSpec {
+    program: "cargo",
+    args: &["tree", "-d"],
+};
+
+const APPROVED_DUPLICATE_PACKAGES: &[&str] = &[
+    "bitflags",
+    "either",
+    "foldhash",
+    "getrandom",
+    "hashbrown",
+    "indexmap",
+    "linux-raw-sys",
+    "memchr",
+    "r-efi",
+    "rand",
+    "rand_chacha",
+    "rand_core",
+    "rustix",
+    "serde",
+    "serde_core",
+    "serde_json",
+    "socket2",
+    "stutter-common",
+    "syn",
+    "thiserror",
+    "thiserror-impl",
+    "tower",
+    "which",
+    "windows-sys",
+    "wit-bindgen",
+];
+
 const SCHEMA_CHECK_COMMANDS: &[CommandSpec] = &[CommandSpec {
     program: "cargo",
     args: &["test", "-p", "stutter", "artifact_contract_tests"],
@@ -165,6 +209,19 @@ const REPORT_GOLDEN_UPDATE_COMMANDS: &[CommandSpec] = &[CommandSpec {
         "--exact",
     ],
 }];
+
+const DEPENDENCY_HYGIENE_WORKFLOW: WorkflowSpec = WorkflowSpec {
+    name: "dependency-hygiene",
+    description: "validates cargo-deny policy and rejects newly introduced duplicate dependency families",
+    affected_paths: &[
+        "Cargo.toml",
+        "Cargo.lock",
+        "deny.toml",
+        "*/Cargo.toml",
+        "xtask/src/main.rs",
+    ],
+    commands: DEPENDENCY_HYGIENE_COMMANDS,
+};
 
 const SCHEMA_CHECK_WORKFLOW: WorkflowSpec = WorkflowSpec {
     name: "schema-check",
@@ -220,6 +277,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             run_cargo(&root, &["clippy", "--all-targets", "--", "-D", "warnings"])
         }
         XtaskCommand::Smoke => run_command_specs(&root, SMOKE_COMMANDS),
+        XtaskCommand::DependencyHygiene => run_dependency_hygiene(&root),
         XtaskCommand::SchemaCheck => run_workflow(&root, SCHEMA_CHECK_WORKFLOW),
         XtaskCommand::FixtureCheck => run_workflow(&root, FIXTURE_CHECK_WORKFLOW),
         XtaskCommand::FixtureUpdate => run_workflow(&root, FIXTURE_UPDATE_WORKFLOW),
@@ -239,20 +297,33 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
     }
 }
 
+fn run_dependency_hygiene(root: &Path) -> anyhow::Result<()> {
+    print_workflow_header(DEPENDENCY_HYGIENE_WORKFLOW);
+    run_command_specs(root, DEPENDENCY_HYGIENE_WORKFLOW.commands)
+        .with_context(|| workflow_failure_message(DEPENDENCY_HYGIENE_WORKFLOW))?;
+    run_duplicate_dependency_check(root)
+        .with_context(|| workflow_failure_message(DEPENDENCY_HYGIENE_WORKFLOW))
+}
+
 fn run_workflow(root: &Path, workflow: WorkflowSpec) -> anyhow::Result<()> {
+    print_workflow_header(workflow);
+    run_command_specs(root, workflow.commands).with_context(|| workflow_failure_message(workflow))
+}
+
+fn print_workflow_header(workflow: WorkflowSpec) {
     println!("xtask {}: {}", workflow.name, workflow.description);
     println!("xtask {} affected paths:", workflow.name);
     for path in workflow.affected_paths {
         println!("  - {path}");
     }
+}
 
-    run_command_specs(root, workflow.commands).with_context(|| {
-        format!(
-            "xtask {} failed while processing affected paths: {}",
-            workflow.name,
-            workflow.affected_paths.join(", ")
-        )
-    })
+fn workflow_failure_message(workflow: WorkflowSpec) -> String {
+    format!(
+        "xtask {} failed while processing affected paths: {}",
+        workflow.name,
+        workflow.affected_paths.join(", ")
+    )
 }
 
 fn run_command_specs(root: &Path, commands: &[CommandSpec]) -> anyhow::Result<()> {
@@ -260,6 +331,62 @@ fn run_command_specs(root: &Path, commands: &[CommandSpec]) -> anyhow::Result<()
         run_process(root, command.program, command.args)?;
     }
     Ok(())
+}
+
+fn run_duplicate_dependency_check(root: &Path) -> anyhow::Result<()> {
+    let output = run_process_capture_stdout(
+        root,
+        DUPLICATE_DEPENDENCY_COMMAND.program,
+        DUPLICATE_DEPENDENCY_COMMAND.args,
+    )?;
+    let duplicate_names = duplicate_package_names(&output);
+    let approved_names = APPROVED_DUPLICATE_PACKAGES
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+
+    let unexpected_names = duplicate_names
+        .iter()
+        .filter(|name| !approved_names.contains(name.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if !unexpected_names.is_empty() {
+        bail!(
+            "duplicate dependency check found unapproved duplicate packages: {}. Inspect `cargo tree -d` and either unify versions or add a deliberate allowlist entry in xtask/src/main.rs.",
+            unexpected_names.join(", ")
+        );
+    }
+
+    Ok(())
+}
+
+fn duplicate_package_names(output: &str) -> Vec<String> {
+    let mut names = BTreeSet::new();
+
+    for line in output.lines() {
+        let Some(first) = line.chars().next() else {
+            continue;
+        };
+
+        if first.is_whitespace() || matches!(first, '├' | '└' | '│') {
+            continue;
+        }
+
+        let Some((name, version_tail)) = line.split_once(" v") else {
+            continue;
+        };
+
+        if version_tail
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_digit())
+        {
+            names.insert(name.to_owned());
+        }
+    }
+
+    names.into_iter().collect()
 }
 
 fn scaffold_only(name: &str) {
@@ -289,6 +416,37 @@ fn run_process(root: &Path, program: &str, args: &[&str]) -> anyhow::Result<()> 
     }
 
     Ok(())
+}
+
+fn run_process_capture_stdout(root: &Path, program: &str, args: &[&str]) -> anyhow::Result<String> {
+    let command_text = format_command(program, args);
+    println!("--- STAGE: {command_text} ---");
+
+    let output = ProcessCommand::new(program)
+        .args(args)
+        .current_dir(root)
+        .env("RUSTUP_TOOLCHAIN", rustup_toolchain())
+        .output()
+        .with_context(|| format!("failed to start `{command_text}`"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+
+    if !stdout.is_empty() {
+        print!("{stdout}");
+    }
+    if !stderr.is_empty() {
+        eprint!("{stderr}");
+    }
+
+    if !output.status.success() {
+        bail!(
+            "command `{command_text}` failed with status {}",
+            output.status
+        );
+    }
+
+    Ok(stdout)
 }
 
 fn rustup_toolchain() -> String {
@@ -323,10 +481,11 @@ mod tests {
     use clap::CommandFactory;
 
     use super::{
-        CI_COMMANDS, Cli, FIXTURE_CHECK_COMMANDS, FIXTURE_UPDATE_COMMANDS,
-        REPORT_GOLDEN_UPDATE_COMMANDS, SCHEMA_CHECK_COMMANDS, SMOKE_COMMANDS,
-        FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_WORKFLOW, REPORT_GOLDEN_UPDATE_WORKFLOW,
-        SCHEMA_CHECK_WORKFLOW, format_command,
+        APPROVED_DUPLICATE_PACKAGES, CI_COMMANDS, Cli, DEPENDENCY_HYGIENE_COMMANDS,
+        DEPENDENCY_HYGIENE_WORKFLOW, DUPLICATE_DEPENDENCY_COMMAND, FIXTURE_CHECK_COMMANDS,
+        FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_COMMANDS, FIXTURE_UPDATE_WORKFLOW,
+        REPORT_GOLDEN_UPDATE_COMMANDS, REPORT_GOLDEN_UPDATE_WORKFLOW, SCHEMA_CHECK_COMMANDS,
+        SCHEMA_CHECK_WORKFLOW, SMOKE_COMMANDS, duplicate_package_names, format_command,
     };
 
     #[test]
@@ -342,6 +501,7 @@ mod tests {
             vec![
                 "ci",
                 "clippy",
+                "dependency-hygiene",
                 "fixture-check",
                 "fixture-update",
                 "fmt",
@@ -381,6 +541,61 @@ mod tests {
                 "bash scripts/smoke/advisor_offline.sh",
             ]
         );
+    }
+
+    #[test]
+    fn dependency_hygiene_runs_deny_and_duplicate_dependency_checks() {
+        assert_eq!(
+            command_texts(DEPENDENCY_HYGIENE_COMMANDS),
+            vec!["cargo deny check"]
+        );
+        assert_eq!(
+            format_command(
+                DUPLICATE_DEPENDENCY_COMMAND.program,
+                DUPLICATE_DEPENDENCY_COMMAND.args
+            ),
+            "cargo tree -d"
+        );
+        assert_eq!(
+            DEPENDENCY_HYGIENE_WORKFLOW.affected_paths,
+            &[
+                "Cargo.toml",
+                "Cargo.lock",
+                "deny.toml",
+                "*/Cargo.toml",
+                "xtask/src/main.rs",
+            ]
+        );
+    }
+
+    #[test]
+    fn duplicate_dependency_parser_reads_top_level_cargo_tree_entries() {
+        let output = "\
+bitflags v1.3.2
+└── example v0.1.0
+
+bitflags v2.11.1
+└── other v0.1.0
+
+syn v1.0.109
+└── proc-macro-helper v0.1.0
+
+syn v2.0.117
+└── proc-macro-helper v0.2.0
+";
+
+        assert_eq!(
+            duplicate_package_names(output),
+            vec!["bitflags".to_owned(), "syn".to_owned()]
+        );
+    }
+
+    #[test]
+    fn approved_duplicate_package_list_records_current_baseline() {
+        assert!(APPROVED_DUPLICATE_PACKAGES.contains(&"bitflags"));
+        assert!(APPROVED_DUPLICATE_PACKAGES.contains(&"getrandom"));
+        assert!(APPROVED_DUPLICATE_PACKAGES.contains(&"syn"));
+        assert!(APPROVED_DUPLICATE_PACKAGES.contains(&"windows-sys"));
     }
 
     #[test]
