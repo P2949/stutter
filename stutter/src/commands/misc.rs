@@ -9,6 +9,7 @@ use crate::{
 pub fn run_version_command(input: input::VersionCommandInput) -> anyhow::Result<()> {
     println!("stutter {}", metadata::build_version());
     if input.features {
+        println!("git_rev: {}", metadata::build_git_rev());
         println!("features: {}", metadata::build_feature_labels().join(", "));
     }
     Ok(())

@@ -314,6 +314,7 @@ fn run_single_soak_scenario(
         },
         scenario.candidate_safety_class.clone(),
     )?;
+    let scenario_name = runtime_report.scenario_name().to_owned();
     let decisions = runtime_report
         .decisions
         .iter()
@@ -324,7 +325,7 @@ fn run_single_soak_scenario(
 
     Ok((
         DaemonSoakScenarioReport {
-            name: scenario.name.clone(),
+            name: scenario_name,
             mode: scenario.mode,
             ticks: scenario.ticks.len() as u64,
             decisions,

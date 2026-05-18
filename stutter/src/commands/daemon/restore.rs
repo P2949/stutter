@@ -16,10 +16,20 @@ pub struct DaemonRestoreCommandOutcome {
     pub profile: restore::ProfileRestoreCommandOutcome,
 }
 
+impl DaemonRestoreCommandOutcome {
+    pub fn restored_any(&self) -> bool {
+        self.autotune.restored_actions > 0 || self.profile.restored_any
+    }
+
+    pub fn failed_total(&self) -> usize {
+        self.autotune.failed_actions + self.profile.error_total()
+    }
+}
+
 pub fn run_restore_command(
     input: crate::commands::input::DaemonRestoreCommandInput,
 ) -> anyhow::Result<()> {
-    run_restore_command_with_profile_paths(
+    let outcome = run_restore_command_with_profile_paths(
         input,
         None,
         None,
@@ -27,6 +37,11 @@ pub fn run_restore_command(
         affinity::default_restore_path(),
         profile_restore::default_restore_path(),
     )?;
+    log::info!(
+        "daemon_restore_completed restored_any={} failed_total={}",
+        outcome.restored_any(),
+        outcome.failed_total()
+    );
     Ok(())
 }
 
