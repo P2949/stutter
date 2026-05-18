@@ -1050,8 +1050,8 @@ mod tests {
             &action,
             &audit_path,
         )
-        .unwrap_err()
-        .to_string();
+        .unwrap_err();
+        let err = format!("{err:#}");
 
         assert!(err.contains("tree pid must be greater than zero"));
         fs::remove_dir_all(dir).ok();
