@@ -430,6 +430,31 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_selection_helper_returns_mutable_snapshots_for_tests() {
+        let observation = AutotuneObservation {
+            target_root_pid: Some(10),
+            active_tasks: vec![
+                task(10, TaskClass::Game),
+                task(11, TaskClass::GameRenderThread),
+                task(12, TaskClass::GameWorkerThread),
+                task(13, TaskClass::AudioRealtime),
+            ],
+            ..AutotuneObservation::default()
+        };
+
+        let snapshots = mutable_task_snapshots_for_observation(
+            &observation,
+            TaskTargetSelector::GameRenderAndWorkers,
+        );
+
+        assert_eq!(
+            snapshots.iter().map(|task| task.tid).collect::<Vec<_>>(),
+            vec![10, 11, 12]
+        );
+        assert!(snapshots.iter().all(|task| task.process_pid == 10));
+    }
+
+    #[test]
     fn foreground_root_selector_keeps_only_target_root_pid() {
         let observation = AutotuneObservation {
             target_root_pid: Some(10),
