@@ -740,6 +740,50 @@ mod tests {
     }
 
     #[test]
+    fn default_exit_rollback_executor_restores_empty_restore_file() {
+        let dir = temp_dir("default-executor");
+        let restore_path = dir.join("restore.json");
+        crate::affinity::save_restore_state(&restore_path, &[]).unwrap();
+
+        let registry = ActiveAutotuneActionRegistry::new();
+        register_cpu_affinity_rollback(
+            &registry,
+            "cpu-affinity-profile:empty-restore",
+            RollbackToken::CpuAffinityRestoreFile {
+                path: restore_path.clone(),
+                affected_tasks: 0,
+            },
+        );
+
+        let summary = rollback_active_low_risk_actions_on_exit(
+            &registry,
+            &RollbackOnExitConfig::default(),
+            ShutdownReason::DaemonStop,
+            None,
+        );
+
+        assert_eq!(summary.reason, ShutdownReason::DaemonStop);
+        assert_eq!(summary.attempted_actions, 1);
+        assert_eq!(summary.rolled_back_actions, 1);
+        assert_eq!(summary.failed_actions, 0);
+        assert_eq!(summary.skipped_actions, 0);
+        assert!(summary.success());
+        assert!(registry.is_empty());
+        assert!(!restore_path.exists());
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn ctrl_c_rollback_handler_future_is_constructible_without_polling_signal() {
+        let _future = wait_for_ctrl_c_and_rollback(
+            ActiveAutotuneActionRegistry::new(),
+            RollbackOnExitConfig::default(),
+            None,
+        );
+    }
+
+    #[test]
     fn target_exit_rolls_back_active_actions() {
         let registry = ActiveAutotuneActionRegistry::new();
         registry.register(action("cpu-affinity-profile:game-main"));
