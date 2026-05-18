@@ -34,6 +34,12 @@ jobs:
       - name: Install bpf-linker
         run: cargo install bpf-linker --locked
 
+      - name: Install dependency hygiene tools
+        run: cargo install cargo-deny --locked
+
+      - name: Run dependency hygiene
+        run: cargo run -p xtask -- dependency-hygiene
+
       - name: Run non-root smoke build gate
         run: scripts/smoke/build.sh
 
