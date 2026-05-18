@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+
 pub(crate) mod actions;
 pub(crate) mod agent;
 pub(crate) mod alert;
