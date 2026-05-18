@@ -800,6 +800,39 @@ mod tests {
     }
 
     #[test]
+    fn report_text_rendering_matches_snapshot_fixture() {
+        let session = minimal_session_for_report_test();
+        let validation = crate::session_io::RunValidationReport::default();
+        let data_quality = data_quality_summary(&session, &validation);
+        let cluster_analysis = SpikeClusterAnalysis {
+            source: SpikeClusterSource::TopSpikesFallback,
+            source_count: 0,
+            clusters: Vec::new(),
+        };
+        let pressure_timeline = PressureTimelineSummary::default();
+        let runtime_slices = RuntimeSliceAnalysisSummary::default();
+        let correlation_sections = TextReportCorrelationSections::new();
+
+        let rendered = render_report(
+            Path::new("snapshot/session.json"),
+            &session,
+            &cluster_analysis,
+            &[],
+            &data_quality,
+            &pressure_timeline,
+            &runtime_slices,
+            &correlation_sections,
+            &FocusReportSummary::default(),
+            &ForegroundReportSummary::default(),
+            10,
+            5,
+            None,
+        );
+
+        assert_eq!(rendered, include_str!("snapshots/text_report_minimal.snap"));
+    }
+
+    #[test]
     fn data_quality_is_low_for_validation_errors() {
         let session = minimal_session_for_report_test();
         let validation = crate::session_io::RunValidationReport {
