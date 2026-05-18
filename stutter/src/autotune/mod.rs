@@ -1,3 +1,28 @@
+//! Autotune planning, measurement, and controller orchestration.
+//!
+//! Owns:
+//! - candidate generation, objective scoring, live experiment state, controller runtime setup,
+//!   history/replay models, workload policy, protection, and autotune command dispatch.
+//!
+//! Does not own:
+//! - raw sysfs/procfs mutation, remote API authorization, CLI argument parsing, recorder file
+//!   formats, or daemon privilege transport.
+//!
+//! Allowed dependencies:
+//! - actions for audited mutations, daemon policy types for safety decisions, config models,
+//!   focus/process-tree inputs, recorder/report data models, and system observation helpers.
+//!
+//! Main entry points:
+//! - `AutotuneCommandInput`, `autotune_command`, `runtime::run_autotune_controller_session`,
+//!   `controller::AutotuneController`, planner/candidate modules, and emergency restore flows.
+//!
+//! Safety, mutation, and persistence invariants:
+//! - live tuning must route mutation through action providers and daemon policy checks;
+//! - experiments must keep enough journal/history state to recover or explain decisions;
+//! - startup recovery and emergency restore paths must treat prior applied actions as durable
+//!   state until they are verified restored;
+//! - unsupported live modes must fail before constructing a mutating runtime configuration.
+
 pub mod active_config;
 pub mod apply;
 pub mod apply_low_risk;

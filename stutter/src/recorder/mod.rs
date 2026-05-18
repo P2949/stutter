@@ -1,3 +1,28 @@
+//! Recording artifact schema, live buffers, retention, and writer facade.
+//!
+//! Owns:
+//! - session schema versioning, recorder event types, live recorder buffers, recording counters,
+//!   spike buffering, session metadata models, artifact writers, and retention helpers.
+//!
+//! Does not own:
+//! - report analysis/rendering, autotune planning, daemon policy decisions, remote API handling,
+//!   or host tuning actions.
+//!
+//! Allowed dependencies:
+//! - config labels, foreground/scx event models, metrics/runtime-slice records, session I/O, and
+//!   filesystem helpers required to prepare, write, finalize, and prune recording artifacts.
+//!
+//! Main entry points:
+//! - `SESSION_SCHEMA_VERSION`, `LiveRecorder`, `RecordingRun`, `FinalizeRecordingInput`,
+//!   `prepare_recording`, `finalize_recording`, `SpikeEventBuffer`, NDJSON/CSV writers, and
+//!   the re-exported session file models.
+//!
+//! Safety, mutation, and persistence invariants:
+//! - artifact schema changes must update `SESSION_SCHEMA_VERSION` and validation fixtures;
+//! - writers must preserve append/finalize ordering and surface I/O failures to callers;
+//! - retention must only remove files selected by `RecordingRetentionPolicy`;
+//! - recorder code may persist run artifacts but must not apply tuning or daemon policy changes.
+
 mod event_types;
 mod live;
 mod retention;
