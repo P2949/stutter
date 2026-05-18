@@ -770,7 +770,10 @@ const EXISTING_DIRECT_PRINT_ALLOWLIST: &[ExistingDirectPrintAllowance] = &[
     },
 ];
 
-const EXPECTED_ROOT_PUBLIC_MODULES: &[ExpectedPublicModule] = &[];
+const EXPECTED_ROOT_PUBLIC_MODULES: &[ExpectedPublicModule] = &[ExpectedPublicModule {
+    name: "api",
+    reason: "single intentional public façade replacing direct public subsystem modules",
+}];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RustPathOccurrence {

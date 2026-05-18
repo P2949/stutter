@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+pub mod api;
+
 pub(crate) mod actions;
 pub(crate) mod agent;
 pub(crate) mod alert;
@@ -70,7 +72,7 @@ pub(crate) mod tune;
 pub(crate) mod validate;
 pub(crate) mod watch;
 
-pub use error::StutterError;
+pub use api::error::StutterError;
 
 pub async fn run_cli() -> Result<(), StutterError> {
     let command = cli::parse_app_command()?;
