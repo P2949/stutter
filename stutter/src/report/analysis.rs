@@ -1230,7 +1230,7 @@ pub(crate) fn build_pressure_timeline(
         has_near_spike_windows,
     };
 
-    let pressure_notes = build_pressure_notes(
+    let pressure_notes = build_pressure_notes(PressureNoteInput {
         max_cpu_some,
         max_mem_some,
         max_mem_full,
@@ -1238,8 +1238,8 @@ pub(crate) fn build_pressure_timeline(
         max_io_full,
         has_mem_psi,
         has_io_psi,
-        &peak_windows,
-    );
+        peak_windows: &peak_windows,
+    });
 
     PressureTimelineSummary {
         sample_count: windows.len(),
@@ -1280,17 +1280,26 @@ pub(crate) fn push_pressure_peak_window(
     peak_windows.push(peak_window);
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn build_pressure_notes(
-    max_cpu_some: f64,
-    max_mem_some: Option<f64>,
-    max_mem_full: Option<f64>,
-    max_io_some: Option<f64>,
-    max_io_full: Option<f64>,
-    has_mem_psi: bool,
-    has_io_psi: bool,
-    peak_windows: &[PressurePeakWindow],
-) -> Vec<String> {
+pub(crate) struct PressureNoteInput<'a> {
+    pub max_cpu_some: f64,
+    pub max_mem_some: Option<f64>,
+    pub max_mem_full: Option<f64>,
+    pub max_io_some: Option<f64>,
+    pub max_io_full: Option<f64>,
+    pub has_mem_psi: bool,
+    pub has_io_psi: bool,
+    pub peak_windows: &'a [PressurePeakWindow],
+}
+
+pub(crate) fn build_pressure_notes(input: PressureNoteInput<'_>) -> Vec<String> {
+    let max_cpu_some = input.max_cpu_some;
+    let max_mem_some = input.max_mem_some;
+    let max_mem_full = input.max_mem_full;
+    let max_io_some = input.max_io_some;
+    let max_io_full = input.max_io_full;
+    let has_mem_psi = input.has_mem_psi;
+    let has_io_psi = input.has_io_psi;
+    let peak_windows = input.peak_windows;
     let mut notes = Vec::new();
 
     push_pressure_note_if_above(

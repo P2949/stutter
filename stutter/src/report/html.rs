@@ -1,6 +1,9 @@
 use super::{
     analysis::{block_io_correlation_basis, text_report_correlation_sections, *},
-    render::{html::render_html_report, text::render_report},
+    render::{
+        html::render_html_report,
+        text::{TextReportRenderInput, render_report},
+    },
     *,
 };
 
@@ -70,21 +73,21 @@ pub fn write_html_report(
         top,
     );
 
-    let text_report = render_report(
+    let text_report = render_report(TextReportRenderInput {
         path,
-        &analysis.session,
-        &analysis.cluster_analysis,
-        &analysis.frame_diagnoses,
-        &analysis.data_quality,
-        &analysis.pressure_timeline,
-        &analysis.runtime_slices,
-        &correlation_sections,
-        &analysis.focus_summary,
-        &analysis.foreground_summary,
+        session: &analysis.session,
+        cluster_analysis: &analysis.cluster_analysis,
+        frame_diagnoses: &analysis.frame_diagnoses,
+        data_quality: &analysis.data_quality,
+        pressure_timeline: &analysis.pressure_timeline,
+        runtime_slice_summary: &analysis.runtime_slices,
+        correlation_sections: &correlation_sections,
+        focus_summary: &analysis.focus_summary,
+        foreground_summary: &analysis.foreground_summary,
         top,
         cluster_window_ms,
         filter_class,
-    );
+    });
     let model = build_html_report_model(
         &analysis.session,
         &artifacts,

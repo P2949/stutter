@@ -1342,9 +1342,35 @@ fn write_fixture(
     Ok(())
 }
 
+macro_rules! fixture_metadata {
+    (
+        $name:expr,
+        $source:expr,
+        $quality_expectation:expr,
+        $description:expr,
+        $primary_cause:expr,
+        $accepted_confidence:expr,
+        $data_quality:expr,
+        $evidence_contains:expr,
+        $artifacts:expr $(,)?
+    ) => {
+        fixture_metadata(FixtureMetadataInput {
+            name: $name,
+            source: $source,
+            quality_expectation: $quality_expectation,
+            description: $description,
+            primary_cause: $primary_cause,
+            accepted_confidence: $accepted_confidence,
+            data_quality: $data_quality,
+            evidence_contains: $evidence_contains,
+            artifacts: $artifacts,
+        })
+    };
+}
+
 fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMetadata {
     match name {
-        "clean_run" => fixture_metadata(
+        "clean_run" => fixture_metadata!(
             name,
             "synthetic-contract",
             "High",
@@ -1355,7 +1381,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &[],
             exact_artifacts(artifacts),
         ),
-        "cpu_pressure" => fixture_metadata(
+        "cpu_pressure" => fixture_metadata!(
             name,
             "synthetic-contract",
             "High",
@@ -1366,7 +1392,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["high CPU PSI"],
             exact_artifacts(artifacts),
         ),
-        "block_io_stall" => fixture_metadata(
+        "block_io_stall" => fixture_metadata!(
             name,
             "synthetic-contract",
             "High",
@@ -1377,7 +1403,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["block I/O"],
             exact_artifacts(artifacts),
         ),
-        "irq_heavy" => fixture_metadata(
+        "irq_heavy" => fixture_metadata!(
             name,
             "synthetic-contract",
             "High",
@@ -1388,7 +1414,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["IRQ"],
             exact_artifacts(artifacts),
         ),
-        "gpu_bound_clean_cpu" => fixture_metadata(
+        "gpu_bound_clean_cpu" => fixture_metadata!(
             name,
             "synthetic-contract",
             "High",
@@ -1400,7 +1426,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             exact_artifacts(artifacts),
         ),
         "truncated_drop_counters" => with_quality_reasons(
-            fixture_metadata(
+            fixture_metadata!(
                 name,
                 "synthetic-contract",
                 "Medium",
@@ -1413,7 +1439,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             ),
             &["truncated", "drop"],
         ),
-        "reused_tid_no_contamination" => fixture_metadata(
+        "reused_tid_no_contamination" => fixture_metadata!(
             name,
             "synthetic-contract",
             "High",
@@ -1425,7 +1451,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             exact_artifacts(artifacts),
         ),
         "old_schema_warning" => with_quality_reasons(
-            fixture_metadata(
+            fixture_metadata!(
                 name,
                 "synthetic-contract",
                 "Medium",
@@ -1438,7 +1464,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             ),
             &["older than current"],
         ),
-        "game_thread_scheduler_delay" => fixture_metadata(
+        "game_thread_scheduler_delay" => fixture_metadata!(
             name,
             "synthetic-edge-case",
             "High",
@@ -1449,7 +1475,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["game thread", "delayed"],
             exact_artifacts(artifacts),
         ),
-        "compositor_scheduler_delay" => fixture_metadata(
+        "compositor_scheduler_delay" => fixture_metadata!(
             name,
             "synthetic-edge-case",
             "High",
@@ -1461,7 +1487,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             exact_artifacts(artifacts),
         ),
         "real_gpu_bound_looking" => {
-            let mut metadata = fixture_metadata(
+            let mut metadata = fixture_metadata!(
                 name,
                 "sanitized-real-recording",
                 "High",
@@ -1476,7 +1502,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             metadata.expected.required_candidate_evidence = vec!["GPU busy".to_owned()];
             metadata
         }
-        "real_block_io_overlap" => fixture_metadata(
+        "real_block_io_overlap" => fixture_metadata!(
             name,
             "sanitized-real-recording",
             "High",
@@ -1488,7 +1514,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             exact_artifacts(artifacts),
         ),
         "real_truncated_low_quality" => with_quality_reasons(
-            fixture_metadata(
+            fixture_metadata!(
                 name,
                 "sanitized-real-recording",
                 "Medium",
@@ -1501,7 +1527,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             ),
             &["truncated", "drop"],
         ),
-        "real_foreground_window" => fixture_metadata(
+        "real_foreground_window" => fixture_metadata!(
             name,
             "sanitized-real-recording",
             "High",
@@ -1512,7 +1538,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &[],
             exact_artifacts(artifacts),
         ),
-        "real_community_rules_classification" => fixture_metadata(
+        "real_community_rules_classification" => fixture_metadata!(
             name,
             "sanitized-real-recording",
             "High",
@@ -1523,7 +1549,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["game thread", "delayed"],
             exact_artifacts(artifacts),
         ),
-        "foreground_window" => fixture_metadata(
+        "foreground_window" => fixture_metadata!(
             name,
             "synthetic-edge-case",
             "High",
@@ -1534,7 +1560,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &[],
             exact_artifacts(artifacts),
         ),
-        "community_rules_classification" => fixture_metadata(
+        "community_rules_classification" => fixture_metadata!(
             name,
             "synthetic-edge-case",
             "High",
@@ -1545,7 +1571,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &[],
             exact_artifacts(artifacts),
         ),
-        "clean_baseline" => fixture_metadata(
+        "clean_baseline" => fixture_metadata!(
             name,
             "public-example",
             "High",
@@ -1556,7 +1582,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &[],
             exact_artifacts(artifacts),
         ),
-        "game_thread_scheduler_delay_public" => fixture_metadata(
+        "game_thread_scheduler_delay_public" => fixture_metadata!(
             name,
             "public-example",
             "High",
@@ -1568,7 +1594,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             exact_artifacts(artifacts),
         ),
         "low_quality_truncated" => with_quality_reasons(
-            fixture_metadata(
+            fixture_metadata!(
                 name,
                 "public-example",
                 "Medium",
@@ -1581,7 +1607,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             ),
             &["truncated", "drop"],
         ),
-        "game_scheduler_pressure" => fixture_metadata(
+        "game_scheduler_pressure" => fixture_metadata!(
             name,
             "autotune-replay",
             "High",
@@ -1592,7 +1618,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["game thread"],
             exact_artifacts(artifacts),
         ),
-        "gpu_bound" => fixture_metadata(
+        "gpu_bound" => fixture_metadata!(
             name,
             "autotune-replay",
             "High",
@@ -1604,7 +1630,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             exact_artifacts(artifacts),
         ),
         "low_quality" => with_quality_reasons(
-            fixture_metadata(
+            fixture_metadata!(
                 name,
                 "autotune-replay",
                 "Medium",
@@ -1617,7 +1643,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             ),
             &["truncated", "drop"],
         ),
-        "real_clean_baseline" => fixture_metadata(
+        "real_clean_baseline" => fixture_metadata!(
             name,
             "validation-corpus",
             "High",
@@ -1628,7 +1654,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &[],
             exact_artifacts(artifacts),
         ),
-        "real_compositor_scheduler_delay" => fixture_metadata(
+        "real_compositor_scheduler_delay" => fixture_metadata!(
             name,
             "sanitized-real-recording",
             "High",
@@ -1639,7 +1665,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["compositor thread"],
             exact_artifacts(artifacts),
         ),
-        "real_game_thread_scheduler_delay" => fixture_metadata(
+        "real_game_thread_scheduler_delay" => fixture_metadata!(
             name,
             "validation-corpus",
             "High",
@@ -1650,7 +1676,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["game thread", "delayed"],
             exact_artifacts(artifacts),
         ),
-        "real_irq_overlap" => fixture_metadata(
+        "real_irq_overlap" => fixture_metadata!(
             name,
             "sanitized-real-recording",
             "High",
@@ -1661,7 +1687,7 @@ fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> FixtureMeta
             &["IRQ"],
             exact_artifacts(artifacts),
         ),
-        other => fixture_metadata(
+        other => fixture_metadata!(
             other,
             "synthetic-contract",
             "High",
@@ -1686,37 +1712,40 @@ fn with_quality_reasons(
     metadata
 }
 
-#[allow(clippy::too_many_arguments)]
-fn fixture_metadata(
-    name: &str,
-    source: &str,
-    quality_expectation: &str,
-    description: &str,
-    primary_cause: &str,
-    accepted_confidence: &[&str],
-    data_quality: &str,
-    evidence_contains: &[&str],
+struct FixtureMetadataInput<'a> {
+    name: &'a str,
+    source: &'a str,
+    quality_expectation: &'a str,
+    description: &'a str,
+    primary_cause: &'a str,
+    accepted_confidence: &'a [&'a str],
+    data_quality: &'a str,
+    evidence_contains: &'a [&'a str],
     artifacts: FixtureExpectedArtifacts,
-) -> FixtureMetadata {
+}
+
+fn fixture_metadata(input: FixtureMetadataInput<'_>) -> FixtureMetadata {
     FixtureMetadata {
-        name: name.to_owned(),
+        name: input.name.to_owned(),
         schema_version: SESSION_SCHEMA_VERSION,
-        source: source.to_owned(),
-        quality_expectation: quality_expectation.to_owned(),
-        description: description.to_owned(),
+        source: input.source.to_owned(),
+        quality_expectation: input.quality_expectation.to_owned(),
+        description: input.description.to_owned(),
         expected: FixtureExpected {
-            primary_cause: primary_cause.to_owned(),
+            primary_cause: input.primary_cause.to_owned(),
             required_candidate: None,
             required_candidate_evidence: Vec::new(),
             quality_reasons_contain: Vec::new(),
-            accepted_confidence: accepted_confidence
+            accepted_confidence: input
+                .accepted_confidence
                 .iter()
                 .map(|item| (*item).to_owned())
                 .collect(),
-            data_quality: data_quality.to_owned(),
-            artifacts,
+            data_quality: input.data_quality.to_owned(),
+            artifacts: input.artifacts,
             evidence: FixtureExpectedEvidence {
-                contains: evidence_contains
+                contains: input
+                    .evidence_contains
                     .iter()
                     .map(|item| (*item).to_owned())
                     .collect(),

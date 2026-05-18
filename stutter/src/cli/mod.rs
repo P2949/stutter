@@ -25,7 +25,9 @@ use report::{
     ReleaseArgs, ReleaseCommand, ReportArgs, RestoreArgs, RulesArgs, RulesCommand, ScenarioArgs,
     ScenarioCommand, SummaryArgs, TuneArgs,
 };
-use service::{ServiceArgs, ServiceCommand, build_service_command_request};
+use service::{
+    ServiceArgs, ServiceCommand, ServiceCommandRequestInput, build_service_command_request,
+};
 use validate::{ValidateArgs, parse_optional_task_class, validate_comm_patterns, validate_pids};
 
 #[cfg(test)]
@@ -757,45 +759,45 @@ where
         },
         Some(Command::Service(args)) => match args.command {
             ServiceCommand::Install(args) => Ok(AppCommand::Service(ServiceCommandInput {
-                request: build_service_command_request(
-                    ServiceAction::Install,
-                    args.manager,
-                    args.mode,
-                    args.dry_run,
-                    args.unit_dir,
-                    args.config_dir,
-                    args.state_dir,
-                    args.log_dir,
-                    args.binary,
-                )?,
+                request: build_service_command_request(ServiceCommandRequestInput {
+                    action: ServiceAction::Install,
+                    manager: args.manager,
+                    mode: args.mode,
+                    dry_run: args.dry_run,
+                    unit_dir: args.unit_dir,
+                    config_dir: args.config_dir,
+                    state_dir: args.state_dir,
+                    log_dir: args.log_dir,
+                    binary: args.binary,
+                })?,
                 json: args.json,
             })),
             ServiceCommand::Uninstall(args) => Ok(AppCommand::Service(ServiceCommandInput {
-                request: build_service_command_request(
-                    ServiceAction::Uninstall,
-                    args.manager,
-                    args.mode,
-                    args.dry_run,
-                    args.unit_dir,
-                    args.config_dir,
-                    args.state_dir,
-                    args.log_dir,
-                    args.binary,
-                )?,
+                request: build_service_command_request(ServiceCommandRequestInput {
+                    action: ServiceAction::Uninstall,
+                    manager: args.manager,
+                    mode: args.mode,
+                    dry_run: args.dry_run,
+                    unit_dir: args.unit_dir,
+                    config_dir: args.config_dir,
+                    state_dir: args.state_dir,
+                    log_dir: args.log_dir,
+                    binary: args.binary,
+                })?,
                 json: args.json,
             })),
             ServiceCommand::Doctor(args) => Ok(AppCommand::Service(ServiceCommandInput {
-                request: build_service_command_request(
-                    ServiceAction::Doctor,
-                    args.manager,
-                    args.mode,
-                    true,
-                    args.unit_dir,
-                    args.config_dir,
-                    args.state_dir,
-                    args.log_dir,
-                    args.binary,
-                )?,
+                request: build_service_command_request(ServiceCommandRequestInput {
+                    action: ServiceAction::Doctor,
+                    manager: args.manager,
+                    mode: args.mode,
+                    dry_run: true,
+                    unit_dir: args.unit_dir,
+                    config_dir: args.config_dir,
+                    state_dir: args.state_dir,
+                    log_dir: args.log_dir,
+                    binary: args.binary,
+                })?,
                 json: args.json,
             })),
         },
@@ -973,14 +975,19 @@ mod split_smoke_tests {
     }
 
     #[test]
-    #[allow(clippy::type_complexity)]
     fn cli_split_review_guard_covers_all_split_cli_modules() {
-        let cases: &[(&[&str], fn(AppCommand) -> bool)] = &[
-            (&["stutter", "monitor", "--pid", "1234"], |command| {
-                matches!(command, AppCommand::Monitor(_))
-            }),
-            (
-                &[
+        struct CliSplitCase {
+            argv: &'static [&'static str],
+            matches_command: fn(AppCommand) -> bool,
+        }
+
+        let cases: &[CliSplitCase] = &[
+            CliSplitCase {
+                argv: &["stutter", "monitor", "--pid", "1234"],
+                matches_command: |command| matches!(command, AppCommand::Monitor(_)),
+            },
+            CliSplitCase {
+                argv: &[
                     "stutter",
                     "autotune",
                     "--tree-pid",
@@ -988,39 +995,47 @@ mod split_smoke_tests {
                     "--mode",
                     "observe",
                 ],
-                |command| matches!(command, AppCommand::Autotune(_)),
-            ),
-            (&["stutter", "daemon", "status", "--json"], |command| {
-                matches!(command, AppCommand::DaemonStatus(_))
-            }),
-            (&["stutter", "agent"], |command| {
-                matches!(command, AppCommand::Agent(_))
-            }),
-            (&["stutter", "report", "/tmp/run"], |command| {
-                matches!(command, AppCommand::Report(_))
-            }),
-            (&["stutter", "config", "check"], |command| {
-                matches!(command, AppCommand::ConfigCheck(_))
-            }),
-            (
-                &["stutter", "service", "doctor", "--mode", "user-observe"],
-                |command| matches!(command, AppCommand::Service(_)),
-            ),
-            (&["stutter", "validate", "/tmp/run"], |command| {
-                matches!(command, AppCommand::Validate(_))
-            }),
+                matches_command: |command| matches!(command, AppCommand::Autotune(_)),
+            },
+            CliSplitCase {
+                argv: &["stutter", "daemon", "status", "--json"],
+                matches_command: |command| matches!(command, AppCommand::DaemonStatus(_)),
+            },
+            CliSplitCase {
+                argv: &["stutter", "agent"],
+                matches_command: |command| matches!(command, AppCommand::Agent(_)),
+            },
+            CliSplitCase {
+                argv: &["stutter", "report", "/tmp/run"],
+                matches_command: |command| matches!(command, AppCommand::Report(_)),
+            },
+            CliSplitCase {
+                argv: &["stutter", "config", "check"],
+                matches_command: |command| matches!(command, AppCommand::ConfigCheck(_)),
+            },
+            CliSplitCase {
+                argv: &["stutter", "service", "doctor", "--mode", "user-observe"],
+                matches_command: |command| matches!(command, AppCommand::Service(_)),
+            },
+            CliSplitCase {
+                argv: &["stutter", "validate", "/tmp/run"],
+                matches_command: |command| matches!(command, AppCommand::Validate(_)),
+            },
         ];
 
-        for (argv, is_expected_command) in cases {
-            Cli::try_parse_from(*argv)
-                .unwrap_or_else(|err| panic!("Cli::try_parse_from failed for {argv:?}: {err}"));
+        for case in cases {
+            Cli::try_parse_from(case.argv).unwrap_or_else(|err| {
+                panic!("Cli::try_parse_from failed for {:?}: {err}", case.argv)
+            });
 
-            let command = parse_app_command_from(*argv)
-                .unwrap_or_else(|err| panic!("parse_app_command_from failed for {argv:?}: {err}"));
+            let command = parse_app_command_from(case.argv).unwrap_or_else(|err| {
+                panic!("parse_app_command_from failed for {:?}: {err}", case.argv)
+            });
 
             assert!(
-                is_expected_command(command),
-                "parsed command did not match expected AppCommand variant for {argv:?}"
+                (case.matches_command)(command),
+                "parsed command did not match expected AppCommand variant for {:?}",
+                case.argv
             );
         }
     }

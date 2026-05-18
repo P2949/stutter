@@ -127,21 +127,21 @@ pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io
 // Render entry point
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
-pub fn render_tui(
-    f: &mut Frame,
-    state: &TuiState,
-    active_targets: &BTreeMap<u32, TaskInfo>,
-    stats_by_task: &BTreeMap<u32, TaskStats>,
-    interval_records: &[IntervalRecord],
-    recent_diagnoses: &std::collections::VecDeque<LiveDiagnosisEntry>,
-    elapsed_ms: u128,
-    drop_counters: &DropCountersSnapshot,
-    current_focus: Option<&ResolvedFocus>,
-    current_foreground: Option<&ForegroundWindowSnapshot>,
-    focus_switch_count: u64,
-    foreground_include_title: bool,
-) {
+pub struct TuiRenderInput<'a> {
+    pub state: &'a TuiState,
+    pub active_targets: &'a BTreeMap<u32, TaskInfo>,
+    pub stats_by_task: &'a BTreeMap<u32, TaskStats>,
+    pub interval_records: &'a [IntervalRecord],
+    pub recent_diagnoses: &'a std::collections::VecDeque<LiveDiagnosisEntry>,
+    pub elapsed_ms: u128,
+    pub drop_counters: &'a DropCountersSnapshot,
+    pub current_focus: Option<&'a ResolvedFocus>,
+    pub current_foreground: Option<&'a ForegroundWindowSnapshot>,
+    pub focus_switch_count: u64,
+    pub foreground_include_title: bool,
+}
+
+pub fn render_tui(f: &mut Frame, input: TuiRenderInput<'_>) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -152,29 +152,17 @@ pub fn render_tui(
         ])
         .split(f.area());
 
-    render_status_bar(
-        f,
-        state,
-        active_targets,
-        stats_by_task,
-        elapsed_ms,
-        drop_counters,
-        current_focus,
-        current_foreground,
-        focus_switch_count,
-        foreground_include_title,
-        chunks[0],
-    );
+    render_status_bar(f, chunks[0], &input);
 
-    render_task_table(f, state, stats_by_task, chunks[1]);
+    render_task_table(f, input.state, input.stats_by_task, chunks[1]);
 
     let bottom = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(chunks[2]);
 
-    render_sparkline(f, interval_records, bottom[0]);
-    render_cpu_heat(f, stats_by_task, bottom[1]);
+    render_sparkline(f, input.interval_records, bottom[0]);
+    render_cpu_heat(f, input.stats_by_task, bottom[1]);
 
     let lower = Layout::default()
         .direction(Direction::Horizontal)
@@ -183,28 +171,15 @@ pub fn render_tui(
 
     let autotune_snapshot = load_default_autotune_tui_panel_snapshot();
     render_autotune_panel(f, Some(&autotune_snapshot), lower[0]);
-    render_diagnoses(f, recent_diagnoses, lower[1]);
+    render_diagnoses(f, input.recent_diagnoses, lower[1]);
 }
 
 // ---------------------------------------------------------------------------
 // Status bar
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
-fn render_status_bar(
-    f: &mut Frame,
-    state: &TuiState,
-    active_targets: &BTreeMap<u32, TaskInfo>,
-    stats_by_task: &BTreeMap<u32, TaskStats>,
-    elapsed_ms: u128,
-    drop_counters: &DropCountersSnapshot,
-    current_focus: Option<&ResolvedFocus>,
-    current_foreground: Option<&ForegroundWindowSnapshot>,
-    focus_switch_count: u64,
-    foreground_include_title: bool,
-    area: Rect,
-) {
-    let secs = elapsed_ms / 1000;
+fn render_status_bar(f: &mut Frame, area: Rect, input: &TuiRenderInput<'_>) {
+    let secs = input.elapsed_ms / 1000;
     let mins = secs / 60;
     let remaining = secs % 60;
 
@@ -212,12 +187,12 @@ fn render_status_bar(
         Span::raw(format!(" Elapsed: {mins}m{remaining:02}s │ ")),
         Span::raw(format!(
             "Active: {}/{} │ ",
-            active_targets.len(),
-            stats_by_task.len()
+            input.active_targets.len(),
+            input.stats_by_task.len()
         )),
     ];
 
-    let drops = drop_counters.total();
+    let drops = input.drop_counters.total();
     if drops > 0 {
         parts.push(Span::styled(
             format!("Drops: {drops} │ "),
@@ -230,16 +205,17 @@ fn render_status_bar(
         ));
     }
 
-    let filter_text = state
+    let filter_text = input
+        .state
         .filter_class
         .map(|c| format!("{c:?}"))
         .unwrap_or_else(|| "All".to_owned());
     parts.push(Span::raw(format!(
         "[f]Filter: {filter_text} │ [s]Sort: {} │ ",
-        state.sort_field.label()
+        input.state.sort_field.label()
     )));
 
-    if state.paused {
+    if input.state.paused {
         parts.push(Span::styled(
             "PAUSED",
             Style::default()
@@ -254,8 +230,9 @@ fn render_status_bar(
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" stutter profiler ");
-    let foreground_line = foreground_status_line(current_foreground, foreground_include_title);
-    let focus_line = focus_status_line(current_focus, focus_switch_count);
+    let foreground_line =
+        foreground_status_line(input.current_foreground, input.foreground_include_title);
+    let focus_line = focus_status_line(input.current_focus, input.focus_switch_count);
     let paragraph =
         Paragraph::new(vec![Line::from(parts), foreground_line, focus_line]).block(block);
     f.render_widget(paragraph, area);

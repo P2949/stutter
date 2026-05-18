@@ -13,8 +13,8 @@ use crate::{
         candidate_memory::CandidateMemoryResult,
         comparison::{ExperimentDataQuality, ExperimentResult},
         controller::{
-            ActiveExperiment as ControllerActiveExperiment, ControllerPolicy,
-            ControllerRuntimeState,
+            ActiveExperiment as ControllerActiveExperiment, ControllerCandidateResultInput,
+            ControllerPolicy, ControllerRuntimeState,
         },
         controller_journal::{
             ControllerJournalActionMetadata, ControllerJournalRecord, ControllerJournalState,
@@ -72,6 +72,7 @@ pub struct LiveExperimentManagerInput<'a> {
     pub candidate_window_seconds: u64,
     pub manual_restore_command: &'static str,
     pub controller_journal_path: Option<PathBuf>,
+    #[cfg(test)]
     pub exit_rollback_registry: Option<&'a crate::autotune::shutdown::ActiveAutotuneActionRegistry>,
     pub privileged_action_service: Option<&'a dyn PrivilegedActionService>,
 }
@@ -104,6 +105,7 @@ pub struct LiveExperimentHistoryContext {
 
 #[derive(Clone, Debug)]
 pub struct LiveExperimentOutcome {
+    #[cfg(test)]
     pub event: LiveExperimentEvent,
     pub history_context: Option<LiveExperimentHistoryContext>,
     pub clear_measurement_window: bool,
@@ -112,6 +114,7 @@ pub struct LiveExperimentOutcome {
 impl LiveExperimentOutcome {
     fn noop() -> Self {
         Self {
+            #[cfg(test)]
             event: LiveExperimentEvent::Noop,
             history_context: None,
             clear_measurement_window: false,
@@ -120,6 +123,7 @@ impl LiveExperimentOutcome {
 
     fn event(event: LiveExperimentEvent) -> Self {
         Self {
+            #[cfg(test)]
             event,
             history_context: None,
             clear_measurement_window: false,
@@ -245,6 +249,7 @@ impl LiveExperimentManager {
         self.current.is_some()
     }
 
+    #[cfg(test)]
     pub fn current_experiment(&self) -> Option<&LiveExperiment> {
         self.current.as_ref()
     }
@@ -651,6 +656,7 @@ impl LiveExperimentManager {
         let applied_rollback =
             executor.apply_candidate(input, candidate, experiment_id, observation)?;
 
+        #[cfg(test)]
         if input.mode == DaemonMode::ApplyLowRisk
             && let Some(registry) = input.exit_rollback_registry
         {
@@ -802,20 +808,20 @@ impl LiveExperimentManager {
                     return Err(err);
                 }
 
-                controller_state.record_candidate_result(
-                    &experiment.candidate,
+                controller_state.record_candidate_result(ControllerCandidateResultInput {
+                    candidate: &experiment.candidate,
                     observation,
-                    None,
-                    CandidateMemoryResult::Kept,
-                    Some(experiment.baseline_score.score.total),
-                    Some(candidate_score.score.total),
-                    None,
-                    Some(
+                    cpu_topology_signature: None,
+                    result: CandidateMemoryResult::Kept,
+                    baseline_score_total: Some(experiment.baseline_score.score.total),
+                    current_score_total: Some(candidate_score.score.total),
+                    rollback_reason: None,
+                    cooldown_expires_unix_nanos: Some(
                         observation
                             .now_unix_nanos
                             .saturating_add(input.controller_policy.cooldown_after_keep.as_nanos()),
                     ),
-                );
+                });
 
                 let cooldown_until_unix_nanos = observation
                     .now_unix_nanos
@@ -900,19 +906,19 @@ impl LiveExperimentManager {
             "rollback_verified",
         )?;
 
-        controller_state.record_candidate_result(
-            &experiment.candidate,
+        controller_state.record_candidate_result(ControllerCandidateResultInput {
+            candidate: &experiment.candidate,
             observation,
-            None,
-            CandidateMemoryResult::Reverted,
-            Some(experiment.baseline_score.score.total),
-            Some(observation.score.total),
-            Some(reason.to_owned()),
-            Some(
+            cpu_topology_signature: None,
+            result: CandidateMemoryResult::Reverted,
+            baseline_score_total: Some(experiment.baseline_score.score.total),
+            current_score_total: Some(observation.score.total),
+            rollback_reason: Some(reason.to_owned()),
+            cooldown_expires_unix_nanos: Some(
                 now_unix_nanos
                     .saturating_add(input.controller_policy.cooldown_after_revert.as_nanos()),
             ),
-        );
+        });
 
         let cooldown_until_unix_nanos =
             now_unix_nanos.saturating_add(input.controller_policy.cooldown_after_revert.as_nanos());

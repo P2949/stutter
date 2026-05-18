@@ -78,29 +78,47 @@ pub fn build_advisor_report_from_analysis(
     analysis: &ReportAnalysisJson,
 ) -> AdvisorReport {
     let causes = causes_from_analysis(analysis);
-    build_advisor_report_from_evidence(
+    build_advisor_report_from_evidence(AdvisorEvidenceInput {
         run,
-        analysis.data_quality.level,
-        &causes,
+        data_quality: analysis.data_quality.level,
+        causes: &causes,
         profiles,
-        analysis.session.config.hwmon || analysis.artifacts_summary.gpu_sample_count > 0,
-        analysis.session.config.irq_latency || analysis.artifacts_summary.irq_event_count > 0,
-        analysis.session.config.block_io || analysis.artifacts_summary.block_io_event_count > 0,
-        analysis.session.config.tree_roots.first().copied(),
-    )
+        signal_availability: AdvisorSignalAvailability {
+            has_hwmon: analysis.session.config.hwmon
+                || analysis.artifacts_summary.gpu_sample_count > 0,
+            has_irq: analysis.session.config.irq_latency
+                || analysis.artifacts_summary.irq_event_count > 0,
+            has_block_io: analysis.session.config.block_io
+                || analysis.artifacts_summary.block_io_event_count > 0,
+        },
+        tree_pid: analysis.session.config.tree_roots.first().copied(),
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn build_advisor_report_from_evidence(
-    run: &Path,
-    data_quality: DataQualityLevel,
-    causes: &[StutterCause],
-    profiles: Option<&Path>,
-    has_hwmon: bool,
-    has_irq: bool,
-    has_block_io: bool,
-    tree_pid: Option<u32>,
-) -> AdvisorReport {
+pub(crate) struct AdvisorSignalAvailability {
+    pub has_hwmon: bool,
+    pub has_irq: bool,
+    pub has_block_io: bool,
+}
+
+pub(crate) struct AdvisorEvidenceInput<'a> {
+    pub run: &'a Path,
+    pub data_quality: DataQualityLevel,
+    pub causes: &'a [StutterCause],
+    pub profiles: Option<&'a Path>,
+    pub signal_availability: AdvisorSignalAvailability,
+    pub tree_pid: Option<u32>,
+}
+
+pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>) -> AdvisorReport {
+    let run = input.run;
+    let data_quality = input.data_quality;
+    let causes = input.causes;
+    let profiles = input.profiles;
+    let has_hwmon = input.signal_availability.has_hwmon;
+    let has_irq = input.signal_availability.has_irq;
+    let has_block_io = input.signal_availability.has_block_io;
+    let tree_pid = input.tree_pid;
     let mut warnings = Vec::new();
     let mut recommendations = Vec::new();
 
@@ -415,16 +433,18 @@ mod tests {
     }
 
     fn report_for(causes: &[StutterCause], quality: DataQualityLevel) -> AdvisorReport {
-        build_advisor_report_from_evidence(
-            Path::new("/tmp/run"),
-            quality,
+        build_advisor_report_from_evidence(AdvisorEvidenceInput {
+            run: Path::new("/tmp/run"),
+            data_quality: quality,
             causes,
-            Some(Path::new("profiles.toml")),
-            false,
-            false,
-            false,
-            Some(42),
-        )
+            profiles: Some(Path::new("profiles.toml")),
+            signal_availability: AdvisorSignalAvailability {
+                has_hwmon: false,
+                has_irq: false,
+                has_block_io: false,
+            },
+            tree_pid: Some(42),
+        })
     }
 
     #[test]

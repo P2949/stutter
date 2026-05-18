@@ -336,8 +336,9 @@ mod tests {
         autotune::{
             experiment::WindowScore,
             history::{
-                AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneMode, ControllerPhase,
-                ObservationSummary, SituationKind, append_autotune_history_event,
+                AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneHistoryEventInput,
+                AutotuneMode, ControllerPhase, ObservationSummary, SituationKind,
+                append_autotune_history_event,
             },
         },
         recorder::{RecordedTime, SessionFile},
@@ -409,14 +410,14 @@ mod tests {
         decision: &str,
         reason: &str,
     ) -> AutotuneHistoryEvent {
-        let mut event = AutotuneHistoryEvent::new(
-            "controller-1",
+        let mut event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+            controller_id: "controller-1".to_owned(),
             phase,
-            AutotuneMode::ApplyLowRisk,
-            None,
-            SituationKind::GameCpuSchedulerPressure,
-            observation_summary(820),
-            AutotuneDecisionSummary {
+            mode: AutotuneMode::ApplyLowRisk,
+            target: None,
+            situation: SituationKind::GameCpuSchedulerPressure,
+            observation_summary: observation_summary(820),
+            decision: AutotuneDecisionSummary {
                 decision: decision.to_owned(),
                 candidate_name: Some("game-main-suggested".to_owned()),
                 action_kind: Some("cpu_affinity_profile".to_owned()),
@@ -424,8 +425,8 @@ mod tests {
                 eligible: true,
                 rollback_policy: "rollback-on-exit".to_owned(),
             },
-            reason,
-        )
+            reason: reason.to_owned(),
+        })
         .with_experiment_id("experiment-1")
         .with_action_id("cpu-affinity-profile:game-main-suggested");
 

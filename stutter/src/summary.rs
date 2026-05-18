@@ -6,15 +6,13 @@ use std::{
 use anyhow::Context;
 use serde::Serialize;
 
-#[allow(unused_imports)]
-pub use crate::report::diff::{
-    RunDiffSummary, TaskDeltaSummary, build_run_diff_summary, run_diff_summary_from_sessions,
-};
+#[cfg(test)]
+use crate::report::diff::run_diff_summary_from_sessions;
 use crate::{
     metrics::format_latency,
     process_tree::TaskClass,
     recorder::{SESSION_SCHEMA_VERSION, SessionFile, SessionTask},
-    report::{DataQualityLevel, data_quality_summary},
+    report::{DataQualityLevel, RunDiffSummary, build_run_diff_summary, data_quality_summary},
     session_io::{self, RunValidationReport},
 };
 

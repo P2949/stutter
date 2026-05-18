@@ -66,7 +66,6 @@ pub struct FinalizeRecordingInput<'a> {
     pub focus_mode: Option<String>,
     pub final_focus_kind: Option<String>,
     pub focus_switch_count: u64,
-    #[allow(dead_code)]
     pub current_focus: Option<crate::focus::ResolvedFocus>,
     pub final_foreground_event: Option<ForegroundEvent>,
 }

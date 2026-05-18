@@ -4,7 +4,9 @@ pub(crate) mod render;
 
 use std::path::Path;
 
-pub use analysis::{build_run_diff_summary, run_diff_summary_from_sessions};
+pub use analysis::build_run_diff_summary;
+#[cfg(test)]
+pub use analysis::run_diff_summary_from_sessions;
 pub use model::{RunDiffSummary, TaskDeltaSummary};
 
 use crate::{process_tree::TaskClass, summary};

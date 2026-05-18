@@ -1601,11 +1601,10 @@ async fn list_runs_handler(
     let mut runs = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&state.runs_dir) {
         for entry in entries.flatten() {
-            if entry.path().is_dir() {
-                #[allow(clippy::collapsible_if)]
-                if let Some(name) = entry.file_name().to_str() {
-                    runs.push(name.to_owned());
-                }
+            if entry.path().is_dir()
+                && let Some(name) = entry.file_name().to_str()
+            {
+                runs.push(name.to_owned());
             }
         }
     }

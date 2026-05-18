@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod api;
 
 pub(crate) mod actions;
@@ -35,14 +33,12 @@ pub(crate) mod flamegraph;
 pub(crate) mod foreground;
 pub(crate) mod hwmon;
 pub(crate) mod irq_inspect;
-pub(crate) mod kernel_event;
 pub(crate) mod mangohud;
 pub(crate) mod metadata;
 pub(crate) mod metrics;
 pub(crate) mod otel;
 pub(crate) mod perf_counters;
 pub(crate) mod probe_catalog;
-pub(crate) mod procfs;
 pub(crate) mod profile_restore;
 pub(crate) mod profiles;
 pub(crate) mod prometheus;
@@ -61,9 +57,7 @@ pub(crate) mod service;
 pub(crate) mod spike;
 pub(crate) mod summary;
 pub(crate) mod system_inventory;
-pub(crate) mod target_snapshot;
 pub(crate) mod task_class;
-pub(crate) mod task_filter;
 pub(crate) mod tasks;
 pub(crate) mod topology;
 pub(crate) mod tui;

@@ -28,7 +28,6 @@ pub struct AutotuneObservationFocus {
     pub root_pids: Vec<u32>,
     pub member_pids: Vec<u32>,
     pub confidence: f32,
-    pub score: f32,
     pub situation: SituationKind,
     pub reasons: Vec<String>,
 }

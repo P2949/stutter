@@ -500,7 +500,7 @@ pub struct ScenarioCompareJson {
     pub scenario: String,
     pub baseline: PathBuf,
     pub current: PathBuf,
-    pub diff: crate::summary::RunDiffSummary,
+    pub diff: crate::report::diff::RunDiffSummary,
     pub expected_class_check: ExpectedClassCheck,
 }
 
@@ -559,8 +559,9 @@ pub fn compare_scenario(input: ScenarioCompareInput) -> Result<()> {
     let current_missing = missing_expected_classes(&current_path, &scenario.expected_classes)?;
 
     if input.json_summary {
-        let diff = crate::summary::build_run_diff_summary(&baseline_path, &current_path, None)?
-            .limited(input.top);
+        let diff =
+            crate::report::diff::build_run_diff_summary(&baseline_path, &current_path, None)?
+                .limited(input.top);
         let output = ScenarioCompareJson {
             scenario: scenario.name,
             baseline: baseline_path,

@@ -456,26 +456,27 @@ mod tests {
     use super::*;
     use crate::{metrics::IntervalRecord, process_tree::TaskClass, recorder::FrameEvent};
 
-    #[allow(clippy::too_many_arguments)]
-    fn record(
+    struct IntervalRecordFixture<'a> {
         elapsed_ms: u64,
         task: u32,
         active: bool,
         samples: u64,
         class: TaskClass,
-        process_comm: &str,
-        comm: &str,
+        process_comm: &'a str,
+        comm: &'a str,
         cpu_psi_some: f64,
-    ) -> IntervalRecord {
+    }
+
+    fn record(fixture: IntervalRecordFixture<'_>) -> IntervalRecord {
         IntervalRecord {
-            elapsed_ms,
-            task,
-            active,
-            class,
-            process_comm: Arc::from(process_comm),
-            comm: comm.to_owned(),
-            samples,
-            cpu_psi_some,
+            elapsed_ms: fixture.elapsed_ms,
+            task: fixture.task,
+            active: fixture.active,
+            class: fixture.class,
+            process_comm: Arc::from(fixture.process_comm),
+            comm: fixture.comm.to_owned(),
+            samples: fixture.samples,
+            cpu_psi_some: fixture.cpu_psi_some,
             ..Default::default()
         }
     }
@@ -489,46 +490,46 @@ mod tests {
 
     fn window_with_game_context() -> RollingWindow {
         let mut window = RollingWindow::new(Duration::from_secs(10));
-        window.push_interval(record(
-            1000,
-            10,
-            true,
-            50,
-            TaskClass::Game,
-            "Game.exe",
-            "RenderThread",
-            3.0,
-        ));
-        window.push_interval(record(
-            1000,
-            11,
-            true,
-            50,
-            TaskClass::GameHelper,
-            "Game.exe",
-            "Worker",
-            4.0,
-        ));
-        window.push_interval(record(
-            2000,
-            10,
-            true,
-            50,
-            TaskClass::Game,
-            "Game.exe",
-            "RenderThread",
-            5.0,
-        ));
-        window.push_interval(record(
-            2000,
-            11,
-            true,
-            50,
-            TaskClass::GameHelper,
-            "Game.exe",
-            "Worker",
-            6.0,
-        ));
+        window.push_interval(record(IntervalRecordFixture {
+            elapsed_ms: 1000,
+            task: 10,
+            active: true,
+            samples: 50,
+            class: TaskClass::Game,
+            process_comm: "Game.exe",
+            comm: "RenderThread",
+            cpu_psi_some: 3.0,
+        }));
+        window.push_interval(record(IntervalRecordFixture {
+            elapsed_ms: 1000,
+            task: 11,
+            active: true,
+            samples: 50,
+            class: TaskClass::GameHelper,
+            process_comm: "Game.exe",
+            comm: "Worker",
+            cpu_psi_some: 4.0,
+        }));
+        window.push_interval(record(IntervalRecordFixture {
+            elapsed_ms: 2000,
+            task: 10,
+            active: true,
+            samples: 50,
+            class: TaskClass::Game,
+            process_comm: "Game.exe",
+            comm: "RenderThread",
+            cpu_psi_some: 5.0,
+        }));
+        window.push_interval(record(IntervalRecordFixture {
+            elapsed_ms: 2000,
+            task: 11,
+            active: true,
+            samples: 50,
+            class: TaskClass::GameHelper,
+            process_comm: "Game.exe",
+            comm: "Worker",
+            cpu_psi_some: 6.0,
+        }));
 
         for elapsed_ms in [1000, 2000, 3000, 4000, 5000] {
             window.push_frame(frame(elapsed_ms));

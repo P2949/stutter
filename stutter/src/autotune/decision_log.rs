@@ -85,29 +85,30 @@ pub struct DecisionJsonlEntry {
     pub reason: String,
 }
 
+pub struct DecisionJsonlEntryInput {
+    pub phase: ControllerPhaseLabel,
+    pub mode: AutotuneModeLabel,
+    pub target_present: bool,
+    pub situation: SituationKindLabel,
+    pub score_total: u64,
+    pub data_quality: OnlineDataQualityLabel,
+    pub decision: AutotuneDecisionLabel,
+    pub reason: String,
+}
+
 impl DecisionJsonlEntry {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        phase: ControllerPhaseLabel,
-        mode: AutotuneModeLabel,
-        target_present: bool,
-        situation: SituationKindLabel,
-        score_total: u64,
-        data_quality: OnlineDataQualityLabel,
-        decision: AutotuneDecisionLabel,
-        reason: impl Into<String>,
-    ) -> Self {
+    pub fn new(input: DecisionJsonlEntryInput) -> Self {
         Self {
             schema_version: 1,
             unix_nanos: crate::audit::unix_nanos_now(),
-            phase,
-            mode,
-            target_present,
-            situation,
-            score_total,
-            data_quality,
-            decision,
-            reason: reason.into(),
+            phase: input.phase,
+            mode: input.mode,
+            target_present: input.target_present,
+            situation: input.situation,
+            score_total: input.score_total,
+            data_quality: input.data_quality,
+            decision: input.decision,
+            reason: input.reason,
         }
     }
 
@@ -118,16 +119,16 @@ impl DecisionJsonlEntry {
         data_quality: OnlineDataQualityLabel,
         reason: impl Into<String>,
     ) -> Self {
-        Self::new(
-            ControllerPhaseLabel::Observing,
-            AutotuneModeLabel::Observe,
+        Self::new(DecisionJsonlEntryInput {
+            phase: ControllerPhaseLabel::Observing,
+            mode: AutotuneModeLabel::Observe,
             target_present,
             situation,
             score_total,
             data_quality,
-            AutotuneDecisionLabel::Noop,
-            reason,
-        )
+            decision: AutotuneDecisionLabel::Noop,
+            reason: reason.into(),
+        })
     }
 }
 
@@ -250,16 +251,16 @@ mod tests {
         );
         first.unix_nanos = 123456;
 
-        let mut second = DecisionJsonlEntry::new(
-            ControllerPhaseLabel::Observing,
-            AutotuneModeLabel::Suggest,
-            true,
-            SituationKindLabel::CpuPressure,
-            200,
-            OnlineDataQualityLabel::Medium,
-            AutotuneDecisionLabel::Suggest,
-            "suggest mode; candidate would be reported but not applied",
-        );
+        let mut second = DecisionJsonlEntry::new(DecisionJsonlEntryInput {
+            phase: ControllerPhaseLabel::Observing,
+            mode: AutotuneModeLabel::Suggest,
+            target_present: true,
+            situation: SituationKindLabel::CpuPressure,
+            score_total: 200,
+            data_quality: OnlineDataQualityLabel::Medium,
+            decision: AutotuneDecisionLabel::Suggest,
+            reason: "suggest mode; candidate would be reported but not applied".to_owned(),
+        });
         second.unix_nanos = 123457;
 
         append_decision_jsonl(&path, &first).unwrap();

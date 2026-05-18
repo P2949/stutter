@@ -458,24 +458,24 @@ pub struct SessionSpike {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::foreground::ForegroundEvent;
+    use crate::foreground::{ForegroundEvent, ForegroundEventInput};
 
     #[test]
     fn foreground_event_serializes_without_title_by_default() {
-        let event = ForegroundEvent::new(
-            1_000,
-            crate::foreground::ForegroundSource::Sway,
-            crate::foreground::ForegroundProviderStatus::Available,
-            Some(4242),
-            Some("steam_app_379430".to_owned()),
-            Some("steam_app_379430".to_owned()),
-            Some("Private game or browser title".to_owned()),
-            false,
-            Some("7".to_owned()),
-            Some("gaming".to_owned()),
-            0.95,
-            "focused Sway node from swaymsg get_tree",
-        );
+        let event = ForegroundEvent::new(ForegroundEventInput {
+            elapsed_ms: 1_000,
+            source: crate::foreground::ForegroundSource::Sway,
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid: Some(4242),
+            app_id: Some("steam_app_379430".to_owned()),
+            class: Some("steam_app_379430".to_owned()),
+            title: Some("Private game or browser title".to_owned()),
+            include_title: false,
+            window_id: Some("7".to_owned()),
+            workspace: Some("gaming".to_owned()),
+            confidence: 0.95,
+            reason: "focused Sway node from swaymsg get_tree".to_owned(),
+        });
 
         let value = serde_json::to_value(&event).unwrap();
 

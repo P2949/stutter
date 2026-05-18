@@ -13,7 +13,6 @@ use crate::{
     test_fixture_builder,
 };
 
-#[allow(dead_code)]
 #[derive(Debug)]
 struct ExpectedFixture<'a> {
     name: &'a str,
@@ -25,7 +24,6 @@ struct ExpectedFixture<'a> {
     require_json_shape: bool,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Default, Clone, Copy)]
 struct ExpectedArtifacts {
     spikes: Option<u64>,
@@ -643,7 +641,6 @@ fn assert_fixture_from_metadata(name: &str) -> ReportAnalysisJson {
     analysis
 }
 
-#[allow(dead_code)]
 fn assert_fixture_hard_coded(expected: ExpectedFixture<'_>) -> ReportAnalysisJson {
     let analysis = build_fixture_analysis(expected.name);
 

@@ -452,6 +452,7 @@ impl CandidateAction {
     }
 }
 
+#[cfg(test)]
 pub fn candidate_is_noop(candidate: &CandidateAction, snapshot: &ActiveConfigSnapshot) -> bool {
     candidate
         .matches_active_config(ActiveConfigMatchInput {
@@ -461,6 +462,7 @@ pub fn candidate_is_noop(candidate: &CandidateAction, snapshot: &ActiveConfigSna
         .is_match()
 }
 
+#[cfg(test)]
 pub fn candidate_is_noop_with_tasks(
     candidate: &CandidateAction,
     snapshot: &ActiveConfigSnapshot,
@@ -869,14 +871,16 @@ mod tests {
 
         write_task_fixture(
             &proc_root,
-            42,
-            "game",
-            "0-3",
-            5,
-            "best-effort:4",
-            128,
-            1024,
-            "/game.slice",
+            TaskFixture {
+                tid: 42,
+                comm: "game",
+                cpus_allowed_list: "0-3",
+                nice: 5,
+                ioprio: "best-effort:4",
+                uclamp_min: 128,
+                uclamp_max: 1024,
+                cgroup: "/game.slice",
+            },
         );
         write_irq_fixture(&proc_root, 44, "00000002");
         write_cpu_policy_fixture(&sys_root, "policy0", "performance", "performance", "0-3");
@@ -960,14 +964,16 @@ mod tests {
 
         write_task_fixture(
             &proc_root,
-            77,
-            "worker",
-            "2",
-            0,
-            "idle",
-            64,
-            512,
-            "/compile.slice",
+            TaskFixture {
+                tid: 77,
+                comm: "worker",
+                cpus_allowed_list: "2",
+                nice: 0,
+                ioprio: "idle",
+                uclamp_min: 64,
+                uclamp_max: 512,
+                cgroup: "/compile.slice",
+            },
         );
 
         let inventory = SystemInventory::probe_root(&SystemInventoryRoot {
@@ -1027,14 +1033,16 @@ mod tests {
 
         write_task_fixture(
             &proc_root,
-            77,
-            "worker",
-            "2",
-            10,
-            "idle",
-            64,
-            512,
-            "/compile.slice",
+            TaskFixture {
+                tid: 77,
+                comm: "worker",
+                cpus_allowed_list: "2",
+                nice: 10,
+                ioprio: "idle",
+                uclamp_min: 64,
+                uclamp_max: 512,
+                cgroup: "/compile.slice",
+            },
         );
 
         let inventory = SystemInventory::probe_root(&SystemInventoryRoot {
@@ -1221,34 +1229,44 @@ mod tests {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn write_task_fixture(
-        proc_root: &Path,
+    struct TaskFixture<'a> {
         tid: u32,
-        comm: &str,
-        cpus_allowed_list: &str,
+        comm: &'a str,
+        cpus_allowed_list: &'a str,
         nice: i32,
-        ioprio: &str,
+        ioprio: &'a str,
         uclamp_min: u32,
         uclamp_max: u32,
-        cgroup: &str,
-    ) {
-        let task_root = proc_root.join(tid.to_string());
+        cgroup: &'a str,
+    }
+
+    fn write_task_fixture(proc_root: &Path, fixture: TaskFixture<'_>) {
+        let task_root = proc_root.join(fixture.tid.to_string());
         fs::create_dir_all(&task_root).unwrap();
 
         fs::write(
             task_root.join("status"),
-            format!("Name:\t{comm}\nCpus_allowed_list:\t{cpus_allowed_list}\n"),
+            format!(
+                "Name:\t{}\nCpus_allowed_list:\t{}\n",
+                fixture.comm, fixture.cpus_allowed_list
+            ),
         )
         .unwrap();
-        fs::write(task_root.join("stat"), fake_stat_line(tid, comm, nice)).unwrap();
-        fs::write(task_root.join("ioprio"), format!("{ioprio}\n")).unwrap();
+        fs::write(
+            task_root.join("stat"),
+            fake_stat_line(fixture.tid, fixture.comm, fixture.nice),
+        )
+        .unwrap();
+        fs::write(task_root.join("ioprio"), format!("{}\n", fixture.ioprio)).unwrap();
         fs::write(
             task_root.join("sched"),
-            format!("uclamp.min                                   : {uclamp_min}\nuclamp.max                                   : {uclamp_max}\n"),
+            format!(
+                "uclamp.min                                   : {}\nuclamp.max                                   : {}\n",
+                fixture.uclamp_min, fixture.uclamp_max
+            ),
         )
         .unwrap();
-        fs::write(task_root.join("cgroup"), format!("0::{cgroup}\n")).unwrap();
+        fs::write(task_root.join("cgroup"), format!("0::{}\n", fixture.cgroup)).unwrap();
     }
 
     fn fake_stat_line(tid: u32, comm: &str, nice: i32) -> String {

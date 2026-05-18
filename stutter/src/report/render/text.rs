@@ -250,22 +250,36 @@ pub(crate) fn render_check_summary(summary: &RegressionCheckSummary, top: usize)
     output
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn render_report(
-    path: &Path,
-    session: &SessionFile,
-    cluster_analysis: &SpikeClusterAnalysis,
-    frame_diagnoses: &[FrameDiagnosis],
-    data_quality: &DataQualitySummary,
-    pressure_timeline: &PressureTimelineSummary,
-    runtime_slice_summary: &RuntimeSliceAnalysisSummary,
-    correlation_sections: &TextReportCorrelationSections,
-    focus_summary: &FocusReportSummary,
-    foreground_summary: &ForegroundReportSummary,
-    top: usize,
-    cluster_window_ms: u64,
-    filter_class: Option<TaskClass>,
-) -> String {
+pub(crate) struct TextReportRenderInput<'a> {
+    pub path: &'a Path,
+    pub session: &'a SessionFile,
+    pub cluster_analysis: &'a SpikeClusterAnalysis,
+    pub frame_diagnoses: &'a [FrameDiagnosis],
+    pub data_quality: &'a DataQualitySummary,
+    pub pressure_timeline: &'a PressureTimelineSummary,
+    pub runtime_slice_summary: &'a RuntimeSliceAnalysisSummary,
+    pub correlation_sections: &'a TextReportCorrelationSections,
+    pub focus_summary: &'a FocusReportSummary,
+    pub foreground_summary: &'a ForegroundReportSummary,
+    pub top: usize,
+    pub cluster_window_ms: u64,
+    pub filter_class: Option<TaskClass>,
+}
+
+pub(crate) fn render_report(input: TextReportRenderInput<'_>) -> String {
+    let path = input.path;
+    let session = input.session;
+    let cluster_analysis = input.cluster_analysis;
+    let frame_diagnoses = input.frame_diagnoses;
+    let data_quality = input.data_quality;
+    let pressure_timeline = input.pressure_timeline;
+    let runtime_slice_summary = input.runtime_slice_summary;
+    let correlation_sections = input.correlation_sections;
+    let focus_summary = input.focus_summary;
+    let foreground_summary = input.foreground_summary;
+    let top = input.top;
+    let cluster_window_ms = input.cluster_window_ms;
+    let filter_class = input.filter_class;
     let mut output = String::new();
 
     pushln(&mut output, "stutter report");

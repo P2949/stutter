@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeSet,
-    env,
+    env, fs,
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
 };
@@ -37,6 +37,11 @@ enum XtaskCommand {
         about = "Validate generated artifact schema/example contracts"
     )]
     SchemaCheck,
+    #[command(
+        name = "no-allow-attrs",
+        about = "Reject Rust allow attributes in repository source"
+    )]
+    NoAllowAttrs,
     #[command(
         name = "fixture-check",
         about = "Validate committed validation corpus fixtures"
@@ -279,6 +284,7 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
         XtaskCommand::Smoke => run_command_specs(&root, SMOKE_COMMANDS),
         XtaskCommand::DependencyHygiene => run_dependency_hygiene(&root),
         XtaskCommand::SchemaCheck => run_workflow(&root, SCHEMA_CHECK_WORKFLOW),
+        XtaskCommand::NoAllowAttrs => run_no_allow_attrs(&root),
         XtaskCommand::FixtureCheck => run_workflow(&root, FIXTURE_CHECK_WORKFLOW),
         XtaskCommand::FixtureUpdate => run_workflow(&root, FIXTURE_UPDATE_WORKFLOW),
         XtaskCommand::ReportGoldenUpdate => run_workflow(&root, REPORT_GOLDEN_UPDATE_WORKFLOW),
@@ -295,6 +301,107 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+fn run_no_allow_attrs(root: &Path) -> anyhow::Result<()> {
+    let matches = find_allow_attributes(root)?;
+    if matches.is_empty() {
+        return Ok(());
+    }
+
+    println!("Rust allow attributes are forbidden:");
+    for allow_match in matches {
+        println!(
+            "{}:{}: {}",
+            allow_match.path.display(),
+            allow_match.line,
+            allow_match.text.trim()
+        );
+    }
+
+    bail!("remove Rust allow attributes and fix the lint directly")
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct AllowAttributeMatch {
+    path: PathBuf,
+    line: usize,
+    text: String,
+}
+
+fn find_allow_attributes(root: &Path) -> anyhow::Result<Vec<AllowAttributeMatch>> {
+    let mut matches = Vec::new();
+    for source_dir in rust_source_roots(root) {
+        collect_allow_attributes(root, &source_dir, &mut matches)?;
+    }
+    Ok(matches)
+}
+
+fn rust_source_roots(root: &Path) -> Vec<PathBuf> {
+    [
+        "stutter",
+        "stutter-common",
+        "stutter-config",
+        "stutter-core",
+        "stutter-ebpf",
+        "stutter-report",
+        "xtask",
+    ]
+    .into_iter()
+    .map(|path| root.join(path))
+    .collect()
+}
+
+fn collect_allow_attributes(
+    root: &Path,
+    dir: &Path,
+    matches: &mut Vec<AllowAttributeMatch>,
+) -> anyhow::Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))? {
+        let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to read file type for {}", path.display()))?;
+
+        if file_type.is_dir() {
+            collect_allow_attributes(root, &path, matches)?;
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            scan_allow_attribute_file(root, &path, matches)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn scan_allow_attribute_file(
+    root: &Path,
+    path: &Path,
+    matches: &mut Vec<AllowAttributeMatch>,
+) -> anyhow::Result<()> {
+    let content =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let relative_path = path.strip_prefix(root).unwrap_or(path);
+
+    for (line_index, line) in content.lines().enumerate() {
+        let compact = line.split_whitespace().collect::<String>();
+        if compact.contains("#![allow(")
+            || compact.contains("#[allow(")
+            || (compact.contains("cfg_attr(") && compact.contains("allow("))
+        {
+            matches.push(AllowAttributeMatch {
+                path: relative_path.to_path_buf(),
+                line: line_index + 1,
+                text: line.to_owned(),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 fn run_dependency_hygiene(root: &Path) -> anyhow::Result<()> {
@@ -486,6 +593,7 @@ mod tests {
         FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_COMMANDS, FIXTURE_UPDATE_WORKFLOW,
         REPORT_GOLDEN_UPDATE_COMMANDS, REPORT_GOLDEN_UPDATE_WORKFLOW, SCHEMA_CHECK_COMMANDS,
         SCHEMA_CHECK_WORKFLOW, SMOKE_COMMANDS, duplicate_package_names, format_command,
+        scan_allow_attribute_file,
     };
 
     #[test]
@@ -507,6 +615,7 @@ mod tests {
                 "fmt",
                 "generate-completions",
                 "generate-man",
+                "no-allow-attrs",
                 "package",
                 "report-golden-update",
                 "schema-check",
@@ -596,6 +705,39 @@ syn v2.0.117
         assert!(APPROVED_DUPLICATE_PACKAGES.contains(&"getrandom"));
         assert!(APPROVED_DUPLICATE_PACKAGES.contains(&"syn"));
         assert!(APPROVED_DUPLICATE_PACKAGES.contains(&"windows-sys"));
+    }
+
+    #[test]
+    fn allow_attribute_scanner_rejects_direct_and_cfg_attr_suppressions() {
+        let root = std::env::temp_dir().join(format!("stutter-allow-scan-{}", std::process::id()));
+        let nested = root.join("src");
+        std::fs::create_dir_all(&nested).expect("create temp scanner fixture directory");
+        let source = nested.join("lib.rs");
+        std::fs::write(
+            &source,
+            "\
+#![deny(warnings)]
+#![allow(dead_code)]
+#[allow(unused_imports)]
+#[cfg_attr(test, allow(dead_code))]
+pub fn live() {}
+",
+        )
+        .expect("write temp scanner fixture");
+
+        let mut matches = Vec::new();
+        scan_allow_attribute_file(&root, &source, &mut matches).expect("scan temp scanner fixture");
+
+        assert_eq!(matches.len(), 3);
+        assert_eq!(
+            matches
+                .iter()
+                .map(|allow_match| allow_match.line)
+                .collect::<Vec<_>>(),
+            vec![2, 3, 4]
+        );
+
+        std::fs::remove_dir_all(root).expect("remove temp scanner fixture");
     }
 
     #[test]

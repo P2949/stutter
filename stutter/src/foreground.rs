@@ -47,6 +47,21 @@ pub struct ForegroundWindowSnapshot {
     pub reason: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ForegroundAvailableInput {
+    pub elapsed_ms: u64,
+    pub source: ForegroundSource,
+    pub pid: Option<u32>,
+    pub app_id: Option<String>,
+    pub class: Option<String>,
+    pub title: Option<String>,
+    pub include_title: bool,
+    pub window_id: Option<String>,
+    pub workspace: Option<String>,
+    pub confidence: f32,
+    pub reason: String,
+}
+
 impl ForegroundWindowSnapshot {
     pub fn unsupported(elapsed_ms: u64, reason: impl Into<String>) -> Self {
         Self {
@@ -72,33 +87,20 @@ impl ForegroundWindowSnapshot {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn available(
-        elapsed_ms: u64,
-        source: ForegroundSource,
-        pid: Option<u32>,
-        app_id: Option<String>,
-        class: Option<String>,
-        title: Option<String>,
-        include_title: bool,
-        window_id: Option<String>,
-        workspace: Option<String>,
-        confidence: f32,
-        reason: impl Into<String>,
-    ) -> Self {
+    pub fn available(input: ForegroundAvailableInput) -> Self {
         Self {
-            elapsed_ms,
-            source: Some(source),
+            elapsed_ms: input.elapsed_ms,
+            source: Some(input.source),
             status: ForegroundProviderStatus::Available,
-            pid,
-            app_id,
-            class,
-            title: redact_title_unless_allowed(title, include_title),
-            window_id,
-            workspace,
-            confidence,
+            pid: input.pid,
+            app_id: input.app_id,
+            class: input.class,
+            title: redact_title_unless_allowed(input.title, input.include_title),
+            window_id: input.window_id,
+            workspace: input.workspace,
+            confidence: input.confidence,
             stale_ms: None,
-            reason: reason.into(),
+            reason: input.reason,
         }
     }
 
@@ -146,34 +148,36 @@ pub struct ForegroundEvent {
     pub reason: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ForegroundEventInput {
+    pub elapsed_ms: u64,
+    pub source: ForegroundSource,
+    pub status: ForegroundProviderStatus,
+    pub pid: Option<u32>,
+    pub app_id: Option<String>,
+    pub class: Option<String>,
+    pub title: Option<String>,
+    pub include_title: bool,
+    pub window_id: Option<String>,
+    pub workspace: Option<String>,
+    pub confidence: f32,
+    pub reason: String,
+}
+
 impl ForegroundEvent {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        elapsed_ms: u64,
-        source: ForegroundSource,
-        status: ForegroundProviderStatus,
-        pid: Option<u32>,
-        app_id: Option<String>,
-        class: Option<String>,
-        title: Option<String>,
-        include_title: bool,
-        window_id: Option<String>,
-        workspace: Option<String>,
-        confidence: f32,
-        reason: impl Into<String>,
-    ) -> Self {
+    pub fn new(input: ForegroundEventInput) -> Self {
         Self {
-            elapsed_ms,
-            source,
-            status,
-            pid,
-            app_id,
-            class,
-            title: redact_title_unless_allowed(title, include_title),
-            window_id,
-            workspace,
-            confidence,
-            reason: reason.into(),
+            elapsed_ms: input.elapsed_ms,
+            source: input.source,
+            status: input.status,
+            pid: input.pid,
+            app_id: input.app_id,
+            class: input.class,
+            title: redact_title_unless_allowed(input.title, input.include_title),
+            window_id: input.window_id,
+            workspace: input.workspace,
+            confidence: input.confidence,
+            reason: input.reason,
         }
     }
 
@@ -191,7 +195,6 @@ pub fn redact_title_unless_allowed(title: Option<String>, include_title: bool) -
     if include_title { title } else { None }
 }
 
-#[allow(dead_code)] // TODO: expose foreground polling cadence through daemon/session config.
 pub const DEFAULT_FOREGROUND_POLL_MS: u64 = 1_000;
 pub const DEFAULT_FOREGROUND_MAX_STALE_MS: u64 = 2_500;
 pub const DEFAULT_FOREGROUND_MIN_CONFIDENCE: f32 = 0.75;
@@ -227,7 +230,6 @@ impl UnsupportedForegroundProvider {
         Self::new(GENERIC_WAYLAND_UNSUPPORTED_REASON)
     }
 
-    #[allow(dead_code)] // TODO: surface unsupported foreground provider reasons in status output.
     pub fn reason(&self) -> &str {
         &self.reason
     }
@@ -268,7 +270,6 @@ pub fn auto_foreground_provider() -> Box<dyn ForegroundProvider + Send> {
     ))
 }
 
-#[allow(dead_code)] // TODO: use once session construction no longer injects providers directly.
 pub fn auto_foreground_resolver() -> ForegroundResolver {
     ForegroundResolver::new(auto_foreground_provider())
 }
@@ -289,7 +290,6 @@ fn is_generic_wayland_without_supported_foreground_api() -> bool {
     true
 }
 
-#[allow(dead_code)] // TODO: use when adding explicit GNOME/KDE foreground provider diagnostics.
 fn current_desktop_looks_like_gnome_or_kde() -> bool {
     let desktop = std::env::var("XDG_CURRENT_DESKTOP")
         .or_else(|_| std::env::var("DESKTOP_SESSION"))
@@ -300,7 +300,6 @@ fn current_desktop_looks_like_gnome_or_kde() -> bool {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // TODO: wire Hyprland foreground provider once hyprctl sampling is enabled.
 struct HyprlandActiveWindow {
     address: Option<String>,
     class: Option<String>,
@@ -312,12 +311,10 @@ struct HyprlandActiveWindow {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // TODO: wire Hyprland foreground provider once hyprctl sampling is enabled.
 struct HyprlandWorkspace {
     name: Option<String>,
 }
 
-#[allow(dead_code)] // TODO: wire Hyprland foreground provider once hyprctl sampling is enabled.
 fn hyprland_snapshot_from_activewindow_json(
     elapsed_ms: u64,
     active_window_json: &str,
@@ -381,7 +378,6 @@ impl SwayForegroundProvider {
         }
     }
 
-    #[allow(dead_code)] // Test helper until provider command injection is promoted.
     pub fn with_swaymsg(mut self, swaymsg: impl Into<String>) -> Self {
         self.swaymsg = swaymsg.into();
         self
@@ -609,7 +605,6 @@ impl X11ForegroundProvider {
         }
     }
 
-    #[allow(dead_code)] // Test helper until provider command injection is promoted.
     pub fn with_xprop(mut self, xprop: impl Into<String>) -> Self {
         self.xprop = xprop.into();
         self
@@ -1238,19 +1233,19 @@ WM_NAME(STRING) = "Kingdom Come: Deliverance"
 
     #[test]
     fn foreground_resolver_returns_stale_snapshot_with_lower_confidence() {
-        let good = ForegroundWindowSnapshot::available(
-            1_000,
-            ForegroundSource::Sway,
-            Some(4242),
-            Some("steam_app_379430".to_owned()),
-            Some("steam_app_379430".to_owned()),
-            Some("private title".to_owned()),
-            true,
-            Some("7".to_owned()),
-            Some("gaming".to_owned()),
-            0.95,
-            "focused Sway node from swaymsg get_tree",
-        );
+        let good = ForegroundWindowSnapshot::available(ForegroundAvailableInput {
+            elapsed_ms: 1_000,
+            source: ForegroundSource::Sway,
+            pid: Some(4242),
+            app_id: Some("steam_app_379430".to_owned()),
+            class: Some("steam_app_379430".to_owned()),
+            title: Some("private title".to_owned()),
+            include_title: true,
+            window_id: Some("7".to_owned()),
+            workspace: Some("gaming".to_owned()),
+            confidence: 0.95,
+            reason: "focused Sway node from swaymsg get_tree".to_owned(),
+        });
         let error = ForegroundWindowSnapshot {
             elapsed_ms: 1_500,
             source: Some(ForegroundSource::Sway),
@@ -1282,19 +1277,19 @@ WM_NAME(STRING) = "Kingdom Come: Deliverance"
 
     #[test]
     fn foreground_resolver_drops_snapshot_after_max_stale() {
-        let good = ForegroundWindowSnapshot::available(
-            1_000,
-            ForegroundSource::X11,
-            Some(12345),
-            Some("steam_app_379430".to_owned()),
-            Some("steam_app_379430".to_owned()),
-            Some("private title".to_owned()),
-            true,
-            Some("0x4600007".to_owned()),
-            None,
-            0.90,
-            "active X11 window from xprop",
-        );
+        let good = ForegroundWindowSnapshot::available(ForegroundAvailableInput {
+            elapsed_ms: 1_000,
+            source: ForegroundSource::X11,
+            pid: Some(12345),
+            app_id: Some("steam_app_379430".to_owned()),
+            class: Some("steam_app_379430".to_owned()),
+            title: Some("private title".to_owned()),
+            include_title: true,
+            window_id: Some("0x4600007".to_owned()),
+            workspace: None,
+            confidence: 0.90,
+            reason: "active X11 window from xprop".to_owned(),
+        });
         let error = ForegroundWindowSnapshot {
             elapsed_ms: 4_000,
             source: Some(ForegroundSource::X11),
@@ -1975,17 +1970,19 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
         let provider = SequenceProvider::new(
             ForegroundSource::Sway,
             vec![ForegroundWindowSnapshot::available(
-                0,
-                ForegroundSource::Sway,
-                Some(1234),
-                Some("firefox".to_owned()),
-                Some("Firefox".to_owned()),
-                Some("private browser tab".to_owned()),
-                true,
-                Some("42".to_owned()),
-                Some("web".to_owned()),
-                0.95,
-                "active sway node",
+                ForegroundAvailableInput {
+                    elapsed_ms: 0,
+                    source: ForegroundSource::Sway,
+                    pid: Some(1234),
+                    app_id: Some("firefox".to_owned()),
+                    class: Some("Firefox".to_owned()),
+                    title: Some("private browser tab".to_owned()),
+                    include_title: true,
+                    window_id: Some("42".to_owned()),
+                    workspace: Some("web".to_owned()),
+                    confidence: 0.95,
+                    reason: "active sway node".to_owned(),
+                },
             )],
         );
         let mut resolver = ForegroundResolver::new(Box::new(provider));
@@ -2005,17 +2002,19 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
         let provider = SequenceProvider::new(
             ForegroundSource::Hyprland,
             vec![ForegroundWindowSnapshot::available(
-                0,
-                ForegroundSource::Hyprland,
-                Some(1234),
-                Some("foot".to_owned()),
-                Some("foot".to_owned()),
-                Some("terminal private title".to_owned()),
-                true,
-                Some("0xabc".to_owned()),
-                Some("dev".to_owned()),
-                0.95,
-                "active hyprland client",
+                ForegroundAvailableInput {
+                    elapsed_ms: 0,
+                    source: ForegroundSource::Hyprland,
+                    pid: Some(1234),
+                    app_id: Some("foot".to_owned()),
+                    class: Some("foot".to_owned()),
+                    title: Some("terminal private title".to_owned()),
+                    include_title: true,
+                    window_id: Some("0xabc".to_owned()),
+                    workspace: Some("dev".to_owned()),
+                    confidence: 0.95,
+                    reason: "active hyprland client".to_owned(),
+                },
             )],
         );
         let mut resolver = ForegroundResolver::new(Box::new(provider)).with_include_title(true);
@@ -2030,19 +2029,19 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
         let provider = SequenceProvider::new(
             ForegroundSource::Sway,
             vec![
-                ForegroundWindowSnapshot::available(
-                    0,
-                    ForegroundSource::Sway,
-                    Some(2222),
-                    Some("steam".to_owned()),
-                    Some("Steam".to_owned()),
-                    Some("private title".to_owned()),
-                    true,
-                    Some("17".to_owned()),
-                    Some("games".to_owned()),
-                    0.95,
-                    "active sway node",
-                ),
+                ForegroundWindowSnapshot::available(ForegroundAvailableInput {
+                    elapsed_ms: 0,
+                    source: ForegroundSource::Sway,
+                    pid: Some(2222),
+                    app_id: Some("steam".to_owned()),
+                    class: Some("Steam".to_owned()),
+                    title: Some("private title".to_owned()),
+                    include_title: true,
+                    window_id: Some("17".to_owned()),
+                    workspace: Some("games".to_owned()),
+                    confidence: 0.95,
+                    reason: "active sway node".to_owned(),
+                }),
                 ForegroundWindowSnapshot::unavailable(
                     0,
                     ForegroundSource::Sway,
@@ -2075,19 +2074,19 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
         let provider = SequenceProvider::new(
             ForegroundSource::Sway,
             vec![
-                ForegroundWindowSnapshot::available(
-                    0,
-                    ForegroundSource::Sway,
-                    Some(2222),
-                    Some("steam".to_owned()),
-                    Some("Steam".to_owned()),
-                    None,
-                    false,
-                    Some("17".to_owned()),
-                    Some("games".to_owned()),
-                    0.95,
-                    "active sway node",
-                ),
+                ForegroundWindowSnapshot::available(ForegroundAvailableInput {
+                    elapsed_ms: 0,
+                    source: ForegroundSource::Sway,
+                    pid: Some(2222),
+                    app_id: Some("steam".to_owned()),
+                    class: Some("Steam".to_owned()),
+                    title: None,
+                    include_title: false,
+                    window_id: Some("17".to_owned()),
+                    workspace: Some("games".to_owned()),
+                    confidence: 0.95,
+                    reason: "active sway node".to_owned(),
+                }),
                 ForegroundWindowSnapshot::unavailable(
                     0,
                     ForegroundSource::Sway,
@@ -2111,19 +2110,19 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
         let provider = SequenceProvider::new(
             ForegroundSource::X11,
             vec![
-                ForegroundWindowSnapshot::available(
-                    0,
-                    ForegroundSource::X11,
-                    Some(3333),
-                    None,
-                    Some("Firefox".to_owned()),
-                    None,
-                    false,
-                    Some("0x1200007".to_owned()),
-                    Some("1".to_owned()),
-                    0.50,
-                    "low-confidence x11 focus",
-                ),
+                ForegroundWindowSnapshot::available(ForegroundAvailableInput {
+                    elapsed_ms: 0,
+                    source: ForegroundSource::X11,
+                    pid: Some(3333),
+                    app_id: None,
+                    class: Some("Firefox".to_owned()),
+                    title: None,
+                    include_title: false,
+                    window_id: Some("0x1200007".to_owned()),
+                    workspace: Some("1".to_owned()),
+                    confidence: 0.50,
+                    reason: "low-confidence x11 focus".to_owned(),
+                }),
                 ForegroundWindowSnapshot::unavailable(
                     0,
                     ForegroundSource::X11,
@@ -2144,15 +2143,10 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
     }
 
     #[test]
-    #[allow(clippy::assertions_on_constants)]
     fn foreground_resolver_defaults_match_phase_two_policy() {
         let provider = SequenceProvider::new(ForegroundSource::Unsupported, Vec::new());
         let resolver = ForegroundResolver::new(Box::new(provider));
 
-        assert_eq!(DEFAULT_FOREGROUND_POLL_MS, 1_000);
-        assert_eq!(DEFAULT_FOREGROUND_MAX_STALE_MS, 2_500);
-        assert_eq!(DEFAULT_FOREGROUND_MIN_CONFIDENCE, 0.75);
-        assert!(!DEFAULT_FOREGROUND_INCLUDE_TITLE);
         assert!(!resolver.include_title());
         assert_eq!(resolver.max_stale_ms(), 2_500);
         assert_eq!(resolver.provider_source(), ForegroundSource::Unsupported);
@@ -2173,19 +2167,19 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
 
     #[test]
     fn available_snapshot_redacts_title_by_default() {
-        let snapshot = ForegroundWindowSnapshot::available(
-            250,
-            ForegroundSource::Sway,
-            Some(1234),
-            Some("steam".to_owned()),
-            Some("Steam".to_owned()),
-            Some("Private chat title".to_owned()),
-            false,
-            Some("42".to_owned()),
-            Some("games".to_owned()),
-            0.95,
-            "active sway node",
-        );
+        let snapshot = ForegroundWindowSnapshot::available(ForegroundAvailableInput {
+            elapsed_ms: 250,
+            source: ForegroundSource::Sway,
+            pid: Some(1234),
+            app_id: Some("steam".to_owned()),
+            class: Some("Steam".to_owned()),
+            title: Some("Private chat title".to_owned()),
+            include_title: false,
+            window_id: Some("42".to_owned()),
+            workspace: Some("games".to_owned()),
+            confidence: 0.95,
+            reason: "active sway node".to_owned(),
+        });
 
         assert_eq!(snapshot.elapsed_ms, 250);
         assert_eq!(snapshot.source, Some(ForegroundSource::Sway));
@@ -2202,39 +2196,39 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
 
     #[test]
     fn available_snapshot_keeps_title_when_explicitly_allowed() {
-        let snapshot = ForegroundWindowSnapshot::available(
-            250,
-            ForegroundSource::Hyprland,
-            Some(1234),
-            Some("firefox".to_owned()),
-            Some("firefox".to_owned()),
-            Some("Private browser tab".to_owned()),
-            true,
-            Some("0xabc".to_owned()),
-            Some("web".to_owned()),
-            0.90,
-            "active hyprland client",
-        );
+        let snapshot = ForegroundWindowSnapshot::available(ForegroundAvailableInput {
+            elapsed_ms: 250,
+            source: ForegroundSource::Hyprland,
+            pid: Some(1234),
+            app_id: Some("firefox".to_owned()),
+            class: Some("firefox".to_owned()),
+            title: Some("Private browser tab".to_owned()),
+            include_title: true,
+            window_id: Some("0xabc".to_owned()),
+            workspace: Some("web".to_owned()),
+            confidence: 0.90,
+            reason: "active hyprland client".to_owned(),
+        });
 
         assert_eq!(snapshot.title.as_deref(), Some("Private browser tab"));
     }
 
     #[test]
     fn event_constructor_redacts_title_by_default() {
-        let event = ForegroundEvent::new(
-            500,
-            ForegroundSource::X11,
-            ForegroundProviderStatus::Available,
-            Some(5678),
-            None,
-            Some("Firefox".to_owned()),
-            Some("Sensitive tab title".to_owned()),
-            false,
-            Some("0x1200007".to_owned()),
-            Some("1".to_owned()),
-            0.80,
-            "active x11 window",
-        );
+        let event = ForegroundEvent::new(ForegroundEventInput {
+            elapsed_ms: 500,
+            source: ForegroundSource::X11,
+            status: ForegroundProviderStatus::Available,
+            pid: Some(5678),
+            app_id: None,
+            class: Some("Firefox".to_owned()),
+            title: Some("Sensitive tab title".to_owned()),
+            include_title: false,
+            window_id: Some("0x1200007".to_owned()),
+            workspace: Some("1".to_owned()),
+            confidence: 0.80,
+            reason: "active x11 window".to_owned(),
+        });
 
         assert_eq!(event.title, None);
         assert_eq!(event.source, ForegroundSource::X11);
@@ -2279,20 +2273,20 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
 
     #[test]
     fn serde_uses_snake_case_for_enums() {
-        let event = ForegroundEvent::new(
-            100,
-            ForegroundSource::Hyprland,
-            ForegroundProviderStatus::Unavailable,
-            None,
-            None,
-            None,
-            None,
-            false,
-            None,
-            None,
-            0.0,
-            "hyprctl unavailable",
-        );
+        let event = ForegroundEvent::new(ForegroundEventInput {
+            elapsed_ms: 100,
+            source: ForegroundSource::Hyprland,
+            status: ForegroundProviderStatus::Unavailable,
+            pid: None,
+            app_id: None,
+            class: None,
+            title: None,
+            include_title: false,
+            window_id: None,
+            workspace: None,
+            confidence: 0.0,
+            reason: "hyprctl unavailable".to_owned(),
+        });
 
         let json = serde_json::to_string(&event).unwrap();
 

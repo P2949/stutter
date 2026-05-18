@@ -421,6 +421,17 @@ impl Default for InProcessPrivilegedActionService {
     }
 }
 
+struct CandidateBoundaryAuditInput<'a> {
+    stage: &'static str,
+    request_kind: &'static str,
+    intent: PolicyIntent,
+    descriptor: &'a ActionDescriptor,
+    success: bool,
+    reason_code: &'a str,
+    detail: &'a str,
+    affected_tasks: usize,
+}
+
 impl InProcessPrivilegedActionService {
     pub fn with_proc_root(proc_root: impl Into<PathBuf>) -> Self {
         Self {
@@ -446,30 +457,19 @@ impl InProcessPrivilegedActionService {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn audit_candidate_boundary(
-        &self,
-        stage: &'static str,
-        request_kind: &'static str,
-        intent: PolicyIntent,
-        descriptor: &ActionDescriptor,
-        success: bool,
-        reason_code: &str,
-        detail: &str,
-        affected_tasks: usize,
-    ) {
+    fn audit_candidate_boundary(&self, input: CandidateBoundaryAuditInput<'_>) {
         self.record_boundary_audit(PrivilegeBoundaryAuditInput {
-            stage,
-            request_kind,
+            stage: input.stage,
+            request_kind: input.request_kind,
             operation: PrivilegedOperation::ApplyAction,
-            policy_intent: Some(intent),
+            policy_intent: Some(input.intent),
             caller_role: PrivilegeProcessRole::PrivilegedWorker,
             transport: PrivilegeTransport::LocalCli,
-            descriptor: Some(descriptor),
-            success,
-            reason_code,
-            detail,
-            affected_tasks,
+            descriptor: Some(input.descriptor),
+            success: input.success,
+            reason_code: input.reason_code,
+            detail: input.detail,
+            affected_tasks: input.affected_tasks,
         });
     }
 
@@ -513,70 +513,78 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
         request: CandidateApplyRequest,
     ) -> anyhow::Result<CandidateDryRunRecord> {
         let descriptor = request.plan.descriptor.clone();
-        self.audit_candidate_boundary(
-            "request_received",
-            "dry_run",
-            PolicyIntent::DryRun,
-            &descriptor,
-            true,
-            "request_received",
-            "privilege dry-run request received",
-            0,
-        );
+        self.audit_candidate_boundary(CandidateBoundaryAuditInput {
+            stage: "request_received",
+            request_kind: "dry_run",
+            intent: PolicyIntent::DryRun,
+            descriptor: &descriptor,
+            success: true,
+            reason_code: "request_received",
+            detail: "privilege dry-run request received",
+            affected_tasks: 0,
+        });
         if let Err(err) = validate_candidate_plan_request(&request, PolicyIntent::DryRun) {
             let detail = format!("{err:#}");
             let reason_code = stable_error_reason_code(&detail);
-            self.audit_candidate_boundary(
-                "policy_validation",
-                "dry_run",
-                PolicyIntent::DryRun,
-                &descriptor,
-                false,
-                &reason_code,
-                &detail,
-                0,
-            );
+            self.audit_candidate_boundary(CandidateBoundaryAuditInput {
+                stage: "policy_validation",
+                request_kind: "dry_run",
+                intent: PolicyIntent::DryRun,
+                descriptor: &descriptor,
+                success: false,
+                reason_code: &reason_code,
+                detail: &detail,
+                affected_tasks: 0,
+            });
             return Err(err);
         }
-        self.audit_candidate_boundary(
-            "policy_validation",
-            "dry_run",
-            PolicyIntent::DryRun,
-            &descriptor,
-            true,
-            "policy_allowed",
-            "candidate plan passed dry-run validation",
-            0,
-        );
+        self.audit_candidate_boundary(CandidateBoundaryAuditInput {
+            stage: "policy_validation",
+            request_kind: "dry_run",
+            intent: PolicyIntent::DryRun,
+            descriptor: &descriptor,
+            success: true,
+            reason_code: "policy_allowed",
+            detail: "candidate plan passed dry-run validation",
+            affected_tasks: 0,
+        });
         let executor = executor_for_candidate(request.plan.candidate)?;
+        let executor_descriptor = executor.descriptor();
+        debug_assert_eq!(executor_descriptor.action_kind, descriptor.action_kind);
+        debug_assert_eq!(executor.safety_class(), descriptor.safety_class);
+        let executor_label = format!(
+            "candidate={} action_kind={}",
+            executor.candidate_name(),
+            executor.action_kind()
+        );
         let result = executor.dry_run();
         match result {
             Ok(record) => {
-                self.audit_candidate_boundary(
-                    "dry_run_completed",
-                    "dry_run",
-                    PolicyIntent::DryRun,
-                    &descriptor,
-                    true,
-                    "dry_run_completed",
-                    "privileged dry-run completed",
-                    record.affected_tasks,
-                );
+                self.audit_candidate_boundary(CandidateBoundaryAuditInput {
+                    stage: "dry_run_completed",
+                    request_kind: "dry_run",
+                    intent: PolicyIntent::DryRun,
+                    descriptor: &descriptor,
+                    success: true,
+                    reason_code: "dry_run_completed",
+                    detail: &format!("privileged dry-run completed {executor_label}"),
+                    affected_tasks: record.affected_tasks,
+                });
                 Ok(record)
             }
             Err(err) => {
                 let detail = format!("{err:#}");
                 let reason_code = stable_error_reason_code(&detail);
-                self.audit_candidate_boundary(
-                    "dry_run_failed",
-                    "dry_run",
-                    PolicyIntent::DryRun,
-                    &descriptor,
-                    false,
-                    &reason_code,
-                    &detail,
-                    0,
-                );
+                self.audit_candidate_boundary(CandidateBoundaryAuditInput {
+                    stage: "dry_run_failed",
+                    request_kind: "dry_run",
+                    intent: PolicyIntent::DryRun,
+                    descriptor: &descriptor,
+                    success: false,
+                    reason_code: &reason_code,
+                    detail: &detail,
+                    affected_tasks: 0,
+                });
                 Err(err)
             }
         }
@@ -584,67 +592,75 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
 
     fn apply_candidate(&self, request: CandidateApplyRequest) -> anyhow::Result<ApplyResult> {
         let descriptor = request.plan.descriptor.clone();
-        self.audit_candidate_boundary(
-            "request_received",
-            "apply",
-            PolicyIntent::Apply,
-            &descriptor,
-            true,
-            "request_received",
-            "privilege apply request received",
-            0,
-        );
+        self.audit_candidate_boundary(CandidateBoundaryAuditInput {
+            stage: "request_received",
+            request_kind: "apply",
+            intent: PolicyIntent::Apply,
+            descriptor: &descriptor,
+            success: true,
+            reason_code: "request_received",
+            detail: "privilege apply request received",
+            affected_tasks: 0,
+        });
         if let Err(err) = validate_candidate_plan_request(&request, PolicyIntent::Apply) {
             let detail = format!("{err:#}");
             let reason_code = stable_error_reason_code(&detail);
-            self.audit_candidate_boundary(
-                "policy_validation",
-                "apply",
-                PolicyIntent::Apply,
-                &descriptor,
-                false,
-                &reason_code,
-                &detail,
-                0,
-            );
+            self.audit_candidate_boundary(CandidateBoundaryAuditInput {
+                stage: "policy_validation",
+                request_kind: "apply",
+                intent: PolicyIntent::Apply,
+                descriptor: &descriptor,
+                success: false,
+                reason_code: &reason_code,
+                detail: &detail,
+                affected_tasks: 0,
+            });
             return Err(err);
         }
-        self.audit_candidate_boundary(
-            "policy_validation",
-            "apply",
-            PolicyIntent::Apply,
-            &descriptor,
-            true,
-            "policy_allowed",
-            "candidate plan passed apply validation",
-            0,
-        );
+        self.audit_candidate_boundary(CandidateBoundaryAuditInput {
+            stage: "policy_validation",
+            request_kind: "apply",
+            intent: PolicyIntent::Apply,
+            descriptor: &descriptor,
+            success: true,
+            reason_code: "policy_allowed",
+            detail: "candidate plan passed apply validation",
+            affected_tasks: 0,
+        });
         if let Err(err) = revalidate_candidate_targets(&request.plan.candidate, &self.proc_root) {
             let detail = format!("{err:#}");
             let reason_code = stable_error_reason_code(&detail);
-            self.audit_candidate_boundary(
-                "target_revalidation",
-                "apply",
-                PolicyIntent::Apply,
-                &descriptor,
-                false,
-                &reason_code,
-                &detail,
-                0,
-            );
+            self.audit_candidate_boundary(CandidateBoundaryAuditInput {
+                stage: "target_revalidation",
+                request_kind: "apply",
+                intent: PolicyIntent::Apply,
+                descriptor: &descriptor,
+                success: false,
+                reason_code: &reason_code,
+                detail: &detail,
+                affected_tasks: 0,
+            });
             return Err(err);
         }
-        self.audit_candidate_boundary(
-            "apply_started",
-            "apply",
-            PolicyIntent::Apply,
-            &descriptor,
-            true,
-            "apply_started",
-            "privileged apply started",
-            0,
-        );
+        self.audit_candidate_boundary(CandidateBoundaryAuditInput {
+            stage: "apply_started",
+            request_kind: "apply",
+            intent: PolicyIntent::Apply,
+            descriptor: &descriptor,
+            success: true,
+            reason_code: "apply_started",
+            detail: "privileged apply started",
+            affected_tasks: 0,
+        });
         let executor = executor_for_candidate(request.plan.candidate)?;
+        let executor_descriptor = executor.descriptor();
+        debug_assert_eq!(executor_descriptor.action_kind, descriptor.action_kind);
+        debug_assert_eq!(executor.safety_class(), descriptor.safety_class);
+        let executor_label = format!(
+            "candidate={} action_kind={}",
+            executor.candidate_name(),
+            executor.action_kind()
+        );
         let run_policy = ActionRunPolicy {
             policy: request.policy,
             context: request.context,
@@ -657,16 +673,16 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
             Err(err) => {
                 let detail = format!("{err:#}");
                 let reason_code = stable_error_reason_code(&detail);
-                self.audit_candidate_boundary(
-                    "apply_failed",
-                    "apply",
-                    PolicyIntent::Apply,
-                    &descriptor,
-                    false,
-                    &reason_code,
-                    &detail,
-                    0,
-                );
+                self.audit_candidate_boundary(CandidateBoundaryAuditInput {
+                    stage: "apply_failed",
+                    request_kind: "apply",
+                    intent: PolicyIntent::Apply,
+                    descriptor: &descriptor,
+                    success: false,
+                    reason_code: &reason_code,
+                    detail: &detail,
+                    affected_tasks: 0,
+                });
                 return Err(err);
             }
         };
@@ -674,29 +690,29 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
             Some(rollback) => rollback,
             None => {
                 let detail = "privileged apply completed without rollback token";
-                self.audit_candidate_boundary(
-                    "apply_failed",
-                    "apply",
-                    PolicyIntent::Apply,
-                    &descriptor,
-                    false,
-                    "privileged_apply_missing_rollback",
+                self.audit_candidate_boundary(CandidateBoundaryAuditInput {
+                    stage: "apply_failed",
+                    request_kind: "apply",
+                    intent: PolicyIntent::Apply,
+                    descriptor: &descriptor,
+                    success: false,
+                    reason_code: "privileged_apply_missing_rollback",
                     detail,
-                    result.state.affected_tasks,
-                );
+                    affected_tasks: result.state.affected_tasks,
+                });
                 anyhow::bail!("{detail}");
             }
         };
-        self.audit_candidate_boundary(
-            "apply_completed",
-            "apply",
-            PolicyIntent::Apply,
-            &descriptor,
-            true,
-            "apply_completed",
-            "privileged apply completed",
-            result.state.affected_tasks,
-        );
+        self.audit_candidate_boundary(CandidateBoundaryAuditInput {
+            stage: "apply_completed",
+            request_kind: "apply",
+            intent: PolicyIntent::Apply,
+            descriptor: &descriptor,
+            success: true,
+            reason_code: "apply_completed",
+            detail: &format!("privileged apply completed {executor_label}"),
+            affected_tasks: result.state.affected_tasks,
+        });
         Ok(ApplyResult {
             state: result.state,
             rollback,

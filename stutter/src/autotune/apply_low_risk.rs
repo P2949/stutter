@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -18,10 +19,14 @@ use crate::{
             ActionHooks, ActionRunPolicy, AuditedActionResult, run_audited_action_with_hooks,
         },
     },
+    autotune::candidate::CandidateAction,
+};
+#[cfg(test)]
+use crate::{
     autotune::{
         candidate::{
-            CandidateAction, CandidateDryRunRecord, dry_run_candidates,
-            dry_run_record_from_action_state, generate_profile_candidates,
+            CandidateDryRunRecord, dry_run_candidates, dry_run_record_from_action_state,
+            generate_profile_candidates,
         },
         controller_journal::{
             ControllerJournalActionMetadata, journal_process_identity,
@@ -33,6 +38,7 @@ use crate::{
     profiles::Profile,
 };
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub struct ApplyLowRiskPlan {
     pub tree_pid: u32,
@@ -42,6 +48,7 @@ pub struct ApplyLowRiskPlan {
     pub duration: Duration,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub struct ApplyLowRiskOutcome {
     pub candidate_name: String,
@@ -51,6 +58,7 @@ pub struct ApplyLowRiskOutcome {
     pub rollback_performed: bool,
 }
 
+#[cfg(test)]
 pub trait LowRiskActionExecutor {
     fn candidate_name(&self) -> &str;
     fn action_kind(&self) -> &'static str;
@@ -60,11 +68,13 @@ pub trait LowRiskActionExecutor {
     fn rollback(&mut self, token: &RollbackToken) -> anyhow::Result<()>;
 }
 
+#[cfg(test)]
 pub struct CpuAffinityLowRiskExecutor {
     candidate_name: String,
     action: CpuAffinityProfileAction,
 }
 
+#[cfg(test)]
 impl CpuAffinityLowRiskExecutor {
     pub fn from_candidate(candidate: CandidateAction) -> anyhow::Result<Self> {
         match candidate {
@@ -81,6 +91,7 @@ impl CpuAffinityLowRiskExecutor {
     }
 }
 
+#[cfg(test)]
 impl LowRiskActionExecutor for CpuAffinityLowRiskExecutor {
     fn candidate_name(&self) -> &str {
         &self.candidate_name
@@ -113,6 +124,7 @@ impl LowRiskActionExecutor for CpuAffinityLowRiskExecutor {
     }
 }
 
+#[cfg(test)]
 pub fn executor_for_low_risk_candidate(
     candidate: CandidateAction,
 ) -> anyhow::Result<Box<dyn LowRiskActionExecutor>> {
@@ -131,13 +143,15 @@ fn unsupported_low_risk_candidate<T>(candidate: &CandidateAction) -> anyhow::Res
     )
 }
 
-pub struct AuditedRollbackGuard<'a, A: TuningAction + ?Sized> {
+#[cfg(test)]
+pub struct AuditedRollbackGuard<'a, A: crate::actions::TuningAction + ?Sized> {
     action: &'a A,
     token: Option<RollbackToken>,
     rollback_performed: bool,
 }
 
-impl<'a, A: TuningAction + ?Sized> AuditedRollbackGuard<'a, A> {
+#[cfg(test)]
+impl<'a, A: crate::actions::TuningAction + ?Sized> AuditedRollbackGuard<'a, A> {
     pub fn new(action: &'a A, token: RollbackToken) -> Self {
         Self {
             action,
@@ -159,7 +173,8 @@ impl<'a, A: TuningAction + ?Sized> AuditedRollbackGuard<'a, A> {
     }
 }
 
-impl<A: TuningAction + ?Sized> Drop for AuditedRollbackGuard<'_, A> {
+#[cfg(test)]
+impl<A: crate::actions::TuningAction + ?Sized> Drop for AuditedRollbackGuard<'_, A> {
     fn drop(&mut self) {
         if let Some(token) = self.token.take() {
             if let Err(err) = self.action.rollback(&token) {
@@ -171,12 +186,14 @@ impl<A: TuningAction + ?Sized> Drop for AuditedRollbackGuard<'_, A> {
     }
 }
 
+#[cfg(test)]
 struct RollbackGuard<'a, E: LowRiskActionExecutor + ?Sized> {
     executor: &'a mut E,
     token: Option<RollbackToken>,
     rollback_performed: bool,
 }
 
+#[cfg(test)]
 impl<'a, E: LowRiskActionExecutor + ?Sized> RollbackGuard<'a, E> {
     fn new(executor: &'a mut E, token: RollbackToken) -> Self {
         Self {
@@ -199,6 +216,7 @@ impl<'a, E: LowRiskActionExecutor + ?Sized> RollbackGuard<'a, E> {
     }
 }
 
+#[cfg(test)]
 impl<E: LowRiskActionExecutor + ?Sized> Drop for RollbackGuard<'_, E> {
     fn drop(&mut self) {
         if let Some(token) = self.token.take() {
@@ -240,6 +258,7 @@ pub fn action_from_candidate(
     }
 }
 
+#[cfg(test)]
 pub fn append_low_risk_history_event(
     path: &std::path::Path,
     event: &crate::autotune::history::AutotuneHistoryEvent,
@@ -334,6 +353,7 @@ pub fn apply_cpu_affinity_candidate_with_audit_path_for_tests(
     })
 }
 
+#[cfg(test)]
 pub async fn run_apply_low_risk_candidate(
     candidate: CandidateAction,
     duration: Duration,
@@ -342,6 +362,7 @@ pub async fn run_apply_low_risk_candidate(
     run_apply_low_risk_with_executor(executor.as_mut(), duration).await
 }
 
+#[cfg(test)]
 pub async fn run_apply_low_risk_with_executor<E: LowRiskActionExecutor + ?Sized>(
     executor: &mut E,
     duration: Duration,
@@ -409,6 +430,7 @@ pub fn ensure_low_risk_action_allowed(
     Ok(())
 }
 
+#[cfg(test)]
 pub fn resolve_one_target_tree_pid(
     tree_pid: Option<u32>,
     watch_process: Option<&str>,
@@ -416,6 +438,7 @@ pub fn resolve_one_target_tree_pid(
     resolve_one_target_tree_pid_at(Path::new("/proc"), tree_pid, watch_process)
 }
 
+#[cfg(test)]
 pub fn resolve_one_target_tree_pid_at(
     proc_root: &Path,
     tree_pid: Option<u32>,
@@ -458,6 +481,7 @@ pub fn resolve_one_target_tree_pid_at(
     }
 }
 
+#[cfg(test)]
 fn validate_one_live_tree_at(proc_root: &Path, tree_pid: u32) -> anyhow::Result<()> {
     if tree_pid == 0 {
         anyhow::bail!("tree pid must be greater than zero");
@@ -480,6 +504,7 @@ fn validate_one_live_tree_at(proc_root: &Path, tree_pid: u32) -> anyhow::Result<
     Ok(())
 }
 
+#[cfg(test)]
 fn process_roots_by_comm_at(proc_root: &Path, comm: &str) -> anyhow::Result<Vec<u32>> {
     let mut matches = Vec::new();
 
@@ -508,6 +533,7 @@ fn process_roots_by_comm_at(proc_root: &Path, comm: &str) -> anyhow::Result<Vec<
     Ok(matches)
 }
 
+#[cfg(test)]
 pub fn select_first_eligible_low_risk_candidate(
     candidates: &[CandidateAction],
     records: &[CandidateDryRunRecord],
@@ -529,6 +555,7 @@ pub fn select_first_eligible_low_risk_candidate(
     anyhow::bail!("no eligible ReversibleLowRisk CPU affinity profile candidate found")
 }
 
+#[cfg(test)]
 pub fn plan_apply_low_risk_from_profiles(
     tree_pid: u32,
     profiles_path: &Path,
@@ -556,6 +583,7 @@ pub fn plan_apply_low_risk_from_profiles(
     })
 }
 
+#[cfg(test)]
 pub fn resolve_low_risk_experiment_with_active_profile_state<
     E: crate::autotune::resolution::ExperimentRollbackExecutor + ?Sized,
 >(
@@ -574,6 +602,7 @@ pub fn resolve_low_risk_experiment_with_active_profile_state<
     )
 }
 
+#[cfg(test)]
 pub fn resolve_low_risk_experiment<
     E: crate::autotune::resolution::ExperimentRollbackExecutor + ?Sized,
 >(
@@ -584,6 +613,7 @@ pub fn resolve_low_risk_experiment<
     crate::autotune::resolution::resolve_experiment(experiment, result, rollback_executor)
 }
 
+#[cfg(test)]
 pub fn compare_low_risk_experiment(
     baseline: &crate::autotune::experiment::WindowScore,
     candidate: &crate::autotune::experiment::WindowScore,
@@ -600,6 +630,7 @@ pub fn compare_low_risk_experiment(
     )
 }
 
+#[cfg(test)]
 pub fn ensure_candidate_measurement_ready_for_decision(
     measurement_status: &crate::autotune::measurement::CandidateMeasurementWindowStatus,
 ) -> anyhow::Result<crate::autotune::experiment::WindowScore> {
@@ -608,6 +639,7 @@ pub fn ensure_candidate_measurement_ready_for_decision(
     )
 }
 
+#[cfg(test)]
 pub fn ensure_baseline_ready_for_apply(
     baseline_status: &crate::autotune::baseline::BaselineWindowStatus,
 ) -> anyhow::Result<crate::autotune::experiment::WindowScore> {
@@ -622,6 +654,7 @@ pub fn ensure_baseline_ready_for_apply(
     }
 }
 
+#[cfg(test)]
 fn controller_journal_metadata_for_cpu_affinity_action(
     candidate_name: &str,
     action: &CpuAffinityProfileAction,
@@ -649,6 +682,7 @@ fn controller_journal_metadata_for_cpu_affinity_action(
         .with_safety_class(action.safety_class())
 }
 
+#[cfg(test)]
 fn controller_journal_hooks_for_low_risk_action<'a>(
     journal_path: &'a Path,
     experiment_id: &'a str,
@@ -691,6 +725,7 @@ fn controller_journal_hooks_for_low_risk_action<'a>(
     })
 }
 
+#[cfg(test)]
 pub async fn apply_low_risk_command(
     input: &crate::autotune::AutotuneCommandInput,
 ) -> anyhow::Result<ApplyLowRiskOutcome> {
@@ -1278,23 +1313,26 @@ mod tests {
         };
 
         let event = crate::autotune::history::AutotuneHistoryEvent::new(
-            "controller-1",
-            crate::autotune::history::ControllerPhase::Cooldown,
-            crate::autotune::history::AutotuneMode::ApplyLowRisk,
-            None,
-            crate::autotune::history::SituationKind::GameCpuSchedulerPressure,
-            crate::autotune::history::observation_summary_from_window_score(
-                true, 31, 0, "High", &score,
-            ),
-            crate::autotune::history::AutotuneDecisionSummary {
-                decision: "Revert".to_owned(),
-                candidate_name: Some("game-main".to_owned()),
-                action_kind: Some("cpu_affinity_profile".to_owned()),
-                safety_class: Some(SafetyClass::ReversibleLowRisk),
-                eligible: true,
-                rollback_policy: "rollback-on-exit".to_owned(),
+            crate::autotune::history::AutotuneHistoryEventInput {
+                controller_id: "controller-1".to_owned(),
+                phase: crate::autotune::history::ControllerPhase::Cooldown,
+                mode: crate::autotune::history::AutotuneMode::ApplyLowRisk,
+                target: None,
+                situation: crate::autotune::history::SituationKind::GameCpuSchedulerPressure,
+                observation_summary:
+                    crate::autotune::history::observation_summary_from_window_score(
+                        true, 31, 0, "High", &score,
+                    ),
+                decision: crate::autotune::history::AutotuneDecisionSummary {
+                    decision: "Revert".to_owned(),
+                    candidate_name: Some("game-main".to_owned()),
+                    action_kind: Some("cpu_affinity_profile".to_owned()),
+                    safety_class: Some(SafetyClass::ReversibleLowRisk),
+                    eligible: true,
+                    rollback_policy: "rollback-on-exit".to_owned(),
+                },
+                reason: "regressed; rollback performed".to_owned(),
             },
-            "regressed; rollback performed",
         )
         .with_rollback_performed(true);
 

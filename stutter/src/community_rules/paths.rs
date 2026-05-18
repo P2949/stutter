@@ -1,11 +1,10 @@
 use std::path::PathBuf;
 
 pub fn default_user_rules_dir() -> Option<PathBuf> {
-    #[allow(clippy::collapsible_if)]
-    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-        if !xdg.trim().is_empty() {
-            return Some(PathBuf::from(xdg).join("stutter").join("community-rules"));
-        }
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME")
+        && !xdg.trim().is_empty()
+    {
+        return Some(PathBuf::from(xdg).join("stutter").join("community-rules"));
     }
 
     std::env::var("HOME")

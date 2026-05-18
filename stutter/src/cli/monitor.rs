@@ -701,7 +701,6 @@ fn merge_bool(
     }
 }
 
-#[allow(dead_code)]
 pub(super) fn monitor_config_from_monitor_args(
     args: MonitorArgs,
     recording_mode: RecordingMode,
@@ -729,7 +728,6 @@ pub(super) fn monitor_config_from_monitor_args_with_presence(
     )
 }
 
-#[allow(dead_code)]
 pub(super) fn monitor_config_from_monitor_args_with_file(
     args: MonitorArgs,
     file_config: Option<crate::config_file::UserConfigFile>,
@@ -882,18 +880,16 @@ pub(super) fn monitor_config_from_monitor_args_with_file_and_presence(
     validate_pids("--tree-pid", &args.tree_pids)?;
     validate_pids("--exclude-tree-pid", &args.exclude_tree_pids)?;
 
-    #[allow(clippy::collapsible_if)]
-    if let Some(kb) = args.ringbuf_size_kb {
-        if !(64..=16 * 1024).contains(&kb) {
-            anyhow::bail!("--ringbuf-size-kb must be between 64 and 16384");
-        }
+    if let Some(kb) = args.ringbuf_size_kb
+        && !(64..=16 * 1024).contains(&kb)
+    {
+        anyhow::bail!("--ringbuf-size-kb must be between 64 and 16384");
     }
 
-    #[allow(clippy::collapsible_if)]
-    if let Some(factor) = args.wakeup_map_factor {
-        if factor == 0 || factor > 64 {
-            anyhow::bail!("--wakeup-map-factor must be between 1 and 64");
-        }
+    if let Some(factor) = args.wakeup_map_factor
+        && (factor == 0 || factor > 64)
+    {
+        anyhow::bail!("--wakeup-map-factor must be between 1 and 64");
     }
 
     if args.otlp_endpoint.is_some() && !cfg!(feature = "otel") {
@@ -904,11 +900,10 @@ pub(super) fn monitor_config_from_monitor_args_with_file_and_presence(
         anyhow::bail!("--otel-service-name must not be empty");
     }
 
-    #[allow(clippy::collapsible_if)]
-    if let Some(endpoint) = &args.otlp_endpoint {
-        if endpoint.trim().is_empty() {
-            anyhow::bail!("--otlp-endpoint must not be empty");
-        }
+    if let Some(endpoint) = &args.otlp_endpoint
+        && endpoint.trim().is_empty()
+    {
+        anyhow::bail!("--otlp-endpoint must not be empty");
     }
 
     if summary_period_ms == 0 {
@@ -1125,7 +1120,6 @@ fn validate_foreground_monitor_args(args: &MonitorArgs) -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
 fn parse_monitor_config_for_phase15<const N: usize>(
     args: [&str; N],
 ) -> anyhow::Result<Arc<crate::config::model::MonitorConfig>> {

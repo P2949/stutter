@@ -164,27 +164,26 @@ impl EventRuntimeConfig {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+pub struct EventHandlingContext<'a> {
+    pub config: &'a EventRuntimeConfig,
+    pub started: Instant,
+    pub tasks: &'a mut TaskTracker,
+    pub monotonic_start_ns: Option<u64>,
+    pub diagnostics: interpret::SchedulerEventDiagnostics<'a>,
+}
+
 pub fn handle_event_with_runtime_config(
     event: &SchedulerEvent,
-    config: &EventRuntimeConfig,
-    started: Instant,
-    tasks: &mut TaskTracker,
-    monotonic_start_ns: Option<u64>,
-    scx_ops: Option<&str>,
-    scx_state: Option<&str>,
-    scx_enable_seq: Option<&str>,
+    context: EventHandlingContext<'_>,
 ) -> interpret::SchedulerSampleUpdate {
-    interpret::interpret_scheduler_event(
+    interpret::interpret_scheduler_event(interpret::SchedulerEventInput {
         event,
-        &config.spike,
-        started,
-        tasks,
-        monotonic_start_ns,
-        scx_ops,
-        scx_state,
-        scx_enable_seq,
-    )
+        config: &context.config.spike,
+        started: context.started,
+        tasks: context.tasks,
+        monotonic_start_ns: context.monotonic_start_ns,
+        diagnostics: context.diagnostics,
+    })
 }
 
 pub fn irq_event_record(monotonic_start_ns: Option<u64>, event: &IrqEvent) -> IrqEventRecord {
@@ -208,7 +207,6 @@ pub fn log_irq_record(record: &IrqEventRecord) {
     );
 }
 
-#[allow(dead_code)]
 pub fn log_irq_event(event: &IrqEvent) {
     debug!(
         "irq_event cpu={} irq={} latency={}",

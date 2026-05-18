@@ -11,8 +11,8 @@ use crate::{
             read_controller_journal, write_controller_journal_clean,
         },
         history::{
-            AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneMode, ControllerPhase,
-            ObservationSummary, SituationKind, append_autotune_history_event,
+            AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneHistoryEventInput, AutotuneMode,
+            ControllerPhase, ObservationSummary, SituationKind, append_autotune_history_event,
             default_autotune_history_path,
         },
     },
@@ -156,18 +156,18 @@ pub fn recover_controller_journal_with_executor<E: StartupRecoveryRollbackExecut
                 "startup crash recovery found applying journal without rollback token".to_owned();
             write_startup_recovery_daemon_state_snapshot(
                 &config.state_snapshot_path,
-                startup_recovery_daemon_state(
-                    DaemonPhase::Faulted,
-                    "applying_without_rollback",
-                    reason.clone(),
-                    &experiment_id,
-                    &action_id,
-                    None,
-                    false,
-                    true,
-                    true,
-                    Some("stutter daemon emergency-restore"),
-                ),
+                startup_recovery_daemon_state(StartupRecoveryDaemonStateInput {
+                    phase: DaemonPhase::Faulted,
+                    decision: "applying_without_rollback",
+                    reason: reason.clone(),
+                    experiment_id: &experiment_id,
+                    action_id: &action_id,
+                    rollback_token: None,
+                    rollback_available: false,
+                    include_active_experiment: true,
+                    faulted: true,
+                    manual_restore_command: Some("stutter daemon emergency-restore"),
+                }),
             )?;
 
             Ok(StartupRecoveryOutcome::ApplyingWithoutRollback {
@@ -197,18 +197,18 @@ pub fn recover_controller_journal_with_executor<E: StartupRecoveryRollbackExecut
                 );
                 write_startup_recovery_daemon_state_snapshot(
                     &config.state_snapshot_path,
-                    startup_recovery_daemon_state(
-                        DaemonPhase::Faulted,
-                        "missing_rollback_token",
+                    startup_recovery_daemon_state(StartupRecoveryDaemonStateInput {
+                        phase: DaemonPhase::Faulted,
+                        decision: "missing_rollback_token",
                         reason,
-                        &experiment_id,
-                        &action_id,
-                        None,
-                        false,
-                        true,
-                        true,
-                        Some("stutter daemon emergency-restore"),
-                    ),
+                        experiment_id: &experiment_id,
+                        action_id: &action_id,
+                        rollback_token: None,
+                        rollback_available: false,
+                        include_active_experiment: true,
+                        faulted: true,
+                        manual_restore_command: Some("stutter daemon emergency-restore"),
+                    }),
                 )?;
 
                 Ok(StartupRecoveryOutcome::ApplyingWithoutRollback {
@@ -250,18 +250,18 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
         );
         write_startup_recovery_daemon_state_snapshot(
             &config.state_snapshot_path,
-            startup_recovery_daemon_state(
-                DaemonPhase::Faulted,
-                "rollback_disabled",
+            startup_recovery_daemon_state(StartupRecoveryDaemonStateInput {
+                phase: DaemonPhase::Faulted,
+                decision: "rollback_disabled",
                 reason,
-                &experiment_id,
-                &action_id,
-                Some(&rollback_token),
-                true,
-                true,
-                true,
-                Some(&manual_restore_command),
-            ),
+                experiment_id: &experiment_id,
+                action_id: &action_id,
+                rollback_token: Some(&rollback_token),
+                rollback_available: true,
+                include_active_experiment: true,
+                faulted: true,
+                manual_restore_command: Some(&manual_restore_command),
+            }),
         )?;
 
         return Ok(StartupRecoveryOutcome::RollbackDisabled {
@@ -292,37 +292,37 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
                 ),
             )?;
 
-            write_startup_recovery_history_event(
-                &config.history_path,
-                ControllerPhase::Cooldown,
-                "restored",
-                &experiment_id,
-                &action_id,
-                &rollback_token,
-                true,
-                format!(
+            write_startup_recovery_history_event(StartupRecoveryHistoryEventInput {
+                history_path: &config.history_path,
+                phase: ControllerPhase::Cooldown,
+                decision: "restored",
+                experiment_id: &experiment_id,
+                action_id: &action_id,
+                rollback_token: &rollback_token,
+                rollback_performed: true,
+                reason: format!(
                     "startup crash recovery rollback succeeded; manual_restore_command=\"{}\"",
                     manual_restore_command
                 ),
-            )?;
+            })?;
 
             write_startup_recovery_daemon_state_snapshot(
                 &config.state_snapshot_path,
-                startup_recovery_daemon_state(
-                    DaemonPhase::Cooldown,
-                    "restored",
-                    format!(
+                startup_recovery_daemon_state(StartupRecoveryDaemonStateInput {
+                    phase: DaemonPhase::Cooldown,
+                    decision: "restored",
+                    reason: format!(
                         "startup crash recovery rollback succeeded; affected_tasks={}",
                         summary.affected_tasks
                     ),
-                    &experiment_id,
-                    &action_id,
-                    None,
-                    false,
-                    false,
-                    false,
-                    Some(&manual_restore_command),
-                ),
+                    experiment_id: &experiment_id,
+                    action_id: &action_id,
+                    rollback_token: None,
+                    rollback_available: false,
+                    include_active_experiment: false,
+                    faulted: false,
+                    manual_restore_command: Some(&manual_restore_command),
+                }),
             )?;
 
             Ok(StartupRecoveryOutcome::Recovered {
@@ -347,34 +347,34 @@ fn recover_applied_journal_record<E: StartupRecoveryRollbackExecutor + ?Sized>(
                 ),
             )?;
 
-            write_startup_recovery_history_event(
-                &config.history_path,
-                ControllerPhase::Faulted,
-                "CrashRecoveryFault",
-                &experiment_id,
-                &action_id,
-                &rollback_token,
-                false,
-                format!(
+            write_startup_recovery_history_event(StartupRecoveryHistoryEventInput {
+                history_path: &config.history_path,
+                phase: ControllerPhase::Faulted,
+                decision: "CrashRecoveryFault",
+                experiment_id: &experiment_id,
+                action_id: &action_id,
+                rollback_token: &rollback_token,
+                rollback_performed: false,
+                reason: format!(
                     "{}; manual_restore_command=\"{}\"",
                     reason, manual_restore_command
                 ),
-            )?;
+            })?;
 
             write_startup_recovery_daemon_state_snapshot(
                 &config.state_snapshot_path,
-                startup_recovery_daemon_state(
-                    DaemonPhase::Faulted,
-                    "faulted",
-                    reason.clone(),
-                    &experiment_id,
-                    &action_id,
-                    Some(&rollback_token),
-                    true,
-                    true,
-                    true,
-                    Some(&manual_restore_command),
-                ),
+                startup_recovery_daemon_state(StartupRecoveryDaemonStateInput {
+                    phase: DaemonPhase::Faulted,
+                    decision: "faulted",
+                    reason: reason.clone(),
+                    experiment_id: &experiment_id,
+                    action_id: &action_id,
+                    rollback_token: Some(&rollback_token),
+                    rollback_available: true,
+                    include_active_experiment: true,
+                    faulted: true,
+                    manual_restore_command: Some(&manual_restore_command),
+                }),
             )?;
 
             Ok(StartupRecoveryOutcome::Faulted {
@@ -418,42 +418,45 @@ fn write_startup_recovery_audit_event(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn write_startup_recovery_history_event(
-    history_path: &Path,
+struct StartupRecoveryHistoryEventInput<'a> {
+    history_path: &'a Path,
     phase: ControllerPhase,
-    decision: &str,
-    experiment_id: &str,
-    action_id: &str,
-    rollback_token: &RollbackToken,
+    decision: &'a str,
+    experiment_id: &'a str,
+    action_id: &'a str,
+    rollback_token: &'a RollbackToken,
     rollback_performed: bool,
     reason: String,
+}
+
+fn write_startup_recovery_history_event(
+    input: StartupRecoveryHistoryEventInput<'_>,
 ) -> anyhow::Result<()> {
-    let event = AutotuneHistoryEvent::new(
-        "startup-recovery",
-        phase,
-        AutotuneMode::ApplyLowRisk,
-        None,
-        SituationKind::Unknown,
-        empty_observation_summary(),
-        AutotuneDecisionSummary {
-            decision: decision.to_owned(),
-            candidate_name: candidate_name_from_action_id(action_id),
-            action_kind: Some(action_kind_from_action_id(action_id)),
-            safety_class: Some(safety_class_for_rollback_token(rollback_token)),
-            eligible: rollback_performed,
+    let event = AutotuneHistoryEvent::new(AutotuneHistoryEventInput {
+        controller_id: "startup-recovery".to_owned(),
+        phase: input.phase,
+        mode: AutotuneMode::ApplyLowRisk,
+        target: None,
+        situation: SituationKind::Unknown,
+        observation_summary: empty_observation_summary(),
+        decision: AutotuneDecisionSummary {
+            decision: input.decision.to_owned(),
+            candidate_name: candidate_name_from_action_id(input.action_id),
+            action_kind: Some(action_kind_from_action_id(input.action_id)),
+            safety_class: Some(safety_class_for_rollback_token(input.rollback_token)),
+            eligible: input.rollback_performed,
             rollback_policy: "rollback-on-crash-recovery".to_owned(),
         },
-        reason,
-    )
-    .with_experiment_id(experiment_id.to_owned())
-    .with_action_id(action_id.to_owned())
-    .with_rollback_performed(rollback_performed);
+        reason: input.reason,
+    })
+    .with_experiment_id(input.experiment_id.to_owned())
+    .with_action_id(input.action_id.to_owned())
+    .with_rollback_performed(input.rollback_performed);
 
-    append_autotune_history_event(history_path, &event).with_context(|| {
+    append_autotune_history_event(input.history_path, &event).with_context(|| {
         format!(
             "failed to write startup recovery history event to {}",
-            history_path.display()
+            input.history_path.display()
         )
     })
 }
@@ -473,31 +476,8 @@ fn write_startup_recovery_daemon_state_snapshot(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn startup_recovery_daemon_state(
-    phase: DaemonPhase,
-    decision: &str,
-    reason: String,
-    experiment_id: &str,
-    action_id: &str,
-    rollback_token: Option<&RollbackToken>,
-    rollback_available: bool,
-    include_active_experiment: bool,
-    faulted: bool,
-    manual_restore_command: Option<&str>,
-) -> DaemonState {
-    daemon_state_for_startup_recovery_snapshot(StartupRecoveryDaemonStateInput {
-        phase,
-        decision,
-        reason,
-        experiment_id,
-        action_id,
-        rollback_token,
-        rollback_available,
-        include_active_experiment,
-        faulted,
-        manual_restore_command,
-    })
+fn startup_recovery_daemon_state(input: StartupRecoveryDaemonStateInput<'_>) -> DaemonState {
+    daemon_state_for_startup_recovery_snapshot(input)
 }
 
 fn empty_observation_summary() -> ObservationSummary {

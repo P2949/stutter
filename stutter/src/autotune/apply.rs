@@ -1,7 +1,11 @@
+#[cfg(test)]
 use std::time::Duration;
 
+#[cfg(test)]
 use anyhow::Context;
 
+#[cfg(test)]
+use crate::daemon_policy::{ActionSource, DaemonPolicy, PolicyIntent};
 use crate::{
     actions::{
         RollbackToken, SafetyClass, TuningAction,
@@ -13,9 +17,10 @@ use crate::{
     autotune::candidate::{
         CandidateAction, CandidateDryRunRecord, dry_run_record_from_action_state,
     },
-    daemon_policy::{ActionDescriptor, ActionSource, DaemonPolicy, PolicyIntent},
+    daemon_policy::ActionDescriptor,
 };
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub struct ApplyCandidateOutcome {
     pub candidate_name: String,
@@ -211,6 +216,7 @@ pub fn executor_for_candidate(
     }
 }
 
+#[cfg(test)]
 pub async fn run_apply_medium_risk_candidate(
     candidate: CandidateAction,
     duration: Duration,
@@ -219,6 +225,7 @@ pub async fn run_apply_medium_risk_candidate(
     run_apply_medium_risk_with_executor(executor.as_ref(), duration).await
 }
 
+#[cfg(test)]
 pub async fn run_apply_medium_risk_with_executor(
     executor: &dyn CandidateActionExecutor,
     duration: Duration,
@@ -270,6 +277,7 @@ pub async fn run_apply_medium_risk_with_executor(
     })
 }
 
+#[cfg(test)]
 pub fn ensure_medium_risk_action_allowed(descriptor: &ActionDescriptor) -> anyhow::Result<()> {
     let policy = DaemonPolicy::apply_medium_risk(ActionSource::AutotuneRuntime);
     policy
@@ -282,12 +290,14 @@ pub fn ensure_medium_risk_action_allowed(descriptor: &ActionDescriptor) -> anyho
         })
 }
 
+#[cfg(test)]
 struct GenericRollbackGuard<'a> {
     executor: &'a dyn CandidateActionExecutor,
     token: Option<RollbackToken>,
     rollback_performed: bool,
 }
 
+#[cfg(test)]
 impl<'a> GenericRollbackGuard<'a> {
     fn new(executor: &'a dyn CandidateActionExecutor, token: RollbackToken) -> Self {
         Self {
@@ -310,6 +320,7 @@ impl<'a> GenericRollbackGuard<'a> {
     }
 }
 
+#[cfg(test)]
 impl Drop for GenericRollbackGuard<'_> {
     fn drop(&mut self) {
         if let Some(token) = self.token.take() {
@@ -344,7 +355,7 @@ fn action_kind_static(action_kind: &str) -> &'static str {
 mod tests {
     use super::*;
     use crate::{
-        actions::{ActionId, ActionOutcome, ActionState, ActionWarning},
+        actions::{ActionId, ActionState, ActionWarning},
         daemon_policy::{ActionEffectScope, RollbackRequirement},
     };
 
@@ -410,18 +421,8 @@ mod tests {
                 warnings: Vec::new(),
             };
             Ok(AuditedActionResult {
-                state: state.clone(),
+                state,
                 rollback: Some(self.rollback.clone()),
-                outcome: ActionOutcome {
-                    action_id: self.descriptor.action_id.clone(),
-                    safety_class: self.descriptor.safety_class.clone(),
-                    dry_run: false,
-                    preflight_warnings: Vec::new(),
-                    state,
-                    rollback: Some(self.rollback.clone()),
-                    started_unix_nanos: 1,
-                    finished_unix_nanos: 2,
-                },
             })
         }
 

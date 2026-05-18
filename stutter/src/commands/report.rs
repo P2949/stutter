@@ -43,16 +43,16 @@ pub fn run_report_command(input: ReportCommandInput) -> anyhow::Result<()> {
             input.filter_class,
         )?;
     }
-    report::print_report(
-        &path,
-        input.json,
-        input.analysis_json,
-        input.json_summary,
-        input.top,
-        input.cluster_window_ms,
-        input.filter_class,
-        input.flamegraph,
-    )
+    report::print_report(report::PrintReportInput {
+        path: &path,
+        json: input.json,
+        analysis_json: input.analysis_json,
+        json_summary: input.json_summary,
+        top: input.top,
+        cluster_window_ms: input.cluster_window_ms,
+        filter_class: input.filter_class,
+        flamegraph: input.flamegraph,
+    })
 }
 
 pub fn run_recommend_command(input: RecommendCommandInput) -> anyhow::Result<()> {

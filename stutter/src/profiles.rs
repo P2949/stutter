@@ -201,7 +201,6 @@ pub fn apply_profile_to_tree(
     .map(|result| result.affinity_records)
 }
 
-#[allow(dead_code)]
 pub fn apply_profile_to_tree_cached(
     tree_pid: u32,
     profile: &Profile,
@@ -544,7 +543,6 @@ fn profile_apply_summary(
     )
 }
 
-#[allow(dead_code)]
 fn profile_apply_summary_with_reader<F>(
     tasks: &BTreeMap<u32, TaskInfo>,
     profile: &Profile,

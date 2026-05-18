@@ -26,6 +26,7 @@
 pub(crate) mod active_config;
 pub(crate) mod apply;
 pub(crate) mod apply_low_risk;
+#[cfg(test)]
 pub(crate) mod baseline;
 pub(crate) mod candidate;
 pub(crate) mod comparison;
@@ -37,15 +38,17 @@ pub(crate) mod generate_profiles;
 pub(crate) mod gpu_focus;
 pub(crate) mod history;
 pub(crate) mod history_replay;
-pub(crate) mod human_output;
 pub(crate) mod kept;
 pub(crate) mod live_experiment;
+#[cfg(test)]
 pub(crate) mod measurement;
 pub(crate) mod profiles;
 pub(crate) mod protection;
 pub(crate) mod providers;
 pub(crate) mod replay;
+#[cfg(test)]
 pub(crate) mod resolution;
+#[cfg(test)]
 pub(crate) mod shutdown;
 pub(crate) mod situation;
 pub(crate) mod status;
@@ -57,9 +60,9 @@ pub(crate) mod workload_policy;
 pub const DEFAULT_MIN_FOCUS_CONFIDENCE: f32 = 0.70;
 
 pub(crate) mod candidate_memory;
-pub(crate) mod context_segment;
 pub(crate) mod controller;
 pub(crate) mod decision;
+#[cfg(test)]
 pub(crate) mod decision_log;
 pub(crate) mod objective;
 pub(crate) mod observation;

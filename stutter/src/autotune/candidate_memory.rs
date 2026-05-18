@@ -234,6 +234,17 @@ pub struct CandidateMemory {
     pub workload_actions: Vec<WorkloadActionMemory>,
 }
 
+pub struct CandidateResultRecordInput<'a> {
+    pub candidate: &'a CandidateAction,
+    pub context: &'a CandidateContextHashInput,
+    pub now_unix_nanos: u128,
+    pub result: CandidateMemoryResult,
+    pub baseline_score_total: Option<u64>,
+    pub current_score_total: Option<u64>,
+    pub rollback_reason: Option<String>,
+    pub cooldown_expires_unix_nanos: Option<u128>,
+}
+
 impl CandidateMemory {
     pub fn record_attempt(
         &mut self,
@@ -242,41 +253,37 @@ impl CandidateMemory {
         now_unix_nanos: u128,
         cooldown_expires_unix_nanos: Option<u128>,
     ) -> CandidateMemoryRecord {
-        self.record_result(
+        self.record_result(CandidateResultRecordInput {
             candidate,
             context,
             now_unix_nanos,
-            CandidateMemoryResult::Tried,
-            None,
-            None,
-            None,
+            result: CandidateMemoryResult::Tried,
+            baseline_score_total: None,
+            current_score_total: None,
+            rollback_reason: None,
             cooldown_expires_unix_nanos,
-        )
+        })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn record_result(
         &mut self,
-        candidate: &CandidateAction,
-        context: &CandidateContextHashInput,
-        now_unix_nanos: u128,
-        result: CandidateMemoryResult,
-        baseline_score_total: Option<u64>,
-        current_score_total: Option<u64>,
-        rollback_reason: Option<String>,
-        cooldown_expires_unix_nanos: Option<u128>,
+        input: CandidateResultRecordInput<'_>,
     ) -> CandidateMemoryRecord {
+        let candidate = input.candidate;
+        let context = input.context;
+        let baseline_score_total = input.baseline_score_total;
+        let current_score_total = input.current_score_total;
         let context_hash = context.context_hash();
         let action_id = candidate.action_id();
         let record = CandidateMemoryRecord {
             action_id: action_id.clone(),
             candidate_name: candidate.candidate_name().to_owned(),
-            last_tried_unix_nanos: now_unix_nanos,
-            result,
+            last_tried_unix_nanos: input.now_unix_nanos,
+            result: input.result,
             context_hash: context_hash.clone(),
             score_delta: score_delta_i64(baseline_score_total, current_score_total),
-            rollback_reason: normalize_owned_reason(rollback_reason),
-            cooldown_expires_unix_nanos,
+            rollback_reason: normalize_owned_reason(input.rollback_reason),
+            cooldown_expires_unix_nanos: input.cooldown_expires_unix_nanos,
         };
 
         if let Some(existing) = self.records.iter_mut().find(|existing| {
@@ -659,16 +666,16 @@ mod tests {
         }]);
         let mut memory = CandidateMemory::default();
 
-        let record = memory.record_result(
-            &candidate,
-            &context,
-            1_000,
-            CandidateMemoryResult::Reverted,
-            Some(1_000),
-            Some(1_125),
-            Some(" candidate regressed ".to_owned()),
-            Some(301_000_000_000),
-        );
+        let record = memory.record_result(CandidateResultRecordInput {
+            candidate: &candidate,
+            context: &context,
+            now_unix_nanos: 1_000,
+            result: CandidateMemoryResult::Reverted,
+            baseline_score_total: Some(1_000),
+            current_score_total: Some(1_125),
+            rollback_reason: Some(" candidate regressed ".to_owned()),
+            cooldown_expires_unix_nanos: Some(301_000_000_000),
+        });
 
         assert_eq!(
             record.action_id,
@@ -698,16 +705,16 @@ mod tests {
         let mut memory = CandidateMemory::default();
 
         memory.record_attempt(&candidate, &context, 1_000, None);
-        let record = memory.record_result(
-            &candidate,
-            &context,
-            2_000,
-            CandidateMemoryResult::Kept,
-            Some(1_000),
-            Some(800),
-            None,
-            Some(62_000_000_000),
-        );
+        let record = memory.record_result(CandidateResultRecordInput {
+            candidate: &candidate,
+            context: &context,
+            now_unix_nanos: 2_000,
+            result: CandidateMemoryResult::Kept,
+            baseline_score_total: Some(1_000),
+            current_score_total: Some(800),
+            rollback_reason: None,
+            cooldown_expires_unix_nanos: Some(62_000_000_000),
+        });
 
         assert_eq!(memory.records.len(), 1);
         assert_eq!(memory.latest(), Some(&record));
@@ -760,16 +767,16 @@ mod tests {
         other_context.target_exe_ino = Some(100);
         let mut memory = CandidateMemory::default();
 
-        memory.record_result(
-            &candidate,
-            &context,
-            1_000,
-            CandidateMemoryResult::Reverted,
-            Some(100),
-            Some(120),
-            None,
-            Some(10_000),
-        );
+        memory.record_result(CandidateResultRecordInput {
+            candidate: &candidate,
+            context: &context,
+            now_unix_nanos: 1_000,
+            result: CandidateMemoryResult::Reverted,
+            baseline_score_total: Some(100),
+            current_score_total: Some(120),
+            rollback_reason: None,
+            cooldown_expires_unix_nanos: Some(10_000),
+        });
 
         assert!(
             memory

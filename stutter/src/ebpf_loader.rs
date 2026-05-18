@@ -46,7 +46,6 @@ pub struct LoadedEbpf {
     pub target_pid_map: AyaHashMap<MapData, u32, u8>,
     pub target_irq_map: Option<AyaHashMap<MapData, u32, u8>>,
     // Stored to keep the optional native cgroup map FD alive for the session.
-    #[allow(dead_code)]
     pub target_cgroup_map: Option<AyaHashMap<MapData, u64, u8>>,
     pub prev_faults_map: Option<AyaHashMap<MapData, u32, [u64; 2]>>, // (tid) -> (maj, min)
     pub block_io_correlation_basis: BlockIoCorrelationBasis,
@@ -616,7 +615,6 @@ fn wakeup_data_entries_floor_for_max_tasks(max_tasks: usize) -> u32 {
         .min(MAX_WAKEUP_DATA_ENTRIES)
 }
 
-#[allow(dead_code)]
 pub(crate) fn map_sizing_for_config(config: &crate::config::model::MonitorConfig) -> EbpfMapSizing {
     map_sizing_for_config_from_memory(config, current_memory_snapshot())
 }

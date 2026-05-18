@@ -1,5 +1,3 @@
-#![allow(clippy::field_reassign_with_default)]
-#![allow(clippy::useless_vec)]
 use std::{
     collections::BTreeMap,
     fs,
@@ -30,34 +28,33 @@ mod events {
     use super::MonitorEventSink;
     pub use crate::artifacts::push_artifact_event;
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn handle_event(
-        event: &super::SchedulerEvent,
-        config: &crate::config::model::MonitorConfig,
-        started: super::Instant,
-        tasks: &mut super::tasks::TaskTracker,
-        monotonic_start_ns: Option<u64>,
-        recorder: &mut super::recorder::LiveRecorder,
-        _alert_sender: Option<&tokio::sync::mpsc::Sender<super::AlertPayload>>,
-        scx_ops: Option<&str>,
-        scx_state: Option<&str>,
-        scx_enable_seq: Option<&str>,
-    ) -> Option<crate::recorder::SpikeEvent> {
-        let runtime_config = super::raw_events::EventRuntimeConfig::from_monitor_config(config);
+    pub struct HandleEventInput<'a> {
+        pub event: &'a super::SchedulerEvent,
+        pub config: &'a crate::config::model::MonitorConfig,
+        pub started: super::Instant,
+        pub tasks: &'a mut super::tasks::TaskTracker,
+        pub monotonic_start_ns: Option<u64>,
+        pub recorder: &'a mut super::recorder::LiveRecorder,
+        pub diagnostics: super::raw_events::interpret::SchedulerEventDiagnostics<'a>,
+    }
+
+    pub fn handle_event(input: HandleEventInput<'_>) -> Option<crate::recorder::SpikeEvent> {
+        let runtime_config =
+            super::raw_events::EventRuntimeConfig::from_monitor_config(input.config);
         let update = super::raw_events::handle_event_with_runtime_config(
-            event,
-            &runtime_config,
-            started,
-            tasks,
-            monotonic_start_ns,
-            scx_ops,
-            scx_state,
-            scx_enable_seq,
+            input.event,
+            super::raw_events::EventHandlingContext {
+                config: &runtime_config,
+                started: input.started,
+                tasks: input.tasks,
+                monotonic_start_ns: input.monotonic_start_ns,
+                diagnostics: input.diagnostics,
+            },
         );
 
         for event in &update.events {
             let mut ctx = super::MonitorSinkContext {
-                recorder: &mut *recorder,
+                recorder: &mut *input.recorder,
                 alert_sender: None,
                 output: super::MonitorOutputConfig::default(),
             };
@@ -196,38 +193,34 @@ fn event_comm_updates_only_unknown_existing_name() {
     let stats_by_task = BTreeMap::from([(7, metrics::TaskStats::new(7, "?".to_owned(), 0))]);
 
     let first_event = scheduler_event(7, "real-name");
-    let mut tasks = tasks::TaskTracker::default();
-    tasks.stats_by_task = stats_by_task;
+    let mut tasks = tasks::TaskTracker {
+        stats_by_task,
+        ..Default::default()
+    };
     let mut recorder = recorder::LiveRecorder::default();
 
-    events::handle_event(
-        &first_event,
-        &monitor_config,
-        Instant::now(),
-        &mut tasks,
-        None,
-        &mut recorder,
-        None,
-        None,
-        None,
-        None,
-    );
+    events::handle_event(events::HandleEventInput {
+        event: &first_event,
+        config: &monitor_config,
+        started: Instant::now(),
+        tasks: &mut tasks,
+        monotonic_start_ns: None,
+        recorder: &mut recorder,
+        diagnostics: Default::default(),
+    });
 
     assert_eq!(tasks.stats_by_task.get(&7).unwrap().comm, "real-name");
 
     let second_event = scheduler_event(7, "later-name");
-    events::handle_event(
-        &second_event,
-        &monitor_config,
-        Instant::now(),
-        &mut tasks,
-        None,
-        &mut recorder,
-        None,
-        None,
-        None,
-        None,
-    );
+    events::handle_event(events::HandleEventInput {
+        event: &second_event,
+        config: &monitor_config,
+        started: Instant::now(),
+        tasks: &mut tasks,
+        monotonic_start_ns: None,
+        recorder: &mut recorder,
+        diagnostics: Default::default(),
+    });
 
     assert_eq!(tasks.stats_by_task.get(&7).unwrap().comm, "real-name");
 }
@@ -242,26 +235,30 @@ fn spike_events_capture_only_threshold_crossing_events() {
     )]);
     let spike_events = SpikeEventBuffer::default();
 
-    let below_threshold = scheduler_event_with_latency(7, "RenderThread", 999_999);
-    let mut tasks = tasks::TaskTracker::default();
     let stats_by_task = BTreeMap::<u32, crate::metrics::TaskStats>::new();
-    tasks.active_targets = active_targets;
-    tasks.stats_by_task = stats_by_task;
-    let mut recorder = recorder::LiveRecorder::default();
-    recorder.buffers.spike_events = Some(spike_events);
+    let below_threshold = scheduler_event_with_latency(7, "RenderThread", 999_999);
+    let mut tasks = tasks::TaskTracker {
+        active_targets,
+        stats_by_task,
+        ..Default::default()
+    };
+    let mut recorder = recorder::LiveRecorder {
+        buffers: recorder::LiveBuffers {
+            spike_events: Some(spike_events),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
 
-    events::handle_event(
-        &below_threshold,
-        &monitor_config,
-        Instant::now(),
-        &mut tasks,
-        Some(100),
-        &mut recorder,
-        None,
-        None,
-        None,
-        None,
-    );
+    events::handle_event(events::HandleEventInput {
+        event: &below_threshold,
+        config: &monitor_config,
+        started: Instant::now(),
+        tasks: &mut tasks,
+        monotonic_start_ns: Some(100),
+        recorder: &mut recorder,
+        diagnostics: Default::default(),
+    });
     assert!(
         recorder
             .buffers
@@ -273,18 +270,15 @@ fn spike_events_capture_only_threshold_crossing_events() {
     );
 
     let at_threshold = scheduler_event_with_latency(7, "RenderThread", 1_000_000);
-    events::handle_event(
-        &at_threshold,
-        &monitor_config,
-        Instant::now(),
-        &mut tasks,
-        Some(100),
-        &mut recorder,
-        None,
-        None,
-        None,
-        None,
-    );
+    events::handle_event(events::HandleEventInput {
+        event: &at_threshold,
+        config: &monitor_config,
+        started: Instant::now(),
+        tasks: &mut tasks,
+        monotonic_start_ns: Some(100),
+        recorder: &mut recorder,
+        diagnostics: Default::default(),
+    });
 
     let spike_events_slice = recorder.buffers.spike_events.as_ref().unwrap().as_slice();
     assert_eq!(spike_events_slice.len(), 1);
@@ -319,42 +313,43 @@ fn spike_event_fault_deltas_are_captured_correctly() {
     first_event.min_flt = 20;
 
     let stats_by_task = BTreeMap::<u32, crate::metrics::TaskStats>::new();
-    let mut tasks = tasks::TaskTracker::default();
-    tasks.active_targets = active_targets;
-    tasks.stats_by_task = stats_by_task;
-    let mut recorder = recorder::LiveRecorder::default();
-    recorder.buffers.spike_events = Some(spike_events);
+    let mut tasks = tasks::TaskTracker {
+        active_targets,
+        stats_by_task,
+        ..Default::default()
+    };
+    let mut recorder = recorder::LiveRecorder {
+        buffers: recorder::LiveBuffers {
+            spike_events: Some(spike_events),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
 
-    events::handle_event(
-        &first_event,
-        &monitor_config,
-        Instant::now(),
-        &mut tasks,
-        Some(100),
-        &mut recorder,
-        None,
-        None,
-        None,
-        None,
-    );
+    events::handle_event(events::HandleEventInput {
+        event: &first_event,
+        config: &monitor_config,
+        started: Instant::now(),
+        tasks: &mut tasks,
+        monotonic_start_ns: Some(100),
+        recorder: &mut recorder,
+        diagnostics: Default::default(),
+    });
 
     // Second event is a spike with additional faults
     let mut spike_event = scheduler_event_with_latency(7, "RenderThread", 1_000_000);
     spike_event.maj_flt = 15; // +5 delta
     spike_event.min_flt = 30; // +10 delta
 
-    events::handle_event(
-        &spike_event,
-        &monitor_config,
-        Instant::now(),
-        &mut tasks,
-        Some(100),
-        &mut recorder,
-        None,
-        None,
-        None,
-        None,
-    );
+    events::handle_event(events::HandleEventInput {
+        event: &spike_event,
+        config: &monitor_config,
+        started: Instant::now(),
+        tasks: &mut tasks,
+        monotonic_start_ns: Some(100),
+        recorder: &mut recorder,
+        diagnostics: Default::default(),
+    });
 
     let spike_events_slice = recorder.buffers.spike_events.as_ref().unwrap().as_slice();
     assert_eq!(spike_events_slice.len(), 1);
@@ -869,7 +864,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     stats.session_latency.record(1_000);
     stats.session_latency.record(2_000_000);
     let stats_by_task = BTreeMap::from([(7, stats)]);
-    let spike_events = vec![SpikeEvent {
+    let spike_events = [SpikeEvent {
         task: 7,
         class: TaskClass::Helper,
         process_pid: Some(7),
@@ -896,13 +891,20 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         block_start_insert_failed: 0,
     };
 
-    let mut task_tracker = tasks::TaskTracker::default();
-    task_tracker.active_targets = active_targets;
-    task_tracker.stats_by_task = stats_by_task;
+    let task_tracker = tasks::TaskTracker {
+        active_targets,
+        stats_by_task,
+        ..Default::default()
+    };
 
-    let mut recorder = recorder::LiveRecorder::default();
-    recorder.run = Some(recording);
-    recorder.buffers.spike_events = Some(SpikeEventBuffer::default());
+    let mut recorder = recorder::LiveRecorder {
+        run: Some(recording),
+        buffers: recorder::LiveBuffers {
+            spike_events: Some(SpikeEventBuffer::default()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     recorder
         .buffers
         .spike_events
@@ -1362,17 +1364,24 @@ fn report_reads_recorded_session_and_spike_events() {
         ..Default::default()
     }];
 
-    let mut task_tracker = tasks::TaskTracker::default();
-    task_tracker.active_targets = active_targets;
-    task_tracker.stats_by_task = stats_by_task;
+    let task_tracker = tasks::TaskTracker {
+        active_targets,
+        stats_by_task,
+        ..Default::default()
+    };
 
-    let mut recorder = recorder::LiveRecorder::default();
-    recorder.run = Some(recording);
     let mut buffer = SpikeEventBuffer::default();
     for spike in spike_events {
         buffer.push(spike);
     }
-    recorder.buffers.spike_events = Some(buffer);
+    let recorder = recorder::LiveRecorder {
+        run: Some(recording),
+        buffers: recorder::LiveBuffers {
+            spike_events: Some(buffer),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
 
     let monitor_config = config.clone();
     recorder::finalize_recording(FinalizeRecordingInput {
@@ -1394,8 +1403,28 @@ fn report_reads_recorded_session_and_spike_events() {
     })
     .unwrap();
 
-    crate::report::print_report(&dir, false, false, false, 10, 5, None, None).unwrap();
-    crate::report::print_report(&dir, true, false, false, 10, 5, None, None).unwrap();
+    crate::report::print_report(crate::report::PrintReportInput {
+        path: &dir,
+        json: false,
+        analysis_json: false,
+        json_summary: false,
+        top: 10,
+        cluster_window_ms: 5,
+        filter_class: None,
+        flamegraph: None,
+    })
+    .unwrap();
+    crate::report::print_report(crate::report::PrintReportInput {
+        path: &dir,
+        json: true,
+        analysis_json: false,
+        json_summary: false,
+        top: 10,
+        cluster_window_ms: 5,
+        filter_class: None,
+        flamegraph: None,
+    })
+    .unwrap();
 
     fs::remove_dir_all(dir).ok();
 }
@@ -1439,17 +1468,24 @@ fn report_cluster_output_caps_inline_points() {
         })
         .collect::<Vec<_>>();
 
-    let mut task_tracker = tasks::TaskTracker::default();
-    task_tracker.active_targets = active_targets;
-    task_tracker.stats_by_task = stats_by_task;
+    let task_tracker = tasks::TaskTracker {
+        active_targets,
+        stats_by_task,
+        ..Default::default()
+    };
 
-    let mut recorder = recorder::LiveRecorder::default();
-    recorder.run = Some(recording);
     let mut buffer = SpikeEventBuffer::default();
     for spike in spike_events.iter().cloned() {
         buffer.push(spike);
     }
-    recorder.buffers.spike_events = Some(buffer);
+    let recorder = recorder::LiveRecorder {
+        run: Some(recording),
+        buffers: recorder::LiveBuffers {
+            spike_events: Some(buffer),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
 
     let monitor_config = config.clone();
     recorder::finalize_recording(FinalizeRecordingInput {
@@ -1473,8 +1509,10 @@ fn report_cluster_output_caps_inline_points() {
 
     let session = crate::session_io::load_session(&dir).unwrap();
 
-    let mut artifacts = crate::session_io::RunArtifacts::default();
-    artifacts.spikes = spike_events;
+    let artifacts = crate::session_io::RunArtifacts {
+        spikes: spike_events,
+        ..Default::default()
+    };
     let output = render_report_for_test(&session, &artifacts, 5, 10);
 
     assert!(output.contains("total_spikes=10"));
@@ -2369,8 +2407,10 @@ fn stat_wait_sum_saturation_helper_allows_u64_max() {
 
 #[test]
 fn old_json_defaults_saturation_flag_to_false() {
-    let mut task = SessionTask::default();
-    task.stat_wait_sum_ns_saturated = true; // Set to true to ensure serialization includes it
+    let task = SessionTask {
+        stat_wait_sum_ns_saturated: true,
+        ..Default::default()
+    };
     let json = serde_json::to_string(&task).unwrap();
     // Remove the field from JSON to simulate old version
     let old_json = json.replace("\"stat_wait_sum_ns_saturated\":true,", "");
@@ -2456,19 +2496,19 @@ fn render_report_for_test(
         cluster_window_ms.saturating_mul(1_000_000),
         top,
     );
-    crate::report::render_report(
-        Path::new("session.json"),
+    crate::report::render_report(crate::report::TextReportRenderInput {
+        path: Path::new("session.json"),
         session,
-        &cluster_analysis,
-        &[],
-        &data_quality,
-        &pressure_timeline,
-        &runtime_slices,
-        &correlation_sections,
-        &crate::report::FocusReportSummary::default(),
-        &crate::report::ForegroundReportSummary::default(),
+        cluster_analysis: &cluster_analysis,
+        frame_diagnoses: &[],
+        data_quality: &data_quality,
+        pressure_timeline: &pressure_timeline,
+        runtime_slice_summary: &runtime_slices,
+        correlation_sections: &correlation_sections,
+        focus_summary: &crate::report::FocusReportSummary::default(),
+        foreground_summary: &crate::report::ForegroundReportSummary::default(),
         top,
         cluster_window_ms,
-        None,
-    )
+        filter_class: None,
+    })
 }

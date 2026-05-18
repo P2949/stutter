@@ -393,7 +393,6 @@ pub fn render_baseline_tune_recommendation_markdown(rec: &BaselineTuneRecommenda
     out
 }
 
-#[allow(dead_code)]
 fn render_tune_recommendation_for_summary(summary: &TuneSummary) -> String {
     render_tune_recommendation_markdown(&tune::recommendation::build_tune_recommendation(
         summary, None,

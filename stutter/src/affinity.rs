@@ -34,7 +34,6 @@ pub struct RestoreState {
     pub records: Vec<AffinityRecord>,
 }
 
-#[allow(dead_code)]
 pub const RESTORE_SCHEMA_VERSION: u32 = 3;
 
 impl CpuMask {
@@ -412,7 +411,6 @@ pub(crate) fn restore_identity_status_at(
 }
 
 impl AffinityRecord {
-    #[allow(dead_code)]
     fn has_identity(&self) -> bool {
         self.process_pid.is_some()
             || self.process_starttime_ticks.is_some()
@@ -436,7 +434,6 @@ pub fn default_restore_path() -> PathBuf {
     base
 }
 
-#[allow(dead_code)]
 pub fn save_restore_state(path: &Path, records: &[AffinityRecord]) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -452,7 +449,6 @@ pub fn save_restore_state(path: &Path, records: &[AffinityRecord]) -> anyhow::Re
     Ok(())
 }
 
-#[allow(dead_code)]
 pub fn save_merged_restore_state(
     path: &Path,
     records: &[AffinityRecord],
@@ -501,7 +497,6 @@ pub fn save_merged_restore_state(
     save_restore_state(path, &records)
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct RestoreMergeKey {
     tid: u32,
@@ -510,7 +505,6 @@ struct RestoreMergeKey {
     task_starttime_ticks: Option<u64>,
 }
 
-#[allow(dead_code)]
 fn restore_merge_key(record: &AffinityRecord) -> RestoreMergeKey {
     RestoreMergeKey {
         tid: record.tid,

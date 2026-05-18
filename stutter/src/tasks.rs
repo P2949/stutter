@@ -22,6 +22,16 @@ pub struct RefreshInput<'a> {
     pub recording_started: Option<Instant>,
 }
 
+pub struct RefreshInternalInput<'a> {
+    pub snapshot: crate::process_tree::TargetSnapshot,
+    pub max_tasks: usize,
+    pub tree_events: &'a mut Vec<TreeEvent>,
+    pub elapsed_ms: u64,
+    pub recording_started: Option<Instant>,
+    pub prev_faults_map: Option<&'a mut AyaHashMap<MapData, u32, [u64; 2]>>,
+    pub target_pid_map: &'a mut dyn TaskMap,
+}
+
 pub type TaskExeInodesMap = BTreeMap<u32, (Option<u64>, Option<u64>, Option<u64>)>;
 
 #[derive(Default)]
@@ -61,36 +71,31 @@ impl TaskTracker {
 
         let budget_report = snapshot.budget_report.clone();
 
-        self.refresh_internal(
+        self.refresh_internal(RefreshInternalInput {
             snapshot,
-            input.max_tasks,
-            input.tree_events,
-            input.elapsed_ms,
-            input.recording_started,
-            input.prev_faults_map.as_deref_mut(),
-            input.target_pid_map,
-        )
+            max_tasks: input.max_tasks,
+            tree_events: input.tree_events,
+            elapsed_ms: input.elapsed_ms,
+            recording_started: input.recording_started,
+            prev_faults_map: input.prev_faults_map.as_deref_mut(),
+            target_pid_map: input.target_pid_map,
+        })
         .await?;
 
         Ok(budget_report)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn refresh_internal(
         &mut self,
-        snapshot: crate::process_tree::TargetSnapshot,
-        max_tasks: usize,
-        tree_events: &mut Vec<TreeEvent>,
-        elapsed_ms: u64,
-        recording_started: Option<Instant>,
-        mut prev_faults_map: Option<&mut AyaHashMap<MapData, u32, [u64; 2]>>,
-        target_pid_map: &mut dyn TaskMap,
+        input: RefreshInternalInput<'_>,
     ) -> anyhow::Result<()> {
-        if snapshot.tasks.len() > max_tasks {
+        let snapshot = input.snapshot;
+        let mut prev_faults_map = input.prev_faults_map;
+        if snapshot.tasks.len() > input.max_tasks {
             anyhow::bail!(
                 "too many target tasks after expansion: got {}, but --max-tasks is {}",
                 snapshot.tasks.len(),
-                max_tasks
+                input.max_tasks
             );
         }
 
@@ -104,10 +109,10 @@ impl TaskTracker {
 
         self.handle_replacements(
             &snapshot.tasks,
-            tree_events,
+            input.tree_events,
             &mut prev_faults_map,
-            elapsed_ms,
-            recording_started,
+            input.elapsed_ms,
+            input.recording_started,
         );
 
         let diffs: Vec<(TargetDiffAction, TaskInfo)> = {
@@ -126,7 +131,7 @@ impl TaskTracker {
             let tid = task.tid;
             match action {
                 TargetDiffAction::Added => {
-                    target_pid_map.insert(tid, 1, 0)?;
+                    input.target_pid_map.insert(tid, 1, 0)?;
 
                     let action_name = target_event_action(task.from_cgroup, "added");
                     info!(
@@ -134,8 +139,8 @@ impl TaskTracker {
                         action_name, tid, task.process_pid, task.comm, task.class
                     );
 
-                    tree_events.push(TreeEvent {
-                        elapsed_ms,
+                    input.tree_events.push(TreeEvent {
+                        elapsed_ms: input.elapsed_ms,
                         action: action_name.to_owned(),
                         tid,
                         process_pid: task.process_pid,
@@ -148,10 +153,10 @@ impl TaskTracker {
 
                     reactivate_or_reset_stats_inner(
                         &mut self.stats_by_task,
-                        recording_started,
+                        input.recording_started,
                         tid,
                         &task,
-                        elapsed_ms,
+                        input.elapsed_ms,
                     );
 
                     update_task_exe_info(&mut self.task_exe_inodes, tid, &task);
@@ -166,8 +171,8 @@ impl TaskTracker {
                         action_name, tid, task.process_pid, task.comm, task.class
                     );
 
-                    tree_events.push(TreeEvent {
-                        elapsed_ms,
+                    input.tree_events.push(TreeEvent {
+                        elapsed_ms: input.elapsed_ms,
                         action: action_name.to_owned(),
                         tid,
                         process_pid: task.process_pid,
@@ -180,7 +185,7 @@ impl TaskTracker {
 
                     if let Some(stats) = self.stats_by_task.get_mut(&tid) {
                         stats.active = false;
-                        stats.removed_ms = Some(elapsed_ms);
+                        stats.removed_ms = Some(input.elapsed_ms);
                     }
 
                     remove_prev_faults_state(
@@ -189,7 +194,7 @@ impl TaskTracker {
                         tid,
                     );
 
-                    target_pid_map.remove(&tid)?;
+                    input.target_pid_map.remove(&tid)?;
                     self.active_targets.remove(&tid);
                 }
             }
@@ -371,15 +376,15 @@ mod tests {
 
         let mut tree_events = Vec::new();
         let result = tracker
-            .refresh_internal(
+            .refresh_internal(RefreshInternalInput {
                 snapshot,
-                config.target.max_tasks,
-                &mut tree_events,
-                0,
-                None,
-                None,
-                &mut mock_map,
-            )
+                max_tasks: config.target.max_tasks,
+                tree_events: &mut tree_events,
+                elapsed_ms: 0,
+                recording_started: None,
+                prev_faults_map: None,
+                target_pid_map: &mut mock_map,
+            })
             .await;
 
         assert!(result.is_err());
