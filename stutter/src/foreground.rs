@@ -1928,7 +1928,10 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
         assert_eq!(provider.source(), ForegroundSource::Unsupported);
         assert_eq!(snapshot.source, Some(ForegroundSource::Unsupported));
         assert_eq!(snapshot.status, ForegroundProviderStatus::Unsupported);
-        assert_eq!(snapshot.reason, GENERIC_WAYLAND_UNSUPPORTED_REASON);
+        assert_eq!(
+            snapshot.reason,
+            "GNOME/KDE Wayland session detected, but no safe generic Wayland foreground-window API is available"
+        );
         assert_eq!(snapshot.title, None);
 
         unsafe {
@@ -1965,7 +1968,10 @@ _NET_WM_NAME(UTF8_STRING) = "Private browser tab"
 
         assert_eq!(provider.source(), ForegroundSource::Unsupported);
         assert_eq!(snapshot.status, ForegroundProviderStatus::Unsupported);
-        assert_eq!(snapshot.reason, GENERIC_WAYLAND_UNSUPPORTED_REASON);
+        assert_eq!(
+            snapshot.reason,
+            "GNOME/KDE Wayland session detected, but no safe generic Wayland foreground-window API is available"
+        );
 
         unsafe {
             restore_env_var("WAYLAND_DISPLAY", previous_wayland_display);

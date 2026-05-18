@@ -63,6 +63,7 @@ pub struct CommunityRule {
 
 #[derive(Debug, Clone)]
 pub enum CommunityRulesSourceKind {
+    #[cfg(test)]
     BuiltinFixture,
     UserData,
     SystemData,
@@ -185,16 +186,9 @@ pub fn load_community_rules_file(
     source: CommunityRulesSourceKind,
 ) -> anyhow::Result<CommunityRulesFile> {
     match source {
+        #[cfg(test)]
         CommunityRulesSourceKind::BuiltinFixture => {
-            #[cfg(test)]
-            {
-                load_rules_file(Path::new("__stutter_test_fixture__"))
-            }
-
-            #[cfg(not(test))]
-            {
-                anyhow::bail!("built-in community rules fixture is only available in tests")
-            }
+            load_rules_file(Path::new("__stutter_test_fixture__"))
         }
         CommunityRulesSourceKind::UserData => {
             let dir = default_user_rules_dir().ok_or_else(|| {
@@ -612,8 +606,13 @@ fn rules_status_command() -> anyhow::Result<()> {
     println!("rules directory: {}", dir.display());
     if active.exists() {
         println!("enabled rules: {}", active.display());
+        println!(
+            "enabled rules status: {}",
+            describe_rules_db(CommunityRulesSourceKind::ExplicitPath(active.clone()))
+        );
     } else {
         println!("enabled rules: none");
+        println!("enabled rules status: not loaded");
     }
 
     let files = if dir.exists() {
@@ -622,8 +621,35 @@ fn rules_status_command() -> anyhow::Result<()> {
         Vec::new()
     };
     println!("imported rules files: {}", files.len());
+    println!(
+        "user rules source: {}",
+        describe_rules_file(CommunityRulesSourceKind::UserData)
+    );
+    println!(
+        "system rules source: {}",
+        describe_rules_file(CommunityRulesSourceKind::SystemData)
+    );
 
     Ok(())
+}
+
+fn describe_rules_file(source: CommunityRulesSourceKind) -> String {
+    match load_community_rules_file(source) {
+        Ok(file) => format!(
+            "available name={} rules={} generated_at={}",
+            file.source.name,
+            file.rules.len(),
+            file.source.generated_at
+        ),
+        Err(error) => format!("unavailable ({error:#})"),
+    }
+}
+
+fn describe_rules_db(source: CommunityRulesSourceKind) -> String {
+    match load_community_rules_db(source) {
+        Ok(db) => format!("loaded rules={}", db.rule_count()),
+        Err(error) => format!("failed ({error:#})"),
+    }
 }
 
 fn rules_enable_command(name: &str) -> anyhow::Result<()> {

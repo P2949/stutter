@@ -423,8 +423,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/foreground.rs",
-        max_lines: 2_395,
-        reason: "existing foreground provider implementation pending future split; Hyprland provider wiring added while cleanup removes dead foreground code",
+        max_lines: 2_401,
+        reason: "existing foreground provider implementation pending future split; tests updated for wired GNOME/KDE Wayland unsupported reason",
     },
     OversizedRustFileAllowance {
         path: "src/cli/monitor.rs",
@@ -443,8 +443,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/community_rules.rs",
-        max_lines: 2_132,
-        reason: "existing community rule model/import implementation pending future split",
+        max_lines: 2_152,
+        reason: "existing community rule model/import implementation pending future split; rules status now reports loaded source health",
     },
     OversizedRustFileAllowance {
         path: "src/test_fixture_builder.rs",

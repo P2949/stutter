@@ -190,18 +190,20 @@ impl SessionTargetPlan {
             crate::config_file::community_rules_config_from_user_config(user_config.as_ref());
         let community_rules =
             crate::community_rules::load_community_rules_status(&community_rules_config);
+        let community_rules_status = community_rules.label();
         match &community_rules {
             crate::community_rules::CommunityRulesStatus::Loaded { db } => {
                 log::info!(
-                    "community_rules_status status=loaded rules={}",
+                    "community_rules_status status={} rules={}",
+                    community_rules_status,
                     db.rule_count()
                 );
             }
             crate::community_rules::CommunityRulesStatus::Disabled => {
-                log::info!("community_rules_status status=disabled");
+                log::info!("community_rules_status status={community_rules_status}");
             }
             crate::community_rules::CommunityRulesStatus::Failed { error } => {
-                log::warn!("community_rules_status status=failed err={error}");
+                log::warn!("community_rules_status status={community_rules_status} err={error}");
             }
         }
 
