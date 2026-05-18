@@ -279,3 +279,48 @@ impl TuningAction for FakeAction {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn builder_methods_feed_descriptor_and_restore_token() {
+        let restore_path = PathBuf::from("/tmp/stutter-fake-action-custom-restore.json");
+        let action = FakeAction::new()
+            .with_effect_scope(ActionEffectScope::SystemWide)
+            .with_rollback(RollbackRequirement::BestEffortOnly)
+            .with_persistent_effect(true)
+            .with_system_wide_state()
+            .with_requires_explicit_target(false)
+            .with_confidence(Some(0.75))
+            .with_restore_path(restore_path.clone());
+
+        let descriptor = action.descriptor();
+        assert_eq!(descriptor.effect_scope, ActionEffectScope::SystemWide);
+        assert_eq!(descriptor.rollback, RollbackRequirement::BestEffortOnly);
+        assert!(descriptor.persistent_effect);
+        assert!(descriptor.touches_system_wide_state);
+        assert!(!descriptor.requires_explicit_target);
+        assert_eq!(descriptor.confidence, Some(0.75));
+
+        let token = action.apply().unwrap();
+        assert!(action.applied());
+        match &token {
+            RollbackToken::CpuAffinityRestoreFile {
+                path,
+                affected_tasks,
+            } => {
+                assert_eq!(path, &restore_path);
+                assert_eq!(*affected_tasks, 5);
+            }
+            other => panic!("unexpected fake action rollback token: {other:?}"),
+        }
+
+        action.rollback(&token).unwrap();
+        assert!(action.rolled_back());
+        assert!(!action.applied());
+    }
+}
