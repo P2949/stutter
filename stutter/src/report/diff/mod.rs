@@ -1,4 +1,13 @@
-use super::{text::*, *};
+mod analysis;
+mod model;
+pub(crate) mod render;
+
+use std::path::Path;
+
+pub use analysis::{build_run_diff_summary, run_diff_summary_from_sessions};
+pub use model::{RunDiffSummary, TaskDeltaSummary};
+
+use crate::{process_tree::TaskClass, summary};
 
 pub fn print_diff_report(
     path_a: &Path,
@@ -8,6 +17,16 @@ pub fn print_diff_report(
 ) -> anyhow::Result<()> {
     print!("{}", render_diff_report(path_a, path_b, top, filter_class)?);
     Ok(())
+}
+
+pub fn render_diff_report(
+    path_a: &Path,
+    path_b: &Path,
+    top: usize,
+    filter_class: Option<TaskClass>,
+) -> anyhow::Result<String> {
+    let diff = build_run_diff_summary(path_a, path_b, filter_class)?;
+    Ok(render::render_run_diff_summary(&diff, top))
 }
 
 pub fn print_batch_report(

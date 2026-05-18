@@ -1,10 +1,7 @@
 use super::{
     analysis::{block_io_correlation_basis, text_report_correlation_sections},
     build_report_analysis_from_input,
-    render::{
-        json::render_json_pretty,
-        text::{render_report, render_run_diff_summary},
-    },
+    render::{json::render_json_pretty, text::render_report},
     *,
 };
 
@@ -76,14 +73,4 @@ pub fn print_report(
     );
 
     Ok(())
-}
-
-pub fn render_diff_report(
-    path_a: &Path,
-    path_b: &Path,
-    top: usize,
-    filter_class: Option<TaskClass>,
-) -> anyhow::Result<String> {
-    let diff = summary::build_run_diff_summary(path_a, path_b, filter_class)?;
-    Ok(render_run_diff_summary(&diff, top))
 }

@@ -31,7 +31,7 @@ pub fn check_regression(
     top: usize,
     filter_class: Option<TaskClass>,
 ) -> anyhow::Result<()> {
-    let diff = summary::build_run_diff_summary(path_baseline, path_current, filter_class)?;
+    let diff = build_run_diff_summary(path_baseline, path_current, filter_class)?;
     let mut violations = Vec::new();
 
     if let Some(threshold_ms) = max_regression_p99_ms {
