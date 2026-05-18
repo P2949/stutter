@@ -500,8 +500,13 @@ fn minimal_recording_report_text_does_not_panic() {
     let session_data = fs::read_to_string(&session_path).unwrap();
     let session: SessionFile = serde_json::from_str(&session_data).unwrap();
 
+    let data_quality = report::data_quality_summary(&session, &RunArtifacts::default().validation);
+    let pressure_timeline = report::PressureTimelineSummary::default();
+    let runtime_slices = report::RuntimeSliceAnalysisSummary::default();
+
     // Call the report rendering helper.
     // We use default/empty values for clusters and artifacts to keep it minimal.
+    let correlation_sections = report::TextReportCorrelationSections::new();
     let output = report::render_report(
         &temp,
         &session,
@@ -511,7 +516,10 @@ fn minimal_recording_report_text_does_not_panic() {
             clusters: vec![],
         },
         &[],
-        &RunArtifacts::default(),
+        &data_quality,
+        &pressure_timeline,
+        &runtime_slices,
+        &correlation_sections,
         &report::FocusReportSummary::default(),
         &report::ForegroundReportSummary::default(),
         10,

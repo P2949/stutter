@@ -29,11 +29,14 @@ pub mod html;
 pub(crate) mod load;
 mod model;
 pub mod regression;
+pub(crate) mod render;
 pub mod text;
 
 pub use analysis::build_report_analysis;
 #[cfg(test)]
 pub use analysis::build_spike_density;
+#[cfg(test)]
+pub(crate) use analysis::text_report_correlation_sections;
 #[cfg(test)]
 pub(crate) use analysis::{
     annotate_clusters_with_foreground, artifacts_summary_from_session, build_frame_pacing_summary,
@@ -46,10 +49,10 @@ pub(crate) use analysis::{
     violation_from_delta,
 };
 pub use diff::{print_batch_report, print_diff_report};
+#[cfg(test)]
+pub use html::build_html_report_model;
 pub(crate) use html::task_html_row;
 pub use html::write_html_report;
-#[cfg(test)]
-pub use html::{build_html_report_model, render_html_report};
 pub(crate) use load::{load_report_input, load_report_session};
 pub use model::{
     ArtifactsSummary, DataQualityLevel, DataQualitySummary, FocusReportSummary,
@@ -60,19 +63,22 @@ pub use model::{
     SpikeDensityBucket, TaskHtmlRow,
 };
 pub(crate) use model::{
-    CorrelationCtx, ReportBuildResult, ReportInputModel, SpikeClusterCandidate,
+    ReportBuildResult, ReportInputModel, SpikeClusterCandidate, TextReportCorrelationSection,
+    TextReportCorrelationSections,
 };
 #[cfg(test)]
 pub use regression::check_percentile_regression;
 pub use regression::{RegressionCheckSummary, RegressionViolation, check_regression};
-pub use text::print_report;
-pub(crate) use text::render_check_summary;
 #[cfg(test)]
-pub use text::render_diff_report;
+pub(crate) use render::html::render_html_report;
+pub(crate) use render::text::render_check_summary;
 #[cfg(test)]
-pub(crate) use text::{
+pub(crate) use render::text::{
     render_cluster, render_focus_summary_text, render_foreground_summary_text, render_report,
 };
+pub use text::print_report;
+#[cfg(test)]
+pub use text::render_diff_report;
 
 const MIN_CLUSTER_TASKS: usize = 3;
 const MAX_INLINE_CLUSTER_POINTS: usize = 8;
@@ -748,6 +754,51 @@ mod tests {
     }
 
     #[test]
+    fn renderers_accept_report_model_values_without_loading_or_analysis() {
+        use super::render::{json::render_json_pretty, text::render_report};
+
+        let session = minimal_session_for_report_test();
+        let focus = FocusReportSummary::default();
+        let foreground = ForegroundReportSummary::default();
+        let artifacts = session_io::RunArtifacts {
+            session: session.clone(),
+            validation: crate::session_io::RunValidationReport::default(),
+            ..Default::default()
+        };
+        let data_quality = data_quality_summary(&session, &artifacts.validation);
+        let pressure_timeline = PressureTimelineSummary::default();
+        let runtime_slices = RuntimeSliceAnalysisSummary::default();
+
+        let correlation_sections = TextReportCorrelationSections::new();
+        let rendered = render_report(
+            Path::new("runs/example"),
+            &session,
+            &SpikeClusterAnalysis {
+                source: SpikeClusterSource::TopSpikesFallback,
+                source_count: 0,
+                clusters: Vec::new(),
+            },
+            &[],
+            &data_quality,
+            &pressure_timeline,
+            &runtime_slices,
+            &correlation_sections,
+            &focus,
+            &foreground,
+            10,
+            5,
+            None,
+        );
+
+        assert!(rendered.contains("file: runs/example"));
+        assert!(
+            render_json_pretty(&session)
+                .unwrap()
+                .contains("\"schema_version\"")
+        );
+    }
+
+    #[test]
     fn data_quality_is_low_for_validation_errors() {
         let session = minimal_session_for_report_test();
         let validation = crate::session_io::RunValidationReport {
@@ -835,6 +886,12 @@ mod tests {
     #[test]
     fn render_report_includes_data_quality_section() {
         let session = minimal_session_for_report_test();
+        let artifacts = session_io::RunArtifacts::default();
+        let data_quality = data_quality_summary(&session, &artifacts.validation);
+        let pressure_timeline = PressureTimelineSummary::default();
+        let runtime_slices = RuntimeSliceAnalysisSummary::default();
+
+        let correlation_sections = TextReportCorrelationSections::new();
         let output = render_report(
             Path::new("session.json"),
             &session,
@@ -844,7 +901,10 @@ mod tests {
                 clusters: vec![],
             },
             &[],
-            &session_io::RunArtifacts::default(),
+            &data_quality,
+            &pressure_timeline,
+            &runtime_slices,
+            &correlation_sections,
             &FocusReportSummary::default(),
             &ForegroundReportSummary::default(),
             10,
@@ -940,13 +1000,21 @@ mod tests {
             intervals: vec![pressure_interval(100, 40.0, 2.0, 0.0, 0.0, 0.0)],
             ..Default::default()
         };
+        let data_quality = data_quality_summary(&session, &artifacts.validation);
+        let pressure_timeline =
+            build_pressure_timeline(&artifacts.intervals, &cluster_analysis.clusters, 5);
+        let runtime_slices = RuntimeSliceAnalysisSummary::default();
 
+        let correlation_sections = TextReportCorrelationSections::new();
         let output = render_report(
             Path::new("session.json"),
             &session,
             &cluster_analysis,
             &[],
-            &artifacts,
+            &data_quality,
+            &pressure_timeline,
+            &runtime_slices,
+            &correlation_sections,
             &FocusReportSummary::default(),
             &ForegroundReportSummary::default(),
             10,

@@ -1473,20 +1473,9 @@ fn report_cluster_output_caps_inline_points() {
 
     let session = crate::session_io::load_session(&dir).unwrap();
 
-    let cluster_analysis =
-        crate::report::spike_cluster_analysis(&session, Some(&spike_events), 5_000_000, 10, None);
-    let output = crate::report::render_report(
-        &dir,
-        &session,
-        &cluster_analysis,
-        &[],
-        &crate::session_io::RunArtifacts::default(),
-        &crate::report::FocusReportSummary::default(),
-        &crate::report::ForegroundReportSummary::default(),
-        10,
-        5,
-        None,
-    );
+    let mut artifacts = crate::session_io::RunArtifacts::default();
+    artifacts.spikes = spike_events;
+    let output = render_report_for_test(&session, &artifacts, 5, 10);
 
     assert!(output.contains("total_spikes=10"));
     assert!(output.contains("shown_points=8"));
@@ -1503,7 +1492,6 @@ fn report_cluster_output_caps_inline_points() {
 fn report_correlates_artifacts_with_spike_clusters() {
     let dir = temp_test_dir("report-correlation");
     fs::create_dir_all(&dir).unwrap();
-    let session_path = dir.join("session.json");
     let session = minimal_session_for_report();
     let spike_events = (0..3)
         .map(|idx| SpikeEvent {
@@ -1528,6 +1516,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
         })
         .collect::<Vec<_>>();
     let artifacts = crate::session_io::RunArtifacts {
+        spikes: spike_events,
         scx_events: Vec::new(),
         irq_events: vec![IrqEventRecord {
             elapsed_ms: Some(10),
@@ -1560,20 +1549,7 @@ fn report_correlates_artifacts_with_spike_clusters() {
         ..Default::default()
     };
 
-    let cluster_analysis =
-        crate::report::spike_cluster_analysis(&session, Some(&spike_events), 5_000_000, 10, None);
-    let output = crate::report::render_report(
-        &session_path,
-        &session,
-        &cluster_analysis,
-        &[],
-        &artifacts,
-        &crate::report::FocusReportSummary::default(),
-        &crate::report::ForegroundReportSummary::default(),
-        10,
-        5,
-        None,
-    );
+    let output = render_report_for_test(&session, &artifacts, 5, 10);
 
     assert!(output.contains("irq overlap"));
     assert!(output.contains("irqs=137"));
@@ -1589,42 +1565,19 @@ fn report_correlates_artifacts_with_spike_clusters() {
 fn report_uses_run_level_block_io_correlation_basis() {
     let dir = temp_test_dir("report-block-io-basis");
     fs::create_dir_all(&dir).unwrap();
-    let session_path = dir.join("session.json");
     let mut session = minimal_session_for_report();
     session.core.block_io_event_count = 1;
     session.core.block_io_correlation_basis = "request-pointer".to_owned();
 
-    let cluster_analysis =
-        crate::report::spike_cluster_analysis(&session, None, 5_000_000, 10, None);
-    let output = crate::report::render_report(
-        &session_path,
-        &session,
-        &cluster_analysis,
-        &[],
-        &crate::session_io::RunArtifacts::default(),
-        &crate::report::FocusReportSummary::default(),
-        &crate::report::ForegroundReportSummary::default(),
-        10,
-        5,
-        None,
-    );
+    let output =
+        render_report_for_test(&session, &crate::session_io::RunArtifacts::default(), 5, 10);
 
     assert!(output.contains("io_events: 1 (request-pointer correlated (confidence: high))"));
     assert!(!output.contains("block i/o correlation warning"));
 
     session.core.block_io_correlation_basis = "dev+sector".to_owned();
-    let output = crate::report::render_report(
-        &session_path,
-        &session,
-        &cluster_analysis,
-        &[],
-        &crate::session_io::RunArtifacts::default(),
-        &crate::report::FocusReportSummary::default(),
-        &crate::report::ForegroundReportSummary::default(),
-        10,
-        5,
-        None,
-    );
+    let output =
+        render_report_for_test(&session, &crate::session_io::RunArtifacts::default(), 5, 10);
     assert!(output.contains(
         "io_events: 1 (dev+sector correlated (advisory, approximate, confidence: medium))"
     ));
@@ -2473,4 +2426,49 @@ fn metadata_file_deserializes_flat_json_into_core() {
 
     assert_eq!(deserialized.core.schema_version, 123);
     assert_eq!(deserialized.core.run_name.as_deref(), Some("flat-test"));
+}
+
+fn render_report_for_test(
+    session: &crate::recorder::SessionFile,
+    artifacts: &crate::session_io::RunArtifacts,
+    cluster_window_ms: u64,
+    top: usize,
+) -> String {
+    let spikes = if artifacts.spikes.is_empty() {
+        None
+    } else {
+        Some(artifacts.spikes.as_slice())
+    };
+    let cluster_analysis = crate::report::spike_cluster_analysis(
+        session,
+        spikes,
+        cluster_window_ms.saturating_mul(1_000_000),
+        top,
+        None,
+    );
+    let data_quality = crate::report::data_quality_summary(session, &artifacts.validation);
+    let pressure_timeline = crate::report::PressureTimelineSummary::default();
+    let runtime_slices = crate::report::RuntimeSliceAnalysisSummary::default();
+    let correlation_sections = crate::report::text_report_correlation_sections(
+        &cluster_analysis.clusters,
+        artifacts,
+        crate::report::analysis::block_io_correlation_basis(session),
+        cluster_window_ms.saturating_mul(1_000_000),
+        top,
+    );
+    crate::report::render_report(
+        Path::new("session.json"),
+        session,
+        &cluster_analysis,
+        &[],
+        &data_quality,
+        &pressure_timeline,
+        &runtime_slices,
+        &correlation_sections,
+        &crate::report::FocusReportSummary::default(),
+        &crate::report::ForegroundReportSummary::default(),
+        top,
+        cluster_window_ms,
+        None,
+    )
 }

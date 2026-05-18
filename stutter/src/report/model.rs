@@ -310,6 +310,42 @@ pub struct HtmlReportModel {
 
 // Old RunArtifacts removed in favor of session_io::RunArtifacts
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct TextReportCorrelationSections {
+    pub(crate) sections: Vec<TextReportCorrelationSection>,
+}
+
+impl TextReportCorrelationSections {
+    pub(crate) fn new() -> Self {
+        Self {
+            sections: Vec::new(),
+        }
+    }
+
+    pub(crate) fn push_section(&mut self, section: TextReportCorrelationSection) {
+        self.sections.push(section);
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TextReportCorrelationSection {
+    pub(crate) title: String,
+    pub(crate) lines: Vec<String>,
+}
+
+impl TextReportCorrelationSection {
+    pub(crate) fn new(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            lines: Vec::new(),
+        }
+    }
+
+    pub(crate) fn push_line(&mut self, line: impl Into<String>) {
+        self.lines.push(line.into());
+    }
+}
+
 pub(crate) struct ReportInputModel {
     artifacts: session_io::RunArtifacts,
 }
@@ -369,10 +405,4 @@ pub(crate) struct ReportBuildResult {
 pub enum RegressionMetric {
     P99,
     Max,
-}
-
-pub(crate) struct CorrelationCtx<'a> {
-    pub(crate) output: &'a mut String,
-    pub(crate) clusters: &'a [SpikeCluster],
-    pub(crate) top: usize,
 }
