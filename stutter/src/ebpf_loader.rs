@@ -615,6 +615,7 @@ fn wakeup_data_entries_floor_for_max_tasks(max_tasks: usize) -> u32 {
         .min(MAX_WAKEUP_DATA_ENTRIES)
 }
 
+#[cfg(test)]
 pub(crate) fn map_sizing_for_config(config: &crate::config::model::MonitorConfig) -> EbpfMapSizing {
     map_sizing_for_config_from_memory(config, current_memory_snapshot())
 }

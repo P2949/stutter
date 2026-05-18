@@ -1,4 +1,6 @@
-use std::time::{Duration, SystemTime};
+#[cfg(any(feature = "otel", test))]
+use std::time::Duration;
+use std::time::SystemTime;
 
 use anyhow::Result;
 
@@ -171,8 +173,19 @@ mod disabled {
         }
     }
 
-    pub fn spawn_exporter(_config: OtelConfig) -> Result<OtelExporterHandle> {
-        anyhow::bail!("OpenTelemetry support was not compiled in. Rebuild with --features otel.");
+    pub fn spawn_exporter(config: OtelConfig) -> Result<OtelExporterHandle> {
+        let OtelConfig {
+            endpoint,
+            service_name,
+            started_at,
+            monotonic_start_ns,
+        } = config;
+
+        anyhow::bail!(
+            "OpenTelemetry support was not compiled in. Rebuild with --features otel. \
+requested endpoint={endpoint:?} service_name={service_name:?} \
+started_at={started_at:?} monotonic_start_ns={monotonic_start_ns}"
+        );
     }
 }
 
@@ -181,6 +194,7 @@ pub use disabled::*;
 #[cfg(feature = "otel")]
 pub use enabled::*;
 
+#[cfg(any(feature = "otel", test))]
 pub fn monotonic_ns_to_system_time(
     started_at: SystemTime,
     monotonic_start_ns: u64,

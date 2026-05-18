@@ -148,7 +148,7 @@ impl<'a, 'b> MonitorOutputSinks<'a, 'b> {
     }
 
     pub fn dispatch(&mut self, event: &MonitorEvent) -> Result<(), SinkError> {
-        self.registry.dispatch(event, &mut self.ctx)
+        self.dispatch_all(std::iter::once(event))
     }
 
     pub fn dispatch_all<'c>(
