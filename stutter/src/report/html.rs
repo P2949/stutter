@@ -88,10 +88,11 @@ pub fn write_html_report(
     cluster_window_ms: u64,
     filter_class: Option<TaskClass>,
 ) -> anyhow::Result<()> {
+    let input = load_report_input(path)?;
     let ReportBuildResult {
         analysis,
         artifacts,
-    } = build_report_analysis_with_artifacts(path, top, cluster_window_ms, filter_class)?;
+    } = build_report_analysis_from_input(input, top, cluster_window_ms, filter_class)?;
 
     let text_report = render_report(
         path,

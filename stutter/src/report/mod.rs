@@ -26,6 +26,7 @@ use crate::{
 pub mod analysis;
 pub mod diff;
 pub mod html;
+pub(crate) mod load;
 mod model;
 pub mod regression;
 pub mod text;
@@ -41,13 +42,15 @@ pub(crate) use analysis::{
     runtime_slice_analysis_summary, spike_cluster_analysis,
 };
 pub(crate) use analysis::{
-    data_quality_summary, event_stream_warning, ms_to_ns_i64, violation_from_delta,
+    build_report_analysis_from_input, data_quality_summary, event_stream_warning, ms_to_ns_i64,
+    violation_from_delta,
 };
 pub use diff::{print_batch_report, print_diff_report};
 pub(crate) use html::task_html_row;
 pub use html::write_html_report;
 #[cfg(test)]
 pub use html::{build_html_report_model, render_html_report};
+pub(crate) use load::{load_report_input, load_report_session};
 pub use model::{
     ArtifactsSummary, DataQualityLevel, DataQualitySummary, FocusReportSummary,
     ForegroundReportSummary, FrameOutlierView, FramePacingSummary, HtmlChartArtifacts,
@@ -56,7 +59,9 @@ pub use model::{
     RuntimeSliceAnalysisSummary, RuntimeThreadSummary, SpikeClusterAnalysis, SpikeClusterSource,
     SpikeDensityBucket, TaskHtmlRow,
 };
-pub(crate) use model::{CorrelationCtx, ReportBuildResult, SpikeClusterCandidate};
+pub(crate) use model::{
+    CorrelationCtx, ReportBuildResult, ReportInputModel, SpikeClusterCandidate,
+};
 #[cfg(test)]
 pub use regression::check_percentile_regression;
 pub use regression::{RegressionCheckSummary, RegressionViolation, check_regression};
@@ -708,6 +713,38 @@ mod tests {
         assert!(!model::FocusReportSummary::default().is_visible());
         assert!(!ForegroundReportSummary::default().is_visible());
         assert!(!model::ForegroundReportSummary::default().is_visible());
+    }
+
+    #[test]
+    fn analysis_from_report_input_model_preserves_existing_summary_behavior() {
+        let session = minimal_session_for_report_test();
+        let artifacts = session_io::RunArtifacts {
+            session: session.clone(),
+            validation: crate::session_io::RunValidationReport::default(),
+            ..Default::default()
+        };
+
+        let result = build_report_analysis_from_input(
+            ReportInputModel::from_artifacts(artifacts),
+            10,
+            5,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.analysis.session.core.duration_ms,
+            session.core.duration_ms
+        );
+        assert_eq!(result.analysis.data_quality.level, DataQualityLevel::High);
+        assert!(
+            result
+                .analysis
+                .data_quality
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("no data-quality problems"))
+        );
     }
 
     #[test]

@@ -310,6 +310,20 @@ pub struct HtmlReportModel {
 
 // Old RunArtifacts removed in favor of session_io::RunArtifacts
 
+pub(crate) struct ReportInputModel {
+    artifacts: session_io::RunArtifacts,
+}
+
+impl ReportInputModel {
+    pub(crate) fn from_artifacts(artifacts: session_io::RunArtifacts) -> Self {
+        Self { artifacts }
+    }
+
+    pub(crate) fn into_artifacts(self) -> session_io::RunArtifacts {
+        self.artifacts
+    }
+}
+
 #[derive(Clone, Eq, PartialEq)]
 pub(crate) struct SpikeClusterCandidate {
     pub(crate) start_idx: usize,
