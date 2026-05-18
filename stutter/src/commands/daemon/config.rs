@@ -4,8 +4,12 @@ use crate::{
     actions::{ActionId, SafetyClass},
     config_file::{self, UserConfigFile},
     daemon::{
-        ActionDescriptor, ActionSource, DaemonConfig, DaemonPolicy, DaemonPolicyBuildInput,
-        PolicyExplanation, PolicyIntent, RollbackRequirement, build_daemon_policy,
+        config::DaemonConfig,
+        explain::PolicyExplanation,
+        policy::{
+            ActionDescriptor, ActionSource, DaemonPolicy, DaemonPolicyBuildInput, PolicyIntent,
+            RollbackRequirement, build_daemon_policy,
+        },
     },
     remote::AgentAutotuneLimits,
 };
@@ -65,7 +69,7 @@ pub fn daemon_config_explain_descriptor() -> ActionDescriptor {
         action_id: ActionId("daemon-config-explain".to_owned()),
         action_kind: "daemon-config-explain".to_owned(),
         safety_class: SafetyClass::ObserveOnly,
-        effect_scope: crate::daemon::ActionEffectScope::ObserveOnly,
+        effect_scope: crate::daemon::policy::ActionEffectScope::ObserveOnly,
         rollback: RollbackRequirement::NotRequiredForDryRun,
         persistent_effect: false,
         touches_system_wide_state: false,
@@ -235,7 +239,7 @@ pub fn render_config_explain_text(output: &DaemonConfigExplainOutput) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::DaemonPreset;
+    use crate::daemon::config::DaemonPreset;
 
     #[test]
     fn daemon_config_explain_text_contains_effective_policy_and_rules() {
@@ -369,7 +373,10 @@ mod tests {
                 .unwrap();
 
         assert_eq!(output.config.preset, DaemonPreset::ObserveOnly);
-        assert_eq!(output.config.mode, crate::daemon::DaemonMode::Observe);
+        assert_eq!(
+            output.config.mode,
+            crate::daemon::policy::DaemonMode::Observe
+        );
     }
 
     #[test]
@@ -378,7 +385,10 @@ mod tests {
             build_config_explain_output_from_user_config(None, Some("gaming-low-risk")).unwrap();
 
         assert_eq!(output.config.preset, DaemonPreset::GamingLowRisk);
-        assert_eq!(output.config.mode, crate::daemon::DaemonMode::ApplyLowRisk);
+        assert_eq!(
+            output.config.mode,
+            crate::daemon::policy::DaemonMode::ApplyLowRisk
+        );
         assert!(
             output
                 .policy

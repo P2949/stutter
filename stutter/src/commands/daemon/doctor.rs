@@ -2,9 +2,12 @@ use serde::Serialize;
 
 use super::status::configured_system_health_snapshot;
 use crate::daemon::{
-    CapabilityProbe, DaemonCapabilities, DaemonState, DaemonWatchdogConfig, DaemonWatchdogInputs,
-    DaemonWatchdogReport, SystemHealthSnapshot, default_daemon_state_snapshot_path,
-    evaluate_daemon_watchdog, load_daemon_state,
+    capabilities::{CapabilityProbe, DaemonCapabilities},
+    health::SystemHealthSnapshot,
+    state::{DaemonState, default_daemon_state_snapshot_path, load_daemon_state},
+    watchdog::{
+        DaemonWatchdogConfig, DaemonWatchdogInputs, DaemonWatchdogReport, evaluate_daemon_watchdog,
+    },
 };
 
 #[derive(Clone, Debug, Serialize)]

@@ -3,7 +3,7 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use crate::{
     autotune,
     config::model::MonitorConfig,
-    daemon::DaemonSoakConfig,
+    daemon::soak::DaemonSoakConfig,
     doctor::DoctorInput,
     process_tree::TaskClass,
     release::{ReleaseChannel, ReleaseReadinessInputs},

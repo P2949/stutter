@@ -1,4 +1,4 @@
-use crate::daemon::{DaemonSoakReport, run_fake_daemon_soak};
+use crate::daemon::soak::{DaemonSoakReport, run_fake_daemon_soak};
 
 pub fn run_soak_command(
     input: crate::commands::input::DaemonSoakCommandInput,
@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn daemon_soak_text_contains_budget_metrics() {
         let config = crate::daemon::soak::DaemonSoakConfig::default();
-        let report = crate::daemon::run_fake_daemon_soak(&config);
+        let report = crate::daemon::soak::run_fake_daemon_soak(&config);
 
         let text = render_soak_text(&report);
 

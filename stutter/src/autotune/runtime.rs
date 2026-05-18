@@ -40,17 +40,20 @@ use crate::{
     },
     config::model::MonitorConfig,
     daemon::{
-        ActionSource, DAEMON_STATE_SCHEMA_VERSION, DaemonConfig, DaemonDecisionState,
-        DaemonDegradedStatus, DaemonFaultState, DaemonMode, DaemonPhase, DaemonPolicy,
-        DaemonPolicyBuildInput, DaemonState, DaemonTargetState, DaemonWorkloadProfile,
-        SystemHealthInputs, SystemHealthSnapshot, SystemHealthThresholds, build_daemon_policy,
-        evaluate_system_health,
+        DaemonConfig, DaemonPolicy,
+        health::{
+            SystemHealthInputs, SystemHealthSnapshot, SystemHealthThresholds,
+            evaluate_system_health,
+        },
+        policy::{ActionSource, DaemonMode, DaemonPolicyBuildInput, build_daemon_policy},
         privilege::{
             InProcessPrivilegedActionService, UnixSocketPrivilegedActionService,
             default_privileged_worker_socket_path,
         },
         state::{
-            DaemonProfileEnvironment, DaemonProfileMemory, DaemonProfilePartition,
+            DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus,
+            DaemonFaultState, DaemonPhase, DaemonProfileEnvironment, DaemonProfileMemory,
+            DaemonProfilePartition, DaemonState, DaemonTargetState, DaemonWorkloadProfile,
             daemon_profile_stable_hash,
         },
     },

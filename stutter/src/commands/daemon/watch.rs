@@ -3,7 +3,7 @@ use std::{thread, time::Duration};
 use super::status::{
     DaemonStatusOutput, build_status_output_with_recent_decisions, render_status_text,
 };
-use crate::daemon::DaemonPhase;
+use crate::daemon::state::DaemonPhase;
 
 #[derive(Clone, Debug)]
 pub struct DaemonWatchSignature {
@@ -171,15 +171,19 @@ pub fn render_watch_notification(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::{DaemonPhase, SystemHealthSnapshot};
+    use crate::daemon::{
+        health::{SystemHealthSnapshot, SystemHealthState},
+        policy::DaemonMode,
+        state::DaemonPhase,
+    };
 
     #[test]
     fn daemon_watch_line_is_compact_and_notification_only_tracks_meaningful_changes() {
         let mut output = build_status_output_with_recent_decisions(0);
-        output.state.mode = crate::daemon::DaemonMode::ApplyLowRisk;
+        output.state.mode = DaemonMode::ApplyLowRisk;
         output.state.phase = DaemonPhase::Apply;
         output.current_health = SystemHealthSnapshot {
-            state: crate::daemon::SystemHealthState::Healthy,
+            state: SystemHealthState::Healthy,
             ok_for_apply: true,
             reason_code: None,
             unix_nanos: Some(1_000),

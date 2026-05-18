@@ -8,7 +8,7 @@ use std::{
 use serde::Serialize;
 
 use crate::{
-    daemon::{CapabilityProbe, DaemonCapabilities},
+    daemon::capabilities::{CapabilityProbe, DaemonCapabilities},
     ebpf_loader, hwmon,
     probe_catalog::ProbeStatus,
     probe_registry::PROBE_REGISTRY,

@@ -13,7 +13,7 @@ use crate::{
         schema::{CURRENT_CONFIG_VERSION, ConfigDiagnostic, ParsedUserConfigFile, RawConfigFile},
         source::ConfigSource,
     },
-    daemon::{ActionSource, DaemonConfig, DaemonPreset, SystemHealthThresholds},
+    daemon::{DaemonConfig, DaemonPreset, health::SystemHealthThresholds, policy::ActionSource},
     error::ConfigError,
     remote::AgentAutotuneLimits,
 };

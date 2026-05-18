@@ -61,7 +61,7 @@ use crate::{
         merge::{CliOverrides, ConfigSources, DefaultConfig, PresetConfig},
         model::MonitorConfig,
     },
-    daemon::{DaemonSoakBudget, DaemonSoakConfig, DaemonSoakProfile},
+    daemon::soak::{DaemonSoakBudget, DaemonSoakConfig, DaemonSoakProfile},
     process_tree::TaskClass,
     release::{ReleaseChannel, ReleaseReadinessInputs},
     service::{

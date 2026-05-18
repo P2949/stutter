@@ -6,7 +6,7 @@ use crate::{
         observation::AutotuneObservation,
         system_context::SystemContextSnapshot,
     },
-    daemon::{DaemonCapabilities, DaemonPolicy, SystemHealthSnapshot},
+    daemon::{DaemonPolicy, capabilities::DaemonCapabilities, health::SystemHealthSnapshot},
     profiles::Profile,
 };
 
@@ -64,7 +64,7 @@ impl CandidateProviderRegistry {
         let mut registry = Self::default();
         registry.register(Box::new(cpu_affinity::CpuAffinityProvider));
 
-        if policy.mode == crate::daemon::DaemonMode::Suggest
+        if policy.mode == crate::daemon::policy::DaemonMode::Suggest
             || policy.max_safety_class >= crate::actions::SafetyClass::ReversibleMediumRisk
         {
             registry.register(Box::new(nice::NiceProvider));
@@ -73,7 +73,8 @@ impl CandidateProviderRegistry {
             registry.register(Box::new(cgroup::CgroupProvider));
         }
 
-        if policy.mode == crate::daemon::DaemonMode::Suggest && policy.allow_system_wide_suggestions
+        if policy.mode == crate::daemon::policy::DaemonMode::Suggest
+            && policy.allow_system_wide_suggestions
         {
             registry.register(Box::new(irq_affinity::IrqAffinityProvider));
             registry.register(Box::new(cpu_power::CpuPowerProvider));
@@ -138,7 +139,10 @@ mod tests {
             quality::OnlineDataQuality,
             state::SituationKind,
         },
-        daemon::{ActionSource, DaemonMode, SystemHealthSnapshot},
+        daemon::{
+            health::SystemHealthSnapshot,
+            policy::{ActionSource, DaemonMode},
+        },
         daemon_policy::{DaemonPolicyBuildInput, build_daemon_policy},
         focus::FocusGroupKind,
         process_tree::TaskClass,

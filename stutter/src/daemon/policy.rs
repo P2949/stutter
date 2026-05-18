@@ -2064,10 +2064,10 @@ mod tests {
     #[test]
     fn daemon_policy_context_can_be_derived_from_health_snapshot() {
         let context = DaemonPolicyContext::default().with_system_health(
-            &crate::daemon::SystemHealthSnapshot {
+            &crate::daemon::health::SystemHealthSnapshot {
                 ok_for_apply: false,
                 reason_code: Some("low_disk".to_owned()),
-                ..crate::daemon::SystemHealthSnapshot::default()
+                ..crate::daemon::health::SystemHealthSnapshot::default()
             },
         );
 

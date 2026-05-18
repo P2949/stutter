@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::daemon::{DaemonPhase, DaemonState, SystemHealthSnapshot, SystemHealthState};
+use crate::daemon::{
+    DaemonPhase, DaemonState,
+    health::{SystemHealthSnapshot, SystemHealthState},
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DaemonWatchdogConfig {
@@ -269,7 +272,10 @@ fn issue(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::{DaemonExperimentState, DaemonMode, DaemonRollbackState};
+    use crate::daemon::{
+        policy::DaemonMode,
+        state::{DaemonExperimentState, DaemonRollbackState},
+    };
 
     fn healthy_inputs() -> DaemonWatchdogInputs {
         DaemonWatchdogInputs {

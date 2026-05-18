@@ -7,8 +7,13 @@ use super::{
 use crate::{
     autotune::planner::{PlannerEvaluationSummary, PlannerSummary},
     daemon::{
-        DaemonPhase, DaemonPolicy, DaemonPolicyExplanation, DaemonStatusExplanation,
-        DaemonWatchdogReport, SystemHealthSnapshot, policy_context_from_daemon_status,
+        explain::{
+            DaemonPolicyExplanation, DaemonStatusExplanation, policy_context_from_daemon_status,
+        },
+        health::SystemHealthSnapshot,
+        policy::DaemonPolicy,
+        state::DaemonPhase,
+        watchdog::DaemonWatchdogReport,
     },
 };
 
@@ -24,7 +29,7 @@ pub struct DaemonExplainOutput {
 pub struct DaemonWhyNotOptimizeOutput {
     pub state_path: String,
     pub state_loaded: bool,
-    pub mode: crate::daemon::DaemonMode,
+    pub mode: crate::daemon::policy::DaemonMode,
     pub phase: DaemonPhase,
     pub health: SystemHealthSnapshot,
     pub watchdog: DaemonWatchdogReport,
@@ -38,7 +43,7 @@ pub struct DaemonWhyNotOptimizeOutput {
 pub struct DaemonWhatChangedOutput {
     pub state_path: String,
     pub state_loaded: bool,
-    pub mode: crate::daemon::DaemonMode,
+    pub mode: crate::daemon::policy::DaemonMode,
     pub phase: DaemonPhase,
     pub health: SystemHealthSnapshot,
     pub watchdog: DaemonWatchdogReport,
@@ -431,7 +436,7 @@ mod tests {
     #[test]
     fn daemon_status_and_why_text_render_planner_summary() {
         let mut output = build_status_output_with_recent_decisions(0);
-        output.state.last_decision = Some(crate::daemon::DaemonDecisionState {
+        output.state.last_decision = Some(crate::daemon::state::DaemonDecisionState {
             decision: "optimize".to_owned(),
             reason: "found better affinity".to_owned(),
             planner: Some(PlannerSummary {
@@ -453,7 +458,7 @@ mod tests {
                     provider: "sysctl".to_owned(),
                     objective: crate::autotune::objective::ObjectiveKind::StutterScore,
                     safety_class: crate::actions::SafetyClass::HighRisk,
-                    effect_scope: crate::daemon_policy::ActionEffectScope::SystemWide,
+                    effect_scope: crate::daemon::policy::ActionEffectScope::SystemWide,
                     confidence: 0.0,
                     eligible: false,
                     rank: None,

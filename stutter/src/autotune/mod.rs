@@ -80,7 +80,7 @@ pub(crate) mod tui_panel;
 
 use std::{path::PathBuf, time::Duration};
 
-use crate::daemon::{ActionSource, DaemonMode};
+use crate::daemon::policy::{ActionSource, DaemonMode};
 
 #[derive(Debug, Clone)]
 pub struct AutotuneCommandInput {

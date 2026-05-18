@@ -18,7 +18,10 @@ use crate::{
         system_context::SystemContextSnapshot,
         workload_policy::WorkloadPolicyMatrix,
     },
-    daemon::{DaemonCapabilities, DaemonMode, DaemonPolicy, SystemHealthSnapshot},
+    daemon::{
+        DaemonPolicy, capabilities::DaemonCapabilities, health::SystemHealthSnapshot,
+        policy::DaemonMode,
+    },
     daemon_policy::{ActionDescriptor, DaemonPolicyContext, PolicyIntent},
     profiles::Profile,
 };
@@ -361,7 +364,7 @@ impl CandidatePlanner {
         input: PlannerInput<'_>,
         dry_runner: &mut R,
     ) -> PlanResult {
-        if input.daemon_policy.mode == crate::daemon::DaemonMode::Observe {
+        if input.daemon_policy.mode == crate::daemon::policy::DaemonMode::Observe {
             return PlanResult {
                 selected: None,
                 evaluations: Vec::new(),
@@ -985,7 +988,7 @@ mod tests {
             quality::OnlineDataQuality,
             state::SituationKind,
         },
-        daemon::{ActionSource, DaemonMode},
+        daemon::policy::{ActionSource, DaemonMode},
         daemon_policy::{DaemonPolicyBuildInput, build_daemon_policy},
         focus::FocusGroupKind,
         process_tree::TaskClass,
@@ -1404,7 +1407,7 @@ mod tests {
     fn evaluate_candidate_with_runner(
         policy: &DaemonPolicy,
         observation: &AutotuneObservation,
-        capabilities: &crate::daemon::DaemonCapabilities,
+        capabilities: &crate::daemon::capabilities::DaemonCapabilities,
         controller_state: &ControllerRuntimeState,
         candidate: CandidateAction,
         confidence: f32,

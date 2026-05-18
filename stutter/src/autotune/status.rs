@@ -14,8 +14,11 @@ use super::{
     planner::{PlannerEvaluationSummary, PlannerSummary},
 };
 use crate::daemon::{
-    DaemonMode, DaemonPhase, DaemonState, DaemonTargetState, default_daemon_state_snapshot_path,
-    load_daemon_state,
+    policy::DaemonMode,
+    state::{
+        DaemonPhase, DaemonState, DaemonTargetState, default_daemon_state_snapshot_path,
+        load_daemon_state,
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -763,7 +766,7 @@ mod tests {
     use crate::{
         actions::{RollbackToken, SafetyClass},
         autotune::history::{AutotuneDecisionSummary, ObservationSummary, SituationKind},
-        daemon::{
+        daemon::state::{
             DaemonDecisionState, DaemonDegradedStatus, DaemonExperimentState, DaemonFaultState,
             DaemonPhase, DaemonRollbackState, DaemonState, DaemonStateSnapshotWriter,
             DaemonTargetState,
@@ -1113,7 +1116,7 @@ mod tests {
     #[test]
     fn status_from_daemon_state_lists_all_profile_memory_kept_actions() {
         let profile =
-            |candidate_name: &str, action_id: &str| crate::daemon::DaemonWorkloadProfile {
+            |candidate_name: &str, action_id: &str| crate::daemon::state::DaemonWorkloadProfile {
                 workload_identity_hash: "workload-a".to_owned(),
                 workload_label: Some("KingdomCome.exe".to_owned()),
                 candidate_name: candidate_name.to_owned(),
@@ -1129,7 +1132,7 @@ mod tests {
                 candidate_score_total: Some(800),
                 score_delta: -200,
                 confidence_milli: 900,
-                environment: crate::daemon::DaemonProfileEnvironment::default(),
+                environment: crate::daemon::state::DaemonProfileEnvironment::default(),
                 partition: crate::daemon::state::DaemonProfilePartition::default(),
             };
         let state = DaemonState {

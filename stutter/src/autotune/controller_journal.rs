@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     actions::{RollbackToken, SafetyClass},
-    daemon::DaemonMode,
+    daemon::policy::DaemonMode,
 };
 
 pub const CONTROLLER_JOURNAL_SCHEMA_VERSION: u32 = 1;

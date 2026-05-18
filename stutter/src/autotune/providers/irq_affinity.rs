@@ -479,7 +479,11 @@ mod tests {
             },
             system_context::SystemContextSnapshot,
         },
-        daemon::{ActionSource, DaemonCapabilities, DaemonMode, SystemHealthSnapshot},
+        daemon::{
+            capabilities::DaemonCapabilities,
+            health::SystemHealthSnapshot,
+            policy::{ActionSource, DaemonMode},
+        },
         daemon_policy::{DaemonPolicyBuildInput, build_daemon_policy},
         focus::FocusGroupKind,
         system_inventory::SystemInventory,

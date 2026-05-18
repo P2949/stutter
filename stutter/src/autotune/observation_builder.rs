@@ -65,14 +65,14 @@ impl AutotuneObservationBuilder {
         let primary_situation = focus
             .map(|focus| focus.situation)
             .unwrap_or(SituationKind::Unknown);
-        let system_health = crate::daemon::evaluate_system_health(
-            crate::daemon::SystemHealthInputs {
+        let system_health = crate::daemon::health::evaluate_system_health(
+            crate::daemon::health::SystemHealthInputs {
                 ebpf_dropped_events: input.drop_counters.total(),
-                ..crate::daemon::SystemHealthInputs::default()
+                ..crate::daemon::health::SystemHealthInputs::default()
             },
-            &crate::daemon::SystemHealthThresholds {
+            &crate::daemon::health::SystemHealthThresholds {
                 max_ebpf_dropped_events: input.online_data_quality_policy.max_drop_counter_total,
-                ..crate::daemon::SystemHealthThresholds::default()
+                ..crate::daemon::health::SystemHealthThresholds::default()
             },
         );
         let active_tasks =

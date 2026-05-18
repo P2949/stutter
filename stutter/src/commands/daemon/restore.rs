@@ -6,7 +6,7 @@ use crate::{
         restore_known_autotune_actions,
     },
     commands::restore,
-    daemon::default_daemon_state_snapshot_path,
+    daemon::state::default_daemon_state_snapshot_path,
     profile_restore,
 };
 

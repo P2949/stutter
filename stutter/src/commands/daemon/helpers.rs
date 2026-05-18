@@ -4,9 +4,10 @@ use super::status::DaemonStatusOutput;
 use crate::{
     config_file::{self, UserConfigFile},
     daemon::{
-        ActionSource, DaemonConfig, DaemonPolicy, DaemonPolicyBuildInput, DaemonPreset,
-        DaemonState, DaemonStateSnapshotWriter, DaemonStateStore, build_daemon_policy,
-        load_daemon_state,
+        config::{DaemonConfig, DaemonPreset},
+        policy::{ActionSource, DaemonPolicy, DaemonPolicyBuildInput, build_daemon_policy},
+        state::{DaemonState, DaemonStateSnapshotWriter, load_daemon_state},
+        store::DaemonStateStore,
     },
 };
 
@@ -114,13 +115,13 @@ pub fn daemon_state_store_for_path(path: &Path) -> anyhow::Result<DaemonStateSto
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::{DaemonMode, DaemonState};
+    use crate::daemon::{policy::DaemonMode, state::DaemonState};
 
     #[test]
     fn daemon_explain_policy_uses_configured_safety_with_live_state() {
         let state = DaemonState {
             mode: DaemonMode::ApplyLowRisk,
-            active_target: Some(crate::daemon::DaemonTargetState {
+            active_target: Some(crate::daemon::state::DaemonTargetState {
                 root_pid: Some(1234),
                 active_targets: 1,
                 comm: Some("game".to_owned()),

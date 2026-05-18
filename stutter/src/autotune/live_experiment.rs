@@ -31,10 +31,12 @@ use crate::{
         washout::WashoutWindowConfig,
     },
     daemon::{
-        DaemonExperimentState, DaemonMode, DaemonPolicy, DaemonPolicyContext, DaemonRollbackState,
+        DaemonPolicy,
+        policy::{DaemonMode, DaemonPolicyContext},
         privilege::{
             CandidateApplyRequest, CandidatePlanRequest, PrivilegedActionService, RollbackRequest,
         },
+        state::{DaemonExperimentState, DaemonRollbackState},
     },
 };
 

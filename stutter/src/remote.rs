@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::{
     actions::SafetyClass,
     config::{FocusSource, ForegroundSource, layer::MonitorConfigLayer, model::MonitorConfig},
-    daemon::{DaemonMode, DaemonState},
+    daemon::{DaemonState, policy::DaemonMode},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

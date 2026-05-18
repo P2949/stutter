@@ -67,17 +67,36 @@ use crate::{
     commands::restore,
     config::{FocusSource, ForegroundSource, model::MonitorConfig},
     daemon::{
-        ActionDescriptor, ActionEffectScope, ActionSource, CapabilityProbe, DaemonCapabilities,
-        DaemonDecisionState, DaemonExperimentState, DaemonMode, DaemonPhase, DaemonPolicy,
-        DaemonPolicyBuildInput, DaemonPolicyExplanation, DaemonRollbackState, DaemonState,
-        DaemonStatusExplanation, DaemonTargetState, DaemonWatchdogConfig, DaemonWatchdogInputs,
-        DaemonWatchdogReport, PolicyDecisionKind, PolicyExplanation, PolicyIntent, PolicyRejection,
-        PrivilegeCommandAllowlist, PrivilegeCommandRequest, PrivilegeProcessRole,
-        PrivilegeTransport, PrivilegedOperation, RemotePolicyContext, RollbackRequirement,
-        SystemHealthMonitor, SystemHealthProbeRoot, SystemHealthSnapshot, SystemHealthThresholds,
-        build_daemon_policy, daemon_decision_state, daemon_state_for_agent_fault,
-        daemon_state_for_record_start, daemon_state_from_startup_recovery,
-        evaluate_daemon_watchdog, policy_context_from_daemon_status,
+        DaemonPhase, DaemonPolicy, DaemonState,
+        capabilities::{CapabilityProbe, DaemonCapabilities},
+        explain::{
+            DaemonPolicyExplanation, DaemonStatusExplanation, PolicyDecisionKind,
+            PolicyExplanation, policy_context_from_daemon_status,
+        },
+        health::{
+            SystemHealthMonitor, SystemHealthProbeRoot, SystemHealthSnapshot,
+            SystemHealthThresholds,
+        },
+        policy::{
+            ActionDescriptor, ActionEffectScope, ActionSource, DaemonMode, DaemonPolicyBuildInput,
+            PolicyIntent, PolicyRejection, RemotePolicyContext, RollbackRequirement,
+            build_daemon_policy,
+        },
+        privilege::{
+            PrivilegeCommandAllowlist, PrivilegeCommandRequest, PrivilegeProcessRole,
+            PrivilegeTransport, PrivilegedOperation,
+        },
+        state::{
+            DaemonDecisionState, DaemonExperimentState, DaemonRollbackState, DaemonTargetState,
+        },
+        state_builders::{
+            daemon_decision_state, daemon_state_for_agent_fault, daemon_state_for_record_start,
+            daemon_state_from_startup_recovery,
+        },
+        watchdog::{
+            DaemonWatchdogConfig, DaemonWatchdogInputs, DaemonWatchdogReport,
+            evaluate_daemon_watchdog,
+        },
     },
     remote::{
         AgentAutotuneLimits, AgentFeatureFlags, AutotuneConfigResponse, AutotuneHistoryResponse,
@@ -239,8 +258,8 @@ struct DaemonHealthResponse {
     ok: bool,
     phase: DaemonPhase,
     health: SystemHealthSnapshot,
-    degraded: Vec<crate::daemon::DaemonDegradedStatus>,
-    faulted: Option<crate::daemon::DaemonFaultState>,
+    degraded: Vec<crate::daemon::state::DaemonDegradedStatus>,
+    faulted: Option<crate::daemon::state::DaemonFaultState>,
     unavailable_features: Vec<&'static str>,
 }
 
@@ -831,7 +850,7 @@ fn remote_autotune_mode_limit_rejection(mode: DaemonMode) -> AutotuneStartSecuri
 
 fn rejection_from_policy_explanation(
     mode: DaemonMode,
-    explanation: crate::daemon::PolicyExplanation,
+    explanation: crate::daemon::explain::PolicyExplanation,
     auth_error: Option<StatusCode>,
 ) -> Option<AutotuneStartSecurityRejection> {
     match explanation.decision {
@@ -993,11 +1012,11 @@ async fn mark_agent_daemon_policy_rejection(
     daemon_state.last_decision = Some(daemon_decision_state(decision, reason.clone()));
     daemon_state
         .degraded
-        .push(crate::daemon::DaemonDegradedStatus {
+        .push(crate::daemon::state::DaemonDegradedStatus {
             category: "agent".to_owned(),
             message: reason.clone(),
         });
-    daemon_state.faulted = Some(crate::daemon::DaemonFaultState {
+    daemon_state.faulted = Some(crate::daemon::state::DaemonFaultState {
         reason,
         manual_restore_command: Some("stutter daemon emergency-restore".to_owned()),
     });
@@ -2450,7 +2469,7 @@ async fn daemon_restore_handler(
         ));
     } else {
         daemon_state.phase = DaemonPhase::Faulted;
-        daemon_state.faulted = Some(crate::daemon::DaemonFaultState {
+        daemon_state.faulted = Some(crate::daemon::state::DaemonFaultState {
             reason: format!(
                 "daemon restore did not complete safely status={:?}",
                 outcome.status
@@ -3136,7 +3155,7 @@ mod tests {
             mode: DaemonMode::ApplyLowRisk,
             phase: DaemonPhase::Decide,
             cooldown_until_unix_nanos: Some(crate::audit::unix_nanos_now() + 3_600_000_000_000),
-            degraded: vec![crate::daemon::DaemonDegradedStatus {
+            degraded: vec![crate::daemon::state::DaemonDegradedStatus {
                 category: "data_quality".to_owned(),
                 message: "insufficient samples".to_owned(),
             }],
@@ -3191,7 +3210,7 @@ mod tests {
                 active_targets: 2,
                 comm: Some("game".to_owned()),
             }),
-            degraded: vec![crate::daemon::DaemonDegradedStatus {
+            degraded: vec![crate::daemon::state::DaemonDegradedStatus {
                 category: "data_quality".to_owned(),
                 message: "insufficient samples".to_owned(),
             }],
