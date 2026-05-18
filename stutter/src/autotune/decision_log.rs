@@ -208,6 +208,13 @@ mod tests {
     }
 
     #[test]
+    fn default_decision_log_path_uses_stutter_state_location() {
+        let path = default_decision_log_path();
+
+        assert!(path.ends_with(".local/state/stutter/autotune/decisions.jsonl"));
+    }
+
+    #[test]
     fn decision_entry_serializes_with_requested_schema_fields() {
         let mut entry = DecisionJsonlEntry::observe_noop(
             true,

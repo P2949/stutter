@@ -199,7 +199,7 @@ pub fn should_rollback_candidate(result: &ExperimentResult) -> bool {
 mod tests {
     use super::*;
     use crate::{
-        actions::RollbackToken,
+        actions::{RollbackToken, fake_action::FakeAction},
         affinity::CpuMask,
         autotune::{candidate::CandidateAction, experiment::WindowScore, kept::ActiveProfileState},
         process_tree::TaskClass,
@@ -367,6 +367,29 @@ mod tests {
         }
         assert_eq!(experiment.phase, ExperimentPhase::Cooldown);
         assert!(!experiment.has_rollback());
+    }
+
+    #[test]
+    fn action_wrapper_resolution_rolls_back_and_exposes_metadata() {
+        let mut experiment = active_experiment();
+        let action = FakeAction::new();
+
+        let resolution = resolve_experiment_with_action(
+            &mut experiment,
+            &ExperimentResult::Regressed {
+                regression_percent: 9.25,
+            },
+            &action,
+        )
+        .unwrap();
+
+        assert!(resolution.entered_cooldown());
+        assert_eq!(resolution.experiment_id().as_str(), "experiment-1");
+        assert!(resolution.reason().contains("regressed by 9.25%"));
+        assert_eq!(experiment.phase, ExperimentPhase::Cooldown);
+        assert!(!experiment.has_rollback());
+        assert!(action.rolled_back());
+        assert_eq!(action.events(), vec!["rollback"]);
     }
 
     #[test]

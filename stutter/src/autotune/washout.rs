@@ -371,6 +371,14 @@ mod tests {
     }
 
     #[test]
+    fn washout_state_exposes_runner_start_timestamp() {
+        let state = state();
+
+        assert_eq!(state.started_unix_nanos(), 1_000_000_000);
+        assert_eq!(state.config().washout_ms(), 10_000);
+    }
+
+    #[test]
     fn defaults_use_ten_second_washout() {
         let config = WashoutWindowConfig::default();
 
@@ -442,6 +450,8 @@ mod tests {
             Ok(verify_state(true, 31)),
         );
 
+        assert!(status.is_complete());
+
         match status {
             WashoutWindowStatus::Complete {
                 elapsed_ms,
@@ -463,6 +473,12 @@ mod tests {
         );
 
         assert!(status.is_failed());
+        match &status {
+            WashoutWindowStatus::Failed { elapsed_ms, .. } => {
+                assert_eq!(*elapsed_ms, 1_000);
+            }
+            other => panic!("expected failed washout, got {other:?}"),
+        }
         assert!(
             status
                 .reasons()
