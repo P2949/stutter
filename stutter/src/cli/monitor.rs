@@ -325,7 +325,7 @@ pub(super) struct BenchArgs {
     pub(super) role: String,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct MonitorArgPresence {
     pub(super) watch_poll_ms: bool,
     pub(super) follow_exec: bool,
@@ -706,12 +706,7 @@ pub(super) fn monitor_config_from_monitor_args(
     recording_mode: RecordingMode,
 ) -> anyhow::Result<MonitorConfig> {
     let file_config = crate::config_file::load_user_config()?;
-    monitor_config_from_monitor_args_with_file_and_presence(
-        args,
-        file_config,
-        recording_mode,
-        MonitorArgPresence::default(),
-    )
+    monitor_config_from_monitor_args_with_file(args, file_config, recording_mode)
 }
 
 pub(super) fn monitor_config_from_monitor_args_with_presence(
@@ -719,6 +714,10 @@ pub(super) fn monitor_config_from_monitor_args_with_presence(
     recording_mode: RecordingMode,
     cli_presence: MonitorArgPresence,
 ) -> anyhow::Result<MonitorConfig> {
+    if cli_presence == MonitorArgPresence::default() {
+        return monitor_config_from_monitor_args(args, recording_mode);
+    }
+
     let file_config = crate::config_file::load_user_config()?;
     monitor_config_from_monitor_args_with_file_and_presence(
         args,
