@@ -62,7 +62,9 @@ pub mod artifacts {
 pub mod autotune {
     //! Public autotune command, planning, status, and data contract façade.
 
-    pub use crate::autotune::{AutotuneCommandInput, DEFAULT_MIN_FOCUS_CONFIDENCE, autotune_command};
+    pub use crate::autotune::{
+        AutotuneCommandInput, DEFAULT_MIN_FOCUS_CONFIDENCE, autotune_command,
+    };
 
     pub mod candidate {
         //! Public candidate plan and suggestion contracts.
@@ -74,11 +76,12 @@ pub mod autotune {
             CgroupPlacementActionPlan, CpuAffinityProfilePlan, CpuPowerActionPlan,
             FakeCandidatePlan, GeneratedCpuSetPolicy, GeneratedProfileCandidatePlan,
             GeneratedTopologyProfilePlan, GpuPowerActionPlan, IoPrioActionPlan,
-            IrqAffinityActionPlan, NiceActionPlan, RealCandidateDryRunner, RejectedCandidateProfile,
-            UclampActionPlan, VmKnobActionPlan, apply_candidate_plan_file, candidate_plan_path,
-            default_candidate_plan_dir, dry_run_candidate, dry_run_candidates,
-            dry_run_candidates_with_runner, dry_run_record_from_action_state,
-            generate_profile_candidate_plan, generate_profile_candidate_plan_for_observation,
+            IrqAffinityActionPlan, NiceActionPlan, RealCandidateDryRunner,
+            RejectedCandidateProfile, UclampActionPlan, VmKnobActionPlan,
+            apply_candidate_plan_file, candidate_plan_path, default_candidate_plan_dir,
+            dry_run_candidate, dry_run_candidates, dry_run_candidates_with_runner,
+            dry_run_record_from_action_state, generate_profile_candidate_plan,
+            generate_profile_candidate_plan_for_observation,
             generate_profile_candidate_plan_with_history, generate_profile_candidates,
             generate_profile_candidates_for_observation,
             generate_topology_aware_profile_candidate_plan,
@@ -244,8 +247,7 @@ pub mod config {
 
         pub use crate::config::merge::{
             ApiOverrides, CliOverrides, ConfigSources, DefaultConfig, PresetConfig,
-            RuntimeOverrides, merge_config_sources_checked,
-            merge_config_sources_effective_checked,
+            RuntimeOverrides, merge_config_sources_checked, merge_config_sources_effective_checked,
         };
     }
 
@@ -253,10 +255,10 @@ pub mod config {
         //! Public monitor configuration model contracts.
 
         pub use crate::config::model::{
-            AlertConfig, CpuPerfConfig, EbpfSizingConfig, FocusConfig, HwmonConfig,
-            MangoHudConfig, MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig,
-            RecordingRetentionConfig, RemoteConfig, RuntimeSlicesConfig, SafetyConfig,
-            StreamConfig, TargetConfig, TimingConfig, UiConfig, WatchConfig,
+            AlertConfig, CpuPerfConfig, EbpfSizingConfig, FocusConfig, HwmonConfig, MangoHudConfig,
+            MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, RecordingRetentionConfig,
+            RemoteConfig, RuntimeSlicesConfig, SafetyConfig, StreamConfig, TargetConfig,
+            TimingConfig, UiConfig, WatchConfig,
         };
     }
 
@@ -287,45 +289,41 @@ pub mod config {
 pub mod daemon {
     //! Public daemon policy, state, health, lifecycle, and runtime contracts.
 
-    pub use crate::{
-        daemon::{
-            ActionDescriptor, ActionEffectScope, ActionSource, AutotuneSubsystem,
-            AutotuneSubsystemEvent, CapabilityProbe, CapabilityProbeRoot, CgroupTargetRole,
-            DaemonAcceptanceReport, DaemonAcceptanceStep, DaemonAutotuneConfig,
-            DaemonCapabilities, DaemonCgroupTargetsConfig, DaemonConfig, DaemonDecisionState,
-            DaemonDegradedStatus, DaemonExperimentState, DaemonFaultState, DaemonHealthConfig,
-            DaemonLifecycleAction, DaemonLifecycleEvent, DaemonLifecycleInputs,
-            DaemonLifecyclePolicy, DaemonLifecycleTransition, DaemonMode, DaemonOverheadBudget,
-            DaemonOverheadIssue, DaemonOverheadMonitor, DaemonOverheadReport,
-            DaemonOverheadSnapshot, DaemonPhase, DaemonPolicy, DaemonPolicyBuildInput,
-            DaemonPolicyContext, DaemonPolicyExplanation, DaemonPolicyVerdict, DaemonPreset,
-            DaemonProfileEnvironment, DaemonProfileMemory, DaemonProfilePartition,
-            DaemonProfileValidation, DaemonRemoteConfig, DaemonRetentionConfig,
-            DaemonRollbackState, DaemonRuntime, DaemonRuntimeConfig, DaemonRuntimeEvent,
-            DaemonSafetyConfig, DaemonSelfHealingAction, DaemonSoakBudget, DaemonSoakConfig,
-            DaemonSoakFailure, DaemonSoakMetrics, DaemonSoakProfile, DaemonSoakReport,
-            DaemonSoakScenarioReport, DaemonState, DaemonStateSnapshotWriter, DaemonStateStore,
-            DaemonStatusExplanation, DaemonTargetConfig, DaemonTargetState, DaemonTransition,
-            DaemonWatchdogConfig, DaemonWatchdogInputs, DaemonWatchdogIssue,
-            DaemonWatchdogReport, DaemonWorkloadProfile, MonitorShutdownSummary,
-            MonitorSubsystem, MonitorSubsystemConfig, PolicyDecisionKind, PolicyExplainLine,
-            PolicyExplanation, PolicyIntent, PolicyRejection, PolicyRuleEvaluation,
-            PrivilegeCommandAllowlist, PrivilegeCommandRequest, PrivilegeDecision,
-            PrivilegeProcessRole, PrivilegeTransport, PrivilegedOperation, RemoteApplyPolicy,
-            RemotePolicyContext, RollbackRequirement, SoakAssertion, SoakScenario, SoakTick,
-            StartupRecoveryDaemonStateInput, SuspendResumeDetector, SystemHealthInputs,
-            SystemHealthIssue, SystemHealthMonitor, SystemHealthProbeRoot, SystemHealthSnapshot,
-            SystemHealthState, SystemHealthThresholds, DAEMON_STATE_SCHEMA_VERSION,
-            build_daemon_policy, daemon_decision_state, daemon_state_for_agent_fault,
-            daemon_state_for_record_start, daemon_state_for_startup_recovery_snapshot,
-            daemon_state_from_startup_recovery, default_daemon_state_snapshot_path,
-            evaluate_daemon_lifecycle_event, evaluate_daemon_overhead, evaluate_daemon_watchdog,
-            evaluate_system_health, load_daemon_state, policy_context_from_daemon_status,
-            policy_context_from_daemon_status_at, privileged_operation_audit_event,
-            run_fake_daemon_acceptance_suite, run_fake_daemon_soak, run_scenario_daemon_soak,
-            safety_class_for_rollback_token,
-        },
-        daemon::config::{DaemonCandidateConfidenceConfig, normalize_cgroup_target_path},
+    pub use crate::daemon::{
+        ActionDescriptor, ActionEffectScope, ActionSource, AutotuneSubsystem,
+        AutotuneSubsystemEvent, CapabilityProbe, CapabilityProbeRoot, CgroupTargetRole,
+        DAEMON_STATE_SCHEMA_VERSION, DaemonAcceptanceReport, DaemonAcceptanceStep,
+        DaemonAutotuneConfig, DaemonCapabilities, DaemonCgroupTargetsConfig, DaemonConfig,
+        DaemonDecisionState, DaemonDegradedStatus, DaemonExperimentState, DaemonFaultState,
+        DaemonHealthConfig, DaemonLifecycleAction, DaemonLifecycleEvent, DaemonLifecycleInputs,
+        DaemonLifecyclePolicy, DaemonLifecycleTransition, DaemonMode, DaemonOverheadBudget,
+        DaemonOverheadIssue, DaemonOverheadMonitor, DaemonOverheadReport, DaemonOverheadSnapshot,
+        DaemonPhase, DaemonPolicy, DaemonPolicyBuildInput, DaemonPolicyContext,
+        DaemonPolicyExplanation, DaemonPolicyVerdict, DaemonPreset, DaemonProfileEnvironment,
+        DaemonProfileMemory, DaemonProfilePartition, DaemonProfileValidation, DaemonRemoteConfig,
+        DaemonRetentionConfig, DaemonRollbackState, DaemonRuntime, DaemonRuntimeConfig,
+        DaemonRuntimeEvent, DaemonSafetyConfig, DaemonSelfHealingAction, DaemonSoakBudget,
+        DaemonSoakConfig, DaemonSoakFailure, DaemonSoakMetrics, DaemonSoakProfile,
+        DaemonSoakReport, DaemonSoakScenarioReport, DaemonState, DaemonStateSnapshotWriter,
+        DaemonStateStore, DaemonStatusExplanation, DaemonTargetConfig, DaemonTargetState,
+        DaemonTransition, DaemonWatchdogConfig, DaemonWatchdogInputs, DaemonWatchdogIssue,
+        DaemonWatchdogReport, DaemonWorkloadProfile, MonitorShutdownSummary, MonitorSubsystem,
+        MonitorSubsystemConfig, PolicyDecisionKind, PolicyExplainLine, PolicyExplanation,
+        PolicyIntent, PolicyRejection, PolicyRuleEvaluation, PrivilegeCommandAllowlist,
+        PrivilegeCommandRequest, PrivilegeDecision, PrivilegeProcessRole, PrivilegeTransport,
+        PrivilegedOperation, RemoteApplyPolicy, RemotePolicyContext, RollbackRequirement,
+        SoakAssertion, SoakScenario, SoakTick, StartupRecoveryDaemonStateInput,
+        SuspendResumeDetector, SystemHealthInputs, SystemHealthIssue, SystemHealthMonitor,
+        SystemHealthProbeRoot, SystemHealthSnapshot, SystemHealthState, SystemHealthThresholds,
+        build_daemon_policy,
+        config::{DaemonCandidateConfidenceConfig, normalize_cgroup_target_path},
+        daemon_decision_state, daemon_state_for_agent_fault, daemon_state_for_record_start,
+        daemon_state_for_startup_recovery_snapshot, daemon_state_from_startup_recovery,
+        default_daemon_state_snapshot_path, evaluate_daemon_lifecycle_event,
+        evaluate_daemon_overhead, evaluate_daemon_watchdog, evaluate_system_health,
+        load_daemon_state, policy_context_from_daemon_status, policy_context_from_daemon_status_at,
+        privileged_operation_audit_event, run_fake_daemon_acceptance_suite, run_fake_daemon_soak,
+        run_scenario_daemon_soak, safety_class_for_rollback_token,
     };
 }
 
@@ -378,11 +376,10 @@ pub mod focus {
 
     pub use crate::focus::{
         Classification, FocusCache, FocusCounters, FocusDecision, FocusGroup, FocusGroupKind,
-        FocusPolicy, FocusProcess, FocusResolver, FocusScoreBreakdown, FocusSnapshot,
-        PriorityBand, ProcessIdentity, ResolvedFocus, SafetyWarning, SystemTaskClass,
-        ThreadIdentity, build_focus_snapshot_from_processes, classify_process, classify_thread,
-        focus_snapshot_at, priority_band_for_class, safety_warnings_for_group,
-        situation_for_group,
+        FocusPolicy, FocusProcess, FocusResolver, FocusScoreBreakdown, FocusSnapshot, PriorityBand,
+        ProcessIdentity, ResolvedFocus, SafetyWarning, SystemTaskClass, ThreadIdentity,
+        build_focus_snapshot_from_processes, classify_process, classify_thread, focus_snapshot_at,
+        priority_band_for_class, safety_warnings_for_group, situation_for_group,
     };
 }
 
@@ -414,13 +411,13 @@ pub mod process_tree {
 
     pub use crate::process_tree::{
         CachedProcInfo, CompiledPattern, DEFAULT_MAX_PROC_SCAN_MS, DEFAULT_MAX_THREADS_PER_PROCESS,
-        ProcInfo, ProcessCache, ScanBudget, ScanBudgetReport, TargetDiffAction,
-        TargetDiffRef, TargetSnapshot, TargetSnapshotInput, TaskClass, TaskFilters, TaskInfo,
-        classify_task, classify_task_with_context, collect_cgroup_pids_at, descendants_of,
-        diff_tasks_ref, expand_tasks_at, find_auto_target_pids, parse_proc_stat_policy,
-        parse_proc_stat_starttime, process_starttime_at, render_tree, render_tree_at,
-        same_logical_task, scan_processes_at, sched_policy_name, target_snapshot, task_comm_at,
-        thread_ids_of_at, thread_ids_of_at_limited,
+        ProcInfo, ProcessCache, ScanBudget, ScanBudgetReport, TargetDiffAction, TargetDiffRef,
+        TargetSnapshot, TargetSnapshotInput, TaskClass, TaskFilters, TaskInfo, classify_task,
+        classify_task_with_context, collect_cgroup_pids_at, descendants_of, diff_tasks_ref,
+        expand_tasks_at, find_auto_target_pids, parse_proc_stat_policy, parse_proc_stat_starttime,
+        process_starttime_at, render_tree, render_tree_at, same_logical_task, scan_processes_at,
+        sched_policy_name, target_snapshot, task_comm_at, thread_ids_of_at,
+        thread_ids_of_at_limited,
     };
 }
 
@@ -451,10 +448,10 @@ pub mod report {
         ForegroundReportSummary, FrameOutlierView, FramePacingSummary, HtmlChartArtifacts,
         HtmlReportModel, PressureKind, PressurePeakWindow, PressureTimelineCoverage,
         PressureTimelineSummary, PressureWindow, RegressionCheckSummary, RegressionMetric,
-        RegressionViolation, ReportAnalysisJson, RuntimeSliceAnalysisSummary,
-        RuntimeThreadSummary, SpikeClusterAnalysis, SpikeClusterSource, SpikeDensityBucket,
-        TaskHtmlRow, build_report_analysis, check_regression, print_batch_report,
-        print_diff_report, print_report, write_html_report,
+        RegressionViolation, ReportAnalysisJson, RuntimeSliceAnalysisSummary, RuntimeThreadSummary,
+        SpikeClusterAnalysis, SpikeClusterSource, SpikeDensityBucket, TaskHtmlRow,
+        build_report_analysis, check_regression, print_batch_report, print_diff_report,
+        print_report, write_html_report,
     };
 }
 

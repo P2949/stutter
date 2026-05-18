@@ -402,6 +402,11 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
         reason: "existing broad regression test module pending future split",
     },
     OversizedRustFileAllowance {
+        path: "src/architecture_tests.rs",
+        max_lines: 2_416,
+        reason: "Proposal 31 public API facade tests intentionally extend architecture gates pending future split",
+    },
+    OversizedRustFileAllowance {
         path: "src/process_tree.rs",
         max_lines: 2_381,
         reason: "existing process tree scanner/classifier implementation pending future split, plus module-level line additions",
@@ -480,11 +485,6 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
         path: "src/report/mod.rs",
         max_lines: 1_545,
         reason: "existing report public module and tests pending future split",
-    },
-    OversizedRustFileAllowance {
-        path: "src/architecture_tests.rs",
-        max_lines: 2_400,
-        reason: "existing architecture boundary test module plus the explicit file-size, unwrap/expect, and no-printing guards",
     },
     OversizedRustFileAllowance {
         path: "src/cli/report.rs",

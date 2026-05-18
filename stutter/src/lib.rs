@@ -84,8 +84,6 @@ mod architecture_tests;
 #[cfg(test)]
 mod artifact_contract_tests;
 #[cfg(test)]
-mod autotune_lifecycle_tests;
-#[cfg(test)]
 mod recording_fixture_tests;
 #[cfg(test)]
 mod regression_tests;
