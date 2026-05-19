@@ -378,8 +378,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/focus/mod.rs",
-        max_lines: 4_030,
-        reason: "existing focus snapshot, scoring, resolver, and classification module pending future split, plus module-level line additions",
+        max_lines: 866,
+        reason: "existing focus snapshot, scoring, resolver, and classification module pending future split, after extracting tests",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/candidate.rs",
@@ -700,6 +700,10 @@ const EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_ALLOWLIST:
     ExistingProductionUnwrapExpectAllowance {
         path: "src/focus/mod.rs",
         reason: "existing focus implementation/tests contain production unwrap/expect calls",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/focus/test_support.rs",
+        reason: "cfg(test)-only focus test support helpers contain unwrap/expect calls for synthetic fixture setup",
     },
     ExistingProductionUnwrapExpectAllowance {
         path: "src/probe_registry.rs",
