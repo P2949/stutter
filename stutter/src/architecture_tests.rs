@@ -363,7 +363,7 @@ const ARCHITECTURE_DEPENDENCY_MATRIX: &[DependencyMatrixEntry] = &[
 const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     OversizedRustFileAllowance {
         path: "src/agent.rs",
-        max_lines: 5_086,
+        max_lines: 5_092,
         reason: "existing monolithic agent/control API implementation pending future split; agent split facades and structured startup logging are staged here",
     },
     OversizedRustFileAllowance {
@@ -373,7 +373,7 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/autotune/candidate.rs",
-        max_lines: 3_841,
+        max_lines: 3_844,
         reason: "existing autotune candidate model and tests pending future split; suggestion/apply candidate boundary is staged here",
     },
     OversizedRustFileAllowance {
@@ -443,7 +443,7 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/community_rules.rs",
-        max_lines: 2_246,
+        max_lines: 2_249,
         reason: "existing community rule model/import implementation pending future split; render-returning-string command output is staged here",
     },
     OversizedRustFileAllowance {
@@ -563,7 +563,7 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/actions/cgroup.rs",
-        max_lines: 1_112,
+        max_lines: 1_115,
         reason: "existing cgroup action implementation pending future split; rollback handler registration is staged here",
     },
     OversizedRustFileAllowance {

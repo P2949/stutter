@@ -829,19 +829,10 @@ where
         Some(Command::Rules(args)) => Ok(AppCommand::Rules(RulesCommandInput {
             command: match args.command {
                 RulesCommand::Import(args) => {
-                    let input =
-                        match crate::commands::input::RulesImportCommandInput::try_from(args) {
-                            Ok(input) => input,
-                            Err(never) => match never {},
-                        };
-                    crate::commands::input::RulesCommand::Import(input)
+                    crate::commands::input::RulesCommand::Import(args.into())
                 }
                 RulesCommand::Check(args) => {
-                    let input = match crate::commands::input::RulesCheckArgs::try_from(args) {
-                        Ok(input) => input,
-                        Err(never) => match never {},
-                    };
-                    crate::commands::input::RulesCommand::Check(input)
+                    crate::commands::input::RulesCommand::Check(args.into())
                 }
                 RulesCommand::List(_) => crate::commands::input::RulesCommand::List,
                 RulesCommand::Status(_) => crate::commands::input::RulesCommand::Status,
