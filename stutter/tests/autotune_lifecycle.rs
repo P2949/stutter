@@ -118,7 +118,7 @@ async fn apply_low_risk_fake_candidate_lifecycle_keeps_and_cleans_journal() -> a
     let journal_path = dir.join("controller-journal.json");
 
     let candidate = CandidateAction::fake(
-        ActionId("test-fake".to_owned()),
+        ActionId::new("test-fake".to_owned()),
         SafetyClass::ReversibleLowRisk,
     );
     let mut config = AutotuneRuntimeConfig::apply_low_risk(None, Some(1234), None)

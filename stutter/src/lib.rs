@@ -29,7 +29,10 @@ pub(crate) mod commands;
 pub(crate) mod community_rules;
 pub(crate) mod config_file;
 pub(crate) mod diagnosis;
+pub(crate) mod display_path_compare;
 pub(crate) mod doctor;
+pub(crate) mod drm_fence_tracepoints;
+pub(crate) mod drm_tracepoints;
 pub(crate) mod ebpf;
 pub(crate) mod ebpf_loader;
 pub(crate) mod flamegraph;
@@ -69,6 +72,8 @@ pub(crate) mod tui;
 pub(crate) mod tune;
 pub(crate) mod validate;
 pub(crate) mod watch;
+pub(crate) mod wayland_presentation;
+pub(crate) mod wayland_probe;
 
 pub use api::error::StutterError;
 

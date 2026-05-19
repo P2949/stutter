@@ -142,7 +142,7 @@ impl CandidateAction {
                 format!("vm_knob changes={}", plan.action.changes.len())
             }
             CandidateAction::Fake { plan } => {
-                format!("fake action_id={}", plan.action_id.0)
+                format!("fake action_id={}", plan.action_id.as_str())
             }
         }
     }

@@ -47,6 +47,83 @@ pub struct ArtifactsSummary {
     pub scx_event_count: u64,
     pub focus_event_count: u64,
     pub foreground_event_count: u64,
+    pub kms_flip_event_count: u64,
+    pub drm_fence_event_count: u64,
+    pub wayland_presentation_event_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct KmsTimingSummary {
+    pub event_count: usize,
+    pub duration_count: usize,
+    pub median_flip_ms: Option<f64>,
+    pub p95_flip_ms: Option<f64>,
+    pub p99_flip_ms: Option<f64>,
+    pub max_flip_ms: Option<f64>,
+    pub scanout_window_estimate: ScanoutWindowEstimate,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ScanoutWindowEstimate {
+    pub estimate_count: usize,
+    pub refresh_period_ns: Option<u64>,
+    pub refresh_period_ms: Option<f64>,
+    pub first_estimated_top_of_screen_visible_ns: Option<u64>,
+    pub first_estimated_bottom_of_screen_visible_ns: Option<u64>,
+    pub last_estimated_top_of_screen_visible_ns: Option<u64>,
+    pub last_estimated_bottom_of_screen_visible_ns: Option<u64>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct DrmFenceTimingSummary {
+    pub event_count: usize,
+    pub wait_interval_count: usize,
+    pub median_wait_ms: Option<f64>,
+    pub p95_wait_ms: Option<f64>,
+    pub p99_wait_ms: Option<f64>,
+    pub max_wait_ms: Option<f64>,
+    pub render_gpu_wait_count: usize,
+    pub display_gpu_wait_count: usize,
+    pub cross_gpu_candidate_count: usize,
+    pub waits_near_frame_outliers: usize,
+    pub waits_near_kms_delays: usize,
+    pub top_waits: Vec<DrmFenceWaitSummary>,
+    pub notes: Vec<String>,
+    pub confidence: String,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct DrmFenceWaitSummary {
+    pub elapsed_ms: u64,
+    pub duration_ms: Option<f64>,
+    pub source: String,
+    pub gpu_role: Option<String>,
+    pub context: Option<u64>,
+    pub seqno: Option<u64>,
+    pub correlation_basis: String,
+    pub confidence: String,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct WaylandPresentationSummary {
+    pub event_count: usize,
+    pub presented_count: usize,
+    pub discarded_count: usize,
+    pub zero_copy_count: usize,
+    pub zero_copy_ratio: Option<f64>,
+    pub source_counts: BTreeMap<String, usize>,
+    pub surface_role_counts: BTreeMap<String, usize>,
+    pub median_commit_to_present_ms: Option<f64>,
+    pub p95_commit_to_present_ms: Option<f64>,
+    pub p99_commit_to_present_ms: Option<f64>,
+    pub max_commit_to_present_ms: Option<f64>,
+    pub delays_near_frame_outliers: usize,
+    pub delays_near_kms_delays: usize,
+    pub compositor_queue_candidate_count: usize,
+    pub outputs_seen: Vec<String>,
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -179,6 +256,9 @@ pub struct ReportAnalysisJson {
     pub data_quality: DataQualitySummary,
     pub focus_summary: FocusReportSummary,
     pub foreground_summary: ForegroundReportSummary,
+    pub kms_timing: KmsTimingSummary,
+    pub drm_fence_timing: DrmFenceTimingSummary,
+    pub wayland_presentation: WaylandPresentationSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

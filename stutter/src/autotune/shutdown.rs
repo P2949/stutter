@@ -68,7 +68,7 @@ impl ActiveAutotuneAction {
         }
 
         Some(Self {
-            action_id: descriptor.action_id.0,
+            action_id: descriptor.action_id.into_string(),
             action_kind: descriptor.action_kind,
             safety_class: descriptor.safety_class,
             rollback: kept.rollback.clone(),

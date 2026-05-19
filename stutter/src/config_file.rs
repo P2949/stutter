@@ -66,6 +66,7 @@ pub struct UserConfigFile {
     pub daemon_allow_system_wide_apply: Option<bool>,
     pub daemon_allow_high_risk: Option<bool>,
     pub daemon_allow_medium_risk_apply: Option<bool>,
+    pub system_wide_allowlist: Option<crate::daemon::config::DaemonSystemWideAllowlistConfig>,
     pub autotune: Option<AutotuneConfigFile>,
     pub community_rules: Option<CommunityRulesConfigFile>,
     pub agent: Option<AgentConfigFile>,
@@ -80,6 +81,11 @@ pub struct AutotuneConfigFile {
     pub allow_cpu_power_on_battery: Option<bool>,
     pub privileged_worker_socket: Option<PathBuf>,
     pub unsafe_in_process_privileged_worker: Option<bool>,
+    pub manage_privileged_worker: Option<bool>,
+    pub privileged_worker_restart_limit: Option<u32>,
+    pub external_mutation_policy:
+        Option<crate::autotune::external_mutation::ExternalMutationPolicy>,
+    pub high_risk_dry_run: Option<bool>,
     pub workload_policy: Option<DaemonWorkloadPolicyConfigFile>,
     pub workload_policy_rules: Option<Vec<WorkloadPolicyRuleConfigFile>>,
 }
@@ -330,6 +336,9 @@ pub fn apply_daemon_user_config_overrides(
     if let Some(allow_high_risk) = user_config.daemon_allow_high_risk {
         daemon_config.safety.allow_high_risk = allow_high_risk;
     }
+    if let Some(allowlist) = user_config.system_wide_allowlist.clone() {
+        daemon_config.safety.system_wide_allowlist = allowlist;
+    }
     if let Some(allow_medium_risk_apply) = user_config
         .autotune
         .as_ref()
@@ -358,6 +367,34 @@ pub fn apply_daemon_user_config_overrides(
         .and_then(|autotune| autotune.unsafe_in_process_privileged_worker)
     {
         daemon_config.autotune.unsafe_in_process_privileged_worker = unsafe_in_process;
+    }
+    if let Some(manage_worker) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.manage_privileged_worker)
+    {
+        daemon_config.autotune.manage_privileged_worker = manage_worker;
+    }
+    if let Some(restart_limit) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.privileged_worker_restart_limit)
+    {
+        daemon_config.autotune.privileged_worker_restart_limit = restart_limit;
+    }
+    if let Some(policy) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.external_mutation_policy)
+    {
+        daemon_config.autotune.external_mutation_policy = policy;
+    }
+    if let Some(high_risk_dry_run) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.high_risk_dry_run)
+    {
+        daemon_config.autotune.high_risk_dry_run = high_risk_dry_run;
     }
     if let Ok(Some((_field, rules))) = workload_policy_rule_configs_from_user_config(user_config)
         && let Ok(workload_policy) = parse_workload_policy_rule_configs(rules)
@@ -515,6 +552,14 @@ pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
         anyhow::bail!(
             "autotune.unsafe_in_process_privileged_worker requires experimental = true in the user config"
         );
+    }
+    if config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.privileged_worker_restart_limit)
+        == Some(0)
+    {
+        anyhow::bail!("autotune.privileged_worker_restart_limit must be greater than zero");
     }
     Ok(())
 }

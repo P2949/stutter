@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+pub use stutter_core::ids::ActionId;
 
 use crate::actions::token::RollbackToken;
 
@@ -36,9 +37,6 @@ pub enum SafetyClass {
     ReversibleMediumRisk,
     HighRisk,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ActionId(pub String);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionWarning {

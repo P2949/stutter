@@ -66,7 +66,7 @@ pub fn build_config_explain_output_from_user_config(
 
 pub fn daemon_config_explain_descriptor() -> ActionDescriptor {
     ActionDescriptor {
-        action_id: ActionId("daemon-config-explain".to_owned()),
+        action_id: ActionId::new("daemon-config-explain".to_owned()),
         action_kind: "daemon-config-explain".to_owned(),
         safety_class: SafetyClass::ObserveOnly,
         effect_scope: crate::daemon::policy::ActionEffectScope::ObserveOnly,

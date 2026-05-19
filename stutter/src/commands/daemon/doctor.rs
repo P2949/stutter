@@ -180,6 +180,11 @@ pub fn render_daemon_doctor_text(report: &DaemonDoctorReport) -> String {
             .unwrap_or("unknown")
     ));
     let unavailable = report.capabilities.unavailable_features();
+    if let Some(reachable) = report.capabilities.privileged_worker_socket_reachable {
+        text.push_str(&format!(
+            "privileged_worker_socket_reachable: {reachable}\n"
+        ));
+    }
     if unavailable.is_empty() {
         text.push_str("unavailable_features: none\n");
     } else {

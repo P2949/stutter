@@ -279,7 +279,7 @@ impl GpuPowerAction {
 
 impl TuningAction for GpuPowerAction {
     fn id(&self) -> ActionId {
-        ActionId(format!(
+        ActionId::new(format!(
             "gpu-power:set:card={}:dpm={}:profile={}",
             self.drm_card,
             optional_value_label(self.power_dpm_force_performance_level.as_deref()),
@@ -679,7 +679,7 @@ mod tests {
 
         assert_eq!(
             action.id(),
-            ActionId("gpu-power:set:card=card0:dpm=high:profile=3D_FULL_SCREEN".to_owned())
+            ActionId::new("gpu-power:set:card=card0:dpm=high:profile=3D_FULL_SCREEN".to_owned())
         );
         assert_eq!(
             action.describe(),

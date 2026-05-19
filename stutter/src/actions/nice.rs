@@ -188,7 +188,7 @@ impl NiceAction {
 
 impl TuningAction for NiceAction {
     fn id(&self) -> ActionId {
-        ActionId(format!(
+        ActionId::new(format!(
             "nice:set:{}:targets:{}",
             self.nice,
             self.targets.len()
@@ -511,7 +511,10 @@ mod tests {
     fn action_id_and_description_include_requested_nice() {
         let action = action_for(42, 7);
 
-        assert_eq!(action.id(), ActionId("nice:set:7:targets:1".to_owned()));
+        assert_eq!(
+            action.id(),
+            ActionId::new("nice:set:7:targets:1".to_owned())
+        );
         assert_eq!(action.describe(), "set nice=7 for task(s) [42]");
     }
 

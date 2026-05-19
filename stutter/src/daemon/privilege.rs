@@ -6,6 +6,8 @@ use std::{
         net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
+    time::{Duration, Instant},
 };
 
 use anyhow::Context;
@@ -297,7 +299,7 @@ impl PrivilegeAuditSink {
             input.request_kind,
             input
                 .descriptor
-                .map(|descriptor| descriptor.action_id.0.as_str())
+                .map(|descriptor| descriptor.action_id.as_str())
                 .unwrap_or("none"),
             input.reason_code,
             input.detail
@@ -317,7 +319,7 @@ impl PrivilegeAuditSink {
                 command: "daemon_privilege".to_owned(),
                 action_id: input
                     .descriptor
-                    .map(|descriptor| descriptor.action_id.0.clone())
+                    .map(|descriptor| descriptor.action_id.as_str().to_owned())
                     .or_else(|| Some(input.operation.audit_action_id().to_owned())),
                 safety_class: input
                     .descriptor
@@ -1082,6 +1084,120 @@ impl PrivilegedActionService for UnixSocketPrivilegedActionService {
             other => anyhow::bail!("privileged_worker_unexpected_response: {other:?}"),
         }
     }
+}
+
+#[derive(Debug)]
+pub struct PrivilegedWorkerHandle {
+    child: Child,
+    socket_path: PathBuf,
+    restart_count: u32,
+}
+
+impl PrivilegedWorkerHandle {
+    pub fn spawn(socket_path: &Path) -> anyhow::Result<Self> {
+        let _ = fs::remove_file(socket_path);
+        prepare_privileged_worker_socket_path(socket_path)?;
+        let child = spawn_privileged_worker_child(socket_path)?;
+        wait_for_privileged_worker_socket(socket_path)?;
+        log::info!(
+            "privileged_worker_started socket={} pid={}",
+            socket_path.display(),
+            child.id()
+        );
+        Ok(Self {
+            child,
+            socket_path: socket_path.to_path_buf(),
+            restart_count: 0,
+        })
+    }
+
+    pub fn restart_count(&self) -> u32 {
+        self.restart_count
+    }
+
+    pub fn is_alive(&mut self) -> bool {
+        self.child
+            .try_wait()
+            .map(|status| status.is_none())
+            .unwrap_or(false)
+    }
+
+    pub fn restart(&mut self) -> anyhow::Result<()> {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = fs::remove_file(&self.socket_path);
+        prepare_privileged_worker_socket_path(&self.socket_path)?;
+        let child = spawn_privileged_worker_child(&self.socket_path)?;
+        wait_for_privileged_worker_socket(&self.socket_path)?;
+        self.restart_count = self.restart_count.saturating_add(1);
+        log::info!(
+            "privileged_worker_restarted socket={} restart_count={} pid={}",
+            self.socket_path.display(),
+            self.restart_count,
+            child.id()
+        );
+        self.child = child;
+        Ok(())
+    }
+
+    pub fn shutdown_gracefully(&mut self, timeout_ms: u64) -> anyhow::Result<()> {
+        if let Ok(mut stream) = UnixStream::connect(&self.socket_path) {
+            serde_json::to_writer(&mut stream, &PrivilegedWorkerRequest::Shutdown)?;
+            stream.write_all(b"\n")?;
+            stream.flush()?;
+        }
+
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        loop {
+            if self.child.try_wait()?.is_some() {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                self.child.kill().ok();
+                self.child.wait().ok();
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+}
+
+impl Drop for PrivilegedWorkerHandle {
+    fn drop(&mut self) {
+        self.child.kill().ok();
+        self.child.wait().ok();
+        fs::remove_file(&self.socket_path).ok();
+    }
+}
+
+fn spawn_privileged_worker_child(socket_path: &Path) -> anyhow::Result<Child> {
+    let socket = socket_path.to_str().context("socket path is not UTF-8")?;
+    Command::new(std::env::current_exe()?)
+        .args(["privileged-worker", "--socket", socket])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| {
+            format!(
+                "failed to spawn privileged worker for socket {}",
+                socket_path.display()
+            )
+        })
+}
+
+fn wait_for_privileged_worker_socket(socket_path: &Path) -> anyhow::Result<()> {
+    let deadline = Instant::now() + Duration::from_millis(2_000);
+    while Instant::now() < deadline {
+        if socket_path.exists() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    anyhow::bail!(
+        "privileged_worker_socket_not_ready: {} did not appear within 2000ms",
+        socket_path.display()
+    )
 }
 
 pub fn default_privileged_worker_socket_path() -> anyhow::Result<PathBuf> {
@@ -1864,7 +1980,7 @@ mod tests {
 
     fn fake_apply_request() -> CandidateApplyRequest {
         let candidate = CandidateAction::fake(
-            crate::actions::ActionId("fake:privilege".to_owned()),
+            crate::actions::ActionId::new("fake:privilege".to_owned()),
             SafetyClass::ReversibleLowRisk,
         );
         CandidateApplyRequest {

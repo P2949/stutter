@@ -106,6 +106,12 @@ pub(super) struct AutotuneArgs {
         help = "Explicitly unlock live apply-medium-risk for reversible process-local candidates"
     )]
     pub(super) allow_medium_risk: bool,
+
+    #[arg(
+        long = "high-risk-dry-run",
+        help = "In suggest mode, run dry-run diagnostics for manual-only high-risk candidates without enabling apply"
+    )]
+    pub(super) high_risk_dry_run: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -257,5 +263,16 @@ mod tests {
         };
 
         assert_eq!(args.min_focus_confidence, 0.42);
+    }
+
+    #[test]
+    fn autotune_cli_parses_high_risk_dry_run_flag() {
+        let cli = Cli::try_parse_from(["stutter", "autotune", "--high-risk-dry-run"]).unwrap();
+
+        let Some(Command::Autotune(args)) = cli.command else {
+            panic!("expected autotune command");
+        };
+
+        assert!(args.high_risk_dry_run);
     }
 }

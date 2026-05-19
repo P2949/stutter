@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 stutter-common = { path = "../stutter-common", features = ["user"] }
+stutter-core = { path = "../stutter-core" }
 
 anyhow = { workspace = true, default-features = true }
 aya = { workspace = true }
@@ -34,6 +35,8 @@ hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service", "
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tower = "0.5"
 url = "2"
+wayland-client = { version = "0.31.14", optional = true }
+wayland-protocols = { version = "0.32.12", features = ["client"], optional = true }
 tokio = { workspace = true, features = [
     "macros",
     "rt",
@@ -60,6 +63,10 @@ otel = [
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",
     "dep:opentelemetry-otlp",
+]
+wayland-probe = [
+    "dep:wayland-client",
+    "dep:wayland-protocols",
 ]
 
 [build-dependencies]

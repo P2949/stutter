@@ -16,9 +16,11 @@ pub mod error {
 pub mod actions {
     //! Public action descriptors, safety classes, outcomes, and rollback contracts.
 
+    pub use stutter_core::ids::ActionId;
+
     pub use crate::actions::{
-        ActionError, ActionFailure, ActionId, ActionOutcome, ActionPhase, ActionResult,
-        ActionState, ActionTimeout, ActionWarning, CgroupRestoreRecord, CpuPowerRestoreRecord,
+        ActionError, ActionFailure, ActionOutcome, ActionPhase, ActionResult, ActionState,
+        ActionTimeout, ActionWarning, CgroupRestoreRecord, CpuPowerRestoreRecord,
         GpuPowerRestoreRecord, IoPrioRestoreRecord, IrqAffinityRestoreRecord, NiceRestoreRecord,
         PhaseFailure, RestoreAllInput, RestoreAllSummary, RollbackCandidate, RollbackHandler,
         RollbackOutcome, RollbackPreview, RollbackRegistry, RollbackResult, RollbackToken,

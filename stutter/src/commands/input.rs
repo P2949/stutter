@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use crate::{
     autotune::commands::live::AutotuneCommandInput as LiveAutotuneCommandInput,
@@ -25,6 +25,7 @@ pub enum AppCommand {
     Tune(TuneCommandInput),
     Recommend(RecommendCommandInput),
     Check(CheckCommandInput),
+    DisplayPathCompare(DisplayPathCompareCommandInput),
     ConfigCheck(ConfigCheckCommandInput),
     ConfigExplain(DaemonConfigExplainCommandInput),
     AutotuneGenerateProfiles(AutotuneGenerateProfilesCommandInput),
@@ -40,6 +41,8 @@ pub enum AppCommand {
     Probes(ProbesCommandInput),
     ProfileTemplate(ProfileTemplateCommandInput),
     InspectIrqs(InspectIrqsCommandInput),
+    InspectDrmTracepoints(InspectDrmTracepointsCommandInput),
+    WaylandProbe(WaylandProbeCommandInput),
     Agent(AgentCommandInput),
     PrivilegedWorker(PrivilegedWorkerCommandInput),
     DaemonConfigExplain(DaemonConfigExplainCommandInput),
@@ -57,6 +60,7 @@ pub enum AppCommand {
     DaemonAcceptance(DaemonAcceptanceCommandInput),
     DaemonPause(DaemonPauseCommandInput),
     DaemonResume(DaemonResumeCommandInput),
+    DaemonResyncState(DaemonResyncStateCommandInput),
     DaemonRestore(DaemonRestoreCommandInput),
     Completions(CompletionsCommandInput),
     Man(ManCommandInput),
@@ -133,6 +137,13 @@ pub struct ReportCommandInput {
     pub diff: Option<PathBuf>,
     pub filter_class: Option<TaskClass>,
     pub flamegraph: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct DisplayPathCompareCommandInput {
+    pub baseline: PathBuf,
+    pub test: PathBuf,
+    pub json: bool,
 }
 
 #[derive(Debug)]
@@ -275,6 +286,20 @@ pub struct InspectIrqsCommandInput {
 }
 
 #[derive(Debug)]
+pub struct InspectDrmTracepointsCommandInput {
+    pub json: bool,
+    pub events_root: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct WaylandProbeCommandInput {
+    pub duration: Duration,
+    pub output: Option<String>,
+    pub fullscreen: bool,
+    pub out_dir: PathBuf,
+}
+
+#[derive(Debug)]
 pub struct DaemonConfigExplainCommandInput {
     pub json: bool,
     pub preset: Option<String>,
@@ -378,6 +403,12 @@ pub struct DaemonPauseCommandInput;
 
 #[derive(Debug)]
 pub struct DaemonResumeCommandInput;
+
+#[derive(Debug)]
+pub struct DaemonResyncStateCommandInput {
+    pub dry_run: bool,
+    pub json: bool,
+}
 
 #[derive(Debug)]
 pub struct DaemonRestoreCommandInput {

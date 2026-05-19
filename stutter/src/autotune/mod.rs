@@ -37,6 +37,7 @@ pub(crate) mod controller_journal;
 pub(crate) mod domain;
 pub(crate) mod emergency_restore;
 pub(crate) mod experiment;
+pub(crate) mod external_mutation;
 pub(crate) mod generate_profiles;
 pub(crate) mod gpu_focus;
 pub(crate) mod history;

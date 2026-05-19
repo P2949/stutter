@@ -278,7 +278,7 @@ impl VmKnobAction {
 
 impl TuningAction for VmKnobAction {
     fn id(&self) -> ActionId {
-        ActionId(format!(
+        ActionId::new(format!(
             "vm-knobs:set:changes={}",
             self.changes
                 .iter()
@@ -658,7 +658,7 @@ mod tests {
 
         assert_eq!(
             action.id(),
-            ActionId(
+            ActionId::new(
                 "vm-knobs:set:changes=sys/kernel/mm/transparent_hugepage/enabled=madvise,proc/sys/vm/compaction_proactiveness=20".to_owned()
             )
         );

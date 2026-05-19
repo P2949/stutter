@@ -1464,6 +1464,6 @@ mod tests {
             Some("game-main".to_owned())
         );
         assert_eq!(candidate_name_from_action_id("sysfs-restore"), None);
-        assert_eq!(ActionId("test".to_owned()).0, "test");
+        assert_eq!(ActionId::new("test".to_owned()).as_str(), "test");
     }
 }

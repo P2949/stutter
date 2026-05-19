@@ -217,7 +217,7 @@ impl CpuPowerAction {
 
 impl TuningAction for CpuPowerAction {
     fn id(&self) -> ActionId {
-        ActionId(format!(
+        ActionId::new(format!(
             "cpu-power:set:cpus={}:governor={}:epp={}",
             cpu_list_label(&self.cpus),
             optional_value_label(self.scaling_governor.as_deref()),
@@ -605,7 +605,7 @@ mod tests {
 
         assert_eq!(
             action.id(),
-            ActionId("cpu-power:set:cpus=0,1:governor=performance:epp=performance".to_owned())
+            ActionId::new("cpu-power:set:cpus=0,1:governor=performance:epp=performance".to_owned())
         );
         assert_eq!(
             action.describe(),

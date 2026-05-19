@@ -60,7 +60,7 @@ impl LiveExperiment {
     }
 
     pub fn action_id(&self) -> String {
-        self.candidate.action_id().0
+        self.candidate.action_id().into_string()
     }
 }
 
@@ -274,6 +274,10 @@ impl LiveExperimentManager {
     #[cfg(test)]
     pub fn current_experiment(&self) -> Option<&LiveExperiment> {
         self.current.as_ref()
+    }
+
+    pub fn abandon_current_for_external_resync(&mut self) -> Option<LiveExperiment> {
+        self.current.take()
     }
 
     pub fn current_experiment_id(&self) -> Option<ExperimentId> {
@@ -537,7 +541,7 @@ impl LiveExperimentManager {
             candidate.profile_name(),
             observation.now_unix_nanos
         ));
-        let action_id = candidate.action_id().0;
+        let action_id = candidate.action_id().into_string();
         let action_kind = candidate.action_kind().to_owned();
         let safety_class = candidate.safety_class();
 
@@ -1147,7 +1151,7 @@ mod tests {
 
     fn low_risk_candidate() -> CandidateAction {
         CandidateAction::fake(
-            ActionId("fake-low-risk".to_owned()),
+            ActionId::new("fake-low-risk".to_owned()),
             SafetyClass::ReversibleLowRisk,
         )
     }

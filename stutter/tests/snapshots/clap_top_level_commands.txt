@@ -12,12 +12,15 @@ stutter
   recommend
   release
   check
+  compare
   config
   audit
   advisor
   doctor
   profile-template
   inspect-irqs
+  inspect-drm-tracepoints
+  wayland-probe
   autotune
   autotune-status
   agent

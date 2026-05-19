@@ -244,14 +244,14 @@ mod tests {
     }
 
     #[test]
-    fn drm_fence_latency_remains_planned_and_default_off() {
+    fn drm_fence_latency_is_implemented_but_default_off() {
         let entries = probe_catalog_entries();
         let entry = entries
             .iter()
             .find(|entry| entry.key == "drm_fence_latency")
             .expect("drm_fence_latency probe catalog entry must exist");
 
-        assert_eq!(entry.status, ProbeStatus::Planned);
+        assert_eq!(entry.status, ProbeStatus::Implemented);
         assert!(!entry.default_enabled);
         assert_eq!(entry.overhead, ProbeOverhead::High);
     }

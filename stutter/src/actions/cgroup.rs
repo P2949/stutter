@@ -354,7 +354,7 @@ impl CgroupPlacementAction {
 
 impl TuningAction for CgroupPlacementAction {
     fn id(&self) -> ActionId {
-        ActionId(format!(
+        ActionId::new(format!(
             "cgroup:place:{}:targets:{}",
             normalize_cgroup_path(&self.target_cgroup)
                 .map(|path| path.display().to_string())
@@ -821,7 +821,7 @@ mod tests {
 
         assert_eq!(
             action.id(),
-            ActionId("cgroup:place:/stutter/game.slice:targets:1".to_owned())
+            ActionId::new("cgroup:place:/stutter/game.slice:targets:1".to_owned())
         );
         assert_eq!(
             action.describe(),

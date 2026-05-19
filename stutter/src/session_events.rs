@@ -8,8 +8,9 @@ use crate::{
     focus::FocusGroupKind,
     process_tree::TaskInfo,
     recorder::{
-        BlockIoRecord, CpuFreqRecord, FocusEvent, ForegroundEvent, FrameEvent, GpuSample,
-        IrqEventRecord, MigrationEventRecord, SpikeEvent,
+        BlockIoRecord, CpuFreqRecord, DrmFenceEventRecord, FocusEvent, ForegroundEvent, FrameEvent,
+        GpuSample, IrqEventRecord, KmsFlipEventRecord, MigrationEventRecord, SpikeEvent,
+        WaylandPresentationEventRecord,
     },
     scx::ScxEvent,
 };
@@ -63,6 +64,15 @@ pub enum MonitorEvent {
     },
     ScxEvent {
         event: Box<ScxEvent>,
+    },
+    KmsFlipEvent {
+        event: Box<KmsFlipEventRecord>,
+    },
+    DrmFenceEvent {
+        event: Box<DrmFenceEventRecord>,
+    },
+    WaylandPresentationEvent {
+        event: Box<WaylandPresentationEventRecord>,
     },
     Exec {
         elapsed_ms: u64,
@@ -126,6 +136,9 @@ impl MonitorEvent {
             | Self::IoEvent { .. }
             | Self::MigrationEvent { .. }
             | Self::CpuFreqSample { .. }
+            | Self::KmsFlipEvent { .. }
+            | Self::DrmFenceEvent { .. }
+            | Self::WaylandPresentationEvent { .. }
             | Self::LiveDiagnosis { .. } => MonitorEventDeliveryClass::Droppable,
         }
     }
@@ -145,6 +158,9 @@ impl MonitorEvent {
             Self::CpuFreqSample { .. } => "cpu_freq_sample",
             Self::ForegroundEvent { .. } => "foreground_event",
             Self::ScxEvent { .. } => "scx_event",
+            Self::KmsFlipEvent { .. } => "kms_flip_event",
+            Self::DrmFenceEvent { .. } => "drm_fence_event",
+            Self::WaylandPresentationEvent { .. } => "wayland_presentation_event",
             Self::LiveDiagnosis { .. } => "live_diagnosis",
             Self::Exec { .. } => "exec",
             Self::DataQualityWarning { .. } => "data_quality_warning",
@@ -169,6 +185,9 @@ impl MonitorEvent {
             Self::CpuFreqSample { event } => Some(event.elapsed_ms),
             Self::ForegroundEvent { event } => Some(event.elapsed_ms),
             Self::ScxEvent { event } => Some(event.elapsed_ms),
+            Self::KmsFlipEvent { event } => Some(event.elapsed_ms),
+            Self::DrmFenceEvent { event } => Some(event.elapsed_ms),
+            Self::WaylandPresentationEvent { event } => Some(event.elapsed_ms),
             Self::LiveDiagnosis { entry } => Some(entry.elapsed_ms),
             Self::Exec { elapsed_ms, .. } => Some(*elapsed_ms),
             Self::DataQualityWarning { .. } => None,

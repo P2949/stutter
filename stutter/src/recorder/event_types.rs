@@ -209,6 +209,66 @@ pub struct BlockIoRecord {
     pub rwbs: String,
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub struct KmsFlipEventRecord {
+    pub elapsed_ms: u64,
+    pub timestamp_ns: u64,
+    pub source: String,
+    pub card: Option<String>,
+    pub driver: Option<String>,
+    pub crtc_id: Option<u32>,
+    pub connector: Option<String>,
+    pub event_kind: String,
+    pub sequence: Option<u64>,
+    pub request_ns: Option<u64>,
+    pub done_ns: Option<u64>,
+    pub duration_ns: Option<u64>,
+    pub flags: Vec<String>,
+    pub confidence: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub struct DrmFenceEventRecord {
+    pub elapsed_ms: u64,
+    pub timestamp_ns: u64,
+    pub source: String,
+    pub event_kind: String,
+    pub driver: Option<String>,
+    pub card: Option<String>,
+    pub gpu_role: Option<String>,
+    pub pid: Option<u32>,
+    pub tid: Option<u32>,
+    pub comm: Option<String>,
+    pub context: Option<u64>,
+    pub seqno: Option<u64>,
+    pub timeline_hash: Option<u64>,
+    pub wait_start_ns: Option<u64>,
+    pub wait_done_ns: Option<u64>,
+    pub duration_ns: Option<u64>,
+    pub exporter_driver: Option<String>,
+    pub importer_driver: Option<String>,
+    pub correlation_basis: String,
+    pub confidence: String,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub struct WaylandPresentationEventRecord {
+    pub elapsed_ms: u64,
+    pub source: String,
+    pub app_id: Option<String>,
+    pub surface_role: Option<String>,
+    pub commit_ns: Option<u64>,
+    pub presented_ns: Option<u64>,
+    pub commit_to_present_ns: Option<u64>,
+    pub output_name: Option<String>,
+    pub refresh_ns: Option<u64>,
+    pub sequence: Option<u64>,
+    pub zero_copy: Option<bool>,
+    pub discarded: bool,
+    pub flags: Vec<String>,
+    pub confidence: String,
+}
+
 fn default_block_io_correlation_basis() -> Cow<'static, str> {
     Cow::Borrowed("dev+sector")
 }

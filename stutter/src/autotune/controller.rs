@@ -321,7 +321,7 @@ pub fn decide_autotune_transition(
             duration,
             reason: format!(
                 "same action '{}' is still cooling down; minimum_time_between_same_action is {}s",
-                candidate.action_id().0,
+                candidate.action_id().as_str(),
                 policy.minimum_time_between_same_action.as_secs()
             ),
         };
@@ -544,7 +544,7 @@ mod tests {
     }
 
     fn candidate_with_safety_class(safety_class: SafetyClass) -> CandidateAction {
-        CandidateAction::fake(ActionId("test".to_owned()), safety_class)
+        CandidateAction::fake(ActionId::new("test".to_owned()), safety_class)
     }
 
     fn high_quality_observation(score_total: u64) -> AutotuneObservation {

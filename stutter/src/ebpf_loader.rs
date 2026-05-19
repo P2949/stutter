@@ -14,14 +14,24 @@ use aya::{
 };
 use serde::{Deserialize, Serialize};
 use stutter_common::{
+    DRM_FENCE_PROVIDER_AMDGPU, DRM_FENCE_PROVIDER_DMA_FENCE, DRM_FENCE_PROVIDER_DRM_SCHED,
+    DRM_FENCE_PROVIDER_I915, DRM_GPU_ROLE_DISPLAY, DRM_GPU_ROLE_RENDER, DRM_GPU_ROLE_UNKNOWN,
     DROP_BLOCK_START_INSERT_FAILED, DROP_IRQ_START_TIMES_INSERT_FAILED,
     DROP_RINGBUF_RESERVE_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_STALE_ENTRY,
 };
 use tokio::io::unix::AsyncFd;
 
 use crate::{
-    config::TARGET_PIDS_MAX, ebpf::EbpfLoadError, probe_activation::ProbeActivationPlan,
-    probe_registry::ProbeKey, session::targeting::TargetPolicy,
+    config::TARGET_PIDS_MAX,
+    drm_fence_tracepoints::{DrmFenceTracepointDiscovery, DrmFenceTracepointFormat},
+    drm_tracepoints::{
+        DrmTracepointField, DrmTracepointFormat, KmsTracepointAvailability, KmsTracepointProvider,
+        selected_request_format,
+    },
+    ebpf::EbpfLoadError,
+    probe_activation::ProbeActivationPlan,
+    probe_registry::ProbeKey,
+    session::targeting::TargetPolicy,
 };
 
 const DEFAULT_AVAILABLE_MEMORY_BYTES: u64 = 1 << 30;
@@ -205,6 +215,215 @@ pub fn load_and_attach(
         loader.override_global("BLOCK_RQ_COMPLETE_RWBS_OFFSET", offset, true);
     }
 
+    let kms_offsets = kms_provider_tracepoint_offsets(&tracepoints.kms);
+    if let Some(ref offsets) = kms_offsets {
+        match tracepoints.kms.provider {
+            KmsTracepointProvider::I915 => {
+                loader.override_global(
+                    "I915_FLIP_REQUEST_CRTC_OFFSET",
+                    &offsets.request_crtc_offset,
+                    true,
+                );
+                loader.override_global(
+                    "I915_FLIP_REQUEST_PIPE_OFFSET",
+                    &offsets.request_pipe_offset,
+                    true,
+                );
+                loader.override_global(
+                    "I915_FLIP_DONE_CRTC_OFFSET",
+                    &offsets.done_crtc_offset,
+                    true,
+                );
+                loader.override_global(
+                    "I915_FLIP_DONE_PIPE_OFFSET",
+                    &offsets.done_pipe_offset,
+                    true,
+                );
+                loader.override_global(
+                    "I915_FLIP_DONE_SEQUENCE_OFFSET",
+                    &offsets.done_sequence_offset,
+                    true,
+                );
+                loader.override_global(
+                    "I915_FLIP_DONE_SEQUENCE_SIZE",
+                    &offsets.done_sequence_size,
+                    true,
+                );
+            }
+            KmsTracepointProvider::GenericDrm => {
+                loader.override_global(
+                    "DRM_FLIP_REQUEST_CRTC_OFFSET",
+                    &offsets.request_crtc_offset,
+                    true,
+                );
+                loader.override_global(
+                    "DRM_FLIP_REQUEST_PIPE_OFFSET",
+                    &offsets.request_pipe_offset,
+                    true,
+                );
+                loader.override_global(
+                    "DRM_FLIP_DONE_CRTC_OFFSET",
+                    &offsets.done_crtc_offset,
+                    true,
+                );
+                loader.override_global(
+                    "DRM_FLIP_DONE_PIPE_OFFSET",
+                    &offsets.done_pipe_offset,
+                    true,
+                );
+                loader.override_global(
+                    "DRM_FLIP_DONE_SEQUENCE_OFFSET",
+                    &offsets.done_sequence_offset,
+                    true,
+                );
+                loader.override_global(
+                    "DRM_FLIP_DONE_SEQUENCE_SIZE",
+                    &offsets.done_sequence_size,
+                    true,
+                );
+                loader.override_global("DRM_VBLANK_CRTC_OFFSET", &offsets.vblank_crtc_offset, true);
+                loader.override_global("DRM_VBLANK_PIPE_OFFSET", &offsets.vblank_pipe_offset, true);
+                loader.override_global(
+                    "DRM_VBLANK_SEQUENCE_OFFSET",
+                    &offsets.vblank_sequence_offset,
+                    true,
+                );
+                loader.override_global(
+                    "DRM_VBLANK_SEQUENCE_SIZE",
+                    &offsets.vblank_sequence_size,
+                    true,
+                );
+            }
+            KmsTracepointProvider::Amdgpu => {
+                loader.override_global(
+                    "AMDGPU_FLIP_REQUEST_CRTC_OFFSET",
+                    &offsets.request_crtc_offset,
+                    true,
+                );
+                loader.override_global(
+                    "AMDGPU_FLIP_REQUEST_PIPE_OFFSET",
+                    &offsets.request_pipe_offset,
+                    true,
+                );
+                loader.override_global(
+                    "AMDGPU_FLIP_DONE_CRTC_OFFSET",
+                    &offsets.done_crtc_offset,
+                    true,
+                );
+                loader.override_global(
+                    "AMDGPU_FLIP_DONE_PIPE_OFFSET",
+                    &offsets.done_pipe_offset,
+                    true,
+                );
+                loader.override_global(
+                    "AMDGPU_FLIP_DONE_SEQUENCE_OFFSET",
+                    &offsets.done_sequence_offset,
+                    true,
+                );
+                loader.override_global(
+                    "AMDGPU_FLIP_DONE_SEQUENCE_SIZE",
+                    &offsets.done_sequence_size,
+                    true,
+                );
+                loader.override_global(
+                    "AMDGPU_VBLANK_CRTC_OFFSET",
+                    &offsets.vblank_crtc_offset,
+                    true,
+                );
+                loader.override_global(
+                    "AMDGPU_VBLANK_PIPE_OFFSET",
+                    &offsets.vblank_pipe_offset,
+                    true,
+                );
+                loader.override_global(
+                    "AMDGPU_VBLANK_SEQUENCE_OFFSET",
+                    &offsets.vblank_sequence_offset,
+                    true,
+                );
+                loader.override_global(
+                    "AMDGPU_VBLANK_SEQUENCE_SIZE",
+                    &offsets.vblank_sequence_size,
+                    true,
+                );
+            }
+            KmsTracepointProvider::Mixed | KmsTracepointProvider::Unavailable => {}
+        }
+    }
+
+    let drm_fence_offsets = tracepoints
+        .drm_fence
+        .as_ref()
+        .and_then(drm_fence_tracepoint_offsets);
+    if let Some(ref offsets) = drm_fence_offsets {
+        loader.override_global(
+            "DRM_FENCE_WAIT_START_CONTEXT_OFFSET",
+            &offsets.wait_start_context_offset,
+            true,
+        );
+        loader.override_global(
+            "DRM_FENCE_WAIT_START_SEQNO_OFFSET",
+            &offsets.wait_start_seqno_offset,
+            true,
+        );
+        loader.override_global(
+            "DRM_FENCE_WAIT_START_TIMELINE_OFFSET",
+            &offsets.wait_start_timeline_offset,
+            true,
+        );
+        loader.override_global(
+            "DRM_FENCE_WAIT_DONE_CONTEXT_OFFSET",
+            &offsets.wait_done_context_offset,
+            true,
+        );
+        loader.override_global(
+            "DRM_FENCE_WAIT_DONE_SEQNO_OFFSET",
+            &offsets.wait_done_seqno_offset,
+            true,
+        );
+        loader.override_global(
+            "DRM_FENCE_WAIT_DONE_TIMELINE_OFFSET",
+            &offsets.wait_done_timeline_offset,
+            true,
+        );
+        loader.override_global(
+            "DRM_FENCE_SIGNAL_CONTEXT_OFFSET",
+            &offsets.signal_context_offset,
+            true,
+        );
+        loader.override_global(
+            "DRM_FENCE_SIGNAL_SEQNO_OFFSET",
+            &offsets.signal_seqno_offset,
+            true,
+        );
+        loader.override_global(
+            "DRM_FENCE_SIGNAL_TIMELINE_OFFSET",
+            &offsets.signal_timeline_offset,
+            true,
+        );
+        loader.override_global(
+            "DRM_FENCE_WAIT_START_PROVIDER",
+            &offsets.wait_start_provider,
+            true,
+        );
+        loader.override_global(
+            "DRM_FENCE_WAIT_START_GPU_ROLE",
+            &offsets.wait_start_gpu_role,
+            true,
+        );
+        loader.override_global(
+            "DRM_FENCE_WAIT_DONE_PROVIDER",
+            &offsets.wait_done_provider,
+            true,
+        );
+        loader.override_global(
+            "DRM_FENCE_WAIT_DONE_GPU_ROLE",
+            &offsets.wait_done_gpu_role,
+            true,
+        );
+        loader.override_global("DRM_FENCE_SIGNAL_PROVIDER", &offsets.signal_provider, true);
+        loader.override_global("DRM_FENCE_SIGNAL_GPU_ROLE", &offsets.signal_gpu_role, true);
+    }
+
     let block_io_correlation_basis = if tracepoints.block_rq_key_offset.is_some() {
         BlockIoCorrelationBasis::RequestPointer
     } else {
@@ -331,6 +550,16 @@ pub fn load_and_attach(
                 "block_rq tracepoints missing `rwbs`; block I/O correlation will continue but read/write flags are unavailable"
             );
         }
+    }
+
+    if activation_plan.has_probe(ProbeKey::KmsPageflipTiming) {
+        attach_kms_tracepoints(&mut ebpf, &mut activation_plan, &tracepoints.kms);
+    }
+
+    if activation_plan.has_probe(ProbeKey::DrmFenceLatency)
+        && let (Some(discovery), Some(offsets)) = (&tracepoints.drm_fence, drm_fence_offsets)
+    {
+        attach_drm_fence_tracepoints(&mut ebpf, &mut activation_plan, discovery, offsets);
     }
 
     if activation_plan.should_attach_follow_exec()
@@ -514,6 +743,105 @@ fn attach_tracepoint(
     program.load()?;
     program.attach(category, tracepoint_name)?;
     Ok(())
+}
+
+fn attach_kms_tracepoints(
+    ebpf: &mut Ebpf,
+    activation_plan: &mut ProbeActivationPlan,
+    kms: &KmsTracepointAvailability,
+) {
+    let (request_program, done_program, vblank_program) = match kms.provider {
+        KmsTracepointProvider::GenericDrm => (
+            "drm_flip_request",
+            "drm_flip_done",
+            Some("drm_vblank_event"),
+        ),
+        KmsTracepointProvider::I915 => ("i915_flip_request", "i915_flip_done", None),
+        KmsTracepointProvider::Amdgpu => (
+            "amdgpu_flip_request",
+            "amdgpu_flip_done",
+            Some("amdgpu_vblank_event"),
+        ),
+        KmsTracepointProvider::Mixed | KmsTracepointProvider::Unavailable => return,
+    };
+
+    if let Some(request) = selected_request_format(kms) {
+        attach_optional_kms_tracepoint(ebpf, activation_plan, request_program, request);
+    }
+    if let Some(done) = kms.pageflip_done.as_ref() {
+        attach_optional_kms_tracepoint(ebpf, activation_plan, done_program, done);
+    }
+    if let (Some(program), Some(vblank)) = (vblank_program, kms.vblank_event.as_ref()) {
+        attach_optional_kms_tracepoint(ebpf, activation_plan, program, vblank);
+    }
+}
+
+fn attach_optional_kms_tracepoint(
+    ebpf: &mut Ebpf,
+    activation_plan: &mut ProbeActivationPlan,
+    program_name: &'static str,
+    tracepoint: &DrmTracepointFormat,
+) {
+    if let Err(err) = attach_tracepoint(ebpf, program_name, &tracepoint.category, &tracepoint.name)
+    {
+        activation_plan.push_attach_warning(ProbeKey::KmsPageflipTiming, program_name, &err);
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program={} tracepoint={} err={err:#}",
+            ProbeKey::KmsPageflipTiming,
+            program_name,
+            tracepoint.ref_name()
+        );
+    }
+}
+
+fn attach_drm_fence_tracepoints(
+    ebpf: &mut Ebpf,
+    activation_plan: &mut ProbeActivationPlan,
+    discovery: &DrmFenceTracepointDiscovery,
+    offsets: DrmFenceTracepointOffsets,
+) {
+    if offsets.has_wait_interval {
+        if let Some(start) = discovery.selected_wait_start() {
+            attach_optional_drm_fence_tracepoint(
+                ebpf,
+                activation_plan,
+                "drm_fence_wait_start",
+                start,
+            );
+        }
+        if let Some(done) = discovery.selected_wait_done() {
+            attach_optional_drm_fence_tracepoint(
+                ebpf,
+                activation_plan,
+                "drm_fence_wait_done",
+                done,
+            );
+        }
+    }
+    if offsets.has_signal
+        && let Some(signal) = discovery.selected_signal()
+    {
+        attach_optional_drm_fence_tracepoint(ebpf, activation_plan, "drm_fence_signal", signal);
+    }
+}
+
+fn attach_optional_drm_fence_tracepoint(
+    ebpf: &mut Ebpf,
+    activation_plan: &mut ProbeActivationPlan,
+    program_name: &'static str,
+    tracepoint: &DrmFenceTracepointFormat,
+) {
+    if let Err(err) = attach_tracepoint(ebpf, program_name, &tracepoint.category, &tracepoint.name)
+    {
+        activation_plan.push_attach_warning(ProbeKey::DrmFenceLatency, program_name, &err);
+        log::warn!(
+            "optional_probe_attach_failed key={:?} program={} tracepoint={}/{} err={err:#}",
+            ProbeKey::DrmFenceLatency,
+            program_name,
+            tracepoint.category,
+            tracepoint.name
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1157,6 +1485,8 @@ pub struct TracepointAvailability {
     pub block_rq_issue_rwbs_offset: Option<u32>,
     pub block_rq_complete_nr_sector_offset: Option<u32>,
     pub block_rq_complete_rwbs_offset: Option<u32>,
+    pub kms: KmsTracepointAvailability,
+    pub drm_fence: Option<DrmFenceTracepointDiscovery>,
     pub sched_process_exit: bool,
     pub sched_process_exec: bool,
 }
@@ -1185,6 +1515,41 @@ struct BlockIoTracepointOffsets {
     block_rq_issue_rwbs_offset: Option<u32>,
     block_rq_complete_nr_sector_offset: Option<u32>,
     block_rq_complete_rwbs_offset: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KmsProviderTracepointOffsets {
+    request_crtc_offset: u32,
+    request_pipe_offset: u32,
+    done_crtc_offset: u32,
+    done_pipe_offset: u32,
+    done_sequence_offset: u32,
+    done_sequence_size: u32,
+    vblank_crtc_offset: u32,
+    vblank_pipe_offset: u32,
+    vblank_sequence_offset: u32,
+    vblank_sequence_size: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct DrmFenceTracepointOffsets {
+    wait_start_context_offset: u32,
+    wait_start_seqno_offset: u32,
+    wait_start_timeline_offset: u32,
+    wait_start_provider: u32,
+    wait_start_gpu_role: u32,
+    wait_done_context_offset: u32,
+    wait_done_seqno_offset: u32,
+    wait_done_timeline_offset: u32,
+    wait_done_provider: u32,
+    wait_done_gpu_role: u32,
+    signal_context_offset: u32,
+    signal_seqno_offset: u32,
+    signal_timeline_offset: u32,
+    signal_provider: u32,
+    signal_gpu_role: u32,
+    has_wait_interval: bool,
+    has_signal: bool,
 }
 
 fn validate_block_io_tracepoint_offsets(events_root: &Path) -> BlockIoTracepointOffsets {
@@ -1343,6 +1708,144 @@ fn validated_tracepoint_field_offset(
     }
 
     Some(field.offset)
+}
+
+fn kms_provider_tracepoint_offsets(
+    kms: &KmsTracepointAvailability,
+) -> Option<KmsProviderTracepointOffsets> {
+    if !kms.selected_provider_has_required_fields() {
+        return None;
+    }
+
+    let request = selected_request_format(kms);
+    let done = kms.pageflip_done.as_ref();
+    let vblank = kms.vblank_event.as_ref();
+
+    let request_crtc =
+        request.and_then(|format| find_kms_field(format, &["crtc_id", "crtc", "crtc_index"]));
+    let request_pipe = request.and_then(|format| find_kms_field(format, &["pipe"]));
+    let done_crtc =
+        done.and_then(|format| find_kms_field(format, &["crtc_id", "crtc", "crtc_index"]));
+    let done_pipe = done.and_then(|format| find_kms_field(format, &["pipe"]));
+    let done_sequence = done.and_then(|format| {
+        find_kms_field(format, &["sequence", "seq", "vbl_count", "frame", "count"])
+    });
+    let vblank_crtc =
+        vblank.and_then(|format| find_kms_field(format, &["crtc_id", "crtc", "crtc_index"]));
+    let vblank_pipe = vblank.and_then(|format| find_kms_field(format, &["pipe"]));
+    let vblank_sequence = vblank.and_then(|format| {
+        find_kms_field(format, &["sequence", "seq", "vbl_count", "frame", "count"])
+    });
+
+    Some(KmsProviderTracepointOffsets {
+        request_crtc_offset: request_crtc.map(|field| field.offset).unwrap_or(0),
+        request_pipe_offset: request_pipe.map(|field| field.offset).unwrap_or(0),
+        done_crtc_offset: done_crtc.map(|field| field.offset).unwrap_or(0),
+        done_pipe_offset: done_pipe.map(|field| field.offset).unwrap_or(0),
+        done_sequence_offset: done_sequence.map(|field| field.offset).unwrap_or(0),
+        done_sequence_size: done_sequence.map(|field| field.size).unwrap_or(0),
+        vblank_crtc_offset: vblank_crtc.map(|field| field.offset).unwrap_or(0),
+        vblank_pipe_offset: vblank_pipe.map(|field| field.offset).unwrap_or(0),
+        vblank_sequence_offset: vblank_sequence.map(|field| field.offset).unwrap_or(0),
+        vblank_sequence_size: vblank_sequence.map(|field| field.size).unwrap_or(0),
+    })
+}
+
+fn find_kms_field<'a>(
+    format: &'a DrmTracepointFormat,
+    names: &[&str],
+) -> Option<&'a DrmTracepointField> {
+    format.find_field(names)
+}
+
+fn drm_fence_tracepoint_offsets(
+    discovery: &DrmFenceTracepointDiscovery,
+) -> Option<DrmFenceTracepointOffsets> {
+    let mut offsets = DrmFenceTracepointOffsets::default();
+
+    if let (Some(start), Some(done)) = (
+        discovery.selected_wait_start(),
+        discovery.selected_wait_done(),
+    ) && let (Some(start_identity), Some(done_identity)) =
+        (fence_identity_offsets(start), fence_identity_offsets(done))
+    {
+        let (start_provider, start_gpu_role) = drm_fence_provider_for_category(&start.category);
+        let (done_provider, done_gpu_role) = drm_fence_provider_for_category(&done.category);
+        offsets.wait_start_context_offset = start_identity.context_offset;
+        offsets.wait_start_seqno_offset = start_identity.seqno_offset;
+        offsets.wait_start_timeline_offset = start_identity.timeline_offset;
+        offsets.wait_start_provider = start_provider;
+        offsets.wait_start_gpu_role = start_gpu_role;
+        offsets.wait_done_context_offset = done_identity.context_offset;
+        offsets.wait_done_seqno_offset = done_identity.seqno_offset;
+        offsets.wait_done_timeline_offset = done_identity.timeline_offset;
+        offsets.wait_done_provider = done_provider;
+        offsets.wait_done_gpu_role = done_gpu_role;
+        offsets.has_wait_interval = true;
+    }
+
+    if let Some(signal) = discovery.selected_signal()
+        && let Some(signal_identity) = fence_identity_offsets(signal)
+    {
+        let (signal_provider, signal_gpu_role) = drm_fence_provider_for_category(&signal.category);
+        offsets.signal_context_offset = signal_identity.context_offset;
+        offsets.signal_seqno_offset = signal_identity.seqno_offset;
+        offsets.signal_timeline_offset = signal_identity.timeline_offset;
+        offsets.signal_provider = signal_provider;
+        offsets.signal_gpu_role = signal_gpu_role;
+        offsets.has_signal = true;
+    }
+
+    (offsets.has_wait_interval || offsets.has_signal).then_some(offsets)
+}
+
+pub(crate) fn drm_fence_probe_supported(discovery: &DrmFenceTracepointDiscovery) -> bool {
+    drm_fence_tracepoint_offsets(discovery).is_some()
+}
+
+pub(crate) fn drm_fence_probe_has_wait_interval(discovery: &DrmFenceTracepointDiscovery) -> bool {
+    drm_fence_tracepoint_offsets(discovery).is_some_and(|offsets| offsets.has_wait_interval)
+}
+
+pub(crate) fn drm_fence_probe_has_signal(discovery: &DrmFenceTracepointDiscovery) -> bool {
+    drm_fence_tracepoint_offsets(discovery).is_some_and(|offsets| offsets.has_signal)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FenceIdentityOffsets {
+    context_offset: u32,
+    seqno_offset: u32,
+    timeline_offset: u32,
+}
+
+fn fence_identity_offsets(format: &DrmFenceTracepointFormat) -> Option<FenceIdentityOffsets> {
+    let context = find_fence_field(format, &["context", "ctx"]);
+    let timeline = find_fence_field(format, &["timeline", "timeline_hash", "timeline_name"]);
+    let seqno = find_fence_field(format, &["seqno", "seq", "sequence"]);
+
+    let has_context_or_timeline = context.is_some() || timeline.is_some();
+    let seqno = seqno?;
+    has_context_or_timeline.then_some(FenceIdentityOffsets {
+        context_offset: context.map(|field| field.offset).unwrap_or(0),
+        seqno_offset: seqno.offset,
+        timeline_offset: timeline.map(|field| field.offset).unwrap_or(0),
+    })
+}
+
+fn find_fence_field<'a>(
+    format: &'a DrmFenceTracepointFormat,
+    names: &[&str],
+) -> Option<&'a crate::drm_fence_tracepoints::DrmFenceTracepointField> {
+    format.find_field(names).filter(|field| field.size >= 8)
+}
+
+fn drm_fence_provider_for_category(category: &str) -> (u32, u32) {
+    match category {
+        "amdgpu" => (DRM_FENCE_PROVIDER_AMDGPU, DRM_GPU_ROLE_RENDER),
+        "i915" => (DRM_FENCE_PROVIDER_I915, DRM_GPU_ROLE_DISPLAY),
+        "drm_sched" => (DRM_FENCE_PROVIDER_DRM_SCHED, DRM_GPU_ROLE_RENDER),
+        _ => (DRM_FENCE_PROVIDER_DMA_FENCE, DRM_GPU_ROLE_UNKNOWN),
+    }
 }
 
 fn parse_tracepoint_format_at(path: &Path) -> anyhow::Result<TracepointFormat> {
@@ -1584,6 +2087,94 @@ mod block_io_tracepoint_validation_tests {
         assert_eq!(offsets.block_rq_key_offset, None);
         assert_eq!(offsets.block_rq_issue_nr_sector_offset, Some(48));
         assert_eq!(offsets.block_rq_complete_nr_sector_offset, Some(48));
+    }
+
+    #[test]
+    fn kms_provider_offsets_require_common_flip_identity() {
+        let kms = crate::drm_tracepoints::KmsTracepointAvailability {
+            pageflip_request: Some(crate::drm_tracepoints::parse_drm_tracepoint_format(
+                "i915",
+                "i915_flip_request",
+                "field:unsigned int pipe;\toffset:8;\tsize:4;\tsigned:0;\n",
+            )),
+            pageflip_done: Some(crate::drm_tracepoints::parse_drm_tracepoint_format(
+                "i915",
+                "i915_flip_complete",
+                "field:unsigned int pipe;\toffset:12;\tsize:4;\tsigned:0;\n\
+                 field:unsigned long sequence;\toffset:16;\tsize:8;\tsigned:0;\n",
+            )),
+            vblank_event: None,
+            atomic_commit: None,
+            provider: crate::drm_tracepoints::KmsTracepointProvider::I915,
+            generic_drm: Vec::new(),
+            i915: Vec::new(),
+            amdgpu: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        let offsets = kms_provider_tracepoint_offsets(&kms).unwrap();
+
+        assert_eq!(offsets.request_pipe_offset, 8);
+        assert_eq!(offsets.done_pipe_offset, 12);
+        assert_eq!(offsets.done_sequence_offset, 16);
+        assert_eq!(offsets.done_sequence_size, 8);
+
+        let mut missing_identity = kms;
+        missing_identity.pageflip_done = Some(crate::drm_tracepoints::parse_drm_tracepoint_format(
+            "i915",
+            "i915_flip_complete",
+            "field:unsigned long sequence;\toffset:16;\tsize:8;\tsigned:0;\n",
+        ));
+        assert!(kms_provider_tracepoint_offsets(&missing_identity).is_none());
+    }
+
+    #[test]
+    fn drm_fence_offsets_preserve_vendor_provider_roles() {
+        let discovery = crate::drm_fence_tracepoints::DrmFenceTracepointDiscovery {
+            events_root: PathBuf::from("/tmp/events"),
+            categories: vec![
+                crate::drm_fence_tracepoints::DrmFenceTracepointCategory {
+                    category: "amdgpu".to_owned(),
+                    status: "available".to_owned(),
+                    tracepoints: vec![crate::drm_fence_tracepoints::parse_tracepoint_format(
+                        "amdgpu",
+                        "amdgpu_job_done",
+                        "field:u64 context;\toffset:8;\tsize:8;\tsigned:0;\n\
+                         field:u64 seqno;\toffset:16;\tsize:8;\tsigned:0;\n",
+                    )],
+                    warnings: Vec::new(),
+                },
+                crate::drm_fence_tracepoints::DrmFenceTracepointCategory {
+                    category: "i915".to_owned(),
+                    status: "available".to_owned(),
+                    tracepoints: vec![
+                        crate::drm_fence_tracepoints::parse_tracepoint_format(
+                            "i915",
+                            "i915_request_wait_begin",
+                            "field:u64 context;\toffset:24;\tsize:8;\tsigned:0;\n\
+                             field:u64 seqno;\toffset:32;\tsize:8;\tsigned:0;\n",
+                        ),
+                        crate::drm_fence_tracepoints::parse_tracepoint_format(
+                            "i915",
+                            "i915_request_wait_end",
+                            "field:u64 context;\toffset:40;\tsize:8;\tsigned:0;\n\
+                             field:u64 seqno;\toffset:48;\tsize:8;\tsigned:0;\n",
+                        ),
+                    ],
+                    warnings: Vec::new(),
+                },
+            ],
+            supported_profile: "amdgpu+i915 partial".to_owned(),
+        };
+
+        let offsets = drm_fence_tracepoint_offsets(&discovery).unwrap();
+
+        assert!(offsets.has_wait_interval);
+        assert!(offsets.has_signal);
+        assert_eq!(offsets.wait_start_provider, DRM_FENCE_PROVIDER_I915);
+        assert_eq!(offsets.wait_start_gpu_role, DRM_GPU_ROLE_DISPLAY);
+        assert_eq!(offsets.signal_provider, DRM_FENCE_PROVIDER_AMDGPU);
+        assert_eq!(offsets.signal_gpu_role, DRM_GPU_ROLE_RENDER);
     }
 
     #[test]
@@ -1997,6 +2588,35 @@ fn validate_tracepoint_formats(
     let block_rq_complete_nr_sector_offset = block_io.block_rq_complete_nr_sector_offset;
     let block_rq_complete_rwbs_offset = block_io.block_rq_complete_rwbs_offset;
 
+    let kms = if config.probes.kms_timing {
+        crate::drm_tracepoints::discover_kms_tracepoints(events_root)
+    } else {
+        KmsTracepointAvailability::unavailable()
+    };
+    if config.probes.kms_timing && !kms.has_selected_tracepoints() {
+        log::warn!("KMS timing tracepoints missing; continuing without KMS pageflip timing probe");
+    } else if config.probes.kms_timing && !kms.selected_provider_has_required_fields() {
+        log::warn!(
+            "KMS timing tracepoints found, but selected provider fields are not sufficient for pageflip/vblank correlation"
+        );
+    }
+
+    let drm_fence = if config.probes.drm_fence_latency {
+        Some(crate::drm_fence_tracepoints::discover_drm_fence_tracepoints(events_root))
+    } else {
+        None
+    };
+    if config.probes.drm_fence_latency
+        && !drm_fence
+            .as_ref()
+            .and_then(drm_fence_tracepoint_offsets)
+            .is_some()
+    {
+        log::warn!(
+            "DRM fence tracepoints missing or lack stable identity fields; continuing without DRM fence latency probe"
+        );
+    }
+
     let sched_process_exit = validate_optional_tracepoint_format_at(
         &events_root.join("sched/sched_process_exit/format"),
         "sched_process_exit",
@@ -2025,6 +2645,8 @@ fn validate_tracepoint_formats(
         block_rq_issue_rwbs_offset,
         block_rq_complete_nr_sector_offset,
         block_rq_complete_rwbs_offset,
+        kms,
+        drm_fence,
         sched_process_exit,
         sched_process_exec,
     })

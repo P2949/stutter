@@ -7,7 +7,10 @@ use crate::{
     actions::{ActionId, SafetyClass},
     daemon::{
         capabilities::DaemonCapabilities,
-        config::{DaemonCandidateConfidenceConfig, DaemonCgroupTargetsConfig, DaemonConfig},
+        config::{
+            DaemonCandidateConfidenceConfig, DaemonCgroupTargetsConfig, DaemonConfig,
+            DaemonSystemWideAllowlistConfig,
+        },
         explain::{PolicyDecisionKind, PolicyExplanation, PolicyRuleEvaluation},
         health::SystemHealthSnapshot,
     },
@@ -212,6 +215,7 @@ pub struct DaemonPolicy {
     pub enabled_action_families: BTreeSet<String>,
     pub denied_action_families: BTreeSet<String>,
     pub cgroup_targets: DaemonCgroupTargetsConfig,
+    pub system_wide_allowlist: DaemonSystemWideAllowlistConfig,
     pub rollback_required_before_apply: bool,
     pub allow_medium_risk_apply: bool,
     pub allow_system_wide_suggestions: bool,
@@ -219,6 +223,7 @@ pub struct DaemonPolicy {
     pub allow_high_risk: bool,
     pub allow_persistent_effects: bool,
     pub allow_cpu_power_on_battery: bool,
+    pub high_risk_dry_run: bool,
     pub min_confidence: f32,
     pub confidence: DaemonCandidateConfidenceConfig,
     pub remote_apply: RemoteApplyPolicy,
@@ -571,6 +576,7 @@ pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
         enabled_action_families: config.safety.enabled_action_families.clone(),
         denied_action_families: config.safety.denied_action_families.clone(),
         cgroup_targets: config.safety.cgroup_targets.clone(),
+        system_wide_allowlist: config.safety.system_wide_allowlist.clone(),
         rollback_required_before_apply: config.mode.supports_apply(),
         allow_medium_risk_apply,
         allow_system_wide_suggestions,
@@ -578,6 +584,7 @@ pub fn build_daemon_policy(input: DaemonPolicyBuildInput<'_>) -> DaemonPolicy {
         allow_high_risk,
         allow_persistent_effects: config.safety.allow_persistent_effects,
         allow_cpu_power_on_battery: config.autotune.allow_cpu_power_on_battery,
+        high_risk_dry_run: config.mode == DaemonMode::Suggest && config.autotune.high_risk_dry_run,
         min_confidence,
         confidence,
         remote_apply: remote_apply_policy_for_config(config, remote_context),
@@ -1660,7 +1667,7 @@ mod tests {
         rollback: RollbackRequirement,
     ) -> ActionDescriptor {
         ActionDescriptor {
-            action_id: ActionId("test-action".to_owned()),
+            action_id: ActionId::new("test-action".to_owned()),
             action_kind: "test".to_owned(),
             safety_class,
             effect_scope,
@@ -1694,6 +1701,7 @@ mod tests {
             ionice_available: true,
             irq_affinity_available: true,
             gpu_sysfs_available: true,
+            privileged_worker_socket_reachable: Some(true),
         }
     }
 

@@ -213,6 +213,55 @@ pub(super) struct MonitorArgs {
     )]
     pub(super) runtime_slices_max_tasks: usize,
 
+    #[arg(long = "kms-timing")]
+    pub(super) kms_timing: bool,
+
+    #[arg(long = "kms-card", value_name = "cardN")]
+    pub(super) kms_card: Option<String>,
+
+    #[arg(long = "kms-connector", value_name = "NAME")]
+    pub(super) kms_connector: Option<String>,
+
+    #[arg(long = "kms-crtc", value_name = "ID")]
+    pub(super) kms_crtc: Option<u32>,
+
+    #[arg(long = "drm-fence-latency")]
+    pub(super) drm_fence_latency: bool,
+
+    #[arg(long = "drm-fence-render-card", value_name = "cardN")]
+    pub(super) drm_fence_render_card: Option<String>,
+
+    #[arg(long = "drm-fence-display-card", value_name = "cardN")]
+    pub(super) drm_fence_display_card: Option<String>,
+
+    #[arg(long = "drm-fence-driver", value_name = "amdgpu|i915|auto")]
+    pub(super) drm_fence_driver: Option<String>,
+
+    #[arg(long = "wayland-presentation")]
+    pub(super) wayland_presentation: bool,
+
+    #[arg(long = "wayland-presentation-log", value_name = "PATH")]
+    pub(super) wayland_presentation_log: Option<PathBuf>,
+
+    #[arg(
+        long = "wayland-presentation-source",
+        value_enum,
+        default_value_t = WaylandPresentationSource::ExternalLog
+    )]
+    pub(super) wayland_presentation_source: WaylandPresentationSource,
+
+    #[arg(long = "display-path-label", value_name = "LABEL")]
+    pub(super) display_path_label: Option<String>,
+
+    #[arg(long = "display-render-gpu", value_name = "DRIVER")]
+    pub(super) display_render_gpu: Option<String>,
+
+    #[arg(long = "display-scanout-gpu", value_name = "DRIVER")]
+    pub(super) display_scanout_gpu: Option<String>,
+
+    #[arg(long = "display-connector", value_name = "NAME")]
+    pub(super) display_connector: Option<String>,
+
     #[arg(
         long = "json-stream",
         help = "Emit scheduler spike events to stdout as newline-delimited JSON"
@@ -334,6 +383,7 @@ pub(super) struct MonitorArgPresence {
     pub(super) otel_service_name: bool,
     pub(super) focus_source: bool,
     pub(super) foreground_source: bool,
+    pub(super) wayland_presentation_source: bool,
     pub(super) foreground_poll_ms: bool,
     pub(super) foreground_max_stale_ms: bool,
     pub(super) auto_focus_poll_ms: bool,
@@ -358,6 +408,7 @@ impl MonitorArgPresence {
             otel_service_name: command_line(matches, "otel_service_name"),
             focus_source: command_line(matches, "focus_source"),
             foreground_source: command_line(matches, "foreground_source"),
+            wayland_presentation_source: command_line(matches, "wayland_presentation_source"),
             foreground_poll_ms: command_line(matches, "foreground_poll_ms"),
             foreground_max_stale_ms: command_line(matches, "foreground_max_stale_ms"),
             auto_focus_poll_ms: command_line(matches, "auto_focus_poll_ms"),
@@ -483,6 +534,23 @@ impl MonitorArgs {
             runtime_slices_max_tasks: presence
                 .runtime_slices_max_tasks
                 .then_some(self.runtime_slices_max_tasks),
+            kms_timing: self.kms_timing.then_some(true),
+            kms_drm_card: self.kms_card.clone().map(Some),
+            kms_connector: self.kms_connector.clone().map(Some),
+            kms_crtc: self.kms_crtc.map(Some),
+            drm_fence_latency: self.drm_fence_latency.then_some(true),
+            drm_fence_render_card: self.drm_fence_render_card.clone().map(Some),
+            drm_fence_display_card: self.drm_fence_display_card.clone().map(Some),
+            drm_fence_driver_filter: self.drm_fence_driver.clone().map(Some),
+            wayland_presentation: self.wayland_presentation.then_some(true),
+            wayland_presentation_log: self.wayland_presentation_log.clone().map(Some),
+            wayland_presentation_source: presence
+                .wayland_presentation_source
+                .then_some(self.wayland_presentation_source),
+            display_path_label: self.display_path_label.clone().map(Some),
+            display_render_gpu: self.display_render_gpu.clone().map(Some),
+            display_scanout_gpu: self.display_scanout_gpu.clone().map(Some),
+            display_connector: self.display_connector.clone().map(Some),
             mangohud_log: self.mangohud_log.clone().map(Some),
             mangohud_log_live: self.mangohud_log_live.then_some(true),
             tui: self.tui.then_some(true),
@@ -595,6 +663,21 @@ impl Default for MonitorArgs {
             runtime_slices: false,
             no_runtime_slices: false,
             runtime_slices_max_tasks: 256,
+            kms_timing: false,
+            kms_card: None,
+            kms_connector: None,
+            kms_crtc: None,
+            drm_fence_latency: false,
+            drm_fence_render_card: None,
+            drm_fence_display_card: None,
+            drm_fence_driver: None,
+            wayland_presentation: false,
+            wayland_presentation_log: None,
+            wayland_presentation_source: WaylandPresentationSource::ExternalLog,
+            display_path_label: None,
+            display_render_gpu: None,
+            display_scanout_gpu: None,
+            display_connector: None,
             json_stream: false,
             metrics_port: None,
             preset: None,
@@ -975,6 +1058,40 @@ pub(super) fn monitor_config_from_monitor_args_with_file_and_presence(
     }
     if matches!(args.hwmon_drm_card.as_deref(), Some("")) {
         anyhow::bail!("--hwmon-drm-card must not be empty");
+    }
+    if matches!(args.kms_card.as_deref(), Some("")) {
+        anyhow::bail!("--kms-card must not be empty");
+    }
+    if matches!(args.kms_connector.as_deref(), Some("")) {
+        anyhow::bail!("--kms-connector must not be empty");
+    }
+    if matches!(args.drm_fence_render_card.as_deref(), Some("")) {
+        anyhow::bail!("--drm-fence-render-card must not be empty");
+    }
+    if matches!(args.drm_fence_display_card.as_deref(), Some("")) {
+        anyhow::bail!("--drm-fence-display-card must not be empty");
+    }
+    if let Some(driver) = args.drm_fence_driver.as_deref() {
+        if driver.trim().is_empty() {
+            anyhow::bail!("--drm-fence-driver must not be empty");
+        }
+        if !matches!(driver, "amdgpu" | "i915" | "auto") {
+            anyhow::bail!("--drm-fence-driver must be one of: amdgpu, i915, auto");
+        }
+    }
+    if matches!(args.wayland_presentation_log.as_deref(), Some(path) if path.as_os_str().is_empty())
+    {
+        anyhow::bail!("--wayland-presentation-log must not be empty");
+    }
+    for (flag, value) in [
+        ("--display-path-label", args.display_path_label.as_deref()),
+        ("--display-render-gpu", args.display_render_gpu.as_deref()),
+        ("--display-scanout-gpu", args.display_scanout_gpu.as_deref()),
+        ("--display-connector", args.display_connector.as_deref()),
+    ] {
+        if value.is_some_and(|value| value.trim().is_empty()) {
+            anyhow::bail!("{flag} must not be empty");
+        }
     }
     if matches!(args.alert_webhook_url.as_deref(), Some("")) {
         anyhow::bail!("--alert-webhook-url must not be empty");

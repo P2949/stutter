@@ -16,15 +16,15 @@ use super::{
         RecordingRetentionPolicy, apply_recording_retention, ensure_min_free_space_for_path,
     },
     session_files::{
-        MetadataFile, RecordedConfig, RecordedCpuSnapshot, RecordedLatency, RecordedSpike,
-        RecordedTime, SessionFile, SessionMetadataCore, SessionSpike, SessionTask, WakerEntry,
-        focus_source_label, foreground_source_arg_label, foreground_source_label,
+        DisplayPathMetadata, MetadataFile, RecordedConfig, RecordedCpuSnapshot, RecordedLatency,
+        RecordedSpike, RecordedTime, SessionFile, SessionMetadataCore, SessionSpike, SessionTask,
+        WakerEntry, focus_source_label, foreground_source_arg_label, foreground_source_label,
     },
     writers::NdjsonWriter,
 };
 use crate::{
     artifacts::ArtifactKind,
-    config::{TARGET_PIDS_MAX, model::MonitorConfig},
+    config::{TARGET_PIDS_MAX, WaylandPresentationSource, model::MonitorConfig},
     foreground::ForegroundEvent,
     metadata::collect_system_metadata,
     metrics::{CpuSnapshot, SpikeRecord, TaskStats},
@@ -324,6 +324,10 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         focus_switch_count,
         focus_event_count: recorder.counters.focus_event_count,
         foreground_event_count: recorder.counters.foreground_event_count,
+        kms_flip_event_count: recorder.counters.kms_flip_event_count,
+        drm_fence_event_count: recorder.counters.drm_fence_event_count,
+        wayland_presentation_event_count: recorder.counters.wayland_presentation_event_count,
+        display_path: display_path_metadata(config),
         foreground_source: final_foreground_event
             .as_ref()
             .map(|event| foreground_source_label(event.source)),
@@ -556,6 +560,23 @@ pub fn recorded_config(config: &MonitorConfig, tree_pids: &[u32]) -> RecordedCon
         stat_wait: config.probes.stat_wait,
         runtime_slices: config.probes.runtime_slices,
         runtime_slices_max_tasks: config.runtime_slices.max_tasks,
+        kms_timing: config.probes.kms_timing,
+        kms_card: config.kms_timing.drm_card.clone(),
+        kms_connector: config.kms_timing.connector.clone(),
+        kms_crtc: config.kms_timing.crtc,
+        drm_fence_latency: config.probes.drm_fence_latency,
+        drm_fence_render_card: config.drm_fence.render_card.clone(),
+        drm_fence_display_card: config.drm_fence.display_card.clone(),
+        drm_fence_driver: config.drm_fence.driver_filter.clone(),
+        wayland_presentation: config.probes.wayland_presentation,
+        wayland_presentation_log: config.wayland_presentation.log_path.clone(),
+        wayland_presentation_source: wayland_presentation_source_label(
+            config.wayland_presentation.source,
+        ),
+        display_path_label: config.display_path.label.clone(),
+        display_render_gpu: config.display_path.render_gpu.clone(),
+        display_scanout_gpu: config.display_path.scanout_gpu.clone(),
+        display_connector: config.display_path.connector.clone(),
         otlp_endpoint: config.outputs.otlp_endpoint.clone(),
         otel_service_name: config.outputs.otel_service_name.clone(),
         auto_focus: config.focus.auto_focus,
@@ -572,6 +593,29 @@ pub fn recorded_config(config: &MonitorConfig, tree_pids: &[u32]) -> RecordedCon
         auto_focus_required_polls: config.focus.auto_focus_required_polls,
         auto_focus_max_roots: config.focus.auto_focus_max_roots,
     }
+}
+
+fn display_path_metadata(config: &MonitorConfig) -> Option<DisplayPathMetadata> {
+    let metadata = DisplayPathMetadata {
+        label: config.display_path.label.clone(),
+        render_gpu: config.display_path.render_gpu.clone(),
+        scanout_gpu: config.display_path.scanout_gpu.clone(),
+        connector: config.display_path.connector.clone(),
+    };
+    (metadata.label.is_some()
+        || metadata.render_gpu.is_some()
+        || metadata.scanout_gpu.is_some()
+        || metadata.connector.is_some())
+    .then_some(metadata)
+}
+
+fn wayland_presentation_source_label(source: WaylandPresentationSource) -> String {
+    match source {
+        WaylandPresentationSource::ExternalLog => "external-log",
+        WaylandPresentationSource::Gamescope => "gamescope",
+        WaylandPresentationSource::SelfTest => "self-test",
+    }
+    .to_owned()
 }
 
 pub(crate) fn elapsed_ms_from_monotonic(

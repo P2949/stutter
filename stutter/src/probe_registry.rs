@@ -20,7 +20,10 @@ pub enum ProbeKey {
     PsiTimeline,
     PressureStallTimelineOverlay,
     RuntimeSlices,
+    KmsPageflipTiming,
     DrmFenceLatency,
+    WaylandPresentationTiming,
+    DisplayPathCost,
     PerfCounterPresets,
     CompositorFramePacingViews,
 }
@@ -439,21 +442,146 @@ pub const PROBE_REGISTRY: &[ProbeSpec] = &[
         validation_contract: "runtime_slices.json is optional NDJSON; missing schedstat falls back to proc stat or reports unavailable; analysis never treats missing runtime data as proof.",
     },
     ProbeSpec {
-        key: ProbeKey::DrmFenceLatency,
-        catalog_key: "drm_fence_latency",
-        title: "DRM fence latency",
-        status: ProbeStatus::Planned,
-        answers_question: "Was frame stutter caused by GPU queue/fence delay rather than CPU runnable delay?",
-        cli_flags: &[],
-        artifacts: &[],
+        key: ProbeKey::KmsPageflipTiming,
+        catalog_key: "kms_pageflip_timing",
+        title: "KMS pageflip timing",
+        status: ProbeStatus::Implemented,
+        answers_question: "Did KMS pageflip/vblank completion timing line up with frame pacing outliers?",
+        cli_flags: &["--kms-timing"],
+        artifacts: &[ArtifactKind::KmsFlipEvents],
         default_enabled: false,
         overhead: ProbeOverhead::High,
         required_capabilities: &[ProbeCapability::Ebpf, ProbeCapability::Tracepoint],
+        ebpf_programs: &[
+            EbpfProgramSpec {
+                name: "drm_flip_request",
+            },
+            EbpfProgramSpec {
+                name: "drm_flip_done",
+            },
+            EbpfProgramSpec {
+                name: "drm_vblank_event",
+            },
+            EbpfProgramSpec {
+                name: "i915_flip_request",
+            },
+            EbpfProgramSpec {
+                name: "i915_flip_done",
+            },
+            EbpfProgramSpec {
+                name: "amdgpu_flip_request",
+            },
+            EbpfProgramSpec {
+                name: "amdgpu_flip_done",
+            },
+            EbpfProgramSpec {
+                name: "amdgpu_vblank_event",
+            },
+        ],
+        tracepoints: &[
+            TracepointSpec {
+                category: "drm",
+                name: "drm_vblank_event",
+            },
+            TracepointSpec {
+                category: "i915",
+                name: "i915_flip_request",
+            },
+            TracepointSpec {
+                category: "i915",
+                name: "i915_flip_complete",
+            },
+            TracepointSpec {
+                category: "amdgpu",
+                name: "amdgpu_flip_complete",
+            },
+        ],
+        perf_events: &[],
+        data_quality_rules: &[DataQualityRule {
+            key: "kms_timing_optional",
+            description: "KMS timing requires compatible DRM/i915/amdgpu pageflip or vblank tracepoints; missing events are unavailable evidence, not proof of healthy scanout",
+        }],
+        validation_contract: "kms_flip_events.json is optional NDJSON populated from compatible DRM/i915/amdgpu pageflip or vblank tracepoints; missing KMS events means unavailable evidence, not proof that scanout was healthy.",
+    },
+    ProbeSpec {
+        key: ProbeKey::DrmFenceLatency,
+        catalog_key: "drm_fence_latency",
+        title: "DRM fence latency",
+        status: ProbeStatus::Implemented,
+        answers_question: "Was frame stutter caused by GPU queue/fence delay rather than CPU runnable delay?",
+        cli_flags: &["--drm-fence-latency"],
+        artifacts: &[ArtifactKind::DrmFenceEvents],
+        default_enabled: false,
+        overhead: ProbeOverhead::High,
+        required_capabilities: &[ProbeCapability::Ebpf, ProbeCapability::Tracepoint],
+        ebpf_programs: &[
+            EbpfProgramSpec {
+                name: "drm_fence_wait_start",
+            },
+            EbpfProgramSpec {
+                name: "drm_fence_wait_done",
+            },
+            EbpfProgramSpec {
+                name: "drm_fence_signal",
+            },
+        ],
+        tracepoints: &[
+            TracepointSpec {
+                category: "dma_fence",
+                name: "dma_fence_wait_start",
+            },
+            TracepointSpec {
+                category: "dma_fence",
+                name: "dma_fence_wait_end",
+            },
+            TracepointSpec {
+                category: "dma_fence",
+                name: "dma_fence_signaled",
+            },
+        ],
+        perf_events: &[],
+        data_quality_rules: &[DataQualityRule {
+            key: "drm_fence_optional",
+            description: "DRM fence latency requires compatible wait/signal tracepoints with stable context/seqno or timeline/seqno identity",
+        }],
+        validation_contract: "drm_fence_events.json is optional NDJSON populated from compatible fence wait/signal tracepoints; missing fence events are unavailable evidence, not proof of no GPU/display wait.",
+    },
+    ProbeSpec {
+        key: ProbeKey::WaylandPresentationTiming,
+        catalog_key: "wayland_presentation_timing",
+        title: "Wayland presentation timing",
+        status: ProbeStatus::Implemented,
+        answers_question: "Did Wayland commit-to-present timing, discarded frames, or direct-scanout hints correlate with frame outliers?",
+        cli_flags: &["--wayland-presentation"],
+        artifacts: &[ArtifactKind::WaylandPresentationEvents],
+        default_enabled: false,
+        overhead: ProbeOverhead::Low,
+        required_capabilities: &[ProbeCapability::ExternalLog],
+        ebpf_programs: &[],
+        tracepoints: &[],
+        perf_events: &[],
+        data_quality_rules: &[DataQualityRule {
+            key: "wayland_presentation_cooperative_source",
+            description: "Wayland presentation timing requires a cooperative client, Gamescope/compositor log, or self-test source; missing events are unavailable evidence",
+        }],
+        validation_contract: "wayland_presentation_events.json is optional NDJSON populated from cooperative presentation logs; arbitrary Wayland clients cannot be observed without cooperation.",
+    },
+    ProbeSpec {
+        key: ProbeKey::DisplayPathCost,
+        catalog_key: "display_path_cost",
+        title: "Display path cost",
+        status: ProbeStatus::ViewOnly,
+        answers_question: "How did frame/presentation metrics differ between two controlled display-path runs?",
+        cli_flags: &[],
+        artifacts: &[],
+        default_enabled: false,
+        overhead: ProbeOverhead::Low,
+        required_capabilities: &[],
         ebpf_programs: &[],
         tracepoints: &[],
         perf_events: &[],
         data_quality_rules: &[],
-        validation_contract: "not implemented; blocked until diagnosis fixtures, false-positive tests, process/thread attribution design, and MangoHud alignment tests exist",
+        validation_contract: "view-only comparison derived from two runs; no raw display_path_cost artifact is emitted.",
     },
     ProbeSpec {
         key: ProbeKey::PerfCounterPresets,

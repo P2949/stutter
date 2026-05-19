@@ -320,6 +320,9 @@ pub(super) struct DoctorArgs {
     #[arg(long = "block-io")]
     pub(super) block_io: bool,
 
+    #[arg(long = "kms-timing")]
+    pub(super) kms_timing: bool,
+
     #[arg(long = "faults")]
     pub(super) faults: bool,
 
@@ -346,6 +349,54 @@ pub(super) struct InspectIrqsArgs {
 
     #[arg(long, default_value_t = 30)]
     pub(super) top: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+pub(super) struct InspectDrmTracepointsArgs {
+    #[arg(long)]
+    pub(super) json: bool,
+
+    #[arg(long = "events-root", value_name = "PATH", hide = true)]
+    pub(super) events_root: Option<PathBuf>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub(super) struct WaylandProbeArgs {
+    #[arg(long = "duration", default_value_t = 30, value_name = "SECONDS")]
+    pub(super) duration_secs: u64,
+
+    #[arg(long = "output", value_name = "NAME")]
+    pub(super) output: Option<String>,
+
+    #[arg(long = "fullscreen")]
+    pub(super) fullscreen: bool,
+
+    #[arg(long = "out-dir", value_name = "DIR")]
+    pub(super) out_dir: PathBuf,
+}
+
+#[derive(Args, Debug, Clone)]
+pub(super) struct CompareArgs {
+    #[command(subcommand)]
+    pub(super) command: CompareCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub(super) enum CompareCommand {
+    #[command(name = "display-path")]
+    DisplayPath(DisplayPathCompareArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub(super) struct DisplayPathCompareArgs {
+    #[arg(long = "baseline", value_name = "RUN")]
+    pub(super) baseline: PathBuf,
+
+    #[arg(long = "test", value_name = "RUN")]
+    pub(super) test: PathBuf,
+
+    #[arg(long = "json")]
+    pub(super) json: bool,
 }
 
 #[derive(Args, Debug, Clone)]

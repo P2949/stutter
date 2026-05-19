@@ -29,6 +29,7 @@ pub async fn dispatch(command: AppCommand) -> Result<(), StutterError> {
         AppCommand::Tune(input) => misc::run_tune_command(input).await,
         AppCommand::Recommend(input) => report::run_recommend_command(input),
         AppCommand::Check(input) => report::run_check_command(input),
+        AppCommand::DisplayPathCompare(input) => misc::run_display_path_compare_command(input),
         AppCommand::ConfigCheck(input) => misc::run_config_check_command(input),
         AppCommand::ConfigExplain(input) => daemon::run_config_explain_command(input),
         AppCommand::AutotuneGenerateProfiles(input) => {
@@ -46,6 +47,10 @@ pub async fn dispatch(command: AppCommand) -> Result<(), StutterError> {
         AppCommand::Probes(input) => misc::run_probes_command(input),
         AppCommand::ProfileTemplate(input) => misc::run_profile_template_command(input),
         AppCommand::InspectIrqs(input) => misc::run_inspect_irqs_command(input),
+        AppCommand::InspectDrmTracepoints(input) => {
+            misc::run_inspect_drm_tracepoints_command(input)
+        }
+        AppCommand::WaylandProbe(input) => misc::run_wayland_probe_command(input),
         AppCommand::Agent(input) => agent::run_agent_command(input).await,
         AppCommand::PrivilegedWorker(input) => daemon::run_privileged_worker_command(input),
         AppCommand::DaemonConfigExplain(input) => daemon::run_config_explain_command(input),
@@ -63,6 +68,7 @@ pub async fn dispatch(command: AppCommand) -> Result<(), StutterError> {
         AppCommand::DaemonAcceptance(input) => daemon::run_acceptance_command(input),
         AppCommand::DaemonPause(input) => daemon::run_pause_command(input),
         AppCommand::DaemonResume(input) => daemon::run_resume_command(input),
+        AppCommand::DaemonResyncState(input) => daemon::run_resync_state_command(input),
         AppCommand::DaemonRestore(input) => daemon::run_restore_command(input),
         AppCommand::Completions(input) => misc::run_completions_command(input),
         AppCommand::Man(input) => misc::run_man_command(input),

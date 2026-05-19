@@ -9,6 +9,7 @@ This directory intentionally contains only small, representative sanitized examp
 | `clean_baseline/`              | Quiet baseline run with no strong diagnosis.   |
 | `game_thread_scheduler_delay/` | Game-thread scheduler-delay diagnosis example. |
 | `low_quality_truncated/`       | Low-quality/truncated data-quality example.    |
+| `display_timing_optional/`     | Minimal optional KMS/fence/Wayland stream examples. |
 
 The larger regression corpus lives under:
 

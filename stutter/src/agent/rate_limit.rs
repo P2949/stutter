@@ -1,13 +1,10 @@
-#![allow(unused_imports)] // Transitional split façade: re-exported contracts are consumed as call sites migrate.
 //! Agent request rate limiting.
-
-pub(crate) use super::AgentRateLimiter;
 
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
 
-    use super::*;
+    use super::super::AgentRateLimiter;
 
     #[tokio::test]
     async fn rate_limiter_rejects_until_window_expires() {

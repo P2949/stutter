@@ -233,7 +233,10 @@ fn probe_requested(key: ProbeKey, config: &MonitorConfig) -> bool {
         ProbeKey::Faults => config.probes.faults || config.probes.stat_wait,
         ProbeKey::CpuPerf => config.probes.cpu_perf,
         ProbeKey::RuntimeSlices => config.probes.runtime_slices,
-        ProbeKey::DrmFenceLatency
+        ProbeKey::KmsPageflipTiming => config.probes.kms_timing,
+        ProbeKey::DrmFenceLatency => config.probes.drm_fence_latency,
+        ProbeKey::WaylandPresentationTiming => config.probes.wayland_presentation,
+        ProbeKey::DisplayPathCost
         | ProbeKey::PerfCounterPresets
         | ProbeKey::CompositorFramePacingViews => false,
     }
@@ -254,6 +257,22 @@ fn unavailable_reason(
         }
         ProbeKey::BlockIo if !tracepoints.block_rq => {
             Some("block_rq tracepoints unavailable or incompatible".to_owned())
+        }
+        ProbeKey::KmsPageflipTiming if !tracepoints.kms.has_selected_tracepoints() => {
+            Some("kms_timing_requested_but_no_supported_tracepoints".to_owned())
+        }
+        ProbeKey::KmsPageflipTiming if !tracepoints.kms.selected_provider_has_required_fields() => {
+            Some("kms_timing_requested_but_missing_required_fields".to_owned())
+        }
+        ProbeKey::DrmFenceLatency
+            if tracepoints.drm_fence.as_ref().is_none_or(|discovery| {
+                !crate::ebpf_loader::drm_fence_probe_supported(discovery)
+            }) =>
+        {
+            Some("drm_fence_latency_requested_but_no_supported_tracepoints".to_owned())
+        }
+        ProbeKey::WaylandPresentationTiming if config.wayland_presentation.log_path.is_none() => {
+            Some("wayland_presentation_requested_but_no_log_path".to_owned())
         }
         ProbeKey::Faults
             if config.probes.stat_wait && !tracepoints.sched_stat_wait && !config.probes.faults =>
@@ -300,6 +319,48 @@ fn program_available(
         "sched_stat_wait" => config.probes.stat_wait && tracepoints.sched_stat_wait,
         "irq_handler_entry" | "irq_handler_exit" => tracepoints.irq_handler,
         "block_rq_issue" | "block_rq_complete" => tracepoints.block_rq,
+        "i915_flip_request" | "i915_flip_done" => {
+            tracepoints.kms.provider == crate::drm_tracepoints::KmsTracepointProvider::I915
+                && tracepoints.kms.selected_provider_has_required_fields()
+        }
+        "drm_flip_request" => {
+            tracepoints.kms.provider == crate::drm_tracepoints::KmsTracepointProvider::GenericDrm
+                && tracepoints.kms.selected_provider_has_required_fields()
+                && crate::drm_tracepoints::selected_request_format(&tracepoints.kms).is_some()
+        }
+        "drm_flip_done" => {
+            tracepoints.kms.provider == crate::drm_tracepoints::KmsTracepointProvider::GenericDrm
+                && tracepoints.kms.selected_provider_has_required_fields()
+                && tracepoints.kms.pageflip_done.is_some()
+        }
+        "drm_vblank_event" => {
+            tracepoints.kms.provider == crate::drm_tracepoints::KmsTracepointProvider::GenericDrm
+                && tracepoints.kms.selected_provider_has_required_fields()
+                && tracepoints.kms.vblank_event.is_some()
+        }
+        "amdgpu_flip_request" => {
+            tracepoints.kms.provider == crate::drm_tracepoints::KmsTracepointProvider::Amdgpu
+                && tracepoints.kms.selected_provider_has_required_fields()
+                && crate::drm_tracepoints::selected_request_format(&tracepoints.kms).is_some()
+        }
+        "amdgpu_flip_done" => {
+            tracepoints.kms.provider == crate::drm_tracepoints::KmsTracepointProvider::Amdgpu
+                && tracepoints.kms.selected_provider_has_required_fields()
+                && tracepoints.kms.pageflip_done.is_some()
+        }
+        "amdgpu_vblank_event" => {
+            tracepoints.kms.provider == crate::drm_tracepoints::KmsTracepointProvider::Amdgpu
+                && tracepoints.kms.selected_provider_has_required_fields()
+                && tracepoints.kms.vblank_event.is_some()
+        }
+        "drm_fence_wait_start" | "drm_fence_wait_done" => tracepoints
+            .drm_fence
+            .as_ref()
+            .is_some_and(crate::ebpf_loader::drm_fence_probe_has_wait_interval),
+        "drm_fence_signal" => tracepoints
+            .drm_fence
+            .as_ref()
+            .is_some_and(crate::ebpf_loader::drm_fence_probe_has_signal),
         "major_fault" | "minor_fault" => config.probes.faults,
         _ => false,
     }
@@ -334,8 +395,33 @@ mod tests {
             block_rq_issue_rwbs_offset: Some(32),
             block_rq_complete_nr_sector_offset: Some(24),
             block_rq_complete_rwbs_offset: Some(32),
+            kms: crate::drm_tracepoints::KmsTracepointAvailability::unavailable(),
+            drm_fence: None,
             sched_process_exit: true,
             sched_process_exec: true,
+        }
+    }
+
+    fn i915_kms_tracepoints() -> crate::drm_tracepoints::KmsTracepointAvailability {
+        crate::drm_tracepoints::KmsTracepointAvailability {
+            pageflip_request: Some(crate::drm_tracepoints::parse_drm_tracepoint_format(
+                "i915",
+                "i915_flip_request",
+                "field:unsigned int pipe;\toffset:8;\tsize:4;\tsigned:0;\n",
+            )),
+            pageflip_done: Some(crate::drm_tracepoints::parse_drm_tracepoint_format(
+                "i915",
+                "i915_flip_complete",
+                "field:unsigned int pipe;\toffset:8;\tsize:4;\tsigned:0;\n\
+                 field:unsigned int sequence;\toffset:12;\tsize:4;\tsigned:0;\n",
+            )),
+            vblank_event: None,
+            atomic_commit: None,
+            provider: crate::drm_tracepoints::KmsTracepointProvider::I915,
+            generic_drm: Vec::new(),
+            i915: Vec::new(),
+            amdgpu: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 
@@ -376,6 +462,76 @@ mod tests {
                 && warning.message.contains("block_rq tracepoints")
         }));
         assert!(!plan.should_attach_program("block_rq_issue"));
+    }
+
+    #[test]
+    fn kms_timing_activation_requires_compatible_i915_fields() {
+        let mut config = config();
+        config.probes.kms_timing = true;
+        let mut tracepoints = tracepoints();
+        tracepoints.kms = i915_kms_tracepoints();
+
+        let plan = ProbeActivationPlan::from_config(&config, &tracepoints).unwrap();
+
+        assert!(plan.has_probe(ProbeKey::KmsPageflipTiming));
+        assert!(plan.should_attach_program("i915_flip_request"));
+        assert!(plan.should_attach_program("i915_flip_done"));
+        assert!(
+            plan.required_artifacts()
+                .contains(&ArtifactKind::KmsFlipEvents)
+        );
+    }
+
+    #[test]
+    fn kms_timing_generic_vblank_attaches_only_vblank_program() {
+        let mut config = config();
+        config.probes.kms_timing = true;
+        let mut tracepoints = tracepoints();
+        tracepoints.kms = crate::drm_tracepoints::KmsTracepointAvailability {
+            pageflip_request: None,
+            pageflip_done: None,
+            vblank_event: Some(crate::drm_tracepoints::parse_drm_tracepoint_format(
+                "drm",
+                "drm_vblank_event",
+                "field:unsigned int crtc_id;\toffset:8;\tsize:4;\tsigned:0;\n\
+                 field:unsigned int sequence;\toffset:12;\tsize:4;\tsigned:0;\n",
+            )),
+            atomic_commit: None,
+            provider: crate::drm_tracepoints::KmsTracepointProvider::GenericDrm,
+            generic_drm: Vec::new(),
+            i915: Vec::new(),
+            amdgpu: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        let plan = ProbeActivationPlan::from_config(&config, &tracepoints).unwrap();
+
+        assert!(plan.has_probe(ProbeKey::KmsPageflipTiming));
+        assert!(plan.should_attach_program("drm_vblank_event"));
+        assert!(!plan.should_attach_program("drm_flip_request"));
+        assert!(!plan.should_attach_program("drm_flip_done"));
+    }
+
+    #[test]
+    fn kms_timing_missing_identity_fields_disables_probe() {
+        let mut config = config();
+        config.probes.kms_timing = true;
+        let mut tracepoints = tracepoints();
+        let mut kms = i915_kms_tracepoints();
+        kms.pageflip_done = Some(crate::drm_tracepoints::parse_drm_tracepoint_format(
+            "i915",
+            "i915_flip_complete",
+            "field:unsigned int sequence;\toffset:12;\tsize:4;\tsigned:0;\n",
+        ));
+        tracepoints.kms = kms;
+
+        let plan = ProbeActivationPlan::from_config(&config, &tracepoints).unwrap();
+
+        assert!(!plan.has_probe(ProbeKey::KmsPageflipTiming));
+        assert!(plan.disabled.iter().any(|reason| {
+            reason.key == ProbeKey::KmsPageflipTiming
+                && reason.reason == "kms_timing_requested_but_missing_required_fields"
+        }));
     }
 
     #[test]

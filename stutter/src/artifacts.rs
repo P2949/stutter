@@ -30,6 +30,9 @@ pub enum ArtifactKind {
     RuntimeSlices,
     FocusEvents,
     ForegroundEvents,
+    KmsFlipEvents,
+    DrmFenceEvents,
+    WaylandPresentationEvents,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -54,6 +57,9 @@ pub enum ArtifactCounter {
     MigrationEvent,
     CpuFreqSample,
     ScxEvent,
+    KmsFlipEvent,
+    DrmFenceEvent,
+    WaylandPresentationEvent,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -195,6 +201,30 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         legacy_aliases: &[],
         counter_field: Some(ArtifactCounter::ForegroundEvent),
     },
+    ArtifactSpec {
+        kind: ArtifactKind::KmsFlipEvents,
+        file_name: "kms_flip_events.json",
+        encoding: ArtifactEncoding::Ndjson,
+        required: false,
+        legacy_aliases: &[],
+        counter_field: Some(ArtifactCounter::KmsFlipEvent),
+    },
+    ArtifactSpec {
+        kind: ArtifactKind::DrmFenceEvents,
+        file_name: "drm_fence_events.json",
+        encoding: ArtifactEncoding::Ndjson,
+        required: false,
+        legacy_aliases: &[],
+        counter_field: Some(ArtifactCounter::DrmFenceEvent),
+    },
+    ArtifactSpec {
+        kind: ArtifactKind::WaylandPresentationEvents,
+        file_name: "wayland_presentation_events.json",
+        encoding: ArtifactEncoding::Ndjson,
+        required: false,
+        legacy_aliases: &[],
+        counter_field: Some(ArtifactCounter::WaylandPresentationEvent),
+    },
 ];
 
 #[derive(Debug, Default)]
@@ -301,6 +331,9 @@ pub fn artifact_counter_label(counter: ArtifactCounter) -> &'static str {
         ArtifactCounter::MigrationEvent => "migration event",
         ArtifactCounter::CpuFreqSample => "CPU frequency sample",
         ArtifactCounter::ScxEvent => "SCX event",
+        ArtifactCounter::KmsFlipEvent => "KMS flip event",
+        ArtifactCounter::DrmFenceEvent => "DRM fence event",
+        ArtifactCounter::WaylandPresentationEvent => "Wayland presentation event",
     }
 }
 
@@ -328,6 +361,9 @@ impl ArtifactSelection {
             ArtifactKind::FrameEvents,
             ArtifactKind::FocusEvents,
             ArtifactKind::ForegroundEvents,
+            ArtifactKind::KmsFlipEvents,
+            ArtifactKind::DrmFenceEvents,
+            ArtifactKind::WaylandPresentationEvents,
         ])
     }
 

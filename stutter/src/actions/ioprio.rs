@@ -305,7 +305,7 @@ impl IoPrioAction {
 
 impl TuningAction for IoPrioAction {
     fn id(&self) -> ActionId {
-        ActionId(format!(
+        ActionId::new(format!(
             "ioprio:set:{}:targets:{}",
             self.ioprio.label(),
             self.targets.len()
@@ -677,7 +677,7 @@ mod tests {
 
         assert_eq!(
             action.id(),
-            ActionId("ioprio:set:best-effort:6:targets:1".to_owned())
+            ActionId::new("ioprio:set:best-effort:6:targets:1".to_owned())
         );
         assert_eq!(
             action.describe(),

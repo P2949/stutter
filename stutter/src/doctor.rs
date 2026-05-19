@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use crate::{
     daemon::capabilities::{CapabilityProbe, DaemonCapabilities},
+    drm_tracepoints::{self, DrmTracepointFormat},
     ebpf_loader, hwmon,
     probe_catalog::ProbeStatus,
     probe_registry::PROBE_REGISTRY,
@@ -24,6 +25,7 @@ pub struct DoctorInput {
     pub irq_latency: bool,
     pub irqs: Vec<u32>,
     pub block_io: bool,
+    pub kms_timing: bool,
     pub faults: bool,
     pub cpu_perf: bool,
     pub mangohud_log: Option<PathBuf>,
@@ -77,6 +79,9 @@ pub fn build_doctor_report(input: &DoctorInput) -> DoctorReport {
     }
     if input.cpu_perf {
         checks.push(cpu_perf_preflight_check());
+    }
+    if input.kms_timing {
+        checks.push(kms_timing_check());
     }
     if input.hwmon {
         checks.push(hwmon_check(input));
@@ -375,6 +380,7 @@ fn probe_registry_check(input: &DoctorInput) -> DoctorCheck {
             "irq_latency" => input.irq_latency,
             "gpu_hwmon" => input.hwmon,
             "block_io" => input.block_io,
+            "kms_pageflip_timing" => input.kms_timing,
             "faults" => input.faults,
             "cpu_perf" => input.cpu_perf,
             "frame_log" => input.mangohud_log.is_some(),
@@ -456,6 +462,93 @@ fn tracepoint_check(input: &DoctorInput) -> DoctorCheck {
             DoctorStatus::Fail => {
                 "required scheduler tracepoint formats are missing or incompatible".to_owned()
             }
+        },
+        details,
+    }
+}
+
+fn kms_timing_check() -> DoctorCheck {
+    let availability = drm_tracepoints::discover_kms_tracepoints_default();
+    kms_timing_check_from_availability(availability)
+}
+
+fn kms_timing_check_from_availability(
+    availability: drm_tracepoints::KmsTracepointAvailability,
+) -> DoctorCheck {
+    let mut details = BTreeMap::new();
+    details.insert(
+        "generic_drm_tracepoints".to_owned(),
+        available_unavailable(!availability.generic_drm.is_empty()),
+    );
+    details.insert(
+        "i915_pageflip_tracepoints".to_owned(),
+        available_unavailable(!availability.i915.is_empty()),
+    );
+    details.insert(
+        "amdgpu_pageflip_tracepoints".to_owned(),
+        available_unavailable(!availability.amdgpu.is_empty()),
+    );
+    details.insert(
+        "selected_provider".to_owned(),
+        availability.selected_provider_name().to_owned(),
+    );
+    details.insert(
+        "pageflip_request".to_owned(),
+        format_tracepoint_ref(availability.pageflip_request.as_ref()),
+    );
+    details.insert(
+        "pageflip_done".to_owned(),
+        format_tracepoint_ref(availability.pageflip_done.as_ref()),
+    );
+    details.insert(
+        "vblank_event".to_owned(),
+        format_tracepoint_ref(availability.vblank_event.as_ref()),
+    );
+    details.insert(
+        "atomic_commit".to_owned(),
+        format_tracepoint_ref(availability.atomic_commit.as_ref()),
+    );
+    details.insert(
+        "available_drm_tracepoints".to_owned(),
+        format_tracepoint_names(&availability.generic_drm),
+    );
+    details.insert(
+        "available_i915_tracepoints".to_owned(),
+        format_tracepoint_names(&availability.i915),
+    );
+    details.insert(
+        "available_amdgpu_tracepoints".to_owned(),
+        format_tracepoint_names(&availability.amdgpu),
+    );
+    details.insert(
+        "usable_crtc_id".to_owned(),
+        yes_no(availability.has_usable_crtc_id()),
+    );
+    details.insert(
+        "usable_sequence".to_owned(),
+        yes_no(availability.has_usable_sequence()),
+    );
+    details.insert(
+        "usable_timestamp".to_owned(),
+        yes_no(availability.has_usable_timestamp()),
+    );
+
+    for (idx, warning) in availability.warnings.iter().enumerate() {
+        details.insert(format!("warning_{idx}"), warning.clone());
+    }
+
+    let usable = availability.has_selected_tracepoints();
+    DoctorCheck {
+        name: "kms_timing".to_owned(),
+        status: if usable {
+            DoctorStatus::Pass
+        } else {
+            DoctorStatus::Warn
+        },
+        message: if usable {
+            "KMS timing tracepoints are usable with medium confidence".to_owned()
+        } else {
+            "KMS timing unavailable: no supported pageflip/vblank tracepoints found".to_owned()
         },
         details,
     }
@@ -745,6 +838,32 @@ fn format_optional_u64(value: Option<u64>) -> String {
         .unwrap_or_else(|| "unlimited_or_unknown".to_owned())
 }
 
+fn format_tracepoint_ref(format: Option<&DrmTracepointFormat>) -> String {
+    format
+        .map(|format| format!("{}/{}", format.category, format.name))
+        .unwrap_or_else(|| "-".to_owned())
+}
+
+fn format_tracepoint_names(formats: &[DrmTracepointFormat]) -> String {
+    if formats.is_empty() {
+        "-".to_owned()
+    } else {
+        formats
+            .iter()
+            .map(|format| format.name.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+}
+
+fn available_unavailable(value: bool) -> String {
+    if value {
+        "available".to_owned()
+    } else {
+        "unavailable".to_owned()
+    }
+}
+
 fn yes_no(value: bool) -> String {
     if value {
         "yes".to_owned()
@@ -890,6 +1009,7 @@ mod tests {
             irq_latency: false,
             irqs: Vec::new(),
             block_io: false,
+            kms_timing: false,
             faults: false,
             cpu_perf: false,
             mangohud_log: None,
@@ -924,6 +1044,7 @@ mod tests {
             ionice_available: true,
             irq_affinity_available: false,
             gpu_sysfs_available: false,
+            privileged_worker_socket_reachable: Some(false),
         });
 
         assert_eq!(check.name, "daemon_capabilities");
@@ -944,6 +1065,7 @@ mod tests {
             irq_latency: false,
             irqs: Vec::new(),
             block_io: false,
+            kms_timing: false,
             faults: false,
             cpu_perf: false,
             mangohud_log: None,
@@ -962,6 +1084,39 @@ mod tests {
                 .details
                 .contains_key("sched_wakeup_new_coverage")
         );
+    }
+
+    #[test]
+    fn kms_timing_check_reports_usable_provider() {
+        let availability = drm_tracepoints::KmsTracepointAvailability {
+            pageflip_request: None,
+            pageflip_done: None,
+            vblank_event: Some(drm_tracepoints::parse_drm_tracepoint_format(
+                "drm",
+                "drm_vblank_event",
+                "field:unsigned int crtc_id;\toffset:8;\tsize:4;\tsigned:0;\n\
+                 field:unsigned int sequence;\toffset:12;\tsize:4;\tsigned:0;\n",
+            )),
+            atomic_commit: None,
+            provider: drm_tracepoints::KmsTracepointProvider::GenericDrm,
+            generic_drm: vec![drm_tracepoints::parse_drm_tracepoint_format(
+                "drm",
+                "drm_vblank_event",
+                "field:unsigned int crtc_id;\toffset:8;\tsize:4;\tsigned:0;\n",
+            )],
+            i915: Vec::new(),
+            amdgpu: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        let check = kms_timing_check_from_availability(availability);
+
+        assert_eq!(check.name, "kms_timing");
+        assert_eq!(check.status, DoctorStatus::Pass);
+        assert_eq!(check.details["selected_provider"], "generic_drm");
+        assert_eq!(check.details["generic_drm_tracepoints"], "available");
+        assert_eq!(check.details["usable_crtc_id"], "yes");
+        assert_eq!(check.details["usable_timestamp"], "yes");
     }
 
     #[test]

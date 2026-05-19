@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn autonomous_policy_uses_autonomous_families_not_allowed_families() {
         let candidate = CandidateAction::fake(
-            crate::actions::ActionId("fake-autonomous-test".to_owned()),
+            crate::actions::ActionId::new("fake-autonomous-test".to_owned()),
             crate::actions::SafetyClass::ReversibleLowRisk,
         );
         let allowed_only = WorkloadPolicyRule {

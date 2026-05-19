@@ -40,6 +40,14 @@ pub struct SessionMetadataCore {
     #[serde(default)]
     pub foreground_event_count: u64,
     #[serde(default)]
+    pub kms_flip_event_count: u64,
+    #[serde(default)]
+    pub drm_fence_event_count: u64,
+    #[serde(default)]
+    pub wayland_presentation_event_count: u64,
+    #[serde(default)]
+    pub display_path: Option<DisplayPathMetadata>,
+    #[serde(default)]
     pub foreground_source: Option<String>,
     #[serde(default)]
     pub final_foreground_pid: Option<u32>,
@@ -113,6 +121,14 @@ pub struct SessionFile {
     pub config: RecordedConfig,
     pub tasks: Vec<SessionTask>,
     pub top_spikes: Vec<SessionSpike>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct DisplayPathMetadata {
+    pub label: Option<String>,
+    pub render_gpu: Option<String>,
+    pub scanout_gpu: Option<String>,
+    pub connector: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -196,6 +212,36 @@ pub struct RecordedConfig {
     pub runtime_slices: bool,
     #[serde(default)]
     pub runtime_slices_max_tasks: usize,
+    #[serde(default)]
+    pub kms_timing: bool,
+    #[serde(default)]
+    pub kms_card: Option<String>,
+    #[serde(default)]
+    pub kms_connector: Option<String>,
+    #[serde(default)]
+    pub kms_crtc: Option<u32>,
+    #[serde(default)]
+    pub drm_fence_latency: bool,
+    #[serde(default)]
+    pub drm_fence_render_card: Option<String>,
+    #[serde(default)]
+    pub drm_fence_display_card: Option<String>,
+    #[serde(default)]
+    pub drm_fence_driver: Option<String>,
+    #[serde(default)]
+    pub wayland_presentation: bool,
+    #[serde(default)]
+    pub wayland_presentation_log: Option<PathBuf>,
+    #[serde(default)]
+    pub wayland_presentation_source: String,
+    #[serde(default)]
+    pub display_path_label: Option<String>,
+    #[serde(default)]
+    pub display_render_gpu: Option<String>,
+    #[serde(default)]
+    pub display_scanout_gpu: Option<String>,
+    #[serde(default)]
+    pub display_connector: Option<String>,
     #[serde(default)]
     pub otlp_endpoint: Option<String>,
     #[serde(default)]

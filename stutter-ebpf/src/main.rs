@@ -11,11 +11,18 @@ use aya_ebpf::{
     programs::TracePointContext,
 };
 use stutter_common::{
-    BlockIoEvent, CpuFreqEvent, DROP_BLOCK_START_INSERT_FAILED, DROP_COUNTERS_MAX,
-    DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
-    DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_STALE_ENTRY, EVENT_BLOCK_IO, EVENT_CPU_FREQ,
-    EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT,
-    ExecEvent, IrqEvent, MigrationEvent, SchedulerEvent, StatWaitEvent,
+    BlockIoEvent, CpuFreqEvent, DRM_FENCE_EVENT_SIGNAL, DRM_FENCE_EVENT_WAIT_DONE,
+    DRM_FENCE_EVENT_WAIT_INTERVAL, DRM_FENCE_HAS_CONTEXT, DRM_FENCE_HAS_DURATION,
+    DRM_FENCE_HAS_PID, DRM_FENCE_HAS_SEQNO, DRM_FENCE_HAS_TIMELINE, DRM_FENCE_IS_EXPORTER_SIDE,
+    DRM_FENCE_IS_IMPORTER_SIDE, DRM_FENCE_PROVIDER_DMA_FENCE, DRM_GPU_ROLE_UNKNOWN,
+    DROP_BLOCK_START_INSERT_FAILED, DROP_COUNTERS_MAX, DROP_IRQ_START_TIMES_INSERT_FAILED,
+    DROP_RINGBUF_RESERVE_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_STALE_ENTRY,
+    DrmFenceEvent, EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY,
+    EVENT_KMS_FLIP, EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent,
+    KMS_FLIP_EVENT_INTERVAL, KMS_FLIP_EVENT_PAGEFLIP_DONE, KMS_FLIP_EVENT_VBLANK,
+    KMS_FLIP_HAS_CRTC, KMS_FLIP_HAS_DONE_NS, KMS_FLIP_HAS_DURATION_NS, KMS_FLIP_HAS_REQUEST_NS,
+    KMS_FLIP_HAS_SEQUENCE, KMS_FLIP_PROVIDER_AMDGPU, KMS_FLIP_PROVIDER_DRM, KMS_FLIP_PROVIDER_I915,
+    KmsFlipEvent, MigrationEvent, SchedulerEvent, StatWaitEvent,
 };
 
 #[unsafe(no_mangle)]
@@ -32,6 +39,129 @@ static mut BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET: u32 = 0;
 
 #[unsafe(no_mangle)]
 static mut BLOCK_RQ_COMPLETE_RWBS_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut I915_FLIP_REQUEST_CRTC_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut I915_FLIP_REQUEST_PIPE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut I915_FLIP_DONE_CRTC_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut I915_FLIP_DONE_PIPE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut I915_FLIP_DONE_SEQUENCE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut I915_FLIP_DONE_SEQUENCE_SIZE: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FLIP_REQUEST_CRTC_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FLIP_REQUEST_PIPE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FLIP_DONE_CRTC_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FLIP_DONE_PIPE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FLIP_DONE_SEQUENCE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FLIP_DONE_SEQUENCE_SIZE: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_VBLANK_CRTC_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_VBLANK_PIPE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_VBLANK_SEQUENCE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_VBLANK_SEQUENCE_SIZE: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut AMDGPU_FLIP_REQUEST_CRTC_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut AMDGPU_FLIP_REQUEST_PIPE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut AMDGPU_FLIP_DONE_CRTC_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut AMDGPU_FLIP_DONE_PIPE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut AMDGPU_FLIP_DONE_SEQUENCE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut AMDGPU_FLIP_DONE_SEQUENCE_SIZE: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut AMDGPU_VBLANK_CRTC_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut AMDGPU_VBLANK_PIPE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut AMDGPU_VBLANK_SEQUENCE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut AMDGPU_VBLANK_SEQUENCE_SIZE: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_WAIT_START_CONTEXT_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_WAIT_START_SEQNO_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_WAIT_START_TIMELINE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_WAIT_DONE_CONTEXT_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_WAIT_DONE_SEQNO_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_WAIT_DONE_TIMELINE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_SIGNAL_CONTEXT_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_SIGNAL_SEQNO_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_SIGNAL_TIMELINE_OFFSET: u32 = 0;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_WAIT_START_PROVIDER: u32 = DRM_FENCE_PROVIDER_DMA_FENCE;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_WAIT_START_GPU_ROLE: u32 = DRM_GPU_ROLE_UNKNOWN;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_WAIT_DONE_PROVIDER: u32 = DRM_FENCE_PROVIDER_DMA_FENCE;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_WAIT_DONE_GPU_ROLE: u32 = DRM_GPU_ROLE_UNKNOWN;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_SIGNAL_PROVIDER: u32 = DRM_FENCE_PROVIDER_DMA_FENCE;
+
+#[unsafe(no_mangle)]
+static mut DRM_FENCE_SIGNAL_GPU_ROLE: u32 = DRM_GPU_ROLE_UNKNOWN;
 
 const TARGET_PIDS_MAP_MAX_ENTRIES: u32 = 1_024;
 const WAKEUP_DATA_MAP_MAX_ENTRIES: u32 = 131_072;
@@ -113,6 +243,39 @@ struct IoStart {
     tid: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct KmsFlipKey {
+    card_minor: u32,
+    crtc_id: u32,
+    pipe: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct FenceKey {
+    context: u64,
+    seqno: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct FenceWaitStart {
+    ts: u64,
+    pid: u32,
+    tid: u32,
+    provider: u32,
+    gpu_role: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct FenceSignal {
+    ts: u64,
+    provider: u32,
+    gpu_role: u32,
+}
+
 #[map]
 static PREV_FAULTS: HashMap<u32, FaultCounters> =
     HashMap::<u32, FaultCounters>::with_max_entries(PREV_FAULTS_MAP_MAX_ENTRIES, 0);
@@ -120,6 +283,18 @@ static PREV_FAULTS: HashMap<u32, FaultCounters> =
 #[map]
 static BLOCK_START: LruHashMap<u64, IoStart> =
     LruHashMap::<u64, IoStart>::with_max_entries(16384, 0);
+
+#[map]
+static KMS_FLIP_STARTS: HashMap<KmsFlipKey, u64> =
+    HashMap::<KmsFlipKey, u64>::with_max_entries(4096, 0);
+
+#[map]
+static FENCE_WAIT_STARTS: HashMap<FenceKey, FenceWaitStart> =
+    HashMap::<FenceKey, FenceWaitStart>::with_max_entries(4096, 0);
+
+#[map]
+static FENCE_SIGNAL_TIMES: HashMap<FenceKey, FenceSignal> =
+    HashMap::<FenceKey, FenceSignal>::with_max_entries(4096, 0);
 
 #[map]
 static DROP_COUNTERS: PerCpuArray<u64> = PerCpuArray::<u64>::with_max_entries(DROP_COUNTERS_MAX, 0);
@@ -756,6 +931,534 @@ pub fn block_rq_issue(ctx: TracePointContext) -> u32 {
     match try_block_rq_issue(ctx) {
         Ok(ret) => ret,
         Err(ret) => ret,
+    }
+}
+
+#[tracepoint]
+pub fn i915_flip_request(ctx: TracePointContext) -> u32 {
+    match try_kms_flip_request(
+        ctx,
+        unsafe { core::ptr::read_volatile(&raw const I915_FLIP_REQUEST_CRTC_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const I915_FLIP_REQUEST_PIPE_OFFSET) },
+    ) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[tracepoint]
+pub fn i915_flip_done(ctx: TracePointContext) -> u32 {
+    match try_kms_flip_done(
+        ctx,
+        (KMS_FLIP_PROVIDER_I915 << 16) | KMS_FLIP_EVENT_PAGEFLIP_DONE,
+        kms_offset_pair(
+            unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_CRTC_OFFSET) },
+            unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_PIPE_OFFSET) },
+        ),
+    ) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[tracepoint]
+pub fn drm_flip_request(ctx: TracePointContext) -> u32 {
+    match try_kms_flip_request(
+        ctx,
+        unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_REQUEST_CRTC_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_REQUEST_PIPE_OFFSET) },
+    ) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[tracepoint]
+pub fn drm_flip_done(ctx: TracePointContext) -> u32 {
+    match try_kms_flip_done(
+        ctx,
+        (KMS_FLIP_PROVIDER_DRM << 16) | KMS_FLIP_EVENT_PAGEFLIP_DONE,
+        kms_offset_pair(
+            unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_CRTC_OFFSET) },
+            unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_PIPE_OFFSET) },
+        ),
+    ) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[tracepoint]
+pub fn drm_vblank_event(ctx: TracePointContext) -> u32 {
+    match try_kms_flip_done(
+        ctx,
+        (KMS_FLIP_PROVIDER_DRM << 16) | KMS_FLIP_EVENT_VBLANK,
+        kms_offset_pair(
+            unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_CRTC_OFFSET) },
+            unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_PIPE_OFFSET) },
+        ),
+    ) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[tracepoint]
+pub fn amdgpu_flip_request(ctx: TracePointContext) -> u32 {
+    match try_kms_flip_request(
+        ctx,
+        unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_REQUEST_CRTC_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_REQUEST_PIPE_OFFSET) },
+    ) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[tracepoint]
+pub fn amdgpu_flip_done(ctx: TracePointContext) -> u32 {
+    match try_kms_flip_done(
+        ctx,
+        (KMS_FLIP_PROVIDER_AMDGPU << 16) | KMS_FLIP_EVENT_PAGEFLIP_DONE,
+        kms_offset_pair(
+            unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_CRTC_OFFSET) },
+            unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_PIPE_OFFSET) },
+        ),
+    ) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+#[tracepoint]
+pub fn amdgpu_vblank_event(ctx: TracePointContext) -> u32 {
+    match try_kms_flip_done(
+        ctx,
+        (KMS_FLIP_PROVIDER_AMDGPU << 16) | KMS_FLIP_EVENT_VBLANK,
+        kms_offset_pair(
+            unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_CRTC_OFFSET) },
+            unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_PIPE_OFFSET) },
+        ),
+    ) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+fn try_kms_flip_request(
+    ctx: TracePointContext,
+    crtc_offset: u32,
+    pipe_offset: u32,
+) -> Result<u32, u32> {
+    let Some(key) = kms_flip_key(&ctx, crtc_offset, pipe_offset) else {
+        return Ok(0);
+    };
+
+    let now = unsafe { bpf_ktime_get_ns() };
+    let _ = KMS_FLIP_STARTS.insert(key, now, 0);
+
+    Ok(0)
+}
+
+fn try_kms_flip_done(
+    ctx: TracePointContext,
+    provider_and_event_kind: u32,
+    offset_pair: u64,
+) -> Result<u32, u32> {
+    let provider = provider_and_event_kind >> 16;
+    let completion_event_kind = provider_and_event_kind & 0xffff;
+    let crtc_offset = (offset_pair >> 32) as u32;
+    let pipe_offset = offset_pair as u32;
+    let now = unsafe { bpf_ktime_get_ns() };
+    let Some(key) = kms_flip_key(&ctx, crtc_offset, pipe_offset) else {
+        return Ok(0);
+    };
+
+    let start_ns = unsafe { KMS_FLIP_STARTS.get(key).copied() };
+    let _ = KMS_FLIP_STARTS.remove(key);
+    let (sequence_offset, sequence_size) = kms_sequence_offsets(provider, completion_event_kind);
+    let sequence = read_sequence_field(&ctx, sequence_offset, sequence_size);
+
+    emit_kms_flip_event(&key, provider_and_event_kind, sequence, start_ns, now);
+
+    Ok(0)
+}
+
+fn kms_offset_pair(crtc_offset: u32, pipe_offset: u32) -> u64 {
+    ((crtc_offset as u64) << 32) | (pipe_offset as u64)
+}
+
+fn kms_sequence_offsets(provider: u32, completion_event_kind: u32) -> (u32, u32) {
+    if provider == KMS_FLIP_PROVIDER_I915 {
+        return (
+            unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_SEQUENCE_OFFSET) },
+            unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_SEQUENCE_SIZE) },
+        );
+    }
+
+    if provider == KMS_FLIP_PROVIDER_DRM {
+        if completion_event_kind == KMS_FLIP_EVENT_VBLANK {
+            return (
+                unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_SEQUENCE_OFFSET) },
+                unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_SEQUENCE_SIZE) },
+            );
+        }
+        return (
+            unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_SEQUENCE_OFFSET) },
+            unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_SEQUENCE_SIZE) },
+        );
+    }
+
+    if completion_event_kind == KMS_FLIP_EVENT_VBLANK {
+        (
+            unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_SEQUENCE_OFFSET) },
+            unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_SEQUENCE_SIZE) },
+        )
+    } else {
+        (
+            unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_SEQUENCE_OFFSET) },
+            unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_SEQUENCE_SIZE) },
+        )
+    }
+}
+
+fn kms_flip_key(ctx: &TracePointContext, crtc_offset: u32, pipe_offset: u32) -> Option<KmsFlipKey> {
+    let crtc_id = read_optional_u32(ctx, crtc_offset).unwrap_or(0);
+    let pipe = read_optional_u32(ctx, pipe_offset).unwrap_or(0);
+
+    if crtc_id == 0 && pipe == 0 {
+        None
+    } else {
+        Some(KmsFlipKey {
+            card_minor: 0,
+            crtc_id,
+            pipe,
+        })
+    }
+}
+
+fn read_optional_u32(ctx: &TracePointContext, offset: u32) -> Option<u32> {
+    if offset == 0 {
+        None
+    } else {
+        unsafe { ctx.read_at::<u32>(offset as usize).ok() }
+    }
+}
+
+fn read_sequence_field(ctx: &TracePointContext, offset: u32, size: u32) -> Option<u64> {
+    if offset == 0 {
+        None
+    } else if size >= 8 {
+        unsafe { ctx.read_at::<u64>(offset as usize).ok() }
+    } else {
+        unsafe {
+            ctx.read_at::<u32>(offset as usize)
+                .ok()
+                .map(|value| value as u64)
+        }
+    }
+}
+
+fn emit_kms_flip_event(
+    key: &KmsFlipKey,
+    provider_and_event_kind: u32,
+    sequence: Option<u64>,
+    start_ns: Option<u64>,
+    done_ns: u64,
+) {
+    let Some(mut entry) = EVENTS.reserve::<KmsFlipEvent>(0) else {
+        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
+        return;
+    };
+
+    let event = entry.as_mut_ptr();
+    let duration_ns = start_ns
+        .map(|start| done_ns.saturating_sub(start))
+        .unwrap_or(0);
+
+    let mut flags = KMS_FLIP_HAS_DONE_NS;
+    if key.crtc_id != 0 {
+        flags |= KMS_FLIP_HAS_CRTC;
+    }
+    if start_ns.is_some() {
+        flags |= KMS_FLIP_HAS_REQUEST_NS | KMS_FLIP_HAS_DURATION_NS;
+    }
+    if sequence.is_some() {
+        flags |= KMS_FLIP_HAS_SEQUENCE;
+    }
+
+    unsafe {
+        (*event).kind = EVENT_KMS_FLIP;
+        let provider = provider_and_event_kind >> 16;
+        let completion_event_kind = provider_and_event_kind & 0xffff;
+        (*event).event_kind = if start_ns.is_some() {
+            KMS_FLIP_EVENT_INTERVAL
+        } else {
+            completion_event_kind
+        };
+        (*event).provider = provider;
+        (*event).flags = flags;
+        let pid_tgid = bpf_get_current_pid_tgid();
+        (*event).pid = (pid_tgid >> 32) as u32;
+        (*event).tid = (pid_tgid & 0xffff_ffff) as u32;
+        (*event).cpu = bpf_get_smp_processor_id() as u32;
+        (*event).card_minor = key.card_minor;
+        (*event).crtc_id = key.crtc_id;
+        (*event).pipe = key.pipe;
+        (*event).sequence = sequence.unwrap_or(0);
+        (*event).request_ns = start_ns.unwrap_or(0);
+        (*event).done_ns = done_ns;
+        (*event).duration_ns = duration_ns;
+        (*event).timestamp_ns = done_ns;
+    }
+
+    entry.submit(0);
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct FenceIdentity {
+    key: FenceKey,
+    flags: u32,
+    timeline_hash: u64,
+}
+
+#[tracepoint]
+pub fn drm_fence_wait_start(ctx: TracePointContext) -> u32 {
+    match try_drm_fence_wait_start(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+fn try_drm_fence_wait_start(ctx: TracePointContext) -> Result<u32, u32> {
+    let Some(identity) = fence_identity(
+        &ctx,
+        unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_START_CONTEXT_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_START_SEQNO_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_START_TIMELINE_OFFSET) },
+    ) else {
+        return Ok(0);
+    };
+
+    let pid_tgid = bpf_get_current_pid_tgid();
+    let start = FenceWaitStart {
+        ts: unsafe { bpf_ktime_get_ns() },
+        pid: (pid_tgid >> 32) as u32,
+        tid: (pid_tgid & 0xffff_ffff) as u32,
+        provider: unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_START_PROVIDER) },
+        gpu_role: unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_START_GPU_ROLE) },
+    };
+    let _ = FENCE_WAIT_STARTS.insert(identity.key, start, 0);
+
+    Ok(0)
+}
+
+#[tracepoint]
+pub fn drm_fence_wait_done(ctx: TracePointContext) -> u32 {
+    match try_drm_fence_wait_done(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+fn try_drm_fence_wait_done(ctx: TracePointContext) -> Result<u32, u32> {
+    let Some(identity) = fence_identity(
+        &ctx,
+        unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_DONE_CONTEXT_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_DONE_SEQNO_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_DONE_TIMELINE_OFFSET) },
+    ) else {
+        return Ok(0);
+    };
+
+    let now = unsafe { bpf_ktime_get_ns() };
+    let start = unsafe { FENCE_WAIT_STARTS.get(identity.key).copied() };
+    let _ = FENCE_WAIT_STARTS.remove(identity.key);
+    let signal = unsafe { FENCE_SIGNAL_TIMES.get(identity.key).copied() };
+    let _ = FENCE_SIGNAL_TIMES.remove(identity.key);
+
+    let Some(mut entry) = EVENTS.reserve::<DrmFenceEvent>(0) else {
+        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
+        return Ok(0);
+    };
+    let event = entry.as_mut_ptr();
+
+    let (
+        event_kind,
+        wait_start_ns,
+        duration_ns,
+        pid,
+        tid,
+        provider,
+        gpu_role,
+        signal_ns,
+        driver_id,
+        extra_flags,
+    ) = match start {
+        Some(start) => (
+            DRM_FENCE_EVENT_WAIT_INTERVAL,
+            start.ts,
+            now.saturating_sub(start.ts),
+            start.pid,
+            start.tid,
+            start.provider,
+            start.gpu_role,
+            signal.map(|signal| signal.ts).unwrap_or(0),
+            signal
+                .map(|signal| signal.provider)
+                .unwrap_or(start.provider),
+            DRM_FENCE_HAS_DURATION
+                | DRM_FENCE_HAS_PID
+                | DRM_FENCE_IS_IMPORTER_SIDE
+                | if signal.is_some() {
+                    DRM_FENCE_IS_EXPORTER_SIDE
+                } else {
+                    0
+                },
+        ),
+        None => (
+            DRM_FENCE_EVENT_WAIT_DONE,
+            0,
+            0,
+            0,
+            0,
+            unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_DONE_PROVIDER) },
+            unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_DONE_GPU_ROLE) },
+            signal.map(|signal| signal.ts).unwrap_or(0),
+            signal
+                .map(|signal| signal.provider)
+                .unwrap_or_else(|| unsafe {
+                    core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_DONE_PROVIDER)
+                }),
+            DRM_FENCE_IS_IMPORTER_SIDE
+                | if signal.is_some() {
+                    DRM_FENCE_IS_EXPORTER_SIDE
+                } else {
+                    0
+                },
+        ),
+    };
+
+    unsafe {
+        (*event).kind = EVENT_DRM_FENCE;
+        (*event).event_kind = event_kind;
+        (*event).provider = provider;
+        (*event).flags = identity.flags | extra_flags;
+        (*event).pid = pid;
+        (*event).tid = tid;
+        (*event).cpu = bpf_get_smp_processor_id() as u32;
+        (*event).driver_id = driver_id;
+        (*event).gpu_role = gpu_role;
+        (*event).context = identity.key.context;
+        (*event).seqno = identity.key.seqno;
+        (*event).timeline_hash = identity.timeline_hash;
+        (*event).wait_start_ns = wait_start_ns;
+        (*event).wait_done_ns = now;
+        (*event).signal_ns = signal_ns;
+        (*event).duration_ns = duration_ns;
+        (*event).timestamp_ns = now;
+    }
+
+    entry.submit(0);
+    Ok(0)
+}
+
+#[tracepoint]
+pub fn drm_fence_signal(ctx: TracePointContext) -> u32 {
+    match try_drm_fence_signal(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+fn try_drm_fence_signal(ctx: TracePointContext) -> Result<u32, u32> {
+    let Some(identity) = fence_identity(
+        &ctx,
+        unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_SIGNAL_CONTEXT_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_SIGNAL_SEQNO_OFFSET) },
+        unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_SIGNAL_TIMELINE_OFFSET) },
+    ) else {
+        return Ok(0);
+    };
+
+    let now = unsafe { bpf_ktime_get_ns() };
+    let provider = unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_SIGNAL_PROVIDER) };
+    let gpu_role = unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_SIGNAL_GPU_ROLE) };
+    let _ = FENCE_SIGNAL_TIMES.insert(
+        identity.key,
+        FenceSignal {
+            ts: now,
+            provider,
+            gpu_role,
+        },
+        0,
+    );
+
+    let Some(mut entry) = EVENTS.reserve::<DrmFenceEvent>(0) else {
+        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
+        return Ok(0);
+    };
+    let event = entry.as_mut_ptr();
+    unsafe {
+        (*event).kind = EVENT_DRM_FENCE;
+        (*event).event_kind = DRM_FENCE_EVENT_SIGNAL;
+        (*event).provider = provider;
+        (*event).flags = identity.flags | DRM_FENCE_IS_EXPORTER_SIDE;
+        (*event).pid = 0;
+        (*event).tid = 0;
+        (*event).cpu = bpf_get_smp_processor_id() as u32;
+        (*event).driver_id = provider;
+        (*event).gpu_role = gpu_role;
+        (*event).context = identity.key.context;
+        (*event).seqno = identity.key.seqno;
+        (*event).timeline_hash = identity.timeline_hash;
+        (*event).wait_start_ns = 0;
+        (*event).wait_done_ns = 0;
+        (*event).signal_ns = now;
+        (*event).duration_ns = 0;
+        (*event).timestamp_ns = now;
+    }
+    entry.submit(0);
+
+    Ok(0)
+}
+
+fn fence_identity(
+    ctx: &TracePointContext,
+    context_offset: u32,
+    seqno_offset: u32,
+    timeline_offset: u32,
+) -> Option<FenceIdentity> {
+    let context = read_optional_u64(ctx, context_offset);
+    let seqno = read_optional_u64(ctx, seqno_offset);
+    let timeline_hash = read_optional_u64(ctx, timeline_offset).unwrap_or(0);
+    let key_context = context.or((timeline_hash != 0).then_some(timeline_hash))?;
+    let key_seqno = seqno?;
+
+    let mut flags = DRM_FENCE_HAS_SEQNO;
+    if context.is_some() {
+        flags |= DRM_FENCE_HAS_CONTEXT;
+    }
+    if timeline_hash != 0 {
+        flags |= DRM_FENCE_HAS_TIMELINE;
+    }
+
+    Some(FenceIdentity {
+        key: FenceKey {
+            context: key_context,
+            seqno: key_seqno,
+        },
+        flags,
+        timeline_hash,
+    })
+}
+
+fn read_optional_u64(ctx: &TracePointContext, offset: u32) -> Option<u64> {
+    if offset == 0 {
+        None
+    } else {
+        unsafe { ctx.read_at::<u64>(offset as usize).ok() }
     }
 }
 

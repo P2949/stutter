@@ -56,7 +56,7 @@ impl Default for FakeAction {
 impl FakeAction {
     pub fn new() -> Self {
         Self {
-            action_id: ActionId("fake-action".to_owned()),
+            action_id: ActionId::new("fake-action".to_owned()),
             description: "fake action".to_owned(),
             safety_class: SafetyClass::ReversibleLowRisk,
             effect_scope: ActionEffectScope::LocalProcessTree,
@@ -149,7 +149,7 @@ impl FakeAction {
     }
 
     pub fn with_action_id(mut self, action_id: impl Into<String>) -> Self {
-        self.action_id = ActionId(action_id.into());
+        self.action_id = ActionId::new(action_id.into());
         self
     }
 
@@ -209,7 +209,7 @@ impl TuningAction for FakeAction {
     fn descriptor(&self) -> ActionDescriptor {
         ActionDescriptor {
             action_id: self.id(),
-            action_kind: self.action_id.0.clone(),
+            action_kind: self.action_id.as_str().to_owned(),
             safety_class: self.safety_class.clone(),
             effect_scope: self.effect_scope,
             rollback: self.rollback,

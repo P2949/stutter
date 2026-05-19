@@ -285,7 +285,7 @@ mod tests {
         fn new(action_kind: &'static str, scope: ActionEffectScope) -> Self {
             Self {
                 descriptor: ActionDescriptor {
-                    action_id: ActionId(format!("{action_kind}:fake")),
+                    action_id: ActionId::new(format!("{action_kind}:fake")),
                     action_kind: action_kind.to_owned(),
                     safety_class: SafetyClass::ReversibleMediumRisk,
                     effect_scope: scope,
@@ -384,7 +384,7 @@ mod tests {
     async fn run_apply_medium_risk_candidate_rejects_unsupported_candidate_kind() {
         let err = run_apply_medium_risk_candidate(
             crate::autotune::candidate::CandidateAction::fake(
-                ActionId("fake-medium-risk".to_owned()),
+                ActionId::new("fake-medium-risk".to_owned()),
                 SafetyClass::ReversibleMediumRisk,
             ),
             Duration::ZERO,

@@ -1,5 +1,3 @@
-#![allow(unused_imports)] // Transitional planning façade while planner/candidate split lands.
-
 pub(crate) mod candidate;
 pub(crate) mod collect;
 pub(crate) mod denial;
@@ -11,6 +9,5 @@ pub(crate) mod profile_candidates;
 pub(crate) mod ranking;
 pub(crate) mod suggestion;
 
-pub(crate) use crate::autotune::candidate::{
-    ApplyCandidate, ApplyEligibility, CandidateAction, CandidatePlanFile, SuggestionCandidate,
-};
+#[cfg(test)]
+mod tests;

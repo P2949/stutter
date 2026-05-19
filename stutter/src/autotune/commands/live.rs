@@ -29,6 +29,7 @@ pub struct AutotuneCommandInput {
     pub foreground_max_stale_ms: u64,
     pub allow_system_wide_suggestions: bool,
     pub allow_medium_risk: bool,
+    pub high_risk_dry_run: bool,
 }
 
 fn unsupported_live_autotune_mode_error(mode: impl std::fmt::Display) -> anyhow::Error {
@@ -81,6 +82,8 @@ fn runtime_config_for_command(
     daemon_config.autotune.washout_seconds = input.washout_seconds;
     daemon_config.safety.allow_system_wide_suggestions = input.allow_system_wide_suggestions;
     daemon_config.autotune.allow_medium_risk_apply = input.allow_medium_risk;
+    daemon_config.autotune.high_risk_dry_run =
+        mode == DaemonMode::Suggest && input.high_risk_dry_run;
 
     if matches!(mode, DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk) {
         daemon_config.autotune.candidate_window_seconds = input.duration_seconds.unwrap_or(30);
@@ -241,6 +244,7 @@ mod tests {
             foreground_max_stale_ms: 2500,
             allow_system_wide_suggestions: false,
             allow_medium_risk: false,
+            high_risk_dry_run: false,
         }
     }
 
@@ -317,6 +321,7 @@ mod tests {
             foreground_max_stale_ms: 2500,
             allow_system_wide_suggestions: false,
             allow_medium_risk: false,
+            high_risk_dry_run: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();
@@ -349,6 +354,7 @@ mod tests {
             foreground_max_stale_ms: 2500,
             allow_system_wide_suggestions: false,
             allow_medium_risk: false,
+            high_risk_dry_run: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();
@@ -384,6 +390,7 @@ mod tests {
             foreground_max_stale_ms: 2500,
             allow_system_wide_suggestions: false,
             allow_medium_risk: false,
+            high_risk_dry_run: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();
