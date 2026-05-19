@@ -15,8 +15,11 @@ use crate::{
     actions::{ActionState, RollbackToken, SafetyClass, TaskIdentity, runner::ActionRunPolicy},
     audit::{AuditEvent, append_audit_event_to_path},
     autotune::{
-        apply::executor_for_candidate,
-        candidate::{CandidateAction, CandidateDryRunRecord, CandidatePlanFile},
+        apply::{executor_for_apply_candidate, executor_for_candidate_preview},
+        candidate::{
+            ApplyEligibility, CandidateAction, CandidateDryRunRecord, CandidatePlanFile,
+            try_promote_to_apply_candidate,
+        },
         objective::ObjectiveKind,
     },
     daemon_policy::{ActionDescriptor, DaemonPolicy, DaemonPolicyContext, PolicyIntent},
@@ -545,7 +548,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
             detail: "candidate plan passed dry-run validation",
             affected_tasks: 0,
         });
-        let executor = executor_for_candidate(request.plan.candidate)?;
+        let executor = executor_for_candidate_preview(request.plan.candidate)?;
         let executor_descriptor = executor.descriptor();
         debug_assert_eq!(executor_descriptor.action_kind, descriptor.action_kind);
         debug_assert_eq!(executor.safety_class(), descriptor.safety_class);
@@ -649,7 +652,10 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
             detail: "privileged apply started",
             affected_tasks: 0,
         });
-        let executor = executor_for_candidate(request.plan.candidate)?;
+        let apply_candidate =
+            try_promote_to_apply_candidate(request.plan.candidate, ApplyEligibility::approved())
+                .map_err(|eligibility| anyhow::anyhow!(eligibility.denial_message()))?;
+        let executor = executor_for_apply_candidate(apply_candidate)?;
         let executor_descriptor = executor.descriptor();
         debug_assert_eq!(executor_descriptor.action_kind, descriptor.action_kind);
         debug_assert_eq!(executor.safety_class(), descriptor.safety_class);
@@ -752,7 +758,7 @@ impl PrivilegedActionService for InProcessPrivilegedActionService {
             request.token.affected_tasks(),
         );
         let affected_tasks = request.token.affected_tasks();
-        let executor = executor_for_candidate(request.candidate)?;
+        let executor = executor_for_candidate_preview(request.candidate)?;
         if let Err(err) = executor.rollback(&request.token) {
             let detail = format!("{err:#}");
             let reason_code = stable_error_reason_code(&detail);

@@ -11,6 +11,10 @@ use crate::{
     actions::{
         ActionId, ActionState, ActionWarning, CgroupRestoreRecord, RollbackToken, SafetyClass,
         TaskIdentity, TuningAction,
+        rollback::{
+            RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult,
+            token_dry_run_preview, token_restore_result,
+        },
     },
     process_tree::TaskClass,
 };
@@ -45,6 +49,85 @@ pub struct CgroupPlacementAction {
     pub targets: Vec<CgroupPlacementTarget>,
     pub cpuset_cpus: Option<String>,
     pub cpuset_mems: Option<String>,
+}
+
+pub(crate) struct CgroupRollbackHandler;
+
+impl RollbackHandler for CgroupRollbackHandler {
+    fn id(&self) -> &'static str {
+        "cgroup-rollback"
+    }
+
+    fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>> {
+        Ok(Vec::new())
+    }
+
+    fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
+        anyhow::bail!("cgroup rollback requires an explicit rollback token")
+    }
+
+    fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
+        anyhow::bail!("cgroup rollback requires an explicit rollback token")
+    }
+
+    fn supports_token(&self, token: &RollbackToken) -> bool {
+        matches!(token, RollbackToken::CgroupRestore { .. })
+    }
+
+    fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
+        if !self.supports_token(token) {
+            anyhow::bail!("cgroup rollback handler does not support {token:?}");
+        }
+        Ok(token_dry_run_preview(self.id(), token, "cgroup-restore"))
+    }
+
+    fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+        let RollbackToken::CgroupRestore { records } = token else {
+            anyhow::bail!("cgroup rollback handler does not support {token:?}");
+        };
+
+        let mut restored = 0usize;
+        let mut skipped = 0usize;
+        let mut failures = Vec::new();
+
+        for record in records {
+            if !task_exists(Path::new("/proc"), record.pid) {
+                skipped += 1;
+                continue;
+            }
+
+            let original_cgroup = if record.original_cgroup.is_absolute() {
+                record.original_cgroup.clone()
+            } else {
+                Path::new("/sys/fs/cgroup")
+                    .join(strip_cgroup_leading_slash(&record.original_cgroup))
+            };
+            let cgroup_procs = original_cgroup.join("cgroup.procs");
+            match write_trimmed(&cgroup_procs, &record.pid.to_string()) {
+                Ok(()) => restored += 1,
+                Err(err) => failures.push(format!(
+                    "failed to restore pid={} to cgroup {}: {err:#}",
+                    record.pid,
+                    original_cgroup.display()
+                )),
+            }
+        }
+
+        if !failures.is_empty() {
+            anyhow::bail!(
+                "failed to rollback cgroup placement: {}",
+                failures.join("; ")
+            );
+        }
+
+        Ok(token_restore_result(
+            self.id(),
+            token,
+            restored,
+            skipped,
+            Vec::new(),
+        ))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

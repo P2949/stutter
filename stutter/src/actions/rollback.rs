@@ -115,6 +115,20 @@ impl RollbackRegistry {
     }
 }
 
+pub fn default_rollback_registry() -> RollbackRegistry {
+    let mut registry = RollbackRegistry::new();
+    registry.register(crate::actions::cpu_affinity::CpuAffinityRollbackHandler);
+    registry.register(crate::actions::nice::NiceRollbackHandler);
+    registry.register(crate::actions::ioprio::IoPrioRollbackHandler);
+    registry.register(crate::actions::uclamp::UclampRollbackHandler);
+    registry.register(crate::actions::cgroup::CgroupRollbackHandler);
+    registry.register(crate::actions::irq_affinity::IrqAffinityRollbackHandler);
+    registry.register(crate::actions::cpu_power::CpuPowerRollbackHandler);
+    registry.register(crate::actions::gpu_power::GpuPowerRollbackHandler);
+    registry.register(crate::actions::vm_knobs::VmKnobRollbackHandler);
+    registry
+}
+
 impl Default for RollbackRegistry {
     fn default() -> Self {
         Self::new()
@@ -184,6 +198,42 @@ pub struct RestoreAllSummary {
     pub skipped_identity_mismatch: usize,
     pub legacy_unverified: usize,
     pub errors: usize,
+}
+
+pub(crate) fn token_dry_run_preview(
+    handler_id: &'static str,
+    token: &RollbackToken,
+    rollback_kind: &'static str,
+) -> RollbackPreview {
+    RollbackPreview {
+        handler_id,
+        restore_path: token.restore_path().cloned().unwrap_or_default(),
+        affected_tasks: token.affected_tasks(),
+        message: format!(
+            "would restore rollback_kind={} affected_items={}",
+            rollback_kind,
+            token.affected_tasks()
+        ),
+    }
+}
+
+pub(crate) fn token_restore_result(
+    handler_id: &'static str,
+    token: &RollbackToken,
+    restored: usize,
+    skipped: usize,
+    messages: Vec<String>,
+) -> RollbackResult {
+    RollbackResult {
+        handler_id,
+        restore_path: token.restore_path().cloned().unwrap_or_default(),
+        restored,
+        skipped_dead: skipped,
+        skipped_identity_mismatch: 0,
+        legacy_unverified: 0,
+        errors: 0,
+        messages,
+    }
 }
 
 #[cfg(test)]
@@ -423,5 +473,115 @@ mod tests {
         assert_eq!(result.handler_id, "token");
         assert_eq!(result.restored, 1);
         assert_eq!(result.messages, vec!["restored sysfs token"]);
+    }
+
+    #[test]
+    fn default_rollback_registry_has_handler_for_every_reversible_token_kind() {
+        let registry = default_rollback_registry();
+        let tokens = vec![
+            (
+                "cpu-affinity-rollback",
+                RollbackToken::CpuAffinityRestoreFile {
+                    path: PathBuf::from("/tmp/stutter-affinity-restore.json"),
+                    affected_tasks: 1,
+                },
+            ),
+            (
+                "nice-rollback",
+                RollbackToken::NiceRestore {
+                    records: vec![crate::actions::NiceRestoreRecord {
+                        tid: 1,
+                        original_nice: 0,
+                    }],
+                },
+            ),
+            (
+                "ioprio-rollback",
+                RollbackToken::IoPrioRestore {
+                    records: vec![crate::actions::IoPrioRestoreRecord {
+                        tid: 1,
+                        original_ioprio: 0,
+                    }],
+                },
+            ),
+            (
+                "uclamp-rollback",
+                RollbackToken::UclampRestore {
+                    records: vec![crate::actions::UclampRestoreRecord {
+                        tid: 1,
+                        original_util_min: 0,
+                        original_util_max: 1024,
+                    }],
+                },
+            ),
+            (
+                "cgroup-rollback",
+                RollbackToken::CgroupRestore {
+                    records: vec![crate::actions::CgroupRestoreRecord {
+                        pid: 1,
+                        original_cgroup: PathBuf::from("/sys/fs/cgroup"),
+                    }],
+                },
+            ),
+            (
+                "irq-affinity-rollback",
+                RollbackToken::IrqAffinityRestore {
+                    records: vec![crate::actions::IrqAffinityRestoreRecord {
+                        irq: 1,
+                        device_hint: "test".to_owned(),
+                        original_smp_affinity: "1".to_owned(),
+                    }],
+                },
+            ),
+            (
+                "cpu-power-rollback",
+                RollbackToken::CpuPowerRestore {
+                    records: vec![crate::actions::CpuPowerRestoreRecord {
+                        path: PathBuf::from(
+                            "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor",
+                        ),
+                        original_value: "powersave".to_owned(),
+                    }],
+                },
+            ),
+            (
+                "gpu-power-rollback",
+                RollbackToken::GpuPowerRestore {
+                    records: vec![crate::actions::GpuPowerRestoreRecord {
+                        path: PathBuf::from(
+                            "/sys/class/drm/card0/device/power_dpm_force_performance_level",
+                        ),
+                        original_value: "auto".to_owned(),
+                    }],
+                },
+            ),
+            (
+                "vm-knob-rollback",
+                RollbackToken::VmKnobRestore {
+                    records: vec![crate::actions::VmKnobRestoreRecord {
+                        path: PathBuf::from("/proc/sys/vm/swappiness"),
+                        original_value: "60".to_owned(),
+                    }],
+                },
+            ),
+            (
+                "vm-knob-rollback",
+                RollbackToken::SysfsRestore {
+                    path: PathBuf::from("/sys/devices/system/cpu/test-knob"),
+                    original_value: "0".to_owned(),
+                },
+            ),
+        ];
+
+        for (expected_handler, token) in tokens {
+            assert!(
+                registry
+                    .handlers()
+                    .iter()
+                    .any(|handler| handler.id() == expected_handler
+                        && handler.supports_token(&token)),
+                "default registry must include {expected_handler} for token {token:?}"
+            );
+        }
     }
 }

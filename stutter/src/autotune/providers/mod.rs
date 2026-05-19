@@ -1,12 +1,15 @@
 use crate::{
+    actions::SafetyClass,
     autotune::{
-        candidate::CandidateAction,
+        candidate::{CandidateAction, CandidateFamily},
+        conflicts::ActionConflictGroup,
         controller::ControllerRuntimeState,
         objective::{ObjectiveKind, ObjectiveSignalQuality},
         observation::AutotuneObservation,
         system_context::SystemContextSnapshot,
     },
     daemon::{DaemonPolicy, capabilities::DaemonCapabilities, health::SystemHealthSnapshot},
+    daemon_policy::{DaemonMode, RollbackRequirement},
     profiles::Profile,
 };
 
@@ -30,8 +33,25 @@ pub struct CandidateProposal {
     pub rank_hint: u32,
 }
 
+#[derive(Clone, Debug)]
+pub struct CandidateProviderMetadata {
+    pub family: CandidateFamily,
+    pub description: &'static str,
+    pub safety_class: SafetyClass,
+    pub required_mode: DaemonMode,
+    pub rollback_requirement: RollbackRequirement,
+    pub capability_requirements: &'static [&'static str],
+    pub conflict_group: ActionConflictGroup,
+    pub cooldown_key: &'static str,
+    pub objective: ObjectiveKind,
+    pub policy_coverage: &'static [&'static str],
+}
+
 pub trait CandidateProvider {
-    fn family(&self) -> &'static str;
+    fn family(&self) -> CandidateFamily;
+    fn metadata(&self) -> CandidateProviderMetadata {
+        provider_metadata_for_family(self.family())
+    }
     fn propose(&self, input: &CandidateProviderInput<'_>) -> Vec<CandidateProposal>;
 }
 
@@ -96,12 +116,207 @@ impl CandidateProviderRegistry {
             .collect()
     }
 
+    pub fn metadata(&self) -> Vec<CandidateProviderMetadata> {
+        self.providers
+            .iter()
+            .map(|provider| provider.metadata())
+            .collect()
+    }
+
     pub fn propose(&self, input: &CandidateProviderInput<'_>) -> Vec<CandidateProposal> {
         self.providers
             .iter()
             .filter(|provider| family_enabled(input.daemon_policy, provider.family()))
             .flat_map(|provider| provider.propose(input))
             .collect()
+    }
+}
+
+fn provider_metadata_for_family(family: CandidateFamily) -> CandidateProviderMetadata {
+    match family {
+        "cpu_affinity_profile" => CandidateProviderMetadata {
+            family,
+            description: "Topology-aware CPU affinity profile suggestions for a focused workload.",
+            safety_class: SafetyClass::ReversibleLowRisk,
+            required_mode: DaemonMode::Suggest,
+            rollback_requirement: RollbackRequirement::RequiredBeforeApply,
+            capability_requirements: &["sched_setaffinity", "procfs"],
+            conflict_group: ActionConflictGroup::CpuPlacement,
+            cooldown_key: "cpu_affinity_profile",
+            objective: ObjectiveKind::StutterScore,
+            policy_coverage: &[
+                "daemon_mode",
+                "safety_class",
+                "rollback_required",
+                "target_scope",
+                "protected_tasks",
+                "cooldown",
+            ],
+        },
+        "nice" => CandidateProviderMetadata {
+            family,
+            description: "Per-task nice adjustments for foreground or background CPU pressure.",
+            safety_class: SafetyClass::ReversibleMediumRisk,
+            required_mode: DaemonMode::ApplyMediumRisk,
+            rollback_requirement: RollbackRequirement::RequiredBeforeApply,
+            capability_requirements: &["setpriority", "procfs"],
+            conflict_group: ActionConflictGroup::CpuPriority,
+            cooldown_key: "nice",
+            objective: ObjectiveKind::DesktopInteractivity,
+            policy_coverage: &[
+                "daemon_mode",
+                "safety_class",
+                "capability",
+                "target_scope",
+                "protected_tasks",
+                "cooldown",
+            ],
+        },
+        "ionice" => CandidateProviderMetadata {
+            family,
+            description: "Per-task I/O priority adjustments for block I/O pressure.",
+            safety_class: SafetyClass::ReversibleMediumRisk,
+            required_mode: DaemonMode::ApplyMediumRisk,
+            rollback_requirement: RollbackRequirement::RequiredBeforeApply,
+            capability_requirements: &["ioprio_set", "procfs"],
+            conflict_group: ActionConflictGroup::IoPriority,
+            cooldown_key: "ionice",
+            objective: ObjectiveKind::DesktopInteractivity,
+            policy_coverage: &[
+                "daemon_mode",
+                "safety_class",
+                "capability",
+                "evidence_quality",
+                "target_scope",
+                "protected_tasks",
+                "cooldown",
+            ],
+        },
+        "uclamp" => CandidateProviderMetadata {
+            family,
+            description: "Per-task utilization clamp adjustments for scheduler latency.",
+            safety_class: SafetyClass::ReversibleMediumRisk,
+            required_mode: DaemonMode::ApplyMediumRisk,
+            rollback_requirement: RollbackRequirement::RequiredBeforeApply,
+            capability_requirements: &["sched_setattr", "procfs"],
+            conflict_group: ActionConflictGroup::CpuPriority,
+            cooldown_key: "uclamp",
+            objective: ObjectiveKind::GameRunnableLatency,
+            policy_coverage: &[
+                "daemon_mode",
+                "safety_class",
+                "capability",
+                "system_health",
+                "target_scope",
+                "protected_tasks",
+                "cooldown",
+            ],
+        },
+        "cgroup_placement" => CandidateProviderMetadata {
+            family,
+            description: "Move eligible workload tasks into configured cgroup targets.",
+            safety_class: SafetyClass::ReversibleMediumRisk,
+            required_mode: DaemonMode::ApplyMediumRisk,
+            rollback_requirement: RollbackRequirement::RequiredBeforeApply,
+            capability_requirements: &["cgroup_v2", "cgroup.procs"],
+            conflict_group: ActionConflictGroup::CgroupPlacement,
+            cooldown_key: "cgroup_placement",
+            objective: ObjectiveKind::DesktopInteractivity,
+            policy_coverage: &[
+                "daemon_mode",
+                "safety_class",
+                "configured_targets",
+                "target_scope",
+                "protected_tasks",
+                "cooldown",
+            ],
+        },
+        "irq_affinity" => CandidateProviderMetadata {
+            family,
+            description: "Suggest IRQ affinity placement when stable IRQ pressure evidence exists.",
+            safety_class: SafetyClass::HighRisk,
+            required_mode: DaemonMode::Suggest,
+            rollback_requirement: RollbackRequirement::RequiredBeforeApply,
+            capability_requirements: &["proc_irq", "irq_device_identity"],
+            conflict_group: ActionConflictGroup::IrqPlacement,
+            cooldown_key: "irq_affinity",
+            objective: ObjectiveKind::GameRunnableLatency,
+            policy_coverage: &[
+                "suggest_only",
+                "manual_only_high_risk",
+                "system_wide_suggestions",
+                "evidence_quality",
+                "cooldown",
+            ],
+        },
+        "cpu_power" => CandidateProviderMetadata {
+            family,
+            description: "Suggest CPU power policy changes under workload pressure and safe health.",
+            safety_class: SafetyClass::HighRisk,
+            required_mode: DaemonMode::Suggest,
+            rollback_requirement: RollbackRequirement::RequiredBeforeApply,
+            capability_requirements: &["sysfs_cpu_cpufreq", "power_supply"],
+            conflict_group: ActionConflictGroup::CpuPower,
+            cooldown_key: "cpu_power",
+            objective: ObjectiveKind::GameRunnableLatency,
+            policy_coverage: &[
+                "suggest_only",
+                "manual_only_high_risk",
+                "system_wide_suggestions",
+                "system_health",
+                "battery_policy",
+                "cooldown",
+            ],
+        },
+        "gpu_power" => CandidateProviderMetadata {
+            family,
+            description: "Suggest focused GPU power policy changes for GPU-bound workloads.",
+            safety_class: SafetyClass::HighRisk,
+            required_mode: DaemonMode::Suggest,
+            rollback_requirement: RollbackRequirement::RequiredBeforeApply,
+            capability_requirements: &["sysfs_drm", "gpu_focus_identity"],
+            conflict_group: ActionConflictGroup::GpuPower,
+            cooldown_key: "gpu_power",
+            objective: ObjectiveKind::GameFramePacing,
+            policy_coverage: &[
+                "suggest_only",
+                "manual_only_high_risk",
+                "system_wide_suggestions",
+                "system_health",
+                "focus_identity",
+                "cooldown",
+            ],
+        },
+        "vm_knob" => CandidateProviderMetadata {
+            family,
+            description: "Suggest VM/sysfs knob changes for memory or writeback pressure.",
+            safety_class: SafetyClass::HighRisk,
+            required_mode: DaemonMode::Suggest,
+            rollback_requirement: RollbackRequirement::RequiredBeforeApply,
+            capability_requirements: &["proc_sys_vm", "memory_pressure_evidence"],
+            conflict_group: ActionConflictGroup::VmMemory,
+            cooldown_key: "vm_knob",
+            objective: ObjectiveKind::DesktopInteractivity,
+            policy_coverage: &[
+                "suggest_only",
+                "manual_only_high_risk",
+                "system_wide_suggestions",
+                "evidence_quality",
+                "cooldown",
+            ],
+        },
+        _ => CandidateProviderMetadata {
+            family,
+            description: "Candidate provider with explicit registration metadata.",
+            safety_class: SafetyClass::ObserveOnly,
+            required_mode: DaemonMode::Observe,
+            rollback_requirement: RollbackRequirement::NotRequiredForDryRun,
+            capability_requirements: &["unknown"],
+            conflict_group: ActionConflictGroup::None,
+            cooldown_key: "unknown",
+            objective: ObjectiveKind::StutterScore,
+            policy_coverage: &["provider_registered"],
+        },
     }
 }
 
@@ -228,6 +443,64 @@ mod tests {
         assert!(families.contains(&"cpu_power"));
         assert!(families.contains(&"gpu_power"));
         assert!(families.contains(&"vm_knob"));
+    }
+
+    #[test]
+    fn registered_providers_expose_complete_policy_metadata() {
+        let registry = CandidateProviderRegistry::default_for_policy(
+            &policy_with_system_wide_suggestions(DaemonMode::Suggest),
+        );
+
+        for metadata in registry.metadata() {
+            assert!(!metadata.family.is_empty());
+            assert!(!metadata.description.trim().is_empty());
+            assert_ne!(
+                metadata.rollback_requirement,
+                RollbackRequirement::Unavailable
+            );
+            assert!(
+                !metadata.capability_requirements.is_empty(),
+                "{} must document capability requirements",
+                metadata.family
+            );
+            assert_ne!(
+                metadata.conflict_group,
+                ActionConflictGroup::None,
+                "{} must declare a conflict group",
+                metadata.family
+            );
+            assert!(!metadata.cooldown_key.is_empty());
+            assert!(
+                !metadata.policy_coverage.is_empty(),
+                "{} must document policy gates",
+                metadata.family
+            );
+
+            match metadata.safety_class {
+                SafetyClass::ReversibleLowRisk
+                | SafetyClass::ReversibleMediumRisk
+                | SafetyClass::HighRisk => {}
+                SafetyClass::ObserveOnly => {
+                    panic!(
+                        "{} is an action provider and must not be observe-only",
+                        metadata.family
+                    )
+                }
+            }
+
+            match metadata.required_mode {
+                DaemonMode::Suggest | DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk => {}
+                DaemonMode::Observe | DaemonMode::ApplyHighRisk => {
+                    panic!(
+                        "{} must declare suggest/apply-low/apply-medium as its required mode",
+                        metadata.family
+                    )
+                }
+            }
+
+            let objective = format!("{:?}", metadata.objective);
+            assert!(!objective.is_empty());
+        }
     }
 
     #[test]

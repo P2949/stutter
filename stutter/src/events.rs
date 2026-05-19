@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, time::Instant};
 
 use log::{debug, info, warn};
 use stutter_common::{
-    BlockIoEvent, CpuFreqEvent, ExecEvent, IrqEvent, MigrationEvent, SchedulerEvent,
+    BlockIoEvent, CpuFreqEvent, ExecEvent, IrqEvent as RawIrqEvent, MigrationEvent, SchedulerEvent,
 };
 
 use crate::{
@@ -15,6 +15,7 @@ use crate::{
 };
 
 pub mod decode;
+pub mod domain;
 pub mod interpret;
 
 pub fn handle_irq_record(record: &IrqEventRecord) -> MonitorEvent {
@@ -186,7 +187,8 @@ pub fn handle_event_with_runtime_config(
     })
 }
 
-pub fn irq_event_record(monotonic_start_ns: Option<u64>, event: &IrqEvent) -> IrqEventRecord {
+pub fn irq_event_record(monotonic_start_ns: Option<u64>, event: &RawIrqEvent) -> IrqEventRecord {
+    let event = domain::IrqEvent::from_raw(*event);
     IrqEventRecord {
         elapsed_ms: monotonic_start_ns
             .map(|start| event.enter_ns.saturating_sub(start) / 1_000_000),
@@ -207,7 +209,8 @@ pub fn log_irq_record(record: &IrqEventRecord) {
     );
 }
 
-pub fn log_irq_event(event: &IrqEvent) {
+pub fn log_irq_event(event: &RawIrqEvent) {
+    let event = domain::IrqEvent::from_raw(*event);
     debug!(
         "irq_event cpu={} irq={} latency={}",
         event.cpu,

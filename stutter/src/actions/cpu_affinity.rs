@@ -2,7 +2,87 @@ use std::path::Path;
 
 use crate::actions::{
     ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
+    rollback::{
+        RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
+        token_restore_result,
+    },
 };
+
+pub(crate) struct CpuAffinityRollbackHandler;
+
+impl RollbackHandler for CpuAffinityRollbackHandler {
+    fn id(&self) -> &'static str {
+        "cpu-affinity-rollback"
+    }
+
+    fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>> {
+        Ok(Vec::new())
+    }
+
+    fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
+        anyhow::bail!("CPU affinity rollback requires an explicit rollback token")
+    }
+
+    fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
+        anyhow::bail!("CPU affinity rollback requires an explicit rollback token")
+    }
+
+    fn supports_token(&self, token: &RollbackToken) -> bool {
+        matches!(token, RollbackToken::CpuAffinityRestoreFile { .. })
+    }
+
+    fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
+        if !self.supports_token(token) {
+            anyhow::bail!("CPU affinity rollback handler does not support {token:?}");
+        }
+        Ok(token_dry_run_preview(
+            self.id(),
+            token,
+            "cpu-affinity-restore-file",
+        ))
+    }
+
+    fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+        let RollbackToken::CpuAffinityRestoreFile { path, .. } = token else {
+            anyhow::bail!("CPU affinity rollback handler does not support {token:?}");
+        };
+
+        if crate::profile_restore::load_restore_state(path).is_ok() {
+            let summary = crate::profile_restore::restore_saved(path)?;
+            return Ok(token_restore_result(
+                self.id(),
+                token,
+                summary.restored_total(),
+                summary.skipped_dead + summary.skipped_identity_mismatch,
+                vec![format!(
+                    "affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={} errors={}",
+                    summary.affinity,
+                    summary.nice,
+                    summary.ionice,
+                    summary.skipped_dead,
+                    summary.skipped_identity_mismatch,
+                    summary.errors
+                )],
+            ));
+        }
+
+        let summary = crate::affinity::restore_saved(path)?;
+        Ok(token_restore_result(
+            self.id(),
+            token,
+            summary.restored,
+            summary.skipped_dead + summary.skipped_identity_mismatch + summary.legacy_unverified,
+            vec![format!(
+                "restored={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={} errors={}",
+                summary.restored,
+                summary.skipped_dead,
+                summary.skipped_identity_mismatch,
+                summary.legacy_unverified,
+                summary.errors
+            )],
+        ))
+    }
+}
 
 pub struct CpuAffinityProfileAction {
     pub tree_pid: u32,

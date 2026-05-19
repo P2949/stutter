@@ -7,6 +7,7 @@ use std::{
 use anyhow::Context;
 use serde::Deserialize;
 
+pub use crate::error::ProfileError;
 use crate::{
     actions::{
         TaskIdentity, TuningAction,
@@ -18,6 +19,17 @@ use crate::{
     process_tree::{self, CompiledPattern, TaskClass, TaskInfo},
     profile_restore::{self, IoPrioRestoreRecordV2, NiceRestoreRecordV2},
 };
+
+pub(crate) mod apply;
+pub(crate) mod cache;
+pub(crate) mod matcher;
+pub(crate) mod model;
+pub(crate) mod parse;
+pub(crate) mod plan;
+pub(crate) mod render;
+pub(crate) mod validate;
+pub(crate) mod verify;
+pub(crate) mod warnings;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProfileCpuWarning {
@@ -179,10 +191,15 @@ pub fn load_first_profile(path: &Path) -> anyhow::Result<Profile> {
     })
 }
 
-pub fn load_profiles(path: &Path) -> anyhow::Result<Vec<Profile>> {
-    let data = fs::read_to_string(path)
-        .with_context(|| format!("failed to read profile {}", path.display()))?;
-    parse_profiles(&data).with_context(|| format!("failed to parse profile {}", path.display()))
+pub fn load_profiles(path: &Path) -> Result<Vec<Profile>, ProfileError> {
+    let data = fs::read_to_string(path).map_err(|source| ProfileError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    parse_profiles(&data).map_err(|source| ProfileError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 pub fn apply_profile_to_tree(

@@ -403,6 +403,33 @@ pub(super) struct CliRulesImportArgs {
     pub(super) dry_run: bool,
 }
 
+impl TryFrom<CliRulesImportArgs> for crate::commands::input::RulesImportCommandInput {
+    type Error = std::convert::Infallible;
+
+    fn try_from(args: CliRulesImportArgs) -> Result<Self, Self::Error> {
+        Ok(Self {
+            source: args.source,
+            name: args.name,
+            source_repo: args.source_repo,
+            source_commit: args.source_commit,
+            license: args.license,
+            out: args.out,
+            dry_run: args.dry_run,
+        })
+    }
+}
+
+impl TryFrom<RulesCheckArgs> for crate::commands::input::RulesCheckArgs {
+    type Error = std::convert::Infallible;
+
+    fn try_from(args: RulesCheckArgs) -> Result<Self, Self::Error> {
+        Ok(Self {
+            source: args.source,
+            generated: args.generated,
+        })
+    }
+}
+
 #[derive(Args, Debug, Clone)]
 pub(super) struct RulesListArgs {}
 

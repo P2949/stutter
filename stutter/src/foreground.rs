@@ -2,6 +2,13 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod command;
+pub(crate) mod model;
+pub(crate) mod parse;
+pub(crate) mod provider;
+pub(crate) mod providers;
+pub(crate) mod resolver;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ForegroundSource {

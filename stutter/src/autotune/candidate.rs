@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     actions::{
         ActionState, ActionWarning, SafetyClass, TuningAction, cgroup::CgroupPlacementAction,
-        cpu_affinity::CpuAffinityProfileAction, cpu_power::CpuPowerAction,
-        gpu_power::GpuPowerAction, ioprio::IoPrioAction, irq_affinity::IrqAffinityAction,
-        nice::NiceAction, uclamp::UclampAction, vm_knobs::VmKnobAction,
+        cpu_power::CpuPowerAction, gpu_power::GpuPowerAction, ioprio::IoPrioAction,
+        irq_affinity::IrqAffinityAction, nice::NiceAction, uclamp::UclampAction,
+        vm_knobs::VmKnobAction,
     },
     autotune::{conflicts::ActionConflictGroup, objective::ObjectiveKind},
     daemon_policy::{
@@ -22,6 +22,9 @@ use crate::{
     profiles::{Profile, ProfileRule},
     topology::{CoreInfo, TopologyModel, cpu_mask_to_vec, cpus_to_mask, sorted_unique},
 };
+
+pub type CandidateFamily = &'static str;
+pub type ExecutablePlan = CandidateAction;
 
 #[derive(Clone, Debug)]
 pub enum CandidateAction {
@@ -35,6 +38,113 @@ pub enum CandidateAction {
     GpuPower { plan: GpuPowerActionPlan },
     VmKnob { plan: VmKnobActionPlan },
     Fake { plan: FakeCandidatePlan },
+}
+
+#[derive(Clone, Debug)]
+#[allow(dead_code)] // Transitional: providers still emit CandidateAction while planner migration adopts this wrapper.
+pub struct SuggestionCandidate {
+    candidate: CandidateAction,
+}
+
+#[allow(dead_code)] // Transitional: providers still emit CandidateAction while planner migration adopts this wrapper.
+impl SuggestionCandidate {
+    pub fn new(candidate: CandidateAction) -> Self {
+        Self { candidate }
+    }
+
+    pub fn candidate(&self) -> &CandidateAction {
+        &self.candidate
+    }
+
+    pub fn into_candidate(self) -> CandidateAction {
+        self.candidate
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ApplyCandidate {
+    candidate: CandidateAction,
+    eligibility: ApplyEligibility,
+}
+
+impl ApplyCandidate {
+    pub fn candidate(&self) -> &CandidateAction {
+        &self.candidate
+    }
+
+    pub fn eligibility(&self) -> &ApplyEligibility {
+        &self.eligibility
+    }
+
+    pub fn into_candidate(self) -> CandidateAction {
+        self.candidate
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApplyEligibility {
+    pub policy_passed: bool,
+    pub safety_passed: bool,
+    pub rollback_available: bool,
+    pub mode_passed: bool,
+    pub data_quality_passed: bool,
+    pub target_scope_passed: bool,
+    pub capability_passed: bool,
+    pub denial_reason: Option<String>,
+}
+
+impl ApplyEligibility {
+    pub fn approved() -> Self {
+        Self {
+            policy_passed: true,
+            safety_passed: true,
+            rollback_available: true,
+            mode_passed: true,
+            data_quality_passed: true,
+            target_scope_passed: true,
+            capability_passed: true,
+            denial_reason: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn denied(reason: impl Into<String>) -> Self {
+        Self {
+            denial_reason: Some(reason.into()),
+            ..Self::approved()
+        }
+    }
+
+    pub fn is_applyable(&self) -> bool {
+        self.policy_passed
+            && self.safety_passed
+            && self.rollback_available
+            && self.mode_passed
+            && self.data_quality_passed
+            && self.target_scope_passed
+            && self.capability_passed
+            && self.denial_reason.is_none()
+    }
+
+    pub fn denial_message(&self) -> String {
+        self.denial_reason
+            .clone()
+            .unwrap_or_else(|| "apply eligibility gates did not all pass".to_owned())
+    }
+}
+
+pub fn try_promote_to_apply_candidate(
+    candidate: CandidateAction,
+    eligibility: ApplyEligibility,
+) -> Result<ApplyCandidate, ApplyEligibility> {
+    if eligibility.is_applyable() {
+        Ok(ApplyCandidate {
+            candidate,
+            eligibility,
+        })
+    } else {
+        Err(eligibility)
+    }
 }
 
 impl CandidateAction {
@@ -1252,7 +1362,16 @@ pub fn apply_candidate_plan_file(path: &Path, dry_run: bool) -> anyhow::Result<C
     };
     policy.check_action(PolicyIntent::Apply, &plan.descriptor)?;
 
-    let executor = crate::autotune::apply::executor_for_candidate(candidate)?;
+    let apply_candidate = try_promote_to_apply_candidate(candidate, ApplyEligibility::approved())
+        .map_err(|eligibility| {
+        crate::autotune::AutotunePlanError::ApplyDenied {
+            message: format!(
+                "candidate_plan_apply_denied: {}",
+                eligibility.denial_message()
+            ),
+        }
+    })?;
+    let executor = crate::autotune::apply::executor_for_apply_candidate(apply_candidate)?;
     let result = executor.apply_with_audit(crate::actions::runner::ActionRunPolicy {
         policy,
         context: crate::daemon_policy::DaemonPolicyContext::default(),
@@ -1359,56 +1478,19 @@ pub fn dry_run_record_from_action_state(
 }
 
 pub fn dry_run_candidate(candidate: &CandidateAction) -> CandidateDryRunRecord {
-    match candidate {
-        CandidateAction::CpuAffinityProfile { plan } => {
-            let action = CpuAffinityProfileAction {
-                tree_pid: plan.tree_pid,
-                profile: plan.profile.clone(),
-                force_restore_overwrite: false,
-            };
-            let safety_class = action.safety_class();
+    let candidate_name = candidate.candidate_name().to_owned();
+    let safety_class = candidate.safety_class();
 
-            match action.dry_run() {
-                Ok(state) => {
-                    dry_run_record_from_action_state(plan.profile_name.clone(), safety_class, state)
-                }
-                Err(err) => CandidateDryRunRecord {
-                    candidate_name: plan.profile_name.clone(),
-                    affected_tasks: 0,
-                    warnings: Vec::new(),
-                    safety_class,
-                    eligible: false,
-                    reason: Some(format!("dry-run failed: {err:#}")),
-                },
-            }
-        }
-        CandidateAction::Nice { plan } => {
-            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
-        }
-        CandidateAction::IoPrio { plan } => {
-            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
-        }
-        CandidateAction::Uclamp { plan } => {
-            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
-        }
-        CandidateAction::CgroupPlacement { plan } => {
-            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
-        }
-        CandidateAction::IrqAffinity { plan } => {
-            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
-        }
-        CandidateAction::CpuPower { plan } => {
-            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
-        }
-        CandidateAction::GpuPower { plan } => {
-            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
-        }
-        CandidateAction::VmKnob { plan } => {
-            dry_run_planned_action(plan.name.clone(), plan.action.safety_class(), &plan.action)
-        }
-        CandidateAction::Fake { .. } => {
-            panic!("dry-run not implemented for Fake candidate");
-        }
+    match crate::actions::default_action_factory_registry().build(candidate) {
+        Ok(action) => dry_run_planned_action(candidate_name, safety_class, &action),
+        Err(err) => CandidateDryRunRecord {
+            candidate_name,
+            affected_tasks: 0,
+            warnings: Vec::new(),
+            safety_class,
+            eligible: false,
+            reason: Some(format!("dry-run action build failed: {err}")),
+        },
     }
 }
 
@@ -3618,6 +3700,24 @@ mod tests {
                     .to_owned()
             )
         );
+    }
+
+    #[test]
+    fn apply_candidate_requires_successful_eligibility_promotion() {
+        let candidate = CandidateAction::cpu_affinity_profile(profile("game-main"), 1234);
+
+        let apply_candidate =
+            try_promote_to_apply_candidate(candidate.clone(), ApplyEligibility::approved())
+                .unwrap();
+        assert_eq!(
+            apply_candidate.candidate().candidate_name(),
+            candidate.candidate_name()
+        );
+
+        let denied =
+            try_promote_to_apply_candidate(candidate, ApplyEligibility::denied("policy denied"))
+                .unwrap_err();
+        assert_eq!(denied.denial_message(), "policy denied");
     }
 
     #[test]

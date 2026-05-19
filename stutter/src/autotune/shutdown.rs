@@ -149,7 +149,7 @@ impl ExitRollbackExecutor for CpuAffinityExitRollbackExecutor {
         ensure_exit_rollback_action_allowed(action)?;
 
         if let Some(candidate) = action.candidate.clone() {
-            let executor = crate::autotune::apply::executor_for_candidate(candidate)?;
+            let executor = crate::autotune::apply::executor_for_candidate_preview(candidate)?;
             executor.rollback(&action.rollback)?;
             return Ok(action.rollback.affected_tasks());
         }

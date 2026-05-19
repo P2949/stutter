@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 use crate::actions::{
     ActionId, ActionState, ActionWarning, IoPrioRestoreRecord, RollbackToken, SafetyClass,
     TaskIdentity, TuningAction,
+    rollback::{
+        RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
+        token_restore_result,
+    },
 };
 
 const IOPRIO_WHO_PROCESS: libc::c_int = 1;
@@ -144,6 +148,60 @@ pub struct IoPrioAction {
     pub targets: Vec<TaskIdentity>,
     pub ioprio: IoPrioValue,
     pub policy: IoPrioPolicy,
+}
+
+pub(crate) struct IoPrioRollbackHandler;
+
+impl RollbackHandler for IoPrioRollbackHandler {
+    fn id(&self) -> &'static str {
+        "ioprio-rollback"
+    }
+
+    fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>> {
+        Ok(Vec::new())
+    }
+
+    fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
+        anyhow::bail!("I/O priority rollback requires an explicit rollback token")
+    }
+
+    fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
+        anyhow::bail!("I/O priority rollback requires an explicit rollback token")
+    }
+
+    fn supports_token(&self, token: &RollbackToken) -> bool {
+        matches!(token, RollbackToken::IoPrioRestore { .. })
+    }
+
+    fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
+        if !self.supports_token(token) {
+            anyhow::bail!("I/O priority rollback handler does not support {token:?}");
+        }
+        Ok(token_dry_run_preview(self.id(), token, "ioprio-restore"))
+    }
+
+    fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+        let RollbackToken::IoPrioRestore { records } = token else {
+            anyhow::bail!("I/O priority rollback handler does not support {token:?}");
+        };
+
+        for record in records {
+            set_task_ioprio(record.tid, record.original_ioprio).with_context(|| {
+                format!(
+                    "failed to restore original I/O priority={} for tid={}",
+                    record.original_ioprio, record.tid
+                )
+            })?;
+        }
+
+        Ok(token_restore_result(
+            self.id(),
+            token,
+            records.len(),
+            0,
+            Vec::new(),
+        ))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

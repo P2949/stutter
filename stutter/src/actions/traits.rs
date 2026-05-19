@@ -30,3 +30,44 @@ pub trait TuningAction {
     fn verify(&self) -> ActionResult<ActionState>;
     fn rollback(&self, token: &RollbackToken) -> ActionResult<()>;
 }
+
+impl<T> TuningAction for Box<T>
+where
+    T: TuningAction + ?Sized,
+{
+    fn id(&self) -> ActionId {
+        self.as_ref().id()
+    }
+
+    fn describe(&self) -> String {
+        self.as_ref().describe()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.as_ref().safety_class()
+    }
+
+    fn descriptor(&self) -> crate::daemon_policy::ActionDescriptor {
+        self.as_ref().descriptor()
+    }
+
+    fn preflight(&self) -> ActionResult<Vec<ActionWarning>> {
+        self.as_ref().preflight()
+    }
+
+    fn dry_run(&self) -> ActionResult<ActionState> {
+        self.as_ref().dry_run()
+    }
+
+    fn apply(&self) -> ActionResult<RollbackToken> {
+        self.as_ref().apply()
+    }
+
+    fn verify(&self) -> ActionResult<ActionState> {
+        self.as_ref().verify()
+    }
+
+    fn rollback(&self, token: &RollbackToken) -> ActionResult<()> {
+        self.as_ref().rollback(token)
+    }
+}

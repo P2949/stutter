@@ -4,7 +4,7 @@ use super::{
     model::MonitorConfig,
     source::ConfigSource,
 };
-use crate::error::ConfigError;
+use crate::config::ConfigError;
 
 #[derive(Debug, Clone, Default)]
 pub struct DefaultConfig {
@@ -170,7 +170,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            crate::error::ConfigError::InvalidUserLayer(_)
+            crate::config::ConfigError::InvalidUserLayer(_)
         ));
     }
 

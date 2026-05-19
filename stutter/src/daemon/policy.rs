@@ -2,6 +2,7 @@ use std::{collections::BTreeSet, fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::error::DaemonPolicyError;
 use crate::{
     actions::{ActionId, SafetyClass},
     daemon::{
@@ -12,6 +13,11 @@ use crate::{
     },
     remote::AgentAutotuneLimits,
 };
+
+pub(crate) mod context;
+pub(crate) mod evaluate;
+pub(crate) mod explain;
+pub(crate) mod model;
 
 pub const HIGH_RISK_APPLY_IMPLEMENTED: bool = false;
 
@@ -1425,6 +1431,7 @@ impl DaemonPolicy {
         intent: PolicyIntent,
         descriptor: &ActionDescriptor,
     ) -> Result<(), PolicyRejection> {
+        debug_assert!(validate_policy_descriptor_shape(descriptor).is_ok());
         match self.explain_action(intent, descriptor).decision {
             PolicyDecisionKind::Allowed => Ok(()),
             PolicyDecisionKind::Rejected { rejection } => Err(rejection),
@@ -1437,6 +1444,7 @@ impl DaemonPolicy {
         descriptor: &ActionDescriptor,
         context: &DaemonPolicyContext,
     ) -> Result<(), PolicyRejection> {
+        debug_assert!(validate_policy_descriptor_shape(descriptor).is_ok());
         match self
             .explain_action_with_context(intent, descriptor, context)
             .decision
@@ -1621,6 +1629,17 @@ impl DaemonPolicy {
             final_reason,
         }
     }
+}
+
+fn validate_policy_descriptor_shape(
+    descriptor: &ActionDescriptor,
+) -> Result<(), DaemonPolicyError> {
+    if descriptor.action_kind.trim().is_empty() {
+        return Err(DaemonPolicyError::InvalidInput {
+            message: "action_kind must not be empty".to_owned(),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]

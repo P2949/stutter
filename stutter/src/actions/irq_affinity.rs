@@ -9,6 +9,10 @@ use anyhow::Context;
 use crate::actions::{
     ActionId, ActionState, ActionWarning, IrqAffinityRestoreRecord, RollbackToken, SafetyClass,
     TuningAction,
+    rollback::{
+        RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
+        token_restore_result,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +60,98 @@ pub struct IrqAffinityAction {
     pub risk: IrqAffinityRisk,
     pub evidence: IrqAffinityEvidence,
     pub irq_root: PathBuf,
+}
+
+pub(crate) struct IrqAffinityRollbackHandler;
+
+impl RollbackHandler for IrqAffinityRollbackHandler {
+    fn id(&self) -> &'static str {
+        "irq-affinity-rollback"
+    }
+
+    fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>> {
+        Ok(Vec::new())
+    }
+
+    fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
+        anyhow::bail!("IRQ affinity rollback requires an explicit rollback token")
+    }
+
+    fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
+        anyhow::bail!("IRQ affinity rollback requires an explicit rollback token")
+    }
+
+    fn supports_token(&self, token: &RollbackToken) -> bool {
+        matches!(token, RollbackToken::IrqAffinityRestore { .. })
+    }
+
+    fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
+        if !self.supports_token(token) {
+            anyhow::bail!("IRQ affinity rollback handler does not support {token:?}");
+        }
+        Ok(token_dry_run_preview(
+            self.id(),
+            token,
+            "irq-affinity-restore",
+        ))
+    }
+
+    fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+        let RollbackToken::IrqAffinityRestore { records } = token else {
+            anyhow::bail!("IRQ affinity rollback handler does not support {token:?}");
+        };
+
+        let mut restored = 0usize;
+        let mut skipped = 0usize;
+        let mut messages = Vec::new();
+
+        for record in records {
+            let irq_dir = Path::new("/proc/irq").join(record.irq.to_string());
+            if !irq_dir.is_dir() {
+                skipped += 1;
+                messages.push(format!("IRQ {} directory disappeared", record.irq));
+                continue;
+            }
+
+            match read_irq_device_hint(&irq_dir) {
+                Ok(device_hint) if device_hint == record.device_hint => {}
+                Ok(device_hint) => {
+                    skipped += 1;
+                    messages.push(format!(
+                        "IRQ {} device mapping changed: expected {:?}, actual {:?}",
+                        record.irq, record.device_hint, device_hint
+                    ));
+                    continue;
+                }
+                Err(err) => {
+                    skipped += 1;
+                    messages.push(format!(
+                        "IRQ {} device mapping unreadable during rollback: {err:#}",
+                        record.irq
+                    ));
+                    continue;
+                }
+            }
+
+            let path = irq_dir.join("smp_affinity");
+            write_trimmed(&path, &record.original_smp_affinity).with_context(|| {
+                format!(
+                    "failed to restore IRQ {} smp_affinity via {}",
+                    record.irq,
+                    path.display()
+                )
+            })?;
+            restored += 1;
+        }
+
+        Ok(token_restore_result(
+            self.id(),
+            token,
+            restored,
+            skipped,
+            messages,
+        ))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

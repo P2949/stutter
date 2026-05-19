@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 use crate::actions::{
     ActionId, ActionState, ActionWarning, NiceRestoreRecord, RollbackToken, SafetyClass,
     TaskIdentity, TuningAction,
+    rollback::{
+        RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
+        token_restore_result,
+    },
 };
 
 const LINUX_MIN_NICE: i32 = -20;
@@ -33,6 +37,60 @@ pub struct NiceAction {
     pub targets: Vec<TaskIdentity>,
     pub nice: i32,
     pub policy: NicePolicy,
+}
+
+pub(crate) struct NiceRollbackHandler;
+
+impl RollbackHandler for NiceRollbackHandler {
+    fn id(&self) -> &'static str {
+        "nice-rollback"
+    }
+
+    fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>> {
+        Ok(Vec::new())
+    }
+
+    fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
+        anyhow::bail!("nice rollback requires an explicit rollback token")
+    }
+
+    fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
+        anyhow::bail!("nice rollback requires an explicit rollback token")
+    }
+
+    fn supports_token(&self, token: &RollbackToken) -> bool {
+        matches!(token, RollbackToken::NiceRestore { .. })
+    }
+
+    fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
+        if !self.supports_token(token) {
+            anyhow::bail!("nice rollback handler does not support {token:?}");
+        }
+        Ok(token_dry_run_preview(self.id(), token, "nice-restore"))
+    }
+
+    fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+        let RollbackToken::NiceRestore { records } = token else {
+            anyhow::bail!("nice rollback handler does not support {token:?}");
+        };
+
+        for record in records {
+            set_task_nice(record.tid, record.original_nice).with_context(|| {
+                format!(
+                    "failed to restore original nice={} for tid={}",
+                    record.original_nice, record.tid
+                )
+            })?;
+        }
+
+        Ok(token_restore_result(
+            self.id(),
+            token,
+            records.len(),
+            0,
+            Vec::new(),
+        ))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -16,6 +16,15 @@ pub mod importer;
 pub mod loader;
 pub mod paths;
 
+pub mod classify;
+pub mod commands;
+pub mod db;
+pub mod import;
+pub mod load;
+pub mod model;
+pub mod normalize;
+pub mod render;
+
 use importer::{ImportInput, ImportReport, import_ananicy_rules};
 pub use loader::{LoadCommunityRulesInput, load_rules_db, load_rules_dir, load_rules_file};
 pub use paths::{default_system_rules_dirs, default_user_rules_dir};
@@ -238,7 +247,7 @@ pub fn rules_command(command: input::RulesCommand) -> anyhow::Result<()> {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct RulesCheckReport {
+pub(crate) struct RulesCheckReport {
     source_files: usize,
     json_objects: usize,
     imported_rules: usize,
@@ -411,56 +420,66 @@ fn exact_only_non_game_check_rule(class: TaskClass, ambiguous: bool) -> bool {
         )
 }
 
-fn print_rules_check_report(report: &RulesCheckReport) {
-    println!(
-        "rules check: {}",
+pub(crate) fn render_rules_check_report(report: &RulesCheckReport) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "rules check: {}\n",
         if report.ok() { "ok" } else { "warning" }
-    );
-    println!("source files: {}", report.source_files);
-    println!("json objects: {}", report.json_objects);
-    println!("imported rules: {}", report.imported_rules);
-    println!("objects skipped: {}", report.skipped_objects());
-    println!("duplicates: {}", report.duplicates);
-    println!("ambiguous names: {}", report.ambiguous_names);
-    println!(
-        "context-required game rules: {}",
+    ));
+    out.push_str(&format!("source files: {}\n", report.source_files));
+    out.push_str(&format!("json objects: {}\n", report.json_objects));
+    out.push_str(&format!("imported rules: {}\n", report.imported_rules));
+    out.push_str(&format!("objects skipped: {}\n", report.skipped_objects()));
+    out.push_str(&format!("duplicates: {}\n", report.duplicates));
+    out.push_str(&format!("ambiguous names: {}\n", report.ambiguous_names));
+    out.push_str(&format!(
+        "context-required game rules: {}\n",
         report.context_required_game_rules
-    );
-    println!(
-        "exact-only non-game rules: {}",
+    ));
+    out.push_str(&format!(
+        "exact-only non-game rules: {}\n",
         report.exact_only_non_game_rules
-    );
-    println!("unknown mapped classes: {}", report.unknown_mapped_classes);
-    println!(
-        "rules mapped to Unknown: {}",
+    ));
+    out.push_str(&format!(
+        "unknown mapped classes: {}\n",
+        report.unknown_mapped_classes
+    ));
+    out.push_str(&format!(
+        "rules mapped to Unknown: {}\n",
         report.rules_mapped_to_unknown
-    );
+    ));
 
     if report.classes.is_empty() {
-        println!("classes: none");
+        out.push_str("classes: none\n");
     } else {
-        println!("classes:");
+        out.push_str("classes:\n");
         for (class, count) in &report.classes {
-            println!("  {class}: {count}");
+            out.push_str(&format!("  {class}: {count}\n"));
         }
     }
 
     if !report.largest_duplicate_groups.is_empty() {
-        println!("largest duplicate groups:");
+        out.push_str("largest duplicate groups:\n");
         for (name, count) in &report.largest_duplicate_groups {
-            println!("  {name}: {count}");
+            out.push_str(&format!("  {name}: {count}\n"));
         }
     }
 
     if !report.warnings.is_empty() {
-        println!("warnings:");
+        out.push_str("warnings:\n");
         for warning in &report.warnings {
-            println!("  {warning}");
+            out.push_str(&format!("  {warning}\n"));
         }
     }
+
+    out
 }
 
-fn rules_import_command(args: input::RulesImportArgs) -> anyhow::Result<()> {
+fn print_rules_check_report(report: &RulesCheckReport) {
+    print!("{}", render_rules_check_report(report));
+}
+
+fn rules_import_command(args: input::RulesImportCommandInput) -> anyhow::Result<()> {
     let generated_at = generated_at_now();
     let source_display = args.source.display().to_string();
     let input = ImportInput {
@@ -497,13 +516,15 @@ fn rules_import_command(args: input::RulesImportArgs) -> anyhow::Result<()> {
     };
 
     if args.dry_run {
-        println!("dry-run: analyzed Ananicy-compatible rules from {source_display}");
-        print_import_report(&report);
-        println!("dry-run: would write {}", out_path.display());
-        println!("dry-run: would write {}", metadata_path.display());
-        println!("license: {}", args.license);
-        println!(
-            "note: imported rules are user-installed data and are not part of the stutter binary"
+        print!(
+            "{}",
+            render_rules_import_dry_run(
+                &source_display,
+                &report,
+                &out_path,
+                &metadata_path,
+                &args.license
+            )
         );
         return Ok(());
     }
@@ -531,44 +552,100 @@ fn rules_import_command(args: input::RulesImportArgs) -> anyhow::Result<()> {
         )
     })?;
 
-    println!(
-        "imported {} reduced rules from {}",
-        report.imported_rules, imported.source.name
+    print!(
+        "{}",
+        render_rules_import_written(
+            &report,
+            &imported.source.name,
+            &out_path,
+            &metadata_path,
+            &args.license
+        )
     );
-    println!("wrote {}", out_path.display());
-    println!("wrote {}", metadata_path.display());
-    println!("license: {}", args.license);
-    println!("note: imported rules are user-installed data and are not part of the stutter binary");
     Ok(())
 }
 
-fn print_import_report(report: &ImportReport) {
-    println!("import report:");
-    println!("  scanned_files: {}", report.scanned_files);
-    println!("  parsed_objects: {}", report.parsed_objects);
-    println!("  imported_rules: {}", report.imported_rules);
-    println!("  skipped_no_name: {}", report.skipped_no_name);
-    println!("  skipped_bad_name: {}", report.skipped_bad_name);
-    println!("  skipped_unknown_class: {}", report.skipped_unknown_class);
-    println!("  duplicate_rules: {}", report.duplicate_rules);
-    println!("  ambiguous_rules: {}", report.ambiguous_rules);
-    println!(
-        "  context_required_game_rules: {}",
+pub(crate) fn render_import_report(report: &ImportReport) -> String {
+    let mut out = String::new();
+    out.push_str("import report:\n");
+    out.push_str(&format!("  scanned_files: {}\n", report.scanned_files));
+    out.push_str(&format!("  parsed_objects: {}\n", report.parsed_objects));
+    out.push_str(&format!("  imported_rules: {}\n", report.imported_rules));
+    out.push_str(&format!("  skipped_no_name: {}\n", report.skipped_no_name));
+    out.push_str(&format!(
+        "  skipped_bad_name: {}\n",
+        report.skipped_bad_name
+    ));
+    out.push_str(&format!(
+        "  skipped_unknown_class: {}\n",
+        report.skipped_unknown_class
+    ));
+    out.push_str(&format!("  duplicate_rules: {}\n", report.duplicate_rules));
+    out.push_str(&format!("  ambiguous_rules: {}\n", report.ambiguous_rules));
+    out.push_str(&format!(
+        "  context_required_game_rules: {}\n",
         report.context_required_game_rules
-    );
-    println!(
-        "  exact_only_non_game_rules: {}",
+    ));
+    out.push_str(&format!(
+        "  exact_only_non_game_rules: {}\n",
         report.exact_only_non_game_rules
-    );
+    ));
 
     if report.classes.is_empty() {
-        println!("  classes: none");
+        out.push_str("  classes: none\n");
     } else {
-        println!("  classes:");
+        out.push_str("  classes:\n");
         for (class, count) in &report.classes {
-            println!("    {class}: {count}");
+            out.push_str(&format!("    {class}: {count}\n"));
         }
     }
+
+    out
+}
+
+pub(crate) fn render_rules_import_dry_run(
+    source_display: &str,
+    report: &ImportReport,
+    out_path: &Path,
+    metadata_path: &Path,
+    license: &str,
+) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "dry-run: analyzed Ananicy-compatible rules from {source_display}\n"
+    ));
+    out.push_str(&render_import_report(report));
+    out.push_str(&format!("dry-run: would write {}\n", out_path.display()));
+    out.push_str(&format!(
+        "dry-run: would write {}\n",
+        metadata_path.display()
+    ));
+    out.push_str(&format!("license: {license}\n"));
+    out.push_str(
+        "note: imported rules are user-installed data and are not part of the stutter binary\n",
+    );
+    out
+}
+
+pub(crate) fn render_rules_import_written(
+    report: &ImportReport,
+    source_name: &str,
+    out_path: &Path,
+    metadata_path: &Path,
+    license: &str,
+) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "imported {} reduced rules from {source_name}\n",
+        report.imported_rules
+    ));
+    out.push_str(&format!("wrote {}\n", out_path.display()));
+    out.push_str(&format!("wrote {}\n", metadata_path.display()));
+    out.push_str(&format!("license: {license}\n"));
+    out.push_str(
+        "note: imported rules are user-installed data and are not part of the stutter binary\n",
+    );
+    out
 }
 
 fn rules_list_command() -> anyhow::Result<()> {
@@ -1482,6 +1559,26 @@ mod rules_command_tests {
     }
 
     #[test]
+    fn import_report_text_matches_snapshot() {
+        let mut report = ImportReport {
+            scanned_files: 2,
+            parsed_objects: 3,
+            imported_rules: 1,
+            skipped_no_name: 1,
+            skipped_unknown_class: 1,
+            ambiguous_rules: 1,
+            context_required_game_rules: 1,
+            ..ImportReport::default()
+        };
+        report.classes.insert("Game".to_owned(), 1);
+
+        assert_eq!(
+            render_import_report(&report),
+            include_str!("../tests/snapshots/community_rules_import_report.txt")
+        );
+    }
+
+    #[test]
     fn rules_import_dry_run_does_not_write() {
         let dir = tempdir().unwrap();
         let source = dir.path().join("source");
@@ -1494,7 +1591,7 @@ mod rules_command_tests {
         )
         .unwrap();
 
-        rules_import_command(crate::cli::RulesImportArgs {
+        rules_import_command(crate::cli::RulesImportCommandInput {
             source,
             name: "ananicy".to_owned(),
             license: "GPL-3.0-only".to_owned(),
@@ -1522,7 +1619,7 @@ mod rules_command_tests {
         )
         .unwrap();
 
-        rules_import_command(crate::cli::RulesImportArgs {
+        rules_import_command(crate::cli::RulesImportCommandInput {
             source,
             name: "ananicy".to_owned(),
             license: "GPL-3.0-only".to_owned(),

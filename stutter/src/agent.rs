@@ -54,6 +54,7 @@ use tokio::{
 };
 use tower::{Service, ServiceExt as _};
 
+pub use crate::error::AgentError;
 use crate::{
     actions::{ActionId, SafetyClass},
     autotune::{
@@ -106,6 +107,18 @@ use crate::{
         StopRecordResponse, VersionResponse,
     },
 };
+
+pub(crate) mod artifacts;
+pub(crate) mod auth;
+pub(crate) mod autotune;
+pub(crate) mod config;
+pub(crate) mod daemon;
+pub(crate) mod rate_limit;
+pub(crate) mod recording;
+pub(crate) mod routes;
+pub(crate) mod server;
+pub(crate) mod startup;
+pub(crate) mod state;
 
 pub const DEFAULT_AGENT_MAX_DURATION_SECONDS: u64 = 300;
 pub const DEFAULT_AGENT_MAX_TARGETS: usize = 128;
@@ -192,7 +205,7 @@ pub struct RunHandle {
 }
 
 #[derive(Debug)]
-struct AgentRateLimiter {
+pub(crate) struct AgentRateLimiter {
     max_requests: usize,
     window: Duration,
     accepted: Mutex<VecDeque<Instant>>,
@@ -210,7 +223,7 @@ impl Default for AgentRateLimiter {
 
 impl AgentRateLimiter {
     #[cfg(test)]
-    fn new(max_requests: usize, window: Duration) -> Self {
+    pub(crate) fn new(max_requests: usize, window: Duration) -> Self {
         Self {
             max_requests,
             window,
@@ -218,7 +231,7 @@ impl AgentRateLimiter {
         }
     }
 
-    async fn accept(&self, now: Instant) -> bool {
+    pub(crate) async fn accept(&self, now: Instant) -> bool {
         let mut accepted = self.accepted.lock().await;
         while accepted
             .front()
@@ -327,9 +340,12 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
             affected_tasks,
             manual_restore_command,
         } => {
-            println!(
+            log::info!(
                 "autotune startup recovery: rolled back interrupted action experiment_id={} action_id={} affected_tasks={} manual_restore_command=\"{}\"",
-                experiment_id, action_id, affected_tasks, manual_restore_command
+                experiment_id,
+                action_id,
+                affected_tasks,
+                manual_restore_command
             );
         }
         crate::autotune::startup_recovery::StartupRecoveryOutcome::Faulted {
@@ -338,11 +354,13 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
             manual_restore_command,
             reason,
         } => {
-            eprintln!(
+            log::error!(
                 "autotune startup recovery faulted: experiment_id={} action_id={} reason={}",
-                experiment_id, action_id, reason
+                experiment_id,
+                action_id,
+                reason
             );
-            eprintln!("manual restore command: {}", manual_restore_command);
+            log::error!("manual restore command: {}", manual_restore_command);
             anyhow::bail!(
                 "autotune startup recovery failed; controller is Faulted; manual restore command: {}",
                 manual_restore_command
@@ -353,18 +371,21 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
             action_id,
             manual_restore_command,
         } => {
-            println!(
+            log::warn!(
                 "autotune startup recovery: rollback_on_crash_recovery=false; leaving applied journal in place experiment_id={} action_id={} manual_restore_command=\"{}\"",
-                experiment_id, action_id, manual_restore_command
+                experiment_id,
+                action_id,
+                manual_restore_command
             );
         }
         crate::autotune::startup_recovery::StartupRecoveryOutcome::ApplyingWithoutRollback {
             experiment_id,
             action_id,
         } => {
-            println!(
+            log::warn!(
                 "autotune startup recovery: found applying journal without rollback token experiment_id={} action_id={}; no automatic rollback attempted",
-                experiment_id, action_id
+                experiment_id,
+                action_id
             );
         }
         crate::autotune::startup_recovery::StartupRecoveryOutcome::Clean => {}
@@ -375,11 +396,11 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
             && config.read_token.is_none()
             && config.apply_token.is_none()
         {
-            println!(
+            log::warn!(
                 "WARNING: stutter agent is listening on a non-loopback address without authentication because --allow-unsafe-bind was passed."
             );
         } else {
-            println!(
+            log::warn!(
                 "WARNING: stutter agent is listening on a non-loopback address. Authentication is enabled."
             );
         }
@@ -450,10 +471,10 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
         .with_state(state);
 
     if let Some(path) = listen_unix_socket {
-        println!("stutter agent listening on unix://{}", path.display());
+        log::info!("stutter agent listening on unix://{}", path.display());
         serve_unix_socket(path, app).await?;
     } else {
-        println!("stutter agent listening on http://{}", listen_bind);
+        log::info!("stutter agent listening on http://{}", listen_bind);
         let listener = tokio::net::TcpListener::bind(listen_bind).await?;
         axum::serve(listener, app).await?;
     }
@@ -618,22 +639,26 @@ pub fn load_bearer_token(
     bearer_token_file: Option<&StdPath>,
 ) -> anyhow::Result<Option<String>> {
     if let Some(path) = bearer_token_file {
-        let token = std::fs::read_to_string(path)
-            .with_context(|| format!("failed to read bearer token file {}", path.display()))?;
-        return normalize_bearer_token(token);
+        let token =
+            std::fs::read_to_string(path).map_err(|source| AgentError::BearerTokenFile {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        return normalize_bearer_token(token).map_err(anyhow::Error::new);
     }
 
     if let Some(value) = std::env::var_os(bearer_token_env) {
-        return normalize_bearer_token(value.to_string_lossy().into_owned());
+        return normalize_bearer_token(value.to_string_lossy().into_owned())
+            .map_err(anyhow::Error::new);
     }
 
     Ok(None)
 }
 
-fn normalize_bearer_token(raw: String) -> anyhow::Result<Option<String>> {
+fn normalize_bearer_token(raw: String) -> Result<Option<String>, AgentError> {
     let token = raw.trim().to_owned();
     if token.is_empty() {
-        anyhow::bail!("bearer token is empty");
+        return Err(AgentError::EmptyBearerToken);
     }
     Ok(Some(token))
 }

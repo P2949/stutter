@@ -10,6 +10,10 @@ use anyhow::Context;
 use crate::actions::{
     ActionId, ActionState, ActionWarning, GpuPowerRestoreRecord, RollbackToken, SafetyClass,
     TuningAction,
+    rollback::{
+        RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
+        token_restore_result,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +59,53 @@ pub struct GpuPowerAction {
     pub drm_card: String,
     pub power_dpm_force_performance_level: Option<String>,
     pub pp_power_profile_mode: Option<String>,
+}
+
+pub(crate) struct GpuPowerRollbackHandler;
+
+impl RollbackHandler for GpuPowerRollbackHandler {
+    fn id(&self) -> &'static str {
+        "gpu-power-rollback"
+    }
+
+    fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>> {
+        Ok(Vec::new())
+    }
+
+    fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
+        anyhow::bail!("GPU power rollback requires an explicit rollback token")
+    }
+
+    fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
+        anyhow::bail!("GPU power rollback requires an explicit rollback token")
+    }
+
+    fn supports_token(&self, token: &RollbackToken) -> bool {
+        matches!(token, RollbackToken::GpuPowerRestore { .. })
+    }
+
+    fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
+        if !self.supports_token(token) {
+            anyhow::bail!("GPU power rollback handler does not support {token:?}");
+        }
+        Ok(token_dry_run_preview(self.id(), token, "gpu-power-restore"))
+    }
+
+    fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+        let RollbackToken::GpuPowerRestore { records } = token else {
+            anyhow::bail!("GPU power rollback handler does not support {token:?}");
+        };
+
+        rollback_gpu_power_records(records)?;
+
+        Ok(token_restore_result(
+            self.id(),
+            token,
+            records.len(),
+            0,
+            Vec::new(),
+        ))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

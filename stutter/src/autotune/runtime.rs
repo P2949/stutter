@@ -9,9 +9,24 @@ use std::{
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 
+#[path = "runtime/controller.rs"]
+pub(crate) mod controller;
+#[path = "runtime/emergency_restore.rs"]
+pub(crate) mod emergency_restore;
+#[path = "runtime/history.rs"]
+pub(crate) mod history;
+#[path = "runtime/journal.rs"]
+pub(crate) mod journal;
+#[cfg(test)]
+#[path = "runtime/shutdown.rs"]
+pub(crate) mod shutdown;
+#[path = "runtime/startup_recovery.rs"]
+pub(crate) mod startup_recovery;
+
 use crate::{
     actions::SafetyClass,
     autotune::{
+        AutotuneRuntimeError,
         candidate::{CandidateAction, CandidateDryRunRecord},
         candidate_memory::CandidateMemoryResult,
         controller::{ControllerPolicy, ControllerRuntimeState, decide_autotune_transition},
@@ -120,6 +135,20 @@ pub fn daemon_config_for_runtime_mode(
     config.autotune.candidate_window_seconds = DEFAULT_RUNTIME_WINDOW_SECONDS;
     config.autotune.washout_seconds = crate::autotune::washout::DEFAULT_WASHOUT_SECONDS;
     config
+}
+
+fn validate_runtime_config(config: &AutotuneRuntimeConfig) -> Result<(), AutotuneRuntimeError> {
+    if config.window_seconds == 0 {
+        return Err(AutotuneRuntimeError::InvalidMode {
+            message: "window_seconds must be greater than zero".to_owned(),
+        });
+    }
+    if config.candidate_window_seconds == 0 {
+        return Err(AutotuneRuntimeError::InvalidMode {
+            message: "candidate_window_seconds must be greater than zero".to_owned(),
+        });
+    }
+    Ok(())
 }
 
 impl AutotuneRuntimeConfig {
@@ -1349,6 +1378,7 @@ pub async fn run_autotune_controller_session(
     external_stop: Option<oneshot::Receiver<()>>,
     duration: Option<Duration>,
 ) -> anyhow::Result<AutotuneControllerExit> {
+    validate_runtime_config(&runtime_config).map_err(anyhow::Error::new)?;
     let (event_tx, mut event_rx) = mpsc::channel::<MonitorEvent>(1024);
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
     let mut runtime = AutotuneRuntime::new(runtime_config);

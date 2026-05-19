@@ -31,6 +31,7 @@ use std::{
 use anyhow::Context;
 use serde::Serialize;
 
+pub use crate::error::ReportError;
 use crate::{
     diagnosis::{Diagnosis, FrameDiagnosis, diagnose_cluster, select_anchor_for_diagnosis},
     metrics::format_latency,

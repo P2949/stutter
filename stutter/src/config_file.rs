@@ -590,28 +590,30 @@ pub fn load_user_config() -> Result<Option<UserConfigFile>> {
     Ok(Some(parsed.file))
 }
 
-pub fn parse_focus_source_value(value: &str) -> Result<FocusSource> {
+pub fn parse_focus_source_value(value: &str) -> std::result::Result<FocusSource, ConfigError> {
     match value.trim().to_ascii_lowercase().as_str() {
         "heuristic" => Ok(FocusSource::Heuristic),
         "foreground" => Ok(FocusSource::Foreground),
         "hybrid" => Ok(FocusSource::Hybrid),
-        other => anyhow::bail!(
-            "invalid focus_source {:?}; valid values are heuristic, foreground, hybrid",
-            other
-        ),
+        other => Err(ConfigError::InvalidValue {
+            field: "focus_source",
+            message: format!("got {other:?}; valid values are heuristic, foreground, hybrid"),
+        }),
     }
 }
 
-pub fn parse_foreground_source_value(value: &str) -> Result<ForegroundSource> {
+pub fn parse_foreground_source_value(
+    value: &str,
+) -> std::result::Result<ForegroundSource, ConfigError> {
     match value.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok(ForegroundSource::Auto),
         "sway" => Ok(ForegroundSource::Sway),
         "hyprland" => Ok(ForegroundSource::Hyprland),
         "x11" => Ok(ForegroundSource::X11),
-        other => anyhow::bail!(
-            "invalid foreground_source {:?}; valid values are auto, sway, hyprland, x11",
-            other
-        ),
+        other => Err(ConfigError::InvalidValue {
+            field: "foreground_source",
+            message: format!("got {other:?}; valid values are auto, sway, hyprland, x11"),
+        }),
     }
 }
 
