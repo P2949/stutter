@@ -160,6 +160,21 @@ gpu_power
 vm_knob
 ```
 
+## System-Wide Target Allowlists
+
+System-adjacent suggestions for CPU power, GPU power, IRQ affinity, and VM knobs require explicit target allowlists. Empty lists allow no system-wide targets by default.
+
+```toml
+[system_wide_allowlist]
+cpu_policies = ["policy0", "policy1"]
+gpu_cards = ["card0"]
+gpu_pci_ids = ["1002:*"]
+irq_devices = ["amdgpu", "xhci_hcd"]
+vm_knobs = ["proc/sys/vm/swappiness"]
+```
+
+Candidates outside these lists are denied with `system_wide_target_not_allowlisted` and are not dry-run or applied.
+
 ## Workload Policy Rules
 
 `[autotune.workload_policy]` can override the built-in workload policy matrix.
@@ -185,5 +200,9 @@ autonomous_families = []
 `autonomous_families` controls which allowed families may be selected in autonomous apply modes. An empty list is valid and means the rule allows suggestions but no autonomous apply for that situation.
 
 Invalid action family names, invalid objective names, duplicate situation rules, and conflicting workload policy locations produce config diagnostics and validation errors.
+
+Run `stutter daemon policy-lint` to inspect the resolved workload policy matrix. Use `--json` for structured output, and `--preset <name>` to lint a specific daemon preset.
+
+Policy lints are warnings when a rule is intentionally suggestion-only, such as an empty `autonomous_families` list. Lints are errors when policy would make denied, system-wide, high-risk, or medium-risk families autonomous in a mode that cannot safely apply them. Critical workload-policy lint errors fail daemon config loading.
 
 The legacy alias `[[autotune.workload_policy_rules]]` is still accepted, but new config should use `[[autotune.workload_policy.rules]]`.

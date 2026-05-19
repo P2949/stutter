@@ -27,6 +27,12 @@ pub fn run_policy_explain_command(
     policy::run_policy_explain_command(input)
 }
 
+pub fn run_policy_lint_command(
+    input: crate::commands::input::DaemonPolicyLintCommandInput,
+) -> anyhow::Result<()> {
+    policy::run_policy_lint_command(input)
+}
+
 pub fn run_privileged_worker_command(
     input: crate::commands::input::PrivilegedWorkerCommandInput,
 ) -> anyhow::Result<()> {

@@ -382,19 +382,14 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
         reason: "existing focus snapshot, scoring, resolver, and classification module pending future split, after extracting tests",
     },
     OversizedRustFileAllowance {
-        path: "src/autotune/candidate.rs",
-        max_lines: 100,
-        reason: "compatibility facade re-exporting focused autotune planning modules",
-    },
-    OversizedRustFileAllowance {
         path: "src/autotune/planning/tests.rs",
         max_lines: 1_514,
         reason: "existing broad candidate planning regression tests moved out of candidate.rs pending future test split",
     },
     OversizedRustFileAllowance {
-        path: "src/autotune/planner.rs",
-        max_lines: 962,
-        reason: "existing autotune planner implementation after extracting embedded planner tests",
+        path: "src/autotune/planner/mod.rs",
+        max_lines: 1_057,
+        reason: "existing autotune planner implementation pending future split; system-wide allowlist safety gates are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/ebpf_loader.rs",
@@ -408,8 +403,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/autotune/runtime.rs",
-        max_lines: 2_828,
-        reason: "existing autotune runtime orchestration pending future split; runtime submodule facades are staged here",
+        max_lines: 2_830,
+        reason: "existing autotune runtime orchestration pending future split; rollback-verification state plumbing is staged here",
     },
     OversizedRustFileAllowance {
         path: "src/regression_tests.rs",
@@ -487,9 +482,9 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
         reason: "existing audited action runner implementation pending future split",
     },
     OversizedRustFileAllowance {
-        path: "src/autotune/live_experiment.rs",
-        max_lines: 1_713,
-        reason: "existing live experiment manager implementation pending future split; action factory rollback path is staged here",
+        path: "src/autotune/live_experiment/mod.rs",
+        max_lines: 2_046,
+        reason: "existing live experiment manager implementation pending future split; rollback verification and simulated rollback coverage are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/report/render/text.rs",
@@ -498,8 +493,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/config_file.rs",
-        max_lines: 1_692,
-        reason: "existing config file parser/model implementation pending future split; display-path config is staged here",
+        max_lines: 1_725,
+        reason: "existing config file parser/model implementation pending future split; system-wide allowlist config parsing is staged here",
     },
     OversizedRustFileAllowance {
         path: "src/report/mod.rs",
@@ -538,8 +533,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/autotune/active_config.rs",
-        max_lines: 1_337,
-        reason: "existing active autotune config implementation pending future split",
+        max_lines: 1_815,
+        reason: "existing active autotune config implementation pending future split; rollback baseline verification is staged here",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/controller.rs",
@@ -1121,7 +1116,7 @@ fn direct_print_forbidden_files() -> Vec<PathBuf> {
         root.join("agent.rs"),
         root.join("autotune/mod.rs"),
         root.join("autotune/runtime.rs"),
-        root.join("autotune/planner.rs"),
+        root.join("autotune/planner/mod.rs"),
         root.join("report/analysis.rs"),
         root.join("process_tree.rs"),
     ];

@@ -5,15 +5,19 @@ use serde::Deserialize;
 
 use crate::{
     autotune::workload_policy::{
-        DaemonWorkloadPolicyConfigFile, WorkloadPolicyRuleConfigFile,
-        parse_workload_policy_rule_configs,
+        DaemonWorkloadPolicyConfigFile, WorkloadPolicyRuleConfigFile, lint_workload_policy,
+        parse_workload_policy_rule_configs, validate_workload_policy_lints,
     },
     config::{
         FocusSource, ForegroundSource,
         schema::{CURRENT_CONFIG_VERSION, ConfigDiagnostic, ParsedUserConfigFile, RawConfigFile},
         source::ConfigSource,
     },
-    daemon::{DaemonConfig, DaemonPreset, health::SystemHealthThresholds, policy::ActionSource},
+    daemon::{
+        DaemonConfig, DaemonPreset,
+        health::SystemHealthThresholds,
+        policy::{ActionSource, DaemonPolicyBuildInput, build_daemon_policy},
+    },
     error::ConfigError,
     remote::AgentAutotuneLimits,
 };
@@ -250,6 +254,7 @@ pub fn daemon_config_from_user_config(
 
     let mut daemon_config = DaemonConfig::from_preset(preset, source);
     apply_daemon_user_config_overrides(&mut daemon_config, config);
+    validate_resolved_workload_policy(&daemon_config)?;
     Ok(daemon_config)
 }
 
@@ -564,6 +569,16 @@ pub fn validate_daemon_user_config(config: &UserConfigFile) -> Result<()> {
     Ok(())
 }
 
+fn validate_resolved_workload_policy(daemon_config: &DaemonConfig) -> Result<()> {
+    let policy = build_daemon_policy(DaemonPolicyBuildInput {
+        config: daemon_config,
+        remote_context: None,
+    });
+    let matrix = daemon_config.autotune.workload_policy.resolved_matrix()?;
+    let lints = lint_workload_policy(&matrix, &policy);
+    validate_workload_policy_lints(&lints)
+}
+
 fn validate_optional_confidence(field: &str, confidence: Option<f32>) -> Result<()> {
     if let Some(confidence) = confidence
         && (!confidence.is_finite() || !(0.0..=1.0).contains(&confidence))
@@ -807,6 +822,7 @@ fn known_top_level_user_config_field(field: &str) -> bool {
             | "daemon_allow_system_wide_apply"
             | "daemon_allow_high_risk"
             | "daemon_allow_medium_risk_apply"
+            | "system_wide_allowlist"
             | "autotune"
             | "community_rules"
             | "agent"
@@ -1141,6 +1157,38 @@ mod tests {
     }
 
     #[test]
+    fn daemon_config_from_user_config_applies_system_wide_allowlist() {
+        let toml = r#"
+            daemon_allow_system_wide_suggestions = true
+
+            [system_wide_allowlist]
+            cpu_policies = ["policy0", "policy1"]
+            gpu_cards = ["card0"]
+            gpu_pci_ids = ["1002:*"]
+            irq_devices = ["amdgpu", "xhci_hcd"]
+            vm_knobs = ["proc/sys/vm/swappiness"]
+        "#;
+
+        let parsed = parse_user_config_toml_versioned(toml).unwrap();
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.field.as_deref() != Some("system_wide_allowlist"))
+        );
+
+        let daemon_config =
+            daemon_config_from_user_config(Some(&parsed.file), None, ActionSource::Cli).unwrap();
+        let allowlist = &daemon_config.safety.system_wide_allowlist;
+
+        assert!(allowlist.cpu_policies.contains("policy0"));
+        assert!(allowlist.allows_gpu("card0", None));
+        assert!(allowlist.allows_gpu("card99", Some("1002:abcd")));
+        assert!(allowlist.allows_irq_device("pci:amdgpu"));
+        assert!(allowlist.allows_vm_knob(PathBuf::from("/proc/sys/vm/swappiness").as_path()));
+    }
+
+    #[test]
     fn daemon_config_from_user_config_applies_nested_workload_policy_overrides() {
         let toml = r#"
             [autotune]
@@ -1206,6 +1254,29 @@ mod tests {
             rule.allowed_families,
             ["nice"].into_iter().map(str::to_owned).collect()
         );
+    }
+
+    #[test]
+    fn daemon_config_from_user_config_rejects_critical_workload_policy_lints() {
+        let toml = r#"
+            daemon_preset = "gaming-low-risk"
+
+            [autotune]
+
+            [[autotune.workload_policy.rules]]
+            situation = "game_focused"
+            allowed_families = ["gpu_power"]
+            allowed_objectives = ["thermal_recovery"]
+            autonomous_families = ["gpu_power"]
+        "#;
+        let config = parse_user_config_toml(toml).unwrap();
+
+        let err = daemon_config_from_user_config(Some(&config), None, ActionSource::Cli)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("critical workload policy lint"));
+        assert!(err.contains("system-wide action family"));
     }
 
     #[test]

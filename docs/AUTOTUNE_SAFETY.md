@@ -39,3 +39,13 @@ HighRisk:
 `HighRisk` actions must not be enabled by default. They require manual approval or explicit configuration and must never be silently selected by an autonomous controller.
 
 Any action that cannot be rolled back is ineligible for autonomous mode regardless of its nominal safety class.
+
+## Safety Matrix
+
+Local safety iteration should run:
+
+```bash
+scripts/check-autotune-safety.sh
+```
+
+CI also runs this matrix alongside `cargo fmt --all --check`, `cargo build --all-targets`, `cargo clippy --all-targets -- -D warnings`, and `cargo test --all-targets`. The matrix covers planner golden fixtures, high-risk apply denial, medium-risk unlocks, protected-task exclusion, privilege-boundary denials, no-op detection, rollback verification, and fake soak scenarios.

@@ -10,6 +10,8 @@ pub(super) struct DaemonArgs {
 pub(super) enum DaemonCommand {
     Config(DaemonConfigArgs),
     Policy(DaemonPolicyArgs),
+    #[command(name = "policy-lint")]
+    PolicyLint(DaemonPolicyLintArgs),
     Profiles(DaemonProfilesArgs),
     Explain(DaemonExplainArgs),
     #[command(name = "why-not-optimize")]
@@ -47,6 +49,15 @@ pub(super) enum DaemonPolicyCommand {
 
 #[derive(Args, Debug, Clone)]
 pub(super) struct DaemonPolicyExplainArgs {
+    #[arg(long = "json")]
+    pub(super) json: bool,
+
+    #[arg(long = "preset", value_name = "NAME")]
+    pub(super) preset: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub(super) struct DaemonPolicyLintArgs {
     #[arg(long = "json")]
     pub(super) json: bool,
 
@@ -296,6 +307,26 @@ mod tests {
 
         let AppCommand::DaemonPolicyExplain(input) = command else {
             panic!("expected daemon policy explain command");
+        };
+
+        assert!(input.json);
+        assert_eq!(input.preset.as_deref(), Some("gaming-low-risk"));
+    }
+
+    #[test]
+    fn parses_daemon_policy_lint_json_command() {
+        let command = parse_daemon_command([
+            "stutter",
+            "daemon",
+            "policy-lint",
+            "--preset",
+            "gaming-low-risk",
+            "--json",
+        ])
+        .unwrap();
+
+        let AppCommand::DaemonPolicyLint(input) = command else {
+            panic!("expected daemon policy lint command");
         };
 
         assert!(input.json);

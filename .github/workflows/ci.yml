@@ -43,7 +43,7 @@ jobs:
       - name: Run dependency hygiene
         run: cargo run -p xtask -- dependency-hygiene
 
-      - name: Run non-root smoke build gate
+      - name: Run full fmt/build/clippy/test gate
         run: scripts/smoke/build.sh
 
       - name: Run offline recommendation smoke
@@ -107,6 +107,9 @@ jobs:
 
       - name: Install bpf-linker
         run: cargo install bpf-linker --locked
+
+      - name: Run autotune safety matrix
+        run: scripts/check-autotune-safety.sh
 
       - name: Fake daemon simulation
         run: cargo test -p stutter autotune::simulation

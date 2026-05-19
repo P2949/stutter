@@ -45,13 +45,14 @@ use crate::{
         AutotuneStatusCommandInput, BenchCommandInput, CheckCommandInput, CompletionsCommandInput,
         ConfigCheckCommandInput, DaemonAcceptanceCommandInput, DaemonBenchOverheadCommandInput,
         DaemonConfigExplainCommandInput, DaemonDoctorCommandInput, DaemonExplainCommandInput,
-        DaemonPauseCommandInput, DaemonPolicyExplainCommandInput, DaemonProfilesCommandInput,
-        DaemonProfilesExplainCommandInput, DaemonProfilesForgetCommandInput,
-        DaemonProfilesListCommandInput, DaemonResetStateCommandInput, DaemonRestoreCommandInput,
-        DaemonResumeCommandInput, DaemonResyncStateCommandInput, DaemonSoakCommandInput,
-        DaemonStatusCommandInput, DaemonWatchCommandInput, DaemonWhatChangedCommandInput,
-        DaemonWhyNotOptimizeCommandInput, DisplayPathCompareCommandInput, DoctorCommandInput,
-        InspectIrqsCommandInput, InspectTreeCommandInput, ManCommandInput, MonitorCommandInput,
+        DaemonPauseCommandInput, DaemonPolicyExplainCommandInput, DaemonPolicyLintCommandInput,
+        DaemonProfilesCommandInput, DaemonProfilesExplainCommandInput,
+        DaemonProfilesForgetCommandInput, DaemonProfilesListCommandInput,
+        DaemonResetStateCommandInput, DaemonRestoreCommandInput, DaemonResumeCommandInput,
+        DaemonResyncStateCommandInput, DaemonSoakCommandInput, DaemonStatusCommandInput,
+        DaemonWatchCommandInput, DaemonWhatChangedCommandInput, DaemonWhyNotOptimizeCommandInput,
+        DisplayPathCompareCommandInput, DoctorCommandInput, InspectIrqsCommandInput,
+        InspectTreeCommandInput, ManCommandInput, MonitorCommandInput,
         PrivilegedWorkerCommandInput, ProbesCommandInput, ProfileTemplateCommandInput,
         RecommendCommandInput, ReleaseCheckCommandInput, ReportCommandInput, RestoreCommandInput,
         RulesCommandInput, ScenarioCompareCommandInput, ScenarioCreateCommandInput,
@@ -682,6 +683,12 @@ where
                     },
                 )),
             },
+            DaemonCommand::PolicyLint(lint_args) => {
+                Ok(AppCommand::DaemonPolicyLint(DaemonPolicyLintCommandInput {
+                    json: lint_args.json,
+                    preset: lint_args.preset,
+                }))
+            }
             DaemonCommand::Profiles(profiles_args) => match profiles_args.command {
                 DaemonProfilesCommand::List(list_args) => Ok(AppCommand::DaemonProfiles(
                     DaemonProfilesCommandInput::List(DaemonProfilesListCommandInput {

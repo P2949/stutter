@@ -2086,6 +2086,7 @@ Add centralized provider confidence calibration. Do not let providers return unc
 PROPOSAL 28: Add hardware allowlists for CPU/GPU/IRQ/VM system-adjacent suggestions
 
 PRIORITY: HIGH
+STATUS: Completed 2026-05-19.
 System-wide suggestions must be constrained to user-approved devices and knobs before the project moves toward automated system-wide tuning.
 
 CURRENT STATE:
@@ -2143,6 +2144,7 @@ Add system-wide target allowlists for CPU policies, GPUs, IRQ devices, and VM kn
 PROPOSAL 29: Add rollback verification after every rollback operation
 
 PRIORITY: HIGH
+STATUS: Completed 2026-05-19.
 Rollback success must be verified against active config, not trusted only because the rollback function returned `Ok`.
 
 CURRENT STATE:
@@ -2199,6 +2201,7 @@ Add rollback verification. Capture conflict-group-specific active config before 
 PROPOSAL 30: Add build/test/CI gate for the full watcher safety matrix
 
 PRIORITY: HIGH
+STATUS: Completed 2026-05-19.
 The project now has enough safety-sensitive architecture that CI must enforce the invariants automatically.
 
 CURRENT STATE:
@@ -2258,6 +2261,7 @@ Add CI and local scripts that enforce formatting, build, clippy, full tests, and
 PROPOSAL 31: Decompose large architecture hubs after safety gates are stable
 
 PRIORITY: MEDIUM
+STATUS: Completed 2026-05-19.
 Large files are now the main maintainability risk and will slow future full-system tuning work.
 
 CURRENT STATE:
@@ -2328,6 +2332,7 @@ Perform a behavior-preserving module split of `candidate.rs`, `planner.rs`, and 
 PROPOSAL 32: Add automated workload policy validation and linting
 
 PRIORITY: MEDIUM
+STATUS: Completed 2026-05-19.
 Configurable workload policy is powerful, but invalid policy can accidentally allow dangerous autonomous actions.
 
 CURRENT STATE:
