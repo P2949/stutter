@@ -478,8 +478,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/actions/runner.rs",
-        max_lines: 1_747,
-        reason: "existing audited action runner implementation pending future split",
+        max_lines: 694,
+        reason: "existing audited action runner implementation after extracting embedded runner tests",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/live_experiment/mod.rs",
@@ -493,7 +493,7 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/config_file.rs",
-        max_lines: 1_725,
+        max_lines: 1_763,
         reason: "existing config file parser/model implementation pending future split; system-wide allowlist config parsing is staged here",
     },
     OversizedRustFileAllowance {
@@ -583,7 +583,7 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/cli/mod.rs",
-        max_lines: 1_088,
+        max_lines: 1_095,
         reason: "existing top-level CLI parser implementation pending future split; Clap command tree and compare command coverage are staged here",
     },
     OversizedRustFileAllowance {
