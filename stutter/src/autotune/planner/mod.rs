@@ -6,6 +6,7 @@ use crate::{
     actions::{ActionState, SafetyClass},
     autotune::{
         active_config::{ActiveConfigMatch, ActiveConfigMatchInput},
+        activity::ActivityLevel,
         candidate::{
             CandidateAction, CandidateDryRunner, CandidateEvidence, RealCandidateDryRunner,
         },
@@ -53,6 +54,7 @@ pub enum CandidateDenyReason {
     ObjectiveNotAllowedForWorkload,
     ObjectiveSignalMissing,
     TargetSnapshotMissing,
+    WorkloadIdle,
     ManualOnlyHighRisk,
     DryRunFailed,
     DryRunMatchedZeroTasks,
@@ -335,6 +337,7 @@ impl CandidateDenyReason {
             Self::ObjectiveNotAllowedForWorkload => "objective_not_allowed_for_workload",
             Self::ObjectiveSignalMissing => "objective_signal_missing",
             Self::TargetSnapshotMissing => "target_snapshot_missing",
+            Self::WorkloadIdle => "workload_idle",
             Self::ManualOnlyHighRisk => "manual_only_high_risk",
             Self::DryRunFailed => "dry_run_failed",
             Self::DryRunMatchedZeroTasks => "dry_run_matched_zero_tasks",
@@ -540,6 +543,19 @@ fn evaluate_proposal_static(
 
     let mut deny_reasons = Vec::new();
     let mut deny_messages = proposal.deny_reasons.clone();
+
+    if input.observation.activity_level == ActivityLevel::Idle
+        && !matches!(
+            input.observation.primary_situation,
+            crate::autotune::situation::SituationKind::Idle
+        )
+    {
+        deny_reasons.push(CandidateDenyReason::WorkloadIdle);
+        deny_messages.push(format!(
+            "workload activity is idle for non-idle situation {:?}",
+            input.observation.primary_situation
+        ));
+    }
 
     if proposal.deny_reasons.iter().any(|reason| {
         reason.contains("target_selection_fallback_root")

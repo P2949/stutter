@@ -14,20 +14,36 @@ pub struct PsiSnapshot {
     pub io_full_total_us: u64,
 }
 
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct PsiDelta {
+    pub snapshot: PsiSnapshot,
+    pub mem_stall_delta_us: Option<u64>,
+    pub cpu_stall_delta_us: Option<u64>,
+    pub io_stall_delta_us: Option<u64>,
+    pub mem_stall_spike: bool,
+}
+
+pub const MEM_STALL_SPIKE_THRESHOLD_US: u64 = 100_000;
+
 pub struct PsiReader {
     proc_root: PathBuf,
+    prev_snapshot: Option<PsiSnapshot>,
 }
 
 impl PsiReader {
     pub fn new() -> Self {
         Self {
             proc_root: PathBuf::from("/proc"),
+            prev_snapshot: None,
         }
     }
 
     #[cfg(test)]
     pub fn with_root(root: PathBuf) -> Self {
-        Self { proc_root: root }
+        Self {
+            proc_root: root,
+            prev_snapshot: None,
+        }
     }
 
     pub fn read(&self) -> anyhow::Result<PsiSnapshot> {
@@ -63,6 +79,37 @@ impl PsiReader {
         }
 
         Ok(snapshot)
+    }
+
+    pub fn read_with_delta(&mut self) -> anyhow::Result<PsiDelta> {
+        let snapshot = self.read()?;
+        let previous = self.prev_snapshot.as_ref();
+        let mem_stall_delta_us = previous.map(|prev| {
+            snapshot
+                .mem_some_total_us
+                .saturating_sub(prev.mem_some_total_us)
+        });
+        let cpu_stall_delta_us = previous.map(|prev| {
+            snapshot
+                .cpu_some_total_us
+                .saturating_sub(prev.cpu_some_total_us)
+        });
+        let io_stall_delta_us = previous.map(|prev| {
+            snapshot
+                .io_some_total_us
+                .saturating_sub(prev.io_some_total_us)
+        });
+        let mem_stall_spike = mem_stall_delta_us.unwrap_or(0) > MEM_STALL_SPIKE_THRESHOLD_US;
+
+        self.prev_snapshot = Some(snapshot.clone());
+
+        Ok(PsiDelta {
+            snapshot,
+            mem_stall_delta_us,
+            cpu_stall_delta_us,
+            io_stall_delta_us,
+            mem_stall_spike,
+        })
     }
 
     fn read_file(&self, rel_path: &str) -> anyhow::Result<HashMap<String, PsiLine>> {
@@ -149,5 +196,47 @@ mod tests {
         assert_eq!(snapshot.io_some_total_us, 3000);
         assert_eq!(snapshot.io_full_avg10, 5.00);
         assert_eq!(snapshot.io_full_total_us, 1500);
+    }
+
+    #[test]
+    fn read_with_delta_reports_memory_stall_spikes() {
+        let dir =
+            std::env::temp_dir().join(format!("stutter-psi-delta-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let pressure_dir = dir.join("pressure");
+        fs::create_dir_all(&pressure_dir).unwrap();
+
+        fs::write(
+            pressure_dir.join("cpu"),
+            "some avg10=0.00 avg60=0.00 avg300=0.00 total=10\n",
+        )
+        .unwrap();
+        fs::write(
+            pressure_dir.join("memory"),
+            "some avg10=0.00 avg60=0.00 avg300=0.00 total=1000\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+        )
+        .unwrap();
+        fs::write(
+            pressure_dir.join("io"),
+            "some avg10=0.00 avg60=0.00 avg300=0.00 total=20\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+        )
+        .unwrap();
+
+        let mut reader = PsiReader::with_root(dir.clone());
+        let first = reader.read_with_delta().unwrap();
+        assert_eq!(first.mem_stall_delta_us, None);
+        assert!(!first.mem_stall_spike);
+
+        fs::write(
+            pressure_dir.join("memory"),
+            "some avg10=0.00 avg60=0.00 avg300=0.00 total=151001\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
+        )
+        .unwrap();
+
+        let second = reader.read_with_delta().unwrap();
+        assert_eq!(second.mem_stall_delta_us, Some(150_001));
+        assert!(second.mem_stall_spike);
+
+        fs::remove_dir_all(dir).ok();
     }
 }

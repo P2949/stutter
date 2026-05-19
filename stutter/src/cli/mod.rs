@@ -500,7 +500,7 @@ where
                     }
                 }
             } else {
-                validate_autotune_mode(&args.mode, args.allow_medium_risk)?;
+                validate_autotune_mode(&args.mode, args.allow_medium_risk, args.dry_run_all_safe)?;
                 Ok(AppCommand::Autotune(AutotuneCommandDto {
                     input: crate::autotune::commands::live::AutotuneCommandInput {
                         config: args.config,
@@ -526,6 +526,7 @@ where
                         allow_system_wide_suggestions: args.allow_system_wide_suggestions,
                         allow_medium_risk: args.allow_medium_risk,
                         high_risk_dry_run: args.high_risk_dry_run,
+                        dry_run_all_safe: args.dry_run_all_safe,
                     },
                 }))
             }

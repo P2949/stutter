@@ -193,7 +193,7 @@ mod tests {
     fn fake_stat_line(tid: u32, comm: &str, nice: i32) -> String {
         let mut fields = vec!["0".to_owned(); 40];
         fields[0] = "S".to_owned();
-        fields[17] = nice.to_string();
+        fields[16] = nice.to_string();
         format!("{tid} ({comm}) {}\n", fields.join(" "))
     }
 }

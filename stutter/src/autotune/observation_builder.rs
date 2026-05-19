@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, fs, os::unix::fs::MetadataExt, path::Path};
 
 use crate::{
     autotune::{
+        activity::ActivityLevel,
         gpu_focus::{FocusGpuResolver, FocusGpuResolverInput, FocusGpuSource},
         objective::ObjectiveSignalQuality,
         observation::{
@@ -43,6 +44,7 @@ pub struct AutotuneObservationBuilderInput<'a> {
     pub drop_counters: DropCountersSnapshot,
     pub proc_root: &'a Path,
     pub sys_root: &'a Path,
+    pub activity_level: ActivityLevel,
 }
 
 #[derive(Clone, Debug)]
@@ -115,6 +117,7 @@ impl AutotuneObservationBuilder {
             scored_samples: window_score.scored_samples,
             score: stutter_score_from_runtime_window_score(&window_score),
             data_quality: window_score.data_quality.clone(),
+            activity_level: input.activity_level,
             objective_signals,
             primary_situation,
             situation: Default::default(),
@@ -383,6 +386,7 @@ mod tests {
             drop_counters: DropCountersSnapshot::default(),
             proc_root: &proc_root,
             sys_root: &sys_root,
+            activity_level: ActivityLevel::Active,
         });
         let observation = output.observation;
 
@@ -449,6 +453,7 @@ mod tests {
             drop_counters: DropCountersSnapshot::default(),
             proc_root: &proc_root,
             sys_root: &sys_root,
+            activity_level: ActivityLevel::Active,
         });
         let observation = output.observation;
 
@@ -510,6 +515,7 @@ mod tests {
             drop_counters: DropCountersSnapshot::default(),
             proc_root: &proc_root,
             sys_root: &sys_root,
+            activity_level: ActivityLevel::Active,
         })
         .observation;
 
@@ -560,6 +566,7 @@ mod tests {
             drop_counters: DropCountersSnapshot::default(),
             proc_root: &proc_root,
             sys_root: &sys_root,
+            activity_level: ActivityLevel::Active,
         })
         .observation;
 
@@ -599,6 +606,7 @@ mod tests {
             drop_counters: DropCountersSnapshot::default(),
             proc_root: &proc_root,
             sys_root: &sys_root,
+            activity_level: ActivityLevel::Active,
         })
         .observation;
 
@@ -632,6 +640,7 @@ mod tests {
             drop_counters: DropCountersSnapshot::default(),
             proc_root: &proc_root,
             sys_root: &sys_root,
+            activity_level: ActivityLevel::Active,
         })
         .observation;
 
@@ -672,6 +681,7 @@ mod tests {
             drop_counters: DropCountersSnapshot::default(),
             proc_root: &proc_root,
             sys_root: &sys_root,
+            activity_level: ActivityLevel::Active,
         })
         .observation;
 

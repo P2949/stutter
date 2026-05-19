@@ -11,6 +11,7 @@ mod tests {
         super::{CandidateDenyReason, CandidatePlanner, PlannerInput},
         support::*,
     };
+    use crate::autotune::activity::ActivityLevel;
 
     #[test]
     fn workload_memory_cools_down_same_workload_without_blocking_other_workload() {
@@ -104,6 +105,8 @@ mod tests {
         vm_evidence: bool,
         #[serde(default)]
         thermal_degraded: bool,
+        #[serde(default)]
+        activity_level: Option<ActivityLevel>,
         // Optional ObjectiveSignals override for fixtures that exercise the
         // rolling-window/observation signal path directly.
         #[serde(default)]
@@ -119,6 +122,18 @@ mod tests {
         allow_medium_risk_apply: bool,
         #[serde(default)]
         enabled_action_families: Vec<String>,
+        #[serde(default)]
+        irq_devices: Vec<String>,
+        #[serde(default)]
+        gpu_cards: Vec<String>,
+        #[serde(default)]
+        allow_gpu_power_in_autotune: bool,
+        #[serde(default)]
+        vm_knobs: Vec<String>,
+        #[serde(default)]
+        allow_vm_knobs_in_autotune: bool,
+        #[serde(default)]
+        autonomous_families: Vec<String>,
         #[serde(default)]
         compile_cgroup: Option<String>,
         #[serde(default)]
@@ -167,12 +182,16 @@ mod tests {
             "game_cpu_scheduler_pressure.json",
             "game_gpu_bound.json",
             "game_gpu_power_limited.json",
+            "game_gpu_profile_switch_medium_risk.json",
+            "game_idle_suppressed.json",
+            "game_irq_gpu_medium_risk.json",
             "game_irq_pressure_signals_present.json",
             "io_pressure.json",
             "irq_pressure.json",
             "kept_action_conflict.json",
             "low_data_quality.json",
             "media_playback.json",
+            "memory_pressure_swappiness_medium_risk.json",
             "recording_active.json",
             "thermal_degraded.json",
             "virtual_machine_load.json",
@@ -195,6 +214,7 @@ mod tests {
         let mut observation = build_fixture_observation(&case);
         let policy = build_fixture_policy(&case.policy, observation.target_root_pid);
         let profiles = fixture_profiles(&case);
+        let workload_policy = fixture_workload_policy(&case);
         let planner = CandidatePlanner::default_for_policy(&policy);
 
         let mut controller_state = ControllerRuntimeState::default();
@@ -246,7 +266,7 @@ mod tests {
                 system_health: &observation.system_health,
                 controller_state: &controller_state,
                 active_profile_state: active_profile_state.as_ref(),
-                workload_policy: &WorkloadPolicyMatrix::default_rules(),
+                workload_policy: &workload_policy,
                 profiles: &profiles,
             },
             &mut dry_runner,
@@ -420,6 +440,12 @@ mod tests {
         config.autotune.allow_medium_risk_apply = fixture.allow_medium_risk_apply;
         config.safety.enabled_action_families =
             fixture.enabled_action_families.iter().cloned().collect();
+        config.safety.system_wide_allowlist.irq_devices =
+            fixture.irq_devices.iter().cloned().collect();
+        config.safety.system_wide_allowlist.gpu_cards = fixture.gpu_cards.iter().cloned().collect();
+        config.safety.system_wide_allowlist.vm_knobs = fixture.vm_knobs.iter().cloned().collect();
+        config.autotune.allow_gpu_power_in_autotune = fixture.allow_gpu_power_in_autotune;
+        config.autotune.allow_vm_knobs_in_autotune = fixture.allow_vm_knobs_in_autotune;
 
         if let Some(path) = &fixture.compile_cgroup {
             config.safety.cgroup_targets.compile_cgroup = Some(std::path::PathBuf::from(path));
@@ -437,6 +463,22 @@ mod tests {
         })
     }
 
+    fn fixture_workload_policy(case: &PlannerGoldenCase) -> WorkloadPolicyMatrix {
+        let mut policy = WorkloadPolicyMatrix::default_rules();
+        if !case.policy.autonomous_families.is_empty() {
+            let situation = parse_fixture_situation(&case.situation);
+            if let Some(rule) = policy
+                .rules
+                .iter_mut()
+                .find(|rule| rule.situation == situation)
+            {
+                rule.autonomous_families =
+                    case.policy.autonomous_families.iter().cloned().collect();
+            }
+        }
+        policy
+    }
+
     fn build_fixture_observation(case: &PlannerGoldenCase) -> AutotuneObservation {
         let situation = parse_fixture_situation(&case.situation);
         let focus_kind = parse_fixture_focus_kind(&case.focus_kind);
@@ -445,6 +487,9 @@ mod tests {
         observation.focus_confidence = 0.95;
         observation.situation.primary = situation;
         observation.situation.confidence = 0.95;
+        if let Some(activity_level) = case.activity_level {
+            observation.activity_level = activity_level;
+        }
         observation.active_tasks = fixture_tasks(situation, focus_kind);
         observation.capabilities = DaemonCapabilities {
             btf_available: true,
@@ -645,6 +690,13 @@ mod tests {
                         vendor: Some("amd".to_owned()),
                         hwmon_paths: Vec::new(),
                     });
+                active_config.gpu_power.devices.push(
+                    crate::autotune::observation::GpuPowerRuntimeState {
+                        device: "card0".to_owned(),
+                        power_dpm_force_performance_level: Some("auto".to_owned()),
+                        pp_power_profile_mode: Some("BOOTUP_DEFAULT".to_owned()),
+                    },
+                );
             }
 
             if signals

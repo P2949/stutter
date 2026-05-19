@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
+use serde::{Deserialize, Serialize};
 
 use crate::actions::{
     ActionId, ActionState, ActionWarning, GpuPowerRestoreRecord, RollbackToken, SafetyClass,
@@ -53,7 +54,7 @@ impl Default for GpuPowerPolicy {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpuPowerAction {
     pub sysfs_root: PathBuf,
     pub drm_card: String,
@@ -297,7 +298,12 @@ impl TuningAction for GpuPowerAction {
     }
 
     fn safety_class(&self) -> SafetyClass {
-        SafetyClass::HighRisk
+        if self.pp_power_profile_mode.is_some() && self.power_dpm_force_performance_level.is_none()
+        {
+            SafetyClass::ReversibleMediumRisk
+        } else {
+            SafetyClass::HighRisk
+        }
     }
 
     fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
@@ -663,11 +669,23 @@ mod tests {
     }
 
     #[test]
-    fn safety_class_is_high_risk() {
+    fn safety_class_is_high_risk_when_dpm_level_changes() {
         let root = temp_sysfs_root("safety");
         let action = action_for(&root);
 
         assert_eq!(action.safety_class(), SafetyClass::HighRisk);
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn profile_mode_only_is_reversible_medium_risk() {
+        let root = temp_sysfs_root("profile-medium-risk");
+        let mut action = action_for(&root);
+        action.power_dpm_force_performance_level = None;
+        action.pp_power_profile_mode = Some("3D_FULL_SCREEN".to_owned());
+
+        assert_eq!(action.safety_class(), SafetyClass::ReversibleMediumRisk);
 
         fs::remove_dir_all(root).ok();
     }

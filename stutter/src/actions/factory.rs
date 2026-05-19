@@ -1,9 +1,18 @@
+use std::collections::BTreeSet;
+
 use crate::{
     actions::{
-        ActionError, TuningAction, cgroup::CgroupPlacementAction,
-        cpu_affinity::CpuAffinityProfileAction, cpu_power::CpuPowerAction,
-        gpu_power::GpuPowerAction, ioprio::IoPrioAction, irq_affinity::IrqAffinityAction,
-        nice::NiceAction, uclamp::UclampAction, vm_knobs::VmKnobAction,
+        ActionError, ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass,
+        TuningAction,
+        cgroup::CgroupPlacementAction,
+        cpu_affinity::CpuAffinityProfileAction,
+        cpu_power::{CpuPowerAction, CpuPowerPolicy},
+        gpu_power::{GpuPowerAction, GpuPowerMode, GpuPowerPolicy},
+        ioprio::IoPrioAction,
+        irq_affinity::{IrqAffinityAction, IrqAffinityPolicy},
+        nice::NiceAction,
+        uclamp::UclampAction,
+        vm_knobs::{VmKnobAction, VmKnobMode, VmKnobPolicy},
     },
     autotune::candidate::{CandidateAction, CandidateFamily, ExecutablePlan},
 };
@@ -173,14 +182,22 @@ impl ActionFactory for IrqAffinityActionFactory {
         let CandidateAction::IrqAffinity { plan } = plan else {
             return Err(ActionError::preflight("candidate family mismatch"));
         };
-        Ok(Box::new(IrqAffinityAction {
+        let action = IrqAffinityAction {
             irq: plan.action.irq,
             device_hint: plan.action.device_hint.clone(),
             smp_affinity: plan.action.smp_affinity.clone(),
             risk: plan.action.risk,
             evidence: plan.action.evidence.clone(),
             irq_root: plan.action.irq_root.clone(),
-        }))
+        };
+        let policy = IrqAffinityPolicy {
+            allow_irq_affinity_changes: true,
+            allow_high_risk_devices: false,
+            require_strong_irq_evidence: true,
+            require_stable_irq_identity: true,
+            require_known_device_mapping: true,
+        };
+        Ok(Box::new(PolicyBackedIrqAffinityAction { action, policy }))
     }
 }
 
@@ -195,12 +212,20 @@ impl ActionFactory for CpuPowerActionFactory {
         let CandidateAction::CpuPower { plan } = plan else {
             return Err(ActionError::preflight("candidate family mismatch"));
         };
-        Ok(Box::new(CpuPowerAction {
+        let action = CpuPowerAction {
             sysfs_root: plan.action.sysfs_root.clone(),
             cpus: plan.action.cpus.clone(),
             scaling_governor: plan.action.scaling_governor.clone(),
             energy_performance_preference: plan.action.energy_performance_preference.clone(),
-        }))
+        };
+        let policy = CpuPowerPolicy {
+            allow_cpu_power_changes: true,
+            allowed_cpus: action.cpus.iter().copied().collect::<BTreeSet<_>>(),
+            allow_governor_changes: action.scaling_governor.is_some(),
+            allow_epp_changes: action.energy_performance_preference.is_some(),
+            ..CpuPowerPolicy::default()
+        };
+        Ok(Box::new(PolicyBackedCpuPowerAction { action, policy }))
     }
 }
 
@@ -215,7 +240,7 @@ impl ActionFactory for GpuPowerActionFactory {
         let CandidateAction::GpuPower { plan } = plan else {
             return Err(ActionError::preflight("candidate family mismatch"));
         };
-        Ok(Box::new(GpuPowerAction {
+        let action = GpuPowerAction {
             sysfs_root: plan.action.sysfs_root.clone(),
             drm_card: plan.action.drm_card.clone(),
             power_dpm_force_performance_level: plan
@@ -223,7 +248,16 @@ impl ActionFactory for GpuPowerActionFactory {
                 .power_dpm_force_performance_level
                 .clone(),
             pp_power_profile_mode: plan.action.pp_power_profile_mode.clone(),
-        }))
+        };
+        let policy = GpuPowerPolicy {
+            allow_gpu_power_changes: true,
+            mode: GpuPowerMode::ManualApply,
+            allowed_drm_cards: [action.drm_card.clone()].into_iter().collect(),
+            allow_force_performance_level: action.power_dpm_force_performance_level.is_some(),
+            allow_power_profile_mode: action.pp_power_profile_mode.is_some(),
+            ..GpuPowerPolicy::default()
+        };
+        Ok(Box::new(PolicyBackedGpuPowerAction { action, policy }))
     }
 }
 
@@ -238,10 +272,178 @@ impl ActionFactory for VmKnobActionFactory {
         let CandidateAction::VmKnob { plan } = plan else {
             return Err(ActionError::preflight("candidate family mismatch"));
         };
-        Ok(Box::new(VmKnobAction {
+        let action = VmKnobAction {
             root: plan.action.root.clone(),
             changes: plan.action.changes.clone(),
-        }))
+        };
+        let policy = VmKnobPolicy {
+            allow_vm_knob_changes: true,
+            mode: VmKnobMode::ManualApply,
+            allowed_paths: action
+                .changes
+                .iter()
+                .map(|change| change.path.clone())
+                .collect(),
+            require_latency_cliff_evidence: true,
+            latency_cliff_evidence: true,
+        };
+        Ok(Box::new(PolicyBackedVmKnobAction { action, policy }))
+    }
+}
+
+struct PolicyBackedIrqAffinityAction {
+    action: IrqAffinityAction,
+    policy: IrqAffinityPolicy,
+}
+
+impl TuningAction for PolicyBackedIrqAffinityAction {
+    fn id(&self) -> ActionId {
+        self.action.id()
+    }
+
+    fn describe(&self) -> String {
+        self.action.describe()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.action.safety_class()
+    }
+
+    fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
+        self.action.preflight_with_policy(&self.policy)
+    }
+
+    fn dry_run(&self) -> anyhow::Result<ActionState> {
+        self.action.dry_run_with_policy(&self.policy)
+    }
+
+    fn apply(&self) -> anyhow::Result<RollbackToken> {
+        self.action.apply_with_policy(&self.policy)
+    }
+
+    fn verify(&self) -> anyhow::Result<ActionState> {
+        self.action.verify_with_policy(&self.policy)
+    }
+
+    fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
+        self.action.rollback(token)
+    }
+}
+
+struct PolicyBackedCpuPowerAction {
+    action: CpuPowerAction,
+    policy: CpuPowerPolicy,
+}
+
+impl TuningAction for PolicyBackedCpuPowerAction {
+    fn id(&self) -> ActionId {
+        self.action.id()
+    }
+
+    fn describe(&self) -> String {
+        self.action.describe()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.action.safety_class()
+    }
+
+    fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
+        self.action.preflight_with_policy(&self.policy)
+    }
+
+    fn dry_run(&self) -> anyhow::Result<ActionState> {
+        self.action.dry_run_with_policy(&self.policy)
+    }
+
+    fn apply(&self) -> anyhow::Result<RollbackToken> {
+        self.action.apply_with_policy(&self.policy)
+    }
+
+    fn verify(&self) -> anyhow::Result<ActionState> {
+        self.action.verify_with_policy(&self.policy)
+    }
+
+    fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
+        self.action.rollback(token)
+    }
+}
+
+struct PolicyBackedGpuPowerAction {
+    action: GpuPowerAction,
+    policy: GpuPowerPolicy,
+}
+
+impl TuningAction for PolicyBackedGpuPowerAction {
+    fn id(&self) -> ActionId {
+        self.action.id()
+    }
+
+    fn describe(&self) -> String {
+        self.action.describe()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.action.safety_class()
+    }
+
+    fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
+        self.action.preflight_with_policy(&self.policy)
+    }
+
+    fn dry_run(&self) -> anyhow::Result<ActionState> {
+        self.action.dry_run_with_policy(&self.policy)
+    }
+
+    fn apply(&self) -> anyhow::Result<RollbackToken> {
+        self.action.apply_with_policy(&self.policy)
+    }
+
+    fn verify(&self) -> anyhow::Result<ActionState> {
+        self.action.verify_with_policy(&self.policy)
+    }
+
+    fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
+        self.action.rollback(token)
+    }
+}
+
+struct PolicyBackedVmKnobAction {
+    action: VmKnobAction,
+    policy: VmKnobPolicy,
+}
+
+impl TuningAction for PolicyBackedVmKnobAction {
+    fn id(&self) -> ActionId {
+        self.action.id()
+    }
+
+    fn describe(&self) -> String {
+        self.action.describe()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.action.safety_class()
+    }
+
+    fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
+        self.action.preflight_with_policy(&self.policy)
+    }
+
+    fn dry_run(&self) -> anyhow::Result<ActionState> {
+        self.action.dry_run_with_policy(&self.policy)
+    }
+
+    fn apply(&self) -> anyhow::Result<RollbackToken> {
+        self.action.apply_with_policy(&self.policy)
+    }
+
+    fn verify(&self) -> anyhow::Result<ActionState> {
+        self.action.verify_with_policy(&self.policy)
+    }
+
+    fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
+        self.action.rollback(token)
     }
 }
 

@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
+use serde::{Deserialize, Serialize};
 
 use crate::actions::{
     ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
@@ -43,13 +44,13 @@ impl Default for VmKnobPolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VmKnobChange {
     pub path: PathBuf,
     pub value: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmKnobAction {
     pub root: PathBuf,
     pub changes: Vec<VmKnobChange>,
@@ -260,6 +261,7 @@ impl VmKnobAction {
 
             validate_supported_reversible_knob(&relative_path)?;
             validate_knob_value(&relative_path, &change.value)?;
+            validate_declared_safe_value(&relative_path, &change.value)?;
 
             let absolute_path = self.root.join(&relative_path);
             ensure_writable_file(&absolute_path)?;
@@ -306,7 +308,11 @@ impl TuningAction for VmKnobAction {
     }
 
     fn safety_class(&self) -> SafetyClass {
-        SafetyClass::HighRisk
+        if self.changes.len() == 1 && is_medium_risk_vm_knob_change(&self.changes[0]) {
+            SafetyClass::ReversibleMediumRisk
+        } else {
+            SafetyClass::HighRisk
+        }
     }
 
     fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
@@ -423,6 +429,47 @@ fn validate_knob_value(relative_path: &Path, value: &str) -> anyhow::Result<()> 
         validate_thp_value(relative_path, value)
     } else {
         validate_numeric_vm_value(relative_path, value)
+    }
+}
+
+fn is_medium_risk_vm_knob_change(change: &VmKnobChange) -> bool {
+    normalize_relative_knob_path(&change.path)
+        .ok()
+        .is_some_and(|path| {
+            path == Path::new("proc/sys/vm/swappiness") && change.value.trim() == "10"
+        })
+}
+
+fn validate_declared_safe_value(relative_path: &Path, value: &str) -> anyhow::Result<()> {
+    if let Some(values) = declared_safe_values(relative_path)
+        && !values.contains(&value)
+    {
+        anyhow::bail!(
+            "vm knob write refused: {} not in safe_values for {}",
+            value,
+            relative_path.display()
+        );
+    }
+
+    if relative_path == Path::new("proc/sys/vm/swappiness") {
+        let parsed = value.parse::<u32>().with_context(|| {
+            format!(
+                "VM knob {} requires an unsigned integer value",
+                relative_path.display()
+            )
+        })?;
+        validate_range(relative_path, parsed, 1, 60)?;
+    }
+
+    Ok(())
+}
+
+fn declared_safe_values(relative_path: &Path) -> Option<&'static [&'static str]> {
+    match relative_path.to_string_lossy().as_ref() {
+        "proc/sys/vm/swappiness" => Some(&["10"]),
+        "proc/sys/vm/dirty_background_ratio" => Some(&["5"]),
+        "proc/sys/vm/dirty_ratio" => Some(&["10"]),
+        _ => None,
     }
 }
 
@@ -647,6 +694,22 @@ mod tests {
         let action = thp_action(&root);
 
         assert_eq!(action.safety_class(), SafetyClass::HighRisk);
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn swappiness_safe_value_is_reversible_medium_risk() {
+        let root = temp_root("swappiness-medium-risk");
+        let action = VmKnobAction {
+            root: root.clone(),
+            changes: vec![VmKnobChange {
+                path: PathBuf::from("proc/sys/vm/swappiness"),
+                value: "10".to_owned(),
+            }],
+        };
+
+        assert_eq!(action.safety_class(), SafetyClass::ReversibleMediumRisk);
 
         fs::remove_dir_all(root).ok();
     }

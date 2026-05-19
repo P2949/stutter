@@ -315,6 +315,17 @@ pub(crate) fn ioprio_candidate(name: &str) -> CandidateAction {
 }
 
 pub(crate) fn irq_affinity_candidate(name: &str) -> CandidateAction {
+    irq_affinity_candidate_with_risk(name, IrqAffinityRisk::ReversibleMediumRisk)
+}
+
+pub(crate) fn high_risk_irq_affinity_candidate(name: &str) -> CandidateAction {
+    irq_affinity_candidate_with_risk(name, IrqAffinityRisk::HighRisk)
+}
+
+pub(crate) fn irq_affinity_candidate_with_risk(
+    name: &str,
+    risk: IrqAffinityRisk,
+) -> CandidateAction {
     let evidence = IrqAffinityEvidence {
         strong_irq_evidence: true,
         stable_irq_identity: true,
@@ -331,7 +342,7 @@ pub(crate) fn irq_affinity_candidate(name: &str) -> CandidateAction {
                 42,
                 "test-device".to_owned(),
                 "1".to_owned(),
-                IrqAffinityRisk::ReversibleMediumRisk,
+                risk,
                 evidence,
             ),
             evidence: Vec::new(),
@@ -510,12 +521,22 @@ pub(crate) fn evaluate_static_candidate_with_confidence(
     confidence: f32,
 ) -> CandidateEvaluation {
     let policy = policy(mode);
+    evaluate_static_candidate_with_policy(&policy, situation, focus_kind, candidate, confidence)
+}
+
+pub(crate) fn evaluate_static_candidate_with_policy(
+    policy: &DaemonPolicy,
+    situation: SituationKind,
+    focus_kind: FocusGroupKind,
+    candidate: CandidateAction,
+    confidence: f32,
+) -> CandidateEvaluation {
     let mut observation = observation_for_situation(situation, focus_kind);
     enable_capability_for_candidate(&mut observation, &candidate);
     let mut dry_runner = CountingDryRunner::default();
 
     evaluate_candidate_with_runner(
-        &policy,
+        policy,
         &observation,
         &observation.capabilities,
         &ControllerRuntimeState::default(),

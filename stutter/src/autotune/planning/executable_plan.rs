@@ -28,6 +28,10 @@ pub enum CandidateExecutablePlan {
     IoPrio { plan: IoPrioActionPlan },
     Uclamp { plan: UclampActionPlan },
     CgroupPlacement { plan: CgroupPlacementActionPlan },
+    IrqAffinity { plan: IrqAffinityActionPlan },
+    CpuPower { plan: CpuPowerActionPlan },
+    GpuPower { plan: GpuPowerActionPlan },
+    VmKnob { plan: VmKnobActionPlan },
 }
 
 impl CandidateExecutablePlan {
@@ -38,6 +42,20 @@ impl CandidateExecutablePlan {
             CandidateAction::Uclamp { plan } => Some(Self::Uclamp { plan: plan.clone() }),
             CandidateAction::CgroupPlacement { plan } => {
                 Some(Self::CgroupPlacement { plan: plan.clone() })
+            }
+            CandidateAction::IrqAffinity { plan }
+                if plan.safety_class() < SafetyClass::HighRisk =>
+            {
+                Some(Self::IrqAffinity { plan: plan.clone() })
+            }
+            CandidateAction::CpuPower { plan } if plan.safety_class() < SafetyClass::HighRisk => {
+                Some(Self::CpuPower { plan: plan.clone() })
+            }
+            CandidateAction::GpuPower { plan } if plan.safety_class() < SafetyClass::HighRisk => {
+                Some(Self::GpuPower { plan: plan.clone() })
+            }
+            CandidateAction::VmKnob { plan } if plan.safety_class() < SafetyClass::HighRisk => {
+                Some(Self::VmKnob { plan: plan.clone() })
             }
             CandidateAction::CpuAffinityProfile { .. }
             | CandidateAction::IrqAffinity { .. }
@@ -54,6 +72,10 @@ impl CandidateExecutablePlan {
             Self::IoPrio { plan } => CandidateAction::IoPrio { plan },
             Self::Uclamp { plan } => CandidateAction::Uclamp { plan },
             Self::CgroupPlacement { plan } => CandidateAction::CgroupPlacement { plan },
+            Self::IrqAffinity { plan } => CandidateAction::IrqAffinity { plan },
+            Self::CpuPower { plan } => CandidateAction::CpuPower { plan },
+            Self::GpuPower { plan } => CandidateAction::GpuPower { plan },
+            Self::VmKnob { plan } => CandidateAction::VmKnob { plan },
         }
     }
 }
@@ -94,7 +116,7 @@ pub struct CgroupPlacementActionPlan {
     pub objective: ObjectiveKind,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IrqAffinityActionPlan {
     pub name: String,
     pub action: IrqAffinityAction,
@@ -102,7 +124,7 @@ pub struct IrqAffinityActionPlan {
     pub objective: ObjectiveKind,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CpuPowerActionPlan {
     pub name: String,
     pub action: CpuPowerAction,
@@ -110,7 +132,7 @@ pub struct CpuPowerActionPlan {
     pub objective: ObjectiveKind,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GpuPowerActionPlan {
     pub name: String,
     pub action: GpuPowerAction,
@@ -118,7 +140,7 @@ pub struct GpuPowerActionPlan {
     pub objective: ObjectiveKind,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VmKnobActionPlan {
     pub name: String,
     pub action: VmKnobAction,

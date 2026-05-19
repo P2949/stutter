@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn suggest_manual_only_high_risk_candidate_is_not_eligible_and_does_not_dry_run() {
-        let candidate = irq_affinity_candidate("suggest-irq-manual-only");
+        let candidate = high_risk_irq_affinity_candidate("suggest-irq-manual-only");
         let policy = policy(DaemonMode::Suggest);
         let mut observation =
             observation_for_situation(SituationKind::IrqPressure, FocusGroupKind::Game);
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn explicit_high_risk_dry_run_collects_diagnostics_without_eligibility() {
-        let candidate = irq_affinity_candidate("suggest-irq-dry-run");
+        let candidate = high_risk_irq_affinity_candidate("suggest-irq-dry-run");
         let mut config = crate::autotune::runtime::daemon_config_for_runtime_mode(
             DaemonMode::Suggest,
             ActionSource::AutotuneRuntime,

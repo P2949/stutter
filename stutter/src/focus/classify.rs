@@ -1,4 +1,11 @@
-use super::*;
+use serde::{Deserialize, Serialize};
+
+use super::process_scan::try_community_rules_classification;
+use crate::process_tree::TaskClass as SystemTaskClass;
+
+pub(crate) const SCHED_FIFO: u32 = 1;
+pub(crate) const SCHED_RR: u32 = 2;
+pub(crate) const SCHED_DEADLINE: u32 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PriorityBand {

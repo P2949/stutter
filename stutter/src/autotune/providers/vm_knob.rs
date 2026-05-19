@@ -176,8 +176,8 @@ fn vm_knob_policies() -> Vec<VmKnobPolicy> {
             safe_values: vec!["10".to_owned()],
             trigger: VmKnobTrigger::SwapPressure,
             objective: ObjectiveKind::IoLatency,
-            safety_class: SafetyClass::HighRisk,
-            manual_only: true,
+            safety_class: SafetyClass::ReversibleMediumRisk,
+            manual_only: false,
         },
         VmKnobPolicy {
             knob: "vm.dirty_background_ratio",
@@ -221,7 +221,13 @@ fn trigger_evidence(
         VmKnobTrigger::SwapPressure => signals
             .swap_activity_events
             .filter(|value| *value > 0)
-            .map(|value| format!("swap_activity_events={value}")),
+            .map(|value| format!("swap_activity_events={value}"))
+            .or_else(|| {
+                signals
+                    .mem_stall_spike_count
+                    .filter(|value| *value > 0)
+                    .map(|value| format!("mem_stall_spike_count={value}"))
+            }),
         VmKnobTrigger::DirtyBackgroundWriteback => signals
             .dirty_writeback_events
             .filter(|value| *value > 0)

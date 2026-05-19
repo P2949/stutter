@@ -48,12 +48,12 @@ impl CandidateProvider for GpuPowerProvider {
         let confidence = gpu_power_confidence(input, &structured_evidence);
         let candidate = CandidateAction::GpuPower {
             plan: GpuPowerActionPlan {
-                name: format!("gpu-power-{}-high", structured_evidence.drm_card),
+                name: format!("gpu-power-{}-profile", structured_evidence.drm_card),
                 action: GpuPowerAction {
                     sysfs_root: std::path::PathBuf::from("/sys"),
                     drm_card: structured_evidence.drm_card.clone(),
-                    power_dpm_force_performance_level: Some("high".to_owned()),
-                    pp_power_profile_mode: None,
+                    power_dpm_force_performance_level: None,
+                    pp_power_profile_mode: Some("3D_FULL_SCREEN".to_owned()),
                 },
                 evidence: vec![CandidateEvidence::new(
                     "gpu_power_structured",
@@ -106,8 +106,8 @@ fn gpu_power_evidence(input: &CandidateProviderInput<'_>) -> Option<GpuPowerCand
                 .find(|device| device.device == card.name)
         });
 
-    if runtime_state.and_then(|state| state.power_dpm_force_performance_level.as_deref())
-        == Some("high")
+    if runtime_state.and_then(|state| state.pp_power_profile_mode.as_deref())
+        == Some("3D_FULL_SCREEN")
     {
         return None;
     }
@@ -339,8 +339,13 @@ mod tests {
         let CandidateAction::GpuPower { plan } = &proposals[0].candidate else {
             panic!("expected gpu power candidate");
         };
-        assert_eq!(plan.name, "gpu-power-card1-high");
+        assert_eq!(plan.name, "gpu-power-card1-profile");
         assert_eq!(plan.action.drm_card, "card1");
+        assert_eq!(plan.action.power_dpm_force_performance_level, None);
+        assert_eq!(
+            plan.action.pp_power_profile_mode.as_deref(),
+            Some("3D_FULL_SCREEN")
+        );
         assert!(proposals[0].confidence > 0.0);
     }
 
@@ -401,8 +406,13 @@ mod tests {
         let CandidateAction::GpuPower { plan } = &proposals[0].candidate else {
             panic!("expected gpu power candidate");
         };
-        assert_eq!(plan.name, "gpu-power-card77-high");
+        assert_eq!(plan.name, "gpu-power-card77-profile");
         assert_eq!(plan.action.drm_card, "card77");
+        assert_eq!(plan.action.power_dpm_force_performance_level, None);
+        assert_eq!(
+            plan.action.pp_power_profile_mode.as_deref(),
+            Some("3D_FULL_SCREEN")
+        );
     }
 
     fn policy() -> crate::daemon::DaemonPolicy {

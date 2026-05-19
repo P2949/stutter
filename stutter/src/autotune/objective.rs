@@ -113,6 +113,8 @@ pub struct ObjectiveSignals {
     pub gpu_focus_source: Option<String>,
     pub memory_pressure_some_avg10_percent: Option<f32>,
     pub swap_activity_events: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_stall_spike_count: Option<u64>,
     pub dirty_writeback_events: Option<u64>,
     pub frame_p99_ms: Option<f64>,
     pub foreground_over_5ms: Option<u64>,

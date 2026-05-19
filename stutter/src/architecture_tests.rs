@@ -373,13 +373,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/agent/autotune.rs",
-        max_lines: 1_058,
+        max_lines: 1_059,
         reason: "autotune agent route handlers and remote policy helpers moved out of agent.rs pending future policy/helper split",
-    },
-    OversizedRustFileAllowance {
-        path: "src/focus/mod.rs",
-        max_lines: 866,
-        reason: "existing focus snapshot, scoring, resolver, and classification module pending future split, after extracting tests",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/planning/tests.rs",
@@ -388,8 +383,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/autotune/planner/mod.rs",
-        max_lines: 1_057,
-        reason: "existing autotune planner implementation pending future split; system-wide allowlist safety gates are staged here",
+        max_lines: 1_073,
+        reason: "existing autotune planner implementation pending future split; system-wide allowlist safety gates and activity idle suppression are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/ebpf_loader.rs",
@@ -398,18 +393,18 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/daemon/policy.rs",
-        max_lines: 2_684,
-        reason: "existing daemon policy implementation pending future split; pure-evaluation facade is staged here",
+        max_lines: 1_695,
+        reason: "existing daemon policy implementation after extracting embedded policy tests; medium-risk system scope feature gates are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/runtime.rs",
-        max_lines: 2_830,
-        reason: "existing autotune runtime orchestration pending future split; rollback-verification state plumbing is staged here",
+        max_lines: 3_013,
+        reason: "existing autotune runtime orchestration pending future split; rollback verification, dry-run-all-safe plan output, and activity sampling are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/regression_tests.rs",
-        max_lines: 2_514,
-        reason: "existing broad regression test module pending future split",
+        max_lines: 2_516,
+        reason: "existing broad regression test module pending future split; PSI delta serialization fixture coverage is staged here",
     },
     OversizedRustFileAllowance {
         path: "src/architecture_tests.rs",
@@ -428,13 +423,13 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/daemon/privilege.rs",
-        max_lines: 2_452,
-        reason: "existing privileged daemon worker implementation pending future split; action factory apply path is staged here",
+        max_lines: 2_468,
+        reason: "existing privileged daemon worker implementation pending future split; action factory apply path and managed-worker restart testing hooks are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/foreground.rs",
-        max_lines: 1_144,
-        reason: "existing foreground provider implementation after extracting embedded foreground tests",
+        max_lines: 1_150,
+        reason: "existing foreground provider implementation after extracting embedded foreground tests; Hyprland provider wiring is staged here",
     },
     OversizedRustFileAllowance {
         path: "src/cli/monitor.rs",
@@ -458,8 +453,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/test_fixture_builder.rs",
-        max_lines: 2_146,
-        reason: "existing shared test fixture builder pending future split",
+        max_lines: 2_150,
+        reason: "existing shared test fixture builder pending future split; PSI delta fixture fields are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/report/analysis.rs",
@@ -493,8 +488,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/config_file.rs",
-        max_lines: 1_763,
-        reason: "existing config file parser/model implementation pending future split; system-wide allowlist config parsing is staged here",
+        max_lines: 1_779,
+        reason: "existing config file parser/model implementation pending future split; system-wide allowlist and medium-risk autotune config parsing are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/report/mod.rs",
@@ -508,8 +503,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/autotune/status.rs",
-        max_lines: 1_422,
-        reason: "existing autotune status rendering implementation pending future split",
+        max_lines: 1_426,
+        reason: "existing autotune status rendering implementation pending future split; dry-run affected-task status output is staged here",
     },
     OversizedRustFileAllowance {
         path: "src/validation_corpus_tests.rs",
@@ -543,18 +538,18 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/autotune/providers/mod.rs",
-        max_lines: 1_208,
-        reason: "existing autotune provider registry, calibration, and provider tests pending future split",
+        max_lines: 1_211,
+        reason: "existing autotune provider registry, calibration, and provider tests pending future split; public provider extension reexports are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/metrics.rs",
-        max_lines: 1_257,
-        reason: "existing metrics model and tests pending future split",
+        max_lines: 1_263,
+        reason: "existing metrics model and tests pending future split; PSI delta interval fields are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/rolling_window.rs",
-        max_lines: 1_162,
-        reason: "existing autotune rolling window implementation pending future split",
+        max_lines: 1_164,
+        reason: "existing autotune rolling window implementation pending future split; memory PSI spike aggregation is staged here",
     },
     OversizedRustFileAllowance {
         path: "src/config/effective.rs",
@@ -583,18 +578,18 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/cli/mod.rs",
-        max_lines: 1_095,
-        reason: "existing top-level CLI parser implementation pending future split; Clap command tree and compare command coverage are staged here",
+        max_lines: 1_096,
+        reason: "existing top-level CLI parser implementation pending future split; Clap command tree, compare command coverage, and dry-run-all-safe parsing are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/actions/cpu_power.rs",
-        max_lines: 1_003,
-        reason: "existing CPU power action implementation pending future split; rollback handler registration is staged here",
+        max_lines: 1_031,
+        reason: "existing CPU power action implementation pending future split; rollback handler registration, medium-risk EPP classification, and policy-backed factory execution are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/actions/gpu_power.rs",
-        max_lines: 1_041,
-        reason: "existing GPU power action implementation pending future split; rollback handler registration is staged here",
+        max_lines: 1_059,
+        reason: "existing GPU power action implementation pending future split; rollback handler registration and medium-risk profile classification are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/actions/uclamp.rs",
@@ -603,8 +598,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/actions/vm_knobs.rs",
-        max_lines: 1_069,
-        reason: "existing VM knob action implementation pending future split; rollback handler registration is staged here",
+        max_lines: 1_132,
+        reason: "existing VM knob action implementation pending future split; rollback handler registration, safe-value medium-risk guards, and executable plan serialization are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/doctor.rs",
@@ -697,10 +692,6 @@ const EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_ALLOWLIST:
         reason: "existing event interpretation implementation contains production unwrap/expect calls",
     },
     ExistingProductionUnwrapExpectAllowance {
-        path: "src/focus/mod.rs",
-        reason: "existing focus implementation/tests contain production unwrap/expect calls",
-    },
-    ExistingProductionUnwrapExpectAllowance {
         path: "src/focus/test_support.rs",
         reason: "cfg(test)-only focus test support helpers contain unwrap/expect calls for synthetic fixture setup",
     },
@@ -749,7 +740,7 @@ const EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_ALLOWLIST:
 const EXISTING_DIRECT_PRINT_ALLOWLIST: &[ExistingDirectPrintAllowance] = &[
     ExistingDirectPrintAllowance {
         path: "src/autotune/runtime.rs",
-        line_number: 893,
+        line_number: 935,
         macro_name: "println!",
         reason: "existing autotune runtime stream output pending conversion to explicit rendering boundary",
     },

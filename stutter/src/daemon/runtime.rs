@@ -759,6 +759,7 @@ mod tests {
                     candidate_count: 0,
                     top_denied_reason: None,
                     planner: None,
+                    dry_run_plan_files: Vec::new(),
                     score_total: 900,
                     data_quality: "High".to_owned(),
                     data_quality_reason_codes: Vec::new(),

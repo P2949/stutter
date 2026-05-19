@@ -46,22 +46,29 @@ pub(crate) mod rollback;
 pub(crate) mod token;
 pub(crate) mod traits;
 
+pub use cpu_power::{CpuPowerAction, CpuPowerPolicy};
 pub use error::{
     ActionError, ActionFailure, ActionResult, ActionTimeout, PhaseFailure, RollbackOutcome,
     ScopeLimitExceeded,
 };
 pub use factory::default_action_factory_registry;
+pub use gpu_power::{GpuPowerAction, GpuPowerMode, GpuPowerPolicy};
+pub use irq_affinity::{
+    IrqAffinityAction, IrqAffinityEvidence, IrqAffinityPolicy, IrqAffinityRisk,
+};
 pub use model::{
     ActionId, ActionOutcome, ActionPhase, ActionState, ActionWarning, CgroupRestoreRecord,
     CpuPowerRestoreRecord, GpuPowerRestoreRecord, IoPrioRestoreRecord, IrqAffinityRestoreRecord,
     NiceRestoreRecord, SafetyClass, TaskIdentity, UclampRestoreRecord, VmKnobRestoreRecord,
 };
+pub use nice::{NiceAction, NicePolicy};
 pub use rollback::{
     RestoreAllInput, RestoreAllSummary, RollbackCandidate, RollbackHandler, RollbackPreview,
     RollbackRegistry, RollbackResult, default_rollback_registry,
 };
 pub use token::RollbackToken;
 pub use traits::TuningAction;
+pub use vm_knobs::{VmKnobAction, VmKnobChange, VmKnobMode, VmKnobPolicy};
 
 #[cfg(test)]
 mod tests {

@@ -55,11 +55,15 @@ impl CandidateProvider for CpuPowerProvider {
             .filter(|available| supports_token(Some(available), "performance"))
             .map(|_| "performance".to_owned());
 
+        let Some(epp) = epp else {
+            return Vec::new();
+        };
+
         let action = CpuPowerAction {
             sysfs_root: std::path::PathBuf::from("/sys"),
             cpus: structured_evidence.related_cpus.clone(),
-            scaling_governor: Some("performance".to_owned()),
-            energy_performance_preference: epp,
+            scaling_governor: None,
+            energy_performance_preference: Some(epp),
         };
         let objective = match input.observation.primary_situation {
             SituationKind::CompileCpuBound => {
@@ -347,13 +351,7 @@ mod tests {
             profiles: &[],
         });
 
-        assert_eq!(proposals.len(), 1);
-        let CandidateAction::CpuPower { plan } = &proposals[0].candidate else {
-            panic!("expected cpu power candidate");
-        };
-        assert_eq!(plan.action.cpus, vec![9]);
-        assert_eq!(plan.action.scaling_governor.as_deref(), Some("performance"));
-        assert_eq!(plan.action.energy_performance_preference, None);
+        assert!(proposals.is_empty());
     }
 
     #[test]
@@ -421,6 +419,11 @@ mod tests {
         };
         assert_eq!(plan.name, "cpu-power-policy-policy9-performance");
         assert_eq!(plan.action.cpus, vec![9]);
+        assert_eq!(plan.action.scaling_governor, None);
+        assert_eq!(
+            plan.action.energy_performance_preference.as_deref(),
+            Some("performance")
+        );
     }
 
     #[test]

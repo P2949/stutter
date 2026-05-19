@@ -11,6 +11,65 @@ pub struct IrqLine {
     pub raw: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IrqDeviceClass {
+    Gpu,
+    DisplayController,
+    Usb,
+    Network,
+    StorageController,
+    Audio,
+    Unknown,
+    ExplicitHighRisk,
+}
+
+impl IrqDeviceClass {
+    pub fn from_irq_name(name: &str) -> Self {
+        let name = name.to_ascii_lowercase();
+        if name.trim().is_empty() {
+            return Self::Unknown;
+        }
+
+        if contains_any(&name, &["amdgpu", "nvidia", "i915", "radeon", "nouveau"]) {
+            Self::Gpu
+        } else if contains_any(&name, &["xhci", "uhci", "ehci", "ohci"]) {
+            Self::Usb
+        } else if contains_any(&name, &["ahci", "nvme", "scsi", "sata", "mpt"]) {
+            Self::StorageController
+        } else if contains_any(
+            &name,
+            &[
+                "igc", "ixgbe", "e1000", "r8169", "rtw", "iwl", "ath", "brcm", "mt76",
+            ],
+        ) {
+            Self::Network
+        } else if contains_any(&name, &["snd", "audio", "hda", "ac97"]) {
+            Self::Audio
+        } else {
+            Self::Unknown
+        }
+    }
+
+    pub fn default_risk(self) -> crate::actions::irq_affinity::IrqAffinityRisk {
+        match self {
+            Self::Gpu | Self::DisplayController | Self::Usb | Self::Network | Self::Audio => {
+                crate::actions::irq_affinity::IrqAffinityRisk::ReversibleMediumRisk
+            }
+            Self::StorageController | Self::Unknown | Self::ExplicitHighRisk => {
+                crate::actions::irq_affinity::IrqAffinityRisk::HighRisk
+            }
+        }
+    }
+}
+
+pub fn classify_irq_device(line: &IrqLine) -> IrqDeviceClass {
+    IrqDeviceClass::from_irq_name(&line.name)
+}
+
+fn contains_any(value: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| value.contains(needle))
+}
+
 pub fn run_inspect_irqs(json: bool, filters: &[String], top: usize) -> Result<()> {
     let contents =
         std::fs::read_to_string("/proc/interrupts").context("failed to read /proc/interrupts")?;
@@ -242,5 +301,40 @@ LOC:      11111      22222      33333      44444   Local timer interrupts
         assert!(output.contains("stutter monitor --irq-latency --irq 146"));
         assert!(!output.contains("stutter monitor --irq-latency --irq NMI"));
         assert!(!output.contains("stutter monitor --irq-latency --irq LOC"));
+    }
+
+    #[test]
+    fn classifies_irq_device_safety_tiers() {
+        let gpu = IrqLine {
+            irq: "146".to_owned(),
+            counts_by_cpu: vec![1],
+            total: 1,
+            kind: "PCI-MSI".to_owned(),
+            name: "amdgpu".to_owned(),
+            raw: String::new(),
+        };
+        let storage = IrqLine {
+            name: "ahci".to_owned(),
+            ..gpu.clone()
+        };
+        let unknown = IrqLine {
+            name: String::new(),
+            ..gpu.clone()
+        };
+
+        assert_eq!(classify_irq_device(&gpu), IrqDeviceClass::Gpu);
+        assert_eq!(
+            classify_irq_device(&storage),
+            IrqDeviceClass::StorageController
+        );
+        assert_eq!(classify_irq_device(&unknown), IrqDeviceClass::Unknown);
+        assert_eq!(
+            classify_irq_device(&gpu).default_risk(),
+            crate::actions::irq_affinity::IrqAffinityRisk::ReversibleMediumRisk
+        );
+        assert_eq!(
+            classify_irq_device(&storage).default_risk(),
+            crate::actions::irq_affinity::IrqAffinityRisk::HighRisk
+        );
     }
 }

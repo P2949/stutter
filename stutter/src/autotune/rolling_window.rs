@@ -353,6 +353,12 @@ impl RollingWindow {
                 .map(|record| record.major_faults)
                 .fold(0_u64, u64::saturating_add)
         });
+        let mem_stall_spike_count = (!self.intervals.is_empty()).then(|| {
+            self.intervals
+                .iter()
+                .map(|record| u64::from(record.mem_psi_spike))
+                .fold(0_u64, u64::saturating_add)
+        });
 
         let gpu_active_render_node = latest_gpu.and_then(|sample| sample.render_node.clone());
         let gpu_drm_card = latest_gpu.and_then(|sample| sample.drm_card.clone());
@@ -450,6 +456,7 @@ impl RollingWindow {
                 .map(|_| "gpu_sample".to_owned()),
             memory_pressure_some_avg10_percent,
             swap_activity_events,
+            mem_stall_spike_count,
             dirty_writeback_events: has_block_io_events.then_some(dirty_writeback_events),
             frame_p99_ms: Some(self.frame_p99_ms()),
             foreground_over_5ms: Some(

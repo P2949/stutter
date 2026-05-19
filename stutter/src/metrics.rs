@@ -241,6 +241,10 @@ pub struct IntervalRecord {
     #[serde(default)]
     pub mem_psi_full: f64,
     #[serde(default)]
+    pub mem_psi_delta_us: u64,
+    #[serde(default)]
+    pub mem_psi_spike: bool,
+    #[serde(default)]
     pub io_psi_some: f64,
     #[serde(default)]
     pub io_psi_full: f64,
@@ -898,7 +902,7 @@ pub fn collect_interval_summaries_labeled(
     elapsed_ms: u64,
     drop_counters: &crate::ebpf_loader::DropCountersSnapshot,
     prev_faults_map: Option<&aya::maps::HashMap<aya::maps::MapData, u32, [u64; 2]>>,
-    psi_snapshot: Option<&crate::psi::PsiSnapshot>,
+    psi_snapshot: Option<&crate::psi::PsiDelta>,
     prev_faults_snapshot: &mut BTreeMap<u32, (u64, u64)>,
 ) -> Vec<IntervalRecord> {
     if prev_faults_map.is_none() {
@@ -1022,7 +1026,7 @@ pub struct IntervalRecordFromSnapshotInput<'a> {
     pub cpu: &'a CpuSnapshot,
     pub elapsed_ms: u64,
     pub drop_counters: &'a crate::ebpf_loader::DropCountersSnapshot,
-    pub psi: Option<&'a crate::psi::PsiSnapshot>,
+    pub psi: Option<&'a crate::psi::PsiDelta>,
     pub faults_delta: (u64, u64),
 }
 
@@ -1064,11 +1068,13 @@ pub fn interval_record_from_snapshot(input: IntervalRecordFromSnapshotInput) -> 
         worst_cpu_max_ns: cpu.worst_cpu_max_ns,
         spikiest_cpu: cpu.spikiest_cpu,
         spikiest_cpu_spikes: cpu.spikiest_cpu_spikes,
-        cpu_psi_some: psi.map(|p| p.cpu_some_avg10).unwrap_or(0.0),
-        mem_psi_some: psi.map(|p| p.mem_some_avg10).unwrap_or(0.0),
-        mem_psi_full: psi.map(|p| p.mem_full_avg10).unwrap_or(0.0),
-        io_psi_some: psi.map(|p| p.io_some_avg10).unwrap_or(0.0),
-        io_psi_full: psi.map(|p| p.io_full_avg10).unwrap_or(0.0),
+        cpu_psi_some: psi.map(|p| p.snapshot.cpu_some_avg10).unwrap_or(0.0),
+        mem_psi_some: psi.map(|p| p.snapshot.mem_some_avg10).unwrap_or(0.0),
+        mem_psi_full: psi.map(|p| p.snapshot.mem_full_avg10).unwrap_or(0.0),
+        mem_psi_delta_us: psi.and_then(|p| p.mem_stall_delta_us).unwrap_or(0),
+        mem_psi_spike: psi.map(|p| p.mem_stall_spike).unwrap_or(false),
+        io_psi_some: psi.map(|p| p.snapshot.io_some_avg10).unwrap_or(0.0),
+        io_psi_full: psi.map(|p| p.snapshot.io_full_avg10).unwrap_or(0.0),
         percentile_scope: latency.percentile_scope.clone(),
         histogram: latency.histogram.clone(),
         drop_counters: drop_counters.clone(),

@@ -1024,13 +1024,17 @@ impl UnixSocketPrivilegedActionService {
         })
     }
 
-    #[cfg(test)]
-    pub fn request_shutdown_for_tests(&self) -> anyhow::Result<()> {
+    pub fn request_shutdown(&self) -> anyhow::Result<()> {
         match self.call_worker(PrivilegedWorkerRequest::Shutdown)? {
             PrivilegedWorkerResponse::Shutdown { .. } => Ok(()),
             response @ PrivilegedWorkerResponse::Error { .. } => Err(response.into_error()),
             other => anyhow::bail!("privileged_worker_unexpected_response: {other:?}"),
         }
+    }
+
+    #[cfg(test)]
+    pub fn request_shutdown_for_tests(&self) -> anyhow::Result<()> {
+        self.request_shutdown()
     }
 }
 
@@ -1090,14 +1094,20 @@ impl PrivilegedActionService for UnixSocketPrivilegedActionService {
 pub struct PrivilegedWorkerHandle {
     child: Child,
     socket_path: PathBuf,
+    executable_path: PathBuf,
     restart_count: u32,
 }
 
 impl PrivilegedWorkerHandle {
     pub fn spawn(socket_path: &Path) -> anyhow::Result<Self> {
+        let executable = std::env::current_exe()?;
+        Self::spawn_with_executable(socket_path, &executable)
+    }
+
+    pub fn spawn_with_executable(socket_path: &Path, executable: &Path) -> anyhow::Result<Self> {
         let _ = fs::remove_file(socket_path);
         prepare_privileged_worker_socket_path(socket_path)?;
-        let child = spawn_privileged_worker_child(socket_path)?;
+        let child = spawn_privileged_worker_child(executable, socket_path)?;
         wait_for_privileged_worker_socket(socket_path)?;
         log::info!(
             "privileged_worker_started socket={} pid={}",
@@ -1107,6 +1117,7 @@ impl PrivilegedWorkerHandle {
         Ok(Self {
             child,
             socket_path: socket_path.to_path_buf(),
+            executable_path: executable.to_path_buf(),
             restart_count: 0,
         })
     }
@@ -1122,12 +1133,17 @@ impl PrivilegedWorkerHandle {
             .unwrap_or(false)
     }
 
+    pub fn terminate(&mut self) -> anyhow::Result<()> {
+        self.child.kill().ok();
+        self.child.wait().ok();
+        fs::remove_file(&self.socket_path).ok();
+        Ok(())
+    }
+
     pub fn restart(&mut self) -> anyhow::Result<()> {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        let _ = fs::remove_file(&self.socket_path);
+        self.terminate()?;
         prepare_privileged_worker_socket_path(&self.socket_path)?;
-        let child = spawn_privileged_worker_child(&self.socket_path)?;
+        let child = spawn_privileged_worker_child(&self.executable_path, &self.socket_path)?;
         wait_for_privileged_worker_socket(&self.socket_path)?;
         self.restart_count = self.restart_count.saturating_add(1);
         log::info!(
@@ -1170,9 +1186,9 @@ impl Drop for PrivilegedWorkerHandle {
     }
 }
 
-fn spawn_privileged_worker_child(socket_path: &Path) -> anyhow::Result<Child> {
+fn spawn_privileged_worker_child(executable: &Path, socket_path: &Path) -> anyhow::Result<Child> {
     let socket = socket_path.to_str().context("socket path is not UTF-8")?;
-    Command::new(std::env::current_exe()?)
+    Command::new(executable)
         .args(["privileged-worker", "--socket", socket])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

@@ -5,6 +5,8 @@
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, os::unix::fs::PermissionsExt};
+
     use super::super::{super::*, restore_env_var};
 
     #[test]
@@ -42,6 +44,68 @@ mod tests {
         assert_eq!(snapshot.window_id.as_deref(), Some("0x123456789abcdef"));
         assert!((snapshot.confidence - 0.95).abs() < f32::EPSILON);
         assert_eq!(event.title, None);
+    }
+
+    #[test]
+    fn hyprland_is_detected_when_instance_signature_is_set() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+        let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
+
+        unsafe {
+            std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "fake-hyprland-instance");
+        }
+
+        assert!(HyprlandForegroundProvider::is_detected());
+
+        unsafe {
+            restore_env_var("HYPRLAND_INSTANCE_SIGNATURE", previous_hyprland);
+        }
+    }
+
+    #[test]
+    fn hyprland_provider_sample_uses_hyprctl_activewindow_json() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+        let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
+        let root = crate::test_support::TestRoot::new("hyprland-provider-sample");
+        let hyprctl = root.join("hyprctl");
+        fs::write(
+            &hyprctl,
+            r#"#!/bin/sh
+cat <<'JSON'
+{
+  "address": "0xabcdef",
+  "workspace": { "name": "dev" },
+  "class": "kitty",
+  "title": "Terminal",
+  "pid": 8128
+}
+JSON
+"#,
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&hyprctl).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&hyprctl, permissions).unwrap();
+
+        unsafe {
+            std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "fake-hyprland-instance");
+        }
+
+        let mut provider =
+            HyprlandForegroundProvider::new().with_hyprctl(hyprctl.to_string_lossy());
+        let snapshot = provider.sample(4_500);
+
+        assert_eq!(provider.source(), ForegroundSource::Hyprland);
+        assert_eq!(snapshot.elapsed_ms, 4_500);
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, Some(8128));
+        assert_eq!(snapshot.class.as_deref(), Some("kitty"));
+        assert_eq!(snapshot.workspace.as_deref(), Some("dev"));
+        assert_eq!(snapshot.window_id.as_deref(), Some("0xabcdef"));
+
+        unsafe {
+            restore_env_var("HYPRLAND_INSTANCE_SIGNATURE", previous_hyprland);
+        }
     }
 
     #[test]
@@ -144,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn hyprland_wayland_is_reserved_for_future_compositor_specific_provider() {
+    fn hyprland_wayland_uses_hyprland_foreground_provider() {
         let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
         let previous_wayland_display = std::env::var_os("WAYLAND_DISPLAY");
         let previous_swaysock = std::env::var_os("SWAYSOCK");
@@ -157,6 +221,10 @@ mod tests {
         }
 
         assert!(!is_generic_wayland_without_supported_foreground_api());
+        assert!(HyprlandForegroundProvider::is_detected());
+
+        let provider = auto_foreground_provider();
+        assert_eq!(provider.source(), ForegroundSource::Hyprland);
 
         unsafe {
             restore_env_var("WAYLAND_DISPLAY", previous_wayland_display);

@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::Context;
+use serde::{Deserialize, Serialize};
 
 use crate::actions::{
     ActionId, ActionState, ActionWarning, IrqAffinityRestoreRecord, RollbackToken, SafetyClass,
@@ -15,13 +16,13 @@ use crate::actions::{
     },
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IrqAffinityRisk {
     ReversibleMediumRisk,
     HighRisk,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrqAffinityEvidence {
     pub strong_irq_evidence: bool,
     pub stable_irq_identity: bool,
@@ -52,7 +53,7 @@ impl Default for IrqAffinityPolicy {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrqAffinityAction {
     pub irq: u32,
     pub device_hint: String,
@@ -186,6 +187,44 @@ impl IrqAffinityAction {
         self.preflight_at(policy)
     }
 
+    pub fn dry_run_with_policy(&self, policy: &IrqAffinityPolicy) -> anyhow::Result<ActionState> {
+        self.dry_run_at(policy)
+    }
+
+    pub fn verify_with_policy(&self, policy: &IrqAffinityPolicy) -> anyhow::Result<ActionState> {
+        self.verify_at(policy)
+    }
+
+    pub fn apply_with_policy(&self, policy: &IrqAffinityPolicy) -> anyhow::Result<RollbackToken> {
+        let snapshot = self.collect_snapshot(policy)?;
+        let path = self.smp_affinity_path();
+
+        if snapshot.smp_affinity.trim() != self.smp_affinity.trim() {
+            write_trimmed(&path, &self.smp_affinity)
+                .with_context(|| format!("failed to write IRQ {} smp_affinity", self.irq))?;
+
+            let after = read_trimmed(&path)
+                .with_context(|| format!("failed to verify IRQ {} smp_affinity write", self.irq))?;
+
+            if normalize_affinity(&after) != normalize_affinity(&self.smp_affinity) {
+                anyhow::bail!(
+                    "IRQ {} smp_affinity verification failed: requested={} actual={}",
+                    self.irq,
+                    self.smp_affinity,
+                    after
+                );
+            }
+        }
+
+        Ok(RollbackToken::IrqAffinityRestore {
+            records: vec![IrqAffinityRestoreRecord {
+                irq: snapshot.irq,
+                device_hint: snapshot.device_hint,
+                original_smp_affinity: snapshot.smp_affinity,
+            }],
+        })
+    }
+
     fn preflight_at(&self, policy: &IrqAffinityPolicy) -> anyhow::Result<Vec<ActionWarning>> {
         let snapshot = self.collect_snapshot(policy)?;
         let mut warnings = Vec::new();
@@ -301,34 +340,7 @@ impl TuningAction for IrqAffinityAction {
     }
 
     fn apply(&self) -> anyhow::Result<RollbackToken> {
-        let policy = IrqAffinityPolicy::default();
-        let snapshot = self.collect_snapshot(&policy)?;
-        let path = self.smp_affinity_path();
-
-        if snapshot.smp_affinity.trim() != self.smp_affinity.trim() {
-            write_trimmed(&path, &self.smp_affinity)
-                .with_context(|| format!("failed to write IRQ {} smp_affinity", self.irq))?;
-
-            let after = read_trimmed(&path)
-                .with_context(|| format!("failed to verify IRQ {} smp_affinity write", self.irq))?;
-
-            if normalize_affinity(&after) != normalize_affinity(&self.smp_affinity) {
-                anyhow::bail!(
-                    "IRQ {} smp_affinity verification failed: requested={} actual={}",
-                    self.irq,
-                    self.smp_affinity,
-                    after
-                );
-            }
-        }
-
-        Ok(RollbackToken::IrqAffinityRestore {
-            records: vec![IrqAffinityRestoreRecord {
-                irq: snapshot.irq,
-                device_hint: snapshot.device_hint,
-                original_smp_affinity: snapshot.smp_affinity,
-            }],
-        })
+        self.apply_with_policy(&IrqAffinityPolicy::default())
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
