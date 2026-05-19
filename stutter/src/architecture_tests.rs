@@ -393,8 +393,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/autotune/planner.rs",
-        max_lines: 3_467,
-        reason: "existing autotune planner and planner tests pending future split",
+        max_lines: 962,
+        reason: "existing autotune planner implementation after extracting embedded planner tests",
     },
     OversizedRustFileAllowance {
         path: "src/ebpf_loader.rs",
@@ -652,6 +652,10 @@ const EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_ALLOWLIST:
     ExistingProductionUnwrapExpectAllowance {
         path: "src/architecture_tests.rs",
         reason: "architecture tests intentionally contain unwrap/expect scanner fixtures and test-only panic helpers",
+    },
+    ExistingProductionUnwrapExpectAllowance {
+        path: "src/autotune/planner_tests/support.rs",
+        reason: "autotune planner test support is cfg-test-only through planner.rs and contains synthetic fixture unwraps",
     },
     ExistingProductionUnwrapExpectAllowance {
         path: "src/autotune/planning/tests.rs",
