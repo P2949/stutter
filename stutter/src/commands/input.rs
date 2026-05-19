@@ -47,6 +47,7 @@ pub enum AppCommand {
     PrivilegedWorker(PrivilegedWorkerCommandInput),
     DaemonConfigExplain(DaemonConfigExplainCommandInput),
     DaemonPolicyExplain(DaemonPolicyExplainCommandInput),
+    DaemonPolicyLint(DaemonPolicyLintCommandInput),
     DaemonProfiles(DaemonProfilesCommandInput),
     DaemonExplain(DaemonExplainCommandInput),
     DaemonWhyNotOptimize(DaemonWhyNotOptimizeCommandInput),
@@ -307,6 +308,12 @@ pub struct DaemonConfigExplainCommandInput {
 
 #[derive(Debug)]
 pub struct DaemonPolicyExplainCommandInput {
+    pub json: bool,
+    pub preset: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct DaemonPolicyLintCommandInput {
     pub json: bool,
     pub preset: Option<String>,
 }

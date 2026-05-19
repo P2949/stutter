@@ -113,6 +113,11 @@ mod tests {
             None,
         );
         config.safety.allow_system_wide_suggestions = true;
+        config
+            .safety
+            .system_wide_allowlist
+            .irq_devices
+            .insert("test-device".to_owned());
         config.autotune.high_risk_dry_run = true;
         let policy = build_daemon_policy(DaemonPolicyBuildInput {
             config: &config,
@@ -323,6 +328,219 @@ mod tests {
             evaluation
                 .deny_reasons
                 .contains(&CandidateDenyReason::CgroupTargetNotAllowlisted)
+        );
+    }
+
+    #[test]
+    fn system_wide_allowlist_denies_cpu_power_policy_outside_allowlist() {
+        let mut candidate = cpu_power_candidate("cpu-power-policy9");
+        let CandidateAction::CpuPower { plan } = &mut candidate else {
+            panic!("expected CPU power candidate");
+        };
+        plan.evidence.push(CandidateEvidence::new(
+            "cpu_power_structured",
+            "policy=policy9 related_cpus=[0]",
+            1.0,
+        ));
+
+        let mut policy = policy(DaemonMode::Suggest);
+        policy
+            .system_wide_allowlist
+            .cpu_policies
+            .insert("policy0".to_owned());
+        let mut observation = observation_for_situation(
+            SituationKind::GameCpuSchedulerPressure,
+            FocusGroupKind::Game,
+        );
+        enable_capability_for_candidate(&mut observation, &candidate);
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(!evaluation.eligible);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::SystemWideTargetNotAllowlisted)
+        );
+        assert!(
+            evaluation
+                .deny_messages
+                .iter()
+                .any(|message| message.contains("policy9"))
+        );
+    }
+
+    #[test]
+    fn system_wide_allowlist_denies_gpu_card_outside_allowlist() {
+        let candidate = gpu_power_candidate("gpu-card-denied");
+        let mut policy = policy(DaemonMode::Suggest);
+        policy
+            .system_wide_allowlist
+            .gpu_cards
+            .insert("card1".to_owned());
+        let mut observation =
+            observation_for_situation(SituationKind::GameGpuBound, FocusGroupKind::Game);
+        enable_capability_for_candidate(&mut observation, &candidate);
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(!evaluation.eligible);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::SystemWideTargetNotAllowlisted)
+        );
+        assert!(
+            evaluation
+                .deny_messages
+                .iter()
+                .any(|message| message.contains("card0"))
+        );
+    }
+
+    #[test]
+    fn system_wide_allowlist_denies_irq_device_outside_allowlist() {
+        let candidate = irq_affinity_candidate("irq-device-denied");
+        let mut policy = policy(DaemonMode::Suggest);
+        policy
+            .system_wide_allowlist
+            .irq_devices
+            .insert("amdgpu".to_owned());
+        let mut observation =
+            observation_for_situation(SituationKind::IrqPressure, FocusGroupKind::Desktop);
+        enable_capability_for_candidate(&mut observation, &candidate);
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(!evaluation.eligible);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::SystemWideTargetNotAllowlisted)
+        );
+        assert!(
+            evaluation
+                .deny_messages
+                .iter()
+                .any(|message| message.contains("test-device"))
+        );
+    }
+
+    #[test]
+    fn system_wide_allowlist_denies_vm_knob_outside_allowlist() {
+        let candidate = vm_knob_candidate("vm-knob-denied");
+        let mut policy = policy(DaemonMode::Suggest);
+        policy
+            .system_wide_allowlist
+            .vm_knobs
+            .insert("proc/sys/vm/dirty_ratio".to_owned());
+        let mut observation =
+            observation_for_situation(SituationKind::IoPressure, FocusGroupKind::Desktop);
+        enable_capability_for_candidate(&mut observation, &candidate);
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 0);
+        assert!(!evaluation.eligible);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::SystemWideTargetNotAllowlisted)
+        );
+        assert!(
+            evaluation
+                .deny_messages
+                .iter()
+                .any(|message| message.contains("vm/swappiness"))
+        );
+    }
+
+    #[test]
+    fn system_wide_allowlist_allows_explicit_targets_to_reach_manual_only_gate() {
+        let candidate = gpu_power_candidate("gpu-card-allowlisted");
+        let mut config = crate::autotune::runtime::daemon_config_for_runtime_mode(
+            DaemonMode::Suggest,
+            ActionSource::AutotuneRuntime,
+            Some(1234),
+            None,
+        );
+        config.safety.allow_system_wide_suggestions = true;
+        config
+            .safety
+            .system_wide_allowlist
+            .gpu_cards
+            .insert("card0".to_owned());
+        config.autotune.high_risk_dry_run = true;
+        let policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        });
+        let mut observation =
+            observation_for_situation(SituationKind::GameGpuBound, FocusGroupKind::Game);
+        enable_capability_for_candidate(&mut observation, &candidate);
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 1);
+        assert!(evaluation.dry_run.is_some());
+        assert!(!evaluation.eligible);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ManualOnlyHighRisk)
+        );
+        assert!(
+            !evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::SystemWideTargetNotAllowlisted)
         );
     }
 

@@ -715,6 +715,11 @@ fn evaluate_proposal_static(
         ));
     }
 
+    if let Some(message) = system_wide_allowlist_denial(&proposal.candidate, input.daemon_policy) {
+        deny_reasons.push(CandidateDenyReason::SystemWideTargetNotAllowlisted);
+        deny_messages.push(message);
+    }
+
     if let Some(snapshot) = input.observation.active_config_snapshot.as_ref() {
         let active_config_input = ActiveConfigMatchInput {
             snapshot,
@@ -915,6 +920,96 @@ fn mode_requires_autonomous_workload_family(mode: DaemonMode) -> bool {
     )
 }
 
+fn system_wide_allowlist_denial(
+    candidate: &CandidateAction,
+    policy: &DaemonPolicy,
+) -> Option<String> {
+    let allowlist = &policy.system_wide_allowlist;
+
+    match candidate {
+        CandidateAction::CpuPower { plan } => {
+            let policies = evidence_token_values(&plan.evidence, "policy=");
+            if policies.is_empty() {
+                return Some(
+                    "CPU power policy target is not identified or allowlisted by daemon policy"
+                        .to_owned(),
+                );
+            }
+
+            policies
+                .into_iter()
+                .find(|target| !allowlist.cpu_policies.contains(target))
+                .map(|target| {
+                    format!("CPU power policy {target} is not allowlisted by daemon policy")
+                })
+        }
+        CandidateAction::GpuPower { plan } => {
+            let pci_id = evidence_token_values(&plan.evidence, "pci_id=")
+                .into_iter()
+                .next();
+
+            (!allowlist.allows_gpu(&plan.action.drm_card, pci_id.as_deref())).then(
+                || match pci_id {
+                    Some(pci_id) => format!(
+                        "GPU target {} ({pci_id}) is not allowlisted by daemon policy",
+                        plan.action.drm_card
+                    ),
+                    None => format!(
+                        "GPU target {} is not allowlisted by daemon policy",
+                        plan.action.drm_card
+                    ),
+                },
+            )
+        }
+        CandidateAction::IrqAffinity { plan } => {
+            (!allowlist.allows_irq_device(&plan.action.device_hint)).then(|| {
+                format!(
+                    "IRQ device {} is not allowlisted by daemon policy",
+                    plan.action.device_hint
+                )
+            })
+        }
+        CandidateAction::VmKnob { plan } => plan
+            .action
+            .changes
+            .iter()
+            .find(|change| !allowlist.allows_vm_knob(&change.path))
+            .map(|change| {
+                format!(
+                    "VM knob {} is not allowlisted by daemon policy",
+                    change.path.display()
+                )
+            }),
+        _ => None,
+    }
+}
+
+fn evidence_token_values(evidence: &[CandidateEvidence], prefix: &str) -> Vec<String> {
+    evidence
+        .iter()
+        .flat_map(|entry| entry.value.split_whitespace())
+        .filter_map(|token| token.strip_prefix(prefix))
+        .filter_map(normalize_evidence_token_value)
+        .collect()
+}
+
+fn normalize_evidence_token_value(value: &str) -> Option<String> {
+    let mut value = value.trim().trim_end_matches(',');
+    if value == "None" {
+        return None;
+    }
+
+    if let Some(inner) = value
+        .strip_prefix("Some(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        value = inner;
+    }
+
+    let value = value.trim_matches('"');
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
 fn policy_context_for_input(input: PlannerInput<'_>) -> DaemonPolicyContext {
     DaemonPolicyContext {
         data_quality_ok: !input.observation.data_quality.blocks_action(),
@@ -958,5 +1053,5 @@ fn deny_reason_from_policy(reason_code: &str) -> CandidateDenyReason {
 }
 
 #[cfg(test)]
-#[path = "planner_tests/mod.rs"]
+#[path = "../planner_tests/mod.rs"]
 mod planner_tests;

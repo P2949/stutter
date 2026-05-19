@@ -3,8 +3,9 @@ use std::collections::BTreeSet;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::autotune::{
-    candidate::CandidateAction, objective::ObjectiveKind, situation::SituationKind,
+use crate::{
+    autotune::{candidate::CandidateAction, objective::ObjectiveKind, situation::SituationKind},
+    daemon::policy::{DaemonMode, DaemonPolicy},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +37,54 @@ impl WorkloadPolicyRule {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkloadPolicyMatrix {
     pub rules: Vec<WorkloadPolicyRule>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LintSeverity {
+    Warning,
+    Error,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkloadPolicyLint {
+    pub severity: LintSeverity,
+    pub reason_code: String,
+    pub message: String,
+    pub situation: Option<SituationKind>,
+    pub family: Option<String>,
+}
+
+impl WorkloadPolicyLint {
+    fn warning(
+        reason_code: &'static str,
+        message: String,
+        situation: Option<SituationKind>,
+        family: Option<&str>,
+    ) -> Self {
+        Self {
+            severity: LintSeverity::Warning,
+            reason_code: reason_code.to_owned(),
+            message,
+            situation,
+            family: family.map(str::to_owned),
+        }
+    }
+
+    fn error(
+        reason_code: &'static str,
+        message: String,
+        situation: Option<SituationKind>,
+        family: Option<&str>,
+    ) -> Self {
+        Self {
+            severity: LintSeverity::Error,
+            reason_code: reason_code.to_owned(),
+            message,
+            situation,
+            family: family.map(str::to_owned),
+        }
+    }
 }
 
 impl WorkloadPolicyMatrix {
@@ -87,6 +136,40 @@ impl WorkloadPolicyMatrix {
 
 pub fn workload_policy_for_situation(situation: SituationKind) -> WorkloadPolicyRule {
     WorkloadPolicyMatrix::default_rules().rule_for(situation)
+}
+
+pub fn lint_workload_policy(
+    matrix: &WorkloadPolicyMatrix,
+    policy: &DaemonPolicy,
+) -> Vec<WorkloadPolicyLint> {
+    let mut lints = Vec::new();
+
+    for rule in &matrix.rules {
+        lint_rule(rule, policy, &mut lints);
+    }
+
+    lints.sort_by(|left, right| {
+        left.severity
+            .cmp(&right.severity)
+            .then_with(|| left.reason_code.cmp(&right.reason_code))
+            .then_with(|| format!("{:?}", left.situation).cmp(&format!("{:?}", right.situation)))
+            .then_with(|| left.family.cmp(&right.family))
+    });
+    lints
+}
+
+pub fn validate_workload_policy_lints(lints: &[WorkloadPolicyLint]) -> anyhow::Result<()> {
+    let errors = lints
+        .iter()
+        .filter(|lint| lint.severity == LintSeverity::Error)
+        .map(|lint| lint.message.as_str())
+        .collect::<Vec<_>>();
+
+    if errors.is_empty() {
+        return Ok(());
+    }
+
+    anyhow::bail!("critical workload policy lint(s): {}", errors.join("; "))
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,6 +276,152 @@ pub fn validate_workload_policy_rule(rule: &WorkloadPolicyRule) -> anyhow::Resul
     }
 
     Ok(())
+}
+
+fn lint_rule(
+    rule: &WorkloadPolicyRule,
+    policy: &DaemonPolicy,
+    lints: &mut Vec<WorkloadPolicyLint>,
+) {
+    if rule.autonomous_families.is_empty() && !rule.allowed_families.is_empty() {
+        lints.push(WorkloadPolicyLint::warning(
+            "empty_autonomous_families",
+            format!(
+                "{:?} allows suggestions but has no autonomous families; live apply will not choose these candidates",
+                rule.situation
+            ),
+            Some(rule.situation),
+            None,
+        ));
+    }
+
+    for family in &rule.autonomous_families {
+        if policy
+            .denied_action_families
+            .iter()
+            .any(|denied| family_matches(family, denied) || family_matches(denied, family))
+        {
+            lints.push(WorkloadPolicyLint::error(
+                "denied_family_is_autonomous",
+                format!(
+                    "{:?} makes denied action family {family:?} autonomous",
+                    rule.situation
+                ),
+                Some(rule.situation),
+                Some(family),
+            ));
+        }
+
+        if high_risk_family(family) && !policy.allow_high_risk {
+            lints.push(WorkloadPolicyLint::error(
+                "high_risk_family_is_autonomous",
+                format!(
+                    "{:?} makes high-risk action family {family:?} autonomous while high-risk apply is disabled",
+                    rule.situation
+                ),
+                Some(rule.situation),
+                Some(family),
+            ));
+        }
+
+        if system_wide_family(family) && !policy.allow_system_wide_apply {
+            lints.push(WorkloadPolicyLint::error(
+                "system_wide_family_is_autonomous",
+                format!(
+                    "{:?} makes system-wide action family {family:?} autonomous while system-wide apply is disabled",
+                    rule.situation
+                ),
+                Some(rule.situation),
+                Some(family),
+            ));
+        }
+
+        if policy.mode == DaemonMode::ApplyLowRisk && medium_or_high_risk_family(family) {
+            lints.push(WorkloadPolicyLint::error(
+                "apply_low_risk_autonomous_family_too_risky",
+                format!(
+                    "{:?} makes medium/high-risk action family {family:?} autonomous in apply-low-risk mode",
+                    rule.situation
+                ),
+                Some(rule.situation),
+                Some(family),
+            ));
+        }
+    }
+
+    for objective in &rule.allowed_objectives {
+        if !rule
+            .allowed_families
+            .iter()
+            .any(|family| family_supports_objective(family, *objective))
+        {
+            lints.push(WorkloadPolicyLint::warning(
+                "objective_without_capable_family",
+                format!(
+                    "{:?} allows objective {:?} but no allowed action family is expected to optimize it",
+                    rule.situation, objective
+                ),
+                Some(rule.situation),
+                None,
+            ));
+        }
+    }
+}
+
+fn high_risk_family(family: &str) -> bool {
+    matches!(
+        family,
+        "cpu_power" | "gpu_power" | "irq_affinity" | "vm_knob"
+    )
+}
+
+fn system_wide_family(family: &str) -> bool {
+    matches!(
+        family,
+        "cpu_power" | "gpu_power" | "irq_affinity" | "vm_knob"
+    )
+}
+
+fn medium_or_high_risk_family(family: &str) -> bool {
+    !matches!(family, "cpu_affinity_profile")
+}
+
+fn family_supports_objective(family: &str, objective: ObjectiveKind) -> bool {
+    use ObjectiveKind::*;
+
+    match family {
+        "cpu_affinity_profile" => matches!(
+            objective,
+            StutterScore
+                | GameFramePacing
+                | GameRunnableLatency
+                | DesktopInteractivity
+                | CompileThroughputWithForegroundProtection
+        ),
+        "nice" | "uclamp" => matches!(
+            objective,
+            StutterScore
+                | DesktopInteractivity
+                | BrowserInteractivity
+                | CompileThroughputWithForegroundProtection
+                | GameRunnableLatency
+        ),
+        "ionice" => matches!(objective, StutterScore | DesktopInteractivity | IoLatency),
+        "cgroup_placement" => matches!(
+            objective,
+            StutterScore
+                | DesktopInteractivity
+                | CompileThroughputWithForegroundProtection
+                | GameRunnableLatency
+        ),
+        "irq_affinity" => matches!(objective, StutterScore | IrqOverlapReduction),
+        "cpu_power" | "gpu_power" => matches!(
+            objective,
+            StutterScore | ThermalRecovery | GameFramePacing | BrowserInteractivity
+        ),
+        "vm_knob" => matches!(objective, StutterScore | IoLatency),
+        _ => false,
+    }
 }
 
 pub fn validate_action_family_name(family: &str) -> anyhow::Result<()> {
@@ -573,5 +802,78 @@ mod tests {
                 .to_string()
                 .contains("duplicate workload policy rule")
         );
+    }
+
+    #[test]
+    fn default_workload_policy_has_no_error_lints_for_default_daemon_policies() {
+        for preset in [
+            crate::daemon::config::DaemonPreset::ObserveOnly,
+            crate::daemon::config::DaemonPreset::GamingLowRisk,
+            crate::daemon::config::DaemonPreset::GamingLaptopSafe,
+            crate::daemon::config::DaemonPreset::WorkstationLowRisk,
+            crate::daemon::config::DaemonPreset::DebugAggressive,
+        ] {
+            let config = crate::daemon::config::DaemonConfig::from_preset(
+                preset,
+                crate::daemon_policy::ActionSource::Test,
+            );
+            let policy = crate::daemon::policy::build_daemon_policy(
+                crate::daemon::policy::DaemonPolicyBuildInput {
+                    config: &config,
+                    remote_context: None,
+                },
+            );
+            let lints = lint_workload_policy(&WorkloadPolicyMatrix::default_rules(), &policy);
+
+            assert!(
+                lints
+                    .iter()
+                    .all(|lint| lint.severity == LintSeverity::Warning),
+                "preset {preset:?} produced error lints: {lints:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn linter_rejects_autonomous_system_wide_or_denied_families() {
+        let mut config = crate::daemon::config::DaemonConfig::from_preset(
+            crate::daemon::config::DaemonPreset::GamingLowRisk,
+            crate::daemon_policy::ActionSource::Test,
+        );
+        config
+            .safety
+            .denied_action_families
+            .insert("nice".to_owned());
+        let policy = crate::daemon::policy::build_daemon_policy(
+            crate::daemon::policy::DaemonPolicyBuildInput {
+                config: &config,
+                remote_context: None,
+            },
+        );
+        let matrix = WorkloadPolicyMatrix {
+            rules: vec![WorkloadPolicyRule {
+                situation: SituationKind::GameFocused,
+                allowed_families: ["gpu_power", "nice"]
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+                allowed_objectives: [ObjectiveKind::ThermalRecovery].into_iter().collect(),
+                autonomous_families: ["gpu_power", "nice"]
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+            }],
+        };
+
+        let lints = lint_workload_policy(&matrix, &policy);
+
+        assert!(lints.iter().any(|lint| {
+            lint.reason_code == "system_wide_family_is_autonomous"
+                && lint.severity == LintSeverity::Error
+        }));
+        assert!(lints.iter().any(|lint| {
+            lint.reason_code == "denied_family_is_autonomous"
+                && lint.severity == LintSeverity::Error
+        }));
     }
 }

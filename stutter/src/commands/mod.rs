@@ -55,6 +55,7 @@ pub async fn dispatch(command: AppCommand) -> Result<(), StutterError> {
         AppCommand::PrivilegedWorker(input) => daemon::run_privileged_worker_command(input),
         AppCommand::DaemonConfigExplain(input) => daemon::run_config_explain_command(input),
         AppCommand::DaemonPolicyExplain(input) => daemon::run_policy_explain_command(input),
+        AppCommand::DaemonPolicyLint(input) => daemon::run_policy_lint_command(input),
         AppCommand::DaemonProfiles(input) => daemon::run_profiles_command(input),
         AppCommand::DaemonExplain(input) => daemon::run_explain_command(input),
         AppCommand::DaemonWhyNotOptimize(input) => daemon::run_why_not_optimize_command(input),

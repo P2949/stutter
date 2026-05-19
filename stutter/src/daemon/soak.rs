@@ -439,12 +439,15 @@ fn evaluate_scenario_assertions(
                 }
             }
             SoakAssertion::ShutdownRestoresActiveActions => {
-                if report.final_state.active_rollback.is_some() {
+                let pending_manual_restore = report.final_state.active_rollback.is_some()
+                    && report.final_state.phase == DaemonPhase::Faulted
+                    && report.final_state.faulted.is_some();
+                if report.final_state.active_rollback.is_some() && !pending_manual_restore {
                     scenario_failure(
                         &mut failures,
                         "shutdown_restores_active_actions",
                         scenario,
-                        "scenario ended with an active rollback still pending",
+                        "scenario ended with an active rollback pending outside faulted manual-restore state",
                     );
                 }
             }

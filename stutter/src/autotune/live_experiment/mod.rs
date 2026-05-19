@@ -8,6 +8,7 @@ use anyhow::Context;
 use crate::{
     actions::{RollbackToken, SafetyClass},
     autotune::{
+        active_config::{RollbackVerification, verify_rollback_restored_baseline},
         apply_low_risk::apply_candidate_with_audit,
         candidate::CandidateAction,
         candidate_memory::CandidateMemoryResult,
@@ -26,8 +27,9 @@ use crate::{
         experiment::{ExperimentId, WindowScore},
         kept::{ActiveProfileState, KeptCandidateState},
         objective::{ObjectiveComparisonInput, ObjectiveSignals, compare_for_objective},
-        observation::AutotuneObservation,
+        observation::{ActiveConfigSnapshot, AutotuneObservation},
         state::ControllerPhase,
+        system_context::{SystemContextSnapshotInput, collect_system_context},
         washout::WashoutWindowConfig,
     },
     daemon::{
@@ -48,6 +50,7 @@ pub struct LiveExperiment {
     pub mode: DaemonMode,
     pub baseline_score: WindowScore,
     pub baseline_signals: ObjectiveSignals,
+    pub baseline_active_config: Option<ActiveConfigSnapshot>,
     pub applied_unix_nanos: u128,
     pub washout_until_unix_nanos: u128,
     pub measure_until_unix_nanos: u128,
@@ -178,7 +181,7 @@ trait LiveExperimentActionExecutor {
         input: &LiveExperimentManagerInput<'_>,
         experiment: &LiveExperiment,
         observation: &AutotuneObservation,
-    ) -> anyhow::Result<()>;
+    ) -> anyhow::Result<Option<ActiveConfigSnapshot>>;
 }
 
 struct RuntimeLiveExperimentActionExecutor;
@@ -233,7 +236,7 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
         input: &LiveExperimentManagerInput<'_>,
         experiment: &LiveExperiment,
         observation: &AutotuneObservation,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Option<ActiveConfigSnapshot>> {
         if experiment.mode == DaemonMode::ApplyMediumRisk
             && experiment.safety_class > SafetyClass::ReversibleLowRisk
         {
@@ -253,7 +256,7 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
             executor.rollback(&experiment.rollback)?;
         }
 
-        Ok(())
+        Ok(collect_post_rollback_active_config(observation))
     }
 }
 
@@ -588,6 +591,7 @@ impl LiveExperimentManager {
             mode: input.mode,
             baseline_score: baseline_score.clone(),
             baseline_signals: observation.objective_signals.clone(),
+            baseline_active_config: observation.active_config_snapshot.clone(),
             applied_unix_nanos: observation.now_unix_nanos,
             washout_until_unix_nanos,
             measure_until_unix_nanos,
@@ -715,7 +719,7 @@ impl LiveExperimentManager {
         experiment: &LiveExperiment,
         observation: &AutotuneObservation,
         state: ControllerJournalState,
-        verify_result: &'static str,
+        verify_result: &str,
     ) -> ControllerJournalRecord {
         let action_id = experiment.action_id();
         ControllerJournalRecord::for_phase(
@@ -741,7 +745,7 @@ impl LiveExperimentManager {
         experiment: &LiveExperiment,
         observation: &AutotuneObservation,
         state: ControllerJournalState,
-        verify_result: &'static str,
+        verify_result: &str,
     ) -> anyhow::Result<()> {
         if input.simulate_action_effects && input.controller_journal_path.is_none() {
             return Ok(());
@@ -763,7 +767,7 @@ impl LiveExperimentManager {
         candidate: &CandidateAction,
         observation: &AutotuneObservation,
         affected_tasks: Option<usize>,
-        verify_result: &'static str,
+        verify_result: &str,
     ) -> ControllerJournalActionMetadata {
         let pid = observation
             .target_root_pid
@@ -916,11 +920,86 @@ impl LiveExperimentManager {
             return Err(err);
         }
 
+        let post_rollback_active_config = if input.simulate_action_effects {
+            None
+        } else {
+            match executor.rollback_candidate(input, &experiment, observation) {
+                Ok(snapshot) => snapshot,
+                Err(err) => {
+                    self.current = Some(experiment);
+                    return Err(err);
+                }
+            }
+        };
+
         if !input.simulate_action_effects
-            && let Err(err) = executor.rollback_candidate(input, &experiment, observation)
+            && let Some(verification) = rollback_verification_for_experiment(
+                &experiment,
+                post_rollback_active_config.as_ref(),
+                observation,
+            )
         {
-            self.current = Some(experiment);
-            return Err(err);
+            log_rollback_verification(&experiment, &verification);
+            if !verification.verified {
+                let verify_result = format!(
+                    "{} expected={} actual={}",
+                    verification.reason_code, verification.expected, verification.actual
+                );
+                self.write_controller_journal_phase_for_live_experiment(
+                    input,
+                    &experiment,
+                    observation,
+                    ControllerJournalState::Faulted,
+                    &verify_result,
+                )?;
+
+                controller_state.record_candidate_result(ControllerCandidateResultInput {
+                    candidate: &experiment.candidate,
+                    observation,
+                    cpu_topology_signature: None,
+                    result: CandidateMemoryResult::Faulted,
+                    baseline_score_total: Some(experiment.baseline_score.score.total),
+                    current_score_total: Some(observation.score.total),
+                    rollback_reason: Some(format!(
+                        "rollback verification failed: {} expected={} actual={}",
+                        verification.reason_code, verification.expected, verification.actual
+                    )),
+                    cooldown_expires_unix_nanos: Some(
+                        now_unix_nanos.saturating_add(
+                            input.controller_policy.cooldown_after_fault.as_nanos(),
+                        ),
+                    ),
+                });
+
+                let cooldown_until_unix_nanos = now_unix_nanos
+                    .saturating_add(input.controller_policy.cooldown_after_fault.as_nanos());
+                let history_context = LiveExperimentHistoryContext {
+                    experiment_id: experiment.experiment_id.as_str().to_owned(),
+                    action_id: experiment.action_id(),
+                    candidate_name: experiment.candidate.profile_name().to_owned(),
+                    action_kind: experiment.candidate.action_kind().to_owned(),
+                    mode: experiment.mode,
+                    safety_class: experiment.safety_class.clone(),
+                    score_before: Some(experiment.baseline_score.clone()),
+                    score_after: Some(window_score_from_observation(observation)),
+                    rollback_performed: true,
+                    rollback_policy: format!(
+                        "rollback-verification-failed:{}",
+                        verification.reason_code
+                    ),
+                    cooldown_until_unix_nanos: Some(cooldown_until_unix_nanos),
+                    manual_restore_command: Some(input.manual_restore_command.to_owned()),
+                };
+
+                controller_state
+                    .enter_cooldown_after_fault(&input.controller_policy, now_unix_nanos);
+                self.current = Some(experiment);
+
+                return Ok(LiveExperimentOutcome::with_history(
+                    LiveExperimentEvent::Faulted,
+                    history_context,
+                ));
+            }
         }
 
         self.write_controller_journal_phase_for_live_experiment(
@@ -928,7 +1007,11 @@ impl LiveExperimentManager {
             &experiment,
             observation,
             ControllerJournalState::Reverted,
-            "rollback_verified",
+            if input.simulate_action_effects {
+                "rollback_simulated"
+            } else {
+                "rollback_verified"
+            },
         )?;
 
         controller_state.record_candidate_result(ControllerCandidateResultInput {
@@ -977,6 +1060,66 @@ fn controller_journal_path(input: &LiveExperimentManagerInput<'_>) -> PathBuf {
         .controller_journal_path
         .clone()
         .unwrap_or_else(default_controller_journal_path)
+}
+
+fn collect_post_rollback_active_config(
+    observation: &AutotuneObservation,
+) -> Option<ActiveConfigSnapshot> {
+    observation.active_config_snapshot.as_ref()?;
+
+    Some(
+        collect_system_context(SystemContextSnapshotInput {
+            proc_root: Path::new("/proc"),
+            sys_root: Path::new("/sys"),
+            active_tasks: &observation.active_tasks,
+            health: observation.system_health.clone(),
+            sampled_at_unix_nanos: crate::audit::unix_nanos_now(),
+        })
+        .active_config,
+    )
+}
+
+fn rollback_verification_for_experiment(
+    experiment: &LiveExperiment,
+    post_rollback_active_config: Option<&ActiveConfigSnapshot>,
+    observation: &AutotuneObservation,
+) -> Option<RollbackVerification> {
+    let baseline = experiment.baseline_active_config.as_ref()?;
+    Some(match post_rollback_active_config {
+        Some(post_rollback) => verify_rollback_restored_baseline(
+            &experiment.candidate,
+            baseline,
+            post_rollback,
+            &observation.active_tasks,
+        ),
+        None => RollbackVerification {
+            verified: false,
+            expected: "post-rollback active config snapshot".to_owned(),
+            actual: "missing".to_owned(),
+            reason_code: "rollback_verification_unavailable".to_owned(),
+        },
+    })
+}
+
+fn log_rollback_verification(experiment: &LiveExperiment, verification: &RollbackVerification) {
+    if verification.verified {
+        log::info!(
+            "autotune_rollback_verification_passed experiment_id={} action_id={} expected={} actual={}",
+            experiment.experiment_id.as_str(),
+            experiment.action_id(),
+            verification.expected,
+            verification.actual
+        );
+    } else {
+        log::error!(
+            "autotune_rollback_verification_failed experiment_id={} action_id={} reason_code={} expected={} actual={}",
+            experiment.experiment_id.as_str(),
+            experiment.action_id(),
+            verification.reason_code,
+            verification.expected,
+            verification.actual
+        );
+    }
 }
 
 fn policy_context_for_runtime_apply(observation: &AutotuneObservation) -> DaemonPolicyContext {
@@ -1056,6 +1199,7 @@ mod tests {
         rollback_calls: usize,
         fail_apply: bool,
         fail_rollback: bool,
+        post_rollback_active_config: Option<ActiveConfigSnapshot>,
     }
 
     impl LiveExperimentActionExecutor for FakeLiveExecutor {
@@ -1080,14 +1224,14 @@ mod tests {
             _input: &LiveExperimentManagerInput<'_>,
             _experiment: &LiveExperiment,
             _observation: &AutotuneObservation,
-        ) -> anyhow::Result<()> {
+        ) -> anyhow::Result<Option<ActiveConfigSnapshot>> {
             self.rollback_calls += 1;
 
             if self.fail_rollback {
                 anyhow::bail!("intentional rollback failure");
             }
 
-            Ok(())
+            Ok(self.post_rollback_active_config.clone())
         }
     }
 
@@ -1230,10 +1374,38 @@ mod tests {
             mode: DaemonMode::ApplyLowRisk,
             baseline_score: score(1_000),
             baseline_signals: ObjectiveSignals::from_window_score(&score(1_000)),
+            baseline_active_config: None,
             applied_unix_nanos: 100,
             washout_until_unix_nanos: 200,
             measure_until_unix_nanos: 300,
             rollback: rollback(),
+        }
+    }
+
+    fn nice_live_experiment_with_baseline_config() -> LiveExperiment {
+        LiveExperiment {
+            experiment_id: ExperimentId::new("experiment-nice"),
+            candidate: medium_risk_candidate(),
+            safety_class: SafetyClass::ReversibleMediumRisk,
+            mode: DaemonMode::ApplyMediumRisk,
+            baseline_score: score(1_000),
+            baseline_signals: ObjectiveSignals::from_window_score(&score(1_000)),
+            baseline_active_config: Some(active_nice_config(42, 0)),
+            applied_unix_nanos: 100,
+            washout_until_unix_nanos: 200,
+            measure_until_unix_nanos: 300,
+            rollback: RollbackToken::NiceRestore {
+                records: Vec::new(),
+            },
+        }
+    }
+
+    fn active_nice_config(tid: u32, nice: i32) -> ActiveConfigSnapshot {
+        ActiveConfigSnapshot {
+            nice: crate::autotune::observation::ActiveNiceSnapshot {
+                per_tid: std::collections::BTreeMap::from([(tid, nice)]),
+            },
+            ..ActiveConfigSnapshot::default()
         }
     }
 
@@ -1570,6 +1742,166 @@ mod tests {
     }
 
     #[test]
+    fn rollback_verification_success_clears_active_experiment() {
+        let journal_path = temp_journal_path("rollback-verify-success");
+        let mut manager = LiveExperimentManager::new();
+        manager.set_current_for_tests(nice_live_experiment_with_baseline_config());
+        let mut controller_state = ControllerRuntimeState {
+            active_experiment: Some(ControllerActiveExperiment {
+                experiment_id: ExperimentId::new("experiment-nice"),
+                candidate: medium_risk_candidate(),
+                baseline_score_total: 1_000,
+            }),
+            ..ControllerRuntimeState::default()
+        };
+        let mut active_profile_state = ActiveProfileState::default();
+        let mut executor = FakeLiveExecutor {
+            post_rollback_active_config: Some(active_nice_config(42, 0)),
+            ..FakeLiveExecutor::default()
+        };
+        let mut observation = observation(1_200, 400);
+        observation.active_config_snapshot = Some(active_nice_config(42, 5));
+
+        let outcome = manager
+            .apply_decision_side_effects_with_executor(
+                medium_input(journal_path, None),
+                LiveExperimentRuntimeState {
+                    controller_state: &mut controller_state,
+                    active_profile_state: &mut active_profile_state,
+                },
+                &observation,
+                &AutotuneDecision::Revert {
+                    experiment_id: ExperimentId::new("experiment-nice"),
+                    reason: "candidate regressed".to_owned(),
+                },
+                "candidate regressed",
+                &mut executor,
+            )
+            .unwrap();
+
+        assert_eq!(outcome.event, LiveExperimentEvent::Reverted);
+        assert!(!manager.has_active_experiment());
+        assert_eq!(controller_state.phase, ControllerPhase::Cooldown);
+        assert_eq!(executor.rollback_calls, 1);
+    }
+
+    #[test]
+    fn rollback_verification_failure_faults_and_keeps_manual_restore_state() {
+        let journal_path = temp_journal_path("rollback-verify-failure");
+        let mut manager = LiveExperimentManager::new();
+        manager.set_current_for_tests(nice_live_experiment_with_baseline_config());
+        let mut controller_state = ControllerRuntimeState {
+            active_experiment: Some(ControllerActiveExperiment {
+                experiment_id: ExperimentId::new("experiment-nice"),
+                candidate: medium_risk_candidate(),
+                baseline_score_total: 1_000,
+            }),
+            ..ControllerRuntimeState::default()
+        };
+        let mut active_profile_state = ActiveProfileState::default();
+        let mut executor = FakeLiveExecutor {
+            post_rollback_active_config: Some(active_nice_config(42, 5)),
+            ..FakeLiveExecutor::default()
+        };
+        let mut observation = observation(1_200, 400);
+        observation.active_config_snapshot = Some(active_nice_config(42, 5));
+
+        let outcome = manager
+            .apply_decision_side_effects_with_executor(
+                medium_input(journal_path.clone(), None),
+                LiveExperimentRuntimeState {
+                    controller_state: &mut controller_state,
+                    active_profile_state: &mut active_profile_state,
+                },
+                &observation,
+                &AutotuneDecision::Revert {
+                    experiment_id: ExperimentId::new("experiment-nice"),
+                    reason: "candidate regressed".to_owned(),
+                },
+                "candidate regressed",
+                &mut executor,
+            )
+            .unwrap();
+
+        assert_eq!(outcome.event, LiveExperimentEvent::Faulted);
+        assert!(manager.has_active_experiment());
+        assert_eq!(controller_state.phase, ControllerPhase::Faulted);
+        assert_eq!(executor.rollback_calls, 1);
+        assert!(
+            manager
+                .daemon_rollback_state("stutter daemon emergency-restore")
+                .is_some()
+        );
+        assert!(
+            outcome
+                .history_context
+                .as_ref()
+                .unwrap()
+                .rollback_policy
+                .contains("rollback-verification-failed:rollback_state_mismatch")
+        );
+
+        let journal =
+            crate::autotune::controller_journal::read_controller_journal(&journal_path).unwrap();
+        assert_eq!(journal.state(), ControllerJournalState::Faulted);
+        assert!(
+            journal
+                .verify_result
+                .as_deref()
+                .unwrap()
+                .contains("rollback_state_mismatch")
+        );
+    }
+
+    #[test]
+    fn rollback_verification_is_skipped_for_simulated_action_effects() {
+        let journal_path = temp_journal_path("rollback-verify-simulated");
+        let mut manager = LiveExperimentManager::new();
+        manager.set_current_for_tests(nice_live_experiment_with_baseline_config());
+        let mut controller_state = ControllerRuntimeState {
+            active_experiment: Some(ControllerActiveExperiment {
+                experiment_id: ExperimentId::new("experiment-nice"),
+                candidate: medium_risk_candidate(),
+                baseline_score_total: 1_000,
+            }),
+            ..ControllerRuntimeState::default()
+        };
+        let mut active_profile_state = ActiveProfileState::default();
+        let mut executor = FakeLiveExecutor::default();
+        let mut observation = observation(1_200, 400);
+        observation.active_config_snapshot = Some(active_nice_config(42, 5));
+        let mut input = medium_input(journal_path.clone(), None);
+        input.simulate_action_effects = true;
+
+        let outcome = manager
+            .apply_decision_side_effects_with_executor(
+                input,
+                LiveExperimentRuntimeState {
+                    controller_state: &mut controller_state,
+                    active_profile_state: &mut active_profile_state,
+                },
+                &observation,
+                &AutotuneDecision::Revert {
+                    experiment_id: ExperimentId::new("experiment-nice"),
+                    reason: "candidate regressed".to_owned(),
+                },
+                "candidate regressed",
+                &mut executor,
+            )
+            .unwrap();
+
+        assert_eq!(outcome.event, LiveExperimentEvent::Reverted);
+        assert!(!manager.has_active_experiment());
+        assert_eq!(controller_state.phase, ControllerPhase::Cooldown);
+        assert_eq!(executor.rollback_calls, 0);
+
+        let journal =
+            crate::autotune::controller_journal::read_controller_journal(&journal_path).unwrap();
+        assert_eq!(journal.state(), ControllerJournalState::Reverted);
+        assert_eq!(journal.verify_result.as_deref(), Some("rollback_simulated"));
+    }
+
+    #[test]
     fn rollback_failure_keeps_active_experiment_and_returns_error() {
         let journal_path = temp_journal_path("rollback-failure");
         let mut manager = LiveExperimentManager::new();
@@ -1638,6 +1970,7 @@ mod tests {
                 block_io_worst_latency_ns: Some(2_000_000),
                 ..ObjectiveSignals::from_window_score(&score(1_000))
             },
+            baseline_active_config: None,
             applied_unix_nanos: 10,
             washout_until_unix_nanos: 20,
             measure_until_unix_nanos: 30,
