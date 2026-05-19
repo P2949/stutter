@@ -438,8 +438,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/foreground.rs",
-        max_lines: 2_408,
-        reason: "existing foreground provider implementation pending future split; provider and command-runner facades are staged here",
+        max_lines: 1_144,
+        reason: "existing foreground provider implementation after extracting embedded foreground tests",
     },
     OversizedRustFileAllowance {
         path: "src/cli/monitor.rs",
