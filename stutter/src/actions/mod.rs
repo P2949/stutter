@@ -88,7 +88,6 @@ mod tests {
         for (kind, name) in [
             ("pub enum", "ActionError"),
             ("pub enum", "SafetyClass"),
-            ("pub struct", "ActionId"),
             ("pub struct", "RollbackRegistry"),
             ("pub enum", "RollbackToken"),
             ("pub trait", "TuningAction"),

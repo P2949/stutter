@@ -1314,6 +1314,18 @@ mod tests {
         }
     }
 
+    fn active_task_from_task(task: &TaskInfo) -> crate::autotune::observation::ActiveTaskSnapshot {
+        crate::autotune::observation::ActiveTaskSnapshot {
+            tid: task.tid,
+            process_pid: task.process_pid,
+            comm: task.comm.clone(),
+            class: task.class,
+            process_starttime_ticks: task.process_starttime_ticks,
+            task_starttime_ticks: task.task_starttime_ticks,
+            cgroup_path: None,
+        }
+    }
+
     #[test]
     fn parses_minimal_profile() {
         let profiles = parse_profiles(
@@ -1667,6 +1679,99 @@ mod tests {
                 pending_nice: 0,
                 pending_ionice: 0,
             }
+        );
+    }
+
+    #[test]
+    fn profile_evaluation_matches_apply_plan_rule_order_and_masks() {
+        let main = test_task(11, TaskClass::Game, "Main");
+        let render = test_task(12, TaskClass::GameRenderThread, "RenderThread");
+        let worker = test_task(13, TaskClass::Game, "WorkerThread");
+        let compositor = test_task(14, TaskClass::Compositor, "kwin_wayland");
+        let service = test_task(15, TaskClass::Service, "dbus-daemon");
+        let tasks = BTreeMap::from([
+            (main.tid, main.clone()),
+            (render.tid, render.clone()),
+            (worker.tid, worker.clone()),
+            (compositor.tid, compositor.clone()),
+            (service.tid, service.clone()),
+        ]);
+        let profile = Profile {
+            name: "rule-order".to_owned(),
+            rules: vec![
+                ProfileRule {
+                    affinity: Some(CpuMask::parse("0").unwrap()),
+                    nice: None,
+                    ionice: None,
+                    match_class: vec![TaskClass::Game],
+                    match_comm: vec![CompiledPattern::new("Main".to_owned()).unwrap()],
+                },
+                ProfileRule {
+                    affinity: Some(CpuMask::parse("1").unwrap()),
+                    nice: None,
+                    ionice: None,
+                    match_class: vec![TaskClass::Game, TaskClass::GameRenderThread],
+                    match_comm: Vec::new(),
+                },
+                ProfileRule {
+                    affinity: Some(CpuMask::parse("2").unwrap()),
+                    nice: None,
+                    ionice: None,
+                    match_class: vec![TaskClass::Compositor],
+                    match_comm: Vec::new(),
+                },
+            ],
+        };
+        let active_tasks = tasks
+            .values()
+            .map(active_task_from_task)
+            .collect::<Vec<_>>();
+
+        let evaluated = evaluate_profile_for_tasks(ProfileEvaluationInput {
+            profile: &profile,
+            active_tasks: &active_tasks,
+            topology: None,
+        })
+        .into_iter()
+        .map(|task| (task.tid, task.requested_mask, task.matched_rule_index))
+        .collect::<Vec<_>>();
+        assert_eq!(
+            evaluated,
+            vec![
+                (11, "0".to_owned(), 0),
+                (12, "1".to_owned(), 1),
+                (13, "1".to_owned(), 1),
+                (14, "2".to_owned(), 2),
+            ]
+        );
+
+        let apply_plan = planned_profile_apply_with_readers(
+            &tasks,
+            &profile,
+            None,
+            |_| Ok(CpuMask::parse("7").unwrap()),
+            |_| Ok(0),
+            |_| Ok(0),
+        )
+        .unwrap();
+        let mut apply_decisions = apply_plan
+            .affinity_changes
+            .iter()
+            .map(|change| {
+                (
+                    change.record.tid,
+                    change.record.applied_mask.to_range_string(),
+                )
+            })
+            .collect::<Vec<_>>();
+        apply_decisions.sort_by_key(|(tid, _)| *tid);
+
+        assert_eq!(
+            apply_decisions,
+            evaluated
+                .into_iter()
+                .map(|(tid, mask, _)| (tid, mask))
+                .collect::<Vec<_>>()
         );
     }
 

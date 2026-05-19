@@ -272,7 +272,7 @@ impl IrqAffinityAction {
 
 impl TuningAction for IrqAffinityAction {
     fn id(&self) -> ActionId {
-        ActionId(format!(
+        ActionId::new(format!(
             "irq-affinity:set:irq={}:affinity={}",
             self.irq, self.smp_affinity
         ))
@@ -662,7 +662,7 @@ mod tests {
 
         assert_eq!(
             action.id(),
-            ActionId("irq-affinity:set:irq=44:affinity=00000002".to_owned())
+            ActionId::new("irq-affinity:set:irq=44:affinity=00000002".to_owned())
         );
         assert_eq!(
             action.describe(),

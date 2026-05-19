@@ -43,6 +43,7 @@ pub enum CandidateDenyReason {
     ConflictWithActiveAction,
     ConflictWithKeptAction,
     CgroupTargetNotAllowlisted,
+    SystemWideTargetNotAllowlisted,
     WorkloadPolicyBlocked,
     NotAutonomousForWorkload,
     ProviderConfidenceTooLow,
@@ -324,6 +325,7 @@ impl CandidateDenyReason {
             Self::ConflictWithActiveAction => "conflict_with_active_action",
             Self::ConflictWithKeptAction => "conflict_with_kept_action",
             Self::CgroupTargetNotAllowlisted => "cgroup_target_not_allowlisted",
+            Self::SystemWideTargetNotAllowlisted => "system_wide_target_not_allowlisted",
             Self::WorkloadPolicyBlocked => "workload_policy_blocked",
             Self::NotAutonomousForWorkload => "not_autonomous_for_workload",
             Self::ProviderConfidenceTooLow => "provider_confidence_too_low",
@@ -807,11 +809,14 @@ fn dry_run_candidate_if_still_eligible<R: CandidateDryRunner>(
     let mut deny_reasons = draft.deny_reasons;
     let mut deny_messages = draft.deny_messages;
     let mut dry_run_state = None;
+    let high_risk_suggest_dry_run = input.daemon_policy.mode == DaemonMode::Suggest
+        && input.daemon_policy.high_risk_dry_run
+        && draft.candidate.is_high_risk_system_adjacent()
+        && deny_reasons
+            .iter()
+            .all(|reason| *reason == CandidateDenyReason::ManualOnlyHighRisk);
 
-    if deny_reasons.is_empty()
-        && !(input.daemon_policy.mode == DaemonMode::Suggest
-            && draft.candidate.is_high_risk_system_adjacent())
-    {
+    if deny_reasons.is_empty() || high_risk_suggest_dry_run {
         let record = dry_runner.dry_run(&draft.candidate);
         dry_run_state = Some(ActionState {
             applied: false,
@@ -1595,6 +1600,46 @@ mod tests {
     }
 
     #[test]
+    fn explicit_high_risk_dry_run_collects_diagnostics_without_eligibility() {
+        let candidate = irq_affinity_candidate("suggest-irq-dry-run");
+        let mut config = crate::autotune::runtime::daemon_config_for_runtime_mode(
+            DaemonMode::Suggest,
+            ActionSource::AutotuneRuntime,
+            Some(1234),
+            None,
+        );
+        config.safety.allow_system_wide_suggestions = true;
+        config.autotune.high_risk_dry_run = true;
+        let policy = build_daemon_policy(DaemonPolicyBuildInput {
+            config: &config,
+            remote_context: None,
+        });
+        let mut observation =
+            observation_for_situation(SituationKind::IrqPressure, FocusGroupKind::Game);
+        enable_capability_for_candidate(&mut observation, &candidate);
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            candidate,
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert_eq!(dry_runner.calls, 1);
+        assert!(evaluation.dry_run.is_some());
+        assert!(!evaluation.eligible);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ManualOnlyHighRisk)
+        );
+    }
+
+    #[test]
     fn low_confidence_medium_risk_candidate_is_denied_even_when_family_and_objective_allowed() {
         let evaluation = evaluate_static_candidate_with_confidence(
             DaemonMode::ApplyMediumRisk,
@@ -2092,7 +2137,7 @@ mod tests {
     fn low_risk_policy_denies_medium_risk_fake_candidate() {
         let policy = policy(DaemonMode::ApplyLowRisk);
         let candidate = CandidateAction::fake(
-            crate::actions::ActionId("fake-medium".to_owned()),
+            crate::actions::ActionId::new("fake-medium".to_owned()),
             SafetyClass::ReversibleMediumRisk,
         );
 

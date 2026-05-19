@@ -125,6 +125,9 @@ impl ReplayPolicyEngine for ObserveOnlyReplayPolicy {
             | MonitorEvent::ForegroundEvent { .. }
             | MonitorEvent::SchedulerSample { .. }
             | MonitorEvent::ScxEvent { .. }
+            | MonitorEvent::KmsFlipEvent { .. }
+            | MonitorEvent::DrmFenceEvent { .. }
+            | MonitorEvent::WaylandPresentationEvent { .. }
             | MonitorEvent::Exec { .. } => {}
         }
         Ok(())

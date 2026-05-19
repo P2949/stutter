@@ -589,7 +589,7 @@ mod tests {
 
     fn fake_candidate() -> CandidateAction {
         CandidateAction::fake(
-            ActionId("cpu-affinity-profile:test".to_owned()),
+            ActionId::new("cpu-affinity-profile:test".to_owned()),
             SafetyClass::ReversibleLowRisk,
         )
     }
@@ -679,7 +679,7 @@ mod tests {
 
         assert_eq!(
             record.action_id,
-            ActionId("cpu-affinity-profile:test".to_owned())
+            ActionId::new("cpu-affinity-profile:test".to_owned())
         );
         assert_eq!(record.candidate_name, "fake-profile");
         assert_eq!(record.last_tried_unix_nanos, 1_000);

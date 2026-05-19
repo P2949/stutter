@@ -27,11 +27,16 @@ use crate::{
     actions::SafetyClass,
     autotune::{
         AutotuneRuntimeError,
+        active_config::{ActiveConfigMatch, ActiveConfigMatchInput},
         candidate::{CandidateAction, CandidateDryRunRecord},
         candidate_memory::CandidateMemoryResult,
         controller::{ControllerPolicy, ControllerRuntimeState, decide_autotune_transition},
         decision::AutotuneDecision,
         experiment::{ExperimentId, WindowScore},
+        external_mutation::{
+            ExternalMutationRecoveryDecision, recovery_decision_for_active_experiment,
+            recovery_decision_for_kept_action,
+        },
         history::{
             AutotuneDecisionSummary, AutotuneHistoryEvent, AutotuneHistoryEventInput,
             AutotuneMode as HistoryAutotuneMode, ControllerPhase as HistoryControllerPhase,
@@ -46,7 +51,9 @@ use crate::{
         observation_builder::{
             AutotuneObservationBuilder, AutotuneObservationBuilderInput, AutotuneObservationFocus,
         },
-        planner::{CandidatePlanner, PlanResult, PlannerInput, PlannerSummary},
+        planner::{
+            CandidateDenyReason, CandidatePlanner, PlanResult, PlannerInput, PlannerSummary,
+        },
         quality::{OnlineDataQuality, OnlineDataQualityPolicy},
         rolling_window::RollingWindow,
         state::{ControllerPhase, SituationKind},
@@ -62,8 +69,8 @@ use crate::{
         },
         policy::{ActionSource, DaemonMode, DaemonPolicyBuildInput, build_daemon_policy},
         privilege::{
-            InProcessPrivilegedActionService, UnixSocketPrivilegedActionService,
-            default_privileged_worker_socket_path,
+            InProcessPrivilegedActionService, PrivilegedWorkerHandle,
+            UnixSocketPrivilegedActionService, default_privileged_worker_socket_path,
         },
         state::{
             DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus,
@@ -457,6 +464,15 @@ fn top_denied_reason_for_plan(plan: &PlanResult) -> Option<String> {
         .or_else(|| plan.no_action_reason.clone())
 }
 
+fn plan_has_deny_reason(plan: &PlanResult, reason: CandidateDenyReason) -> bool {
+    plan.evaluations.iter().any(|evaluation| {
+        evaluation
+            .deny_reasons
+            .iter()
+            .any(|candidate_reason| *candidate_reason == reason)
+    })
+}
+
 impl AutotuneRuntime {
     pub fn new(config: AutotuneRuntimeConfig) -> Self {
         let daemon_policy = config.daemon_policy.clone();
@@ -529,7 +545,7 @@ impl AutotuneRuntime {
                 if self.live_experiments.has_active_experiment() {
                     self.rollback_live_experiment(
                         crate::audit::unix_nanos_now(),
-                        "focus changed during active low-risk experiment",
+                        "focus changed during active experiment",
                     )?;
                 }
                 self.latest_focus = Some(AutotuneObservationFocus {
@@ -548,7 +564,7 @@ impl AutotuneRuntime {
                 if self.live_experiments.has_active_experiment() {
                     self.rollback_live_experiment(
                         crate::audit::unix_nanos_now(),
-                        "focus cleared during active low-risk experiment",
+                        "focus cleared during active experiment",
                     )?;
                 }
                 self.latest_focus = None;
@@ -566,6 +582,9 @@ impl AutotuneRuntime {
             | MonitorEvent::SchedulerSample { .. }
             | MonitorEvent::Spike { .. }
             | MonitorEvent::ScxEvent { .. }
+            | MonitorEvent::KmsFlipEvent { .. }
+            | MonitorEvent::DrmFenceEvent { .. }
+            | MonitorEvent::WaylandPresentationEvent { .. }
             | MonitorEvent::Exec { .. } => {}
         }
 
@@ -659,12 +678,12 @@ impl AutotuneRuntime {
             .filter(|record| record.result == CandidateMemoryResult::Kept)
             .map(|record| {
                 let (action_kind, safety_class) =
-                    daemon_profile_action_kind_and_safety_class(&record.action_id.0);
+                    daemon_profile_action_kind_and_safety_class(record.action_id.as_str());
                 DaemonWorkloadProfile {
                     workload_identity_hash: workload_identity_hash.clone(),
                     workload_label: workload_label.clone(),
                     candidate_name: record.candidate_name.clone(),
-                    action_id: record.action_id.0.clone(),
+                    action_id: record.action_id.as_str().to_owned(),
                     action_kind,
                     safety_class,
                     kept_unix_nanos: record.last_tried_unix_nanos,
@@ -841,20 +860,26 @@ impl AutotuneRuntime {
             if let Some(decision) = self.live_experiments.active_window_decision(&observation) {
                 decision
             } else if self.live_experiments.has_active_experiment() {
-                decide_autotune_transition(
-                    &self.controller.policy,
-                    &self.controller.state,
-                    &observation,
-                    None,
-                )
+                self.active_experiment_external_mutation_decision(&observation)
+                    .unwrap_or_else(|| {
+                        decide_autotune_transition(
+                            &self.controller.policy,
+                            &self.controller.state,
+                            &observation,
+                            None,
+                        )
+                    })
             } else {
                 let candidate = self.select_candidate_for_observation(&observation);
-                decide_autotune_transition(
-                    &self.controller.policy,
-                    &self.controller.state,
-                    &observation,
-                    candidate,
-                )
+                self.plan_external_mutation_recovery_decision(&observation)
+                    .unwrap_or_else(|| {
+                        decide_autotune_transition(
+                            &self.controller.policy,
+                            &self.controller.state,
+                            &observation,
+                            candidate,
+                        )
+                    })
             };
 
         let reason = forced_reason
@@ -873,6 +898,144 @@ impl AutotuneRuntime {
         self.last_decision = Some(stream_entry.clone());
 
         Ok(Some(stream_entry))
+    }
+
+    fn active_experiment_external_mutation_decision(
+        &mut self,
+        observation: &AutotuneObservation,
+    ) -> Option<AutotuneDecision> {
+        let snapshot = observation.active_config_snapshot.as_ref()?;
+        let experiment = self.live_experiments.current_experiment()?;
+        let active_config_input = ActiveConfigMatchInput {
+            snapshot,
+            active_tasks: &observation.active_tasks,
+        };
+        let ActiveConfigMatch::Differs { expected, actual } = experiment
+            .candidate
+            .matches_active_config(active_config_input)
+        else {
+            return None;
+        };
+
+        let decision = recovery_decision_for_active_experiment(
+            self.config.daemon_config.autotune.external_mutation_policy,
+        );
+        let experiment_id = experiment.experiment_id.clone();
+        let reason = format!(
+            "external_mutation_detected: active experiment {} no longer matches live state; expected {}; actual {}; recovery_decision={}",
+            experiment.candidate.candidate_name(),
+            expected,
+            actual,
+            decision.reason_code()
+        );
+
+        match decision {
+            ExternalMutationRecoveryDecision::RestoreExpectedState => {
+                Some(AutotuneDecision::Revert {
+                    experiment_id,
+                    reason,
+                })
+            }
+            ExternalMutationRecoveryDecision::AcceptExternalMutationAndResync => {
+                let abandoned = self.live_experiments.abandon_current_for_external_resync();
+                self.controller.state.active_experiment = None;
+                self.controller.state.phase = ControllerPhase::Observing;
+                Some(AutotuneDecision::Noop {
+                    reason: format!(
+                        "{reason}; abandoned_active_experiment={}",
+                        abandoned.is_some()
+                    ),
+                })
+            }
+            ExternalMutationRecoveryDecision::FaultRequireManualRestore
+            | ExternalMutationRecoveryDecision::AbandonKeptAction => {
+                Some(AutotuneDecision::Fault { reason })
+            }
+        }
+    }
+
+    fn plan_external_mutation_recovery_decision(
+        &mut self,
+        _observation: &AutotuneObservation,
+    ) -> Option<AutotuneDecision> {
+        let plan = self.last_plan_result.as_ref()?;
+        let has_kept_drift =
+            plan_has_deny_reason(plan, CandidateDenyReason::KeptActionNoLongerActive);
+        let has_active_drift =
+            plan_has_deny_reason(plan, CandidateDenyReason::ExternalMutationDetected);
+
+        if has_active_drift {
+            let decision = recovery_decision_for_active_experiment(
+                self.config.daemon_config.autotune.external_mutation_policy,
+            );
+            return Some(match decision {
+                ExternalMutationRecoveryDecision::RestoreExpectedState => {
+                    if let Some(experiment) = self.live_experiments.current_experiment() {
+                        AutotuneDecision::Revert {
+                            experiment_id: experiment.experiment_id.clone(),
+                            reason: format!(
+                                "external_mutation_detected: active experiment drifted; recovery_decision={}",
+                                decision.reason_code()
+                            ),
+                        }
+                    } else {
+                        AutotuneDecision::Fault {
+                            reason: "external_mutation_detected: active experiment drifted but no current experiment was available for rollback".to_owned(),
+                        }
+                    }
+                }
+                ExternalMutationRecoveryDecision::AcceptExternalMutationAndResync => {
+                    let abandoned = self.live_experiments.abandon_current_for_external_resync();
+                    self.controller.state.active_experiment = None;
+                    self.controller.state.phase = ControllerPhase::Observing;
+                    AutotuneDecision::Noop {
+                        reason: format!(
+                            "external_mutation_detected: accepted external active-experiment mutation and resynced controller state; abandoned_active_experiment={}",
+                            abandoned.is_some()
+                        ),
+                    }
+                }
+                ExternalMutationRecoveryDecision::FaultRequireManualRestore
+                | ExternalMutationRecoveryDecision::AbandonKeptAction => AutotuneDecision::Fault {
+                    reason: format!(
+                        "external_mutation_detected: active experiment drifted; recovery_decision={}",
+                        decision.reason_code()
+                    ),
+                },
+            });
+        }
+
+        if has_kept_drift {
+            let decision = recovery_decision_for_kept_action(
+                self.config.daemon_config.autotune.external_mutation_policy,
+            );
+            return Some(match decision {
+                ExternalMutationRecoveryDecision::AbandonKeptAction => {
+                    let abandoned = self
+                        .controller
+                        .active_profile_state
+                        .abandon_kept_actions_for_external_resync();
+                    AutotuneDecision::Noop {
+                        reason: format!(
+                            "kept_action_no_longer_active: accepted external mutation and abandoned kept action state; recovery_decision={} abandoned_kept_actions={abandoned}",
+                            decision.reason_code()
+                        ),
+                    }
+                }
+                ExternalMutationRecoveryDecision::FaultRequireManualRestore
+                | ExternalMutationRecoveryDecision::RestoreExpectedState
+                | ExternalMutationRecoveryDecision::AcceptExternalMutationAndResync => {
+                    AutotuneDecision::Fault {
+                        reason: format!(
+                            "kept_action_no_longer_active: kept action drifted; recovery_decision={}; run stutter daemon resync-state or restore manually",
+                            decision.reason_code()
+                        ),
+                    }
+                }
+            });
+        }
+
+        None
     }
 
     fn build_observation(&self) -> AutotuneObservation {
@@ -1382,6 +1545,9 @@ pub async fn run_autotune_controller_session(
     let (event_tx, mut event_rx) = mpsc::channel::<MonitorEvent>(1024);
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
     let mut runtime = AutotuneRuntime::new(runtime_config);
+    warn_if_unmanaged_privileged_worker_missing(&runtime.config)?;
+    let mut worker_handle = maybe_spawn_privileged_worker(&runtime.config)?;
+    let mut event_loop_iterations = 0u64;
 
     let (stop_task, _stop_tx_guard) = if duration.is_some() || external_stop.is_some() {
         (
@@ -1415,6 +1581,22 @@ pub async fn run_autotune_controller_session(
 
     while let Some(event) = event_rx.recv().await {
         runtime.on_event(event)?;
+        event_loop_iterations = event_loop_iterations.saturating_add(1);
+        if event_loop_iterations.is_multiple_of(30)
+            && let Some(handle) = worker_handle.as_mut()
+            && !handle.is_alive()
+        {
+            handle.restart()?;
+            if handle.restart_count()
+                > runtime
+                    .config
+                    .daemon_config
+                    .autotune
+                    .privileged_worker_restart_limit
+            {
+                anyhow::bail!("privileged_worker_crash_loop");
+            }
+        }
     }
 
     if let Some(stop_task) = stop_task {
@@ -1423,7 +1605,66 @@ pub async fn run_autotune_controller_session(
     }
 
     let monitor_result = monitor_task.await?;
+    if let Some(handle) = worker_handle.as_mut() {
+        handle.shutdown_gracefully(3_000)?;
+    }
     finish_autotune_controller_session(&mut runtime, monitor_result)
+}
+
+fn maybe_spawn_privileged_worker(
+    config: &AutotuneRuntimeConfig,
+) -> anyhow::Result<Option<PrivilegedWorkerHandle>> {
+    if config.mode() != DaemonMode::ApplyMediumRisk
+        || config.simulate_action_effects
+        || config
+            .daemon_config
+            .autotune
+            .unsafe_in_process_privileged_worker
+        || !config.daemon_config.autotune.manage_privileged_worker
+    {
+        return Ok(None);
+    }
+
+    let socket_path = config
+        .daemon_config
+        .autotune
+        .privileged_worker_socket
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(default_privileged_worker_socket_path)?;
+    PrivilegedWorkerHandle::spawn(&socket_path).map(Some)
+}
+
+fn warn_if_unmanaged_privileged_worker_missing(
+    config: &AutotuneRuntimeConfig,
+) -> anyhow::Result<()> {
+    if config.mode() != DaemonMode::ApplyMediumRisk
+        || config.simulate_action_effects
+        || config
+            .daemon_config
+            .autotune
+            .unsafe_in_process_privileged_worker
+        || config.daemon_config.autotune.manage_privileged_worker
+    {
+        return Ok(());
+    }
+
+    let socket_path = config
+        .daemon_config
+        .autotune
+        .privileged_worker_socket
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(default_privileged_worker_socket_path)?;
+    if !socket_path.exists() {
+        let message = format!(
+            "ApplyMediumRisk is configured with managed privileged worker disabled, but socket {} is missing; start it with: stutter privileged-worker --socket {}",
+            socket_path.display(),
+            socket_path.display()
+        );
+        log::warn!("{message}");
+    }
+    Ok(())
 }
 
 fn finish_autotune_controller_session(
@@ -1791,7 +2032,7 @@ mod tests {
         let mut runtime = AutotuneRuntime::new(config);
         let observation = high_quality_game_observation_with_focus_confidence(0.95);
         let candidate = CandidateAction::fake(
-            crate::actions::ActionId("fake-medium".to_owned()),
+            crate::actions::ActionId::new("fake-medium".to_owned()),
             SafetyClass::ReversibleMediumRisk,
         );
 
@@ -1896,7 +2137,7 @@ mod tests {
     #[test]
     fn top_denied_reason_for_plan_prefers_deny_reason_enum() {
         let candidate = CandidateAction::fake(
-            crate::actions::ActionId("fake-noop".to_owned()),
+            crate::actions::ActionId::new("fake-noop".to_owned()),
             SafetyClass::ObserveOnly,
         );
         let descriptor = candidate.descriptor();
@@ -2012,7 +2253,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_reports_active_low_risk_experiment_state() {
+    fn runtime_reports_active_experiment_state() {
         let mut runtime = runtime();
 
         assert!(!runtime.has_active_experiment());
@@ -2074,7 +2315,7 @@ mod tests {
         runtime.last_observation = observation.clone();
 
         let candidate = CandidateAction::fake(
-            crate::actions::ActionId("fake-low-risk-stop".to_owned()),
+            crate::actions::ActionId::new("fake-low-risk-stop".to_owned()),
             SafetyClass::ReversibleLowRisk,
         );
 

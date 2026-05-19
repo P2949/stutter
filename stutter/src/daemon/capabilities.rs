@@ -15,6 +15,7 @@ pub struct DaemonCapabilities {
     pub ionice_available: bool,
     pub irq_affinity_available: bool,
     pub gpu_sysfs_available: bool,
+    pub privileged_worker_socket_reachable: Option<bool>,
 }
 
 impl DaemonCapabilities {
@@ -96,6 +97,10 @@ impl CapabilityProbe {
             ionice_available: cfg!(target_os = "linux"),
             irq_affinity_available: self.proc_path("irq/default_smp_affinity").is_file(),
             gpu_sysfs_available: self.sys_path("class/drm").is_dir(),
+            privileged_worker_socket_reachable:
+                crate::daemon::privilege::default_privileged_worker_socket_path()
+                    .ok()
+                    .map(|path| path.exists()),
         }
     }
 

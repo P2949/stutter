@@ -2,8 +2,9 @@ use anyhow::Context;
 use serde::Serialize;
 
 use crate::{
-    advisor, audit, cli, commands::input, community_rules, config_file, doctor, irq_inspect,
-    metadata, probe_catalog, process_tree, profiles, tune, watch,
+    advisor, audit, cli, commands::input, community_rules, config_file, display_path_compare,
+    doctor, drm_fence_tracepoints, irq_inspect, metadata, probe_catalog, process_tree, profiles,
+    tune, watch, wayland_probe,
 };
 
 pub fn run_version_command(input: input::VersionCommandInput) -> anyhow::Result<()> {
@@ -148,6 +149,41 @@ pub fn run_profile_template_command(
 
 pub fn run_inspect_irqs_command(input: input::InspectIrqsCommandInput) -> anyhow::Result<()> {
     irq_inspect::run_inspect_irqs(input.json, &input.filter, input.top)
+}
+
+pub fn run_inspect_drm_tracepoints_command(
+    input: input::InspectDrmTracepointsCommandInput,
+) -> anyhow::Result<()> {
+    let discovery = input
+        .events_root
+        .as_deref()
+        .map(drm_fence_tracepoints::discover_drm_fence_tracepoints)
+        .unwrap_or_else(drm_fence_tracepoints::discover_drm_fence_tracepoints_default);
+    if input.json {
+        println!("{}", serde_json::to_string_pretty(&discovery)?);
+    } else {
+        print!("{}", drm_fence_tracepoints::render_text(&discovery));
+    }
+    Ok(())
+}
+
+pub fn run_display_path_compare_command(
+    input: input::DisplayPathCompareCommandInput,
+) -> anyhow::Result<()> {
+    display_path_compare::run_display_path_compare(display_path_compare::DisplayPathCompareInput {
+        baseline: input.baseline,
+        test: input.test,
+        json: input.json,
+    })
+}
+
+pub fn run_wayland_probe_command(input: input::WaylandProbeCommandInput) -> anyhow::Result<()> {
+    wayland_probe::run_wayland_probe_command(wayland_probe::WaylandProbeCommandInput {
+        duration: input.duration,
+        output: input.output,
+        fullscreen: input.fullscreen,
+        out_dir: input.out_dir,
+    })
 }
 
 pub fn run_completions_command(input: input::CompletionsCommandInput) -> anyhow::Result<()> {

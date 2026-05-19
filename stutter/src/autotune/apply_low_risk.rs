@@ -1061,7 +1061,7 @@ mod tests {
     async fn run_apply_low_risk_candidate_rejects_non_profile_candidates() {
         let err = run_apply_low_risk_candidate(
             CandidateAction::fake(
-                ActionId("fake-low-risk".to_owned()),
+                ActionId::new("fake-low-risk".to_owned()),
                 SafetyClass::ReversibleLowRisk,
             ),
             Duration::ZERO,
@@ -1098,6 +1098,7 @@ mod tests {
             foreground_max_stale_ms: 5_000,
             allow_system_wide_suggestions: false,
             allow_medium_risk: false,
+            high_risk_dry_run: false,
         };
 
         let err = apply_low_risk_command(&input)
@@ -1398,7 +1399,7 @@ mod tests {
 
     impl TuningAction for TestAction {
         fn id(&self) -> ActionId {
-            ActionId(self.id.to_owned())
+            ActionId::new(self.id.to_owned())
         }
 
         fn describe(&self) -> String {

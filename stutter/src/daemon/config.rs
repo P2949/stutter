@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     actions::SafetyClass,
-    autotune::workload_policy::DaemonWorkloadPolicyConfig,
+    autotune::{
+        external_mutation::ExternalMutationPolicy, workload_policy::DaemonWorkloadPolicyConfig,
+    },
     daemon::{
         health::SystemHealthThresholds,
         policy::{ActionSource, DaemonMode},
@@ -229,6 +231,8 @@ pub struct DaemonSafetyConfig {
     pub enabled_action_families: BTreeSet<String>,
     pub denied_action_families: BTreeSet<String>,
     pub cgroup_targets: DaemonCgroupTargetsConfig,
+    #[serde(default)]
+    pub system_wide_allowlist: DaemonSystemWideAllowlistConfig,
     pub allow_system_wide_suggestions: bool,
     pub allow_system_wide_apply: bool,
     pub allow_high_risk: bool,
@@ -247,6 +251,7 @@ impl Default for DaemonSafetyConfig {
             enabled_action_families: BTreeSet::new(),
             denied_action_families: BTreeSet::new(),
             cgroup_targets: DaemonCgroupTargetsConfig::default(),
+            system_wide_allowlist: DaemonSystemWideAllowlistConfig::default(),
             allow_system_wide_suggestions: false,
             allow_system_wide_apply: false,
             allow_high_risk: false,
@@ -274,6 +279,62 @@ pub struct DaemonCgroupTargetsConfig {
     pub background_cgroup: Option<PathBuf>,
     pub game_cgroup: Option<PathBuf>,
     pub compile_cgroup: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DaemonSystemWideAllowlistConfig {
+    pub cpu_policies: BTreeSet<String>,
+    pub gpu_cards: BTreeSet<String>,
+    pub gpu_pci_ids: BTreeSet<String>,
+    pub irq_devices: BTreeSet<String>,
+    pub vm_knobs: BTreeSet<String>,
+}
+
+impl DaemonSystemWideAllowlistConfig {
+    pub fn allows_gpu(&self, card: &str, pci_id: Option<&str>) -> bool {
+        self.gpu_cards.contains(card)
+            || pci_id.is_some_and(|pci_id| {
+                self.gpu_pci_ids
+                    .iter()
+                    .any(|allowed| wildcard_match(allowed, pci_id))
+            })
+    }
+
+    pub fn allows_irq_device(&self, device: &str) -> bool {
+        let device = device.to_ascii_lowercase();
+        self.irq_devices
+            .iter()
+            .any(|allowed| device.contains(&allowed.to_ascii_lowercase()))
+    }
+
+    pub fn allows_vm_knob(&self, path: &Path) -> bool {
+        let normalized = normalize_vm_knob_path(path);
+        self.vm_knobs
+            .iter()
+            .any(|allowed| normalize_vm_knob_text(allowed) == normalized)
+    }
+}
+
+fn wildcard_match(pattern: &str, value: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return value.starts_with(prefix);
+    }
+    pattern == value
+}
+
+fn normalize_vm_knob_path(path: &Path) -> String {
+    normalize_vm_knob_text(&path.to_string_lossy())
+}
+
+fn normalize_vm_knob_text(path: &str) -> String {
+    path.trim()
+        .trim_start_matches('/')
+        .strip_prefix("proc/sys/")
+        .unwrap_or_else(|| path.trim().trim_start_matches('/'))
+        .replace('.', "/")
 }
 
 impl DaemonCgroupTargetsConfig {
@@ -448,6 +509,14 @@ pub struct DaemonAutotuneConfig {
     pub allow_cpu_power_on_battery: bool,
     pub privileged_worker_socket: Option<PathBuf>,
     pub unsafe_in_process_privileged_worker: bool,
+    #[serde(default = "default_manage_privileged_worker")]
+    pub manage_privileged_worker: bool,
+    #[serde(default = "default_privileged_worker_restart_limit")]
+    pub privileged_worker_restart_limit: u32,
+    #[serde(default)]
+    pub external_mutation_policy: ExternalMutationPolicy,
+    #[serde(default)]
+    pub high_risk_dry_run: bool,
     pub workload_policy: DaemonWorkloadPolicyConfig,
     pub confidence: DaemonCandidateConfidenceConfig,
 }
@@ -462,10 +531,22 @@ impl Default for DaemonAutotuneConfig {
             allow_cpu_power_on_battery: false,
             privileged_worker_socket: None,
             unsafe_in_process_privileged_worker: false,
+            manage_privileged_worker: default_manage_privileged_worker(),
+            privileged_worker_restart_limit: default_privileged_worker_restart_limit(),
+            external_mutation_policy: ExternalMutationPolicy::default(),
+            high_risk_dry_run: false,
             workload_policy: DaemonWorkloadPolicyConfig::default(),
             confidence: DaemonCandidateConfidenceConfig::default(),
         }
     }
+}
+
+fn default_manage_privileged_worker() -> bool {
+    true
+}
+
+fn default_privileged_worker_restart_limit() -> u32 {
+    3
 }
 
 #[cfg(test)]

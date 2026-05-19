@@ -124,6 +124,10 @@ fn apply_layer_with_provenance(
     apply_mangohud_layer(&mut config.mangohud, &layer);
     apply_cpu_perf_layer(&mut config.cpu_perf, &layer);
     apply_runtime_slices_layer(&mut config.runtime_slices, &layer);
+    apply_kms_timing_layer(&mut config.kms_timing, &layer);
+    apply_drm_fence_layer(&mut config.drm_fence, &layer);
+    apply_wayland_presentation_layer(&mut config.wayland_presentation, &layer);
+    apply_display_path_layer(&mut config.display_path, &layer);
     apply_ebpf_sizing_layer(&mut config.ebpf_sizing, &layer);
     apply_ui_layer(&mut config.ui, &layer);
     apply_remote_layer(&mut config.remote, &layer);
@@ -226,6 +230,86 @@ fn record_layer_provenance(
         &layer.runtime_slices,
         provenance,
         "runtime_slices.enabled",
+        source,
+    );
+    record_if_present(&layer.kms_timing, provenance, "probes.kms_timing", source);
+    record_if_present(
+        &layer.drm_fence_latency,
+        provenance,
+        "probes.drm_fence_latency",
+        source,
+    );
+    record_if_present(
+        &layer.wayland_presentation,
+        provenance,
+        "probes.wayland_presentation",
+        source,
+    );
+    record_if_present(
+        &layer.kms_drm_card,
+        provenance,
+        "kms_timing.drm_card",
+        source,
+    );
+    record_if_present(
+        &layer.kms_connector,
+        provenance,
+        "kms_timing.connector",
+        source,
+    );
+    record_if_present(&layer.kms_crtc, provenance, "kms_timing.crtc", source);
+    record_if_present(
+        &layer.drm_fence_render_card,
+        provenance,
+        "drm_fence.render_card",
+        source,
+    );
+    record_if_present(
+        &layer.drm_fence_display_card,
+        provenance,
+        "drm_fence.display_card",
+        source,
+    );
+    record_if_present(
+        &layer.drm_fence_driver_filter,
+        provenance,
+        "drm_fence.driver_filter",
+        source,
+    );
+    record_if_present(
+        &layer.wayland_presentation_log,
+        provenance,
+        "wayland_presentation.log_path",
+        source,
+    );
+    record_if_present(
+        &layer.wayland_presentation_source,
+        provenance,
+        "wayland_presentation.source",
+        source,
+    );
+    record_if_present(
+        &layer.display_path_label,
+        provenance,
+        "display_path.label",
+        source,
+    );
+    record_if_present(
+        &layer.display_render_gpu,
+        provenance,
+        "display_path.render_gpu",
+        source,
+    );
+    record_if_present(
+        &layer.display_scanout_gpu,
+        provenance,
+        "display_path.scanout_gpu",
+        source,
+    );
+    record_if_present(
+        &layer.display_connector,
+        provenance,
+        "display_path.connector",
         source,
     );
 
@@ -536,6 +620,15 @@ fn apply_probe_layer(config: &mut ProbeConfig, layer: &MonitorConfigLayer) {
     if let Some(value) = layer.runtime_slices {
         config.runtime_slices = value;
     }
+    if let Some(value) = layer.kms_timing {
+        config.kms_timing = value;
+    }
+    if let Some(value) = layer.drm_fence_latency {
+        config.drm_fence_latency = value;
+    }
+    if let Some(value) = layer.wayland_presentation {
+        config.wayland_presentation = value;
+    }
 }
 
 fn apply_recording_layer(config: &mut RecordingConfig, layer: &MonitorConfigLayer) {
@@ -712,6 +805,66 @@ fn apply_runtime_slices_layer(
     }
     if let Some(value) = layer.runtime_slices_max_tasks {
         config.max_tasks = value;
+    }
+}
+
+fn apply_kms_timing_layer(
+    config: &mut crate::config::model::KmsTimingConfig,
+    layer: &MonitorConfigLayer,
+) {
+    if let Some(value) = &layer.kms_drm_card {
+        config.drm_card = value.clone();
+    }
+    if let Some(value) = &layer.kms_connector {
+        config.connector = value.clone();
+    }
+    if let Some(value) = layer.kms_crtc {
+        config.crtc = value;
+    }
+}
+
+fn apply_drm_fence_layer(
+    config: &mut crate::config::model::DrmFenceConfig,
+    layer: &MonitorConfigLayer,
+) {
+    if let Some(value) = &layer.drm_fence_render_card {
+        config.render_card = value.clone();
+    }
+    if let Some(value) = &layer.drm_fence_display_card {
+        config.display_card = value.clone();
+    }
+    if let Some(value) = &layer.drm_fence_driver_filter {
+        config.driver_filter = value.clone();
+    }
+}
+
+fn apply_wayland_presentation_layer(
+    config: &mut crate::config::model::WaylandPresentationConfig,
+    layer: &MonitorConfigLayer,
+) {
+    if let Some(value) = &layer.wayland_presentation_log {
+        config.log_path = value.clone();
+    }
+    if let Some(value) = layer.wayland_presentation_source {
+        config.source = value;
+    }
+}
+
+fn apply_display_path_layer(
+    config: &mut crate::config::model::DisplayPathConfig,
+    layer: &MonitorConfigLayer,
+) {
+    if let Some(value) = &layer.display_path_label {
+        config.label = value.clone();
+    }
+    if let Some(value) = &layer.display_render_gpu {
+        config.render_gpu = value.clone();
+    }
+    if let Some(value) = &layer.display_scanout_gpu {
+        config.scanout_gpu = value.clone();
+    }
+    if let Some(value) = &layer.display_connector {
+        config.connector = value.clone();
     }
 }
 

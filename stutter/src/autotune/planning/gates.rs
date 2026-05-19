@@ -1,8 +1,20 @@
-#![allow(dead_code)] // Transitional gate extraction target.
+//! Candidate safety and eligibility gate helpers.
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct GateDecision {
-    pub passed: bool,
-    pub reason_code: Option<String>,
-    pub message: Option<String>,
+use super::candidate::CandidateAction;
+use crate::actions::SafetyClass;
+
+impl CandidateAction {
+    pub fn is_high_risk_system_adjacent(&self) -> bool {
+        let descriptor = self.descriptor();
+        descriptor.touches_system_wide_state || descriptor.safety_class == SafetyClass::HighRisk
+    }
+
+    pub fn manual_only_reason(&self) -> Option<String> {
+        self.is_high_risk_system_adjacent().then(|| {
+            format!(
+                "manual-only high-risk/system-adjacent candidate; autonomous apply is disabled for action_kind={}",
+                self.action_kind()
+            )
+        })
+    }
 }

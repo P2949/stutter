@@ -165,7 +165,7 @@ impl CpuAffinityProfileAction {
 
 impl TuningAction for CpuAffinityProfileAction {
     fn id(&self) -> ActionId {
-        ActionId(format!("cpu-affinity-profile:{}", self.profile.name))
+        ActionId::new(format!("cpu-affinity-profile:{}", self.profile.name))
     }
 
     fn describe(&self) -> String {
@@ -335,7 +335,7 @@ mod tests {
     fn action_id_includes_profile_name() {
         assert_eq!(
             action().id(),
-            ActionId("cpu-affinity-profile:test-profile".to_owned())
+            ActionId::new("cpu-affinity-profile:test-profile".to_owned())
         );
     }
 

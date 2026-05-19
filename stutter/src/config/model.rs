@@ -1,6 +1,8 @@
 use std::{path::PathBuf, time::Duration};
 
-use crate::config::{CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX};
+use crate::config::{
+    CsvStreamTarget, FocusSource, ForegroundSource, TARGET_PIDS_MAX, WaylandPresentationSource,
+};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MonitorConfig {
@@ -18,6 +20,10 @@ pub struct MonitorConfig {
     pub mangohud: MangoHudConfig,
     pub cpu_perf: CpuPerfConfig,
     pub runtime_slices: RuntimeSlicesConfig,
+    pub kms_timing: KmsTimingConfig,
+    pub drm_fence: DrmFenceConfig,
+    pub wayland_presentation: WaylandPresentationConfig,
+    pub display_path: DisplayPathConfig,
     pub ebpf_sizing: EbpfSizingConfig,
     pub ui: UiConfig,
     pub remote: RemoteConfig,
@@ -84,6 +90,37 @@ pub struct ProbeConfig {
     pub block_io: bool,
     pub stat_wait: bool,
     pub runtime_slices: bool,
+    pub kms_timing: bool,
+    pub drm_fence_latency: bool,
+    pub wayland_presentation: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct KmsTimingConfig {
+    pub drm_card: Option<String>,
+    pub connector: Option<String>,
+    pub crtc: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DrmFenceConfig {
+    pub render_card: Option<String>,
+    pub display_card: Option<String>,
+    pub driver_filter: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct WaylandPresentationConfig {
+    pub log_path: Option<PathBuf>,
+    pub source: WaylandPresentationSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DisplayPathConfig {
+    pub label: Option<String>,
+    pub render_gpu: Option<String>,
+    pub scanout_gpu: Option<String>,
+    pub connector: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

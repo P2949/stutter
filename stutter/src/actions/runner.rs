@@ -416,7 +416,7 @@ where
         schema_version: 1,
         unix_nanos: started_unix_nanos,
         command: command.to_owned(),
-        action_id: Some(action_id.0.clone()),
+        action_id: Some(action_id.as_str().to_owned()),
         safety_class: Some(safety_class.clone()),
         dry_run,
         success: false,
@@ -760,7 +760,7 @@ mod tests {
 
     impl TuningAction for TestAction<'_> {
         fn id(&self) -> ActionId {
-            ActionId("test-action".to_owned())
+            ActionId::new("test-action".to_owned())
         }
 
         fn describe(&self) -> String {
@@ -861,6 +861,7 @@ mod tests {
             ionice_available: true,
             irq_affinity_available: true,
             gpu_sysfs_available: true,
+            privileged_worker_socket_reachable: Some(true),
         }
     }
 

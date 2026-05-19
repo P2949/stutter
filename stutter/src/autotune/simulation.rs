@@ -132,7 +132,7 @@ fn simulation_runtime_config(
     })
     .with_min_focus_confidence(0.70)
     .with_simulated_candidates(vec![CandidateAction::fake(
-        ActionId("cpu-affinity-profile:simulation-low-risk".to_owned()),
+        ActionId::new("cpu-affinity-profile:simulation-low-risk".to_owned()),
         candidate_safety_class,
     )])
     .with_simulated_action_effects()

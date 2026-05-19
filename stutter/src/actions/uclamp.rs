@@ -267,7 +267,7 @@ impl UclampAction {
 
 impl TuningAction for UclampAction {
     fn id(&self) -> ActionId {
-        ActionId(format!(
+        ActionId::new(format!(
             "uclamp:set:min={}:max={}:targets:{}",
             optional_uclamp_value(self.values.sched_util_min),
             optional_uclamp_value(self.values.sched_util_max),
@@ -765,7 +765,7 @@ mod tests {
 
         assert_eq!(
             action.id(),
-            ActionId("uclamp:set:min=128:max=keep:targets:1".to_owned())
+            ActionId::new("uclamp:set:min=128:max=keep:targets:1".to_owned())
         );
         assert_eq!(
             action.describe(),

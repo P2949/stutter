@@ -430,7 +430,7 @@ fn unsafe_remote_apply_rejected() -> bool {
 
 fn acceptance_apply_descriptor() -> ActionDescriptor {
     ActionDescriptor {
-        action_id: ActionId("acceptance-low-risk-candidate".to_owned()),
+        action_id: ActionId::new("acceptance-low-risk-candidate".to_owned()),
         action_kind: "cpu_affinity_profile".to_owned(),
         safety_class: SafetyClass::ReversibleLowRisk,
         effect_scope: ActionEffectScope::LocalProcessTree,

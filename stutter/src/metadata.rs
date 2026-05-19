@@ -36,6 +36,9 @@ pub fn build_feature_labels() -> Vec<&'static str> {
     if cfg!(feature = "otel") {
         features.push("otel");
     }
+    if cfg!(feature = "wayland-probe") {
+        features.push("wayland-probe");
+    }
     if features.is_empty() {
         features.push("default");
     }

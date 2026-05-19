@@ -83,12 +83,13 @@ pub(crate) use html::task_html_row;
 pub use html::write_html_report;
 pub(crate) use load::{load_report_input, load_report_session};
 pub use model::{
-    ArtifactsSummary, DataQualityLevel, DataQualitySummary, FocusReportSummary,
-    ForegroundReportSummary, FrameOutlierView, FramePacingSummary, HtmlChartArtifacts,
-    HtmlReportModel, PressureKind, PressurePeakWindow, PressureTimelineCoverage,
-    PressureTimelineSummary, PressureWindow, RegressionMetric, ReportAnalysisJson,
-    RuntimeSliceAnalysisSummary, RuntimeThreadSummary, SpikeClusterAnalysis, SpikeClusterSource,
-    SpikeDensityBucket, TaskHtmlRow,
+    ArtifactsSummary, DataQualityLevel, DataQualitySummary, DrmFenceTimingSummary,
+    DrmFenceWaitSummary, FocusReportSummary, ForegroundReportSummary, FrameOutlierView,
+    FramePacingSummary, HtmlChartArtifacts, HtmlReportModel, KmsTimingSummary, PressureKind,
+    PressurePeakWindow, PressureTimelineCoverage, PressureTimelineSummary, PressureWindow,
+    RegressionMetric, ReportAnalysisJson, RuntimeSliceAnalysisSummary, RuntimeThreadSummary,
+    ScanoutWindowEstimate, SpikeClusterAnalysis, SpikeClusterSource, SpikeDensityBucket,
+    TaskHtmlRow, WaylandPresentationSummary,
 };
 pub(crate) use model::{
     ReportBuildResult, ReportInputModel, SpikeClusterCandidate, TextReportCorrelationSection,
@@ -136,6 +137,120 @@ mod tests {
             public_child_modules.is_empty(),
             "report child modules must stay crate-private and be exposed intentionally through api::report: {public_child_modules:?}"
         );
+    }
+
+    #[test]
+    fn display_timing_summaries_handle_empty_optional_streams() {
+        let kms = crate::report::analysis::build_kms_timing_summary(&[]);
+        let fence = crate::report::analysis::build_drm_fence_timing_summary(&[], &[], &[]);
+        let wayland = crate::report::analysis::build_wayland_presentation_summary(&[], &[], &[]);
+
+        assert_eq!(kms.event_count, 0);
+        assert_eq!(kms.notes, vec!["no KMS timing events present"]);
+        assert_eq!(fence.event_count, 0);
+        assert_eq!(fence.confidence, "missing");
+        assert_eq!(wayland.event_count, 0);
+        assert_eq!(
+            wayland.notes,
+            vec!["no Wayland presentation events present"]
+        );
+    }
+
+    #[test]
+    fn display_timing_summaries_compute_basic_percentiles() {
+        let kms_events = vec![
+            crate::recorder::KmsFlipEventRecord {
+                elapsed_ms: 1_000,
+                duration_ns: Some(2_000_000),
+                done_ns: Some(1_000_000_000),
+                ..Default::default()
+            },
+            crate::recorder::KmsFlipEventRecord {
+                elapsed_ms: 1_016,
+                duration_ns: Some(4_000_000),
+                done_ns: Some(1_016_666_667),
+                ..Default::default()
+            },
+        ];
+        let fence_events = vec![crate::recorder::DrmFenceEventRecord {
+            elapsed_ms: 1_001,
+            duration_ns: Some(3_000_000),
+            source: "i915".to_owned(),
+            gpu_role: Some("display".to_owned()),
+            importer_driver: Some("i915".to_owned()),
+            exporter_driver: Some("amdgpu".to_owned()),
+            context: Some(7),
+            seqno: Some(9),
+            correlation_basis: "context_seqno".to_owned(),
+            confidence: "high".to_owned(),
+            ..Default::default()
+        }];
+        let frame_events = vec![
+            crate::recorder::FrameEvent {
+                elapsed_ms: 980,
+                frametime_ms: 16.0,
+            },
+            crate::recorder::FrameEvent {
+                elapsed_ms: 1_000,
+                frametime_ms: 40.0,
+            },
+        ];
+        let wayland_events = vec![crate::recorder::WaylandPresentationEventRecord {
+            elapsed_ms: 1_002,
+            source: "gamescope".to_owned(),
+            surface_role: Some("game".to_owned()),
+            commit_to_present_ns: Some(4_000_000),
+            presented_ns: Some(10),
+            zero_copy: Some(true),
+            output_name: Some("DP-1".to_owned()),
+            ..Default::default()
+        }];
+
+        let kms = crate::report::analysis::build_kms_timing_summary(&kms_events);
+        let fence = crate::report::analysis::build_drm_fence_timing_summary(
+            &fence_events,
+            &kms_events,
+            &frame_events,
+        );
+        let wayland = crate::report::analysis::build_wayland_presentation_summary(
+            &wayland_events,
+            &kms_events,
+            &frame_events,
+        );
+
+        assert_eq!(kms.duration_count, 2);
+        assert_eq!(kms.median_flip_ms, Some(3.0));
+        assert_eq!(
+            kms.scanout_window_estimate.refresh_period_ns,
+            Some(16_666_667)
+        );
+        assert_eq!(
+            kms.scanout_window_estimate
+                .first_estimated_top_of_screen_visible_ns,
+            Some(1_000_000_000)
+        );
+        assert!(
+            kms.scanout_window_estimate
+                .notes
+                .iter()
+                .any(|note| note.contains("not photon latency"))
+        );
+        assert_eq!(fence.wait_interval_count, 1);
+        assert_eq!(fence.max_wait_ms, Some(3.0));
+        assert_eq!(fence.display_gpu_wait_count, 1);
+        assert_eq!(fence.cross_gpu_candidate_count, 1);
+        assert_eq!(fence.waits_near_frame_outliers, 1);
+        assert_eq!(fence.waits_near_kms_delays, 1);
+        assert_eq!(fence.top_waits.len(), 1);
+        assert_eq!(wayland.presented_count, 1);
+        assert_eq!(wayland.zero_copy_ratio, Some(1.0));
+        assert_eq!(wayland.p99_commit_to_present_ms, Some(4.0));
+        assert_eq!(wayland.outputs_seen, vec!["DP-1"]);
+        assert_eq!(wayland.source_counts.get("gamescope"), Some(&1));
+        assert_eq!(wayland.surface_role_counts.get("game"), Some(&1));
+        assert_eq!(wayland.delays_near_frame_outliers, 1);
+        assert_eq!(wayland.delays_near_kms_delays, 1);
+        assert_eq!(wayland.compositor_queue_candidate_count, 1);
     }
 
     fn foreground_event(
@@ -897,6 +1012,28 @@ mod tests {
     }
 
     #[test]
+    fn data_quality_warns_on_degraded_drm_fence_evidence() {
+        let session = minimal_session_for_report_test();
+        let validation = crate::session_io::RunValidationReport {
+            warnings: vec![
+                "DRM fence events contain only signal/marker evidence; wait duration attribution is low confidence"
+                    .to_owned(),
+            ],
+            ..Default::default()
+        };
+
+        let summary = data_quality_summary(&session, &validation);
+
+        assert_eq!(summary.level, DataQualityLevel::Medium);
+        assert!(
+            summary
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("DRM fence latency evidence"))
+        );
+    }
+
+    #[test]
     fn data_quality_warns_on_truncated_spikes() {
         let mut session = minimal_session_for_report_test();
         session.core.spike_events_truncated = true;
@@ -1131,6 +1268,9 @@ mod tests {
             data_quality: data_quality_summary(&session, &validation),
             focus_summary: FocusReportSummary::default(),
             foreground_summary: ForegroundReportSummary::default(),
+            kms_timing: KmsTimingSummary::default(),
+            drm_fence_timing: DrmFenceTimingSummary::default(),
+            wayland_presentation: WaylandPresentationSummary::default(),
         };
 
         let value = serde_json::to_value(&analysis).unwrap();
@@ -1215,6 +1355,9 @@ mod tests {
             data_quality: data_quality_summary(&session, &validation),
             focus_summary: FocusReportSummary::default(),
             foreground_summary: ForegroundReportSummary::default(),
+            kms_timing: KmsTimingSummary::default(),
+            drm_fence_timing: DrmFenceTimingSummary::default(),
+            wayland_presentation: WaylandPresentationSummary::default(),
         };
 
         build_html_report_model(

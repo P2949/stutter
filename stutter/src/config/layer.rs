@@ -1,7 +1,10 @@
 use std::{path::PathBuf, time::Duration};
 
 use crate::{
-    config::{CsvStreamTarget, FocusSource, ForegroundSource, model::MonitorConfig},
+    config::{
+        CsvStreamTarget, FocusSource, ForegroundSource, WaylandPresentationSource,
+        model::MonitorConfig,
+    },
     config_file::UserConfigFile,
     presets::PresetDefaults,
 };
@@ -33,6 +36,9 @@ pub struct MonitorConfigLayer {
     pub block_io: Option<bool>,
     pub stat_wait: Option<bool>,
     pub runtime_slices: Option<bool>,
+    pub kms_timing: Option<bool>,
+    pub drm_fence_latency: Option<bool>,
+    pub wayland_presentation: Option<bool>,
 
     pub run_name: Option<Option<String>>,
     pub output_dir: Option<Option<PathBuf>>,
@@ -87,6 +93,18 @@ pub struct MonitorConfigLayer {
     pub cpu_perf_cache_refs: Option<bool>,
 
     pub runtime_slices_max_tasks: Option<usize>,
+    pub kms_drm_card: Option<Option<String>>,
+    pub kms_connector: Option<Option<String>>,
+    pub kms_crtc: Option<Option<u32>>,
+    pub drm_fence_render_card: Option<Option<String>>,
+    pub drm_fence_display_card: Option<Option<String>>,
+    pub drm_fence_driver_filter: Option<Option<String>>,
+    pub wayland_presentation_log: Option<Option<PathBuf>>,
+    pub wayland_presentation_source: Option<WaylandPresentationSource>,
+    pub display_path_label: Option<Option<String>>,
+    pub display_render_gpu: Option<Option<String>>,
+    pub display_scanout_gpu: Option<Option<String>>,
+    pub display_connector: Option<Option<String>>,
 
     pub ringbuf_size_kb: Option<Option<u32>>,
     pub wakeup_map_factor: Option<Option<u32>>,
@@ -122,6 +140,9 @@ impl MonitorConfigLayer {
             block_io: Some(config.probes.block_io),
             stat_wait: Some(config.probes.stat_wait),
             runtime_slices: Some(config.probes.runtime_slices),
+            kms_timing: Some(config.probes.kms_timing),
+            drm_fence_latency: Some(config.probes.drm_fence_latency),
+            wayland_presentation: Some(config.probes.wayland_presentation),
 
             run_name: Some(config.recording.run_name),
             output_dir: Some(config.recording.output_dir),
@@ -176,6 +197,18 @@ impl MonitorConfigLayer {
             cpu_perf_cache_refs: Some(config.cpu_perf.collect_cache_refs),
 
             runtime_slices_max_tasks: Some(config.runtime_slices.max_tasks),
+            kms_drm_card: Some(config.kms_timing.drm_card),
+            kms_connector: Some(config.kms_timing.connector),
+            kms_crtc: Some(config.kms_timing.crtc),
+            drm_fence_render_card: Some(config.drm_fence.render_card),
+            drm_fence_display_card: Some(config.drm_fence.display_card),
+            drm_fence_driver_filter: Some(config.drm_fence.driver_filter),
+            wayland_presentation_log: Some(config.wayland_presentation.log_path),
+            wayland_presentation_source: Some(config.wayland_presentation.source),
+            display_path_label: Some(config.display_path.label),
+            display_render_gpu: Some(config.display_path.render_gpu),
+            display_scanout_gpu: Some(config.display_path.scanout_gpu),
+            display_connector: Some(config.display_path.connector),
 
             ringbuf_size_kb: Some(config.ebpf_sizing.ringbuf_size_kb),
             wakeup_map_factor: Some(config.ebpf_sizing.wakeup_map_factor),

@@ -13,9 +13,10 @@ use crate::{
         artifact_spec,
     },
     recorder::{
-        BlockIoRecord, CpuFreqRecord, FocusEvent, ForegroundEvent, FrameEvent, GpuSample,
-        IntervalRecord, IrqEventRecord, MetadataFile, MigrationEventRecord, RuntimeSliceRecord,
-        SESSION_SCHEMA_VERSION, ScxEvent, SessionFile, SpikeEvent, TreeEvent,
+        BlockIoRecord, CpuFreqRecord, DrmFenceEventRecord, FocusEvent, ForegroundEvent, FrameEvent,
+        GpuSample, IntervalRecord, IrqEventRecord, KmsFlipEventRecord, MetadataFile,
+        MigrationEventRecord, RuntimeSliceRecord, SESSION_SCHEMA_VERSION, ScxEvent, SessionFile,
+        SpikeEvent, TreeEvent, WaylandPresentationEventRecord,
     },
 };
 
@@ -38,6 +39,9 @@ pub struct RunArtifacts {
     pub runtime_slices: Vec<RuntimeSliceRecord>,
     pub focus_events: Vec<FocusEvent>,
     pub foreground_events: Vec<ForegroundEvent>,
+    pub kms_flip_events: Vec<KmsFlipEventRecord>,
+    pub drm_fence_events: Vec<DrmFenceEventRecord>,
+    pub wayland_presentation_events: Vec<WaylandPresentationEventRecord>,
 
     pub validation: RunValidationReport,
 }
@@ -411,6 +415,25 @@ pub fn load_run_artifacts(path: &Path, selection: ArtifactSelection) -> Result<R
         Vec::new()
     };
 
+    let kms_flip_events = if selection.contains(ArtifactKind::KmsFlipEvents) {
+        loader.load_optional_ndjson(ArtifactKind::KmsFlipEvents)?
+    } else {
+        Vec::new()
+    };
+
+    let drm_fence_events = if selection.contains(ArtifactKind::DrmFenceEvents) {
+        loader.load_optional_ndjson(ArtifactKind::DrmFenceEvents)?
+    } else {
+        Vec::new()
+    };
+
+    let wayland_presentation_events = if selection.contains(ArtifactKind::WaylandPresentationEvents)
+    {
+        loader.load_optional_ndjson(ArtifactKind::WaylandPresentationEvents)?
+    } else {
+        Vec::new()
+    };
+
     let mut artifacts = RunArtifacts {
         run_dir,
         session,
@@ -428,6 +451,9 @@ pub fn load_run_artifacts(path: &Path, selection: ArtifactSelection) -> Result<R
         runtime_slices,
         focus_events,
         foreground_events,
+        kms_flip_events,
+        drm_fence_events,
+        wayland_presentation_events,
         validation,
     };
 
@@ -461,6 +487,11 @@ fn expected_artifact_count_for_counter(
         ArtifactCounter::MigrationEvent => session.core.migration_event_count,
         ArtifactCounter::CpuFreqSample => session.core.cpu_freq_sample_count,
         ArtifactCounter::ScxEvent => Some(session.core.scx_event_count),
+        ArtifactCounter::KmsFlipEvent => Some(session.core.kms_flip_event_count),
+        ArtifactCounter::DrmFenceEvent => Some(session.core.drm_fence_event_count),
+        ArtifactCounter::WaylandPresentationEvent => {
+            Some(session.core.wayland_presentation_event_count)
+        }
     }
 }
 
@@ -635,6 +666,97 @@ fn check_consistency(artifacts: &mut RunArtifacts) {
         ArtifactKind::ForegroundEvents,
         artifacts.foreground_events.len(),
     );
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        ArtifactKind::KmsFlipEvents,
+        artifacts.kms_flip_events.len(),
+    );
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        ArtifactKind::DrmFenceEvents,
+        artifacts.drm_fence_events.len(),
+    );
+    check_present_loaded_artifact_count(
+        validation,
+        session,
+        ArtifactKind::WaylandPresentationEvents,
+        artifacts.wayland_presentation_events.len(),
+    );
+    check_drm_fence_data_quality(artifacts);
+}
+
+fn check_drm_fence_data_quality(artifacts: &mut RunArtifacts) {
+    if !artifacts.session.config.drm_fence_latency {
+        return;
+    }
+
+    let validation = &mut artifacts.validation;
+    let events = &artifacts.drm_fence_events;
+    let artifact_missing = validation
+        .missing_optional_files
+        .iter()
+        .any(|file| file == artifact_file_name(ArtifactKind::DrmFenceEvents));
+
+    if artifact_missing {
+        validation.warnings.push(
+            "DRM fence latency was requested but drm_fence_events.json is missing; tracepoints may have been unavailable"
+                .to_owned(),
+        );
+    }
+
+    if events.is_empty() {
+        validation.warnings.push(
+            "DRM fence latency was requested but no fence events were recorded; absence is not proof of no GPU wait"
+                .to_owned(),
+        );
+    } else {
+        if events
+            .iter()
+            .all(|event| event.event_kind != "wait_interval" || event.duration_ns.is_none())
+        {
+            validation.warnings.push(
+                "DRM fence events contain only signal/marker evidence; wait duration attribution is low confidence"
+                    .to_owned(),
+            );
+        }
+        if events
+            .iter()
+            .any(|event| event.correlation_basis == "unknown")
+        {
+            validation.warnings.push(
+                "DRM fence events include records without a stable context/seqno or timeline/seqno key"
+                    .to_owned(),
+            );
+        }
+        if events.iter().any(|event| {
+            event.source == "unknown" || matches!(event.gpu_role.as_deref(), None | Some("unknown"))
+        }) {
+            validation.warnings.push(
+                "DRM fence driver or GPU-role mapping is incomplete for some events".to_owned(),
+            );
+        }
+    }
+
+    if artifacts
+        .session
+        .config
+        .drm_fence_render_card
+        .as_deref()
+        .is_none_or(str::is_empty)
+        || artifacts
+            .session
+            .config
+            .drm_fence_display_card
+            .as_deref()
+            .is_none_or(str::is_empty)
+    {
+        validation.warnings.push(
+            "DRM fence render/display cards were not both identified; cross-GPU attribution is approximate"
+                .to_owned(),
+        );
+    }
 }
 
 impl RunArtifacts {
@@ -710,6 +832,56 @@ impl RunArtifacts {
         self.foreground_events = loader.load_optional_ndjson_filtered(
             ArtifactKind::ForegroundEvents,
             |r: &ForegroundEvent| windows.is_in_ms(r.elapsed_ms),
+        )?;
+
+        self.kms_flip_events = loader.load_optional_ndjson_filtered(
+            ArtifactKind::KmsFlipEvents,
+            |r: &KmsFlipEventRecord| {
+                if windows.is_in_ns(r.timestamp_ns) {
+                    return true;
+                }
+                if let (Some(start_ns), Some(done_ns)) = (r.request_ns, r.done_ns) {
+                    return windows
+                        .windows_ns
+                        .iter()
+                        .any(|(start, end)| done_ns >= *start && start_ns <= *end);
+                }
+                false
+            },
+        )?;
+
+        self.drm_fence_events = loader.load_optional_ndjson_filtered(
+            ArtifactKind::DrmFenceEvents,
+            |r: &DrmFenceEventRecord| {
+                if windows.is_in_ns(r.timestamp_ns) {
+                    return true;
+                }
+                if let (Some(start_ns), Some(done_ns)) = (r.wait_start_ns, r.wait_done_ns) {
+                    return windows
+                        .windows_ns
+                        .iter()
+                        .any(|(start, end)| done_ns >= *start && start_ns <= *end);
+                }
+                false
+            },
+        )?;
+
+        self.wayland_presentation_events = loader.load_optional_ndjson_filtered(
+            ArtifactKind::WaylandPresentationEvents,
+            |r: &WaylandPresentationEventRecord| {
+                if r.presented_ns
+                    .is_some_and(|presented| windows.is_in_ns(presented))
+                {
+                    return true;
+                }
+                if let (Some(commit_ns), Some(presented_ns)) = (r.commit_ns, r.presented_ns) {
+                    return windows
+                        .windows_ns
+                        .iter()
+                        .any(|(start, end)| presented_ns >= *start && commit_ns <= *end);
+                }
+                windows.is_in_ms(r.elapsed_ms)
+            },
         )?;
 
         Ok(())
@@ -867,8 +1039,64 @@ fn count_artifact_kind(kind: ArtifactKind, path: &Path) -> Result<usize> {
         ArtifactKind::RuntimeSlices => count_ndjson_file::<RuntimeSliceRecord>(path),
         ArtifactKind::FocusEvents => count_ndjson_file::<FocusEvent>(path),
         ArtifactKind::ForegroundEvents => count_ndjson_file::<ForegroundEvent>(path),
+        ArtifactKind::KmsFlipEvents => count_ndjson_file::<KmsFlipEventRecord>(path),
+        ArtifactKind::DrmFenceEvents => count_ndjson_file::<DrmFenceEventRecord>(path),
+        ArtifactKind::WaylandPresentationEvents => {
+            count_ndjson_file::<WaylandPresentationEventRecord>(path)
+        }
         ArtifactKind::Session | ArtifactKind::Metadata => {
             anyhow::bail!("artifact {:?} is not an NDJSON stream", kind)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drm_fence_requested_without_stable_waits_adds_validation_warnings() {
+        let mut artifacts = RunArtifacts::default();
+        artifacts.session.config.drm_fence_latency = true;
+        artifacts.session.config.drm_fence_render_card = Some("card1".to_owned());
+        artifacts.session.config.drm_fence_display_card = Some("card0".to_owned());
+        artifacts.drm_fence_events.push(DrmFenceEventRecord {
+            source: "amdgpu".to_owned(),
+            event_kind: "signal".to_owned(),
+            gpu_role: Some("render".to_owned()),
+            correlation_basis: "unknown".to_owned(),
+            ..Default::default()
+        });
+
+        check_drm_fence_data_quality(&mut artifacts);
+
+        assert!(
+            artifacts
+                .validation
+                .warnings
+                .iter()
+                .any(|warning| { warning.contains("only signal/marker evidence") })
+        );
+        assert!(
+            artifacts
+                .validation
+                .warnings
+                .iter()
+                .any(|warning| { warning.contains("without a stable context/seqno") })
+        );
+    }
+
+    #[test]
+    fn drm_fence_requested_without_card_mapping_adds_warning() {
+        let mut artifacts = RunArtifacts::default();
+        artifacts.session.config.drm_fence_latency = true;
+
+        check_drm_fence_data_quality(&mut artifacts);
+
+        assert!(
+            artifacts.validation.warnings.iter().any(|warning| {
+                warning.contains("render/display cards were not both identified")
+            })
+        );
     }
 }

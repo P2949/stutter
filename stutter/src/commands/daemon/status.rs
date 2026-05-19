@@ -251,6 +251,11 @@ pub fn render_status_text(output: &DaemonStatusOutput) -> String {
         text.push_str("pause_state: operator_paused\n");
     }
     let unavailable = output.capabilities.unavailable_features();
+    if let Some(reachable) = output.capabilities.privileged_worker_socket_reachable {
+        text.push_str(&format!(
+            "privileged_worker_socket_reachable: {reachable}\n"
+        ));
+    }
     if unavailable.is_empty() {
         text.push_str("unavailable_features: none\n");
     } else {

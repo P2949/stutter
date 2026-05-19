@@ -23,10 +23,11 @@ use monitor::{
     monitor_arg_presence_from_matches, monitor_config_from_monitor_args_with_presence,
 };
 use report::{
-    AdvisorArgs, ApplyProfileArgs, AuditArgs, CheckArgs, CompletionsArgs, DoctorArgs,
-    InspectIrqsArgs, InspectTreeArgs, ManArgs, ProbesArgs, ProfileTemplateArgs, RecommendArgs,
-    ReleaseArgs, ReleaseCommand, ReportArgs, RestoreArgs, RulesArgs, RulesCommand, ScenarioArgs,
-    ScenarioCommand, SummaryArgs, TuneArgs,
+    AdvisorArgs, ApplyProfileArgs, AuditArgs, CheckArgs, CompareArgs, CompareCommand,
+    CompletionsArgs, DoctorArgs, InspectDrmTracepointsArgs, InspectIrqsArgs, InspectTreeArgs,
+    ManArgs, ProbesArgs, ProfileTemplateArgs, RecommendArgs, ReleaseArgs, ReleaseCommand,
+    ReportArgs, RestoreArgs, RulesArgs, RulesCommand, ScenarioArgs, ScenarioCommand, SummaryArgs,
+    TuneArgs, WaylandProbeArgs,
 };
 use service::{
     ServiceArgs, ServiceCommand, ServiceCommandRequestInput, build_service_command_request,
@@ -47,18 +48,19 @@ use crate::{
         DaemonPauseCommandInput, DaemonPolicyExplainCommandInput, DaemonProfilesCommandInput,
         DaemonProfilesExplainCommandInput, DaemonProfilesForgetCommandInput,
         DaemonProfilesListCommandInput, DaemonResetStateCommandInput, DaemonRestoreCommandInput,
-        DaemonResumeCommandInput, DaemonSoakCommandInput, DaemonStatusCommandInput,
-        DaemonWatchCommandInput, DaemonWhatChangedCommandInput, DaemonWhyNotOptimizeCommandInput,
-        DoctorCommandInput, InspectIrqsCommandInput, InspectTreeCommandInput, ManCommandInput,
-        MonitorCommandInput, PrivilegedWorkerCommandInput, ProbesCommandInput,
-        ProfileTemplateCommandInput, RecommendCommandInput, ReleaseCheckCommandInput,
-        ReportCommandInput, RestoreCommandInput, RulesCommandInput, ScenarioCompareCommandInput,
-        ScenarioCreateCommandInput, ScenarioPathCommandInput, ScenarioRunCommandInput,
-        ServiceCommandInput, SummaryCommandInput, TuneCommandInput, ValidateCommandInput,
-        VersionCommandInput,
+        DaemonResumeCommandInput, DaemonResyncStateCommandInput, DaemonSoakCommandInput,
+        DaemonStatusCommandInput, DaemonWatchCommandInput, DaemonWhatChangedCommandInput,
+        DaemonWhyNotOptimizeCommandInput, DisplayPathCompareCommandInput, DoctorCommandInput,
+        InspectIrqsCommandInput, InspectTreeCommandInput, ManCommandInput, MonitorCommandInput,
+        PrivilegedWorkerCommandInput, ProbesCommandInput, ProfileTemplateCommandInput,
+        RecommendCommandInput, ReleaseCheckCommandInput, ReportCommandInput, RestoreCommandInput,
+        RulesCommandInput, ScenarioCompareCommandInput, ScenarioCreateCommandInput,
+        ScenarioPathCommandInput, ScenarioRunCommandInput, ServiceCommandInput,
+        SummaryCommandInput, TuneCommandInput, ValidateCommandInput, VersionCommandInput,
+        WaylandProbeCommandInput,
     },
     config::{
-        CsvStreamTarget, FocusSource, ForegroundSource,
+        CsvStreamTarget, FocusSource, ForegroundSource, WaylandPresentationSource,
         effective::resolve_monitor_config_sources,
         layer::MonitorConfigLayer,
         merge::{CliOverrides, ConfigSources, DefaultConfig, PresetConfig},
@@ -139,6 +141,7 @@ enum Command {
     Recommend(RecommendArgs),
     Release(ReleaseArgs),
     Check(CheckArgs),
+    Compare(CompareArgs),
     Config(ConfigArgs),
     Audit(AuditArgs),
     Advisor(AdvisorArgs),
@@ -146,6 +149,10 @@ enum Command {
     ProfileTemplate(ProfileTemplateArgs),
     #[command(name = "inspect-irqs")]
     InspectIrqs(InspectIrqsArgs),
+    #[command(name = "inspect-drm-tracepoints")]
+    InspectDrmTracepoints(InspectDrmTracepointsArgs),
+    #[command(name = "wayland-probe")]
+    WaylandProbe(WaylandProbeArgs),
     Autotune(AutotuneArgs),
     #[command(name = "autotune-status")]
     AutotuneStatus(AutotuneStatusArgs),
@@ -517,6 +524,7 @@ where
                         foreground_max_stale_ms: args.foreground_max_stale_ms,
                         allow_system_wide_suggestions: args.allow_system_wide_suggestions,
                         allow_medium_risk: args.allow_medium_risk,
+                        high_risk_dry_run: args.high_risk_dry_run,
                     },
                 }))
             }
@@ -561,6 +569,7 @@ where
                 irq_latency: args.irq_latency,
                 irqs: args.irqs,
                 block_io: args.block_io,
+                kms_timing: args.kms_timing,
                 faults: args.faults,
                 cpu_perf: args.cpu_perf,
                 mangohud_log: args.mangohud_log,
@@ -579,6 +588,32 @@ where
                 json: args.json,
                 filter: args.filter.clone(),
                 top: args.top,
+            }))
+        }
+        Some(Command::InspectDrmTracepoints(args)) => Ok(AppCommand::InspectDrmTracepoints(
+            crate::commands::input::InspectDrmTracepointsCommandInput {
+                json: args.json,
+                events_root: args.events_root,
+            },
+        )),
+        Some(Command::Compare(args)) => match args.command {
+            CompareCommand::DisplayPath(display) => Ok(AppCommand::DisplayPathCompare(
+                DisplayPathCompareCommandInput {
+                    baseline: display.baseline.clone(),
+                    test: display.test.clone(),
+                    json: display.json,
+                },
+            )),
+        },
+        Some(Command::WaylandProbe(args)) => {
+            if args.duration_secs == 0 {
+                anyhow::bail!("--duration must be greater than zero");
+            }
+            Ok(AppCommand::WaylandProbe(WaylandProbeCommandInput {
+                duration: Duration::from_secs(args.duration_secs),
+                output: args.output.clone(),
+                fullscreen: args.fullscreen,
+                out_dir: args.out_dir.clone(),
             }))
         }
         None => Ok(AppCommand::Monitor(MonitorCommandInput {
@@ -760,6 +795,12 @@ where
             }
             DaemonCommand::Pause(_) => Ok(AppCommand::DaemonPause(DaemonPauseCommandInput)),
             DaemonCommand::Resume(_) => Ok(AppCommand::DaemonResume(DaemonResumeCommandInput)),
+            DaemonCommand::ResyncState(resync_args) => Ok(AppCommand::DaemonResyncState(
+                DaemonResyncStateCommandInput {
+                    dry_run: resync_args.dry_run,
+                    json: resync_args.json,
+                },
+            )),
             DaemonCommand::Restore(restore_args) => {
                 Ok(AppCommand::DaemonRestore(DaemonRestoreCommandInput {
                     dry_run: restore_args.dry_run,

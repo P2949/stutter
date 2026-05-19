@@ -10,6 +10,7 @@ pub mod privileged_worker;
 pub mod profiles;
 pub mod reset;
 pub mod restore;
+pub mod resync;
 pub mod soak;
 pub mod status;
 pub mod watch;
@@ -114,4 +115,10 @@ pub fn run_restore_command(
     input: crate::commands::input::DaemonRestoreCommandInput,
 ) -> anyhow::Result<()> {
     restore::run_restore_command(input)
+}
+
+pub fn run_resync_state_command(
+    input: crate::commands::input::DaemonResyncStateCommandInput,
+) -> anyhow::Result<()> {
+    resync::run_resync_state_command(input)
 }

@@ -27,6 +27,8 @@ pub(super) enum DaemonCommand {
     Acceptance(DaemonAcceptanceArgs),
     Pause(DaemonPauseArgs),
     Resume(DaemonResumeArgs),
+    #[command(name = "resync-state")]
+    ResyncState(DaemonResyncStateArgs),
     Restore(DaemonRestoreArgs),
     #[command(name = "emergency-restore")]
     EmergencyRestore(DaemonRestoreArgs),
@@ -93,6 +95,15 @@ pub(super) struct DaemonProfilesForgetArgs {
 pub(super) struct DaemonProfilesExplainArgs {
     #[arg(long = "workload-hash", value_name = "HASH")]
     pub(super) workload_identity_hash: Option<String>,
+
+    #[arg(long = "json")]
+    pub(super) json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub(super) struct DaemonResyncStateArgs {
+    #[arg(long = "dry-run")]
+    pub(super) dry_run: bool,
 
     #[arg(long = "json")]
     pub(super) json: bool,
@@ -655,6 +666,20 @@ mod tests {
         let command = parse_daemon_command(["stutter", "daemon", "resume"]).unwrap();
 
         assert!(matches!(command, AppCommand::DaemonResume(_)));
+    }
+
+    #[test]
+    fn parses_daemon_resync_state_command() {
+        let command =
+            parse_daemon_command(["stutter", "daemon", "resync-state", "--dry-run", "--json"])
+                .unwrap();
+
+        let AppCommand::DaemonResyncState(input) = command else {
+            panic!("expected daemon resync-state command");
+        };
+
+        assert!(input.dry_run);
+        assert!(input.json);
     }
 
     #[test]

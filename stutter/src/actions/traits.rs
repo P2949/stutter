@@ -12,7 +12,7 @@ pub trait TuningAction {
     fn descriptor(&self) -> crate::daemon_policy::ActionDescriptor {
         let action_id = self.id();
         crate::daemon_policy::ActionDescriptor {
-            action_kind: action_id.0.clone(),
+            action_kind: action_id.as_str().to_owned(),
             action_id,
             safety_class: self.safety_class(),
             effect_scope: crate::daemon_policy::ActionEffectScope::LocalProcessTree,

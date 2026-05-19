@@ -200,6 +200,12 @@ impl ActiveProfileState {
         self.history.push(history_entry);
         Ok(())
     }
+
+    pub fn abandon_kept_actions_for_external_resync(&mut self) -> usize {
+        let count = self.kept_actions.actions.len();
+        self.kept_actions.actions.clear();
+        count
+    }
 }
 
 #[cfg(test)]
@@ -232,7 +238,10 @@ mod tests {
     }
 
     fn fake_candidate(name: &str) -> CandidateAction {
-        CandidateAction::fake(ActionId(name.to_owned()), SafetyClass::ReversibleLowRisk)
+        CandidateAction::fake(
+            ActionId::new(name.to_owned()),
+            SafetyClass::ReversibleLowRisk,
+        )
     }
 
     fn window_score(total: u64) -> WindowScore {

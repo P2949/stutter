@@ -309,6 +309,33 @@ impl MonitorEventSink for RecorderSink {
                     ctx.recorder.counters.scx_event_count += 1;
                 }
             }
+            MonitorEvent::KmsFlipEvent { event } => {
+                push_artifact_event(
+                    ctx.recorder,
+                    ArtifactKind::KmsFlipEvents,
+                    event.as_ref(),
+                    "kms_flip_events",
+                    |c| c.kms_flip_event_count += 1,
+                );
+            }
+            MonitorEvent::DrmFenceEvent { event } => {
+                push_artifact_event(
+                    ctx.recorder,
+                    ArtifactKind::DrmFenceEvents,
+                    event.as_ref(),
+                    "drm_fence_events",
+                    |c| c.drm_fence_event_count += 1,
+                );
+            }
+            MonitorEvent::WaylandPresentationEvent { event } => {
+                push_artifact_event(
+                    ctx.recorder,
+                    ArtifactKind::WaylandPresentationEvents,
+                    event.as_ref(),
+                    "wayland_presentation_events",
+                    |c| c.wayland_presentation_event_count += 1,
+                );
+            }
             MonitorEvent::FocusChanged {
                 elapsed_ms,
                 old_kind,

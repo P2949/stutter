@@ -323,7 +323,7 @@ fn descriptor(
     rollback: RollbackRequirement,
 ) -> ActionDescriptor {
     ActionDescriptor {
-        action_id: ActionId(format!("explain:{action_kind}")),
+        action_id: ActionId::new(format!("explain:{action_kind}")),
         action_kind: action_kind.to_owned(),
         safety_class,
         effect_scope,
@@ -454,6 +454,7 @@ mod tests {
             ionice_available: true,
             irq_affinity_available: true,
             gpu_sysfs_available: true,
+            privileged_worker_socket_reachable: Some(true),
         };
         let context = policy_context_from_daemon_status(&state, &health, &capabilities);
         let policy = DaemonPolicy::apply_low_risk(ActionSource::Test);
@@ -500,6 +501,7 @@ mod tests {
             ionice_available: true,
             irq_affinity_available: true,
             gpu_sysfs_available: true,
+            privileged_worker_socket_reachable: Some(true),
         };
 
         let active_context =
@@ -635,7 +637,7 @@ mod tests {
             verdict: DaemonPolicyVerdict::Allow,
             decision: PolicyDecisionKind::Allowed,
             intent: PolicyIntent::Apply,
-            action_id: ActionId("test-action".to_owned()),
+            action_id: ActionId::new("test-action".to_owned()),
             action_kind: "test".to_owned(),
             mode: DaemonMode::ApplyLowRisk,
             source: ActionSource::Test,
