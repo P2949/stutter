@@ -307,12 +307,16 @@ fn append_planner_evaluation_text(
     evaluation: &PlannerEvaluationSummary,
 ) {
     text.push_str(&format!(
-        "{prefix}: candidate={} action_kind={} objective={:?} confidence={:.3} eligible={} reasons={} evidence={}\n",
+        "{prefix}: candidate={} action_kind={} objective={:?} confidence={:.3} eligible={} dry_run_affected_tasks={} reasons={} evidence={}\n",
         evaluation.candidate_name,
         evaluation.action_kind,
         evaluation.objective,
         evaluation.confidence,
         evaluation.eligible,
+        evaluation
+            .dry_run_affected_tasks
+            .map(|affected| affected.to_string())
+            .unwrap_or_else(|| "none".to_owned()),
         if evaluation.deny_reason_codes.is_empty() {
             "none".to_owned()
         } else {

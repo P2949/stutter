@@ -30,6 +30,7 @@ pub struct AutotuneCommandInput {
     pub allow_system_wide_suggestions: bool,
     pub allow_medium_risk: bool,
     pub high_risk_dry_run: bool,
+    pub dry_run_all_safe: bool,
 }
 
 fn unsupported_live_autotune_mode_error(mode: impl std::fmt::Display) -> anyhow::Error {
@@ -42,7 +43,12 @@ fn unsupported_live_autotune_mode_error(mode: impl std::fmt::Display) -> anyhow:
 fn ensure_supported_live_autotune_mode(
     mode: DaemonMode,
     allow_medium_risk: bool,
+    dry_run_all_safe: bool,
 ) -> anyhow::Result<()> {
+    if dry_run_all_safe && mode != DaemonMode::Suggest {
+        anyhow::bail!("--dry-run-all-safe requires --mode suggest");
+    }
+
     match mode {
         DaemonMode::Observe | DaemonMode::Suggest | DaemonMode::ApplyLowRisk => Ok(()),
         DaemonMode::ApplyMediumRisk if allow_medium_risk => Ok(()),
@@ -58,11 +64,12 @@ fn ensure_supported_live_autotune_mode(
 fn parse_supported_live_autotune_mode(
     raw_mode: &str,
     allow_medium_risk: bool,
+    dry_run_all_safe: bool,
 ) -> anyhow::Result<DaemonMode> {
     let mode = raw_mode
         .parse::<DaemonMode>()
         .map_err(|_| unsupported_live_autotune_mode_error(raw_mode))?;
-    ensure_supported_live_autotune_mode(mode, allow_medium_risk)?;
+    ensure_supported_live_autotune_mode(mode, allow_medium_risk, dry_run_all_safe)?;
     Ok(mode)
 }
 
@@ -94,13 +101,18 @@ fn runtime_config_for_command(
         input.decision_log.clone(),
     )
     .with_profiles(profiles)
+    .with_dry_run_all_safe(input.dry_run_all_safe)
     .with_washout(input.washout_seconds, input.washout_verify_interval_ms);
 
     Ok(config)
 }
 
 pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()> {
-    let mode = parse_supported_live_autotune_mode(&input.mode, input.allow_medium_risk)?;
+    let mode = parse_supported_live_autotune_mode(
+        &input.mode,
+        input.allow_medium_risk,
+        input.dry_run_all_safe,
+    )?;
 
     if matches!(mode, DaemonMode::ApplyLowRisk | DaemonMode::ApplyMediumRisk) {
         if input.auto_focus {
@@ -245,6 +257,7 @@ mod tests {
             allow_system_wide_suggestions: false,
             allow_medium_risk: false,
             high_risk_dry_run: false,
+            dry_run_all_safe: false,
         }
     }
 
@@ -252,8 +265,12 @@ mod tests {
     fn runtime_config_builder_accepts_all_controller_modes() {
         for raw_mode in ["observe", "suggest", "apply-low-risk"] {
             let input = base_autotune_input(raw_mode);
-            let mode =
-                parse_supported_live_autotune_mode(raw_mode, input.allow_medium_risk).unwrap();
+            let mode = parse_supported_live_autotune_mode(
+                raw_mode,
+                input.allow_medium_risk,
+                input.dry_run_all_safe,
+            )
+            .unwrap();
             runtime_config_for_command(&input, mode, Vec::new()).unwrap();
         }
     }
@@ -281,18 +298,27 @@ mod tests {
 
     #[test]
     fn medium_live_mode_requires_unlock_and_high_live_mode_is_rejected() {
-        let err = parse_supported_live_autotune_mode("apply-medium-risk", false)
+        let err = parse_supported_live_autotune_mode("apply-medium-risk", false, false)
             .unwrap_err()
             .to_string();
         assert!(err.contains("requires --allow-medium-risk"));
 
-        let mode = parse_supported_live_autotune_mode("apply-medium-risk", true).unwrap();
+        let mode = parse_supported_live_autotune_mode("apply-medium-risk", true, false).unwrap();
         assert_eq!(mode, DaemonMode::ApplyMediumRisk);
 
-        let err = parse_supported_live_autotune_mode("apply-high-risk", true)
+        let err = parse_supported_live_autotune_mode("apply-high-risk", true, false)
             .unwrap_err()
             .to_string();
         assert!(err.contains("high-risk apply is not implemented"));
+    }
+
+    #[test]
+    fn dry_run_all_safe_requires_suggest_mode() {
+        let err = parse_supported_live_autotune_mode("apply-low-risk", false, true)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("--dry-run-all-safe requires --mode suggest"));
     }
 
     #[tokio::test]
@@ -322,6 +348,7 @@ mod tests {
             allow_system_wide_suggestions: false,
             allow_medium_risk: false,
             high_risk_dry_run: false,
+            dry_run_all_safe: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();
@@ -355,6 +382,7 @@ mod tests {
             allow_system_wide_suggestions: false,
             allow_medium_risk: false,
             high_risk_dry_run: false,
+            dry_run_all_safe: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();
@@ -391,6 +419,7 @@ mod tests {
             allow_system_wide_suggestions: false,
             allow_medium_risk: false,
             high_risk_dry_run: false,
+            dry_run_all_safe: false,
         };
 
         let err = autotune_command(input).await.unwrap_err().to_string();

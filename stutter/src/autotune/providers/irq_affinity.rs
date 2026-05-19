@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    actions::irq_affinity::{IrqAffinityAction, IrqAffinityEvidence, IrqAffinityRisk},
+    actions::irq_affinity::{IrqAffinityAction, IrqAffinityEvidence},
     autotune::{
         candidate::{CandidateAction, CandidateEvidence, IrqAffinityActionPlan},
         objective::ObjectiveKind,
@@ -12,7 +12,7 @@ use crate::{
         },
         situation::SituationKind,
     },
-    irq_inspect::{IrqLine, is_numeric_irq},
+    irq_inspect::{IrqLine, classify_irq_device, is_numeric_irq},
     process_tree::TaskClass,
 };
 
@@ -26,6 +26,7 @@ pub struct IrqCandidateEvidence {
     pub stable_identity: bool,
     pub known_device_mapping: bool,
     pub placement_rationale: String,
+    pub irq_line: IrqLine,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -57,6 +58,7 @@ impl CandidateProvider for IrqAffinityProvider {
             return Vec::new();
         };
 
+        let device_class = classify_irq_device(&evidence_model.irq_line);
         let evidence = IrqAffinityEvidence {
             strong_irq_evidence: true,
             stable_irq_identity: evidence_model.stable_identity,
@@ -78,7 +80,7 @@ impl CandidateProvider for IrqAffinityProvider {
                     evidence_model.irq,
                     evidence_model.device.clone(),
                     evidence_model.suggested_mask.clone(),
-                    IrqAffinityRisk::HighRisk,
+                    device_class.default_risk(),
                     evidence,
                 ),
                 evidence: vec![CandidateEvidence::new(
@@ -162,6 +164,7 @@ fn observed_irq(input: &CandidateProviderInput<'_>) -> Option<IrqCandidateEviden
         stable_identity,
         known_device_mapping,
         placement_rationale,
+        irq_line: irq_line.clone(),
     })
 }
 

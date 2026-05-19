@@ -1070,7 +1070,7 @@ fn read_status_value(path: PathBuf, key: &str) -> Option<String> {
 fn read_nice(proc_root: &Path, tid: u32) -> Option<i32> {
     let contents = fs::read_to_string(proc_root.join(tid.to_string()).join("stat")).ok()?;
     let fields = stat_fields_after_comm(&contents)?;
-    fields.get(17)?.parse::<i32>().ok()
+    fields.get(16)?.parse::<i32>().ok()
 }
 
 fn read_ioprio(proc_root: &Path, tid: u32) -> Option<String> {
@@ -1720,7 +1720,7 @@ mod tests {
     fn fake_stat_line(tid: u32, comm: &str, nice: i32) -> String {
         let mut fields = vec!["0".to_owned(); 40];
         fields[0] = "S".to_owned();
-        fields[17] = nice.to_string();
+        fields[16] = nice.to_string();
         format!("{tid} ({comm}) {}\n", fields.join(" "))
     }
 

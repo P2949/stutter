@@ -699,6 +699,7 @@ pub(crate) async fn autotune_start_handler(
         allow_system_wide_suggestions: false,
         allow_medium_risk: policy.mode == DaemonMode::ApplyMediumRisk,
         high_risk_dry_run: false,
+        dry_run_all_safe: false,
     };
 
     let monitor_config = match crate::cli::autotune_monitor_config(&input) {

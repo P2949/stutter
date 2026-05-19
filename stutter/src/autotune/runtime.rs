@@ -28,7 +28,8 @@ use crate::{
     autotune::{
         AutotuneRuntimeError,
         active_config::{ActiveConfigMatch, ActiveConfigMatchInput},
-        candidate::{CandidateAction, CandidateDryRunRecord},
+        activity::ActivityClassifier,
+        candidate::{self, CandidateAction, CandidateDryRunRecord},
         candidate_memory::CandidateMemoryResult,
         controller::{ControllerPolicy, ControllerRuntimeState, decide_autotune_transition},
         decision::AutotuneDecision,
@@ -106,6 +107,8 @@ pub struct AutotuneRuntimeConfig {
     pub workload_policy: WorkloadPolicyMatrix,
     pub workload_policy_error: Option<String>,
     pub washout: WashoutWindowConfig,
+    pub dry_run_all_safe: bool,
+    pub dry_run_plan_dir: Option<PathBuf>,
     pub simulated_candidates: Vec<CandidateAction>,
     pub simulate_action_effects: bool,
 }
@@ -153,6 +156,11 @@ fn validate_runtime_config(config: &AutotuneRuntimeConfig) -> Result<(), Autotun
     if config.candidate_window_seconds == 0 {
         return Err(AutotuneRuntimeError::InvalidMode {
             message: "candidate_window_seconds must be greater than zero".to_owned(),
+        });
+    }
+    if config.dry_run_all_safe && config.mode() != DaemonMode::Suggest {
+        return Err(AutotuneRuntimeError::InvalidMode {
+            message: "--dry-run-all-safe requires suggest mode".to_owned(),
         });
     }
     Ok(())
@@ -232,6 +240,8 @@ impl AutotuneRuntimeConfig {
             workload_policy,
             workload_policy_error,
             washout: WashoutWindowConfig::default(),
+            dry_run_all_safe: false,
+            dry_run_plan_dir: None,
             simulated_candidates: Vec::new(),
             simulate_action_effects: false,
         }
@@ -274,6 +284,16 @@ impl AutotuneRuntimeConfig {
     pub fn with_washout(mut self, seconds: u64, verify_interval_ms: u64) -> Self {
         self.washout = WashoutWindowConfig::default().with_washout(seconds, verify_interval_ms);
         self.daemon_config.autotune.washout_seconds = seconds;
+        self
+    }
+
+    pub fn with_dry_run_all_safe(mut self, enabled: bool) -> Self {
+        self.dry_run_all_safe = enabled;
+        self
+    }
+
+    pub fn with_dry_run_plan_dir(mut self, path: PathBuf) -> Self {
+        self.dry_run_plan_dir = Some(path);
         self
     }
 
@@ -324,11 +344,24 @@ pub struct AutotuneDecisionStreamEntry {
     pub candidate_count: usize,
     pub top_denied_reason: Option<String>,
     pub planner: Option<PlannerSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dry_run_plan_files: Vec<AutotuneDryRunPlanFileSummary>,
     pub score_total: u64,
     pub data_quality: String,
     pub data_quality_reason_codes: Vec<String>,
     pub decision: String,
     pub reason: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AutotuneDryRunPlanFileSummary {
+    pub candidate_name: String,
+    pub action_kind: String,
+    pub path: PathBuf,
+    pub affected_tasks: usize,
+    pub safety_class: SafetyClass,
+    pub eligible: bool,
+    pub deny_reasons: Vec<CandidateDenyReason>,
 }
 
 #[derive(Clone, Debug)]
@@ -443,10 +476,12 @@ pub struct AutotuneRuntime {
     target_state: RuntimeTargetState,
     latest_drop_counters: DropCountersSnapshot,
     recent_diagnoses: VecDeque<LiveDiagnosisEntry>,
+    activity_classifier: ActivityClassifier,
     live_experiments: LiveExperimentManager,
     last_observation: AutotuneObservation,
     last_decision: Option<AutotuneDecisionStreamEntry>,
     last_plan_result: Option<PlanResult>,
+    last_dry_run_plan_files: Vec<AutotuneDryRunPlanFileSummary>,
     pending_history_context: Option<RuntimeHistoryContext>,
 }
 
@@ -482,10 +517,12 @@ impl AutotuneRuntime {
             latest_focus: None,
             latest_drop_counters: DropCountersSnapshot::default(),
             recent_diagnoses: VecDeque::new(),
+            activity_classifier: ActivityClassifier::new(5),
             live_experiments: LiveExperimentManager::new(),
             last_observation: AutotuneObservation::default(),
             last_decision: None,
             last_plan_result: None,
+            last_dry_run_plan_files: Vec::new(),
             pending_history_context: None,
             config,
         }
@@ -504,6 +541,11 @@ impl AutotuneRuntime {
                 drop_counters,
                 ..
             } => {
+                let scored_samples = records
+                    .iter()
+                    .map(|record| record.samples)
+                    .fold(0_u64, u64::saturating_add);
+                self.activity_classifier.push_interval(scored_samples);
                 self.latest_drop_counters = drop_counters;
                 self.controller.window.push_intervals(records);
                 return self.evaluate_and_emit(None);
@@ -867,7 +909,7 @@ impl AutotuneRuntime {
                         )
                     })
             } else {
-                let candidate = self.select_candidate_for_observation(&observation);
+                let candidate = self.select_candidate_for_observation(&observation)?;
                 self.plan_external_mutation_recovery_decision(&observation)
                     .unwrap_or_else(|| {
                         decide_autotune_transition(
@@ -1047,6 +1089,7 @@ impl AutotuneRuntime {
             drop_counters: self.latest_drop_counters.clone(),
             proc_root: Path::new("/proc"),
             sys_root: Path::new("/sys"),
+            activity_level: self.activity_classifier.classify(),
         })
         .observation
     }
@@ -1054,14 +1097,16 @@ impl AutotuneRuntime {
     fn select_candidate_for_observation(
         &mut self,
         observation: &AutotuneObservation,
-    ) -> Option<CandidateAction> {
+    ) -> anyhow::Result<Option<CandidateAction>> {
+        self.last_dry_run_plan_files.clear();
+
         if self.config.mode() == DaemonMode::Observe {
             self.last_plan_result = Some(PlanResult {
                 selected: None,
                 evaluations: Vec::new(),
                 no_action_reason: Some("observe mode does not suggest or apply".to_owned()),
             });
-            return None;
+            return Ok(None);
         }
 
         if observation.data_quality.blocks_action()
@@ -1076,10 +1121,12 @@ impl AutotuneRuntime {
                     "quality, focus, realtime, or confidence gate blocked planning".to_owned(),
                 ),
             });
-            return None;
+            return Ok(None);
         }
 
-        let tree_pid = observation.target_root_pid.or(self.config.tree_pid())?;
+        let Some(tree_pid) = observation.target_root_pid.or(self.config.tree_pid()) else {
+            return Ok(None);
+        };
 
         if !self.config.simulated_candidates.is_empty() {
             let candidates = self.config.simulated_candidates.clone();
@@ -1098,7 +1145,7 @@ impl AutotuneRuntime {
                     .is_none()
                     .then(|| "no simulated candidate selected".to_owned()),
             });
-            return selected;
+            return Ok(selected);
         }
 
         let mut observation = observation.clone();
@@ -1112,7 +1159,7 @@ impl AutotuneRuntime {
                 evaluations: Vec::new(),
                 no_action_reason: Some(format!("invalid workload policy configuration: {err}")),
             });
-            return None;
+            return Ok(None);
         }
         let result = planner.plan(PlannerInput {
             observation: &observation,
@@ -1125,8 +1172,46 @@ impl AutotuneRuntime {
             profiles: &self.config.profiles,
         });
         let selected = result.selected.clone();
+        if self.config.dry_run_all_safe {
+            self.last_dry_run_plan_files = self.write_dry_run_plan_files_for_plan(&result)?;
+        }
         self.last_plan_result = Some(result);
-        selected
+        Ok(selected)
+    }
+
+    fn write_dry_run_plan_files_for_plan(
+        &self,
+        plan: &PlanResult,
+    ) -> anyhow::Result<Vec<AutotuneDryRunPlanFileSummary>> {
+        let plan_dir = self
+            .config
+            .dry_run_plan_dir
+            .clone()
+            .unwrap_or_else(candidate::default_candidate_plan_dir);
+        let mut written = Vec::new();
+
+        for evaluation in &plan.evaluations {
+            let Some(dry_run) = evaluation.dry_run.as_ref() else {
+                continue;
+            };
+            let path = candidate::candidate_plan_path(&evaluation.candidate, &plan_dir);
+            candidate::write_candidate_plan_file(
+                &path,
+                &evaluation.candidate,
+                Some(dry_run.affected_tasks),
+            )?;
+            written.push(AutotuneDryRunPlanFileSummary {
+                candidate_name: evaluation.candidate_name.clone(),
+                action_kind: evaluation.action_kind.clone(),
+                path,
+                affected_tasks: dry_run.affected_tasks,
+                safety_class: evaluation.descriptor.safety_class.clone(),
+                eligible: evaluation.eligible,
+                deny_reasons: evaluation.deny_reasons.clone(),
+            });
+        }
+
+        Ok(written)
     }
 
     fn apply_decision_side_effects(
@@ -1135,6 +1220,12 @@ impl AutotuneRuntime {
         decision: &AutotuneDecision,
         reason: &str,
     ) -> anyhow::Result<()> {
+        if self.config.dry_run_all_safe
+            && matches!(decision, AutotuneDecision::StartExperiment { .. })
+        {
+            anyhow::bail!("dry-run-all-safe mode refused to start a live experiment");
+        }
+
         let use_privileged_service = self.config.mode() == DaemonMode::ApplyMediumRisk
             && !self.config.simulate_action_effects;
         let socket_service = if use_privileged_service
@@ -1275,6 +1366,7 @@ impl AutotuneRuntime {
                 .as_ref()
                 .and_then(top_denied_reason_for_plan),
             planner: self.last_plan_result.as_ref().map(PlanResult::summary),
+            dry_run_plan_files: self.last_dry_run_plan_files.clone(),
             score_total: observation.score.total,
             data_quality: data_quality_label(&observation.data_quality),
             data_quality_reason_codes: observation.data_quality.reason_code_strings(),
@@ -2068,6 +2160,32 @@ mod tests {
         }
     }
 
+    fn active_task_snapshot(
+        tid: u32,
+        process_pid: u32,
+        comm: &str,
+        class: TaskClass,
+    ) -> crate::autotune::observation::ActiveTaskSnapshot {
+        crate::autotune::observation::ActiveTaskSnapshot {
+            tid,
+            process_pid,
+            comm: comm.to_owned(),
+            class,
+            process_starttime_ticks: Some(u64::from(process_pid)),
+            task_starttime_ticks: Some(u64::from(tid)),
+            cgroup_path: None,
+        }
+    }
+
+    fn temp_runtime_plan_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "stutter-runtime-dry-run-{name}-{}",
+            crate::audit::unix_nanos_now()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     fn high_quality_game_observation_with_focus_confidence(
         focus_confidence: f32,
     ) -> AutotuneObservation {
@@ -2247,6 +2365,68 @@ mod tests {
                 .unwrap_or_default()
                 .contains("unknown workload policy action family")
         );
+    }
+
+    #[test]
+    fn dry_run_all_safe_runtime_config_requires_suggest_mode() {
+        let config = AutotuneRuntimeConfig::apply_low_risk(None, Some(1234), None)
+            .with_dry_run_all_safe(true);
+
+        let err = validate_runtime_config(&config).unwrap_err().to_string();
+
+        assert!(err.contains("--dry-run-all-safe requires suggest mode"));
+    }
+
+    #[test]
+    fn dry_run_all_safe_writes_plan_files_without_starting_experiment() {
+        let plan_dir = temp_runtime_plan_dir("suggest-mode");
+        let current_pid = std::process::id();
+        let mut config = AutotuneRuntimeConfig::suggest(None, Some(current_pid), None)
+            .with_profiles(vec![low_risk_profile()])
+            .with_dry_run_all_safe(true)
+            .with_dry_run_plan_dir(plan_dir.clone());
+        config.history_log = None;
+        let mut runtime = AutotuneRuntime::new(config);
+        let mut observation = high_quality_game_observation_with_focus_confidence(0.95);
+        observation.target_root_pid = Some(current_pid);
+        observation.active_target_count = 1;
+        observation.active_tasks = vec![active_task_snapshot(
+            current_pid,
+            current_pid,
+            "game",
+            TaskClass::Game,
+        )];
+
+        let candidate = runtime
+            .select_candidate_for_observation(&observation)
+            .unwrap();
+        let decision = decide_autotune_transition(
+            &runtime.controller.policy,
+            &runtime.controller.state,
+            &observation,
+            candidate,
+        );
+
+        runtime
+            .apply_decision_side_effects(&observation, &decision, "dry-run-all-safe test")
+            .unwrap();
+
+        assert!(!runtime.has_active_experiment());
+        assert!(runtime.controller.state.active_experiment.is_none());
+        assert!(runtime.pending_history_context.is_none());
+        assert!(
+            !runtime.last_dry_run_plan_files.is_empty(),
+            "expected at least one candidate plan file from dry-run planner results"
+        );
+        for plan in &runtime.last_dry_run_plan_files {
+            assert!(plan.path.starts_with(&plan_dir));
+            assert!(
+                plan.path.exists(),
+                "missing plan file {}",
+                plan.path.display()
+            );
+            assert_eq!(plan.safety_class, SafetyClass::ReversibleLowRisk);
+        }
     }
 
     #[test]
@@ -2433,6 +2613,7 @@ mod tests {
             candidate_count: 0,
             top_denied_reason: None,
             planner: None,
+            dry_run_plan_files: Vec::new(),
             score_total: 999,
             data_quality: "Low: low scored samples".to_owned(),
             data_quality_reason_codes: vec!["measurement_uncertain".to_owned()],
@@ -2576,7 +2757,9 @@ mod tests {
             runtime.controller.policy.min_focus_confidence - 0.01,
         );
 
-        let candidate = runtime.select_candidate_for_observation(&observation);
+        let candidate = runtime
+            .select_candidate_for_observation(&observation)
+            .unwrap();
 
         assert!(candidate.is_none());
     }

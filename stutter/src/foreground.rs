@@ -331,7 +331,7 @@ struct HyprlandWorkspace {
     name: Option<String>,
 }
 
-fn hyprland_snapshot_from_activewindow_json(
+pub(crate) fn hyprland_snapshot_from_activewindow_json(
     elapsed_ms: u64,
     active_window_json: &str,
 ) -> ForegroundWindowSnapshot {
@@ -392,6 +392,12 @@ impl HyprlandForegroundProvider {
         Self {
             hyprctl: "hyprctl".to_owned(),
         }
+    }
+
+    #[cfg(test)]
+    pub fn with_hyprctl(mut self, hyprctl: impl Into<String>) -> Self {
+        self.hyprctl = hyprctl.into();
+        self
     }
 
     pub fn is_detected() -> bool {

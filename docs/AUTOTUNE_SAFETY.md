@@ -40,6 +40,8 @@ HighRisk:
 
 Any action that cannot be rolled back is ineligible for autonomous mode regardless of its nominal safety class.
 
+`stutter autotune --mode suggest --dry-run-all-safe` is the no-mutation integration path for the watcher stack. It may run safe dry-runs and write candidate plan files, but suggest mode must not create rollback tokens, start experiments, or call an apply path. Manual high-risk diagnostics remain gated behind `--high-risk-dry-run`.
+
 ## Safety Matrix
 
 Local safety iteration should run:

@@ -15,7 +15,7 @@ mod tests {
         let policy = policy(DaemonMode::ApplyLowRisk);
         let mut registry = CandidateProviderRegistry::default();
         registry.register(Box::new(StaticProvider {
-            candidate: irq_affinity_candidate("irq-manual"),
+            candidate: high_risk_irq_affinity_candidate("irq-manual"),
         }));
         let planner = CandidatePlanner::new(registry);
         let mut observation = observation();
@@ -63,7 +63,7 @@ mod tests {
             let policy = policy(mode);
             let mut registry = CandidateProviderRegistry::default();
             registry.register(Box::new(StaticProvider {
-                candidate: irq_affinity_candidate(&candidate_name),
+                candidate: high_risk_irq_affinity_candidate(&candidate_name),
             }));
             let planner = CandidatePlanner::new(registry);
             let mut observation = observation();

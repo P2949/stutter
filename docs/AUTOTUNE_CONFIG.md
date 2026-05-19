@@ -68,6 +68,16 @@ apply-medium-risk:
 
 `HighRisk` actions are not enabled by any mode in this contract. They require manual approval or a separate explicit future configuration key.
 
+## End-to-End Dry Run
+
+Use the live suggest-mode dry run to exercise provider selection, static gates, safe action dry-runs, planner summaries, and candidate plan-file output without mutating system state:
+
+```bash
+stutter autotune --mode suggest --dry-run-all-safe --tree-pid <PID>
+```
+
+`--dry-run-all-safe` is valid only with `--mode suggest`. It writes candidate plan files for candidates that reached the dry-run stage under daemon policy, reports dry-run affected-task counts and deny reasons in the planner summary, and refuses to start live experiments. High-risk/system-adjacent dry-run diagnostics are still opt-in through `--high-risk-dry-run`.
+
 ## Target
 
 `target` selects the future target-resolution strategy.

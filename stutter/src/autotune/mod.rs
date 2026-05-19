@@ -25,6 +25,7 @@
 //! - unsupported live modes must fail before constructing a mutating runtime configuration.
 
 pub(crate) mod active_config;
+pub(crate) mod activity;
 pub(crate) mod apply;
 pub(crate) mod apply_low_risk;
 #[cfg(test)]

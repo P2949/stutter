@@ -312,7 +312,8 @@ fn lint_rule(
             ));
         }
 
-        if high_risk_family(family) && !policy.allow_high_risk {
+        let family_enabled_for_apply = policy.mode.supports_apply();
+        if family_enabled_for_apply && high_risk_family(family) && !policy.allow_high_risk {
             lints.push(WorkloadPolicyLint::error(
                 "high_risk_family_is_autonomous",
                 format!(
@@ -324,7 +325,11 @@ fn lint_rule(
             ));
         }
 
-        if system_wide_family(family) && !policy.allow_system_wide_apply {
+        if family_enabled_for_apply
+            && system_wide_family(family)
+            && !policy.allow_system_wide_apply
+            && !medium_risk_system_family_allowed(family, policy)
+        {
             lints.push(WorkloadPolicyLint::error(
                 "system_wide_family_is_autonomous",
                 format!(
@@ -336,7 +341,10 @@ fn lint_rule(
             ));
         }
 
-        if policy.mode == DaemonMode::ApplyLowRisk && medium_or_high_risk_family(family) {
+        if family_enabled_for_apply
+            && policy.mode == DaemonMode::ApplyLowRisk
+            && medium_or_high_risk_family(family)
+        {
             lints.push(WorkloadPolicyLint::error(
                 "apply_low_risk_autonomous_family_too_risky",
                 format!(
@@ -369,10 +377,7 @@ fn lint_rule(
 }
 
 fn high_risk_family(family: &str) -> bool {
-    matches!(
-        family,
-        "cpu_power" | "gpu_power" | "irq_affinity" | "vm_knob"
-    )
+    matches!(family, "high_risk")
 }
 
 fn system_wide_family(family: &str) -> bool {
@@ -380,6 +385,19 @@ fn system_wide_family(family: &str) -> bool {
         family,
         "cpu_power" | "gpu_power" | "irq_affinity" | "vm_knob"
     )
+}
+
+fn medium_risk_system_family_allowed(family: &str, policy: &DaemonPolicy) -> bool {
+    if policy.mode != DaemonMode::ApplyMediumRisk || !policy.allow_medium_risk_apply {
+        return false;
+    }
+
+    match family {
+        "irq_affinity" => true,
+        "cpu_power" | "gpu_power" => policy.allow_gpu_power_in_autotune,
+        "vm_knob" => policy.allow_vm_knobs_in_autotune,
+        _ => false,
+    }
 }
 
 fn medium_or_high_risk_family(family: &str) -> bool {

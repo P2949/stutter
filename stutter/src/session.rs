@@ -1774,7 +1774,7 @@ impl MonitorSession {
             }
 
             let drop_counters_snapshot = self.runtime.probes.loaded.snapshot_drop_counters();
-            let psi_snapshot = self.runtime.probes.psi_reader.read().ok();
+            let psi_snapshot = self.runtime.probes.psi_reader.read_with_delta().ok();
             let records = collect_interval_summaries_labeled(
                 self.interval_label,
                 &mut self.runtime.targeting.tasks.stats_by_task,

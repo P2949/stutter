@@ -112,6 +112,12 @@ pub(super) struct AutotuneArgs {
         help = "In suggest mode, run dry-run diagnostics for manual-only high-risk candidates without enabling apply"
     )]
     pub(super) high_risk_dry_run: bool,
+
+    #[arg(
+        long = "dry-run-all-safe",
+        help = "In suggest mode, run safe candidate dry-runs, write candidate plan files, and never apply changes"
+    )]
+    pub(super) dry_run_all_safe: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -211,7 +217,15 @@ pub(super) struct AutotuneStatusArgs {
     pub(super) json: bool,
 }
 
-pub(super) fn validate_autotune_mode(mode: &str, allow_medium_risk: bool) -> anyhow::Result<()> {
+pub(super) fn validate_autotune_mode(
+    mode: &str,
+    allow_medium_risk: bool,
+    dry_run_all_safe: bool,
+) -> anyhow::Result<()> {
+    if dry_run_all_safe && mode != "suggest" {
+        anyhow::bail!("--dry-run-all-safe requires --mode suggest");
+    }
+
     match mode {
         "observe" | "suggest" | "apply-low-risk" => Ok(()),
         "apply-medium-risk" if allow_medium_risk => Ok(()),
@@ -274,5 +288,31 @@ mod tests {
         };
 
         assert!(args.high_risk_dry_run);
+    }
+
+    #[test]
+    fn autotune_cli_parses_dry_run_all_safe_flag() {
+        let cli = Cli::try_parse_from([
+            "stutter",
+            "autotune",
+            "--mode",
+            "suggest",
+            "--dry-run-all-safe",
+        ])
+        .unwrap();
+
+        let Some(Command::Autotune(args)) = cli.command else {
+            panic!("expected autotune command");
+        };
+
+        assert!(args.dry_run_all_safe);
+    }
+
+    #[test]
+    fn dry_run_all_safe_requires_suggest_mode() {
+        let err = validate_autotune_mode("apply-low-risk", false, true)
+            .expect_err("dry-run-all-safe outside suggest mode should fail");
+
+        assert!(err.to_string().contains("--dry-run-all-safe"));
     }
 }

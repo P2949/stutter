@@ -343,6 +343,8 @@ mod tests {
             cpu_psi_some: 0.0,
             mem_psi_some: 0.0,
             mem_psi_full: 0.0,
+            mem_psi_delta_us: 0,
+            mem_psi_spike: false,
             io_psi_some: 0.0,
             io_psi_full: 0.0,
             percentile_scope: "all".to_owned(),

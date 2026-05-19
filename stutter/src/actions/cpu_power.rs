@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
+use serde::{Deserialize, Serialize};
 
 use crate::actions::{
     ActionId, ActionState, ActionWarning, CpuPowerRestoreRecord, RollbackToken, SafetyClass,
@@ -45,7 +46,7 @@ impl Default for CpuPowerPolicy {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CpuPowerAction {
     pub sysfs_root: PathBuf,
     pub cpus: Vec<u32>,
@@ -114,6 +115,47 @@ impl CpuPowerAction {
         policy: &CpuPowerPolicy,
     ) -> anyhow::Result<Vec<ActionWarning>> {
         self.preflight_at(policy)
+    }
+
+    pub fn dry_run_with_policy(&self, policy: &CpuPowerPolicy) -> anyhow::Result<ActionState> {
+        self.dry_run_at(policy)
+    }
+
+    pub fn verify_with_policy(&self, policy: &CpuPowerPolicy) -> anyhow::Result<ActionState> {
+        self.verify_at(policy)
+    }
+
+    pub fn apply_with_policy(&self, policy: &CpuPowerPolicy) -> anyhow::Result<RollbackToken> {
+        let target_files = self.collect_target_files(policy)?;
+        let mut records = Vec::new();
+
+        for target in target_files {
+            records.push(CpuPowerRestoreRecord {
+                path: target.path.clone(),
+                original_value: target.original_value.clone(),
+            });
+
+            if target.original_value == target.requested_value {
+                continue;
+            }
+
+            write_trimmed(&target.path, &target.requested_value)
+                .with_context(|| format!("failed to write {}", target.path.display()))?;
+
+            let actual = read_trimmed(&target.path)
+                .with_context(|| format!("failed to verify write to {}", target.path.display()))?;
+            if actual != target.requested_value {
+                rollback_cpu_power_records(&records)?;
+                anyhow::bail!(
+                    "CPU power write verification failed for {}: requested={:?} actual={:?}",
+                    target.path.display(),
+                    target.requested_value,
+                    actual
+                );
+            }
+        }
+
+        Ok(RollbackToken::CpuPowerRestore { records })
     }
 
     fn preflight_at(&self, policy: &CpuPowerPolicy) -> anyhow::Result<Vec<ActionWarning>> {
@@ -235,7 +277,11 @@ impl TuningAction for CpuPowerAction {
     }
 
     fn safety_class(&self) -> SafetyClass {
-        SafetyClass::HighRisk
+        if self.energy_performance_preference.is_some() && self.scaling_governor.is_none() {
+            SafetyClass::ReversibleMediumRisk
+        } else {
+            SafetyClass::HighRisk
+        }
     }
 
     fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
@@ -247,37 +293,7 @@ impl TuningAction for CpuPowerAction {
     }
 
     fn apply(&self) -> anyhow::Result<RollbackToken> {
-        let policy = CpuPowerPolicy::default();
-        let target_files = self.collect_target_files(&policy)?;
-        let mut records = Vec::new();
-
-        for target in target_files {
-            records.push(CpuPowerRestoreRecord {
-                path: target.path.clone(),
-                original_value: target.original_value.clone(),
-            });
-
-            if target.original_value == target.requested_value {
-                continue;
-            }
-
-            write_trimmed(&target.path, &target.requested_value)
-                .with_context(|| format!("failed to write {}", target.path.display()))?;
-
-            let actual = read_trimmed(&target.path)
-                .with_context(|| format!("failed to verify write to {}", target.path.display()))?;
-            if actual != target.requested_value {
-                rollback_cpu_power_records(&records)?;
-                anyhow::bail!(
-                    "CPU power write verification failed for {}: requested={:?} actual={:?}",
-                    target.path.display(),
-                    target.requested_value,
-                    actual
-                );
-            }
-        }
-
-        Ok(RollbackToken::CpuPowerRestore { records })
+        self.apply_with_policy(&CpuPowerPolicy::default())
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
@@ -589,11 +605,23 @@ mod tests {
     }
 
     #[test]
-    fn safety_class_is_high_risk_by_default() {
+    fn safety_class_is_high_risk_when_governor_changes() {
         let root = temp_sysfs_root("safety");
         let action = action_for(&root);
 
         assert_eq!(action.safety_class(), SafetyClass::HighRisk);
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn epp_only_is_reversible_medium_risk() {
+        let root = temp_sysfs_root("epp-medium-risk");
+        let mut action = action_for(&root);
+        action.scaling_governor = None;
+        action.energy_performance_preference = Some("performance".to_owned());
+
+        assert_eq!(action.safety_class(), SafetyClass::ReversibleMediumRisk);
 
         fs::remove_dir_all(root).ok();
     }

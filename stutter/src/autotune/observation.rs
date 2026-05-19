@@ -16,6 +16,7 @@ pub(crate) mod system_context;
 pub(crate) mod target_selection;
 
 use super::{
+    activity::ActivityLevel,
     objective::ObjectiveSignals,
     quality::OnlineDataQuality,
     situation::{SituationClassification, SituationKind, classify_situation},
@@ -149,6 +150,8 @@ pub struct AutotuneObservation {
 
     pub score: StutterScore,
     pub data_quality: OnlineDataQuality,
+    #[serde(default)]
+    pub activity_level: ActivityLevel,
     pub objective_signals: ObjectiveSignals,
 
     pub primary_situation: SituationKind,
@@ -187,6 +190,7 @@ impl Default for AutotuneObservation {
             scored_samples: 0,
             score: StutterScore::default(),
             data_quality: OnlineDataQuality::default(),
+            activity_level: ActivityLevel::default(),
             objective_signals: ObjectiveSignals::default(),
             primary_situation: SituationKind::Unknown,
             situation: SituationClassification::default(),

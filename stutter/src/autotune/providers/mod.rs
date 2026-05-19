@@ -154,9 +154,12 @@ impl CandidateProviderRegistry {
             registry.register(Box::new(cgroup::CgroupProvider));
         }
 
-        if policy.mode == crate::daemon::policy::DaemonMode::Suggest
-            && policy.allow_system_wide_suggestions
-        {
+        let system_wide_suggestions = policy.mode == crate::daemon::policy::DaemonMode::Suggest
+            && policy.allow_system_wide_suggestions;
+        let medium_risk_apply = policy.mode == crate::daemon::policy::DaemonMode::ApplyMediumRisk
+            && policy.allow_medium_risk_apply;
+
+        if system_wide_suggestions || medium_risk_apply {
             registry.register(Box::new(irq_affinity::IrqAffinityProvider));
             registry.register(Box::new(cpu_power::CpuPowerProvider));
             registry.register(Box::new(gpu_power::GpuPowerProvider));

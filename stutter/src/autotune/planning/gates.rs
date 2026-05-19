@@ -6,7 +6,7 @@ use crate::actions::SafetyClass;
 impl CandidateAction {
     pub fn is_high_risk_system_adjacent(&self) -> bool {
         let descriptor = self.descriptor();
-        descriptor.touches_system_wide_state || descriptor.safety_class == SafetyClass::HighRisk
+        descriptor.safety_class == SafetyClass::HighRisk
     }
 
     pub fn manual_only_reason(&self) -> Option<String> {

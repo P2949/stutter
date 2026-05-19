@@ -83,6 +83,8 @@ pub struct UserConfigFile {
 pub struct AutotuneConfigFile {
     pub allow_medium_risk_apply: Option<bool>,
     pub allow_cpu_power_on_battery: Option<bool>,
+    pub allow_gpu_power_in_autotune: Option<bool>,
+    pub allow_vm_knobs_in_autotune: Option<bool>,
     pub privileged_worker_socket: Option<PathBuf>,
     pub unsafe_in_process_privileged_worker: Option<bool>,
     pub manage_privileged_worker: Option<bool>,
@@ -358,6 +360,20 @@ pub fn apply_daemon_user_config_overrides(
         .and_then(|autotune| autotune.allow_cpu_power_on_battery)
     {
         daemon_config.autotune.allow_cpu_power_on_battery = allow_cpu_power_on_battery;
+    }
+    if let Some(allow_gpu_power_in_autotune) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.allow_gpu_power_in_autotune)
+    {
+        daemon_config.autotune.allow_gpu_power_in_autotune = allow_gpu_power_in_autotune;
+    }
+    if let Some(allow_vm_knobs_in_autotune) = user_config
+        .autotune
+        .as_ref()
+        .and_then(|autotune| autotune.allow_vm_knobs_in_autotune)
+    {
+        daemon_config.autotune.allow_vm_knobs_in_autotune = allow_vm_knobs_in_autotune;
     }
     if let Some(socket) = user_config
         .autotune

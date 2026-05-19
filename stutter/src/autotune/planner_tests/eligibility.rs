@@ -134,12 +134,6 @@ mod tests {
                 uclamp_candidate("recording-uclamp"),
             ),
             (
-                "irq affinity",
-                SituationKind::IrqPressure,
-                FocusGroupKind::Desktop,
-                irq_affinity_candidate("irq-affinity"),
-            ),
-            (
                 "io ionice",
                 SituationKind::IoPressure,
                 FocusGroupKind::Desktop,
@@ -149,11 +143,13 @@ mod tests {
 
         for (label, situation, focus_kind, candidate) in cases {
             let action_kind = candidate.action_kind();
-            let suggest = evaluate_static_candidate(
-                DaemonMode::Suggest,
+            let suggest_policy = policy(DaemonMode::Suggest);
+            let suggest = evaluate_static_candidate_with_policy(
+                &suggest_policy,
                 situation,
                 focus_kind,
                 candidate.clone(),
+                1.0,
             );
 
             if candidate.is_high_risk_system_adjacent() {

@@ -99,6 +99,7 @@ mod tests {
             allow_system_wide_suggestions: false,
             allow_medium_risk: false,
             high_risk_dry_run: false,
+            dry_run_all_safe: false,
         };
 
         let err = apply_low_risk_command(&input)

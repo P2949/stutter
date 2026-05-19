@@ -20,12 +20,14 @@ pub mod actions {
 
     pub use crate::actions::{
         ActionError, ActionFailure, ActionOutcome, ActionPhase, ActionResult, ActionState,
-        ActionTimeout, ActionWarning, CgroupRestoreRecord, CpuPowerRestoreRecord,
-        GpuPowerRestoreRecord, IoPrioRestoreRecord, IrqAffinityRestoreRecord, NiceRestoreRecord,
+        ActionTimeout, ActionWarning, CgroupRestoreRecord, CpuPowerAction, CpuPowerPolicy,
+        CpuPowerRestoreRecord, GpuPowerAction, GpuPowerMode, GpuPowerPolicy, GpuPowerRestoreRecord,
+        IoPrioRestoreRecord, IrqAffinityAction, IrqAffinityEvidence, IrqAffinityPolicy,
+        IrqAffinityRestoreRecord, IrqAffinityRisk, NiceAction, NicePolicy, NiceRestoreRecord,
         PhaseFailure, RestoreAllInput, RestoreAllSummary, RollbackCandidate, RollbackHandler,
         RollbackOutcome, RollbackPreview, RollbackRegistry, RollbackResult, RollbackToken,
         SafetyClass, ScopeLimitExceeded, TaskIdentity, TuningAction, UclampRestoreRecord,
-        VmKnobRestoreRecord,
+        VmKnobAction, VmKnobChange, VmKnobMode, VmKnobPolicy, VmKnobRestoreRecord,
     };
 }
 
@@ -68,6 +70,7 @@ pub mod autotune {
     pub use crate::autotune::{
         DEFAULT_MIN_FOCUS_CONFIDENCE,
         commands::live::{AutotuneCommandInput, autotune_command},
+        objective::ObjectiveKind,
     };
 
     pub mod candidate {
@@ -98,6 +101,36 @@ pub mod autotune {
             suggestions_from_candidates_and_dry_run_records, suggestions_from_dry_run_records,
             write_candidate_plan_file,
         };
+    }
+
+    pub mod activity {
+        //! Public autotune activity classification contracts.
+
+        pub use crate::autotune::activity::{ActivityClassifier, ActivityLevel};
+    }
+
+    pub mod observation {
+        //! Public autotune observation contracts.
+
+        pub use crate::autotune::{
+            observation::{AutotuneObservation, WorkloadIdentity},
+            quality::OnlineDataQuality,
+        };
+    }
+
+    pub mod providers {
+        //! Public autotune provider extension contracts.
+
+        pub use crate::autotune::providers::{
+            CandidateProposal, CandidateProvider, CandidateProviderInput,
+            CandidateProviderMetadata, CandidateProviderRegistry, vm_knob::VmKnobProvider,
+        };
+    }
+
+    pub mod system_context {
+        //! Public autotune system-context snapshot contracts.
+
+        pub use crate::autotune::system_context::SystemContextSnapshot;
     }
 
     pub mod controller {
@@ -330,9 +363,12 @@ pub mod daemon {
             RemoteApplyPolicy, RemotePolicyContext, RollbackRequirement, build_daemon_policy,
         },
         privilege::{
+            CandidateApplyRequest, CandidatePlanRequest, InProcessPrivilegedActionService,
             PrivilegeCommandAllowlist, PrivilegeCommandRequest, PrivilegeDecision,
-            PrivilegeProcessRole, PrivilegeTransport, PrivilegedOperation,
-            privileged_operation_audit_event,
+            PrivilegeProcessRole, PrivilegeTransport, PrivilegedActionService, PrivilegedOperation,
+            PrivilegedWorkerHandle, PrivilegedWorkerRequest, PrivilegedWorkerResponse,
+            RollbackRequest, UnixSocketPrivilegedActionService, privileged_operation_audit_event,
+            run_privileged_worker_with_service,
         },
         state::{
             DAEMON_STATE_SCHEMA_VERSION, DaemonDecisionState, DaemonDegradedStatus,
@@ -403,19 +439,12 @@ pub mod focus {
 
     pub use crate::{
         focus::{
-            classify::{
-                Classification, PriorityBand, ProcessIdentity, ThreadIdentity, classify_process,
-                classify_thread, priority_band_for_class,
-            },
-            groups::{
-                FocusGroup, FocusGroupKind, FocusScoreBreakdown, SafetyWarning,
-                safety_warnings_for_group, situation_for_group,
-            },
-            resolve::{FocusDecision, FocusPolicy, FocusResolver, ResolvedFocus},
-            snapshot::{
-                FocusCache, FocusCounters, FocusProcess, FocusSnapshot,
-                build_focus_snapshot_from_processes, focus_snapshot_at,
-            },
+            Classification, FocusCache, FocusCounters, FocusDecision, FocusGroup, FocusGroupKind,
+            FocusPolicy, FocusProcess, FocusResolver, FocusScoreBreakdown, FocusSnapshot,
+            PriorityBand, ProcessIdentity, ResolvedFocus, SafetyWarning, ThreadIdentity,
+            build_focus_snapshot_from_processes, classify_process, classify_thread,
+            focus_snapshot_at, priority_band_for_class, safety_warnings_for_group,
+            situation_for_group,
         },
         process_tree::TaskClass as SystemTaskClass,
     };
