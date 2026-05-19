@@ -468,8 +468,8 @@ const OVERSIZED_RUST_FILE_ALLOWLIST: &[OversizedRustFileAllowance] = &[
     },
     OversizedRustFileAllowance {
         path: "src/autotune/apply_low_risk.rs",
-        max_lines: 1_989,
-        reason: "existing low-risk autotune apply path pending future split; helper APIs now have no-allow regression coverage, including audit-path failure coverage",
+        max_lines: 825,
+        reason: "existing low-risk autotune apply path after extracting embedded apply-low-risk tests",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/shutdown.rs",
