@@ -202,17 +202,16 @@ pub(crate) fn calibrate_provider_proposal(
     let mut cap = 1.0_f32;
 
     match proposal.provider {
-        "cpu_affinity_profile" | "nice" | "ionice" | "uclamp" | "cgroup_placement" => {
-            if input.observation.active_tasks.is_empty() {
-                cap = cap.min(calibration.max_without_active_config);
-            }
+        "cpu_affinity_profile" | "nice" | "ionice" | "uclamp" | "cgroup_placement"
+            if input.observation.active_tasks.is_empty() =>
+        {
+            cap = cap.min(calibration.max_without_active_config);
         }
-        "irq_affinity" => {
+        "irq_affinity"
             if !proposal_has_evidence_token(&proposal, "stable_identity=true")
-                || !proposal_has_evidence_token(&proposal, "current_mask=")
-            {
-                cap = cap.min(calibration.max_without_direct_signal);
-            }
+                || !proposal_has_evidence_token(&proposal, "current_mask=") =>
+        {
+            cap = cap.min(calibration.max_without_direct_signal);
         }
         "gpu_power" => {
             if input.system_context.inventory.drm_devices.len() > 1

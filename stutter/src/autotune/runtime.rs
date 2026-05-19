@@ -465,12 +465,9 @@ fn top_denied_reason_for_plan(plan: &PlanResult) -> Option<String> {
 }
 
 fn plan_has_deny_reason(plan: &PlanResult, reason: CandidateDenyReason) -> bool {
-    plan.evaluations.iter().any(|evaluation| {
-        evaluation
-            .deny_reasons
-            .iter()
-            .any(|candidate_reason| *candidate_reason == reason)
-    })
+    plan.evaluations
+        .iter()
+        .any(|evaluation| evaluation.deny_reasons.contains(&reason))
 }
 
 impl AutotuneRuntime {

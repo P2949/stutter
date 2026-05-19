@@ -271,7 +271,6 @@ impl LiveExperimentManager {
         self.current.is_some()
     }
 
-    #[cfg(test)]
     pub fn current_experiment(&self) -> Option<&LiveExperiment> {
         self.current.as_ref()
     }
