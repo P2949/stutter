@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 use crate::actions::{
     ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TaskIdentity, TuningAction,
     UclampRestoreRecord,
+    rollback::{
+        RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
+        token_restore_result,
+    },
 };
 
 const UCLAMP_MIN_VALUE: u32 = 0;
@@ -102,6 +106,67 @@ impl Default for UclampPolicy {
 pub struct UclampAction {
     pub targets: Vec<TaskIdentity>,
     pub values: UclampValues,
+}
+
+pub(crate) struct UclampRollbackHandler;
+
+impl RollbackHandler for UclampRollbackHandler {
+    fn id(&self) -> &'static str {
+        "uclamp-rollback"
+    }
+
+    fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>> {
+        Ok(Vec::new())
+    }
+
+    fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
+        anyhow::bail!("uclamp rollback requires an explicit rollback token")
+    }
+
+    fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
+        anyhow::bail!("uclamp rollback requires an explicit rollback token")
+    }
+
+    fn supports_token(&self, token: &RollbackToken) -> bool {
+        matches!(token, RollbackToken::UclampRestore { .. })
+    }
+
+    fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
+        if !self.supports_token(token) {
+            anyhow::bail!("uclamp rollback handler does not support {token:?}");
+        }
+        Ok(token_dry_run_preview(self.id(), token, "uclamp-restore"))
+    }
+
+    fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+        let RollbackToken::UclampRestore { records } = token else {
+            anyhow::bail!("uclamp rollback handler does not support {token:?}");
+        };
+
+        for record in records {
+            set_task_uclamp(
+                record.tid,
+                UclampCurrentValues {
+                    sched_util_min: record.original_util_min,
+                    sched_util_max: record.original_util_max,
+                },
+            )
+            .with_context(|| {
+                format!(
+                    "failed to restore uclamp min={} max={} for tid={}",
+                    record.original_util_min, record.original_util_max, record.tid
+                )
+            })?;
+        }
+
+        Ok(token_restore_result(
+            self.id(),
+            token,
+            records.len(),
+            0,
+            Vec::new(),
+        ))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

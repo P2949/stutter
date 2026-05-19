@@ -39,10 +39,15 @@ use crate::{
 };
 
 pub(crate) mod classify;
+pub(crate) mod community_rules;
+pub(crate) mod foreground;
 pub(crate) mod groups;
 pub(crate) mod resolve;
+pub(crate) mod safety;
 pub(crate) mod score;
 pub(crate) mod snapshot;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 #[cfg(test)]
 pub(crate) use classify::priority_band_for_class;

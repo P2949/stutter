@@ -6,10 +6,13 @@ mod agent;
 mod autotune;
 mod config;
 mod daemon;
+mod map;
 mod monitor;
+mod parse;
 mod report;
 mod service;
 mod validate;
+mod version_parse;
 
 use agent::{AgentArgs, PrivilegedWorkerArgs, agent_listen_args};
 use autotune::{AutotuneArgs, AutotuneCommand, AutotuneStatusArgs, validate_autotune_mode};
@@ -31,7 +34,7 @@ use service::{
 use validate::{ValidateArgs, parse_optional_task_class, validate_comm_patterns, validate_pids};
 
 #[cfg(test)]
-pub(crate) use crate::commands::input::RulesImportArgs;
+pub(crate) use crate::commands::input::RulesImportCommandInput;
 use crate::{
     commands::input::{
         AdvisorCommandInput, AgentCommandInput, AppCommand, ApplyProfileCommandInput,
@@ -105,6 +108,19 @@ mod version_tests {
         };
 
         assert!(input.features);
+    }
+
+    #[test]
+    fn clap_top_level_command_tree_matches_snapshot() {
+        let mut rendered = String::from("stutter\n");
+        for subcommand in Cli::command().get_subcommands() {
+            rendered.push_str(&format!("  {}\n", subcommand.get_name()));
+        }
+
+        assert_eq!(
+            rendered,
+            include_str!("../../tests/snapshots/clap_top_level_commands.txt")
+        );
     }
 }
 
@@ -812,23 +828,21 @@ where
         }
         Some(Command::Rules(args)) => Ok(AppCommand::Rules(RulesCommandInput {
             command: match args.command {
-                RulesCommand::Import(args) => crate::commands::input::RulesCommand::Import(
-                    crate::commands::input::RulesImportArgs {
-                        source: args.source,
-                        name: args.name,
-                        source_repo: args.source_repo,
-                        source_commit: args.source_commit,
-                        license: args.license,
-                        out: args.out,
-                        dry_run: args.dry_run,
-                    },
-                ),
-                RulesCommand::Check(args) => crate::commands::input::RulesCommand::Check(
-                    crate::commands::input::RulesCheckArgs {
-                        source: args.source,
-                        generated: args.generated,
-                    },
-                ),
+                RulesCommand::Import(args) => {
+                    let input =
+                        match crate::commands::input::RulesImportCommandInput::try_from(args) {
+                            Ok(input) => input,
+                            Err(never) => match never {},
+                        };
+                    crate::commands::input::RulesCommand::Import(input)
+                }
+                RulesCommand::Check(args) => {
+                    let input = match crate::commands::input::RulesCheckArgs::try_from(args) {
+                        Ok(input) => input,
+                        Err(never) => match never {},
+                    };
+                    crate::commands::input::RulesCommand::Check(input)
+                }
                 RulesCommand::List(_) => crate::commands::input::RulesCommand::List,
                 RulesCommand::Status(_) => crate::commands::input::RulesCommand::Status,
                 RulesCommand::Enable(args) => crate::commands::input::RulesCommand::Enable(

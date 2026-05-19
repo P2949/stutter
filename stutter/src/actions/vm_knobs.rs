@@ -10,6 +10,10 @@ use anyhow::Context;
 use crate::actions::{
     ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
     VmKnobRestoreRecord,
+    rollback::{
+        RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
+        token_restore_result,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +53,71 @@ pub struct VmKnobChange {
 pub struct VmKnobAction {
     pub root: PathBuf,
     pub changes: Vec<VmKnobChange>,
+}
+
+pub(crate) struct VmKnobRollbackHandler;
+
+impl RollbackHandler for VmKnobRollbackHandler {
+    fn id(&self) -> &'static str {
+        "vm-knob-rollback"
+    }
+
+    fn discover(&self) -> anyhow::Result<Vec<RollbackCandidate>> {
+        Ok(Vec::new())
+    }
+
+    fn dry_run(&self, _: &RollbackCandidate) -> anyhow::Result<RollbackPreview> {
+        anyhow::bail!("VM knob/sysfs rollback requires an explicit rollback token")
+    }
+
+    fn restore(&self, _: RollbackCandidate) -> anyhow::Result<RollbackResult> {
+        anyhow::bail!("VM knob/sysfs rollback requires an explicit rollback token")
+    }
+
+    fn supports_token(&self, token: &RollbackToken) -> bool {
+        matches!(
+            token,
+            RollbackToken::VmKnobRestore { .. } | RollbackToken::SysfsRestore { .. }
+        )
+    }
+
+    fn dry_run_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackPreview> {
+        let rollback_kind = match token {
+            RollbackToken::VmKnobRestore { .. } => "vm-knob-restore",
+            RollbackToken::SysfsRestore { .. } => "sysfs-restore",
+            _ => anyhow::bail!("VM knob/sysfs rollback handler does not support {token:?}"),
+        };
+        Ok(token_dry_run_preview(self.id(), token, rollback_kind))
+    }
+
+    fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
+        match token {
+            RollbackToken::VmKnobRestore { records } => {
+                rollback_vm_knob_records(records)?;
+                Ok(token_restore_result(
+                    self.id(),
+                    token,
+                    records.len(),
+                    0,
+                    Vec::new(),
+                ))
+            }
+            RollbackToken::SysfsRestore {
+                path,
+                original_value,
+            } => {
+                write_trimmed(path, original_value)?;
+                Ok(token_restore_result(
+                    self.id(),
+                    token,
+                    1,
+                    0,
+                    vec![format!("restored sysfs value {}", path.display())],
+                ))
+            }
+            _ => anyhow::bail!("VM knob/sysfs rollback handler does not support {token:?}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -66,20 +66,36 @@ use crate::{
     },
 };
 
+#[path = "session/alerts.rs"]
+pub(crate) mod alerts;
 #[path = "session/event_bus.rs"]
 pub(crate) mod event_bus;
+#[path = "session/exporter.rs"]
+pub(crate) mod exporter;
+#[path = "session/hwmon.rs"]
+pub(crate) mod hwmon_stage;
 #[path = "session/live_telemetry.rs"]
 pub(crate) mod live_telemetry;
+#[path = "session/monitor_session.rs"]
+pub(crate) mod monitor_session;
 #[path = "session/outputs.rs"]
 pub(crate) mod outputs;
 #[path = "session/probes.rs"]
 pub(crate) mod probes;
+#[path = "session/recording.rs"]
+pub(crate) mod recording;
 #[path = "session/runtime.rs"]
 pub(crate) mod runtime;
+#[path = "session/sampler.rs"]
+pub(crate) mod sampler;
 #[path = "session/sinks.rs"]
 pub(crate) mod sinks;
+#[path = "session/target.rs"]
+pub(crate) mod target;
 #[path = "session/targeting.rs"]
 pub(crate) mod targeting;
+#[path = "session/ticks/mod.rs"]
+pub(crate) mod ticks;
 
 #[path = "session/ui.rs"]
 pub(crate) mod ui;
@@ -87,6 +103,12 @@ pub(crate) mod ui;
 const LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS: u64 = 5;
 // Keep this aligned with the report default unless live diagnosis gets
 // its own CLI/config field.
+
+#[allow(dead_code)] // Transitional session-stage context; tick extraction will adopt this incrementally.
+pub(crate) struct SessionContext<'a> {
+    pub config: &'a MonitorConfig,
+    pub started: Instant,
+}
 
 fn needs_tree_tick_from_parts(
     had_tree_roots: bool,
@@ -2140,9 +2162,11 @@ pub fn configure_target_irqs(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+#[path = "session/tests.rs"]
+mod tree_tick_tests;
 
+#[cfg(test)]
+mod tests {
     #[test]
     fn session_child_modules_are_not_public_submodules() {
         let source = include_str!("session.rs");
@@ -2157,26 +2181,6 @@ mod tests {
             public_child_modules.is_empty(),
             "session child modules must stay crate-private and be exposed intentionally through api::session: {public_child_modules:?}"
         );
-    }
-
-    #[test]
-    fn tree_tick_not_needed_for_direct_pid_only() {
-        assert!(!needs_tree_tick_from_parts(false, false, false));
-    }
-
-    #[test]
-    fn tree_tick_needed_for_tree_roots() {
-        assert!(needs_tree_tick_from_parts(true, false, false));
-    }
-
-    #[test]
-    fn tree_tick_needed_for_watch_process_even_without_current_root() {
-        assert!(needs_tree_tick_from_parts(false, true, false));
-    }
-
-    #[test]
-    fn tree_tick_needed_for_cgroupv2() {
-        assert!(needs_tree_tick_from_parts(false, false, true));
     }
 }
 

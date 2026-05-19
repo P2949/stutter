@@ -40,6 +40,7 @@ pub(crate) mod vm_knobs;
 pub(crate) mod runner;
 
 pub(crate) mod error;
+pub(crate) mod factory;
 pub(crate) mod model;
 pub(crate) mod rollback;
 pub(crate) mod token;
@@ -49,6 +50,7 @@ pub use error::{
     ActionError, ActionFailure, ActionResult, ActionTimeout, PhaseFailure, RollbackOutcome,
     ScopeLimitExceeded,
 };
+pub use factory::default_action_factory_registry;
 pub use model::{
     ActionId, ActionOutcome, ActionPhase, ActionState, ActionWarning, CgroupRestoreRecord,
     CpuPowerRestoreRecord, GpuPowerRestoreRecord, IoPrioRestoreRecord, IrqAffinityRestoreRecord,
@@ -56,7 +58,7 @@ pub use model::{
 };
 pub use rollback::{
     RestoreAllInput, RestoreAllSummary, RollbackCandidate, RollbackHandler, RollbackPreview,
-    RollbackRegistry, RollbackResult,
+    RollbackRegistry, RollbackResult, default_rollback_registry,
 };
 pub use token::RollbackToken;
 pub use traits::TuningAction;
@@ -97,5 +99,16 @@ mod tests {
                 "actions/mod.rs must re-export domain contracts from focused modules instead of defining {needle}"
             );
         }
+    }
+
+    #[test]
+    fn action_root_has_no_broad_allow_suppressions() {
+        let source = include_str!("mod.rs");
+        let allow_needle = concat!("#[", "allow(");
+
+        assert!(
+            !source.contains(allow_needle),
+            "actions/mod.rs should stay a narrow facade without broad allow suppressions"
+        );
     }
 }

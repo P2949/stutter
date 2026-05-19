@@ -841,7 +841,7 @@ pub fn task_comm_at(proc_root: &Path, pid: u32, tid: u32) -> Option<String> {
         .join(tid.to_string())
         .join("comm");
 
-    fs::read_to_string(comm_path)
+    crate::procfs::read_procfs_to_string(&comm_path)
         .ok()
         .map(|comm| comm.trim().to_owned())
         .filter(|comm| !comm.is_empty())

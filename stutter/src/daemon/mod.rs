@@ -39,6 +39,7 @@ pub(crate) mod runtime;
 pub(crate) mod soak;
 pub(crate) mod state;
 pub(crate) mod state_builders;
+pub(crate) mod state_compat;
 pub(crate) mod store;
 pub(crate) mod testing;
 pub(crate) mod watchdog;

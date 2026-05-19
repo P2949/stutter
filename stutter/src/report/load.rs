@@ -1,11 +1,21 @@
 use super::*;
 use crate::artifacts::ArtifactSelection;
 
-pub(crate) fn load_report_input(path: &Path) -> anyhow::Result<ReportInputModel> {
-    let validation = session_io::validate_run_dir_shallow(path)?;
+pub(crate) fn load_report_input(path: &Path) -> Result<ReportInputModel, ReportError> {
+    let validation =
+        session_io::validate_run_dir_shallow(path).map_err(|source| ReportError::Load {
+            path: path.to_path_buf(),
+            source,
+        })?;
     log_run_validation(path, &validation);
 
-    let artifacts = session_io::load_run_artifacts(path, ArtifactSelection::report())?;
+    let artifacts =
+        session_io::load_run_artifacts(path, ArtifactSelection::report()).map_err(|source| {
+            ReportError::Load {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
     Ok(ReportInputModel::from_artifacts(artifacts))
 }
 

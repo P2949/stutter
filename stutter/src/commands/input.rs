@@ -420,7 +420,7 @@ pub struct ManCommandInput {
 
 #[derive(Debug)]
 pub enum RulesCommand {
-    Import(RulesImportArgs),
+    Import(RulesImportCommandInput),
     Check(RulesCheckArgs),
     List,
     Status,
@@ -430,7 +430,7 @@ pub enum RulesCommand {
 }
 
 #[derive(Debug)]
-pub struct RulesImportArgs {
+pub struct RulesImportCommandInput {
     pub source: PathBuf,
     pub name: String,
     pub source_repo: Option<String>,

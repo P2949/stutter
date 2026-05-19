@@ -34,16 +34,20 @@ pub(crate) mod commands;
 pub(crate) mod comparison;
 pub(crate) mod conflicts;
 pub(crate) mod controller_journal;
+pub(crate) mod domain;
 pub(crate) mod emergency_restore;
 pub(crate) mod experiment;
 pub(crate) mod generate_profiles;
 pub(crate) mod gpu_focus;
 pub(crate) mod history;
 pub(crate) mod history_replay;
+pub(crate) mod human_output;
 pub(crate) mod kept;
 pub(crate) mod live_experiment;
 #[cfg(test)]
 pub(crate) mod measurement;
+pub(crate) mod output;
+pub(crate) mod planning;
 pub(crate) mod profiles;
 pub(crate) mod protection;
 pub(crate) mod providers;
@@ -58,6 +62,8 @@ pub(crate) mod system_context;
 pub(crate) mod target_selection;
 pub(crate) mod washout;
 pub(crate) mod workload_policy;
+
+pub use crate::error::{AutotunePlanError, AutotuneRuntimeError};
 
 pub const DEFAULT_MIN_FOCUS_CONFIDENCE: f32 = 0.70;
 

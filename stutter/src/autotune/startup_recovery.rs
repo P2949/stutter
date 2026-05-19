@@ -1251,7 +1251,7 @@ mod tests {
         assert!(summary.message.contains("rollback_kind=sysfs-restore"));
         assert!(summary.message.contains("restored_items=1"));
         assert!(summary.message.contains("skipped_items=0"));
-        assert_eq!(fs::read_to_string(&path).unwrap(), "powersave\n");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "powersave");
 
         fs::remove_dir_all(dir).ok();
     }

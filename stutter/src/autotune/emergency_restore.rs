@@ -167,7 +167,7 @@ impl RollbackHandler for AutotuneRollbackTokenHandler {
 }
 
 pub fn default_autotune_rollback_registry() -> RollbackRegistry {
-    let mut registry = RollbackRegistry::new();
+    let mut registry = crate::actions::default_rollback_registry();
     registry.register(AutotuneRollbackTokenHandler);
     registry
 }
@@ -274,15 +274,15 @@ pub fn restore_known_autotune_actions(
         | ControllerJournalState::Faulted => {
             let (experiment_id, action_id) = journal_experiment_action(&record);
             if let Some(rollback_token) = record.rollback_token() {
-                restore_applied_journal_record(
-                    &journal_path,
-                    &audit_path,
-                    &history_path,
-                    &experiment_id,
-                    &action_id,
+                restore_applied_journal_record(RestoreAppliedJournalInput {
+                    journal_path: &journal_path,
+                    audit_path: &audit_path,
+                    history_path: &history_path,
+                    experiment_id: &experiment_id,
+                    action_id: &action_id,
                     rollback_token,
-                    input.dry_run,
-                )
+                    dry_run: input.dry_run,
+                })
             } else {
                 Ok(AutotuneRestoreOutcome {
                     status: AutotuneRestoreStatus::ApplyingWithoutRollbackToken,
@@ -315,15 +315,28 @@ fn journal_experiment_action(record: &ControllerJournalRecord) -> (String, Strin
     )
 }
 
-fn restore_applied_journal_record(
-    journal_path: &Path,
-    audit_path: &Path,
-    history_path: &Path,
-    experiment_id: &str,
-    action_id: &str,
-    rollback_token: &RollbackToken,
+struct RestoreAppliedJournalInput<'a> {
+    journal_path: &'a Path,
+    audit_path: &'a Path,
+    history_path: &'a Path,
+    experiment_id: &'a str,
+    action_id: &'a str,
+    rollback_token: &'a RollbackToken,
     dry_run: bool,
+}
+
+fn restore_applied_journal_record(
+    input: RestoreAppliedJournalInput<'_>,
 ) -> anyhow::Result<AutotuneRestoreOutcome> {
+    let RestoreAppliedJournalInput {
+        journal_path,
+        audit_path,
+        history_path,
+        experiment_id,
+        action_id,
+        rollback_token,
+        dry_run,
+    } = input;
     let registry = default_autotune_rollback_registry();
     let manual_command = manual_restore_command_for_token(rollback_token);
     let rollback_kind = rollback_token_kind(rollback_token);
@@ -337,8 +350,8 @@ fn restore_applied_journal_record(
             skipped_actions: 1,
             messages: vec![
                 format!(
-                    "autotune restore dry-run: would restore experiment_id={} action_id={} rollback_kind={} affected_tasks={}",
-                    experiment_id, action_id, rollback_kind, preview.affected_tasks
+                    "autotune restore dry-run: would restore experiment_id={} action_id={} rollback_kind={} affected_tasks={} manual_restore_command=\"{}\"",
+                    experiment_id, action_id, rollback_kind, preview.affected_tasks, manual_command
                 ),
                 preview.message,
             ],
@@ -1223,14 +1236,13 @@ mod tests {
         let registry = default_autotune_rollback_registry();
 
         let preview = registry.preview_token(&token).unwrap();
-        assert_eq!(preview.handler_id, "autotune-rollback-token");
+        assert_eq!(preview.handler_id, "vm-knob-rollback");
         assert_eq!(preview.restore_path, target);
         assert_eq!(preview.affected_tasks, 1);
         assert!(preview.message.contains("rollback_kind=sysfs-restore"));
-        assert!(preview.message.contains("manual_restore_command"));
 
         let result = registry.restore_token(&token).unwrap();
-        assert_eq!(result.handler_id, "autotune-rollback-token");
+        assert_eq!(result.handler_id, "vm-knob-rollback");
         assert_eq!(result.restored, 1);
         assert_eq!(result.errors, 0);
         assert_eq!(fs::read_to_string(&target).unwrap(), "original");

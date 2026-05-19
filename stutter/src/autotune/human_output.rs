@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Transitional output renderer module; call sites migrate through autotune::output.
+
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

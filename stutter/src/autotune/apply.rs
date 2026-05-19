@@ -5,17 +5,18 @@ use std::time::Duration;
 use anyhow::Context;
 
 #[cfg(test)]
+use crate::autotune::candidate::{ApplyEligibility, try_promote_to_apply_candidate};
+#[cfg(test)]
 use crate::daemon_policy::{ActionSource, DaemonPolicy, PolicyIntent};
 use crate::{
     actions::{
-        RollbackToken, SafetyClass, TuningAction,
-        cpu_affinity::CpuAffinityProfileAction,
+        RollbackToken, SafetyClass, TuningAction, default_action_factory_registry,
         runner::{
             ActionHooks, ActionRunPolicy, AuditedActionResult, run_audited_action_with_hooks,
         },
     },
     autotune::candidate::{
-        CandidateAction, CandidateDryRunRecord, dry_run_record_from_action_state,
+        ApplyCandidate, CandidateAction, CandidateDryRunRecord, dry_run_record_from_action_state,
     },
     daemon_policy::ActionDescriptor,
 };
@@ -42,92 +43,31 @@ pub trait CandidateActionExecutor {
     fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()>;
 }
 
-struct PlannedActionExecutor<A: TuningAction + 'static> {
+struct BoxedActionExecutor {
     candidate_name: String,
     action_kind: &'static str,
-    action: A,
-}
-
-impl<A: TuningAction + 'static> PlannedActionExecutor<A> {
-    fn new(candidate_name: String, action_kind: &'static str, action: A) -> Self {
-        Self {
-            candidate_name,
-            action_kind,
-            action,
-        }
-    }
-}
-
-impl<A: TuningAction + 'static> CandidateActionExecutor for PlannedActionExecutor<A> {
-    fn candidate_name(&self) -> &str {
-        &self.candidate_name
-    }
-
-    fn action_kind(&self) -> &'static str {
-        self.action_kind
-    }
-
-    fn descriptor(&self) -> ActionDescriptor {
-        ActionDescriptor {
-            action_id: self.action.id(),
-            action_kind: self.action_kind.to_owned(),
-            safety_class: self.action.safety_class(),
-            effect_scope: crate::daemon_policy::ActionEffectScope::LocalProcessTree,
-            rollback: crate::daemon_policy::RollbackRequirement::RequiredBeforeApply,
-            persistent_effect: false,
-            touches_system_wide_state: false,
-            requires_explicit_target: true,
-            confidence: None,
-        }
-    }
-
-    fn dry_run(&self) -> anyhow::Result<CandidateDryRunRecord> {
-        let state = self.action.dry_run()?;
-        Ok(dry_run_record_from_action_state(
-            self.candidate_name.clone(),
-            self.action.safety_class(),
-            state,
-        ))
-    }
-
-    fn apply_with_audit(&self, run_policy: ActionRunPolicy) -> anyhow::Result<AuditedActionResult> {
-        run_audited_action_with_hooks(
-            "autotune candidate",
-            &self.action,
-            run_policy,
-            ActionHooks::none(),
-        )
-        .map_err(anyhow::Error::new)
-    }
-
-    fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
-        self.action.rollback(token)
-    }
-}
-
-struct DescribedActionExecutor<A: TuningAction + 'static> {
-    candidate_name: String,
     descriptor: ActionDescriptor,
-    action: A,
+    action: Box<dyn TuningAction>,
 }
 
-impl<A: TuningAction + 'static> DescribedActionExecutor<A> {
-    fn new(candidate: &CandidateAction, action: A) -> Self {
+impl BoxedActionExecutor {
+    fn new(candidate: &CandidateAction, action: Box<dyn TuningAction>) -> Self {
         Self {
             candidate_name: candidate.candidate_name().to_owned(),
+            action_kind: action_kind_static(candidate.action_kind()),
             descriptor: candidate.descriptor(),
             action,
         }
     }
 }
 
-impl<A: TuningAction + 'static> CandidateActionExecutor for DescribedActionExecutor<A> {
+impl CandidateActionExecutor for BoxedActionExecutor {
     fn candidate_name(&self) -> &str {
         &self.candidate_name
     }
 
     fn action_kind(&self) -> &'static str {
-        action_kind_static(&self.descriptor.action_kind)
+        self.action_kind
     }
 
     fn descriptor(&self) -> ActionDescriptor {
@@ -158,7 +98,22 @@ impl<A: TuningAction + 'static> CandidateActionExecutor for DescribedActionExecu
     }
 }
 
-pub fn executor_for_candidate(
+pub fn executor_for_apply_candidate(
+    apply_candidate: ApplyCandidate,
+) -> anyhow::Result<Box<dyn CandidateActionExecutor>> {
+    debug_assert!(apply_candidate.eligibility().is_applyable());
+    debug_assert!(!apply_candidate.candidate().action_kind().is_empty());
+    let candidate = apply_candidate.into_candidate();
+    build_executor_for_candidate(candidate)
+}
+
+pub fn executor_for_candidate_preview(
+    candidate: CandidateAction,
+) -> anyhow::Result<Box<dyn CandidateActionExecutor>> {
+    build_executor_for_candidate(candidate)
+}
+
+fn build_executor_for_candidate(
     candidate: CandidateAction,
 ) -> anyhow::Result<Box<dyn CandidateActionExecutor>> {
     if candidate.is_high_risk_system_adjacent() {
@@ -169,51 +124,10 @@ pub fn executor_for_candidate(
         );
     }
 
-    match candidate {
-        CandidateAction::CpuAffinityProfile { plan } => Ok(Box::new(PlannedActionExecutor::new(
-            plan.profile_name,
-            "cpu_affinity_profile",
-            CpuAffinityProfileAction {
-                tree_pid: plan.tree_pid,
-                profile: plan.profile,
-                force_restore_overwrite: false,
-            },
-        ))),
-        CandidateAction::Nice { plan } => {
-            let candidate = CandidateAction::Nice { plan: plan.clone() };
-            Ok(Box::new(DescribedActionExecutor::new(
-                &candidate,
-                plan.action,
-            )))
-        }
-        CandidateAction::IoPrio { plan } => {
-            let candidate = CandidateAction::IoPrio { plan: plan.clone() };
-            Ok(Box::new(DescribedActionExecutor::new(
-                &candidate,
-                plan.action,
-            )))
-        }
-        CandidateAction::Uclamp { plan } => {
-            let candidate = CandidateAction::Uclamp { plan: plan.clone() };
-            Ok(Box::new(DescribedActionExecutor::new(
-                &candidate,
-                plan.action,
-            )))
-        }
-        CandidateAction::CgroupPlacement { plan } => {
-            let candidate = CandidateAction::CgroupPlacement { plan: plan.clone() };
-            Ok(Box::new(DescribedActionExecutor::new(
-                &candidate,
-                plan.action,
-            )))
-        }
-        other => anyhow::bail!(
-            "generic apply executor does not support candidate '{}' action_kind={} safety={:?}",
-            other.candidate_name(),
-            other.action_kind(),
-            other.safety_class()
-        ),
-    }
+    let action = default_action_factory_registry()
+        .build(&candidate)
+        .map_err(anyhow::Error::new)?;
+    Ok(Box::new(BoxedActionExecutor::new(&candidate, action)))
 }
 
 #[cfg(test)]
@@ -221,7 +135,9 @@ pub async fn run_apply_medium_risk_candidate(
     candidate: CandidateAction,
     duration: Duration,
 ) -> anyhow::Result<ApplyCandidateOutcome> {
-    let executor = executor_for_candidate(candidate)?;
+    let apply_candidate = try_promote_to_apply_candidate(candidate, ApplyEligibility::approved())
+        .map_err(|eligibility| anyhow::anyhow!(eligibility.denial_message()))?;
+    let executor = executor_for_apply_candidate(apply_candidate)?;
     run_apply_medium_risk_with_executor(executor.as_ref(), duration).await
 }
 
@@ -477,6 +393,6 @@ mod tests {
         .unwrap_err()
         .to_string();
 
-        assert!(err.contains("generic apply executor does not support candidate"));
+        assert!(err.contains("no action factory registered"));
     }
 }

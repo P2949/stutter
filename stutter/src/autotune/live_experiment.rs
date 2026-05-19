@@ -247,8 +247,9 @@ impl LiveExperimentActionExecutor for RuntimeLiveExperimentActionExecutor {
                 context: policy_context_for_runtime_apply(observation),
             })?;
         } else {
-            let executor =
-                crate::autotune::apply::executor_for_candidate(experiment.candidate.clone())?;
+            let executor = crate::autotune::apply::executor_for_candidate_preview(
+                experiment.candidate.clone(),
+            )?;
             executor.rollback(&experiment.rollback)?;
         }
 

@@ -1,15 +1,13 @@
-use crate::{
-    config::{
-        layer::MonitorConfigLayer,
-        merge::{self, ConfigSources},
-        model::{
-            FocusConfig, MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, SafetyConfig,
-            TargetConfig, TimingConfig,
-        },
-        schema::ConfigDiagnostic,
-        source::{ConfigSource, FieldProvenance},
+use crate::config::{
+    ConfigError,
+    layer::MonitorConfigLayer,
+    merge::{self, ConfigSources},
+    model::{
+        FocusConfig, MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, SafetyConfig,
+        TargetConfig, TimingConfig,
     },
-    error::ConfigError,
+    schema::ConfigDiagnostic,
+    source::{ConfigSource, FieldProvenance},
 };
 
 #[derive(Debug, Clone, PartialEq)]

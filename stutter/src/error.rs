@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -16,6 +18,20 @@ pub enum StutterError {
     Artifact(#[from] ArtifactError),
     #[error("report error: {0}")]
     Report(#[from] ReportError),
+    #[error("profile error: {0}")]
+    Profile(#[from] ProfileError),
+    #[error("procfs error: {0}")]
+    Procfs(#[from] ProcfsError),
+    #[error("eBPF load error: {0}")]
+    EbpfLoad(#[from] EbpfLoadError),
+    #[error("autotune plan error: {0}")]
+    AutotunePlan(#[from] AutotunePlanError),
+    #[error("autotune runtime error: {0}")]
+    AutotuneRuntime(#[from] AutotuneRuntimeError),
+    #[error("daemon policy error: {0}")]
+    DaemonPolicy(#[from] DaemonPolicyError),
+    #[error("agent error: {0}")]
+    Agent(#[from] AgentError),
     #[error("action error: {0}")]
     Action(#[from] crate::actions::ActionError),
     #[error("remote error: {0}")]
@@ -45,6 +61,58 @@ pub enum ConfigError {
         #[source]
         source: anyhow::Error,
     },
+    #[error("invalid config value for {field}: {message}")]
+    InvalidValue {
+        field: &'static str,
+        message: String,
+    },
+}
+
+#[derive(Debug, Error)]
+pub enum ProfileError {
+    #[error("failed to read profile {path}: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse profile {path}: {source:#}")]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: anyhow::Error,
+    },
+    #[error("profile validation failed: {message}")]
+    Validation { message: String },
+}
+
+#[derive(Debug, Error)]
+pub enum ProcfsError {
+    #[error("failed to read procfs path {path}: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse procfs field {field}: {message}")]
+    Parse {
+        field: &'static str,
+        message: String,
+    },
+}
+
+#[derive(Debug, Error)]
+pub enum EbpfLoadError {
+    #[error("failed to read BPF object {path}: {source}")]
+    ReadObject {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("BPF object {path} is empty")]
+    EmptyObject { path: PathBuf },
+    #[error("eBPF load failed: {message}")]
+    Load { message: String },
 }
 
 #[derive(Debug, Error)]
@@ -87,6 +155,53 @@ pub enum ArtifactError {
 pub enum ReportError {
     #[error(transparent)]
     Source(#[from] anyhow::Error),
+    #[error("failed to load report input from {path}: {source:#}")]
+    Load {
+        path: PathBuf,
+        #[source]
+        source: anyhow::Error,
+    },
+}
+
+#[derive(Debug, Error)]
+pub enum AutotunePlanError {
+    #[error("invalid candidate plan: {message}")]
+    InvalidPlan { message: String },
+    #[error("candidate denied for apply: {message}")]
+    ApplyDenied { message: String },
+}
+
+#[derive(Debug, Error)]
+pub enum AutotuneRuntimeError {
+    #[error("invalid autotune runtime mode: {message}")]
+    InvalidMode { message: String },
+    #[error("autotune runtime failed: {source:#}")]
+    Source {
+        #[source]
+        source: anyhow::Error,
+    },
+}
+
+#[derive(Debug, Error)]
+pub enum DaemonPolicyError {
+    #[error("invalid daemon policy input: {message}")]
+    InvalidInput { message: String },
+    #[error("daemon policy rejected action: {message}")]
+    Rejected { message: String },
+}
+
+#[derive(Debug, Error)]
+pub enum AgentError {
+    #[error("failed to read bearer token file {path}: {source}")]
+    BearerTokenFile {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("bearer token is empty")]
+    EmptyBearerToken,
+    #[error("agent request is invalid: {message}")]
+    InvalidRequest { message: String },
 }
 
 #[derive(Debug, Error)]
