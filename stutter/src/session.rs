@@ -2467,7 +2467,8 @@ fn kms_flip_flag_names(flags: u32) -> Vec<String> {
         (stutter_common::KMS_FLIP_HAS_CRTC, "has_crtc"),
     ]
     .into_iter()
-    .filter_map(|(bit, name)| (flags & bit != 0).then(|| name.to_owned()))
+    .filter(|&(bit, _)| flags & bit != 0)
+    .map(|(_, name)| name.to_owned())
     .collect()
 }
 

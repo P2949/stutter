@@ -22,18 +22,13 @@ pub enum ForegroundSource {
     X11,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum WaylandPresentationSource {
+    #[default]
     ExternalLog,
     Gamescope,
     SelfTest,
-}
-
-impl Default for WaylandPresentationSource {
-    fn default() -> Self {
-        Self::ExternalLog
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

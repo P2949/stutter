@@ -3,7 +3,7 @@
 use super::{autotune::*, daemon::*, recording::*, routes::*, *};
 
 #[cfg(test)]
-mod tests {
+mod cases {
     use super::*;
 
     fn minimal_remote_request() -> RemoteMonitorRequest {
