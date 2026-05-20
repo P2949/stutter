@@ -78,6 +78,7 @@ RUSTUP_TOOLCHAIN=nightly cargo test --all-targets
 - [x] Patch F2: Move process-family tree helpers: created `src/focus/tree_walk.rs` and moved tree walk helper functions.
 - [x] Patch F3: Move safety helpers: created `src/focus/safety.rs` and moved safety check logic and helper functions.
 - [x] Patch F4: Move group-build helpers: created `src/focus/group_build.rs` and moved group construction helper functions.
+- [x] Patch F5: Move scoring penalty helpers: moved scoring penalty functions from `process_scan.rs` to `score.rs`.
 
 ## Current shape from the uploaded code
 
