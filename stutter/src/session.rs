@@ -32,6 +32,7 @@ use std::{
 };
 
 use crossterm::event::{Event, KeyCode};
+use futures_util::{FutureExt, future::Fuse};
 use log::{info, warn};
 use tokio::{
     task,
@@ -257,6 +258,36 @@ fn scx_snapshot(tracker: &crate::scx::ScxTracker) -> ScxSnapshot {
         state: tracker.current_state().map(str::to_owned),
         enable_seq: tracker.current_enable_seq().map(str::to_owned),
     }
+}
+
+/// First-frame MangoHud alignment between the MangoHud CSV clock and the
+/// recorder's monotonic clock.
+///
+/// The live MangoHud path discovers this once per recording. It is delivered
+/// through a `oneshot` because the alignment event is a single initialization
+/// value, not a stream.
+pub(crate) type MangoHudAlignment = (u64, u64);
+
+pub(crate) type MangoHudAlignmentReceiver = tokio::sync::oneshot::Receiver<MangoHudAlignment>;
+pub(crate) type FusedMangoHudAlignmentReceiver = Fuse<MangoHudAlignmentReceiver>;
+
+/// Make the MangoHud alignment receiver safe to keep inside the main select loop.
+///
+/// `tokio::sync::oneshot::Receiver` is a one-shot future. After it resolves,
+/// polling it again is a programmer error and Tokio panics with:
+///
+/// `called after complete`
+///
+/// `MonitorSession::run` keeps this receiver in a long-running `tokio::select!`
+/// loop. Once MangoHud alignment has been observed, the loop continues recording
+/// frames, scheduler events, hwmon samples, foreground changes, and stop signals.
+/// Therefore the completed receiver must become inert after its first result.
+/// `Fuse` gives exactly that behavior: after completion, future polls return
+/// `Pending` instead of panicking.
+pub(crate) fn fused_mangohud_alignment_receiver(
+    receiver: MangoHudAlignmentReceiver,
+) -> FusedMangoHudAlignmentReceiver {
+    receiver.fuse()
 }
 
 #[cfg(test)]

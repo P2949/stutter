@@ -406,7 +406,9 @@ impl MonitorSession {
 
         self.refresh_tasks_and_emit_snapshot().await?;
 
-        let (mangohud_tx, mut mangohud_rx) = tokio::sync::oneshot::channel::<(u64, u64)>();
+        let (mangohud_tx, mangohud_rx) = tokio::sync::oneshot::channel::<MangoHudAlignment>();
+        let mangohud_rx = fused_mangohud_alignment_receiver(mangohud_rx);
+        tokio::pin!(mangohud_rx);
         let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel(1024);
 
         if let Some(run) = self.runtime.outputs.recorder.run.as_ref()
