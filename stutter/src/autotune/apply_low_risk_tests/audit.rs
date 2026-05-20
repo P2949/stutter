@@ -9,7 +9,10 @@ mod tests {
 
     use super::super::*;
     use crate::{
-        actions::{SafetyClass, cpu_affinity::CpuAffinityProfileAction},
+        actions::{
+            SafetyClass, cpu_affinity::CpuAffinityProfileAction,
+            runner::run_audited_action_with_audit_path,
+        },
         profiles::Profile,
     };
 

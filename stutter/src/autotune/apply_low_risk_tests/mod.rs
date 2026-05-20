@@ -12,7 +12,6 @@ mod target_resolution;
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::Duration,
 };
 
 use super::*;

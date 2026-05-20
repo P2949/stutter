@@ -10,7 +10,10 @@ mod tests {
     use super::super::*;
     use crate::{
         actions::{ActionId, ActionState, ActionWarning, SafetyClass},
-        autotune::candidate::{CandidateAction, CandidateDryRunRecord},
+        autotune::{
+            candidate::{CandidateAction, CandidateDryRunRecord},
+            planning::dry_run::dry_run_record_from_action_state,
+        },
         profiles::Profile,
     };
 

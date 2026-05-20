@@ -133,7 +133,10 @@ fn report_text_rendering_matches_snapshot_fixture() {
         filter_class: None,
     });
 
-    assert_eq!(rendered, include_str!("snapshots/text_report_minimal.snap"));
+    assert_eq!(
+        rendered,
+        include_str!("../snapshots/text_report_minimal.snap")
+    );
 }
 
 #[test]
