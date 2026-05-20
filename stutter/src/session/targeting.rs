@@ -1,14 +1,23 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
+
+use log::info;
 
 use crate::{
     community_rules::CommunityRulesDb,
-    config::model::MonitorConfig,
+    config::{FocusSource, ForegroundSource, model::MonitorConfig},
     error::ConfigError,
-    process_tree::{CompiledPattern, ProcessCache, TargetSnapshotInput, TaskFilters},
+    focus::{FocusDecision, FocusPolicy, FocusResolver, ResolvedFocus},
+    process_tree::{
+        CompiledPattern, ProcessCache, TargetSnapshotInput, TaskFilters, find_auto_target_pids,
+    },
     tasks::TaskTracker,
     watch::{
         WatchProcessConfig, WatchProcessState, add_watch_tree_pid, capture_tree_root_starttimes,
         process_root_starttime, remove_stale_tree_roots, remove_watch_tree_pid,
+        resolve_watch_process,
     },
 };
 
@@ -202,5 +211,175 @@ mod tests {
             Err(other) => panic!("unexpected error: {other}"),
             Ok(_) => panic!("expected invalid include_comm regex to fail"),
         }
+    }
+}
+
+pub(crate) fn needs_tree_tick_from_parts(
+    had_tree_roots: bool,
+    watch_process_active: bool,
+    cgroupv2_active: bool,
+) -> bool {
+    had_tree_roots || watch_process_active || cgroupv2_active
+}
+
+fn foreground_capture_enabled(config: &MonitorConfig) -> bool {
+    config.focus.foreground_window
+        || (config.focus.auto_focus && config.focus.focus_source != FocusSource::Heuristic)
+}
+
+fn foreground_resolver_from_config(
+    config: &MonitorConfig,
+) -> crate::foreground::ForegroundResolver {
+    let resolver = match config.focus.foreground_source {
+        ForegroundSource::Auto => crate::foreground::auto_foreground_resolver(),
+        ForegroundSource::Sway => crate::foreground::ForegroundResolver::new(Box::new(
+            crate::foreground::SwayForegroundProvider::new(),
+        )),
+        ForegroundSource::Hyprland => crate::foreground::ForegroundResolver::new(Box::new(
+            crate::foreground::HyprlandForegroundProvider::new(),
+        )),
+        ForegroundSource::X11 => crate::foreground::ForegroundResolver::new(Box::new(
+            crate::foreground::X11ForegroundProvider::new(),
+        )),
+    };
+
+    resolver
+        .with_include_title(config.focus.foreground_include_title)
+        .with_max_stale_ms(config.focus.foreground_max_stale_ms)
+}
+
+pub(crate) struct SessionTargetPlan {
+    pub(crate) tree_pids: Vec<u32>,
+    pub(crate) watch_config: WatchProcessConfig,
+    pub(crate) watch_state: WatchProcessState,
+    pub(crate) tree_root_starttimes: BTreeMap<u32, Option<u64>>,
+    pub(crate) had_tree_roots: bool,
+    pub(crate) focus_resolver: Option<FocusResolver>,
+    pub(crate) current_focus: Option<ResolvedFocus>,
+    pub(crate) foreground_resolver: Option<crate::foreground::ForegroundResolver>,
+    pub(crate) current_foreground: Option<crate::foreground::ForegroundWindowSnapshot>,
+    pub(crate) community_rules: crate::community_rules::CommunityRulesStatus,
+}
+
+impl SessionTargetPlan {
+    pub(crate) async fn resolve(config: &MonitorConfig) -> anyhow::Result<Self> {
+        let explicit_target = config.has_explicit_target();
+        let mut tree_pids = config.target.tree_pids.clone();
+
+        let mut focus_resolver = None;
+        let mut current_focus = None;
+        let foreground_enabled = foreground_capture_enabled(config);
+        let foreground_resolver =
+            foreground_enabled.then(|| foreground_resolver_from_config(config));
+        let current_foreground = None;
+
+        let user_config = crate::config_file::load_user_config()?;
+
+        log::info!(
+            "monitor_session_config source=monitor_config summary_period_ms={} spike_threshold_ns={} max_tasks={} hwmon={} cpu_freq={} foreground_window={} focus_source={:?} foreground_source={:?}",
+            config.timing.summary_period_ms,
+            config.timing.spike_threshold_ns,
+            config.target.max_tasks,
+            config.probes.hwmon,
+            config.probes.cpu_freq,
+            config.focus.foreground_window,
+            config.focus.focus_source,
+            config.focus.foreground_source,
+        );
+
+        let community_rules_config =
+            crate::config_file::community_rules_config_from_user_config(user_config.as_ref());
+        let community_rules =
+            crate::community_rules::load_community_rules_status(&community_rules_config);
+        let community_rules_status = community_rules.label();
+        match &community_rules {
+            crate::community_rules::CommunityRulesStatus::Loaded { db } => {
+                log::info!(
+                    "community_rules_status status={} rules={}",
+                    community_rules_status,
+                    db.rule_count()
+                );
+            }
+            crate::community_rules::CommunityRulesStatus::Disabled => {
+                log::info!("community_rules_status status={community_rules_status}");
+            }
+            crate::community_rules::CommunityRulesStatus::Failed { error } => {
+                log::warn!("community_rules_status status={community_rules_status} err={error}");
+            }
+        }
+
+        if !explicit_target && config.focus.auto_focus {
+            let policy = FocusPolicy {
+                poll_ms: config.focus.auto_focus_poll_ms,
+                min_confidence: config.focus.auto_focus_min_confidence,
+                switch_margin: config.focus.auto_focus_switch_margin,
+                switch_cooldown_ms: config.focus.auto_focus_switch_cooldown_ms,
+                required_winner_polls: config.focus.auto_focus_required_polls,
+                max_roots: config.focus.auto_focus_max_roots,
+            };
+
+            let mut resolver = FocusResolver::new(policy);
+            match resolver.sample(Path::new("/proc"), 0, None, FocusSource::Heuristic) {
+                FocusDecision::Switch { new, .. } | FocusDecision::Keep { focus: new } => {
+                    tree_pids = new.group.root_pids.clone();
+                    info!(
+                        "auto_focus_initial_target kind={:?} score={:.3} confidence={:.3} roots={:?} situation={:?}",
+                        new.group.kind,
+                        new.group.score,
+                        new.group.confidence,
+                        new.group.root_pids,
+                        new.situation
+                    );
+                    current_focus = Some(new);
+                }
+                FocusDecision::NoTarget { reason } | FocusDecision::Clear { reason, .. } => {
+                    info!("auto_focus_no_initial_target reason={reason}");
+                }
+            }
+
+            focus_resolver = Some(resolver);
+        } else if !explicit_target {
+            let auto_targets = find_auto_target_pids(Path::new("/proc"));
+            if auto_targets.is_empty() {
+                anyhow::bail!(
+                    "no target specified and no game launcher (gamescope, pressure-vessel, etc.) detected. \
+                     Please provide --pid <PID>, --tree-pid <PID>, --watch-process <COMM>, or --cgroupv2 <PATH>"
+                );
+            }
+
+            let pids: Vec<_> = auto_targets.iter().map(|(p, _)| *p).collect();
+            let class = auto_targets[0].1;
+            info!("auto_detected_launcher class={class} pids={pids:?}");
+            let stdout_is_machine_stream =
+                config.outputs.json_stream || config.csv_streams_to_stdout();
+            if !stdout_is_machine_stream {
+                println!(
+                    "auto-detected game launcher: {class} (PIDs {pids:?}). monitoring tree..."
+                );
+            }
+            tree_pids = pids;
+        }
+
+        let watch_config = WatchProcessConfig::from_monitor_config(config);
+        let watch_state = match resolve_watch_process(&watch_config, &mut tree_pids).await? {
+            Some(pid) => WatchProcessState::Running(pid),
+            None => WatchProcessState::None,
+        };
+
+        let had_tree_roots = !tree_pids.is_empty();
+        let tree_root_starttimes = capture_tree_root_starttimes(&tree_pids);
+
+        Ok(Self {
+            tree_pids,
+            watch_config,
+            watch_state,
+            tree_root_starttimes,
+            had_tree_roots,
+            focus_resolver,
+            current_focus,
+            foreground_resolver,
+            current_foreground,
+            community_rules,
+        })
     }
 }

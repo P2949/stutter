@@ -4,6 +4,7 @@
 //! Does not own mode parsing, safety-class gates, remote policy, explanation rendering, or production behavior.
 
 use super::{super::*, all_capabilities_available, descriptor, descriptor_with};
+use crate::daemon::explain::PolicyDecisionKind;
 
 #[test]
 fn daemon_policy_context_blocks_apply_on_bad_data_quality() {

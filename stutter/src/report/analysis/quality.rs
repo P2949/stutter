@@ -1,0 +1,239 @@
+//! Report data-quality and block-I/O correlation helpers.
+//!
+//! Owns data-quality level downgrade/reporting and compact block-I/O correlation labels. Does not
+//! own task row selection, pressure timelines, clustering, diagnosis, or report orchestration.
+
+use super::*;
+use crate::artifacts::{ArtifactKind, artifact_file_name};
+
+pub(crate) fn format_optional_ratio(value: Option<f64>) -> String {
+    value
+        .map(|ratio| format!("{:.1}%", ratio * 100.0))
+        .unwrap_or_else(|| "-".to_owned())
+}
+
+pub(crate) fn format_pressure_option(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{value:.2}"))
+        .unwrap_or_else(|| "-".to_owned())
+}
+
+pub(crate) fn block_io_correlation_basis(session: &SessionFile) -> &str {
+    if session.core.block_io_correlation_basis.is_empty() {
+        "dev+sector"
+    } else {
+        &session.core.block_io_correlation_basis
+    }
+}
+
+pub(crate) fn block_io_correlation_confidence(session: &SessionFile) -> &str {
+    if session.core.block_io_correlation_confidence.is_empty() {
+        crate::ebpf_loader::BlockIoCorrelationBasis::from_str(block_io_correlation_basis(session))
+            .confidence()
+    } else {
+        &session.core.block_io_correlation_confidence
+    }
+}
+
+pub(crate) fn block_io_correlation_warning(session: &SessionFile) -> Option<String> {
+    match block_io_correlation_basis(session) {
+        "dev+sector" => crate::ebpf_loader::BlockIoCorrelationBasis::DevSector
+            .warning()
+            .map(str::to_owned),
+        _ => None,
+    }
+}
+
+pub(crate) fn data_quality_summary(
+    session: &SessionFile,
+    validation: &crate::session_io::RunValidationReport,
+) -> DataQualitySummary {
+    let mut reasons = Vec::new();
+    let mut level = DataQualityLevel::High;
+
+    if !validation.errors.is_empty() {
+        level = DataQualityLevel::Low;
+        reasons.push("run directory has validation errors".to_owned());
+    }
+
+    if validation
+        .warnings
+        .iter()
+        .any(|warning| warning.starts_with("DRM fence "))
+    {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("DRM fence latency evidence is degraded or incomplete".to_owned());
+    }
+
+    if session.core.schema_version != SESSION_SCHEMA_VERSION {
+        if session.core.schema_version > SESSION_SCHEMA_VERSION {
+            level = DataQualityLevel::Low;
+            reasons.push("session schema is newer than this stutter binary".to_owned());
+        } else {
+            level = downgrade_quality(level, DataQualityLevel::Medium);
+            reasons.push("session schema is older than this stutter binary".to_owned());
+        }
+    }
+
+    if session.core.event_stream_write_errors > 0 {
+        level = DataQualityLevel::Low;
+        reasons.push("recording stream had write errors".to_owned());
+    }
+
+    let missing_non_focus_optional = validation
+        .missing_optional_files
+        .iter()
+        .filter(|f| {
+            *f != artifact_file_name(ArtifactKind::FocusEvents)
+                && *f != artifact_file_name(ArtifactKind::ForegroundEvents)
+                && *f != artifact_file_name(ArtifactKind::KmsFlipEvents)
+                && *f != artifact_file_name(ArtifactKind::DrmFenceEvents)
+                && *f != artifact_file_name(ArtifactKind::WaylandPresentationEvents)
+        })
+        .collect::<Vec<_>>();
+
+    if !missing_non_focus_optional.is_empty() {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("optional correlation artifacts are missing".to_owned());
+    }
+
+    if session.core.spike_events_truncated {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("spike event stream was truncated".to_owned());
+    }
+
+    if session.core.spike_events_dropped_count > 0 {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("spike events were dropped".to_owned());
+    }
+
+    if session.core.interval_record_count == 0 {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("no interval records are available".to_owned());
+    }
+
+    if session.core.active_target_pids_count == 0 {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("no active target tasks were present at end of run".to_owned());
+    }
+
+    let drop_counters_nonzero = session.core.drop_counters.total() > 0;
+
+    if drop_counters_nonzero {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("eBPF drop counters are non-zero".to_owned());
+    }
+
+    let mut percentile_scope_counts = BTreeMap::new();
+    for task in &session.tasks {
+        *percentile_scope_counts
+            .entry(task.latency.percentile_scope.clone())
+            .or_insert(0) += 1;
+    }
+
+    if percentile_scope_counts.contains_key("histogram") {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("some percentile values are histogram-estimated".to_owned());
+    }
+
+    if percentile_scope_counts.contains_key("capped_prefix") {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("some percentile values are based on capped prefix samples".to_owned());
+    }
+
+    let block_io_correlation_basis = block_io_correlation_basis(session).to_owned();
+    let block_io_correlation_confidence = block_io_correlation_confidence(session).to_owned();
+    let block_io_correlation_warning = block_io_correlation_warning(session);
+    if session.core.block_io_event_count > 0 && block_io_correlation_basis == "dev+sector" {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        if let Some(warning) = &block_io_correlation_warning {
+            reasons.push(warning.clone());
+        } else {
+            reasons.push("block I/O correlation is approximate dev+sector matching".to_owned());
+        }
+    }
+
+    let frame_timestamp_alignment = if session.core.frame_event_count == 0 {
+        "none".to_owned()
+    } else if session.core.mangohud_first_frame_monotonic_ns.is_some() {
+        "monotonic_observed".to_owned()
+    } else {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("MangoHud frame timestamp alignment is approximate".to_owned());
+        "approximate_first_row".to_owned()
+    };
+
+    let cpu_perf_requested = session.config.cpu_perf;
+    let task_cpu_perf_count = session
+        .tasks
+        .iter()
+        .filter(|task| task.cpu_perf.is_some())
+        .count();
+    if cpu_perf_requested && task_cpu_perf_count == 0 {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("CPU perf was requested but no counters were recorded".to_owned());
+    }
+    if session.core.cpu_perf_open_errors > 0 || session.core.cpu_perf_read_errors > 0 {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("CPU perf counters had open/read errors".to_owned());
+    }
+    if session.core.cpu_perf_skipped_tasks > 0 {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push(format!(
+            "CPU perf skipped {} active tasks due to cpu_perf_max_tasks limit",
+            session.core.cpu_perf_skipped_tasks
+        ));
+    }
+    if session
+        .tasks
+        .iter()
+        .filter_map(|task| task.cpu_perf.as_ref())
+        .any(|perf| perf.multiplexed)
+    {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push("CPU perf counters were multiplexed; values are scaled estimates".to_owned());
+    }
+
+    if reasons.is_empty() {
+        reasons.push("no data-quality problems detected".to_owned());
+    }
+
+    DataQualitySummary {
+        level,
+        reasons,
+        missing_optional_files: validation.missing_optional_files.clone(),
+        validation_errors: validation.errors.clone(),
+        validation_warnings: validation.warnings.clone(),
+        schema_version: session.core.schema_version,
+        expected_schema_version: SESSION_SCHEMA_VERSION,
+        event_stream_write_errors: session.core.event_stream_write_errors,
+        spike_events_truncated: session.core.spike_events_truncated,
+        spike_events_retained_count: session.core.spike_events_retained_count,
+        spike_events_dropped_count: session.core.spike_events_dropped_count,
+        interval_record_count: session.core.interval_record_count,
+        active_target_pids_count: session.core.active_target_pids_count,
+        drop_counters_nonzero,
+        percentile_scope_counts,
+        block_io_correlation_basis,
+        block_io_correlation_confidence,
+        block_io_correlation_warning,
+        frame_timestamp_alignment,
+        cpu_perf_requested,
+        cpu_perf_open_errors: session.core.cpu_perf_open_errors,
+        cpu_perf_read_errors: session.core.cpu_perf_read_errors,
+        cpu_perf_skipped_tasks: session.core.cpu_perf_skipped_tasks,
+    }
+}
+
+pub(crate) fn downgrade_quality(
+    current: DataQualityLevel,
+    candidate: DataQualityLevel,
+) -> DataQualityLevel {
+    use DataQualityLevel::{High, Low, Medium};
+
+    match (current, candidate) {
+        (Low, _) | (_, Low) => Low,
+        (Medium, _) | (_, Medium) => Medium,
+        (High, High) => High,
+    }
+}

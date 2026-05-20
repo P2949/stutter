@@ -10,6 +10,7 @@ mod remote;
 mod safety;
 
 use super::*;
+use crate::{actions::ActionId, daemon::capabilities::DaemonCapabilities};
 
 fn descriptor(safety_class: SafetyClass) -> ActionDescriptor {
     descriptor_with(

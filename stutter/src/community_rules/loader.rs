@@ -7,6 +7,10 @@ use anyhow::Context;
 
 use super::{CommunityRulesDb, CommunityRulesFile};
 
+#[cfg(test)]
+const TEST_FIXTURE_RULES_JSON: &str =
+    include_str!("../../assets/community-rules/ananicy.fixture.generated.json");
+
 #[derive(Debug, Clone)]
 pub struct LoadCommunityRulesInput {
     pub enabled: bool,
@@ -32,7 +36,7 @@ pub fn load_rules_file(path: &Path) -> anyhow::Result<CommunityRulesFile> {
     #[cfg(test)]
     if path == Path::new("__stutter_test_fixture__") {
         return parse_rules_json(
-            super::TEST_FIXTURE_RULES_JSON,
+            TEST_FIXTURE_RULES_JSON,
             "embedded community rules test fixture",
         );
     }
