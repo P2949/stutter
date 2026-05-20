@@ -3,6 +3,7 @@
 //! Owns conversion from user configuration or source selection into loaded rule files/databases.
 //! Does not own low-level directory scanning, path defaults, command handling, or classification.
 
+#[cfg(test)]
 use std::path::Path;
 
 use super::{

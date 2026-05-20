@@ -42,14 +42,16 @@ pub(crate) mod runner;
 pub(crate) mod error;
 pub(crate) mod factory;
 pub(crate) mod model;
+pub(crate) mod restore_identity;
 pub(crate) mod rollback;
 pub(crate) mod token;
 pub(crate) mod traits;
+pub(crate) mod transaction;
 
 pub use cpu_power::{CpuPowerAction, CpuPowerPolicy};
 pub use error::{
-    ActionError, ActionFailure, ActionResult, ActionTimeout, PhaseFailure, RollbackOutcome,
-    ScopeLimitExceeded,
+    ActionError, ActionFailure, ActionResult, ActionTimeout, ApplyResult, PartialApplyError,
+    PhaseFailure, RollbackOutcome, ScopeLimitExceeded,
 };
 pub use factory::default_action_factory_registry;
 pub use gpu_power::{GpuPowerAction, GpuPowerMode, GpuPowerPolicy};
@@ -59,9 +61,11 @@ pub use irq_affinity::{
 pub use model::{
     ActionId, ActionOutcome, ActionPhase, ActionState, ActionWarning, CgroupRestoreRecord,
     CpuPowerRestoreRecord, GpuPowerRestoreRecord, IoPrioRestoreRecord, IrqAffinityRestoreRecord,
-    NiceRestoreRecord, SafetyClass, TaskIdentity, UclampRestoreRecord, VmKnobRestoreRecord,
+    NiceRestoreRecord, SafetyClass, TaskIdentity, TaskRestoreIdentity, UclampRestoreRecord,
+    VmKnobRestoreRecord,
 };
 pub use nice::{NiceAction, NicePolicy};
+pub use restore_identity::{RestoreIdentityStatus, verify_task_identity};
 pub use rollback::{
     RestoreAllInput, RestoreAllSummary, RollbackCandidate, RollbackHandler, RollbackPreview,
     RollbackRegistry, RollbackResult, default_rollback_registry,

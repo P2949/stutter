@@ -317,8 +317,10 @@ impl TuningAction for PolicyBackedIrqAffinityAction {
         self.action.dry_run_with_policy(&self.policy)
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
-        self.action.apply_with_policy(&self.policy)
+    fn apply(&self) -> crate::actions::ApplyResult {
+        self.action
+            .apply_with_policy(&self.policy)
+            .map_err(Into::into)
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
@@ -356,8 +358,10 @@ impl TuningAction for PolicyBackedCpuPowerAction {
         self.action.dry_run_with_policy(&self.policy)
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
-        self.action.apply_with_policy(&self.policy)
+    fn apply(&self) -> crate::actions::ApplyResult {
+        self.action
+            .apply_with_policy(&self.policy)
+            .map_err(Into::into)
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
@@ -395,8 +399,10 @@ impl TuningAction for PolicyBackedGpuPowerAction {
         self.action.dry_run_with_policy(&self.policy)
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
-        self.action.apply_with_policy(&self.policy)
+    fn apply(&self) -> crate::actions::ApplyResult {
+        self.action
+            .apply_with_policy(&self.policy)
+            .map_err(Into::into)
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
@@ -434,8 +440,10 @@ impl TuningAction for PolicyBackedVmKnobAction {
         self.action.dry_run_with_policy(&self.policy)
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
-        self.action.apply_with_policy(&self.policy)
+    fn apply(&self) -> crate::actions::ApplyResult {
+        self.action
+            .apply_with_policy(&self.policy)
+            .map_err(Into::into)
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {

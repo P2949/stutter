@@ -29,9 +29,10 @@ pub(crate) use commands::{
 pub(crate) use db::CommunityRulesDb;
 #[cfg(test)]
 pub(crate) use importer::ImportReport;
+#[cfg(test)]
+pub(crate) use load::load_community_rules;
 pub(crate) use load::{
-    load_community_rules, load_community_rules_db, load_community_rules_file,
-    load_community_rules_status,
+    load_community_rules_db, load_community_rules_file, load_community_rules_status,
 };
 pub(crate) use loader::load_rules_file;
 pub(crate) use model::{

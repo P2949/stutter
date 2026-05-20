@@ -560,7 +560,8 @@ mod tests {
     use crate::{
         actions::{
             CgroupRestoreRecord, CpuPowerRestoreRecord, GpuPowerRestoreRecord, IoPrioRestoreRecord,
-            IrqAffinityRestoreRecord, NiceRestoreRecord, UclampRestoreRecord, VmKnobRestoreRecord,
+            IrqAffinityRestoreRecord, NiceRestoreRecord, TaskRestoreIdentity, UclampRestoreRecord,
+            VmKnobRestoreRecord,
         },
         autotune::controller_journal::{
             ControllerJournalRecord, ControllerJournalState, write_controller_journal_applied,
@@ -1279,7 +1280,12 @@ mod tests {
             },
             RollbackToken::NiceRestore {
                 records: vec![NiceRestoreRecord {
-                    tid: 1001,
+                    identity: TaskRestoreIdentity {
+                        tid: 1001,
+                        comm: "test".to_owned(),
+                        process_starttime_ticks: None,
+                        task_starttime_ticks: None,
+                    },
                     original_nice: 5,
                 }],
             },
@@ -1292,20 +1298,35 @@ mod tests {
             },
             RollbackToken::IoPrioRestore {
                 records: vec![IoPrioRestoreRecord {
-                    tid: 1002,
+                    identity: TaskRestoreIdentity {
+                        tid: 1002,
+                        comm: "test".to_owned(),
+                        process_starttime_ticks: None,
+                        task_starttime_ticks: None,
+                    },
                     original_ioprio: 0x4000,
                 }],
             },
             RollbackToken::UclampRestore {
                 records: vec![UclampRestoreRecord {
-                    tid: 1003,
+                    identity: TaskRestoreIdentity {
+                        tid: 1003,
+                        comm: "test".to_owned(),
+                        process_starttime_ticks: None,
+                        task_starttime_ticks: None,
+                    },
                     original_util_min: 0,
                     original_util_max: 1024,
                 }],
             },
             RollbackToken::CgroupRestore {
                 records: vec![CgroupRestoreRecord {
-                    pid: 1004,
+                    identity: TaskRestoreIdentity {
+                        tid: 1004,
+                        comm: "test".to_owned(),
+                        process_starttime_ticks: None,
+                        task_starttime_ticks: None,
+                    },
                     original_cgroup: PathBuf::from("/sys/fs/cgroup/game.slice"),
                 }],
             },

@@ -314,8 +314,9 @@ impl TuningAction for GpuPowerAction {
         self.dry_run_at(&GpuPowerPolicy::default())
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
+    fn apply(&self) -> crate::actions::ApplyResult {
         self.apply_with_policy(&GpuPowerPolicy::default())
+            .map_err(Into::into)
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {

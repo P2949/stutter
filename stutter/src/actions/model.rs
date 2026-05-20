@@ -72,14 +72,33 @@ impl TaskIdentity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct NiceRestoreRecord {
+pub struct TaskRestoreIdentity {
     pub tid: u32,
+    pub comm: String,
+    pub process_starttime_ticks: Option<u64>,
+    pub task_starttime_ticks: Option<u64>,
+}
+
+impl TaskRestoreIdentity {
+    pub fn from_task_info(task: &crate::process_tree::TaskInfo) -> Self {
+        Self {
+            tid: task.tid,
+            comm: task.comm.clone(),
+            process_starttime_ticks: task.process_starttime_ticks,
+            task_starttime_ticks: task.task_starttime_ticks,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NiceRestoreRecord {
+    pub identity: TaskRestoreIdentity,
     pub original_nice: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UclampRestoreRecord {
-    pub tid: u32,
+    pub identity: TaskRestoreIdentity,
     pub original_util_min: u32,
     pub original_util_max: u32,
 }
@@ -93,7 +112,7 @@ pub struct IrqAffinityRestoreRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IoPrioRestoreRecord {
-    pub tid: u32,
+    pub identity: TaskRestoreIdentity,
     pub original_ioprio: i32,
 }
 
@@ -117,7 +136,7 @@ pub struct CpuPowerRestoreRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CgroupRestoreRecord {
-    pub pid: u32,
+    pub identity: TaskRestoreIdentity,
     pub original_cgroup: PathBuf,
 }
 

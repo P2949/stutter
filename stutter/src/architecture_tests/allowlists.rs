@@ -66,7 +66,7 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/session/monitor_session.rs",
-        max_lines: 1_464,
+        max_lines: 1_470,
         reason: "temporary extraction stage: owns MonitorSession run loop and remaining tick handlers after facade split; next split is session/ticks/target.rs",
     },
     OversizedRustFileAllowance {
@@ -86,7 +86,7 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/actions/runner.rs",
-        max_lines: 694,
+        max_lines: 750,
         reason: "existing audited action runner implementation after extracting embedded runner tests",
     },
     OversizedRustFileAllowance {
@@ -126,12 +126,12 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/autotune/startup_recovery.rs",
-        max_lines: 1_360,
+        max_lines: 1_380,
         reason: "existing autotune startup recovery implementation pending future split",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/emergency_restore.rs",
-        max_lines: 1_469,
+        max_lines: 1_490,
         reason: "existing autotune emergency restore implementation pending future split; restore input struct conversion is staged here",
     },
     OversizedRustFileAllowance {
@@ -186,7 +186,7 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/actions/cgroup.rs",
-        max_lines: 1_115,
+        max_lines: 1_145,
         reason: "existing cgroup action implementation pending future split; rollback handler registration is staged here",
     },
     OversizedRustFileAllowance {
@@ -196,22 +196,22 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/actions/cpu_power.rs",
-        max_lines: 1_031,
+        max_lines: 1_035,
         reason: "existing CPU power action implementation pending future split; rollback handler registration, medium-risk EPP classification, and policy-backed factory execution are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/actions/gpu_power.rs",
-        max_lines: 1_059,
+        max_lines: 1_065,
         reason: "existing GPU power action implementation pending future split; rollback handler registration and medium-risk profile classification are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/actions/uclamp.rs",
-        max_lines: 1_046,
+        max_lines: 1_080,
         reason: "existing uclamp action implementation pending future split; rollback handler registration is staged here",
     },
     OversizedRustFileAllowance {
         path: "src/actions/vm_knobs.rs",
-        max_lines: 1_132,
+        max_lines: 1_135,
         reason: "existing VM knob action implementation pending future split; rollback handler registration, safe-value medium-risk guards, and executable plan serialization are staged here",
     },
     OversizedRustFileAllowance {

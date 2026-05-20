@@ -339,8 +339,9 @@ impl TuningAction for IrqAffinityAction {
         self.dry_run_at(&IrqAffinityPolicy::default())
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
+    fn apply(&self) -> crate::actions::ApplyResult {
         self.apply_with_policy(&IrqAffinityPolicy::default())
+            .map_err(Into::into)
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {

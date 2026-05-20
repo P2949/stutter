@@ -6,10 +6,9 @@
 #[cfg(test)]
 use std::sync::OnceLock;
 
-use super::{
-    CommunityRule, CommunityRulesDb, CommunityRulesSourceKind, load_community_rules_db,
-    normalize_process_name,
-};
+use super::{CommunityRule, CommunityRulesDb, normalize_process_name};
+#[cfg(test)]
+use super::{CommunityRulesSourceKind, load_community_rules_db};
 use crate::process_tree::TaskClass;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

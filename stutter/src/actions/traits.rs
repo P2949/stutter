@@ -1,5 +1,5 @@
 use crate::actions::{
-    error::ActionResult,
+    error::{ActionResult, ApplyResult},
     model::{ActionId, ActionState, ActionWarning, SafetyClass},
     token::RollbackToken,
 };
@@ -26,7 +26,7 @@ pub trait TuningAction {
 
     fn preflight(&self) -> ActionResult<Vec<ActionWarning>>;
     fn dry_run(&self) -> ActionResult<ActionState>;
-    fn apply(&self) -> ActionResult<RollbackToken>;
+    fn apply(&self) -> ApplyResult;
     fn verify(&self) -> ActionResult<ActionState>;
     fn rollback(&self, token: &RollbackToken) -> ActionResult<()>;
 }
@@ -59,7 +59,7 @@ where
         self.as_ref().dry_run()
     }
 
-    fn apply(&self) -> ActionResult<RollbackToken> {
+    fn apply(&self) -> ApplyResult {
         self.as_ref().apply()
     }
 

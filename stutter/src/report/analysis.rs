@@ -18,9 +18,11 @@ pub(crate) use correlation::text_report_correlation_sections;
 pub use density::build_spike_density;
 pub(crate) use density::*;
 pub(crate) use diagnosis::*;
+#[cfg(test)]
+pub(crate) use foreground::foreground_for_cluster;
 pub(crate) use foreground::{
-    annotate_clusters_with_foreground, focus_report_summary, foreground_for_cluster,
-    foreground_for_elapsed_ms, foreground_report_summary,
+    annotate_clusters_with_foreground, focus_report_summary, foreground_for_elapsed_ms,
+    foreground_report_summary,
 };
 pub(crate) use format::*;
 pub(crate) use frame::*;

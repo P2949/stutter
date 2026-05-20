@@ -9,12 +9,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     actions::{
-        ActionId, ActionState, ActionWarning, CgroupRestoreRecord, RollbackToken, SafetyClass,
-        TaskIdentity, TuningAction,
+        ActionId, ActionState, ActionWarning, ApplyResult, CgroupRestoreRecord, PartialApplyError,
+        RestoreIdentityStatus, RollbackToken, SafetyClass, TaskIdentity, TaskRestoreIdentity,
+        TuningAction,
         rollback::{
             RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult,
             token_dry_run_preview, token_restore_result,
         },
+        verify_task_identity,
     },
     process_tree::TaskClass,
 };
@@ -86,14 +88,42 @@ impl RollbackHandler for CgroupRollbackHandler {
             anyhow::bail!("cgroup rollback handler does not support {token:?}");
         };
 
-        let mut restored = 0usize;
-        let mut skipped = 0usize;
-        let mut failures = Vec::new();
+        let mut restored = 0;
+        let mut skipped_dead = 0;
+        let mut skipped_identity_mismatch = 0;
+        let mut legacy_unverified = 0;
+        let mut errors = 0;
+        let mut messages = Vec::new();
 
         for record in records {
-            if !task_exists(Path::new("/proc"), record.pid) {
-                skipped += 1;
-                continue;
+            let status = verify_task_identity(Path::new("/proc"), &record.identity);
+            match status {
+                RestoreIdentityStatus::Missing => {
+                    skipped_dead += 1;
+                    log::debug!(
+                        "cgroup restore skipped: task tid={} is missing/dead",
+                        record.identity.tid
+                    );
+                    continue;
+                }
+                RestoreIdentityStatus::Mismatch { reason } => {
+                    skipped_identity_mismatch += 1;
+                    let msg = format!(
+                        "cgroup restore identity mismatch for tid={}: {}",
+                        record.identity.tid, reason
+                    );
+                    log::warn!("{}", msg);
+                    messages.push(msg);
+                    continue;
+                }
+                RestoreIdentityStatus::UnknownLegacy => {
+                    legacy_unverified += 1;
+                    log::warn!(
+                        "cgroup restore running in legacy mode (unverified identity) for tid={}",
+                        record.identity.tid
+                    );
+                }
+                RestoreIdentityStatus::SameTask => {}
             }
 
             let original_cgroup = if record.original_cgroup.is_absolute() {
@@ -103,30 +133,56 @@ impl RollbackHandler for CgroupRollbackHandler {
                     .join(strip_cgroup_leading_slash(&record.original_cgroup))
             };
             let cgroup_procs = original_cgroup.join("cgroup.procs");
-            match write_trimmed(&cgroup_procs, &record.pid.to_string()) {
-                Ok(()) => restored += 1,
-                Err(err) => failures.push(format!(
-                    "failed to restore pid={} to cgroup {}: {err:#}",
-                    record.pid,
-                    original_cgroup.display()
-                )),
+            match write_trimmed(&cgroup_procs, &record.identity.tid.to_string()) {
+                Ok(()) => {
+                    restored += 1;
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    skipped_dead += 1;
+                    log::debug!(
+                        "cgroup restore skipped (NotFound): task tid={} is dead",
+                        record.identity.tid
+                    );
+                }
+                Err(e) => {
+                    if e.raw_os_error() == Some(3) {
+                        skipped_dead += 1;
+                        log::debug!(
+                            "cgroup restore skipped (ESRCH): task tid={} is dead",
+                            record.identity.tid
+                        );
+                    } else {
+                        errors += 1;
+                        let msg = format!(
+                            "failed to restore pid={} to cgroup {}: {}",
+                            record.identity.tid,
+                            original_cgroup.display(),
+                            e
+                        );
+                        log::error!("{}", msg);
+                        messages.push(msg);
+                    }
+                }
             }
         }
 
-        if !failures.is_empty() {
+        if errors > 0 {
             anyhow::bail!(
                 "failed to rollback cgroup placement: {}",
-                failures.join("; ")
+                messages.join("; ")
             );
         }
 
-        Ok(token_restore_result(
-            self.id(),
-            token,
+        Ok(RollbackResult {
+            handler_id: self.id(),
+            restore_path: token.restore_path().cloned().unwrap_or_default(),
             restored,
-            skipped,
-            Vec::new(),
-        ))
+            skipped_dead,
+            skipped_identity_mismatch,
+            legacy_unverified,
+            errors,
+            messages,
+        })
     }
 }
 
@@ -318,10 +374,10 @@ impl CgroupPlacementAction {
         let mut failures = Vec::new();
 
         for record in records {
-            if !task_exists(proc_root, record.pid) {
+            if !task_exists(proc_root, record.identity.tid) {
                 log::info!(
                     "cgroup_rollback_skip_exited_task tid={} original_cgroup={}",
-                    record.pid,
+                    record.identity.tid,
                     record.original_cgroup.display()
                 );
                 continue;
@@ -332,10 +388,10 @@ impl CgroupPlacementAction {
                 .join(strip_cgroup_leading_slash(&record.original_cgroup));
             let procs = original_abs.join("cgroup.procs");
 
-            if let Err(err) = write_trimmed(&procs, &record.pid.to_string()) {
+            if let Err(err) = write_trimmed(&procs, &record.identity.tid.to_string()) {
                 failures.push(format!(
                     "tid={} original_cgroup={} error={err:#}",
-                    record.pid,
+                    record.identity.tid,
                     original_abs.display()
                 ));
             }
@@ -389,44 +445,57 @@ impl TuningAction for CgroupPlacementAction {
         self.dry_run_at(Path::new("/proc"), &CgroupPlacementPolicy::default())
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
-        let policy = CgroupPlacementPolicy::default();
-        let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &policy)?;
-        let target_abs = self.target_cgroup_abs()?;
+    fn apply(&self) -> crate::actions::ApplyResult {
+        let res: Result<RollbackToken, crate::actions::PartialApplyError> = (|| {
+            let policy = CgroupPlacementPolicy::default();
+            let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &policy)?;
+            let target_abs = self.target_cgroup_abs()?;
 
-        if let Some(cpuset_cpus) = &self.cpuset_cpus {
-            write_trimmed(&target_abs.join("cpuset.cpus"), cpuset_cpus)?;
-        }
-
-        if let Some(cpuset_mems) = &self.cpuset_mems {
-            write_trimmed(&target_abs.join("cpuset.mems"), cpuset_mems)?;
-        }
-
-        let mut records = Vec::new();
-        for (snapshot, _) in snapshots {
-            let current_target = self
-                .cgroup_root
-                .join(strip_cgroup_leading_slash(&snapshot.original_cgroup));
-            if current_target == target_abs {
-                continue;
+            if let Some(cpuset_cpus) = &self.cpuset_cpus {
+                write_trimmed(&target_abs.join("cpuset.cpus"), cpuset_cpus)?;
             }
 
-            write_trimmed(&target_abs.join("cgroup.procs"), &snapshot.tid.to_string())
-                .with_context(|| {
-                    format!(
-                        "failed to move tid={} to {}",
-                        snapshot.tid,
-                        target_abs.display()
-                    )
-                })?;
+            if let Some(cpuset_mems) = &self.cpuset_mems {
+                write_trimmed(&target_abs.join("cpuset.mems"), cpuset_mems)?;
+            }
 
-            records.push(CgroupRestoreRecord {
-                pid: snapshot.tid,
-                original_cgroup: snapshot.original_cgroup,
-            });
-        }
+            let mut records = Vec::new();
+            for (snapshot, _) in snapshots {
+                let current_target = self
+                    .cgroup_root
+                    .join(strip_cgroup_leading_slash(&snapshot.original_cgroup));
+                if current_target == target_abs {
+                    continue;
+                }
 
-        Ok(RollbackToken::CgroupRestore { records })
+                let identity = crate::actions::TaskRestoreIdentity {
+                    tid: snapshot.tid,
+                    comm: snapshot
+                        .comm
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_owned()),
+                    process_starttime_ticks: None,
+                    task_starttime_ticks: snapshot.starttime_ticks,
+                };
+
+                write_trimmed(&target_abs.join("cgroup.procs"), &snapshot.tid.to_string())
+                    .with_context(|| {
+                        format!(
+                            "failed to move tid={} to {}",
+                            snapshot.tid,
+                            target_abs.display()
+                        )
+                    })?;
+
+                records.push(CgroupRestoreRecord {
+                    identity,
+                    original_cgroup: snapshot.original_cgroup,
+                });
+            }
+
+            Ok(RollbackToken::CgroupRestore { records })
+        })();
+        res.map_err(Into::into)
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
@@ -1034,7 +1103,12 @@ mod tests {
 
         let token = RollbackToken::CgroupRestore {
             records: vec![CgroupRestoreRecord {
-                pid: 42,
+                identity: crate::actions::TaskRestoreIdentity {
+                    tid: 42,
+                    comm: "test".to_owned(),
+                    process_starttime_ticks: None,
+                    task_starttime_ticks: None,
+                },
                 original_cgroup: PathBuf::from("/old.slice"),
             }],
         };
@@ -1071,11 +1145,21 @@ mod tests {
         let token = RollbackToken::CgroupRestore {
             records: vec![
                 CgroupRestoreRecord {
-                    pid: 1,
+                    identity: crate::actions::TaskRestoreIdentity {
+                        tid: 1,
+                        comm: "test".to_owned(),
+                        process_starttime_ticks: None,
+                        task_starttime_ticks: None,
+                    },
                     original_cgroup: PathBuf::from("/a.slice"),
                 },
                 CgroupRestoreRecord {
-                    pid: 2,
+                    identity: crate::actions::TaskRestoreIdentity {
+                        tid: 2,
+                        comm: "test".to_owned(),
+                        process_starttime_ticks: None,
+                        task_starttime_ticks: None,
+                    },
                     original_cgroup: PathBuf::from("/b.slice"),
                 },
             ],

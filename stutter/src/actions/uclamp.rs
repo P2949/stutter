@@ -4,12 +4,14 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::actions::{
-    ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TaskIdentity, TuningAction,
+    ActionId, ActionState, ActionWarning, ApplyResult, PartialApplyError, RestoreIdentityStatus,
+    RollbackToken, SafetyClass, TaskIdentity, TaskRestoreIdentity, TuningAction,
     UclampRestoreRecord,
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
         token_restore_result,
     },
+    verify_task_identity,
 };
 
 const UCLAMP_MIN_VALUE: u32 = 0;
@@ -143,29 +145,101 @@ impl RollbackHandler for UclampRollbackHandler {
             anyhow::bail!("uclamp rollback handler does not support {token:?}");
         };
 
+        let mut restored = 0;
+        let mut skipped_dead = 0;
+        let mut skipped_identity_mismatch = 0;
+        let mut legacy_unverified = 0;
+        let mut errors = 0;
+        let mut messages = Vec::new();
+
         for record in records {
-            set_task_uclamp(
-                record.tid,
-                UclampCurrentValues {
-                    sched_util_min: record.original_util_min,
-                    sched_util_max: record.original_util_max,
-                },
-            )
-            .with_context(|| {
-                format!(
-                    "failed to restore uclamp min={} max={} for tid={}",
-                    record.original_util_min, record.original_util_max, record.tid
-                )
-            })?;
+            let status = verify_task_identity(Path::new("/proc"), &record.identity);
+            match status {
+                RestoreIdentityStatus::Missing => {
+                    skipped_dead += 1;
+                    log::debug!(
+                        "uclamp restore skipped: task tid={} is missing/dead",
+                        record.identity.tid
+                    );
+                    continue;
+                }
+                RestoreIdentityStatus::Mismatch { reason } => {
+                    skipped_identity_mismatch += 1;
+                    let msg = format!(
+                        "uclamp restore identity mismatch for tid={}: {}",
+                        record.identity.tid, reason
+                    );
+                    log::warn!("{}", msg);
+                    messages.push(msg);
+                    continue;
+                }
+                RestoreIdentityStatus::UnknownLegacy => {
+                    legacy_unverified += 1;
+                    log::warn!(
+                        "uclamp restore running in legacy mode (unverified identity) for tid={}",
+                        record.identity.tid
+                    );
+                }
+                RestoreIdentityStatus::SameTask => {}
+            }
+
+            let requested = UclampCurrentValues {
+                sched_util_min: record.original_util_min,
+                sched_util_max: record.original_util_max,
+            };
+
+            match set_task_uclamp(record.identity.tid, requested) {
+                Ok(_) => {
+                    restored += 1;
+                }
+                Err(e) => {
+                    if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+                        if io_err.kind() == std::io::ErrorKind::NotFound
+                            || io_err.raw_os_error() == Some(3)
+                        {
+                            skipped_dead += 1;
+                            log::debug!(
+                                "uclamp restore skipped: task tid={} is dead",
+                                record.identity.tid
+                            );
+                        } else {
+                            errors += 1;
+                            let msg = format!(
+                                "failed to restore uclamp min={} max={} for tid={}: {}",
+                                record.original_util_min,
+                                record.original_util_max,
+                                record.identity.tid,
+                                io_err
+                            );
+                            log::error!("{}", msg);
+                            messages.push(msg);
+                        }
+                    } else {
+                        errors += 1;
+                        let msg = format!(
+                            "failed to restore uclamp min={} max={} for tid={}: {}",
+                            record.original_util_min,
+                            record.original_util_max,
+                            record.identity.tid,
+                            e
+                        );
+                        log::error!("{}", msg);
+                        messages.push(msg);
+                    }
+                }
+            }
         }
 
-        Ok(token_restore_result(
-            self.id(),
-            token,
-            records.len(),
-            0,
-            Vec::new(),
-        ))
+        Ok(RollbackResult {
+            handler_id: self.id(),
+            restore_path: token.restore_path().cloned().unwrap_or_default(),
+            restored,
+            skipped_dead,
+            skipped_identity_mismatch,
+            legacy_unverified,
+            errors,
+            messages,
+        })
     }
 }
 
@@ -302,32 +376,49 @@ impl TuningAction for UclampAction {
         self.dry_run_at(Path::new("/proc"), &UclampPolicy::default())
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
-        let policy = UclampPolicy::default();
-        let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &policy)?;
-        let mut records = Vec::new();
+    fn apply(&self) -> ApplyResult {
+        let res = (|| {
+            let policy = UclampPolicy::default();
+            let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &policy)?;
+            let filtered_snapshots: Vec<_> = snapshots
+                .into_iter()
+                .filter(|(snapshot, _)| requested_values_differ(self.values, snapshot.current))
+                .collect();
 
-        for (snapshot, _) in snapshots {
-            if !requested_values_differ(self.values, snapshot.current) {
-                continue;
-            }
+            let tx = crate::actions::transaction::ApplyTransaction::new();
+            tx.apply_loop(
+                filtered_snapshots,
+                |(snapshot, _)| {
+                    let identity = TaskRestoreIdentity {
+                        tid: snapshot.tid,
+                        comm: snapshot
+                            .comm
+                            .clone()
+                            .unwrap_or_else(|| "unknown".to_owned()),
+                        process_starttime_ticks: None,
+                        task_starttime_ticks: snapshot.starttime_ticks,
+                    };
 
-            let requested = UclampCurrentValues {
-                sched_util_min: self.values.requested_min_or(snapshot.current),
-                sched_util_max: self.values.requested_max_or(snapshot.current),
-            };
+                    let requested = UclampCurrentValues {
+                        sched_util_min: self.values.requested_min_or(snapshot.current),
+                        sched_util_max: self.values.requested_max_or(snapshot.current),
+                    };
 
-            set_task_uclamp(snapshot.tid, requested)
-                .with_context(|| format!("failed to set uclamp for tid={}", snapshot.tid))?;
-
-            records.push(UclampRestoreRecord {
-                tid: snapshot.tid,
-                original_util_min: snapshot.current.sched_util_min,
-                original_util_max: snapshot.current.sched_util_max,
-            });
-        }
-
-        Ok(RollbackToken::UclampRestore { records })
+                    set_task_uclamp(snapshot.tid, requested)
+                        .map_err(|e| {
+                            anyhow::Error::from(e)
+                                .context(format!("failed to set uclamp for tid={}", snapshot.tid))
+                        })
+                        .map(|_| UclampRestoreRecord {
+                            identity,
+                            original_util_min: snapshot.current.sched_util_min,
+                            original_util_max: snapshot.current.sched_util_max,
+                        })
+                },
+                |records| RollbackToken::UclampRestore { records },
+            )
+        })();
+        res
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
@@ -341,7 +432,7 @@ impl TuningAction for UclampAction {
 
         for record in records {
             set_task_uclamp(
-                record.tid,
+                record.identity.tid,
                 UclampCurrentValues {
                     sched_util_min: record.original_util_min,
                     sched_util_max: record.original_util_max,
@@ -350,7 +441,7 @@ impl TuningAction for UclampAction {
             .with_context(|| {
                 format!(
                     "failed to restore uclamp min={} max={} for tid={}",
-                    record.original_util_min, record.original_util_max, record.tid
+                    record.original_util_min, record.original_util_max, record.identity.tid
                 )
             })?;
         }
@@ -1028,12 +1119,22 @@ mod tests {
         let token = RollbackToken::UclampRestore {
             records: vec![
                 UclampRestoreRecord {
-                    tid: 1,
+                    identity: TaskRestoreIdentity {
+                        tid: 1,
+                        comm: "test".to_owned(),
+                        process_starttime_ticks: None,
+                        task_starttime_ticks: None,
+                    },
                     original_util_min: 0,
                     original_util_max: 1024,
                 },
                 UclampRestoreRecord {
-                    tid: 2,
+                    identity: TaskRestoreIdentity {
+                        tid: 2,
+                        comm: "test".to_owned(),
+                        process_starttime_ticks: None,
+                        task_starttime_ticks: None,
+                    },
                     original_util_min: 128,
                     original_util_max: 900,
                 },

@@ -237,24 +237,30 @@ impl TuningAction for FakeAction {
         Ok(self.action_state(false, self.affected_tasks))
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
-        self.push_event("apply");
+    fn apply(&self) -> crate::actions::ApplyResult {
+        let res: Result<RollbackToken, crate::actions::PartialApplyError> = (|| {
+            self.push_event("apply");
 
-        if self.switches.fail_apply {
-            anyhow::bail!("fake apply failure");
-        }
+            if self.switches.fail_apply {
+                return Err(crate::actions::PartialApplyError {
+                    source: anyhow::anyhow!("fake apply failure"),
+                    rollback: None,
+                });
+            }
 
-        if self.switches.slow_apply {
-            self.push_event("slow_apply");
-            thread::sleep(self.slow_apply_duration);
-        }
+            if self.switches.slow_apply {
+                self.push_event("slow_apply");
+                thread::sleep(self.slow_apply_duration);
+            }
 
-        self.state.applied.store(true, Ordering::SeqCst);
+            self.state.applied.store(true, Ordering::SeqCst);
 
-        Ok(RollbackToken::CpuAffinityRestoreFile {
-            path: self.restore_path.clone(),
-            affected_tasks: self.affected_tasks,
-        })
+            Ok(RollbackToken::CpuAffinityRestoreFile {
+                path: self.restore_path.clone(),
+                affected_tasks: self.affected_tasks,
+            })
+        })();
+        res
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
