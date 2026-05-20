@@ -61,8 +61,8 @@ pub(crate) async fn serve_unix_socket_with_limits(
 
         tokio::spawn(async move {
             let _permit = permit;
-            let connection = HyperConnectionBuilder::new(TokioExecutor::new())
-                .serve_connection_with_upgrades(socket, hyper_service);
+            let builder = HyperConnectionBuilder::new(TokioExecutor::new());
+            let connection = builder.serve_connection_with_upgrades(socket, hyper_service);
             match tokio::time::timeout(connection_timeout, connection).await {
                 Ok(Ok(())) => {}
                 Ok(Err(err)) => {
