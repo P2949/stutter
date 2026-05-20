@@ -33,6 +33,9 @@ pub enum ArtifactKind {
     KmsFlipEvents,
     DrmFenceEvents,
     WaylandPresentationEvents,
+    DisplayTopology,
+    DmaBufEvents,
+    GpuEngineSamples,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -60,6 +63,8 @@ pub enum ArtifactCounter {
     KmsFlipEvent,
     DrmFenceEvent,
     WaylandPresentationEvent,
+    DmaBufEvent,
+    GpuEngineSample,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -225,6 +230,30 @@ pub const ARTIFACT_SPECS: &[ArtifactSpec] = &[
         legacy_aliases: &[],
         counter_field: Some(ArtifactCounter::WaylandPresentationEvent),
     },
+    ArtifactSpec {
+        kind: ArtifactKind::DisplayTopology,
+        file_name: "display_topology.json",
+        encoding: ArtifactEncoding::JsonObject,
+        required: false,
+        legacy_aliases: &[],
+        counter_field: None,
+    },
+    ArtifactSpec {
+        kind: ArtifactKind::DmaBufEvents,
+        file_name: "dmabuf_events.json",
+        encoding: ArtifactEncoding::Ndjson,
+        required: false,
+        legacy_aliases: &[],
+        counter_field: Some(ArtifactCounter::DmaBufEvent),
+    },
+    ArtifactSpec {
+        kind: ArtifactKind::GpuEngineSamples,
+        file_name: "gpu_engine_samples.json",
+        encoding: ArtifactEncoding::Ndjson,
+        required: false,
+        legacy_aliases: &[],
+        counter_field: Some(ArtifactCounter::GpuEngineSample),
+    },
 ];
 
 #[derive(Debug, Default)]
@@ -334,6 +363,8 @@ pub fn artifact_counter_label(counter: ArtifactCounter) -> &'static str {
         ArtifactCounter::KmsFlipEvent => "KMS flip event",
         ArtifactCounter::DrmFenceEvent => "DRM fence event",
         ArtifactCounter::WaylandPresentationEvent => "Wayland presentation event",
+        ArtifactCounter::DmaBufEvent => "DMABUF event",
+        ArtifactCounter::GpuEngineSample => "GPU engine sample",
     }
 }
 
@@ -364,6 +395,9 @@ impl ArtifactSelection {
             ArtifactKind::KmsFlipEvents,
             ArtifactKind::DrmFenceEvents,
             ArtifactKind::WaylandPresentationEvents,
+            ArtifactKind::DisplayTopology,
+            ArtifactKind::DmaBufEvents,
+            ArtifactKind::GpuEngineSamples,
         ])
     }
 
@@ -402,6 +436,9 @@ impl ArtifactSelection {
             ArtifactKind::SpikeEvents,
             ArtifactKind::FrameEvents,
             ArtifactKind::FocusEvents,
+            ArtifactKind::DisplayTopology,
+            ArtifactKind::DmaBufEvents,
+            ArtifactKind::GpuEngineSamples,
         ]);
 
         if runtime_slices {
