@@ -30,6 +30,7 @@ pub(crate) mod community_rules;
 pub(crate) mod config_file;
 pub(crate) mod diagnosis;
 pub(crate) mod display_path_compare;
+pub(crate) mod display_topology;
 pub(crate) mod doctor;
 pub(crate) mod drm_fence_tracepoints;
 pub(crate) mod drm_tracepoints;

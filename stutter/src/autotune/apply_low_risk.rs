@@ -26,6 +26,7 @@ pub(crate) use audit::{
 #[cfg(test)]
 pub(crate) use crate::autotune::washout::WashoutWindowConfig;
 
+#[cfg(test)]
 pub fn ensure_low_risk_action_allowed(
     action_kind: &str,
     safety_class: &crate::actions::SafetyClass,

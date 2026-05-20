@@ -28,6 +28,7 @@ impl<R> ApplyTransaction<R> {
         (!self.applied.is_empty()).then(|| make_token(self.applied))
     }
 
+    #[cfg(test)]
     pub fn rollback_applied<F>(self, mut rollback_fn: F) -> anyhow::Result<()>
     where
         F: FnMut(&R) -> anyhow::Result<()>,

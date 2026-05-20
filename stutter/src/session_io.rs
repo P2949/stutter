@@ -12,11 +12,13 @@ use crate::{
         artifact_file_name, artifact_kinds, artifact_path, artifact_primary_and_alias_paths,
         artifact_spec,
     },
+    display_topology::DisplayTopologySnapshot,
     recorder::{
-        BlockIoRecord, CpuFreqRecord, DrmFenceEventRecord, FocusEvent, ForegroundEvent, FrameEvent,
-        GpuSample, IntervalRecord, IrqEventRecord, KmsFlipEventRecord, MetadataFile,
-        MigrationEventRecord, RuntimeSliceRecord, SESSION_SCHEMA_VERSION, ScxEvent, SessionFile,
-        SpikeEvent, TreeEvent, WaylandPresentationEventRecord,
+        BlockIoRecord, CpuFreqRecord, DmaBufEventRecord, DrmFenceEventRecord, FocusEvent,
+        ForegroundEvent, FrameEvent, GpuEngineSample, GpuSample, IntervalRecord, IrqEventRecord,
+        KmsFlipEventRecord, MetadataFile, MigrationEventRecord, RuntimeSliceRecord,
+        SESSION_SCHEMA_VERSION, ScxEvent, SessionFile, SpikeEvent, TreeEvent,
+        WaylandPresentationEventRecord,
     },
 };
 
@@ -42,6 +44,9 @@ pub struct RunArtifacts {
     pub kms_flip_events: Vec<KmsFlipEventRecord>,
     pub drm_fence_events: Vec<DrmFenceEventRecord>,
     pub wayland_presentation_events: Vec<WaylandPresentationEventRecord>,
+    pub display_topology: Option<DisplayTopologySnapshot>,
+    pub dmabuf_events: Vec<DmaBufEventRecord>,
+    pub gpu_engine_samples: Vec<GpuEngineSample>,
 
     pub validation: RunValidationReport,
 }
@@ -434,6 +439,24 @@ pub fn load_run_artifacts(path: &Path, selection: ArtifactSelection) -> Result<R
         Vec::new()
     };
 
+    let display_topology = if selection.contains(ArtifactKind::DisplayTopology) {
+        loader.load_optional_json::<DisplayTopologySnapshot>(ArtifactKind::DisplayTopology)?
+    } else {
+        None
+    };
+
+    let dmabuf_events = if selection.contains(ArtifactKind::DmaBufEvents) {
+        loader.load_optional_ndjson(ArtifactKind::DmaBufEvents)?
+    } else {
+        Vec::new()
+    };
+
+    let gpu_engine_samples = if selection.contains(ArtifactKind::GpuEngineSamples) {
+        loader.load_optional_ndjson(ArtifactKind::GpuEngineSamples)?
+    } else {
+        Vec::new()
+    };
+
     let mut artifacts = RunArtifacts {
         run_dir,
         session,
@@ -454,6 +477,9 @@ pub fn load_run_artifacts(path: &Path, selection: ArtifactSelection) -> Result<R
         kms_flip_events,
         drm_fence_events,
         wayland_presentation_events,
+        display_topology,
+        dmabuf_events,
+        gpu_engine_samples,
         validation,
     };
 
@@ -492,6 +518,8 @@ fn expected_artifact_count_for_counter(
         ArtifactCounter::WaylandPresentationEvent => {
             Some(session.core.wayland_presentation_event_count)
         }
+        ArtifactCounter::DmaBufEvent => None,
+        ArtifactCounter::GpuEngineSample => None,
     }
 }
 
@@ -1044,7 +1072,14 @@ fn count_artifact_kind(kind: ArtifactKind, path: &Path) -> Result<usize> {
         ArtifactKind::WaylandPresentationEvents => {
             count_ndjson_file::<WaylandPresentationEventRecord>(path)
         }
-        ArtifactKind::Session | ArtifactKind::Metadata => {
+        ArtifactKind::DmaBufEvents => {
+            // DmaBufEventRecord not yet imported; use serde_json::Value as placeholder
+            count_ndjson_file::<serde_json::Value>(path)
+        }
+        ArtifactKind::GpuEngineSamples => {
+            count_ndjson_file::<serde_json::Value>(path)
+        }
+        ArtifactKind::Session | ArtifactKind::Metadata | ArtifactKind::DisplayTopology => {
             anyhow::bail!("artifact {:?} is not an NDJSON stream", kind)
         }
     }

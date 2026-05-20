@@ -244,6 +244,8 @@ pub struct DrmFenceEventRecord {
     pub timeline_hash: Option<u64>,
     pub wait_start_ns: Option<u64>,
     pub wait_done_ns: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal_ns: Option<u64>,
     pub duration_ns: Option<u64>,
     pub exporter_driver: Option<String>,
     pub importer_driver: Option<String>,
@@ -273,14 +275,88 @@ fn default_block_io_correlation_basis() -> Cow<'static, str> {
     Cow::Borrowed("dev+sector")
 }
 
-pub(crate) fn default_block_io_correlation_basis_string() -> String {
-    default_block_io_correlation_basis().into_owned()
-}
-
 pub(crate) fn default_block_io_correlation_confidence_string() -> String {
     crate::ebpf_loader::BlockIoCorrelationBasis::DevSector
         .confidence()
         .to_owned()
+}
+
+pub(crate) fn default_block_io_correlation_basis_string() -> String {
+    default_block_io_correlation_basis().into_owned()
+}
+
+/// DMABUF buffer path event record. Populated from cooperative compositor/game logs.
+/// All fields are optional to support partial information from different sources.
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub struct DmaBufEventRecord {
+    pub elapsed_ms: u64,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_name: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modifier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modifier_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planes: Option<u32>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allocation_driver: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_driver: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allocation_card: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_card: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linear: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scanout_capable: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zero_copy: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explicit_sync: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy_required: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub confidence: String,
+}
+
+/// Per-engine GPU activity sample. Supports multi-GPU scenarios (render + scanout).
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub struct GpuEngineSample {
+    pub elapsed_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drm_card: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_node: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub driver: Option<String>,
+    /// Engine name: gfx, sdma0, rcs0, bcs0, display, blitter, etc.
+    pub engine: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub busy_percent: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_comm: Option<String>,
+    /// Sampling source: hwmon, pmu, fdinfo, debugfs
+    pub source: String,
+    pub confidence: String,
 }
 
 #[cfg(test)]
