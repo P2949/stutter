@@ -17,6 +17,7 @@ use crate::daemon_policy::{ActionDescriptor, ActionEffectScope, RollbackRequirem
 pub struct FakeActionSwitches {
     pub fail_preflight: bool,
     pub fail_apply: bool,
+    pub partial_apply_failure: bool,
     pub fail_verify: bool,
     pub fail_rollback: bool,
     pub slow_apply: bool,
@@ -85,6 +86,12 @@ impl FakeAction {
 
     pub fn with_fail_apply(mut self) -> Self {
         self.switches.fail_apply = true;
+        self
+    }
+
+    pub fn with_partial_apply_failure(mut self) -> Self {
+        self.switches.fail_apply = true;
+        self.switches.partial_apply_failure = true;
         self
     }
 
@@ -242,6 +249,17 @@ impl TuningAction for FakeAction {
             self.push_event("apply");
 
             if self.switches.fail_apply {
+                if self.switches.partial_apply_failure {
+                    self.state.applied.store(true, Ordering::SeqCst);
+                    return Err(crate::actions::PartialApplyError {
+                        source: anyhow::anyhow!("fake apply failure after first target"),
+                        rollback: Some(RollbackToken::CpuAffinityRestoreFile {
+                            path: self.restore_path.clone(),
+                            affected_tasks: 1,
+                        }),
+                    });
+                }
+
                 return Err(crate::actions::PartialApplyError {
                     source: anyhow::anyhow!("fake apply failure"),
                     rollback: None,

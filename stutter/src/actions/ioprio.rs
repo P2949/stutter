@@ -415,10 +415,9 @@ impl TuningAction for IoPrioAction {
                 .filter(|(snapshot, _)| snapshot.current_ioprio != requested)
                 .collect();
 
-            let tx = crate::actions::transaction::ApplyTransaction::new();
-            tx.apply_loop(
-                filtered_snapshots,
-                |(snapshot, _)| {
+            let records = filtered_snapshots
+                .into_iter()
+                .map(|(snapshot, _)| {
                     let identity = TaskRestoreIdentity {
                         tid: snapshot.tid,
                         comm: snapshot
@@ -429,17 +428,23 @@ impl TuningAction for IoPrioAction {
                         task_starttime_ticks: snapshot.starttime_ticks,
                     };
 
-                    set_task_ioprio(snapshot.tid, requested)
-                        .map_err(|e| {
-                            e.context(format!(
-                                "failed to set I/O priority for tid={}",
-                                snapshot.tid
-                            ))
-                        })
-                        .map(|_| IoPrioRestoreRecord {
-                            identity,
-                            original_ioprio: snapshot.current_ioprio,
-                        })
+                    IoPrioRestoreRecord {
+                        identity,
+                        original_ioprio: snapshot.current_ioprio,
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let tx = crate::actions::transaction::ApplyTransaction::new();
+            tx.apply_planned_loop(
+                records,
+                |record| {
+                    set_task_ioprio(record.identity.tid, requested).map_err(|e| {
+                        e.context(format!(
+                            "failed to set I/O priority for tid={}",
+                            record.identity.tid
+                        ))
+                    })
                 },
                 |records| RollbackToken::IoPrioRestore { records },
             )

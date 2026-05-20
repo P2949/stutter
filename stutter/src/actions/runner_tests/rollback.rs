@@ -95,6 +95,54 @@ mod tests {
     }
 
     #[test]
+    fn fake_action_partial_apply_failure_rolls_back_applied_prefix() {
+        let dir = temp_dir("fake-partial-apply-failure");
+        let audit_path = dir.join("audit.jsonl");
+        let action = FakeAction::new()
+            .with_affected_tasks(2)
+            .with_partial_apply_failure();
+
+        let result = run_audited_action_with_audit_path(
+            "fake-controller",
+            &action,
+            apply_policy(),
+            &audit_path,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            action.events(),
+            vec!["preflight", "dry_run", "apply", "rollback"]
+        );
+        assert!(!action.applied());
+        assert!(action.rolled_back());
+
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(err.contains("fake apply failure after first target"));
+        assert!(err.contains("partial rollback attempted"));
+        assert!(err.contains("completed successfully"));
+
+        let events = crate::audit::read_audit_tail(&audit_path, 10).unwrap();
+        assert_eq!(events.len(), 4);
+        assert!(events.iter().any(|event| event.action_phase
+            == Some(crate::actions::ActionPhase::Rollback)
+            && event.success
+            && event.affected_tasks == 1
+            && event.message.contains("partial rollback attempted")));
+        let terminal = terminal_event(&events);
+        assert!(!terminal.success);
+        assert_eq!(terminal.affected_tasks, 1);
+        assert!(terminal.message.contains("partial rollback attempted"));
+        assert!(
+            terminal
+                .message
+                .contains("fake apply failure after first target")
+        );
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn verify_failure_triggers_rollback_in_audited_runner() {
         let dir = temp_dir("verify-failure-rollback");
         let audit_path = dir.join("audit.jsonl");

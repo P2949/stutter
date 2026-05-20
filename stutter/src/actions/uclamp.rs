@@ -383,10 +383,9 @@ impl TuningAction for UclampAction {
                 .filter(|(snapshot, _)| requested_values_differ(self.values, snapshot.current))
                 .collect();
 
-            let tx = crate::actions::transaction::ApplyTransaction::new();
-            tx.apply_loop(
-                filtered_snapshots,
-                |(snapshot, _)| {
+            let records = filtered_snapshots
+                .into_iter()
+                .map(|(snapshot, _)| {
                     let identity = TaskRestoreIdentity {
                         tid: snapshot.tid,
                         comm: snapshot
@@ -402,17 +401,31 @@ impl TuningAction for UclampAction {
                         sched_util_max: self.values.requested_max_or(snapshot.current),
                     };
 
-                    set_task_uclamp(snapshot.tid, requested)
-                        .map_err(|e| {
-                            e.context(format!("failed to set uclamp for tid={}", snapshot.tid))
-                        })
-                        .map(|_| UclampRestoreRecord {
+                    (
+                        UclampRestoreRecord {
                             identity,
                             original_util_min: snapshot.current.sched_util_min,
                             original_util_max: snapshot.current.sched_util_max,
-                        })
+                        },
+                        requested,
+                    )
+                })
+                .collect::<Vec<_>>();
+
+            let tx = crate::actions::transaction::ApplyTransaction::new();
+            tx.apply_planned_loop(
+                records,
+                |(record, requested)| {
+                    set_task_uclamp(record.identity.tid, *requested).map_err(|e| {
+                        e.context(format!(
+                            "failed to set uclamp for tid={}",
+                            record.identity.tid
+                        ))
+                    })
                 },
-                |records| RollbackToken::UclampRestore { records },
+                |records| RollbackToken::UclampRestore {
+                    records: records.into_iter().map(|(record, _)| record).collect(),
+                },
             )
         })()
     }
