@@ -35,11 +35,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "agent root is now a thin configuration/startup/auth boundary after route handlers moved to focused submodules",
     },
     OversizedRustFileAllowance {
-        path: "src/agent/tests.rs",
-        max_lines: 2_123,
-        reason: "existing broad agent route and policy regression tests moved out of agent.rs pending future test split",
-    },
-    OversizedRustFileAllowance {
         path: "src/agent/autotune.rs",
         max_lines: 1_196,
         reason: "autotune agent route handlers, remote policy helpers, restore endpoint wiring, and task reaping remain pending future policy/helper split",
@@ -48,11 +43,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         path: "src/autotune/planning/tests.rs",
         max_lines: 1_514,
         reason: "existing broad candidate planning regression tests moved out of candidate.rs pending future test split",
-    },
-    OversizedRustFileAllowance {
-        path: "src/regression_tests.rs",
-        max_lines: 2_518,
-        reason: "existing broad regression test module pending future split; PSI delta serialization and repair regression fixture coverage are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/diagnosis.rs",
@@ -70,14 +60,9 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "temporary extraction stage: owns MonitorSession run loop and remaining tick handlers after facade split; next split is session/ticks/target.rs",
     },
     OversizedRustFileAllowance {
-        path: "src/test_fixture_builder.rs",
-        max_lines: 2_151,
-        reason: "existing shared test fixture builder pending future split; PSI delta and restore fixture fields are staged here",
-    },
-    OversizedRustFileAllowance {
         path: "src/autotune/apply_low_risk.rs",
-        max_lines: 825,
-        reason: "existing low-risk autotune apply path after extracting embedded apply-low-risk tests",
+        max_lines: 325,
+        reason: "temporary extraction stage: owns low-risk experiment readiness and command dispatch after model/executor/audit/target split",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/shutdown.rs",
@@ -251,10 +236,6 @@ pub(in crate::architecture_tests) const EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_A
         reason: "existing fake action test-support implementation contains production unwrap/expect calls",
     },
     ExistingProductionUnwrapExpectAllowance {
-        path: "src/agent/tests.rs",
-        reason: "agent regression tests are cfg-test-only through agent.rs and contain test fixture unwraps",
-    },
-    ExistingProductionUnwrapExpectAllowance {
         path: "src/affinity.rs",
         reason: "existing affinity implementation contains production unwrap/expect calls",
     },
@@ -325,10 +306,6 @@ pub(in crate::architecture_tests) const EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_A
     ExistingProductionUnwrapExpectAllowance {
         path: "src/recording_fixture_tests.rs",
         reason: "existing recording fixture test module contains unwrap/expect calls outside cfg-test module blocks",
-    },
-    ExistingProductionUnwrapExpectAllowance {
-        path: "src/regression_tests.rs",
-        reason: "existing regression test module contains unwrap/expect calls outside cfg-test module blocks",
     },
     ExistingProductionUnwrapExpectAllowance {
         path: "src/report/render/text.rs",
