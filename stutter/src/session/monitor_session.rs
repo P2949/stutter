@@ -1,6 +1,7 @@
 //! MonitorSession orchestration and run loop.
 
 use super::*;
+use crate::session::ticks::foreground::foreground_event_for_final_metadata;
 
 pub struct MonitorSession {
     pub config: Arc<MonitorConfig>,
@@ -1406,7 +1407,11 @@ impl MonitorSession {
                     .map(|focus| format!("{:?}", focus.group.kind)),
                 focus_switch_count: self.focus_switch_count,
                 current_focus: self.current_focus.clone(),
-                final_foreground_event: self.runtime.outputs.recorder.last_foreground_event.clone(),
+                final_foreground_event: foreground_event_for_final_metadata(
+                    self.current_foreground.as_ref(),
+                    self.runtime.outputs.recorder.last_foreground_event.as_ref(),
+                    self.config.focus.foreground_include_title,
+                ),
                 drop_counters,
                 cpu_perf_status: self
                     .runtime

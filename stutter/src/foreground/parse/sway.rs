@@ -139,17 +139,21 @@ fn is_sway_window_container(node: &SwayNode) -> bool {
                 .is_some_and(|value| !value.trim().is_empty()))
 }
 
+fn non_empty_sway_text(value: Option<&str>) -> bool {
+    value.is_some_and(|value| !value.trim().is_empty())
+}
+
 fn sway_confidence(node: &SwayNode) -> f32 {
     if node.pid.is_some() {
         0.95
-    } else if node.app_id.is_some()
-        || node
-            .window_properties
-            .as_ref()
-            .is_some_and(|properties| properties.class.is_some())
+    } else if non_empty_sway_text(node.app_id.as_deref())
+        || node.window_properties.as_ref().is_some_and(|properties| {
+            non_empty_sway_text(properties.class.as_deref())
+                || non_empty_sway_text(properties.instance.as_deref())
+        })
     {
         0.65
-    } else if node.name.is_some() || node.window.is_some() {
+    } else if non_empty_sway_text(node.name.as_deref()) || node.window.is_some() {
         0.35
     } else {
         0.0
