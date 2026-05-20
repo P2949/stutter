@@ -38,5 +38,6 @@ pub(crate) mod snapshot;
 pub(crate) mod test_support;
 #[cfg(test)]
 pub(crate) mod tests;
+pub(crate) mod tree_walk;
 
 pub use public_api::*;

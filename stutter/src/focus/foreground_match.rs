@@ -1,11 +1,10 @@
-use std::collections::BTreeSet;
-
 use super::{
     classify::PriorityBand,
     groups::{FocusGroup, FocusGroupKind, FocusScoreBreakdown},
     process_scan::{is_active_foreground_candidate, is_critical_realtime_process},
     score::focus_group_contains_pid,
     snapshot::{FocusProcess, FocusSnapshot},
+    tree_walk::descendants_of_process,
 };
 use crate::process_tree::TaskClass as SystemTaskClass;
 
@@ -91,79 +90,6 @@ pub(super) fn add_foreground_fallback_group_if_needed(snapshot: &mut FocusSnapsh
             format!("conservative foreground fallback root pid={pid}"),
         ],
     });
-}
-
-fn descendants_of_process(snapshot: &FocusSnapshot, root_pid: u32) -> Vec<u32> {
-    let mut descendants = BTreeSet::new();
-    let mut stack = snapshot
-        .children_by_parent
-        .get(&root_pid)
-        .cloned()
-        .unwrap_or_default();
-
-    while let Some(pid) = stack.pop() {
-        if !snapshot.processes.contains_key(&pid) {
-            continue;
-        }
-
-        if !descendants.insert(pid) {
-            continue;
-        }
-
-        if let Some(children) = snapshot.children_by_parent.get(&pid) {
-            stack.extend(children.iter().copied());
-        }
-    }
-
-    descendants.into_iter().collect()
-}
-
-pub(super) fn same_process_family(snapshot: &FocusSnapshot, left_pid: u32, right_pid: u32) -> bool {
-    if left_pid == right_pid {
-        return true;
-    }
-
-    if is_process_ancestor(snapshot, left_pid, right_pid) {
-        return true;
-    }
-
-    if is_process_ancestor(snapshot, right_pid, left_pid) {
-        return true;
-    }
-
-    let left_parent = snapshot
-        .processes
-        .get(&left_pid)
-        .map(|process| process.ppid);
-    let right_parent = snapshot
-        .processes
-        .get(&right_pid)
-        .map(|process| process.ppid);
-
-    matches!((left_parent, right_parent), (Some(left), Some(right)) if left != 0 && left == right)
-}
-
-fn is_process_ancestor(snapshot: &FocusSnapshot, ancestor_pid: u32, descendant_pid: u32) -> bool {
-    let mut current = descendant_pid;
-    let mut seen = BTreeSet::new();
-
-    while seen.insert(current) {
-        let Some(process) = snapshot.processes.get(&current) else {
-            return false;
-        };
-
-        if process.ppid == ancestor_pid {
-            return true;
-        }
-
-        if process.ppid == 0 || process.ppid == current {
-            return false;
-        }
-
-        current = process.ppid;
-    }
-
-    false
 }
 
 pub(super) fn foreground_process_is_safe_auto_target(process: &FocusProcess) -> bool {

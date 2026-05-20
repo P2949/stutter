@@ -698,4 +698,3 @@ fn architecture_violation_message_includes_boundary_path_file_and_line() {
     assert!(message.contains("crate::commands"));
     assert!(message.contains("crate::commands::AppCommand"));
 }
-
