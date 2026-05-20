@@ -1,6 +1,7 @@
 use std::{
     fs,
     fs::OpenOptions,
+    io,
     path::{Component, Path, PathBuf},
 };
 
@@ -14,7 +15,7 @@ use crate::{
         TuningAction,
         rollback::{
             RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult,
-            token_dry_run_preview, token_restore_result,
+            token_dry_run_preview,
         },
         verify_task_identity,
     },
@@ -137,31 +138,23 @@ impl RollbackHandler for CgroupRollbackHandler {
                 Ok(()) => {
                     restored += 1;
                 }
-                Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Err(e) if is_dead_task_io_error(&e) => {
                     skipped_dead += 1;
                     log::debug!(
-                        "cgroup restore skipped (NotFound): task tid={} is dead",
+                        "cgroup restore skipped: task tid={} is missing/dead",
                         record.identity.tid
                     );
                 }
                 Err(e) => {
-                    if e.raw_os_error() == Some(3) {
-                        skipped_dead += 1;
-                        log::debug!(
-                            "cgroup restore skipped (ESRCH): task tid={} is dead",
-                            record.identity.tid
-                        );
-                    } else {
-                        errors += 1;
-                        let msg = format!(
-                            "failed to restore pid={} to cgroup {}: {}",
-                            record.identity.tid,
-                            original_cgroup.display(),
-                            e
-                        );
-                        log::error!("{}", msg);
-                        messages.push(msg);
-                    }
+                    errors += 1;
+                    let msg = format!(
+                        "failed to restore pid={} to cgroup {}: {}",
+                        record.identity.tid,
+                        original_cgroup.display(),
+                        e
+                    );
+                    log::error!("{}", msg);
+                    messages.push(msg);
                 }
             }
         }
@@ -445,8 +438,8 @@ impl TuningAction for CgroupPlacementAction {
         self.dry_run_at(Path::new("/proc"), &CgroupPlacementPolicy::default())
     }
 
-    fn apply(&self) -> crate::actions::ApplyResult {
-        let res: Result<RollbackToken, crate::actions::PartialApplyError> = (|| {
+    fn apply(&self) -> ApplyResult {
+        let res: Result<RollbackToken, PartialApplyError> = (|| {
             let policy = CgroupPlacementPolicy::default();
             let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &policy)?;
             let target_abs = self.target_cgroup_abs()?;
@@ -468,7 +461,7 @@ impl TuningAction for CgroupPlacementAction {
                     continue;
                 }
 
-                let identity = crate::actions::TaskRestoreIdentity {
+                let identity = TaskRestoreIdentity {
                     tid: snapshot.tid,
                     comm: snapshot
                         .comm
@@ -785,6 +778,14 @@ fn read_trimmed(path: &Path) -> anyhow::Result<String> {
         .with_context(|| format!("failed to read {}", path.display()))
 }
 
+fn is_dead_task_io_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause.downcast_ref::<io::Error>().is_some_and(|io_err| {
+            io_err.kind() == io::ErrorKind::NotFound || io_err.raw_os_error() == Some(libc::ESRCH)
+        })
+    })
+}
+
 fn write_trimmed(path: &Path, value: &str) -> anyhow::Result<()> {
     fs::write(path, value.trim())
         .with_context(|| format!("failed to write {} to {}", value.trim(), path.display()))
@@ -793,10 +794,12 @@ fn write_trimmed(path: &Path, value: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use std::{
-        fs,
+        fs, io,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    use anyhow::Context as _;
 
     use super::*;
 
@@ -867,6 +870,27 @@ mod tests {
         fs::write(path.join("cpuset.cpus"), "0-7\n").unwrap();
         fs::write(path.join("cpuset.mems"), "0\n").unwrap();
         path
+    }
+
+    #[test]
+    fn detects_dead_task_io_errors_through_anyhow_context() {
+        let missing = Err::<(), _>(io::Error::new(io::ErrorKind::NotFound, "task gone"))
+            .context("failed to write cgroup.procs")
+            .unwrap_err();
+        assert!(is_dead_task_io_error(&missing));
+
+        let esrch = Err::<(), _>(io::Error::from_raw_os_error(libc::ESRCH))
+            .context("failed to move task")
+            .unwrap_err();
+        assert!(is_dead_task_io_error(&esrch));
+
+        let permission_denied = Err::<(), _>(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "cgroup.procs not writable",
+        ))
+        .context("failed to write cgroup.procs")
+        .unwrap_err();
+        assert!(!is_dead_task_io_error(&permission_denied));
     }
 
     #[test]

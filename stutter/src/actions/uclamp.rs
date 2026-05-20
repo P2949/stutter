@@ -4,12 +4,10 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::actions::{
-    ActionId, ActionState, ActionWarning, ApplyResult, PartialApplyError, RestoreIdentityStatus,
-    RollbackToken, SafetyClass, TaskIdentity, TaskRestoreIdentity, TuningAction,
-    UclampRestoreRecord,
+    ActionId, ActionState, ActionWarning, ApplyResult, RestoreIdentityStatus, RollbackToken,
+    SafetyClass, TaskIdentity, TaskRestoreIdentity, TuningAction, UclampRestoreRecord,
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
-        token_restore_result,
     },
     verify_task_identity,
 };
