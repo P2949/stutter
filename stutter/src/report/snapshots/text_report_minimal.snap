@@ -1,8 +1,8 @@
 stutter report
 ==============
 file: snapshot/session.json
-schema: 21
-expected_schema: 21
+schema: 22
+expected_schema: 22
 run: -
 duration_ms: 1000
 stop_reason: test
@@ -18,7 +18,7 @@ active_tasks_at_end: 1
 data quality
 ------------
 level: High
-schema: 21 expected=21
+schema: 22 expected=22
 event_stream_write_errors: 0
 spike_events: retained=0 dropped=0 truncated=false
 interval_records: 1

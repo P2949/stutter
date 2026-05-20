@@ -5,8 +5,12 @@
 
 #[cfg(test)]
 mod tests {
-    use super::super::{
-        super::*, TestAction, apply_policy, temp_dir, test_cpu_affinity_profile_action,
+    use std::fs;
+
+    use super::super::*;
+    use crate::{
+        actions::{SafetyClass, cpu_affinity::CpuAffinityProfileAction},
+        profiles::Profile,
     };
 
     #[test]

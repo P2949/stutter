@@ -5,7 +5,14 @@
 
 #[cfg(test)]
 mod tests {
-    use super::super::{super::*, FakeExecutor};
+    use std::time::Duration;
+
+    use super::super::*;
+    use crate::{
+        actions::{ActionId, ActionState, ActionWarning, SafetyClass},
+        autotune::candidate::{CandidateAction, CandidateDryRunRecord},
+        profiles::Profile,
+    };
 
     #[test]
     fn low_risk_candidate_executor_wraps_cpu_affinity_profile_candidates() {
