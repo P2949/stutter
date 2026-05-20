@@ -255,10 +255,10 @@ pub(crate) fn evaluate_proposal_static(
                 ));
             }
             ActiveConfigMatch::Differs { .. } => {}
-            ActiveConfigMatch::Unknown { reason } => {
+            ActiveConfigMatch::Unknown { summary } => {
                 deny_reasons.push(CandidateDenyReason::ActiveConfigUnknown);
                 deny_messages.push(format!(
-                    "candidate active configuration could not be verified conservatively: {reason}"
+                    "candidate active configuration could not be verified conservatively: {summary}"
                 ));
             }
         }
@@ -281,10 +281,10 @@ pub(crate) fn evaluate_proposal_static(
                         actual
                     ));
                 }
-                ActiveConfigMatch::Unknown { reason } => {
+                ActiveConfigMatch::Unknown { summary } => {
                     deny_reasons.push(CandidateDenyReason::ActiveConfigUnknown);
                     deny_messages.push(format!(
-                        "active experiment configuration is unknown for conflict group {:?}: {reason}; restore or resync before applying another conflicting action",
+                        "active experiment configuration is unknown for conflict group {:?}: {summary}; restore or resync before applying another conflicting action",
                         active_experiment.candidate.conflict_group()
                     ));
                 }
@@ -304,10 +304,10 @@ pub(crate) fn evaluate_proposal_static(
                             actual
                         ));
                     }
-                    ActiveConfigMatch::Unknown { reason } => {
+                    ActiveConfigMatch::Unknown { summary } => {
                         deny_reasons.push(CandidateDenyReason::ActiveConfigUnknown);
                         deny_messages.push(format!(
-                            "kept action {} active configuration is unknown: {reason}; restore or resync before planning new candidates",
+                            "kept action {} active configuration is unknown: {summary}; restore or resync before planning new candidates",
                             kept.candidate.candidate_name()
                         ));
                     }
