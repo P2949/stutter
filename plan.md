@@ -76,6 +76,7 @@ RUSTUP_TOOLCHAIN=nightly cargo test --all-targets
 - [x] Patch 1.8/architecture dependencies: moved the dependency matrix, matrix helper, and coverage test into `src/architecture_tests/dependencies.rs`; `architecture_tests.rs` dropped to 889 lines and no longer needs an oversized-file allowance.
 - [x] Patch 1.8/architecture file-size-public-api: moved Rust file-size checks into `src/architecture_tests/file_size.rs` and public API surface checks into `src/architecture_tests/public_api.rs`; `architecture_tests.rs` dropped to 728 lines.
 - [x] Patch F2: Move process-family tree helpers: created `src/focus/tree_walk.rs` and moved tree walk helper functions.
+- [x] Patch F3: Move safety helpers: created `src/focus/safety.rs` and moved safety check logic and helper functions.
 
 ## Current shape from the uploaded code
 
