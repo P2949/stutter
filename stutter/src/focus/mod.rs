@@ -26,6 +26,7 @@
 //!   becoming automatic targets.
 
 pub(crate) mod classify;
+pub(crate) mod community_rules;
 mod foreground_match;
 pub(crate) mod group_build;
 pub(crate) mod groups;
