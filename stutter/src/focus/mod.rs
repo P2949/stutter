@@ -32,6 +32,7 @@ mod process_scan;
 pub(crate) mod provider;
 mod public_api;
 pub(crate) mod resolve;
+pub(crate) mod safety;
 pub(crate) mod score;
 pub(crate) mod snapshot;
 #[cfg(test)]

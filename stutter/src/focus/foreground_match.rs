@@ -1,24 +1,11 @@
 use super::{
-    classify::PriorityBand,
     groups::{FocusGroup, FocusGroupKind, FocusScoreBreakdown},
-    process_scan::{is_active_foreground_candidate, is_critical_realtime_process},
+    safety::{is_critical_realtime_process, process_name_looks_like_systemd},
     score::focus_group_contains_pid,
     snapshot::{FocusProcess, FocusSnapshot},
     tree_walk::descendants_of_process,
 };
 use crate::process_tree::TaskClass as SystemTaskClass;
-
-pub(super) fn process_name_looks_like_systemd(process: &FocusProcess) -> bool {
-    let comm = process.comm.to_ascii_lowercase();
-    let cmdline = process.cmdline.to_ascii_lowercase();
-
-    comm == "systemd"
-        || comm.starts_with("systemd-")
-        || cmdline == "systemd"
-        || cmdline.contains("/systemd ")
-        || cmdline.contains("/systemd\0")
-        || cmdline.ends_with("/systemd")
-}
 
 pub(super) fn process_name_looks_like_xwayland(process: &FocusProcess) -> bool {
     let comm = process.comm.to_ascii_lowercase();
@@ -114,10 +101,4 @@ pub(super) fn foreground_process_is_safe_auto_target(process: &FocusProcess) -> 
     }
 
     true
-}
-
-pub(super) fn is_unknown_foreground_like(process: &FocusProcess) -> bool {
-    process.classification.class == SystemTaskClass::Unknown
-        && is_active_foreground_candidate(process)
-        && process.classification.priority_band != PriorityBand::Background
 }
