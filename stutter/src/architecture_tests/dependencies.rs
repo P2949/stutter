@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use super::{
     autotune_src_root, crate_src_root,
-    scanners::{assert_sources_do_not_reference_paths, rust_files_under, ForbiddenRustPath},
+    scanners::{ForbiddenRustPath, assert_sources_do_not_reference_paths, rust_files_under},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

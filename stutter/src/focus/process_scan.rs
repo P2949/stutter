@@ -5,6 +5,7 @@ use super::{
     groups::{FocusGroup, FocusGroupKind, SafetyWarning, make_focus_group},
     score::{process_focus_score, total_cpu_ticks},
     snapshot::{FocusProcess, FocusSnapshot},
+    tree_walk::{descendants_of_pid, has_ancestor_in_set},
 };
 use crate::process_tree::TaskClass as SystemTaskClass;
 
@@ -182,53 +183,6 @@ pub(super) fn root_pids_from_members(
         .collect::<Vec<_>>()
 }
 
-pub(super) fn descendants_of_pid(snapshot: &FocusSnapshot, root_pid: u32) -> BTreeSet<u32> {
-    let mut result = BTreeSet::new();
-    let mut stack = vec![root_pid];
-
-    while let Some(pid) = stack.pop() {
-        if !result.insert(pid) {
-            continue;
-        }
-
-        if let Some(children) = snapshot.children_by_parent.get(&pid) {
-            for child in children.iter().rev() {
-                stack.push(*child);
-            }
-        }
-    }
-
-    result
-}
-
-pub(super) fn has_ancestor_in_set(
-    snapshot: &FocusSnapshot,
-    pid: u32,
-    pids: &BTreeSet<u32>,
-) -> bool {
-    let mut current = pid;
-    let mut seen = BTreeSet::new();
-
-    while let Some(process) = snapshot.processes.get(&current) {
-        if !seen.insert(current) {
-            return false;
-        }
-
-        let parent = process.ppid;
-        if parent == current || parent == 0 {
-            return false;
-        }
-
-        if pids.contains(&parent) {
-            return true;
-        }
-
-        current = parent;
-    }
-
-    false
-}
-
 pub(super) fn compare_process_preference(
     snapshot: &FocusSnapshot,
     left_pid: u32,
@@ -249,37 +203,6 @@ pub(super) fn compare_process_preference(
         .partial_cmp(&right_score)
         .unwrap_or(std::cmp::Ordering::Equal)
         .then_with(|| left_pid.cmp(&right_pid))
-}
-
-pub(super) fn process_appears_tied_to_root(
-    snapshot: &FocusSnapshot,
-    pid: u32,
-    root_pid: u32,
-) -> bool {
-    if pid == root_pid {
-        return true;
-    }
-
-    let Some(process) = snapshot.processes.get(&pid) else {
-        return false;
-    };
-    let Some(root) = snapshot.processes.get(&root_pid) else {
-        return false;
-    };
-
-    descendants_of_pid(snapshot, root_pid).contains(&pid)
-        || process.ppid == root.ppid
-        || same_non_empty_cgroup(process, root)
-        || (contains_game_runtime_text(process) && contains_game_runtime_text(root))
-}
-
-fn same_non_empty_cgroup(left: &FocusProcess, right: &FocusProcess) -> bool {
-    match (&left.cgroup_path, &right.cgroup_path) {
-        (Some(left), Some(right)) => {
-            !left.as_os_str().is_empty() && !right.as_os_str().is_empty() && left == right
-        }
-        _ => false,
-    }
 }
 
 pub(super) fn contains_game_runtime_text(process: &FocusProcess) -> bool {

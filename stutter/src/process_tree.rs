@@ -18,16 +18,16 @@
 //! Safety, mutation, and persistence invariants live with the owning child modules.
 
 #[cfg(test)]
-pub use crate::process::model::{priority_band_for_class, PriorityBand};
+pub use crate::process::model::{PriorityBand, priority_band_for_class};
 pub(crate) use crate::process::procfs::read_proc_info_at;
 pub use crate::process::{
     cgroup::collect_cgroup_pids_at,
     classify::{classify_task, classify_task_with_context},
     model::{
         CachedProcInfo, CompiledPattern, DEFAULT_MAX_PROC_SCAN_MS, DEFAULT_MAX_THREADS_PER_PROCESS,
-        ProcInfo, ProcessCache, ScanBudget, ScanBudgetReport, TargetDiffAction,
-        TargetDiffRef, TargetSnapshot, TargetSnapshotInput, TaskClass, TaskFilters, TaskInfo,
-        same_logical_task, sched_policy_name,
+        ProcInfo, ProcessCache, ScanBudget, ScanBudgetReport, TargetDiffAction, TargetDiffRef,
+        TargetSnapshot, TargetSnapshotInput, TaskClass, TaskFilters, TaskInfo, same_logical_task,
+        sched_policy_name,
     },
     procfs::{
         descendants_of, scan_processes_at, task_comm_at, thread_ids_of_at, thread_ids_of_at_limited,

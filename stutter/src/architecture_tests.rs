@@ -29,4 +29,3 @@ fn relative_to_crate_root(path: &Path) -> String {
         .to_string_lossy()
         .replace('\\', "/")
 }
-
