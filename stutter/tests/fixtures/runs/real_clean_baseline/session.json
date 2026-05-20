@@ -1,5 +1,5 @@
 {
-  "schema_version": 21,
+  "schema_version": 22,
   "run_name": "real_clean_baseline",
   "started_at": {
     "unix_seconds": 1625097600,
@@ -42,6 +42,12 @@
   "final_foreground_pid": null,
   "final_foreground_app_id": null,
   "final_foreground_class": null,
+  "final_foreground_status": null,
+  "final_foreground_window_id": null,
+  "final_foreground_workspace": null,
+  "final_foreground_confidence": null,
+  "final_foreground_stale_ms": null,
+  "final_foreground_reason": null,
   "interval_record_count": 2,
   "intervals_dropped": 0,
   "spike_events_retained_count": 0,

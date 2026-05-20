@@ -361,6 +361,76 @@ mod tests {
     }
 
     #[test]
+    fn foreground_missing_process_pid_does_not_boost_or_create_focus_group_in_hybrid_mode() {
+        let mut foreground = foreground_snapshot(Some(9999));
+        foreground.window_id = Some("163".to_owned());
+        foreground.workspace = Some("5".to_owned());
+
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(foreground),
+            vec![test_group(
+                FocusGroupKind::Browser,
+                vec![20],
+                vec![20, 21],
+                Some(20),
+                "browser",
+                0.90,
+            )],
+        );
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Hybrid);
+
+        assert_eq!(snapshot.groups.len(), 1);
+        assert_eq!(snapshot.groups[0].display_name, "browser");
+        assert_eq!(snapshot.groups[0].score_breakdown.foreground_score, 0.0);
+    }
+
+    #[test]
+    fn foreground_missing_process_pid_clears_unrelated_groups_in_foreground_only_mode() {
+        let foreground = foreground_snapshot(Some(9999));
+
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(foreground),
+            vec![test_group(
+                FocusGroupKind::Browser,
+                vec![20],
+                vec![20, 21],
+                Some(20),
+                "browser",
+                0.90,
+            )],
+        );
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
+
+        assert!(snapshot.groups.is_empty());
+    }
+
+    #[test]
+    fn stale_foreground_snapshot_does_not_score_focus_groups() {
+        let mut foreground = foreground_snapshot(Some(11));
+        foreground.stale_ms = Some(500);
+
+        let mut snapshot = foreground_scoring_snapshot(
+            Some(foreground),
+            vec![test_group(
+                FocusGroupKind::Game,
+                vec![10],
+                vec![10, 11],
+                Some(10),
+                "game",
+                0.30,
+            )],
+        );
+
+        apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Hybrid);
+
+        assert_eq!(snapshot.groups.len(), 1);
+        assert_eq!(snapshot.groups[0].display_name, "game");
+        assert_eq!(snapshot.groups[0].score_breakdown.foreground_score, 0.0);
+    }
+
+    #[test]
     fn foreground_score_is_full_confidence_for_member_pid() {
         let foreground = foreground_snapshot(Some(11));
         let snapshot = foreground_scoring_snapshot(
@@ -434,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn foreground_source_falls_back_to_heuristic_when_provider_unavailable() {
+    fn foreground_source_clears_groups_when_provider_unavailable() {
         let mut unavailable = foreground_snapshot(Some(11));
         unavailable.status = crate::foreground::ForegroundProviderStatus::Unavailable;
         unavailable.confidence = 0.0;
@@ -462,11 +532,7 @@ mod tests {
 
         apply_foreground_source_mode_to_snapshot(&mut snapshot, FocusSource::Foreground);
 
-        assert_eq!(snapshot.groups.len(), 2);
-        assert_eq!(snapshot.groups[0].display_name, "game");
-        assert_eq!(snapshot.groups[0].score, 0.30);
-        assert_eq!(snapshot.groups[1].display_name, "browser");
-        assert_eq!(snapshot.groups[1].score, 0.90);
+        assert!(snapshot.groups.is_empty());
     }
 
     #[test]

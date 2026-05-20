@@ -1,5 +1,5 @@
 name = "compositor_scheduler_delay"
-schema_version = 21
+schema_version = 22
 source = "synthetic-edge-case"
 quality_expectation = "High"
 description = "Synthetic edge-case fixture for compositor thread scheduler delay during a visible frame spike."

@@ -1,5 +1,5 @@
 name = "gpu_bound_clean_cpu"
-schema_version = 21
+schema_version = 22
 source = "synthetic-contract"
 quality_expectation = "High"
 description = "Synthetic GPU-bound fixture with high GPU busy and clean CPU pressure."

@@ -1,5 +1,5 @@
 name = "block_io_stall"
-schema_version = 21
+schema_version = 22
 source = "synthetic-contract"
 quality_expectation = "High"
 description = "Synthetic block I/O fixture with a long request overlapping a scheduler-latency spike."

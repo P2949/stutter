@@ -25,6 +25,7 @@ mod tests {
                 {
                   "id": 3,
                   "name": "Kingdom Come: Deliverance",
+                  "type": "con",
                   "focused": true,
                   "pid": 4242,
                   "app_id": "steam_app_379430",
@@ -76,6 +77,7 @@ mod tests {
                 {
                   "id": 3,
                   "name": "Private browser tab title",
+                  "type": "con",
                   "focused": true,
                   "pid": 9000,
                   "app_id": "firefox",
@@ -106,6 +108,139 @@ mod tests {
         assert_eq!(event.app_id.as_deref(), Some("firefox"));
         assert_eq!(event.class.as_deref(), Some("Navigator"));
         assert_eq!(event.title, None);
+    }
+
+    #[test]
+    fn sway_tree_parser_skips_focused_workspace_and_selects_focused_con() {
+        let json = r#"
+        {
+          "id": 1,
+          "name": "root",
+          "type": "root",
+          "focused": false,
+          "nodes": [
+            {
+              "id": 2,
+              "name": "games",
+              "type": "workspace",
+              "focused": true,
+              "nodes": [
+                {
+                  "id": 42,
+                  "name": "Kingdom Come: Deliverance",
+                  "type": "con",
+                  "focused": true,
+                  "pid": 4242,
+                  "app_id": "steam_app_379430",
+                  "window": null,
+                  "window_properties": {
+                    "class": "steam_app_379430",
+                    "instance": "steam_app_379430",
+                    "title": "Kingdom Come: Deliverance"
+                  },
+                  "nodes": [],
+                  "floating_nodes": []
+                }
+              ],
+              "floating_nodes": []
+            }
+          ],
+          "floating_nodes": []
+        }
+        "#;
+
+        let provider = SwayForegroundProvider::new();
+        let snapshot = provider.sample_from_tree_json(1_000, json);
+
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, Some(4242));
+        assert_eq!(snapshot.app_id.as_deref(), Some("steam_app_379430"));
+        assert_eq!(snapshot.window_id.as_deref(), Some("42"));
+        assert_eq!(snapshot.workspace.as_deref(), Some("games"));
+    }
+
+    #[test]
+    fn sway_tree_parser_reports_unavailable_when_only_workspace_is_focused() {
+        let json = r#"
+        {
+          "id": 1,
+          "name": "root",
+          "type": "root",
+          "focused": false,
+          "nodes": [
+            {
+              "id": 2,
+              "name": "games",
+              "type": "workspace",
+              "focused": true,
+              "nodes": [],
+              "floating_nodes": []
+            }
+          ],
+          "floating_nodes": []
+        }
+        "#;
+
+        let provider = SwayForegroundProvider::new();
+        let snapshot = provider.sample_from_tree_json(1_000, json);
+
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
+        assert_eq!(snapshot.pid, None);
+        assert_eq!(snapshot.app_id, None);
+        assert_eq!(snapshot.window_id, None);
+    }
+
+    #[test]
+    fn sway_tree_parser_prefers_deep_focused_leaf_over_focused_parent_container() {
+        let json = r#"
+        {
+          "id": 1,
+          "name": "root",
+          "type": "root",
+          "focused": false,
+          "nodes": [
+            {
+              "id": 2,
+              "name": "dev",
+              "type": "workspace",
+              "focused": false,
+              "nodes": [
+                {
+                  "id": 10,
+                  "name": "split container",
+                  "type": "con",
+                  "focused": true,
+                  "nodes": [
+                    {
+                      "id": 11,
+                      "name": "Alacritty",
+                      "type": "con",
+                      "focused": true,
+                      "pid": 9001,
+                      "app_id": "Alacritty",
+                      "window": null,
+                      "window_properties": null,
+                      "nodes": [],
+                      "floating_nodes": []
+                    }
+                  ],
+                  "floating_nodes": []
+                }
+              ],
+              "floating_nodes": []
+            }
+          ],
+          "floating_nodes": []
+        }
+        "#;
+
+        let provider = SwayForegroundProvider::new();
+        let snapshot = provider.sample_from_tree_json(1_000, json);
+
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, Some(9001));
+        assert_eq!(snapshot.window_id.as_deref(), Some("11"));
+        assert_eq!(snapshot.workspace.as_deref(), Some("dev"));
     }
 
     #[test]
@@ -150,6 +285,7 @@ mod tests {
                 {
                   "id": 3,
                   "name": "Steam - private title",
+                  "type": "con",
                   "focused": true,
                   "pid": 4242,
                   "app_id": "steam",
@@ -204,6 +340,7 @@ mod tests {
                 {
                   "id": 9,
                   "name": "floating terminal",
+                  "type": "con",
                   "focused": true,
                   "pid": 7777,
                   "app_id": "foot",
@@ -252,6 +389,7 @@ mod tests {
                 {
                   "id": 3,
                   "name": "Firefox",
+                  "type": "con",
                   "focused": true,
                   "pid": null,
                   "app_id": "firefox",
@@ -300,6 +438,7 @@ mod tests {
                 {
                   "id": 3,
                   "name": "unknown window",
+                  "type": "con",
                   "focused": true,
                   "pid": null,
                   "app_id": null,

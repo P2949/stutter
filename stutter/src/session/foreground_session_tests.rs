@@ -130,9 +130,65 @@ fn foreground_identity_ignores_elapsed_title_reason_and_confidence_only_changes(
         window_id: Some("0x1200007".to_owned()),
         workspace: None,
         confidence: 0.50,
-        stale_ms: Some(150),
+        stale_ms: None,
         reason: "new reason".to_owned(),
     };
 
     assert!(!foreground_identity_changed(Some(&old), &new));
+}
+
+#[test]
+fn foreground_identity_changes_when_same_pid_moves_to_different_window_id() {
+    let old = foreground_snapshot(ForegroundSnapshotTestInput {
+        elapsed_ms: 100,
+        status: crate::foreground::ForegroundProviderStatus::Available,
+        pid: Some(2960),
+        app_id: Some("steam"),
+        class: None,
+        window_id: Some("25"),
+        workspace: Some("4"),
+        confidence: 0.95,
+    });
+
+    let new = foreground_snapshot(ForegroundSnapshotTestInput {
+        elapsed_ms: 200,
+        status: crate::foreground::ForegroundProviderStatus::Available,
+        pid: Some(2960),
+        app_id: Some("Spotify"),
+        class: None,
+        window_id: Some("7"),
+        workspace: Some("2"),
+        confidence: 0.95,
+    });
+
+    assert!(foreground_identity_changed(Some(&old), &new));
+}
+
+#[test]
+fn foreground_identity_changes_when_fresh_snapshot_becomes_stale_once() {
+    let mut old = foreground_snapshot(ForegroundSnapshotTestInput {
+        elapsed_ms: 100,
+        status: crate::foreground::ForegroundProviderStatus::Available,
+        pid: Some(4242),
+        app_id: Some("steam"),
+        class: Some("Steam"),
+        window_id: Some("42"),
+        workspace: Some("games"),
+        confidence: 0.95,
+    });
+
+    let mut new = old.clone();
+    new.elapsed_ms = 600;
+    new.stale_ms = Some(500);
+    new.confidence = 0.50;
+    new.reason = "using stale foreground snapshot from 500ms ago".to_owned();
+
+    assert!(foreground_identity_changed(Some(&old), &new));
+
+    old.stale_ms = Some(500);
+    let mut still_stale = old.clone();
+    still_stale.elapsed_ms = 1_000;
+    still_stale.stale_ms = Some(900);
+
+    assert!(!foreground_identity_changed(Some(&old), &still_stale));
 }

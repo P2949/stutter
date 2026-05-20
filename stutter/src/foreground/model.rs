@@ -131,6 +131,7 @@ impl ForegroundWindowSnapshot {
             window_id: self.window_id.clone(),
             workspace: self.workspace.clone(),
             confidence: self.confidence,
+            stale_ms: self.stale_ms,
             reason: self.reason.clone(),
         })
     }
@@ -148,6 +149,8 @@ pub struct ForegroundEvent {
     pub window_id: Option<String>,
     pub workspace: Option<String>,
     pub confidence: f32,
+    #[serde(default)]
+    pub stale_ms: Option<u64>,
     pub reason: String,
 }
 
@@ -164,6 +167,7 @@ pub struct ForegroundEventInput {
     pub window_id: Option<String>,
     pub workspace: Option<String>,
     pub confidence: f32,
+    pub stale_ms: Option<u64>,
     pub reason: String,
 }
 
@@ -180,6 +184,7 @@ impl ForegroundEvent {
             window_id: input.window_id,
             workspace: input.workspace,
             confidence: input.confidence,
+            stale_ms: input.stale_ms,
             reason: input.reason,
         }
     }

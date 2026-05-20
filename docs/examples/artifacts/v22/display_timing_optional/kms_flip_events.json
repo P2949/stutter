@@ -1,0 +1,1 @@
+{"elapsed_ms":1200,"timestamp_ns":1001200000000,"source":"i915_tracepoint","card":"card0","driver":"i915","crtc_id":42,"connector":"DP-1","event_kind":"flip_interval","sequence":99182,"request_ns":1001190000000,"done_ns":1001200000000,"duration_ns":10000000,"flags":["has_request_ns","has_done_ns","has_duration_ns","has_sequence","has_crtc"],"confidence":"medium"}

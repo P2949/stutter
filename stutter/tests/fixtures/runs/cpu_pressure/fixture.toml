@@ -1,5 +1,5 @@
 name = "cpu_pressure"
-schema_version = 21
+schema_version = 22
 source = "synthetic-contract"
 quality_expectation = "High"
 description = "Synthetic CPU pressure fixture with high CPU PSI near a scheduler-latency spike."

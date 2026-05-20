@@ -56,6 +56,18 @@ pub struct SessionMetadataCore {
     #[serde(default)]
     pub final_foreground_class: Option<String>,
     #[serde(default)]
+    pub final_foreground_status: Option<String>,
+    #[serde(default)]
+    pub final_foreground_window_id: Option<String>,
+    #[serde(default)]
+    pub final_foreground_workspace: Option<String>,
+    #[serde(default)]
+    pub final_foreground_confidence: Option<f32>,
+    #[serde(default)]
+    pub final_foreground_stale_ms: Option<u64>,
+    #[serde(default)]
+    pub final_foreground_reason: Option<String>,
+    #[serde(default)]
     pub interval_record_count: u64,
     #[serde(default)]
     pub intervals_dropped: u64,
@@ -520,6 +532,7 @@ mod tests {
             window_id: Some("7".to_owned()),
             workspace: Some("gaming".to_owned()),
             confidence: 0.95,
+            stale_ms: None,
             reason: "focused Sway node from swaymsg get_tree".to_owned(),
         });
 
@@ -569,6 +582,7 @@ mod tests {
             window_id: Some("123".to_owned()),
             workspace: Some("games".to_owned()),
             confidence: 0.95,
+            stale_ms: None,
             reason: "focused Sway node from swaymsg get_tree".to_owned(),
         };
 
@@ -584,6 +598,52 @@ mod tests {
         assert!(json.contains("\"window_id\":\"123\""));
         assert!(json.contains("\"workspace\":\"games\""));
         assert!(json.contains("\"confidence\":0.95"));
+    }
+
+    #[test]
+    fn foreground_event_serializes_stale_ms() {
+        let event = ForegroundEvent {
+            elapsed_ms: 2_000,
+            source: crate::foreground::ForegroundSource::Sway,
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid: Some(4242),
+            app_id: Some("steam".to_owned()),
+            class: Some("Steam".to_owned()),
+            title: None,
+            window_id: Some("42".to_owned()),
+            workspace: Some("games".to_owned()),
+            confidence: 0.50,
+            stale_ms: Some(750),
+            reason: "using stale foreground snapshot from 750ms ago".to_owned(),
+        };
+
+        let value = serde_json::to_value(&event).unwrap();
+
+        assert_eq!(
+            value.get("stale_ms").and_then(serde_json::Value::as_u64),
+            Some(750)
+        );
+    }
+
+    #[test]
+    fn foreground_event_deserializes_old_events_without_stale_ms() {
+        let value = serde_json::json!({
+            "elapsed_ms": 1234,
+            "source": "sway",
+            "status": "available",
+            "pid": 4242,
+            "app_id": "steam",
+            "class": "Steam",
+            "title": null,
+            "window_id": "42",
+            "workspace": "games",
+            "confidence": 0.95,
+            "reason": "old foreground event"
+        });
+
+        let event: ForegroundEvent = serde_json::from_value(value).unwrap();
+
+        assert_eq!(event.stale_ms, None);
     }
 
     #[test]
@@ -629,6 +689,12 @@ mod tests {
         assert_eq!(core.final_foreground_pid, None);
         assert_eq!(core.final_foreground_app_id, None);
         assert_eq!(core.final_foreground_class, None);
+        assert_eq!(core.final_foreground_status, None);
+        assert_eq!(core.final_foreground_window_id, None);
+        assert_eq!(core.final_foreground_workspace, None);
+        assert_eq!(core.final_foreground_confidence, None);
+        assert_eq!(core.final_foreground_stale_ms, None);
+        assert_eq!(core.final_foreground_reason, None);
     }
 
     #[test]

@@ -338,6 +338,24 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         final_foreground_class: final_foreground_event
             .as_ref()
             .and_then(|event| event.class.clone()),
+        final_foreground_status: final_foreground_event
+            .as_ref()
+            .map(|event| format!("{:?}", event.status).to_ascii_lowercase()),
+        final_foreground_window_id: final_foreground_event
+            .as_ref()
+            .and_then(|event| event.window_id.clone()),
+        final_foreground_workspace: final_foreground_event
+            .as_ref()
+            .and_then(|event| event.workspace.clone()),
+        final_foreground_confidence: final_foreground_event
+            .as_ref()
+            .map(|event| event.confidence),
+        final_foreground_stale_ms: final_foreground_event
+            .as_ref()
+            .and_then(|event| event.stale_ms),
+        final_foreground_reason: final_foreground_event
+            .as_ref()
+            .map(|event| event.reason.clone()),
         interval_record_count,
         intervals_dropped: recorder.counters.intervals_dropped,
         spike_events_retained_count: if recorder.streams.contains(ArtifactKind::SpikeEvents) {
@@ -1032,6 +1050,98 @@ mod tests {
     }
 
     #[test]
+    fn finalize_recording_persists_full_final_foreground_identity() {
+        let dir = temp_dir("final-foreground-identity");
+        fs::create_dir_all(&dir).unwrap();
+
+        let recorder = LiveRecorder {
+            run: Some(RecordingRun {
+                run_name: Some("final-foreground-identity".to_owned()),
+                run_dir: dir.clone(),
+                started_at: SystemTime::now(),
+                started_instant: Instant::now(),
+                monotonic_start_ns: Some(1),
+                mangohud_start_offset: None,
+                mangohud_first_frame_monotonic_ns: None,
+                mangohud_first_frame_raw_elapsed_ms: None,
+            }),
+            counters: RecordingCounters {
+                foreground_event_count: 1,
+                ..RecordingCounters::default()
+            },
+            ..LiveRecorder::default()
+        };
+        let config = MonitorConfig::default();
+        let tasks = crate::tasks::TaskTracker::default();
+        let foreground = ForegroundEvent {
+            elapsed_ms: 1_000,
+            source: crate::foreground::ForegroundSource::Sway,
+            status: crate::foreground::ForegroundProviderStatus::Available,
+            pid: Some(159447),
+            app_id: Some("steam_app_379430".to_owned()),
+            class: Some("steam_app_379430".to_owned()),
+            title: None,
+            window_id: Some("163".to_owned()),
+            workspace: Some("5".to_owned()),
+            confidence: 0.95,
+            stale_ms: Some(500),
+            reason: "focused Sway node from swaymsg get_tree".to_owned(),
+        };
+
+        finalize_recording(FinalizeRecordingInput {
+            recorder: &recorder,
+            config: &config,
+            tree_pids: &[],
+            stop_reason: "test",
+            tasks: &tasks,
+            frame_events: &[],
+            block_io_correlation_basis: crate::ebpf_loader::BlockIoCorrelationBasis::RequestPointer
+                .as_str()
+                .to_owned(),
+            block_io_correlation_confidence:
+                crate::ebpf_loader::BlockIoCorrelationBasis::RequestPointer
+                    .confidence()
+                    .to_owned(),
+            drop_counters: crate::ebpf_loader::DropCountersSnapshot::default(),
+            cpu_perf_status: None,
+            focus_mode: None,
+            final_focus_kind: None,
+            focus_switch_count: 0,
+            current_focus: None,
+            final_foreground_event: Some(foreground),
+        })
+        .unwrap();
+
+        let session: SessionFile =
+            serde_json::from_str(&fs::read_to_string(dir.join("session.json")).unwrap()).unwrap();
+        let metadata: MetadataFile =
+            serde_json::from_str(&fs::read_to_string(dir.join("metadata.json")).unwrap()).unwrap();
+
+        for core in [&session.core, &metadata.core] {
+            assert_eq!(core.final_foreground_pid, Some(159447));
+            assert_eq!(
+                core.final_foreground_app_id.as_deref(),
+                Some("steam_app_379430")
+            );
+            assert_eq!(
+                core.final_foreground_class.as_deref(),
+                Some("steam_app_379430")
+            );
+            assert_eq!(core.final_foreground_status.as_deref(), Some("available"));
+            assert_eq!(core.final_foreground_window_id.as_deref(), Some("163"));
+            assert_eq!(core.final_foreground_workspace.as_deref(), Some("5"));
+            assert_eq!(core.final_foreground_confidence, Some(0.95));
+            assert_eq!(core.final_foreground_stale_ms, Some(500));
+            assert_eq!(
+                core.final_foreground_reason.as_deref(),
+                Some("focused Sway node from swaymsg get_tree")
+            );
+        }
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn sync_tracker_tracks_parent_once_for_same_directory() {
         let mut tracker = SyncTracker::default();
 
@@ -1097,6 +1207,7 @@ mod tests {
             window_id: Some("0x1200007".to_owned()),
             workspace: None,
             confidence: 0.90,
+            stale_ms: None,
             reason: "active X11 window from xprop".to_owned(),
         };
 

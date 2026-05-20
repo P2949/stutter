@@ -3,6 +3,10 @@ use crate::{session::MonitorSession, session_events::MonitorEvent};
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ForegroundTickContext;
 
+fn foreground_stale_state(snapshot: &crate::foreground::ForegroundWindowSnapshot) -> bool {
+    snapshot.stale_ms.is_some()
+}
+
 pub(crate) fn foreground_identity_changed(
     old: Option<&crate::foreground::ForegroundWindowSnapshot>,
     new: &crate::foreground::ForegroundWindowSnapshot,
@@ -18,6 +22,7 @@ pub(crate) fn foreground_identity_changed(
         || old.class.as_deref() != new.class.as_deref()
         || old.window_id.as_deref() != new.window_id.as_deref()
         || old.workspace.as_deref() != new.workspace.as_deref()
+        || foreground_stale_state(old) != foreground_stale_state(new)
 }
 
 impl MonitorSession {

@@ -82,6 +82,7 @@ mod tests {
             window_id: Some("0x1200007".to_owned()),
             workspace: Some("1".to_owned()),
             confidence: 0.80,
+            stale_ms: None,
             reason: "active x11 window".to_owned(),
         });
 
@@ -140,6 +141,7 @@ mod tests {
             window_id: None,
             workspace: None,
             confidence: 0.0,
+            stale_ms: None,
             reason: "hyprctl unavailable".to_owned(),
         });
 

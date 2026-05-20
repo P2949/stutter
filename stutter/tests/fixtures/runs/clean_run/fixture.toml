@@ -1,5 +1,5 @@
 name = "clean_run"
-schema_version = 21
+schema_version = 22
 source = "synthetic-contract"
 quality_expectation = "High"
 description = "Synthetic clean run fixture that should remain high quality and produce no strong diagnosis."

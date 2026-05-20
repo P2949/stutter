@@ -1,5 +1,5 @@
 name = "real_truncated_low_quality"
-schema_version = 21
+schema_version = 22
 source = "sanitized-real-recording"
 quality_expectation = "Medium"
 description = "Sanitized low-quality recording with truncated spike events and nonzero drop counters; quality handling is the regression target, not diagnosis cause detection."

@@ -1,5 +1,5 @@
 name = "old_schema_warning"
-schema_version = 21
+schema_version = 22
 source = "synthetic-contract"
 quality_expectation = "Medium"
 description = "Synthetic old-schema fixture that should warn without being rejected."

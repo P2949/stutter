@@ -93,10 +93,6 @@ fn find_focused_sway_node<'a>(
         workspace
     };
 
-    if node.focused.unwrap_or(false) {
-        return Some((node, current_workspace));
-    }
-
     for child in node
         .nodes
         .iter()
@@ -108,7 +104,39 @@ fn find_focused_sway_node<'a>(
         }
     }
 
+    if node.focused.unwrap_or(false) && is_sway_window_container(node) {
+        return Some((node, current_workspace));
+    }
+
     None
+}
+
+fn is_sway_window_container(node: &SwayNode) -> bool {
+    node.node_type.as_deref() == Some("con")
+        && (node.pid.is_some()
+            || node
+                .app_id
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            || node.window.is_some()
+            || node.window_properties.as_ref().is_some_and(|properties| {
+                properties
+                    .class
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+                    || properties
+                        .instance
+                        .as_deref()
+                        .is_some_and(|value| !value.trim().is_empty())
+                    || properties
+                        .title
+                        .as_deref()
+                        .is_some_and(|value| !value.trim().is_empty())
+            })
+            || node
+                .name
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty()))
 }
 
 fn sway_confidence(node: &SwayNode) -> f32 {
@@ -121,7 +149,7 @@ fn sway_confidence(node: &SwayNode) -> f32 {
             .is_some_and(|properties| properties.class.is_some())
     {
         0.65
-    } else if node.name.is_some() || node.window.is_some() || node.id.is_some() {
+    } else if node.name.is_some() || node.window.is_some() {
         0.35
     } else {
         0.0

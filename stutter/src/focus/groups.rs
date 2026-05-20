@@ -21,7 +21,7 @@ use super::{
         is_unknown_foreground_like, process_name_looks_like_systemd, safety_warning_reason,
     },
     score::*,
-    snapshot::{FocusProcess, FocusSnapshot},
+    snapshot::FocusSnapshot,
     tree_walk::{
         descendants_of_pid, has_ancestor_in_set, process_appears_tied_to_root, same_process_family,
     },
@@ -286,6 +286,17 @@ pub fn situation_for_group(group: &FocusGroup) -> SituationKind {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ForegroundFocusReadiness {
+    Ready { pid: u32 },
+    NoForeground,
+    UnavailableStatus,
+    StaleSnapshot,
+    MissingPid,
+    MissingProcess { pid: u32 },
+    UnsafeProcess { pid: u32, reason: &'static str },
+}
+
 pub(crate) fn apply_foreground_source_mode_to_snapshot(
     snapshot: &mut FocusSnapshot,
     source_mode: FocusSource,
@@ -294,17 +305,33 @@ pub(crate) fn apply_foreground_source_mode_to_snapshot(
         return;
     }
 
-    let foreground_available = foreground_context_is_available_for_focus(snapshot);
-
-    if !foreground_available {
-        return;
-    }
-
-    if !foreground_target_is_safe_to_score(snapshot) {
-        if source_mode == FocusSource::Foreground {
-            snapshot.groups.clear();
+    match foreground_focus_readiness(snapshot) {
+        ForegroundFocusReadiness::Ready { pid } => {
+            let _ = pid;
         }
-        return;
+        ForegroundFocusReadiness::UnsafeProcess { pid, reason } => {
+            let _ = (pid, reason);
+            if source_mode == FocusSource::Foreground {
+                snapshot.groups.clear();
+            }
+            return;
+        }
+        ForegroundFocusReadiness::MissingProcess { pid } => {
+            let _ = pid;
+            if source_mode == FocusSource::Foreground {
+                snapshot.groups.clear();
+            }
+            return;
+        }
+        ForegroundFocusReadiness::MissingPid
+        | ForegroundFocusReadiness::StaleSnapshot
+        | ForegroundFocusReadiness::UnavailableStatus
+        | ForegroundFocusReadiness::NoForeground => {
+            if source_mode == FocusSource::Foreground {
+                snapshot.groups.clear();
+            }
+            return;
+        }
     }
 
     add_foreground_fallback_group_if_needed(snapshot);
@@ -346,55 +373,67 @@ pub(crate) fn apply_foreground_source_mode_to_snapshot(
     snapshot.groups = groups;
 }
 
-pub(crate) fn foreground_context_is_available_for_focus(snapshot: &FocusSnapshot) -> bool {
+pub(crate) fn foreground_focus_readiness(snapshot: &FocusSnapshot) -> ForegroundFocusReadiness {
     let Some(foreground) = snapshot.foreground.as_ref() else {
-        return false;
+        return ForegroundFocusReadiness::NoForeground;
     };
 
-    foreground.status == crate::foreground::ForegroundProviderStatus::Available
-        && foreground.pid.is_some()
-        && foreground.confidence > 0.0
-        && foreground.stale_ms.is_none()
-}
+    if foreground.status != crate::foreground::ForegroundProviderStatus::Available {
+        return ForegroundFocusReadiness::UnavailableStatus;
+    }
 
-pub(crate) fn foreground_target_is_safe_to_score(snapshot: &FocusSnapshot) -> bool {
-    let Some(pid) = snapshot
-        .foreground
-        .as_ref()
-        .and_then(|foreground| foreground.pid)
-    else {
-        return false;
+    if foreground.stale_ms.is_some() {
+        return ForegroundFocusReadiness::StaleSnapshot;
+    }
+
+    if foreground.confidence <= 0.0 {
+        return ForegroundFocusReadiness::UnavailableStatus;
+    }
+
+    let Some(pid) = foreground.pid else {
+        return ForegroundFocusReadiness::MissingPid;
     };
 
     let Some(process) = snapshot.processes.get(&pid) else {
-        return false;
+        return ForegroundFocusReadiness::MissingProcess { pid };
     };
 
-    foreground_process_is_safe_auto_target(process)
-}
-
-pub(crate) fn foreground_process_is_safe_auto_target(process: &FocusProcess) -> bool {
     if process.pid == 1 {
-        return false;
+        return ForegroundFocusReadiness::UnsafeProcess {
+            pid,
+            reason: "pid one",
+        };
     }
 
     if process_name_looks_like_systemd(process) {
-        return false;
+        return ForegroundFocusReadiness::UnsafeProcess {
+            pid,
+            reason: "systemd",
+        };
     }
 
     if process.classification.class == SystemTaskClass::Compositor {
-        return false;
+        return ForegroundFocusReadiness::UnsafeProcess {
+            pid,
+            reason: "compositor",
+        };
     }
 
     if is_critical_realtime_process(process) {
-        return false;
+        return ForegroundFocusReadiness::UnsafeProcess {
+            pid,
+            reason: "critical realtime",
+        };
     }
 
     if process_name_looks_like_xwayland(process) {
-        return false;
+        return ForegroundFocusReadiness::UnsafeProcess {
+            pid,
+            reason: "xwayland",
+        };
     }
 
-    true
+    ForegroundFocusReadiness::Ready { pid }
 }
 
 pub(crate) fn foreground_aware_total_score(breakdown: &FocusScoreBreakdown) -> f32 {

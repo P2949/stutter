@@ -486,6 +486,7 @@ pub(in crate::test_fixture_builder) fn foreground_window_fixture() -> (SessionFi
         window_id: Some("0xSANITIZED".to_owned()),
         workspace: Some("gaming".to_owned()),
         confidence: 0.95,
+        stale_ms: None,
         reason: "focused Sway node from sanitized fixture".to_owned(),
     }];
 
@@ -503,6 +504,13 @@ pub(in crate::test_fixture_builder) fn foreground_window_fixture() -> (SessionFi
     session.core.final_foreground_pid = Some(5701);
     session.core.final_foreground_app_id = Some("steam_app_sanitized".to_owned());
     session.core.final_foreground_class = Some("steam_app_sanitized".to_owned());
+    session.core.final_foreground_status = Some("available".to_owned());
+    session.core.final_foreground_window_id = Some("0xSANITIZED".to_owned());
+    session.core.final_foreground_workspace = Some("gaming".to_owned());
+    session.core.final_foreground_confidence = Some(0.95);
+    session.core.final_foreground_stale_ms = None;
+    session.core.final_foreground_reason =
+        Some("focused Sway node from sanitized fixture".to_owned());
 
     apply_artifact_counts(
         &mut session,

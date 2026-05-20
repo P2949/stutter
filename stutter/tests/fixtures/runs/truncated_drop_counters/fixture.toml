@@ -1,5 +1,5 @@
 name = "truncated_drop_counters"
-schema_version = 21
+schema_version = 22
 source = "synthetic-contract"
 quality_expectation = "Medium"
 description = "Synthetic low-quality fixture with truncated spike events and non-zero drop counters."
