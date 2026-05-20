@@ -1,6 +1,7 @@
 //! Automatic GPU/display topology detection.
 
 use std::path::{Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -22,9 +23,9 @@ pub struct CompositorInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DrmDeviceInfo {
-    pub card: String,                  // card0
-    pub render_node: Option<String>,   // renderD128
-    pub driver: Option<String>,        // i915, amdgpu
+    pub card: String,                // card0
+    pub render_node: Option<String>, // renderD128
+    pub driver: Option<String>,      // i915, amdgpu
     pub vendor_id: Option<String>,
     pub device_id: Option<String>,
     pub pci_slot: Option<String>,
@@ -35,8 +36,8 @@ pub struct DrmDeviceInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConnectorInfo {
     pub card: String,
-    pub name: String,                  // HDMI-A-1, DP-1
-    pub status: Option<String>,        // connected/disconnected
+    pub name: String,           // HDMI-A-1, DP-1
+    pub status: Option<String>, // connected/disconnected
     pub enabled: Option<String>,
     pub modes: Vec<String>,
     pub edid_hash: Option<String>,
@@ -100,8 +101,12 @@ fn detect_compositor(proc_root: &Path) -> Option<CompositorInfo> {
     let entries = std::fs::read_dir(proc_root).ok()?;
     for entry in entries.flatten() {
         let name = entry.file_name();
-        let Some(name_str) = name.to_str() else { continue; };
-        let Ok(pid) = name_str.parse::<u32>() else { continue; };
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
+        let Ok(pid) = name_str.parse::<u32>() else {
+            continue;
+        };
         let comm_path = entry.path().join("comm");
         if let Ok(comm) = std::fs::read_to_string(comm_path) {
             let comm_trimmed = comm.trim();
@@ -133,21 +138,25 @@ fn probe_drm_devices(sys_root: &Path) -> Vec<DrmDeviceInfo> {
         let device_path = path.join("device");
         let vendor_id = read_trimmed(device_path.join("vendor"));
         let device_id = read_trimmed(device_path.join("device"));
-        
+
         let driver = if let Ok(driver_link) = std::fs::read_link(device_path.join("driver")) {
-            driver_link.file_name().map(|n| n.to_string_lossy().into_owned())
+            driver_link
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
         } else {
             None
         };
 
         let pci_slot = if let Ok(canon_device) = std::fs::canonicalize(&device_path) {
-            canon_device.file_name().map(|n| n.to_string_lossy().into_owned())
+            canon_device
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
         } else {
             None
         };
 
-        let boot_vga = read_trimmed(device_path.join("boot_vga"))
-            .and_then(|val| Some(val.trim() == "1"));
+        let boot_vga =
+            read_trimmed(device_path.join("boot_vga")).and_then(|val| Some(val.trim() == "1"));
 
         let render_node = std::fs::read_dir(path.join("device/drm"))
             .ok()
@@ -207,7 +216,7 @@ fn probe_connectors(sys_root: &Path, _warnings: &mut Vec<String>) -> Vec<Connect
         let status = read_trimmed(path.join("status"));
         let enabled = read_trimmed(path.join("enabled"));
         let modes = read_trimmed_lines(path.join("modes"));
-        
+
         let edid_hash = if let Ok(edid_bytes) = std::fs::read(path.join("edid")) {
             if !edid_bytes.is_empty() && edid_bytes.iter().any(|&b| b != 0) {
                 Some(stable_hash_bytes(&edid_bytes))
@@ -313,14 +322,15 @@ fn guess_display_path(
     let render_driver = render_device.and_then(|d| d.driver.clone());
 
     let is_cross_gpu = Some(render_card_str != scanout_card_str);
-    
-    let confidence = if connected_connector.is_some() && render_driver.is_some() && scanout_driver.is_some() {
-        "high".to_owned()
-    } else if render_card_str == scanout_card_str {
-        "medium".to_owned()
-    } else {
-        "low".to_owned()
-    };
+
+    let confidence =
+        if connected_connector.is_some() && render_driver.is_some() && scanout_driver.is_some() {
+            "high".to_owned()
+        } else if render_card_str == scanout_card_str {
+            "medium".to_owned()
+        } else {
+            "low".to_owned()
+        };
 
     Some(DisplayPathGuess {
         render_card: Some(render_card_str.clone()),
@@ -415,11 +425,11 @@ mod tests {
         std::os::unix::fs::symlink(&driver_amd, card1.join("device/driver")).ok();
 
         let topology = probe_display_topology_root(&proc, &sys);
-        
+
         assert_eq!(topology.drm_devices.len(), 2);
         assert_eq!(topology.drm_devices[0].card, "card0");
         assert_eq!(topology.drm_devices[1].card, "card1");
-        
+
         let guess = topology.guessed_path.unwrap();
         assert_eq!(guess.scanout_card.as_deref(), Some("card0"));
         assert_eq!(guess.render_card.as_deref(), Some("card1"));
