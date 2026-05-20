@@ -617,6 +617,7 @@ Important fields:
 - `timeline_hash`
 - `wait_start_ns`
 - `wait_done_ns`
+- `signal_ns`
 - `duration_ns`
 - `exporter_driver`
 - `importer_driver`

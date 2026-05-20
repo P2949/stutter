@@ -40,9 +40,9 @@ pub type RuntimeSliceRecord = crate::metrics::RuntimeSliceRecord;
 // Re-export from other crates
 // Re-export from event_types.rs - these were pub in the original recorder.rs
 pub use event_types::{
-    BlockIoRecord, CpuFreqRecord, DrmFenceEventRecord, FocusEvent, FrameEvent, GpuSample,
-    IrqEventRecord, KmsFlipEventRecord, MigrationEventRecord, SpikeDiagnosticContext, SpikeEvent,
-    TreeEvent, WaylandPresentationEventRecord,
+    BlockIoRecord, CpuFreqRecord, DmaBufEventRecord, DrmFenceEventRecord, FocusEvent, FrameEvent,
+    GpuEngineSample, GpuSample, IrqEventRecord, KmsFlipEventRecord, MigrationEventRecord,
+    SpikeDiagnosticContext, SpikeEvent, TreeEvent, WaylandPresentationEventRecord,
 };
 // Re-export from live.rs - these were pub in the original recorder.rs
 pub use live::{ExporterState, LiveBuffers, LiveRecorder, RecordingCounters};
