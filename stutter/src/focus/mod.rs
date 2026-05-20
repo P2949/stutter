@@ -27,6 +27,7 @@
 
 pub(crate) mod classify;
 mod foreground_match;
+pub(crate) mod group_build;
 pub(crate) mod groups;
 mod process_scan;
 pub(crate) mod provider;

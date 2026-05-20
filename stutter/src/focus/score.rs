@@ -1,11 +1,12 @@
 use super::{
     classify::PriorityBand,
+    group_build::is_stable_build_root,
     groups::{FocusGroup, FocusGroupKind, FocusScoreBreakdown},
     process_scan::{
         browser_group_penalty, compile_group_penalty, contains_game_runtime_text,
         desktop_group_penalty, game_group_penalty, idle_group_penalty,
-        is_active_foreground_candidate, is_game_runtime_process, is_stable_build_root,
-        low_to_moderate_activity_bonus, process_identity_text,
+        is_active_foreground_candidate, is_game_runtime_process, low_to_moderate_activity_bonus,
+        process_identity_text,
     },
     snapshot::{FocusProcess, FocusSnapshot},
 };
