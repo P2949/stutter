@@ -289,6 +289,7 @@ pub(crate) fn evaluate_proposal_static(
 
         if let Some(state) = input.active_profile_state {
             for kept in state.kept_actions.values() {
+                let conflicts_with_candidate = proposal.candidate.conflicts_with(&kept.candidate);
                 match kept.candidate.matches_active_config(active_config_input) {
                     ActiveConfigMatch::Differs { expected, actual } => {
                         deny_reasons.push(CandidateDenyReason::KeptActionNoLongerActive);
@@ -299,14 +300,14 @@ pub(crate) fn evaluate_proposal_static(
                             actual
                         ));
                     }
-                    ActiveConfigMatch::Unknown { summary } => {
+                    ActiveConfigMatch::Unknown { summary } if !conflicts_with_candidate => {
                         deny_reasons.push(CandidateDenyReason::ActiveConfigUnknown);
                         deny_messages.push(format!(
                             "kept action {} active configuration is unknown: {summary}; restore or resync before planning new candidates",
                             kept.candidate.candidate_name()
                         ));
                     }
-                    ActiveConfigMatch::Matches { .. } => {}
+                    ActiveConfigMatch::Unknown { .. } | ActiveConfigMatch::Matches { .. } => {}
                 }
             }
         }
