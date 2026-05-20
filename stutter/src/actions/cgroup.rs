@@ -488,7 +488,6 @@ impl TuningAction for CgroupPlacementAction {
 
             Ok(RollbackToken::CgroupRestore { records })
         })();
-        res.map_err(Into::into)
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {

@@ -286,7 +286,7 @@ impl TuningAction for NiceAction {
     }
 
     fn apply(&self) -> ApplyResult {
-        let res = (|| {
+        (|| {
             let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &self.policy)?;
             let filtered_snapshots: Vec<_> = snapshots
                 .into_iter()
@@ -309,8 +309,7 @@ impl TuningAction for NiceAction {
 
                     set_task_nice(snapshot.tid, self.nice)
                         .map_err(|e| {
-                            anyhow::Error::from(e)
-                                .context(format!("failed to set nice for tid={}", snapshot.tid))
+                            e.context(format!("failed to set nice for tid={}", snapshot.tid))
                         })
                         .map(|_| NiceRestoreRecord {
                             identity,
@@ -319,8 +318,7 @@ impl TuningAction for NiceAction {
                 },
                 |records| RollbackToken::NiceRestore { records },
             )
-        })();
-        res
+        })()
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
