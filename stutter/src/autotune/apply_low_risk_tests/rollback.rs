@@ -5,7 +5,13 @@
 
 #[cfg(test)]
 mod tests {
-    use super::super::{super::*, FakeExecutor, TestAction, temp_dir};
+    use std::{fs, path::PathBuf, time::Duration};
+
+    use super::super::*;
+    use crate::{
+        actions::{RollbackToken, SafetyClass},
+        autotune::controller_journal::ControllerJournalActionMetadata,
+    };
 
     #[test]
     fn audited_rollback_guard_rolls_back_explicitly() {

@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::*;
+    use super::super::*;
 
     #[test]
     fn low_risk_resolution_keeps_improved_candidate_as_current_profile() {

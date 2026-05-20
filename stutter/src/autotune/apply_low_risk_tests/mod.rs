@@ -9,7 +9,21 @@ mod policy;
 mod rollback;
 mod target_resolution;
 
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
 use super::*;
+use crate::{
+    actions::{
+        ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
+        cpu_affinity::CpuAffinityProfileAction, runner::ActionRunPolicy,
+    },
+    autotune::candidate::CandidateDryRunRecord,
+    profiles::Profile,
+};
 
 #[derive(Default)]
 struct FakeExecutor {

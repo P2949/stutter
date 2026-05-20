@@ -1,32 +1,17 @@
 #[cfg(test)]
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{path::Path, time::Duration};
 
+#[cfg(test)]
 use anyhow::Context;
 
-#[cfg(test)]
-use crate::actions::runner::run_audited_action_with_audit_path;
-#[cfg(test)]
-use crate::actions::{ActionId, ActionWarning};
 use crate::{
-    actions::{
-        ActionState, RollbackToken, SafetyClass, TuningAction,
-        cpu_affinity::CpuAffinityProfileAction, runner::ActionRunPolicy,
-    },
-    autotune::candidate::CandidateAction,
+    actions::cpu_affinity::CpuAffinityProfileAction, autotune::candidate::CandidateAction,
 };
 #[cfg(test)]
 use crate::{
     autotune::{
-        candidate::{
-            CandidateDryRunRecord, dry_run_candidates, dry_run_record_from_action_state,
-            generate_profile_candidates,
-        },
+        candidate::{CandidateDryRunRecord, dry_run_candidates, generate_profile_candidates},
         controller_journal::{
-            ControllerJournalActionMetadata, write_controller_journal_applied_with_metadata,
             write_controller_journal_applying_with_metadata, write_controller_journal_clean,
         },
         washout::{WashoutWindowConfig, run_washout_for_action},
@@ -41,6 +26,7 @@ mod model;
 #[cfg(test)]
 mod target;
 
+pub use audit::action_from_candidate;
 #[cfg(test)]
 pub(crate) use audit::{
     AuditedRollbackGuard, append_low_risk_history_event,
@@ -49,7 +35,13 @@ pub(crate) use audit::{
     controller_journal_hooks_for_low_risk_action,
     controller_journal_metadata_for_cpu_affinity_action,
 };
-pub use audit::{action_from_candidate, ensure_low_risk_action_allowed};
+
+pub fn ensure_low_risk_action_allowed(
+    action_kind: &str,
+    safety_class: &crate::actions::SafetyClass,
+) -> anyhow::Result<()> {
+    audit::ensure_low_risk_action_allowed(action_kind, safety_class)
+}
 #[cfg(test)]
 pub use executor::{
     CpuAffinityLowRiskExecutor, LowRiskActionExecutor, executor_for_low_risk_candidate,

@@ -11,6 +11,8 @@ use anyhow::Context;
 
 use super::{model::AuditedCandidateApplyOutcome, unsupported_low_risk_candidate};
 #[cfg(test)]
+use crate::actions::RollbackToken;
+#[cfg(test)]
 use crate::actions::runner::run_audited_action_with_audit_path;
 #[cfg(test)]
 use crate::autotune::controller_journal::{
@@ -19,7 +21,7 @@ use crate::autotune::controller_journal::{
 };
 use crate::{
     actions::{
-        RollbackToken, SafetyClass, TuningAction,
+        SafetyClass, TuningAction,
         cpu_affinity::CpuAffinityProfileAction,
         runner::{
             ActionHooks, ActionRunPolicy, AuditedActionResult, run_audited_action_with_hooks,

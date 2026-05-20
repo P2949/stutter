@@ -5,7 +5,18 @@
 
 #[cfg(test)]
 mod tests {
-    use super::super::{super::*, fake_proc_with_comm, temp_dir};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::Duration,
+    };
+
+    use super::super::*;
+    use crate::{
+        actions::SafetyClass,
+        autotune::candidate::{CandidateAction, CandidateDryRunRecord},
+        profiles::Profile,
+    };
 
     #[test]
     fn low_risk_planner_selects_first_eligible_record_and_documents_empty_profiles() {
