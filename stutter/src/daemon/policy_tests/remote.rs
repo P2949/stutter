@@ -4,6 +4,7 @@
 //! Does not own local mode parsing, local safety gates, capability/context gates, explanation rendering, or production behavior.
 
 use super::{super::*, descriptor};
+use crate::{daemon::explain::PolicyDecisionKind, remote::AgentAutotuneLimits};
 
 #[test]
 fn build_daemon_policy_remote_context_is_deterministic_and_respects_limits() {

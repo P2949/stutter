@@ -1,4 +1,6 @@
-#![allow(unused_imports)] // Transitional foreground provider façade.
+//! Foreground provider implementations grouped by selection mode.
+//!
+//! Owns provider module wiring. Does not own model DTOs, parser modules, or resolver policy.
 
 pub(crate) mod auto;
 pub(crate) mod hyprland;

@@ -4,6 +4,7 @@
 //! Does not own mode parsing, safety-class gates, capability/context gates, remote policy, or production behavior.
 
 use super::{super::*, descriptor, descriptor_with};
+use crate::daemon::explain::PolicyDecisionKind;
 
 #[test]
 fn policy_verdicts_distinguish_delay_observe_only_manual_and_reject() {

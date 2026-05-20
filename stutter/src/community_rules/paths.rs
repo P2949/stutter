@@ -1,5 +1,9 @@
 use std::path::PathBuf;
 
+pub fn default_community_rules_dir() -> Option<PathBuf> {
+    default_user_rules_dir()
+}
+
 pub fn default_user_rules_dir() -> Option<PathBuf> {
     if let Ok(xdg) = std::env::var("XDG_DATA_HOME")
         && !xdg.trim().is_empty()
