@@ -6,16 +6,17 @@ use super::{
     classify::PriorityBand,
     foreground_match::{
         add_foreground_fallback_group_if_needed, is_foreground_fallback_group,
-        is_unknown_foreground_like, process_name_looks_like_systemd,
         process_name_looks_like_xwayland,
     },
     process_scan::{
         build_tree_groups_for_kind, compare_process_preference, display_name_for_group,
-        is_active_foreground_candidate, is_browser_class, is_compile_class,
-        is_critical_realtime_process, is_game_class, is_game_runtime_process,
-        is_non_service_interactive_class, is_stable_build_root, is_too_broad_system_service_group,
-        nearest_compile_session_root, root_pids_from_members, safety_warning_reason,
-        stable_build_root_rank,
+        is_active_foreground_candidate, is_browser_class, is_compile_class, is_game_class,
+        is_game_runtime_process, is_non_service_interactive_class, is_stable_build_root,
+        nearest_compile_session_root, root_pids_from_members, stable_build_root_rank,
+    },
+    safety::{
+        is_critical_realtime_process, is_too_broad_system_service_group,
+        is_unknown_foreground_like, process_name_looks_like_systemd, safety_warning_reason,
     },
     score::*,
     snapshot::{FocusProcess, FocusSnapshot},
