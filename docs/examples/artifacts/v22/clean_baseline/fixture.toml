@@ -1,0 +1,28 @@
+name = "clean_baseline"
+schema_version = 22
+source = "public-example"
+quality_expectation = "High"
+description = "Small public clean baseline example."
+
+[expected]
+primary_cause = "Unknown"
+accepted_confidence = []
+data_quality = "High"
+
+[expected.artifacts]
+spikes = 0
+intervals = 2
+irq_events = 0
+gpu_samples = 0
+frames = 0
+block_io_events = 0
+foreground_events = 0
+
+[expected.evidence]
+contains = []
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true

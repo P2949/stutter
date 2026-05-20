@@ -195,7 +195,7 @@ const FIXTURE_UPDATE_COMMANDS: &[CommandSpec] = &[
             "test",
             "-p",
             "stutter",
-            "validation_corpus_tests::regenerate_public_examples_v21",
+            "validation_corpus_tests::regenerate_public_examples_v22",
             "--",
             "--ignored",
             "--exact",
@@ -233,7 +233,7 @@ const SCHEMA_CHECK_WORKFLOW: WorkflowSpec = WorkflowSpec {
     description: "validates artifact contract tests and public example artifact schema expectations",
     affected_paths: &[
         "stutter/src/artifact_contract_tests.rs",
-        "docs/examples/artifacts/v21/**",
+        "docs/examples/artifacts/v22/**",
     ],
     commands: SCHEMA_CHECK_COMMANDS,
 };
@@ -250,10 +250,10 @@ const FIXTURE_CHECK_WORKFLOW: WorkflowSpec = WorkflowSpec {
 
 const FIXTURE_UPDATE_WORKFLOW: WorkflowSpec = WorkflowSpec {
     name: "fixture-update",
-    description: "updates validation corpus fixtures and public v21 example artifact fixtures",
+    description: "updates validation corpus fixtures and public v22 example artifact fixtures",
     affected_paths: &[
         "stutter/tests/fixtures/runs/**",
-        "docs/examples/artifacts/v21/**",
+        "docs/examples/artifacts/v22/**",
     ],
     commands: FIXTURE_UPDATE_COMMANDS,
 };
@@ -750,7 +750,7 @@ pub fn live() {}
             SCHEMA_CHECK_WORKFLOW.affected_paths,
             &[
                 "stutter/src/artifact_contract_tests.rs",
-                "docs/examples/artifacts/v21/**",
+                "docs/examples/artifacts/v22/**",
             ]
         );
     }
@@ -776,14 +776,14 @@ pub fn live() {}
             command_texts(FIXTURE_UPDATE_COMMANDS),
             vec![
                 "cargo test -p stutter validation_corpus_tests::regenerate_validation_corpus -- --ignored --exact",
-                "cargo test -p stutter validation_corpus_tests::regenerate_public_examples_v21 -- --ignored --exact",
+                "cargo test -p stutter validation_corpus_tests::regenerate_public_examples_v22 -- --ignored --exact",
             ]
         );
         assert_eq!(
             FIXTURE_UPDATE_WORKFLOW.affected_paths,
             &[
                 "stutter/tests/fixtures/runs/**",
-                "docs/examples/artifacts/v21/**",
+                "docs/examples/artifacts/v22/**",
             ]
         );
     }

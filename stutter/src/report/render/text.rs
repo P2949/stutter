@@ -94,6 +94,12 @@ pub(crate) fn render_foreground_summary_text(foreground: &ForegroundReportSummar
         .unwrap_or("unknown");
     pushln(&mut output, format!("  app_id/class: {app_or_class}"));
 
+    if let Some(window_id) = foreground.final_window_id.as_deref() {
+        pushln(&mut output, format!("  window_id: {window_id}"));
+    } else {
+        pushln(&mut output, "  window_id: unknown");
+    }
+
     if let Some(workspace) = foreground.final_workspace.as_deref() {
         pushln(&mut output, format!("  workspace: {workspace}"));
     } else {
@@ -117,6 +123,12 @@ pub(crate) fn render_foreground_summary_text(foreground: &ForegroundReportSummar
 
     if let Some(status) = foreground.provider_status.as_deref() {
         pushln(&mut output, format!("  provider status: {status}"));
+    }
+
+    if let Some(stale_ms) = foreground.stale_ms {
+        pushln(&mut output, format!("  stale: yes, {stale_ms} ms"));
+    } else {
+        pushln(&mut output, "  stale: no");
     }
 
     pushln(&mut output, format!("  events: {}", foreground.event_count));

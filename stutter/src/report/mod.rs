@@ -273,6 +273,7 @@ mod tests {
             window_id: Some("7".to_owned()),
             workspace: workspace.map(str::to_owned),
             confidence,
+            stale_ms: None,
             reason: "test foreground event".to_owned(),
         }
     }
@@ -326,6 +327,7 @@ mod tests {
         assert_eq!(summary.final_pid, Some(4242));
         assert_eq!(summary.final_app_id.as_deref(), Some("steam_app_379430"));
         assert_eq!(summary.final_class.as_deref(), Some("steam_app_379430"));
+        assert_eq!(summary.final_window_id.as_deref(), Some("7"));
         assert_eq!(summary.final_workspace.as_deref(), Some("gaming"));
         assert_eq!(summary.event_count, 1);
         assert_eq!(summary.confidence, Some(0.95));
@@ -340,10 +342,12 @@ mod tests {
             final_app_id: Some("steam_app_379430".to_owned()),
             final_class: Some("steam_app_379430".to_owned()),
             final_title: None,
+            final_window_id: Some("7".to_owned()),
             final_workspace: Some("gaming".to_owned()),
             event_count: 1,
             confidence: Some(0.95),
             provider_status: Some("available".to_owned()),
+            stale_ms: None,
             reasons: Vec::new(),
         };
 
@@ -441,6 +445,7 @@ mod tests {
         assert_eq!(summary.final_app_id.as_deref(), Some("steam_app_379430"));
         assert_eq!(summary.final_class.as_deref(), Some("steam_app_379430"));
         assert_eq!(summary.final_title, None);
+        assert_eq!(summary.final_window_id.as_deref(), Some("7"));
         assert_eq!(summary.final_workspace.as_deref(), Some("gaming"));
         assert_eq!(summary.event_count, 2);
         assert_eq!(summary.confidence, Some(0.95));
@@ -456,10 +461,12 @@ mod tests {
             final_app_id: Some("steam_app_379430".to_owned()),
             final_class: Some("steam_app_379430".to_owned()),
             final_title: None,
+            final_window_id: Some("7".to_owned()),
             final_workspace: Some("gaming".to_owned()),
             event_count: 7,
             confidence: Some(0.95),
             provider_status: Some("available".to_owned()),
+            stale_ms: None,
             reasons: vec!["focused Sway node from swaymsg get_tree".to_owned()],
         };
 
@@ -469,8 +476,10 @@ mod tests {
         assert!(text.contains("  source: sway"));
         assert!(text.contains("  final pid: 12345"));
         assert!(text.contains("  app_id/class: steam_app_379430"));
+        assert!(text.contains("  window_id: 7"));
         assert!(text.contains("  workspace: gaming"));
         assert!(text.contains("  confidence: 0.95"));
+        assert!(text.contains("  stale: no"));
         assert!(text.contains("  events: 7"));
         assert!(text.contains("  title: redacted (pass --foreground-include-title to record it)"));
     }

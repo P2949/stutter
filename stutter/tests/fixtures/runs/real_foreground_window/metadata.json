@@ -1,5 +1,5 @@
 {
-  "schema_version": 21,
+  "schema_version": 22,
   "run_name": "real_foreground_window",
   "started_at": {
     "unix_seconds": 1625097600,
@@ -43,6 +43,12 @@
   "final_foreground_pid": 5701,
   "final_foreground_app_id": "steam_app_sanitized",
   "final_foreground_class": "steam_app_sanitized",
+  "final_foreground_status": "available",
+  "final_foreground_window_id": "0xSANITIZED",
+  "final_foreground_workspace": "gaming",
+  "final_foreground_confidence": 0.96,
+  "final_foreground_stale_ms": null,
+  "final_foreground_reason": "focused Sway node from sanitized real foreground fixture",
   "interval_record_count": 3,
   "intervals_dropped": 0,
   "spike_events_retained_count": 3,

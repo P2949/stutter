@@ -1266,7 +1266,7 @@ fn validation_corpus_old_schema_warns_without_rejecting() {
 
 #[test]
 #[ignore]
-fn regenerate_public_examples_v21() {
+fn regenerate_public_examples_v22() {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
         .parent()
@@ -1275,10 +1275,10 @@ fn regenerate_public_examples_v21() {
         .join("docs")
         .join("examples")
         .join("artifacts")
-        .join("v21");
+        .join("v22");
 
-    test_fixture_builder::write_public_examples_v21(&root)
-        .unwrap_or_else(|err| panic!("failed to regenerate public v21 examples: {err:#}"));
+    test_fixture_builder::write_public_examples_v22(&root)
+        .unwrap_or_else(|err| panic!("failed to regenerate public v22 examples: {err:#}"));
 }
 
 #[test]

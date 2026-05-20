@@ -1,5 +1,5 @@
 {
-  "schema_version": 20,
+  "schema_version": 21,
   "run_name": "old_schema_warning",
   "started_at": {
     "unix_seconds": 1625097600,

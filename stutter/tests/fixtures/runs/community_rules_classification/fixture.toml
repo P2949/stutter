@@ -1,5 +1,5 @@
 name = "community_rules_classification"
-schema_version = 21
+schema_version = 22
 source = "synthetic-edge-case"
 quality_expectation = "High"
 description = "Synthetic edge-case fixture that verifies a community-classified game task remains classified as Game."

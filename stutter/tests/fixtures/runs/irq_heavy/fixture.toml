@@ -1,5 +1,5 @@
 name = "irq_heavy"
-schema_version = 21
+schema_version = 22
 source = "synthetic-contract"
 quality_expectation = "High"
 description = "Synthetic IRQ fixture with a long IRQ handler overlapping scheduler-latency spikes."

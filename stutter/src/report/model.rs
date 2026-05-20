@@ -194,10 +194,12 @@ pub struct ForegroundReportSummary {
     pub final_app_id: Option<String>,
     pub final_class: Option<String>,
     pub final_title: Option<String>,
+    pub final_window_id: Option<String>,
     pub final_workspace: Option<String>,
     pub event_count: u64,
     pub confidence: Option<f32>,
     pub provider_status: Option<String>,
+    pub stale_ms: Option<u64>,
     pub reasons: Vec<String>,
 }
 
@@ -209,10 +211,12 @@ impl ForegroundReportSummary {
             || self.final_app_id.is_some()
             || self.final_class.is_some()
             || self.final_title.is_some()
+            || self.final_window_id.is_some()
             || self.final_workspace.is_some()
             || self.event_count > 0
             || self.confidence.is_some()
             || self.provider_status.is_some()
+            || self.stale_ms.is_some()
             || !self.reasons.is_empty()
     }
 }

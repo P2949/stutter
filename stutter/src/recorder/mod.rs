@@ -31,7 +31,7 @@ mod session_files;
 mod spike_buffer;
 mod writers;
 
-pub const SESSION_SCHEMA_VERSION: u32 = 21;
+pub const SESSION_SCHEMA_VERSION: u32 = 22;
 
 // Re-export types from metrics
 pub type IntervalRecord = crate::metrics::IntervalRecord;

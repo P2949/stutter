@@ -1,5 +1,5 @@
 name = "real_clean_baseline"
-schema_version = 21
+schema_version = 22
 source = "validation-corpus"
 quality_expectation = "High"
 description = "Real clean baseline example."

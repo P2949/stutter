@@ -107,7 +107,7 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn write_public_examples_v21(root: &Path) -> anyhow::Result<()> {
+pub(crate) fn write_public_examples_v22(root: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(root)
         .with_context(|| format!("failed to create public example root {}", root.display()))?;
 
@@ -133,7 +133,7 @@ pub(crate) fn write_public_examples_v21(root: &Path) -> anyhow::Result<()> {
         "low_quality_truncated",
         public_low_quality_truncated_fixture(),
     )?;
-    write_public_examples_readme_v21(root)?;
+    write_public_examples_readme_v22(root)?;
 
     Ok(())
 }
@@ -213,8 +213,8 @@ fn write_fixture(
     Ok(())
 }
 
-fn write_public_examples_readme_v21(root: &Path) -> anyhow::Result<()> {
-    let readme = r#"# stutter v21 public artifact examples
+fn write_public_examples_readme_v22(root: &Path) -> anyhow::Result<()> {
+    let readme = r#"# stutter v22 public artifact examples
 
 This directory intentionally contains only small, representative sanitized examples.
 

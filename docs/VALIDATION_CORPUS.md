@@ -59,14 +59,14 @@ foreground_events.json
 Selected small public examples live under:
 
 ```text
-docs/examples/artifacts/v21/
+docs/examples/artifacts/v22/
   clean_baseline/
   game_thread_scheduler_delay/
   low_quality_truncated/
   README.md
 ```
 
-Do not duplicate every large regression fixture under `docs/examples/artifacts/v21/`.
+Do not duplicate every large regression fixture under `docs/examples/artifacts/v22/`.
 The larger regression corpus belongs under `stutter/tests/fixtures/runs/`.
 
 ## Fixture tiers
@@ -168,7 +168,7 @@ Example:
 
 ```toml
 name = "real_game_thread_scheduler_delay"
-schema_version = 21
+schema_version = 22
 source = "sanitized-real-recording"
 quality_expectation = "High"
 description = "Game main/render thread had scheduler delay during a visible frame spike."
@@ -494,10 +494,10 @@ Regenerate the committed synthetic validation fixtures with:
 cargo test -p stutter regenerate_validation_corpus -- --ignored
 ```
 
-Regenerate the selected public v21 examples with:
+Regenerate the selected public v22 examples with:
 
 ```bash
-cargo test -p stutter regenerate_public_examples_v21 -- --ignored
+cargo test -p stutter regenerate_public_examples_v22 -- --ignored
 ```
 
 After regeneration, run:
@@ -530,7 +530,7 @@ CI should not run:
 
 ```bash
 cargo test -p stutter regenerate_validation_corpus -- --ignored
-cargo test -p stutter regenerate_public_examples_v21 -- --ignored
+cargo test -p stutter regenerate_public_examples_v22 -- --ignored
 ```
 
 Smoke-check one fixture through the public CLI:
@@ -545,7 +545,7 @@ A typical local corpus maintenance pass is:
 ```bash
 cargo fmt --all
 cargo test -p stutter regenerate_validation_corpus -- --ignored
-cargo test -p stutter regenerate_public_examples_v21 -- --ignored
+cargo test -p stutter regenerate_public_examples_v22 -- --ignored
 cargo test -p stutter validation_corpus
 cargo run -p stutter -- validate stutter/tests/fixtures/runs/real_clean_baseline
 cargo run -p stutter -- report --analysis-json stutter/tests/fixtures/runs/real_clean_baseline >/dev/null

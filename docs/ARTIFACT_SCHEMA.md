@@ -101,7 +101,7 @@ The schema version is stored in:
   `metadata.json`
 
 The current supported version is `recorder::SESSION_SCHEMA_VERSION`. For this
-document version, that value is `21`.
+document version, that value is `22`.
 
 Version behavior:
 
@@ -184,6 +184,12 @@ Key fields:
 - `final_foreground_pid`
 - `final_foreground_app_id`
 - `final_foreground_class`
+- `final_foreground_status`
+- `final_foreground_window_id`
+- `final_foreground_workspace`
+- `final_foreground_confidence`
+- `final_foreground_stale_ms`
+- `final_foreground_reason`
 
 Consistency rules:
 
@@ -512,6 +518,7 @@ Important fields:
 - `window_id`
 - `workspace`
 - `confidence`
+- `stale_ms`
 - `reason`
 
 Privacy:
@@ -525,7 +532,8 @@ Consistency rules:
 - The number of records should match `session.json` field
   `foreground_event_count`.
 - The final foreground identity fields in `session.json` are derived from the
-  last recorded foreground event.
+  last recorded foreground event, including status, window/container ID,
+  workspace, confidence, stale age, and provider reason.
 
 ### `kms_flip_events.json`
 
@@ -880,7 +888,7 @@ Strict exit policy:
 Versioned examples live under:
 
 ```text
-docs/examples/artifacts/v21/
+docs/examples/artifacts/v22/
 ```
 
 The version number matches `recorder::SESSION_SCHEMA_VERSION`. These examples

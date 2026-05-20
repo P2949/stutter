@@ -1,5 +1,5 @@
 name = "real_gpu_bound_looking"
-schema_version = 21
+schema_version = 22
 source = "sanitized-real-recording"
 quality_expectation = "High"
 description = "GPU busy was high during a visible frame spike; scheduler evidence may also exist, so GPU-bound is required as a candidate rather than always primary."
