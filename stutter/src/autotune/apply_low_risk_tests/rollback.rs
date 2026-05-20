@@ -10,7 +10,9 @@ mod tests {
     use super::super::*;
     use crate::{
         actions::{RollbackToken, SafetyClass},
-        autotune::controller_journal::ControllerJournalActionMetadata,
+        autotune::controller_journal::{
+            ControllerJournalActionMetadata, write_controller_journal_applied_with_metadata,
+        },
     };
 
     #[test]

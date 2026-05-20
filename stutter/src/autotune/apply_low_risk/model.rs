@@ -1,6 +1,11 @@
 //! Apply-low-risk public data transfer models.
 
-use super::*;
+#[cfg(test)]
+use std::{path::PathBuf, time::Duration};
+
+use crate::actions::{ActionState, RollbackToken, SafetyClass};
+#[cfg(test)]
+use crate::autotune::candidate::{CandidateAction, CandidateDryRunRecord};
 
 #[cfg(test)]
 #[derive(Clone, Debug)]

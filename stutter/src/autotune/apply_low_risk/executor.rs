@@ -1,6 +1,19 @@
 //! Test-only low-risk action executors and rollback harnesses.
 
-use super::*;
+use std::time::Duration;
+
+use anyhow::Context;
+
+use super::{
+    ensure_low_risk_action_allowed, model::ApplyLowRiskOutcome, unsupported_low_risk_candidate,
+};
+use crate::{
+    actions::{RollbackToken, SafetyClass, TuningAction, cpu_affinity::CpuAffinityProfileAction},
+    autotune::{
+        candidate::{CandidateAction, CandidateDryRunRecord},
+        planning::dry_run::dry_run_record_from_action_state,
+    },
+};
 
 #[cfg(test)]
 pub trait LowRiskActionExecutor {
