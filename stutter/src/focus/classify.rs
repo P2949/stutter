@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::process_scan::try_community_rules_classification;
+use super::community_rules::try_community_rules_classification;
 use crate::process_tree::TaskClass as SystemTaskClass;
 
 pub(crate) const SCHED_FIFO: u32 = 1;
