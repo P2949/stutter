@@ -17,6 +17,11 @@ const OPTIONAL_ARTIFACT_FILES: &[&str] = &[
     "focus_events.json",
     "foreground_events.json",
     "runtime_slices.json",
+    "kms_flip_events.json",
+    "drm_fence_events.json",
+    "wayland_presentation_events.json",
+    "dmabuf_events.json",
+    "gpu_engine_samples.json",
 ];
 
 pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
@@ -193,6 +198,10 @@ fn write_fixture(
         &MetadataFile {
             core: session.core.clone(),
         },
+    )?;
+    write_json_pretty(
+        dir.join("display_topology.json"),
+        &crate::display_topology::DisplayTopologySnapshot::default(),
     )?;
 
     for file in OPTIONAL_ARTIFACT_FILES {
