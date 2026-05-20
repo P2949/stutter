@@ -19,10 +19,9 @@ mod rollback;
 pub use execute::run_audited_action;
 #[cfg(test)]
 pub use execute::run_audited_action_with_audit_path;
-
-pub(crate) use execute::run_audited_action_with_hooks;
 #[cfg(test)]
 pub(crate) use execute::run_audited_action_with_audit_path_and_hooks;
+pub(crate) use execute::run_audited_action_with_hooks;
 pub(crate) use model::ActionHooks;
 pub use model::{ActionRunPolicy, AuditedActionResult};
 
