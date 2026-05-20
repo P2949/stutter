@@ -1373,63 +1373,10 @@ impl MonitorSession {
         }
 
         if self.runtime.outputs.recorder.run.is_some() {
-            let frame_events = if !self.config.mangohud.log_live
-                && let Some(path) = &self.config.mangohud.log
-            {
-                let (alignment_monotonic_ns, alignment_raw_elapsed_ms, mangohud_ignore_offset) =
-                    if let Some(run) = self.runtime.outputs.recorder.run.as_ref() {
-                        (
-                            run.mangohud_first_frame_monotonic_ns,
-                            run.mangohud_first_frame_raw_elapsed_ms,
-                            run.mangohud_start_offset.unwrap_or(0),
-                        )
-                    } else {
-                        (None, None, 0)
-                    };
-
-                match mangohud::read_frame_events(
-                    path,
-                    mangohud_ignore_offset,
-                    alignment_monotonic_ns,
-                    alignment_raw_elapsed_ms,
-                    self.runtime
-                        .outputs
-                        .recorder
-                        .run
-                        .as_ref()
-                        .and_then(|r| r.monotonic_start_ns),
-                ) {
-                    Ok(events) => events,
-                    Err(err) => {
-                        warn!(
-                            "mangohud_log_read_failed path={} err={err:#}",
-                            path.display()
-                        );
-                        Vec::new()
-                    }
-                }
-            } else {
-                Vec::new()
-            };
-
-            if !frame_events.is_empty()
-                && self
-                    .runtime
-                    .outputs
-                    .recorder
-                    .streams
-                    .contains(ArtifactKind::FrameEvents)
-            {
-                for frame in &frame_events {
-                    crate::artifacts::push_artifact_event(
-                        &mut self.runtime.outputs.recorder,
-                        ArtifactKind::FrameEvents,
-                        frame,
-                        "frame_events",
-                        |c| c.frame_event_count += 1,
-                    );
-                }
-            }
+            let frame_events = crate::session::mangohud_frames::read_and_stream_non_live_events(
+                self.config.as_ref(),
+                &mut self.runtime.outputs.recorder,
+            );
 
             self.runtime.outputs.recorder.streams.finish_all()?;
 

@@ -90,7 +90,8 @@ pub fn read_frame_events(
     )
 }
 
-pub fn parse_frame_events<I>(
+#[cfg(test)]
+fn parse_frame_events<I>(
     header: &str,
     lines: I,
     alignment_monotonic_ns: Option<u64>,
@@ -308,9 +309,10 @@ pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u
             }
         }
 
-        let layout = layout_cache
-            .as_ref()
-            .expect("layout_cache was initialized above");
+        let Some(layout) = layout_cache.as_ref() else {
+            sleep(Duration::from_millis(500)).await;
+            continue;
+        };
         let schema = &layout.schema;
         let read_offset = start_offset.max(layout.data_start_offset);
 

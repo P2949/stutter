@@ -87,6 +87,8 @@ pub(crate) mod exporter;
 pub(crate) mod hwmon_stage;
 #[path = "session/live_telemetry.rs"]
 pub(crate) mod live_telemetry;
+#[path = "session/mangohud_frames.rs"]
+pub(crate) mod mangohud_frames;
 #[path = "session/monitor_session.rs"]
 pub(crate) mod monitor_session;
 #[path = "session/outputs.rs"]
