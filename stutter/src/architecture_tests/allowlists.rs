@@ -60,19 +60,9 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "temporary extraction stage: owns MonitorSession run loop and remaining tick handlers after facade split; next split is session/ticks/target.rs",
     },
     OversizedRustFileAllowance {
-        path: "src/autotune/apply_low_risk.rs",
-        max_lines: 325,
-        reason: "temporary extraction stage: owns low-risk experiment readiness and command dispatch after model/executor/audit/target split",
-    },
-    OversizedRustFileAllowance {
         path: "src/autotune/shutdown.rs",
         max_lines: 1_015,
         reason: "existing autotune shutdown and rollback-on-exit tests pending future split; exit rollback helpers now have no-allow regression coverage",
-    },
-    OversizedRustFileAllowance {
-        path: "src/actions/runner.rs",
-        max_lines: 750,
-        reason: "existing audited action runner implementation after extracting embedded runner tests",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/live_experiment/mod.rs",
@@ -191,8 +181,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/actions/ioprio.rs",
-        max_lines: 1_043,
-        reason: "existing I/O priority action implementation pending future split; rollback handler registration and partial-apply transaction coverage are staged here",
+        max_lines: 1_050,
+        reason: "existing I/O priority action implementation pending future split; transactional apply now prebuilds restore records before mutation",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/runtime.rs",
@@ -201,8 +191,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/actions/uclamp.rs",
-        max_lines: 1_143,
-        reason: "existing uclamp action implementation pending future split; rollback handler registration and partial-apply transaction coverage are staged here",
+        max_lines: 1_160,
+        reason: "existing uclamp action implementation pending future split; transactional apply now prebuilds restore records before mutation",
     },
     OversizedRustFileAllowance {
         path: "src/actions/vm_knobs.rs",

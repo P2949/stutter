@@ -293,10 +293,9 @@ impl TuningAction for NiceAction {
                 .filter(|(snapshot, _)| snapshot.current_nice != self.nice)
                 .collect();
 
-            let tx = crate::actions::transaction::ApplyTransaction::new();
-            tx.apply_loop(
-                filtered_snapshots,
-                |(snapshot, _)| {
+            let records = filtered_snapshots
+                .into_iter()
+                .map(|(snapshot, _)| {
                     let identity = TaskRestoreIdentity {
                         tid: snapshot.tid,
                         comm: snapshot
@@ -307,14 +306,23 @@ impl TuningAction for NiceAction {
                         task_starttime_ticks: snapshot.starttime_ticks,
                     };
 
-                    set_task_nice(snapshot.tid, self.nice)
-                        .map_err(|e| {
-                            e.context(format!("failed to set nice for tid={}", snapshot.tid))
-                        })
-                        .map(|_| NiceRestoreRecord {
-                            identity,
-                            original_nice: snapshot.current_nice,
-                        })
+                    NiceRestoreRecord {
+                        identity,
+                        original_nice: snapshot.current_nice,
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let tx = crate::actions::transaction::ApplyTransaction::new();
+            tx.apply_planned_loop(
+                records,
+                |record| {
+                    set_task_nice(record.identity.tid, self.nice).map_err(|e| {
+                        e.context(format!(
+                            "failed to set nice for tid={}",
+                            record.identity.tid
+                        ))
+                    })
                 },
                 |records| RollbackToken::NiceRestore { records },
             )
