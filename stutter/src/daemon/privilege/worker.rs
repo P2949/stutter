@@ -116,15 +116,40 @@ fn spawn_privileged_worker_child(executable: &Path, socket_path: &Path) -> anyho
 
 fn wait_for_privileged_worker_socket(socket_path: &Path) -> anyhow::Result<()> {
     let deadline = Instant::now() + Duration::from_millis(2_000);
+    let mut last_error = None;
+
     while Instant::now() < deadline {
-        if socket_path.exists() {
-            return Ok(());
+        match UnixStream::connect(socket_path) {
+            Ok(_) => return Ok(()),
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::NotFound
+                        | std::io::ErrorKind::ConnectionRefused
+                        | std::io::ErrorKind::WouldBlock
+                ) =>
+            {
+                last_error = Some(err);
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!(
+                        "privileged_worker_socket_not_ready: failed to connect to {}",
+                        socket_path.display()
+                    )
+                });
+            }
         }
-        std::thread::sleep(Duration::from_millis(50));
     }
+
+    let suffix = last_error
+        .map(|err| format!("; last_error={err}"))
+        .unwrap_or_default();
     anyhow::bail!(
-        "privileged_worker_socket_not_ready: {} did not appear within 2000ms",
-        socket_path.display()
+        "privileged_worker_socket_not_ready: {} was not connectable within 2000ms{}",
+        socket_path.display(),
+        suffix
     )
 }
 

@@ -70,6 +70,7 @@ fn drop_counter_serializes_wakeup_failures_as_lost_wakeup_timestamps() {
         ringbuf_reserve_failed: 0,
         irq_start_times_insert_failed: 0,
         block_start_insert_failed: 0,
+        block_fallback_key_collisions: 0,
     };
 
     let value = serde_json::to_value(&snapshot).unwrap();
@@ -105,6 +106,7 @@ fn drop_counter_serializes_stale_wakeup_entries() {
         ringbuf_reserve_failed: 0,
         irq_start_times_insert_failed: 0,
         block_start_insert_failed: 0,
+        block_fallback_key_collisions: 0,
     };
 
     let value = serde_json::to_value(&snapshot).unwrap();
@@ -125,6 +127,7 @@ fn drop_counter_totals_include_stale_wakeup_entries() {
         ringbuf_reserve_failed: 4,
         irq_start_times_insert_failed: 8,
         block_start_insert_failed: 16,
+        block_fallback_key_collisions: 0,
     };
 
     assert_eq!(snapshot.total(), 31);

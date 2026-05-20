@@ -7,10 +7,10 @@ use anyhow::Context;
 
 use crate::{
     actions::{
-        CgroupRestoreRecord, CpuPowerRestoreRecord, GpuPowerRestoreRecord, IoPrioRestoreRecord,
-        IrqAffinityRestoreRecord, NiceRestoreRecord, RollbackCandidate, RollbackHandler,
-        RollbackPreview, RollbackRegistry, RollbackResult, RollbackToken, SafetyClass,
-        UclampRestoreRecord, VmKnobRestoreRecord,
+        CgroupCpusetRestoreRecord, CgroupRestoreRecord, CpuPowerRestoreRecord,
+        GpuPowerRestoreRecord, IoPrioRestoreRecord, IrqAffinityRestoreRecord, NiceRestoreRecord,
+        RollbackCandidate, RollbackHandler, RollbackPreview, RollbackRegistry, RollbackResult,
+        RollbackToken, SafetyClass, UclampRestoreRecord, VmKnobRestoreRecord,
     },
     audit::{AuditEvent, append_audit_event_to_path},
     autotune::{
@@ -515,7 +515,9 @@ fn restore_rollback_token_direct(token: &RollbackToken) -> anyhow::Result<Rollba
         RollbackToken::IrqAffinityRestore { records } => {
             restore_irq_affinity_records_at(Path::new("/proc/irq"), records)
         }
-        RollbackToken::CgroupRestore { records } => restore_cgroup_records(records),
+        RollbackToken::CgroupRestore { records, cpuset } => {
+            restore_cgroup_token(records, cpuset.as_ref())
+        }
         RollbackToken::CpuPowerRestore { records } => restore_cpu_power_records(records),
         RollbackToken::VmKnobRestore { records } => restore_vm_knob_records(records),
         RollbackToken::GpuPowerRestore { records } => restore_gpu_power_records(records),
@@ -687,6 +689,23 @@ fn restore_irq_affinity_records_at(
     })
 }
 
+fn restore_cgroup_token(
+    records: &[CgroupRestoreRecord],
+    cpuset: Option<&CgroupCpusetRestoreRecord>,
+) -> anyhow::Result<RollbackRestoreSummary> {
+    let mut summary = restore_cgroup_records(records)?;
+    if let Some(cpuset) = cpuset {
+        let restored_cpuset_files = restore_cgroup_cpuset_record(cpuset)?;
+        summary.restored_items = summary.restored_items.saturating_add(restored_cpuset_files);
+        if restored_cpuset_files > 0 {
+            summary.messages.push(format!(
+                "restored {restored_cpuset_files} cgroup cpuset file(s)"
+            ));
+        }
+    }
+    Ok(summary)
+}
+
 fn restore_cgroup_records(
     records: &[CgroupRestoreRecord],
 ) -> anyhow::Result<RollbackRestoreSummary> {
@@ -705,6 +724,33 @@ fn restore_cgroup_records(
     }
 
     Ok(RollbackRestoreSummary::success("cgroup-restore", restored))
+}
+
+fn restore_cgroup_cpuset_record(record: &CgroupCpusetRestoreRecord) -> anyhow::Result<usize> {
+    let mut restored = 0usize;
+    if let Some(original) = &record.original_cpuset_cpus {
+        write_sysfs_value(&record.cgroup_path.join("cpuset.cpus"), original).with_context(
+            || {
+                format!(
+                    "failed to restore {}",
+                    record.cgroup_path.join("cpuset.cpus").display()
+                )
+            },
+        )?;
+        restored += 1;
+    }
+    if let Some(original) = &record.original_cpuset_mems {
+        write_sysfs_value(&record.cgroup_path.join("cpuset.mems"), original).with_context(
+            || {
+                format!(
+                    "failed to restore {}",
+                    record.cgroup_path.join("cpuset.mems").display()
+                )
+            },
+        )?;
+        restored += 1;
+    }
+    Ok(restored)
 }
 
 fn restore_cpu_power_records(
@@ -946,17 +992,35 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
             })
             .collect::<Vec<_>>()
             .join(" && "),
-        RollbackToken::CgroupRestore { records } => records
-            .iter()
-            .map(|record| {
-                format!(
-                    "printf '%s' {} | sudo tee {}/cgroup.procs >/dev/null",
-                    record.identity.tid,
-                    shell_quote_path(&record.original_cgroup)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" && "),
+        RollbackToken::CgroupRestore { records, cpuset } => {
+            let mut commands = records
+                .iter()
+                .map(|record| {
+                    format!(
+                        "printf '%s' {} | sudo tee {}/cgroup.procs >/dev/null",
+                        record.identity.tid,
+                        shell_quote_path(&record.original_cgroup)
+                    )
+                })
+                .collect::<Vec<_>>();
+            if let Some(cpuset) = cpuset {
+                if let Some(original) = &cpuset.original_cpuset_cpus {
+                    commands.push(format!(
+                        "printf '%s' {} | sudo tee {}/cpuset.cpus >/dev/null",
+                        shell_quote_value(original),
+                        shell_quote_path(&cpuset.cgroup_path)
+                    ));
+                }
+                if let Some(original) = &cpuset.original_cpuset_mems {
+                    commands.push(format!(
+                        "printf '%s' {} | sudo tee {}/cpuset.mems >/dev/null",
+                        shell_quote_value(original),
+                        shell_quote_path(&cpuset.cgroup_path)
+                    ));
+                }
+            }
+            commands.join(" && ")
+        }
         RollbackToken::CpuPowerRestore { records } => sysfs_manual_commands(
             records
                 .iter()

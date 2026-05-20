@@ -59,10 +59,10 @@ pub use irq_affinity::{
     IrqAffinityAction, IrqAffinityEvidence, IrqAffinityPolicy, IrqAffinityRisk,
 };
 pub use model::{
-    ActionId, ActionOutcome, ActionPhase, ActionState, ActionWarning, CgroupRestoreRecord,
-    CpuPowerRestoreRecord, GpuPowerRestoreRecord, IoPrioRestoreRecord, IrqAffinityRestoreRecord,
-    NiceRestoreRecord, SafetyClass, TaskIdentity, TaskRestoreIdentity, UclampRestoreRecord,
-    VmKnobRestoreRecord,
+    ActionId, ActionOutcome, ActionPhase, ActionState, ActionWarning, CgroupCpusetRestoreRecord,
+    CgroupRestoreRecord, CpuPowerRestoreRecord, GpuPowerRestoreRecord, IoPrioRestoreRecord,
+    IrqAffinityRestoreRecord, NiceRestoreRecord, SafetyClass, TaskIdentity, TaskRestoreIdentity,
+    UclampRestoreRecord, VmKnobRestoreRecord,
 };
 pub use nice::{NiceAction, NicePolicy};
 pub use restore_identity::{RestoreIdentityStatus, verify_task_identity};

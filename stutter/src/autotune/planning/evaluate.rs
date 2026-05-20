@@ -244,45 +244,74 @@ pub(crate) fn evaluate_proposal_static(
             snapshot,
             active_tasks: &input.observation.active_tasks,
         };
-        if let ActiveConfigMatch::Matches { summary } = proposal
+        match proposal
             .candidate
             .matches_active_config(active_config_input)
         {
-            deny_reasons.push(CandidateDenyReason::NoEffectiveChange);
-            deny_messages.push(format!(
-                "candidate would not change active configuration: {summary}"
-            ));
+            ActiveConfigMatch::Matches { summary } => {
+                deny_reasons.push(CandidateDenyReason::NoEffectiveChange);
+                deny_messages.push(format!(
+                    "candidate would not change active configuration: {summary}"
+                ));
+            }
+            ActiveConfigMatch::Differs { .. } => {}
+            ActiveConfigMatch::Unknown { reason } => {
+                deny_reasons.push(CandidateDenyReason::ActiveConfigUnknown);
+                deny_messages.push(format!(
+                    "candidate active configuration could not be verified conservatively: {reason}"
+                ));
+            }
         }
 
         if let Some(active_experiment) = input.controller_state.active_experiment.as_ref()
             && proposal
                 .candidate
                 .conflicts_with(&active_experiment.candidate)
-            && let ActiveConfigMatch::Differs { expected, actual } = active_experiment
+        {
+            match active_experiment
                 .candidate
                 .matches_active_config(active_config_input)
-        {
-            deny_reasons.push(CandidateDenyReason::ExternalMutationDetected);
-            deny_messages.push(format!(
-                "active experiment no longer matches live state for conflict group {:?}; expected {}; actual {}; restore or resync before applying another conflicting action",
-                active_experiment.candidate.conflict_group(),
-                expected,
-                actual
-            ));
+            {
+                ActiveConfigMatch::Differs { expected, actual } => {
+                    deny_reasons.push(CandidateDenyReason::ExternalMutationDetected);
+                    deny_messages.push(format!(
+                        "active experiment no longer matches live state for conflict group {:?}; expected {}; actual {}; restore or resync before applying another conflicting action",
+                        active_experiment.candidate.conflict_group(),
+                        expected,
+                        actual
+                    ));
+                }
+                ActiveConfigMatch::Unknown { reason } => {
+                    deny_reasons.push(CandidateDenyReason::ActiveConfigUnknown);
+                    deny_messages.push(format!(
+                        "active experiment configuration is unknown for conflict group {:?}: {reason}; restore or resync before applying another conflicting action",
+                        active_experiment.candidate.conflict_group()
+                    ));
+                }
+                ActiveConfigMatch::Matches { .. } => {}
+            }
         }
 
         if let Some(state) = input.active_profile_state {
             for kept in state.kept_actions.values() {
-                if let ActiveConfigMatch::Differs { expected, actual } =
-                    kept.candidate.matches_active_config(active_config_input)
-                {
-                    deny_reasons.push(CandidateDenyReason::KeptActionNoLongerActive);
-                    deny_messages.push(format!(
-                        "kept action {} no longer matches live state; expected {}; actual {}; restore or resync before planning new candidates",
-                        kept.candidate.candidate_name(),
-                        expected,
-                        actual
-                    ));
+                match kept.candidate.matches_active_config(active_config_input) {
+                    ActiveConfigMatch::Differs { expected, actual } => {
+                        deny_reasons.push(CandidateDenyReason::KeptActionNoLongerActive);
+                        deny_messages.push(format!(
+                            "kept action {} no longer matches live state; expected {}; actual {}; restore or resync before planning new candidates",
+                            kept.candidate.candidate_name(),
+                            expected,
+                            actual
+                        ));
+                    }
+                    ActiveConfigMatch::Unknown { reason } => {
+                        deny_reasons.push(CandidateDenyReason::ActiveConfigUnknown);
+                        deny_messages.push(format!(
+                            "kept action {} active configuration is unknown: {reason}; restore or resync before planning new candidates",
+                            kept.candidate.candidate_name()
+                        ));
+                    }
+                    ActiveConfigMatch::Matches { .. } => {}
                 }
             }
         }

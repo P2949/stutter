@@ -904,12 +904,14 @@ document.addEventListener('DOMContentLoaded', () => {
             session.drop_counters.wakeup_data_insert_failed > 0 ||
             session.drop_counters.ringbuf_reserve_failed > 0 ||
             session.drop_counters.irq_start_times_insert_failed > 0 ||
-            session.drop_counters.block_start_insert_failed > 0
+            session.drop_counters.block_start_insert_failed > 0 ||
+            session.drop_counters.block_fallback_key_collisions > 0
         )) {
             const total = (session.drop_counters.wakeup_data_insert_failed || 0) +
                           (session.drop_counters.ringbuf_reserve_failed || 0) +
                           (session.drop_counters.irq_start_times_insert_failed || 0) +
-                          (session.drop_counters.block_start_insert_failed || 0);
+                          (session.drop_counters.block_start_insert_failed || 0) +
+                          (session.drop_counters.block_fallback_key_collisions || 0);
             addRow('eBPF Drops (Cumulative)', total);
         }
         html += '</tbody></table>';
@@ -917,6 +919,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (session.block_io_event_count > 0 && blockIoBasis === 'dev+sector') {
             document.getElementById('block-io-warning').style.display = 'block';
+        }
+        if (session.drop_counters && session.drop_counters.block_fallback_key_collisions > 0) {
+            const warning = document.getElementById('block-io-warning');
+            warning.style.display = 'block';
+            warning.textContent = 'Block I/O latency attribution degraded: fallback key collisions were detected and ambiguous samples were dropped.';
         }
     }
 

@@ -10,6 +10,9 @@ pub(crate) async fn daemon_status_handler(
         return status.into_response();
     }
 
+    crate::agent::recording::reap_finished_recording(&state).await;
+    crate::agent::autotune::reap_finished_autotune(&state).await;
+
     let active_recording = state.active_run.lock().await.is_some();
     let active_autotune = state.active_autotune.lock().await.is_some();
     let daemon_state = state.daemon_state.lock().await.clone();

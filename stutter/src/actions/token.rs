@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::actions::model::{
-    CgroupRestoreRecord, CpuPowerRestoreRecord, GpuPowerRestoreRecord, IoPrioRestoreRecord,
-    IrqAffinityRestoreRecord, NiceRestoreRecord, UclampRestoreRecord, VmKnobRestoreRecord,
+    CgroupCpusetRestoreRecord, CgroupRestoreRecord, CpuPowerRestoreRecord, GpuPowerRestoreRecord,
+    IoPrioRestoreRecord, IrqAffinityRestoreRecord, NiceRestoreRecord, UclampRestoreRecord,
+    VmKnobRestoreRecord,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -30,6 +31,8 @@ pub enum RollbackToken {
     },
     CgroupRestore {
         records: Vec<CgroupRestoreRecord>,
+        #[serde(default)]
+        cpuset: Option<CgroupCpusetRestoreRecord>,
     },
     CpuPowerRestore {
         records: Vec<CpuPowerRestoreRecord>,
@@ -54,7 +57,7 @@ impl RollbackToken {
             Self::IrqAffinityRestore { records } => records.len(),
             Self::IoPrioRestore { records } => records.len(),
             Self::UclampRestore { records } => records.len(),
-            Self::CgroupRestore { records } => records.len(),
+            Self::CgroupRestore { records, .. } => records.len(),
             Self::CpuPowerRestore { records } => records.len(),
             Self::VmKnobRestore { records } => records.len(),
             Self::GpuPowerRestore { records } => records.len(),

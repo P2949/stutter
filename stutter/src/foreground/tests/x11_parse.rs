@@ -77,7 +77,7 @@ WM_NAME(STRING) = "Kingdom Come: Deliverance"
                 .reason
                 .contains("stutter-definitely-missing-xprop-binary")
         );
-        assert!(snapshot.reason.contains("was not found in PATH"));
+        assert!(snapshot.reason.contains("trusted foreground helper paths"));
 
         unsafe {
             if let Some(previous) = previous {

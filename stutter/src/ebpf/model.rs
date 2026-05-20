@@ -6,8 +6,9 @@ use aya::{
 };
 use serde::{Deserialize, Serialize};
 use stutter_common::{
-    DROP_BLOCK_START_INSERT_FAILED, DROP_IRQ_START_TIMES_INSERT_FAILED,
-    DROP_RINGBUF_RESERVE_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_STALE_ENTRY,
+    DROP_BLOCK_FALLBACK_KEY_COLLISION, DROP_BLOCK_START_INSERT_FAILED,
+    DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
+    DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_STALE_ENTRY,
 };
 use tokio::io::unix::AsyncFd;
 
@@ -78,6 +79,8 @@ pub struct DropCountersSnapshot {
     pub irq_start_times_insert_failed: u64,
     #[serde(default)]
     pub block_start_insert_failed: u64,
+    #[serde(default)]
+    pub block_fallback_key_collisions: u64,
 }
 
 impl DropCountersSnapshot {
@@ -87,6 +90,7 @@ impl DropCountersSnapshot {
             .saturating_add(self.ringbuf_reserve_failed)
             .saturating_add(self.irq_start_times_insert_failed)
             .saturating_add(self.block_start_insert_failed)
+            .saturating_add(self.block_fallback_key_collisions)
     }
 
     pub fn total_excluding_block_io(&self) -> u64 {
@@ -119,6 +123,10 @@ impl LoadedEbpf {
             block_start_insert_failed: drop_counter_value(
                 &self.drop_counters,
                 DROP_BLOCK_START_INSERT_FAILED,
+            ),
+            block_fallback_key_collisions: drop_counter_value(
+                &self.drop_counters,
+                DROP_BLOCK_FALLBACK_KEY_COLLISION,
             ),
         }
     }

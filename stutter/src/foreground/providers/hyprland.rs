@@ -8,6 +8,7 @@ use std::process::Command;
 use serde::Deserialize;
 
 use crate::foreground::{
+    command::resolve_trusted_foreground_helper,
     model::{ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot},
     provider::ForegroundProvider,
 };
@@ -119,10 +120,21 @@ impl ForegroundProvider for HyprlandForegroundProvider {
             };
         }
 
-        let output = match Command::new(&self.hyprctl)
-            .args(["activewindow", "-j"])
-            .output()
-        {
+        let Some(hyprctl) = resolve_trusted_foreground_helper(&self.hyprctl) else {
+            return ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::Hyprland),
+                status: ForegroundProviderStatus::Unavailable,
+                confidence: 0.0,
+                reason: format!(
+                    "{} was not found in trusted foreground helper paths; Hyprland foreground provider is unavailable",
+                    self.hyprctl
+                ),
+                ..ForegroundWindowSnapshot::default()
+            };
+        };
+
+        let output = match Command::new(&hyprctl).args(["activewindow", "-j"]).output() {
             Ok(output) => output,
             Err(err) => {
                 return ForegroundWindowSnapshot {
@@ -130,7 +142,7 @@ impl ForegroundProvider for HyprlandForegroundProvider {
                     source: Some(ForegroundSource::Hyprland),
                     status: ForegroundProviderStatus::Error,
                     confidence: 0.0,
-                    reason: format!("failed to run {} activewindow -j: {err}", self.hyprctl),
+                    reason: format!("failed to run {} activewindow -j: {err}", hyprctl.display()),
                     ..ForegroundWindowSnapshot::default()
                 };
             }
@@ -145,7 +157,7 @@ impl ForegroundProvider for HyprlandForegroundProvider {
                 confidence: 0.0,
                 reason: format!(
                     "{} activewindow -j exited with status {}; stderr={}",
-                    self.hyprctl,
+                    hyprctl.display(),
                     output.status,
                     stderr.trim()
                 ),

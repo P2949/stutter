@@ -140,6 +140,13 @@ pub struct CgroupRestoreRecord {
     pub original_cgroup: PathBuf,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CgroupCpusetRestoreRecord {
+    pub cgroup_path: PathBuf,
+    pub original_cpuset_cpus: Option<String>,
+    pub original_cpuset_mems: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionOutcome {
     pub action_id: ActionId,

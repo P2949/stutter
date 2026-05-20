@@ -120,16 +120,20 @@ impl RollingWindow {
     where
         I: IntoIterator<Item = IntervalRecord>,
     {
-        let mut latest_elapsed_ms = None;
-
-        for record in records {
-            latest_elapsed_ms = Some(latest_elapsed_ms.unwrap_or(0).max(record.elapsed_ms));
-            self.intervals.push_back(record);
+        let mut records = records.into_iter().collect::<Vec<_>>();
+        if records.is_empty() {
+            return;
         }
 
-        if let Some(elapsed_ms) = latest_elapsed_ms {
-            self.prune_to(elapsed_ms);
-        }
+        records.sort_by_key(|record| record.elapsed_ms);
+        let latest_elapsed_ms = records
+            .iter()
+            .map(|record| record.elapsed_ms)
+            .max()
+            .expect("non-empty interval batch has a latest elapsed timestamp");
+
+        self.intervals.extend(records);
+        self.prune_to(latest_elapsed_ms);
     }
 
     pub fn push_frame(&mut self, frame: FrameEvent) {
@@ -138,12 +142,13 @@ impl RollingWindow {
         self.prune_to(elapsed_ms);
     }
 
-    pub fn push_irq_event(&mut self, event: IrqEventRecord) {
-        let elapsed_ms = event.elapsed_ms;
+    pub fn push_irq_event(&mut self, mut event: IrqEventRecord) {
+        let elapsed_ms = event
+            .elapsed_ms
+            .unwrap_or_else(|| self.latest_elapsed_ms().unwrap_or(0));
+        event.elapsed_ms = Some(elapsed_ms);
         self.irq_events.push_back(event);
-        if let Some(elapsed_ms) = elapsed_ms {
-            self.prune_to(elapsed_ms);
-        }
+        self.prune_to(elapsed_ms);
     }
 
     pub fn push_block_io_event(&mut self, event: BlockIoRecord) {
@@ -179,22 +184,24 @@ impl RollingWindow {
     pub fn prune_to(&mut self, now_elapsed_ms: u64) {
         let start_ms = self.window_start_ms_for(now_elapsed_ms);
 
-        prune_front_by_elapsed(&mut self.intervals, start_ms, |record| record.elapsed_ms);
-        prune_front_by_elapsed(&mut self.frames, start_ms, |frame| frame.elapsed_ms);
-        prune_front_by_elapsed(&mut self.diagnoses, start_ms, |diagnosis| {
+        retain_by_elapsed(&mut self.intervals, start_ms, |record| record.elapsed_ms);
+        retain_by_elapsed(&mut self.frames, start_ms, |frame| frame.elapsed_ms);
+        retain_by_elapsed(&mut self.diagnoses, start_ms, |diagnosis| {
             diagnosis.elapsed_ms
         });
-        prune_front_by_elapsed(&mut self.irq_events, start_ms, |event| {
-            event.elapsed_ms.unwrap_or(0)
+        self.irq_events.retain(|event| {
+            event
+                .elapsed_ms
+                .is_some_and(|elapsed_ms| elapsed_ms >= start_ms)
         });
-        prune_front_by_elapsed(&mut self.block_io_events, start_ms, |event| {
+        retain_by_elapsed(&mut self.block_io_events, start_ms, |event| {
             event.elapsed_ms
         });
-        prune_front_by_elapsed(&mut self.gpu_samples, start_ms, |sample| sample.elapsed_ms);
-        prune_front_by_elapsed(&mut self.cpu_freq_events, start_ms, |event| {
+        retain_by_elapsed(&mut self.gpu_samples, start_ms, |sample| sample.elapsed_ms);
+        retain_by_elapsed(&mut self.cpu_freq_events, start_ms, |event| {
             event.elapsed_ms
         });
-        prune_front_by_elapsed(&mut self.foreground_events, start_ms, |event| {
+        retain_by_elapsed(&mut self.foreground_events, start_ms, |event| {
             event.elapsed_ms
         });
     }
@@ -233,7 +240,7 @@ impl RollingWindow {
             self.frames
                 .iter()
                 .map(|frame| frame.frametime_ms)
-                .filter(|value| value.is_finite() && *value >= 0.0)
+                .filter(|value| value.is_finite() && *value > 0.0)
                 .collect(),
             0.99,
         )
@@ -243,7 +250,7 @@ impl RollingWindow {
         self.frames
             .iter()
             .map(|frame| frame.frametime_ms)
-            .filter(|value| value.is_finite() && *value >= 0.0)
+            .filter(|value| value.is_finite() && *value > 0.0)
             .fold(0.0, f64::max)
     }
 
@@ -583,16 +590,11 @@ fn source_quality_for_block_io_basis(basis: Option<&str>) -> ObjectiveSignalQual
     }
 }
 
-fn prune_front_by_elapsed<T, F>(items: &mut VecDeque<T>, start_ms: u64, elapsed_ms: F)
+fn retain_by_elapsed<T, F>(items: &mut VecDeque<T>, start_ms: u64, elapsed_ms: F)
 where
     F: Fn(&T) -> u64,
 {
-    while items
-        .front()
-        .is_some_and(|item| elapsed_ms(item) < start_ms)
-    {
-        items.pop_front();
-    }
+    items.retain(|item| elapsed_ms(item) >= start_ms);
 }
 
 fn percentile_f64(mut values: Vec<f64>, percentile: f64) -> f64 {
@@ -832,6 +834,58 @@ mod tests {
     }
 
     #[test]
+    fn push_intervals_sorts_out_of_order_batches_before_pruning() {
+        let mut window = RollingWindow::new(Duration::from_secs(2));
+
+        window.push_intervals(vec![
+            interval(4501, 4),
+            interval(1000, 1),
+            interval(2500, 2),
+        ]);
+
+        assert_eq!(
+            window
+                .intervals
+                .iter()
+                .map(|record| record.elapsed_ms)
+                .collect::<Vec<_>>(),
+            vec![2500, 4501]
+        );
+        assert_eq!(window.scored_samples(), 6);
+    }
+
+    #[test]
+    fn untimestamped_irq_events_are_timestamped_at_ingestion() {
+        let mut window = RollingWindow::new(Duration::from_secs(1));
+        window.push_interval(interval(5_000, 10));
+        let mut event = irq_event(0, 3_000_000);
+        event.elapsed_ms = None;
+
+        window.push_irq_event(event);
+
+        assert_eq!(
+            window
+                .irq_events
+                .iter()
+                .map(|event| event.elapsed_ms)
+                .collect::<Vec<_>>(),
+            vec![Some(5_000)]
+        );
+    }
+
+    #[test]
+    fn prune_to_drops_legacy_untimestamped_irq_events() {
+        let mut window = RollingWindow::new(Duration::from_secs(1));
+        let mut event = irq_event(0, 3_000_000);
+        event.elapsed_ms = None;
+        window.irq_events.push_back(event);
+
+        window.prune_to(2_000);
+
+        assert!(window.irq_events.is_empty());
+    }
+
+    #[test]
     fn latest_elapsed_ms_uses_max_across_streams() {
         let mut window = RollingWindow::new(Duration::from_secs(10));
         window.intervals.push_back(interval(1000, 10));
@@ -844,15 +898,27 @@ mod tests {
     }
 
     #[test]
-    fn frame_stats_ignore_non_finite_and_negative_values() {
+    fn frame_stats_ignore_non_finite_negative_and_zero_values() {
         let mut window = RollingWindow::new(Duration::from_secs(10));
-        window.push_frame(frame(1000, 16.0));
+        window.push_frame(frame(1000, 0.0));
+        window.push_frame(frame(1050, 16.0));
         window.push_frame(frame(1100, f64::NAN));
         window.push_frame(frame(1200, -1.0));
         window.push_frame(frame(1300, 33.0));
 
         assert_eq!(window.frame_max_ms(), 33.0);
         assert_eq!(window.frame_p99_ms(), 33.0);
+    }
+
+    #[test]
+    fn frame_stats_return_zero_when_every_frame_time_is_invalid() {
+        let mut window = RollingWindow::new(Duration::from_secs(10));
+        window.push_frame(frame(1000, 0.0));
+        window.push_frame(frame(1100, -1.0));
+        window.push_frame(frame(1200, f64::NAN));
+
+        assert_eq!(window.frame_max_ms(), 0.0);
+        assert_eq!(window.frame_p99_ms(), 0.0);
     }
 
     #[test]

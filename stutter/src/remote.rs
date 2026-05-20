@@ -318,6 +318,14 @@ pub struct AutotuneStopResponse {
 pub struct AutotuneRestoreResponse {
     pub status: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restored_actions: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped_actions: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_actions: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub restore_messages: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

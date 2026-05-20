@@ -484,6 +484,7 @@ mod tests {
                 },
                 original_cgroup: PathBuf::from("/user.slice/app.scope"),
             }],
+            cpuset: None,
         };
         let cpu_power = RollbackToken::CpuPowerRestore { records: vec![] };
 

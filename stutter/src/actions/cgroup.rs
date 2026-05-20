@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     actions::{
-        ActionId, ActionState, ActionWarning, ApplyResult, CgroupRestoreRecord,
-        RestoreIdentityStatus, RollbackToken, SafetyClass, TaskIdentity, TaskRestoreIdentity,
-        TuningAction,
+        ActionId, ActionState, ActionWarning, ApplyResult, CgroupCpusetRestoreRecord,
+        CgroupRestoreRecord, PartialApplyError, RestoreIdentityStatus, RollbackToken, SafetyClass,
+        TaskIdentity, TaskRestoreIdentity, TuningAction,
         rollback::{
             RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult,
             token_dry_run_preview,
@@ -85,7 +85,7 @@ impl RollbackHandler for CgroupRollbackHandler {
     }
 
     fn restore_token(&self, token: &RollbackToken) -> anyhow::Result<RollbackResult> {
-        let RollbackToken::CgroupRestore { records } = token else {
+        let RollbackToken::CgroupRestore { records, cpuset } = token else {
             anyhow::bail!("cgroup rollback handler does not support {token:?}");
         };
 
@@ -153,6 +153,20 @@ impl RollbackHandler for CgroupRollbackHandler {
                         original_cgroup.display(),
                         e
                     );
+                    log::error!("{}", msg);
+                    messages.push(msg);
+                }
+            }
+        }
+
+        if let Some(cpuset) = cpuset {
+            match restore_cpuset_record(Path::new("/sys/fs/cgroup"), cpuset) {
+                Ok(restored_files) => {
+                    restored += restored_files;
+                }
+                Err(err) => {
+                    errors += 1;
+                    let msg = format!("failed to restore cgroup cpuset state: {err:#}");
                     log::error!("{}", msg);
                     messages.push(msg);
                 }
@@ -348,6 +362,29 @@ impl CgroupPlacementAction {
         Ok(snapshots)
     }
 
+    fn cpuset_restore_record(
+        &self,
+        target_abs: &Path,
+    ) -> anyhow::Result<Option<CgroupCpusetRestoreRecord>> {
+        if self.cpuset_cpus.is_none() && self.cpuset_mems.is_none() {
+            return Ok(None);
+        }
+
+        Ok(Some(CgroupCpusetRestoreRecord {
+            cgroup_path: target_abs.to_path_buf(),
+            original_cpuset_cpus: if self.cpuset_cpus.is_some() {
+                read_optional_trimmed(&target_abs.join("cpuset.cpus"))?
+            } else {
+                None
+            },
+            original_cpuset_mems: if self.cpuset_mems.is_some() {
+                read_optional_trimmed(&target_abs.join("cpuset.mems"))?
+            } else {
+                None
+            },
+        }))
+    }
+
     fn target_cgroup_abs(&self) -> anyhow::Result<PathBuf> {
         let target_rel = normalize_cgroup_path(&self.target_cgroup)?;
         Ok(self
@@ -360,7 +397,7 @@ impl CgroupPlacementAction {
         proc_root: &Path,
         token: &RollbackToken,
     ) -> anyhow::Result<()> {
-        let RollbackToken::CgroupRestore { records } = token else {
+        let RollbackToken::CgroupRestore { records, cpuset } = token else {
             anyhow::bail!("rollback token is not a cgroup restore token");
         };
 
@@ -388,6 +425,12 @@ impl CgroupPlacementAction {
                     original_abs.display()
                 ));
             }
+        }
+
+        if let Some(cpuset) = cpuset
+            && let Err(err) = restore_cpuset_record(&self.cgroup_root, cpuset)
+        {
+            failures.push(format!("cpuset_restore_error={err:#}"));
         }
 
         if !failures.is_empty() {
@@ -443,13 +486,34 @@ impl TuningAction for CgroupPlacementAction {
             let policy = CgroupPlacementPolicy::default();
             let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &policy)?;
             let target_abs = self.target_cgroup_abs()?;
+            let cpuset = self.cpuset_restore_record(&target_abs)?;
+            let mut cpuset_changed = false;
 
             if let Some(cpuset_cpus) = &self.cpuset_cpus {
-                write_trimmed(&target_abs.join("cpuset.cpus"), cpuset_cpus)?;
+                write_trimmed(&target_abs.join("cpuset.cpus"), cpuset_cpus).with_context(|| {
+                    format!(
+                        "failed to write {}",
+                        target_abs.join("cpuset.cpus").display()
+                    )
+                })?;
+                cpuset_changed = true;
             }
 
             if let Some(cpuset_mems) = &self.cpuset_mems {
-                write_trimmed(&target_abs.join("cpuset.mems"), cpuset_mems)?;
+                if let Err(err) = write_trimmed(&target_abs.join("cpuset.mems"), cpuset_mems)
+                    .with_context(|| {
+                        format!(
+                            "failed to write {}",
+                            target_abs.join("cpuset.mems").display()
+                        )
+                    })
+                {
+                    return Err(PartialApplyError {
+                        source: err,
+                        rollback: cgroup_partial_token(Vec::new(), cpuset_changed, &cpuset),
+                    });
+                }
+                cpuset_changed = true;
             }
 
             let mut records = Vec::new();
@@ -471,14 +535,21 @@ impl TuningAction for CgroupPlacementAction {
                     task_starttime_ticks: snapshot.starttime_ticks,
                 };
 
-                write_trimmed(&target_abs.join("cgroup.procs"), &snapshot.tid.to_string())
-                    .with_context(|| {
-                        format!(
-                            "failed to move tid={} to {}",
-                            snapshot.tid,
-                            target_abs.display()
-                        )
-                    })?;
+                if let Err(err) =
+                    write_trimmed(&target_abs.join("cgroup.procs"), &snapshot.tid.to_string())
+                        .with_context(|| {
+                            format!(
+                                "failed to move tid={} to {}",
+                                snapshot.tid,
+                                target_abs.display()
+                            )
+                        })
+                {
+                    return Err(PartialApplyError {
+                        source: err,
+                        rollback: cgroup_partial_token(records, cpuset_changed, &cpuset),
+                    });
+                }
 
                 records.push(CgroupRestoreRecord {
                     identity,
@@ -486,7 +557,10 @@ impl TuningAction for CgroupPlacementAction {
                 });
             }
 
-            Ok(RollbackToken::CgroupRestore { records })
+            Ok(RollbackToken::CgroupRestore {
+                records,
+                cpuset: cpuset.filter(|_| cpuset_changed),
+            })
         })()
     }
 
@@ -777,6 +851,63 @@ fn read_trimmed(path: &Path) -> anyhow::Result<String> {
         .with_context(|| format!("failed to read {}", path.display()))
 }
 
+fn read_optional_trimmed(path: &Path) -> anyhow::Result<Option<String>> {
+    match fs::read_to_string(path) {
+        Ok(value) => Ok(Some(value.trim().to_owned())),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+fn cgroup_partial_token(
+    records: Vec<CgroupRestoreRecord>,
+    cpuset_changed: bool,
+    cpuset: &Option<CgroupCpusetRestoreRecord>,
+) -> Option<RollbackToken> {
+    if records.is_empty() && !cpuset_changed {
+        None
+    } else {
+        Some(RollbackToken::CgroupRestore {
+            records,
+            cpuset: if cpuset_changed { cpuset.clone() } else { None },
+        })
+    }
+}
+
+fn restore_cpuset_record(
+    cgroup_root: &Path,
+    record: &CgroupCpusetRestoreRecord,
+) -> anyhow::Result<usize> {
+    let cgroup_path = if record.cgroup_path.is_absolute() {
+        record.cgroup_path.clone()
+    } else {
+        cgroup_root.join(strip_cgroup_leading_slash(&record.cgroup_path))
+    };
+
+    let mut restored = 0usize;
+    if let Some(original) = &record.original_cpuset_cpus {
+        write_trimmed(&cgroup_path.join("cpuset.cpus"), original).with_context(|| {
+            format!(
+                "failed to restore {}",
+                cgroup_path.join("cpuset.cpus").display()
+            )
+        })?;
+        restored += 1;
+    }
+
+    if let Some(original) = &record.original_cpuset_mems {
+        write_trimmed(&cgroup_path.join("cpuset.mems"), original).with_context(|| {
+            format!(
+                "failed to restore {}",
+                cgroup_path.join("cpuset.mems").display()
+            )
+        })?;
+        restored += 1;
+    }
+
+    Ok(restored)
+}
+
 fn is_dead_task_io_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         cause.downcast_ref::<io::Error>().is_some_and(|io_err| {
@@ -869,6 +1000,53 @@ mod tests {
         fs::write(path.join("cpuset.cpus"), "0-7\n").unwrap();
         fs::write(path.join("cpuset.mems"), "0\n").unwrap();
         path
+    }
+
+    #[test]
+    fn cgroup_partial_token_keeps_cpuset_restore_state() {
+        let cpuset = CgroupCpusetRestoreRecord {
+            cgroup_path: PathBuf::from("/stutter/game.slice"),
+            original_cpuset_cpus: Some("0-7".to_owned()),
+            original_cpuset_mems: Some("0".to_owned()),
+        };
+
+        let token = cgroup_partial_token(Vec::new(), true, &Some(cpuset.clone()))
+            .expect("cpuset mutation should produce a rollback token");
+
+        let RollbackToken::CgroupRestore {
+            records,
+            cpuset: restored_cpuset,
+        } = token
+        else {
+            panic!("expected cgroup rollback token");
+        };
+        assert!(records.is_empty());
+        assert_eq!(restored_cpuset, Some(cpuset));
+    }
+
+    #[test]
+    fn rollback_restores_cpuset_files_from_token() {
+        let proc_root = temp_dir("proc-cpuset-rollback");
+        let cgroup_root = temp_dir("cgroup-cpuset-rollback");
+        let target = write_fake_cgroup(&cgroup_root, "/stutter/game.slice");
+        fs::write(target.join("cpuset.cpus"), "2-3\n").unwrap();
+        fs::write(target.join("cpuset.mems"), "1\n").unwrap();
+        let action = action_for(&cgroup_root, 42);
+        let token = RollbackToken::CgroupRestore {
+            records: Vec::new(),
+            cpuset: Some(CgroupCpusetRestoreRecord {
+                cgroup_path: PathBuf::from("/stutter/game.slice"),
+                original_cpuset_cpus: Some("0-7".to_owned()),
+                original_cpuset_mems: Some("0".to_owned()),
+            }),
+        };
+
+        action.rollback_at(&proc_root, &token).unwrap();
+
+        assert_eq!(read_trimmed(&target.join("cpuset.cpus")).unwrap(), "0-7");
+        assert_eq!(read_trimmed(&target.join("cpuset.mems")).unwrap(), "0");
+        fs::remove_dir_all(proc_root).ok();
+        fs::remove_dir_all(cgroup_root).ok();
     }
 
     #[test]
@@ -1134,6 +1312,7 @@ mod tests {
                 },
                 original_cgroup: PathBuf::from("/old.slice"),
             }],
+            cpuset: None,
         };
 
         action.rollback_at(&proc_root, &token).unwrap();
@@ -1186,6 +1365,7 @@ mod tests {
                     original_cgroup: PathBuf::from("/b.slice"),
                 },
             ],
+            cpuset: None,
         };
 
         assert_eq!(token.affected_tasks(), 2);
