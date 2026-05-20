@@ -80,6 +80,7 @@ RUSTUP_TOOLCHAIN=nightly cargo test --all-targets
 - [x] Patch F4: Move group-build helpers: created `src/focus/group_build.rs` and moved group construction helper functions.
 - [x] Patch F5: Move scoring penalty helpers: moved scoring penalty functions from `process_scan.rs` to `score.rs`.
 - [x] Patch F6: Move community-rule bridge: created `src/focus/community_rules.rs` and moved community classification helpers.
+- [x] Patch F7: Shrink `focus/mod.rs` to facade: verified `focus/mod.rs` is a clean module-decl/re-export facade and all sub-modules are tidy.
 
 ## Current shape from the uploaded code
 
