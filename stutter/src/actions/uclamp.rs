@@ -375,7 +375,7 @@ impl TuningAction for UclampAction {
     }
 
     fn apply(&self) -> ApplyResult {
-        let res = (|| {
+        (|| {
             let policy = UclampPolicy::default();
             let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &policy)?;
             let filtered_snapshots: Vec<_> = snapshots
@@ -404,8 +404,7 @@ impl TuningAction for UclampAction {
 
                     set_task_uclamp(snapshot.tid, requested)
                         .map_err(|e| {
-                            anyhow::Error::from(e)
-                                .context(format!("failed to set uclamp for tid={}", snapshot.tid))
+                            e.context(format!("failed to set uclamp for tid={}", snapshot.tid))
                         })
                         .map(|_| UclampRestoreRecord {
                             identity,
@@ -415,8 +414,7 @@ impl TuningAction for UclampAction {
                 },
                 |records| RollbackToken::UclampRestore { records },
             )
-        })();
-        res
+        })()
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {

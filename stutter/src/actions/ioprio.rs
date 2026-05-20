@@ -407,7 +407,7 @@ impl TuningAction for IoPrioAction {
     }
 
     fn apply(&self) -> ApplyResult {
-        let res = (|| {
+        (|| {
             let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &self.policy)?;
             let requested = self.ioprio.encode()?;
             let filtered_snapshots: Vec<_> = snapshots
@@ -431,7 +431,7 @@ impl TuningAction for IoPrioAction {
 
                     set_task_ioprio(snapshot.tid, requested)
                         .map_err(|e| {
-                            anyhow::Error::from(e).context(format!(
+                            e.context(format!(
                                 "failed to set I/O priority for tid={}",
                                 snapshot.tid
                             ))
@@ -443,8 +443,7 @@ impl TuningAction for IoPrioAction {
                 },
                 |records| RollbackToken::IoPrioRestore { records },
             )
-        })();
-        res
+        })()
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
