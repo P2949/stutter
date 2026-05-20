@@ -1373,8 +1373,6 @@ impl MonitorSession {
         }
 
         if self.runtime.outputs.recorder.run.is_some() {
-            self.runtime.outputs.recorder.streams.finish_all()?;
-
             let frame_events = if !self.config.mangohud.log_live
                 && let Some(path) = &self.config.mangohud.log
             {
@@ -1413,6 +1411,27 @@ impl MonitorSession {
             } else {
                 Vec::new()
             };
+
+            if !frame_events.is_empty()
+                && self
+                    .runtime
+                    .outputs
+                    .recorder
+                    .streams
+                    .contains(ArtifactKind::FrameEvents)
+            {
+                for frame in &frame_events {
+                    crate::artifacts::push_artifact_event(
+                        &mut self.runtime.outputs.recorder,
+                        ArtifactKind::FrameEvents,
+                        frame,
+                        "frame_events",
+                        |c| c.frame_event_count += 1,
+                    );
+                }
+            }
+
+            self.runtime.outputs.recorder.streams.finish_all()?;
 
             recorder::finalize_recording(FinalizeRecordingInput {
                 recorder: &self.runtime.outputs.recorder,
