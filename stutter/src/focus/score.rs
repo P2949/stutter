@@ -3,9 +3,7 @@ use super::{
     group_build::is_stable_build_root,
     groups::{FocusGroup, FocusGroupKind, FocusScoreBreakdown},
     process_scan::{
-        browser_group_penalty, compile_group_penalty, contains_game_runtime_text,
-        desktop_group_penalty, game_group_penalty, idle_group_penalty,
-        is_active_foreground_candidate, is_game_runtime_process, low_to_moderate_activity_bonus,
+        contains_game_runtime_text, is_active_foreground_candidate, is_game_runtime_process,
         process_identity_text,
     },
     snapshot::{FocusProcess, FocusSnapshot},
@@ -624,4 +622,135 @@ pub(crate) fn process_focus_score(process: &FocusProcess) -> f32 {
         * 0.05;
 
     class_base + process.classification.confidence + cpu_score + io_score + ctxt_score
+}
+
+fn low_to_moderate_activity_bonus(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let cpu_ticks = total_cpu_ticks(snapshot, member_pids);
+    if cpu_ticks == 0 {
+        0.0
+    } else if cpu_ticks <= 150 {
+        0.25
+    } else {
+        0.15
+    }
+}
+
+fn game_group_penalty(snapshot: &FocusSnapshot, root_pids: &[u32], member_pids: &[u32]) -> f32 {
+    let root_is_launcher_only = root_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| {
+                let text = process_identity_text(process);
+                text.contains("steam")
+                    && !text.contains("steamapps")
+                    && !text.contains("pressure-vessel")
+                    && !text.contains("proton")
+            })
+            .unwrap_or(false)
+    });
+
+    let active_game_child_count = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .filter(|process| {
+            process.classification.class == SystemTaskClass::Game
+                || process.classification.class == SystemTaskClass::GameRenderThread
+                || process.classification.class == SystemTaskClass::GameWorkerThread
+        })
+        .filter(|process| is_active_foreground_candidate(process))
+        .count();
+
+    if root_is_launcher_only && active_game_child_count == 0 {
+        0.45
+    } else if total_cpu_ticks(snapshot, member_pids) < 5 && active_game_child_count == 0 {
+        0.20
+    } else {
+        0.0
+    }
+}
+
+fn browser_group_penalty(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let idle_renderer_count = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .filter(|process| process.classification.class == SystemTaskClass::BrowserRenderer)
+        .filter(|process| !is_active_foreground_candidate(process))
+        .count();
+
+    let active_child_count = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .filter(|process| process.classification.class != SystemTaskClass::BrowserForeground)
+        .filter(|process| is_active_foreground_candidate(process))
+        .count();
+
+    if idle_renderer_count > active_child_count.saturating_mul(2).saturating_add(2) {
+        ((idle_renderer_count - active_child_count) as f32 * 0.04).min(0.25)
+    } else {
+        0.0
+    }
+}
+
+fn compile_group_penalty(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    let has_stable_build_root = member_pids.iter().any(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(is_stable_build_root)
+            .unwrap_or(false)
+    });
+
+    let active_compiler_or_linker_count = member_pids
+        .iter()
+        .filter_map(|pid| snapshot.processes.get(pid))
+        .filter(|process| {
+            matches!(
+                process.classification.class,
+                SystemTaskClass::Compiler | SystemTaskClass::Linker
+            ) && is_active_foreground_candidate(process)
+        })
+        .count();
+
+    let indexer_only = member_pids.iter().all(|pid| {
+        snapshot
+            .processes
+            .get(pid)
+            .map(|process| process.classification.class == SystemTaskClass::Indexer)
+            .unwrap_or(false)
+    });
+
+    if indexer_only {
+        0.55
+    } else if !has_stable_build_root && active_compiler_or_linker_count == 0 {
+        0.35
+    } else {
+        0.0
+    }
+}
+
+fn idle_group_penalty(snapshot: &FocusSnapshot, member_pids: &[u32]) -> f32 {
+    if total_cpu_ticks(snapshot, member_pids) == 0 {
+        0.20
+    } else {
+        0.10
+    }
+}
+
+fn desktop_group_penalty(snapshot: &FocusSnapshot, primary_pid: Option<u32>) -> f32 {
+    let Some(primary_pid) = primary_pid else {
+        return 0.10;
+    };
+
+    let Some(primary) = snapshot.processes.get(&primary_pid) else {
+        return 0.10;
+    };
+
+    if primary.classification.class == SystemTaskClass::Compositor
+        && !is_active_foreground_candidate(primary)
+    {
+        0.20
+    } else {
+        0.0
+    }
 }
