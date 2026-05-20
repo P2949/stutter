@@ -4,6 +4,45 @@ use anyhow::Context;
 
 use crate::recorder::{FrameEvent, monotonic_now_ns};
 
+const FRAMETIME_HEADERS: &[&str] = &[
+    "frametime",
+    "frametime_ms",
+    "frame_time",
+    "frame_time_ms",
+    "frame time",
+    "frame time ms",
+];
+
+const ELAPSED_HEADERS: &[&str] = &[
+    "elapsed_ms",
+    "time_ms",
+    "ms",
+    "time",
+    "elapsed",
+    "elapsed_ns",
+    "time_ns",
+    "ns",
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ElapsedUnit {
+    Milliseconds,
+    Nanoseconds,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MangoHudCsvSchema {
+    frametime_idx: usize,
+    elapsed_idx: Option<usize>,
+    elapsed_unit: ElapsedUnit,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MangoHudCsvLayout {
+    schema: MangoHudCsvSchema,
+    data_start_offset: u64,
+}
+
 pub fn read_frame_events(
     path: &Path,
     ignore_offset: u64,
@@ -11,31 +50,27 @@ pub fn read_frame_events(
     alignment_raw_elapsed_ms: Option<u64>,
     recorder_start_monotonic_ns: Option<u64>,
 ) -> anyhow::Result<Vec<FrameEvent>> {
+    let layout = detect_layout(path)?;
     let mut file = fs::File::open(path)
         .with_context(|| format!("failed to read MangoHud log {}", path.display()))?;
 
-    let mut header = String::new();
-    {
-        let mut reader = std::io::BufReader::new(&file);
-        reader.read_line(&mut header)?;
-    }
-
-    let mut skip_first_line = ignore_offset == 0;
-    if ignore_offset > 0 {
+    let seek_offset = ignore_offset.max(layout.data_start_offset);
+    let mut skip_first_line = false;
+    if seek_offset > layout.data_start_offset {
         use std::io::{Read, Seek, SeekFrom};
         // By default, if we are at a nonzero offset, we assume we might be mid-line
         // unless we can prove we are at a newline boundary.
         skip_first_line = true;
-        if file.seek(SeekFrom::Start(ignore_offset - 1)).is_ok() {
+        if file.seek(SeekFrom::Start(seek_offset - 1)).is_ok() {
             let mut buf = [0u8; 1];
             if file.read_exact(&mut buf).is_ok() && buf[0] == b'\n' {
                 skip_first_line = false;
             }
         }
-        file.seek(SeekFrom::Start(ignore_offset))?;
+        file.seek(SeekFrom::Start(seek_offset))?;
     } else {
         use std::io::{Seek, SeekFrom};
-        file.seek(SeekFrom::Start(0))?;
+        file.seek(SeekFrom::Start(layout.data_start_offset))?;
     }
 
     let reader = std::io::BufReader::new(file);
@@ -46,8 +81,8 @@ pub fn read_frame_events(
         let _ = lines.next();
     }
 
-    parse_frame_events(
-        &header,
+    parse_frame_events_with_schema(
+        &layout.schema,
         lines,
         alignment_monotonic_ns,
         alignment_raw_elapsed_ms,
@@ -69,28 +104,31 @@ where
         return Ok(Vec::new());
     }
     let headers = split_csv_line(header);
-    let elapsed_idx = find_header(
-        &headers,
-        &["elapsed_ms", "time_ms", "ms", "time", "elapsed"],
-    );
-    let frametime_idx = find_header(
-        &headers,
-        &[
-            "frametime",
-            "frametime_ms",
-            "frame_time",
-            "frame_time_ms",
-            "frame time",
-            "frame time ms",
-        ],
-    );
-
-    if frametime_idx.is_none() {
-        anyhow::bail!(
+    let schema = schema_from_headers(&headers).ok_or_else(|| {
+        anyhow::anyhow!(
             "MangoHud CSV did not contain a recognized frametime column; headers={headers:?}"
-        );
-    }
+        )
+    })?;
 
+    parse_frame_events_with_schema(
+        &schema,
+        lines,
+        alignment_monotonic_ns,
+        alignment_raw_elapsed_ms,
+        recorder_start_monotonic_ns,
+    )
+}
+
+fn parse_frame_events_with_schema<I>(
+    schema: &MangoHudCsvSchema,
+    lines: I,
+    alignment_monotonic_ns: Option<u64>,
+    alignment_raw_elapsed_ms: Option<u64>,
+    recorder_start_monotonic_ns: Option<u64>,
+) -> anyhow::Result<Vec<FrameEvent>>
+where
+    I: Iterator<Item = std::io::Result<String>>,
+{
     let mut events = Vec::new();
     let mut first_elapsed_ms: Option<u64> = None;
     let mut accumulated_ms = 0.0;
@@ -104,18 +142,7 @@ where
         if line.trim().is_empty() {
             continue;
         }
-        let columns = split_csv_line(&line);
-        if let Some(frametime_ms) = frametime_idx
-            .and_then(|idx| columns.get(idx))
-            .and_then(|value| value.parse::<f64>().ok())
-            .filter(|value| value.is_finite())
-        {
-            let raw_elapsed = elapsed_idx
-                .and_then(|idx| columns.get(idx))
-                .and_then(|value| value.parse::<f64>().ok())
-                .filter(|value| value.is_finite());
-
-            let raw_val = raw_elapsed.map(|raw| raw.max(0.0) as u64);
+        if let Some((raw_val, frametime_ms)) = parse_frame_line(schema, &line) {
             if first_elapsed_ms.is_none() {
                 first_elapsed_ms = raw_val;
             }
@@ -153,55 +180,23 @@ where
     Ok(events)
 }
 
-#[derive(Default)]
 pub struct MangoHudLiveParser {
-    frametime_idx: Option<usize>,
-    elapsed_idx: Option<usize>,
-    header_seen: bool,
+    schema: MangoHudCsvSchema,
 }
 
 impl MangoHudLiveParser {
+    fn new(schema: MangoHudCsvSchema) -> Self {
+        Self { schema }
+    }
+
     pub fn parse_line(&mut self, line: &str) -> Option<FrameEvent> {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             return None;
         }
 
-        if !self.header_seen {
-            let headers = split_csv_line(line);
-            self.elapsed_idx = find_header(
-                &headers,
-                &["elapsed_ms", "time_ms", "ms", "time", "elapsed"],
-            );
-            self.frametime_idx = find_header(
-                &headers,
-                &[
-                    "frametime",
-                    "frametime_ms",
-                    "frame_time",
-                    "frame_time_ms",
-                    "frame time",
-                    "frame time ms",
-                ],
-            );
-            self.header_seen = true;
-            return None;
-        }
-
-        let columns = split_csv_line(line);
-        let frametime_ms = self
-            .frametime_idx
-            .and_then(|idx| columns.get(idx))
-            .and_then(|value| value.parse::<f64>().ok())
-            .filter(|value| value.is_finite())?;
-
-        let raw_elapsed = self
-            .elapsed_idx
-            .and_then(|idx| columns.get(idx))
-            .and_then(|value| value.parse::<f64>().ok())
-            .filter(|value| value.is_finite());
-
-        let elapsed_ms = raw_elapsed.map(|raw| raw.max(0.0) as u64).unwrap_or(0);
+        let (elapsed_ms, frametime_ms) = parse_frame_line(&self.schema, line)?;
+        let elapsed_ms = elapsed_ms.unwrap_or(0);
 
         Some(FrameEvent {
             elapsed_ms,
@@ -227,7 +222,16 @@ pub async fn tail_frames(
 
     let mut read_buf = vec![0_u8; 8192];
     let mut pending = String::new();
-    let mut parser = MangoHudLiveParser::default();
+    let layout = detect_layout(&path)?;
+    log::info!(
+        "mangohud_schema_detected path={} frametime_idx={} elapsed_idx={:?} elapsed_unit={:?} data_start_offset={}",
+        path.display(),
+        layout.schema.frametime_idx,
+        layout.schema.elapsed_idx,
+        layout.schema.elapsed_unit,
+        layout.data_start_offset
+    );
+    let mut parser = MangoHudLiveParser::new(layout.schema);
 
     loop {
         let n = match file.read(&mut read_buf).await {
@@ -275,7 +279,7 @@ pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u
 
     use tokio::time::{Duration, sleep};
 
-    let mut elapsed_idx_cache: Option<Option<usize>> = None;
+    let mut layout_cache: Option<MangoHudCsvLayout> = None;
 
     loop {
         let mut file = match fs::File::open(path) {
@@ -289,41 +293,36 @@ pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u
 
         let len = file.metadata()?.len();
 
-        if elapsed_idx_cache.is_none() {
-            let mut header_buf = String::new();
-
-            let hfile = match fs::File::open(path) {
-                Ok(file) => file,
+        if layout_cache.is_none() {
+            match try_detect_layout(path) {
+                Ok(Some(layout)) => layout_cache = Some(layout),
+                Ok(None) => {
+                    sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                     sleep(Duration::from_millis(500)).await;
                     continue;
                 }
                 Err(err) => return Err(err.into()),
-            };
-
-            let mut hreader = std::io::BufReader::new(hfile);
-            hreader.read_line(&mut header_buf)?;
-
-            if header_buf.trim().is_empty() {
-                sleep(Duration::from_millis(500)).await;
-                continue;
             }
-
-            let headers = split_csv_line(&header_buf);
-            elapsed_idx_cache = Some(find_header(&headers, &["elapsed_ms", "time_ms", "ms"]));
         }
 
-        let elapsed_idx = elapsed_idx_cache.flatten();
+        let layout = layout_cache
+            .as_ref()
+            .expect("layout_cache was initialized above");
+        let schema = &layout.schema;
+        let read_offset = start_offset.max(layout.data_start_offset);
 
-        if len > start_offset {
-            file.seek(SeekFrom::Start(start_offset))?;
+        if len > read_offset {
+            file.seek(SeekFrom::Start(read_offset))?;
             let mut reader = std::io::BufReader::new(file);
 
             let mut line = String::new();
 
-            if start_offset > 0 {
+            if read_offset > 0 {
                 let mut f2 = fs::File::open(path)?;
-                f2.seek(SeekFrom::Start(start_offset - 1))?;
+                f2.seek(SeekFrom::Start(read_offset - 1))?;
                 let mut b = [0u8; 1];
                 if f2.read_exact(&mut b).is_ok() && b[0] != b'\n' {
                     reader.read_line(&mut line)?;
@@ -333,13 +332,8 @@ pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u
             line.clear();
             if reader.read_line(&mut line)? > 0 {
                 let observed_ns = monotonic_now_ns().unwrap_or(0);
-                let columns = split_csv_line(&line);
-
-                if let Some(raw_elapsed) = elapsed_idx
-                    .and_then(|idx| columns.get(idx))
-                    .and_then(|value| value.parse::<f64>().ok())
-                {
-                    return Ok((raw_elapsed.max(0.0) as u64, observed_ns));
+                if let Some((Some(raw_elapsed_ms), _)) = parse_frame_line(schema, &line) {
+                    return Ok((raw_elapsed_ms, observed_ns));
                 }
 
                 return Ok((0, observed_ns));
@@ -347,6 +341,92 @@ pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u
         }
 
         sleep(Duration::from_millis(500)).await;
+    }
+}
+
+fn detect_layout(path: &Path) -> anyhow::Result<MangoHudCsvLayout> {
+    try_detect_layout(path)?.with_context(|| {
+        format!(
+            "MangoHud CSV did not contain a recognized frame header: {}",
+            path.display()
+        )
+    })
+}
+
+fn try_detect_layout(path: &Path) -> std::io::Result<Option<MangoHudCsvLayout>> {
+    let file = fs::File::open(path)?;
+    detect_layout_from_reader(std::io::BufReader::new(file))
+}
+
+fn detect_layout_from_reader<R: BufRead>(
+    mut reader: R,
+) -> std::io::Result<Option<MangoHudCsvLayout>> {
+    let mut offset = 0_u64;
+
+    loop {
+        let mut line = String::new();
+        let n = reader.read_line(&mut line)?;
+        if n == 0 {
+            return Ok(None);
+        }
+
+        let next_offset = offset + n as u64;
+        let headers = split_csv_line(&line);
+        if let Some(schema) = schema_from_headers(&headers) {
+            return Ok(Some(MangoHudCsvLayout {
+                schema,
+                data_start_offset: next_offset,
+            }));
+        }
+
+        offset = next_offset;
+    }
+}
+
+fn schema_from_headers(headers: &[String]) -> Option<MangoHudCsvSchema> {
+    let frametime_idx = find_header(headers, FRAMETIME_HEADERS)?;
+    let elapsed_idx = find_header(headers, ELAPSED_HEADERS);
+    let elapsed_unit = elapsed_idx
+        .and_then(|idx| headers.get(idx))
+        .map(|header| elapsed_unit_for_header(header))
+        .unwrap_or(ElapsedUnit::Milliseconds);
+
+    Some(MangoHudCsvSchema {
+        frametime_idx,
+        elapsed_idx,
+        elapsed_unit,
+    })
+}
+
+fn elapsed_unit_for_header(header: &str) -> ElapsedUnit {
+    match header.trim().to_ascii_lowercase().as_str() {
+        "elapsed" | "elapsed_ns" | "time_ns" | "ns" => ElapsedUnit::Nanoseconds,
+        _ => ElapsedUnit::Milliseconds,
+    }
+}
+
+fn parse_frame_line(schema: &MangoHudCsvSchema, line: &str) -> Option<(Option<u64>, f64)> {
+    let columns = split_csv_line(line);
+    let frametime_ms = columns
+        .get(schema.frametime_idx)
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite())?;
+
+    let elapsed_ms = schema
+        .elapsed_idx
+        .and_then(|idx| columns.get(idx))
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite())
+        .map(|raw| elapsed_value_to_ms(raw, schema.elapsed_unit));
+
+    Some((elapsed_ms, frametime_ms))
+}
+
+fn elapsed_value_to_ms(raw: f64, unit: ElapsedUnit) -> u64 {
+    let raw = raw.max(0.0);
+    match unit {
+        ElapsedUnit::Milliseconds => raw as u64,
+        ElapsedUnit::Nanoseconds => (raw / 1_000_000.0) as u64,
     }
 }
 
@@ -385,6 +465,136 @@ fn split_csv_line(line: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const MANGOHUD_WITH_METADATA: &str = "\
+os,cpu,gpu,ram,kernel,driver,cpuscheduler\n\
+'Gentoo Linux',Intel Core i5-10600K CPU @ 4.10GHz,Intel(R) UHD Graphics 630 (CML GT2),32148228,7.0.1-cachyos,,performance\n\
+fps,frametime,cpu_load,cpu_power,gpu_load,cpu_temp,gpu_temp,gpu_core_clock,gpu_mem_clock,gpu_vram_used,gpu_power,ram_used,swap_used,process_rss,cpu_mhz,elapsed\n\
+49.9594,20.0163,3.33333,0,0,44,0,950,0,0,0,10.039,2.04078,0,800,39991331\n\
+49.9079,20.0369,3.33333,0,0,44,0,950,0,0,0,10.039,2.04078,0,800,60029893\n";
+
+    #[test]
+    fn detects_mangohud_frame_header_after_metadata_rows() {
+        let layout =
+            detect_layout_from_reader(std::io::BufReader::new(MANGOHUD_WITH_METADATA.as_bytes()))
+                .unwrap()
+                .unwrap();
+
+        assert_eq!(layout.schema.frametime_idx, 1);
+        assert_eq!(layout.schema.elapsed_idx, Some(15));
+        assert_eq!(layout.schema.elapsed_unit, ElapsedUnit::Nanoseconds);
+        assert_eq!(
+            layout.data_start_offset,
+            MANGOHUD_WITH_METADATA
+                .lines()
+                .take(3)
+                .map(|line| line.len() + 1)
+                .sum::<usize>() as u64
+        );
+    }
+
+    #[test]
+    fn live_parser_uses_detected_schema_for_first_tailed_data_row() {
+        let layout =
+            detect_layout_from_reader(std::io::BufReader::new(MANGOHUD_WITH_METADATA.as_bytes()))
+                .unwrap()
+                .unwrap();
+        let mut parser = MangoHudLiveParser::new(layout.schema);
+
+        let first = parser
+            .parse_line("49.9594,20.0163,3.33333,0,0,44,0,950,0,0,0,10.039,2.04078,0,800,39991331")
+            .unwrap();
+        let second = parser
+            .parse_line("49.9079,20.0369,3.33333,0,0,44,0,950,0,0,0,10.039,2.04078,0,800,60029893")
+            .unwrap();
+
+        assert_eq!(first.elapsed_ms, 39);
+        assert_eq!(first.frametime_ms, 20.0163);
+        assert_eq!(second.elapsed_ms, 60);
+        assert_eq!(second.frametime_ms, 20.0369);
+    }
+
+    #[test]
+    fn read_frame_events_parses_mangohud_metadata_and_elapsed_nanoseconds() -> anyhow::Result<()> {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "stutter_test_mangohud_metadata_{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&temp_dir)?;
+        let path = temp_dir.join("mangohud.csv");
+        fs::File::create(&path)?.write_all(MANGOHUD_WITH_METADATA.as_bytes())?;
+
+        let events = read_frame_events(&path, 0, None, None, None)?;
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].elapsed_ms, 0);
+        assert_eq!(events[1].elapsed_ms, 21);
+        assert_eq!(events[0].frametime_ms, 20.0163);
+        assert_eq!(events[1].frametime_ms, 20.0369);
+
+        fs::remove_dir_all(temp_dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn read_frame_events_respects_offset_after_mangohud_metadata() -> anyhow::Result<()> {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "stutter_test_mangohud_offset_{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&temp_dir)?;
+        let path = temp_dir.join("mangohud.csv");
+        fs::File::create(&path)?.write_all(MANGOHUD_WITH_METADATA.as_bytes())?;
+        let layout = detect_layout(&path)?;
+
+        let events = read_frame_events(&path, layout.data_start_offset, None, None, None)?;
+        assert_eq!(events.len(), 2);
+
+        let row1_len = MANGOHUD_WITH_METADATA
+            .lines()
+            .nth(3)
+            .expect("sample has first frame row")
+            .len()
+            + 1;
+        let events = read_frame_events(
+            &path,
+            layout.data_start_offset + row1_len as u64,
+            None,
+            None,
+            None,
+        )?;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].frametime_ms, 20.0369);
+
+        fs::remove_dir_all(temp_dir).ok();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn poll_alignment_uses_mangohud_elapsed_nanoseconds() -> anyhow::Result<()> {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "stutter_test_mangohud_alignment_{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&temp_dir)?;
+        let path = temp_dir.join("mangohud.csv");
+        fs::File::create(&path)?.write_all(MANGOHUD_WITH_METADATA.as_bytes())?;
+        let layout = detect_layout(&path)?;
+
+        let (raw_ms, observed_ns) = poll_alignment(&path, layout.data_start_offset).await?;
+
+        assert_eq!(raw_ms, 39);
+        assert!(observed_ns > 0);
+
+        fs::remove_dir_all(temp_dir).ok();
+        Ok(())
+    }
 
     #[test]
     fn parses_header_based_frametime_csv() {
