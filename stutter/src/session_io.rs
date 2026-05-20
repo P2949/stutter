@@ -1072,11 +1072,8 @@ fn count_artifact_kind(kind: ArtifactKind, path: &Path) -> Result<usize> {
         ArtifactKind::WaylandPresentationEvents => {
             count_ndjson_file::<WaylandPresentationEventRecord>(path)
         }
-        ArtifactKind::DmaBufEvents => {
-            // DmaBufEventRecord not yet imported; use serde_json::Value as placeholder
-            count_ndjson_file::<serde_json::Value>(path)
-        }
-        ArtifactKind::GpuEngineSamples => count_ndjson_file::<serde_json::Value>(path),
+        ArtifactKind::DmaBufEvents => count_ndjson_file::<DmaBufEventRecord>(path),
+        ArtifactKind::GpuEngineSamples => count_ndjson_file::<GpuEngineSample>(path),
         ArtifactKind::Session | ArtifactKind::Metadata | ArtifactKind::DisplayTopology => {
             anyhow::bail!("artifact {:?} is not an NDJSON stream", kind)
         }

@@ -819,6 +819,7 @@ impl MonitorSession {
                                         .then_some(event.wait_start_ns),
                                     wait_done_ns: (event.wait_done_ns != 0)
                                         .then_some(event.wait_done_ns),
+                                    signal_ns: (event.signal_ns != 0).then_some(event.signal_ns),
                                     duration_ns: (event.flags
                                         & stutter_common::DRM_FENCE_HAS_DURATION
                                         != 0)
