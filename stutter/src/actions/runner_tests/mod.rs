@@ -108,16 +108,19 @@ impl TuningAction for TestAction<'_> {
         })
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
-        self.log.events.borrow_mut().push("apply");
-        if self.should_fail_apply {
-            anyhow::bail!("apply intentional failure");
-        }
-        self.log.mutated.set(true);
-        Ok(RollbackToken::CpuAffinityRestoreFile {
-            path: PathBuf::from("/tmp/restore"),
-            affected_tasks: self.affected_tasks,
-        })
+    fn apply(&self) -> crate::actions::ApplyResult {
+        let res = (|| {
+            self.log.events.borrow_mut().push("apply");
+            if self.should_fail_apply {
+                anyhow::bail!("apply intentional failure");
+            }
+            self.log.mutated.set(true);
+            Ok(RollbackToken::CpuAffinityRestoreFile {
+                path: PathBuf::from("/tmp/restore"),
+                affected_tasks: self.affected_tasks,
+            })
+        })();
+        res.map_err(Into::into)
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {

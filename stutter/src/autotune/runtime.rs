@@ -1,6 +1,8 @@
+#[cfg(test)]
+use std::path::PathBuf;
 use std::{
     collections::{BTreeMap, VecDeque},
-    path::{Path, PathBuf},
+    path::Path,
     time::Duration,
 };
 
@@ -38,12 +40,15 @@ pub(crate) use config::validate_runtime_config;
 pub use config::{AutotuneRuntimeConfig, daemon_config_for_runtime_mode};
 pub use daemon_state::daemon_phase_from_controller_phase;
 pub(crate) use decision_view::data_quality_label;
+#[cfg(test)]
 pub(crate) use session::finish_autotune_controller_session;
 pub use session::{AutotuneControllerExit, run_autotune_controller_session};
 pub(crate) use stream::emit_decision_stream_entry;
 pub use stream::{AutotuneDecisionStreamEntry, AutotuneDryRunPlanFileSummary};
 pub use target_state::RuntimeTargetState;
 
+#[cfg(test)]
+use self::planning::top_denied_reason_for_plan;
 use self::{
     daemon_state::{history_mode, history_phase, history_situation},
     decision_view::{
@@ -53,9 +58,10 @@ use self::{
     history::{LifecycleHistoryEventInput, RuntimeHistoryContext},
     planning::{
         plan_has_deny_reason, select_best_candidate_for_situation, simulated_dry_run_records,
-        top_denied_reason_for_plan,
     },
 };
+#[cfg(test)]
+use crate::autotune::state::SituationKind;
 use crate::{
     autotune::{
         active_config::{ActiveConfigMatch, ActiveConfigMatchInput},
@@ -80,7 +86,7 @@ use crate::{
         },
         planner::{CandidateDenyReason, CandidatePlanner, PlanResult, PlannerInput},
         rolling_window::RollingWindow,
-        state::{ControllerPhase, SituationKind},
+        state::ControllerPhase,
     },
     daemon::{
         DaemonPolicy,

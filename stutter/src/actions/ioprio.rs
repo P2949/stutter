@@ -4,12 +4,14 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::actions::{
-    ActionId, ActionState, ActionWarning, IoPrioRestoreRecord, RollbackToken, SafetyClass,
-    TaskIdentity, TuningAction,
+    ActionId, ActionState, ActionWarning, ApplyResult, IoPrioRestoreRecord, PartialApplyError,
+    RestoreIdentityStatus, RollbackToken, SafetyClass, TaskIdentity, TaskRestoreIdentity,
+    TuningAction,
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
         token_restore_result,
     },
+    verify_task_identity,
 };
 
 const IOPRIO_WHO_PROCESS: libc::c_int = 1;
@@ -185,22 +187,90 @@ impl RollbackHandler for IoPrioRollbackHandler {
             anyhow::bail!("I/O priority rollback handler does not support {token:?}");
         };
 
+        let mut restored = 0;
+        let mut skipped_dead = 0;
+        let mut skipped_identity_mismatch = 0;
+        let mut legacy_unverified = 0;
+        let mut errors = 0;
+        let mut messages = Vec::new();
+
         for record in records {
-            set_task_ioprio(record.tid, record.original_ioprio).with_context(|| {
-                format!(
-                    "failed to restore original I/O priority={} for tid={}",
-                    record.original_ioprio, record.tid
-                )
-            })?;
+            let status = verify_task_identity(Path::new("/proc"), &record.identity);
+            match status {
+                RestoreIdentityStatus::Missing => {
+                    skipped_dead += 1;
+                    log::debug!(
+                        "ioprio restore skipped: task tid={} is missing/dead",
+                        record.identity.tid
+                    );
+                    continue;
+                }
+                RestoreIdentityStatus::Mismatch { reason } => {
+                    skipped_identity_mismatch += 1;
+                    let msg = format!(
+                        "ioprio restore identity mismatch for tid={}: {}",
+                        record.identity.tid, reason
+                    );
+                    log::warn!("{}", msg);
+                    messages.push(msg);
+                    continue;
+                }
+                RestoreIdentityStatus::UnknownLegacy => {
+                    legacy_unverified += 1;
+                    log::warn!(
+                        "ioprio restore running in legacy mode (unverified identity) for tid={}",
+                        record.identity.tid
+                    );
+                }
+                RestoreIdentityStatus::SameTask => {}
+            }
+
+            match set_task_ioprio(record.identity.tid, record.original_ioprio) {
+                Ok(_) => {
+                    restored += 1;
+                }
+                Err(e) => {
+                    if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+                        if io_err.kind() == std::io::ErrorKind::NotFound
+                            || io_err.raw_os_error() == Some(3)
+                        {
+                            skipped_dead += 1;
+                            log::debug!(
+                                "ioprio restore skipped: task tid={} is dead",
+                                record.identity.tid
+                            );
+                        } else {
+                            errors += 1;
+                            let msg = format!(
+                                "failed to restore original I/O priority={} for tid={}: {}",
+                                record.original_ioprio, record.identity.tid, io_err
+                            );
+                            log::error!("{}", msg);
+                            messages.push(msg);
+                        }
+                    } else {
+                        errors += 1;
+                        let msg = format!(
+                            "failed to restore original I/O priority={} for tid={}: {}",
+                            record.original_ioprio, record.identity.tid, e
+                        );
+                        log::error!("{}", msg);
+                        messages.push(msg);
+                    }
+                }
+            }
         }
 
-        Ok(token_restore_result(
-            self.id(),
-            token,
-            records.len(),
-            0,
-            Vec::new(),
-        ))
+        Ok(RollbackResult {
+            handler_id: self.id(),
+            restore_path: token.restore_path().cloned().unwrap_or_default(),
+            restored,
+            skipped_dead,
+            skipped_identity_mismatch,
+            legacy_unverified,
+            errors,
+            messages,
+        })
     }
 }
 
@@ -338,26 +408,45 @@ impl TuningAction for IoPrioAction {
         self.dry_run_at(Path::new("/proc"), &self.policy)
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
-        let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &self.policy)?;
-        let requested = self.ioprio.encode()?;
-        let mut records = Vec::new();
+    fn apply(&self) -> ApplyResult {
+        let res = (|| {
+            let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &self.policy)?;
+            let requested = self.ioprio.encode()?;
+            let filtered_snapshots: Vec<_> = snapshots
+                .into_iter()
+                .filter(|(snapshot, _)| snapshot.current_ioprio != requested)
+                .collect();
 
-        for (snapshot, _) in snapshots {
-            if snapshot.current_ioprio == requested {
-                continue;
-            }
+            let tx = crate::actions::transaction::ApplyTransaction::new();
+            tx.apply_loop(
+                filtered_snapshots,
+                |(snapshot, _)| {
+                    let identity = TaskRestoreIdentity {
+                        tid: snapshot.tid,
+                        comm: snapshot
+                            .comm
+                            .clone()
+                            .unwrap_or_else(|| "unknown".to_owned()),
+                        process_starttime_ticks: None,
+                        task_starttime_ticks: snapshot.starttime_ticks,
+                    };
 
-            set_task_ioprio(snapshot.tid, requested)
-                .with_context(|| format!("failed to set I/O priority for tid={}", snapshot.tid))?;
-
-            records.push(IoPrioRestoreRecord {
-                tid: snapshot.tid,
-                original_ioprio: snapshot.current_ioprio,
-            });
-        }
-
-        Ok(RollbackToken::IoPrioRestore { records })
+                    set_task_ioprio(snapshot.tid, requested)
+                        .map_err(|e| {
+                            anyhow::Error::from(e).context(format!(
+                                "failed to set I/O priority for tid={}",
+                                snapshot.tid
+                            ))
+                        })
+                        .map(|_| IoPrioRestoreRecord {
+                            identity,
+                            original_ioprio: snapshot.current_ioprio,
+                        })
+                },
+                |records| RollbackToken::IoPrioRestore { records },
+            )
+        })();
+        res
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
@@ -370,10 +459,10 @@ impl TuningAction for IoPrioAction {
         };
 
         for record in records {
-            set_task_ioprio(record.tid, record.original_ioprio).with_context(|| {
+            set_task_ioprio(record.identity.tid, record.original_ioprio).with_context(|| {
                 format!(
                     "failed to restore original I/O priority={} for tid={}",
-                    record.original_ioprio, record.tid
+                    record.original_ioprio, record.identity.tid
                 )
             })?;
         }
@@ -931,11 +1020,21 @@ mod tests {
         let token = RollbackToken::IoPrioRestore {
             records: vec![
                 IoPrioRestoreRecord {
-                    tid: 1,
+                    identity: TaskRestoreIdentity {
+                        tid: 1,
+                        comm: "test".to_owned(),
+                        process_starttime_ticks: None,
+                        task_starttime_ticks: None,
+                    },
                     original_ioprio: IoPrioValue::best_effort(4).encode().unwrap(),
                 },
                 IoPrioRestoreRecord {
-                    tid: 2,
+                    identity: TaskRestoreIdentity {
+                        tid: 2,
+                        comm: "test".to_owned(),
+                        process_starttime_ticks: None,
+                        task_starttime_ticks: None,
+                    },
                     original_ioprio: IoPrioValue::idle().encode().unwrap(),
                 },
             ],

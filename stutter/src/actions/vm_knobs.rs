@@ -323,8 +323,9 @@ impl TuningAction for VmKnobAction {
         self.dry_run_at(&VmKnobPolicy::default())
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
+    fn apply(&self) -> crate::actions::ApplyResult {
         self.apply_with_policy(&VmKnobPolicy::default())
+            .map_err(Into::into)
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {

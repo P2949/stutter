@@ -8,6 +8,7 @@ pub use crate::autotune::planning::{
     },
     planner::{CandidatePlanner, PlannerInput},
 };
+#[cfg(test)]
 pub(crate) use crate::autotune::planning::{
     evaluate::evaluate_proposals_with_runner, ranking::sort_candidate_evaluations,
 };

@@ -118,15 +118,18 @@ impl TuningAction for TestAction {
         })
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
-        if self.should_fail_apply {
-            anyhow::bail!("intentional apply failure");
-        }
+    fn apply(&self) -> crate::actions::ApplyResult {
+        let res = (|| {
+            if self.should_fail_apply {
+                anyhow::bail!("intentional apply failure");
+            }
 
-        Ok(RollbackToken::CpuAffinityRestoreFile {
-            path: PathBuf::from("/tmp/stutter-test-restore.json"),
-            affected_tasks: self.affected_tasks,
-        })
+            Ok(RollbackToken::CpuAffinityRestoreFile {
+                path: PathBuf::from("/tmp/stutter-test-restore.json"),
+                affected_tasks: self.affected_tasks,
+            })
+        })();
+        res.map_err(Into::into)
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {

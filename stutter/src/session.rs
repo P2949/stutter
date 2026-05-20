@@ -112,6 +112,7 @@ pub(crate) mod ticks;
 pub(crate) mod ui;
 
 pub use monitor_session::MonitorSession;
+#[cfg(test)]
 pub(crate) use ticks::foreground::foreground_identity_changed;
 
 const LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS: u64 = 5;

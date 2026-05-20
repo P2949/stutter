@@ -1,8 +1,4 @@
-use super::{
-    classify::ProcessIdentity,
-    groups::FocusGroupKind,
-    snapshot::{FocusProcess, FocusSnapshot},
-};
+use super::{groups::FocusGroupKind, snapshot::FocusProcess};
 use crate::process_tree::TaskClass as SystemTaskClass;
 
 pub(super) fn contains_game_runtime_text(process: &FocusProcess) -> bool {

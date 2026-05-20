@@ -545,7 +545,57 @@ where
                 PolicyIntent::Apply,
                 &descriptor,
             )?;
-            let rollback = action.apply().map_err(ActionError::apply)?;
+            let apply_res = action.apply();
+            let rollback = match apply_res {
+                Ok(token) => token,
+                Err(partial_err) => {
+                    let source = partial_err.source;
+                    if let Some(token) = partial_err.rollback {
+                        audit_event.affected_tasks = token.affected_tasks();
+                        audit_event.restore_path = token.restore_path().cloned();
+                        match action.rollback(&token) {
+                            Ok(()) => {
+                                append_runner_audit_event(
+                                    audit_path,
+                                    &audit_event,
+                                    RunnerAuditEventUpdate::new(
+                                        Some(crate::actions::ActionPhase::Rollback),
+                                        true,
+                                        token.affected_tasks(),
+                                        token.restore_path().cloned(),
+                                        None,
+                                        "partial rollback completed after apply failure",
+                                    ),
+                                );
+                                return Err(ActionError::apply(format!(
+                                    "apply failed: {}; partial rollback completed successfully",
+                                    source
+                                )));
+                            }
+                            Err(rollback_err) => {
+                                append_runner_audit_event(
+                                    audit_path,
+                                    &audit_event,
+                                    RunnerAuditEventUpdate::new(
+                                        Some(crate::actions::ActionPhase::Rollback),
+                                        false,
+                                        token.affected_tasks(),
+                                        token.restore_path().cloned(),
+                                        Some("EmergencyRollbackFailed".to_owned()),
+                                        "partial rollback failed after apply failure",
+                                    ),
+                                );
+                                return Err(ActionError::emergency_rollback(
+                                    format!("apply failed: {source}"),
+                                    rollback_err,
+                                ));
+                            }
+                        }
+                    } else {
+                        return Err(ActionError::apply(source));
+                    }
+                }
+            };
             audit_event.affected_tasks = rollback.affected_tasks();
             audit_event.restore_path = rollback.restore_path().cloned();
 

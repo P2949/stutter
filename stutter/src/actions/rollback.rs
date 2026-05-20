@@ -490,7 +490,12 @@ mod tests {
                 "nice-rollback",
                 RollbackToken::NiceRestore {
                     records: vec![crate::actions::NiceRestoreRecord {
-                        tid: 1,
+                        identity: crate::actions::TaskRestoreIdentity {
+                            tid: 1,
+                            comm: "test".to_owned(),
+                            process_starttime_ticks: None,
+                            task_starttime_ticks: None,
+                        },
                         original_nice: 0,
                     }],
                 },
@@ -499,7 +504,12 @@ mod tests {
                 "ioprio-rollback",
                 RollbackToken::IoPrioRestore {
                     records: vec![crate::actions::IoPrioRestoreRecord {
-                        tid: 1,
+                        identity: crate::actions::TaskRestoreIdentity {
+                            tid: 1,
+                            comm: "test".to_owned(),
+                            process_starttime_ticks: None,
+                            task_starttime_ticks: None,
+                        },
                         original_ioprio: 0,
                     }],
                 },
@@ -508,7 +518,12 @@ mod tests {
                 "uclamp-rollback",
                 RollbackToken::UclampRestore {
                     records: vec![crate::actions::UclampRestoreRecord {
-                        tid: 1,
+                        identity: crate::actions::TaskRestoreIdentity {
+                            tid: 1,
+                            comm: "test".to_owned(),
+                            process_starttime_ticks: None,
+                            task_starttime_ticks: None,
+                        },
                         original_util_min: 0,
                         original_util_max: 1024,
                     }],
@@ -518,7 +533,12 @@ mod tests {
                 "cgroup-rollback",
                 RollbackToken::CgroupRestore {
                     records: vec![crate::actions::CgroupRestoreRecord {
-                        pid: 1,
+                        identity: crate::actions::TaskRestoreIdentity {
+                            tid: 1,
+                            comm: "test".to_owned(),
+                            process_starttime_ticks: None,
+                            task_starttime_ticks: None,
+                        },
                         original_cgroup: PathBuf::from("/sys/fs/cgroup"),
                     }],
                 },

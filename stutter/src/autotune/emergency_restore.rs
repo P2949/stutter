@@ -546,7 +546,7 @@ fn restore_nice_records(records: &[NiceRestoreRecord]) -> anyhow::Result<Rollbac
         let rc = unsafe {
             libc::setpriority(
                 libc::PRIO_PROCESS,
-                record.tid as libc::id_t,
+                record.identity.tid as libc::id_t,
                 record.original_nice as libc::c_int,
             )
         };
@@ -555,7 +555,7 @@ fn restore_nice_records(records: &[NiceRestoreRecord]) -> anyhow::Result<Rollbac
             return Err(std::io::Error::last_os_error()).with_context(|| {
                 format!(
                     "failed to restore nice={} for tid={}",
-                    record.original_nice, record.tid
+                    record.original_nice, record.identity.tid
                 )
             });
         }
@@ -576,7 +576,7 @@ fn restore_ioprio_records(
             libc::syscall(
                 libc::SYS_ioprio_set,
                 IOPRIO_WHO_PROCESS,
-                record.tid as libc::c_int,
+                record.identity.tid as libc::c_int,
                 record.original_ioprio as libc::c_int,
             )
         };
@@ -585,7 +585,7 @@ fn restore_ioprio_records(
             return Err(std::io::Error::last_os_error()).with_context(|| {
                 format!(
                     "failed to restore I/O priority={} for tid={}",
-                    record.original_ioprio, record.tid
+                    record.original_ioprio, record.identity.tid
                 )
             });
         }
@@ -615,7 +615,7 @@ fn restore_uclamp_records(
         let rc = unsafe {
             libc::syscall(
                 libc::SYS_sched_setattr,
-                record.tid as libc::pid_t,
+                record.identity.tid as libc::pid_t,
                 &mut attr as *mut SchedAttr,
                 0u32,
             )
@@ -625,7 +625,7 @@ fn restore_uclamp_records(
             return Err(std::io::Error::last_os_error()).with_context(|| {
                 format!(
                     "failed to restore uclamp min={} max={} for tid={}",
-                    record.original_util_min, record.original_util_max, record.tid
+                    record.original_util_min, record.original_util_max, record.identity.tid
                 )
             });
         }
@@ -694,10 +694,10 @@ fn restore_cgroup_records(
 
     for record in records {
         let cgroup_procs = record.original_cgroup.join("cgroup.procs");
-        write_sysfs_value(&cgroup_procs, &record.pid.to_string()).with_context(|| {
+        write_sysfs_value(&cgroup_procs, &record.identity.tid.to_string()).with_context(|| {
             format!(
                 "failed to restore pid={} to cgroup {}",
-                record.pid,
+                record.identity.tid,
                 record.original_cgroup.display()
             )
         })?;
@@ -910,7 +910,12 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
         }
         RollbackToken::NiceRestore { records } => records
             .iter()
-            .map(|record| format!("sudo renice -n {} -p {}", record.original_nice, record.tid))
+            .map(|record| {
+                format!(
+                    "sudo renice -n {} -p {}",
+                    record.original_nice, record.identity.tid
+                )
+            })
             .collect::<Vec<_>>()
             .join(" && "),
         RollbackToken::IoPrioRestore { records } => records
@@ -920,7 +925,7 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
                     "sudo python3 -c 'import os; os.syscall({},{},{},{})'",
                     libc::SYS_ioprio_set,
                     IOPRIO_WHO_PROCESS,
-                    record.tid,
+                    record.identity.tid,
                     record.original_ioprio
                 )
             })
@@ -946,7 +951,7 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
             .map(|record| {
                 format!(
                     "printf '%s' {} | sudo tee {}/cgroup.procs >/dev/null",
-                    record.pid,
+                    record.identity.tid,
                     shell_quote_path(&record.original_cgroup)
                 )
             })
@@ -1069,7 +1074,7 @@ mod tests {
     use crate::{
         actions::{
             ActionId, CpuPowerRestoreRecord, GpuPowerRestoreRecord, IrqAffinityRestoreRecord,
-            NiceRestoreRecord, VmKnobRestoreRecord,
+            NiceRestoreRecord, TaskRestoreIdentity, VmKnobRestoreRecord,
         },
         autotune::controller_journal::{
             ControllerJournalRecord, ControllerJournalState, read_controller_journal,
@@ -1169,7 +1174,12 @@ mod tests {
             "nice:set:5:targets:1",
             RollbackToken::NiceRestore {
                 records: vec![NiceRestoreRecord {
-                    tid: 123,
+                    identity: TaskRestoreIdentity {
+                        tid: 123,
+                        comm: "test".to_owned(),
+                        process_starttime_ticks: None,
+                        task_starttime_ticks: None,
+                    },
                     original_nice: 0,
                 }],
             },
@@ -1206,7 +1216,12 @@ mod tests {
                 "nice:set:5:targets:1",
                 Some(RollbackToken::NiceRestore {
                     records: vec![NiceRestoreRecord {
-                        tid: 123,
+                        identity: TaskRestoreIdentity {
+                            tid: 123,
+                            comm: "test".to_owned(),
+                            process_starttime_ticks: None,
+                            task_starttime_ticks: None,
+                        },
                         original_nice: 0,
                     }],
                 }),
@@ -1439,7 +1454,12 @@ mod tests {
     fn manual_commands_cover_non_cpu_affinity_tokens() {
         let nice = manual_restore_command_for_token(&RollbackToken::NiceRestore {
             records: vec![NiceRestoreRecord {
-                tid: 7,
+                identity: TaskRestoreIdentity {
+                    tid: 7,
+                    comm: "test".to_owned(),
+                    process_starttime_ticks: None,
+                    task_starttime_ticks: None,
+                },
                 original_nice: 3,
             }],
         });

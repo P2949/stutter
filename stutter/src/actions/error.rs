@@ -671,6 +671,35 @@ impl std::error::Error for ActionError {}
 
 pub type ActionResult<T> = anyhow::Result<T>;
 
+#[derive(Debug)]
+pub struct PartialApplyError {
+    pub source: anyhow::Error,
+    pub rollback: Option<crate::actions::RollbackToken>,
+}
+
+impl std::fmt::Display for PartialApplyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.source)
+    }
+}
+
+impl std::error::Error for PartialApplyError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+impl From<anyhow::Error> for PartialApplyError {
+    fn from(source: anyhow::Error) -> Self {
+        Self {
+            source,
+            rollback: None,
+        }
+    }
+}
+
+pub type ApplyResult = Result<crate::actions::RollbackToken, PartialApplyError>;
+
 #[cfg(test)]
 mod tests {
     use super::*;

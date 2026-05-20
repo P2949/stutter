@@ -116,7 +116,7 @@ impl LowRiskActionExecutor for CpuAffinityLowRiskExecutor {
     }
 
     fn apply(&mut self) -> anyhow::Result<RollbackToken> {
-        self.action.apply()
+        Ok(self.action.apply()?)
     }
 
     fn rollback(&mut self, token: &RollbackToken) -> anyhow::Result<()> {

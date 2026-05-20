@@ -12,9 +12,11 @@ pub(crate) mod providers;
 pub(crate) mod resolver;
 
 pub use model::{
-    DEFAULT_FOREGROUND_POLL_MS, ForegroundAvailableInput, ForegroundEvent, ForegroundEventInput,
-    ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot,
+    DEFAULT_FOREGROUND_POLL_MS, ForegroundEvent, ForegroundProviderStatus, ForegroundSource,
+    ForegroundWindowSnapshot,
 };
+#[cfg(test)]
+pub(crate) use model::{ForegroundAvailableInput, ForegroundEventInput};
 #[cfg(test)]
 pub(crate) use parse::x11::parse_x11_quoted_strings;
 #[cfg(test)]

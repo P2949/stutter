@@ -476,7 +476,12 @@ mod tests {
     fn rollback_token_safety_class_marks_cgroup_as_medium_risk() {
         let cgroup = RollbackToken::CgroupRestore {
             records: vec![crate::actions::CgroupRestoreRecord {
-                pid: 1234,
+                identity: crate::actions::TaskRestoreIdentity {
+                    tid: 1234,
+                    comm: "test".to_owned(),
+                    process_starttime_ticks: None,
+                    task_starttime_ticks: None,
+                },
                 original_cgroup: PathBuf::from("/user.slice/app.scope"),
             }],
         };

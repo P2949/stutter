@@ -210,18 +210,21 @@ impl TuningAction for CpuAffinityProfileAction {
         })
     }
 
-    fn apply(&self) -> anyhow::Result<RollbackToken> {
-        self.preflight()?;
-        let result = crate::profiles::apply_managed_profile_to_tree(
-            self.tree_pid,
-            &self.profile,
-            self.force_restore_overwrite,
-            false,
-        )?;
-        Ok(RollbackToken::CpuAffinityRestoreFile {
-            path: crate::profile_restore::default_restore_path(),
-            affected_tasks: result.affected_tasks(),
-        })
+    fn apply(&self) -> crate::actions::ApplyResult {
+        let res: Result<RollbackToken, crate::actions::PartialApplyError> = (|| {
+            self.preflight()?;
+            let result = crate::profiles::apply_managed_profile_to_tree(
+                self.tree_pid,
+                &self.profile,
+                self.force_restore_overwrite,
+                false,
+            )?;
+            Ok(RollbackToken::CpuAffinityRestoreFile {
+                path: crate::profile_restore::default_restore_path(),
+                affected_tasks: result.affected_tasks(),
+            })
+        })();
+        res
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {

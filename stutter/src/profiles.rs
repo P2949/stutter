@@ -33,7 +33,8 @@ pub(crate) use parse::parse_profiles;
 pub use parse::{load_first_profile, load_profiles};
 pub use render::{generate_topology_template, render_profiles_toml};
 use warnings::warn_profile_offline_cpus;
-pub use warnings::{profile_offline_cpu_warnings, profile_rule_overlap_warnings};
+#[cfg(test)]
+pub(crate) use warnings::{profile_offline_cpu_warnings, profile_rule_overlap_warnings};
 
 #[derive(Clone, Debug)]
 pub struct Profile {

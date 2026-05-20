@@ -8,11 +8,6 @@ mod public_api;
 mod scanners;
 mod unwrap_expect;
 
-use scanners::{
-    ForbiddenRustPath, RustPathOccurrence, assert_sources_do_not_reference_paths,
-    format_architecture_violation, rust_files_under, rust_path_occurrences,
-};
-
 const RUST_FILE_SIZE_LIMIT_LINES: usize = 1_000;
 
 fn crate_src_root() -> PathBuf {

@@ -13,15 +13,18 @@ use std::{
 use anyhow::Context;
 
 use crate::{
-    actions::{RollbackToken, TaskIdentity, runner::ActionRunPolicy},
+    actions::runner::ActionRunPolicy,
     autotune::{
         apply::{executor_for_apply_candidate, executor_for_candidate_preview},
-        candidate::{
-            ApplyEligibility, CandidateAction, CandidateDryRunRecord,
-            try_promote_to_apply_candidate,
-        },
+        candidate::{ApplyEligibility, CandidateDryRunRecord, try_promote_to_apply_candidate},
     },
-    daemon_policy::{ActionDescriptor, DaemonPolicy, DaemonPolicyContext, PolicyIntent},
+    daemon_policy::{ActionDescriptor, PolicyIntent},
+};
+#[cfg(test)]
+use crate::{
+    actions::{RollbackToken, TaskIdentity},
+    autotune::candidate::CandidateAction,
+    daemon_policy::{DaemonPolicy, DaemonPolicyContext},
 };
 
 mod allowlist;
@@ -42,6 +45,7 @@ pub use worker::{
     PrivilegedWorkerHandle, default_privileged_worker_socket_path, run_privileged_worker,
     run_privileged_worker_with_service,
 };
+#[cfg(test)]
 pub(crate) use worker::{
     execute_privileged_worker_request, execute_privileged_worker_request_with_audit_sink,
 };
