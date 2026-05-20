@@ -468,6 +468,53 @@ mod tests {
     }
 
     #[test]
+    fn sway_tree_parser_does_not_treat_empty_app_id_or_class_as_medium_confidence() {
+        let json = r#"
+        {
+          "id": 1,
+          "name": "root",
+          "type": "root",
+          "focused": false,
+          "nodes": [
+            {
+              "id": 2,
+              "name": "misc",
+              "type": "workspace",
+              "focused": false,
+              "nodes": [
+                {
+                  "id": 3,
+                  "name": "unknown window",
+                  "type": "con",
+                  "focused": true,
+                  "pid": null,
+                  "app_id": "   ",
+                  "window": null,
+                  "window_properties": {
+                    "class": "",
+                    "instance": "   ",
+                    "title": ""
+                  },
+                  "nodes": [],
+                  "floating_nodes": []
+                }
+              ],
+              "floating_nodes": []
+            }
+          ],
+          "floating_nodes": []
+        }
+        "#;
+
+        let provider = SwayForegroundProvider::new();
+        let snapshot = provider.sample_from_tree_json(5_500, json);
+
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Available);
+        assert_eq!(snapshot.pid, None);
+        assert_eq!(snapshot.confidence, 0.35);
+    }
+
+    #[test]
     fn sway_tree_parser_reports_unavailable_when_no_focused_node_exists() {
         let json = r#"
         {

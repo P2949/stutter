@@ -25,6 +25,16 @@ pub(crate) fn foreground_identity_changed(
         || foreground_stale_state(old) != foreground_stale_state(new)
 }
 
+pub(crate) fn foreground_event_for_final_metadata(
+    current: Option<&crate::foreground::ForegroundWindowSnapshot>,
+    last_recorded: Option<&crate::foreground::ForegroundEvent>,
+    include_title: bool,
+) -> Option<crate::foreground::ForegroundEvent> {
+    current
+        .and_then(|snapshot| snapshot.to_event(include_title))
+        .or_else(|| last_recorded.cloned())
+}
+
 impl MonitorSession {
     fn foreground_event_for_snapshot(
         &self,

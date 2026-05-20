@@ -192,3 +192,74 @@ fn foreground_identity_changes_when_fresh_snapshot_becomes_stale_once() {
 
     assert!(!foreground_identity_changed(Some(&old), &still_stale));
 }
+
+#[test]
+fn final_foreground_metadata_prefers_current_snapshot_when_stale_age_did_not_emit() {
+    let mut last_recorded_snapshot = foreground_snapshot(ForegroundSnapshotTestInput {
+        elapsed_ms: 600,
+        status: crate::foreground::ForegroundProviderStatus::Available,
+        pid: Some(4242),
+        app_id: Some("steam"),
+        class: Some("Steam"),
+        window_id: Some("42"),
+        workspace: Some("games"),
+        confidence: 0.50,
+    });
+    last_recorded_snapshot.stale_ms = Some(500);
+    last_recorded_snapshot.reason = "using stale foreground snapshot from 500ms ago".to_owned();
+
+    let mut current_snapshot = last_recorded_snapshot.clone();
+    current_snapshot.elapsed_ms = 2_100;
+    current_snapshot.stale_ms = Some(2_000);
+    current_snapshot.confidence = 0.25;
+    current_snapshot.reason = "using stale foreground snapshot from 2000ms ago".to_owned();
+
+    assert!(!foreground_identity_changed(
+        Some(&last_recorded_snapshot),
+        &current_snapshot
+    ));
+
+    let last_recorded_event = last_recorded_snapshot.to_event(false).unwrap();
+    let final_event = crate::session::ticks::foreground::foreground_event_for_final_metadata(
+        Some(&current_snapshot),
+        Some(&last_recorded_event),
+        false,
+    )
+    .unwrap();
+
+    assert_eq!(final_event.elapsed_ms, 2_100);
+    assert_eq!(final_event.pid, Some(4242));
+    assert_eq!(final_event.window_id.as_deref(), Some("42"));
+    assert_eq!(final_event.stale_ms, Some(2_000));
+    assert_eq!(final_event.confidence, 0.25);
+    assert_eq!(
+        final_event.reason.as_str(),
+        "using stale foreground snapshot from 2000ms ago"
+    );
+}
+
+#[test]
+fn final_foreground_metadata_falls_back_to_last_recorded_event_without_current_snapshot() {
+    let snapshot = foreground_snapshot(ForegroundSnapshotTestInput {
+        elapsed_ms: 600,
+        status: crate::foreground::ForegroundProviderStatus::Available,
+        pid: Some(4242),
+        app_id: Some("steam"),
+        class: Some("Steam"),
+        window_id: Some("42"),
+        workspace: Some("games"),
+        confidence: 0.95,
+    });
+    let last_recorded_event = snapshot.to_event(false).unwrap();
+
+    let final_event = crate::session::ticks::foreground::foreground_event_for_final_metadata(
+        None,
+        Some(&last_recorded_event),
+        false,
+    )
+    .unwrap();
+
+    assert_eq!(final_event.elapsed_ms, 600);
+    assert_eq!(final_event.pid, Some(4242));
+    assert_eq!(final_event.window_id.as_deref(), Some("42"));
+}
