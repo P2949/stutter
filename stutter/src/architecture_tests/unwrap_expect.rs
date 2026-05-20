@@ -59,7 +59,10 @@ fn production_unwrap_expect_calls_in_source(
 }
 
 fn is_test_source_path(path: &str) -> bool {
-    path.ends_with("_tests.rs") || path.ends_with("/tests.rs") || path.contains("/tests/")
+    path.ends_with("_tests.rs")
+        || path.ends_with("/tests.rs")
+        || path.contains("/tests/")
+        || path.split('/').any(|segment| segment.ends_with("_tests"))
 }
 
 #[test]
@@ -116,6 +119,11 @@ mod tests {
     assert!(
         production_unwrap_expect_calls_in_source(source, "src/process/tests/scanner.rs").is_empty(),
         "child test modules under tests/ must not be scanned as production code"
+    );
+    assert!(
+        production_unwrap_expect_calls_in_source(source, "src/regression_tests/support.rs")
+            .is_empty(),
+        "child test modules under *_tests/ must not be scanned as production code"
     );
 }
 
