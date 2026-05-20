@@ -8,11 +8,13 @@ use super::{
         add_foreground_fallback_group_if_needed, is_foreground_fallback_group,
         process_name_looks_like_xwayland,
     },
-    process_scan::{
-        build_tree_groups_for_kind, compare_process_preference, display_name_for_group,
-        is_active_foreground_candidate, is_browser_class, is_compile_class, is_game_class,
-        is_game_runtime_process, is_non_service_interactive_class, is_stable_build_root,
+    group_build::{
+        build_tree_groups_for_kind, compare_process_preference, is_stable_build_root,
         nearest_compile_session_root, root_pids_from_members, stable_build_root_rank,
+    },
+    process_scan::{
+        display_name_for_group, is_active_foreground_candidate, is_browser_class, is_compile_class,
+        is_game_class, is_game_runtime_process, is_non_service_interactive_class,
     },
     safety::{
         is_critical_realtime_process, is_too_broad_system_service_group,
