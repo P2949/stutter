@@ -6,6 +6,7 @@
 use std::process::Command;
 
 use crate::foreground::{
+    command::resolve_trusted_foreground_helper,
     model::{ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot},
     parse::x11::{parse_x11_active_window_id, parse_x11_window_properties, x11_confidence},
     provider::ForegroundProvider,
@@ -36,7 +37,7 @@ impl X11ForegroundProvider {
     }
 
     pub fn is_detected() -> bool {
-        std::env::var("DISPLAY").is_ok() && which::which("xprop").is_ok()
+        std::env::var("DISPLAY").is_ok() && resolve_trusted_foreground_helper("xprop").is_some()
     }
 
     pub fn sample_from_xprop_outputs(
@@ -93,21 +94,21 @@ impl ForegroundProvider for X11ForegroundProvider {
             };
         }
 
-        if which::which(&self.xprop).is_err() {
+        let Some(xprop) = resolve_trusted_foreground_helper(&self.xprop) else {
             return ForegroundWindowSnapshot {
                 elapsed_ms,
                 source: Some(ForegroundSource::X11),
                 status: ForegroundProviderStatus::Unavailable,
                 confidence: 0.0,
                 reason: format!(
-                    "{} was not found in PATH; X11 foreground provider is unavailable",
+                    "{} was not found in trusted foreground helper paths; X11 foreground provider is unavailable",
                     self.xprop
                 ),
                 ..ForegroundWindowSnapshot::default()
             };
-        }
+        };
 
-        let active_output = match Command::new(&self.xprop)
+        let active_output = match Command::new(&xprop)
             .args(["-root", "_NET_ACTIVE_WINDOW"])
             .output()
         {
@@ -120,7 +121,7 @@ impl ForegroundProvider for X11ForegroundProvider {
                     confidence: 0.0,
                     reason: format!(
                         "failed to run {} -root _NET_ACTIVE_WINDOW: {err}",
-                        self.xprop
+                        xprop.display()
                     ),
                     ..ForegroundWindowSnapshot::default()
                 };
@@ -136,7 +137,7 @@ impl ForegroundProvider for X11ForegroundProvider {
                 confidence: 0.0,
                 reason: format!(
                     "{} -root _NET_ACTIVE_WINDOW exited with status {}; stderr={}",
-                    self.xprop,
+                    xprop.display(),
                     active_output.status,
                     stderr.trim()
                 ),
@@ -169,7 +170,7 @@ impl ForegroundProvider for X11ForegroundProvider {
             };
         };
 
-        let properties_output = match Command::new(&self.xprop)
+        let properties_output = match Command::new(&xprop)
             .args([
                 "-id",
                 &window_id,
@@ -189,7 +190,8 @@ impl ForegroundProvider for X11ForegroundProvider {
                     confidence: 0.0,
                     reason: format!(
                         "failed to run {} -id {} _NET_WM_PID WM_CLASS _NET_WM_NAME WM_NAME: {err}",
-                        self.xprop, window_id
+                        xprop.display(),
+                        window_id
                     ),
                     ..ForegroundWindowSnapshot::default()
                 };
@@ -205,7 +207,7 @@ impl ForegroundProvider for X11ForegroundProvider {
                 confidence: 0.0,
                 reason: format!(
                     "{} -id {} _NET_WM_PID WM_CLASS _NET_WM_NAME WM_NAME exited with status {}; stderr={}",
-                    self.xprop,
+                    xprop.display(),
                     window_id,
                     properties_output.status,
                     stderr.trim()

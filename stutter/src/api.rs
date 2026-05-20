@@ -20,14 +20,15 @@ pub mod actions {
 
     pub use crate::actions::{
         ActionError, ActionFailure, ActionOutcome, ActionPhase, ActionResult, ActionState,
-        ActionTimeout, ActionWarning, CgroupRestoreRecord, CpuPowerAction, CpuPowerPolicy,
-        CpuPowerRestoreRecord, GpuPowerAction, GpuPowerMode, GpuPowerPolicy, GpuPowerRestoreRecord,
-        IoPrioRestoreRecord, IrqAffinityAction, IrqAffinityEvidence, IrqAffinityPolicy,
-        IrqAffinityRestoreRecord, IrqAffinityRisk, NiceAction, NicePolicy, NiceRestoreRecord,
-        PhaseFailure, RestoreAllInput, RestoreAllSummary, RollbackCandidate, RollbackHandler,
-        RollbackOutcome, RollbackPreview, RollbackRegistry, RollbackResult, RollbackToken,
-        SafetyClass, ScopeLimitExceeded, TaskIdentity, TuningAction, UclampRestoreRecord,
-        VmKnobAction, VmKnobChange, VmKnobMode, VmKnobPolicy, VmKnobRestoreRecord,
+        ActionTimeout, ActionWarning, CgroupCpusetRestoreRecord, CgroupRestoreRecord,
+        CpuPowerAction, CpuPowerPolicy, CpuPowerRestoreRecord, GpuPowerAction, GpuPowerMode,
+        GpuPowerPolicy, GpuPowerRestoreRecord, IoPrioRestoreRecord, IrqAffinityAction,
+        IrqAffinityEvidence, IrqAffinityPolicy, IrqAffinityRestoreRecord, IrqAffinityRisk,
+        NiceAction, NicePolicy, NiceRestoreRecord, PhaseFailure, RestoreAllInput,
+        RestoreAllSummary, RollbackCandidate, RollbackHandler, RollbackOutcome, RollbackPreview,
+        RollbackRegistry, RollbackResult, RollbackToken, SafetyClass, ScopeLimitExceeded,
+        TaskIdentity, TuningAction, UclampRestoreRecord, VmKnobAction, VmKnobChange, VmKnobMode,
+        VmKnobPolicy, VmKnobRestoreRecord,
     };
 }
 

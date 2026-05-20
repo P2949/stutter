@@ -541,6 +541,7 @@ mod tests {
                         },
                         original_cgroup: PathBuf::from("/sys/fs/cgroup"),
                     }],
+                    cpuset: None,
                 },
             ),
             (

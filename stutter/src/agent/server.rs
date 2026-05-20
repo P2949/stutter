@@ -2,7 +2,29 @@
 
 use super::*;
 
+const DEFAULT_AGENT_UNIX_CONNECTION_LIMIT: usize = 128;
+const DEFAULT_AGENT_UNIX_CONNECTION_TIMEOUT: Duration = Duration::from_secs(60);
+
 pub(crate) async fn serve_unix_socket(path: PathBuf, app: Router) -> anyhow::Result<()> {
+    serve_unix_socket_with_limits(
+        path,
+        app,
+        DEFAULT_AGENT_UNIX_CONNECTION_LIMIT,
+        DEFAULT_AGENT_UNIX_CONNECTION_TIMEOUT,
+    )
+    .await
+}
+
+pub(crate) async fn serve_unix_socket_with_limits(
+    path: PathBuf,
+    app: Router,
+    max_connections: usize,
+    connection_timeout: Duration,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        max_connections > 0,
+        "agent unix socket max_connections must be greater than zero"
+    );
     prepare_unix_socket_path(&path)?;
     let listener = tokio::net::UnixListener::bind(&path)
         .with_context(|| format!("failed to bind agent unix socket {}", path.display()))?;
@@ -13,12 +35,21 @@ pub(crate) async fn serve_unix_socket(path: PathBuf, app: Router) -> anyhow::Res
         )
     })?;
 
+    let connection_permits = Arc::new(Semaphore::new(max_connections));
     let mut make_service = app.into_make_service();
     loop {
         let (socket, _) = listener
             .accept()
             .await
             .with_context(|| format!("failed to accept connection on {}", path.display()))?;
+        let permit = match connection_permits.clone().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                log::warn!("agent_unix_connection_limit_reached max_connections={max_connections}");
+                drop(socket);
+                continue;
+            }
+        };
         let socket = TokioIo::new(socket);
 
         let tower_service = make_service
@@ -29,11 +60,20 @@ pub(crate) async fn serve_unix_socket(path: PathBuf, app: Router) -> anyhow::Res
         let hyper_service = TowerToHyperService::new(tower_service);
 
         tokio::spawn(async move {
-            if let Err(err) = HyperConnectionBuilder::new(TokioExecutor::new())
-                .serve_connection_with_upgrades(socket, hyper_service)
-                .await
-            {
-                log::debug!("agent_unix_connection_failed err={err:#}");
+            let _permit = permit;
+            let connection = HyperConnectionBuilder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(socket, hyper_service);
+            match tokio::time::timeout(connection_timeout, connection).await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    log::debug!("agent_unix_connection_failed err={err:#}");
+                }
+                Err(_) => {
+                    log::warn!(
+                        "agent_unix_connection_timeout timeout_ms={}",
+                        connection_timeout.as_millis()
+                    );
+                }
             }
         });
     }

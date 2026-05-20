@@ -52,7 +52,8 @@ pub const DROP_RINGBUF_RESERVE_FAILED: u32 = 1;
 pub const DROP_IRQ_START_TIMES_INSERT_FAILED: u32 = 2;
 pub const DROP_BLOCK_START_INSERT_FAILED: u32 = 3;
 pub const DROP_WAKEUP_DATA_STALE_ENTRY: u32 = 4;
-pub const DROP_COUNTERS_MAX: u32 = 5;
+pub const DROP_BLOCK_FALLBACK_KEY_COLLISION: u32 = 5;
+pub const DROP_COUNTERS_MAX: u32 = 6;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

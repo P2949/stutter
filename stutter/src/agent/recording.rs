@@ -65,6 +65,8 @@ pub(crate) async fn start_record_handler(
             .into_response();
     }
 
+    reap_finished_recording(&state).await;
+
     let mut active = state.active_run.lock().await;
     if active.is_some() {
         audit_agent_event(
@@ -175,6 +177,72 @@ pub(crate) async fn start_record_handler(
         .into_response()
 }
 
+pub(crate) async fn reap_finished_recording(state: &AgentState) {
+    let handle = {
+        let mut active = state.active_run.lock().await;
+        match active.as_ref() {
+            Some(handle) if handle.join.is_finished() => active.take(),
+            _ => None,
+        }
+    };
+
+    let Some(handle) = handle else {
+        return;
+    };
+
+    let run_id = handle.id.clone();
+    match handle.join.await {
+        Ok(Ok(_)) => {
+            audit_agent_event(
+                "remote-record-reap",
+                true,
+                0,
+                format!("run_id={run_id} completed"),
+            );
+            replace_agent_daemon_state(
+                state,
+                daemon_state_for_agent_decision(
+                    DaemonMode::Observe,
+                    DaemonPhase::Disabled,
+                    "record_completed",
+                    format!("run_id={run_id}"),
+                ),
+            )
+            .await;
+        }
+        Ok(Err(err)) => {
+            audit_agent_event(
+                "remote-record-reap",
+                false,
+                0,
+                format!("run_id={run_id} error={err:#}"),
+            );
+            mark_agent_daemon_fault(
+                state,
+                DaemonMode::Observe,
+                "record_failed",
+                format!("run_id={run_id} error={err:#}"),
+            )
+            .await;
+        }
+        Err(err) => {
+            audit_agent_event(
+                "remote-record-reap",
+                false,
+                0,
+                format!("run_id={run_id} join_error={err}"),
+            );
+            mark_agent_daemon_fault(
+                state,
+                DaemonMode::Observe,
+                "record_join_failed",
+                format!("run_id={run_id} join_error={err}"),
+            )
+            .await;
+        }
+    }
+}
+
 pub(crate) async fn stop_record_handler(
     State(state): State<Arc<AgentState>>,
     headers: HeaderMap,
@@ -185,8 +253,10 @@ pub(crate) async fn stop_record_handler(
         return status.into_response();
     }
 
-    let mut active = state.active_run.lock().await;
-    let handle = active.take();
+    let handle = {
+        let mut active = state.active_run.lock().await;
+        active.take()
+    };
 
     if let Some(handle) = handle {
         let _ = handle.stop_tx.send(());
@@ -291,6 +361,9 @@ pub(crate) async fn status_handler(
     if let Err(status) = authorize(&headers, &state.auth) {
         return status.into_response();
     }
+
+    reap_finished_recording(&state).await;
+
     let active = state.active_run.lock().await;
     Json(RecordStatusResponse {
         active: active.is_some(),

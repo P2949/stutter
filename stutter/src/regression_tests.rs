@@ -889,6 +889,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         ringbuf_reserve_failed: 3,
         irq_start_times_insert_failed: 0,
         block_start_insert_failed: 0,
+        block_fallback_key_collisions: 0,
     };
 
     let task_tracker = tasks::TaskTracker {
@@ -2133,7 +2134,8 @@ fn report_diff_shows_regressions_and_improvements() {
             "wakeup_data_insert_failed": 0,
             "ringbuf_reserve_failed": 0,
             "irq_start_times_insert_failed": 0,
-            "block_start_insert_failed": 0
+            "block_start_insert_failed": 0,
+            "block_fallback_key_collisions": 0
         },
         "scx_event_count": 0,
         "irq_event_count": 0,

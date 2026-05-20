@@ -49,7 +49,7 @@ use hyper_util::{
 };
 use serde::Serialize;
 use tokio::{
-    sync::{Mutex, oneshot},
+    sync::{Mutex, Semaphore, oneshot},
     task::JoinHandle,
 };
 use tower::{Service, ServiceExt as _};

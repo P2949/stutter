@@ -967,6 +967,7 @@ fn truncated_drop_counters_fixture() -> (SessionFile, FixtureArtifacts) {
         ringbuf_reserve_failed: 1,
         irq_start_times_insert_failed: 0,
         block_start_insert_failed: 0,
+        block_fallback_key_collisions: 0,
     };
     apply_artifact_counts(
         &mut session,

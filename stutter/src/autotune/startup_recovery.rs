@@ -1329,6 +1329,7 @@ mod tests {
                     },
                     original_cgroup: PathBuf::from("/sys/fs/cgroup/game.slice"),
                 }],
+                cpuset: None,
             },
             RollbackToken::CpuPowerRestore {
                 records: vec![CpuPowerRestoreRecord {

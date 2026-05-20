@@ -15,10 +15,11 @@ use stutter_common::{
     DRM_FENCE_EVENT_WAIT_INTERVAL, DRM_FENCE_HAS_CONTEXT, DRM_FENCE_HAS_DURATION,
     DRM_FENCE_HAS_PID, DRM_FENCE_HAS_SEQNO, DRM_FENCE_HAS_TIMELINE, DRM_FENCE_IS_EXPORTER_SIDE,
     DRM_FENCE_IS_IMPORTER_SIDE, DRM_FENCE_PROVIDER_DMA_FENCE, DRM_GPU_ROLE_UNKNOWN,
-    DROP_BLOCK_START_INSERT_FAILED, DROP_COUNTERS_MAX, DROP_IRQ_START_TIMES_INSERT_FAILED,
-    DROP_RINGBUF_RESERVE_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_STALE_ENTRY,
-    DrmFenceEvent, EVENT_BLOCK_IO, EVENT_CPU_FREQ, EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY,
-    EVENT_KMS_FLIP, EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent,
+    DROP_BLOCK_FALLBACK_KEY_COLLISION, DROP_BLOCK_START_INSERT_FAILED, DROP_COUNTERS_MAX,
+    DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
+    DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_STALE_ENTRY, DrmFenceEvent, EVENT_BLOCK_IO,
+    EVENT_CPU_FREQ, EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_KMS_FLIP,
+    EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent,
     KMS_FLIP_EVENT_INTERVAL, KMS_FLIP_EVENT_PAGEFLIP_DONE, KMS_FLIP_EVENT_VBLANK,
     KMS_FLIP_HAS_CRTC, KMS_FLIP_HAS_DONE_NS, KMS_FLIP_HAS_DURATION_NS, KMS_FLIP_HAS_REQUEST_NS,
     KMS_FLIP_HAS_SEQUENCE, KMS_FLIP_PROVIDER_AMDGPU, KMS_FLIP_PROVIDER_DRM, KMS_FLIP_PROVIDER_I915,
@@ -465,6 +466,9 @@ fn is_target_irq(irq: u32) -> bool {
 }
 
 fn irq_key(irq: u32, cpu: u32) -> u64 {
+    // High 32 bits: IRQ number. Low 32 bits: CPU ID.
+    // CPU IDs such as 65_536 remain entirely in the low half and do not collide
+    // with the IRQ half of the packed key.
     ((irq as u64) << 32) | cpu as u64
 }
 
@@ -634,17 +638,6 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
 
     let pid = next_pid as u32;
 
-    // Read the previous task context from the tracepoint: prev_pid and prev_state.
-    // Offsets validated in userspace preflight assume prev_pid at 24 and prev_state at 32.
-    let prev_pid_raw: i32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
-    let prev_state: i64 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
-
-    let switch_prev_pid = if prev_pid_raw > 0 {
-        prev_pid_raw as u32
-    } else {
-        0
-    };
-
     let wakeup_data = match unsafe { WAKEUP_DATA.get(pid) } {
         Some(d) => *d,
         None => return Ok(0),
@@ -657,6 +650,16 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
         remove_runnable_task_if_present(pid);
         return Ok(0);
     }
+
+    // Read the previous task context only after the cheap relevance filters pass.
+    // Offsets validated in userspace preflight assume prev_pid at 24 and prev_state at 32.
+    let prev_pid_raw: i32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
+    let prev_state: i64 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
+    let switch_prev_pid = if prev_pid_raw > 0 {
+        prev_pid_raw as u32
+    } else {
+        0
+    };
 
     let _ = WAKEUP_DATA.remove(pid);
 
@@ -1474,11 +1477,10 @@ fn try_block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
     let ts = unsafe { bpf_ktime_get_ns() };
     // If userspace detected a unique request pointer field (like `rq`), use it
     // as the primary key. Otherwise fall back to a multi-field metadata hash.
-    let key = if unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) } != 0 {
-        unsafe {
-            ctx.read_at::<u64>(core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) as usize)
-                .unwrap_or(0)
-        }
+    let request_key_offset = unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) };
+    let using_fallback_key = request_key_offset == 0;
+    let key = if !using_fallback_key {
+        unsafe { ctx.read_at::<u64>(request_key_offset as usize).unwrap_or(0) }
     } else {
         let nr_sector_offset =
             unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_ISSUE_NR_SECTOR_OFFSET) };
@@ -1487,6 +1489,12 @@ fn try_block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
 
         block_rq_fallback_key(&ctx, sector, dev, nr_sector_offset, rwbs_offset)
     };
+
+    if key != 0 && using_fallback_key && unsafe { BLOCK_START.get(key).is_some() } {
+        increment_drop_counter(DROP_BLOCK_FALLBACK_KEY_COLLISION);
+        let _ = BLOCK_START.remove(key);
+        return Ok(0);
+    }
 
     if key != 0 && BLOCK_START.insert(key, IoStart { ts, tid }, 0).is_err() {
         increment_drop_counter(DROP_BLOCK_START_INSERT_FAILED);

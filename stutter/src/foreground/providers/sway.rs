@@ -6,6 +6,7 @@
 use std::process::Command;
 
 use crate::foreground::{
+    command::resolve_trusted_foreground_helper,
     model::{ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot},
     parse::sway::{SwayNode, focused_sway_snapshot_from_tree},
     provider::ForegroundProvider,
@@ -75,7 +76,21 @@ impl ForegroundProvider for SwayForegroundProvider {
             };
         }
 
-        let output = match Command::new(&self.swaymsg)
+        let Some(swaymsg) = resolve_trusted_foreground_helper(&self.swaymsg) else {
+            return ForegroundWindowSnapshot {
+                elapsed_ms,
+                source: Some(ForegroundSource::Sway),
+                status: ForegroundProviderStatus::Unavailable,
+                confidence: 0.0,
+                reason: format!(
+                    "{} was not found in trusted foreground helper paths; Sway foreground provider is unavailable",
+                    self.swaymsg
+                ),
+                ..ForegroundWindowSnapshot::default()
+            };
+        };
+
+        let output = match Command::new(&swaymsg)
             .args(["-t", "get_tree", "-r"])
             .output()
         {
@@ -86,7 +101,7 @@ impl ForegroundProvider for SwayForegroundProvider {
                     source: Some(ForegroundSource::Sway),
                     status: ForegroundProviderStatus::Error,
                     confidence: 0.0,
-                    reason: format!("failed to run {} -t get_tree -r: {err}", self.swaymsg),
+                    reason: format!("failed to run {} -t get_tree -r: {err}", swaymsg.display()),
                     ..ForegroundWindowSnapshot::default()
                 };
             }
@@ -101,7 +116,7 @@ impl ForegroundProvider for SwayForegroundProvider {
                 confidence: 0.0,
                 reason: format!(
                     "{} -t get_tree -r exited with status {}; stderr={}",
-                    self.swaymsg,
+                    swaymsg.display(),
                     output.status,
                     stderr.trim()
                 ),
