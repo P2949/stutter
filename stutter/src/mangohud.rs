@@ -24,6 +24,10 @@ const ELAPSED_HEADERS: &[&str] = &[
     "ns",
 ];
 
+const MAX_ABSOLUTE_FRAMETIME_MS: f64 = 5.0 * 60.0 * 1000.0;
+const FRAMETIME_DELTA_MULTIPLIER: f64 = 2.0;
+const FRAMETIME_DELTA_TOLERANCE_MS: f64 = 100.0;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ElapsedUnit {
     Milliseconds,
@@ -133,6 +137,7 @@ where
     let mut events = Vec::new();
     let mut first_elapsed_ms: Option<u64> = None;
     let mut accumulated_ms = 0.0;
+    let mut plausibility_filter = MangoHudFramePlausibilityFilter::default();
 
     let alignment_recorder_elapsed_ms = alignment_monotonic_ns
         .zip(recorder_start_monotonic_ns)
@@ -144,6 +149,10 @@ where
             continue;
         }
         if let Some((raw_val, frametime_ms)) = parse_frame_line(schema, &line) {
+            if !plausibility_filter.accept(raw_val, frametime_ms) {
+                continue;
+            }
+
             if first_elapsed_ms.is_none() {
                 first_elapsed_ms = raw_val;
             }
@@ -183,11 +192,15 @@ where
 
 pub struct MangoHudLiveParser {
     schema: MangoHudCsvSchema,
+    plausibility_filter: MangoHudFramePlausibilityFilter,
 }
 
 impl MangoHudLiveParser {
     fn new(schema: MangoHudCsvSchema) -> Self {
-        Self { schema }
+        Self {
+            schema,
+            plausibility_filter: MangoHudFramePlausibilityFilter::default(),
+        }
     }
 
     pub fn parse_line(&mut self, line: &str) -> Option<FrameEvent> {
@@ -196,8 +209,14 @@ impl MangoHudLiveParser {
             return None;
         }
 
-        let (elapsed_ms, frametime_ms) = parse_frame_line(&self.schema, line)?;
-        let elapsed_ms = elapsed_ms.unwrap_or(0);
+        let (raw_elapsed_ms, frametime_ms) = parse_frame_line(&self.schema, line)?;
+        if !self
+            .plausibility_filter
+            .accept(raw_elapsed_ms, frametime_ms)
+        {
+            return None;
+        }
+        let elapsed_ms = raw_elapsed_ms.unwrap_or(0);
 
         Some(FrameEvent {
             elapsed_ms,
@@ -331,14 +350,21 @@ pub async fn poll_alignment(path: &Path, start_offset: u64) -> anyhow::Result<(u
                 }
             }
 
-            line.clear();
-            if reader.read_line(&mut line)? > 0 {
-                let observed_ns = monotonic_now_ns().unwrap_or(0);
-                if let Some((Some(raw_elapsed_ms), _)) = parse_frame_line(schema, &line) {
-                    return Ok((raw_elapsed_ms, observed_ns));
+            let mut plausibility_filter = MangoHudFramePlausibilityFilter::default();
+            loop {
+                line.clear();
+                if reader.read_line(&mut line)? == 0 {
+                    break;
                 }
 
-                return Ok((0, observed_ns));
+                if let Some((raw_elapsed_ms, frametime_ms)) = parse_frame_line(schema, &line) {
+                    if !plausibility_filter.accept(raw_elapsed_ms, frametime_ms) {
+                        continue;
+                    }
+
+                    let observed_ns = monotonic_now_ns().unwrap_or(0);
+                    return Ok((raw_elapsed_ms.unwrap_or(0), observed_ns));
+                }
             }
         }
 
@@ -412,7 +438,7 @@ fn parse_frame_line(schema: &MangoHudCsvSchema, line: &str) -> Option<(Option<u6
     let frametime_ms = columns
         .get(schema.frametime_idx)
         .and_then(|value| value.parse::<f64>().ok())
-        .filter(|value| value.is_finite())?;
+        .filter(|value| value.is_finite() && *value > 0.0)?;
 
     let elapsed_ms = schema
         .elapsed_idx
@@ -422,6 +448,53 @@ fn parse_frame_line(schema: &MangoHudCsvSchema, line: &str) -> Option<(Option<u6
         .map(|raw| elapsed_value_to_ms(raw, schema.elapsed_unit));
 
     Some((elapsed_ms, frametime_ms))
+}
+
+#[derive(Default)]
+struct MangoHudFramePlausibilityFilter {
+    previous_elapsed_ms: Option<u64>,
+}
+
+impl MangoHudFramePlausibilityFilter {
+    fn accept(&mut self, elapsed_ms: Option<u64>, frametime_ms: f64) -> bool {
+        if !frametime_is_plausible(frametime_ms, self.previous_elapsed_ms, elapsed_ms) {
+            return false;
+        }
+
+        if let Some(elapsed_ms) = elapsed_ms {
+            self.previous_elapsed_ms = Some(elapsed_ms);
+        }
+
+        true
+    }
+}
+
+fn frametime_is_plausible(
+    frametime_ms: f64,
+    previous_elapsed_ms: Option<u64>,
+    current_elapsed_ms: Option<u64>,
+) -> bool {
+    if !frametime_ms.is_finite() || frametime_ms <= 0.0 || frametime_ms > MAX_ABSOLUTE_FRAMETIME_MS
+    {
+        return false;
+    }
+
+    let Some(current_elapsed_ms) = current_elapsed_ms else {
+        return true;
+    };
+
+    let Some(previous_elapsed_ms) = previous_elapsed_ms else {
+        return frametime_ms <= current_elapsed_ms as f64 + FRAMETIME_DELTA_TOLERANCE_MS;
+    };
+
+    if current_elapsed_ms <= previous_elapsed_ms {
+        return frametime_ms <= FRAMETIME_DELTA_TOLERANCE_MS;
+    }
+
+    let elapsed_delta_ms = (current_elapsed_ms - previous_elapsed_ms) as f64;
+    let max_by_multiplier = elapsed_delta_ms * FRAMETIME_DELTA_MULTIPLIER;
+    let max_by_tolerance = elapsed_delta_ms + FRAMETIME_DELTA_TOLERANCE_MS;
+    frametime_ms <= max_by_multiplier.max(max_by_tolerance)
 }
 
 fn elapsed_value_to_ms(raw: f64, unit: ElapsedUnit) -> u64 {
@@ -571,6 +644,97 @@ fps,frametime,cpu_load,cpu_power,gpu_load,cpu_temp,gpu_temp,gpu_core_clock,gpu_m
         )?;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].frametime_ms, 20.0369);
+
+        fs::remove_dir_all(temp_dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn skips_impossible_mangohud_reciprocal_frametimes_in_non_live_parse() {
+        let header = "fps,frametime,elapsed";
+        let data = "\
+50.0,20.0,1000000000\n\
+6.9912e-05,1.43037e+07,1045000000\n\
+3.70289,270.059,1315000000\n\
+50.0,20.0,1335000000\n";
+
+        let events = parse_frame_events(
+            header,
+            data.lines().map(|s| Ok(s.to_owned())),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].elapsed_ms, 0);
+        assert_eq!(events[0].frametime_ms, 20.0);
+        assert_eq!(events[1].elapsed_ms, 315);
+        assert_eq!(events[1].frametime_ms, 270.059);
+        assert_eq!(events[2].elapsed_ms, 335);
+        assert_eq!(events[2].frametime_ms, 20.0);
+    }
+
+    #[test]
+    fn live_parser_skips_impossible_mangohud_reciprocal_frametimes() {
+        let headers = split_csv_line("fps,frametime,elapsed");
+        let schema = schema_from_headers(&headers).unwrap();
+        let mut parser = MangoHudLiveParser::new(schema);
+
+        let first = parser.parse_line("50.0,20.0,1000000000").unwrap();
+        let bad = parser.parse_line("6.9912e-05,1.43037e+07,1045000000");
+        let long_real_frame = parser.parse_line("3.70289,270.059,1315000000").unwrap();
+        let next = parser.parse_line("50.0,20.0,1335000000").unwrap();
+
+        assert_eq!(first.elapsed_ms, 1000);
+        assert_eq!(first.frametime_ms, 20.0);
+        assert!(bad.is_none());
+        assert_eq!(long_real_frame.elapsed_ms, 1315);
+        assert_eq!(long_real_frame.frametime_ms, 270.059);
+        assert_eq!(next.elapsed_ms, 1335);
+        assert_eq!(next.frametime_ms, 20.0);
+    }
+
+    #[test]
+    fn rejects_non_positive_frametimes() {
+        let header = "elapsed_ms,frametime_ms";
+        let data = "10,0\n20,-1\n30,16.7\n";
+        let events = parse_frame_events(
+            header,
+            data.lines().map(|s| Ok(s.to_owned())),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].elapsed_ms, 0);
+        assert_eq!(events[0].frametime_ms, 16.7);
+    }
+
+    #[tokio::test]
+    async fn poll_alignment_skips_impossible_first_mangohud_frame() -> anyhow::Result<()> {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "stutter_test_mangohud_bad_alignment_{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&temp_dir)?;
+        let path = temp_dir.join("mangohud.csv");
+        let csv = "\
+fps,frametime,elapsed\n\
+6.9912e-05,1.43037e+07,1045000000\n\
+50.0,20.0,1065000000\n";
+        fs::File::create(&path)?.write_all(csv.as_bytes())?;
+        let layout = detect_layout(&path)?;
+
+        let (raw_ms, observed_ns) = poll_alignment(&path, layout.data_start_offset).await?;
+
+        assert_eq!(raw_ms, 1065);
+        assert!(observed_ns > 0);
 
         fs::remove_dir_all(temp_dir).ok();
         Ok(())
