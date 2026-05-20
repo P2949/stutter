@@ -371,7 +371,7 @@ impl CgroupPlacementAction {
         }
 
         Ok(Some(CgroupCpusetRestoreRecord {
-            cgroup_path: target_abs.to_path_buf(),
+            cgroup_path: normalize_cgroup_path(&self.target_cgroup)?,
             original_cpuset_cpus: if self.cpuset_cpus.is_some() {
                 read_optional_trimmed(&target_abs.join("cpuset.cpus"))?
             } else {
@@ -878,7 +878,7 @@ fn restore_cpuset_record(
     cgroup_root: &Path,
     record: &CgroupCpusetRestoreRecord,
 ) -> anyhow::Result<usize> {
-    let cgroup_path = if record.cgroup_path.is_absolute() {
+    let cgroup_path = if record.cgroup_path.starts_with(cgroup_root) {
         record.cgroup_path.clone()
     } else {
         cgroup_root.join(strip_cgroup_leading_slash(&record.cgroup_path))

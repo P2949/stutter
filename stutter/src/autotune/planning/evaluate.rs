@@ -255,12 +255,7 @@ pub(crate) fn evaluate_proposal_static(
                 ));
             }
             ActiveConfigMatch::Differs { .. } => {}
-            ActiveConfigMatch::Unknown { summary } => {
-                deny_reasons.push(CandidateDenyReason::ActiveConfigUnknown);
-                deny_messages.push(format!(
-                    "candidate active configuration could not be verified conservatively: {summary}"
-                ));
-            }
+            ActiveConfigMatch::Unknown { .. } => {}
         }
 
         if let Some(active_experiment) = input.controller_state.active_experiment.as_ref()

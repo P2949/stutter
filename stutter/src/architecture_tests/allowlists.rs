@@ -41,8 +41,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/agent/autotune.rs",
-        max_lines: 1_059,
-        reason: "autotune agent route handlers and remote policy helpers moved out of agent.rs pending future policy/helper split",
+        max_lines: 1_196,
+        reason: "autotune agent route handlers, remote policy helpers, restore endpoint wiring, and task reaping remain pending future policy/helper split",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/planning/tests.rs",
@@ -51,8 +51,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/regression_tests.rs",
-        max_lines: 2_516,
-        reason: "existing broad regression test module pending future split; PSI delta serialization fixture coverage is staged here",
+        max_lines: 2_518,
+        reason: "existing broad regression test module pending future split; PSI delta serialization and repair regression fixture coverage are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/diagnosis.rs",
@@ -71,8 +71,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/test_fixture_builder.rs",
-        max_lines: 2_150,
-        reason: "existing shared test fixture builder pending future split; PSI delta fixture fields are staged here",
+        max_lines: 2_151,
+        reason: "existing shared test fixture builder pending future split; PSI delta and restore fixture fields are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/apply_low_risk.rs",
@@ -131,8 +131,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/autotune/emergency_restore.rs",
-        max_lines: 1_490,
-        reason: "existing autotune emergency restore implementation pending future split; restore input struct conversion is staged here",
+        max_lines: 1_553,
+        reason: "existing autotune emergency restore implementation pending future split; restore input conversion and rollback summary wiring are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/tune/mod.rs",
@@ -156,13 +156,13 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/metrics.rs",
-        max_lines: 1_263,
-        reason: "existing metrics model and tests pending future split; PSI delta interval fields are staged here",
+        max_lines: 1_264,
+        reason: "existing metrics model and tests pending future split; PSI delta and fallback-collision counter fields are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/rolling_window.rs",
-        max_lines: 1_164,
-        reason: "existing autotune rolling window implementation pending future split; memory PSI spike aggregation is staged here",
+        max_lines: 1_230,
+        reason: "existing autotune rolling window implementation pending future split; memory PSI spike, IRQ timestamp, and interval ordering coverage are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/config/effective.rs",
@@ -186,8 +186,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/actions/cgroup.rs",
-        max_lines: 1_145,
-        reason: "existing cgroup action implementation pending future split; rollback handler registration is staged here",
+        max_lines: 1_402,
+        reason: "existing cgroup action implementation pending future split; rollback handler registration, identity restore checks, and cpuset rollback coverage are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/cli/mod.rs",
@@ -205,9 +205,19 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "existing GPU power action implementation pending future split; rollback handler registration and medium-risk profile classification are staged here",
     },
     OversizedRustFileAllowance {
+        path: "src/actions/ioprio.rs",
+        max_lines: 1_043,
+        reason: "existing I/O priority action implementation pending future split; rollback handler registration and partial-apply transaction coverage are staged here",
+    },
+    OversizedRustFileAllowance {
+        path: "src/autotune/runtime.rs",
+        max_lines: 1_003,
+        reason: "existing autotune runtime implementation pending future split; restore and task-lifecycle wiring are staged here",
+    },
+    OversizedRustFileAllowance {
         path: "src/actions/uclamp.rs",
-        max_lines: 1_080,
-        reason: "existing uclamp action implementation pending future split; rollback handler registration is staged here",
+        max_lines: 1_143,
+        reason: "existing uclamp action implementation pending future split; rollback handler registration and partial-apply transaction coverage are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/actions/vm_knobs.rs",

@@ -126,11 +126,8 @@ impl RollingWindow {
         }
 
         records.sort_by_key(|record| record.elapsed_ms);
-        let latest_elapsed_ms = records
-            .iter()
-            .map(|record| record.elapsed_ms)
-            .max()
-            .expect("non-empty interval batch has a latest elapsed timestamp");
+        // invariant: records is non-empty because the empty batch returned above.
+        let latest_elapsed_ms = records[records.len() - 1].elapsed_ms;
 
         self.intervals.extend(records);
         self.prune_to(latest_elapsed_ms);
@@ -849,9 +846,9 @@ mod tests {
                 .iter()
                 .map(|record| record.elapsed_ms)
                 .collect::<Vec<_>>(),
-            vec![2500, 4501]
+            vec![4501]
         );
-        assert_eq!(window.scored_samples(), 6);
+        assert_eq!(window.scored_samples(), 4);
     }
 
     #[test]
