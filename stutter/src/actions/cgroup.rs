@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     actions::{
-        ActionId, ActionState, ActionWarning, ApplyResult, CgroupRestoreRecord, PartialApplyError,
+        ActionId, ActionState, ActionWarning, ApplyResult, CgroupRestoreRecord,
         RestoreIdentityStatus, RollbackToken, SafetyClass, TaskIdentity, TaskRestoreIdentity,
         TuningAction,
         rollback::{
@@ -439,7 +439,7 @@ impl TuningAction for CgroupPlacementAction {
     }
 
     fn apply(&self) -> ApplyResult {
-        let res: Result<RollbackToken, PartialApplyError> = (|| {
+        (|| -> ApplyResult {
             let policy = CgroupPlacementPolicy::default();
             let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &policy)?;
             let target_abs = self.target_cgroup_abs()?;
@@ -487,7 +487,7 @@ impl TuningAction for CgroupPlacementAction {
             }
 
             Ok(RollbackToken::CgroupRestore { records })
-        })();
+        })()
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
