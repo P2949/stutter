@@ -155,8 +155,7 @@ fn probe_drm_devices(sys_root: &Path) -> Vec<DrmDeviceInfo> {
             None
         };
 
-        let boot_vga =
-            read_trimmed(device_path.join("boot_vga")).and_then(|val| Some(val.trim() == "1"));
+        let boot_vga = read_trimmed(device_path.join("boot_vga")).map(|val| val.trim() == "1");
 
         let render_node = std::fs::read_dir(path.join("device/drm"))
             .ok()
@@ -268,15 +267,15 @@ fn guess_display_path(
         }
     }
 
-    if scanout_card.is_none() {
-        if let Some(first_device) = drm_devices.first() {
-            scanout_card = Some(first_device.card.clone());
-            reasons.push(format!(
-                "No connected connector found; falling back to first DRM device {}",
-                first_device.card
-            ));
-            warnings.push("no connected connector found; guessing primary scanout card".to_owned());
-        }
+    if scanout_card.is_none()
+        && let Some(first_device) = drm_devices.first()
+    {
+        scanout_card = Some(first_device.card.clone());
+        reasons.push(format!(
+            "No connected connector found; falling back to first DRM device {}",
+            first_device.card
+        ));
+        warnings.push("no connected connector found; guessing primary scanout card".to_owned());
     }
 
     let scanout_card_str = scanout_card.as_ref()?;
@@ -286,9 +285,10 @@ fn guess_display_path(
     // 2. Find the render card.
     let mut render_card = None;
     for device in drm_devices {
-        let is_discrete = device.driver.as_deref().map_or(false, |d| {
-            d == "amdgpu" || d == "nouveau" || d == "nvidia" || d == "radeon"
-        });
+        let is_discrete = device
+            .driver
+            .as_deref()
+            .is_some_and(|d| d == "amdgpu" || d == "nouveau" || d == "nvidia" || d == "radeon");
         if is_discrete {
             render_card = Some(device.card.clone());
             reasons.push(format!(

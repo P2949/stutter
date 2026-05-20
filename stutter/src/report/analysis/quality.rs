@@ -83,13 +83,7 @@ pub(crate) fn data_quality_summary(
     let missing_non_focus_optional = validation
         .missing_optional_files
         .iter()
-        .filter(|f| {
-            *f != artifact_file_name(ArtifactKind::FocusEvents)
-                && *f != artifact_file_name(ArtifactKind::ForegroundEvents)
-                && *f != artifact_file_name(ArtifactKind::KmsFlipEvents)
-                && *f != artifact_file_name(ArtifactKind::DrmFenceEvents)
-                && *f != artifact_file_name(ArtifactKind::WaylandPresentationEvents)
-        })
+        .filter(|file| missing_artifact_downgrades_quality(file.as_str()))
         .collect::<Vec<_>>();
 
     if !missing_non_focus_optional.is_empty() {
@@ -223,6 +217,21 @@ pub(crate) fn data_quality_summary(
         cpu_perf_read_errors: session.core.cpu_perf_read_errors,
         cpu_perf_skipped_tasks: session.core.cpu_perf_skipped_tasks,
     }
+}
+
+fn missing_artifact_downgrades_quality(file: &str) -> bool {
+    ![
+        ArtifactKind::FocusEvents,
+        ArtifactKind::ForegroundEvents,
+        ArtifactKind::KmsFlipEvents,
+        ArtifactKind::DrmFenceEvents,
+        ArtifactKind::WaylandPresentationEvents,
+        ArtifactKind::DisplayTopology,
+        ArtifactKind::DmaBufEvents,
+        ArtifactKind::GpuEngineSamples,
+    ]
+    .iter()
+    .any(|kind| file == artifact_file_name(*kind))
 }
 
 pub(crate) fn downgrade_quality(

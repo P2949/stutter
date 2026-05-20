@@ -1,11 +1,14 @@
 //! Recording runtime setup for monitor sessions.
 
-use std::fs;
+use std::{fs, path::Path};
 
+use anyhow::Context;
 use log::info;
 
 use crate::{
+    artifacts::{ArtifactKind, artifact_path},
     config::{CsvStreamTarget, model::MonitorConfig},
+    display_topology,
     recorder::{self, LiveRecorder, SpikeEventBuffer},
     session::SessionProbePlan,
 };
@@ -41,8 +44,10 @@ impl RecordingRuntime {
                 );
             }
 
-            let registry = &mut recorder.streams;
             let dir = &run.run_dir;
+            write_display_topology_artifact(dir, run.started_instant.elapsed().as_millis() as u64)?;
+
+            let registry = &mut recorder.streams;
 
             for kind in probe_plan
                 .loaded
@@ -64,4 +69,20 @@ impl RecordingRuntime {
 
         Ok(recorder)
     }
+}
+
+fn write_display_topology_artifact(run_dir: &Path, elapsed_ms: u64) -> anyhow::Result<()> {
+    let mut snapshot = display_topology::probe_display_topology();
+    snapshot.collected_at_elapsed_ms = Some(elapsed_ms);
+
+    let path = artifact_path(run_dir, ArtifactKind::DisplayTopology);
+    let mut bytes = serde_json::to_vec_pretty(&snapshot)
+        .context("failed to serialize display topology artifact")?;
+    bytes.push(b'\n');
+    fs::write(&path, bytes).with_context(|| {
+        format!(
+            "failed to write display topology artifact {}",
+            path.display()
+        )
+    })
 }
