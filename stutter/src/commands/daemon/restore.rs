@@ -161,6 +161,10 @@ mod tests {
             restored_actions: 1,
             failed_actions: 2,
             skipped_actions: 3,
+            restored_records: 4,
+            skipped_missing: 5,
+            skipped_identity_mismatch: 6,
+            failed_records: 7,
             messages: vec!["autotune-message".to_owned()],
         };
         let profile_outcome = restore::ProfileRestoreCommandOutcome {

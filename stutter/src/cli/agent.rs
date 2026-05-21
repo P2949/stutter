@@ -97,6 +97,20 @@ pub(super) struct AgentArgs {
         value_name = "N"
     )]
     pub(super) max_concurrent_recordings: usize,
+
+    #[arg(
+        long = "max-unix-connections",
+        default_value_t = crate::agent::DEFAULT_AGENT_UNIX_CONNECTION_LIMIT,
+        value_name = "N"
+    )]
+    pub(super) max_unix_connections: usize,
+
+    #[arg(
+        long = "unix-connection-timeout-ms",
+        default_value_t = crate::agent::DEFAULT_AGENT_UNIX_CONNECTION_TIMEOUT_MS,
+        value_name = "MS"
+    )]
+    pub(super) unix_connection_timeout_ms: u64,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -320,6 +334,10 @@ mod tests {
             "9",
             "--max-concurrent-recordings",
             "1",
+            "--max-unix-connections",
+            "7",
+            "--unix-connection-timeout-ms",
+            "250",
         ])
         .unwrap();
 
@@ -331,6 +349,11 @@ mod tests {
         assert_eq!(input.max_duration_seconds, 300);
         assert_eq!(input.max_targets, 9);
         assert_eq!(input.max_concurrent_recordings, 1);
+        assert_eq!(input.max_unix_connections, 7);
+        assert_eq!(
+            input.unix_connection_timeout,
+            std::time::Duration::from_millis(250)
+        );
     }
 
     #[test]
@@ -347,6 +370,14 @@ mod tests {
             (
                 ["stutter", "agent", "--max-concurrent-recordings", "0"],
                 "--max-concurrent-recordings must be greater than zero",
+            ),
+            (
+                ["stutter", "agent", "--max-unix-connections", "0"],
+                "--max-unix-connections must be greater than zero",
+            ),
+            (
+                ["stutter", "agent", "--unix-connection-timeout-ms", "0"],
+                "--unix-connection-timeout-ms must be greater than zero",
             ),
         ] {
             let err = parse_agent_command(args).unwrap_err();

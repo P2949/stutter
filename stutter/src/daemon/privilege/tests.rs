@@ -330,6 +330,61 @@ fn wait_for_socket(path: &std::path::Path) {
 }
 
 #[test]
+fn privileged_worker_socket_wait_succeeds_when_listener_is_connectable() {
+    let socket = temp_socket_path("ready-listener");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let accept = thread::spawn(move || listener.accept().map(|_| ()));
+
+    wait_for_privileged_worker_socket_with_timing(
+        &socket,
+        Duration::from_millis(200),
+        Duration::from_millis(5),
+    )
+    .unwrap();
+
+    accept.join().unwrap().unwrap();
+    fs::remove_file(socket).ok();
+}
+
+#[test]
+fn privileged_worker_socket_wait_rejects_stale_socket_path() {
+    let socket = temp_socket_path("stale-path");
+    let listener = UnixListener::bind(&socket).unwrap();
+    drop(listener);
+    assert!(socket.exists());
+
+    let err = wait_for_privileged_worker_socket_with_timing(
+        &socket,
+        Duration::from_millis(60),
+        Duration::from_millis(5),
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("privileged_worker_socket_not_ready"));
+    assert!(err.contains("was not connectable within 60ms"));
+    assert!(err.contains("last_error="));
+    fs::remove_file(socket).ok();
+}
+
+#[test]
+fn privileged_worker_socket_wait_timeout_reports_clear_error() {
+    let socket = temp_socket_path("missing-path");
+
+    let err = wait_for_privileged_worker_socket_with_timing(
+        &socket,
+        Duration::from_millis(40),
+        Duration::from_millis(5),
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("privileged_worker_socket_not_ready"));
+    assert!(err.contains("was not connectable within 40ms"));
+    assert!(err.contains(socket.to_string_lossy().as_ref()));
+}
+
+#[test]
 fn unix_socket_privileged_worker_round_trips_apply_and_rollback() {
     let socket = temp_socket_path("round-trip");
     let service = Arc::new(FakeWorkerService::default());

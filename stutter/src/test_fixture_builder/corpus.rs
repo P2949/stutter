@@ -71,6 +71,33 @@ pub(crate) fn write_validation_corpus(root: &Path) -> anyhow::Result<()> {
         "community_rules_classification",
         community_rules_classification_fixture(),
     )?;
+    write_fixture(root, "direct_gpu_clean", direct_gpu_clean_fixture())?;
+    write_fixture(
+        root,
+        "uhd630_cross_gpu_fence_wait",
+        uhd630_cross_gpu_fence_wait_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "uhd630_composited_blitter",
+        uhd630_composited_blitter_fixture(),
+    )?;
+    write_fixture(root, "uhd630_kms_delay", uhd630_kms_delay_fixture())?;
+    write_fixture(
+        root,
+        "wayland_zero_copy_good",
+        wayland_zero_copy_good_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "dmabuf_modifier_mismatch",
+        dmabuf_modifier_mismatch_fixture(),
+    )?;
+    write_fixture(
+        root,
+        "missing_evidence_unknown",
+        missing_evidence_unknown_fixture(),
+    )?;
     write_fixture(root, "real_clean_baseline", real_clean_baseline_fixture())?;
     write_fixture(
         root,
@@ -201,7 +228,7 @@ fn write_fixture(
     )?;
     write_json_pretty(
         dir.join("display_topology.json"),
-        &crate::display_topology::DisplayTopologySnapshot::default(),
+        &artifacts.display_topology.clone().unwrap_or_default(),
     )?;
 
     for file in OPTIONAL_ARTIFACT_FILES {
@@ -217,6 +244,20 @@ fn write_fixture(
     write_ndjson_values(
         dir.join("foreground_events.json"),
         &artifacts.foreground_events,
+    )?;
+    write_ndjson_values(dir.join("kms_flip_events.json"), &artifacts.kms_flip_events)?;
+    write_ndjson_values(
+        dir.join("drm_fence_events.json"),
+        &artifacts.drm_fence_events,
+    )?;
+    write_ndjson_values(
+        dir.join("wayland_presentation_events.json"),
+        &artifacts.wayland_presentation_events,
+    )?;
+    write_ndjson_values(dir.join("dmabuf_events.json"), &artifacts.dmabuf_events)?;
+    write_ndjson_values(
+        dir.join("gpu_engine_samples.json"),
+        &artifacts.gpu_engine_samples,
     )?;
 
     Ok(())

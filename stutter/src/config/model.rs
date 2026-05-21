@@ -23,6 +23,7 @@ pub struct MonitorConfig {
     pub kms_timing: KmsTimingConfig,
     pub drm_fence: DrmFenceConfig,
     pub wayland_presentation: WaylandPresentationConfig,
+    pub dmabuf: DmaBufConfig,
     pub display_path: DisplayPathConfig,
     pub ebpf_sizing: EbpfSizingConfig,
     pub ui: UiConfig,
@@ -93,6 +94,9 @@ pub struct ProbeConfig {
     pub kms_timing: bool,
     pub drm_fence_latency: bool,
     pub wayland_presentation: bool,
+    pub dmabuf_tracking: bool,
+    pub gpu_engine_sampling: bool,
+    pub display_topology: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -113,6 +117,11 @@ pub struct DrmFenceConfig {
 pub struct WaylandPresentationConfig {
     pub log_path: Option<PathBuf>,
     pub source: WaylandPresentationSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DmaBufConfig {
+    pub log_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

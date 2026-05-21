@@ -531,6 +531,7 @@ fn minimal_recording_report_text_does_not_panic() {
         correlation_sections: &correlation_sections,
         focus_summary: &report::FocusReportSummary::default(),
         foreground_summary: &report::ForegroundReportSummary::default(),
+        display_path_diagnosis: None,
         top: 10,
         cluster_window_ms: 500,
         filter_class: None,

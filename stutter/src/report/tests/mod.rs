@@ -174,7 +174,12 @@ fn test_html_report_model() -> HtmlReportModel {
         foreground_summary: ForegroundReportSummary::default(),
         kms_timing: KmsTimingSummary::default(),
         drm_fence_timing: DrmFenceTimingSummary::default(),
+        cross_gpu_fence: CrossGpuFenceSummary::default(),
         wayland_presentation: WaylandPresentationSummary::default(),
+        direct_scanout: DirectScanoutSummary::default(),
+        dmabuf_path: DmaBufPathSummary::default(),
+        gpu_engine_activity: GpuEngineActivitySummary::default(),
+        display_path_diagnosis: DisplayPathDiagnosisSummary::default(),
     };
 
     build_html_report_model(

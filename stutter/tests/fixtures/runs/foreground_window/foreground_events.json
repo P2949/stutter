@@ -1,1 +1,1 @@
-{"elapsed_ms":100,"source":"sway","status":"available","pid":5701,"app_id":"steam_app_sanitized","class":"steam_app_sanitized","title":null,"window_id":"0xSANITIZED","workspace":"gaming","confidence":0.95,"reason":"focused Sway node from sanitized fixture","stale_ms":null}
+{"elapsed_ms":100,"source":"sway","status":"available","pid":5701,"app_id":"steam_app_sanitized","class":"steam_app_sanitized","title":null,"window_id":"0xSANITIZED","workspace":"gaming","confidence":0.95,"stale_ms":null,"reason":"focused Sway node from sanitized fixture"}

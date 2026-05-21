@@ -58,6 +58,26 @@ struct FixtureExpectedArtifacts {
     foreground_events: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     foreground_events_min: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kms_flip_events: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kms_flip_events_min: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    drm_fence_events: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    drm_fence_events_min: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    wayland_presentation_events: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    wayland_presentation_events_min: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dmabuf_events: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dmabuf_events_min: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gpu_engine_samples: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gpu_engine_samples_min: Option<u64>,
 }
 
 #[derive(serde::Serialize)]
@@ -302,6 +322,83 @@ pub(super) fn fixture_metadata_for(name: &str, artifacts: &FixtureArtifacts) -> 
             &[],
             exact_artifacts(artifacts),
         ),
+        "direct_gpu_clean" => fixture_metadata!(
+            name,
+            "synthetic-display-path",
+            "High",
+            "Synthetic display-path fixture for a clean direct render-and-scanout run.",
+            "Unknown",
+            &[],
+            "High",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+        "uhd630_cross_gpu_fence_wait" => fixture_metadata!(
+            name,
+            "synthetic-display-path",
+            "High",
+            "Synthetic display-path fixture with UHD630/i915 scanout and high-confidence cross-GPU fence waits near a frame outlier.",
+            "Unknown",
+            &[],
+            "High",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+        "uhd630_composited_blitter" => fixture_metadata!(
+            name,
+            "synthetic-display-path",
+            "High",
+            "Synthetic display-path fixture with composited presentation and iGPU blitter activity near a frame outlier.",
+            "Unknown",
+            &[],
+            "High",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+        "uhd630_kms_delay" => fixture_metadata!(
+            name,
+            "synthetic-display-path",
+            "High",
+            "Synthetic display-path fixture with UHD630/i915 scanout and KMS/pageflip delay near a frame outlier.",
+            "Unknown",
+            &[],
+            "High",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+        "wayland_zero_copy_good" => fixture_metadata!(
+            name,
+            "synthetic-display-path",
+            "High",
+            "Synthetic display-path fixture where cooperative Wayland evidence reports zero-copy/direct scanout.",
+            "Unknown",
+            &[],
+            "High",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+        "dmabuf_modifier_mismatch" => fixture_metadata!(
+            name,
+            "synthetic-display-path",
+            "High",
+            "Synthetic display-path fixture where cooperative DMABUF evidence reports a modifier mismatch and copy-required candidate.",
+            "Unknown",
+            &[],
+            "High",
+            &[],
+            exact_artifacts(artifacts),
+        ),
+        "missing_evidence_unknown" => fixture_metadata!(
+            name,
+            "synthetic-display-path",
+            "High",
+            "Synthetic display-path fixture with no optional display-path evidence, which should keep suspicion low-confidence.",
+            "Unknown",
+            &[],
+            "High",
+            &[],
+            exact_artifacts(artifacts),
+        ),
         "clean_baseline" => fixture_metadata!(
             name,
             "public-example",
@@ -507,5 +604,15 @@ fn exact_artifacts(artifacts: &FixtureArtifacts) -> FixtureExpectedArtifacts {
         block_io_events_min: None,
         foreground_events: Some(artifacts.foreground_events.len() as u64),
         foreground_events_min: None,
+        kms_flip_events: Some(artifacts.kms_flip_events.len() as u64),
+        kms_flip_events_min: None,
+        drm_fence_events: Some(artifacts.drm_fence_events.len() as u64),
+        drm_fence_events_min: None,
+        wayland_presentation_events: Some(artifacts.wayland_presentation_events.len() as u64),
+        wayland_presentation_events_min: None,
+        dmabuf_events: Some(artifacts.dmabuf_events.len() as u64),
+        dmabuf_events_min: None,
+        gpu_engine_samples: Some(artifacts.gpu_engine_samples.len() as u64),
+        gpu_engine_samples_min: None,
     }
 }

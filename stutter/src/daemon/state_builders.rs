@@ -475,15 +475,16 @@ mod tests {
     #[test]
     fn rollback_token_safety_class_marks_cgroup_as_medium_risk() {
         let cgroup = RollbackToken::CgroupRestore {
-            records: vec![crate::actions::CgroupRestoreRecord {
-                identity: crate::actions::TaskRestoreIdentity {
-                    tid: 1234,
-                    comm: "test".to_owned(),
-                    process_starttime_ticks: None,
-                    task_starttime_ticks: None,
-                },
-                original_cgroup: PathBuf::from("/user.slice/app.scope"),
-            }],
+            records: vec![crate::actions::CgroupRestoreRecord::new(
+                crate::actions::TaskRestoreIdentity::observed(
+                    1234,
+                    None,
+                    Some("test".to_owned()),
+                    None,
+                    None,
+                ),
+                PathBuf::from("/user.slice/app.scope"),
+            )],
             cpuset: None,
         };
         let cpu_power = RollbackToken::CpuPowerRestore { records: vec![] };

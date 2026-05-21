@@ -46,6 +46,10 @@ pub struct SessionMetadataCore {
     #[serde(default)]
     pub wayland_presentation_event_count: u64,
     #[serde(default)]
+    pub dmabuf_event_count: u64,
+    #[serde(default)]
+    pub gpu_engine_sample_count: u64,
+    #[serde(default)]
     pub display_path: Option<DisplayPathMetadata>,
     #[serde(default)]
     pub foreground_source: Option<String>,
@@ -137,10 +141,34 @@ pub struct SessionFile {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct DisplayPathMetadata {
+    #[serde(default)]
     pub label: Option<String>,
+    #[serde(default)]
     pub render_gpu: Option<String>,
+    #[serde(default)]
     pub scanout_gpu: Option<String>,
+    #[serde(default)]
     pub connector: Option<String>,
+    #[serde(default)]
+    pub render_card: Option<String>,
+    #[serde(default)]
+    pub render_render_node: Option<String>,
+    #[serde(default)]
+    pub render_driver: Option<String>,
+    #[serde(default)]
+    pub scanout_card: Option<String>,
+    #[serde(default)]
+    pub scanout_driver: Option<String>,
+    #[serde(default)]
+    pub is_cross_gpu: Option<bool>,
+    #[serde(default)]
+    pub session_type: Option<String>,
+    #[serde(default)]
+    pub compositor: Option<String>,
+    #[serde(default)]
+    pub topology_confidence: Option<String>,
+    #[serde(default)]
+    pub topology_warnings: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -246,6 +274,14 @@ pub struct RecordedConfig {
     pub wayland_presentation_log: Option<PathBuf>,
     #[serde(default)]
     pub wayland_presentation_source: String,
+    #[serde(default)]
+    pub dmabuf_tracking: bool,
+    #[serde(default)]
+    pub dmabuf_log: Option<PathBuf>,
+    #[serde(default)]
+    pub gpu_engine_sampling: bool,
+    #[serde(default)]
+    pub display_topology: bool,
     #[serde(default)]
     pub display_path_label: Option<String>,
     #[serde(default)]

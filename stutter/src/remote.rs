@@ -324,6 +324,14 @@ pub struct AutotuneRestoreResponse {
     pub skipped_actions: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failed_actions: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restored_records: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped_missing: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped_identity_mismatch: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_records: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub restore_messages: Vec<String>,
 }

@@ -78,6 +78,10 @@ pub struct AutotuneRestoreOutcome {
     pub restored_actions: usize,
     pub failed_actions: usize,
     pub skipped_actions: usize,
+    pub restored_records: usize,
+    pub skipped_missing: usize,
+    pub skipped_identity_mismatch: usize,
+    pub failed_records: usize,
     pub messages: Vec<String>,
 }
 
@@ -95,6 +99,9 @@ pub struct RollbackRestoreSummary {
     pub rollback_kind: String,
     pub restored_items: usize,
     pub skipped_items: usize,
+    pub skipped_missing: usize,
+    pub skipped_identity_mismatch: usize,
+    pub failed_items: usize,
     pub messages: Vec<String>,
 }
 
@@ -104,6 +111,9 @@ impl RollbackRestoreSummary {
             rollback_kind: rollback_kind.into(),
             restored_items,
             skipped_items: 0,
+            skipped_missing: 0,
+            skipped_identity_mismatch: 0,
+            failed_items: 0,
             messages: Vec::new(),
         }
     }
@@ -182,6 +192,9 @@ fn rollback_restore_summary_from_registry_result(
         skipped_items: result.skipped_dead
             + result.skipped_identity_mismatch
             + result.legacy_unverified,
+        skipped_missing: result.skipped_dead,
+        skipped_identity_mismatch: result.skipped_identity_mismatch,
+        failed_items: result.errors,
         messages: result.messages,
     }
 }
@@ -228,6 +241,10 @@ pub fn restore_known_autotune_actions(
             restored_actions: 0,
             failed_actions: 0,
             skipped_actions: 0,
+            restored_records: 0,
+            skipped_missing: 0,
+            skipped_identity_mismatch: 0,
+            failed_records: 0,
             messages: vec![format!(
                 "autotune restore: no active autotune action in {}",
                 journal_path.display()
@@ -247,6 +264,10 @@ pub fn restore_known_autotune_actions(
                 restored_actions: 0,
                 failed_actions: 0,
                 skipped_actions: 0,
+                restored_records: 0,
+                skipped_missing: 0,
+                skipped_identity_mismatch: 0,
+                failed_records: 0,
                 messages: vec![format!(
                     "autotune restore: no active autotune action in {}",
                     journal_path.display()
@@ -260,6 +281,10 @@ pub fn restore_known_autotune_actions(
                 restored_actions: 0,
                 failed_actions: 0,
                 skipped_actions: 1,
+                restored_records: 0,
+                skipped_missing: 0,
+                skipped_identity_mismatch: 0,
+                failed_records: 0,
                 messages: vec![format!(
                     "autotune restore: journal is applying without rollback_token experiment_id={} action_id={}; no automatic restore is possible",
                     experiment_id, action_id
@@ -289,6 +314,10 @@ pub fn restore_known_autotune_actions(
                     restored_actions: 0,
                     failed_actions: 0,
                     skipped_actions: 1,
+                    restored_records: 0,
+                    skipped_missing: 0,
+                    skipped_identity_mismatch: 0,
+                    failed_records: 0,
                     messages: vec![format!(
                         "autotune restore: journal is {} without rollback_token experiment_id={} action_id={}; no automatic restore is possible",
                         record.state().as_str(),
@@ -348,6 +377,10 @@ fn restore_applied_journal_record(
             restored_actions: 0,
             failed_actions: 0,
             skipped_actions: 1,
+            restored_records: 0,
+            skipped_missing: 0,
+            skipped_identity_mismatch: 0,
+            failed_records: 0,
             messages: vec![
                 format!(
                     "autotune restore dry-run: would restore experiment_id={} action_id={} rollback_kind={} affected_tasks={} manual_restore_command=\"{}\"",
@@ -361,6 +394,65 @@ fn restore_applied_journal_record(
     match registry.restore_token(rollback_token) {
         Ok(result) => {
             let summary = rollback_restore_summary_from_registry_result(rollback_token, result);
+            if summary.failed_items > 0 {
+                write_emergency_restore_audit_event(
+                    audit_path,
+                    action_id,
+                    rollback_token,
+                    false,
+                    summary.restored_items,
+                    format!(
+                        "autotune emergency restore incomplete experiment_id={} action_id={} rollback_kind={} restored_items={} skipped_items={} failed_items={} manual_restore_command=\"{}\"{}",
+                        experiment_id,
+                        action_id,
+                        summary.rollback_kind,
+                        summary.restored_items,
+                        summary.skipped_items,
+                        summary.failed_items,
+                        manual_command,
+                        render_summary_messages(&summary.messages)
+                    ),
+                )?;
+
+                write_emergency_restore_history_event(EmergencyRestoreHistoryEventInput {
+                    history_path,
+                    phase: ControllerPhase::Faulted,
+                    decision: "EmergencyRestoreFault",
+                    experiment_id,
+                    action_id,
+                    rollback_token,
+                    rollback_performed: false,
+                    reason: format!(
+                        "autotune emergency restore incomplete rollback_kind={} restored_items={} skipped_items={} failed_items={} manual_restore_command=\"{}\"",
+                        summary.rollback_kind,
+                        summary.restored_items,
+                        summary.skipped_items,
+                        summary.failed_items,
+                        manual_command
+                    ),
+                })?;
+
+                return Ok(AutotuneRestoreOutcome {
+                    status: AutotuneRestoreStatus::Faulted,
+                    restored_actions: 0,
+                    failed_actions: 1,
+                    skipped_actions: 0,
+                    restored_records: summary.restored_items,
+                    skipped_missing: summary.skipped_missing,
+                    skipped_identity_mismatch: summary.skipped_identity_mismatch,
+                    failed_records: summary.failed_items,
+                    messages: vec![format!(
+                        "autotune restore failed: experiment_id={} action_id={} rollback_kind={} restored_items={} skipped_items={} failed_items={}",
+                        experiment_id,
+                        action_id,
+                        summary.rollback_kind,
+                        summary.restored_items,
+                        summary.skipped_items,
+                        summary.failed_items
+                    )],
+                });
+            }
+
             write_controller_journal_clean(journal_path).with_context(|| {
                 format!(
                     "failed to clear controller journal after emergency restore {}",
@@ -405,6 +497,10 @@ fn restore_applied_journal_record(
                 restored_actions: 1,
                 failed_actions: 0,
                 skipped_actions: 0,
+                restored_records: summary.restored_items,
+                skipped_missing: summary.skipped_missing,
+                skipped_identity_mismatch: summary.skipped_identity_mismatch,
+                failed_records: summary.failed_items,
                 messages: vec![format!(
                     "autotune restore: restored experiment_id={} action_id={} rollback_kind={} restored_items={} skipped_items={}",
                     experiment_id,
@@ -448,6 +544,10 @@ fn restore_applied_journal_record(
                 restored_actions: 0,
                 failed_actions: 1,
                 skipped_actions: 0,
+                restored_records: 0,
+                skipped_missing: 0,
+                skipped_identity_mismatch: 0,
+                failed_records: 1,
                 messages: vec![
                     format!(
                         "autotune restore failed: experiment_id={} action_id={} rollback_kind={} error={}",
@@ -477,6 +577,9 @@ fn restore_rollback_token_direct(token: &RollbackToken) -> anyhow::Result<Rollba
                     rollback_kind: rollback_token_kind(token).to_owned(),
                     restored_items: summary.restored_total(),
                     skipped_items: summary.skipped_dead + summary.skipped_identity_mismatch,
+                    skipped_missing: summary.skipped_dead,
+                    skipped_identity_mismatch: summary.skipped_identity_mismatch,
+                    failed_items: summary.errors,
                     messages: vec![format!(
                         "affinity={} nice={} ionice={} skipped_dead={} skipped_identity_mismatch={} errors={}",
                         summary.affinity,
@@ -499,6 +602,9 @@ fn restore_rollback_token_direct(token: &RollbackToken) -> anyhow::Result<Rollba
                 skipped_items: summary.skipped_dead
                     + summary.skipped_identity_mismatch
                     + summary.legacy_unverified,
+                skipped_missing: summary.skipped_dead,
+                skipped_identity_mismatch: summary.skipped_identity_mismatch,
+                failed_items: summary.errors,
                 messages: vec![format!(
                     "restored={} skipped_dead={} skipped_identity_mismatch={} legacy_unverified={} errors={}",
                     summary.restored,
@@ -545,10 +651,11 @@ fn restore_nice_records(records: &[NiceRestoreRecord]) -> anyhow::Result<Rollbac
     let mut restored = 0usize;
 
     for record in records {
+        let tid = record.tid();
         let rc = unsafe {
             libc::setpriority(
                 libc::PRIO_PROCESS,
-                record.identity.tid as libc::id_t,
+                tid as libc::id_t,
                 record.original_nice as libc::c_int,
             )
         };
@@ -557,7 +664,7 @@ fn restore_nice_records(records: &[NiceRestoreRecord]) -> anyhow::Result<Rollbac
             return Err(std::io::Error::last_os_error()).with_context(|| {
                 format!(
                     "failed to restore nice={} for tid={}",
-                    record.original_nice, record.identity.tid
+                    record.original_nice, tid
                 )
             });
         }
@@ -574,11 +681,12 @@ fn restore_ioprio_records(
     let mut restored = 0usize;
 
     for record in records {
+        let tid = record.tid();
         let rc = unsafe {
             libc::syscall(
                 libc::SYS_ioprio_set,
                 IOPRIO_WHO_PROCESS,
-                record.identity.tid as libc::c_int,
+                tid as libc::c_int,
                 record.original_ioprio as libc::c_int,
             )
         };
@@ -587,7 +695,7 @@ fn restore_ioprio_records(
             return Err(std::io::Error::last_os_error()).with_context(|| {
                 format!(
                     "failed to restore I/O priority={} for tid={}",
-                    record.original_ioprio, record.identity.tid
+                    record.original_ioprio, tid
                 )
             });
         }
@@ -604,6 +712,7 @@ fn restore_uclamp_records(
     let mut restored = 0usize;
 
     for record in records {
+        let tid = record.tid();
         let mut attr = SchedAttr {
             sched_flags: SCHED_FLAG_KEEP_POLICY
                 | SCHED_FLAG_KEEP_PARAMS
@@ -617,7 +726,7 @@ fn restore_uclamp_records(
         let rc = unsafe {
             libc::syscall(
                 libc::SYS_sched_setattr,
-                record.identity.tid as libc::pid_t,
+                tid as libc::pid_t,
                 &mut attr as *mut SchedAttr,
                 0u32,
             )
@@ -627,7 +736,7 @@ fn restore_uclamp_records(
             return Err(std::io::Error::last_os_error()).with_context(|| {
                 format!(
                     "failed to restore uclamp min={} max={} for tid={}",
-                    record.original_util_min, record.original_util_max, record.identity.tid
+                    record.original_util_min, record.original_util_max, tid
                 )
             });
         }
@@ -685,6 +794,9 @@ fn restore_irq_affinity_records_at(
         rollback_kind: "irq-affinity-restore".to_owned(),
         restored_items: restored,
         skipped_items: skipped,
+        skipped_missing: 0,
+        skipped_identity_mismatch: skipped,
+        failed_items: 0,
         messages,
     })
 }
@@ -712,11 +824,12 @@ fn restore_cgroup_records(
     let mut restored = 0usize;
 
     for record in records {
+        let tid = record.tid();
         let cgroup_procs = record.original_cgroup.join("cgroup.procs");
-        write_sysfs_value(&cgroup_procs, &record.identity.tid.to_string()).with_context(|| {
+        write_sysfs_value(&cgroup_procs, &tid.to_string()).with_context(|| {
             format!(
                 "failed to restore pid={} to cgroup {}",
-                record.identity.tid,
+                tid,
                 record.original_cgroup.display()
             )
         })?;
@@ -959,7 +1072,8 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
             .map(|record| {
                 format!(
                     "sudo renice -n {} -p {}",
-                    record.original_nice, record.identity.tid
+                    record.original_nice,
+                    record.tid()
                 )
             })
             .collect::<Vec<_>>()
@@ -971,7 +1085,7 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
                     "sudo python3 -c 'import os; os.syscall({},{},{},{})'",
                     libc::SYS_ioprio_set,
                     IOPRIO_WHO_PROCESS,
-                    record.identity.tid,
+                    record.tid(),
                     record.original_ioprio
                 )
             })
@@ -998,7 +1112,7 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
                 .map(|record| {
                     format!(
                         "printf '%s' {} | sudo tee {}/cgroup.procs >/dev/null",
-                        record.identity.tid,
+                        record.tid(),
                         shell_quote_path(&record.original_cgroup)
                     )
                 })
@@ -1237,15 +1351,10 @@ mod tests {
             "experiment-1",
             "nice:set:5:targets:1",
             RollbackToken::NiceRestore {
-                records: vec![NiceRestoreRecord {
-                    identity: TaskRestoreIdentity {
-                        tid: 123,
-                        comm: "test".to_owned(),
-                        process_starttime_ticks: None,
-                        task_starttime_ticks: None,
-                    },
-                    original_nice: 0,
-                }],
+                records: vec![NiceRestoreRecord::new(
+                    TaskRestoreIdentity::observed(123, None, Some("test".to_owned()), None, None),
+                    0,
+                )],
             },
         )
         .unwrap();
@@ -1279,15 +1388,16 @@ mod tests {
                 "experiment-live",
                 "nice:set:5:targets:1",
                 Some(RollbackToken::NiceRestore {
-                    records: vec![NiceRestoreRecord {
-                        identity: TaskRestoreIdentity {
-                            tid: 123,
-                            comm: "test".to_owned(),
-                            process_starttime_ticks: None,
-                            task_starttime_ticks: None,
-                        },
-                        original_nice: 0,
-                    }],
+                    records: vec![NiceRestoreRecord::new(
+                        TaskRestoreIdentity::observed(
+                            123,
+                            None,
+                            Some("test".to_owned()),
+                            None,
+                            None,
+                        ),
+                        0,
+                    )],
                 }),
             )
             .with_candidate("game-main");
@@ -1517,15 +1627,10 @@ mod tests {
     #[test]
     fn manual_commands_cover_non_cpu_affinity_tokens() {
         let nice = manual_restore_command_for_token(&RollbackToken::NiceRestore {
-            records: vec![NiceRestoreRecord {
-                identity: TaskRestoreIdentity {
-                    tid: 7,
-                    comm: "test".to_owned(),
-                    process_starttime_ticks: None,
-                    task_starttime_ticks: None,
-                },
-                original_nice: 3,
-            }],
+            records: vec![NiceRestoreRecord::new(
+                TaskRestoreIdentity::observed(7, None, Some("test".to_owned()), None, None),
+                3,
+            )],
         });
         assert_eq!(nice, "sudo renice -n 3 -p 7");
 

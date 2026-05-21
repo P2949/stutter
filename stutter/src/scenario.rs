@@ -327,6 +327,12 @@ pub fn prepare_scenario_run(input: ScenarioRunInput) -> Result<PreparedScenarioR
     let stat_wait = merge_opt_bool(preset_defaults.stat_wait, scenario.stat_wait);
     let block_io = merge_opt_bool(preset_defaults.block_io, scenario.block_io);
     let runtime_slices = preset_defaults.runtime_slices.unwrap_or(false);
+    let kms_timing = preset_defaults.kms_timing.unwrap_or(false);
+    let drm_fence_latency = preset_defaults.drm_fence_latency.unwrap_or(false);
+    let wayland_presentation = preset_defaults.wayland_presentation.unwrap_or(false);
+    let gpu_engine_sampling = preset_defaults.gpu_engine_sampling.unwrap_or(false);
+    let display_topology = preset_defaults.display_topology.unwrap_or(false);
+    let foreground_window = preset_defaults.foreground_window.unwrap_or(false);
     let irq_latency = scenario.irq_latency;
 
     let cpu_freq_config = scenario
@@ -361,6 +367,15 @@ pub fn prepare_scenario_run(input: ScenarioRunInput) -> Result<PreparedScenarioR
             block_io,
             stat_wait,
             runtime_slices,
+            kms_timing,
+            drm_fence_latency,
+            wayland_presentation,
+            gpu_engine_sampling,
+            display_topology,
+            ..Default::default()
+        },
+        focus: crate::config::model::FocusConfig {
+            foreground_window,
             ..Default::default()
         },
         recording: crate::config::model::RecordingConfig {

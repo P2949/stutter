@@ -1279,15 +1279,10 @@ mod tests {
                 affected_tasks: 1,
             },
             RollbackToken::NiceRestore {
-                records: vec![NiceRestoreRecord {
-                    identity: TaskRestoreIdentity {
-                        tid: 1001,
-                        comm: "test".to_owned(),
-                        process_starttime_ticks: None,
-                        task_starttime_ticks: None,
-                    },
-                    original_nice: 5,
-                }],
+                records: vec![NiceRestoreRecord::new(
+                    TaskRestoreIdentity::observed(1001, None, Some("test".to_owned()), None, None),
+                    5,
+                )],
             },
             RollbackToken::IrqAffinityRestore {
                 records: vec![IrqAffinityRestoreRecord {
@@ -1297,38 +1292,23 @@ mod tests {
                 }],
             },
             RollbackToken::IoPrioRestore {
-                records: vec![IoPrioRestoreRecord {
-                    identity: TaskRestoreIdentity {
-                        tid: 1002,
-                        comm: "test".to_owned(),
-                        process_starttime_ticks: None,
-                        task_starttime_ticks: None,
-                    },
-                    original_ioprio: 0x4000,
-                }],
+                records: vec![IoPrioRestoreRecord::new(
+                    TaskRestoreIdentity::observed(1002, None, Some("test".to_owned()), None, None),
+                    0x4000,
+                )],
             },
             RollbackToken::UclampRestore {
-                records: vec![UclampRestoreRecord {
-                    identity: TaskRestoreIdentity {
-                        tid: 1003,
-                        comm: "test".to_owned(),
-                        process_starttime_ticks: None,
-                        task_starttime_ticks: None,
-                    },
-                    original_util_min: 0,
-                    original_util_max: 1024,
-                }],
+                records: vec![UclampRestoreRecord::new(
+                    TaskRestoreIdentity::observed(1003, None, Some("test".to_owned()), None, None),
+                    0,
+                    1024,
+                )],
             },
             RollbackToken::CgroupRestore {
-                records: vec![CgroupRestoreRecord {
-                    identity: TaskRestoreIdentity {
-                        tid: 1004,
-                        comm: "test".to_owned(),
-                        process_starttime_ticks: None,
-                        task_starttime_ticks: None,
-                    },
-                    original_cgroup: PathBuf::from("/sys/fs/cgroup/game.slice"),
-                }],
+                records: vec![CgroupRestoreRecord::new(
+                    TaskRestoreIdentity::observed(1004, None, Some("test".to_owned()), None, None),
+                    PathBuf::from("/sys/fs/cgroup/game.slice"),
+                )],
                 cpuset: None,
             },
             RollbackToken::CpuPowerRestore {

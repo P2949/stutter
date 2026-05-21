@@ -127,6 +127,7 @@ fn apply_layer_with_provenance(
     apply_kms_timing_layer(&mut config.kms_timing, &layer);
     apply_drm_fence_layer(&mut config.drm_fence, &layer);
     apply_wayland_presentation_layer(&mut config.wayland_presentation, &layer);
+    apply_dmabuf_layer(&mut config.dmabuf, &layer);
     apply_display_path_layer(&mut config.display_path, &layer);
     apply_ebpf_sizing_layer(&mut config.ebpf_sizing, &layer);
     apply_ui_layer(&mut config.ui, &layer);
@@ -246,6 +247,24 @@ fn record_layer_provenance(
         source,
     );
     record_if_present(
+        &layer.dmabuf_tracking,
+        provenance,
+        "probes.dmabuf_tracking",
+        source,
+    );
+    record_if_present(
+        &layer.gpu_engine_sampling,
+        provenance,
+        "probes.gpu_engine_sampling",
+        source,
+    );
+    record_if_present(
+        &layer.display_topology,
+        provenance,
+        "probes.display_topology",
+        source,
+    );
+    record_if_present(
         &layer.kms_drm_card,
         provenance,
         "kms_timing.drm_card",
@@ -288,6 +307,7 @@ fn record_layer_provenance(
         "wayland_presentation.source",
         source,
     );
+    record_if_present(&layer.dmabuf_log, provenance, "dmabuf.log_path", source);
     record_if_present(
         &layer.display_path_label,
         provenance,
@@ -629,6 +649,15 @@ fn apply_probe_layer(config: &mut ProbeConfig, layer: &MonitorConfigLayer) {
     if let Some(value) = layer.wayland_presentation {
         config.wayland_presentation = value;
     }
+    if let Some(value) = layer.dmabuf_tracking {
+        config.dmabuf_tracking = value;
+    }
+    if let Some(value) = layer.gpu_engine_sampling {
+        config.gpu_engine_sampling = value;
+    }
+    if let Some(value) = layer.display_topology {
+        config.display_topology = value;
+    }
 }
 
 fn apply_recording_layer(config: &mut RecordingConfig, layer: &MonitorConfigLayer) {
@@ -847,6 +876,12 @@ fn apply_wayland_presentation_layer(
     }
     if let Some(value) = layer.wayland_presentation_source {
         config.source = value;
+    }
+}
+
+fn apply_dmabuf_layer(config: &mut crate::config::model::DmaBufConfig, layer: &MonitorConfigLayer) {
+    if let Some(value) = &layer.dmabuf_log {
+        config.log_path = value.clone();
     }
 }
 

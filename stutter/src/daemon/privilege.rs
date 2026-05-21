@@ -48,6 +48,7 @@ pub use worker::{
 #[cfg(test)]
 pub(crate) use worker::{
     execute_privileged_worker_request, execute_privileged_worker_request_with_audit_sink,
+    wait_for_privileged_worker_socket_with_timing,
 };
 
 pub trait PrivilegedActionService: fmt::Debug + Send + Sync {

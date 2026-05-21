@@ -48,6 +48,9 @@ A typical run directory contains:
   kms_flip_events.json
   drm_fence_events.json
   wayland_presentation_events.json
+  display_topology.json
+  dmabuf_events.json
+  gpu_engine_samples.json
 ```
 
 Required:
@@ -77,6 +80,9 @@ Optional streams:
 - `kms_flip_events.json`
 - `drm_fence_events.json`
 - `wayland_presentation_events.json`
+- `display_topology.json`
+- `dmabuf_events.json`
+- `gpu_engine_samples.json`
 
 ## JSON vs NDJSON
 
@@ -164,6 +170,8 @@ Key fields:
 - `kms_flip_event_count`
 - `drm_fence_event_count`
 - `wayland_presentation_event_count`
+- `dmabuf_event_count`
+- `gpu_engine_sample_count`
 - `display_path`
 - `config.kms_timing`
 - `config.kms_card`
@@ -176,6 +184,10 @@ Key fields:
 - `config.wayland_presentation`
 - `config.wayland_presentation_log`
 - `config.wayland_presentation_source`
+- `config.dmabuf_tracking`
+- `config.dmabuf_log`
+- `config.gpu_engine_sampling`
+- `config.display_topology`
 - `config.display_path_label`
 - `config.display_render_gpu`
 - `config.display_scanout_gpu`
@@ -206,6 +218,8 @@ Consistency rules:
 - `drm_fence_event_count` should match `drm_fence_events.json` when present.
 - `wayland_presentation_event_count` should match
   `wayland_presentation_events.json` when present.
+- `dmabuf_event_count` should match `dmabuf_events.json` when present.
+- `gpu_engine_sample_count` should match `gpu_engine_samples.json` when present.
 - `event_stream_write_errors > 0` means stream artifacts may be incomplete.
 - Nonzero `drop_counters` means kernel-side event loss occurred.
 
@@ -679,6 +693,132 @@ Consistency rules:
 
 - The number of records should match `session.json` field
   `wayland_presentation_event_count` when present.
+
+### `display_topology.json`
+
+Purpose:
+
+- Optional best-effort snapshot of display/GPU topology at recording start.
+- Helps reports and A/B comparisons distinguish direct render+scanout from
+  PRIME/cross-GPU scanout.
+
+Format: JSON object.
+
+Status: Optional artifact.
+
+Version behavior:
+
+- Missing file is tolerated for old runs.
+- Invalid present file is an error.
+- Unknown topology is unavailable evidence, not proof of direct scanout.
+
+Important fields:
+
+- `collected_at_elapsed_ms`
+- `session_type`
+- `compositor`
+- `drm_devices`
+- `connectors`
+- `guessed_path`
+- `warnings`
+
+Consistency rules:
+
+- `session.display_path` is derived from this artifact when manual display-path
+  metadata is not supplied.
+- A/B comparison may downgrade confidence when selected connector EDID or mode
+  evidence differs between runs.
+
+### `dmabuf_events.json`
+
+Purpose:
+
+- Optional cooperative DMABUF format/modifier/import evidence.
+- Helps identify cross-GPU import, linear/modifier mismatch, scanout-capability,
+  zero-copy, and copy-required candidates.
+
+Format: NDJSON.
+
+Status: Optional stream.
+
+Version behavior:
+
+- Missing file is tolerated and means no cooperative DMABUF source was available
+  or enabled.
+- Invalid present file is an error.
+- Copy-required events are candidate attribution, not exact copy latency.
+
+Important fields:
+
+- `elapsed_ms`
+- `source`
+- `app_id`
+- `surface_role`
+- `output_name`
+- `width`
+- `height`
+- `format`
+- `modifier`
+- `modifier_name`
+- `planes`
+- `allocation_driver`
+- `import_driver`
+- `allocation_card`
+- `import_card`
+- `linear`
+- `scanout_capable`
+- `zero_copy`
+- `explicit_sync`
+- `copy_required`
+- `reason`
+- `confidence`
+
+Consistency rules:
+
+- The number of records should match `session.json` field
+  `dmabuf_event_count` when present.
+- Reports aggregate this into `dmabuf_path` and display-path diagnosis evidence.
+
+### `gpu_engine_samples.json`
+
+Purpose:
+
+- Optional per-engine or engine-like GPU activity samples for multi-GPU display
+  paths.
+- Helps distinguish render-GPU pressure from scanout-GPU blitter/render activity
+  near frame outliers.
+
+Format: NDJSON.
+
+Status: Optional stream.
+
+Version behavior:
+
+- Missing file is tolerated and means engine sampling was unavailable or
+  disabled.
+- Invalid present file is an error.
+- Hwmon-derived samples are activity evidence, not exact per-client engine
+  accounting.
+
+Important fields:
+
+- `elapsed_ms`
+- `drm_card`
+- `render_node`
+- `driver`
+- `engine`
+- `busy_percent`
+- `client_pid`
+- `client_comm`
+- `source`
+- `confidence`
+
+Consistency rules:
+
+- The number of records should match `session.json` field
+  `gpu_engine_sample_count` when present.
+- Reports aggregate this into `gpu_engine_activity` and display-path diagnosis
+  evidence.
 
 ## Data-Quality Levels
 

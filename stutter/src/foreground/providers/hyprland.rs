@@ -3,12 +3,10 @@
 //! Owns `hyprctl activewindow -j` sampling and Hyprland active-window JSON conversion. Does not own
 //! provider auto-selection, generic resolver stale handling, or other compositor parsers.
 
-use std::process::Command;
-
 use serde::Deserialize;
 
 use crate::foreground::{
-    command::resolve_trusted_foreground_helper,
+    command::{resolve_trusted_foreground_helper, trusted_foreground_command},
     model::{ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot},
     provider::ForegroundProvider,
 };
@@ -134,7 +132,10 @@ impl ForegroundProvider for HyprlandForegroundProvider {
             };
         };
 
-        let output = match Command::new(&hyprctl).args(["activewindow", "-j"]).output() {
+        let output = match trusted_foreground_command(&hyprctl)
+            .args(["activewindow", "-j"])
+            .output()
+        {
             Ok(output) => output,
             Err(err) => {
                 return ForegroundWindowSnapshot {

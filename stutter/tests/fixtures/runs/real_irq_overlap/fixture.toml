@@ -20,6 +20,11 @@ gpu_samples = 0
 frames = 0
 block_io_events = 0
 foreground_events = 0
+kms_flip_events = 0
+drm_fence_events = 0
+wayland_presentation_events = 0
+dmabuf_events = 0
+gpu_engine_samples = 0
 
 [expected.evidence]
 contains = ["IRQ"]

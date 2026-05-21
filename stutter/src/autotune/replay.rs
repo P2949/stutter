@@ -123,11 +123,13 @@ impl ReplayPolicyEngine for ObserveOnlyReplayPolicy {
             | MonitorEvent::MigrationEvent { .. }
             | MonitorEvent::CpuFreqSample { .. }
             | MonitorEvent::ForegroundEvent { .. }
+            | MonitorEvent::GpuEngineSample { .. }
             | MonitorEvent::SchedulerSample { .. }
             | MonitorEvent::ScxEvent { .. }
             | MonitorEvent::KmsFlipEvent { .. }
             | MonitorEvent::DrmFenceEvent { .. }
             | MonitorEvent::WaylandPresentationEvent { .. }
+            | MonitorEvent::DmaBufEvent { .. }
             | MonitorEvent::Exec { .. } => {}
         }
         Ok(())

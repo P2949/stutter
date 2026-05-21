@@ -174,6 +174,8 @@ pub fn run_display_path_compare_command(
         baseline: input.baseline,
         test: input.test,
         json: input.json,
+        strict: input.strict,
+        expect: input.expect,
     })
 }
 

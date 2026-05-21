@@ -201,6 +201,7 @@ impl AutotuneRuntime {
             MonitorEvent::GpuSample { sample } => {
                 self.controller.window.push_gpu_sample(*sample);
             }
+            MonitorEvent::GpuEngineSample { .. } => {}
             MonitorEvent::CpuFreqSample { event } => {
                 self.controller.window.push_cpu_freq_event(*event);
             }
@@ -263,6 +264,7 @@ impl AutotuneRuntime {
             | MonitorEvent::KmsFlipEvent { .. }
             | MonitorEvent::DrmFenceEvent { .. }
             | MonitorEvent::WaylandPresentationEvent { .. }
+            | MonitorEvent::DmaBufEvent { .. }
             | MonitorEvent::Exec { .. } => {}
         }
 

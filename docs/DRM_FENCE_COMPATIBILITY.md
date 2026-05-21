@@ -37,6 +37,10 @@ Admission notes:
 - When a display-side wait interval observes a previously signaled fence with the
   same key, the interval records the wait provider as `importer_driver` and the
   signal provider as `exporter_driver`.
+- Reports preserve `signal_ns` for matched fences and derive
+  `cross_gpu_fence` candidates when display-side waits, KMS/pageflip timing, and
+  frame outliers line up. This is stronger attribution than a raw wait duration,
+  but still not a direct measurement of copy latency or photon latency.
 - If no stable key exists, only low-confidence signal or overlap evidence should
   be emitted.
 - Reports must say `render GPU queue/fence delay`, `display-side fence wait`, or

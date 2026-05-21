@@ -267,15 +267,25 @@ fn guess_display_path(
         }
     }
 
-    if scanout_card.is_none()
-        && let Some(first_device) = drm_devices.first()
-    {
-        scanout_card = Some(first_device.card.clone());
-        reasons.push(format!(
-            "No connected connector found; falling back to first DRM device {}",
-            first_device.card
-        ));
-        warnings.push("no connected connector found; guessing primary scanout card".to_owned());
+    if scanout_card.is_none() {
+        warnings.push("no connected connector found; display path is unknown".to_owned());
+        let render_device = preferred_render_device(drm_devices);
+        if let Some(device) = render_device {
+            reasons.push(format!(
+                "No connected connector found; render device candidate is {}",
+                device.card
+            ));
+        }
+        return Some(DisplayPathGuess {
+            render_card: render_device.map(|device| device.card.clone()),
+            render_driver: render_device.and_then(|device| device.driver.clone()),
+            scanout_card: None,
+            scanout_driver: None,
+            connector: None,
+            is_cross_gpu: None,
+            confidence: "unknown".to_owned(),
+            reasons,
+        });
     }
 
     let scanout_card_str = scanout_card.as_ref()?;
@@ -283,34 +293,21 @@ fn guess_display_path(
     let scanout_driver = scanout_device.and_then(|d| d.driver.clone());
 
     // 2. Find the render card.
-    let mut render_card = None;
-    for device in drm_devices {
-        let is_discrete = device
-            .driver
-            .as_deref()
-            .is_some_and(|d| d == "amdgpu" || d == "nouveau" || d == "nvidia" || d == "radeon");
-        if is_discrete {
-            render_card = Some(device.card.clone());
+    let render_device = preferred_render_device(drm_devices);
+    let mut render_card = render_device.map(|device| {
+        if is_discrete_gpu(device) {
             reasons.push(format!(
                 "Detected discrete GPU {} with driver {:?}",
                 device.card, device.driver
             ));
-            break;
+        } else {
+            reasons.push(format!(
+                "Defaulting to first device with render node: {}",
+                device.card
+            ));
         }
-    }
-
-    if render_card.is_none() {
-        for device in drm_devices {
-            if device.render_node.is_some() {
-                render_card = Some(device.card.clone());
-                reasons.push(format!(
-                    "Defaulting to first device with render node: {}",
-                    device.card
-                ));
-                break;
-            }
-        }
-    }
+        device.card.clone()
+    });
 
     if render_card.is_none() {
         render_card = Some(scanout_card_str.clone());
@@ -342,6 +339,24 @@ fn guess_display_path(
         confidence,
         reasons,
     })
+}
+
+fn preferred_render_device(drm_devices: &[DrmDeviceInfo]) -> Option<&DrmDeviceInfo> {
+    drm_devices
+        .iter()
+        .find(|device| is_discrete_gpu(device))
+        .or_else(|| {
+            drm_devices
+                .iter()
+                .find(|device| device.render_node.is_some())
+        })
+}
+
+fn is_discrete_gpu(device: &DrmDeviceInfo) -> bool {
+    device
+        .driver
+        .as_deref()
+        .is_some_and(|driver| matches!(driver, "amdgpu" | "nouveau" | "nvidia" | "radeon"))
 }
 
 fn read_trimmed(path: impl AsRef<Path>) -> Option<String> {
@@ -393,6 +408,12 @@ mod tests {
         std::fs::write(path, text).unwrap();
     }
 
+    fn link_driver(sys: &Path, card: &Path, driver: &str) {
+        let driver_path = sys.join(format!("bus/pci/drivers/{driver}"));
+        std::fs::create_dir_all(&driver_path).unwrap();
+        std::os::unix::fs::symlink(&driver_path, card.join("device/driver")).ok();
+    }
+
     #[test]
     fn test_topology_probing_and_guessing() {
         let root = temp_sys_root("intel-amd");
@@ -408,21 +429,14 @@ mod tests {
         write(&sys.join("class/drm/card0-HDMI-A-1/status"), "connected");
         write(&sys.join("class/drm/card0-HDMI-A-1/enabled"), "enabled");
         write(&sys.join("class/drm/card0-HDMI-A-1/modes"), "1920x1080\n");
-
-        // Fake driver links
-        let driver_intel = sys.join("bus/pci/drivers/i915");
-        std::fs::create_dir_all(&driver_intel).unwrap();
-        std::os::unix::fs::symlink(&driver_intel, card0.join("device/driver")).ok();
+        link_driver(&sys, &card0, "i915");
 
         // AMD dGPU: card1, render node only
         let card1 = sys.join("class/drm/card1");
         write(&card1.join("device/vendor"), "0x1002");
         write(&card1.join("device/device"), "0x73ff");
         std::fs::create_dir_all(card1.join("device/drm/renderD129")).unwrap();
-
-        let driver_amd = sys.join("bus/pci/drivers/amdgpu");
-        std::fs::create_dir_all(&driver_amd).unwrap();
-        std::os::unix::fs::symlink(&driver_amd, card1.join("device/driver")).ok();
+        link_driver(&sys, &card1, "amdgpu");
 
         let topology = probe_display_topology_root(&proc, &sys);
 
@@ -435,6 +449,63 @@ mod tests {
         assert_eq!(guess.render_card.as_deref(), Some("card1"));
         assert_eq!(guess.connector.as_deref(), Some("HDMI-A-1"));
         assert_eq!(guess.is_cross_gpu, Some(true));
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn direct_amd_scanout_and_render_path_is_not_cross_gpu() {
+        let root = temp_sys_root("direct-amd");
+        let sys = root.join("sys");
+        let proc = root.join("proc");
+        let card0 = sys.join("class/drm/card0");
+        write(&card0.join("device/vendor"), "0x1002");
+        write(&card0.join("device/device"), "0x744c");
+        std::fs::create_dir_all(card0.join("device/drm/renderD128")).unwrap();
+        link_driver(&sys, &card0, "amdgpu");
+        write(&sys.join("class/drm/card0-DP-1/status"), "connected");
+        write(&sys.join("class/drm/card0-DP-1/enabled"), "enabled");
+        write(&sys.join("class/drm/card0-DP-1/modes"), "2560x1440\n");
+
+        let topology = probe_display_topology_root(&proc, &sys);
+        let guess = topology.guessed_path.unwrap();
+
+        assert_eq!(guess.scanout_card.as_deref(), Some("card0"));
+        assert_eq!(guess.render_card.as_deref(), Some("card0"));
+        assert_eq!(guess.connector.as_deref(), Some("DP-1"));
+        assert_eq!(guess.is_cross_gpu, Some(false));
+        assert_eq!(guess.scanout_driver.as_deref(), Some("amdgpu"));
+        assert_eq!(guess.render_driver.as_deref(), Some("amdgpu"));
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn no_connected_connector_reports_unknown_path_with_warning() {
+        let root = temp_sys_root("no-connector");
+        let sys = root.join("sys");
+        let proc = root.join("proc");
+        let card0 = sys.join("class/drm/card0");
+        write(&card0.join("device/vendor"), "0x8086");
+        write(&card0.join("device/device"), "0x9bc5");
+        std::fs::create_dir_all(card0.join("device/drm/renderD128")).unwrap();
+        link_driver(&sys, &card0, "i915");
+        write(&sys.join("class/drm/card0-HDMI-A-1/status"), "disconnected");
+        write(&sys.join("class/drm/card0-HDMI-A-1/enabled"), "disabled");
+
+        let topology = probe_display_topology_root(&proc, &sys);
+        let guess = topology.guessed_path.unwrap();
+
+        assert_eq!(guess.confidence, "unknown");
+        assert_eq!(guess.scanout_card, None);
+        assert_eq!(guess.connector, None);
+        assert_eq!(guess.is_cross_gpu, None);
+        assert!(
+            topology
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("no connected connector found"))
+        );
 
         std::fs::remove_dir_all(root).ok();
     }

@@ -10,6 +10,8 @@ pub struct MonitorSession {
     pub cpu_to_pkg: BTreeMap<u32, String>,
 
     pub hwmon_reader: Option<Arc<std::sync::Mutex<hwmon::HwmonReader>>>,
+    pub(crate) gpu_engine_reader:
+        Option<Arc<std::sync::Mutex<crate::gpu_engine::MultiGpuHwmonReader>>>,
     pub focus_resolver: Option<FocusResolver>,
     pub current_focus: Option<ResolvedFocus>,
     pub focus_switch_count: u64,
@@ -17,6 +19,7 @@ pub struct MonitorSession {
     pub current_foreground: Option<crate::foreground::ForegroundWindowSnapshot>,
     pub foreground_switch_count: u64,
     pub wayland_presentation_reader: Option<WaylandPresentationLogReader>,
+    pub dmabuf_reader: Option<DmaBufLogReader>,
 
     pub started: Instant,
     pub had_tree_roots: bool,
@@ -53,6 +56,16 @@ impl MonitorSession {
                 .log_path
                 .as_ref()
                 .map(|path| WaylandPresentationLogReader::open_tail(path))
+                .transpose()?
+        } else {
+            None
+        };
+        let dmabuf_reader = if config.probes.dmabuf_tracking {
+            config
+                .dmabuf
+                .log_path
+                .as_ref()
+                .map(|path| DmaBufLogReader::open_tail(path))
                 .transpose()?
         } else {
             None
@@ -106,6 +119,7 @@ impl MonitorSession {
             runtime,
             cpu_to_pkg,
             hwmon_reader: hwmon_runtime.reader,
+            gpu_engine_reader: hwmon_runtime.engine_reader,
             community_rules: target_plan.community_rules,
             focus_resolver: target_plan.focus_resolver,
             current_focus: target_plan.current_focus,
@@ -114,6 +128,7 @@ impl MonitorSession {
             current_foreground: target_plan.current_foreground,
             foreground_switch_count: 0,
             wayland_presentation_reader,
+            dmabuf_reader,
             started,
             had_tree_roots: target_plan.had_tree_roots,
             interval_label,
@@ -261,6 +276,13 @@ impl MonitorSession {
         .await
     }
 
+    async fn handle_dmabuf_tick(&mut self, context: DmaBufTickContext) -> anyhow::Result<()> {
+        self.dispatch_monitor_event(MonitorEvent::DmaBufEvent {
+            event: Box::new(context.event),
+        })
+        .await
+    }
+
     fn normalize_wayland_presentation_event(
         &self,
         mut event: recorder::WaylandPresentationEventRecord,
@@ -283,6 +305,16 @@ impl MonitorSession {
         event
     }
 
+    fn normalize_dmabuf_event(
+        &self,
+        mut event: recorder::DmaBufEventRecord,
+    ) -> recorder::DmaBufEventRecord {
+        if event.elapsed_ms == 0 {
+            event.elapsed_ms = self.started.elapsed().as_millis() as u64;
+        }
+        event
+    }
+
     async fn handle_wayland_presentation_log_tick(&mut self) -> anyhow::Result<()> {
         let events = if let Some(reader) = &mut self.wayland_presentation_reader {
             reader.read_new_events()?
@@ -294,6 +326,21 @@ impl MonitorSession {
             let event = self.normalize_wayland_presentation_event(event);
             self.handle_wayland_presentation_tick(WaylandPresentationTickContext { event })
                 .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_dmabuf_log_tick(&mut self) -> anyhow::Result<()> {
+        let events = if let Some(reader) = &mut self.dmabuf_reader {
+            reader.read_new_events()?
+        } else {
+            Vec::new()
+        };
+
+        for event in events {
+            let event = self.normalize_dmabuf_event(event);
+            self.handle_dmabuf_tick(DmaBufTickContext { event }).await?;
         }
 
         Ok(())
@@ -381,6 +428,14 @@ impl MonitorSession {
         hwmon_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         let mut wayland_presentation_tick = if self.wayland_presentation_reader.is_some() {
+            let mut tick = interval(Duration::from_millis(100));
+            tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+            Some(tick)
+        } else {
+            None
+        };
+
+        let mut dmabuf_tick = if self.dmabuf_reader.is_some() {
             let mut tick = interval(Duration::from_millis(100));
             tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
             Some(tick)
@@ -511,6 +566,10 @@ impl MonitorSession {
 
                 _ = optional_tick(wayland_presentation_tick.as_mut()) => {
                     self.handle_wayland_presentation_log_tick().await?;
+                }
+
+                _ = optional_tick(dmabuf_tick.as_mut()) => {
+                    self.handle_dmabuf_log_tick().await?;
                 }
 
                 maybe_event = async {
@@ -692,18 +751,29 @@ impl MonitorSession {
                         )
                         .unwrap_or_else(|| self.started.elapsed().as_millis() as u64);
                         let flags = kms_flip_flag_names(event.flags);
+                        let source = kms_flip_provider_name(event.provider).to_owned();
+                        let driver = display_driver_from_source(&source);
+                        let card = (event.card_minor != 0)
+                            .then(|| format!("card{}", event.card_minor))
+                            .or_else(|| self.config.kms_timing.drm_card.clone())
+                            .or_else(|| self.config.drm_fence.display_card.clone());
+                        let connector = self
+                            .config
+                            .kms_timing
+                            .connector
+                            .clone()
+                            .or_else(|| self.config.display_path.connector.clone());
                         pending_monitor_events.push(
                             crate::session_events::MonitorEvent::KmsFlipEvent {
                                 event: Box::new(crate::recorder::KmsFlipEventRecord {
                                     elapsed_ms,
                                     timestamp_ns: event.timestamp_ns,
-                                    source: kms_flip_provider_name(event.provider).to_owned(),
-                                    card: (event.card_minor != 0)
-                                        .then(|| format!("card{}", event.card_minor)),
-                                    driver: None,
+                                    source,
+                                    card,
+                                    driver,
                                     crtc_id: (event.flags & stutter_common::KMS_FLIP_HAS_CRTC != 0)
                                         .then_some(event.crtc_id),
-                                    connector: None,
+                                    connector,
                                     event_kind: kms_flip_event_kind_name(event.event_kind)
                                         .to_owned(),
                                     sequence: (event.flags & stutter_common::KMS_FLIP_HAS_SEQUENCE
@@ -790,17 +860,25 @@ impl MonitorSession {
                         } else {
                             "low"
                         };
+                        let source = drm_fence_provider_name(event.provider).to_owned();
+                        let gpu_role = drm_gpu_role_name(event.gpu_role).to_owned();
+                        let driver = display_driver_from_source(&source);
+                        let card = match gpu_role.as_str() {
+                            "render" => self.config.drm_fence.render_card.clone(),
+                            "display" => self.config.drm_fence.display_card.clone(),
+                            _ => None,
+                        };
                         pending_monitor_events.push(
                             crate::session_events::MonitorEvent::DrmFenceEvent {
                                 event: Box::new(crate::recorder::DrmFenceEventRecord {
                                     elapsed_ms,
                                     timestamp_ns: event.timestamp_ns,
-                                    source: drm_fence_provider_name(event.provider).to_owned(),
+                                    source,
                                     event_kind: drm_fence_event_kind_name(event.event_kind)
                                         .to_owned(),
-                                    driver: None,
-                                    card: None,
-                                    gpu_role: Some(drm_gpu_role_name(event.gpu_role).to_owned()),
+                                    driver,
+                                    card,
+                                    gpu_role: Some(gpu_role),
                                     pid: (event.flags & stutter_common::DRM_FENCE_HAS_PID != 0)
                                         .then_some(event.pid),
                                     tid: (event.flags & stutter_common::DRM_FENCE_HAS_PID != 0)
@@ -1166,6 +1244,27 @@ impl MonitorSession {
                 .await?;
             }
         }
+        if let Some(reader_arc) = &self.gpu_engine_reader {
+            let elapsed = self.started.elapsed().as_millis() as u64;
+            let reader_arc_clone = reader_arc.clone();
+
+            let samples = task::spawn_blocking(move || {
+                if let Ok(mut reader) = reader_arc_clone.lock() {
+                    reader.sample(elapsed)
+                } else {
+                    Vec::new()
+                }
+            })
+            .await
+            .map_err(|err| anyhow::anyhow!("gpu engine worker failed: {err}"))?;
+
+            for sample in samples {
+                self.dispatch_monitor_event(MonitorEvent::GpuEngineSample {
+                    sample: Box::new(sample),
+                })
+                .await?;
+            }
+        }
         Ok(())
     }
 
@@ -1434,5 +1533,13 @@ impl MonitorSession {
 
         info!("exiting stop_reason={stop_reason}");
         Ok(stop_reason)
+    }
+}
+
+fn display_driver_from_source(source: &str) -> Option<String> {
+    match source {
+        "amdgpu" | "amdgpu_tracepoint" => Some("amdgpu".to_owned()),
+        "i915" | "i915_tracepoint" => Some("i915".to_owned()),
+        _ => None,
     }
 }

@@ -242,7 +242,12 @@ mod tests {
                 candidate: state_candidate.clone(),
                 baseline_score_total: 100,
             });
-            observation.active_config_snapshot = Some(active_nice_snapshot(1234, 0));
+            observation.active_config_snapshot =
+                Some(active_nice_snapshot_for_tasks(&observation.active_tasks, 0));
+        }
+
+        if case.kept_conflict {
+            observation.active_config_snapshot = None;
         }
 
         let active_profile_state = case.kept_conflict.then(|| {
@@ -541,6 +546,7 @@ mod tests {
             inventory_hash: format!("fixture-{}", case.situation),
         };
         let mut active_config = ActiveConfigSnapshot::default();
+        seed_task_active_config(&mut active_config, &observation.active_tasks);
 
         if case.cpu_power_evidence {
             observation.objective_signals.cpu_power_limited = Some(true);
@@ -563,6 +569,14 @@ mod tests {
                     ),
                     related_cpus: Some("0 1".to_owned()),
                 });
+            active_config.cpu_power.policies.push(
+                crate::autotune::observation::CpuPolicyRuntimeState {
+                    policy: "policy0".to_owned(),
+                    scaling_governor: Some("powersave".to_owned()),
+                    energy_performance_preference: Some("balance_power".to_owned()),
+                    related_cpus: Some("0 1".to_owned()),
+                },
+            );
         }
 
         if case.gpu_power_evidence {
@@ -586,6 +600,13 @@ mod tests {
                     vendor: Some("amd".to_owned()),
                     hwmon_paths: Vec::new(),
                 });
+            active_config.gpu_power.devices.push(
+                crate::autotune::observation::GpuPowerRuntimeState {
+                    device: "card0".to_owned(),
+                    power_dpm_force_performance_level: Some("auto".to_owned()),
+                    pp_power_profile_mode: Some("BOOTUP_DEFAULT".to_owned()),
+                },
+            );
         }
 
         if case.irq_evidence {
@@ -620,6 +641,10 @@ mod tests {
                 ObjectiveSignalQuality::Direct;
             inventory
                 .vm_knobs
+                .insert("proc/sys/vm/swappiness".to_owned(), "60".to_owned());
+            active_config
+                .vm
+                .knobs
                 .insert("proc/sys/vm/swappiness".to_owned(), "60".to_owned());
         }
 
@@ -710,6 +735,10 @@ mod tests {
                 inventory
                     .vm_knobs
                     .insert("proc/sys/vm/swappiness".to_owned(), "60".to_owned());
+                active_config
+                    .vm
+                    .knobs
+                    .insert("proc/sys/vm/swappiness".to_owned(), "60".to_owned());
             }
 
             observation.objective_signals = signals;
@@ -726,6 +755,51 @@ mod tests {
         observation.active_config_snapshot = Some(active_config);
         observation.system_context = Some(system_context);
         observation
+    }
+
+    fn seed_task_active_config(
+        active_config: &mut ActiveConfigSnapshot,
+        active_tasks: &[ActiveTaskSnapshot],
+    ) {
+        for task in active_tasks {
+            active_config
+                .affinity
+                .per_tid
+                .entry(task.tid)
+                .or_insert_with(|| "0-3".to_owned());
+            active_config.nice.per_tid.entry(task.tid).or_insert(0);
+            active_config
+                .ionice
+                .per_tid
+                .entry(task.tid)
+                .or_insert_with(|| "best-effort:4".to_owned());
+            active_config
+                .uclamp
+                .per_tid
+                .entry(task.tid)
+                .or_insert(UclampValues {
+                    sched_util_min: Some(0),
+                    sched_util_max: Some(1024),
+                });
+            if let Some(cgroup_path) = &task.cgroup_path {
+                active_config
+                    .cgroup
+                    .per_tid
+                    .entry(task.tid)
+                    .or_insert_with(|| cgroup_path.clone());
+            }
+        }
+    }
+
+    fn active_nice_snapshot_for_tasks(
+        active_tasks: &[ActiveTaskSnapshot],
+        nice: i32,
+    ) -> ActiveConfigSnapshot {
+        let mut snapshot = ActiveConfigSnapshot::default();
+        for task in active_tasks {
+            snapshot.nice.per_tid.insert(task.tid, nice);
+        }
+        snapshot
     }
 
     fn fixture_tasks(

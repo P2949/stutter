@@ -145,6 +145,8 @@ pub struct DisplayPathCompareCommandInput {
     pub baseline: PathBuf,
     pub test: PathBuf,
     pub json: bool,
+    pub strict: bool,
+    pub expect: Option<crate::display_path_compare::DisplayPathExpectation>,
 }
 
 #[derive(Debug)]
@@ -444,6 +446,8 @@ pub struct AgentCommandInput {
     pub max_duration_seconds: u64,
     pub max_targets: usize,
     pub max_concurrent_recordings: usize,
+    pub max_unix_connections: usize,
+    pub unix_connection_timeout: Duration,
 }
 
 #[derive(Debug)]

@@ -3,10 +3,8 @@
 //! Owns `swaymsg get_tree` process execution and conversion of parsed Sway trees into foreground
 //! snapshots. Does not own Sway tree data-model traversal details or resolver stale handling.
 
-use std::process::Command;
-
 use crate::foreground::{
-    command::resolve_trusted_foreground_helper,
+    command::{resolve_trusted_foreground_helper, trusted_foreground_command},
     model::{ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot},
     parse::sway::{SwayNode, focused_sway_snapshot_from_tree},
     provider::ForegroundProvider,
@@ -90,7 +88,7 @@ impl ForegroundProvider for SwayForegroundProvider {
             };
         };
 
-        let output = match Command::new(&swaymsg)
+        let output = match trusted_foreground_command(&swaymsg)
             .args(["-t", "get_tree", "-r"])
             .output()
         {

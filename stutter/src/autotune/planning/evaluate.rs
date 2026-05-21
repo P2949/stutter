@@ -255,7 +255,12 @@ pub(crate) fn evaluate_proposal_static(
                 ));
             }
             ActiveConfigMatch::Differs { .. } => {}
-            ActiveConfigMatch::Unknown { .. } => {}
+            ActiveConfigMatch::Unknown { summary } => {
+                deny_reasons.push(CandidateDenyReason::ActiveConfigUnknown);
+                deny_messages.push(format!(
+                    "candidate active configuration is unknown: {summary}; restore or resync before applying this action"
+                ));
+            }
         }
 
         if let Some(active_experiment) = input.controller_state.active_experiment.as_ref()
@@ -300,14 +305,21 @@ pub(crate) fn evaluate_proposal_static(
                             actual
                         ));
                     }
-                    ActiveConfigMatch::Unknown { summary } if !conflicts_with_candidate => {
+                    ActiveConfigMatch::Unknown { summary } => {
                         deny_reasons.push(CandidateDenyReason::ActiveConfigUnknown);
-                        deny_messages.push(format!(
-                            "kept action {} active configuration is unknown: {summary}; restore or resync before planning new candidates",
-                            kept.candidate.candidate_name()
-                        ));
+                        if conflicts_with_candidate {
+                            deny_messages.push(format!(
+                                "kept action {} active configuration is unknown and conflicts with this candidate: {summary}; restore or resync before applying another conflicting action",
+                                kept.candidate.candidate_name()
+                            ));
+                        } else {
+                            deny_messages.push(format!(
+                                "kept action {} active configuration is unknown: {summary}; restore or resync before planning new candidates",
+                                kept.candidate.candidate_name()
+                            ));
+                        }
                     }
-                    ActiveConfigMatch::Unknown { .. } | ActiveConfigMatch::Matches { .. } => {}
+                    ActiveConfigMatch::Matches { .. } => {}
                 }
             }
         }

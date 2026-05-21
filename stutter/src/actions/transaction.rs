@@ -81,12 +81,13 @@ mod tests {
     };
 
     fn identity(tid: u32, comm: &str) -> TaskRestoreIdentity {
-        TaskRestoreIdentity {
+        TaskRestoreIdentity::observed(
             tid,
-            comm: comm.to_owned(),
-            process_starttime_ticks: None,
-            task_starttime_ticks: Some(u64::from(tid) + 1_000),
-        }
+            Some(tid),
+            Some(comm.to_owned()),
+            Some(u64::from(tid) + 1_000),
+            None,
+        )
     }
 
     #[test]
@@ -141,21 +142,15 @@ mod tests {
     #[test]
     fn nice_partial_token_contains_applied_restore_records() {
         let records = vec![
-            NiceRestoreRecord {
-                identity: identity(42, "game-thread"),
-                original_nice: 0,
-            },
-            NiceRestoreRecord {
-                identity: identity(43, "game-worker"),
-                original_nice: 5,
-            },
+            NiceRestoreRecord::new(identity(42, "game-thread"), 0),
+            NiceRestoreRecord::new(identity(43, "game-worker"), 5),
         ];
 
         let err = ApplyTransaction::new()
             .apply_planned_loop(
                 records,
                 |record| {
-                    if record.identity.tid == 43 {
+                    if record.tid() == 43 {
                         anyhow::bail!("simulated nice failure");
                     }
                     Ok(())
@@ -171,28 +166,22 @@ mod tests {
         };
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].identity.tid, 42);
+        assert_eq!(records[0].tid(), 42);
         assert_eq!(records[0].original_nice, 0);
     }
 
     #[test]
     fn ioprio_partial_token_contains_applied_restore_records() {
         let records = vec![
-            IoPrioRestoreRecord {
-                identity: identity(42, "storage-worker"),
-                original_ioprio: 4,
-            },
-            IoPrioRestoreRecord {
-                identity: identity(43, "storage-helper"),
-                original_ioprio: 7,
-            },
+            IoPrioRestoreRecord::new(identity(42, "storage-worker"), 4),
+            IoPrioRestoreRecord::new(identity(43, "storage-helper"), 7),
         ];
 
         let err = ApplyTransaction::new()
             .apply_planned_loop(
                 records,
                 |record| {
-                    if record.identity.tid == 43 {
+                    if record.tid() == 43 {
                         anyhow::bail!("simulated ioprio failure");
                     }
                     Ok(())
@@ -208,30 +197,22 @@ mod tests {
         };
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].identity.tid, 42);
+        assert_eq!(records[0].tid(), 42);
         assert_eq!(records[0].original_ioprio, 4);
     }
 
     #[test]
     fn uclamp_partial_token_contains_applied_restore_records() {
         let records = vec![
-            UclampRestoreRecord {
-                identity: identity(42, "game-thread"),
-                original_util_min: 0,
-                original_util_max: 1024,
-            },
-            UclampRestoreRecord {
-                identity: identity(43, "game-worker"),
-                original_util_min: 128,
-                original_util_max: 900,
-            },
+            UclampRestoreRecord::new(identity(42, "game-thread"), 0, 1024),
+            UclampRestoreRecord::new(identity(43, "game-worker"), 128, 900),
         ];
 
         let err = ApplyTransaction::new()
             .apply_planned_loop(
                 records,
                 |record| {
-                    if record.identity.tid == 43 {
+                    if record.tid() == 43 {
                         anyhow::bail!("simulated uclamp failure");
                     }
                     Ok(())
@@ -247,7 +228,7 @@ mod tests {
         };
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].identity.tid, 42);
+        assert_eq!(records[0].tid(), 42);
         assert_eq!(records[0].original_util_min, 0);
         assert_eq!(records[0].original_util_max, 1024);
     }

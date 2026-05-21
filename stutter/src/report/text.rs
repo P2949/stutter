@@ -81,6 +81,7 @@ pub fn print_report(input: PrintReportInput<'_>) -> anyhow::Result<()> {
             correlation_sections: &correlation_sections,
             focus_summary: &analysis.focus_summary,
             foreground_summary: &analysis.foreground_summary,
+            display_path_diagnosis: Some(&analysis.display_path_diagnosis),
             top: input.top,
             cluster_window_ms: input.cluster_window_ms,
             filter_class: input.filter_class,

@@ -36,8 +36,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/agent/autotune.rs",
-        max_lines: 1_196,
-        reason: "autotune agent route handlers, remote policy helpers, restore endpoint wiring, and task reaping remain pending future policy/helper split",
+        max_lines: 1_245,
+        reason: "autotune agent route handlers, remote policy helpers, explicit task reaping status, active record-level restore endpoint wiring, task reaping, and enum-mode apply-low-risk start behavior remain pending future policy/helper split",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/planning/tests.rs",
@@ -51,13 +51,13 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/cli/monitor.rs",
-        max_lines: 1_263,
-        reason: "temporary extraction stage: owns monitor CLI args/defaults/merge/validation logic; next split is cli/monitor/args.rs",
+        max_lines: 1_287,
+        reason: "temporary extraction stage: owns monitor CLI args/defaults/merge/validation logic; DMABUF and GPU-engine flags are staged here until cli/monitor/args.rs exists",
     },
     OversizedRustFileAllowance {
         path: "src/session/monitor_session.rs",
-        max_lines: 1_470,
-        reason: "temporary extraction stage: owns MonitorSession run loop and remaining tick handlers after facade split; next split is session/ticks/target.rs",
+        max_lines: 1_545,
+        reason: "temporary extraction stage: owns MonitorSession run loop and remaining tick handlers after facade split; DMABUF and GPU-engine ingestion are staged here until display-path tick handling is split",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/shutdown.rs",
@@ -76,8 +76,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/config_file.rs",
-        max_lines: 1_779,
-        reason: "existing config file parser/model implementation pending future split; system-wide allowlist and medium-risk autotune config parsing are staged here",
+        max_lines: 1_787,
+        reason: "existing config file parser/model implementation pending future split; display topology, DMABUF, and GPU-engine config fields are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/report/mod.rs",
@@ -86,8 +86,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/cli/report.rs",
-        max_lines: 1_509,
-        reason: "existing report CLI argument surface pending future split; rules Args-to-Input conversion is staged here",
+        max_lines: 1_546,
+        reason: "existing report CLI argument surface pending future split; display-path compare strict/expect parsing and rules Args-to-Input conversion are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/status.rs",
@@ -96,8 +96,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/validation_corpus_tests.rs",
-        max_lines: 1_396,
-        reason: "existing validation corpus test module pending future split",
+        max_lines: 1_468,
+        reason: "existing validation corpus test module pending future split; display-path validation corpus cases are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/startup_recovery.rs",
@@ -106,8 +106,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/autotune/emergency_restore.rs",
-        max_lines: 1_553,
-        reason: "existing autotune emergency restore implementation pending future split; restore input conversion and rollback summary wiring are staged here",
+        max_lines: 1_658,
+        reason: "existing autotune emergency restore implementation pending future split; restore input conversion, rollback summary wiring, and record-level restore outcome propagation are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/tune/mod.rs",
@@ -136,13 +136,13 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/autotune/rolling_window.rs",
-        max_lines: 1_230,
-        reason: "existing autotune rolling window implementation pending future split; memory PSI spike, IRQ timestamp, and interval ordering coverage are staged here",
+        max_lines: 1_382,
+        reason: "existing autotune rolling window implementation pending future split; memory PSI spike, IRQ missing-timestamp policy, interval ordering hardening, and invalid-frametime drop coverage are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/config/effective.rs",
-        max_lines: 1_313,
-        reason: "existing effective config resolution implementation pending future split; display-path provenance is staged here",
+        max_lines: 1_348,
+        reason: "existing effective config resolution implementation pending future split; prime display-path, display topology, DMABUF, and GPU-engine provenance are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/recorder/session.rs",
@@ -161,13 +161,13 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/actions/cgroup.rs",
-        max_lines: 1_402,
-        reason: "existing cgroup action implementation pending future split; rollback handler registration, identity restore checks, and cpuset rollback coverage are staged here",
+        max_lines: 1_740,
+        reason: "existing cgroup action implementation pending future split; rollback handler registration, identity-verified restore checks, best-effort restore error handling, cpuset rollback coverage, restore-write classifier coverage, and transactional cgroup apply coverage are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/cli/mod.rs",
-        max_lines: 1_096,
-        reason: "existing top-level CLI parser implementation pending future split; Clap command tree, compare command coverage, and dry-run-all-safe parsing are staged here",
+        max_lines: 1_106,
+        reason: "existing top-level CLI parser implementation pending future split; Clap command tree, compare expect/strict command coverage, dry-run-all-safe parsing, and agent Unix socket cap/timeout validation are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/actions/cpu_power.rs",
@@ -181,18 +181,18 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/actions/ioprio.rs",
-        max_lines: 1_050,
-        reason: "existing I/O priority action implementation pending future split; transactional apply now prebuilds restore records before mutation",
+        max_lines: 1_080,
+        reason: "existing I/O priority action implementation pending future split; transactional apply now prebuilds restore records before mutation and rollback verifies task identity plus best-effort write errors before restore",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/runtime.rs",
-        max_lines: 1_003,
-        reason: "existing autotune runtime implementation pending future split; restore and task-lifecycle wiring are staged here",
+        max_lines: 1_005,
+        reason: "existing autotune runtime implementation pending future split; restore, task-lifecycle, and display-path event ignore wiring are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/actions/uclamp.rs",
-        max_lines: 1_160,
-        reason: "existing uclamp action implementation pending future split; transactional apply now prebuilds restore records before mutation",
+        max_lines: 1_178,
+        reason: "existing uclamp action implementation pending future split; transactional apply now prebuilds restore records before mutation and rollback verifies task identity plus best-effort write errors before restore",
     },
     OversizedRustFileAllowance {
         path: "src/actions/vm_knobs.rs",

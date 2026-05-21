@@ -3,10 +3,8 @@
 //! Owns `xprop` process execution and X11 active-window snapshot construction. Does not own parser
 //! tokenization details or resolver stale-snapshot policy.
 
-use std::process::Command;
-
 use crate::foreground::{
-    command::resolve_trusted_foreground_helper,
+    command::{resolve_trusted_foreground_helper, trusted_foreground_command},
     model::{ForegroundProviderStatus, ForegroundSource, ForegroundWindowSnapshot},
     parse::x11::{parse_x11_active_window_id, parse_x11_window_properties, x11_confidence},
     provider::ForegroundProvider,
@@ -108,7 +106,7 @@ impl ForegroundProvider for X11ForegroundProvider {
             };
         };
 
-        let active_output = match Command::new(&xprop)
+        let active_output = match trusted_foreground_command(&xprop)
             .args(["-root", "_NET_ACTIVE_WINDOW"])
             .output()
         {
@@ -170,7 +168,7 @@ impl ForegroundProvider for X11ForegroundProvider {
             };
         };
 
-        let properties_output = match Command::new(&xprop)
+        let properties_output = match trusted_foreground_command(&xprop)
             .args([
                 "-id",
                 &window_id,

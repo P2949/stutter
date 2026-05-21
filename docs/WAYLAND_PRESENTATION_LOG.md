@@ -45,3 +45,8 @@ Reports aggregate events by `source` and `surface_role`. Gamescope events with
 compositor evidence and can become a `compositor/presentation queue delay`
 candidate when commit-to-present delay lands near frame outliers. This remains a
 candidate attribution until compared with KMS, DRM fence, and scheduler evidence.
+
+Direct-scanout status is derived from cooperative hints such as `zero_copy`,
+`surface_role`, and source-specific flags. See `docs/DIRECT_SCANOUT_LOG.md` for
+the accepted direct-scanout vocabulary. Missing zero-copy/direct-scanout fields
+mean the evidence is unavailable, not that compositing or copies did not happen.

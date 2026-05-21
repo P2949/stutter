@@ -1,0 +1,33 @@
+name = "uhd630_kms_delay"
+schema_version = 22
+source = "synthetic-display-path"
+quality_expectation = "High"
+description = "Synthetic display-path fixture with UHD630/i915 scanout and KMS/pageflip delay near a frame outlier."
+
+[expected]
+primary_cause = "Unknown"
+accepted_confidence = []
+data_quality = "High"
+
+[expected.artifacts]
+spikes = 0
+intervals = 1
+irq_events = 0
+gpu_samples = 0
+frames = 4
+block_io_events = 0
+foreground_events = 0
+kms_flip_events = 1
+drm_fence_events = 0
+wayland_presentation_events = 1
+dmabuf_events = 0
+gpu_engine_samples = 1
+
+[expected.evidence]
+contains = []
+
+[privacy]
+titles_redacted = true
+paths_redacted = true
+hostnames_redacted = true
+usernames_redacted = true

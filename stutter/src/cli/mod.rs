@@ -604,6 +604,8 @@ where
                     baseline: display.baseline.clone(),
                     test: display.test.clone(),
                     json: display.json,
+                    strict: display.strict,
+                    expect: display.expect,
                 },
             )),
         },
@@ -638,6 +640,12 @@ where
             if args.max_concurrent_recordings > 1 {
                 anyhow::bail!("agent currently supports at most 1 concurrent recording");
             }
+            if args.max_unix_connections == 0 {
+                anyhow::bail!("--max-unix-connections must be greater than zero");
+            }
+            if args.unix_connection_timeout_ms == 0 {
+                anyhow::bail!("--unix-connection-timeout-ms must be greater than zero");
+            }
             let (bind, unix_socket) = agent_listen_args(args.bind, args.port, args.unix_socket)?;
             Ok(AppCommand::Agent(AgentCommandInput {
                 bind,
@@ -653,6 +661,8 @@ where
                 max_duration_seconds: args.max_duration_seconds,
                 max_targets: args.max_targets,
                 max_concurrent_recordings: args.max_concurrent_recordings,
+                max_unix_connections: args.max_unix_connections,
+                unix_connection_timeout: Duration::from_millis(args.unix_connection_timeout_ms),
             }))
         }
         Some(Command::PrivilegedWorker(args)) => {

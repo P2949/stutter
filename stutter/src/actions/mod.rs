@@ -43,6 +43,7 @@ pub(crate) mod error;
 pub(crate) mod factory;
 pub(crate) mod model;
 pub(crate) mod restore_identity;
+pub(crate) mod restore_write;
 pub(crate) mod rollback;
 pub(crate) mod token;
 pub(crate) mod traits;

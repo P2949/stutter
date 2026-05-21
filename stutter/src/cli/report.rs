@@ -395,6 +395,12 @@ pub(super) struct DisplayPathCompareArgs {
     #[arg(long = "test", value_name = "RUN")]
     pub(super) test: PathBuf,
 
+    #[arg(long = "expect", value_enum)]
+    pub(super) expect: Option<crate::display_path_compare::DisplayPathExpectation>,
+
+    #[arg(long = "strict")]
+    pub(super) strict: bool,
+
     #[arg(long = "json")]
     pub(super) json: bool,
 }
@@ -1363,6 +1369,37 @@ mod report_family_cli_tests {
         assert_eq!(input.preset, "diagnosis");
         assert_eq!(input.mangohud_log, Some(PathBuf::from("/tmp/mango.csv")));
         assert_eq!(input.notes.as_deref(), Some("forest route"));
+    }
+
+    #[test]
+    fn compare_display_path_parses_expectation_and_strict() {
+        let command = parse_report_command([
+            "stutter",
+            "compare",
+            "display-path",
+            "--baseline",
+            "/tmp/direct-run",
+            "--test",
+            "/tmp/uhd630-run",
+            "--expect",
+            "direct-to-offload",
+            "--strict",
+            "--json",
+        ])
+        .unwrap();
+
+        let AppCommand::DisplayPathCompare(input) = command else {
+            panic!("expected display-path compare command");
+        };
+
+        assert_eq!(input.baseline, PathBuf::from("/tmp/direct-run"));
+        assert_eq!(input.test, PathBuf::from("/tmp/uhd630-run"));
+        assert_eq!(
+            input.expect,
+            Some(crate::display_path_compare::DisplayPathExpectation::DirectToOffload)
+        );
+        assert!(input.strict);
+        assert!(input.json);
     }
 
     #[test]

@@ -83,13 +83,15 @@ pub(crate) use html::task_html_row;
 pub use html::write_html_report;
 pub(crate) use load::{load_report_input, load_report_session};
 pub use model::{
-    ArtifactsSummary, DataQualityLevel, DataQualitySummary, DrmFenceTimingSummary,
-    DrmFenceWaitSummary, FocusReportSummary, ForegroundReportSummary, FrameOutlierView,
-    FramePacingSummary, HtmlChartArtifacts, HtmlReportModel, KmsTimingSummary, PressureKind,
-    PressurePeakWindow, PressureTimelineCoverage, PressureTimelineSummary, PressureWindow,
-    RegressionMetric, ReportAnalysisJson, RuntimeSliceAnalysisSummary, RuntimeThreadSummary,
-    ScanoutWindowEstimate, SpikeClusterAnalysis, SpikeClusterSource, SpikeDensityBucket,
-    TaskHtmlRow, WaylandPresentationSummary,
+    ArtifactsSummary, CrossGpuFenceCandidate, CrossGpuFenceSummary, DataQualityLevel,
+    DataQualitySummary, DirectScanoutSummary, DisplayPathComponent, DisplayPathDiagnosisSummary,
+    DmaBufPathSummary, DrmFenceTimingSummary, DrmFenceWaitSummary, FocusReportSummary,
+    ForegroundReportSummary, FrameOutlierView, FramePacingSummary, GpuEngineActivitySummary,
+    HtmlChartArtifacts, HtmlReportModel, KmsTimingSummary, PressureKind, PressurePeakWindow,
+    PressureTimelineCoverage, PressureTimelineSummary, PressureWindow, RegressionMetric,
+    ReportAnalysisJson, RuntimeSliceAnalysisSummary, RuntimeThreadSummary, ScanoutWindowEstimate,
+    SpikeClusterAnalysis, SpikeClusterSource, SpikeDensityBucket, TaskHtmlRow,
+    WaylandPresentationSummary,
 };
 pub(crate) use model::{
     ReportBuildResult, ReportInputModel, SpikeClusterCandidate, TextReportCorrelationSection,
