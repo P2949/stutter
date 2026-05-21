@@ -324,6 +324,37 @@ pub(crate) fn daemon_state_for_autotune_start(
     }
 }
 
+pub(crate) fn remote_autotune_controller_duration(
+    mode: DaemonMode,
+    duration_seconds: Option<u64>,
+) -> Option<std::time::Duration> {
+    if mode == DaemonMode::ApplyLowRisk {
+        None
+    } else {
+        duration_seconds.map(std::time::Duration::from_secs)
+    }
+}
+
+pub(crate) fn apply_remote_autotune_runtime_mode_overrides(
+    runtime_config: AutotuneRuntimeConfig,
+    mode: DaemonMode,
+    duration_seconds: Option<u64>,
+) -> AutotuneRuntimeConfig {
+    if mode == DaemonMode::ApplyLowRisk {
+        runtime_config.with_candidate_window_seconds(duration_seconds.unwrap_or(30))
+    } else {
+        runtime_config
+    }
+}
+
+pub(crate) fn remote_autotune_start_message(mode: DaemonMode) -> &'static str {
+    if mode == DaemonMode::ApplyLowRisk {
+        "remote autotune apply-low-risk controller started; apply modes are enabled"
+    } else {
+        "remote autotune observe/suggest controller started; apply modes remain disabled"
+    }
+}
+
 pub(crate) fn daemon_state_for_autotune_stop(
     mode: DaemonMode,
     exit: &crate::autotune::runtime::AutotuneControllerExit,
@@ -484,17 +515,26 @@ pub(crate) fn policy_for_remote_autotune_start_with_safety_context(
     Ok(policy)
 }
 
-pub(crate) async fn reap_finished_autotune(state: &AgentState) {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AutotuneReapStatus {
+    NoActiveSession,
+    StillActive,
+    Completed,
+    Failed,
+}
+
+pub(crate) async fn reap_finished_autotune(state: &AgentState) -> AutotuneReapStatus {
     let handle = {
         let mut active = state.active_autotune.lock().await;
         match active.as_ref() {
             Some(handle) if handle.join.is_finished() => active.take(),
-            _ => None,
+            Some(_) => return AutotuneReapStatus::StillActive,
+            None => return AutotuneReapStatus::NoActiveSession,
         }
     };
 
     let Some(handle) = handle else {
-        return;
+        return AutotuneReapStatus::NoActiveSession;
     };
 
     let mode = daemon_mode_from_agent_mode(&handle.mode);
@@ -507,6 +547,7 @@ pub(crate) async fn reap_finished_autotune(state: &AgentState) {
                 format!("reason={}", exit.reason),
             );
             replace_agent_daemon_state(state, daemon_state_for_autotune_stop(mode, &exit)).await;
+            AutotuneReapStatus::Completed
         }
         Ok(Err(err)) => {
             audit_agent_event("remote-autotune-reap", false, 0, format!("error={err:#}"));
@@ -517,6 +558,7 @@ pub(crate) async fn reap_finished_autotune(state: &AgentState) {
                 format!("autotune controller failed: {err:#}"),
             )
             .await;
+            AutotuneReapStatus::Failed
         }
         Err(err) => {
             audit_agent_event(
@@ -532,6 +574,7 @@ pub(crate) async fn reap_finished_autotune(state: &AgentState) {
                 format!("autotune controller task join failed: {err}"),
             )
             .await;
+            AutotuneReapStatus::Failed
         }
     }
 }
@@ -674,7 +717,6 @@ pub(crate) async fn autotune_start_handler(
         }
     };
     let mode = policy.mode.as_str().to_owned();
-    let is_apply_low_risk = policy.mode == DaemonMode::ApplyLowRisk;
 
     if let Err(err) = validate_autotune_start_limits(&request, &state) {
         audit_agent_event(
@@ -835,17 +877,14 @@ pub(crate) async fn autotune_start_handler(
         )
         .with_profiles(profile_list);
 
-        if is_apply_low_risk {
-            runtime_config =
-                runtime_config.with_candidate_window_seconds(input.duration_seconds.unwrap_or(30));
-        }
+        runtime_config = apply_remote_autotune_runtime_mode_overrides(
+            runtime_config,
+            policy.mode,
+            input.duration_seconds,
+        );
 
         let (stop_tx, stop_rx) = oneshot::channel();
-        let duration = if is_apply_low_risk {
-            None
-        } else {
-            input.duration_seconds.map(std::time::Duration::from_secs)
-        };
+        let duration = remote_autotune_controller_duration(policy.mode, input.duration_seconds);
         let join = tokio::spawn(async move {
             run_autotune_controller_session(monitor_config, runtime_config, Some(stop_rx), duration)
                 .await
@@ -881,16 +920,10 @@ pub(crate) async fn autotune_start_handler(
         ),
     );
 
-    let message = if is_apply_low_risk {
-        "remote autotune apply-low-risk controller started; apply modes are enabled".to_owned()
-    } else {
-        "remote autotune observe/suggest controller started; apply modes remain disabled".to_owned()
-    };
-
     Json(AutotuneStartResponse {
         status: "started".to_owned(),
         mode,
-        message,
+        message: remote_autotune_start_message(policy.mode).to_owned(),
     })
     .into_response()
 }
@@ -1024,12 +1057,23 @@ pub(crate) async fn autotune_restore_handler(
         return status.into_response();
     }
 
-    let outcome = match restore_known_autotune_actions(AutotuneRestoreCommandInput {
-        journal_path: None,
-        audit_path: None,
-        history_path: None,
-        dry_run: false,
-    }) {
+    autotune_restore_authorized(
+        state,
+        AutotuneRestoreCommandInput {
+            journal_path: None,
+            audit_path: None,
+            history_path: None,
+            dry_run: false,
+        },
+    )
+    .await
+}
+
+pub(crate) async fn autotune_restore_authorized(
+    state: Arc<AgentState>,
+    input: AutotuneRestoreCommandInput,
+) -> axum::response::Response {
+    let outcome = match restore_known_autotune_actions(input) {
         Ok(outcome) => outcome,
         Err(err) => {
             audit_agent_event(
@@ -1080,16 +1124,17 @@ pub(crate) async fn autotune_restore_handler(
     );
 
     if ok {
+        let decision = match outcome.status {
+            AutotuneRestoreStatus::Clean => "remote_autotune_nothing_to_restore",
+            _ => "remote_autotune_restored",
+        };
         let mut daemon_state = state.daemon_state.lock().await;
         daemon_state.phase = DaemonPhase::Observe;
         daemon_state.active_experiment = None;
         daemon_state.active_rollback = None;
         daemon_state.faulted = None;
         daemon_state.degraded.clear();
-        daemon_state.last_decision = Some(daemon_decision_state(
-            "remote_autotune_restored",
-            message.clone(),
-        ));
+        daemon_state.last_decision = Some(daemon_decision_state(decision, message.clone()));
     } else {
         mark_agent_daemon_fault(
             &state,
@@ -1113,6 +1158,10 @@ pub(crate) async fn autotune_restore_handler(
             restored_actions: Some(outcome.restored_actions),
             skipped_actions: Some(outcome.skipped_actions),
             failed_actions: Some(outcome.failed_actions),
+            restored_records: Some(outcome.restored_records),
+            skipped_missing: Some(outcome.skipped_missing),
+            skipped_identity_mismatch: Some(outcome.skipped_identity_mismatch),
+            failed_records: Some(outcome.failed_records),
             restore_messages: outcome.messages,
         }),
     )

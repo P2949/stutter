@@ -250,6 +250,21 @@ pub(super) struct MonitorArgs {
     )]
     pub(super) wayland_presentation_source: WaylandPresentationSource,
 
+    #[arg(
+        long = "dmabuf-tracking",
+        help = "Ingest cooperative DMABUF format/modifier path events"
+    )]
+    pub(super) dmabuf_tracking: bool,
+
+    #[arg(long = "dmabuf-log", value_name = "PATH")]
+    pub(super) dmabuf_log: Option<PathBuf>,
+
+    #[arg(
+        long = "gpu-engine-sampling",
+        help = "Collect per-GPU engine activity samples for display-path diagnosis"
+    )]
+    pub(super) gpu_engine_sampling: bool,
+
     #[arg(long = "display-path-label", value_name = "LABEL")]
     pub(super) display_path_label: Option<String>,
 
@@ -547,6 +562,9 @@ impl MonitorArgs {
             wayland_presentation_source: presence
                 .wayland_presentation_source
                 .then_some(self.wayland_presentation_source),
+            dmabuf_tracking: (self.dmabuf_tracking || self.dmabuf_log.is_some()).then_some(true),
+            dmabuf_log: self.dmabuf_log.clone().map(Some),
+            gpu_engine_sampling: self.gpu_engine_sampling.then_some(true),
             display_path_label: self.display_path_label.clone().map(Some),
             display_render_gpu: self.display_render_gpu.clone().map(Some),
             display_scanout_gpu: self.display_scanout_gpu.clone().map(Some),
@@ -674,6 +692,9 @@ impl Default for MonitorArgs {
             wayland_presentation: false,
             wayland_presentation_log: None,
             wayland_presentation_source: WaylandPresentationSource::ExternalLog,
+            dmabuf_tracking: false,
+            dmabuf_log: None,
+            gpu_engine_sampling: false,
             display_path_label: None,
             display_render_gpu: None,
             display_scanout_gpu: None,
@@ -1082,6 +1103,9 @@ pub(super) fn monitor_config_from_monitor_args_with_file_and_presence(
     if matches!(args.wayland_presentation_log.as_deref(), Some(path) if path.as_os_str().is_empty())
     {
         anyhow::bail!("--wayland-presentation-log must not be empty");
+    }
+    if matches!(args.dmabuf_log.as_deref(), Some(path) if path.as_os_str().is_empty()) {
+        anyhow::bail!("--dmabuf-log must not be empty");
     }
     for (flag, value) in [
         ("--display-path-label", args.display_path_label.as_deref()),

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::actions::{
     ActionId, ActionState, ActionWarning, ApplyResult, NiceRestoreRecord, RestoreIdentityStatus,
     RollbackToken, SafetyClass, TaskIdentity, TaskRestoreIdentity, TuningAction,
+    restore_write::{RestoreSummary, RestoreWriteError, classify_restore_write_error},
     rollback::{
         RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
     },
@@ -82,22 +83,18 @@ impl RollbackHandler for NiceRollbackHandler {
         let mut messages = Vec::new();
 
         for record in records {
-            let status = verify_task_identity(Path::new("/proc"), &record.identity);
+            let identity = record.restore_identity();
+            let tid = identity.tid;
+            let status = verify_task_identity(Path::new("/proc"), &identity);
             match status {
                 RestoreIdentityStatus::Missing => {
                     skipped_dead += 1;
-                    log::debug!(
-                        "nice restore skipped: task tid={} is missing/dead",
-                        record.identity.tid
-                    );
+                    log::debug!("nice restore skipped: task tid={} is missing/dead", tid);
                     continue;
                 }
                 RestoreIdentityStatus::Mismatch { reason } => {
                     skipped_identity_mismatch += 1;
-                    let msg = format!(
-                        "nice restore identity mismatch for tid={}: {}",
-                        record.identity.tid, reason
-                    );
+                    let msg = format!("nice restore identity mismatch for tid={}: {}", tid, reason);
                     log::warn!("{}", msg);
                     messages.push(msg);
                     continue;
@@ -106,45 +103,33 @@ impl RollbackHandler for NiceRollbackHandler {
                     legacy_unverified += 1;
                     log::warn!(
                         "nice restore running in legacy mode (unverified identity) for tid={}",
-                        record.identity.tid
+                        tid
                     );
                 }
                 RestoreIdentityStatus::SameTask => {}
             }
 
-            match set_task_nice(record.identity.tid, record.original_nice) {
+            match set_task_nice(tid, record.original_nice) {
                 Ok(_) => {
                     restored += 1;
                 }
-                Err(e) => {
-                    if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
-                        if io_err.kind() == std::io::ErrorKind::NotFound
-                            || io_err.raw_os_error() == Some(3)
-                        {
-                            skipped_dead += 1;
-                            log::debug!(
-                                "nice restore skipped: task tid={} is dead",
-                                record.identity.tid
-                            );
-                        } else {
-                            errors += 1;
-                            let msg = format!(
-                                "failed to restore original nice={} for tid={}: {}",
-                                record.original_nice, record.identity.tid, io_err
-                            );
-                            log::error!("{}", msg);
-                            messages.push(msg);
-                        }
-                    } else {
+                Err(e) => match classify_restore_write_error(Path::new("/proc"), tid, e) {
+                    RestoreWriteError::MissingTask => {
+                        skipped_dead += 1;
+                        log::debug!("nice restore skipped: task tid={} is dead", tid);
+                    }
+                    RestoreWriteError::PermissionDenied(e)
+                    | RestoreWriteError::InvalidValue(e)
+                    | RestoreWriteError::Io(e) => {
                         errors += 1;
                         let msg = format!(
                             "failed to restore original nice={} for tid={}: {}",
-                            record.original_nice, record.identity.tid, e
+                            record.original_nice, tid, e
                         );
                         log::error!("{}", msg);
                         messages.push(msg);
                     }
-                }
+                },
             }
         }
 
@@ -164,9 +149,11 @@ impl RollbackHandler for NiceRollbackHandler {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NiceTargetSnapshot {
     tid: u32,
+    process_pid: Option<u32>,
     current_nice: i32,
     comm: Option<String>,
     starttime_ticks: Option<u64>,
+    exe: Option<std::path::PathBuf>,
 }
 
 impl NiceAction {
@@ -296,20 +283,15 @@ impl TuningAction for NiceAction {
             let records = filtered_snapshots
                 .into_iter()
                 .map(|(snapshot, _)| {
-                    let identity = TaskRestoreIdentity {
-                        tid: snapshot.tid,
-                        comm: snapshot
-                            .comm
-                            .clone()
-                            .unwrap_or_else(|| "unknown".to_owned()),
-                        process_starttime_ticks: None,
-                        task_starttime_ticks: snapshot.starttime_ticks,
-                    };
+                    let identity = TaskRestoreIdentity::observed(
+                        snapshot.tid,
+                        snapshot.process_pid,
+                        snapshot.comm.clone(),
+                        snapshot.starttime_ticks,
+                        snapshot.exe.clone(),
+                    );
 
-                    NiceRestoreRecord {
-                        identity,
-                        original_nice: snapshot.current_nice,
-                    }
+                    NiceRestoreRecord::new(identity, snapshot.current_nice)
                 })
                 .collect::<Vec<_>>();
 
@@ -317,11 +299,8 @@ impl TuningAction for NiceAction {
             tx.apply_planned_loop(
                 records,
                 |record| {
-                    set_task_nice(record.identity.tid, self.nice).map_err(|e| {
-                        e.context(format!(
-                            "failed to set nice for tid={}",
-                            record.identity.tid
-                        ))
+                    set_task_nice(record.tid(), self.nice).map_err(|e| {
+                        e.context(format!("failed to set nice for tid={}", record.tid()))
                     })
                 },
                 |records| RollbackToken::NiceRestore { records },
@@ -338,13 +317,65 @@ impl TuningAction for NiceAction {
             anyhow::bail!("rollback token is not a nice restore token");
         };
 
+        let mut summary = RestoreSummary::default();
+        let mut failures = Vec::new();
+
         for record in records {
-            set_task_nice(record.identity.tid, record.original_nice).with_context(|| {
-                format!(
-                    "failed to restore original nice={} for tid={}",
-                    record.original_nice, record.identity.tid
-                )
-            })?;
+            let identity = record.restore_identity();
+            let tid = identity.tid;
+            match verify_task_identity(Path::new("/proc"), &identity) {
+                RestoreIdentityStatus::SameTask => {}
+                RestoreIdentityStatus::UnknownLegacy => {
+                    log::warn!(
+                        "nice rollback running in legacy mode (unverified identity) for tid={}",
+                        tid
+                    );
+                }
+                RestoreIdentityStatus::Missing => {
+                    summary.record_missing();
+                    log::warn!("nice rollback skipped: task tid={} is missing/dead", tid);
+                    continue;
+                }
+                RestoreIdentityStatus::Mismatch { reason } => {
+                    summary.record_identity_mismatch();
+                    log::warn!(
+                        "nice rollback skipped identity mismatch for tid={}: {}",
+                        tid,
+                        reason
+                    );
+                    continue;
+                }
+            }
+
+            match set_task_nice(tid, record.original_nice) {
+                Ok(()) => summary.record_restored(),
+                Err(err) => match classify_restore_write_error(Path::new("/proc"), tid, err) {
+                    RestoreWriteError::MissingTask => {
+                        summary.record_missing();
+                        log::warn!("nice rollback skipped: task tid={} is missing/dead", tid);
+                    }
+                    RestoreWriteError::PermissionDenied(err)
+                    | RestoreWriteError::InvalidValue(err)
+                    | RestoreWriteError::Io(err) => {
+                        summary.record_failure();
+                        failures.push(format!(
+                            "failed to restore original nice={} for tid={}: {err:#}",
+                            record.original_nice, tid
+                        ));
+                    }
+                },
+            }
+        }
+
+        if summary.has_failures() {
+            anyhow::bail!(
+                "failed to rollback nice after attempting all records: restored={} skipped_missing={} skipped_identity_mismatch={} failed={} errors={}",
+                summary.restored,
+                summary.skipped_missing,
+                summary.skipped_identity_mismatch,
+                summary.failed,
+                failures.join("; ")
+            );
         }
 
         Ok(())
@@ -434,12 +465,15 @@ fn read_target_snapshot_at(
         .ok()
         .map(|comm| comm.trim().to_owned())
         .filter(|comm| !comm.is_empty());
+    let exe = fs::read_link(proc_root.join(target.tid.to_string()).join("exe")).ok();
 
     Ok(NiceTargetSnapshot {
         tid: target.tid,
+        process_pid: target.process_pid,
         current_nice,
         comm,
         starttime_ticks: Some(starttime_ticks),
+        exe,
     })
 }
 

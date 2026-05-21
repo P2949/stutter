@@ -152,6 +152,38 @@ field:long prev_state; offset:32; size:8; signed:1;
 }
 
 #[test]
+fn sched_switch_reads_previous_task_context_after_relevance_filters() {
+    let source = include_str!("../../../../stutter-ebpf/src/main.rs");
+    let start = source.find("fn try_sched_switch").unwrap();
+    let end = source[start..].find("fn try_sched_migrate_task").unwrap() + start;
+    let body = &source[start..end];
+
+    let wakeup_data = body.find("let wakeup_data = match").unwrap();
+    let target_filter = body.find("if !is_target_pid(pid)").unwrap();
+    let prev_pid = body.find("let prev_pid_raw").unwrap();
+    let prev_state = body.find("let prev_state").unwrap();
+
+    assert!(prev_pid > wakeup_data);
+    assert!(prev_pid > target_filter);
+    assert!(prev_state > wakeup_data);
+    assert!(prev_state > target_filter);
+}
+
+#[test]
+fn irq_key_documents_full_u32_irq_cpu_packing_without_overlap_guard() {
+    let source = include_str!("../../../../stutter-ebpf/src/main.rs");
+    let start = source.find("fn irq_key").unwrap();
+    let end = source[start..].find("fn increment_drop_counter").unwrap() + start;
+    let body = &source[start..end];
+
+    assert!(body.contains("High 32 bits: IRQ number. Low 32 bits: CPU ID."));
+    assert!(body.contains("CPU IDs such as 65_536"));
+    assert!(body.contains("((irq as u64) << 32) | cpu as u64"));
+    assert!(!body.contains("cpu >= 65536"));
+    assert!(!body.contains("cpu > 65535"));
+}
+
+#[test]
 fn validates_irq_tracepoint_offsets() {
     let format = r#"
 field:unsigned short common_type; offset:0; size:2; signed:0;

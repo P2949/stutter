@@ -29,6 +29,8 @@ pub async fn run_agent_command(input: AgentCommandInput) -> anyhow::Result<()> {
         max_duration_seconds: input.max_duration_seconds,
         max_targets: input.max_targets,
         max_concurrent_recordings: input.max_concurrent_recordings,
+        max_unix_connections: input.max_unix_connections,
+        unix_connection_timeout: input.unix_connection_timeout,
         autotune_limits,
         health_thresholds,
         rollback_on_crash_recovery: true,

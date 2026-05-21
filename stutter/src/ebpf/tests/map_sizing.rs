@@ -127,10 +127,10 @@ fn drop_counter_totals_include_stale_wakeup_entries() {
         ringbuf_reserve_failed: 4,
         irq_start_times_insert_failed: 8,
         block_start_insert_failed: 16,
-        block_fallback_key_collisions: 0,
+        block_fallback_key_collisions: 32,
     };
 
-    assert_eq!(snapshot.total(), 31);
+    assert_eq!(snapshot.total(), 63);
     assert_eq!(snapshot.total_excluding_block_io(), 15);
 }
 

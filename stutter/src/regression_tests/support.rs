@@ -398,6 +398,7 @@ pub(super) fn render_report_for_test(
         correlation_sections: &correlation_sections,
         focus_summary: &crate::report::FocusReportSummary::default(),
         foreground_summary: &crate::report::ForegroundReportSummary::default(),
+        display_path_diagnosis: None,
         top,
         cluster_window_ms,
         filter_class: None,

@@ -43,8 +43,10 @@ use crate::{
     artifacts::ArtifactKind,
     config::{CsvStreamTarget, model::MonitorConfig},
     diagnosis::{LiveDiagnosisEntry, diagnose_cluster},
+    dmabuf_log::DmaBufLogReader,
     ebpf_loader,
     focus::{FocusResolver, ResolvedFocus},
+    gpu_engine::EngineSampler,
     hwmon, mangohud,
     metrics::{collect_interval_summaries_labeled, log_drop_counters, print_session_summaries},
     recorder::{self, FinalizeRecordingInput, SpikeEvent},
@@ -182,6 +184,11 @@ struct FrameTickContext {
 #[derive(Debug)]
 struct WaylandPresentationTickContext {
     event: recorder::WaylandPresentationEventRecord,
+}
+
+#[derive(Debug)]
+struct DmaBufTickContext {
+    event: recorder::DmaBufEventRecord,
 }
 
 #[derive(Debug, Clone, Copy)]

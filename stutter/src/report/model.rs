@@ -50,6 +50,8 @@ pub struct ArtifactsSummary {
     pub kms_flip_event_count: u64,
     pub drm_fence_event_count: u64,
     pub wayland_presentation_event_count: u64,
+    pub dmabuf_event_count: u64,
+    pub gpu_engine_sample_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -107,6 +109,38 @@ pub struct DrmFenceWaitSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
+pub struct CrossGpuFenceSummary {
+    pub candidate_count: usize,
+    pub high_confidence_count: usize,
+    pub display_side_wait_count: usize,
+    pub render_side_wait_count: usize,
+    pub waits_near_frame_outliers: usize,
+    pub waits_near_kms_delays: usize,
+    pub p95_display_wait_ms: Option<f64>,
+    pub p99_display_wait_ms: Option<f64>,
+    pub top_candidates: Vec<CrossGpuFenceCandidate>,
+    pub confidence: String,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct CrossGpuFenceCandidate {
+    pub elapsed_ms: u64,
+    pub duration_ms: Option<f64>,
+    pub wait_start_ns: Option<u64>,
+    pub wait_done_ns: Option<u64>,
+    pub signal_ns: Option<u64>,
+    pub importer_driver: Option<String>,
+    pub exporter_driver: Option<String>,
+    pub context: Option<u64>,
+    pub seqno: Option<u64>,
+    pub timeline_hash: Option<u64>,
+    pub near_frame_outlier: bool,
+    pub near_kms_delay: bool,
+    pub confidence: String,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct WaylandPresentationSummary {
     pub event_count: usize,
     pub presented_count: usize,
@@ -124,6 +158,79 @@ pub struct WaylandPresentationSummary {
     pub compositor_queue_candidate_count: usize,
     pub outputs_seen: Vec<String>,
     pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct DirectScanoutSummary {
+    pub status: String,
+    pub confidence: String,
+    pub zero_copy_ratio: Option<f64>,
+    pub direct_scanout_event_count: usize,
+    pub composited_event_count: usize,
+    pub blocking_reasons: Vec<String>,
+    pub evidence: Vec<String>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct DmaBufPathSummary {
+    pub event_count: usize,
+    pub linear_count: usize,
+    pub scanout_capable_count: usize,
+    pub copy_required_count: usize,
+    pub modifier_mismatch_count: usize,
+    pub cross_gpu_import_count: usize,
+    pub top_reasons: BTreeMap<String, usize>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct GpuEngineActivitySummary {
+    pub sample_count: usize,
+    pub active_sample_count: usize,
+    pub engine_counts: BTreeMap<String, usize>,
+    pub driver_counts: BTreeMap<String, usize>,
+    pub igpu_render_activity_near_outliers: usize,
+    pub igpu_blitter_activity_near_outliers: usize,
+    pub amdgpu_gfx_activity_near_outliers: usize,
+    pub max_igpu_render_busy_percent: Option<f64>,
+    pub max_igpu_blitter_busy_percent: Option<f64>,
+    pub max_amdgpu_gfx_busy_percent: Option<f64>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct DisplayPathDiagnosisSummary {
+    pub verdict: String,
+    pub suspicion_score: f64,
+    pub confidence: String,
+
+    pub render_gpu: Option<String>,
+    pub scanout_gpu: Option<String>,
+    pub connector: Option<String>,
+    pub is_cross_gpu: Option<bool>,
+
+    pub direct_scanout: DirectScanoutSummary,
+    pub cross_gpu_fence: CrossGpuFenceSummary,
+    pub dmabuf_path: Option<DmaBufPathSummary>,
+    pub gpu_engine_activity: Option<GpuEngineActivitySummary>,
+
+    pub render_component: DisplayPathComponent,
+    pub fence_component: DisplayPathComponent,
+    pub kms_component: DisplayPathComponent,
+    pub wayland_component: DisplayPathComponent,
+    pub compositor_component: DisplayPathComponent,
+
+    pub evidence: Vec<String>,
+    pub missing_evidence: Vec<String>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct DisplayPathComponent {
+    pub status: String,
+    pub score: f64,
+    pub evidence: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -262,7 +369,12 @@ pub struct ReportAnalysisJson {
     pub foreground_summary: ForegroundReportSummary,
     pub kms_timing: KmsTimingSummary,
     pub drm_fence_timing: DrmFenceTimingSummary,
+    pub cross_gpu_fence: CrossGpuFenceSummary,
     pub wayland_presentation: WaylandPresentationSummary,
+    pub direct_scanout: DirectScanoutSummary,
+    pub dmabuf_path: DmaBufPathSummary,
+    pub gpu_engine_activity: GpuEngineActivitySummary,
+    pub display_path_diagnosis: DisplayPathDiagnosisSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -380,6 +492,7 @@ pub struct HtmlReportModel {
     pub artifacts_summary: ArtifactsSummary,
     pub focus_summary: FocusReportSummary,
     pub foreground_summary: ForegroundReportSummary,
+    pub display_path_diagnosis: DisplayPathDiagnosisSummary,
     pub top_tasks_by_max: Vec<TaskHtmlRow>,
     pub top_tasks_by_p99: Vec<TaskHtmlRow>,
     pub spike_density: Vec<SpikeDensityBucket>,

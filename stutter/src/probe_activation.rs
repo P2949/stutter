@@ -236,6 +236,10 @@ fn probe_requested(key: ProbeKey, config: &MonitorConfig) -> bool {
         ProbeKey::KmsPageflipTiming => config.probes.kms_timing,
         ProbeKey::DrmFenceLatency => config.probes.drm_fence_latency,
         ProbeKey::WaylandPresentationTiming => config.probes.wayland_presentation,
+        ProbeKey::DisplayTopology => config.probes.display_topology,
+        ProbeKey::DmaBufPathTracking => config.probes.dmabuf_tracking,
+        ProbeKey::GpuEngineSampling => config.probes.gpu_engine_sampling,
+        ProbeKey::DirectScanoutStatus => false,
         ProbeKey::DisplayPathCost
         | ProbeKey::PerfCounterPresets
         | ProbeKey::CompositorFramePacingViews => false,
@@ -273,6 +277,9 @@ fn unavailable_reason(
         }
         ProbeKey::WaylandPresentationTiming if config.wayland_presentation.log_path.is_none() => {
             Some("wayland_presentation_requested_but_no_log_path".to_owned())
+        }
+        ProbeKey::DmaBufPathTracking if config.dmabuf.log_path.is_none() => {
+            Some("dmabuf_tracking_requested_but_no_log_path".to_owned())
         }
         ProbeKey::Faults
             if config.probes.stat_wait && !tracepoints.sched_stat_wait && !config.probes.faults =>
@@ -550,6 +557,25 @@ mod tests {
         assert!(
             plan.required_artifacts()
                 .contains(&ArtifactKind::FocusEvents)
+        );
+    }
+
+    #[test]
+    fn display_topology_activation_adds_json_artifact_only() {
+        let mut config = config();
+        config.probes.display_topology = true;
+
+        let plan = ProbeActivationPlan::from_config(&config, &tracepoints()).unwrap();
+
+        assert!(plan.has_probe(ProbeKey::DisplayTopology));
+        assert!(
+            plan.required_artifacts()
+                .contains(&ArtifactKind::DisplayTopology)
+        );
+        assert!(
+            !plan
+                .required_stream_artifacts()
+                .contains(&ArtifactKind::DisplayTopology)
         );
     }
 

@@ -276,6 +276,15 @@ impl MonitorEventSink for RecorderSink {
                     |c| c.gpu_sample_count += 1,
                 );
             }
+            MonitorEvent::GpuEngineSample { sample } => {
+                push_artifact_event(
+                    ctx.recorder,
+                    ArtifactKind::GpuEngineSamples,
+                    sample.as_ref(),
+                    "gpu_engine_samples",
+                    |c| c.gpu_engine_sample_count += 1,
+                );
+            }
             MonitorEvent::Frame { event } => {
                 push_artifact_event(
                     ctx.recorder,
@@ -334,6 +343,15 @@ impl MonitorEventSink for RecorderSink {
                     event.as_ref(),
                     "wayland_presentation_events",
                     |c| c.wayland_presentation_event_count += 1,
+                );
+            }
+            MonitorEvent::DmaBufEvent { event } => {
+                push_artifact_event(
+                    ctx.recorder,
+                    ArtifactKind::DmaBufEvents,
+                    event.as_ref(),
+                    "dmabuf_events",
+                    |c| c.dmabuf_event_count += 1,
                 );
             }
             MonitorEvent::FocusChanged {

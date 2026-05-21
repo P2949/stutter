@@ -109,6 +109,29 @@ JSON
     }
 
     #[test]
+    fn hyprland_provider_missing_helper_degrades_cleanly() {
+        let _lock = crate::test_support::TEST_MUTEX.lock().unwrap();
+        let previous_hyprland = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
+
+        unsafe {
+            std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "fake-hyprland-instance");
+        }
+
+        let mut provider =
+            HyprlandForegroundProvider::new().with_hyprctl("stutter-missing-hyprctl-helper");
+        let snapshot = provider.sample(5_000);
+
+        assert_eq!(snapshot.source, Some(ForegroundSource::Hyprland));
+        assert_eq!(snapshot.status, ForegroundProviderStatus::Unavailable);
+        assert!(snapshot.reason.contains("stutter-missing-hyprctl-helper"));
+        assert!(snapshot.reason.contains("trusted foreground helper paths"));
+
+        unsafe {
+            restore_env_var("HYPRLAND_INSTANCE_SIGNATURE", previous_hyprland);
+        }
+    }
+
+    #[test]
     fn unsupported_provider_reports_generic_wayland_reason() {
         let mut provider = UnsupportedForegroundProvider::generic_wayland();
 

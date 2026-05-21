@@ -13,6 +13,7 @@ use crate::{
         ActionId, ActionState, ActionWarning, ApplyResult, CgroupCpusetRestoreRecord,
         CgroupRestoreRecord, PartialApplyError, RestoreIdentityStatus, RollbackToken, SafetyClass,
         TaskIdentity, TaskRestoreIdentity, TuningAction,
+        restore_write::{RestoreSummary, RestoreWriteError, classify_restore_write_error},
         rollback::{
             RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult,
             token_dry_run_preview,
@@ -97,21 +98,20 @@ impl RollbackHandler for CgroupRollbackHandler {
         let mut messages = Vec::new();
 
         for record in records {
-            let status = verify_task_identity(Path::new("/proc"), &record.identity);
+            let identity = record.restore_identity();
+            let tid = identity.tid;
+            let status = verify_task_identity(Path::new("/proc"), &identity);
             match status {
                 RestoreIdentityStatus::Missing => {
                     skipped_dead += 1;
-                    log::debug!(
-                        "cgroup restore skipped: task tid={} is missing/dead",
-                        record.identity.tid
-                    );
+                    log::debug!("cgroup restore skipped: task tid={} is missing/dead", tid);
                     continue;
                 }
                 RestoreIdentityStatus::Mismatch { reason } => {
                     skipped_identity_mismatch += 1;
                     let msg = format!(
                         "cgroup restore identity mismatch for tid={}: {}",
-                        record.identity.tid, reason
+                        tid, reason
                     );
                     log::warn!("{}", msg);
                     messages.push(msg);
@@ -121,7 +121,7 @@ impl RollbackHandler for CgroupRollbackHandler {
                     legacy_unverified += 1;
                     log::warn!(
                         "cgroup restore running in legacy mode (unverified identity) for tid={}",
-                        record.identity.tid
+                        tid
                     );
                 }
                 RestoreIdentityStatus::SameTask => {}
@@ -134,28 +134,29 @@ impl RollbackHandler for CgroupRollbackHandler {
                     .join(strip_cgroup_leading_slash(&record.original_cgroup))
             };
             let cgroup_procs = original_cgroup.join("cgroup.procs");
-            match write_trimmed(&cgroup_procs, &record.identity.tid.to_string()) {
+            match write_trimmed(&cgroup_procs, &tid.to_string()) {
                 Ok(()) => {
                     restored += 1;
                 }
-                Err(e) if is_dead_task_io_error(&e) => {
-                    skipped_dead += 1;
-                    log::debug!(
-                        "cgroup restore skipped: task tid={} is missing/dead",
-                        record.identity.tid
-                    );
-                }
-                Err(e) => {
-                    errors += 1;
-                    let msg = format!(
-                        "failed to restore pid={} to cgroup {}: {}",
-                        record.identity.tid,
-                        original_cgroup.display(),
-                        e
-                    );
-                    log::error!("{}", msg);
-                    messages.push(msg);
-                }
+                Err(e) => match classify_restore_write_error(Path::new("/proc"), tid, e) {
+                    RestoreWriteError::MissingTask => {
+                        skipped_dead += 1;
+                        log::debug!("cgroup restore skipped: task tid={} is missing/dead", tid);
+                    }
+                    RestoreWriteError::PermissionDenied(e)
+                    | RestoreWriteError::InvalidValue(e)
+                    | RestoreWriteError::Io(e) => {
+                        errors += 1;
+                        let msg = format!(
+                            "failed to restore pid={} to cgroup {}: {}",
+                            tid,
+                            original_cgroup.display(),
+                            e
+                        );
+                        log::error!("{}", msg);
+                        messages.push(msg);
+                    }
+                },
             }
         }
 
@@ -196,8 +197,10 @@ impl RollbackHandler for CgroupRollbackHandler {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CgroupTargetSnapshot {
     tid: u32,
+    process_pid: Option<u32>,
     comm: Option<String>,
     starttime_ticks: Option<u64>,
+    exe: Option<std::path::PathBuf>,
     original_cgroup: PathBuf,
 }
 
@@ -402,15 +405,38 @@ impl CgroupPlacementAction {
         };
 
         let mut failures = Vec::new();
+        let mut summary = RestoreSummary::default();
 
         for record in records {
-            if !task_exists(proc_root, record.identity.tid) {
-                log::info!(
-                    "cgroup_rollback_skip_exited_task tid={} original_cgroup={}",
-                    record.identity.tid,
-                    record.original_cgroup.display()
-                );
-                continue;
+            let identity = record.restore_identity();
+            let tid = identity.tid;
+            match verify_task_identity(proc_root, &identity) {
+                RestoreIdentityStatus::SameTask => {}
+                RestoreIdentityStatus::UnknownLegacy => {
+                    log::warn!(
+                        "cgroup rollback running in legacy mode (unverified identity) for tid={}",
+                        tid
+                    );
+                }
+                RestoreIdentityStatus::Missing => {
+                    summary.record_missing();
+                    log::info!(
+                        "cgroup_rollback_skip_exited_task tid={} original_cgroup={}",
+                        tid,
+                        record.original_cgroup.display()
+                    );
+                    continue;
+                }
+                RestoreIdentityStatus::Mismatch { reason } => {
+                    summary.record_identity_mismatch();
+                    log::warn!(
+                        "cgroup_rollback_skip_identity_mismatch tid={} original_cgroup={} reason={}",
+                        tid,
+                        record.original_cgroup.display(),
+                        reason
+                    );
+                    continue;
+                }
             }
 
             let original_abs = self
@@ -418,29 +444,180 @@ impl CgroupPlacementAction {
                 .join(strip_cgroup_leading_slash(&record.original_cgroup));
             let procs = original_abs.join("cgroup.procs");
 
-            if let Err(err) = write_trimmed(&procs, &record.identity.tid.to_string()) {
-                failures.push(format!(
-                    "tid={} original_cgroup={} error={err:#}",
-                    record.identity.tid,
-                    original_abs.display()
-                ));
+            if let Err(err) = write_trimmed(&procs, &tid.to_string()) {
+                match classify_restore_write_error(proc_root, tid, err) {
+                    RestoreWriteError::MissingTask => {
+                        summary.record_missing();
+                        log::info!(
+                            "cgroup_rollback_skip_exited_task tid={} original_cgroup={}",
+                            tid,
+                            record.original_cgroup.display()
+                        );
+                    }
+                    RestoreWriteError::PermissionDenied(err)
+                    | RestoreWriteError::InvalidValue(err)
+                    | RestoreWriteError::Io(err) => {
+                        summary.record_failure();
+                        failures.push(format!(
+                            "tid={} original_cgroup={} error={err:#}",
+                            tid,
+                            original_abs.display()
+                        ));
+                    }
+                }
+            } else {
+                summary.record_restored();
             }
         }
 
         if let Some(cpuset) = cpuset
             && let Err(err) = restore_cpuset_record(&self.cgroup_root, cpuset)
         {
+            summary.record_failure();
             failures.push(format!("cpuset_restore_error={err:#}"));
         }
 
-        if !failures.is_empty() {
+        if summary.has_failures() {
             anyhow::bail!(
-                "failed to rollback cgroup placement: {}",
+                "failed to rollback cgroup placement after attempting all records: restored={} skipped_missing={} skipped_identity_mismatch={} failed={} errors={}",
+                summary.restored,
+                summary.skipped_missing,
+                summary.skipped_identity_mismatch,
+                summary.failed,
                 failures.join("; ")
             );
         }
 
         Ok(())
+    }
+
+    fn apply_at(&self, proc_root: &Path, policy: &CgroupPlacementPolicy) -> ApplyResult {
+        let mut writer = FsCgroupFileWriter;
+        self.apply_at_with_writer(proc_root, policy, &mut writer)
+    }
+
+    fn apply_at_with_writer<W: CgroupFileWriter>(
+        &self,
+        proc_root: &Path,
+        policy: &CgroupPlacementPolicy,
+        writer: &mut W,
+    ) -> ApplyResult {
+        let snapshots = self.collect_target_snapshots_at(proc_root, policy)?;
+        let target_abs = self.target_cgroup_abs()?;
+        let cpuset = self.cpuset_restore_record(&target_abs)?;
+        let mut cpuset_changed = false;
+
+        if let Some(cpuset_cpus) = &self.cpuset_cpus {
+            writer
+                .write_trimmed(&target_abs.join("cpuset.cpus"), cpuset_cpus)
+                .with_context(|| {
+                    format!(
+                        "failed to write {}",
+                        target_abs.join("cpuset.cpus").display()
+                    )
+                })?;
+            cpuset_changed = true;
+        }
+
+        if let Some(cpuset_mems) = &self.cpuset_mems
+            && let Err(err) = writer
+                .write_trimmed(&target_abs.join("cpuset.mems"), cpuset_mems)
+                .with_context(|| {
+                    format!(
+                        "failed to write {}",
+                        target_abs.join("cpuset.mems").display()
+                    )
+                })
+        {
+            return Err(self.partial_apply_error_after_rollback(
+                proc_root,
+                err,
+                Vec::new(),
+                cpuset_changed,
+                &cpuset,
+            ));
+        }
+        if self.cpuset_mems.is_some() {
+            cpuset_changed = true;
+        }
+
+        let mut records = Vec::new();
+        for (snapshot, _) in snapshots {
+            let current_target = self
+                .cgroup_root
+                .join(strip_cgroup_leading_slash(&snapshot.original_cgroup));
+            if current_target == target_abs {
+                continue;
+            }
+
+            let identity = TaskRestoreIdentity::observed(
+                snapshot.tid,
+                snapshot.process_pid,
+                snapshot.comm.clone(),
+                snapshot.starttime_ticks,
+                snapshot.exe.clone(),
+            );
+
+            if let Err(err) = writer
+                .write_trimmed(&target_abs.join("cgroup.procs"), &snapshot.tid.to_string())
+                .with_context(|| {
+                    format!(
+                        "failed to move tid={} to {}",
+                        snapshot.tid,
+                        target_abs.display()
+                    )
+                })
+            {
+                return Err(self.partial_apply_error_after_rollback(
+                    proc_root,
+                    err,
+                    records,
+                    cpuset_changed,
+                    &cpuset,
+                ));
+            }
+
+            records.push(CgroupRestoreRecord::new(identity, snapshot.original_cgroup));
+        }
+
+        Ok(RollbackToken::CgroupRestore {
+            records,
+            cpuset: cpuset.filter(|_| cpuset_changed),
+        })
+    }
+
+    fn partial_apply_error_after_rollback(
+        &self,
+        proc_root: &Path,
+        source: anyhow::Error,
+        records: Vec<CgroupRestoreRecord>,
+        cpuset_changed: bool,
+        cpuset: &Option<CgroupCpusetRestoreRecord>,
+    ) -> PartialApplyError {
+        let rollback = cgroup_partial_token(records, cpuset_changed, cpuset);
+        let source = match rollback.as_ref() {
+            Some(token) => match self.rollback_at(proc_root, token) {
+                Ok(()) => source,
+                Err(rollback_err) => anyhow::anyhow!(
+                    "apply failed: {source:#}; partial cgroup rollback failed: {rollback_err:#}"
+                ),
+            },
+            None => source,
+        };
+
+        PartialApplyError { source, rollback }
+    }
+}
+
+trait CgroupFileWriter {
+    fn write_trimmed(&mut self, path: &Path, value: &str) -> anyhow::Result<()>;
+}
+
+struct FsCgroupFileWriter;
+
+impl CgroupFileWriter for FsCgroupFileWriter {
+    fn write_trimmed(&mut self, path: &Path, value: &str) -> anyhow::Result<()> {
+        write_trimmed(path, value)
     }
 }
 
@@ -482,86 +659,7 @@ impl TuningAction for CgroupPlacementAction {
     }
 
     fn apply(&self) -> ApplyResult {
-        (|| -> ApplyResult {
-            let policy = CgroupPlacementPolicy::default();
-            let snapshots = self.collect_target_snapshots_at(Path::new("/proc"), &policy)?;
-            let target_abs = self.target_cgroup_abs()?;
-            let cpuset = self.cpuset_restore_record(&target_abs)?;
-            let mut cpuset_changed = false;
-
-            if let Some(cpuset_cpus) = &self.cpuset_cpus {
-                write_trimmed(&target_abs.join("cpuset.cpus"), cpuset_cpus).with_context(|| {
-                    format!(
-                        "failed to write {}",
-                        target_abs.join("cpuset.cpus").display()
-                    )
-                })?;
-                cpuset_changed = true;
-            }
-
-            if let Some(cpuset_mems) = &self.cpuset_mems {
-                if let Err(err) = write_trimmed(&target_abs.join("cpuset.mems"), cpuset_mems)
-                    .with_context(|| {
-                        format!(
-                            "failed to write {}",
-                            target_abs.join("cpuset.mems").display()
-                        )
-                    })
-                {
-                    return Err(PartialApplyError {
-                        source: err,
-                        rollback: cgroup_partial_token(Vec::new(), cpuset_changed, &cpuset),
-                    });
-                }
-                cpuset_changed = true;
-            }
-
-            let mut records = Vec::new();
-            for (snapshot, _) in snapshots {
-                let current_target = self
-                    .cgroup_root
-                    .join(strip_cgroup_leading_slash(&snapshot.original_cgroup));
-                if current_target == target_abs {
-                    continue;
-                }
-
-                let identity = TaskRestoreIdentity {
-                    tid: snapshot.tid,
-                    comm: snapshot
-                        .comm
-                        .clone()
-                        .unwrap_or_else(|| "unknown".to_owned()),
-                    process_starttime_ticks: None,
-                    task_starttime_ticks: snapshot.starttime_ticks,
-                };
-
-                if let Err(err) =
-                    write_trimmed(&target_abs.join("cgroup.procs"), &snapshot.tid.to_string())
-                        .with_context(|| {
-                            format!(
-                                "failed to move tid={} to {}",
-                                snapshot.tid,
-                                target_abs.display()
-                            )
-                        })
-                {
-                    return Err(PartialApplyError {
-                        source: err,
-                        rollback: cgroup_partial_token(records, cpuset_changed, &cpuset),
-                    });
-                }
-
-                records.push(CgroupRestoreRecord {
-                    identity,
-                    original_cgroup: snapshot.original_cgroup,
-                });
-            }
-
-            Ok(RollbackToken::CgroupRestore {
-                records,
-                cpuset: cpuset.filter(|_| cpuset_changed),
-            })
-        })()
+        self.apply_at(Path::new("/proc"), &CgroupPlacementPolicy::default())
     }
 
     fn verify(&self) -> anyhow::Result<ActionState> {
@@ -771,14 +869,17 @@ fn read_target_snapshot_at(
         .ok()
         .map(|comm| comm.trim().to_owned())
         .filter(|comm| !comm.is_empty());
+    let exe = fs::read_link(proc_root.join(target.tid.to_string()).join("exe")).ok();
 
     let original_cgroup = read_proc_cgroup_path_at(proc_root, target.tid)
         .with_context(|| format!("failed to read cgroup path for tid={}", target.tid))?;
 
     Ok(CgroupTargetSnapshot {
         tid: target.tid,
+        process_pid: target.process_pid,
         comm,
         starttime_ticks: Some(starttime_ticks),
+        exe,
         original_cgroup,
     })
 }
@@ -908,6 +1009,7 @@ fn restore_cpuset_record(
     Ok(restored)
 }
 
+#[cfg(test)]
 fn is_dead_task_io_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         cause.downcast_ref::<io::Error>().is_some_and(|io_err| {
@@ -978,6 +1080,11 @@ mod tests {
         fs::create_dir_all(&task_dir).unwrap();
         fs::write(task_dir.join("comm"), format!("{comm}\n")).unwrap();
         fs::write(
+            task_dir.join("status"),
+            format!("Name:\t{comm}\nTgid:\t{tid}\nPid:\t{tid}\n"),
+        )
+        .unwrap();
+        fs::write(
             task_dir.join("stat"),
             fake_stat_line(tid, comm, starttime_ticks),
         )
@@ -1000,6 +1107,31 @@ mod tests {
         fs::write(path.join("cpuset.cpus"), "0-7\n").unwrap();
         fs::write(path.join("cpuset.mems"), "0\n").unwrap();
         path
+    }
+
+    struct FailingCgroupWriter {
+        writes: usize,
+        fail_on_write: usize,
+    }
+
+    impl FailingCgroupWriter {
+        fn fail_on_write(fail_on_write: usize) -> Self {
+            Self {
+                writes: 0,
+                fail_on_write,
+            }
+        }
+    }
+
+    impl CgroupFileWriter for FailingCgroupWriter {
+        fn write_trimmed(&mut self, path: &Path, value: &str) -> anyhow::Result<()> {
+            self.writes += 1;
+            if self.writes == self.fail_on_write {
+                anyhow::bail!("injected cgroup write failure for {}", path.display());
+            }
+
+            super::write_trimmed(path, value)
+        }
     }
 
     #[test]
@@ -1273,6 +1405,66 @@ mod tests {
     }
 
     #[test]
+    fn apply_restores_cpuset_cpus_when_cpuset_mems_write_fails() {
+        let proc_root = temp_dir("proc-apply-mems-fail");
+        let cgroup_root = temp_dir("cgroup-apply-mems-fail");
+        write_fake_cgroup(&cgroup_root, "/old.slice");
+        let target = write_fake_cgroup(&cgroup_root, "/stutter/game.slice");
+        write_fake_task(&proc_root, 42, "game-thread", 12345, "/old.slice");
+        let action = action_for(&cgroup_root, 42);
+        let mut writer = FailingCgroupWriter::fail_on_write(2);
+
+        let err = action
+            .apply_at_with_writer(&proc_root, &CgroupPlacementPolicy::default(), &mut writer)
+            .unwrap_err();
+
+        assert!(format!("{:#}", err.source).contains("cpuset.mems"));
+        assert!(err.rollback.is_some());
+        assert_eq!(read_trimmed(&target.join("cpuset.cpus")).unwrap(), "0-7");
+        assert_eq!(read_trimmed(&target.join("cpuset.mems")).unwrap(), "0");
+        assert_eq!(read_trimmed(&target.join("cgroup.procs")).unwrap(), "");
+        fs::remove_dir_all(proc_root).ok();
+        fs::remove_dir_all(cgroup_root).ok();
+    }
+
+    #[test]
+    fn apply_restores_moved_tasks_and_cpuset_when_second_task_move_fails() {
+        let proc_root = temp_dir("proc-apply-second-move-fail");
+        let cgroup_root = temp_dir("cgroup-apply-second-move-fail");
+        write_fake_cgroup(&cgroup_root, "/old-first.slice");
+        write_fake_cgroup(&cgroup_root, "/old-second.slice");
+        let target = write_fake_cgroup(&cgroup_root, "/stutter/game.slice");
+        write_fake_task(&proc_root, 41, "first", 12345, "/old-first.slice");
+        write_fake_task(&proc_root, 42, "second", 12345, "/old-second.slice");
+
+        let mut action = action_for(&cgroup_root, 41);
+        action.targets = vec![
+            placement_target(41, "first", TaskClass::Game),
+            placement_target(42, "second", TaskClass::Game),
+        ];
+        let mut writer = FailingCgroupWriter::fail_on_write(4);
+
+        let err = action
+            .apply_at_with_writer(&proc_root, &CgroupPlacementPolicy::default(), &mut writer)
+            .unwrap_err();
+
+        assert!(format!("{:#}", err.source).contains("failed to move tid=42"));
+        assert!(err.rollback.is_some());
+        assert_eq!(read_trimmed(&target.join("cpuset.cpus")).unwrap(), "0-7");
+        assert_eq!(read_trimmed(&target.join("cpuset.mems")).unwrap(), "0");
+        assert_eq!(
+            read_trimmed(&cgroup_root.join("old-first.slice/cgroup.procs")).unwrap(),
+            "41"
+        );
+        assert_eq!(
+            read_trimmed(&cgroup_root.join("old-second.slice/cgroup.procs")).unwrap(),
+            ""
+        );
+        fs::remove_dir_all(proc_root).ok();
+        fs::remove_dir_all(cgroup_root).ok();
+    }
+
+    #[test]
     fn verify_reports_exited_task_as_warning_not_crash() {
         let proc_root = temp_dir("proc-exited-verify");
         let cgroup_root = temp_dir("cgroup-exited-verify");
@@ -1303,15 +1495,16 @@ mod tests {
         let action = action_for(&cgroup_root, 42);
 
         let token = RollbackToken::CgroupRestore {
-            records: vec![CgroupRestoreRecord {
-                identity: crate::actions::TaskRestoreIdentity {
-                    tid: 42,
-                    comm: "test".to_owned(),
-                    process_starttime_ticks: None,
-                    task_starttime_ticks: None,
-                },
-                original_cgroup: PathBuf::from("/old.slice"),
-            }],
+            records: vec![CgroupRestoreRecord::new(
+                crate::actions::TaskRestoreIdentity::observed(
+                    42,
+                    None,
+                    Some("test".to_owned()),
+                    None,
+                    None,
+                ),
+                PathBuf::from("/old.slice"),
+            )],
             cpuset: None,
         };
 
@@ -1320,6 +1513,149 @@ mod tests {
         assert_eq!(
             read_trimmed(&cgroup_root.join("old.slice/cgroup.procs")).unwrap(),
             ""
+        );
+        fs::remove_dir_all(proc_root).ok();
+        fs::remove_dir_all(cgroup_root).ok();
+    }
+
+    #[test]
+    fn rollback_skips_identity_mismatch_without_restoring_reused_tid() {
+        let proc_root = temp_dir("proc-rollback-reused");
+        let cgroup_root = temp_dir("cgroup-rollback-reused");
+        write_fake_task(&proc_root, 42, "other-thread", 99999, "/stutter/game.slice");
+        write_fake_cgroup(&cgroup_root, "/old.slice");
+        let action = action_for(&cgroup_root, 42);
+
+        let token = RollbackToken::CgroupRestore {
+            records: vec![CgroupRestoreRecord::new(
+                crate::actions::TaskRestoreIdentity::observed(
+                    42,
+                    None,
+                    Some("game-thread".to_owned()),
+                    Some(12345),
+                    None,
+                ),
+                PathBuf::from("/old.slice"),
+            )],
+            cpuset: None,
+        };
+
+        action.rollback_at(&proc_root, &token).unwrap();
+
+        assert_eq!(
+            read_trimmed(&cgroup_root.join("old.slice/cgroup.procs")).unwrap(),
+            ""
+        );
+        fs::remove_dir_all(proc_root).ok();
+        fs::remove_dir_all(cgroup_root).ok();
+    }
+
+    #[test]
+    fn rollback_skips_dead_middle_task_and_restores_remaining_records() {
+        let proc_root = temp_dir("proc-rollback-dead-middle");
+        let cgroup_root = temp_dir("cgroup-rollback-dead-middle");
+        write_fake_task(&proc_root, 41, "first", 4100, "/stutter/game.slice");
+        write_fake_task(&proc_root, 43, "third", 4300, "/stutter/game.slice");
+        write_fake_cgroup(&cgroup_root, "/old-first.slice");
+        write_fake_cgroup(&cgroup_root, "/old-second.slice");
+        write_fake_cgroup(&cgroup_root, "/old-third.slice");
+        let action = action_for(&cgroup_root, 41);
+
+        let token = RollbackToken::CgroupRestore {
+            records: vec![
+                CgroupRestoreRecord::new(
+                    crate::actions::TaskRestoreIdentity::observed(
+                        41,
+                        None,
+                        Some("first".to_owned()),
+                        Some(4100),
+                        None,
+                    ),
+                    PathBuf::from("/old-first.slice"),
+                ),
+                CgroupRestoreRecord::new(
+                    crate::actions::TaskRestoreIdentity::observed(
+                        42,
+                        None,
+                        Some("second".to_owned()),
+                        Some(4200),
+                        None,
+                    ),
+                    PathBuf::from("/old-second.slice"),
+                ),
+                CgroupRestoreRecord::new(
+                    crate::actions::TaskRestoreIdentity::observed(
+                        43,
+                        None,
+                        Some("third".to_owned()),
+                        Some(4300),
+                        None,
+                    ),
+                    PathBuf::from("/old-third.slice"),
+                ),
+            ],
+            cpuset: None,
+        };
+
+        action.rollback_at(&proc_root, &token).unwrap();
+
+        assert_eq!(
+            read_trimmed(&cgroup_root.join("old-first.slice/cgroup.procs")).unwrap(),
+            "41"
+        );
+        assert_eq!(
+            read_trimmed(&cgroup_root.join("old-second.slice/cgroup.procs")).unwrap(),
+            ""
+        );
+        assert_eq!(
+            read_trimmed(&cgroup_root.join("old-third.slice/cgroup.procs")).unwrap(),
+            "43"
+        );
+        fs::remove_dir_all(proc_root).ok();
+        fs::remove_dir_all(cgroup_root).ok();
+    }
+
+    #[test]
+    fn rollback_reports_real_write_failure_after_attempting_remaining_records() {
+        let proc_root = temp_dir("proc-rollback-write-failure");
+        let cgroup_root = temp_dir("cgroup-rollback-write-failure");
+        write_fake_task(&proc_root, 41, "first", 4100, "/stutter/game.slice");
+        write_fake_task(&proc_root, 43, "third", 4300, "/stutter/game.slice");
+        write_fake_cgroup(&cgroup_root, "/old-third.slice");
+        let action = action_for(&cgroup_root, 41);
+
+        let token = RollbackToken::CgroupRestore {
+            records: vec![
+                CgroupRestoreRecord::new(
+                    crate::actions::TaskRestoreIdentity::observed(
+                        41,
+                        None,
+                        Some("first".to_owned()),
+                        Some(4100),
+                        None,
+                    ),
+                    PathBuf::from("/missing-old.slice"),
+                ),
+                CgroupRestoreRecord::new(
+                    crate::actions::TaskRestoreIdentity::observed(
+                        43,
+                        None,
+                        Some("third".to_owned()),
+                        Some(4300),
+                        None,
+                    ),
+                    PathBuf::from("/old-third.slice"),
+                ),
+            ],
+            cpuset: None,
+        };
+
+        let err = action.rollback_at(&proc_root, &token).unwrap_err();
+
+        assert!(format!("{err:#}").contains("after attempting all records"));
+        assert_eq!(
+            read_trimmed(&cgroup_root.join("old-third.slice/cgroup.procs")).unwrap(),
+            "43"
         );
         fs::remove_dir_all(proc_root).ok();
         fs::remove_dir_all(cgroup_root).ok();
@@ -1346,24 +1682,26 @@ mod tests {
     fn cgroup_restore_token_reports_affected_tasks_and_no_restore_path() {
         let token = RollbackToken::CgroupRestore {
             records: vec![
-                CgroupRestoreRecord {
-                    identity: crate::actions::TaskRestoreIdentity {
-                        tid: 1,
-                        comm: "test".to_owned(),
-                        process_starttime_ticks: None,
-                        task_starttime_ticks: None,
-                    },
-                    original_cgroup: PathBuf::from("/a.slice"),
-                },
-                CgroupRestoreRecord {
-                    identity: crate::actions::TaskRestoreIdentity {
-                        tid: 2,
-                        comm: "test".to_owned(),
-                        process_starttime_ticks: None,
-                        task_starttime_ticks: None,
-                    },
-                    original_cgroup: PathBuf::from("/b.slice"),
-                },
+                CgroupRestoreRecord::new(
+                    crate::actions::TaskRestoreIdentity::observed(
+                        1,
+                        None,
+                        Some("test".to_owned()),
+                        None,
+                        None,
+                    ),
+                    PathBuf::from("/a.slice"),
+                ),
+                CgroupRestoreRecord::new(
+                    crate::actions::TaskRestoreIdentity::observed(
+                        2,
+                        None,
+                        Some("test".to_owned()),
+                        None,
+                        None,
+                    ),
+                    PathBuf::from("/b.slice"),
+                ),
             ],
             cpuset: None,
         };

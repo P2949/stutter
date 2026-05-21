@@ -1,9 +1,8 @@
 //! Agent server startup boundary.
 
-use super::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-const DEFAULT_AGENT_UNIX_CONNECTION_LIMIT: usize = 128;
-const DEFAULT_AGENT_UNIX_CONNECTION_TIMEOUT: Duration = Duration::from_secs(60);
+use super::*;
 
 pub(crate) async fn serve_unix_socket(path: PathBuf, app: Router) -> anyhow::Result<()> {
     serve_unix_socket_with_limits(
@@ -25,6 +24,10 @@ pub(crate) async fn serve_unix_socket_with_limits(
         max_connections > 0,
         "agent unix socket max_connections must be greater than zero"
     );
+    anyhow::ensure!(
+        !connection_timeout.is_zero(),
+        "agent unix socket connection_timeout must be greater than zero"
+    );
     prepare_unix_socket_path(&path)?;
     let listener = tokio::net::UnixListener::bind(&path)
         .with_context(|| format!("failed to bind agent unix socket {}", path.display()))?;
@@ -36,6 +39,9 @@ pub(crate) async fn serve_unix_socket_with_limits(
     })?;
 
     let connection_permits = Arc::new(Semaphore::new(max_connections));
+    let active_connections = Arc::new(AtomicUsize::new(0));
+    let rejected_connections = Arc::new(AtomicUsize::new(0));
+    let connection_errors = Arc::new(AtomicUsize::new(0));
     let mut make_service = app.into_make_service();
     loop {
         let (socket, _) = listener
@@ -45,11 +51,18 @@ pub(crate) async fn serve_unix_socket_with_limits(
         let permit = match connection_permits.clone().try_acquire_owned() {
             Ok(permit) => permit,
             Err(_) => {
-                log::warn!("agent_unix_connection_limit_reached max_connections={max_connections}");
+                let rejected = rejected_connections.fetch_add(1, Ordering::Relaxed) + 1;
+                log::warn!(
+                    "agent_unix_connection_limit_reached max_connections={max_connections} rejected_connections={rejected}"
+                );
                 drop(socket);
                 continue;
             }
         };
+        let active = active_connections.fetch_add(1, Ordering::Relaxed) + 1;
+        log::debug!(
+            "agent_unix_connection_accepted active_connections={active} max_connections={max_connections}"
+        );
         let socket = TokioIo::new(socket);
 
         let tower_service = make_service
@@ -59,6 +72,8 @@ pub(crate) async fn serve_unix_socket_with_limits(
             .map_request(|request: Request<Incoming>| request.map(Body::new));
         let hyper_service = TowerToHyperService::new(tower_service);
 
+        let active_connections = active_connections.clone();
+        let connection_errors = connection_errors.clone();
         tokio::spawn(async move {
             let _permit = permit;
             let builder = HyperConnectionBuilder::new(TokioExecutor::new());
@@ -66,7 +81,8 @@ pub(crate) async fn serve_unix_socket_with_limits(
             match tokio::time::timeout(connection_timeout, connection).await {
                 Ok(Ok(())) => {}
                 Ok(Err(err)) => {
-                    log::debug!("agent_unix_connection_failed err={err:#}");
+                    let errors = connection_errors.fetch_add(1, Ordering::Relaxed) + 1;
+                    log::debug!("agent_unix_connection_failed errors={errors} err={err:#}");
                 }
                 Err(_) => {
                     log::warn!(
@@ -75,6 +91,8 @@ pub(crate) async fn serve_unix_socket_with_limits(
                     );
                 }
             }
+            let active = active_connections.fetch_sub(1, Ordering::Relaxed) - 1;
+            log::debug!("agent_unix_connection_closed active_connections={active}");
         });
     }
 }

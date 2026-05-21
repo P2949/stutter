@@ -61,6 +61,8 @@ pub use session::{
     recording_warnings,
 };
 // Re-export from session_files.rs - these were pub in the original recorder.rs
+#[cfg(test)]
+pub use session_files::DisplayPathMetadata;
 pub use session_files::{
     MetadataFile, RecordedConfig, RecordedCpuSnapshot, RecordedLatency, RecordedSpike,
     RecordedTime, SessionFile, SessionMetadataCore, SessionSpike, SessionTask, WakerEntry,

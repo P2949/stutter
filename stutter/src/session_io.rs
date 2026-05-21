@@ -518,8 +518,8 @@ fn expected_artifact_count_for_counter(
         ArtifactCounter::WaylandPresentationEvent => {
             Some(session.core.wayland_presentation_event_count)
         }
-        ArtifactCounter::DmaBufEvent => None,
-        ArtifactCounter::GpuEngineSample => None,
+        ArtifactCounter::DmaBufEvent => Some(session.core.dmabuf_event_count),
+        ArtifactCounter::GpuEngineSample => Some(session.core.gpu_engine_sample_count),
     }
 }
 

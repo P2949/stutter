@@ -8,9 +8,9 @@ use crate::{
     focus::FocusGroupKind,
     process_tree::TaskInfo,
     recorder::{
-        BlockIoRecord, CpuFreqRecord, DrmFenceEventRecord, FocusEvent, ForegroundEvent, FrameEvent,
-        GpuSample, IrqEventRecord, KmsFlipEventRecord, MigrationEventRecord, SpikeEvent,
-        WaylandPresentationEventRecord,
+        BlockIoRecord, CpuFreqRecord, DmaBufEventRecord, DrmFenceEventRecord, FocusEvent,
+        ForegroundEvent, FrameEvent, GpuEngineSample, GpuSample, IrqEventRecord,
+        KmsFlipEventRecord, MigrationEventRecord, SpikeEvent, WaylandPresentationEventRecord,
     },
     scx::ScxEvent,
 };
@@ -47,6 +47,9 @@ pub enum MonitorEvent {
     GpuSample {
         sample: Box<GpuSample>,
     },
+    GpuEngineSample {
+        sample: Box<GpuEngineSample>,
+    },
     IrqEvent {
         event: Box<IrqEventRecord>,
     },
@@ -73,6 +76,9 @@ pub enum MonitorEvent {
     },
     WaylandPresentationEvent {
         event: Box<WaylandPresentationEventRecord>,
+    },
+    DmaBufEvent {
+        event: Box<DmaBufEventRecord>,
     },
     Exec {
         elapsed_ms: u64,
@@ -132,6 +138,7 @@ impl MonitorEvent {
             | Self::Spike { .. }
             | Self::Frame { .. }
             | Self::GpuSample { .. }
+            | Self::GpuEngineSample { .. }
             | Self::IrqEvent { .. }
             | Self::IoEvent { .. }
             | Self::MigrationEvent { .. }
@@ -139,6 +146,7 @@ impl MonitorEvent {
             | Self::KmsFlipEvent { .. }
             | Self::DrmFenceEvent { .. }
             | Self::WaylandPresentationEvent { .. }
+            | Self::DmaBufEvent { .. }
             | Self::LiveDiagnosis { .. } => MonitorEventDeliveryClass::Droppable,
         }
     }
@@ -152,6 +160,7 @@ impl MonitorEvent {
             Self::Alert { .. } => "alert",
             Self::Frame { .. } => "frame",
             Self::GpuSample { .. } => "gpu_sample",
+            Self::GpuEngineSample { .. } => "gpu_engine_sample",
             Self::IrqEvent { .. } => "irq_event",
             Self::IoEvent { .. } => "io_event",
             Self::MigrationEvent { .. } => "migration_event",
@@ -161,6 +170,7 @@ impl MonitorEvent {
             Self::KmsFlipEvent { .. } => "kms_flip_event",
             Self::DrmFenceEvent { .. } => "drm_fence_event",
             Self::WaylandPresentationEvent { .. } => "wayland_presentation_event",
+            Self::DmaBufEvent { .. } => "dmabuf_event",
             Self::LiveDiagnosis { .. } => "live_diagnosis",
             Self::Exec { .. } => "exec",
             Self::DataQualityWarning { .. } => "data_quality_warning",
@@ -179,6 +189,7 @@ impl MonitorEvent {
             Self::Alert { payload } => Some(payload.elapsed_ms),
             Self::Frame { event } => Some(event.elapsed_ms),
             Self::GpuSample { sample } => Some(sample.elapsed_ms),
+            Self::GpuEngineSample { sample } => Some(sample.elapsed_ms),
             Self::IrqEvent { event } => event.elapsed_ms,
             Self::IoEvent { event } => Some(event.elapsed_ms),
             Self::MigrationEvent { event } => Some(event.elapsed_ms),
@@ -188,6 +199,7 @@ impl MonitorEvent {
             Self::KmsFlipEvent { event } => Some(event.elapsed_ms),
             Self::DrmFenceEvent { event } => Some(event.elapsed_ms),
             Self::WaylandPresentationEvent { event } => Some(event.elapsed_ms),
+            Self::DmaBufEvent { event } => Some(event.elapsed_ms),
             Self::LiveDiagnosis { entry } => Some(entry.elapsed_ms),
             Self::Exec { elapsed_ms, .. } => Some(*elapsed_ms),
             Self::DataQualityWarning { .. } => None,

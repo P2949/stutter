@@ -489,58 +489,62 @@ mod tests {
             (
                 "nice-rollback",
                 RollbackToken::NiceRestore {
-                    records: vec![crate::actions::NiceRestoreRecord {
-                        identity: crate::actions::TaskRestoreIdentity {
-                            tid: 1,
-                            comm: "test".to_owned(),
-                            process_starttime_ticks: None,
-                            task_starttime_ticks: None,
-                        },
-                        original_nice: 0,
-                    }],
+                    records: vec![crate::actions::NiceRestoreRecord::new(
+                        crate::actions::TaskRestoreIdentity::observed(
+                            1,
+                            None,
+                            Some("test".to_owned()),
+                            None,
+                            None,
+                        ),
+                        0,
+                    )],
                 },
             ),
             (
                 "ioprio-rollback",
                 RollbackToken::IoPrioRestore {
-                    records: vec![crate::actions::IoPrioRestoreRecord {
-                        identity: crate::actions::TaskRestoreIdentity {
-                            tid: 1,
-                            comm: "test".to_owned(),
-                            process_starttime_ticks: None,
-                            task_starttime_ticks: None,
-                        },
-                        original_ioprio: 0,
-                    }],
+                    records: vec![crate::actions::IoPrioRestoreRecord::new(
+                        crate::actions::TaskRestoreIdentity::observed(
+                            1,
+                            None,
+                            Some("test".to_owned()),
+                            None,
+                            None,
+                        ),
+                        0,
+                    )],
                 },
             ),
             (
                 "uclamp-rollback",
                 RollbackToken::UclampRestore {
-                    records: vec![crate::actions::UclampRestoreRecord {
-                        identity: crate::actions::TaskRestoreIdentity {
-                            tid: 1,
-                            comm: "test".to_owned(),
-                            process_starttime_ticks: None,
-                            task_starttime_ticks: None,
-                        },
-                        original_util_min: 0,
-                        original_util_max: 1024,
-                    }],
+                    records: vec![crate::actions::UclampRestoreRecord::new(
+                        crate::actions::TaskRestoreIdentity::observed(
+                            1,
+                            None,
+                            Some("test".to_owned()),
+                            None,
+                            None,
+                        ),
+                        0,
+                        1024,
+                    )],
                 },
             ),
             (
                 "cgroup-rollback",
                 RollbackToken::CgroupRestore {
-                    records: vec![crate::actions::CgroupRestoreRecord {
-                        identity: crate::actions::TaskRestoreIdentity {
-                            tid: 1,
-                            comm: "test".to_owned(),
-                            process_starttime_ticks: None,
-                            task_starttime_ticks: None,
-                        },
-                        original_cgroup: PathBuf::from("/sys/fs/cgroup"),
-                    }],
+                    records: vec![crate::actions::CgroupRestoreRecord::new(
+                        crate::actions::TaskRestoreIdentity::observed(
+                            1,
+                            None,
+                            Some("test".to_owned()),
+                            None,
+                            None,
+                        ),
+                        PathBuf::from("/sys/fs/cgroup"),
+                    )],
                     cpuset: None,
                 },
             ),

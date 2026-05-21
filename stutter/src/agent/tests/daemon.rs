@@ -269,6 +269,10 @@ fn daemon_restore_messages_include_autotune_and_profile_restore_results() {
         restored_actions: 0,
         failed_actions: 0,
         skipped_actions: 0,
+        restored_records: 0,
+        skipped_missing: 0,
+        skipped_identity_mismatch: 0,
+        failed_records: 0,
         messages: vec!["autotune restore: no active autotune action".to_owned()],
     };
     let profile = restore::ProfileRestoreCommandOutcome {

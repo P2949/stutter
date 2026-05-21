@@ -21,6 +21,12 @@ pub(in crate::test_fixture_builder) fn apply_artifact_counts(
     session.core.frame_event_count = artifacts.frame_events.len() as u64;
     session.core.block_io_event_count = artifacts.block_io_events.len() as u64;
     session.core.foreground_event_count = artifacts.foreground_events.len() as u64;
+    session.core.kms_flip_event_count = artifacts.kms_flip_events.len() as u64;
+    session.core.drm_fence_event_count = artifacts.drm_fence_events.len() as u64;
+    session.core.wayland_presentation_event_count =
+        artifacts.wayland_presentation_events.len() as u64;
+    session.core.dmabuf_event_count = artifacts.dmabuf_events.len() as u64;
+    session.core.gpu_engine_sample_count = artifacts.gpu_engine_samples.len() as u64;
     (
         session.clone(),
         FixtureArtifacts {
@@ -31,6 +37,12 @@ pub(in crate::test_fixture_builder) fn apply_artifact_counts(
             frame_events: artifacts.frame_events.clone(),
             block_io_events: artifacts.block_io_events.clone(),
             foreground_events: artifacts.foreground_events.clone(),
+            kms_flip_events: artifacts.kms_flip_events.clone(),
+            drm_fence_events: artifacts.drm_fence_events.clone(),
+            wayland_presentation_events: artifacts.wayland_presentation_events.clone(),
+            dmabuf_events: artifacts.dmabuf_events.clone(),
+            gpu_engine_samples: artifacts.gpu_engine_samples.clone(),
+            display_topology: artifacts.display_topology.clone(),
         },
     )
 }

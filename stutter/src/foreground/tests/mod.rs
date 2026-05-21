@@ -3,6 +3,7 @@
 //! Owns foreground test module wiring and shared environment/provider test helpers.
 //! Does not own production foreground behavior.
 
+mod command;
 mod hyprland;
 mod redaction;
 mod resolver;

@@ -67,6 +67,8 @@ fn listen_audit_message_reports_unix_socket() {
         max_duration_seconds: DEFAULT_AGENT_MAX_DURATION_SECONDS,
         max_targets: DEFAULT_AGENT_MAX_TARGETS,
         max_concurrent_recordings: DEFAULT_AGENT_MAX_CONCURRENT_RECORDINGS,
+        max_unix_connections: DEFAULT_AGENT_UNIX_CONNECTION_LIMIT,
+        unix_connection_timeout: DEFAULT_AGENT_UNIX_CONNECTION_TIMEOUT,
         autotune_limits: AgentAutotuneLimits::default(),
         health_thresholds: SystemHealthThresholds::default(),
         rollback_on_crash_recovery: true,
@@ -75,6 +77,8 @@ fn listen_audit_message_reports_unix_socket() {
     let message = agent_listen_audit_message(&config, false);
     assert!(message.contains("bind=unix:/tmp/stutter-agent.sock"));
     assert!(message.contains("auth_enabled=false"));
+    assert!(message.contains("max_unix_connections=128"));
+    assert!(message.contains("unix_connection_timeout_ms=60000"));
 }
 
 fn validate_agent_bind_policy(bind: SocketAddr, allow_unsafe_bind: bool) -> anyhow::Result<()> {

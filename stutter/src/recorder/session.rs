@@ -23,8 +23,9 @@ use super::{
     writers::NdjsonWriter,
 };
 use crate::{
-    artifacts::ArtifactKind,
+    artifacts::{ArtifactKind, artifact_path},
     config::{TARGET_PIDS_MAX, WaylandPresentationSource, model::MonitorConfig},
+    display_topology::DisplayTopologySnapshot,
     foreground::ForegroundEvent,
     metadata::collect_system_metadata,
     metrics::{CpuSnapshot, SpikeRecord, TaskStats},
@@ -201,6 +202,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
     let monotonic_end_ns = monotonic_now_ns();
     let duration_ms = recording.started_instant.elapsed().as_millis() as u64;
     let metadata = collect_system_metadata();
+    let display_topology = load_display_topology_snapshot(&recording.run_dir);
 
     let mut active_expanded_tasks = active_targets.keys().copied().collect::<Vec<_>>();
     active_expanded_tasks.sort_unstable();
@@ -327,7 +329,9 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         kms_flip_event_count: recorder.counters.kms_flip_event_count,
         drm_fence_event_count: recorder.counters.drm_fence_event_count,
         wayland_presentation_event_count: recorder.counters.wayland_presentation_event_count,
-        display_path: display_path_metadata(config),
+        dmabuf_event_count: recorder.counters.dmabuf_event_count,
+        gpu_engine_sample_count: recorder.counters.gpu_engine_sample_count,
+        display_path: display_path_metadata(config, display_topology.as_ref()),
         foreground_source: final_foreground_event
             .as_ref()
             .map(|event| foreground_source_label(event.source)),
@@ -591,6 +595,10 @@ pub fn recorded_config(config: &MonitorConfig, tree_pids: &[u32]) -> RecordedCon
         wayland_presentation_source: wayland_presentation_source_label(
             config.wayland_presentation.source,
         ),
+        dmabuf_tracking: config.probes.dmabuf_tracking,
+        dmabuf_log: config.dmabuf.log_path.clone(),
+        gpu_engine_sampling: config.probes.gpu_engine_sampling,
+        display_topology: config.probes.display_topology,
         display_path_label: config.display_path.label.clone(),
         display_render_gpu: config.display_path.render_gpu.clone(),
         display_scanout_gpu: config.display_path.scanout_gpu.clone(),
@@ -613,18 +621,93 @@ pub fn recorded_config(config: &MonitorConfig, tree_pids: &[u32]) -> RecordedCon
     }
 }
 
-fn display_path_metadata(config: &MonitorConfig) -> Option<DisplayPathMetadata> {
+fn load_display_topology_snapshot(run_dir: &Path) -> Option<DisplayTopologySnapshot> {
+    let path = artifact_path(run_dir, ArtifactKind::DisplayTopology);
+    let file = fs::File::open(path).ok()?;
+    serde_json::from_reader(file).ok()
+}
+
+fn display_path_metadata(
+    config: &MonitorConfig,
+    topology: Option<&DisplayTopologySnapshot>,
+) -> Option<DisplayPathMetadata> {
+    let guess = topology.and_then(|topology| topology.guessed_path.as_ref());
     let metadata = DisplayPathMetadata {
-        label: config.display_path.label.clone(),
-        render_gpu: config.display_path.render_gpu.clone(),
-        scanout_gpu: config.display_path.scanout_gpu.clone(),
-        connector: config.display_path.connector.clone(),
+        label: config.display_path.label.clone().or_else(|| {
+            guess.map(|guess| match guess.is_cross_gpu {
+                Some(true) => "cross-gpu".to_owned(),
+                Some(false) => "direct-scanout-gpu".to_owned(),
+                None => "unknown".to_owned(),
+            })
+        }),
+        render_gpu: config.display_path.render_gpu.clone().or_else(|| {
+            guess.and_then(|guess| display_gpu_label(&guess.render_card, &guess.render_driver))
+        }),
+        scanout_gpu: config.display_path.scanout_gpu.clone().or_else(|| {
+            guess.and_then(|guess| display_gpu_label(&guess.scanout_card, &guess.scanout_driver))
+        }),
+        connector: config
+            .display_path
+            .connector
+            .clone()
+            .or_else(|| guess.and_then(|guess| guess.connector.clone())),
+        render_card: guess.and_then(|guess| guess.render_card.clone()),
+        render_render_node: guess
+            .and_then(|guess| guess.render_card.as_deref())
+            .and_then(|card| {
+                topology.and_then(|topology| {
+                    topology
+                        .drm_devices
+                        .iter()
+                        .find(|device| device.card == card)
+                })
+            })
+            .and_then(|device| device.render_node.as_ref())
+            .map(|render_node| {
+                if render_node.starts_with("/dev/") {
+                    render_node.clone()
+                } else {
+                    format!("/dev/dri/{render_node}")
+                }
+            }),
+        render_driver: guess.and_then(|guess| guess.render_driver.clone()),
+        scanout_card: guess.and_then(|guess| guess.scanout_card.clone()),
+        scanout_driver: guess.and_then(|guess| guess.scanout_driver.clone()),
+        is_cross_gpu: guess.and_then(|guess| guess.is_cross_gpu),
+        session_type: topology.and_then(|topology| topology.session_type.clone()),
+        compositor: topology
+            .and_then(|topology| topology.compositor.as_ref())
+            .map(|compositor| compositor.name.clone()),
+        topology_confidence: guess.map(|guess| guess.confidence.clone()),
+        topology_warnings: topology
+            .map(|topology| topology.warnings.clone())
+            .unwrap_or_default(),
     };
-    (metadata.label.is_some()
+    let has_metadata = metadata.label.is_some()
         || metadata.render_gpu.is_some()
         || metadata.scanout_gpu.is_some()
-        || metadata.connector.is_some())
-    .then_some(metadata)
+        || metadata.connector.is_some()
+        || metadata.render_card.is_some()
+        || metadata.render_render_node.is_some()
+        || metadata.render_driver.is_some()
+        || metadata.scanout_card.is_some()
+        || metadata.scanout_driver.is_some()
+        || metadata.is_cross_gpu.is_some()
+        || metadata.session_type.is_some()
+        || metadata.compositor.is_some()
+        || metadata.topology_confidence.is_some()
+        || !metadata.topology_warnings.is_empty();
+
+    has_metadata.then_some(metadata)
+}
+
+fn display_gpu_label(card: &Option<String>, driver: &Option<String>) -> Option<String> {
+    match (card.as_deref(), driver.as_deref()) {
+        (Some(card), Some(driver)) => Some(format!("{card}/{driver}")),
+        (Some(card), None) => Some(card.to_owned()),
+        (None, Some(driver)) => Some(driver.to_owned()),
+        (None, None) => None,
+    }
 }
 
 fn wayland_presentation_source_label(source: WaylandPresentationSource) -> String {

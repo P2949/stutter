@@ -50,6 +50,10 @@ pub struct UserConfigFile {
     pub foreground_poll_ms: Option<u64>,
     pub foreground_max_stale_ms: Option<u64>,
     pub foreground_include_title: Option<bool>,
+    pub dmabuf_tracking: Option<bool>,
+    pub dmabuf_log: Option<PathBuf>,
+    pub gpu_engine_sampling: Option<bool>,
+    pub display_topology: Option<bool>,
     pub daemon_preset: Option<String>,
     pub daemon_enabled_action_families: Option<Vec<String>>,
     pub daemon_denied_action_families: Option<Vec<String>>,
@@ -818,6 +822,10 @@ fn known_top_level_user_config_field(field: &str) -> bool {
             | "foreground_poll_ms"
             | "foreground_max_stale_ms"
             | "foreground_include_title"
+            | "dmabuf_tracking"
+            | "dmabuf_log"
+            | "gpu_engine_sampling"
+            | "display_topology"
             | "daemon_preset"
             | "daemon_enabled_action_families"
             | "daemon_denied_action_families"

@@ -123,6 +123,10 @@ pub(crate) mod state;
 pub const DEFAULT_AGENT_MAX_DURATION_SECONDS: u64 = 300;
 pub const DEFAULT_AGENT_MAX_TARGETS: usize = 128;
 pub const DEFAULT_AGENT_MAX_CONCURRENT_RECORDINGS: usize = 1;
+pub const DEFAULT_AGENT_UNIX_CONNECTION_LIMIT: usize = 128;
+pub const DEFAULT_AGENT_UNIX_CONNECTION_TIMEOUT_MS: u64 = 60_000;
+pub const DEFAULT_AGENT_UNIX_CONNECTION_TIMEOUT: Duration =
+    Duration::from_millis(DEFAULT_AGENT_UNIX_CONNECTION_TIMEOUT_MS);
 pub const DEFAULT_AGENT_MAX_REQUEST_BYTES: usize = 64 * 1024;
 pub const DEFAULT_AGENT_RATE_LIMIT_REQUESTS: usize = 120;
 pub const DEFAULT_AGENT_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
@@ -157,6 +161,8 @@ pub struct AgentConfig {
     pub max_duration_seconds: u64,
     pub max_targets: usize,
     pub max_concurrent_recordings: usize,
+    pub max_unix_connections: usize,
+    pub unix_connection_timeout: Duration,
     pub autotune_limits: AgentAutotuneLimits,
     pub health_thresholds: SystemHealthThresholds,
     pub rollback_on_crash_recovery: bool,
@@ -444,7 +450,19 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
 
     if let Some(path) = listen_unix_socket {
         log::info!("stutter agent listening on unix://{}", path.display());
-        server::serve_unix_socket(path, app).await?;
+        if config.max_unix_connections == DEFAULT_AGENT_UNIX_CONNECTION_LIMIT
+            && config.unix_connection_timeout == DEFAULT_AGENT_UNIX_CONNECTION_TIMEOUT
+        {
+            server::serve_unix_socket(path, app).await?;
+        } else {
+            server::serve_unix_socket_with_limits(
+                path,
+                app,
+                config.max_unix_connections,
+                config.unix_connection_timeout,
+            )
+            .await?;
+        }
     } else {
         log::info!("stutter agent listening on http://{}", listen_bind);
         let listener = tokio::net::TcpListener::bind(listen_bind).await?;
@@ -457,11 +475,13 @@ pub async fn run_agent(config: AgentConfig) -> anyhow::Result<()> {
 fn agent_listen_audit_message(config: &AgentConfig, auth_enabled: bool) -> String {
     match config.unix_socket.as_ref() {
         Some(path) => format!(
-            "bind=unix:{} auth_enabled={} allow_unsafe_bind={} runs_dir={}",
+            "bind=unix:{} auth_enabled={} allow_unsafe_bind={} runs_dir={} max_unix_connections={} unix_connection_timeout_ms={}",
             path.display(),
             auth_enabled,
             config.allow_unsafe_bind,
-            config.runs_dir.display()
+            config.runs_dir.display(),
+            config.max_unix_connections,
+            config.unix_connection_timeout.as_millis()
         ),
         None => format!(
             "bind={} auth_enabled={} allow_unsafe_bind={} runs_dir={}",

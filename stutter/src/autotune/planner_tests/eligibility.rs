@@ -119,6 +119,114 @@ mod tests {
     }
 
     #[test]
+    fn unknown_active_config_denies_candidate_instead_of_passing_as_match() {
+        let policy = policy(DaemonMode::Suggest);
+        let mut observation =
+            observation_for_situation(SituationKind::CompileCpuBound, FocusGroupKind::Compile);
+        observation.active_config_snapshot = Some(ActiveConfigSnapshot::default());
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &ControllerRuntimeState::default(),
+            nice_candidate(),
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert!(!evaluation.eligible);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ActiveConfigUnknown)
+        );
+        assert!(evaluation.deny_messages.iter().any(|message| {
+            message.contains("candidate active configuration is unknown")
+                && message.contains("active nice value missing")
+        }));
+        assert_eq!(dry_runner.calls, 0);
+    }
+
+    #[test]
+    fn active_experiment_with_unknown_config_is_reported_degraded() {
+        let policy = policy(DaemonMode::Suggest);
+        let mut observation =
+            observation_for_situation(SituationKind::CompileCpuBound, FocusGroupKind::Compile);
+        observation.active_config_snapshot = Some(ActiveConfigSnapshot::default());
+        let controller_state = ControllerRuntimeState {
+            active_experiment: Some(ActiveExperiment {
+                experiment_id: ExperimentId::new("unknown-active-config"),
+                candidate: nice_candidate(),
+                baseline_score_total: 1_000,
+            }),
+            ..ControllerRuntimeState::default()
+        };
+        let mut dry_runner = CountingDryRunner::default();
+
+        let evaluation = evaluate_candidate_with_runner(
+            &policy,
+            &observation,
+            &observation.capabilities,
+            &controller_state,
+            nice_candidate(),
+            1.0,
+            &mut dry_runner,
+        );
+
+        assert!(!evaluation.eligible);
+        assert!(
+            evaluation
+                .deny_reasons
+                .contains(&CandidateDenyReason::ActiveConfigUnknown)
+        );
+        assert!(evaluation.deny_messages.iter().any(|message| {
+            message.contains("active experiment configuration is unknown")
+                && message.contains("active nice value missing")
+        }));
+    }
+
+    #[test]
+    fn planner_summary_includes_active_config_unknown_reason() {
+        let policy = policy(DaemonMode::Suggest);
+        let mut registry = CandidateProviderRegistry::default();
+        registry.register(Box::new(StaticProvider {
+            candidate: nice_candidate(),
+        }));
+        let planner = CandidatePlanner::new(registry);
+        let mut observation =
+            observation_for_situation(SituationKind::CompileCpuBound, FocusGroupKind::Compile);
+        observation.active_config_snapshot = Some(ActiveConfigSnapshot::default());
+
+        let result = planner.plan(PlannerInput {
+            observation: &observation,
+            daemon_policy: &policy,
+            capabilities: &observation.capabilities,
+            system_health: &observation.system_health,
+            controller_state: &ControllerRuntimeState::default(),
+            active_profile_state: None,
+            workload_policy: &WorkloadPolicyMatrix::default_rules(),
+            profiles: &[],
+        });
+        let summary = result.summary();
+
+        assert!(summary.grouped_denials.iter().any(|denial| denial.reason
+            == CandidateDenyReason::ActiveConfigUnknown
+            && denial.reason_code == "active_config_unknown"
+            && denial.count == 1));
+        assert!(summary.top_denied_candidates.iter().any(|candidate| {
+            candidate
+                .deny_reasons
+                .contains(&CandidateDenyReason::ActiveConfigUnknown)
+                && candidate
+                    .deny_messages
+                    .iter()
+                    .any(|message| message.contains("active nice value missing"))
+        }));
+    }
+
+    #[test]
     fn empty_autonomous_families_block_browser_recording_irq_and_io_apply() {
         let cases = vec![
             (

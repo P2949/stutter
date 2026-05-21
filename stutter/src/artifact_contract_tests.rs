@@ -74,6 +74,10 @@ fn analysis_json_has_stable_top_level_contract() {
             "pressure_timeline",
             "artifacts_summary",
             "data_quality",
+            "direct_scanout",
+            "dmabuf_path",
+            "gpu_engine_activity",
+            "display_path_diagnosis",
         ],
     );
 
@@ -291,6 +295,38 @@ fn docs_example_artifacts_validate() {
             session.core.block_io_event_count,
             non_empty_line_count(path.join(artifact_file_name(ArtifactKind::BlockIoEvents))),
             "{} block io count mismatch",
+            path.display()
+        );
+        assert_eq!(
+            session.core.kms_flip_event_count,
+            non_empty_line_count(path.join(artifact_file_name(ArtifactKind::KmsFlipEvents))),
+            "{} KMS flip count mismatch",
+            path.display()
+        );
+        assert_eq!(
+            session.core.drm_fence_event_count,
+            non_empty_line_count(path.join(artifact_file_name(ArtifactKind::DrmFenceEvents))),
+            "{} DRM fence count mismatch",
+            path.display()
+        );
+        assert_eq!(
+            session.core.wayland_presentation_event_count,
+            non_empty_line_count(
+                path.join(artifact_file_name(ArtifactKind::WaylandPresentationEvents))
+            ),
+            "{} Wayland presentation count mismatch",
+            path.display()
+        );
+        assert_eq!(
+            session.core.dmabuf_event_count,
+            non_empty_line_count(path.join(artifact_file_name(ArtifactKind::DmaBufEvents))),
+            "{} DMABUF count mismatch",
+            path.display()
+        );
+        assert_eq!(
+            session.core.gpu_engine_sample_count,
+            non_empty_line_count(path.join(artifact_file_name(ArtifactKind::GpuEngineSamples))),
+            "{} GPU engine sample count mismatch",
             path.display()
         );
         let frame_count = if path.join("frame_correlation.json").exists() {

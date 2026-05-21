@@ -512,14 +512,15 @@ pub mod report {
     //! Public report loading, analysis, rendering, diffing, and regression contracts.
 
     pub use crate::report::{
-        ArtifactsSummary, DataQualityLevel, DataQualitySummary, FocusReportSummary,
-        ForegroundReportSummary, FrameOutlierView, FramePacingSummary, HtmlChartArtifacts,
-        HtmlReportModel, PressureKind, PressurePeakWindow, PressureTimelineCoverage,
-        PressureTimelineSummary, PressureWindow, RegressionCheckSummary, RegressionMetric,
-        RegressionViolation, ReportAnalysisJson, RuntimeSliceAnalysisSummary, RuntimeThreadSummary,
-        SpikeClusterAnalysis, SpikeClusterSource, SpikeDensityBucket, TaskHtmlRow,
-        build_report_analysis, check_regression, print_batch_report, print_diff_report,
-        print_report, write_html_report,
+        ArtifactsSummary, DataQualityLevel, DataQualitySummary, DisplayPathComponent,
+        DisplayPathDiagnosisSummary, DmaBufPathSummary, FocusReportSummary,
+        ForegroundReportSummary, FrameOutlierView, FramePacingSummary, GpuEngineActivitySummary,
+        HtmlChartArtifacts, HtmlReportModel, PressureKind, PressurePeakWindow,
+        PressureTimelineCoverage, PressureTimelineSummary, PressureWindow, RegressionCheckSummary,
+        RegressionMetric, RegressionViolation, ReportAnalysisJson, RuntimeSliceAnalysisSummary,
+        RuntimeThreadSummary, SpikeClusterAnalysis, SpikeClusterSource, SpikeDensityBucket,
+        TaskHtmlRow, build_report_analysis, check_regression, print_batch_report,
+        print_diff_report, print_report, write_html_report,
     };
 }
 

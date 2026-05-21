@@ -114,8 +114,23 @@ fn spawn_privileged_worker_child(executable: &Path, socket_path: &Path) -> anyho
         })
 }
 
+const PRIVILEGED_WORKER_SOCKET_READY_TIMEOUT: Duration = Duration::from_millis(2_000);
+const PRIVILEGED_WORKER_SOCKET_READY_RETRY_INTERVAL: Duration = Duration::from_millis(50);
+
 fn wait_for_privileged_worker_socket(socket_path: &Path) -> anyhow::Result<()> {
-    let deadline = Instant::now() + Duration::from_millis(2_000);
+    wait_for_privileged_worker_socket_with_timing(
+        socket_path,
+        PRIVILEGED_WORKER_SOCKET_READY_TIMEOUT,
+        PRIVILEGED_WORKER_SOCKET_READY_RETRY_INTERVAL,
+    )
+}
+
+pub(crate) fn wait_for_privileged_worker_socket_with_timing(
+    socket_path: &Path,
+    timeout: Duration,
+    retry_interval: Duration,
+) -> anyhow::Result<()> {
+    let deadline = Instant::now() + timeout;
     let mut last_error = None;
 
     while Instant::now() < deadline {
@@ -130,7 +145,7 @@ fn wait_for_privileged_worker_socket(socket_path: &Path) -> anyhow::Result<()> {
                 ) =>
             {
                 last_error = Some(err);
-                std::thread::sleep(Duration::from_millis(50));
+                std::thread::sleep(retry_interval);
             }
             Err(err) => {
                 return Err(err).with_context(|| {
@@ -147,8 +162,9 @@ fn wait_for_privileged_worker_socket(socket_path: &Path) -> anyhow::Result<()> {
         .map(|err| format!("; last_error={err}"))
         .unwrap_or_default();
     anyhow::bail!(
-        "privileged_worker_socket_not_ready: {} was not connectable within 2000ms{}",
+        "privileged_worker_socket_not_ready: {} was not connectable within {}ms{}",
         socket_path.display(),
+        timeout.as_millis(),
         suffix
     )
 }

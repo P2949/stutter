@@ -54,6 +54,13 @@ io_events.json
 scx_events.json
 focus_events.json
 foreground_events.json
+runtime_slices.json
+kms_flip_events.json
+drm_fence_events.json
+wayland_presentation_events.json
+display_topology.json
+dmabuf_events.json
+gpu_engine_samples.json
 ```
 
 Selected small public examples live under:
@@ -103,6 +110,13 @@ Current generated synthetic fixtures include:
 | `compositor_scheduler_delay`     | Synthetic compositor scheduler-delay edge case.        |
 | `foreground_window`              | Synthetic foreground-window privacy/summary edge case. |
 | `community_rules_classification` | Synthetic community-rules classification edge case.    |
+| `direct_gpu_clean`               | Clean direct-display display-path fixture.             |
+| `uhd630_cross_gpu_fence_wait`    | Cross-GPU fence display-path fixture.                  |
+| `uhd630_composited_blitter`      | iGPU blitter/composited display-path fixture.          |
+| `uhd630_kms_delay`               | KMS/pageflip display-path fixture.                     |
+| `wayland_zero_copy_good`         | Zero-copy/direct-scanout fixture.                      |
+| `dmabuf_modifier_mismatch`       | DMABUF modifier mismatch fixture.                      |
+| `missing_evidence_unknown`       | Missing-evidence display-path fixture.                 |
 
 ### Real sanitized validation recordings
 
@@ -442,6 +456,10 @@ Additional fixture-specific checks should be added for:
 * frame correlation,
 * IRQ correlation window behavior,
 * block I/O correlation basis,
+* display-path suspicion score and confidence,
+* direct-scanout status,
+* DMABUF modifier/copy-required summaries,
+* GPU engine activity near frame outliers,
 * foreground-window annotation,
 * reused TID separation,
 * community-rules classification,

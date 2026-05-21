@@ -39,6 +39,9 @@ pub struct MonitorConfigLayer {
     pub kms_timing: Option<bool>,
     pub drm_fence_latency: Option<bool>,
     pub wayland_presentation: Option<bool>,
+    pub dmabuf_tracking: Option<bool>,
+    pub gpu_engine_sampling: Option<bool>,
+    pub display_topology: Option<bool>,
 
     pub run_name: Option<Option<String>>,
     pub output_dir: Option<Option<PathBuf>>,
@@ -101,6 +104,7 @@ pub struct MonitorConfigLayer {
     pub drm_fence_driver_filter: Option<Option<String>>,
     pub wayland_presentation_log: Option<Option<PathBuf>>,
     pub wayland_presentation_source: Option<WaylandPresentationSource>,
+    pub dmabuf_log: Option<Option<PathBuf>>,
     pub display_path_label: Option<Option<String>>,
     pub display_render_gpu: Option<Option<String>>,
     pub display_scanout_gpu: Option<Option<String>>,
@@ -143,6 +147,9 @@ impl MonitorConfigLayer {
             kms_timing: Some(config.probes.kms_timing),
             drm_fence_latency: Some(config.probes.drm_fence_latency),
             wayland_presentation: Some(config.probes.wayland_presentation),
+            dmabuf_tracking: Some(config.probes.dmabuf_tracking),
+            gpu_engine_sampling: Some(config.probes.gpu_engine_sampling),
+            display_topology: Some(config.probes.display_topology),
 
             run_name: Some(config.recording.run_name),
             output_dir: Some(config.recording.output_dir),
@@ -205,6 +212,7 @@ impl MonitorConfigLayer {
             drm_fence_driver_filter: Some(config.drm_fence.driver_filter),
             wayland_presentation_log: Some(config.wayland_presentation.log_path),
             wayland_presentation_source: Some(config.wayland_presentation.source),
+            dmabuf_log: Some(config.dmabuf.log_path),
             display_path_label: Some(config.display_path.label),
             display_render_gpu: Some(config.display_path.render_gpu),
             display_scanout_gpu: Some(config.display_path.scanout_gpu),
@@ -253,6 +261,12 @@ impl MonitorConfigLayer {
             foreground_poll_ms: user_file.foreground_poll_ms,
             foreground_max_stale_ms: user_file.foreground_max_stale_ms,
             foreground_include_title: user_file.foreground_include_title,
+            dmabuf_tracking: user_file
+                .dmabuf_tracking
+                .or(user_file.dmabuf_log.as_ref().map(|_| true)),
+            dmabuf_log: user_file.dmabuf_log.clone().map(Some),
+            gpu_engine_sampling: user_file.gpu_engine_sampling,
+            display_topology: user_file.display_topology,
             ..Self::default()
         })
     }
@@ -266,6 +280,12 @@ impl MonitorConfigLayer {
             block_io: defaults.block_io,
             runtime_slices: defaults.runtime_slices,
             irq_latency: defaults.irq_latency,
+            kms_timing: defaults.kms_timing,
+            drm_fence_latency: defaults.drm_fence_latency,
+            wayland_presentation: defaults.wayland_presentation,
+            foreground_window: defaults.foreground_window,
+            gpu_engine_sampling: defaults.gpu_engine_sampling,
+            display_topology: defaults.display_topology,
             ..Self::default()
         }
     }

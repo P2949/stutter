@@ -4,6 +4,7 @@ mod clusters;
 mod correlation;
 mod density;
 mod diagnosis;
+mod display_path;
 mod foreground;
 mod format;
 mod frame;
@@ -18,6 +19,7 @@ pub(crate) use correlation::text_report_correlation_sections;
 pub use density::build_spike_density;
 pub(crate) use density::*;
 pub(crate) use diagnosis::*;
+pub(crate) use display_path::*;
 #[cfg(test)]
 pub(crate) use foreground::foreground_for_cluster;
 pub(crate) use foreground::{
@@ -31,7 +33,9 @@ pub(crate) use quality::*;
 pub(crate) use runtime::*;
 pub(crate) use tasks::*;
 pub(crate) use timing::{
-    build_drm_fence_timing_summary, build_kms_timing_summary, build_wayland_presentation_summary,
+    build_cross_gpu_fence_summary, build_direct_scanout_summary, build_dmabuf_path_summary,
+    build_drm_fence_timing_summary, build_gpu_engine_activity_summary, build_kms_timing_summary,
+    build_wayland_presentation_summary,
 };
 
 pub fn build_report_analysis(
@@ -129,10 +133,36 @@ pub(crate) fn build_report_analysis_from_input(
         &artifacts.kms_flip_events,
         &artifacts.frame_events,
     );
+    let cross_gpu_fence = build_cross_gpu_fence_summary(
+        &artifacts.drm_fence_events,
+        &artifacts.kms_flip_events,
+        &artifacts.frame_events,
+        artifacts.display_topology.as_ref(),
+    );
     let wayland_presentation = build_wayland_presentation_summary(
         &artifacts.wayland_presentation_events,
         &artifacts.kms_flip_events,
         &artifacts.frame_events,
+    );
+    let direct_scanout = build_direct_scanout_summary(
+        &artifacts.wayland_presentation_events,
+        artifacts.display_topology.as_ref(),
+    );
+    let dmabuf_path = build_dmabuf_path_summary(&artifacts.dmabuf_events);
+    let gpu_engine_activity =
+        build_gpu_engine_activity_summary(&artifacts.gpu_engine_samples, &artifacts.frame_events);
+    let display_path_diagnosis = build_display_path_diagnosis_summary(
+        &session,
+        DisplayPathDiagnosisInputs {
+            frame_pacing: &frame_pacing,
+            kms_timing: &kms_timing,
+            drm_fence_timing: &drm_fence_timing,
+            cross_gpu_fence: &cross_gpu_fence,
+            wayland_presentation: &wayland_presentation,
+            direct_scanout: &direct_scanout,
+            dmabuf_path: &dmabuf_path,
+            gpu_engine_activity: &gpu_engine_activity,
+        },
     );
     let diagnosis_thresholds = crate::diagnosis::DiagnosisConfig::default().threshold_table();
 
@@ -151,7 +181,12 @@ pub(crate) fn build_report_analysis_from_input(
             foreground_summary,
             kms_timing,
             drm_fence_timing,
+            cross_gpu_fence,
             wayland_presentation,
+            direct_scanout,
+            dmabuf_path,
+            gpu_engine_activity,
+            display_path_diagnosis,
         },
         artifacts,
     })
@@ -196,6 +231,8 @@ pub(crate) fn artifacts_summary_from_session(session: &SessionFile) -> Artifacts
         kms_flip_event_count: session.core.kms_flip_event_count,
         drm_fence_event_count: session.core.drm_fence_event_count,
         wayland_presentation_event_count: session.core.wayland_presentation_event_count,
+        dmabuf_event_count: session.core.dmabuf_event_count,
+        gpu_engine_sample_count: session.core.gpu_engine_sample_count,
     }
 }
 

@@ -177,17 +177,26 @@ pub(crate) async fn start_record_handler(
         .into_response()
 }
 
-pub(crate) async fn reap_finished_recording(state: &AgentState) {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RecordingReapStatus {
+    NoActiveRun,
+    StillActive,
+    Completed,
+    Failed,
+}
+
+pub(crate) async fn reap_finished_recording(state: &AgentState) -> RecordingReapStatus {
     let handle = {
         let mut active = state.active_run.lock().await;
         match active.as_ref() {
             Some(handle) if handle.join.is_finished() => active.take(),
-            _ => None,
+            Some(_) => return RecordingReapStatus::StillActive,
+            None => return RecordingReapStatus::NoActiveRun,
         }
     };
 
     let Some(handle) = handle else {
-        return;
+        return RecordingReapStatus::NoActiveRun;
     };
 
     let run_id = handle.id.clone();
@@ -209,6 +218,7 @@ pub(crate) async fn reap_finished_recording(state: &AgentState) {
                 ),
             )
             .await;
+            RecordingReapStatus::Completed
         }
         Ok(Err(err)) => {
             audit_agent_event(
@@ -224,6 +234,7 @@ pub(crate) async fn reap_finished_recording(state: &AgentState) {
                 format!("run_id={run_id} error={err:#}"),
             )
             .await;
+            RecordingReapStatus::Failed
         }
         Err(err) => {
             audit_agent_event(
@@ -239,6 +250,7 @@ pub(crate) async fn reap_finished_recording(state: &AgentState) {
                 format!("run_id={run_id} join_error={err}"),
             )
             .await;
+            RecordingReapStatus::Failed
         }
     }
 }

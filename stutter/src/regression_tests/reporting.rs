@@ -314,6 +314,17 @@ fn report_uses_run_level_block_io_correlation_basis() {
 
     fs::remove_dir_all(dir).ok();
 }
+
+#[test]
+fn report_template_warns_on_block_fallback_key_collisions() {
+    let template = include_str!("../report_template.html");
+
+    assert!(template.contains("block_fallback_key_collisions"));
+    assert!(template.contains(
+        "Block I/O latency attribution degraded: fallback key collisions were detected and ambiguous samples were dropped."
+    ));
+}
+
 #[test]
 fn report_diff_shows_regressions_and_improvements() {
     let dir_a = temp_test_dir("diff-a");

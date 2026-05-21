@@ -144,6 +144,63 @@ pub(crate) fn render_foreground_summary_text(foreground: &ForegroundReportSummar
     output
 }
 
+pub(crate) fn render_display_path_diagnosis_text(
+    diagnosis: &DisplayPathDiagnosisSummary,
+) -> String {
+    let mut output = String::new();
+
+    if diagnosis.verdict.is_empty() {
+        return output;
+    }
+
+    pushln(&mut output, "Display path diagnosis:");
+    pushln(
+        &mut output,
+        format!(
+            "  suspicion: {} score={:.2} confidence={}",
+            diagnosis.verdict, diagnosis.suspicion_score, diagnosis.confidence
+        ),
+    );
+    if let Some(is_cross_gpu) = diagnosis.is_cross_gpu {
+        pushln(&mut output, format!("  cross_gpu: {is_cross_gpu}"));
+    }
+    if let Some(render) = diagnosis.render_gpu.as_deref() {
+        pushln(&mut output, format!("  render_gpu: {render}"));
+    }
+    if let Some(scanout) = diagnosis.scanout_gpu.as_deref() {
+        pushln(&mut output, format!("  scanout_gpu: {scanout}"));
+    }
+    pushln(
+        &mut output,
+        format!("  direct_scanout: {}", diagnosis.direct_scanout.status),
+    );
+    pushln(
+        &mut output,
+        format!(
+            "  components: render={} fence={} kms={} wayland={} compositor={}",
+            diagnosis.render_component.status,
+            diagnosis.fence_component.status,
+            diagnosis.kms_component.status,
+            diagnosis.wayland_component.status,
+            diagnosis.compositor_component.status
+        ),
+    );
+    if !diagnosis.evidence.is_empty() {
+        pushln(&mut output, "  evidence:");
+        for evidence in diagnosis.evidence.iter().take(8) {
+            pushln(&mut output, format!("    - {evidence}"));
+        }
+    }
+    if !diagnosis.missing_evidence.is_empty() {
+        pushln(&mut output, "  missing evidence:");
+        for missing in diagnosis.missing_evidence.iter().take(8) {
+            pushln(&mut output, format!("    - {missing}"));
+        }
+    }
+    pushln(&mut output, "");
+    output
+}
+
 pub(crate) fn render_check_summary(summary: &RegressionCheckSummary, top: usize) -> String {
     let mut output = String::new();
     pushln(&mut output, "stutter check");
@@ -273,6 +330,7 @@ pub(crate) struct TextReportRenderInput<'a> {
     pub correlation_sections: &'a TextReportCorrelationSections,
     pub focus_summary: &'a FocusReportSummary,
     pub foreground_summary: &'a ForegroundReportSummary,
+    pub display_path_diagnosis: Option<&'a DisplayPathDiagnosisSummary>,
     pub top: usize,
     pub cluster_window_ms: u64,
     pub filter_class: Option<TaskClass>,
@@ -289,6 +347,7 @@ pub(crate) fn render_report(input: TextReportRenderInput<'_>) -> String {
     let correlation_sections = input.correlation_sections;
     let focus_summary = input.focus_summary;
     let foreground_summary = input.foreground_summary;
+    let display_path_diagnosis = input.display_path_diagnosis;
     let top = input.top;
     let cluster_window_ms = input.cluster_window_ms;
     let filter_class = input.filter_class;
@@ -299,6 +358,9 @@ pub(crate) fn render_report(input: TextReportRenderInput<'_>) -> String {
 
     output.push_str(&render_focus_summary_text(focus_summary));
     output.push_str(&render_foreground_summary_text(foreground_summary));
+    if let Some(display_path_diagnosis) = display_path_diagnosis {
+        output.push_str(&render_display_path_diagnosis_text(display_path_diagnosis));
+    }
 
     pushln(&mut output, format!("file: {}", path.display()));
     pushln(
