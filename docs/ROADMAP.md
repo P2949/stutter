@@ -38,3 +38,20 @@ Near-term work should improve trust, repeatability, and rollback before adding b
 - No silent system-wide tuning.
 - No new low-level probes unless they answer a specific evidence gap.
 - No claim that a recommendation proves root cause.
+
+## Transitional migration markers
+
+A `// Transitional` marker is allowed only for active migration work. Do not add
+empty namespace placeholders or zero-field marker structs simply to reserve a
+future module name.
+
+Acceptable transitional modules must have:
+
+- a local reason,
+- an `Exit:` condition near the marker,
+- an allowlist entry with reason and exit criteria,
+- meaningful code or re-exports that are actively used,
+- a plan to remove the marker.
+
+The `MAX_MIGRATION_MARKER_MODULES` ceiling is a ratchet. When transitional
+modules are removed, lower the ceiling in the same patch.

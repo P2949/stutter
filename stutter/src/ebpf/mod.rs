@@ -3,7 +3,6 @@
 //! The current loader façade remains `crate::ebpf_loader` while internals migrate here.
 
 pub(crate) mod attach;
-pub(crate) mod capabilities;
 pub(crate) mod errors;
 pub(crate) mod load;
 pub(crate) mod maps;
@@ -12,7 +11,6 @@ pub(crate) mod memory;
 pub(crate) mod model;
 pub(crate) mod object;
 pub(crate) mod preflight;
-pub(crate) mod ringbuf;
 pub(crate) mod tracepoint_format;
 pub(crate) mod tracepoints;
 

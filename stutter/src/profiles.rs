@@ -25,7 +25,6 @@ pub(crate) mod parse;
 pub(crate) mod plan;
 pub(crate) mod render;
 pub(crate) mod validate;
-pub(crate) mod verify;
 pub(crate) mod warnings;
 
 #[cfg(test)]
