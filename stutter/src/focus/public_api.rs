@@ -8,7 +8,6 @@ pub(crate) use super::groups::{build_focus_groups, foreground_score_for_group, m
 pub(crate) use super::score::focus_group_kind_for_class;
 #[cfg(test)]
 pub(crate) use super::snapshot::counter_deltas;
-#[allow(unused_imports)]
 pub use super::{
     classify::{
         Classification, PriorityBand, ProcessIdentity, ThreadIdentity, classify_process,

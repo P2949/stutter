@@ -1,6 +1,3 @@
-#![allow(dead_code)] // Transitional eBPF split: map setup migrates from ebpf_loader.
-// Exit: remove this marker once the described migration is complete and the local allow is no longer needed.
-
 use serde::Serialize;
 
 use crate::{
@@ -205,9 +202,4 @@ fn round_up_to_multiple(value: u64, multiple: u64) -> u64 {
         return value;
     }
     value.div_ceil(multiple).saturating_mul(multiple)
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct MapSetupPlan {
-    pub map_names: Vec<&'static str>,
 }

@@ -13,7 +13,7 @@ pub(crate) mod build;
 pub(crate) mod capability;
 pub(crate) mod context;
 pub(crate) mod evaluate;
-pub(crate) mod explain;
+
 pub(crate) mod model;
 pub(crate) mod rejection;
 pub(crate) mod remote;
