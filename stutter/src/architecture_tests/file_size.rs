@@ -67,6 +67,14 @@ fn rust_source_file_sizes_do_not_grow_without_architecture_allowlist() {
                 "{} has {} lines, exceeding allowlisted maximum {} lines; split the file or update OVERSIZED_RUST_FILE_ALLOWLIST with an explicit reason",
                 count.path, count.lines, allowance.max_lines
             )),
+            Some(count) if count.lines <= RUST_FILE_SIZE_LIMIT_LINES => violations.push(format!(
+                "allowlisted oversized Rust file '{}' now has {} lines, at or below the {} line limit; remove its allowlist entry",
+                count.path, count.lines, RUST_FILE_SIZE_LIMIT_LINES
+            )),
+            Some(count) if count.lines < allowance.max_lines => violations.push(format!(
+                "allowlisted oversized Rust file '{}' now has {} lines, below allowlisted maximum {}; lower the allowlist ceiling",
+                count.path, count.lines, allowance.max_lines
+            )),
             Some(_) => {}
             None => violations.push(format!(
                 "allowlisted oversized Rust file '{}' no longer exists; remove or update its allowlist entry",
