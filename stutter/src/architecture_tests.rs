@@ -2,9 +2,12 @@ use std::path::{Path, PathBuf};
 
 mod allow_attributes;
 mod allowlists;
+mod autotune_facades;
+mod concurrency;
 mod dependencies;
 mod direct_prints;
 mod file_size;
+mod objectives;
 mod public_api;
 mod scanners;
 mod transitional;

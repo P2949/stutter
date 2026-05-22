@@ -9,9 +9,9 @@ use super::{
 };
 use crate::{
     actions::{RollbackToken, SafetyClass, TuningAction, cpu_affinity::CpuAffinityProfileAction},
-    autotune::{
-        candidate::{CandidateAction, CandidateDryRunRecord},
-        planning::dry_run::dry_run_record_from_action_state,
+    autotune::planning::{
+        candidate::CandidateAction,
+        dry_run::{CandidateDryRunRecord, dry_run_record_from_action_state},
     },
 };
 

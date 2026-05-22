@@ -5,10 +5,11 @@ use crate::{
     autotune::{
         active_config::{ActiveConfigMatch, ActiveConfigMatchInput},
         activity::ActivityLevel,
-        candidate::{CandidateAction, CandidateDryRunner, CandidateEvidence},
         candidate_memory::CandidateContextHashInput,
         planning::{
+            candidate::{CandidateAction, CandidateEvidence},
             denial::{CandidateDenyReason, normalize_evaluation_denials},
+            dry_run::CandidateDryRunner,
             model::{CandidateEvaluation, CandidateEvaluationDraft},
             planner::PlannerInput,
             policy::{
@@ -330,11 +331,13 @@ pub(crate) fn evaluate_proposal_static(
     let candidate_name = proposal.candidate.candidate_name().to_owned();
     let action_kind = proposal.candidate.action_kind().to_owned();
     let mut evidence = proposal.candidate.evidence().to_vec();
-    evidence.push(crate::autotune::candidate::CandidateEvidence::new(
-        "situation",
-        format!("{:?}", input.observation.primary_situation),
-        input.observation.situation.confidence,
-    ));
+    evidence.push(
+        crate::autotune::planning::candidate::CandidateEvidence::new(
+            "situation",
+            format!("{:?}", input.observation.primary_situation),
+            input.observation.situation.confidence,
+        ),
+    );
 
     CandidateEvaluationDraft {
         candidate_name,

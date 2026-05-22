@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, time::Duration};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    candidate::CandidateAction, objective::ObjectiveKind, observation::AutotuneObservation,
-    state::SituationKind,
+    objective::ObjectiveKind, observation::AutotuneObservation,
+    planning::candidate::CandidateAction, state::SituationKind,
 };
 use crate::{
     actions::ActionId,

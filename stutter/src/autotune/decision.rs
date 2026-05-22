@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-pub use super::{candidate::CandidateAction, experiment::ExperimentId};
+pub use super::{experiment::ExperimentId, planning::candidate::CandidateAction};
 
 #[derive(Clone, Debug)]
 pub enum AutotuneDecision {

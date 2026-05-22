@@ -20,6 +20,26 @@ The autotune subsystem is partially implemented in-tree. Roadmap status refers t
 safe user-facing enablement, not absence of code. Experimental/internal paths may
 exist before they are considered supported defaults.
 
+### Objective comparison maturity
+
+Primary-metric implemented objectives:
+
+- `StutterScore`
+- `IoLatency`
+- `IrqOverlapReduction`
+- `ThermalRecovery`
+
+Fallback-based objectives with direct or derived guardrails:
+
+- `GameFramePacing`
+- `DesktopInteractivity`
+- `BrowserInteractivity`
+
+Guardrail-only or missing direct signal objectives:
+
+- `GameRunnableLatency` uses normalized score until a distinct runnable-latency objective metric is exposed.
+- `CompileThroughputWithForegroundProtection` protects foreground latency and uses normalized score until `compile_progress_intervals` exists.
+
 ## Direction
 
 Near-term work should improve trust, repeatability, and rollback before adding broader system changes:

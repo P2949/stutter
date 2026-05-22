@@ -13,6 +13,8 @@ pub(crate) struct AlertRuntime {
 impl AlertRuntime {
     pub(crate) fn begin(config: &MonitorConfig) -> Self {
         let sender = if config.alerts.threshold_ns.is_some() {
+            // Alert delivery is decoupled from telemetry collection by a bounded channel; the
+            // spawned task owns network/desktop notification side effects.
             let (tx, mut rx) = tokio::sync::mpsc::channel(100);
             let webhook_url = config.alerts.webhook_url.clone();
             let webhook_client = webhook_url.as_ref().map(|_| {

@@ -23,6 +23,11 @@
 //!   than silently continuing;
 //! - this facade should keep top-level re-exports narrow and route subsystem contracts through
 //!   owner modules or `api::daemon`.
+//!
+//! Concurrency model:
+//! - daemon state is mutated by owned runtime/store paths;
+//! - async tasks communicate through explicit channels;
+//! - privileged and kernel/host mutations remain serialized by policy/runtime boundaries.
 
 pub(crate) mod acceptance;
 pub(crate) mod autotune;

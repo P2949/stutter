@@ -20,7 +20,7 @@ use crate::{
         ActionId, ActionState, ActionWarning, RollbackToken, SafetyClass, TuningAction,
         cpu_affinity::CpuAffinityProfileAction, runner::ActionRunPolicy,
     },
-    autotune::candidate::CandidateDryRunRecord,
+    autotune::planning::dry_run::CandidateDryRunRecord,
     profiles::Profile,
 };
 

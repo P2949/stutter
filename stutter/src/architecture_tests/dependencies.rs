@@ -131,9 +131,13 @@ const ARCHITECTURE_DEPENDENCY_MATRIX: &[DependencyMatrixEntry] = &[
         subsystem: "autotune",
         may_depend_on: &[
             "actions",
-            "autotune::candidate",
             "autotune::objective",
             "autotune::observation",
+            "autotune::planning::candidate",
+            "autotune::planning::dry_run",
+            "autotune::planning::plan_io",
+            "autotune::planning::profile_candidates",
+            "autotune::planning::suggestion",
             "autotune::planner",
             "autotune::providers",
             "config",
@@ -383,7 +387,11 @@ fn dependency_matrix_covers_known_top_level_modules() {
     let autotune = dependency_matrix_entry("autotune");
     for dependency in [
         "autotune::observation",
-        "autotune::candidate",
+        "autotune::planning::candidate",
+        "autotune::planning::dry_run",
+        "autotune::planning::plan_io",
+        "autotune::planning::profile_candidates",
+        "autotune::planning::suggestion",
         "autotune::providers",
         "autotune::objective",
     ] {

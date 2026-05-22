@@ -3,9 +3,12 @@ use std::collections::BTreeSet;
 use crate::{
     actions::irq_affinity::{IrqAffinityAction, IrqAffinityEvidence},
     autotune::{
-        candidate::{CandidateAction, CandidateEvidence, IrqAffinityActionPlan},
         objective::ObjectiveKind,
         observation::{ActiveConfigSnapshot, ActiveTaskSnapshot},
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            executable_plan::IrqAffinityActionPlan,
+        },
         providers::{
             CandidateProposal, CandidateProvider, CandidateProviderInput,
             signal_quality_confidence_weight,

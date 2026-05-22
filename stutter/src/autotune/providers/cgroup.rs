@@ -3,8 +3,11 @@ use std::path::{Path, PathBuf};
 use crate::{
     actions::cgroup::{CgroupPlacementAction, CgroupPlacementTarget},
     autotune::{
-        candidate::{CandidateAction, CandidateEvidence, CgroupPlacementActionPlan},
         objective::ObjectiveKind,
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            executable_plan::CgroupPlacementActionPlan,
+        },
         protection::mutation_allowed_for_pid,
         providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
         situation::SituationKind,

@@ -201,7 +201,9 @@ mod tests {
     use crate::{
         actions::{RollbackToken, fake_action::FakeAction},
         affinity::CpuMask,
-        autotune::{candidate::CandidateAction, experiment::WindowScore, kept::ActiveProfileState},
+        autotune::{
+            experiment::WindowScore, kept::ActiveProfileState, planning::candidate::CandidateAction,
+        },
         process_tree::TaskClass,
         profiles::{Profile, ProfileRule},
         scorer::StutterScore,

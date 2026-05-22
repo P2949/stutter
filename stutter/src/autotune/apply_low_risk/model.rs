@@ -5,7 +5,7 @@ use std::{path::PathBuf, time::Duration};
 
 use crate::actions::{ActionState, RollbackToken, SafetyClass};
 #[cfg(test)]
-use crate::autotune::candidate::{CandidateAction, CandidateDryRunRecord};
+use crate::autotune::planning::{candidate::CandidateAction, dry_run::CandidateDryRunRecord};
 
 #[cfg(test)]
 #[derive(Clone, Debug)]

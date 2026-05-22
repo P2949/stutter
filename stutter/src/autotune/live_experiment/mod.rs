@@ -3,7 +3,6 @@ use std::{path::PathBuf, time::Duration};
 use crate::{
     actions::{RollbackToken, SafetyClass},
     autotune::{
-        candidate::CandidateAction,
         candidate_memory::CandidateMemoryResult,
         comparison::ExperimentResult,
         controller::{
@@ -19,6 +18,7 @@ use crate::{
         kept::{ActiveProfileState, KeptCandidateState},
         objective::{ObjectiveComparisonInput, compare_for_objective},
         observation::AutotuneObservation,
+        planning::candidate::CandidateAction,
         state::ControllerPhase,
         washout::WashoutWindowConfig,
     },

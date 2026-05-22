@@ -43,4 +43,16 @@ Observing
 
 The controller starts in `Disabled` unless the user explicitly enables apply mode. In normal operation, `Observing` collects evidence without changing system state. `CandidatePlanning` may only select one candidate experiment after enough valid data exists. `Applying` is allowed only after the candidate passes the safety gate. `Measuring` compares the changed state against the baseline. `Keeping` is allowed only when the result improved enough under the configured policy. `Reverting` is mandatory for failed verification, worse results, inconclusive results without an explicit keep-baseline policy, and any action whose data quality becomes untrustworthy. `Cooldown` prevents immediate repeated changes and then returns the controller to `Observing`.
 
+## Experiment Comparison
+
+Experiment comparison uses normalized score rates for keep/revert decisions so unequal baseline and candidate windows are comparable. The primary stutter metric is:
+
+```text
+score_per_sample = score.total / scored_samples
+```
+
+The over-5ms regression guard is also evaluated as a rate per 1,000 scored samples. Raw score totals and raw over-5ms counts are retained in diagnostics only; they are useful for debugging but must not decide whether an experiment improved or regressed.
+
+Objective-specific comparison is documented in [AUTOTUNE_OBJECTIVES.md](AUTOTUNE_OBJECTIVES.md). Objectives with direct I/O, IRQ, or thermal signals compare those signals first and use normalized stutter score as a guardrail. Frame-pacing and interactivity objectives use their direct or derived latency signals when available and fall back to normalized score when those signals are missing.
+
 This contract is intentionally narrower than a general optimizer. Future implementation must preserve the existing separation between observation, recommendation, and system-changing actions.

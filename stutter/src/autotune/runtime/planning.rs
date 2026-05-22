@@ -3,10 +3,10 @@
 use crate::{
     actions::SafetyClass,
     autotune::{
-        candidate::{CandidateAction, CandidateDryRunRecord},
         controller::ControllerRuntimeState,
         observation::AutotuneObservation,
         planner::{CandidateDenyReason, PlanResult},
+        planning::{candidate::CandidateAction, dry_run::CandidateDryRunRecord},
         state::SituationKind,
     },
 };

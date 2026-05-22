@@ -16,14 +16,17 @@ use crate::{
     actions::runner::ActionRunPolicy,
     autotune::{
         apply::{executor_for_apply_candidate, executor_for_candidate_preview},
-        candidate::{ApplyEligibility, CandidateDryRunRecord, try_promote_to_apply_candidate},
+        planning::{
+            candidate::{ApplyEligibility, try_promote_to_apply_candidate},
+            dry_run::CandidateDryRunRecord,
+        },
     },
     daemon_policy::{ActionDescriptor, PolicyIntent},
 };
 #[cfg(test)]
 use crate::{
     actions::{RollbackToken, TaskIdentity},
-    autotune::candidate::CandidateAction,
+    autotune::planning::candidate::CandidateAction,
     daemon_policy::{DaemonPolicy, DaemonPolicyContext},
 };
 

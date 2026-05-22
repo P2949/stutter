@@ -27,7 +27,7 @@ use crate::{
             ActionHooks, ActionRunPolicy, AuditedActionResult, run_audited_action_with_hooks,
         },
     },
-    autotune::candidate::CandidateAction,
+    autotune::planning::candidate::CandidateAction,
 };
 
 #[cfg(test)]
