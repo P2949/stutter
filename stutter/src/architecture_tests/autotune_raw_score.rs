@@ -37,12 +37,17 @@ fn controller_does_not_compare_raw_score_totals() {
 
 #[test]
 fn diagnostic_raw_score_total_names_are_readable() {
-    let controller = include_str!("../autotune/controller.rs");
-    let memory = include_str!("../autotune/candidate_memory.rs");
+    let sources = [
+        include_str!("../autotune/controller.rs"),
+        include_str!("../autotune/candidate_memory.rs"),
+        include_str!("../autotune/kept.rs"),
+        include_str!("../autotune/runtime/daemon_state.rs"),
+    ];
 
-    for source in [controller, memory] {
+    for source in sources {
         assert!(!source.contains("diagnostic_baseline_diagnostic_score_total"));
         assert!(!source.contains("diagnostic_current_diagnostic_score_total"));
+        assert!(!source.contains("diagnostic_candidate_diagnostic_score_total"));
     }
 }
 
@@ -104,5 +109,49 @@ fn active_experiment_stores_full_window_score() {
     assert!(
         !source.contains("pub baseline_score_total"),
         "ActiveExperiment must not store only a raw baseline score total"
+    );
+}
+
+#[test]
+fn no_duplicated_diagnostic_score_total_names_exist_in_source_tree() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+    for path in collect_rs_files(&root) {
+        let relative = path.strip_prefix(&root).unwrap().to_string_lossy();
+        let source = std::fs::read_to_string(&path).unwrap();
+
+        for forbidden in [
+            "diagnostic_baseline_diagnostic_score_total",
+            "diagnostic_current_diagnostic_score_total",
+            "diagnostic_candidate_diagnostic_score_total",
+        ] {
+            if relative.starts_with("architecture_tests/") {
+                continue;
+            }
+
+            if relative == "daemon/state.rs" && forbidden == "diagnostic_candidate_diagnostic_score_total" {
+                continue;
+            }
+
+            assert!(
+                !source.contains(forbidden),
+                "{relative} should not contain awkward duplicated diagnostic raw-score name {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn daemon_workload_profile_uses_candidate_raw_score_total_name() {
+    let source = include_str!("../daemon/state.rs");
+
+    assert!(
+        source.contains("pub diagnostic_candidate_raw_score_total: Option<u64>"),
+        "DaemonWorkloadProfile should expose diagnostic_candidate_raw_score_total"
+    );
+
+    assert!(
+        source.contains(r#"alias = "diagnostic_candidate_diagnostic_score_total""#),
+        "DaemonWorkloadProfile should keep a serde alias for old persisted state"
     );
 }

@@ -106,7 +106,7 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/daemon/state.rs",
-        max_lines: 1_041,
+        max_lines: 1_091,
         reason: "existing daemon state implementation pending future split",
     },
     OversizedRustFileAllowance {
