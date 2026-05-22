@@ -5,6 +5,7 @@ mod allowlists;
 mod dependencies;
 mod direct_prints;
 mod file_size;
+mod objectives;
 mod public_api;
 mod scanners;
 mod transitional;
