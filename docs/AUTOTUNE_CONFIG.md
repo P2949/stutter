@@ -1,6 +1,6 @@
 # Auto-tune Configuration
 
-`stutter` supports daemon autotune configuration through the user config parser in `stutter/src/config_file.rs`.
+`stutter` supports daemon autotune configuration through the user config parser in `stutter/src/config_file/`.
 
 This document describes the active `[autotune]` configuration surface plus the policy fields used by the daemon runtime.
 

@@ -549,13 +549,15 @@ mod tests {
         };
         assert_eq!(input.explain_last, None);
 
-        let command = parse_daemon_command(["stutter", "daemon", "status", "--explain-last"]).unwrap();
+        let command =
+            parse_daemon_command(["stutter", "daemon", "status", "--explain-last"]).unwrap();
         let AppCommand::DaemonStatus(input) = command else {
             panic!("expected daemon status command");
         };
         assert_eq!(input.explain_last, Some(10));
 
-        let command = parse_daemon_command(["stutter", "daemon", "status", "--explain-last", "1"]).unwrap();
+        let command =
+            parse_daemon_command(["stutter", "daemon", "status", "--explain-last", "1"]).unwrap();
         let AppCommand::DaemonStatus(input) = command else {
             panic!("expected daemon status command");
         };

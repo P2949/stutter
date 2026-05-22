@@ -246,7 +246,7 @@ const FIXTURE_CHECK_WORKFLOW: WorkflowSpec = WorkflowSpec {
     name: "fixture-check",
     description: "validates committed validation corpus fixtures and fixture metadata",
     affected_paths: &[
-        "stutter/src/validation_corpus_tests.rs",
+        "stutter/src/validation_corpus_tests/",
         "stutter/tests/fixtures/runs/**",
     ],
     commands: FIXTURE_CHECK_COMMANDS,
@@ -777,7 +777,7 @@ syn v2.0.117
         assert_eq!(
             FIXTURE_CHECK_WORKFLOW.affected_paths,
             &[
-                "stutter/src/validation_corpus_tests.rs",
+                "stutter/src/validation_corpus_tests/",
                 "stutter/tests/fixtures/runs/**",
             ]
         );
