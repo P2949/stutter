@@ -31,6 +31,7 @@ require_stable_target_identity = true
 min_improvement_percent = 12.5
 max_regression_percent = 7.5
 max_frame_p99_regression_ms = 2.0
+max_over_5ms_regression_per_1k_samples = 0.0
 max_runnable_p99_regression_ms = 1.0
 
 allowed_actions = [
@@ -142,7 +143,17 @@ Data-quality failure blocks action before apply and forces revert during measure
 
 `max_regression_percent` is the maximum tolerated regression before a candidate must be reverted.
 
+Experiment comparison uses normalized score rates for keep/revert decisions:
+
+```text
+score_per_sample = score.total / scored_samples
+```
+
+Raw score totals are retained in diagnostics only. This keeps baseline and candidate windows comparable even when their durations or scored sample counts differ.
+
 `max_frame_p99_regression_ms` is the maximum tolerated frame p99 regression in milliseconds.
+
+`max_over_5ms_regression_per_1k_samples` is the maximum tolerated increase in over-5ms latency events per 1,000 scored samples. A value of `0.0` means the candidate must not increase the normalized over-5ms rate.
 
 `max_runnable_p99_regression_ms` is the maximum tolerated runnable-latency p99 regression in milliseconds.
 
