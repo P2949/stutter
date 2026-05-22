@@ -2,7 +2,7 @@
 
 use std::{fmt, path::Path};
 
-use crate::{actions::TaskIdentity, autotune::candidate::CandidateAction};
+use crate::{actions::TaskIdentity, autotune::planning::candidate::CandidateAction};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TargetRevalidationError {

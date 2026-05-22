@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::Context;
 
 #[cfg(test)]
-use crate::autotune::candidate::{ApplyEligibility, try_promote_to_apply_candidate};
+use crate::autotune::planning::candidate::{ApplyEligibility, try_promote_to_apply_candidate};
 #[cfg(test)]
 use crate::daemon_policy::{ActionSource, DaemonPolicy, PolicyIntent};
 use crate::{
@@ -15,8 +15,9 @@ use crate::{
             ActionHooks, ActionRunPolicy, AuditedActionResult, run_audited_action_with_hooks,
         },
     },
-    autotune::candidate::{
-        ApplyCandidate, CandidateAction, CandidateDryRunRecord, dry_run_record_from_action_state,
+    autotune::planning::{
+        candidate::{ApplyCandidate, CandidateAction},
+        dry_run::{CandidateDryRunRecord, dry_run_record_from_action_state},
     },
     daemon_policy::ActionDescriptor,
 };
@@ -383,7 +384,7 @@ mod tests {
     #[tokio::test]
     async fn run_apply_medium_risk_candidate_rejects_unsupported_candidate_kind() {
         let err = run_apply_medium_risk_candidate(
-            crate::autotune::candidate::CandidateAction::fake(
+            crate::autotune::planning::candidate::CandidateAction::fake(
                 ActionId::new("fake-medium-risk".to_owned()),
                 SafetyClass::ReversibleMediumRisk,
             ),

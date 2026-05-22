@@ -18,11 +18,6 @@ pub(crate) use crate::{
     },
     affinity::CpuMask,
     autotune::{
-        candidate::{
-            CandidateAction, CandidateDryRunRecord, CandidateDryRunner, CandidateEvidence,
-            CgroupPlacementActionPlan, CpuPowerActionPlan, IoPrioActionPlan, IrqAffinityActionPlan,
-            NiceActionPlan, UclampActionPlan,
-        },
         candidate_memory::CandidateMemoryResult,
         controller::{ActiveExperiment, ControllerRuntimeState},
         experiment::{ExperimentId, WindowScore},
@@ -31,6 +26,14 @@ pub(crate) use crate::{
         observation::{
             ActiveAffinitySnapshot, ActiveConfigSnapshot, ActiveNiceSnapshot, ActiveTaskSnapshot,
             AutotuneObservation, WorkloadIdentity,
+        },
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            dry_run::{CandidateDryRunRecord, CandidateDryRunner},
+            executable_plan::{
+                CgroupPlacementActionPlan, CpuPowerActionPlan, IoPrioActionPlan,
+                IrqAffinityActionPlan, NiceActionPlan, UclampActionPlan,
+            },
         },
         providers::{
             CandidateProposal, CandidateProvider, CandidateProviderInput, CandidateProviderRegistry,
@@ -369,7 +372,7 @@ pub(crate) fn cpu_power_candidate(name: &str) -> CandidateAction {
 
 pub(crate) fn gpu_power_candidate(name: &str) -> CandidateAction {
     CandidateAction::GpuPower {
-        plan: crate::autotune::candidate::GpuPowerActionPlan {
+        plan: crate::autotune::planning::executable_plan::GpuPowerActionPlan {
             name: name.to_owned(),
             action: GpuPowerAction {
                 sysfs_root: std::path::PathBuf::from("/sys"),
@@ -385,7 +388,7 @@ pub(crate) fn gpu_power_candidate(name: &str) -> CandidateAction {
 
 pub(crate) fn vm_knob_candidate(name: &str) -> CandidateAction {
     CandidateAction::VmKnob {
-        plan: crate::autotune::candidate::VmKnobActionPlan {
+        plan: crate::autotune::planning::executable_plan::VmKnobActionPlan {
             name: name.to_owned(),
             action: VmKnobAction {
                 root: std::path::PathBuf::from("/proc/sys"),

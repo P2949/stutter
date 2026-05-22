@@ -1,10 +1,13 @@
 use crate::{
     autotune::{
-        candidate::{
-            CandidateAction, generate_profile_candidates_for_observation,
-            generate_topology_aware_profile_candidates,
-        },
         objective::ObjectiveKind,
+        planning::{
+            candidate::CandidateAction,
+            profile_candidates::{
+                generate_profile_candidates_for_observation,
+                generate_topology_aware_profile_candidates,
+            },
+        },
         providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
         situation::SituationKind,
     },

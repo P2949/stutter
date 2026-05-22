@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::candidate::CandidateAction;
+use super::planning::candidate::CandidateAction;
 use crate::{actions::RollbackToken, scorer::StutterScore};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

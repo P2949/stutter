@@ -13,10 +13,10 @@ mod tests {
             actions::RollbackToken,
             affinity::CpuMask,
             autotune::{
-                candidate::CandidateAction,
                 comparison::ExperimentResult,
                 experiment::{ActiveExperiment, ExperimentId, ExperimentPhase, WindowScore},
                 kept::ActiveProfileState,
+                planning::candidate::CandidateAction,
                 resolution::{ExperimentResolution, ExperimentRollbackExecutor},
             },
             process_tree::TaskClass,
@@ -118,9 +118,9 @@ mod tests {
             actions::RollbackToken,
             affinity::CpuMask,
             autotune::{
-                candidate::CandidateAction,
                 comparison::ExperimentResult,
                 experiment::{ActiveExperiment, ExperimentId, ExperimentPhase, WindowScore},
+                planning::candidate::CandidateAction,
                 resolution::{ExperimentResolution, ExperimentRollbackExecutor},
             },
             process_tree::TaskClass,

@@ -30,7 +30,6 @@ pub(crate) mod apply;
 pub(crate) mod apply_low_risk;
 #[cfg(test)]
 pub(crate) mod baseline;
-pub(crate) mod candidate;
 pub(crate) mod commands;
 pub(crate) mod comparison;
 pub(crate) mod conflicts;

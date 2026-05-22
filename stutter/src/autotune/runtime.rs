@@ -59,7 +59,6 @@ use crate::{
     autotune::{
         active_config::{ActiveConfigMatch, ActiveConfigMatchInput},
         activity::ActivityClassifier,
-        candidate::{self, CandidateAction},
         controller::{ControllerPolicy, ControllerRuntimeState, decide_autotune_transition},
         decision::AutotuneDecision,
         experiment::ExperimentId,
@@ -78,6 +77,7 @@ use crate::{
             AutotuneObservationBuilder, AutotuneObservationBuilderInput, AutotuneObservationFocus,
         },
         planner::{CandidateDenyReason, CandidatePlanner, PlanResult, PlannerInput},
+        planning::{candidate::CandidateAction, plan_io},
         rolling_window::RollingWindow,
         state::ControllerPhase,
     },
@@ -671,15 +671,15 @@ impl AutotuneRuntime {
             .config
             .dry_run_plan_dir
             .clone()
-            .unwrap_or_else(candidate::default_candidate_plan_dir);
+            .unwrap_or_else(plan_io::default_candidate_plan_dir);
         let mut written = Vec::new();
 
         for evaluation in &plan.evaluations {
             let Some(dry_run) = evaluation.dry_run.as_ref() else {
                 continue;
             };
-            let path = candidate::candidate_plan_path(&evaluation.candidate, &plan_dir);
-            candidate::write_candidate_plan_file(
+            let path = plan_io::candidate_plan_path(&evaluation.candidate, &plan_dir);
+            plan_io::write_candidate_plan_file(
                 &path,
                 &evaluation.candidate,
                 Some(dry_run.affected_tasks),

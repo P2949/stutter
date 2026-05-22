@@ -4,7 +4,9 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    autotune::{candidate::CandidateAction, objective::ObjectiveKind, situation::SituationKind},
+    autotune::{
+        objective::ObjectiveKind, planning::candidate::CandidateAction, situation::SituationKind,
+    },
     daemon::policy::{DaemonMode, DaemonPolicy},
 };
 

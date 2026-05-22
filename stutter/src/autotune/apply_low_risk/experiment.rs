@@ -9,8 +9,10 @@ use anyhow::Context;
 
 use super::{ApplyLowRiskPlan, ensure_low_risk_action_allowed};
 use crate::{
-    autotune::candidate::{
-        CandidateAction, CandidateDryRunRecord, dry_run_candidates, generate_profile_candidates,
+    autotune::planning::{
+        candidate::CandidateAction,
+        dry_run::{CandidateDryRunRecord, dry_run_candidates},
+        profile_candidates::generate_profile_candidates,
     },
     profiles::Profile,
 };

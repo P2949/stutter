@@ -154,7 +154,7 @@ fn fake_apply_request() -> CandidateApplyRequest {
 
 fn nice_candidate(target: TaskIdentity) -> CandidateAction {
     CandidateAction::Nice {
-        plan: crate::autotune::candidate::NiceActionPlan {
+        plan: crate::autotune::planning::executable_plan::NiceActionPlan {
             name: format!("nice-{}", target.tid),
             action: crate::actions::nice::NiceAction {
                 targets: vec![target],
@@ -162,11 +162,13 @@ fn nice_candidate(target: TaskIdentity) -> CandidateAction {
                 policy: crate::actions::nice::NicePolicy::default(),
             },
             target_root_pid: Some(100),
-            evidence: vec![crate::autotune::candidate::CandidateEvidence::new(
-                "test",
-                "target revalidation test",
-                1.0,
-            )],
+            evidence: vec![
+                crate::autotune::planning::candidate::CandidateEvidence::new(
+                    "test",
+                    "target revalidation test",
+                    1.0,
+                ),
+            ],
             objective: ObjectiveKind::DesktopInteractivity,
         },
     }

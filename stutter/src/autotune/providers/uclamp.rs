@@ -1,8 +1,11 @@
 use crate::{
     actions::uclamp::{UclampAction, UclampValues},
     autotune::{
-        candidate::{CandidateAction, CandidateEvidence, UclampActionPlan},
         objective::ObjectiveKind,
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            executable_plan::UclampActionPlan,
+        },
         protection::mutation_allowed_for_pid,
         providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
         situation::SituationKind,

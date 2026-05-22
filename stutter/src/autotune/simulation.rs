@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use crate::{
     actions::{ActionId, SafetyClass},
     autotune::{
-        candidate::CandidateAction,
+        planning::candidate::CandidateAction,
         quality::OnlineDataQualityPolicy,
         runtime::{
             AutotuneDecisionStreamEntry, AutotuneRuntime, AutotuneRuntimeConfig,

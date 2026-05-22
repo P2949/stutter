@@ -3,8 +3,8 @@ use std::fmt;
 use super::helpers::*;
 use crate::{
     autotune::{
-        candidate::{CandidateAction, CpuAffinityProfilePlan},
         observation::{ActiveConfigSnapshot, ActiveTaskSnapshot},
+        planning::{candidate::CandidateAction, executable_plan::CpuAffinityProfilePlan},
     },
     profiles::{ProfileEvaluationInput, evaluate_profile_for_tasks},
 };

@@ -1,7 +1,10 @@
 use std::{path::PathBuf, time::Duration};
 
 use crate::{
-    autotune::{candidate, profiles, runtime},
+    autotune::{
+        planning::{dry_run, plan_io, profile_candidates, suggestion},
+        profiles, runtime,
+    },
     daemon::policy::{ActionSource, DaemonMode},
 };
 
@@ -130,11 +133,14 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
         && let (Some(profiles_path), Some(tree_pid)) = (input.profiles.as_deref(), input.tree_pid)
     {
         let loaded_profiles = profiles::load_autotune_profiles(profiles_path)?;
-        let candidates =
-            candidate::generate_profile_candidates(&loaded_profiles.profiles, tree_pid, None);
-        let dry_run_records = candidate::dry_run_candidates(&candidates);
-        let plan_dir = candidate::default_candidate_plan_dir();
-        let suggestions = candidate::suggestions_from_candidates_and_dry_run_records(
+        let candidates = profile_candidates::generate_profile_candidates(
+            &loaded_profiles.profiles,
+            tree_pid,
+            None,
+        );
+        let dry_run_records = dry_run::dry_run_candidates(&candidates);
+        let plan_dir = plan_io::default_candidate_plan_dir();
+        let suggestions = suggestion::suggestions_from_candidates_and_dry_run_records(
             &candidates,
             &dry_run_records,
             &plan_dir,
@@ -142,7 +148,7 @@ pub async fn autotune_command(input: AutotuneCommandInput) -> anyhow::Result<()>
             crate::actions::SafetyClass::ReversibleMediumRisk,
             "scheduler pressure detected on Game/WineServer classes",
         )?;
-        candidate::print_candidate_suggestions(&suggestions);
+        suggestion::print_candidate_suggestions(&suggestions);
     }
 
     let loaded_profiles = match input.profiles.as_deref() {

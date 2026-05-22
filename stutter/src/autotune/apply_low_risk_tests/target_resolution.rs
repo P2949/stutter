@@ -14,7 +14,7 @@ mod tests {
     use super::super::*;
     use crate::{
         actions::SafetyClass,
-        autotune::candidate::{CandidateAction, CandidateDryRunRecord},
+        autotune::planning::{candidate::CandidateAction, dry_run::CandidateDryRunRecord},
         profiles::Profile,
     };
 
