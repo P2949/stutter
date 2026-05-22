@@ -265,7 +265,8 @@ pub struct DaemonWorkloadProfile {
     pub kept_unix_nanos: u128,
     pub last_validated_unix_nanos: Option<u128>,
     pub diagnostic_baseline_raw_score_total: Option<u64>,
-    pub diagnostic_candidate_diagnostic_score_total: Option<u64>,
+    #[serde(alias = "diagnostic_candidate_diagnostic_score_total")]
+    pub diagnostic_candidate_raw_score_total: Option<u64>,
     pub score_delta: i64,
     pub confidence_milli: u16,
     pub environment: DaemonProfileEnvironment,
@@ -765,7 +766,7 @@ mod tests {
                     kept_unix_nanos: 300,
                     last_validated_unix_nanos: Some(300),
                     diagnostic_baseline_raw_score_total: Some(1000),
-                    diagnostic_candidate_diagnostic_score_total: Some(850),
+                    diagnostic_candidate_raw_score_total: Some(850),
                     score_delta: -150,
                     confidence_milli: 900,
                     environment: DaemonProfileEnvironment::default(),
@@ -880,7 +881,7 @@ mod tests {
             kept_unix_nanos: 100,
             last_validated_unix_nanos: Some(100),
             diagnostic_baseline_raw_score_total: Some(1000),
-            diagnostic_candidate_diagnostic_score_total: Some(850),
+            diagnostic_candidate_raw_score_total: Some(850),
             score_delta: -150,
             confidence_milli: 900,
             environment: stored_environment,
@@ -928,7 +929,7 @@ mod tests {
             kept_unix_nanos: 1,
             last_validated_unix_nanos: Some(1),
             diagnostic_baseline_raw_score_total: None,
-            diagnostic_candidate_diagnostic_score_total: None,
+            diagnostic_candidate_raw_score_total: None,
             score_delta: 0,
             confidence_milli: 800,
             environment: DaemonProfileEnvironment::default(),
@@ -1037,5 +1038,54 @@ mod tests {
         let rendered = path.to_string_lossy();
 
         assert!(rendered.ends_with(".local/state/stutter/autotune/daemon_state.json"));
+    }
+
+    #[test]
+    fn workload_profile_accepts_legacy_candidate_diagnostic_score_total_name() {
+        let json = r#"{
+            "workload_identity_hash": "workload-abc",
+            "workload_label": "game",
+            "candidate_name": "game-main",
+            "action_id": "cpu-affinity-profile:game-main",
+            "action_kind": "cpu_affinity_profile",
+            "safety_class": "ReversibleLowRisk",
+            "kept_unix_nanos": 300,
+            "last_validated_unix_nanos": 300,
+            "diagnostic_baseline_raw_score_total": 1000,
+            "diagnostic_candidate_diagnostic_score_total": 850,
+            "score_delta": -150,
+            "confidence_milli": 900,
+            "environment": {},
+            "partition": {}
+        }"#;
+
+        let profile: DaemonWorkloadProfile = serde_json::from_str(json).unwrap();
+
+        assert_eq!(profile.diagnostic_candidate_raw_score_total, Some(850));
+    }
+
+    #[test]
+    fn workload_profile_serializes_candidate_raw_score_total_name() {
+        let profile = DaemonWorkloadProfile {
+            workload_identity_hash: "workload-abc".to_owned(),
+            workload_label: Some("game".to_owned()),
+            candidate_name: "game-main".to_owned(),
+            action_id: "cpu-affinity-profile:game-main".to_owned(),
+            action_kind: "cpu_affinity_profile".to_owned(),
+            safety_class: SafetyClass::ReversibleLowRisk,
+            kept_unix_nanos: 300,
+            last_validated_unix_nanos: Some(300),
+            diagnostic_baseline_raw_score_total: Some(1000),
+            diagnostic_candidate_raw_score_total: Some(850),
+            score_delta: -150,
+            confidence_milli: 900,
+            environment: DaemonProfileEnvironment::default(),
+            partition: DaemonProfilePartition::default(),
+        };
+
+        let json = serde_json::to_string(&profile).unwrap();
+
+        assert!(json.contains("diagnostic_candidate_raw_score_total"));
+        assert!(!json.contains("diagnostic_candidate_diagnostic_score_total"));
     }
 }

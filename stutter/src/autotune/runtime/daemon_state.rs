@@ -96,7 +96,7 @@ impl AutotuneRuntime {
                     kept_unix_nanos: record.last_tried_unix_nanos,
                     last_validated_unix_nanos: Some(record.last_tried_unix_nanos),
                     diagnostic_baseline_raw_score_total: None,
-                    diagnostic_candidate_diagnostic_score_total: None,
+                    diagnostic_candidate_raw_score_total: None,
                     score_delta: record.score_delta,
                     // Profile confidence currently uses the raw diagnostic score delta as a coarse
                     // historical hint. It is not an active experiment keep/revert decision.

@@ -162,7 +162,7 @@ mod tests {
                     kept_unix_nanos: 1,
                     last_validated_unix_nanos: Some(1),
                     diagnostic_baseline_raw_score_total: None,
-                    diagnostic_candidate_diagnostic_score_total: None,
+                    diagnostic_candidate_raw_score_total: None,
                     score_delta: 0,
                     confidence_milli: 1000,
                     environment: Default::default(),

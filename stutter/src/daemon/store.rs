@@ -286,7 +286,7 @@ mod tests {
                         kept_unix_nanos: 200,
                         last_validated_unix_nanos: Some(200),
                         diagnostic_baseline_raw_score_total: Some(1000),
-                        diagnostic_candidate_diagnostic_score_total: Some(850),
+                        diagnostic_candidate_raw_score_total: Some(850),
                         score_delta: -150,
                         confidence_milli: 900,
                         environment: crate::daemon::state::DaemonProfileEnvironment::default(),
