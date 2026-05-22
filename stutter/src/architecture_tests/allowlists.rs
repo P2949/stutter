@@ -95,11 +95,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "existing autotune startup recovery implementation pending future split",
     },
     OversizedRustFileAllowance {
-        path: "src/autotune/emergency_restore.rs",
-        max_lines: 1_797,
-        reason: "existing autotune emergency restore implementation pending future split; restore input conversion, rollback summary wiring, record-level restore outcome propagation, and ESRCH skip accounting tests are staged here",
-    },
-    OversizedRustFileAllowance {
         path: "src/tune/mod.rs",
         max_lines: 1_333,
         reason: "existing tune module implementation pending future split",
