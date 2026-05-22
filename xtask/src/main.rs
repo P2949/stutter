@@ -722,13 +722,16 @@ syn v2.0.117
         let source = nested.join("lib.rs");
         let source_content = concat!(
             "#![deny(warnings)]\n",
-            "#![", "allow(dead_code)]\n",
-            "#[", "allow(unused_imports)]\n",
-            "#[cfg_attr(test, ", "allow", "(dead_code))]\n",
+            "#![",
+            "allow(dead_code)]\n",
+            "#[",
+            "allow(unused_imports)]\n",
+            "#[cfg_attr(test, ",
+            "allow",
+            "(dead_code))]\n",
             "pub fn live() {}\n",
         );
-        std::fs::write(&source, source_content)
-        .expect("write temp scanner fixture");
+        std::fs::write(&source, source_content).expect("write temp scanner fixture");
 
         let mut matches = Vec::new();
         scan_allow_attribute_file(&root, &source, &mut matches).expect("scan temp scanner fixture");

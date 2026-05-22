@@ -6,8 +6,6 @@ use std::{
 use log::warn;
 use serde::Serialize;
 
-
-
 use crate::recorder::{LiveRecorder, NdjsonWriter, RecordingCounters};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]

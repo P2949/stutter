@@ -2,8 +2,6 @@ use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-
-
 use crate::{
     actions::SafetyClass,
     config::{FocusSource, ForegroundSource, layer::MonitorConfigLayer, model::MonitorConfig},
