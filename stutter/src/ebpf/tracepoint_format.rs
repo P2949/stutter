@@ -1,6 +1,3 @@
-#![allow(dead_code)] // Transitional eBPF split: tracepoint validation migrates from ebpf_loader.
-// Exit: remove this marker once the described migration is complete and the local allow is no longer needed.
-
 use std::{
     collections::BTreeMap,
     fs,
@@ -307,16 +304,4 @@ fn tracepoint_layout_hint(tracepoint_name: &str, field_name: &str) -> &'static s
     } else {
         " Hint: the running kernel tracepoint format does not match stutter's compiled eBPF read offsets. stutter rejects this layout to avoid mis-decoding tracepoint data."
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ExpectedTracepointField {
-    pub name: &'static str,
-    pub offset: u32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ExpectedTracepointFormat {
-    pub name: &'static str,
-    pub fields: &'static [ExpectedTracepointField],
 }

@@ -17,7 +17,7 @@ macro_rules! migration_module {
     };
 }
 
-pub(in crate::architecture_tests) const MAX_MIGRATION_MARKER_MODULES: usize = 22;
+pub(in crate::architecture_tests) const MAX_MIGRATION_MARKER_MODULES: usize = 18;
 
 pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationModuleAllowance] = &[
     migration_module!(
@@ -94,26 +94,6 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "src/autotune/runtime/startup_recovery.rs",
         "runtime startup-recovery facade preserves old paths during runtime split",
         "remove once old runtime startup-recovery paths are unused"
-    ),
-    migration_module!(
-        "src/ebpf/attach.rs",
-        "eBPF attach target exists while attachment logic migrates from ebpf_loader",
-        "remove once attach logic is fully owned here and old loader paths are unused"
-    ),
-    migration_module!(
-        "src/ebpf/maps.rs",
-        "eBPF map target exists while map setup migrates from ebpf_loader",
-        "remove once map setup is fully owned here and old loader paths are unused"
-    ),
-    migration_module!(
-        "src/ebpf/object.rs",
-        "eBPF object target exists while object loading migrates from ebpf_loader",
-        "remove once object loading is fully owned here and old loader paths are unused"
-    ),
-    migration_module!(
-        "src/ebpf/tracepoint_format.rs",
-        "eBPF tracepoint validation target exists while validation migrates from ebpf_loader",
-        "remove once tracepoint validation is fully owned here and old loader paths are unused"
     ),
     migration_module!(
         "src/events/domain.rs",
