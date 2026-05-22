@@ -1024,8 +1024,117 @@ pub fn block_rq_issue(ctx: TracePointContext) -> u32 {
     }
 }
 
+fn try_block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
+    let dev: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
+    let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
+    let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
+    // Only track starts for target tasks so unrelated system I/O cannot
+    // evict target entries from the start LRU map.
+    if !is_target_pid_or_current_cgroup(tid) {
+        return Ok(0);
+    }
+    let ts = unsafe { bpf_ktime_get_ns() };
+    // If userspace detected a unique request pointer field (like `rq`), use it
+    // as the primary key. Otherwise fall back to a multi-field metadata hash.
+    let request_key_offset = unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) };
+    let using_fallback_key = request_key_offset == 0;
+    let key = if !using_fallback_key {
+        unsafe { ctx.read_at::<u64>(request_key_offset as usize).unwrap_or(0) }
+    } else {
+        let nr_sector_offset =
+            unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_ISSUE_NR_SECTOR_OFFSET) };
+        let rwbs_offset =
+            unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_ISSUE_RWBS_OFFSET) };
+
+        block_rq_fallback_key(&ctx, sector, dev, nr_sector_offset, rwbs_offset)
+    };
+
+    if key != 0 && using_fallback_key && unsafe { BLOCK_START.get(key).is_some() } {
+        increment_drop_counter(DROP_BLOCK_FALLBACK_KEY_COLLISION);
+        let _ = BLOCK_START.remove(key);
+        return Ok(0);
+    }
+
+    if key != 0 && BLOCK_START.insert(key, IoStart { ts, tid }, 0).is_err() {
+        increment_drop_counter(DROP_BLOCK_START_INSERT_FAILED);
+    }
+
+    Ok(0)
+}
+
+#[tracepoint]
+/// Tracepoint entry for block_rq_complete.
+/// Emits target task block I/O duration from matching issue metadata.
+pub fn block_rq_complete(ctx: TracePointContext) -> u32 {
+    match try_block_rq_complete(ctx) {
+        Ok(ret) => ret,
+        Err(ret) => ret,
+    }
+}
+
+fn try_block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
+    let dev: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
+    let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
+    let nr_sector: u32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
+
+    let key = if unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) } != 0 {
+        unsafe {
+            ctx.read_at::<u64>(core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) as usize)
+                .unwrap_or(0)
+        }
+    } else {
+        let nr_sector_offset =
+            unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET) };
+        let rwbs_offset =
+            unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_COMPLETE_RWBS_OFFSET) };
+
+        block_rq_fallback_key(&ctx, sector, dev, nr_sector_offset, rwbs_offset)
+    };
+
+    let start = match if key != 0 {
+        unsafe { BLOCK_START.get(key) }
+    } else {
+        None
+    } {
+        Some(s) => *s,
+        None => return Ok(0),
+    };
+    let _ = BLOCK_START.remove(key);
+
+    let now = unsafe { bpf_ktime_get_ns() };
+    let duration_ns = now.saturating_sub(start.ts);
+
+    let Some(mut entry) = EVENTS.reserve::<BlockIoEvent>(0) else {
+        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
+        return Ok(0);
+    };
+    let event = entry.as_mut_ptr();
+
+    let rwbs_offset = unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_COMPLETE_RWBS_OFFSET) };
+    let rwbs = if rwbs_offset != 0 {
+        unsafe { ctx.read_at(rwbs_offset as usize).unwrap_or([0u8; 8]) }
+    } else {
+        [0u8; 8]
+    };
+
+    unsafe {
+        (*event).kind = EVENT_BLOCK_IO;
+        (*event).tid = start.tid;
+        (*event).dev = dev;
+        (*event).nr_sector = nr_sector;
+        (*event).sector = sector;
+        (*event).duration_ns = duration_ns;
+        (*event).timestamp_ns = now;
+        (*event).rwbs = rwbs;
+    }
+
+    entry.submit(0);
+
+    Ok(0)
+}
+
 // -----------------------------------------------------------------------------
-// KMS flip events
+// KMS/flip tracing
 // -----------------------------------------------------------------------------
 
 #[tracepoint]
@@ -1245,88 +1354,6 @@ fn kms_flip_key(ctx: &TracePointContext, crtc_offset: u32, pipe_offset: u32) -> 
             pipe,
         })
     }
-}
-
-// -----------------------------------------------------------------------------
-// Tracepoint field readers
-// -----------------------------------------------------------------------------
-
-fn read_optional_u32(ctx: &TracePointContext, offset: u32) -> Option<u32> {
-    if offset == 0 {
-        None
-    } else {
-        unsafe { ctx.read_at::<u32>(offset as usize).ok() }
-    }
-}
-
-fn read_sequence_field(ctx: &TracePointContext, offset: u32, size: u32) -> Option<u64> {
-    if offset == 0 {
-        None
-    } else if size >= 8 {
-        unsafe { ctx.read_at::<u64>(offset as usize).ok() }
-    } else {
-        unsafe {
-            ctx.read_at::<u32>(offset as usize)
-                .ok()
-                .map(|value| value as u64)
-        }
-    }
-}
-
-fn emit_kms_flip_event(
-    key: &KmsFlipKey,
-    provider_and_event_kind: u32,
-    sequence: Option<u64>,
-    start_ns: Option<u64>,
-    done_ns: u64,
-) {
-    let Some(mut entry) = EVENTS.reserve::<KmsFlipEvent>(0) else {
-        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return;
-    };
-
-    let event = entry.as_mut_ptr();
-    let duration_ns = start_ns
-        .map(|start| done_ns.saturating_sub(start))
-        .unwrap_or(0);
-
-    let mut flags = KMS_FLIP_HAS_DONE_NS;
-    if key.crtc_id != 0 {
-        flags |= KMS_FLIP_HAS_CRTC;
-    }
-    if start_ns.is_some() {
-        flags |= KMS_FLIP_HAS_REQUEST_NS | KMS_FLIP_HAS_DURATION_NS;
-    }
-    if sequence.is_some() {
-        flags |= KMS_FLIP_HAS_SEQUENCE;
-    }
-
-    unsafe {
-        (*event).kind = EVENT_KMS_FLIP;
-        let provider = provider_and_event_kind >> 16;
-        let completion_event_kind = provider_and_event_kind & 0xffff;
-        (*event).event_kind = if start_ns.is_some() {
-            KMS_FLIP_EVENT_INTERVAL
-        } else {
-            completion_event_kind
-        };
-        (*event).provider = provider;
-        (*event).flags = flags;
-        let pid_tgid = bpf_get_current_pid_tgid();
-        (*event).pid = (pid_tgid >> 32) as u32;
-        (*event).tid = (pid_tgid & 0xffff_ffff) as u32;
-        (*event).cpu = bpf_get_smp_processor_id() as u32;
-        (*event).card_minor = key.card_minor;
-        (*event).crtc_id = key.crtc_id;
-        (*event).pipe = key.pipe;
-        (*event).sequence = sequence.unwrap_or(0);
-        (*event).request_ns = start_ns.unwrap_or(0);
-        (*event).done_ns = done_ns;
-        (*event).duration_ns = duration_ns;
-        (*event).timestamp_ns = done_ns;
-    }
-
-    entry.submit(0);
 }
 
 // -----------------------------------------------------------------------------
@@ -1587,116 +1614,85 @@ fn read_optional_u64(ctx: &TracePointContext, offset: u32) -> Option<u64> {
 }
 
 // -----------------------------------------------------------------------------
-// Block I/O completion
+// Tracepoint field readers
 // -----------------------------------------------------------------------------
 
-fn try_block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
-    let dev: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
-    let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
-    let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
-    // Only track starts for target tasks so unrelated system I/O cannot
-    // evict target entries from the start LRU map.
-    if !is_target_pid_or_current_cgroup(tid) {
-        return Ok(0);
-    }
-    let ts = unsafe { bpf_ktime_get_ns() };
-    // If userspace detected a unique request pointer field (like `rq`), use it
-    // as the primary key. Otherwise fall back to a multi-field metadata hash.
-    let request_key_offset = unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) };
-    let using_fallback_key = request_key_offset == 0;
-    let key = if !using_fallback_key {
-        unsafe { ctx.read_at::<u64>(request_key_offset as usize).unwrap_or(0) }
-    } else {
-        let nr_sector_offset =
-            unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_ISSUE_NR_SECTOR_OFFSET) };
-        let rwbs_offset =
-            unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_ISSUE_RWBS_OFFSET) };
-
-        block_rq_fallback_key(&ctx, sector, dev, nr_sector_offset, rwbs_offset)
-    };
-
-    if key != 0 && using_fallback_key && unsafe { BLOCK_START.get(key).is_some() } {
-        increment_drop_counter(DROP_BLOCK_FALLBACK_KEY_COLLISION);
-        let _ = BLOCK_START.remove(key);
-        return Ok(0);
-    }
-
-    if key != 0 && BLOCK_START.insert(key, IoStart { ts, tid }, 0).is_err() {
-        increment_drop_counter(DROP_BLOCK_START_INSERT_FAILED);
-    }
-
-    Ok(0)
-}
-
-#[tracepoint]
-/// Tracepoint entry for block_rq_complete.
-/// Emits target task block I/O duration from matching issue metadata.
-pub fn block_rq_complete(ctx: TracePointContext) -> u32 {
-    match try_block_rq_complete(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
-}
-
-fn try_block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
-    let dev: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
-    let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
-    let nr_sector: u32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
-
-    let key = if unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) } != 0 {
-        unsafe {
-            ctx.read_at::<u64>(core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) as usize)
-                .unwrap_or(0)
-        }
-    } else {
-        let nr_sector_offset =
-            unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET) };
-        let rwbs_offset =
-            unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_COMPLETE_RWBS_OFFSET) };
-
-        block_rq_fallback_key(&ctx, sector, dev, nr_sector_offset, rwbs_offset)
-    };
-
-    let start = match if key != 0 {
-        unsafe { BLOCK_START.get(key) }
-    } else {
+fn read_optional_u32(ctx: &TracePointContext, offset: u32) -> Option<u32> {
+    if offset == 0 {
         None
-    } {
-        Some(s) => *s,
-        None => return Ok(0),
-    };
-    let _ = BLOCK_START.remove(key);
-
-    let now = unsafe { bpf_ktime_get_ns() };
-    let duration_ns = now.saturating_sub(start.ts);
-
-    let Some(mut entry) = EVENTS.reserve::<BlockIoEvent>(0) else {
-        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return Ok(0);
-    };
-    let event = entry.as_mut_ptr();
-
-    let rwbs_offset = unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_COMPLETE_RWBS_OFFSET) };
-    let rwbs = if rwbs_offset != 0 {
-        unsafe { ctx.read_at(rwbs_offset as usize).unwrap_or([0u8; 8]) }
     } else {
-        [0u8; 8]
+        unsafe { ctx.read_at::<u32>(offset as usize).ok() }
+    }
+}
+
+fn read_sequence_field(ctx: &TracePointContext, offset: u32, size: u32) -> Option<u64> {
+    if offset == 0 {
+        None
+    } else if size >= 8 {
+        unsafe { ctx.read_at::<u64>(offset as usize).ok() }
+    } else {
+        unsafe {
+            ctx.read_at::<u32>(offset as usize)
+                .ok()
+                .map(|value| value as u64)
+        }
+    }
+}
+
+fn emit_kms_flip_event(
+    key: &KmsFlipKey,
+    provider_and_event_kind: u32,
+    sequence: Option<u64>,
+    start_ns: Option<u64>,
+    done_ns: u64,
+) {
+    let Some(mut entry) = EVENTS.reserve::<KmsFlipEvent>(0) else {
+        increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
+        return;
     };
+
+    let event = entry.as_mut_ptr();
+    let duration_ns = start_ns
+        .map(|start| done_ns.saturating_sub(start))
+        .unwrap_or(0);
+
+    let mut flags = KMS_FLIP_HAS_DONE_NS;
+    if key.crtc_id != 0 {
+        flags |= KMS_FLIP_HAS_CRTC;
+    }
+    if start_ns.is_some() {
+        flags |= KMS_FLIP_HAS_REQUEST_NS | KMS_FLIP_HAS_DURATION_NS;
+    }
+    if sequence.is_some() {
+        flags |= KMS_FLIP_HAS_SEQUENCE;
+    }
 
     unsafe {
-        (*event).kind = EVENT_BLOCK_IO;
-        (*event).tid = start.tid;
-        (*event).dev = dev;
-        (*event).nr_sector = nr_sector;
-        (*event).sector = sector;
+        (*event).kind = EVENT_KMS_FLIP;
+        let provider = provider_and_event_kind >> 16;
+        let completion_event_kind = provider_and_event_kind & 0xffff;
+        (*event).event_kind = if start_ns.is_some() {
+            KMS_FLIP_EVENT_INTERVAL
+        } else {
+            completion_event_kind
+        };
+        (*event).provider = provider;
+        (*event).flags = flags;
+        let pid_tgid = bpf_get_current_pid_tgid();
+        (*event).pid = (pid_tgid >> 32) as u32;
+        (*event).tid = (pid_tgid & 0xffff_ffff) as u32;
+        (*event).cpu = bpf_get_smp_processor_id() as u32;
+        (*event).card_minor = key.card_minor;
+        (*event).crtc_id = key.crtc_id;
+        (*event).pipe = key.pipe;
+        (*event).sequence = sequence.unwrap_or(0);
+        (*event).request_ns = start_ns.unwrap_or(0);
+        (*event).done_ns = done_ns;
         (*event).duration_ns = duration_ns;
-        (*event).timestamp_ns = now;
-        (*event).rwbs = rwbs;
+        (*event).timestamp_ns = done_ns;
     }
 
     entry.submit(0);
-
-    Ok(0)
 }
 
 // -----------------------------------------------------------------------------

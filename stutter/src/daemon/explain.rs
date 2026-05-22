@@ -581,7 +581,7 @@ mod tests {
                 decision: "noop".to_owned(),
                 reason: "insufficient data".to_owned(),
                 unix_nanos: Some(1),
-                score_total: None,
+                diagnostic_score_total: None,
                 candidate_count: None,
                 top_denied_reason: None,
                 planner: None,

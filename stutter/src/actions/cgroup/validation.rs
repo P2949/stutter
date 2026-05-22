@@ -1,4 +1,10 @@
-use super::*;
+use std::path::Path;
+
+use super::{
+    fs_io::{ensure_path_under_root, ensure_writable_file, normalize_cgroup_path},
+    model::{CgroupPlacementAction, CgroupPlacementPolicy},
+};
+use crate::process_tree::TaskClass;
 
 pub(super) fn validate_action_request(
     action: &CgroupPlacementAction,

@@ -4,9 +4,9 @@
   "ticks": [
     { "kind": "focus_game", "confidence": 0.95 },
     { "kind": "target_present" },
-    { "kind": "interval", "score_total": 120, "samples": 100 },
+    { "kind": "interval", "diagnostic_score_total": 120, "samples": 100 },
     { "kind": "target_present" },
-    { "kind": "interval", "score_total": 1200, "samples": 100 },
+    { "kind": "interval", "diagnostic_score_total": 1200, "samples": 100 },
     { "kind": "evaluation_tick", "reason": "thermal degradation during experiment" }
   ],
   "assertions": [

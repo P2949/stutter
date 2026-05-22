@@ -27,9 +27,9 @@ pub struct TuneRecommendation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TuneRecommendationMetrics {
-    pub median_score_total: u64,
-    pub iqr_score_total: u64,
-    pub worst_score_total: u64,
+    pub median_diagnostic_score_total: u64,
+    pub iqr_diagnostic_score_total: u64,
+    pub worst_diagnostic_score_total: u64,
     pub median_over_5ms: u64,
     pub median_frame_p99_us: u64,
     pub valid_runs: usize,
@@ -132,10 +132,10 @@ pub fn build_tune_recommendation(
             best_stat.invalid_runs
         ));
     }
-    if best_stat.iqr_score_total > 0 {
+    if best_stat.iqr_diagnostic_score_total > 0 {
         warnings.push(format!(
             "best profile score IQR is non-zero ({})",
-            best_stat.iqr_score_total
+            best_stat.iqr_diagnostic_score_total
         ));
     }
 
@@ -166,7 +166,7 @@ pub fn build_tune_recommendation(
         } else {
             warnings.push("missing frame data for best or comparison profile".to_owned());
         }
-        let close_margin = other.median_score_total / 20;
+        let close_margin = other.median_diagnostic_score_total / 20;
         if metrics.score_delta_abs.unsigned_abs() <= close_margin && close_margin > 0 {
             warnings.push(format!(
                 "close score margin versus '{}': delta_abs={} threshold={}",
@@ -188,7 +188,9 @@ pub fn build_tune_recommendation(
     ));
     why.push(format!(
         "best median score={} IQR={} worst={}",
-        best_stat.median_score_total, best_stat.iqr_score_total, best_stat.worst_score_total
+        best_stat.median_diagnostic_score_total,
+        best_stat.iqr_diagnostic_score_total,
+        best_stat.worst_diagnostic_score_total
     ));
     if best_stat.median_frame_p99_us == 0 {
         warnings.push("missing frame data for best profile".to_owned());
@@ -311,7 +313,7 @@ fn choose_comparison_stat<'a>(
         .profile_stats
         .iter()
         .filter(|stat| stat.profile != best_profile && stat.valid_runs > 0)
-        .min_by_key(|stat| stat.median_score_total);
+        .min_by_key(|stat| stat.median_diagnostic_score_total);
     if second.is_some() {
         (Some("second-best".to_owned()), second)
     } else {
@@ -321,9 +323,9 @@ fn choose_comparison_stat<'a>(
 
 fn metrics_from_stat(stat: &TuneProfileStats) -> TuneRecommendationMetrics {
     TuneRecommendationMetrics {
-        median_score_total: stat.median_score_total,
-        iqr_score_total: stat.iqr_score_total,
-        worst_score_total: stat.worst_score_total,
+        median_diagnostic_score_total: stat.median_diagnostic_score_total,
+        iqr_diagnostic_score_total: stat.iqr_diagnostic_score_total,
+        worst_diagnostic_score_total: stat.worst_diagnostic_score_total,
         median_over_5ms: stat.median_over_5ms,
         median_frame_p99_us: stat.median_frame_p99_us,
         valid_runs: stat.valid_runs,
@@ -335,12 +337,13 @@ fn comparison_between(
     best: &TuneProfileStats,
     other: &TuneProfileStats,
 ) -> TuneRecommendationComparison {
-    let score_delta_abs = best.median_score_total as i64 - other.median_score_total as i64;
+    let score_delta_abs =
+        best.median_diagnostic_score_total as i64 - other.median_diagnostic_score_total as i64;
     TuneRecommendationComparison {
         other_profile: other.profile.clone(),
         score_delta_abs,
-        score_delta_percent: if other.median_score_total > 0 {
-            Some(score_delta_abs as f64 / other.median_score_total as f64 * 100.0)
+        score_delta_percent: if other.median_diagnostic_score_total > 0 {
+            Some(score_delta_abs as f64 / other.median_diagnostic_score_total as f64 * 100.0)
         } else {
             None
         },
@@ -382,9 +385,9 @@ mod tests {
             profile: profile.to_owned(),
             valid_runs: 3,
             invalid_runs: 0,
-            median_score_total: median,
-            iqr_score_total: 0,
-            worst_score_total: median,
+            median_diagnostic_score_total: median,
+            iqr_diagnostic_score_total: 0,
+            worst_diagnostic_score_total: median,
             median_over_5ms: median / 100,
             iqr_over_5ms: 0,
             median_frame_p99_us: 16_000,
@@ -392,7 +395,7 @@ mod tests {
         }
     }
 
-    fn candidate(profile: &str, score_total: u64) -> TuneCandidateSummary {
+    fn candidate(profile: &str, diagnostic_score_total: u64) -> TuneCandidateSummary {
         TuneCandidateSummary {
             profile: profile.to_owned(),
             iteration: 1,
@@ -403,10 +406,10 @@ mod tests {
             interval_count: 2,
             samples: 100,
             scored_samples: 100,
-            score_total,
+            diagnostic_score_total,
             over_1ms: 0,
             over_2ms: 0,
-            over_5ms: score_total / 100,
+            over_5ms: diagnostic_score_total / 100,
             max_latency_ns: 0,
             frame_count: 1,
             frame_max_ms: 16.0,

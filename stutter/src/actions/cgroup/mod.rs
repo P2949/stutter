@@ -4,28 +4,16 @@
 //! Helper modules separate validation, procfs identity checks, filesystem I/O,
 //! and rollback handling so mutation sequencing remains reviewable.
 
-use std::{
-    fs,
-    fs::OpenOptions,
-    io,
-    path::{Component, Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::{
-    actions::{
-        ActionId, ActionState, ActionWarning, ApplyResult, CgroupCpusetRestoreRecord,
-        CgroupRestoreRecord, PartialApplyError, RestoreIdentityStatus, RollbackToken, SafetyClass,
-        TaskIdentity, TaskRestoreIdentity, TuningAction,
-        restore_write::{RestoreSummary, RestoreWriteError, classify_restore_write_error},
-        rollback::{
-            RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult,
-            token_dry_run_preview,
-        },
-        verify_task_identity,
-    },
-    process_tree::TaskClass,
+use crate::actions::{
+    ActionId, ActionState, ActionWarning, ApplyResult, CgroupCpusetRestoreRecord,
+    CgroupRestoreRecord, PartialApplyError, RestoreIdentityStatus, RollbackToken, SafetyClass,
+    TaskRestoreIdentity, TuningAction,
+    restore_write::{RestoreSummary, RestoreWriteError, classify_restore_write_error},
+    verify_task_identity,
 };
 
 mod fs_io;

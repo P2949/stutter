@@ -65,10 +65,10 @@ fn revert_rolls_back_candidate_and_enters_cooldown() {
     let mut manager = LiveExperimentManager::new();
     manager.set_current_for_tests(live_experiment());
     let mut controller_state = ControllerRuntimeState {
-        active_experiment: Some(ControllerActiveExperiment {
+        active_experiment: Some(crate::autotune::controller::ActiveExperiment {
             experiment_id: ExperimentId::new("experiment-active"),
             candidate: low_risk_candidate(),
-            baseline_score_total: 1_000,
+            baseline_score: score(1_000),
         }),
         ..ControllerRuntimeState::default()
     };
@@ -113,10 +113,10 @@ fn rollback_verification_success_clears_active_experiment() {
     let mut manager = LiveExperimentManager::new();
     manager.set_current_for_tests(nice_live_experiment_with_baseline_config());
     let mut controller_state = ControllerRuntimeState {
-        active_experiment: Some(ControllerActiveExperiment {
+        active_experiment: Some(crate::autotune::controller::ActiveExperiment {
             experiment_id: ExperimentId::new("experiment-nice"),
             candidate: medium_risk_candidate(),
-            baseline_score_total: 1_000,
+            baseline_score: score(1_000),
         }),
         ..ControllerRuntimeState::default()
     };
@@ -157,10 +157,10 @@ fn rollback_verification_failure_faults_and_keeps_manual_restore_state() {
     let mut manager = LiveExperimentManager::new();
     manager.set_current_for_tests(nice_live_experiment_with_baseline_config());
     let mut controller_state = ControllerRuntimeState {
-        active_experiment: Some(ControllerActiveExperiment {
+        active_experiment: Some(crate::autotune::controller::ActiveExperiment {
             experiment_id: ExperimentId::new("experiment-nice"),
             candidate: medium_risk_candidate(),
-            baseline_score_total: 1_000,
+            baseline_score: score(1_000),
         }),
         ..ControllerRuntimeState::default()
     };
@@ -225,10 +225,10 @@ fn rollback_verification_is_skipped_for_simulated_action_effects() {
     let mut manager = LiveExperimentManager::new();
     manager.set_current_for_tests(nice_live_experiment_with_baseline_config());
     let mut controller_state = ControllerRuntimeState {
-        active_experiment: Some(ControllerActiveExperiment {
+        active_experiment: Some(crate::autotune::controller::ActiveExperiment {
             experiment_id: ExperimentId::new("experiment-nice"),
             candidate: medium_risk_candidate(),
-            baseline_score_total: 1_000,
+            baseline_score: score(1_000),
         }),
         ..ControllerRuntimeState::default()
     };

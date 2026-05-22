@@ -5,8 +5,12 @@ use super::{
         CandidateContextHashInput, CandidateMemory, CandidateMemoryRecord, CandidateMemoryResult,
         CandidateResultRecordInput,
     },
-    comparison::DEFAULT_SCORE_COMPARISON_CONFIG,
+    comparison::{
+        DEFAULT_SCORE_COMPARISON_CONFIG, ExperimentResult, ScoreComparisonConfig,
+        compare_scores_with_config,
+    },
     decision::{AutotuneDecision, CandidateAction, ExperimentId},
+    experiment::WindowScore,
     observation::AutotuneObservation,
     quality::OnlineDataQuality,
     state::{AutotuneMode, ControllerPhase},
@@ -86,7 +90,7 @@ fn daemon_mode_from_autotune_mode(mode: AutotuneMode) -> DaemonMode {
 pub struct ActiveExperiment {
     pub experiment_id: ExperimentId,
     pub candidate: CandidateAction,
-    pub baseline_score_total: u64,
+    pub baseline_score: WindowScore,
 }
 
 #[derive(Clone, Debug)]
@@ -113,8 +117,8 @@ pub struct ControllerCandidateResultInput<'a> {
     pub observation: &'a AutotuneObservation,
     pub cpu_topology_signature: Option<&'a str>,
     pub result: CandidateMemoryResult,
-    pub baseline_score_total: Option<u64>,
-    pub current_score_total: Option<u64>,
+    pub diagnostic_baseline_diagnostic_score_total: Option<u64>,
+    pub diagnostic_current_diagnostic_score_total: Option<u64>,
     pub rollback_reason: Option<String>,
     pub cooldown_expires_unix_nanos: Option<u128>,
 }
@@ -167,8 +171,10 @@ impl ControllerRuntimeState {
                 context: &context,
                 now_unix_nanos: input.observation.now_unix_nanos,
                 result: input.result,
-                baseline_score_total: input.baseline_score_total,
-                current_score_total: input.current_score_total,
+                diagnostic_baseline_diagnostic_score_total: input
+                    .diagnostic_baseline_diagnostic_score_total,
+                diagnostic_current_diagnostic_score_total: input
+                    .diagnostic_current_diagnostic_score_total,
                 rollback_reason: input.rollback_reason,
                 cooldown_expires_unix_nanos: input.cooldown_expires_unix_nanos,
             })
@@ -246,36 +252,54 @@ pub fn decide_autotune_transition(
             };
         }
 
-        let regression_percent =
-            score_regression_percent(active.baseline_score_total, observation.score.total);
-        if regression_percent > policy.max_regression_percent {
-            return AutotuneDecision::Revert {
-                experiment_id: active.experiment_id.clone(),
-                reason: format!(
-                    "candidate regressed score by {:.1}% which exceeds max_regression_percent {:.1}%",
-                    regression_percent, policy.max_regression_percent
-                ),
-            };
-        }
+        let comparison = compare_scores_with_config(
+            crate::autotune::comparison::ScoreComparisonInput {
+                baseline: &active.baseline_score,
+                candidate: &observation.to_window_score(),
+                data_quality: crate::autotune::comparison::ExperimentDataQuality::High,
+                target_disappeared: false,
+            },
+            &ScoreComparisonConfig {
+                min_improvement_percent: policy.min_improvement_percent,
+                max_regression_percent: policy.max_regression_percent,
+                ..DEFAULT_SCORE_COMPARISON_CONFIG
+            },
+            None,
+        );
 
-        let improvement_percent =
-            score_improvement_percent(active.baseline_score_total, observation.score.total);
-        if improvement_percent >= policy.min_improvement_percent {
-            return AutotuneDecision::KeepCurrent {
-                experiment_id: active.experiment_id.clone(),
-                reason: format!(
-                    "candidate improved score by {:.1}% which meets min_improvement_percent {:.1}%",
-                    improvement_percent, policy.min_improvement_percent
-                ),
-            };
+        match comparison {
+            ExperimentResult::Regressed { regression_percent } => {
+                return AutotuneDecision::Revert {
+                    experiment_id: active.experiment_id.clone(),
+                    reason: format!(
+                        "candidate regressed normalized score by {:.1}% which exceeds max_regression_percent {:.1}%",
+                        regression_percent, policy.max_regression_percent
+                    ),
+                };
+            }
+            ExperimentResult::Improved {
+                improvement_percent,
+            } => {
+                return AutotuneDecision::KeepCurrent {
+                    experiment_id: active.experiment_id.clone(),
+                    reason: format!(
+                        "candidate improved normalized score by {:.1}% which meets min_improvement_percent {:.1}%",
+                        improvement_percent, policy.min_improvement_percent
+                    ),
+                };
+            }
+            ExperimentResult::Inconclusive { reason } => {
+                return AutotuneDecision::Noop {
+                    reason: format!("active experiment is still inconclusive: {}", reason),
+                };
+            }
+            ExperimentResult::Invalid { reason } => {
+                return AutotuneDecision::Revert {
+                    experiment_id: active.experiment_id.clone(),
+                    reason: format!("invalid active experiment score comparison: {}", reason),
+                };
+            }
         }
-
-        return AutotuneDecision::Noop {
-            reason: format!(
-                "active experiment is still inconclusive: improvement={:.1}% regression={:.1}%",
-                improvement_percent, regression_percent
-            ),
-        };
     }
 
     if let Some(decision) =
@@ -491,24 +515,6 @@ fn candidate_looks_like_game_cpu_isolation_profile(candidate: &CandidateAction) 
     }
 }
 
-fn score_regression_percent(baseline: u64, current: u64) -> f64 {
-    if current <= baseline {
-        0.0
-    } else if baseline == 0 {
-        100.0
-    } else {
-        ((current - baseline) as f64 / baseline as f64) * 100.0
-    }
-}
-
-fn score_improvement_percent(baseline: u64, current: u64) -> f64 {
-    if current >= baseline || baseline == 0 {
-        0.0
-    } else {
-        ((baseline - current) as f64 / baseline as f64) * 100.0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -547,7 +553,11 @@ mod tests {
         CandidateAction::fake(ActionId::new("test".to_owned()), safety_class)
     }
 
-    fn high_quality_observation(score_total: u64) -> AutotuneObservation {
+    fn high_quality_observation_with_score(
+        diagnostic_score_total: u64,
+        scored_samples: u64,
+        interval_count: usize,
+    ) -> AutotuneObservation {
         AutotuneObservation {
             now_unix_nanos: 1_000_000_000,
             elapsed_ms: 30_000,
@@ -555,10 +565,12 @@ mod tests {
             target_root_pid: Some(1234),
             active_target_count: 4,
             scored_task_count: 2,
-            interval_count: 5,
-            scored_samples: 100,
+            interval_count,
+            scored_samples,
             score: StutterScore {
-                total: score_total,
+                total: diagnostic_score_total,
+                frame_p99_ms: 12.0,
+                frame_max_ms: 20.0,
                 ..StutterScore::default()
             },
             data_quality: OnlineDataQuality::High,
@@ -583,16 +595,135 @@ mod tests {
         }
     }
 
-    fn active_state_with_baseline_score(baseline_score_total: u64) -> ControllerRuntimeState {
+    fn high_quality_observation(diagnostic_score_total: u64) -> AutotuneObservation {
+        high_quality_observation_with_score(diagnostic_score_total, 100, 5)
+    }
+
+    fn active_state_with_baseline_score(
+        diagnostic_baseline_diagnostic_score_total: u64,
+    ) -> ControllerRuntimeState {
+        active_state_with_baseline_window(diagnostic_baseline_diagnostic_score_total, 100, 5)
+    }
+
+    fn active_state_with_baseline_window(
+        diagnostic_baseline_diagnostic_score_total: u64,
+        baseline_scored_samples: u64,
+        baseline_interval_count: usize,
+    ) -> ControllerRuntimeState {
         ControllerRuntimeState {
             phase: ControllerPhase::Measuring,
             active_experiment: Some(ActiveExperiment {
                 experiment_id: ExperimentId("experiment-1".to_owned()),
                 candidate: candidate_with_safety_class(SafetyClass::ReversibleLowRisk),
-                baseline_score_total,
+                baseline_score: WindowScore {
+                    started_unix_nanos: 0,
+                    finished_unix_nanos: 30_000_000_000,
+                    interval_count: baseline_interval_count,
+                    scored_samples: baseline_scored_samples,
+                    scored_task_count: 2,
+                    score: crate::scorer::StutterScore {
+                        total: diagnostic_baseline_diagnostic_score_total,
+                        frame_p99_ms: 12.0,
+                        frame_max_ms: 20.0,
+                        ..Default::default()
+                    },
+                },
             }),
             cooldown_until_unix_nanos: None,
             candidate_memory: CandidateMemory::default(),
+        }
+    }
+
+    #[test]
+    fn active_experiment_does_not_revert_when_candidate_raw_score_is_higher_but_rate_is_equal() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let state = active_state_with_baseline_window(1_000, 100, 5); // 10.0 / sample
+        let observation = high_quality_observation_with_score(3_000, 300, 15); // 10.0 / sample
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, None);
+
+        match decision {
+            AutotuneDecision::Noop { reason } => {
+                assert!(
+                    reason.contains("active experiment is still inconclusive"),
+                    "expected Noop due to inconclusive normalized rates, got: {reason}"
+                );
+            }
+            other => panic!("expected Noop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn active_experiment_reverts_when_candidate_raw_score_is_lower_but_rate_is_worse() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let state = active_state_with_baseline_window(1_000, 1_000, 50); // 1.0 / sample
+        let observation = high_quality_observation_with_score(900, 100, 5); // 9.0 / sample
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, None);
+
+        match decision {
+            AutotuneDecision::Revert {
+                experiment_id,
+                reason,
+            } => {
+                assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+                assert!(
+                    reason.contains("regressed normalized score"),
+                    "expected regression, got: {reason}"
+                );
+            }
+            other => {
+                panic!("expected Revert for worse rate despite lower raw score, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn active_experiment_keeps_when_candidate_raw_score_is_higher_but_rate_is_better() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let state = active_state_with_baseline_window(1_000, 100, 5); // 10.0 / sample
+        let observation = high_quality_observation_with_score(1_500, 300, 15); // 5.0 / sample
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, None);
+
+        match decision {
+            AutotuneDecision::KeepCurrent {
+                experiment_id,
+                reason,
+            } => {
+                assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+                assert!(
+                    reason.contains("improved normalized score"),
+                    "expected improvement, got: {reason}"
+                );
+            }
+            other => panic!(
+                "expected KeepCurrent for better rate despite higher raw score, got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn active_experiment_reverts_when_score_comparison_is_invalid() {
+        let policy = ControllerPolicy::for_mode(AutotuneMode::ApplyLowRisk);
+        let state = active_state_with_baseline_window(1_000, 100, 5);
+        let mut observation = high_quality_observation_with_score(1_000, 0, 0);
+        observation.scored_task_count = 0;
+
+        let decision = decide_autotune_transition(&policy, &state, &observation, None);
+
+        match decision {
+            AutotuneDecision::Revert {
+                experiment_id,
+                reason,
+            } => {
+                assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
+                assert!(
+                    reason.contains("invalid active experiment score comparison"),
+                    "expected invalid reason, got: {reason}"
+                );
+            }
+            other => panic!("expected Revert for invalid score comparison, got {other:?}"),
         }
     }
 
@@ -782,7 +913,7 @@ mod tests {
             } => {
                 assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
                 assert!(
-                    reason.contains("candidate regressed score by 8.0%"),
+                    reason.contains("candidate regressed normalized score by 8.0%"),
                     "unexpected regression reason: {reason}"
                 );
                 assert!(
@@ -809,7 +940,7 @@ mod tests {
             } => {
                 assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
                 assert!(
-                    reason.contains("candidate improved score by 13.0%"),
+                    reason.contains("candidate improved normalized score by 13.0%"),
                     "unexpected improvement reason: {reason}"
                 );
                 assert!(
@@ -949,7 +1080,7 @@ mod tests {
                 reason,
             } => {
                 assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
-                assert!(reason.contains("regressed score"));
+                assert!(reason.contains("regressed normalized score"));
                 assert!(reason.contains("exceeds max_regression_percent"));
             }
             other => panic!("expected Revert, got {other:?}"),
@@ -970,7 +1101,7 @@ mod tests {
                 reason,
             } => {
                 assert_eq!(experiment_id, ExperimentId("experiment-1".to_owned()));
-                assert!(reason.contains("improved score"));
+                assert!(reason.contains("improved normalized score"));
                 assert!(reason.contains("meets min_improvement_percent"));
             }
             other => panic!("expected KeepCurrent, got {other:?}"),
@@ -1242,9 +1373,9 @@ mod tests {
             observation: &observation,
             cpu_topology_signature: Some("cpu0-7:smt:on"),
             result: CandidateMemoryResult::Reverted,
-            baseline_score_total: Some(1_000),
-            current_score_total: Some(1_125),
-            rollback_reason: Some("candidate regressed score".to_owned()),
+            diagnostic_baseline_diagnostic_score_total: Some(1_000),
+            diagnostic_current_diagnostic_score_total: Some(1_125),
+            rollback_reason: Some("candidate regressed normalized score".to_owned()),
             cooldown_expires_unix_nanos: Some(309_000_000_000),
         });
 
@@ -1253,7 +1384,7 @@ mod tests {
         assert_eq!(record.score_delta, 125);
         assert_eq!(
             record.rollback_reason.as_deref(),
-            Some("candidate regressed score")
+            Some("candidate regressed normalized score")
         );
         assert_eq!(record.cooldown_expires_unix_nanos, Some(309_000_000_000));
         assert_eq!(state.candidate_memory.latest(), Some(&record));
@@ -1272,9 +1403,9 @@ mod tests {
             observation: &observation,
             cpu_topology_signature: Some("cpu0-7:smt:on"),
             result: CandidateMemoryResult::Reverted,
-            baseline_score_total: Some(1_000),
-            current_score_total: Some(1_200),
-            rollback_reason: Some("candidate regressed score".to_owned()),
+            diagnostic_baseline_diagnostic_score_total: Some(1_000),
+            diagnostic_current_diagnostic_score_total: Some(1_200),
+            rollback_reason: Some("candidate regressed normalized score".to_owned()),
             cooldown_expires_unix_nanos: Some(401_000_000_000),
         });
 
