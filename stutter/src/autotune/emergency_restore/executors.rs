@@ -1,8 +1,14 @@
-use super::handler::{default_autotune_rollback_registry, rollback_restore_summary_from_registry_result};
 use std::{mem, path::Path};
+
 use anyhow::Context;
+
+use super::{
+    handler::{default_autotune_rollback_registry, rollback_restore_summary_from_registry_result},
+    helpers::*,
+    manual_command::*,
+    types::*,
+};
 use crate::actions::*;
-use super::{types::*, manual_command::*, helpers::*};
 
 pub(super) const IOPRIO_WHO_PROCESS: libc::c_int = 1;
 pub(super) const SCHED_FLAG_KEEP_POLICY: u64 = 0x08;
@@ -46,7 +52,9 @@ pub fn restore_rollback_token(token: &RollbackToken) -> anyhow::Result<RollbackR
     Ok(rollback_restore_summary_from_registry_result(token, result))
 }
 
-pub fn restore_rollback_token_direct(token: &RollbackToken) -> anyhow::Result<RollbackRestoreSummary> {
+pub fn restore_rollback_token_direct(
+    token: &RollbackToken,
+) -> anyhow::Result<RollbackRestoreSummary> {
     match token {
         RollbackToken::CpuAffinityRestoreFile { path, .. } => {
             if crate::profile_restore::load_restore_state(path).is_ok() {
@@ -162,7 +170,9 @@ where
     ))
 }
 
-pub(super) fn restore_nice_records(records: &[NiceRestoreRecord]) -> anyhow::Result<RollbackRestoreSummary> {
+pub(super) fn restore_nice_records(
+    records: &[NiceRestoreRecord],
+) -> anyhow::Result<RollbackRestoreSummary> {
     restore_task_records(
         "nice-restore",
         records,
@@ -361,7 +371,9 @@ pub(super) fn restore_cgroup_records(
     Ok(RollbackRestoreSummary::success("cgroup-restore", restored))
 }
 
-pub(super) fn restore_cgroup_cpuset_record(record: &CgroupCpusetRestoreRecord) -> anyhow::Result<usize> {
+pub(super) fn restore_cgroup_cpuset_record(
+    record: &CgroupCpusetRestoreRecord,
+) -> anyhow::Result<usize> {
     let mut restored = 0usize;
     if let Some(original) = &record.original_cpuset_cpus {
         write_sysfs_value(&record.cgroup_path.join("cpuset.cpus"), original).with_context(
@@ -450,4 +462,3 @@ pub(super) fn restore_gpu_power_records(
         restored,
     ))
 }
-

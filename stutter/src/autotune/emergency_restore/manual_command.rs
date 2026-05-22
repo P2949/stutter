@@ -1,5 +1,6 @@
-use super::executors::IOPRIO_WHO_PROCESS;
 use std::path::{Path, PathBuf};
+
+use super::executors::IOPRIO_WHO_PROCESS;
 use crate::actions::{RollbackToken, SafetyClass};
 
 pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
@@ -110,7 +111,9 @@ pub fn manual_restore_command_for_token(token: &RollbackToken) -> String {
     }
 }
 
-pub(super) fn sysfs_manual_commands<'a>(records: impl Iterator<Item = (&'a PathBuf, &'a str)>) -> String {
+pub(super) fn sysfs_manual_commands<'a>(
+    records: impl Iterator<Item = (&'a PathBuf, &'a str)>,
+) -> String {
     records
         .map(|(path, original_value)| {
             format!(
