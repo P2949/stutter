@@ -95,7 +95,7 @@ impl AutotuneRuntime {
                     safety_class,
                     kept_unix_nanos: record.last_tried_unix_nanos,
                     last_validated_unix_nanos: Some(record.last_tried_unix_nanos),
-                    diagnostic_baseline_diagnostic_score_total: None,
+                    diagnostic_baseline_raw_score_total: None,
                     diagnostic_candidate_diagnostic_score_total: None,
                     score_delta: record.score_delta,
                     confidence_milli: daemon_profile_confidence_milli(record.score_delta),

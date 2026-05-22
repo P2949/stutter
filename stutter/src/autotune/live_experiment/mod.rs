@@ -559,10 +559,10 @@ impl LiveExperimentManager {
                     observation,
                     cpu_topology_signature: None,
                     result: CandidateMemoryResult::Kept,
-                    diagnostic_baseline_diagnostic_score_total: Some(
+                    diagnostic_baseline_raw_score_total: Some(
                         experiment.baseline_score.score.total,
                     ),
-                    diagnostic_current_diagnostic_score_total: Some(candidate_score.score.total),
+                    diagnostic_current_raw_score_total: Some(candidate_score.score.total),
                     rollback_reason: None,
                     cooldown_expires_unix_nanos: Some(
                         observation
@@ -677,10 +677,10 @@ impl LiveExperimentManager {
                     observation,
                     cpu_topology_signature: None,
                     result: CandidateMemoryResult::Faulted,
-                    diagnostic_baseline_diagnostic_score_total: Some(
+                    diagnostic_baseline_raw_score_total: Some(
                         experiment.baseline_score.score.total,
                     ),
-                    diagnostic_current_diagnostic_score_total: Some(observation.score.total),
+                    diagnostic_current_raw_score_total: Some(observation.score.total),
                     rollback_reason: Some(format!(
                         "rollback verification failed: {} expected={} actual={}",
                         verification.reason_code, verification.expected, verification.actual
@@ -740,8 +740,8 @@ impl LiveExperimentManager {
             observation,
             cpu_topology_signature: None,
             result: CandidateMemoryResult::Reverted,
-            diagnostic_baseline_diagnostic_score_total: Some(experiment.baseline_score.score.total),
-            diagnostic_current_diagnostic_score_total: Some(observation.score.total),
+            diagnostic_baseline_raw_score_total: Some(experiment.baseline_score.score.total),
+            diagnostic_current_raw_score_total: Some(observation.score.total),
             rollback_reason: Some(reason.to_owned()),
             cooldown_expires_unix_nanos: Some(
                 now_unix_nanos

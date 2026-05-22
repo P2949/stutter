@@ -64,7 +64,7 @@ pub struct KeptCandidateHistoryEntry {
     pub kept_unix_nanos: u128,
     pub result: ExperimentResult,
     pub reason: String,
-    pub diagnostic_baseline_diagnostic_score_total: u64,
+    pub diagnostic_baseline_raw_score_total: u64,
     pub diagnostic_candidate_diagnostic_score_total: u64,
     pub rollback_available: bool,
 }
@@ -77,7 +77,7 @@ impl KeptCandidateHistoryEntry {
             kept_unix_nanos: state.kept_unix_nanos,
             result,
             reason: state.reason.clone(),
-            diagnostic_baseline_diagnostic_score_total: state.baseline_score.score.total,
+            diagnostic_baseline_raw_score_total: state.baseline_score.score.total,
             diagnostic_candidate_diagnostic_score_total: state.candidate_score.score.total,
             rollback_available: true,
         }
@@ -323,7 +323,7 @@ mod tests {
         assert_eq!(state.history.len(), 1);
         assert_eq!(state.history[0].profile_name, "game-main");
         assert_eq!(
-            state.history[0].diagnostic_baseline_diagnostic_score_total,
+            state.history[0].diagnostic_baseline_raw_score_total,
             1_000
         );
         assert_eq!(

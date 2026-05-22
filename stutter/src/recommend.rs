@@ -29,7 +29,7 @@ pub struct BaselineTuneRecommendation {
     pub confidence: RankingConfidence,
     pub verdict: TuneRecommendationVerdict,
     pub summary: String,
-    pub diagnostic_baseline_diagnostic_score_total: u64,
+    pub diagnostic_baseline_raw_score_total: u64,
     pub best_median_diagnostic_score_total: Option<u64>,
     pub score_delta_abs: Option<i64>,
     pub score_delta_percent: Option<f64>,
@@ -260,7 +260,7 @@ pub fn build_baseline_tune_recommendation(
         confidence: summary.ranking_confidence,
         verdict,
         summary: summary_text,
-        diagnostic_baseline_diagnostic_score_total: baseline_score.total,
+        diagnostic_baseline_raw_score_total: baseline_score.total,
         best_median_diagnostic_score_total,
         score_delta_abs,
         score_delta_percent,
@@ -299,7 +299,7 @@ pub fn render_baseline_tune_recommendation_markdown(rec: &BaselineTuneRecommenda
         &mut out,
         format!(
             "- Baseline score: {}",
-            rec.diagnostic_baseline_diagnostic_score_total
+            rec.diagnostic_baseline_raw_score_total
         ),
     );
     pushln(
@@ -646,7 +646,7 @@ mod tests {
 
         assert_eq!(json["schema_version"], 2);
         assert_eq!(json["best_profile"], "best");
-        assert_eq!(json["diagnostic_baseline_diagnostic_score_total"], 200);
+        assert_eq!(json["diagnostic_baseline_raw_score_total"], 200);
         assert_eq!(json["baseline_over_5ms"], 2);
         assert!(json["best_median_over_5ms"].is_number());
         assert!(json["over_5ms_delta_abs"].is_number());
@@ -715,7 +715,7 @@ mod tests {
 
         let rec = build_baseline_tune_recommendation(&baseline, &tune).unwrap();
 
-        assert_eq!(rec.diagnostic_baseline_diagnostic_score_total, 50);
+        assert_eq!(rec.diagnostic_baseline_raw_score_total, 50);
         assert_eq!(rec.verdict, TuneRecommendationVerdict::NeedsRetest);
         assert!(
             rec.warnings
