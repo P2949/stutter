@@ -71,7 +71,7 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/autotune/controller.rs",
-        max_lines: 1_425,
+        max_lines: 1_423,
         reason: "Core control loop; needs split into policy/action/metrics",
     },
     OversizedRustFileAllowance {

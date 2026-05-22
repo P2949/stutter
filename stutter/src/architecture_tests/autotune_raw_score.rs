@@ -8,7 +8,7 @@ fn collect_rs_files(dir: &Path) -> Vec<std::path::PathBuf> {
             let path = entry.path();
             if path.is_dir() {
                 files.extend(collect_rs_files(&path));
-            } else if path.extension().map_or(false, |ext| ext == "rs") {
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
                 files.push(path);
             }
         }
@@ -68,17 +68,13 @@ fn controller_does_not_directly_branch_on_raw_score_totals() {
 fn raw_score_total_usage_is_confined_to_known_diagnostic_or_test_paths() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/autotune");
 
-    let allowed = [
-        "candidate_memory.rs",
-        "runtime/daemon_state.rs",
-    ];
+    let allowed = ["candidate_memory.rs", "runtime/daemon_state.rs"];
 
     for path in collect_rs_files(&root) {
         let relative = path.strip_prefix(&root).unwrap().to_string_lossy();
         let source = std::fs::read_to_string(&path).unwrap();
 
-        let uses_raw_total =
-            source.contains(".score.total")
+        let uses_raw_total = source.contains(".score.total")
             || source.contains("score_total()")
             || source.contains("raw_score_total");
 

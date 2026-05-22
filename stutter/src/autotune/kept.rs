@@ -322,10 +322,7 @@ mod tests {
         );
         assert_eq!(state.history.len(), 1);
         assert_eq!(state.history[0].profile_name, "game-main");
-        assert_eq!(
-            state.history[0].diagnostic_baseline_raw_score_total,
-            1_000
-        );
+        assert_eq!(state.history[0].diagnostic_baseline_raw_score_total, 1_000);
         assert_eq!(
             state.history[0].diagnostic_candidate_diagnostic_score_total,
             850
