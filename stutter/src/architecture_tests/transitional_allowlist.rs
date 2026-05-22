@@ -17,7 +17,7 @@ macro_rules! migration_module {
     };
 }
 
-pub(in crate::architecture_tests) const MAX_MIGRATION_MARKER_MODULES: usize = 40;
+pub(in crate::architecture_tests) const MAX_MIGRATION_MARKER_MODULES: usize = 30;
 
 pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationModuleAllowance] = &[
 
@@ -102,23 +102,9 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "remove once parsing entry points live fully in cli/parse.rs"
     ),
 
-    migration_module!(
-        "src/community_rules/import/mod.rs",
-        "community-rule import namespace wraps the existing importer during import split",
-        "remove once importer call sites use the final import modules directly"
-    ),
 
-    migration_module!(
-        "src/community_rules/import/report.rs",
-        "community-rule import report facade keeps result types stable during split",
-        "remove once report types live here without re-export compatibility"
-    ),
 
-    migration_module!(
-        "src/daemon/policy/explain.rs",
-        "daemon policy explanation facade preserves old paths during policy split",
-        "remove once callers import final policy explanation modules directly"
-    ),
+
 
     migration_module!(
         "src/ebpf/attach.rs",
@@ -150,41 +136,13 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "foreground command-runner injection target exists during foreground split",
         "remove once command execution is fully injected through this module"
     ),
-    migration_module!(
-        "src/process/mod.rs",
-        "process facade preserves old imports while process_tree splits",
-        "remove once callers import concrete process modules directly"
-    ),
+
     migration_module!(
         "src/process/procfs.rs",
         "procfs reader trait remains while process-tree I/O splits",
         "remove once process-tree I/O uses the final procfs boundary"
     ),
-    migration_module!(
-        "src/profiles/apply.rs",
-        "profile apply facade preserves old imports during profile split",
-        "remove once profile application callers target the final module boundary"
-    ),
-    migration_module!(
-        "src/profiles/cache.rs",
-        "profile cache facade preserves old imports during profile split",
-        "remove once profile cache callers target the final module boundary"
-    ),
-    migration_module!(
-        "src/profiles/matcher.rs",
-        "profile matcher facade preserves old imports during profile split",
-        "remove once profile matcher callers target the final module boundary"
-    ),
-    migration_module!(
-        "src/profiles/model.rs",
-        "profile model facade preserves old imports during profile split",
-        "remove once profile model callers target the final module boundary"
-    ),
-    migration_module!(
-        "src/profiles/plan.rs",
-        "profile plan facade preserves old imports during profile split",
-        "remove once profile planning callers target the final module boundary"
-    ),
+
 
 
     migration_module!(
@@ -197,11 +155,7 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "session-stage context remains while tick extraction adopts shared context incrementally",
         "remove once tick extraction owns the context and no local dead code allowance is needed"
     ),
-    migration_module!(
-        "src/session/target.rs",
-        "target-stage facade preserves paths while targeting.rs remains active",
-        "remove once target-stage callers use the final module directly"
-    ),
+
     migration_module!(
         "src/session/ticks/mod.rs",
         "tick-context namespace exists during session stage extraction",

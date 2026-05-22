@@ -10,7 +10,7 @@ pub mod paths;
 pub mod classify;
 pub mod commands;
 pub mod db;
-pub mod import;
+
 pub mod load;
 pub mod model;
 pub mod normalize;
