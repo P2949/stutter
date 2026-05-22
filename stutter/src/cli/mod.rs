@@ -6,7 +6,6 @@ mod agent;
 mod autotune;
 mod config;
 mod daemon;
-mod map;
 mod monitor;
 mod parse;
 mod report;

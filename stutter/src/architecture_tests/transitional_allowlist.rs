@@ -17,7 +17,7 @@ macro_rules! migration_module {
     };
 }
 
-pub(in crate::architecture_tests) const MAX_MIGRATION_MARKER_MODULES: usize = 71;
+pub(in crate::architecture_tests) const MAX_MIGRATION_MARKER_MODULES: usize = 48;
 
 pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationModuleAllowance] = &[
     migration_module!(
@@ -106,41 +106,6 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "remove once old runtime startup-recovery paths are unused"
     ),
     migration_module!(
-        "src/cli/map/autotune.rs",
-        "CLI command-family mapping placeholder keeps the staged parser split compiling",
-        "remove once autotune command mapping has moved from cli/mod.rs"
-    ),
-    migration_module!(
-        "src/cli/map/daemon.rs",
-        "CLI command-family mapping placeholder keeps the staged parser split compiling",
-        "remove once daemon command mapping has moved from cli/mod.rs"
-    ),
-    migration_module!(
-        "src/cli/map/mod.rs",
-        "CLI command-family mapping namespace keeps the staged parser split compiling",
-        "remove once command-family mapping has moved from cli/mod.rs"
-    ),
-    migration_module!(
-        "src/cli/map/monitor.rs",
-        "CLI command-family mapping placeholder keeps the staged parser split compiling",
-        "remove once monitor command mapping has moved from cli/mod.rs"
-    ),
-    migration_module!(
-        "src/cli/map/report.rs",
-        "CLI command-family mapping placeholder keeps the staged parser split compiling",
-        "remove once report command mapping has moved from cli/mod.rs"
-    ),
-    migration_module!(
-        "src/cli/map/rules.rs",
-        "CLI command-family mapping placeholder keeps the staged parser split compiling",
-        "remove once rules command mapping has moved from cli/mod.rs"
-    ),
-    migration_module!(
-        "src/cli/map/service.rs",
-        "CLI command-family mapping placeholder keeps the staged parser split compiling",
-        "remove once service command mapping has moved from cli/mod.rs"
-    ),
-    migration_module!(
         "src/cli/parse.rs",
         "CLI parse facade remains while parse_app_command migrates from cli/mod.rs",
         "remove once parsing entry points live fully in cli/parse.rs"
@@ -186,11 +151,6 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "remove once attach logic is fully owned here and old loader paths are unused"
     ),
     migration_module!(
-        "src/ebpf/capabilities.rs",
-        "eBPF capability target exists while probing migrates from ebpf_loader",
-        "remove once capability probing is fully owned here and old loader paths are unused"
-    ),
-    migration_module!(
         "src/ebpf/maps.rs",
         "eBPF map target exists while map setup migrates from ebpf_loader",
         "remove once map setup is fully owned here and old loader paths are unused"
@@ -199,11 +159,6 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "src/ebpf/object.rs",
         "eBPF object target exists while object loading migrates from ebpf_loader",
         "remove once object loading is fully owned here and old loader paths are unused"
-    ),
-    migration_module!(
-        "src/ebpf/ringbuf.rs",
-        "eBPF ring/perf buffer target exists while setup migrates from ebpf_loader",
-        "remove once ring/perf setup is fully owned here and old loader paths are unused"
     ),
     migration_module!(
         "src/ebpf/tracepoint_format.rs",
@@ -261,11 +216,6 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "remove once profile validation callers target the final module boundary"
     ),
     migration_module!(
-        "src/profiles/verify.rs",
-        "profile verify extraction target exists during profile split",
-        "remove once profile verification callers target the final module boundary"
-    ),
-    migration_module!(
         "src/remote/compat.rs",
         "remote compatibility namespace keeps remote API paths stable during split",
         "remove once remote API callers use canonical modules directly"
@@ -274,41 +224,6 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "src/schemas/mod.rs",
         "schema facade preserves serialized model imports while schemas move from owners",
         "remove once callers import concrete schema modules directly"
-    ),
-    migration_module!(
-        "src/service/autotune.rs",
-        "service boundary exists while agent and CLI autotune call sites migrate incrementally",
-        "remove once autotune service callers use the final service boundary"
-    ),
-    migration_module!(
-        "src/service/community_rules.rs",
-        "service boundary exists while community-rule command call sites migrate incrementally",
-        "remove once community-rule callers use the final service boundary"
-    ),
-    migration_module!(
-        "src/service/daemon.rs",
-        "service boundary exists while agent and CLI daemon call sites migrate incrementally",
-        "remove once daemon service callers use the final service boundary"
-    ),
-    migration_module!(
-        "src/service/profile.rs",
-        "service boundary exists while profile command call sites migrate incrementally",
-        "remove once profile service callers use the final service boundary"
-    ),
-    migration_module!(
-        "src/service/recording.rs",
-        "service boundary exists while agent and CLI recording call sites migrate incrementally",
-        "remove once recording service callers use the final service boundary"
-    ),
-    migration_module!(
-        "src/service/report.rs",
-        "service boundary exists while report command call sites migrate incrementally",
-        "remove once report service callers use the final service boundary"
-    ),
-    migration_module!(
-        "src/service/scenario.rs",
-        "service boundary exists while scenario command call sites migrate incrementally",
-        "remove once scenario service callers use the final service boundary"
     ),
     migration_module!(
         "src/session.rs",
@@ -321,39 +236,9 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "remove once target-stage callers use the final module directly"
     ),
     migration_module!(
-        "src/session/ticks/frame.rs",
-        "frame tick context exists during session stage extraction",
-        "remove once frame ticking is fully owned here and used by session runtime"
-    ),
-    migration_module!(
-        "src/session/ticks/hardware.rs",
-        "hardware tick context exists during session stage extraction",
-        "remove once hardware ticking is fully owned here and used by session runtime"
-    ),
-    migration_module!(
         "src/session/ticks/mod.rs",
         "tick-context namespace exists during session stage extraction",
         "remove once tick contexts are fully owned by concrete tick modules"
-    ),
-    migration_module!(
-        "src/session/ticks/probe.rs",
-        "probe tick context exists during session stage extraction",
-        "remove once probe ticking is fully owned here and used by session runtime"
-    ),
-    migration_module!(
-        "src/session/ticks/summary.rs",
-        "summary tick context exists during session stage extraction",
-        "remove once summary ticking is fully owned here and used by session runtime"
-    ),
-    migration_module!(
-        "src/session/ticks/target.rs",
-        "target tick context exists during session stage extraction",
-        "remove once target ticking is fully owned here and used by session runtime"
-    ),
-    migration_module!(
-        "src/session/ticks/telemetry.rs",
-        "telemetry tick context exists during session stage extraction",
-        "remove once telemetry ticking is fully owned here and used by session runtime"
     ),
     migration_module!(
         "src/system/cgroup.rs",

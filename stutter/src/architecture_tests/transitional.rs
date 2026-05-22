@@ -19,6 +19,34 @@ fn bullet_list(items: &[String]) -> String {
         .join("\n")
 }
 
+fn has_meaningful_non_marker_code(source: &str) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim();
+        !trimmed.is_empty()
+            && !trimmed.starts_with("//")
+            && !trimmed.starts_with("//!")
+            && !trimmed.starts_with("#![allow")
+    })
+}
+
+fn looks_like_single_zero_sized_placeholder(source: &str) -> bool {
+    let meaningful = source
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            !line.is_empty()
+                && !line.starts_with("//")
+                && !line.starts_with("//!")
+                && !line.starts_with("#![allow")
+                && !line.starts_with("#[derive")
+        })
+        .collect::<Vec<_>>();
+
+    meaningful.len() == 1
+        && meaningful[0].starts_with("pub(crate) struct ")
+        && meaningful[0].ends_with(';')
+}
+
 #[test]
 fn temporary_migration_markers_are_tracked() {
     let mut allowance_paths = BTreeSet::new();
@@ -44,6 +72,8 @@ fn temporary_migration_markers_are_tracked() {
 
     let mut discovered = Vec::new();
     let mut missing_exit = Vec::new();
+    let mut empty_markers = Vec::new();
+    let mut marker_struct_placeholders = Vec::new();
 
     for path in rust_files_under(&crate_src_root()) {
         let relative = relative_to_crate_root(&path);
@@ -70,6 +100,12 @@ fn temporary_migration_markers_are_tracked() {
         }
 
         if has_marker {
+            if !has_meaningful_non_marker_code(&source) {
+                empty_markers.push(relative.clone());
+            }
+            if looks_like_single_zero_sized_placeholder(&source) {
+                marker_struct_placeholders.push(relative.clone());
+            }
             discovered.push(relative);
         }
     }
@@ -97,6 +133,16 @@ fn temporary_migration_markers_are_tracked() {
         missing_exit.is_empty(),
         "migration markers missing an Exit line:\n{}",
         bullet_list(&missing_exit)
+    );
+    assert!(
+        empty_markers.is_empty(),
+        "migration marker modules with no meaningful code:\n{}",
+        bullet_list(&empty_markers)
+    );
+    assert!(
+        marker_struct_placeholders.is_empty(),
+        "migration marker modules that only define a zero-sized placeholder struct:\n{}",
+        bullet_list(&marker_struct_placeholders)
     );
     assert!(
         discovered.len() <= MAX_MIGRATION_MARKER_MODULES,

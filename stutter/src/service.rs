@@ -3,14 +3,6 @@ use std::{fmt, fs, path::PathBuf, str::FromStr};
 use anyhow::Context;
 use serde::Serialize;
 
-pub(crate) mod autotune;
-pub(crate) mod community_rules;
-pub(crate) mod daemon;
-pub(crate) mod profile;
-pub(crate) mod recording;
-pub(crate) mod report;
-pub(crate) mod scenario;
-
 const SYSTEMD_AGENT_UNIT: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../packaging/systemd/stutter-agent.service"
