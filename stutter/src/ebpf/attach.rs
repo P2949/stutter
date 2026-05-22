@@ -1,6 +1,3 @@
-#![allow(dead_code)] // Transitional eBPF split: attach logic migrates from ebpf_loader.
-// Exit: remove this marker once the described migration is complete and the local allow is no longer needed.
-
 use aya::{
     Ebpf,
     programs::{PerfEvent, TracePoint},
@@ -171,9 +168,4 @@ pub(crate) fn attach_software_perf_event(
     }
 
     Ok(())
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct AttachPlan {
-    pub tracepoints: Vec<&'static str>,
 }
