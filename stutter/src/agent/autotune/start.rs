@@ -225,6 +225,8 @@ pub(crate) async fn autotune_start_handler(
 
         let (stop_tx, stop_rx) = oneshot::channel();
         let duration = remote_autotune_controller_duration(policy.mode, input.duration_seconds);
+        // Remote handlers keep the cancellation sender and join handle; the controller task owns
+        // runtime state and reports completion through the join result.
         let join = tokio::spawn(async move {
             run_autotune_controller_session(monitor_config, runtime_config, Some(stop_rx), duration)
                 .await

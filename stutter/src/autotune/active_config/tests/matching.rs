@@ -8,8 +8,8 @@ use crate::{
             ActiveConfigCollectorInput, ActiveConfigMatch, ActiveConfigMatchInput,
             candidate_is_noop, candidate_is_noop_with_tasks, collect_active_config,
         },
-        candidate::CandidateAction,
         observation::ActiveConfigSnapshot,
+        planning::candidate::CandidateAction,
     },
     daemon::capabilities::DaemonCapabilities,
     process_tree::TaskClass,
@@ -59,7 +59,7 @@ fn candidate_active_config_match_reports_difference_for_task_actions() {
     });
 
     let candidate = CandidateAction::Nice {
-        plan: crate::autotune::candidate::NiceActionPlan {
+        plan: crate::autotune::planning::executable_plan::NiceActionPlan {
             name: "nice-diff".to_owned(),
             action: crate::actions::nice::NiceAction {
                 targets: vec![crate::actions::TaskIdentity {
@@ -128,7 +128,7 @@ fn candidate_noop_helper_matches_typed_snapshot_for_task_actions() {
     });
 
     let candidate = CandidateAction::Nice {
-        plan: crate::autotune::candidate::NiceActionPlan {
+        plan: crate::autotune::planning::executable_plan::NiceActionPlan {
             name: "nice-noop".to_owned(),
             action: crate::actions::nice::NiceAction {
                 targets: vec![crate::actions::TaskIdentity {

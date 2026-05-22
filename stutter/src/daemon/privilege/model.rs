@@ -6,8 +6,10 @@ use super::{serde_u128_string, stable_error_reason_code};
 use crate::{
     actions::{ActionState, RollbackToken, SafetyClass},
     autotune::{
-        candidate::{CandidateAction, CandidateDryRunRecord, CandidatePlanFile},
         objective::ObjectiveKind,
+        planning::{
+            candidate::CandidateAction, dry_run::CandidateDryRunRecord, plan_io::CandidatePlanFile,
+        },
     },
     daemon_policy::{ActionDescriptor, DaemonPolicy, DaemonPolicyContext, PolicyIntent},
 };

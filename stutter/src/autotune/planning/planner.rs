@@ -2,11 +2,11 @@
 
 use crate::{
     autotune::{
-        candidate::{CandidateDryRunner, RealCandidateDryRunner},
         controller::ControllerRuntimeState,
         kept::ActiveProfileState,
         observation::AutotuneObservation,
         planning::{
+            dry_run::{CandidateDryRunner, RealCandidateDryRunner},
             evaluate::evaluate_proposals_with_runner,
             model::PlanResult,
             ranking::{no_action_reason_for_evaluations, sort_candidate_evaluations},

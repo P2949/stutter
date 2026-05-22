@@ -1,8 +1,11 @@
 use crate::{
     actions::ioprio::{IoPrioAction, IoPrioPolicy, IoPrioValue},
     autotune::{
-        candidate::{CandidateAction, CandidateEvidence, IoPrioActionPlan},
         objective::ObjectiveKind,
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            executable_plan::IoPrioActionPlan,
+        },
         protection::mutation_allowed_for_pid,
         providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
         situation::SituationKind,

@@ -9,8 +9,8 @@ use crate::{
     actions::{RollbackToken, SafetyClass},
     autotune::{
         apply_low_risk::apply_candidate_with_audit,
-        candidate::CandidateAction,
         observation::{ActiveConfigSnapshot, AutotuneObservation},
+        planning::candidate::CandidateAction,
     },
     daemon::{
         policy::DaemonMode,

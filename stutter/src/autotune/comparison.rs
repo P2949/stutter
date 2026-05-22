@@ -38,6 +38,8 @@ pub struct ScoreComparisonConfig {
     pub min_improvement_percent: f64,
     pub max_regression_percent: f64,
     pub max_frame_p99_regression_ms: f64,
+    pub max_over_5ms_regression_per_1k_samples: f64,
+    // Raw-count compatibility field for older callers. Keep decision logic on normalized rates.
     pub max_over_5ms_regression: u64,
 }
 
@@ -45,6 +47,7 @@ pub(crate) const DEFAULT_SCORE_COMPARISON_CONFIG: ScoreComparisonConfig = ScoreC
     min_improvement_percent: 12.5,
     max_regression_percent: 7.5,
     max_frame_p99_regression_ms: 2.0,
+    max_over_5ms_regression_per_1k_samples: 0.0,
     max_over_5ms_regression: 0,
 };
 
@@ -116,6 +119,14 @@ pub struct ScoreComparisonInput<'a> {
     pub target_disappeared: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ComparableScore {
+    score_per_sample: f64,
+    over_5ms_per_sample: f64,
+    raw_total: u64,
+    raw_over_5ms: u64,
+}
+
 #[derive(Clone, Debug)]
 pub struct ExperimentComparisonPolicy {
     pub min_improvement_ratio: f64,
@@ -142,6 +153,8 @@ impl ExperimentComparisonPolicy {
             min_improvement_percent: ratio_to_improvement_percent(self.min_improvement_ratio),
             max_regression_percent: ratio_to_regression_percent(self.max_regression_ratio),
             max_frame_p99_regression_ms: self.regressed_frame_p99_slack_ms,
+            max_over_5ms_regression_per_1k_samples: DEFAULT_SCORE_COMPARISON_CONFIG
+                .max_over_5ms_regression_per_1k_samples,
             max_over_5ms_regression: DEFAULT_SCORE_COMPARISON_CONFIG.max_over_5ms_regression,
         }
     }
@@ -189,8 +202,17 @@ pub fn compare_scores_with_config(
         return ExperimentResult::Invalid { reason };
     }
 
+    let baseline = match comparable_score("baseline", input.baseline) {
+        Ok(score) => score,
+        Err(reason) => return ExperimentResult::Invalid { reason },
+    };
+    let candidate = match comparable_score("candidate", input.candidate) {
+        Ok(score) => score,
+        Err(reason) => return ExperimentResult::Invalid { reason },
+    };
+
     let regression_percent =
-        regression_percent(input.baseline.score.total, input.candidate.score.total);
+        regression_percent_f64(baseline.score_per_sample, candidate.score_per_sample);
 
     if input.target_disappeared {
         return ExperimentResult::Regressed { regression_percent };
@@ -204,12 +226,11 @@ pub fn compare_scores_with_config(
         return ExperimentResult::Regressed { regression_percent };
     }
 
-    if input.candidate.score.over_5ms
-        > input
-            .baseline
-            .score
-            .over_5ms
-            .saturating_add(config.max_over_5ms_regression)
+    let baseline_over_5ms_per_1k = baseline.over_5ms_per_sample * 1_000.0;
+    let candidate_over_5ms_per_1k = candidate.over_5ms_per_sample * 1_000.0;
+
+    if candidate_over_5ms_per_1k
+        > baseline_over_5ms_per_1k + config.max_over_5ms_regression_per_1k_samples
     {
         return ExperimentResult::Regressed { regression_percent };
     }
@@ -221,11 +242,11 @@ pub fn compare_scores_with_config(
     }
 
     let improvement_percent =
-        improvement_percent(input.baseline.score.total, input.candidate.score.total);
+        improvement_percent_f64(baseline.score_per_sample, candidate.score_per_sample);
 
     if input.data_quality.is_acceptable_for_improvement()
         && improvement_percent >= config.min_improvement_percent
-        && input.candidate.score.over_5ms <= input.baseline.score.over_5ms
+        && candidate.over_5ms_per_sample <= baseline.over_5ms_per_sample
         && input.candidate.score.frame_p99_ms
             <= input.baseline.score.frame_p99_ms + config.max_frame_p99_regression_ms
     {
@@ -236,13 +257,47 @@ pub fn compare_scores_with_config(
 
     ExperimentResult::Inconclusive {
         reason: format!(
-            "candidate did not meet conservative thresholds: improvement_percent={:.2} min_improvement_percent={:.2} regression_percent={:.2} max_regression_percent={:.2}",
+            "candidate did not meet conservative thresholds: improvement_percent={:.2} min_improvement_percent={:.2} regression_percent={:.2} max_regression_percent={:.2} baseline_score_per_sample={:.6} candidate_score_per_sample={:.6} baseline_over_5ms_per_1k_samples={:.6} candidate_over_5ms_per_1k_samples={:.6} baseline_raw_total={} candidate_raw_total={} baseline_raw_over_5ms={} candidate_raw_over_5ms={} baseline_scored_samples={} candidate_scored_samples={}",
             improvement_percent,
             config.min_improvement_percent,
             regression_percent,
-            config.max_regression_percent
+            config.max_regression_percent,
+            baseline.score_per_sample,
+            candidate.score_per_sample,
+            baseline_over_5ms_per_1k,
+            candidate_over_5ms_per_1k,
+            baseline.raw_total,
+            candidate.raw_total,
+            baseline.raw_over_5ms,
+            candidate.raw_over_5ms,
+            input.baseline.scored_samples,
+            input.candidate.scored_samples
         ),
     }
+}
+
+fn comparable_score(label: &str, score: &WindowScore) -> Result<ComparableScore, String> {
+    let score_per_sample = score
+        .score_per_sample()
+        .ok_or_else(|| format!("{label} score_per_sample is missing"))?;
+    let over_5ms_per_sample = score
+        .over_5ms_per_sample()
+        .ok_or_else(|| format!("{label} over_5ms_per_sample is missing"))?;
+
+    if !score_per_sample.is_finite() {
+        return Err(format!("{label} score_per_sample is not finite"));
+    }
+
+    if !over_5ms_per_sample.is_finite() {
+        return Err(format!("{label} over_5ms_per_sample is not finite"));
+    }
+
+    Ok(ComparableScore {
+        score_per_sample,
+        over_5ms_per_sample,
+        raw_total: score.score.total,
+        raw_over_5ms: score.score.over_5ms,
+    })
 }
 
 fn validate_score_comparison_config(config: &ScoreComparisonConfig) -> Result<(), String> {
@@ -264,6 +319,15 @@ fn validate_score_comparison_config(config: &ScoreComparisonConfig) -> Result<()
         return Err(format!(
             "max_frame_p99_regression_ms must be finite and non-negative: {}",
             config.max_frame_p99_regression_ms
+        ));
+    }
+
+    if !config.max_over_5ms_regression_per_1k_samples.is_finite()
+        || config.max_over_5ms_regression_per_1k_samples < 0.0
+    {
+        return Err(format!(
+            "max_over_5ms_regression_per_1k_samples must be finite and non-negative: {}",
+            config.max_over_5ms_regression_per_1k_samples
         ));
     }
 
@@ -310,21 +374,21 @@ fn ratio_to_regression_percent(ratio: f64) -> f64 {
     }
 }
 
-fn improvement_percent(baseline_total: u64, candidate_total: u64) -> f64 {
-    if baseline_total == 0 || candidate_total >= baseline_total {
+fn improvement_percent_f64(baseline: f64, candidate: f64) -> f64 {
+    if baseline <= 0.0 || candidate >= baseline {
         0.0
     } else {
-        ((baseline_total - candidate_total) as f64 / baseline_total as f64) * 100.0
+        ((baseline - candidate) / baseline) * 100.0
     }
 }
 
-pub(crate) fn regression_percent(baseline_total: u64, candidate_total: u64) -> f64 {
-    if candidate_total <= baseline_total {
+pub(crate) fn regression_percent_f64(baseline: f64, candidate: f64) -> f64 {
+    if candidate <= baseline {
         0.0
-    } else if baseline_total == 0 {
+    } else if baseline <= 0.0 {
         100.0
     } else {
-        ((candidate_total - baseline_total) as f64 / baseline_total as f64) * 100.0
+        ((candidate - baseline) / baseline) * 100.0
     }
 }
 
@@ -350,6 +414,19 @@ mod tests {
         }
     }
 
+    fn window_with_samples(
+        total: u64,
+        over_5ms: u64,
+        frame_p99_ms: f64,
+        scored_samples: u64,
+        interval_count: usize,
+    ) -> WindowScore {
+        let mut score = window(total, over_5ms, frame_p99_ms);
+        score.scored_samples = scored_samples;
+        score.interval_count = interval_count;
+        score
+    }
+
     fn input<'a>(
         baseline: &'a WindowScore,
         candidate: &'a WindowScore,
@@ -362,6 +439,61 @@ mod tests {
             data_quality,
             target_disappeared,
         }
+    }
+
+    fn high_quality_result(baseline: &WindowScore, candidate: &WindowScore) -> ExperimentResult {
+        compare_experiment(input(
+            baseline,
+            candidate,
+            ExperimentDataQuality::High,
+            false,
+        ))
+    }
+
+    #[test]
+    fn normalized_score_rates_drive_experiment_result() {
+        assert!(matches!(
+            high_quality_result(
+                &window_with_samples(1_000, 10, 12.0, 100, 10),
+                &window_with_samples(3_000, 30, 12.0, 300, 30)
+            ),
+            ExperimentResult::Inconclusive { .. }
+        ));
+        assert!(matches!(
+            high_quality_result(
+                &window_with_samples(1_000, 10, 12.0, 1_000, 100),
+                &window_with_samples(900, 1, 12.0, 100, 10)
+            ),
+            ExperimentResult::Regressed { .. }
+        ));
+        assert!(matches!(
+            high_quality_result(
+                &window_with_samples(1_000, 10, 12.0, 100, 10),
+                &window_with_samples(1_500, 30, 12.0, 300, 30)
+            ),
+            ExperimentResult::Improved { .. }
+        ));
+
+        match high_quality_result(
+            &window_with_samples(1_000, 10, 12.0, 100, 10),
+            &window_with_samples(875, 10, 13.0, 100, 10),
+        ) {
+            ExperimentResult::Improved {
+                improvement_percent,
+            } => assert!((improvement_percent - 12.5).abs() < 0.0001),
+            other => panic!("expected Improved, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn longer_candidate_window_with_same_over_5ms_rate_is_not_rejected() {
+        let baseline = window_with_samples(1_000, 10, 12.0, 100, 10);
+        let candidate = window_with_samples(2_400, 30, 12.0, 300, 30);
+
+        assert!(matches!(
+            high_quality_result(&baseline, &candidate),
+            ExperimentResult::Improved { .. }
+        ));
     }
 
     #[test]
@@ -567,6 +699,7 @@ mod tests {
         assert_eq!(config.min_improvement_percent, 12.5);
         assert_eq!(config.max_regression_percent, 7.5);
         assert_eq!(config.max_frame_p99_regression_ms, 2.0);
+        assert_eq!(config.max_over_5ms_regression_per_1k_samples, 0.0);
         assert_eq!(config.max_over_5ms_regression, 0);
 
         assert!(
@@ -578,6 +711,10 @@ mod tests {
         assert_eq!(
             config.max_frame_p99_regression_ms,
             policy_config.max_frame_p99_regression_ms
+        );
+        assert_eq!(
+            config.max_over_5ms_regression_per_1k_samples,
+            policy_config.max_over_5ms_regression_per_1k_samples
         );
         assert_eq!(
             config.max_over_5ms_regression,
@@ -601,6 +738,7 @@ mod tests {
                 min_improvement_percent: 20.0,
                 max_regression_percent: 7.5,
                 max_frame_p99_regression_ms: 2.0,
+                max_over_5ms_regression_per_1k_samples: 0.0,
                 max_over_5ms_regression: 0,
             },
             None,
@@ -630,6 +768,7 @@ mod tests {
                 min_improvement_percent: 12.5,
                 max_regression_percent: 7.5,
                 max_frame_p99_regression_ms: 2.0,
+                max_over_5ms_regression_per_1k_samples: 0.0,
                 max_over_5ms_regression: 0,
             },
             None,
@@ -639,6 +778,12 @@ mod tests {
             ExperimentResult::Inconclusive { reason } => {
                 assert!(reason.contains("candidate did not meet conservative thresholds"));
                 assert!(reason.contains("improvement_percent=10.00"));
+                assert!(reason.contains("baseline_score_per_sample=10.000000"));
+                assert!(reason.contains("candidate_score_per_sample=9.000000"));
+                assert!(reason.contains("baseline_raw_total=1000"));
+                assert!(reason.contains("candidate_raw_total=900"));
+                assert!(reason.contains("baseline_scored_samples=100"));
+                assert!(reason.contains("candidate_scored_samples=100"));
             }
             other => panic!("expected Inconclusive, got {other:?}"),
         }
@@ -660,6 +805,7 @@ mod tests {
                 min_improvement_percent: 12.5,
                 max_regression_percent: 7.5,
                 max_frame_p99_regression_ms: 2.0,
+                max_over_5ms_regression_per_1k_samples: 0.0,
                 max_over_5ms_regression: 0,
             },
             None,
@@ -689,6 +835,7 @@ mod tests {
                 min_improvement_percent: 12.5,
                 max_regression_percent: 7.5,
                 max_frame_p99_regression_ms: 2.0,
+                max_over_5ms_regression_per_1k_samples: 0.0,
                 max_over_5ms_regression: 0,
             },
             None,
@@ -713,6 +860,7 @@ mod tests {
                 min_improvement_percent: 12.5,
                 max_regression_percent: 7.5,
                 max_frame_p99_regression_ms: 2.0,
+                max_over_5ms_regression_per_1k_samples: 10.0,
                 max_over_5ms_regression: 1,
             },
             None,
@@ -738,6 +886,7 @@ mod tests {
                 min_improvement_percent: 12.5,
                 max_regression_percent: 7.5,
                 max_frame_p99_regression_ms: 2.0,
+                max_over_5ms_regression_per_1k_samples: 10.0,
                 max_over_5ms_regression: 1,
             },
             None,
@@ -762,6 +911,7 @@ mod tests {
                 min_improvement_percent: f64::NAN,
                 max_regression_percent: 7.5,
                 max_frame_p99_regression_ms: 2.0,
+                max_over_5ms_regression_per_1k_samples: 0.0,
                 max_over_5ms_regression: 0,
             },
             None,
@@ -816,7 +966,8 @@ mod tests {
     fn compare_scores_can_use_threshold_policy() {
         let mut baseline = window(1_000, 10, 12.0);
         baseline.scored_samples = 1_000;
-        let candidate = window(890, 10, 12.0);
+        let mut candidate = window(890, 10, 12.0);
+        candidate.scored_samples = 1_000;
 
         let result = compare_scores_with_config(
             ScoreComparisonInput {
@@ -829,6 +980,7 @@ mod tests {
                 min_improvement_percent: 12.5,
                 max_regression_percent: 7.5,
                 max_frame_p99_regression_ms: 2.0,
+                max_over_5ms_regression_per_1k_samples: 0.0,
                 max_over_5ms_regression: 0,
             },
             Some(&ThresholdPolicy::default_tiers()),

@@ -1,5 +1,5 @@
 use crate::{
-    actions::cpu_affinity::CpuAffinityProfileAction, autotune::candidate::CandidateAction,
+    actions::cpu_affinity::CpuAffinityProfileAction, autotune::planning::candidate::CandidateAction,
 };
 
 mod audit;

@@ -14,7 +14,7 @@ use super::decision_log::{
 use crate::{
     actions::{RollbackToken, SafetyClass},
     audit::{AuditEvent, append_audit_event_to_path, audit_or_warn},
-    autotune::{candidate::CandidateAction, kept::ActiveProfileState},
+    autotune::{kept::ActiveProfileState, planning::candidate::CandidateAction},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

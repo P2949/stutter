@@ -4,13 +4,17 @@ use super::super::*;
 pub(super) use crate::{
     actions::{ActionId, ActionState, RollbackToken, SafetyClass, TaskIdentity},
     autotune::{
-        candidate::{CandidateAction, CandidateDryRunRecord, CandidateEvidence, NiceActionPlan},
         controller::{ControllerPolicy, ControllerRuntimeState},
         decision::AutotuneDecision,
         experiment::{ExperimentId, WindowScore},
         kept::ActiveProfileState,
         objective::{ObjectiveKind, ObjectiveSignals},
         observation::{ActiveConfigSnapshot, AutotuneObservation},
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            dry_run::CandidateDryRunRecord,
+            executable_plan::NiceActionPlan,
+        },
         quality::OnlineDataQuality,
         washout::WashoutWindowConfig,
     },

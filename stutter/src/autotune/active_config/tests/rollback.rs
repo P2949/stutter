@@ -1,7 +1,7 @@
 use super::support::*;
 use crate::autotune::{
-    active_config::verify_rollback_restored_baseline, candidate::CandidateAction,
-    observation::ActiveConfigSnapshot,
+    active_config::verify_rollback_restored_baseline, observation::ActiveConfigSnapshot,
+    planning::candidate::CandidateAction,
 };
 
 #[test]

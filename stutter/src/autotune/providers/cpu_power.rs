@@ -1,8 +1,11 @@
 use crate::{
     actions::cpu_power::CpuPowerAction,
     autotune::{
-        candidate::{CandidateAction, CandidateEvidence, CpuPowerActionPlan},
         objective::ObjectiveKind,
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            executable_plan::CpuPowerActionPlan,
+        },
         providers::{
             CandidateProposal, CandidateProvider, CandidateProviderInput,
             signal_quality_confidence_weight,

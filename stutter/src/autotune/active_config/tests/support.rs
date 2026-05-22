@@ -3,10 +3,10 @@ use std::{fs, path::Path};
 use crate::{
     affinity::CpuMask,
     autotune::{
-        candidate::CandidateAction,
         observation::{
             ActiveAffinitySnapshot, ActiveConfigSnapshot, ActiveNiceSnapshot, ActiveTaskSnapshot,
         },
+        planning::candidate::CandidateAction,
     },
     process_tree::TaskClass,
     profiles::{Profile, ProfileRule},
@@ -111,7 +111,7 @@ pub(super) fn active_nice_snapshot(tid: u32, nice: i32) -> ActiveConfigSnapshot 
 
 pub(super) fn nice_candidate_for_rollback() -> CandidateAction {
     CandidateAction::Nice {
-        plan: crate::autotune::candidate::NiceActionPlan {
+        plan: crate::autotune::planning::executable_plan::NiceActionPlan {
             name: "nice-rollback-verification".to_owned(),
             action: crate::actions::nice::NiceAction {
                 targets: vec![crate::actions::TaskIdentity {

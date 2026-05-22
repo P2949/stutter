@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use crate::{
     autotune::{
         AutotuneRuntimeError,
-        candidate::CandidateAction,
         history::default_autotune_history_path,
+        planning::candidate::CandidateAction,
         quality::OnlineDataQualityPolicy,
         runtime::DEFAULT_RUNTIME_WINDOW_SECONDS,
         washout::WashoutWindowConfig,
