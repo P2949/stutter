@@ -1,50 +1,23 @@
-#![allow(unused_imports)]
-use std::{
-    path::{Path, PathBuf},
-    sync::Mutex,
-    time::Duration,
-};
-
-use anyhow::Context;
+use std::{path::PathBuf, sync::Mutex};
 
 use super::super::*;
 pub(super) use crate::{
     actions::{ActionId, ActionState, RollbackToken, SafetyClass, TaskIdentity},
     autotune::{
-        active_config::{RollbackVerification, verify_rollback_restored_baseline},
-        apply_low_risk::apply_candidate_with_audit,
         candidate::{CandidateAction, CandidateDryRunRecord, CandidateEvidence, NiceActionPlan},
-        candidate_memory::CandidateMemoryResult,
-        comparison::{ExperimentDataQuality, ExperimentResult},
-        controller::{
-            ActiveExperiment as ControllerActiveExperiment, ControllerCandidateResultInput,
-            ControllerPolicy, ControllerRuntimeState,
-        },
-        controller_journal::{
-            ControllerJournalActionMetadata, ControllerJournalRecord, ControllerJournalState,
-            default_controller_journal_path, journal_process_identity,
-            write_controller_journal_applied_with_metadata,
-            write_controller_journal_applying_with_metadata, write_controller_journal_record,
-        },
+        controller::{ControllerPolicy, ControllerRuntimeState},
         decision::AutotuneDecision,
         experiment::{ExperimentId, WindowScore},
-        kept::{ActiveProfileState, KeptCandidateState},
-        objective::{
-            ObjectiveComparisonInput, ObjectiveKind, ObjectiveSignals, compare_for_objective,
-        },
+        kept::ActiveProfileState,
+        objective::{ObjectiveKind, ObjectiveSignals},
         observation::{ActiveConfigSnapshot, AutotuneObservation},
         quality::OnlineDataQuality,
-        state::ControllerPhase,
-        system_context::{SystemContextSnapshotInput, collect_system_context},
         washout::WashoutWindowConfig,
     },
     daemon::{
         DaemonPolicy,
-        policy::{DaemonMode, DaemonPolicyContext},
-        privilege::{
-            CandidateApplyRequest, CandidatePlanRequest, PrivilegedActionService, RollbackRequest,
-        },
-        state::{DaemonExperimentState, DaemonRollbackState},
+        policy::DaemonMode,
+        privilege::{CandidateApplyRequest, PrivilegedActionService, RollbackRequest},
     },
     daemon_policy::ActionSource,
     scorer::StutterScore,

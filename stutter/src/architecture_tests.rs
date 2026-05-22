@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+mod allow_attributes;
 mod allowlists;
 mod dependencies;
 mod direct_prints;

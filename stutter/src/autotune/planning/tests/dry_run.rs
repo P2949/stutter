@@ -1,30 +1,8 @@
-#![allow(unused_imports)]
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    path::{Path, PathBuf},
-};
-
 use super::{
-    super::{
-        candidate::*, dry_run::*, executable_plan::*, plan_io::*, profile_candidates::*,
-        suggestion::*,
-    },
+    super::{candidate::*, dry_run::*},
     support::*,
 };
-use crate::{
-    actions::{
-        ActionState, ActionWarning, SafetyClass, TaskIdentity,
-        irq_affinity::{IrqAffinityAction, IrqAffinityEvidence, IrqAffinityRisk},
-        nice::{NiceAction, NicePolicy},
-    },
-    affinity::CpuMask,
-    autotune::{conflicts::ActionConflictGroup, objective::ObjectiveKind},
-    daemon_policy::{ActionDescriptor, ActionEffectScope, DaemonMode, RollbackRequirement},
-    process_tree::TaskClass,
-    profiles::{Profile, ProfileRule},
-    topology::{CoreInfo, CpuInfo, TopologyModel},
-};
+use crate::actions::SafetyClass;
 
 #[test]
 fn dry_run_candidate_records_failure_as_ineligible() {
