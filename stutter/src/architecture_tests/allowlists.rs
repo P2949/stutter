@@ -65,11 +65,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "existing text report renderer pending future split",
     },
     OversizedRustFileAllowance {
-        path: "src/config_file.rs",
-        max_lines: 1_787,
-        reason: "existing config file parser/model implementation pending future split; display topology, DMABUF, and GPU-engine config fields are staged here",
-    },
-    OversizedRustFileAllowance {
         path: "src/report/mod.rs",
         max_lines: 1_553,
         reason: "existing report public module and tests pending future split; display-path comparison entry point is staged here",
