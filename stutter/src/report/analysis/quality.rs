@@ -111,11 +111,52 @@ pub(crate) fn data_quality_summary(
         reasons.push("no active target tasks were present at end of run".to_owned());
     }
 
-    let drop_counters_nonzero = session.core.drop_counters.total() > 0;
+    let drop_counters = &session.core.drop_counters;
 
-    if drop_counters_nonzero {
+    if drop_counters.total() > 0 {
         level = downgrade_quality(level, DataQualityLevel::Medium);
-        reasons.push("eBPF drop counters are non-zero".to_owned());
+
+        if drop_counters.wakeup_data_insert_failed > 0 {
+            reasons.push(format!(
+                "wakeup timestamp inserts failed: {} runnable-latency samples may be missing",
+                drop_counters.wakeup_data_insert_failed
+            ));
+        }
+
+        if drop_counters.wakeup_data_stale_entries > 0 {
+            reasons.push(format!(
+                "wakeup timestamp stale entries detected: {} runnable-latency samples may be stale or dropped",
+                drop_counters.wakeup_data_stale_entries
+            ));
+        }
+
+        if drop_counters.ringbuf_reserve_failed > 0 {
+            reasons.push(format!(
+                "ring buffer reserve failures detected: {} eBPF events were dropped before userspace",
+                drop_counters.ringbuf_reserve_failed
+            ));
+        }
+
+        if drop_counters.irq_start_times_insert_failed > 0 {
+            reasons.push(format!(
+                "IRQ start timestamp inserts failed: {} IRQ latency samples may be missing",
+                drop_counters.irq_start_times_insert_failed
+            ));
+        }
+
+        if drop_counters.block_start_insert_failed > 0 {
+            reasons.push(format!(
+                "block I/O start inserts failed: {} block I/O latency samples may be missing",
+                drop_counters.block_start_insert_failed
+            ));
+        }
+
+        if drop_counters.block_fallback_key_collisions > 0 {
+            reasons.push(format!(
+                "block I/O fallback key collisions detected: {} ambiguous fallback samples were dropped; block I/O latency coverage may be incomplete",
+                drop_counters.block_fallback_key_collisions
+            ));
+        }
     }
 
     let mut percentile_scope_counts = BTreeMap::new();
@@ -206,7 +247,7 @@ pub(crate) fn data_quality_summary(
         spike_events_dropped_count: session.core.spike_events_dropped_count,
         interval_record_count: session.core.interval_record_count,
         active_target_pids_count: session.core.active_target_pids_count,
-        drop_counters_nonzero,
+        drop_counters_nonzero: drop_counters.total() > 0,
         percentile_scope_counts,
         block_io_correlation_basis,
         block_io_correlation_confidence,

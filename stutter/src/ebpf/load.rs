@@ -410,7 +410,7 @@ pub fn load_and_attach(
             log::info!("Block I/O correlation using request pointer identity at offset {offset}");
         } else {
             log::warn!(
-                "Block I/O correlation is approximate: using dev+sector hashing instead of request pointers. Concurrent same-sector requests may collide and cause misattribution."
+                "Block I/O correlation is approximate: using dev+sector hashing instead of request pointers. Concurrent same-sector requests may collide; stutter drops ambiguous fallback samples, so block I/O latency coverage may be incomplete."
             );
         }
 

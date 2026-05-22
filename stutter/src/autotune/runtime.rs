@@ -399,51 +399,86 @@ impl AutotuneRuntime {
         observation: &AutotuneObservation,
     ) -> Option<AutotuneDecision> {
         let snapshot = observation.active_config_snapshot.as_ref()?;
-        let experiment = self.live_experiments.current_experiment()?;
-        let active_config_input = ActiveConfigMatchInput {
-            snapshot,
-            active_tasks: &observation.active_tasks,
-        };
-        let ActiveConfigMatch::Differs { expected, actual } = experiment
-            .candidate
-            .matches_active_config(active_config_input)
-        else {
-            return None;
+
+        let (experiment_id, candidate_name, active_match, simulated_fake_candidate) = {
+            let experiment = self.live_experiments.current_experiment()?;
+            let active_config_input = ActiveConfigMatchInput {
+                snapshot,
+                active_tasks: &observation.active_tasks,
+            };
+
+            (
+                experiment.experiment_id.clone(),
+                experiment.candidate.candidate_name().to_owned(),
+                experiment
+                    .candidate
+                    .matches_active_config(active_config_input),
+                self.config.simulate_action_effects
+                    && matches!(&experiment.candidate, CandidateAction::Fake { .. }),
+            )
         };
 
         let decision = recovery_decision_for_active_experiment(
             self.config.daemon_config.autotune.external_mutation_policy,
         );
-        let experiment_id = experiment.experiment_id.clone();
-        let reason = format!(
-            "external_mutation_detected: active experiment {} no longer matches live state; expected {}; actual {}; recovery_decision={}",
-            experiment.candidate.candidate_name(),
-            expected,
-            actual,
-            decision.reason_code()
+
+        let reason = match active_match {
+            ActiveConfigMatch::Matches { .. } => {
+                return None;
+            }
+            ActiveConfigMatch::Differs { expected, actual } => {
+                format!(
+                    "external_mutation_detected: active experiment {candidate_name} no longer matches live state; expected {expected}; actual {actual}; recovery_decision={}",
+                    decision.reason_code()
+                )
+            }
+            ActiveConfigMatch::Unknown { summary } => {
+                if simulated_fake_candidate {
+                    return None;
+                }
+
+                format!(
+                    "active_config_unknown: active experiment {candidate_name} live state could not be verified; summary={summary}; recovery_decision={}",
+                    decision.reason_code()
+                )
+            }
+        };
+
+        if reason.starts_with("active_config_unknown:") {
+            log::warn!("{reason}");
+        }
+
+        Some(self.active_experiment_recovery_decision(experiment_id, reason))
+    }
+
+    fn active_experiment_recovery_decision(
+        &mut self,
+        experiment_id: ExperimentId,
+        reason: String,
+    ) -> AutotuneDecision {
+        let decision = recovery_decision_for_active_experiment(
+            self.config.daemon_config.autotune.external_mutation_policy,
         );
 
         match decision {
-            ExternalMutationRecoveryDecision::RestoreExpectedState => {
-                Some(AutotuneDecision::Revert {
-                    experiment_id,
-                    reason,
-                })
-            }
+            ExternalMutationRecoveryDecision::RestoreExpectedState => AutotuneDecision::Revert {
+                experiment_id,
+                reason,
+            },
             ExternalMutationRecoveryDecision::AcceptExternalMutationAndResync => {
                 let abandoned = self.live_experiments.abandon_current_for_external_resync();
                 self.controller.state.active_experiment = None;
                 self.controller.state.phase = ControllerPhase::Observing;
-                Some(AutotuneDecision::Noop {
+                AutotuneDecision::Noop {
                     reason: format!(
                         "{reason}; abandoned_active_experiment={}",
                         abandoned.is_some()
                     ),
-                })
+                }
             }
             ExternalMutationRecoveryDecision::FaultRequireManualRestore
             | ExternalMutationRecoveryDecision::AbandonKeptAction => {
-                Some(AutotuneDecision::Fault { reason })
+                AutotuneDecision::Fault { reason }
             }
         }
     }
