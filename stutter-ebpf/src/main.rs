@@ -26,6 +26,27 @@ use stutter_common::{
     KmsFlipEvent, MigrationEvent, SchedulerEvent, StatWaitEvent,
 };
 
+// Layout:
+// 1. Tracepoint field offsets and provider constants
+// 2. Shared constants and map sizing
+// 3. BPF maps and shared state structs
+// 4. Scheduler entrypoints
+// 5. Process lifecycle tracepoints
+// 6. CPU frequency and scheduler wait tracepoints
+// 7. Fault counters
+// 8. IRQ overlap tracing
+// 9. Target filtering, runnable-depth accounting, and drop accounting
+// 10. Scheduler tracepoint implementations
+// 11. Block I/O tracing
+// 12. KMS/flip tracing
+// 13. DRM fence waits/signals
+// 14. Tracepoint field readers
+// 15. License and panic handler
+
+// -----------------------------------------------------------------------------
+// Tracepoint field offsets and provider constants
+// -----------------------------------------------------------------------------
+
 #[unsafe(no_mangle)]
 static mut BLOCK_RQ_KEY_OFFSET: u32 = 0;
 
@@ -164,6 +185,10 @@ static mut DRM_FENCE_SIGNAL_PROVIDER: u32 = DRM_FENCE_PROVIDER_DMA_FENCE;
 #[unsafe(no_mangle)]
 static mut DRM_FENCE_SIGNAL_GPU_ROLE: u32 = DRM_GPU_ROLE_UNKNOWN;
 
+// -----------------------------------------------------------------------------
+// Shared constants and map sizing
+// -----------------------------------------------------------------------------
+
 const TARGET_PIDS_MAP_MAX_ENTRIES: u32 = 1_024;
 const WAKEUP_DATA_MAP_MAX_ENTRIES: u32 = 131_072;
 const RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES: u32 = 65_536;
@@ -181,6 +206,10 @@ const _: () = assert!(RUNNABLE_TASK_CPU_MAP_MAX_ENTRIES >= TARGET_PIDS_MAP_MAX_E
 // Do not reduce WAKEUP_DATA, RUNNABLE_TASK_CPU, or PREV_FAULTS toward
 // TARGET_PIDS without updating these capacity invariants and the userspace
 // diagnostics that report target and wakeup-map capacity.
+
+// -----------------------------------------------------------------------------
+// BPF maps and shared state structs
+// -----------------------------------------------------------------------------
 
 #[map]
 // Userspace overrides this before loading the BPF object based on the current
@@ -300,7 +329,13 @@ static FENCE_SIGNAL_TIMES: HashMap<FenceKey, FenceSignal> =
 #[map]
 static DROP_COUNTERS: PerCpuArray<u64> = PerCpuArray::<u64>::with_max_entries(DROP_COUNTERS_MAX, 0);
 
+// -----------------------------------------------------------------------------
+// Scheduler entrypoints
+// -----------------------------------------------------------------------------
+
 #[tracepoint]
+/// Tracepoint entry for sched_wakeup.
+/// Records target wakeup timing and runnable-depth state.
 pub fn sched_wakeup(ctx: TracePointContext) -> u32 {
     match try_sched_wakeup(ctx) {
         Ok(ret) => ret,
@@ -309,6 +344,8 @@ pub fn sched_wakeup(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+/// Tracepoint entry for sched_wakeup_new.
+/// Uses the same target wakeup accounting as sched_wakeup.
 pub fn sched_wakeup_new(ctx: TracePointContext) -> u32 {
     match try_sched_wakeup(ctx) {
         Ok(ret) => ret,
@@ -317,6 +354,8 @@ pub fn sched_wakeup_new(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+/// Tracepoint entry for sched_switch.
+/// Emits runnable latency for target tasks with pending wakeup data.
 pub fn sched_switch(ctx: TracePointContext) -> u32 {
     match try_sched_switch(ctx) {
         Ok(ret) => ret,
@@ -325,6 +364,8 @@ pub fn sched_switch(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+/// Tracepoint entry for sched_migrate_task.
+/// Moves monitored runnable-depth accounting across CPUs.
 pub fn sched_migrate_task(ctx: TracePointContext) -> u32 {
     match try_sched_migrate_task(ctx) {
         Ok(ret) => ret,
@@ -332,7 +373,13 @@ pub fn sched_migrate_task(ctx: TracePointContext) -> u32 {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Process lifecycle tracepoints
+// -----------------------------------------------------------------------------
+
 #[tracepoint]
+/// Tracepoint entry for sched_process_exec.
+/// Emits exec events for monitored tasks or current target cgroups.
 pub fn sched_process_exec(ctx: TracePointContext) -> u32 {
     match try_sched_process_exec(ctx) {
         Ok(ret) => ret,
@@ -367,7 +414,13 @@ fn try_sched_process_exec(_ctx: TracePointContext) -> Result<u32, u32> {
     Ok(0)
 }
 
+// -----------------------------------------------------------------------------
+// CPU frequency and scheduler wait tracepoints
+// -----------------------------------------------------------------------------
+
 #[tracepoint]
+/// Tracepoint entry for cpu_frequency.
+/// Emits CPU frequency state changes.
 pub fn cpu_frequency(ctx: TracePointContext) -> u32 {
     match try_cpu_frequency(ctx) {
         Ok(ret) => ret,
@@ -376,6 +429,8 @@ pub fn cpu_frequency(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+/// Tracepoint entry for sched_stat_wait.
+/// Emits scheduler wait delay for monitored target tasks.
 pub fn sched_stat_wait(ctx: TracePointContext) -> u32 {
     match try_sched_stat_wait(ctx) {
         Ok(ret) => ret,
@@ -384,6 +439,8 @@ pub fn sched_stat_wait(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+/// Tracepoint entry for sched_process_exit.
+/// Clears per-task wakeup, runnable, and fault state.
 pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
 
@@ -398,7 +455,13 @@ pub fn sched_process_exit(_ctx: TracePointContext) -> u32 {
     0
 }
 
+// -----------------------------------------------------------------------------
+// Fault counters
+// -----------------------------------------------------------------------------
+
 #[aya_ebpf::macros::perf_event]
+/// Perf-event entry for major page faults.
+/// Increments per-target fault counters used on later scheduler events.
 pub fn major_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
     if is_target_pid_or_current_cgroup(tid) {
@@ -412,6 +475,8 @@ pub fn major_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
 }
 
 #[aya_ebpf::macros::perf_event]
+/// Perf-event entry for minor page faults.
+/// Increments per-target fault counters used on later scheduler events.
 pub fn minor_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
     if is_target_pid_or_current_cgroup(tid) {
@@ -424,7 +489,13 @@ pub fn minor_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
     0
 }
 
+// -----------------------------------------------------------------------------
+// IRQ overlap tracing
+// -----------------------------------------------------------------------------
+
 #[tracepoint]
+/// Tracepoint entry for irq_handler_entry.
+/// Records start time for allowlisted IRQs on the current CPU.
 pub fn irq_handler_entry(ctx: TracePointContext) -> u32 {
     match try_irq_handler_entry(ctx) {
         Ok(ret) => ret,
@@ -433,12 +504,18 @@ pub fn irq_handler_entry(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+/// Tracepoint entry for irq_handler_exit.
+/// Emits IRQ duration for matching target IRQ starts.
 pub fn irq_handler_exit(ctx: TracePointContext) -> u32 {
     match try_irq_handler_exit(ctx) {
         Ok(ret) => ret,
         Err(ret) => ret,
     }
 }
+
+// -----------------------------------------------------------------------------
+// Target filtering, runnable-depth accounting, and drop accounting
+// -----------------------------------------------------------------------------
 
 #[inline(always)]
 fn is_target_current_cgroup() -> bool {
@@ -579,6 +656,10 @@ fn decrement_target_pending(cpu: u32) {
         unsafe { *depth = (*depth).saturating_sub(1) };
     }
 }
+
+// -----------------------------------------------------------------------------
+// Scheduler tracepoint implementations
+// -----------------------------------------------------------------------------
 
 fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
     let pid: i32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
@@ -903,6 +984,10 @@ fn try_irq_handler_exit(ctx: TracePointContext) -> Result<u32, u32> {
     Ok(0)
 }
 
+// -----------------------------------------------------------------------------
+// Block I/O tracing
+// -----------------------------------------------------------------------------
+
 #[inline(always)]
 fn block_rq_fallback_key(
     ctx: &TracePointContext,
@@ -930,6 +1015,8 @@ fn block_rq_fallback_key(
 }
 
 #[tracepoint]
+/// Tracepoint entry for block_rq_issue.
+/// Records target task block I/O start metadata.
 pub fn block_rq_issue(ctx: TracePointContext) -> u32 {
     match try_block_rq_issue(ctx) {
         Ok(ret) => ret,
@@ -937,7 +1024,13 @@ pub fn block_rq_issue(ctx: TracePointContext) -> u32 {
     }
 }
 
+// -----------------------------------------------------------------------------
+// KMS flip events
+// -----------------------------------------------------------------------------
+
 #[tracepoint]
+/// Tracepoint entry for i915 flip request.
+/// Starts KMS flip interval tracking for i915 tracepoints.
 pub fn i915_flip_request(ctx: TracePointContext) -> u32 {
     match try_kms_flip_request(
         ctx,
@@ -950,6 +1043,8 @@ pub fn i915_flip_request(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+/// Tracepoint entry for i915 flip done.
+/// Completes or emits i915 page-flip timing.
 pub fn i915_flip_done(ctx: TracePointContext) -> u32 {
     match try_kms_flip_done(
         ctx,
@@ -965,6 +1060,8 @@ pub fn i915_flip_done(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+/// Tracepoint entry for DRM flip request.
+/// Starts generic DRM flip interval tracking.
 pub fn drm_flip_request(ctx: TracePointContext) -> u32 {
     match try_kms_flip_request(
         ctx,
@@ -977,6 +1074,8 @@ pub fn drm_flip_request(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+/// Tracepoint entry for DRM flip done.
+/// Completes or emits generic DRM page-flip timing.
 pub fn drm_flip_done(ctx: TracePointContext) -> u32 {
     match try_kms_flip_done(
         ctx,
@@ -992,6 +1091,8 @@ pub fn drm_flip_done(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+/// Tracepoint entry for DRM vblank events.
+/// Emits generic DRM vblank timing when sequence fields are available.
 pub fn drm_vblank_event(ctx: TracePointContext) -> u32 {
     match try_kms_flip_done(
         ctx,
@@ -1007,6 +1108,8 @@ pub fn drm_vblank_event(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+/// Tracepoint entry for amdgpu flip request.
+/// Starts AMDGPU flip interval tracking.
 pub fn amdgpu_flip_request(ctx: TracePointContext) -> u32 {
     match try_kms_flip_request(
         ctx,
@@ -1019,6 +1122,8 @@ pub fn amdgpu_flip_request(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+/// Tracepoint entry for amdgpu flip done.
+/// Completes or emits AMDGPU page-flip timing.
 pub fn amdgpu_flip_done(ctx: TracePointContext) -> u32 {
     match try_kms_flip_done(
         ctx,
@@ -1034,6 +1139,8 @@ pub fn amdgpu_flip_done(ctx: TracePointContext) -> u32 {
 }
 
 #[tracepoint]
+/// Tracepoint entry for amdgpu vblank events.
+/// Emits AMDGPU vblank timing when sequence fields are available.
 pub fn amdgpu_vblank_event(ctx: TracePointContext) -> u32 {
     match try_kms_flip_done(
         ctx,
@@ -1140,6 +1247,10 @@ fn kms_flip_key(ctx: &TracePointContext, crtc_offset: u32, pipe_offset: u32) -> 
     }
 }
 
+// -----------------------------------------------------------------------------
+// Tracepoint field readers
+// -----------------------------------------------------------------------------
+
 fn read_optional_u32(ctx: &TracePointContext, offset: u32) -> Option<u32> {
     if offset == 0 {
         None
@@ -1218,6 +1329,10 @@ fn emit_kms_flip_event(
     entry.submit(0);
 }
 
+// -----------------------------------------------------------------------------
+// DRM fence waits/signals
+// -----------------------------------------------------------------------------
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct FenceIdentity {
@@ -1227,6 +1342,8 @@ struct FenceIdentity {
 }
 
 #[tracepoint]
+/// Tracepoint entry for DRM fence wait start.
+/// Stores fence wait start identity and task metadata.
 pub fn drm_fence_wait_start(ctx: TracePointContext) -> u32 {
     match try_drm_fence_wait_start(ctx) {
         Ok(ret) => ret,
@@ -1258,6 +1375,8 @@ fn try_drm_fence_wait_start(ctx: TracePointContext) -> Result<u32, u32> {
 }
 
 #[tracepoint]
+/// Tracepoint entry for DRM fence wait done.
+/// Emits fence wait intervals and importer/exporter correlation when available.
 pub fn drm_fence_wait_done(ctx: TracePointContext) -> u32 {
     match try_drm_fence_wait_done(ctx) {
         Ok(ret) => ret,
@@ -1368,6 +1487,8 @@ fn try_drm_fence_wait_done(ctx: TracePointContext) -> Result<u32, u32> {
 }
 
 #[tracepoint]
+/// Tracepoint entry for DRM fence signal.
+/// Emits exporter-side fence signals and caches signal timestamps for waits.
 pub fn drm_fence_signal(ctx: TracePointContext) -> u32 {
     match try_drm_fence_signal(ctx) {
         Ok(ret) => ret,
@@ -1465,6 +1586,10 @@ fn read_optional_u64(ctx: &TracePointContext, offset: u32) -> Option<u64> {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Block I/O completion
+// -----------------------------------------------------------------------------
+
 fn try_block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
     let dev: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
     let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
@@ -1504,6 +1629,8 @@ fn try_block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
 }
 
 #[tracepoint]
+/// Tracepoint entry for block_rq_complete.
+/// Emits target task block I/O duration from matching issue metadata.
 pub fn block_rq_complete(ctx: TracePointContext) -> u32 {
     match try_block_rq_complete(ctx) {
         Ok(ret) => ret,
@@ -1571,6 +1698,10 @@ fn try_block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
 
     Ok(0)
 }
+
+// -----------------------------------------------------------------------------
+// License and panic handler
+// -----------------------------------------------------------------------------
 
 #[unsafe(link_section = "license")]
 #[unsafe(no_mangle)]
