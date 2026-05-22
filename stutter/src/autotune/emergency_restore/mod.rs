@@ -1,24 +1,26 @@
-mod types;
-mod handler;
-mod executors;
 mod audit;
-mod manual_command;
+mod executors;
+mod handler;
 mod helpers;
+mod manual_command;
 #[cfg(test)]
 mod tests;
-
-pub use types::*;
-pub use handler::default_autotune_rollback_registry;
-use handler::*;
-pub use executors::*;
-use audit::*;
-pub use manual_command::*;
+mod types;
 
 use std::path::Path;
+
 use anyhow::Context;
-use crate::actions::*;
-use crate::autotune::controller_journal::*;
-use crate::autotune::history::*;
+use audit::*;
+pub use executors::restore_rollback_token;
+pub use handler::default_autotune_rollback_registry;
+use handler::*;
+pub use manual_command::*;
+pub use types::*;
+
+use crate::{
+    actions::*,
+    autotune::{controller_journal::*, history::*},
+};
 
 pub fn autotune_restore_command(input: AutotuneRestoreCommandInput) -> anyhow::Result<()> {
     let outcome = restore_known_autotune_actions(input)?;
@@ -380,4 +382,3 @@ fn restore_applied_journal_record(
         }
     }
 }
-

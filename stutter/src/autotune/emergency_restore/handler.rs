@@ -1,5 +1,8 @@
-use crate::actions::{RollbackCandidate, RollbackHandler, RollbackPreview, RollbackRegistry, RollbackResult, RollbackToken};
-use super::{types::*, manual_command::*, executors::*};
+use super::{executors::*, manual_command::*, types::*};
+use crate::actions::{
+    RollbackCandidate, RollbackHandler, RollbackPreview, RollbackRegistry, RollbackResult,
+    RollbackToken,
+};
 
 #[derive(Default)]
 pub(super) struct AutotuneRollbackTokenHandler;

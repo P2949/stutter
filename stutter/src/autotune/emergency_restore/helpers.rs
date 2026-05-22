@@ -1,5 +1,7 @@
 use std::{fs, path::Path};
+
 use anyhow::Context;
+
 use super::types::*;
 
 pub(super) fn write_sysfs_value(path: &Path, value: &str) -> anyhow::Result<()> {
@@ -60,4 +62,3 @@ pub(super) fn restore_summary_with_missing_skips(
 
     summary
 }
-

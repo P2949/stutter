@@ -100,11 +100,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "existing tune module implementation pending future split",
     },
     OversizedRustFileAllowance {
-        path: "src/autotune/active_config.rs",
-        max_lines: 1_815,
-        reason: "existing active autotune config implementation pending future split; rollback baseline verification is staged here",
-    },
-    OversizedRustFileAllowance {
         path: "src/autotune/controller.rs",
         max_lines: 1_294,
         reason: "existing autotune controller state implementation pending future split",

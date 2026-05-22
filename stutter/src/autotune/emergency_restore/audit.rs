@@ -1,7 +1,13 @@
 use std::path::Path;
+
 use anyhow::Context;
-use crate::{audit::{AuditEvent, append_audit_event_to_path}, actions::RollbackToken, autotune::history::*};
-use super::{manual_command::*};
+
+use super::manual_command::*;
+use crate::{
+    actions::RollbackToken,
+    audit::{AuditEvent, append_audit_event_to_path},
+    autotune::history::*,
+};
 
 pub(super) fn write_emergency_restore_audit_event(
     audit_path: &Path,
