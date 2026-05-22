@@ -110,11 +110,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "existing daemon state implementation pending future split",
     },
     OversizedRustFileAllowance {
-        path: "src/actions/cgroup.rs",
-        max_lines: 1_740,
-        reason: "existing cgroup action implementation pending future split; rollback handler registration, identity-verified restore checks, best-effort restore error handling, cpuset rollback coverage, restore-write classifier coverage, and transactional cgroup apply coverage are staged here",
-    },
-    OversizedRustFileAllowance {
         path: "src/cli/mod.rs",
         max_lines: 1_089,
         reason: "existing top-level CLI parser implementation pending future split; Clap command tree, compare expect/strict command coverage, dry-run-all-safe parsing, and agent Unix socket cap/timeout validation are staged here",
