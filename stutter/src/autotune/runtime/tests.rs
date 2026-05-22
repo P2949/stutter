@@ -478,6 +478,30 @@ fn active_experiment_unknown_config_faults_instead_of_nooping() {
 }
 
 #[test]
+fn simulated_fake_candidate_unknown_active_config_noops() {
+    let mut config =
+        AutotuneRuntimeConfig::observe(None, Some(1234), None).with_simulated_action_effects();
+    config.history_log = None;
+    let mut runtime = AutotuneRuntime::new(config);
+
+    let candidate = CandidateAction::fake(
+        crate::actions::ActionId::new("fake-simulated".to_owned()),
+        SafetyClass::ReversibleLowRisk,
+    );
+
+    runtime
+        .live_experiments
+        .set_current_for_tests(fake_live_experiment(candidate));
+
+    let mut observation = high_quality_game_observation_with_focus_confidence(0.95);
+    observation.active_config_snapshot = Some(ActiveConfigSnapshot::default());
+
+    let decision = runtime.active_experiment_external_mutation_decision(&observation);
+
+    assert!(decision.is_none());
+}
+
+#[test]
 fn active_experiment_unknown_config_restore_policy_reverts() {
     let mut daemon_config = daemon_config_for_runtime_mode(
         DaemonMode::ApplyLowRisk,

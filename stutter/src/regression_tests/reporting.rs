@@ -343,6 +343,16 @@ fn report_template_warns_on_block_fallback_key_collisions() {
 }
 
 #[test]
+fn report_template_counts_wakeup_stale_entries_as_ebpf_drops() {
+    let template = include_str!("../report_template.html");
+
+    assert!(template.contains("(session.drop_counters.wakeup_data_stale_entries || 0) > 0"));
+    assert!(template.contains("(session.drop_counters.wakeup_data_stale_entries || 0) +"));
+    assert!(template.contains("Wakeup timestamp stale entries"));
+    assert!(template.contains("Runnable-latency samples may be stale or dropped."));
+}
+
+#[test]
 fn report_diff_shows_regressions_and_improvements() {
     let dir_a = temp_test_dir("diff-a");
     let dir_b = temp_test_dir("diff-b");

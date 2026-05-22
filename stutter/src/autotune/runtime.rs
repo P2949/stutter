@@ -433,6 +433,10 @@ impl AutotuneRuntime {
                 )
             }
             ActiveConfigMatch::Unknown { summary } => {
+                // Fake candidates have no concrete active-config footprint, so their
+                // matches_active_config() result is always Unknown. In simulated-action
+                // mode this is expected test/dev behavior, not an unverifiable live
+                // system state. Real candidates must not take this bypass.
                 if simulated_fake_candidate {
                     return None;
                 }
@@ -448,18 +452,15 @@ impl AutotuneRuntime {
             log::warn!("{reason}");
         }
 
-        Some(self.active_experiment_recovery_decision(experiment_id, reason))
+        Some(self.active_experiment_recovery_decision(experiment_id, reason, decision))
     }
 
     fn active_experiment_recovery_decision(
         &mut self,
         experiment_id: ExperimentId,
         reason: String,
+        decision: ExternalMutationRecoveryDecision,
     ) -> AutotuneDecision {
-        let decision = recovery_decision_for_active_experiment(
-            self.config.daemon_config.autotune.external_mutation_policy,
-        );
-
         match decision {
             ExternalMutationRecoveryDecision::RestoreExpectedState => AutotuneDecision::Revert {
                 experiment_id,

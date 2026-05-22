@@ -901,18 +901,26 @@ document.addEventListener('DOMContentLoaded', () => {
             addRow('Block I/O Correlation', blockIoBasis + (blockIoBasis === 'dev+sector' ? ' (advisory, approximate)' : ''));
         }
         if (session.drop_counters && (
-            session.drop_counters.wakeup_data_insert_failed > 0 ||
-            session.drop_counters.ringbuf_reserve_failed > 0 ||
-            session.drop_counters.irq_start_times_insert_failed > 0 ||
-            session.drop_counters.block_start_insert_failed > 0 ||
-            session.drop_counters.block_fallback_key_collisions > 0
+            (session.drop_counters.wakeup_data_insert_failed || 0) > 0 ||
+            (session.drop_counters.wakeup_data_stale_entries || 0) > 0 ||
+            (session.drop_counters.ringbuf_reserve_failed || 0) > 0 ||
+            (session.drop_counters.irq_start_times_insert_failed || 0) > 0 ||
+            (session.drop_counters.block_start_insert_failed || 0) > 0 ||
+            (session.drop_counters.block_fallback_key_collisions || 0) > 0
         )) {
             const total = (session.drop_counters.wakeup_data_insert_failed || 0) +
+                          (session.drop_counters.wakeup_data_stale_entries || 0) +
                           (session.drop_counters.ringbuf_reserve_failed || 0) +
                           (session.drop_counters.irq_start_times_insert_failed || 0) +
                           (session.drop_counters.block_start_insert_failed || 0) +
                           (session.drop_counters.block_fallback_key_collisions || 0);
             addRow('eBPF Drops (Cumulative)', total);
+            if ((session.drop_counters.wakeup_data_stale_entries || 0) > 0) {
+                addRow(
+                    'Wakeup timestamp stale entries',
+                    `${session.drop_counters.wakeup_data_stale_entries} (Runnable-latency samples may be stale or dropped.)`
+                );
+            }
         }
         html += '</tbody></table>';
         document.getElementById('metadata-content').innerHTML = html;
