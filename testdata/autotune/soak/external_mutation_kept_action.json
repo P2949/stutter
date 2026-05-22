@@ -4,9 +4,9 @@
   "ticks": [
     { "kind": "focus_game", "confidence": 0.95 },
     { "kind": "target_present" },
-    { "kind": "interval", "score_total": 1000, "samples": 100 },
+    { "kind": "interval", "diagnostic_score_total": 1000, "samples": 100 },
     { "kind": "target_present" },
-    { "kind": "interval", "score_total": 10, "samples": 100 },
+    { "kind": "interval", "diagnostic_score_total": 10, "samples": 100 },
     { "kind": "evaluation_tick", "reason": "external mutation check" }
   ],
   "assertions": [

@@ -30,7 +30,7 @@ pub struct WindowScore {
 }
 
 impl WindowScore {
-    pub fn score_total(&self) -> u64 {
+    pub fn diagnostic_score_total(&self) -> u64 {
         self.score.total
     }
 
@@ -228,7 +228,7 @@ mod tests {
 
         assert_eq!(experiment.id.as_str(), "experiment-1");
         assert_eq!(experiment.phase, ExperimentPhase::BaselineCollecting);
-        assert_eq!(experiment.baseline_score.score_total(), 143);
+        assert_eq!(experiment.baseline_score.diagnostic_score_total(), 143);
         assert!(experiment.candidate_score.is_none());
         assert!(experiment.applied_unix_nanos.is_none());
         assert!(experiment.measure_started_unix_nanos.is_none());
@@ -261,7 +261,7 @@ mod tests {
             experiment
                 .candidate_score
                 .as_ref()
-                .map(WindowScore::score_total),
+                .map(WindowScore::diagnostic_score_total),
             Some(100)
         );
 
@@ -309,7 +309,7 @@ mod tests {
         };
 
         assert_eq!(score.duration_unix_nanos(), 250);
-        assert_eq!(score.score_total(), 99);
+        assert_eq!(score.diagnostic_score_total(), 99);
     }
 
     #[test]

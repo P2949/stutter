@@ -1,4 +1,16 @@
-use super::*;
+use std::path::Path;
+
+use anyhow::Context;
+
+use super::fs_io::{strip_cgroup_leading_slash, write_trimmed};
+use crate::actions::{
+    CgroupCpusetRestoreRecord, CgroupRestoreRecord, RestoreIdentityStatus, RollbackToken,
+    restore_write::{RestoreWriteError, classify_restore_write_error},
+    rollback::{
+        RollbackCandidate, RollbackHandler, RollbackPreview, RollbackResult, token_dry_run_preview,
+    },
+    verify_task_identity,
+};
 
 pub(crate) struct CgroupRollbackHandler;
 
@@ -187,6 +199,9 @@ pub(super) fn restore_cpuset_record(
 
     Ok(restored)
 }
+
+#[cfg(test)]
+use std::io;
 
 #[cfg(test)]
 pub(super) fn is_dead_task_io_error(err: &anyhow::Error) -> bool {

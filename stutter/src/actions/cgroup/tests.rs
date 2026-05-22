@@ -7,6 +7,7 @@ use std::{
 use anyhow::Context as _;
 
 use super::*;
+use crate::{actions::TaskIdentity, process_tree::TaskClass};
 
 fn target(tid: u32, comm: &str, starttime_ticks: u64) -> TaskIdentity {
     TaskIdentity {

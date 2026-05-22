@@ -1,4 +1,10 @@
-use super::*;
+use std::{
+    fs::{self, OpenOptions},
+    io,
+    path::{Component, Path, PathBuf},
+};
+
+use anyhow::Context;
 
 pub(super) trait CgroupFileWriter {
     fn write_trimmed(&mut self, path: &Path, value: &str) -> anyhow::Result<()>;

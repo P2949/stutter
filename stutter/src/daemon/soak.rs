@@ -167,7 +167,7 @@ pub enum SoakTick {
     TargetPresent,
     TargetMissing,
     Interval {
-        score_total: u64,
+        diagnostic_score_total: u64,
         samples: u64,
     },
     DroppedInterval {
@@ -343,10 +343,10 @@ fn fake_step_for_tick(tick: SoakTick) -> FakeDaemonStep {
         SoakTick::TargetPresent => FakeDaemonStep::TargetPresent,
         SoakTick::TargetMissing => FakeDaemonStep::TargetMissing,
         SoakTick::Interval {
-            score_total,
+            diagnostic_score_total,
             samples,
         } => FakeDaemonStep::Interval {
-            score_total,
+            diagnostic_score_total,
             samples,
         },
         SoakTick::DroppedInterval { dropped_events } => {
@@ -559,7 +559,7 @@ fn default_soak_scenarios(profile: DaemonSoakProfile) -> Vec<SoakScenario> {
                 SoakTick::FocusGame { confidence: 0.95 },
                 SoakTick::TargetPresent,
                 SoakTick::Interval {
-                    score_total: 500,
+                    diagnostic_score_total: 500,
                     samples: 100,
                 },
             ],
@@ -577,12 +577,12 @@ fn default_soak_scenarios(profile: DaemonSoakProfile) -> Vec<SoakScenario> {
                 SoakTick::FocusGame { confidence: 0.95 },
                 SoakTick::TargetPresent,
                 SoakTick::Interval {
-                    score_total: 100,
+                    diagnostic_score_total: 100,
                     samples: 100,
                 },
                 SoakTick::TargetPresent,
                 SoakTick::Interval {
-                    score_total: 1_000,
+                    diagnostic_score_total: 1_000,
                     samples: 100,
                 },
             ],

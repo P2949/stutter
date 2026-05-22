@@ -574,7 +574,17 @@ fn active_experiment_unknown_config_resync_policy_abandons_experiment() {
         Some(crate::autotune::controller::ActiveExperiment {
             experiment_id: ExperimentId::new("experiment-unknown-active-config"),
             candidate: controller_candidate,
-            baseline_score_total: 500,
+            baseline_score: WindowScore {
+                started_unix_nanos: 100,
+                finished_unix_nanos: 200,
+                interval_count: 1,
+                scored_samples: 100,
+                scored_task_count: 1,
+                score: StutterScore {
+                    total: 500,
+                    ..StutterScore::default()
+                },
+            },
         });
     runtime.controller.state.phase = ControllerPhase::Measuring;
 
@@ -738,7 +748,7 @@ fn daemon_state_snapshot_serializes_live_runtime_state() {
         top_denied_reason: None,
         planner: None,
         dry_run_plan_files: Vec::new(),
-        score_total: 999,
+        diagnostic_score_total: 999,
         data_quality: "Low: low scored samples".to_owned(),
         data_quality_reason_codes: vec!["measurement_uncertain".to_owned()],
         decision: "faulted".to_owned(),
@@ -751,8 +761,8 @@ fn daemon_state_snapshot_serializes_live_runtime_state() {
             observation: &runtime.last_observation,
             cpu_topology_signature: None,
             result: CandidateMemoryResult::Kept,
-            baseline_score_total: Some(500),
-            current_score_total: Some(400),
+            diagnostic_baseline_diagnostic_score_total: Some(500),
+            diagnostic_current_diagnostic_score_total: Some(400),
             rollback_reason: None,
             cooldown_expires_unix_nanos: None,
         },
@@ -845,7 +855,10 @@ fn daemon_state_snapshot_serializes_live_runtime_state() {
         value["active_rollback"]["token"]["kind"],
         "cpu-affinity-restore-file"
     );
-    assert_eq!(value["last_decision"]["score_total"].as_u64(), Some(999));
+    assert_eq!(
+        value["last_decision"]["diagnostic_score_total"].as_u64(),
+        Some(999)
+    );
     assert_eq!(
         value["active_rollback"]["manual_restore_command"],
         "stutter daemon emergency-restore"
@@ -1061,7 +1074,7 @@ fn interval_event_updates_window_and_emits_noop_decision() {
         .unwrap();
 
     assert_eq!(emitted.decision, "observed");
-    assert_eq!(emitted.score_total, 143);
+    assert_eq!(emitted.diagnostic_score_total, 143);
     assert_eq!(runtime.observation().score.total, 143);
     assert_eq!(runtime.observation().scored_task_count, 1);
 }

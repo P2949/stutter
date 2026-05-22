@@ -41,7 +41,7 @@ pub struct AutotuneDecisionStreamEntry {
     pub planner: Option<PlannerSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dry_run_plan_files: Vec<AutotuneDryRunPlanFileSummary>,
-    pub score_total: u64,
+    pub diagnostic_score_total: u64,
     pub data_quality: String,
     pub data_quality_reason_codes: Vec<String>,
     pub decision: String,
@@ -113,7 +113,7 @@ impl AutotuneRuntime {
                 .and_then(top_denied_reason_for_plan),
             planner: self.last_plan_result.as_ref().map(PlanResult::summary),
             dry_run_plan_files: self.last_dry_run_plan_files.clone(),
-            score_total: observation.score.total,
+            diagnostic_score_total: observation.score.total,
             data_quality: data_quality_label(&observation.data_quality),
             data_quality_reason_codes: observation.data_quality.reason_code_strings(),
             decision: decision_label(decision),

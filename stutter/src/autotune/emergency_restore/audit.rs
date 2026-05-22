@@ -90,7 +90,7 @@ pub(super) fn empty_observation_summary() -> ObservationSummary {
         scored_task_count: 0,
         interval_count: 0,
         scored_samples: 0,
-        score_total: 0,
+        diagnostic_score_total: 0,
         over_1ms: 0,
         over_2ms: 0,
         over_5ms: 0,

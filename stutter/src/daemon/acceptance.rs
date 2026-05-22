@@ -80,7 +80,7 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         "start-low-risk",
         DaemonMode::ApplyLowRisk,
         vec![FakeDaemonStep::Interval {
-            score_total: 500,
+            diagnostic_score_total: 500,
             samples: 100,
         }],
     );
@@ -89,12 +89,12 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         DaemonMode::ApplyLowRisk,
         vec![
             FakeDaemonStep::Interval {
-                score_total: 1_000,
+                diagnostic_score_total: 1_000,
                 samples: 100,
             },
             FakeDaemonStep::TargetPresent,
             FakeDaemonStep::Interval {
-                score_total: 10,
+                diagnostic_score_total: 10,
                 samples: 100,
             },
         ],
@@ -104,12 +104,12 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         DaemonMode::ApplyLowRisk,
         vec![
             FakeDaemonStep::Interval {
-                score_total: 10,
+                diagnostic_score_total: 10,
                 samples: 100,
             },
             FakeDaemonStep::TargetPresent,
             FakeDaemonStep::Interval {
-                score_total: 1_000,
+                diagnostic_score_total: 1_000,
                 samples: 100,
             },
         ],
@@ -119,7 +119,7 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         DaemonMode::ApplyLowRisk,
         vec![
             FakeDaemonStep::Interval {
-                score_total: 500,
+                diagnostic_score_total: 500,
                 samples: 100,
             },
             FakeDaemonStep::FocusCleared {
@@ -132,7 +132,7 @@ pub fn run_fake_daemon_acceptance_suite() -> DaemonAcceptanceReport {
         DaemonMode::ApplyLowRisk,
         vec![
             FakeDaemonStep::Interval {
-                score_total: 500,
+                diagnostic_score_total: 500,
                 samples: 100,
             },
             FakeDaemonStep::TargetMissing,

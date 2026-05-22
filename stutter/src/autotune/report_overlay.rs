@@ -379,7 +379,7 @@ mod tests {
             scored_task_count: 1,
             interval_count: 1,
             scored_samples: 1,
-            score_total: total,
+            diagnostic_score_total: total,
             over_1ms: 0,
             over_2ms: 0,
             over_5ms: 0,

@@ -533,7 +533,7 @@ fn write_exit_decision_event(
         mode: AutotuneModeLabel::ApplyLowRisk,
         target_present: false,
         situation: SituationKindLabel::Unknown,
-        score_total: 0,
+        diagnostic_score_total: 0,
         data_quality: if summary.failed_actions > 0 {
             OnlineDataQualityLabel::Low
         } else {

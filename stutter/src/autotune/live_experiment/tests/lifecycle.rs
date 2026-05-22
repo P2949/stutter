@@ -30,10 +30,10 @@ fn keep_current_records_kept_state_and_clears_active_experiment() {
     let mut manager = LiveExperimentManager::new();
     manager.set_current_for_tests(live_experiment());
     let mut controller_state = ControllerRuntimeState {
-        active_experiment: Some(ControllerActiveExperiment {
+        active_experiment: Some(crate::autotune::controller::ActiveExperiment {
             experiment_id: ExperimentId::new("experiment-active"),
             candidate: low_risk_candidate(),
-            baseline_score_total: 1_000,
+            baseline_score: score(1_000),
         }),
         ..ControllerRuntimeState::default()
     };
