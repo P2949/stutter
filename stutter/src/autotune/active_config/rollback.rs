@@ -1,13 +1,13 @@
 use std::fmt;
 
-use crate::autotune::{
-    candidate::CandidateAction,
-    candidate::CpuAffinityProfilePlan,
-    observation::{ActiveConfigSnapshot, ActiveTaskSnapshot},
-};
-use crate::profiles::{ProfileEvaluationInput, evaluate_profile_for_tasks};
-
 use super::helpers::*;
+use crate::{
+    autotune::{
+        candidate::{CandidateAction, CpuAffinityProfilePlan},
+        observation::{ActiveConfigSnapshot, ActiveTaskSnapshot},
+    },
+    profiles::{ProfileEvaluationInput, evaluate_profile_for_tasks},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RollbackVerification {
@@ -16,7 +16,6 @@ pub struct RollbackVerification {
     pub actual: String,
     pub reason_code: String,
 }
-
 
 pub fn verify_rollback_restored_baseline(
     candidate: &CandidateAction,

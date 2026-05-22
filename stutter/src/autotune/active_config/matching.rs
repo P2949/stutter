@@ -1,11 +1,11 @@
-use crate::autotune::{
-    candidate::CandidateAction,
-    candidate::CpuAffinityProfilePlan,
-    observation::{ActiveConfigSnapshot, ActiveTaskSnapshot},
-};
-use crate::profiles::{ProfileEvaluationInput, evaluate_profile_for_tasks};
-
 use super::helpers::*;
+use crate::{
+    autotune::{
+        candidate::{CandidateAction, CpuAffinityProfilePlan},
+        observation::{ActiveConfigSnapshot, ActiveTaskSnapshot},
+    },
+    profiles::{ProfileEvaluationInput, evaluate_profile_for_tasks},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ActiveConfigMatch {
