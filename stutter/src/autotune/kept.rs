@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use super::{
-    candidate::CandidateAction,
     comparison::ExperimentResult,
     conflicts::ActionConflictGroup,
     experiment::{ExperimentId, WindowScore},
+    planning::candidate::CandidateAction,
 };
 use crate::actions::RollbackToken;
 
@@ -214,7 +214,7 @@ mod tests {
     use crate::{
         actions::{ActionId, RollbackToken, SafetyClass},
         affinity::CpuMask,
-        autotune::candidate::CandidateAction,
+        autotune::planning::candidate::CandidateAction,
         process_tree::TaskClass,
         profiles::{Profile, ProfileRule},
         scorer::StutterScore,

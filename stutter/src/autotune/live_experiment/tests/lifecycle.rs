@@ -80,7 +80,7 @@ fn compare_keep_result_rejects_io_candidate_when_live_io_signal_regresses() {
         safety_class: SafetyClass::ReversibleMediumRisk,
         mode: DaemonMode::ApplyMediumRisk,
         candidate: CandidateAction::IoPrio {
-            plan: crate::autotune::candidate::IoPrioActionPlan {
+            plan: crate::autotune::planning::executable_plan::IoPrioActionPlan {
                 name: "fake-io".to_owned(),
                 action: crate::actions::ioprio::IoPrioAction {
                     targets: vec![crate::actions::TaskIdentity {

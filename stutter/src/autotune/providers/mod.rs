@@ -1,11 +1,11 @@
 use crate::{
     actions::SafetyClass,
     autotune::{
-        candidate::{CandidateAction, CandidateFamily},
         conflicts::ActionConflictGroup,
         controller::ControllerRuntimeState,
         objective::{ObjectiveKind, ObjectiveSignalQuality},
         observation::AutotuneObservation,
+        planning::candidate::{CandidateAction, CandidateFamily},
         system_context::SystemContextSnapshot,
     },
     daemon::{DaemonPolicy, capabilities::DaemonCapabilities, health::SystemHealthSnapshot},

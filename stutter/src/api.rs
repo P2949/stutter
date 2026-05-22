@@ -77,30 +77,40 @@ pub mod autotune {
     pub mod candidate {
         //! Public candidate plan and suggestion contracts.
 
-        pub use crate::autotune::candidate::{
-            CandidateAction, CandidateDryRunRecord, CandidateDryRunner, CandidateEvidence,
-            CandidateExecutablePlan, CandidateManualCommands, CandidatePlan, CandidatePlanFile,
-            CandidatePlanSummary, CandidateProfileStatus, CandidateSuggestion,
-            CgroupPlacementActionPlan, CpuAffinityProfilePlan, CpuPowerActionPlan,
-            FakeCandidatePlan, GeneratedCpuSetPolicy, GeneratedProfileCandidatePlan,
-            GeneratedTopologyProfilePlan, GpuPowerActionPlan, IoPrioActionPlan,
-            IrqAffinityActionPlan, NiceActionPlan, RealCandidateDryRunner,
-            RejectedCandidateProfile, UclampActionPlan, VmKnobActionPlan,
-            apply_candidate_plan_file, candidate_plan_path, default_candidate_plan_dir,
-            dry_run_candidate, dry_run_candidates, dry_run_candidates_with_runner,
-            dry_run_record_from_action_state, generate_profile_candidate_plan,
-            generate_profile_candidate_plan_for_observation,
-            generate_profile_candidate_plan_with_history, generate_profile_candidates,
-            generate_profile_candidates_for_observation,
-            generate_topology_aware_profile_candidate_plan,
-            generate_topology_aware_profile_candidates,
-            generate_topology_aware_profile_candidates_with_policy,
-            generate_topology_aware_profile_plan, generate_topology_aware_profiles,
-            generate_topology_aware_profiles_with_policy, print_candidate_suggestions,
-            render_candidate_suggestion, render_candidate_suggestions,
-            suggestion_from_candidate_dry_run_record, suggestion_from_dry_run_record,
-            suggestions_from_candidates_and_dry_run_records, suggestions_from_dry_run_records,
-            write_candidate_plan_file,
+        pub use crate::autotune::planning::{
+            candidate::{CandidateAction, CandidateEvidence, CandidatePlan},
+            dry_run::{
+                CandidateDryRunRecord, CandidateDryRunner, RealCandidateDryRunner,
+                dry_run_candidate, dry_run_candidates, dry_run_candidates_with_runner,
+                dry_run_record_from_action_state,
+            },
+            executable_plan::{
+                CandidateExecutablePlan, CgroupPlacementActionPlan, CpuAffinityProfilePlan,
+                CpuPowerActionPlan, FakeCandidatePlan, GpuPowerActionPlan, IoPrioActionPlan,
+                IrqAffinityActionPlan, NiceActionPlan, UclampActionPlan, VmKnobActionPlan,
+            },
+            plan_io::{
+                CandidatePlanFile, CandidatePlanSummary, apply_candidate_plan_file,
+                candidate_plan_path, default_candidate_plan_dir, write_candidate_plan_file,
+            },
+            profile_candidates::{
+                CandidateProfileStatus, GeneratedCpuSetPolicy, GeneratedProfileCandidatePlan,
+                GeneratedTopologyProfilePlan, RejectedCandidateProfile,
+                generate_profile_candidate_plan, generate_profile_candidate_plan_for_observation,
+                generate_profile_candidate_plan_with_history, generate_profile_candidates,
+                generate_profile_candidates_for_observation,
+                generate_topology_aware_profile_candidate_plan,
+                generate_topology_aware_profile_candidates,
+                generate_topology_aware_profile_candidates_with_policy,
+                generate_topology_aware_profile_plan, generate_topology_aware_profiles,
+                generate_topology_aware_profiles_with_policy,
+            },
+            suggestion::{
+                CandidateManualCommands, CandidateSuggestion, print_candidate_suggestions,
+                render_candidate_suggestion, render_candidate_suggestions,
+                suggestion_from_candidate_dry_run_record, suggestion_from_dry_run_record,
+                suggestions_from_candidates_and_dry_run_records, suggestions_from_dry_run_records,
+            },
         };
     }
 

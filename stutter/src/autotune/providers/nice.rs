@@ -1,8 +1,11 @@
 use crate::{
     actions::nice::{NiceAction, NicePolicy},
     autotune::{
-        candidate::{CandidateAction, CandidateEvidence, NiceActionPlan},
         objective::ObjectiveKind,
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            executable_plan::NiceActionPlan,
+        },
         protection::mutation_allowed_for_pid,
         providers::{CandidateProposal, CandidateProvider, CandidateProviderInput},
         situation::SituationKind,

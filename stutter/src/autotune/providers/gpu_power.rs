@@ -1,8 +1,11 @@
 use crate::{
     actions::gpu_power::GpuPowerAction,
     autotune::{
-        candidate::{CandidateAction, CandidateEvidence, GpuPowerActionPlan},
         objective::ObjectiveKind,
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            executable_plan::GpuPowerActionPlan,
+        },
         providers::{
             CandidateProposal, CandidateProvider, CandidateProviderInput,
             signal_quality_confidence_weight,

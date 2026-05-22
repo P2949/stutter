@@ -4,7 +4,9 @@ use anyhow::Context;
 
 use crate::{
     affinity::CpuMask,
-    autotune::candidate::{GeneratedCpuSetPolicy, generate_topology_aware_profiles_with_policy},
+    autotune::planning::profile_candidates::{
+        GeneratedCpuSetPolicy, generate_topology_aware_profiles_with_policy,
+    },
     profiles::{Profile, render_profiles_toml},
     topology::TopologyModel,
 };

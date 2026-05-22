@@ -5,10 +5,12 @@ use serde::{Deserialize, Serialize};
 use crate::{
     actions::{ActionState, SafetyClass},
     autotune::{
-        candidate::{CandidateAction, CandidateEvidence},
         objective::ObjectiveKind,
-        planning::denial::{
-            CandidateDenyReason, grouped_denials, names_for_any_reason, names_for_reason,
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            denial::{
+                CandidateDenyReason, grouped_denials, names_for_any_reason, names_for_reason,
+            },
         },
     },
     daemon_policy::{ActionDescriptor, ActionEffectScope},

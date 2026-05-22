@@ -14,7 +14,7 @@ use crate::{
         uclamp::UclampAction,
         vm_knobs::{VmKnobAction, VmKnobMode, VmKnobPolicy},
     },
-    autotune::candidate::{CandidateAction, CandidateFamily, ExecutablePlan},
+    autotune::planning::candidate::{CandidateAction, CandidateFamily, ExecutablePlan},
 };
 
 pub trait ActionFactory {

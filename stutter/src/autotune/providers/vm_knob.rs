@@ -6,8 +6,11 @@ use crate::{
         vm_knobs::{VmKnobAction, VmKnobChange},
     },
     autotune::{
-        candidate::{CandidateAction, CandidateEvidence, VmKnobActionPlan},
         objective::ObjectiveKind,
+        planning::{
+            candidate::{CandidateAction, CandidateEvidence},
+            executable_plan::VmKnobActionPlan,
+        },
         providers::{
             CandidateProposal, CandidateProvider, CandidateProviderInput,
             signal_quality_confidence_weight,

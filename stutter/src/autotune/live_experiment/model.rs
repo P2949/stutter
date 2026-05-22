@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use crate::{
     actions::{RollbackToken, SafetyClass},
     autotune::{
-        candidate::CandidateAction,
         controller::ControllerPolicy,
         experiment::{ExperimentId, WindowScore},
         objective::ObjectiveSignals,
         observation::ActiveConfigSnapshot,
+        planning::candidate::CandidateAction,
         washout::WashoutWindowConfig,
     },
     daemon::{DaemonPolicy, policy::DaemonMode, privilege::PrivilegedActionService},
