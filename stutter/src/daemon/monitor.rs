@@ -10,7 +10,10 @@ use crate::{
 #[derive(Clone)]
 pub struct MonitorSubsystemConfig {
     pub monitor_config: MonitorConfig,
+    // Hwmon readers may be shared with legacy monitor setup; sampling is serialized by the reader
+    // mutex and kept outside daemon state ownership.
     pub shared_hwmon: Option<Arc<Mutex<HwmonReader>>>,
+    // Monitor events cross the daemon/session boundary through a bounded channel.
     pub event_tx: Option<mpsc::Sender<MonitorEvent>>,
 }
 
