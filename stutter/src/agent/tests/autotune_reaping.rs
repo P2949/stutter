@@ -53,6 +53,7 @@ async fn completed_autotune_no_longer_blocks_new_session() {
 
     if let Some(handle) = state.active_autotune.lock().await.take() {
         let _ = handle.stop_tx.send(());
+        handle.join.abort();
         let _ = handle.join.await;
     }
 }

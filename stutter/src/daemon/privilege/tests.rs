@@ -329,8 +329,25 @@ fn wait_for_socket(path: &std::path::Path) {
     panic!("timed out waiting for socket {}", path.display());
 }
 
+fn unix_socket_bind_supported() -> bool {
+    let socket = temp_socket_path("support-probe");
+    match UnixListener::bind(&socket) {
+        Ok(listener) => {
+            drop(listener);
+            fs::remove_file(socket).ok();
+            true
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => false,
+        Err(err) => panic!("unexpected privileged-worker unix socket probe error: {err}"),
+    }
+}
+
 #[test]
 fn privileged_worker_socket_wait_succeeds_when_listener_is_connectable() {
+    if !unix_socket_bind_supported() {
+        return;
+    }
+
     let socket = temp_socket_path("ready-listener");
     let listener = UnixListener::bind(&socket).unwrap();
     let accept = thread::spawn(move || listener.accept().map(|_| ()));
@@ -348,6 +365,10 @@ fn privileged_worker_socket_wait_succeeds_when_listener_is_connectable() {
 
 #[test]
 fn privileged_worker_socket_wait_rejects_stale_socket_path() {
+    if !unix_socket_bind_supported() {
+        return;
+    }
+
     let socket = temp_socket_path("stale-path");
     let listener = UnixListener::bind(&socket).unwrap();
     drop(listener);
@@ -369,6 +390,10 @@ fn privileged_worker_socket_wait_rejects_stale_socket_path() {
 
 #[test]
 fn privileged_worker_socket_wait_timeout_reports_clear_error() {
+    if !unix_socket_bind_supported() {
+        return;
+    }
+
     let socket = temp_socket_path("missing-path");
 
     let err = wait_for_privileged_worker_socket_with_timing(
@@ -386,6 +411,10 @@ fn privileged_worker_socket_wait_timeout_reports_clear_error() {
 
 #[test]
 fn unix_socket_privileged_worker_round_trips_apply_and_rollback() {
+    if !unix_socket_bind_supported() {
+        return;
+    }
+
     let socket = temp_socket_path("round-trip");
     let service = Arc::new(FakeWorkerService::default());
     let worker_service = Arc::clone(&service);

@@ -1,5 +1,6 @@
 //! Userspace event shapes converted from raw `stutter-common` ABI records.
 #![allow(dead_code)] // Transitional event boundary: raw decoders migrate to these wrappers path-by-path.
+// Exit: remove this marker once the described migration is complete and the local allow is no longer needed.
 
 use stutter_common::{
     BlockIoEvent as RawBlockIoEvent, CpuFreqEvent as RawCpuFreqEvent, IrqEvent as RawIrqEvent,

@@ -1,4 +1,5 @@
 #![allow(dead_code)] // Transitional command-runner injection target.
+// Exit: remove this marker once the described migration is complete and the local allow is no longer needed.
 
 use std::{
     path::{Path, PathBuf},

@@ -11,8 +11,14 @@
 | Profile benchmarker | Current | `tune` benchmarks explicit CPU-affinity profile sets and records per-candidate artifacts. |
 | Profile recommender | Current | `tune` writes recommendation artifacts, and `recommend` compares baseline runs with tune output. |
 | Advisor daemon | Current | `advisor --watch-runs` watches completed runs and emits conservative offline recommendations. |
-| Limited auto-tuner | Future | Any future automatic action should go through safety classes, preflight, audit logging, verification, and rollback. |
-| Broader optimizer | Future | IRQ affinity, uclamp, nice, GPU, SCX, and other tunables require stronger evidence and explicit safety design before implementation. |
+| Limited auto-tuner | In development / gated | Runtime, planning, live experiment, rollback, audit, and emergency-restore infrastructure exist. User-facing enablement remains gated on safety validation, policy coverage, and end-to-end recovery confidence. |
+| Broader optimizer | Experimental / internal | Providers and candidate paths exist for CPU affinity, nice, ioprio, uclamp, cgroup placement, IRQ affinity, CPU power, VM knobs, and GPU power. Broader user-facing enablement remains future work pending stronger evidence, policy hardening, and clearer operator controls. |
+
+### Autotune Implementation Status
+
+The autotune subsystem is partially implemented in-tree. Roadmap status refers to
+safe user-facing enablement, not absence of code. Experimental/internal paths may
+exist before they are considered supported defaults.
 
 ## Direction
 
@@ -26,7 +32,9 @@ Near-term work should improve trust, repeatability, and rollback before adding b
 
 ## Non-goals For Now
 
-- No broad privileged auto-optimizer.
+- No broad privileged auto-optimizer is enabled by default. Any automatic action
+  must remain gated by safety class, preflight, audit logging, verification,
+  rollback, and explicit policy.
 - No silent system-wide tuning.
 - No new low-level probes unless they answer a specific evidence gap.
 - No claim that a recommendation proves root cause.

@@ -1,4 +1,6 @@
-#![allow(dead_code)] // Transitional procfs reader trait while process-tree I/O splits.
+#![allow(dead_code)]
+// Transitional procfs reader trait while process-tree I/O splits.
+// Exit: remove this marker once the described migration is complete and the local allow is no longer needed.
 
 //! Procfs process and task readers.
 //!

@@ -1,4 +1,5 @@
 #![allow(unused_imports)] // Transitional system façade while root low-level readers migrate.
+// Exit: remove this marker once the described migration is complete and the local allow is no longer needed.
 
 pub(crate) mod cgroup;
 pub(crate) mod command;
