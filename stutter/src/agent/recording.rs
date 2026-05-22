@@ -152,6 +152,8 @@ pub(crate) async fn start_record_handler(
     let (stop_tx, stop_rx) = oneshot::channel();
     let monitor_config = Arc::new(monitor_config);
 
+    // The agent owns only the cancellation sender and join handle; the monitor session owns its
+    // mutable recording state inside the spawned task.
     let join = tokio::spawn(async move {
         crate::session::run_monitor(monitor_config, None, None, Some(stop_rx)).await
     });

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 mod allow_attributes;
 mod allowlists;
+mod concurrency;
 mod dependencies;
 mod direct_prints;
 mod file_size;

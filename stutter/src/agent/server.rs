@@ -74,6 +74,8 @@ pub(crate) async fn serve_unix_socket_with_limits(
 
         let active_connections = active_connections.clone();
         let connection_errors = connection_errors.clone();
+        // Each accepted socket owns its Hyper connection task; shared counters are atomics and the
+        // semaphore permit bounds total concurrency until the task exits.
         tokio::spawn(async move {
             let _permit = permit;
             let builder = HyperConnectionBuilder::new(TokioExecutor::new());

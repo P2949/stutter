@@ -1,3 +1,10 @@
+//! Single-owner daemon state storage.
+//!
+//! `DaemonStateStore` is mutated through owned daemon runtime/store paths rather than shared
+//! behind arbitrary locks. `replace` is the persistence boundary: it writes a full snapshot before
+//! swapping in-memory state. Any future locking or ownership split must update
+//! `docs/CONCURRENCY.md`.
+
 use super::{
     policy::DaemonMode,
     runtime::DaemonTransition,
