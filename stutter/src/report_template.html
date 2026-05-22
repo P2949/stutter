@@ -897,8 +897,24 @@ document.addEventListener('DOMContentLoaded', () => {
         addRow('SCX State', metadata.scx_state);
         addRow('SCX Ops', metadata.scx_ops);
         const blockIoBasis = session.block_io_correlation_basis || 'dev+sector';
-        if (session.block_io_event_count > 0) {
+        const blockFallbackKeyCollisions =
+            session.drop_counters ? (session.drop_counters.block_fallback_key_collisions || 0) : 0;
+        if ((session.block_io_event_count || 0) > 0) {
+            addRow('Block I/O Events', session.block_io_event_count);
+        }
+        if ((session.block_io_event_count || 0) > 0 || blockFallbackKeyCollisions > 0) {
             addRow('Block I/O Correlation', blockIoBasis + (blockIoBasis === 'dev+sector' ? ' (advisory, approximate)' : ''));
+        }
+        if (blockFallbackKeyCollisions > 0) {
+            const blockIoEvents = session.block_io_event_count || 0;
+            const collisionRatio = blockIoEvents > 0
+                ? ` (${((blockFallbackKeyCollisions / blockIoEvents) * 100).toFixed(2)}% of emitted block I/O events)`
+                : '';
+
+            addRow(
+                'Block I/O fallback collisions',
+                `${blockFallbackKeyCollisions}${collisionRatio} ambiguous fallback-mode samples were dropped. Block I/O latency coverage may be incomplete.`
+            );
         }
         if (session.drop_counters && (
             (session.drop_counters.wakeup_data_insert_failed || 0) > 0 ||
@@ -906,14 +922,14 @@ document.addEventListener('DOMContentLoaded', () => {
             (session.drop_counters.ringbuf_reserve_failed || 0) > 0 ||
             (session.drop_counters.irq_start_times_insert_failed || 0) > 0 ||
             (session.drop_counters.block_start_insert_failed || 0) > 0 ||
-            (session.drop_counters.block_fallback_key_collisions || 0) > 0
+            blockFallbackKeyCollisions > 0
         )) {
             const total = (session.drop_counters.wakeup_data_insert_failed || 0) +
                           (session.drop_counters.wakeup_data_stale_entries || 0) +
                           (session.drop_counters.ringbuf_reserve_failed || 0) +
                           (session.drop_counters.irq_start_times_insert_failed || 0) +
                           (session.drop_counters.block_start_insert_failed || 0) +
-                          (session.drop_counters.block_fallback_key_collisions || 0);
+                          blockFallbackKeyCollisions;
             addRow('eBPF Drops (Cumulative)', total);
             if ((session.drop_counters.wakeup_data_stale_entries || 0) > 0) {
                 addRow(
@@ -925,13 +941,15 @@ document.addEventListener('DOMContentLoaded', () => {
         html += '</tbody></table>';
         document.getElementById('metadata-content').innerHTML = html;
 
-        if (session.block_io_event_count > 0 && blockIoBasis === 'dev+sector') {
+        if ((session.block_io_event_count || 0) > 0 && blockIoBasis === 'dev+sector') {
             document.getElementById('block-io-warning').style.display = 'block';
         }
-        if (session.drop_counters && session.drop_counters.block_fallback_key_collisions > 0) {
+        if (blockFallbackKeyCollisions > 0) {
             const warning = document.getElementById('block-io-warning');
             warning.style.display = 'block';
-            warning.textContent = 'Block I/O fallback key collisions were detected. Ambiguous fallback-mode samples were dropped, so block I/O latency coverage may be incomplete.';
+            warning.textContent =
+                `Block I/O fallback key collisions were detected (${blockFallbackKeyCollisions}). ` +
+                'Ambiguous fallback-mode samples were dropped, so block I/O latency coverage may be incomplete.';
         }
     }
 

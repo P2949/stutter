@@ -333,13 +333,29 @@ fn text_report_shows_block_fallback_collision_warning_even_without_io_events() {
 }
 
 #[test]
-fn report_template_warns_on_block_fallback_key_collisions() {
+fn report_template_surfaces_block_fallback_key_collision_count() {
     let template = include_str!("../report_template.html");
 
-    assert!(template.contains("block_fallback_key_collisions"));
-    assert!(template.contains(
-        "Block I/O fallback key collisions were detected. Ambiguous fallback-mode samples were dropped, so block I/O latency coverage may be incomplete."
-    ));
+    assert!(template.contains("blockFallbackKeyCollisions"));
+    assert!(template.contains("Block I/O fallback collisions"));
+    assert!(template.contains("ambiguous fallback-mode samples were dropped"));
+    assert!(template.contains("Block I/O latency coverage may be incomplete"));
+}
+
+#[test]
+fn report_template_block_fallback_collision_warning_includes_count() {
+    let template = include_str!("../report_template.html");
+
+    assert!(template.contains("Block I/O fallback key collisions were detected"));
+    assert!(template.contains("${blockFallbackKeyCollisions}"));
+}
+
+#[test]
+fn report_template_shows_block_io_event_count_near_correlation_metadata() {
+    let template = include_str!("../report_template.html");
+
+    assert!(template.contains("Block I/O Events"));
+    assert!(template.contains("session.block_io_event_count"));
 }
 
 #[test]
