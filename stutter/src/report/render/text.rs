@@ -638,8 +638,10 @@ pub(crate) fn render_report(input: TextReportRenderInput<'_>) -> String {
         );
         pushln(&mut output, "");
 
-        if session.core.block_io_event_count > 0
-            && block_io_correlation_basis(session) == "dev+sector"
+        let block_fallback_key_collisions =
+            session.core.drop_counters.block_fallback_key_collisions;
+        if block_io_correlation_basis(session) == "dev+sector"
+            && (session.core.block_io_event_count > 0 || block_fallback_key_collisions > 0)
         {
             pushln(&mut output, "block i/o correlation warning");
             pushln(&mut output, "----------------------------");
@@ -648,15 +650,27 @@ pub(crate) fn render_report(input: TextReportRenderInput<'_>) -> String {
             } else {
                 pushln(
                     &mut output,
-                    "note: Block I/O correlation uses dev+sector hashing. Attribution to specific",
+                    "note: Block I/O correlation uses dev+sector hashing because request-pointer",
                 );
                 pushln(
                     &mut output,
-                    "      tasks is best-effort and may collide if multiple concurrent requests",
+                    "      identity was unavailable. Concurrent same-device/same-sector requests",
                 );
                 pushln(
                     &mut output,
-                    "      target the same device and sector. Exact attribution is not guaranteed.",
+                    "      can collide. When a fallback collision is detected, stutter drops the",
+                );
+                pushln(
+                    &mut output,
+                    "      ambiguous start record instead of emitting a potentially wrong latency sample.",
+                );
+            }
+            if block_fallback_key_collisions > 0 {
+                pushln(
+                    &mut output,
+                    format!(
+                        "note: block_fallback_key_collisions={block_fallback_key_collisions}; ambiguous fallback samples were dropped, so block I/O latency coverage may be incomplete."
+                    ),
                 );
             }
             pushln(&mut output, "");

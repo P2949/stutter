@@ -106,8 +106,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/autotune/emergency_restore.rs",
-        max_lines: 1_658,
-        reason: "existing autotune emergency restore implementation pending future split; restore input conversion, rollback summary wiring, and record-level restore outcome propagation are staged here",
+        max_lines: 1_797,
+        reason: "existing autotune emergency restore implementation pending future split; restore input conversion, rollback summary wiring, record-level restore outcome propagation, and ESRCH skip accounting tests are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/tune/mod.rs",
@@ -186,8 +186,13 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/autotune/runtime.rs",
-        max_lines: 1_005,
-        reason: "existing autotune runtime implementation pending future split; restore, task-lifecycle, and display-path event ignore wiring are staged here",
+        max_lines: 1_040,
+        reason: "existing autotune runtime implementation pending future split; restore, task-lifecycle, display-path event ignore wiring, and active-config-unknown recovery routing are staged here",
+    },
+    OversizedRustFileAllowance {
+        path: "src/autotune/runtime/tests.rs",
+        max_lines: 1_110,
+        reason: "existing autotune runtime regression test module pending future split; active-config-unknown fault/restore/resync coverage is staged here",
     },
     OversizedRustFileAllowance {
         path: "src/actions/uclamp.rs",

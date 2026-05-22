@@ -52,7 +52,7 @@ impl BlockIoCorrelationBasis {
         match self {
             Self::RequestPointer => None,
             Self::DevSector => Some(
-                "Block I/O correlation is approximate (dev+sector fallback); concurrent same-sector requests may collide.",
+                "Block I/O correlation is approximate (dev+sector fallback); concurrent same-sector requests may collide. Ambiguous fallback samples are dropped, so block I/O latency coverage may be incomplete.",
             ),
         }
     }
@@ -137,6 +137,20 @@ fn drop_counter_value(counters: &PerCpuArray<MapData, u64>, key: u32) -> u64 {
         .get(&key, 0)
         .map(|values| values.iter().copied().sum())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dev_sector_warning_describes_dropped_ambiguous_samples_not_misattribution() {
+        let warning = BlockIoCorrelationBasis::DevSector.warning().unwrap();
+
+        assert!(warning.contains("Ambiguous fallback samples are dropped"));
+        assert!(warning.contains("coverage may be incomplete"));
+        assert!(!warning.contains("misattribution"));
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

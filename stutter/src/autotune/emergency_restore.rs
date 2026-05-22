@@ -124,6 +124,34 @@ impl RollbackRestoreSummary {
     }
 }
 
+fn is_missing_task_error(err: &std::io::Error) -> bool {
+    err.raw_os_error() == Some(libc::ESRCH)
+}
+
+fn restore_summary_with_missing_skips(
+    rollback_kind: impl Into<String>,
+    restored_items: usize,
+    skipped_missing: usize,
+) -> RollbackRestoreSummary {
+    let mut summary = RollbackRestoreSummary {
+        rollback_kind: rollback_kind.into(),
+        restored_items,
+        skipped_items: skipped_missing,
+        skipped_missing,
+        skipped_identity_mismatch: 0,
+        failed_items: 0,
+        messages: Vec::new(),
+    };
+
+    if skipped_missing > 0 {
+        summary
+            .messages
+            .push(format!("skipped_missing_tasks={skipped_missing}"));
+    }
+
+    summary
+}
+
 #[derive(Default)]
 struct AutotuneRollbackTokenHandler;
 
@@ -647,104 +675,145 @@ fn restore_rollback_token_direct(token: &RollbackToken) -> anyhow::Result<Rollba
     }
 }
 
-fn restore_nice_records(records: &[NiceRestoreRecord]) -> anyhow::Result<RollbackRestoreSummary> {
+fn restore_task_records<T, Apply, Describe>(
+    rollback_kind: &'static str,
+    records: &[T],
+    mut apply: Apply,
+    mut describe_failure: Describe,
+) -> anyhow::Result<RollbackRestoreSummary>
+where
+    Apply: FnMut(&T) -> Result<(), std::io::Error>,
+    Describe: FnMut(&T) -> String,
+{
     let mut restored = 0usize;
+    let mut skipped_missing = 0usize;
 
     for record in records {
-        let tid = record.tid();
-        let rc = unsafe {
-            libc::setpriority(
-                libc::PRIO_PROCESS,
-                tid as libc::id_t,
-                record.original_nice as libc::c_int,
-            )
-        };
-
-        if rc != 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
-                format!(
-                    "failed to restore nice={} for tid={}",
-                    record.original_nice, tid
-                )
-            });
+        match apply(record) {
+            Ok(()) => {
+                restored += 1;
+            }
+            Err(err) if is_missing_task_error(&err) => {
+                skipped_missing += 1;
+            }
+            Err(err) => {
+                return Err(err).with_context(|| describe_failure(record));
+            }
         }
-
-        restored += 1;
     }
 
-    Ok(RollbackRestoreSummary::success("nice-restore", restored))
+    Ok(restore_summary_with_missing_skips(
+        rollback_kind,
+        restored,
+        skipped_missing,
+    ))
+}
+
+fn restore_nice_records(records: &[NiceRestoreRecord]) -> anyhow::Result<RollbackRestoreSummary> {
+    restore_task_records(
+        "nice-restore",
+        records,
+        |record| {
+            let tid = record.tid();
+            let rc = unsafe {
+                libc::setpriority(
+                    libc::PRIO_PROCESS,
+                    tid as libc::id_t,
+                    record.original_nice as libc::c_int,
+                )
+            };
+
+            if rc == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        },
+        |record| {
+            format!(
+                "failed to restore nice={} for tid={}",
+                record.original_nice,
+                record.tid()
+            )
+        },
+    )
 }
 
 fn restore_ioprio_records(
     records: &[IoPrioRestoreRecord],
 ) -> anyhow::Result<RollbackRestoreSummary> {
-    let mut restored = 0usize;
-
-    for record in records {
-        let tid = record.tid();
-        let rc = unsafe {
-            libc::syscall(
-                libc::SYS_ioprio_set,
-                IOPRIO_WHO_PROCESS,
-                tid as libc::c_int,
-                record.original_ioprio as libc::c_int,
-            )
-        };
-
-        if rc != 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
-                format!(
-                    "failed to restore I/O priority={} for tid={}",
-                    record.original_ioprio, tid
+    restore_task_records(
+        "ioprio-restore",
+        records,
+        |record| {
+            let tid = record.tid();
+            let rc = unsafe {
+                libc::syscall(
+                    libc::SYS_ioprio_set,
+                    IOPRIO_WHO_PROCESS,
+                    tid as libc::c_int,
+                    record.original_ioprio as libc::c_int,
                 )
-            });
-        }
+            };
 
-        restored += 1;
-    }
-
-    Ok(RollbackRestoreSummary::success("ioprio-restore", restored))
+            if rc == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        },
+        |record| {
+            format!(
+                "failed to restore I/O priority={} for tid={}",
+                record.original_ioprio,
+                record.tid()
+            )
+        },
+    )
 }
 
 fn restore_uclamp_records(
     records: &[UclampRestoreRecord],
 ) -> anyhow::Result<RollbackRestoreSummary> {
-    let mut restored = 0usize;
+    restore_task_records(
+        "uclamp-restore",
+        records,
+        |record| {
+            let tid = record.tid();
+            let mut attr = SchedAttr {
+                sched_flags: SCHED_FLAG_KEEP_POLICY
+                    | SCHED_FLAG_KEEP_PARAMS
+                    | SCHED_FLAG_UTIL_CLAMP_MIN
+                    | SCHED_FLAG_UTIL_CLAMP_MAX,
+                sched_util_min: record.original_util_min,
+                sched_util_max: record.original_util_max,
+                ..SchedAttr::default()
+            };
 
-    for record in records {
-        let tid = record.tid();
-        let mut attr = SchedAttr {
-            sched_flags: SCHED_FLAG_KEEP_POLICY
-                | SCHED_FLAG_KEEP_PARAMS
-                | SCHED_FLAG_UTIL_CLAMP_MIN
-                | SCHED_FLAG_UTIL_CLAMP_MAX,
-            sched_util_min: record.original_util_min,
-            sched_util_max: record.original_util_max,
-            ..SchedAttr::default()
-        };
-
-        let rc = unsafe {
-            libc::syscall(
-                libc::SYS_sched_setattr,
-                tid as libc::pid_t,
-                &mut attr as *mut SchedAttr,
-                0u32,
-            )
-        };
-
-        if rc != 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
-                format!(
-                    "failed to restore uclamp min={} max={} for tid={}",
-                    record.original_util_min, record.original_util_max, tid
+            let rc = unsafe {
+                libc::syscall(
+                    libc::SYS_sched_setattr,
+                    tid as libc::pid_t,
+                    &mut attr as *mut SchedAttr,
+                    0u32,
                 )
-            });
-        }
+            };
 
-        restored += 1;
-    }
-
-    Ok(RollbackRestoreSummary::success("uclamp-restore", restored))
+            if rc == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        },
+        |record| {
+            format!(
+                "failed to restore uclamp min={} max={} for tid={}",
+                record.original_util_min,
+                record.original_util_max,
+                record.tid()
+            )
+        },
+    )
 }
 
 fn restore_irq_affinity_records_at(
@@ -1279,6 +1348,76 @@ mod tests {
             history_path: Some(dir.join("history.jsonl")),
             dry_run,
         }
+    }
+
+    #[test]
+    fn restore_task_records_skips_esrch_and_continues() {
+        let records = [1_u32, 2_u32, 3_u32];
+
+        let summary = restore_task_records(
+            "test-restore",
+            &records,
+            |record| match *record {
+                1 => Ok(()),
+                2 => Err(std::io::Error::from_raw_os_error(libc::ESRCH)),
+                3 => Ok(()),
+                _ => unreachable!(),
+            },
+            |record| format!("failed record={record}"),
+        )
+        .unwrap();
+
+        assert_eq!(summary.rollback_kind, "test-restore");
+        assert_eq!(summary.restored_items, 2);
+        assert_eq!(summary.skipped_items, 1);
+        assert_eq!(summary.skipped_missing, 1);
+        assert_eq!(summary.skipped_identity_mismatch, 0);
+        assert_eq!(summary.failed_items, 0);
+        assert!(
+            summary
+                .messages
+                .iter()
+                .any(|message| message.contains("skipped_missing_tasks=1"))
+        );
+    }
+
+    #[test]
+    fn restore_task_records_returns_error_for_non_esrch() {
+        let records = [1_u32, 2_u32, 3_u32];
+
+        let err = restore_task_records(
+            "test-restore",
+            &records,
+            |record| match *record {
+                1 => Ok(()),
+                2 => Err(std::io::Error::from_raw_os_error(libc::EPERM)),
+                3 => panic!("must not continue after non-ESRCH failure"),
+                _ => unreachable!(),
+            },
+            |record| format!("failed record={record}"),
+        )
+        .unwrap_err();
+
+        let message = format!("{err:#}");
+        assert!(message.contains("failed record=2"));
+    }
+
+    #[test]
+    fn restore_task_records_empty_list_succeeds() {
+        let records: [u32; 0] = [];
+
+        let summary = restore_task_records(
+            "test-restore",
+            &records,
+            |_| Ok(()),
+            |record| format!("failed record={record}"),
+        )
+        .unwrap();
+
+        assert_eq!(summary.restored_items, 0);
+        assert_eq!(summary.skipped_items, 0);
+        assert_eq!(summary.skipped_missing, 0);
+        assert_eq!(summary.failed_items, 0);
     }
 
     #[test]

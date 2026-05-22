@@ -62,7 +62,7 @@ summary { cursor: pointer; font-weight: 600; color: #111827; }
   <h2>System Metadata</h2>
   <div id="metadata-content"></div>
   <div id="block-io-warning" class="notice notice-warn" style="display:none; margin-top: 16px;">
-    <strong>Notice:</strong> Block I/O correlation is advisory and approximate (dev+sector hashing). Attribution may collide under high concurrency.
+    <strong>Notice:</strong> Block I/O correlation is advisory and approximate (dev+sector hashing). Ambiguous fallback samples are dropped, so block I/O latency coverage may be incomplete.
   </div>
 </section>
 
@@ -923,7 +923,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (session.drop_counters && session.drop_counters.block_fallback_key_collisions > 0) {
             const warning = document.getElementById('block-io-warning');
             warning.style.display = 'block';
-            warning.textContent = 'Block I/O latency attribution degraded: fallback key collisions were detected and ambiguous samples were dropped.';
+            warning.textContent = 'Block I/O fallback key collisions were detected. Ambiguous fallback-mode samples were dropped, so block I/O latency coverage may be incomplete.';
         }
     }
 

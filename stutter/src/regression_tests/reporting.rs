@@ -316,12 +316,29 @@ fn report_uses_run_level_block_io_correlation_basis() {
 }
 
 #[test]
+fn text_report_shows_block_fallback_collision_warning_even_without_io_events() {
+    let mut session = minimal_session_for_report();
+    session.core.block_io_event_count = 0;
+    session.core.block_io_correlation_basis = "dev+sector".to_owned();
+    session.core.block_io_correlation_confidence = "medium".to_owned();
+    session.core.drop_counters.block_fallback_key_collisions = 2;
+
+    let output =
+        render_report_for_test(&session, &crate::session_io::RunArtifacts::default(), 5, 10);
+
+    assert!(output.contains("block i/o correlation warning"));
+    assert!(output.contains("block_fallback_key_collisions=2"));
+    assert!(output.contains("ambiguous fallback samples were dropped"));
+    assert!(output.contains("coverage may be incomplete"));
+}
+
+#[test]
 fn report_template_warns_on_block_fallback_key_collisions() {
     let template = include_str!("../report_template.html");
 
     assert!(template.contains("block_fallback_key_collisions"));
     assert!(template.contains(
-        "Block I/O latency attribution degraded: fallback key collisions were detected and ambiguous samples were dropped."
+        "Block I/O fallback key collisions were detected. Ambiguous fallback-mode samples were dropped, so block I/O latency coverage may be incomplete."
     ));
 }
 

@@ -203,6 +203,25 @@ fn data_quality_warns_on_truncated_spikes() {
 }
 
 #[test]
+fn data_quality_reports_block_fallback_key_collisions_specifically() {
+    let mut session = minimal_session_for_report_test();
+    session.core.block_io_correlation_basis = "dev+sector".to_owned();
+    session.core.block_io_correlation_confidence = "medium".to_owned();
+    session.core.drop_counters.block_fallback_key_collisions = 3;
+
+    let validation = crate::session_io::RunValidationReport::default();
+
+    let summary = data_quality_summary(&session, &validation);
+
+    assert_eq!(summary.level, DataQualityLevel::Medium);
+    assert!(summary.reasons.iter().any(|reason| {
+        reason.contains("block I/O fallback key collisions detected")
+            && reason.contains("3")
+            && reason.contains("coverage may be incomplete")
+    }));
+}
+
+#[test]
 fn data_quality_warns_on_missing_optional_artifacts() {
     let session = minimal_session_for_report_test();
     let validation = crate::session_io::RunValidationReport {
