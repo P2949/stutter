@@ -11,3 +11,7 @@ target/
 
 #llm-stuff
 .llm-runs/
+
+# Python
+__pycache__/
+*.pyc
