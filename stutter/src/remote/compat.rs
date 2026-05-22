@@ -1,4 +1,5 @@
 #![allow(dead_code)] // Transitional remote compatibility namespace.
+// Exit: remove this marker once the described migration is complete and the local allow is no longer needed.
 
 pub(crate) fn normalize_legacy_safety_class(value: &str) -> &str {
     match value {

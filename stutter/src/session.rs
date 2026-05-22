@@ -124,6 +124,7 @@ const LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS: u64 = 5;
 // its own CLI/config field.
 
 #[allow(dead_code)] // Transitional session-stage context; tick extraction will adopt this incrementally.
+// Exit: remove this marker once the described migration is complete and the local allow is no longer needed.
 pub(crate) struct SessionContext<'a> {
     pub config: &'a MonitorConfig,
     pub started: Instant,

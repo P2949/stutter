@@ -35,11 +35,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "agent root is now a thin configuration/startup/auth boundary after route handlers moved to focused submodules",
     },
     OversizedRustFileAllowance {
-        path: "src/agent/autotune.rs",
-        max_lines: 1_245,
-        reason: "autotune agent route handlers, remote policy helpers, explicit task reaping status, active record-level restore endpoint wiring, task reaping, and enum-mode apply-low-risk start behavior remain pending future policy/helper split",
-    },
-    OversizedRustFileAllowance {
         path: "src/autotune/planning/tests.rs",
         max_lines: 1_514,
         reason: "existing broad candidate planning regression tests moved out of candidate.rs pending future test split",

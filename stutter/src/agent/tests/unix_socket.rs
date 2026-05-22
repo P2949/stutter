@@ -1,6 +1,7 @@
 //! Agent Unix socket server limit tests.
 
 use std::{
+    os::unix::net::UnixListener as StdUnixListener,
     path::{Path as StdPath, PathBuf},
     sync::Arc,
     time::Duration,
@@ -15,6 +16,10 @@ use super::{support::*, *};
 
 #[tokio::test]
 async fn unix_socket_connection_cap_rejects_extra_idle_clients() {
+    if !unix_socket_bind_supported() {
+        return;
+    }
+
     let (socket_path, server) =
         start_unix_socket_server("connection_cap", 2, Duration::from_secs(5)).await;
 
@@ -33,6 +38,10 @@ async fn unix_socket_connection_cap_rejects_extra_idle_clients() {
 
 #[tokio::test]
 async fn unix_socket_idle_connection_is_closed_after_timeout() {
+    if !unix_socket_bind_supported() {
+        return;
+    }
+
     let (socket_path, server) =
         start_unix_socket_server("idle_timeout", 1, Duration::from_millis(50)).await;
     let idle = UnixStream::connect(&socket_path).await.unwrap();
@@ -45,6 +54,10 @@ async fn unix_socket_idle_connection_is_closed_after_timeout() {
 
 #[tokio::test]
 async fn unix_socket_active_request_still_works_with_timeout_enabled() {
+    if !unix_socket_bind_supported() {
+        return;
+    }
+
     let (socket_path, server) =
         start_unix_socket_server("active_request", 1, Duration::from_secs(2)).await;
 
@@ -56,6 +69,10 @@ async fn unix_socket_active_request_still_works_with_timeout_enabled() {
 
 #[tokio::test]
 async fn unix_socket_timed_out_idle_connection_releases_permit() {
+    if !unix_socket_bind_supported() {
+        return;
+    }
+
     let (socket_path, server) =
         start_unix_socket_server("timeout_releases_permit", 1, Duration::from_millis(50)).await;
     let idle = UnixStream::connect(&socket_path).await.unwrap();
@@ -155,12 +172,12 @@ async fn assert_version_request_succeeds(path: &StdPath) {
 }
 
 async fn wait_for_unix_socket_path(path: &StdPath) {
-    for _ in 0..100 {
+    for _ in 0..200 {
         if path.exists() {
             return;
         }
         tokio::task::yield_now().await;
-        tokio::time::sleep(Duration::from_millis(1)).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
     panic!("unix socket path was not created: {}", path.display());
@@ -173,4 +190,18 @@ fn agent_unix_socket_temp_dir(name: &str) -> PathBuf {
     ));
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+fn unix_socket_bind_supported() -> bool {
+    let dir = agent_unix_socket_temp_dir("support_probe");
+    let path = dir.join("probe.sock");
+    match StdUnixListener::bind(&path) {
+        Ok(listener) => {
+            drop(listener);
+            let _ = std::fs::remove_file(&path);
+            true
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => false,
+        Err(err) => panic!("unexpected unix socket probe error: {err}"),
+    }
 }

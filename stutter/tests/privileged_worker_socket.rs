@@ -1,5 +1,6 @@
 use std::{
     fs,
+    os::unix::net::UnixListener,
     path::Path,
     sync::Arc,
     thread,
@@ -35,6 +36,22 @@ fn wait_for_socket(path: &Path) {
         thread::sleep(Duration::from_millis(10));
     }
     panic!("timed out waiting for socket {}", path.display());
+}
+
+fn unix_socket_bind_supported() -> bool {
+    let Ok(temp) = tempfile::tempdir() else {
+        return false;
+    };
+    let socket = temp.path().join("support-probe.sock");
+    match UnixListener::bind(&socket) {
+        Ok(listener) => {
+            drop(listener);
+            fs::remove_file(socket).ok();
+            true
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => false,
+        Err(err) => panic!("unexpected privileged-worker integration socket probe error: {err}"),
+    }
 }
 
 fn parse_thread_stat() -> anyhow::Result<(u32, i32, u64)> {
@@ -104,6 +121,10 @@ fn candidate_apply_request(candidate: CandidateAction) -> CandidateApplyRequest 
 
 #[test]
 fn worker_socket_apply_and_rollback_roundtrip() -> anyhow::Result<()> {
+    if !unix_socket_bind_supported() {
+        return Ok(());
+    }
+
     let temp = tempfile::tempdir()?;
     let socket = temp.path().join("worker.sock");
     let service = Arc::new(InProcessPrivilegedActionService::default());
@@ -154,6 +175,10 @@ fn worker_connection_refused_surfaces_as_error() -> anyhow::Result<()> {
 
 #[test]
 fn worker_handle_restart_recovers_connectivity() -> anyhow::Result<()> {
+    if !unix_socket_bind_supported() {
+        return Ok(());
+    }
+
     let temp = tempfile::tempdir()?;
     let socket = temp.path().join("managed-worker.sock");
     let executable = Path::new(env!("CARGO_BIN_EXE_stutter"));

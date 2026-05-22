@@ -6,6 +6,8 @@ mod direct_prints;
 mod file_size;
 mod public_api;
 mod scanners;
+mod transitional;
+mod transitional_allowlist;
 mod unwrap_expect;
 
 const RUST_FILE_SIZE_LIMIT_LINES: usize = 1_000;

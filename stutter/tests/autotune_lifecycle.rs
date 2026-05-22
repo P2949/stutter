@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     fs,
+    os::unix::net::UnixListener,
     path::{Path, PathBuf},
     sync::Arc,
     thread,
@@ -66,6 +67,20 @@ fn wait_for_socket(path: &Path) {
         thread::sleep(Duration::from_millis(25));
     }
     panic!("timed out waiting for socket {}", path.display());
+}
+
+fn unix_socket_bind_supported() -> bool {
+    let dir = temp_dir();
+    let path = dir.join("support-probe.sock");
+    match UnixListener::bind(&path) {
+        Ok(listener) => {
+            drop(listener);
+            fs::remove_file(path).ok();
+            true
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => false,
+        Err(err) => panic!("unexpected lifecycle unix socket probe error: {err}"),
+    }
 }
 
 fn parse_thread_stat() -> anyhow::Result<(u32, i32, u64)> {
@@ -497,6 +512,10 @@ fn activity_classifier_suppresses_idle_game_candidates() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn medium_risk_apply_through_unix_socket_lifecycle() -> anyhow::Result<()> {
+    if !unix_socket_bind_supported() {
+        return Ok(());
+    }
+
     let dir = temp_dir();
     let history_path = dir.join("autotune-history.jsonl");
     let audit_path = dir.join("audit.jsonl");

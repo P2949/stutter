@@ -35,11 +35,13 @@ pub enum CandidateAction {
 
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // Transitional: providers still emit CandidateAction while planner migration adopts this wrapper.
+// Exit: remove this marker once the described migration is complete and the local allow is no longer needed.
 pub struct SuggestionCandidate {
     candidate: CandidateAction,
 }
 
 #[allow(dead_code)] // Transitional: providers still emit CandidateAction while planner migration adopts this wrapper.
+// Exit: remove this marker once the described migration is complete and the local allow is no longer needed.
 impl SuggestionCandidate {
     pub fn new(candidate: CandidateAction) -> Self {
         Self { candidate }

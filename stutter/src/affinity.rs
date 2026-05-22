@@ -360,12 +360,11 @@ pub(crate) fn restore_identity_status_at(
     // this as an identity mismatch rather than falling back to a numeric
     // TID restore. This prevents accidental restores when schema v3
     // records include partial identity data.
-    if process_pid.is_none() || process_starttime_ticks.is_none() || task_starttime_ticks.is_none()
-    {
+    let (Some(process_pid), Some(process_starttime_ticks), Some(task_starttime_ticks)) =
+        (process_pid, process_starttime_ticks, task_starttime_ticks)
+    else {
         return Ok(RestoreRecordStatus::IdentityMismatch);
-    }
-
-    let process_pid = process_pid.unwrap();
+    };
 
     let process_stat_path = proc_root.join(process_pid.to_string()).join("stat");
     let process_starttime = match stat_starttime_at(&process_stat_path) {
@@ -382,7 +381,7 @@ pub(crate) fn restore_identity_status_at(
             ));
         }
     };
-    if process_starttime != process_starttime_ticks {
+    if process_starttime != Some(process_starttime_ticks) {
         return Ok(RestoreRecordStatus::IdentityMismatch);
     }
 
@@ -405,7 +404,7 @@ pub(crate) fn restore_identity_status_at(
             ));
         }
     };
-    if task_starttime != task_starttime_ticks {
+    if task_starttime != Some(task_starttime_ticks) {
         return Ok(RestoreRecordStatus::IdentityMismatch);
     }
 

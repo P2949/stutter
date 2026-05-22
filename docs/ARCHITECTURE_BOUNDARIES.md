@@ -17,6 +17,15 @@ Documentation here does not enable a runtime mode. A mode is supported only when
 policy, runtime enforcement, rollback, audit, and user-facing command behavior
 all support it.
 
+## Refactor Checklist
+
+Before merging large refactors:
+
+```sh
+scripts/list-transitional-modules.sh
+cargo test -p stutter architecture_tests
+```
+
 ## `cli`
 
 - Module owns: command-line parsing, Clap argument structs, default CLI value
