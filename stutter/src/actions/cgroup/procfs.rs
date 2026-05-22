@@ -1,4 +1,12 @@
-use super::*;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+use anyhow::Context;
+
+use super::{fs_io::normalize_cgroup_path, model::CgroupTargetSnapshot};
+use crate::actions::{ActionWarning, TaskIdentity};
 
 pub(super) fn read_target_snapshot_at(
     proc_root: &Path,

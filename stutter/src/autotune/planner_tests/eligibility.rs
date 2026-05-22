@@ -159,7 +159,7 @@ mod tests {
             active_experiment: Some(ActiveExperiment {
                 experiment_id: ExperimentId::new("unknown-active-config"),
                 candidate: nice_candidate(),
-                baseline_score_total: 1_000,
+                baseline_score: window_score(1_000),
             }),
             ..ControllerRuntimeState::default()
         };

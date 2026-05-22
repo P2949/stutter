@@ -141,7 +141,7 @@ fn daemon_explain_response_reports_no_optimize_reasons_and_changes() {
             decision: "noop".to_owned(),
             reason: "insufficient data".to_owned(),
             unix_nanos: Some(1),
-            score_total: None,
+            diagnostic_score_total: None,
             candidate_count: None,
             top_denied_reason: None,
             planner: None,

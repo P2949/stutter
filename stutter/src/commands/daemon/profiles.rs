@@ -310,8 +310,8 @@ mod tests {
             safety_class: SafetyClass::ReversibleLowRisk,
             kept_unix_nanos: 1_000,
             last_validated_unix_nanos: Some(1_000),
-            baseline_score_total: Some(1_000),
-            candidate_score_total: Some(850),
+            diagnostic_baseline_diagnostic_score_total: Some(1_000),
+            diagnostic_candidate_diagnostic_score_total: Some(850),
             score_delta: -150,
             confidence_milli: 900,
             environment: DaemonProfileEnvironment {

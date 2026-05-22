@@ -82,7 +82,7 @@ mod tests {
             active_experiment: Some(ActiveExperiment {
                 experiment_id: ExperimentId::new("external-cpu-affinity"),
                 candidate: active_candidate,
-                baseline_score_total: 1_000,
+                baseline_score: window_score(1_000),
             }),
             ..ControllerRuntimeState::default()
         };
@@ -165,7 +165,7 @@ mod tests {
             active_experiment: Some(ActiveExperiment {
                 experiment_id: ExperimentId::new("external-mutation"),
                 candidate: active_candidate,
-                baseline_score_total: 1_000,
+                baseline_score: window_score(1_000),
             }),
             ..ControllerRuntimeState::default()
         };
@@ -266,7 +266,7 @@ mod tests {
             active_experiment: Some(ActiveExperiment {
                 experiment_id: ExperimentId::new("active-cpu-placement"),
                 candidate: cpu_affinity_candidate("game-main"),
-                baseline_score_total: 100,
+                baseline_score: window_score(100),
             }),
             ..ControllerRuntimeState::default()
         };

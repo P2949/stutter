@@ -79,7 +79,7 @@ pub struct DecisionJsonlEntry {
     pub mode: AutotuneModeLabel,
     pub target_present: bool,
     pub situation: SituationKindLabel,
-    pub score_total: u64,
+    pub diagnostic_score_total: u64,
     pub data_quality: OnlineDataQualityLabel,
     pub decision: AutotuneDecisionLabel,
     pub reason: String,
@@ -90,7 +90,7 @@ pub struct DecisionJsonlEntryInput {
     pub mode: AutotuneModeLabel,
     pub target_present: bool,
     pub situation: SituationKindLabel,
-    pub score_total: u64,
+    pub diagnostic_score_total: u64,
     pub data_quality: OnlineDataQualityLabel,
     pub decision: AutotuneDecisionLabel,
     pub reason: String,
@@ -105,7 +105,7 @@ impl DecisionJsonlEntry {
             mode: input.mode,
             target_present: input.target_present,
             situation: input.situation,
-            score_total: input.score_total,
+            diagnostic_score_total: input.diagnostic_score_total,
             data_quality: input.data_quality,
             decision: input.decision,
             reason: input.reason,
@@ -115,7 +115,7 @@ impl DecisionJsonlEntry {
     pub fn observe_noop(
         target_present: bool,
         situation: SituationKindLabel,
-        score_total: u64,
+        diagnostic_score_total: u64,
         data_quality: OnlineDataQualityLabel,
         reason: impl Into<String>,
     ) -> Self {
@@ -124,7 +124,7 @@ impl DecisionJsonlEntry {
             mode: AutotuneModeLabel::Observe,
             target_present,
             situation,
-            score_total,
+            diagnostic_score_total,
             data_quality,
             decision: AutotuneDecisionLabel::Noop,
             reason: reason.into(),
@@ -233,7 +233,7 @@ mod tests {
         assert!(json.contains("\"mode\":\"Observe\""));
         assert!(json.contains("\"target_present\":true"));
         assert!(json.contains("\"situation\":\"GameCpuSchedulerPressure\""));
-        assert!(json.contains("\"score_total\":143"));
+        assert!(json.contains("\"diagnostic_score_total\":143"));
         assert!(json.contains("\"data_quality\":\"High\""));
         assert!(json.contains("\"decision\":\"Noop\""));
         assert!(json.contains(
@@ -263,7 +263,7 @@ mod tests {
             mode: AutotuneModeLabel::Suggest,
             target_present: true,
             situation: SituationKindLabel::CpuPressure,
-            score_total: 200,
+            diagnostic_score_total: 200,
             data_quality: OnlineDataQualityLabel::Medium,
             decision: AutotuneDecisionLabel::Suggest,
             reason: "suggest mode; candidate would be reported but not applied".to_owned(),

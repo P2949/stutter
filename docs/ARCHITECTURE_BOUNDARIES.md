@@ -401,10 +401,7 @@ cargo test -p stutter architecture_tests
 
 ## `stutter-common`
 
-The eBPF crate keeps tracepoint entrypoints in one translation unit for verifier
-and linking stability. Organization is maintained through internal sections
-rather than Rust module splitting; behavior-sensitive offsets, map capacities,
-and event structs should not be rearranged casually.
+The eBPF crate keeps verifier-sensitive tracepoint code in one translation unit, but handlers are grouped by subsystem: scheduler, process lifecycle, CPU/faults, IRQ, block I/O, KMS, DRM fence, and field readers.
 
 - Module owns: no-std shared event ABI constants, drop counter constants,
   C-compatible event structs shared between eBPF and userspace, optional

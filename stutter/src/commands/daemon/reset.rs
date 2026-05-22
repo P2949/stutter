@@ -63,7 +63,7 @@ pub fn safe_reset_daemon_state() -> DaemonState {
             decision: "daemon_state_reset".to_owned(),
             reason: "operator reset daemon state to safe observe-only defaults".to_owned(),
             unix_nanos: Some(crate::audit::unix_nanos_now()),
-            score_total: None,
+            diagnostic_score_total: None,
             candidate_count: None,
             top_denied_reason: None,
             planner: None,

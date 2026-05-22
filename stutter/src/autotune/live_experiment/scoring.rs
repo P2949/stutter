@@ -25,14 +25,7 @@ pub(super) fn policy_context_for_runtime_apply(
     }
 }
 pub(super) fn window_score_from_observation(observation: &AutotuneObservation) -> WindowScore {
-    WindowScore {
-        started_unix_nanos: observation.now_unix_nanos,
-        finished_unix_nanos: observation.now_unix_nanos,
-        interval_count: observation.interval_count,
-        scored_samples: observation.scored_samples,
-        scored_task_count: observation.scored_task_count,
-        score: observation.score.clone(),
-    }
+    observation.to_window_score()
 }
 pub(super) fn validate_window_score_for_apply(
     label: &str,

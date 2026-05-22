@@ -21,7 +21,7 @@ pub struct RollingWindowScore {
     pub interval_count: usize,
     pub scored_task_count: usize,
     pub scored_samples: u64,
-    pub score_total: u64,
+    pub diagnostic_score_total: u64,
     pub over_1ms: u64,
     pub over_2ms: u64,
     pub over_5ms: u64,
@@ -518,7 +518,7 @@ impl RollingWindow {
             .map(|record| record.max_ns)
             .max()
             .unwrap_or(0);
-        let score_total = over_5ms
+        let diagnostic_score_total = over_5ms
             .saturating_mul(100)
             .saturating_add(over_2ms.saturating_mul(20))
             .saturating_add(over_1ms);
@@ -561,7 +561,7 @@ impl RollingWindow {
             interval_count,
             scored_task_count,
             scored_samples,
-            score_total,
+            diagnostic_score_total,
             over_1ms,
             over_2ms,
             over_5ms,
@@ -1106,7 +1106,7 @@ mod tests {
         assert_eq!(score.over_1ms, 7);
         assert_eq!(score.over_2ms, 3);
         assert_eq!(score.over_5ms, 1);
-        assert_eq!(score.score_total, 167);
+        assert_eq!(score.diagnostic_score_total, 167);
         assert_eq!(score.max_latency_ns, 6_000_000);
         assert_eq!(score.frame_count, 2);
         assert_eq!(score.frame_p99_ms, 33.0);
@@ -1197,7 +1197,7 @@ mod tests {
 
         assert_eq!(score.interval_count, 0);
         assert_eq!(score.scored_samples, 0);
-        assert_eq!(score.score_total, 0);
+        assert_eq!(score.diagnostic_score_total, 0);
         assert!(score.data_quality.is_low());
         assert!(
             score

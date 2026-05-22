@@ -253,7 +253,7 @@ fn class_distribution_from_tasks(
 
 fn stutter_score_from_runtime_window_score(score: &RuntimeWindowScore) -> StutterScore {
     StutterScore {
-        total: score.score_total,
+        total: score.diagnostic_score_total,
         over_1ms: score.over_1ms,
         over_2ms: score.over_2ms,
         over_5ms: score.over_5ms,

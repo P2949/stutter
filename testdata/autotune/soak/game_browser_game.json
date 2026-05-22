@@ -4,11 +4,11 @@
   "ticks": [
     { "kind": "focus_game", "confidence": 0.95 },
     { "kind": "target_present" },
-    { "kind": "interval", "score_total": 500, "samples": 100 },
+    { "kind": "interval", "diagnostic_score_total": 500, "samples": 100 },
     { "kind": "focus_cleared", "reason": "browser foreground" },
     { "kind": "focus_game", "confidence": 0.94 },
     { "kind": "target_present" },
-    { "kind": "interval", "score_total": 450, "samples": 100 }
+    { "kind": "interval", "diagnostic_score_total": 450, "samples": 100 }
   ],
   "assertions": [
     "one_active_experiment_maximum",
