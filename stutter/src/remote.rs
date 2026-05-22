@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub(crate) mod compat;
+
 
 use crate::{
     actions::SafetyClass,
