@@ -40,8 +40,9 @@ use stutter_common::{
 // 11. Block I/O tracing
 // 12. KMS/flip tracing
 // 13. DRM fence waits/signals
-// 14. Tracepoint field readers
-// 15. License and panic handler
+// 14. KMS flip event emission
+// 15. Tracepoint field readers
+// 16. License and panic handler
 
 // -----------------------------------------------------------------------------
 // Tracepoint field offsets and provider constants
@@ -1614,30 +1615,8 @@ fn read_optional_u64(ctx: &TracePointContext, offset: u32) -> Option<u64> {
 }
 
 // -----------------------------------------------------------------------------
-// Tracepoint field readers
+// KMS flip event emission
 // -----------------------------------------------------------------------------
-
-fn read_optional_u32(ctx: &TracePointContext, offset: u32) -> Option<u32> {
-    if offset == 0 {
-        None
-    } else {
-        unsafe { ctx.read_at::<u32>(offset as usize).ok() }
-    }
-}
-
-fn read_sequence_field(ctx: &TracePointContext, offset: u32, size: u32) -> Option<u64> {
-    if offset == 0 {
-        None
-    } else if size >= 8 {
-        unsafe { ctx.read_at::<u64>(offset as usize).ok() }
-    } else {
-        unsafe {
-            ctx.read_at::<u32>(offset as usize)
-                .ok()
-                .map(|value| value as u64)
-        }
-    }
-}
 
 fn emit_kms_flip_event(
     key: &KmsFlipKey,
@@ -1694,6 +1673,33 @@ fn emit_kms_flip_event(
 
     entry.submit(0);
 }
+
+// -----------------------------------------------------------------------------
+// Tracepoint field readers
+// -----------------------------------------------------------------------------
+
+fn read_optional_u32(ctx: &TracePointContext, offset: u32) -> Option<u32> {
+    if offset == 0 {
+        None
+    } else {
+        unsafe { ctx.read_at::<u32>(offset as usize).ok() }
+    }
+}
+
+fn read_sequence_field(ctx: &TracePointContext, offset: u32, size: u32) -> Option<u64> {
+    if offset == 0 {
+        None
+    } else if size >= 8 {
+        unsafe { ctx.read_at::<u64>(offset as usize).ok() }
+    } else {
+        unsafe {
+            ctx.read_at::<u32>(offset as usize)
+                .ok()
+                .map(|value| value as u64)
+        }
+    }
+}
+
 
 // -----------------------------------------------------------------------------
 // License and panic handler
