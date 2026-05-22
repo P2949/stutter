@@ -14,9 +14,7 @@ use crate::{
     },
     daemon::{
         policy::DaemonMode,
-        privilege::{
-            CandidateApplyRequest, CandidatePlanRequest, RollbackRequest,
-        },
+        privilege::{CandidateApplyRequest, CandidatePlanRequest, RollbackRequest},
     },
 };
 

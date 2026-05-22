@@ -25,7 +25,6 @@ use crate::{
     daemon::{
         DaemonPolicy,
         policy::DaemonMode,
-
         state::{DaemonExperimentState, DaemonRollbackState},
     },
 };

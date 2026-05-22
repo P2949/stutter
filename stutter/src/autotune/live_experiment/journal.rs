@@ -1,17 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use super::*;
-use crate::{
-    autotune::{
-        candidate::CandidateAction,
-        controller_journal::{
-            ControllerJournalActionMetadata, ControllerJournalRecord, ControllerJournalState,
-            default_controller_journal_path, journal_process_identity,
-            write_controller_journal_record,
-        },
-        observation::{ActiveConfigSnapshot, AutotuneObservation},
-        system_context::{SystemContextSnapshotInput, collect_system_context},
+use crate::autotune::{
+    candidate::CandidateAction,
+    controller_journal::{
+        ControllerJournalActionMetadata, ControllerJournalRecord, ControllerJournalState,
+        default_controller_journal_path, journal_process_identity, write_controller_journal_record,
     },
+    observation::{ActiveConfigSnapshot, AutotuneObservation},
+    system_context::{SystemContextSnapshotInput, collect_system_context},
 };
 
 pub(super) fn controller_journal_record_for_live_experiment(

@@ -7,8 +7,6 @@ use std::{
 
 use anyhow::Context;
 
-
-
 use super::super::*;
 pub(super) use crate::{
     actions::{ActionId, ActionState, RollbackToken, SafetyClass, TaskIdentity},

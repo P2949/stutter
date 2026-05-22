@@ -1,8 +1,10 @@
-use std::{collections::BTreeSet, collections::BTreeMap, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
+
 use crate::{
-    actions::uclamp::UclampValues,
-    affinity::CpuMask,
-    autotune::observation::CpuPolicyRuntimeState,
+    actions::uclamp::UclampValues, affinity::CpuMask, autotune::observation::CpuPolicyRuntimeState,
 };
 
 pub(super) fn cpu_mask_strings_match(current: &str, requested: &str) -> bool {
