@@ -30,11 +30,6 @@ pub(in crate::architecture_tests) struct ExistingDirectPrintAllowance {
 pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     &[OversizedRustFileAllowance] = &[
     OversizedRustFileAllowance {
-        path: "src/autotune/planning/tests.rs",
-        max_lines: 1_514,
-        reason: "existing broad candidate planning regression tests moved out of candidate.rs pending future test split",
-    },
-    OversizedRustFileAllowance {
         path: "src/diagnosis.rs",
         max_lines: 1_585,
         reason: "temporary extraction stage: owns diagnosis config/model/anchor/candidate/evidence orchestration; next split is diagnosis/model.rs",
@@ -217,10 +212,6 @@ pub(in crate::architecture_tests) const EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_A
     ExistingProductionUnwrapExpectAllowance {
         path: "src/autotune/planner_tests/support.rs",
         reason: "autotune planner test support is cfg-test-only through planner.rs and contains synthetic fixture unwraps",
-    },
-    ExistingProductionUnwrapExpectAllowance {
-        path: "src/autotune/planning/tests.rs",
-        reason: "candidate planning regression tests are cfg-test-only through planning/mod.rs and contain test fixture unwraps",
     },
     ExistingProductionUnwrapExpectAllowance {
         path: "src/autotune/shutdown.rs",
