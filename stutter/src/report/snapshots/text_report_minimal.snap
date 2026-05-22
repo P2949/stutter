@@ -47,4 +47,3 @@ from sched tracepoints. target_pending_wakeups is diagnostic-only monitored-targ
 It is not kernel runqueue depth and must not be used for scoring or tuning decisions.
 
 none min_tasks=3 window_ms=5
-

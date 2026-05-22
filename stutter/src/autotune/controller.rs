@@ -117,8 +117,8 @@ pub struct ControllerCandidateResultInput<'a> {
     pub observation: &'a AutotuneObservation,
     pub cpu_topology_signature: Option<&'a str>,
     pub result: CandidateMemoryResult,
-    pub diagnostic_baseline_diagnostic_score_total: Option<u64>,
-    pub diagnostic_current_diagnostic_score_total: Option<u64>,
+    pub diagnostic_baseline_raw_score_total: Option<u64>,
+    pub diagnostic_current_raw_score_total: Option<u64>,
     pub rollback_reason: Option<String>,
     pub cooldown_expires_unix_nanos: Option<u128>,
 }
@@ -171,10 +171,10 @@ impl ControllerRuntimeState {
                 context: &context,
                 now_unix_nanos: input.observation.now_unix_nanos,
                 result: input.result,
-                diagnostic_baseline_diagnostic_score_total: input
-                    .diagnostic_baseline_diagnostic_score_total,
-                diagnostic_current_diagnostic_score_total: input
-                    .diagnostic_current_diagnostic_score_total,
+                diagnostic_baseline_raw_score_total: input
+                    .diagnostic_baseline_raw_score_total,
+                diagnostic_current_raw_score_total: input
+                    .diagnostic_current_raw_score_total,
                 rollback_reason: input.rollback_reason,
                 cooldown_expires_unix_nanos: input.cooldown_expires_unix_nanos,
             })
@@ -600,13 +600,13 @@ mod tests {
     }
 
     fn active_state_with_baseline_score(
-        diagnostic_baseline_diagnostic_score_total: u64,
+        diagnostic_baseline_raw_score_total: u64,
     ) -> ControllerRuntimeState {
-        active_state_with_baseline_window(diagnostic_baseline_diagnostic_score_total, 100, 5)
+        active_state_with_baseline_window(diagnostic_baseline_raw_score_total, 100, 5)
     }
 
     fn active_state_with_baseline_window(
-        diagnostic_baseline_diagnostic_score_total: u64,
+        diagnostic_baseline_raw_score_total: u64,
         baseline_scored_samples: u64,
         baseline_interval_count: usize,
     ) -> ControllerRuntimeState {
@@ -622,7 +622,7 @@ mod tests {
                     scored_samples: baseline_scored_samples,
                     scored_task_count: 2,
                     score: crate::scorer::StutterScore {
-                        total: diagnostic_baseline_diagnostic_score_total,
+                        total: diagnostic_baseline_raw_score_total,
                         frame_p99_ms: 12.0,
                         frame_max_ms: 20.0,
                         ..Default::default()
@@ -1373,8 +1373,8 @@ mod tests {
             observation: &observation,
             cpu_topology_signature: Some("cpu0-7:smt:on"),
             result: CandidateMemoryResult::Reverted,
-            diagnostic_baseline_diagnostic_score_total: Some(1_000),
-            diagnostic_current_diagnostic_score_total: Some(1_125),
+            diagnostic_baseline_raw_score_total: Some(1_000),
+            diagnostic_current_raw_score_total: Some(1_125),
             rollback_reason: Some("candidate regressed normalized score".to_owned()),
             cooldown_expires_unix_nanos: Some(309_000_000_000),
         });
@@ -1403,8 +1403,8 @@ mod tests {
             observation: &observation,
             cpu_topology_signature: Some("cpu0-7:smt:on"),
             result: CandidateMemoryResult::Reverted,
-            diagnostic_baseline_diagnostic_score_total: Some(1_000),
-            diagnostic_current_diagnostic_score_total: Some(1_200),
+            diagnostic_baseline_raw_score_total: Some(1_000),
+            diagnostic_current_raw_score_total: Some(1_200),
             rollback_reason: Some("candidate regressed normalized score".to_owned()),
             cooldown_expires_unix_nanos: Some(401_000_000_000),
         });

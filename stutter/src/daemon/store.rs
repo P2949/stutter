@@ -285,7 +285,7 @@ mod tests {
                         safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
                         kept_unix_nanos: 200,
                         last_validated_unix_nanos: Some(200),
-                        diagnostic_baseline_diagnostic_score_total: Some(1000),
+                        diagnostic_baseline_raw_score_total: Some(1000),
                         diagnostic_candidate_diagnostic_score_total: Some(850),
                         score_delta: -150,
                         confidence_milli: 900,

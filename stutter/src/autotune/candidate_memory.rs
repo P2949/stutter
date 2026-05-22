@@ -239,8 +239,8 @@ pub struct CandidateResultRecordInput<'a> {
     pub context: &'a CandidateContextHashInput,
     pub now_unix_nanos: u128,
     pub result: CandidateMemoryResult,
-    pub diagnostic_baseline_diagnostic_score_total: Option<u64>,
-    pub diagnostic_current_diagnostic_score_total: Option<u64>,
+    pub diagnostic_baseline_raw_score_total: Option<u64>,
+    pub diagnostic_current_raw_score_total: Option<u64>,
     pub rollback_reason: Option<String>,
     pub cooldown_expires_unix_nanos: Option<u128>,
 }
@@ -258,8 +258,8 @@ impl CandidateMemory {
             context,
             now_unix_nanos,
             result: CandidateMemoryResult::Tried,
-            diagnostic_baseline_diagnostic_score_total: None,
-            diagnostic_current_diagnostic_score_total: None,
+            diagnostic_baseline_raw_score_total: None,
+            diagnostic_current_raw_score_total: None,
             rollback_reason: None,
             cooldown_expires_unix_nanos,
         })
@@ -271,10 +271,10 @@ impl CandidateMemory {
     ) -> CandidateMemoryRecord {
         let candidate = input.candidate;
         let context = input.context;
-        let diagnostic_baseline_diagnostic_score_total =
-            input.diagnostic_baseline_diagnostic_score_total;
-        let diagnostic_current_diagnostic_score_total =
-            input.diagnostic_current_diagnostic_score_total;
+        let diagnostic_baseline_raw_score_total =
+            input.diagnostic_baseline_raw_score_total;
+        let diagnostic_current_raw_score_total =
+            input.diagnostic_current_raw_score_total;
         let context_hash = context.context_hash();
         let action_id = candidate.action_id();
         let record = CandidateMemoryRecord {
@@ -283,9 +283,9 @@ impl CandidateMemory {
             last_tried_unix_nanos: input.now_unix_nanos,
             result: input.result,
             context_hash: context_hash.clone(),
-            score_delta: score_delta_i64(
-                diagnostic_baseline_diagnostic_score_total,
-                diagnostic_current_diagnostic_score_total,
+            score_delta: diagnostic_raw_score_delta_i64(
+                diagnostic_baseline_raw_score_total,
+                diagnostic_current_raw_score_total,
             ),
             rollback_reason: normalize_owned_reason(input.rollback_reason),
             cooldown_expires_unix_nanos: input.cooldown_expires_unix_nanos,
@@ -303,8 +303,8 @@ impl CandidateMemory {
             candidate,
             context,
             &record,
-            diagnostic_baseline_diagnostic_score_total,
-            diagnostic_current_diagnostic_score_total,
+            diagnostic_baseline_raw_score_total,
+            diagnostic_current_raw_score_total,
         );
         self.enforce_bounds();
 
@@ -391,8 +391,8 @@ impl CandidateMemory {
         candidate: &CandidateAction,
         context: &CandidateContextHashInput,
         record: &CandidateMemoryRecord,
-        diagnostic_baseline_diagnostic_score_total: Option<u64>,
-        diagnostic_current_diagnostic_score_total: Option<u64>,
+        diagnostic_baseline_raw_score_total: Option<u64>,
+        diagnostic_current_raw_score_total: Option<u64>,
     ) {
         let context = context.clone().normalized();
         let Some(workload_hash) = context.workload_hash.clone() else {
@@ -400,9 +400,9 @@ impl CandidateMemory {
         };
         let action_id = candidate.action_id();
         let action_kind = candidate.action_kind().to_owned();
-        let score_delta = score_delta_f64(
-            diagnostic_baseline_diagnostic_score_total,
-            diagnostic_current_diagnostic_score_total,
+        let score_delta = diagnostic_raw_score_delta_f64(
+            diagnostic_baseline_raw_score_total,
+            diagnostic_current_raw_score_total,
         )
         .or(Some(0.0));
         let memory = WorkloadActionMemory {
@@ -530,13 +530,13 @@ fn normalize_owned_reason(value: Option<String>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn score_delta_i64(
-    diagnostic_baseline_diagnostic_score_total: Option<u64>,
-    diagnostic_current_diagnostic_score_total: Option<u64>,
+fn diagnostic_raw_score_delta_i64(
+    diagnostic_baseline_raw_score_total: Option<u64>,
+    diagnostic_current_raw_score_total: Option<u64>,
 ) -> i64 {
     let (Some(baseline), Some(current)) = (
-        diagnostic_baseline_diagnostic_score_total,
-        diagnostic_current_diagnostic_score_total,
+        diagnostic_baseline_raw_score_total,
+        diagnostic_current_raw_score_total,
     ) else {
         return 0;
     };
@@ -551,13 +551,13 @@ fn score_delta_i64(
     }
 }
 
-fn score_delta_f64(
-    diagnostic_baseline_diagnostic_score_total: Option<u64>,
-    diagnostic_current_diagnostic_score_total: Option<u64>,
+fn diagnostic_raw_score_delta_f64(
+    diagnostic_baseline_raw_score_total: Option<u64>,
+    diagnostic_current_raw_score_total: Option<u64>,
 ) -> Option<f64> {
     let (Some(baseline), Some(current)) = (
-        diagnostic_baseline_diagnostic_score_total,
-        diagnostic_current_diagnostic_score_total,
+        diagnostic_baseline_raw_score_total,
+        diagnostic_current_raw_score_total,
     ) else {
         return None;
     };
@@ -689,8 +689,8 @@ mod tests {
             context: &context,
             now_unix_nanos: 1_000,
             result: CandidateMemoryResult::Reverted,
-            diagnostic_baseline_diagnostic_score_total: Some(1_000),
-            diagnostic_current_diagnostic_score_total: Some(1_125),
+            diagnostic_baseline_raw_score_total: Some(1_000),
+            diagnostic_current_raw_score_total: Some(1_125),
             rollback_reason: Some(" candidate regressed ".to_owned()),
             cooldown_expires_unix_nanos: Some(301_000_000_000),
         });
@@ -728,8 +728,8 @@ mod tests {
             context: &context,
             now_unix_nanos: 2_000,
             result: CandidateMemoryResult::Kept,
-            diagnostic_baseline_diagnostic_score_total: Some(1_000),
-            diagnostic_current_diagnostic_score_total: Some(800),
+            diagnostic_baseline_raw_score_total: Some(1_000),
+            diagnostic_current_raw_score_total: Some(800),
             rollback_reason: None,
             cooldown_expires_unix_nanos: Some(62_000_000_000),
         });
@@ -790,8 +790,8 @@ mod tests {
             context: &context,
             now_unix_nanos: 1_000,
             result: CandidateMemoryResult::Reverted,
-            diagnostic_baseline_diagnostic_score_total: Some(100),
-            diagnostic_current_diagnostic_score_total: Some(120),
+            diagnostic_baseline_raw_score_total: Some(100),
+            diagnostic_current_raw_score_total: Some(120),
             rollback_reason: None,
             cooldown_expires_unix_nanos: Some(10_000),
         });

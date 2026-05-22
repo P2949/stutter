@@ -97,7 +97,7 @@ fn status_from_daemon_state_lists_all_profile_memory_kept_actions() {
             safety_class: SafetyClass::ReversibleLowRisk,
             kept_unix_nanos: 100,
             last_validated_unix_nanos: Some(100),
-            diagnostic_baseline_diagnostic_score_total: Some(1_000),
+            diagnostic_baseline_raw_score_total: Some(1_000),
             diagnostic_candidate_diagnostic_score_total: Some(800),
             score_delta: -200,
             confidence_milli: 900,
