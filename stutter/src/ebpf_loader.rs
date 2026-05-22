@@ -15,12 +15,11 @@ use crate::config::TARGET_PIDS_MAX;
 pub(crate) use crate::ebpf::tracepoints::drm_fence::{
     drm_fence_probe_has_signal, drm_fence_probe_has_wait_interval, drm_fence_probe_supported,
 };
-#[allow(unused_imports)]
 pub use crate::ebpf::{
-    load::{load_and_attach, resolve_cgroup_id_best_effort},
+    load::load_and_attach,
     maps::ebpf_map_sizing_report,
     model::{BlockIoCorrelationBasis, DropCountersSnapshot, LoadedEbpf},
-    preflight::{TracepointAvailability, TracepointPreflightReport, tracepoint_preflight},
+    preflight::{TracepointAvailability, tracepoint_preflight},
 };
 #[cfg(test)]
 use crate::ebpf::{
@@ -44,8 +43,6 @@ use crate::ebpf::{
         kms::kms_provider_tracepoint_offsets,
     },
 };
-#[allow(dead_code)]
-pub type EbpfMapSizingReport = crate::ebpf::maps::EbpfMapSizingReport;
 
 #[cfg(test)]
 #[path = "ebpf/tests/map_sizing.rs"]

@@ -144,13 +144,14 @@ fn temporary_migration_markers_are_tracked() {
         "migration marker modules that only define a zero-sized placeholder struct:\n{}",
         bullet_list(&marker_struct_placeholders)
     );
-    assert!(
-        discovered.len() <= MAX_MIGRATION_MARKER_MODULES,
-        "migration marker module count increased from ceiling {} to {}:\n{}",
-        MAX_MIGRATION_MARKER_MODULES,
-        discovered.len(),
-        bullet_list(&discovered)
-    );
+    if discovered.len() > MAX_MIGRATION_MARKER_MODULES {
+        panic!(
+            "migration marker module count increased from ceiling {} to {}:\n{}",
+            MAX_MIGRATION_MARKER_MODULES,
+            discovered.len(),
+            bullet_list(&discovered)
+        );
+    }
     assert!(
         untracked.is_empty(),
         "untracked migration marker modules:\n{}",
