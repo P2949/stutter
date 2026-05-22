@@ -41,7 +41,7 @@ pub struct DaemonRecentDecision {
 pub fn run_status_command(
     input: crate::commands::input::DaemonStatusCommandInput,
 ) -> anyhow::Result<()> {
-    let output = build_status_output_with_recent_decisions(input.explain_last);
+    let output = build_status_output_with_recent_decisions(input.explain_last.unwrap_or(0));
 
     if input.json {
         println!("{}", render_status_json(&output)?);

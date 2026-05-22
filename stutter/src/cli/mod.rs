@@ -1,6 +1,8 @@
 use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
-use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand, parser::ValueSource};
+use clap::{
+    ArgAction, Args, CommandFactory, Parser, Subcommand, error::ErrorKind, parser::ValueSource,
+};
 
 mod agent;
 mod autotune;
@@ -87,42 +89,7 @@ struct Cli {
 }
 
 #[cfg(test)]
-mod version_tests {
-    use super::*;
-
-    #[test]
-    fn clap_version_uses_build_version_metadata() {
-        assert_eq!(
-            Cli::command().get_version(),
-            Some(crate::metadata::build_version())
-        );
-        assert_eq!(crate::metadata::build_git_rev(), env!("STUTTER_GIT_REV"));
-    }
-
-    #[test]
-    fn parse_version_features_request_bypasses_clap_version_exit() {
-        let command = parse_app_command_from(["stutter", "--version", "--features"]).unwrap();
-
-        let AppCommand::Version(input) = command else {
-            panic!("expected version command");
-        };
-
-        assert!(input.features);
-    }
-
-    #[test]
-    fn clap_top_level_command_tree_matches_snapshot() {
-        let mut rendered = String::from("stutter\n");
-        for subcommand in Cli::command().get_subcommands() {
-            rendered.push_str(&format!("  {}\n", subcommand.get_name()));
-        }
-
-        assert_eq!(
-            rendered,
-            include_str!("../../tests/snapshots/clap_top_level_commands.txt")
-        );
-    }
-}
+mod version_tests;
 
 #[derive(Subcommand, Debug)]
 enum Command {
@@ -220,6 +187,25 @@ pub(crate) fn autotune_monitor_config(
 
 pub(crate) fn parse_app_command() -> anyhow::Result<AppCommand> {
     parse_app_command_from(std::env::args_os())
+}
+
+pub(crate) fn is_successful_clap_display_error(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<clap::Error>().is_some_and(|err| {
+        matches!(
+            err.kind(),
+            ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+        )
+    })
+}
+
+pub(crate) fn print_clap_display_error(
+    err: anyhow::Error,
+) -> Result<(), crate::error::StutterError> {
+    let err = err
+        .downcast::<clap::Error>()
+        .map_err(crate::error::StutterError::Command)?;
+    err.print()
+        .map_err(|err| crate::error::StutterError::Command(err.into()))
 }
 
 pub(crate) fn parse_app_command_from<I, T>(args: I) -> anyhow::Result<AppCommand>
