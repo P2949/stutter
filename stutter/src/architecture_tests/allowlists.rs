@@ -60,11 +60,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "existing report CLI argument surface pending future split; display-path compare strict/expect parsing and rules Args-to-Input conversion are staged here",
     },
     OversizedRustFileAllowance {
-        path: "src/autotune/status.rs",
-        max_lines: 1_426,
-        reason: "existing autotune status rendering implementation pending future split; dry-run affected-task status output is staged here",
-    },
-    OversizedRustFileAllowance {
         path: "src/autotune/startup_recovery.rs",
         max_lines: 1_353,
         reason: "existing autotune startup recovery implementation pending future split",
@@ -121,7 +116,7 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/cli/mod.rs",
-        max_lines: 1_103,
+        max_lines: 1_089,
         reason: "existing top-level CLI parser implementation pending future split; Clap command tree, compare expect/strict command coverage, dry-run-all-safe parsing, and agent Unix socket cap/timeout validation are staged here",
     },
     OversizedRustFileAllowance {

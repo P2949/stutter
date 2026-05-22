@@ -79,8 +79,60 @@ pub(crate) mod wayland_probe;
 pub use api::error::StutterError;
 
 pub async fn run_cli() -> Result<(), StutterError> {
-    let command = cli::parse_app_command()?;
+    run_parsed_cli(cli::parse_app_command()).await
+}
+
+#[cfg(test)]
+async fn run_cli_from<I, T>(args: I) -> Result<(), StutterError>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    run_parsed_cli(cli::parse_app_command_from(args)).await
+}
+
+async fn run_parsed_cli(command: anyhow::Result<commands::AppCommand>) -> Result<(), StutterError> {
+    let command = match command {
+        Ok(command) => command,
+        Err(err) if cli::is_successful_clap_display_error(&err) => {
+            cli::print_clap_display_error(err)?;
+            return Ok(());
+        }
+        Err(err) => return Err(StutterError::Command(err)),
+    };
+
     commands::dispatch(command).await
+}
+
+#[cfg(test)]
+mod cli_runner_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn clap_help_requests_are_successful_cli_exits() {
+        let cases = [
+            ["stutter", "--help"].as_slice(),
+            ["stutter", "daemon", "--help"].as_slice(),
+            ["stutter", "daemon", "status", "--help"].as_slice(),
+            ["stutter", "rules", "check", "--help"].as_slice(),
+            ["stutter", "profile-template", "--help"].as_slice(),
+        ];
+
+        for args in cases {
+            run_cli_from(args).await.unwrap_or_else(|err| {
+                panic!("help request was converted into an error: {args:?}: {err}")
+            });
+        }
+    }
+
+    #[tokio::test]
+    async fn real_parse_errors_still_use_command_error_path() {
+        let err = run_cli_from(["stutter", "rules", "check"])
+            .await
+            .expect_err("missing required args should remain an error");
+
+        assert!(matches!(err, StutterError::Command(_)));
+    }
 }
 
 #[cfg(test)]

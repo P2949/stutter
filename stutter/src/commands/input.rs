@@ -368,7 +368,7 @@ pub struct DaemonWhatChangedCommandInput {
 #[derive(Debug)]
 pub struct DaemonStatusCommandInput {
     pub json: bool,
-    pub explain_last: usize,
+    pub explain_last: Option<usize>,
 }
 
 #[derive(Debug)]

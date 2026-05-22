@@ -164,8 +164,14 @@ pub(super) struct DaemonStatusArgs {
     #[arg(long = "json")]
     pub(super) json: bool,
 
-    #[arg(long = "explain-last", default_value_t = 10)]
-    pub(super) explain_last: usize,
+    #[arg(
+        long,
+        value_name = "N",
+        num_args = 0..=1,
+        default_missing_value = "10",
+        value_parser = clap::value_parser!(usize)
+    )]
+    pub(super) explain_last: Option<usize>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -512,7 +518,7 @@ mod tests {
         };
 
         assert!(input.json);
-        assert_eq!(input.explain_last, 10);
+        assert_eq!(input.explain_last, None);
     }
 
     #[test]
@@ -532,7 +538,28 @@ mod tests {
         };
 
         assert!(input.json);
-        assert_eq!(input.explain_last, 6);
+        assert_eq!(input.explain_last, Some(6));
+    }
+
+    #[test]
+    fn daemon_status_explain_last_accepts_optional_count() {
+        let command = parse_daemon_command(["stutter", "daemon", "status"]).unwrap();
+        let AppCommand::DaemonStatus(input) = command else {
+            panic!("expected daemon status command");
+        };
+        assert_eq!(input.explain_last, None);
+
+        let command = parse_daemon_command(["stutter", "daemon", "status", "--explain-last"]).unwrap();
+        let AppCommand::DaemonStatus(input) = command else {
+            panic!("expected daemon status command");
+        };
+        assert_eq!(input.explain_last, Some(10));
+
+        let command = parse_daemon_command(["stutter", "daemon", "status", "--explain-last", "1"]).unwrap();
+        let AppCommand::DaemonStatus(input) = command else {
+            panic!("expected daemon status command");
+        };
+        assert_eq!(input.explain_last, Some(1));
     }
 
     #[test]
