@@ -6,8 +6,7 @@ use std::{
 use log::warn;
 use serde::Serialize;
 
-pub(crate) mod compat_v20;
-pub(crate) mod compat_v21;
+
 
 use crate::recorder::{LiveRecorder, NdjsonWriter, RecordingCounters};
 

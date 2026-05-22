@@ -17,19 +17,10 @@ macro_rules! migration_module {
     };
 }
 
-pub(in crate::architecture_tests) const MAX_MIGRATION_MARKER_MODULES: usize = 48;
+pub(in crate::architecture_tests) const MAX_MIGRATION_MARKER_MODULES: usize = 40;
 
 pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationModuleAllowance] = &[
-    migration_module!(
-        "src/artifacts/compat_v20.rs",
-        "legacy v20 artifact compatibility namespace is kept while readers support historical snapshots",
-        "remove once v20 compatibility is handled at the loader boundary or support is retired"
-    ),
-    migration_module!(
-        "src/artifacts/compat_v21.rs",
-        "legacy v21 artifact compatibility namespace is kept while readers support historical snapshots",
-        "remove once v21 compatibility is handled at the loader boundary or support is retired"
-    ),
+
     migration_module!(
         "src/autotune/domain/mod.rs",
         "autotune domain facade keeps pure type extraction stable during import migration",
@@ -110,41 +101,25 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "CLI parse facade remains while parse_app_command migrates from cli/mod.rs",
         "remove once parsing entry points live fully in cli/parse.rs"
     ),
-    migration_module!(
-        "src/cli/version_parse.rs",
-        "CLI version parsing target exists while version parsing moves incrementally",
-        "remove once version parsing is owned here and used by callers"
-    ),
+
     migration_module!(
         "src/community_rules/import/mod.rs",
         "community-rule import namespace wraps the existing importer during import split",
         "remove once importer call sites use the final import modules directly"
     ),
-    migration_module!(
-        "src/community_rules/import/parse.rs",
-        "community-rule import parser extraction target exists during Ananicy input split",
-        "remove once parsing is fully owned here and used by the importer"
-    ),
+
     migration_module!(
         "src/community_rules/import/report.rs",
         "community-rule import report facade keeps result types stable during split",
         "remove once report types live here without re-export compatibility"
     ),
-    migration_module!(
-        "src/community_rules/import/validate.rs",
-        "community-rule import validation extraction target exists during import split",
-        "remove once validation is fully owned here and used by the importer"
-    ),
+
     migration_module!(
         "src/daemon/policy/explain.rs",
         "daemon policy explanation facade preserves old paths during policy split",
         "remove once callers import final policy explanation modules directly"
     ),
-    migration_module!(
-        "src/daemon/state_compat.rs",
-        "daemon state compatibility namespace remains during state model migration",
-        "remove once daemon state callers use the canonical model"
-    ),
+
     migration_module!(
         "src/ebpf/attach.rs",
         "eBPF attach target exists while attachment logic migrates from ebpf_loader",
@@ -210,16 +185,8 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "profile plan facade preserves old imports during profile split",
         "remove once profile planning callers target the final module boundary"
     ),
-    migration_module!(
-        "src/profiles/validate.rs",
-        "profile validation extraction target exists during profile split",
-        "remove once profile validation callers target the final module boundary"
-    ),
-    migration_module!(
-        "src/remote/compat.rs",
-        "remote compatibility namespace keeps remote API paths stable during split",
-        "remove once remote API callers use canonical modules directly"
-    ),
+
+
     migration_module!(
         "src/schemas/mod.rs",
         "schema facade preserves serialized model imports while schemas move from owners",
