@@ -65,11 +65,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "existing autotune status rendering implementation pending future split; dry-run affected-task status output is staged here",
     },
     OversizedRustFileAllowance {
-        path: "src/validation_corpus_tests.rs",
-        max_lines: 1_468,
-        reason: "existing validation corpus test module pending future split; display-path validation corpus cases are staged here",
-    },
-    OversizedRustFileAllowance {
         path: "src/autotune/startup_recovery.rs",
         max_lines: 1_353,
         reason: "existing autotune startup recovery implementation pending future split",
@@ -264,10 +259,6 @@ pub(in crate::architecture_tests) const EXISTING_PRODUCTION_UNWRAP_EXPECT_FILE_A
     ExistingProductionUnwrapExpectAllowance {
         path: "src/tune/mod.rs",
         reason: "existing tune implementation contains production unwrap/expect calls",
-    },
-    ExistingProductionUnwrapExpectAllowance {
-        path: "src/validation_corpus_tests.rs",
-        reason: "existing validation corpus test module contains unwrap/expect calls outside cfg-test module blocks",
     },
 ];
 

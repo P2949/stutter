@@ -1,29 +1,20 @@
-#![allow(unused_imports)]
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::Path};
 
 use super::{
-    super::{
-        candidate::*, dry_run::*, executable_plan::*, plan_io::*, profile_candidates::*,
-        suggestion::*,
-    },
+    super::{candidate::*, dry_run::*, executable_plan::*, plan_io::*, suggestion::*},
     support::*,
 };
 use crate::{
     actions::{
-        ActionState, ActionWarning, SafetyClass, TaskIdentity,
+        SafetyClass, TaskIdentity,
         irq_affinity::{IrqAffinityAction, IrqAffinityEvidence, IrqAffinityRisk},
         nice::{NiceAction, NicePolicy},
     },
     affinity::CpuMask,
-    autotune::{conflicts::ActionConflictGroup, objective::ObjectiveKind},
+    autotune::objective::ObjectiveKind,
     daemon_policy::{ActionDescriptor, ActionEffectScope, DaemonMode, RollbackRequirement},
     process_tree::TaskClass,
     profiles::{Profile, ProfileRule},
-    topology::{CoreInfo, CpuInfo, TopologyModel},
 };
 
 #[test]
