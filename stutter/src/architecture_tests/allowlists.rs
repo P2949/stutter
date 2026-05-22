@@ -186,13 +186,13 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/autotune/runtime.rs",
-        max_lines: 1_040,
+        max_lines: 1_041,
         reason: "existing autotune runtime implementation pending future split; restore, task-lifecycle, display-path event ignore wiring, and active-config-unknown recovery routing are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/autotune/runtime/tests.rs",
-        max_lines: 1_110,
-        reason: "existing autotune runtime regression test module pending future split; active-config-unknown fault/restore/resync coverage is staged here",
+        max_lines: 1_134,
+        reason: "existing autotune runtime regression test module pending future split; active-config-unknown fault/restore/resync and simulated fake-candidate no-op coverage is staged here",
     },
     OversizedRustFileAllowance {
         path: "src/actions/uclamp.rs",
