@@ -89,6 +89,10 @@ const CI_COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         program: "cargo",
+        args: &["run", "-p", "xtask", "--", "no-allow-attrs"],
+    },
+    CommandSpec {
+        program: "cargo",
         args: &["build"],
     },
     CommandSpec {
@@ -637,6 +641,7 @@ mod tests {
             command_texts(CI_COMMANDS),
             vec![
                 "cargo fmt --check",
+                "cargo run -p xtask -- no-allow-attrs",
                 "cargo build",
                 "cargo clippy --all-targets -- -D warnings",
                 "cargo test",
