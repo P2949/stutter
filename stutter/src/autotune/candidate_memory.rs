@@ -192,6 +192,11 @@ pub struct CandidateMemoryRecord {
     pub last_tried_unix_nanos: u128,
     pub result: CandidateMemoryResult,
     pub context_hash: String,
+/// Raw score-total delta retained for diagnostics/history only.
+    ///
+    /// This value is duration/sample-count sensitive and must not be used as the
+    /// primary A/B keep/revert metric. Active experiment decisions use normalized
+    /// `WindowScore` comparison instead.
     pub score_delta: i64,
     pub rollback_reason: Option<String>,
     pub cooldown_expires_unix_nanos: Option<u128>,
@@ -205,6 +210,11 @@ pub struct WorkloadActionMemory {
     pub objective: ObjectiveKind,
     pub situation: SituationKind,
     pub last_result: CandidateMemoryResult,
+/// Raw score-total delta retained as a coarse historical hint.
+    ///
+    /// This is not normalized by sample count or duration. It may inform
+    /// diagnostics/profile confidence, but keep/revert decisions must use
+    /// normalized `WindowScore` comparison.
     pub score_delta: Option<f64>,
     pub last_seen_unix_nanos: u128,
     pub cooldown_until_unix_nanos: Option<u128>,
@@ -530,6 +540,7 @@ fn normalize_owned_reason(value: Option<String>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// Computes a raw total-score delta for persisted diagnostics.
 fn diagnostic_raw_score_delta_i64(
     diagnostic_baseline_raw_score_total: Option<u64>,
     diagnostic_current_raw_score_total: Option<u64>,
@@ -551,6 +562,7 @@ fn diagnostic_raw_score_delta_i64(
     }
 }
 
+/// Computes a raw total-score delta for workload memory summaries.
 fn diagnostic_raw_score_delta_f64(
     diagnostic_baseline_raw_score_total: Option<u64>,
     diagnostic_current_raw_score_total: Option<u64>,

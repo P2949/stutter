@@ -98,6 +98,8 @@ impl AutotuneRuntime {
                     diagnostic_baseline_raw_score_total: None,
                     diagnostic_candidate_diagnostic_score_total: None,
                     score_delta: record.score_delta,
+                    // Profile confidence currently uses the raw diagnostic score delta as a coarse
+                    // historical hint. It is not an active experiment keep/revert decision.
                     confidence_milli: daemon_profile_confidence_milli(record.score_delta),
                     environment: environment.clone(),
                     partition: DaemonProfilePartition {
@@ -263,10 +265,10 @@ pub(crate) fn daemon_profile_action_kind_and_safety_class(
     }
 }
 
-pub(crate) fn daemon_profile_confidence_milli(score_delta: i64) -> u16 {
-    if score_delta < 0 {
+pub(crate) fn daemon_profile_confidence_milli(raw_score_delta: i64) -> u16 {
+    if raw_score_delta < 0 {
         900
-    } else if score_delta == 0 {
+    } else if raw_score_delta == 0 {
         600
     } else {
         350
