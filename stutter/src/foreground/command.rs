@@ -1,6 +1,3 @@
-#![allow(dead_code)] // Transitional command-runner injection target.
-// Exit: remove this marker once the described migration is complete and the local allow is no longer needed.
-
 use std::{
     path::{Path, PathBuf},
     process::Command,
@@ -43,21 +40,4 @@ pub(crate) fn trusted_foreground_command(program: &Path) -> Command {
         }
     }
     command
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ForegroundCommand {
-    pub program: String,
-    pub args: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct CommandOutput {
-    pub stdout: String,
-    pub stderr: String,
-    pub success: bool,
-}
-
-pub(crate) trait ForegroundCommandRunner {
-    fn run(&self, command: &ForegroundCommand) -> anyhow::Result<CommandOutput>;
 }

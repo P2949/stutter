@@ -7,11 +7,9 @@ mod autotune;
 mod config;
 mod daemon;
 mod monitor;
-mod parse;
 mod report;
 mod service;
 mod validate;
-
 
 use agent::{AgentArgs, PrivilegedWorkerArgs, agent_listen_args};
 use autotune::{AutotuneArgs, AutotuneCommand, AutotuneStatusArgs, validate_autotune_mode};

@@ -17,10 +17,9 @@ macro_rules! migration_module {
     };
 }
 
-pub(in crate::architecture_tests) const MAX_MIGRATION_MARKER_MODULES: usize = 30;
+pub(in crate::architecture_tests) const MAX_MIGRATION_MARKER_MODULES: usize = 22;
 
 pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationModuleAllowance] = &[
-
     migration_module!(
         "src/autotune/domain/mod.rs",
         "autotune domain facade keeps pure type extraction stable during import migration",
@@ -97,16 +96,6 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "remove once old runtime startup-recovery paths are unused"
     ),
     migration_module!(
-        "src/cli/parse.rs",
-        "CLI parse facade remains while parse_app_command migrates from cli/mod.rs",
-        "remove once parsing entry points live fully in cli/parse.rs"
-    ),
-
-
-
-
-
-    migration_module!(
         "src/ebpf/attach.rs",
         "eBPF attach target exists while attachment logic migrates from ebpf_loader",
         "remove once attach logic is fully owned here and old loader paths are unused"
@@ -132,53 +121,13 @@ pub(in crate::architecture_tests) const MIGRATION_MODULE_ALLOWLIST: &[MigrationM
         "remove once callers use final event domain modules directly"
     ),
     migration_module!(
-        "src/foreground/command.rs",
-        "foreground command-runner injection target exists during foreground split",
-        "remove once command execution is fully injected through this module"
-    ),
-
-    migration_module!(
-        "src/process/procfs.rs",
-        "procfs reader trait remains while process-tree I/O splits",
-        "remove once process-tree I/O uses the final procfs boundary"
-    ),
-
-
-
-    migration_module!(
-        "src/schemas/mod.rs",
-        "schema facade preserves serialized model imports while schemas move from owners",
-        "remove once callers import concrete schema modules directly"
-    ),
-    migration_module!(
         "src/session.rs",
         "session-stage context remains while tick extraction adopts shared context incrementally",
         "remove once tick extraction owns the context and no local dead code allowance is needed"
     ),
-
     migration_module!(
         "src/session/ticks/mod.rs",
         "tick-context namespace exists during session stage extraction",
         "remove once tick contexts are fully owned by concrete tick modules"
-    ),
-    migration_module!(
-        "src/system/cgroup.rs",
-        "system cgroup facade preserves low-level reader paths while root callers migrate",
-        "remove once cgroup callers use the final system module directly"
-    ),
-    migration_module!(
-        "src/system/command.rs",
-        "system command-runner facade preserves low-level command paths while callers migrate",
-        "remove once command callers use the final system module directly"
-    ),
-    migration_module!(
-        "src/system/mod.rs",
-        "system facade preserves low-level reader imports while root callers migrate",
-        "remove once callers import concrete system modules directly"
-    ),
-    migration_module!(
-        "src/system/sysfs.rs",
-        "system sysfs facade preserves low-level reader paths while callers migrate",
-        "remove once sysfs callers use the final system module directly"
     ),
 ];

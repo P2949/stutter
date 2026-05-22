@@ -1,7 +1,3 @@
-#![allow(dead_code)]
-// Transitional procfs reader trait while process-tree I/O splits.
-// Exit: remove this marker once the described migration is complete and the local allow is no longer needed.
-
 //! Procfs process and task readers.
 //!
 //! Owns bounded process scans, proc status/stat/cmdline/exe reads, thread ID discovery,
@@ -273,12 +269,3 @@ pub fn task_comm_at(proc_root: &Path, pid: u32, tid: u32) -> Option<String> {
         .map(|comm| comm.trim().to_owned())
         .filter(|comm| !comm.is_empty())
 }
-
-use crate::{error::ProcfsError, process::model::TaskInfo};
-
-pub(crate) trait ProcfsReader {
-    fn read_task(&self, tid: u32) -> Result<TaskInfo, ProcfsError>;
-}
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct LinuxProcfsReader;
