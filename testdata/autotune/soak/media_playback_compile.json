@@ -4,7 +4,7 @@
   "ticks": [
     { "kind": "focus_game", "confidence": 0.72 },
     { "kind": "target_present" },
-    { "kind": "interval", "score_total": 180, "samples": 100 },
+    { "kind": "interval", "diagnostic_score_total": 180, "samples": 100 },
     { "kind": "focus_cleared", "reason": "media playback foreground" }
   ],
   "assertions": [

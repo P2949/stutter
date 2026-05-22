@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 mod allow_attributes;
 mod allowlists;
 mod autotune_facades;
+mod autotune_raw_score;
+mod cgroup_imports;
 mod concurrency;
 mod dependencies;
 mod direct_prints;

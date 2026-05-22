@@ -28,8 +28,8 @@ mod tests {
                 observation: &same_workload,
                 cpu_topology_signature: None,
                 result: CandidateMemoryResult::Reverted,
-                baseline_score_total: Some(100),
-                current_score_total: Some(120),
+                diagnostic_baseline_diagnostic_score_total: Some(100),
+                diagnostic_current_diagnostic_score_total: Some(120),
                 rollback_reason: Some("regressed".to_owned()),
                 cooldown_expires_unix_nanos: Some(same_workload.now_unix_nanos + 10_000),
             },
@@ -228,8 +228,8 @@ mod tests {
                     observation: &observation,
                     cpu_topology_signature: None,
                     result: CandidateMemoryResult::Reverted,
-                    baseline_score_total: Some(100),
-                    current_score_total: Some(120),
+                    diagnostic_baseline_diagnostic_score_total: Some(100),
+                    diagnostic_current_diagnostic_score_total: Some(120),
                     rollback_reason: Some("fixture cooldown".to_owned()),
                     cooldown_expires_unix_nanos: Some(observation.now_unix_nanos + 10_000),
                 },
@@ -240,7 +240,7 @@ mod tests {
             controller_state.active_experiment = Some(ActiveExperiment {
                 experiment_id: ExperimentId::new("fixture-external-mutation"),
                 candidate: state_candidate.clone(),
-                baseline_score_total: 100,
+                baseline_score: window_score(100),
             });
             observation.active_config_snapshot =
                 Some(active_nice_snapshot_for_tasks(&observation.active_tasks, 0));

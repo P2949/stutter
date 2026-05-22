@@ -56,9 +56,9 @@ pub struct TuneProfileStats {
     pub profile: String,
     pub valid_runs: usize,
     pub invalid_runs: usize,
-    pub median_score_total: u64,
-    pub iqr_score_total: u64,
-    pub worst_score_total: u64,
+    pub median_diagnostic_score_total: u64,
+    pub iqr_diagnostic_score_total: u64,
+    pub worst_diagnostic_score_total: u64,
     pub median_over_5ms: u64,
     pub iqr_over_5ms: u64,
     pub median_frame_p99_us: u64,
@@ -84,7 +84,7 @@ pub struct TuneCandidateSummary {
     pub interval_count: usize,
     pub samples: u64,
     pub scored_samples: u64,
-    pub score_total: u64,
+    pub diagnostic_score_total: u64,
     pub over_1ms: u64,
     pub over_2ms: u64,
     pub over_5ms: u64,
@@ -448,7 +448,7 @@ async fn collect_tune_results(
                 interval_count: interval_records.len(),
                 samples: sample_count,
                 scored_samples: scored_sample_count,
-                score_total: score.total,
+                diagnostic_score_total: score.total,
                 over_1ms: score.over_1ms,
                 over_2ms: score.over_2ms,
                 over_5ms: score.over_5ms,
@@ -896,7 +896,10 @@ pub fn aggregate_profile_rank(runs: &[TuneCandidateSummary]) -> impl Ord {
     let invalid_run_count = runs.iter().filter(|r| !r.valid).count();
     let valid_runs: Vec<&TuneCandidateSummary> = runs.iter().filter(|r| r.valid).collect();
 
-    let score_totals: Vec<u64> = valid_runs.iter().map(|r| r.score_total).collect();
+    let score_totals: Vec<u64> = valid_runs
+        .iter()
+        .map(|r| r.diagnostic_score_total)
+        .collect();
     let over_5ms: Vec<u64> = valid_runs.iter().map(|r| r.over_5ms).collect();
     let over_2ms: Vec<u64> = valid_runs.iter().map(|r| r.over_2ms).collect();
     let over_1ms: Vec<u64> = valid_runs.iter().map(|r| r.over_1ms).collect();
@@ -962,7 +965,7 @@ pub fn profile_stats_from_grouped(
             let valid_runs = runs.iter().filter(|run| run.valid).collect::<Vec<_>>();
             let score_totals = valid_runs
                 .iter()
-                .map(|run| run.score_total)
+                .map(|run| run.diagnostic_score_total)
                 .collect::<Vec<_>>();
             let over_5ms = valid_runs
                 .iter()
@@ -977,9 +980,9 @@ pub fn profile_stats_from_grouped(
                 profile: profile.clone(),
                 valid_runs: valid_runs.len(),
                 invalid_runs: runs.len().saturating_sub(valid_runs.len()),
-                median_score_total: median_u64(score_totals.clone()),
-                iqr_score_total: iqr_u64(score_totals.clone()),
-                worst_score_total: worst_u64(score_totals),
+                median_diagnostic_score_total: median_u64(score_totals.clone()),
+                iqr_diagnostic_score_total: iqr_u64(score_totals.clone()),
+                worst_diagnostic_score_total: worst_u64(score_totals),
                 median_over_5ms: median_u64(over_5ms.clone()),
                 iqr_over_5ms: iqr_u64(over_5ms),
                 median_frame_p99_us: median_u64(frame_p99_us.clone()),
@@ -1000,7 +1003,7 @@ pub fn assess_ranking_confidence(
         .iter()
         .filter(|stat| stat.valid_runs > 0)
         .collect::<Vec<_>>();
-    valid_stats.sort_by_key(|stat| stat.median_score_total);
+    valid_stats.sort_by_key(|stat| stat.median_diagnostic_score_total);
 
     if valid_stats.len() < 2 {
         notes.push("fewer than two profiles produced valid runs".to_owned());
@@ -1030,8 +1033,12 @@ pub fn assess_ranking_confidence(
         return (RankingConfidence::Unstable, notes);
     };
 
-    let diff = second.median_score_total.abs_diff(best.median_score_total);
-    let max_iqr = best.iqr_score_total.max(second.iqr_score_total);
+    let diff = second
+        .median_diagnostic_score_total
+        .abs_diff(best.median_diagnostic_score_total);
+    let max_iqr = best
+        .iqr_diagnostic_score_total
+        .max(second.iqr_diagnostic_score_total);
     if diff <= max_iqr && max_iqr > 0 {
         notes.push(format!(
             "best and second-best median scores are close relative to variance (diff={diff}, max_iqr={max_iqr})"
@@ -1039,7 +1046,7 @@ pub fn assess_ranking_confidence(
         return (RankingConfidence::Unstable, notes);
     }
 
-    let five_percent_second = second.median_score_total / 20;
+    let five_percent_second = second.median_diagnostic_score_total / 20;
     let close_to_second = diff <= five_percent_second;
 
     if runs < 3 {
@@ -1053,13 +1060,16 @@ pub fn assess_ranking_confidence(
             "best median score is within 5% of second-best (diff={diff})"
         ));
     }
-    if best.iqr_score_total > 0 {
+    if best.iqr_diagnostic_score_total > 0 {
         notes.push("best profile score IQR is non-zero".to_owned());
     }
 
     if runs < 3 || best.invalid_runs > 0 || close_to_second {
         (RankingConfidence::Low, notes)
-    } else if best.iqr_score_total > 0 || second.iqr_score_total > 0 || !notes.is_empty() {
+    } else if best.iqr_diagnostic_score_total > 0
+        || second.iqr_diagnostic_score_total > 0
+        || !notes.is_empty()
+    {
         (RankingConfidence::Medium, notes)
     } else {
         (RankingConfidence::High, notes)
@@ -1173,7 +1183,7 @@ mod tests {
     fn tune_candidate(
         profile: &str,
         iteration: u32,
-        score_total: u64,
+        diagnostic_score_total: u64,
         valid: bool,
     ) -> TuneCandidateSummary {
         TuneCandidateSummary {
@@ -1186,7 +1196,7 @@ mod tests {
             interval_count: 2,
             samples: 100,
             scored_samples: 100,
-            score_total,
+            diagnostic_score_total,
             over_1ms: 0,
             over_2ms: 0,
             over_5ms: 0,

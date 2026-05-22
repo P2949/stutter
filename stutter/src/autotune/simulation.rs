@@ -24,13 +24,24 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub enum FakeDaemonStep {
-    FocusGame { confidence: f32 },
-    FocusCleared { reason: String },
+    FocusGame {
+        confidence: f32,
+    },
+    FocusCleared {
+        reason: String,
+    },
     TargetPresent,
     TargetMissing,
-    Interval { score_total: u64, samples: u64 },
-    DroppedInterval { dropped_events: u64 },
-    EvaluationTick { reason: String },
+    Interval {
+        diagnostic_score_total: u64,
+        samples: u64,
+    },
+    DroppedInterval {
+        dropped_events: u64,
+    },
+    EvaluationTick {
+        reason: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -167,11 +178,11 @@ fn event_for_step(step: FakeDaemonStep, elapsed_ms: u64) -> Option<MonitorEvent>
             removed_targets: vec![1234],
         }),
         FakeDaemonStep::Interval {
-            score_total,
+            diagnostic_score_total,
             samples,
         } => Some(MonitorEvent::Interval {
             elapsed_ms,
-            records: vec![interval_record(elapsed_ms, score_total, samples)],
+            records: vec![interval_record(elapsed_ms, diagnostic_score_total, samples)],
             drop_counters: DropCountersSnapshot::default(),
         }),
         FakeDaemonStep::DroppedInterval { dropped_events } => Some(MonitorEvent::Interval {
@@ -210,18 +221,18 @@ fn task_info() -> TaskInfo {
     }
 }
 
-fn interval_record(elapsed_ms: u64, score_total: u64, samples: u64) -> IntervalRecord {
-    interval_record_with_drops(elapsed_ms, score_total, samples, 0)
+fn interval_record(elapsed_ms: u64, diagnostic_score_total: u64, samples: u64) -> IntervalRecord {
+    interval_record_with_drops(elapsed_ms, diagnostic_score_total, samples, 0)
 }
 
 fn interval_record_with_drops(
     elapsed_ms: u64,
-    score_total: u64,
+    diagnostic_score_total: u64,
     samples: u64,
     dropped_events: u64,
 ) -> IntervalRecord {
-    let over_5ms = score_total / 100;
-    let remainder = score_total % 100;
+    let over_5ms = diagnostic_score_total / 100;
+    let remainder = diagnostic_score_total % 100;
     let over_2ms = remainder / 20;
     let over_1ms = remainder % 20;
 
@@ -235,7 +246,11 @@ fn interval_record_with_drops(
         process_comm: Arc::from("simulation-game"),
         samples,
         stored_samples: samples,
-        max_ns: if score_total > 0 { 6_000_000 } else { 500_000 },
+        max_ns: if diagnostic_score_total > 0 {
+            6_000_000
+        } else {
+            500_000
+        },
         over_1ms,
         over_2ms,
         over_5ms,
@@ -282,7 +297,7 @@ mod tests {
     fn simulation_suggests_candidate_without_starting_experiment() {
         let mut steps = standard_prefix();
         steps.push(FakeDaemonStep::Interval {
-            score_total: 500,
+            diagnostic_score_total: 500,
             samples: 100,
         });
 
@@ -302,7 +317,7 @@ mod tests {
     fn simulation_starts_low_risk_candidate_with_rollback() {
         let mut steps = standard_prefix();
         steps.push(FakeDaemonStep::Interval {
-            score_total: 500,
+            diagnostic_score_total: 500,
             samples: 100,
         });
 
@@ -322,12 +337,12 @@ mod tests {
     fn simulation_keeps_improved_candidate() {
         let mut steps = standard_prefix();
         steps.push(FakeDaemonStep::Interval {
-            score_total: 1_000,
+            diagnostic_score_total: 1_000,
             samples: 100,
         });
         steps.push(FakeDaemonStep::TargetPresent);
         steps.push(FakeDaemonStep::Interval {
-            score_total: 10,
+            diagnostic_score_total: 10,
             samples: 100,
         });
 
@@ -348,12 +363,12 @@ mod tests {
     fn simulation_reverts_regressed_candidate() {
         let mut steps = standard_prefix();
         steps.push(FakeDaemonStep::Interval {
-            score_total: 10,
+            diagnostic_score_total: 10,
             samples: 100,
         });
         steps.push(FakeDaemonStep::TargetPresent);
         steps.push(FakeDaemonStep::Interval {
-            score_total: 1_000,
+            diagnostic_score_total: 1_000,
             samples: 100,
         });
 
@@ -374,7 +389,7 @@ mod tests {
     fn simulation_rolls_back_on_focus_switch() {
         let mut steps = standard_prefix();
         steps.push(FakeDaemonStep::Interval {
-            score_total: 500,
+            diagnostic_score_total: 500,
             samples: 100,
         });
         steps.push(FakeDaemonStep::FocusCleared {
@@ -397,7 +412,7 @@ mod tests {
     fn simulation_rolls_back_when_target_disappears() {
         let mut steps = standard_prefix();
         steps.push(FakeDaemonStep::Interval {
-            score_total: 500,
+            diagnostic_score_total: 500,
             samples: 100,
         });
         steps.push(FakeDaemonStep::TargetMissing);
@@ -439,7 +454,7 @@ mod tests {
         for seed in 0..16_u64 {
             let mut steps = standard_prefix();
             steps.push(FakeDaemonStep::Interval {
-                score_total: if seed % 2 == 0 { 500 } else { 50 },
+                diagnostic_score_total: if seed % 2 == 0 { 500 } else { 50 },
                 samples: 100,
             });
 
@@ -447,14 +462,14 @@ mod tests {
                 0 => {
                     steps.push(FakeDaemonStep::TargetPresent);
                     steps.push(FakeDaemonStep::Interval {
-                        score_total: 5,
+                        diagnostic_score_total: 5,
                         samples: 100,
                     });
                 }
                 1 => {
                     steps.push(FakeDaemonStep::TargetPresent);
                     steps.push(FakeDaemonStep::Interval {
-                        score_total: 1_500,
+                        diagnostic_score_total: 1_500,
                         samples: 100,
                     });
                 }

@@ -128,7 +128,7 @@ pub fn status_from_history_events(
         mode: format_mode(last.mode),
         target: last.target.as_ref().map(status_target_from_identity),
         focus_group: Some(format!("{:?}", last.situation)),
-        current_score: Some(last.observation_summary.score_total),
+        current_score: Some(last.observation_summary.diagnostic_score_total),
         active_profile: active_profile_from_events(events),
         active_candidate: active_candidate_from_events(events),
         kept_actions: kept_actions_from_events(events),
@@ -156,7 +156,7 @@ pub fn status_from_daemon_state(path: PathBuf, state: &DaemonState) -> AutotuneS
         current_score: state
             .last_decision
             .as_ref()
-            .and_then(|decision| decision.score_total),
+            .and_then(|decision| decision.diagnostic_score_total),
         active_profile: active_profile_from_daemon_state(state),
         active_candidate: active_candidate_from_daemon_state(state),
         kept_actions: kept_actions_from_daemon_state(state),

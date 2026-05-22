@@ -815,14 +815,7 @@ impl AutotuneRuntime {
             return Ok(());
         };
 
-        let score = crate::autotune::experiment::WindowScore {
-            started_unix_nanos: observation.now_unix_nanos,
-            finished_unix_nanos: observation.now_unix_nanos,
-            interval_count: observation.interval_count,
-            scored_samples: observation.scored_samples,
-            scored_task_count: observation.scored_task_count,
-            score: observation.score.clone(),
-        };
+        let score = observation.to_window_score();
 
         let target = self.target_identity_from_observation(observation);
         let context = self.pending_history_context.take();
@@ -864,7 +857,7 @@ impl AutotuneRuntime {
                 scored_task_count: observation.scored_task_count,
                 interval_count: observation.interval_count,
                 scored_samples: observation.scored_samples,
-                score_total: observation.score.total,
+                diagnostic_score_total: observation.score.total,
                 over_1ms: observation.score.over_1ms,
                 over_2ms: observation.score.over_2ms,
                 over_5ms: observation.score.over_5ms,
@@ -1001,7 +994,7 @@ impl AutotuneRuntime {
                 scored_task_count: input.observation.scored_task_count,
                 interval_count: input.observation.interval_count,
                 scored_samples: input.observation.scored_samples,
-                score_total: input.observation.score.total,
+                diagnostic_score_total: input.observation.score.total,
                 over_1ms: input.observation.score.over_1ms,
                 over_2ms: input.observation.score.over_2ms,
                 over_5ms: input.observation.score.over_5ms,

@@ -4,7 +4,7 @@
   "ticks": [
     { "kind": "focus_game", "confidence": 0.88 },
     { "kind": "target_present" },
-    { "kind": "interval", "score_total": 260, "samples": 100 },
+    { "kind": "interval", "diagnostic_score_total": 260, "samples": 100 },
     { "kind": "evaluation_tick", "reason": "vm load present; diagnostics only" }
   ],
   "assertions": [

@@ -135,10 +135,10 @@ pub fn render_autotune_prometheus_metrics(metrics: &AutotunePrometheusMetrics) -
             "# HELP stutter_autotune_active_experiment Whether autotune currently has an active applying/applied/measuring experiment according to history or controller journal.\n",
             "# TYPE stutter_autotune_active_experiment gauge\n",
             "stutter_autotune_active_experiment {active_experiment}\n",
-            "# HELP stutter_autotune_last_score Last observed autotune score_total. Lower is better.\n",
+            "# HELP stutter_autotune_last_score Last observed autotune diagnostic_score_total. Lower is better.\n",
             "# TYPE stutter_autotune_last_score gauge\n",
             "stutter_autotune_last_score {last_score}\n",
-            "# HELP stutter_autotune_candidate_score Last candidate autotune score_total. Lower is better.\n",
+            "# HELP stutter_autotune_candidate_score Last candidate autotune diagnostic_score_total. Lower is better.\n",
             "# TYPE stutter_autotune_candidate_score gauge\n",
             "stutter_autotune_candidate_score {candidate_score}\n",
             "# HELP stutter_autotune_rollbacks_total Total autotune rollback events recorded in autotune history.\n",
@@ -171,8 +171,8 @@ pub fn render_autotune_prometheus_metrics(metrics: &AutotunePrometheusMetrics) -
 
 fn latest_score(events: &[AutotuneHistoryEvent]) -> Option<u64> {
     for event in events.iter().rev() {
-        if event.observation_summary.score_total > 0 {
-            return Some(event.observation_summary.score_total);
+        if event.observation_summary.diagnostic_score_total > 0 {
+            return Some(event.observation_summary.diagnostic_score_total);
         }
 
         if let Some(score) = event.score_after.as_ref() {
@@ -193,8 +193,8 @@ fn latest_candidate_score(events: &[AutotuneHistoryEvent]) -> Option<u64> {
             return Some(score.score.total);
         }
 
-        if is_candidate_phase(event.phase) && event.observation_summary.score_total > 0 {
-            return Some(event.observation_summary.score_total);
+        if is_candidate_phase(event.phase) && event.observation_summary.diagnostic_score_total > 0 {
+            return Some(event.observation_summary.diagnostic_score_total);
         }
     }
 
@@ -359,7 +359,7 @@ mod tests {
             scored_task_count: 2,
             interval_count: 10,
             scored_samples: 100,
-            score_total: total,
+            diagnostic_score_total: total,
             over_1ms: 0,
             over_2ms: 0,
             over_5ms: 0,

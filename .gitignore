@@ -11,8 +11,9 @@ target/
 
 #llm-stuff
 .llm-runs/
+.codex
 
 # Python
 __pycache__/
 *.pyc
-.codex
+

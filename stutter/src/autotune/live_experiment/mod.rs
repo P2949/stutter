@@ -370,7 +370,7 @@ impl LiveExperimentManager {
         controller_state.active_experiment = Some(ControllerActiveExperiment {
             experiment_id: experiment_id.clone(),
             candidate: candidate.clone(),
-            baseline_score_total: baseline_score.score.total,
+            baseline_score: baseline_score.clone(),
         });
 
         let (washout_until_unix_nanos, measure_until_unix_nanos) = Self::deadlines_from_now(
@@ -559,8 +559,10 @@ impl LiveExperimentManager {
                     observation,
                     cpu_topology_signature: None,
                     result: CandidateMemoryResult::Kept,
-                    baseline_score_total: Some(experiment.baseline_score.score.total),
-                    current_score_total: Some(candidate_score.score.total),
+                    diagnostic_baseline_diagnostic_score_total: Some(
+                        experiment.baseline_score.score.total,
+                    ),
+                    diagnostic_current_diagnostic_score_total: Some(candidate_score.score.total),
                     rollback_reason: None,
                     cooldown_expires_unix_nanos: Some(
                         observation
@@ -675,8 +677,10 @@ impl LiveExperimentManager {
                     observation,
                     cpu_topology_signature: None,
                     result: CandidateMemoryResult::Faulted,
-                    baseline_score_total: Some(experiment.baseline_score.score.total),
-                    current_score_total: Some(observation.score.total),
+                    diagnostic_baseline_diagnostic_score_total: Some(
+                        experiment.baseline_score.score.total,
+                    ),
+                    diagnostic_current_diagnostic_score_total: Some(observation.score.total),
                     rollback_reason: Some(format!(
                         "rollback verification failed: {} expected={} actual={}",
                         verification.reason_code, verification.expected, verification.actual
@@ -736,8 +740,8 @@ impl LiveExperimentManager {
             observation,
             cpu_topology_signature: None,
             result: CandidateMemoryResult::Reverted,
-            baseline_score_total: Some(experiment.baseline_score.score.total),
-            current_score_total: Some(observation.score.total),
+            diagnostic_baseline_diagnostic_score_total: Some(experiment.baseline_score.score.total),
+            diagnostic_current_diagnostic_score_total: Some(observation.score.total),
             rollback_reason: Some(reason.to_owned()),
             cooldown_expires_unix_nanos: Some(
                 now_unix_nanos

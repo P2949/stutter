@@ -50,7 +50,7 @@ pub struct ObservationSummary {
     pub scored_task_count: usize,
     pub interval_count: usize,
     pub scored_samples: u64,
-    pub score_total: u64,
+    pub diagnostic_score_total: u64,
     pub over_1ms: u64,
     pub over_2ms: u64,
     pub over_5ms: u64,
@@ -246,7 +246,7 @@ pub fn observation_summary_from_window_score(
         scored_task_count: score.scored_task_count,
         interval_count: score.interval_count,
         scored_samples: score.scored_samples,
-        score_total: score.score.total,
+        diagnostic_score_total: score.score.total,
         over_1ms: score.score.over_1ms,
         over_2ms: score.score.over_2ms,
         over_5ms: score.score.over_5ms,
@@ -333,7 +333,7 @@ mod tests {
         assert_eq!(summary.scored_task_count, 2);
         assert_eq!(summary.interval_count, 10);
         assert_eq!(summary.scored_samples, 100);
-        assert_eq!(summary.score_total, 143);
+        assert_eq!(summary.diagnostic_score_total, 143);
         assert_eq!(summary.over_1ms, 3);
         assert_eq!(summary.over_2ms, 2);
         assert_eq!(summary.over_5ms, 1);
