@@ -171,10 +171,8 @@ impl ControllerRuntimeState {
                 context: &context,
                 now_unix_nanos: input.observation.now_unix_nanos,
                 result: input.result,
-                diagnostic_baseline_raw_score_total: input
-                    .diagnostic_baseline_raw_score_total,
-                diagnostic_current_raw_score_total: input
-                    .diagnostic_current_raw_score_total,
+                diagnostic_baseline_raw_score_total: input.diagnostic_baseline_raw_score_total,
+                diagnostic_current_raw_score_total: input.diagnostic_current_raw_score_total,
                 rollback_reason: input.rollback_reason,
                 cooldown_expires_unix_nanos: input.cooldown_expires_unix_nanos,
             })

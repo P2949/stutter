@@ -192,7 +192,7 @@ pub struct CandidateMemoryRecord {
     pub last_tried_unix_nanos: u128,
     pub result: CandidateMemoryResult,
     pub context_hash: String,
-/// Raw score-total delta retained for diagnostics/history only.
+    /// Raw score-total delta retained for diagnostics/history only.
     ///
     /// This value is duration/sample-count sensitive and must not be used as the
     /// primary A/B keep/revert metric. Active experiment decisions use normalized
@@ -210,7 +210,7 @@ pub struct WorkloadActionMemory {
     pub objective: ObjectiveKind,
     pub situation: SituationKind,
     pub last_result: CandidateMemoryResult,
-/// Raw score-total delta retained as a coarse historical hint.
+    /// Raw score-total delta retained as a coarse historical hint.
     ///
     /// This is not normalized by sample count or duration. It may inform
     /// diagnostics/profile confidence, but keep/revert decisions must use
@@ -281,10 +281,8 @@ impl CandidateMemory {
     ) -> CandidateMemoryRecord {
         let candidate = input.candidate;
         let context = input.context;
-        let diagnostic_baseline_raw_score_total =
-            input.diagnostic_baseline_raw_score_total;
-        let diagnostic_current_raw_score_total =
-            input.diagnostic_current_raw_score_total;
+        let diagnostic_baseline_raw_score_total = input.diagnostic_baseline_raw_score_total;
+        let diagnostic_current_raw_score_total = input.diagnostic_current_raw_score_total;
         let context_hash = context.context_hash();
         let action_id = candidate.action_id();
         let record = CandidateMemoryRecord {
