@@ -8,27 +8,20 @@ use std::{
 
 #[path = "runtime/config.rs"]
 pub(crate) mod config;
-#[path = "runtime/controller.rs"]
-pub(crate) mod controller;
+
 #[path = "runtime/daemon_state.rs"]
 pub(crate) mod daemon_state;
 #[path = "runtime/decision_view.rs"]
 pub(crate) mod decision_view;
-#[path = "runtime/emergency_restore.rs"]
-pub(crate) mod emergency_restore;
+
 #[path = "runtime/history.rs"]
 pub(crate) mod history;
-#[path = "runtime/journal.rs"]
-pub(crate) mod journal;
+
 #[path = "runtime/planning.rs"]
 pub(crate) mod planning;
 #[path = "runtime/session.rs"]
 pub(crate) mod session;
-#[cfg(test)]
-#[path = "runtime/shutdown.rs"]
-pub(crate) mod shutdown;
-#[path = "runtime/startup_recovery.rs"]
-pub(crate) mod startup_recovery;
+
 #[path = "runtime/stream.rs"]
 pub(crate) mod stream;
 #[path = "runtime/target_state.rs"]

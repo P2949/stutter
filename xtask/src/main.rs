@@ -378,6 +378,10 @@ fn collect_allow_attributes(
     Ok(())
 }
 
+const OUTER_ATTR_PREFIX: &str = "#[";
+const INNER_ATTR_PREFIX: &str = "#![";
+const ALLOW_CALL: &str = "allow(";
+
 fn scan_allow_attribute_file(
     root: &Path,
     path: &Path,
@@ -387,11 +391,14 @@ fn scan_allow_attribute_file(
         fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
     let relative_path = path.strip_prefix(root).unwrap_or(path);
 
+    let inner_allow = format!("{INNER_ATTR_PREFIX}{ALLOW_CALL}");
+    let outer_allow = format!("{OUTER_ATTR_PREFIX}{ALLOW_CALL}");
+
     for (line_index, line) in content.lines().enumerate() {
         let compact = line.split_whitespace().collect::<String>();
-        if compact.contains("#![allow(")
-            || compact.contains("#[allow(")
-            || (compact.contains("cfg_attr(") && compact.contains("allow("))
+        if compact.contains(&inner_allow)
+            || compact.contains(&outer_allow)
+            || (compact.contains("cfg_attr(") && compact.contains(ALLOW_CALL))
         {
             matches.push(AllowAttributeMatch {
                 path: relative_path.to_path_buf(),
@@ -713,17 +720,18 @@ syn v2.0.117
         let nested = root.join("src");
         std::fs::create_dir_all(&nested).expect("create temp scanner fixture directory");
         let source = nested.join("lib.rs");
-        std::fs::write(
-            &source,
-            "\
-#![deny(warnings)]
-#![allow(dead_code)]
-#[allow(unused_imports)]
-#[cfg_attr(test, allow(dead_code))]
-pub fn live() {}
-",
-        )
-        .expect("write temp scanner fixture");
+        let source_content = concat!(
+            "#![deny(warnings)]\n",
+            "#![",
+            "allow(dead_code)]\n",
+            "#[",
+            "allow(unused_imports)]\n",
+            "#[cfg_attr(test, ",
+            "allow",
+            "(dead_code))]\n",
+            "pub fn live() {}\n",
+        );
+        std::fs::write(&source, source_content).expect("write temp scanner fixture");
 
         let mut matches = Vec::new();
         scan_allow_attribute_file(&root, &source, &mut matches).expect("scan temp scanner fixture");

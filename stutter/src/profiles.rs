@@ -17,14 +17,9 @@ use crate::{
     profile_restore::{self, IoPrioRestoreRecordV2, NiceRestoreRecordV2},
 };
 
-pub(crate) mod apply;
-pub(crate) mod cache;
-pub(crate) mod matcher;
-pub(crate) mod model;
 pub(crate) mod parse;
-pub(crate) mod plan;
 pub(crate) mod render;
-pub(crate) mod validate;
+
 pub(crate) mod warnings;
 
 #[cfg(test)]
