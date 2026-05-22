@@ -105,8 +105,6 @@ pub(crate) mod runtime;
 pub(crate) mod sampler;
 #[path = "session/sinks.rs"]
 pub(crate) mod sinks;
-#[path = "session/target.rs"]
-pub(crate) mod target;
 #[path = "session/targeting.rs"]
 pub(crate) mod targeting;
 #[path = "session/ticks/mod.rs"]
