@@ -2,19 +2,6 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-#[path = "observation/builder.rs"]
-pub(crate) mod builder;
-#[path = "observation/quality.rs"]
-pub(crate) mod quality;
-#[path = "observation/rolling_window.rs"]
-pub(crate) mod rolling_window;
-#[path = "observation/observation.rs"]
-pub(crate) mod snapshot;
-#[path = "observation/system_context.rs"]
-pub(crate) mod system_context;
-#[path = "observation/target_selection.rs"]
-pub(crate) mod target_selection;
-
 use super::{
     activity::ActivityLevel,
     objective::ObjectiveSignals,
