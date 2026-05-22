@@ -25,7 +25,7 @@ use crate::{
     daemon::{
         DaemonPolicy,
         policy::DaemonMode,
-        privilege::PrivilegedActionService,
+
         state::{DaemonExperimentState, DaemonRollbackState},
     },
 };

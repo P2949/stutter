@@ -12,7 +12,6 @@ use crate::{
         observation::{ActiveConfigSnapshot, AutotuneObservation},
         system_context::{SystemContextSnapshotInput, collect_system_context},
     },
-    daemon::privilege::PrivilegedActionService,
 };
 
 pub(super) fn controller_journal_record_for_live_experiment(

@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 use super::{
     super::{journal::controller_journal_record_for_live_experiment, *},
     support::*,
@@ -304,7 +305,7 @@ fn rollback_failure_keeps_active_experiment_and_returns_error() {
 
 #[test]
 fn live_experiment_journal_record_carries_phase_metadata_and_rollback() {
-    let manager = LiveExperimentManager::new();
+    let _manager = LiveExperimentManager::new();
     let journal_path = temp_journal_path("journal-record");
     let input = input(journal_path);
     let observation = observation(1_000, 1_000_000_000);

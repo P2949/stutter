@@ -60,11 +60,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "existing autotune shutdown and rollback-on-exit tests pending future split; exit rollback helpers now have no-allow regression coverage",
     },
     OversizedRustFileAllowance {
-        path: "src/autotune/live_experiment/mod.rs",
-        max_lines: 2_046,
-        reason: "existing live experiment manager implementation pending future split; rollback verification and simulated rollback coverage are staged here",
-    },
-    OversizedRustFileAllowance {
         path: "src/report/render/text.rs",
         max_lines: 1_685,
         reason: "existing text report renderer pending future split",
