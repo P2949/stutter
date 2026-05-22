@@ -392,10 +392,6 @@ pub(crate) fn regression_percent_f64(baseline: f64, candidate: f64) -> f64 {
     }
 }
 
-pub(crate) fn regression_percent(baseline_total: u64, candidate_total: u64) -> f64 {
-    regression_percent_f64(baseline_total as f64, candidate_total as f64)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
