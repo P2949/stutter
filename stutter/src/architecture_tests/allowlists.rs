@@ -30,11 +30,6 @@ pub(in crate::architecture_tests) struct ExistingDirectPrintAllowance {
 pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     &[OversizedRustFileAllowance] = &[
     OversizedRustFileAllowance {
-        path: "src/agent.rs",
-        max_lines: 750,
-        reason: "agent root is now a thin configuration/startup/auth boundary after route handlers moved to focused submodules",
-    },
-    OversizedRustFileAllowance {
         path: "src/autotune/planning/tests.rs",
         max_lines: 1_514,
         reason: "existing broad candidate planning regression tests moved out of candidate.rs pending future test split",
@@ -61,13 +56,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/report/render/text.rs",
-        max_lines: 1_685,
+        max_lines: 1_221,
         reason: "existing text report renderer pending future split",
-    },
-    OversizedRustFileAllowance {
-        path: "src/report/mod.rs",
-        max_lines: 1_553,
-        reason: "existing report public module and tests pending future split; display-path comparison entry point is staged here",
     },
     OversizedRustFileAllowance {
         path: "src/cli/report.rs",
@@ -86,7 +76,7 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/autotune/startup_recovery.rs",
-        max_lines: 1_380,
+        max_lines: 1_353,
         reason: "existing autotune startup recovery implementation pending future split",
     },
     OversizedRustFileAllowance {
@@ -121,7 +111,7 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/recorder/session.rs",
-        max_lines: 1_119,
+        max_lines: 1_011,
         reason: "existing recorder session writer implementation pending future split; display metadata capture is staged here",
     },
     OversizedRustFileAllowance {
@@ -141,17 +131,17 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/cli/mod.rs",
-        max_lines: 1_106,
+        max_lines: 1_103,
         reason: "existing top-level CLI parser implementation pending future split; Clap command tree, compare expect/strict command coverage, dry-run-all-safe parsing, and agent Unix socket cap/timeout validation are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/actions/cpu_power.rs",
-        max_lines: 1_035,
+        max_lines: 1_032,
         reason: "existing CPU power action implementation pending future split; rollback handler registration, medium-risk EPP classification, and policy-backed factory execution are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/actions/gpu_power.rs",
-        max_lines: 1_065,
+        max_lines: 1_060,
         reason: "existing GPU power action implementation pending future split; rollback handler registration and medium-risk profile classification are staged here",
     },
     OversizedRustFileAllowance {
@@ -161,7 +151,7 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/autotune/runtime.rs",
-        max_lines: 1_041,
+        max_lines: 1_034,
         reason: "existing autotune runtime implementation pending future split; restore, task-lifecycle, display-path event ignore wiring, and active-config-unknown recovery routing are staged here",
     },
     OversizedRustFileAllowance {
@@ -176,18 +166,13 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/actions/vm_knobs.rs",
-        max_lines: 1_135,
+        max_lines: 1_133,
         reason: "existing VM knob action implementation pending future split; rollback handler registration, safe-value medium-risk guards, and executable plan serialization are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/doctor.rs",
         max_lines: 1_158,
         reason: "existing doctor diagnostics implementation pending future split",
-    },
-    OversizedRustFileAllowance {
-        path: "src/session_io.rs",
-        max_lines: 1_102,
-        reason: "existing session artifact loader implementation pending future split; DRM fence data-quality warnings are staged here",
     },
 ];
 
