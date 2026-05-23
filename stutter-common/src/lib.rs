@@ -10,6 +10,21 @@ pub const EVENT_EXEC: u32 = 7;
 pub const EVENT_KMS_FLIP: u32 = 8;
 pub const EVENT_DRM_FENCE: u32 = 9;
 
+/// Maximum Linux CPU id tracked by the eBPF-side runnable-depth arrays.
+///
+/// Events for CPU ids at or above this value are still safe, but target-local
+/// runnable-depth and pending-wakeup accounting is intentionally skipped and
+/// counted via `DROP_CPU_ACCOUNTING_UNTRACKED`. Keep this in sync with the
+/// eBPF map capacities for `CPU_RUNNABLE_DEPTH` and `TARGET_PENDING_WAKEUPS`.
+pub const BPF_MAX_TRACKED_CPUS: u32 = 4_096;
+
+/// Fallback eBPF ring-buffer size baked into the BPF object.
+///
+/// Userspace normally overrides the `EVENTS` map size before loading based on
+/// memlock and available memory. This value is the safe fallback used only if
+/// that loader-side sizing path is bypassed.
+pub const BPF_DEFAULT_EVENTS_RINGBUF_BYTES: u32 = 256 * 1024;
+
 pub const KMS_FLIP_HAS_REQUEST_NS: u32 = 1 << 0;
 pub const KMS_FLIP_HAS_DONE_NS: u32 = 1 << 1;
 pub const KMS_FLIP_HAS_DURATION_NS: u32 = 1 << 2;
@@ -53,7 +68,11 @@ pub const DROP_IRQ_START_TIMES_INSERT_FAILED: u32 = 2;
 pub const DROP_BLOCK_START_INSERT_FAILED: u32 = 3;
 pub const DROP_WAKEUP_DATA_STALE_ENTRY: u32 = 4;
 pub const DROP_BLOCK_FALLBACK_KEY_COLLISION: u32 = 5;
-pub const DROP_COUNTERS_MAX: u32 = 6;
+/// A wakeup record for a target TID was replaced before sched_switch consumed it.
+pub const DROP_WAKEUP_DATA_REPLACED_ENTRY: u32 = 6;
+/// Runnable-depth or pending-wakeup CPU accounting skipped an out-of-range CPU id.
+pub const DROP_CPU_ACCOUNTING_UNTRACKED: u32 = 7;
+pub const DROP_COUNTERS_MAX: u32 = 8;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

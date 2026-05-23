@@ -57,10 +57,12 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
     let drop_counters = DropCountersSnapshot {
         wakeup_data_insert_failed: 2,
         wakeup_data_stale_entries: 0,
+        wakeup_data_replaced_entries: 0,
         ringbuf_reserve_failed: 3,
         irq_start_times_insert_failed: 0,
         block_start_insert_failed: 0,
         block_fallback_key_collisions: 0,
+        cpu_accounting_untracked: 0,
     };
 
     let task_tracker = tasks::TaskTracker {

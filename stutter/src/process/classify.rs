@@ -32,31 +32,30 @@ pub fn classify_task_with_context(
     let lower_exe_path = exe_path.to_ascii_lowercase();
     let lower_cgroup_path = cgroup_path.to_ascii_lowercase();
 
-    let combined = [
+    let lower_fields = [
         lower_comm.as_str(),
         lower_process_comm.as_str(),
         lower_cmdline.as_str(),
         lower_exe_path.as_str(),
         lower_cgroup_path.as_str(),
-    ]
-    .join(" ");
+    ];
 
     // 1. Critical System Threads (Kernel, Input, IRQ)
     if is_bracketed_kernel_comm(&lower_comm) {
         return TaskClass::KernelThread;
     }
-    if is_input_thread(&lower_comm, &combined) {
+    if is_input_thread(&lower_comm, &lower_fields) {
         return TaskClass::Input;
     }
-    if is_irq_thread(&lower_comm, &combined) {
+    if is_irq_thread(&lower_comm, &lower_fields) {
         return TaskClass::IrqThread;
     }
 
     // 2. Audio (Realtime)
     if is_audio_realtime_comm(&lower_comm)
         || is_audio_realtime_comm(&lower_process_comm)
-        || contains_any(
-            &combined,
+        || contains_any_field(
+            &lower_fields,
             &[
                 "pipewire",
                 "wireplumber",
@@ -65,7 +64,7 @@ pub fn classify_task_with_context(
                 "easyeffects",
             ],
         )
-        || (matches!(sched_policy, Some(1 | 2 | 6)) && is_audio_looking_process(&combined))
+        || (matches!(sched_policy, Some(1 | 2 | 6)) && is_audio_looking_process(&lower_fields))
     {
         return TaskClass::AudioRealtime;
     }
@@ -115,14 +114,14 @@ pub fn classify_task_with_context(
         }
     }
 
-    if is_browser_process(&lower_comm, &lower_process_comm, &combined) {
-        if contains_any(&combined, &["gpu process", "--type=gpu-process"])
+    if is_browser_process(&lower_comm, &lower_process_comm, &lower_fields) {
+        if contains_any_field(&lower_fields, &["gpu process", "--type=gpu-process"])
             || lower_comm.contains("gpu process")
         {
             return TaskClass::BrowserGpu;
         }
-        if contains_any(
-            &combined,
+        if contains_any_field(
+            &lower_fields,
             &[
                 "utility process",
                 "--type=utility",
@@ -132,8 +131,8 @@ pub fn classify_task_with_context(
         ) {
             return TaskClass::BrowserNetwork;
         }
-        if contains_any(
-            &combined,
+        if contains_any_field(
+            &lower_fields,
             &[
                 "web content",
                 "isolated web co",
@@ -144,8 +143,8 @@ pub fn classify_task_with_context(
         ) {
             return TaskClass::BrowserRenderer;
         }
-        if contains_any(
-            &combined,
+        if contains_any_field(
+            &lower_fields,
             &[
                 "--background",
                 "background",
@@ -246,19 +245,27 @@ fn contains_any(haystack: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| haystack.contains(needle))
 }
 
+fn field_contains(fields: &[&str], needle: &str) -> bool {
+    fields.iter().any(|field| field.contains(needle))
+}
+
+fn contains_any_field(fields: &[&str], needles: &[&str]) -> bool {
+    needles.iter().any(|needle| field_contains(fields, needle))
+}
+
 fn is_bracketed_kernel_comm(comm: &str) -> bool {
     comm.starts_with('[') && comm.ends_with(']')
 }
 
-fn is_irq_thread(comm: &str, combined: &str) -> bool {
+fn is_irq_thread(comm: &str, fields: &[&str]) -> bool {
     comm.starts_with("irq/")
         || comm.starts_with("irq-")
-        || combined.contains(" irq/")
-        || combined.contains(" irq-")
+        || field_contains(fields, " irq/")
+        || field_contains(fields, " irq-")
 }
 
-fn is_input_thread(comm: &str, combined: &str) -> bool {
-    comm.contains("input") || combined.contains("libinput")
+fn is_input_thread(comm: &str, fields: &[&str]) -> bool {
+    comm.contains("input") || field_contains(fields, "libinput")
 }
 
 fn is_audio_realtime_comm(comm: &str) -> bool {
@@ -268,9 +275,9 @@ fn is_audio_realtime_comm(comm: &str) -> bool {
     )
 }
 
-fn is_audio_looking_process(combined: &str) -> bool {
-    contains_any(
-        combined,
+fn is_audio_looking_process(fields: &[&str]) -> bool {
+    contains_any_field(
+        fields,
         &[
             "audio",
             "alsa",
@@ -301,11 +308,11 @@ fn is_game_cgroup(cgroup: &str) -> bool {
     cgroup.contains("steam") || cgroup.contains("games")
 }
 
-fn is_browser_process(comm: &str, process_comm: &str, combined: &str) -> bool {
+fn is_browser_process(comm: &str, process_comm: &str, fields: &[&str]) -> bool {
     let names = ["firefox", "chrome", "chromium", "brave", "browser"];
     contains_any(comm, &names)
         || contains_any(process_comm, &names)
-        || contains_any(combined, &["--type=renderer", "--type=gpu-process"])
+        || contains_any_field(fields, &["--type=renderer", "--type=gpu-process"])
 }
 
 fn is_compiler_comm(comm: &str) -> bool {

@@ -495,10 +495,12 @@ mod tests {
         let drop_counters = DropCountersSnapshot {
             wakeup_data_insert_failed: 1,
             wakeup_data_stale_entries: 0,
+            wakeup_data_replaced_entries: 0,
             ringbuf_reserve_failed: 0,
             irq_start_times_insert_failed: 0,
             block_start_insert_failed: 0,
             block_fallback_key_collisions: 0,
+            cpu_accounting_untracked: 0,
         };
 
         for idx in 0..10 {
@@ -602,10 +604,12 @@ mod tests {
         let drop_counters = DropCountersSnapshot {
             wakeup_data_insert_failed: 2,
             wakeup_data_stale_entries: 0,
+            wakeup_data_replaced_entries: 0,
             ringbuf_reserve_failed: 0,
             irq_start_times_insert_failed: 0,
             block_start_insert_failed: 0,
             block_fallback_key_collisions: 0,
+            cpu_accounting_untracked: 0,
         };
         let records = vec![record(1_000, 7, 10, TaskClass::Game)];
         let status = state.observe_interval(
