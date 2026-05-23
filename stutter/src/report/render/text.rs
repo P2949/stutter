@@ -640,30 +640,16 @@ pub(crate) fn render_report(input: TextReportRenderInput<'_>) -> String {
 
         let block_fallback_key_collisions =
             session.core.drop_counters.block_fallback_key_collisions;
-        if block_io_correlation_basis(session) == "dev+sector"
-            && (session.core.block_io_event_count > 0 || block_fallback_key_collisions > 0)
-        {
+        let basis = block_io_correlation_basis(session);
+        let has_block_fallback_warning = basis == "dev+sector"
+            && (session.core.block_io_event_count > 0 || block_fallback_key_collisions > 0);
+        let should_show_block_io_warning =
+            has_block_fallback_warning || (basis == "unavailable" && session.config.block_io);
+        if should_show_block_io_warning {
             pushln(&mut output, "block i/o correlation warning");
             pushln(&mut output, "----------------------------");
             if let Some(warning) = block_io_correlation_warning(session) {
                 pushln(&mut output, format!("note: {warning}"));
-            } else {
-                pushln(
-                    &mut output,
-                    "note: Block I/O correlation uses dev+sector hashing because request-pointer",
-                );
-                pushln(
-                    &mut output,
-                    "      identity was unavailable. Concurrent same-device/same-sector requests",
-                );
-                pushln(
-                    &mut output,
-                    "      can collide. When a fallback collision is detected, stutter drops the",
-                );
-                pushln(
-                    &mut output,
-                    "      ambiguous start record instead of emitting a potentially wrong latency sample.",
-                );
             }
             if block_fallback_key_collisions > 0 {
                 pushln(

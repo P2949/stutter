@@ -137,6 +137,7 @@ pub(crate) struct SessionProbePlan {
     loaded: ebpf_loader::LoadedEbpf,
     block_io_correlation_basis: String,
     block_io_correlation_confidence: String,
+    native_cgroup_filter: ebpf_loader::NativeCgroupFilterStatus,
 }
 
 impl SessionProbePlan {
@@ -146,11 +147,13 @@ impl SessionProbePlan {
         let block_io_correlation_basis = loaded.block_io_correlation_basis.as_str().to_owned();
         let block_io_correlation_confidence =
             loaded.block_io_correlation_basis.confidence().to_owned();
+        let native_cgroup_filter = loaded.native_cgroup_filter.clone();
 
         Ok(Self {
             loaded,
             block_io_correlation_basis,
             block_io_correlation_confidence,
+            native_cgroup_filter,
         })
     }
 }

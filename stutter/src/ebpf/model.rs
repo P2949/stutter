@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use stutter_common::{
     DROP_BLOCK_FALLBACK_KEY_COLLISION, DROP_BLOCK_START_INSERT_FAILED,
     DROP_CPU_ACCOUNTING_UNTRACKED, DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
-    DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_REPLACED_ENTRY, DROP_WAKEUP_DATA_STALE_ENTRY,
+    DROP_WAKEUP_DATA_CONSUMED_READ_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED,
+    DROP_WAKEUP_DATA_REPLACED_ENTRY, DROP_WAKEUP_DATA_STALE_ENTRY,
 };
 use tokio::io::unix::AsyncFd;
 
@@ -23,8 +24,53 @@ pub struct LoadedEbpf {
     pub target_cgroup_map: Option<AyaHashMap<MapData, u64, u8>>,
     pub prev_faults_map: Option<AyaHashMap<MapData, u32, [u64; 2]>>, // (tid) -> (maj, min)
     pub block_io_correlation_basis: BlockIoCorrelationBasis,
+    pub native_cgroup_filter: NativeCgroupFilterStatus,
     pub activation_plan: ProbeActivationPlan,
     pub(crate) drop_counters: PerCpuArray<MapData, u64>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NativeCgroupFilterStatus {
+    pub enabled: bool,
+    #[serde(default)]
+    pub resolver: Option<String>,
+    #[serde(default)]
+    pub cgroup_path: Option<String>,
+    #[serde(default)]
+    pub cgroup_id: Option<u64>,
+    #[serde(default)]
+    pub verified: bool,
+    #[serde(default)]
+    pub warning: Option<String>,
+}
+
+impl NativeCgroupFilterStatus {
+    pub fn disabled() -> Self {
+        Self::default()
+    }
+
+    pub fn is_disabled(&self) -> bool {
+        !self.enabled
+            && self.resolver.is_none()
+            && self.cgroup_path.is_none()
+            && self.cgroup_id.is_none()
+            && !self.verified
+            && self.warning.is_none()
+    }
+
+    pub fn unverified_directory_inode(cgroup_path: String, cgroup_id: u64) -> Self {
+        Self {
+            enabled: true,
+            resolver: Some("directory_inode".to_owned()),
+            cgroup_path: Some(cgroup_path),
+            cgroup_id: Some(cgroup_id),
+            verified: false,
+            warning: Some(
+                "native cgroup filtering uses best-effort directory-inode resolution and is not runtime-verified; PID expansion remains the authoritative scheduler-wakeup targeting path"
+                    .to_owned(),
+            ),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +129,8 @@ pub struct DropCountersSnapshot {
     pub wakeup_data_stale_entries: u64,
     #[serde(default)]
     pub wakeup_data_replaced_entries: u64,
+    #[serde(default)]
+    pub wakeup_data_consumed_read_failed: u64,
     pub ringbuf_reserve_failed: u64,
     #[serde(default)]
     pub irq_start_times_insert_failed: u64,
@@ -99,6 +147,7 @@ impl DropCountersSnapshot {
         self.wakeup_data_insert_failed
             .saturating_add(self.wakeup_data_stale_entries)
             .saturating_add(self.wakeup_data_replaced_entries)
+            .saturating_add(self.wakeup_data_consumed_read_failed)
             .saturating_add(self.ringbuf_reserve_failed)
             .saturating_add(self.irq_start_times_insert_failed)
             .saturating_add(self.block_start_insert_failed)
@@ -110,6 +159,7 @@ impl DropCountersSnapshot {
         self.wakeup_data_insert_failed
             .saturating_add(self.wakeup_data_stale_entries)
             .saturating_add(self.wakeup_data_replaced_entries)
+            .saturating_add(self.wakeup_data_consumed_read_failed)
             .saturating_add(self.ringbuf_reserve_failed)
             .saturating_add(self.irq_start_times_insert_failed)
             .saturating_add(self.cpu_accounting_untracked)
@@ -126,6 +176,10 @@ impl LoadedEbpf {
             wakeup_data_stale_entries: drop_counter_value(
                 &self.drop_counters,
                 DROP_WAKEUP_DATA_STALE_ENTRY,
+            ),
+            wakeup_data_consumed_read_failed: drop_counter_value(
+                &self.drop_counters,
+                DROP_WAKEUP_DATA_CONSUMED_READ_FAILED,
             ),
             ringbuf_reserve_failed: drop_counter_value(
                 &self.drop_counters,

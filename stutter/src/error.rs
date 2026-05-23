@@ -117,8 +117,6 @@ pub enum EbpfLoadError {
 
 #[derive(Debug, Error)]
 pub enum TargetError {
-    #[error("target process not found: {target}")]
-    ProcessNotFound { target: String },
     #[error("invalid cgroup path {path}: {source:#}")]
     InvalidCgroupPath {
         path: PathBuf,
@@ -154,8 +152,6 @@ pub enum EbpfError {
 
 #[derive(Debug, Error)]
 pub enum ProbeError {
-    #[error("probe {probe} unavailable: {reason}")]
-    Unavailable { probe: String, reason: String },
     #[error("optional probe {probe} program {program} failed to attach: {source:#}")]
     Attach {
         probe: String,

@@ -18,14 +18,15 @@ use crate::{
         maps::map_sizing_for_config_after_memlock,
         memlock::{log_memlock_policy_report, raise_memlock_limit},
         memory::format_optional_bytes,
-        model::{BlockIoCorrelationBasis, LoadedEbpf},
+        model::{BlockIoCorrelationBasis, LoadedEbpf, NativeCgroupFilterStatus},
         object::ebpf_object_bytes,
         preflight::validate_tracepoint_formats,
         tracepoints::{
             drm_fence::drm_fence_tracepoint_offsets, kms::kms_provider_tracepoint_offsets,
         },
     },
-    probe_activation::ProbeActivationPlan,
+    error::{EbpfError, ProbeError, TargetError},
+    probe_activation::{ProbeActivationPlan, ProbeActivationWarning},
     probe_registry::ProbeKey,
     session::targeting::TargetPolicy,
 };
@@ -303,7 +304,11 @@ pub fn load_and_attach(
     };
 
     let object = ebpf_object_bytes()?;
-    let mut ebpf = loader.load(object.as_ref()).context("eBPF load failed")?;
+    let mut ebpf = loader
+        .load(object.as_ref())
+        .map_err(|source| EbpfError::ObjectLoad {
+            source: source.into(),
+        })?;
 
     let mut activation_plan = ProbeActivationPlan::from_config(config, &tracepoints)?;
     for warning in &activation_plan.warnings {
@@ -314,10 +319,18 @@ pub fn load_and_attach(
         );
     }
 
-    attach_tracepoint(&mut ebpf, "sched_wakeup", "sched", "sched_wakeup")
-        .context("eBPF load failed: attach sched_wakeup")?;
-    attach_tracepoint(&mut ebpf, "sched_switch", "sched", "sched_switch")
-        .context("eBPF load failed: attach sched_switch")?;
+    attach_tracepoint(&mut ebpf, "sched_wakeup", "sched", "sched_wakeup").map_err(|source| {
+        EbpfError::Attach {
+            program: "sched_wakeup",
+            source,
+        }
+    })?;
+    attach_tracepoint(&mut ebpf, "sched_switch", "sched", "sched_switch").map_err(|source| {
+        EbpfError::Attach {
+            program: "sched_switch",
+            source,
+        }
+    })?;
 
     if activation_plan.should_attach_program("sched_wakeup_new") {
         attach_tracepoint(&mut ebpf, "sched_wakeup_new", "sched", "sched_wakeup_new")
@@ -459,17 +472,27 @@ pub fn load_and_attach(
         // than aborting the whole profiler startup.
         if let Err(e) = attach_software_perf_event(&mut ebpf, "major_fault", FaultPerfProbe::Major)
         {
-            activation_plan.push_attach_warning(ProbeKey::Faults, "major_fault", &e);
+            let err = ProbeError::Attach {
+                probe: "faults".to_owned(),
+                program: "major_fault",
+                source: e,
+            };
+            activation_plan.push_attach_warning(ProbeKey::Faults, "major_fault", &err);
             log::warn!(
-                "optional_probe_attach_failed key={:?} program=major_fault err={e:#}",
+                "optional_probe_attach_failed key={:?} program=major_fault err={err:#}",
                 ProbeKey::Faults
             );
         }
         if let Err(e) = attach_software_perf_event(&mut ebpf, "minor_fault", FaultPerfProbe::Minor)
         {
-            activation_plan.push_attach_warning(ProbeKey::Faults, "minor_fault", &e);
+            let err = ProbeError::Attach {
+                probe: "faults".to_owned(),
+                program: "minor_fault",
+                source: e,
+            };
+            activation_plan.push_attach_warning(ProbeKey::Faults, "minor_fault", &err);
             log::warn!(
-                "optional_probe_attach_failed key={:?} program=minor_fault err={e:#}",
+                "optional_probe_attach_failed key={:?} program=minor_fault err={err:#}",
                 ProbeKey::Faults
             );
         }
@@ -507,30 +530,51 @@ pub fn load_and_attach(
         .transpose()
         .context("eBPF load failed: PREV_FAULTS map init")?;
 
+    let mut native_cgroup_filter = NativeCgroupFilterStatus::disabled();
     let target_cgroup_map = if config.safety.native_cgroup_filter {
         let cgroup_path =
             config.target.cgroupv2.as_ref().ok_or_else(|| {
                 anyhow::anyhow!("native cgroup filtering requires --cgroupv2 PATH")
             })?;
-        let cgroup_id = resolve_cgroup_id_best_effort(cgroup_path).with_context(|| {
-            format!(
-                "failed to resolve native cgroup id for {}",
-                cgroup_path.display()
-            )
+        let cgroup_id = resolve_cgroup_id_best_effort(cgroup_path).map_err(|source| {
+            TargetError::InvalidCgroupPath {
+                path: cgroup_path.to_path_buf(),
+                source,
+            }
         })?;
 
-        let mut map = AyaHashMap::<_, u64, u8>::try_from(
-            ebpf.take_map("TARGET_CGROUP_IDS")
-                .context("eBPF load failed: TARGET_CGROUP_IDS map not found")?,
-        )
-        .context("eBPF load failed: TARGET_CGROUP_IDS map init")?;
+        let map_data = ebpf
+            .take_map("TARGET_CGROUP_IDS")
+            .ok_or_else(|| EbpfError::MapInit {
+                map: "TARGET_CGROUP_IDS",
+                source: anyhow::anyhow!("map not found"),
+            })?;
+        let mut map =
+            AyaHashMap::<_, u64, u8>::try_from(map_data).map_err(|source| EbpfError::MapInit {
+                map: "TARGET_CGROUP_IDS",
+                source: source.into(),
+            })?;
         map.insert(cgroup_id, 1, 0)
-            .context("failed to insert TARGET_CGROUP_IDS entry")?;
-        log::warn!(
-            "native_cgroup_filter_best_effort cgroup_path={} cgroup_id={} message=\"directory-inode cgroup id resolution is experimental; TARGET_PIDS prepopulation remains the authoritative sched_wakeup targeting path\"",
-            cgroup_path.display(),
-            cgroup_id
+            .map_err(|source| EbpfError::MapInit {
+                map: "TARGET_CGROUP_IDS",
+                source: source.into(),
+            })?;
+        native_cgroup_filter = NativeCgroupFilterStatus::unverified_directory_inode(
+            cgroup_path.display().to_string(),
+            cgroup_id,
         );
+        if let Some(warning) = &native_cgroup_filter.warning {
+            activation_plan.warnings.push(ProbeActivationWarning {
+                key: None,
+                message: warning.clone(),
+            });
+            log::warn!(
+                "native_cgroup_filter_unverified cgroup_path={} cgroup_id={} message=\"{}\"",
+                cgroup_path.display(),
+                cgroup_id,
+                warning,
+            );
+        }
         Some(map)
     } else {
         None
@@ -598,6 +642,7 @@ pub fn load_and_attach(
         target_cgroup_map,
         prev_faults_map,
         block_io_correlation_basis,
+        native_cgroup_filter,
         activation_plan,
         drop_counters,
     })

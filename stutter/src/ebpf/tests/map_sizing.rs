@@ -110,6 +110,7 @@ fn drop_counter_serializes_wakeup_failures_as_lost_wakeup_timestamps() {
         wakeup_data_insert_failed: 7,
         wakeup_data_stale_entries: 0,
         wakeup_data_replaced_entries: 0,
+        wakeup_data_consumed_read_failed: 0,
         ringbuf_reserve_failed: 0,
         irq_start_times_insert_failed: 0,
         block_start_insert_failed: 0,
@@ -148,6 +149,7 @@ fn drop_counter_serializes_stale_wakeup_entries() {
         wakeup_data_insert_failed: 0,
         wakeup_data_stale_entries: 11,
         wakeup_data_replaced_entries: 0,
+        wakeup_data_consumed_read_failed: 0,
         ringbuf_reserve_failed: 0,
         irq_start_times_insert_failed: 0,
         block_start_insert_failed: 0,
@@ -171,6 +173,7 @@ fn drop_counter_totals_include_stale_wakeup_entries() {
         wakeup_data_insert_failed: 1,
         wakeup_data_stale_entries: 2,
         wakeup_data_replaced_entries: 0,
+        wakeup_data_consumed_read_failed: 0,
         ringbuf_reserve_failed: 4,
         irq_start_times_insert_failed: 8,
         block_start_insert_failed: 16,
@@ -180,6 +183,24 @@ fn drop_counter_totals_include_stale_wakeup_entries() {
 
     assert_eq!(snapshot.total(), 63);
     assert_eq!(snapshot.total_excluding_block_io(), 15);
+}
+
+#[test]
+fn drop_counter_totals_include_new_wakeup_and_cpu_accounting_counters() {
+    let snapshot = DropCountersSnapshot {
+        wakeup_data_insert_failed: 0,
+        wakeup_data_stale_entries: 0,
+        wakeup_data_replaced_entries: 3,
+        wakeup_data_consumed_read_failed: 5,
+        ringbuf_reserve_failed: 0,
+        irq_start_times_insert_failed: 0,
+        block_start_insert_failed: 0,
+        block_fallback_key_collisions: 7,
+        cpu_accounting_untracked: 11,
+    };
+
+    assert_eq!(snapshot.total(), 26);
+    assert_eq!(snapshot.total_excluding_block_io(), 19);
 }
 
 #[test]

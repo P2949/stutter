@@ -919,16 +919,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (session.drop_counters && (
             (session.drop_counters.wakeup_data_insert_failed || 0) > 0 ||
             (session.drop_counters.wakeup_data_stale_entries || 0) > 0 ||
+            (session.drop_counters.wakeup_data_replaced_entries || 0) > 0 ||
+            (session.drop_counters.wakeup_data_consumed_read_failed || 0) > 0 ||
             (session.drop_counters.ringbuf_reserve_failed || 0) > 0 ||
             (session.drop_counters.irq_start_times_insert_failed || 0) > 0 ||
             (session.drop_counters.block_start_insert_failed || 0) > 0 ||
+            (session.drop_counters.cpu_accounting_untracked || 0) > 0 ||
             blockFallbackKeyCollisions > 0
         )) {
             const total = (session.drop_counters.wakeup_data_insert_failed || 0) +
                           (session.drop_counters.wakeup_data_stale_entries || 0) +
+                          (session.drop_counters.wakeup_data_replaced_entries || 0) +
+                          (session.drop_counters.wakeup_data_consumed_read_failed || 0) +
                           (session.drop_counters.ringbuf_reserve_failed || 0) +
                           (session.drop_counters.irq_start_times_insert_failed || 0) +
                           (session.drop_counters.block_start_insert_failed || 0) +
+                          (session.drop_counters.cpu_accounting_untracked || 0) +
                           blockFallbackKeyCollisions;
             addRow('eBPF Drops (Cumulative)', total);
             if ((session.drop_counters.wakeup_data_stale_entries || 0) > 0) {
@@ -937,12 +943,36 @@ document.addEventListener('DOMContentLoaded', () => {
                     `${session.drop_counters.wakeup_data_stale_entries} (Runnable-latency samples may be stale or dropped.)`
                 );
             }
+            if ((session.drop_counters.wakeup_data_replaced_entries || 0) > 0) {
+                addRow(
+                    'Wakeup timestamp replaced entries',
+                    `${session.drop_counters.wakeup_data_replaced_entries} (Wakeup records were replaced before sched_switch consumed them.)`
+                );
+            }
+            if ((session.drop_counters.wakeup_data_consumed_read_failed || 0) > 0) {
+                addRow(
+                    'Wakeup consumed read failures',
+                    `${session.drop_counters.wakeup_data_consumed_read_failed} (Wakeup records were consumed but sched_switch field reads failed.)`
+                );
+            }
+            if ((session.drop_counters.cpu_accounting_untracked || 0) > 0) {
+                addRow(
+                    'CPU accounting untracked',
+                    `${session.drop_counters.cpu_accounting_untracked} (CPU ids outside the tracked eBPF accounting range were skipped.)`
+                );
+            }
         }
         html += '</tbody></table>';
         document.getElementById('metadata-content').innerHTML = html;
 
         if ((session.block_io_event_count || 0) > 0 && blockIoBasis === 'dev+sector') {
             document.getElementById('block-io-warning').style.display = 'block';
+        }
+        if (blockIoBasis === 'unavailable') {
+            const warning = document.getElementById('block-io-warning');
+            warning.style.display = 'block';
+            warning.textContent =
+                'Block I/O correlation is unavailable because block_rq tracepoints were not requested, unavailable, or incompatible on this kernel.';
         }
         if (blockFallbackKeyCollisions > 0) {
             const warning = document.getElementById('block-io-warning');

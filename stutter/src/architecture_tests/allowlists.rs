@@ -41,7 +41,7 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/report/render/text.rs",
-        max_lines: 1_221,
+        max_lines: 1_207,
         reason: "existing text report renderer pending future split",
     },
     OversizedRustFileAllowance {

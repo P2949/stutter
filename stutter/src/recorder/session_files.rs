@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{FocusSource, ForegroundSource, TARGET_PIDS_MAX},
-    ebpf_loader::DropCountersSnapshot,
+    ebpf_loader::{DropCountersSnapshot, NativeCgroupFilterStatus},
     metadata::SystemMetadata,
     metrics::CpuPerfRecord,
     process_tree::TaskClass,
@@ -115,6 +115,8 @@ pub struct SessionMetadataCore {
     pub block_io_correlation_basis: String,
     #[serde(default = "super::event_types::default_block_io_correlation_confidence_string")]
     pub block_io_correlation_confidence: String,
+    #[serde(default, skip_serializing_if = "NativeCgroupFilterStatus::is_disabled")]
+    pub native_cgroup_filter: NativeCgroupFilterStatus,
     #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
     #[serde(default)]
