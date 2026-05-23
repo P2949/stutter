@@ -45,11 +45,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "temporary extraction stage: owns MonitorSession run loop and remaining tick handlers after facade split; DMABUF and GPU-engine ingestion are staged here until display-path tick handling is split",
     },
     OversizedRustFileAllowance {
-        path: "src/autotune/shutdown.rs",
-        max_lines: 1_015,
-        reason: "existing autotune shutdown and rollback-on-exit tests pending future split; exit rollback helpers now have no-allow regression coverage",
-    },
-    OversizedRustFileAllowance {
         path: "src/report/render/text.rs",
         max_lines: 1_221,
         reason: "existing text report renderer pending future split",
@@ -60,34 +55,14 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "existing report CLI argument surface pending future split; display-path compare strict/expect parsing and rules Args-to-Input conversion are staged here",
     },
     OversizedRustFileAllowance {
-        path: "src/autotune/startup_recovery.rs",
-        max_lines: 1_353,
-        reason: "existing autotune startup recovery implementation pending future split",
-    },
-    OversizedRustFileAllowance {
         path: "src/tune/mod.rs",
         max_lines: 1_343,
         reason: "Legacy tuning orchestration pending split into data collection / evaluation",
     },
     OversizedRustFileAllowance {
-        path: "src/autotune/controller.rs",
-        max_lines: 1_423,
-        reason: "Core control loop; needs split into policy/action/metrics",
-    },
-    OversizedRustFileAllowance {
-        path: "src/autotune/providers/mod.rs",
-        max_lines: 1_211,
-        reason: "existing autotune provider registry, calibration, and provider tests pending future split; public provider extension reexports are staged here",
-    },
-    OversizedRustFileAllowance {
         path: "src/metrics.rs",
         max_lines: 1_264,
         reason: "existing metrics model and tests pending future split; PSI delta and fallback-collision counter fields are staged here",
-    },
-    OversizedRustFileAllowance {
-        path: "src/autotune/rolling_window.rs",
-        max_lines: 1_382,
-        reason: "existing autotune rolling window implementation pending future split; memory PSI spike, IRQ missing-timestamp policy, interval ordering hardening, and invalid-frametime drop coverage are staged here",
     },
     OversizedRustFileAllowance {
         path: "src/config/effective.rs",
@@ -151,8 +126,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/doctor.rs",
-        max_lines: 1_158,
-        reason: "existing doctor diagnostics implementation pending future split",
+        max_lines: 1_114,
+        reason: "doctor command still owns broad diagnostic orchestration; eBPF map sizing was split to doctor/ebpf_map_sizing.rs",
     },
 ];
 

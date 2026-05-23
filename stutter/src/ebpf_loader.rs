@@ -25,8 +25,9 @@ pub use crate::ebpf::{
 use crate::ebpf::{
     maps::{
         MAX_EVENTS_RINGBUF_BYTES, MAX_WAKEUP_DATA_ENTRIES, MIN_EVENTS_RINGBUF_BYTES,
-        MIN_WAKEUP_DATA_ENTRIES, MemorySnapshot, map_sizing_for_config, map_sizing_from_memory,
-        ring_buffer_size_from_budget, wakeup_data_entries_for_config,
+        MIN_WAKEUP_DATA_ENTRIES, MemorySnapshot, WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES,
+        map_sizing_for_config, map_sizing_from_memory, ring_buffer_size_from_budget,
+        wakeup_data_entries_for_config,
     },
     memlock::memlock_limit_bytes_from_rlim,
     memory::parse_mem_available_bytes,

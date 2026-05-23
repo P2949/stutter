@@ -54,11 +54,41 @@ fn map_sizing_report_includes_target_and_wakeup_capacities() {
             .and_then(serde_json::Value::as_u64),
         Some(TARGET_PIDS_MAX as u64)
     );
+    assert_eq!(
+        value
+            .get("min_events_ringbuf_bytes")
+            .and_then(serde_json::Value::as_u64),
+        Some(MIN_EVENTS_RINGBUF_BYTES as u64)
+    );
+    assert_eq!(
+        value
+            .get("max_events_ringbuf_bytes")
+            .and_then(serde_json::Value::as_u64),
+        Some(MAX_EVENTS_RINGBUF_BYTES as u64)
+    );
     assert!(
         value
             .get("wakeup_data_entries")
             .and_then(serde_json::Value::as_u64)
             .is_some()
+    );
+    assert_eq!(
+        value
+            .get("wakeup_data_map_entry_budget_bytes")
+            .and_then(serde_json::Value::as_u64),
+        Some(WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES)
+    );
+    assert_eq!(
+        value
+            .get("min_wakeup_data_entries")
+            .and_then(serde_json::Value::as_u64),
+        Some(MIN_WAKEUP_DATA_ENTRIES as u64)
+    );
+    assert_eq!(
+        value
+            .get("max_wakeup_data_entries")
+            .and_then(serde_json::Value::as_u64),
+        Some(MAX_WAKEUP_DATA_ENTRIES as u64)
     );
 }
 

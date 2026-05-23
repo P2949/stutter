@@ -17,7 +17,7 @@ const MEMLOCK_BUDGET_DENOMINATOR: u64 = 4;
 // entry. This is not the raw eBPF-private WakeupData struct size; it reserves
 // room for kernel map metadata, alignment, hash storage overhead, and safety
 // margin when splitting the available map-memory budget.
-const WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES: u64 = 64;
+pub(crate) const WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES: u64 = 64;
 pub(crate) const MIN_WAKEUP_DATA_ENTRIES: u32 = 4_096;
 pub(crate) const MAX_WAKEUP_DATA_ENTRIES: u32 = 1_048_576;
 pub(crate) const MIN_EVENTS_RINGBUF_BYTES: u32 = 64 * 1024;
@@ -30,6 +30,8 @@ pub struct EbpfMapSizingReport {
     pub locked_memory_limit_bytes: Option<u64>,
     pub available_memory_bytes: Option<u64>,
     pub events_ringbuf_bytes: u32,
+    pub min_events_ringbuf_bytes: u32,
+    pub max_events_ringbuf_bytes: u32,
     pub target_pids_max: usize,
     pub wakeup_data_entries: u32,
     pub wakeup_data_map_entry_budget_bytes: u64,
@@ -111,6 +113,8 @@ pub fn ebpf_map_sizing_report() -> EbpfMapSizingReport {
         locked_memory_limit_bytes: sizing.locked_memory_limit_bytes,
         available_memory_bytes: sizing.available_memory_bytes,
         events_ringbuf_bytes: sizing.events_ringbuf_bytes,
+        min_events_ringbuf_bytes: MIN_EVENTS_RINGBUF_BYTES,
+        max_events_ringbuf_bytes: MAX_EVENTS_RINGBUF_BYTES,
         target_pids_max: TARGET_PIDS_MAX,
         wakeup_data_entries: sizing.wakeup_data_entries,
         wakeup_data_map_entry_budget_bytes: WAKEUP_DATA_MAP_ENTRY_BUDGET_BYTES,

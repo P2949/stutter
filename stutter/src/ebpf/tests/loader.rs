@@ -160,8 +160,8 @@ fn sched_switch_reads_previous_task_context_after_relevance_filters() {
 
     let wakeup_data = body.find("let wakeup_data = match").unwrap();
     let target_filter = body.find("if !is_target_pid(pid)").unwrap();
-    let prev_pid = body.find("let prev_pid_raw").unwrap();
-    let prev_state = body.find("let prev_state").unwrap();
+    let prev_pid = body.find("let mut prev_pid_raw").unwrap();
+    let prev_state = body.find("let mut prev_state").unwrap();
 
     assert!(prev_pid > wakeup_data);
     assert!(prev_pid > target_filter);

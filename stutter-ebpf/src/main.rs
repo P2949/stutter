@@ -14,9 +14,8 @@ use stutter_common::{
     BlockIoEvent, CpuFreqEvent, DRM_FENCE_EVENT_SIGNAL, DRM_FENCE_EVENT_WAIT_DONE,
     DRM_FENCE_EVENT_WAIT_INTERVAL, DRM_FENCE_HAS_CONTEXT, DRM_FENCE_HAS_DURATION,
     DRM_FENCE_HAS_PID, DRM_FENCE_HAS_SEQNO, DRM_FENCE_HAS_TIMELINE, DRM_FENCE_IS_EXPORTER_SIDE,
-    DRM_FENCE_IS_IMPORTER_SIDE, DRM_FENCE_PROVIDER_DMA_FENCE, DRM_GPU_ROLE_UNKNOWN,
-    DROP_BLOCK_FALLBACK_KEY_COLLISION, DROP_BLOCK_START_INSERT_FAILED, DROP_COUNTERS_MAX,
-    DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
+    DRM_FENCE_IS_IMPORTER_SIDE, DROP_BLOCK_FALLBACK_KEY_COLLISION, DROP_BLOCK_START_INSERT_FAILED,
+    DROP_COUNTERS_MAX, DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
     DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_STALE_ENTRY, DrmFenceEvent, EVENT_BLOCK_IO,
     EVENT_CPU_FREQ, EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_KMS_FLIP,
     EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent,
@@ -44,147 +43,14 @@ use stutter_common::{
 // 15. Tracepoint field readers
 // 16. License and panic handler
 
-// -----------------------------------------------------------------------------
-// Tracepoint field offsets and provider constants
-// -----------------------------------------------------------------------------
+mod trace_offsets;
+mod trace_read;
 
-#[unsafe(no_mangle)]
-static mut BLOCK_RQ_KEY_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut BLOCK_RQ_ISSUE_NR_SECTOR_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut BLOCK_RQ_ISSUE_RWBS_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut BLOCK_RQ_COMPLETE_NR_SECTOR_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut BLOCK_RQ_COMPLETE_RWBS_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut I915_FLIP_REQUEST_CRTC_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut I915_FLIP_REQUEST_PIPE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut I915_FLIP_DONE_CRTC_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut I915_FLIP_DONE_PIPE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut I915_FLIP_DONE_SEQUENCE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut I915_FLIP_DONE_SEQUENCE_SIZE: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FLIP_REQUEST_CRTC_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FLIP_REQUEST_PIPE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FLIP_DONE_CRTC_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FLIP_DONE_PIPE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FLIP_DONE_SEQUENCE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FLIP_DONE_SEQUENCE_SIZE: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_VBLANK_CRTC_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_VBLANK_PIPE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_VBLANK_SEQUENCE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_VBLANK_SEQUENCE_SIZE: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut AMDGPU_FLIP_REQUEST_CRTC_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut AMDGPU_FLIP_REQUEST_PIPE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut AMDGPU_FLIP_DONE_CRTC_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut AMDGPU_FLIP_DONE_PIPE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut AMDGPU_FLIP_DONE_SEQUENCE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut AMDGPU_FLIP_DONE_SEQUENCE_SIZE: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut AMDGPU_VBLANK_CRTC_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut AMDGPU_VBLANK_PIPE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut AMDGPU_VBLANK_SEQUENCE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut AMDGPU_VBLANK_SEQUENCE_SIZE: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_WAIT_START_CONTEXT_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_WAIT_START_SEQNO_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_WAIT_START_TIMELINE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_WAIT_DONE_CONTEXT_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_WAIT_DONE_SEQNO_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_WAIT_DONE_TIMELINE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_SIGNAL_CONTEXT_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_SIGNAL_SEQNO_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_SIGNAL_TIMELINE_OFFSET: u32 = 0;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_WAIT_START_PROVIDER: u32 = DRM_FENCE_PROVIDER_DMA_FENCE;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_WAIT_START_GPU_ROLE: u32 = DRM_GPU_ROLE_UNKNOWN;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_WAIT_DONE_PROVIDER: u32 = DRM_FENCE_PROVIDER_DMA_FENCE;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_WAIT_DONE_GPU_ROLE: u32 = DRM_GPU_ROLE_UNKNOWN;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_SIGNAL_PROVIDER: u32 = DRM_FENCE_PROVIDER_DMA_FENCE;
-
-#[unsafe(no_mangle)]
-static mut DRM_FENCE_SIGNAL_GPU_ROLE: u32 = DRM_GPU_ROLE_UNKNOWN;
+use trace_offsets::*;
+use trace_read::{
+    read_comm16, read_i32, read_i64, read_optional_u32, read_optional_u64, read_sequence_field,
+    read_u32, read_u64,
+};
 
 // -----------------------------------------------------------------------------
 // Shared constants and map sizing
@@ -338,40 +204,28 @@ static DROP_COUNTERS: PerCpuArray<u64> = PerCpuArray::<u64>::with_max_entries(DR
 /// Tracepoint entry for sched_wakeup.
 /// Records target wakeup timing and runnable-depth state.
 pub fn sched_wakeup(ctx: TracePointContext) -> u32 {
-    match try_sched_wakeup(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_sched_wakeup(ctx)
 }
 
 #[tracepoint]
 /// Tracepoint entry for sched_wakeup_new.
 /// Uses the same target wakeup accounting as sched_wakeup.
 pub fn sched_wakeup_new(ctx: TracePointContext) -> u32 {
-    match try_sched_wakeup(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_sched_wakeup(ctx)
 }
 
 #[tracepoint]
 /// Tracepoint entry for sched_switch.
 /// Emits runnable latency for target tasks with pending wakeup data.
 pub fn sched_switch(ctx: TracePointContext) -> u32 {
-    match try_sched_switch(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_sched_switch(ctx)
 }
 
 #[tracepoint]
 /// Tracepoint entry for sched_migrate_task.
 /// Moves monitored runnable-depth accounting across CPUs.
 pub fn sched_migrate_task(ctx: TracePointContext) -> u32 {
-    match try_sched_migrate_task(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_sched_migrate_task(ctx)
 }
 
 // -----------------------------------------------------------------------------
@@ -382,19 +236,17 @@ pub fn sched_migrate_task(ctx: TracePointContext) -> u32 {
 /// Tracepoint entry for sched_process_exec.
 /// Emits exec events for monitored tasks or current target cgroups.
 pub fn sched_process_exec(ctx: TracePointContext) -> u32 {
-    match try_sched_process_exec(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_sched_process_exec(ctx)
 }
 
-fn try_sched_process_exec(_ctx: TracePointContext) -> Result<u32, u32> {
+#[inline(always)]
+fn try_sched_process_exec(_ctx: TracePointContext) -> u32 {
     let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
     let tid = (pid_tgid & 0xffff_ffff) as u32;
 
     if !is_target_pid(pid) && !is_target_pid_or_current_cgroup(tid) {
-        return Ok(0);
+        return 0;
     }
 
     if let Some(mut entry) = EVENTS.reserve::<ExecEvent>(0) {
@@ -412,7 +264,7 @@ fn try_sched_process_exec(_ctx: TracePointContext) -> Result<u32, u32> {
         increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
     }
 
-    Ok(0)
+    0
 }
 
 // -----------------------------------------------------------------------------
@@ -423,20 +275,14 @@ fn try_sched_process_exec(_ctx: TracePointContext) -> Result<u32, u32> {
 /// Tracepoint entry for cpu_frequency.
 /// Emits CPU frequency state changes.
 pub fn cpu_frequency(ctx: TracePointContext) -> u32 {
-    match try_cpu_frequency(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_cpu_frequency(ctx)
 }
 
 #[tracepoint]
 /// Tracepoint entry for sched_stat_wait.
 /// Emits scheduler wait delay for monitored target tasks.
 pub fn sched_stat_wait(ctx: TracePointContext) -> u32 {
-    match try_sched_stat_wait(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_sched_stat_wait(ctx)
 }
 
 #[tracepoint]
@@ -498,20 +344,14 @@ pub fn minor_fault(_ctx: aya_ebpf::programs::PerfEventContext) -> u32 {
 /// Tracepoint entry for irq_handler_entry.
 /// Records start time for allowlisted IRQs on the current CPU.
 pub fn irq_handler_entry(ctx: TracePointContext) -> u32 {
-    match try_irq_handler_entry(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_irq_handler_entry(ctx)
 }
 
 #[tracepoint]
 /// Tracepoint entry for irq_handler_exit.
 /// Emits IRQ duration for matching target IRQ starts.
 pub fn irq_handler_exit(ctx: TracePointContext) -> u32 {
-    match try_irq_handler_exit(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_irq_handler_exit(ctx)
 }
 
 // -----------------------------------------------------------------------------
@@ -662,12 +502,19 @@ fn decrement_target_pending(cpu: u32) {
 // Scheduler tracepoint implementations
 // -----------------------------------------------------------------------------
 
-fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
-    let pid: i32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
-    let target_cpu: u32 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
+#[inline(always)]
+fn try_sched_wakeup(ctx: TracePointContext) -> u32 {
+    let mut pid: i32 = 0;
+    if !read_i32(&ctx, 24, &mut pid) {
+        return 1;
+    }
+    let mut target_cpu: u32 = 0;
+    if !read_u32(&ctx, 32, &mut target_cpu) {
+        return 1;
+    }
 
     if pid <= 0 {
-        return Ok(0);
+        return 0;
     }
 
     let pid = pid as u32;
@@ -677,7 +524,7 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
     // target tasks are counted. Do not call mark_task_runnable() before this
     // filter, or unrelated system wakeups can leak into CPU_RUNNABLE_DEPTH.
     if !is_target_pid(pid) {
-        return Ok(0);
+        return 0;
     }
 
     // Count only monitored target tasks as runnable. This keeps the increment path
@@ -708,21 +555,25 @@ fn try_sched_wakeup(ctx: TracePointContext) -> Result<u32, u32> {
         increment_drop_counter(DROP_WAKEUP_DATA_INSERT_FAILED);
     }
 
-    Ok(0)
+    0
 }
 
-fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
-    let next_pid: i32 = unsafe { ctx.read_at(56).map_err(|_| 1u32)? };
+#[inline(always)]
+fn try_sched_switch(ctx: TracePointContext) -> u32 {
+    let mut next_pid: i32 = 0;
+    if !read_i32(&ctx, 56, &mut next_pid) {
+        return 1;
+    }
 
     if next_pid <= 0 {
-        return Ok(0);
+        return 0;
     }
 
     let pid = next_pid as u32;
 
     let wakeup_data = match unsafe { WAKEUP_DATA.get(pid) } {
         Some(d) => *d,
-        None => return Ok(0),
+        None => return 0,
     };
 
     if !is_target_pid(pid) {
@@ -730,13 +581,19 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
         let _ = WAKEUP_DATA.remove(pid);
         decrement_target_pending(wakeup_data.target_cpu);
         remove_runnable_task_if_present(pid);
-        return Ok(0);
+        return 0;
     }
 
     // Read the previous task context only after the cheap relevance filters pass.
     // Offsets validated in userspace preflight assume prev_pid at 24 and prev_state at 32.
-    let prev_pid_raw: i32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
-    let prev_state: i64 = unsafe { ctx.read_at(32).map_err(|_| 1u32)? };
+    let mut prev_pid_raw: i32 = 0;
+    if !read_i32(&ctx, 24, &mut prev_pid_raw) {
+        return 1;
+    }
+    let mut prev_state: i64 = 0;
+    if !read_i64(&ctx, 32, &mut prev_state) {
+        return 1;
+    }
     let switch_prev_pid = if prev_pid_raw > 0 {
         prev_pid_raw as u32
     } else {
@@ -780,12 +637,18 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
             .unwrap_or(FaultCounters { maj: 0, min: 0 })
     };
 
-    let prio: i32 = unsafe { ctx.read_at(60).map_err(|_| 1u32)? };
-    let comm: [u8; 16] = unsafe { ctx.read_at(40).map_err(|_| 1u32)? };
+    let mut prio: i32 = 0;
+    if !read_i32(&ctx, 60, &mut prio) {
+        return 1;
+    }
+    let mut comm: [u8; 16] = [0; 16];
+    if !read_comm16(&ctx, 40, &mut comm) {
+        return 1;
+    }
 
     let Some(mut entry) = EVENTS.reserve::<SchedulerEvent>(0) else {
         increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return Ok(0);
+        return 0;
     };
     let event = entry.as_mut_ptr();
 
@@ -810,22 +673,32 @@ fn try_sched_switch(ctx: TracePointContext) -> Result<u32, u32> {
 
     entry.submit(0);
 
-    Ok(0)
+    0
 }
 
-fn try_sched_migrate_task(ctx: TracePointContext) -> Result<u32, u32> {
-    let pid: i32 = unsafe { ctx.read_at(12).map_err(|_| 1u32)? };
+#[inline(always)]
+fn try_sched_migrate_task(ctx: TracePointContext) -> u32 {
+    let mut pid: i32 = 0;
+    if !read_i32(&ctx, 12, &mut pid) {
+        return 1;
+    }
     if pid <= 0 {
-        return Ok(0);
+        return 0;
     }
 
     let pid = pid as u32;
     if !is_target_pid(pid) {
-        return Ok(0);
+        return 0;
     }
 
-    let orig_cpu: i32 = unsafe { ctx.read_at(20).map_err(|_| 1u32)? };
-    let dest_cpu: i32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
+    let mut orig_cpu: i32 = 0;
+    if !read_i32(&ctx, 20, &mut orig_cpu) {
+        return 1;
+    }
+    let mut dest_cpu: i32 = 0;
+    if !read_i32(&ctx, 24, &mut dest_cpu) {
+        return 1;
+    }
     let now = unsafe { bpf_ktime_get_ns() };
 
     // Move monitored runnable count if this target task migrates while runnable.
@@ -853,7 +726,7 @@ fn try_sched_migrate_task(ctx: TracePointContext) -> Result<u32, u32> {
 
     let Some(mut entry) = EVENTS.reserve::<MigrationEvent>(0) else {
         increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return Ok(0);
+        return 0;
     };
     let event = entry.as_mut_ptr();
 
@@ -867,17 +740,24 @@ fn try_sched_migrate_task(ctx: TracePointContext) -> Result<u32, u32> {
 
     entry.submit(0);
 
-    Ok(0)
+    0
 }
 
-fn try_cpu_frequency(ctx: TracePointContext) -> Result<u32, u32> {
-    let state: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
-    let cpu_id: u32 = unsafe { ctx.read_at(12).map_err(|_| 1u32)? };
+#[inline(always)]
+fn try_cpu_frequency(ctx: TracePointContext) -> u32 {
+    let mut state: u32 = 0;
+    if !read_u32(&ctx, 8, &mut state) {
+        return 1;
+    }
+    let mut cpu_id: u32 = 0;
+    if !read_u32(&ctx, 12, &mut cpu_id) {
+        return 1;
+    }
     let now = unsafe { bpf_ktime_get_ns() };
 
     let Some(mut entry) = EVENTS.reserve::<CpuFreqEvent>(0) else {
         increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return Ok(0);
+        return 0;
     };
     let event = entry.as_mut_ptr();
 
@@ -891,25 +771,32 @@ fn try_cpu_frequency(ctx: TracePointContext) -> Result<u32, u32> {
 
     entry.submit(0);
 
-    Ok(0)
+    0
 }
 
-fn try_sched_stat_wait(ctx: TracePointContext) -> Result<u32, u32> {
-    let pid: i32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
+#[inline(always)]
+fn try_sched_stat_wait(ctx: TracePointContext) -> u32 {
+    let mut pid: i32 = 0;
+    if !read_i32(&ctx, 8, &mut pid) {
+        return 1;
+    }
     if pid <= 0 {
-        return Ok(0);
+        return 0;
     }
 
     let pid = pid as u32;
     if !is_target_pid(pid) {
-        return Ok(0);
+        return 0;
     }
 
-    let delay: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
+    let mut delay: u64 = 0;
+    if !read_u64(&ctx, 16, &mut delay) {
+        return 1;
+    }
 
     let Some(mut entry) = EVENTS.reserve::<StatWaitEvent>(0) else {
         increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return Ok(0);
+        return 0;
     };
     let event = entry.as_mut_ptr();
 
@@ -921,18 +808,22 @@ fn try_sched_stat_wait(ctx: TracePointContext) -> Result<u32, u32> {
 
     entry.submit(0);
 
-    Ok(0)
+    0
 }
 
-fn try_irq_handler_entry(ctx: TracePointContext) -> Result<u32, u32> {
-    let irq: i32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
+#[inline(always)]
+fn try_irq_handler_entry(ctx: TracePointContext) -> u32 {
+    let mut irq: i32 = 0;
+    if !read_i32(&ctx, 8, &mut irq) {
+        return 1;
+    }
     if irq < 0 {
-        return Ok(0);
+        return 0;
     }
 
     let irq = irq as u32;
     if !is_target_irq(irq) {
-        return Ok(0);
+        return 0;
     }
 
     let cpu = unsafe { bpf_get_smp_processor_id() };
@@ -941,25 +832,29 @@ fn try_irq_handler_entry(ctx: TracePointContext) -> Result<u32, u32> {
     if IRQ_START_TIMES.insert(key, now, 0).is_err() {
         increment_drop_counter(DROP_IRQ_START_TIMES_INSERT_FAILED);
     }
-    Ok(0)
+    0
 }
 
-fn try_irq_handler_exit(ctx: TracePointContext) -> Result<u32, u32> {
-    let irq: i32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
+#[inline(always)]
+fn try_irq_handler_exit(ctx: TracePointContext) -> u32 {
+    let mut irq: i32 = 0;
+    if !read_i32(&ctx, 8, &mut irq) {
+        return 1;
+    }
     if irq < 0 {
-        return Ok(0);
+        return 0;
     }
 
     let irq = irq as u32;
     if !is_target_irq(irq) {
-        return Ok(0);
+        return 0;
     }
 
     let cpu = unsafe { bpf_get_smp_processor_id() };
     let key = irq_key(irq, cpu);
     let enter_ns = match unsafe { IRQ_START_TIMES.get(key) } {
         Some(ts) => *ts,
-        None => return Ok(0),
+        None => return 0,
     };
     let _ = IRQ_START_TIMES.remove(key);
 
@@ -968,7 +863,7 @@ fn try_irq_handler_exit(ctx: TracePointContext) -> Result<u32, u32> {
 
     let Some(mut entry) = EVENTS.reserve::<IrqEvent>(0) else {
         increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return Ok(0);
+        return 0;
     };
     let event = entry.as_mut_ptr();
 
@@ -982,7 +877,7 @@ fn try_irq_handler_exit(ctx: TracePointContext) -> Result<u32, u32> {
     }
 
     entry.submit(0);
-    Ok(0)
+    0
 }
 
 // -----------------------------------------------------------------------------
@@ -1019,20 +914,24 @@ fn block_rq_fallback_key(
 /// Tracepoint entry for block_rq_issue.
 /// Records target task block I/O start metadata.
 pub fn block_rq_issue(ctx: TracePointContext) -> u32 {
-    match try_block_rq_issue(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_block_rq_issue(ctx)
 }
 
-fn try_block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
-    let dev: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
-    let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
+#[inline(always)]
+fn try_block_rq_issue(ctx: TracePointContext) -> u32 {
+    let mut dev: u32 = 0;
+    if !read_u32(&ctx, 8, &mut dev) {
+        return 1;
+    }
+    let mut sector: u64 = 0;
+    if !read_u64(&ctx, 16, &mut sector) {
+        return 1;
+    }
     let tid = (bpf_get_current_pid_tgid() & 0xffff_ffff) as u32;
     // Only track starts for target tasks so unrelated system I/O cannot
     // evict target entries from the start LRU map.
     if !is_target_pid_or_current_cgroup(tid) {
-        return Ok(0);
+        return 0;
     }
     let ts = unsafe { bpf_ktime_get_ns() };
     // If userspace detected a unique request pointer field (like `rq`), use it
@@ -1053,30 +952,37 @@ fn try_block_rq_issue(ctx: TracePointContext) -> Result<u32, u32> {
     if key != 0 && using_fallback_key && unsafe { BLOCK_START.get(key).is_some() } {
         increment_drop_counter(DROP_BLOCK_FALLBACK_KEY_COLLISION);
         let _ = BLOCK_START.remove(key);
-        return Ok(0);
+        return 0;
     }
 
     if key != 0 && BLOCK_START.insert(key, IoStart { ts, tid }, 0).is_err() {
         increment_drop_counter(DROP_BLOCK_START_INSERT_FAILED);
     }
 
-    Ok(0)
+    0
 }
 
 #[tracepoint]
 /// Tracepoint entry for block_rq_complete.
 /// Emits target task block I/O duration from matching issue metadata.
 pub fn block_rq_complete(ctx: TracePointContext) -> u32 {
-    match try_block_rq_complete(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_block_rq_complete(ctx)
 }
 
-fn try_block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
-    let dev: u32 = unsafe { ctx.read_at(8).map_err(|_| 1u32)? };
-    let sector: u64 = unsafe { ctx.read_at(16).map_err(|_| 1u32)? };
-    let nr_sector: u32 = unsafe { ctx.read_at(24).map_err(|_| 1u32)? };
+#[inline(always)]
+fn try_block_rq_complete(ctx: TracePointContext) -> u32 {
+    let mut dev: u32 = 0;
+    if !read_u32(&ctx, 8, &mut dev) {
+        return 1;
+    }
+    let mut sector: u64 = 0;
+    if !read_u64(&ctx, 16, &mut sector) {
+        return 1;
+    }
+    let mut nr_sector: u32 = 0;
+    if !read_u32(&ctx, 24, &mut nr_sector) {
+        return 1;
+    }
 
     let key = if unsafe { core::ptr::read_volatile(&raw const BLOCK_RQ_KEY_OFFSET) } != 0 {
         unsafe {
@@ -1098,7 +1004,7 @@ fn try_block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
         None
     } {
         Some(s) => *s,
-        None => return Ok(0),
+        None => return 0,
     };
     let _ = BLOCK_START.remove(key);
 
@@ -1107,7 +1013,7 @@ fn try_block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
 
     let Some(mut entry) = EVENTS.reserve::<BlockIoEvent>(0) else {
         increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return Ok(0);
+        return 0;
     };
     let event = entry.as_mut_ptr();
 
@@ -1131,7 +1037,7 @@ fn try_block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
 
     entry.submit(0);
 
-    Ok(0)
+    0
 }
 
 // -----------------------------------------------------------------------------
@@ -1142,166 +1048,168 @@ fn try_block_rq_complete(ctx: TracePointContext) -> Result<u32, u32> {
 /// Tracepoint entry for i915 flip request.
 /// Starts KMS flip interval tracking for i915 tracepoints.
 pub fn i915_flip_request(ctx: TracePointContext) -> u32 {
-    match try_kms_flip_request(
+    try_kms_flip_request(
         ctx,
         unsafe { core::ptr::read_volatile(&raw const I915_FLIP_REQUEST_CRTC_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const I915_FLIP_REQUEST_PIPE_OFFSET) },
-    ) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    )
 }
 
 #[tracepoint]
 /// Tracepoint entry for i915 flip done.
 /// Completes or emits i915 page-flip timing.
 pub fn i915_flip_done(ctx: TracePointContext) -> u32 {
-    match try_kms_flip_done(
+    try_kms_flip_done(
         ctx,
         (KMS_FLIP_PROVIDER_I915 << 16) | KMS_FLIP_EVENT_PAGEFLIP_DONE,
         kms_offset_pair(
             unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_CRTC_OFFSET) },
             unsafe { core::ptr::read_volatile(&raw const I915_FLIP_DONE_PIPE_OFFSET) },
         ),
-    ) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    )
 }
 
 #[tracepoint]
 /// Tracepoint entry for DRM flip request.
 /// Starts generic DRM flip interval tracking.
 pub fn drm_flip_request(ctx: TracePointContext) -> u32 {
-    match try_kms_flip_request(
+    try_kms_flip_request(
         ctx,
         unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_REQUEST_CRTC_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_REQUEST_PIPE_OFFSET) },
-    ) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    )
 }
 
 #[tracepoint]
 /// Tracepoint entry for DRM flip done.
 /// Completes or emits generic DRM page-flip timing.
 pub fn drm_flip_done(ctx: TracePointContext) -> u32 {
-    match try_kms_flip_done(
+    try_kms_flip_done(
         ctx,
         (KMS_FLIP_PROVIDER_DRM << 16) | KMS_FLIP_EVENT_PAGEFLIP_DONE,
         kms_offset_pair(
             unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_CRTC_OFFSET) },
             unsafe { core::ptr::read_volatile(&raw const DRM_FLIP_DONE_PIPE_OFFSET) },
         ),
-    ) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    )
 }
 
 #[tracepoint]
 /// Tracepoint entry for DRM vblank events.
 /// Emits generic DRM vblank timing when sequence fields are available.
 pub fn drm_vblank_event(ctx: TracePointContext) -> u32 {
-    match try_kms_flip_done(
+    try_kms_flip_done(
         ctx,
         (KMS_FLIP_PROVIDER_DRM << 16) | KMS_FLIP_EVENT_VBLANK,
         kms_offset_pair(
             unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_CRTC_OFFSET) },
             unsafe { core::ptr::read_volatile(&raw const DRM_VBLANK_PIPE_OFFSET) },
         ),
-    ) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    )
 }
 
 #[tracepoint]
 /// Tracepoint entry for amdgpu flip request.
 /// Starts AMDGPU flip interval tracking.
 pub fn amdgpu_flip_request(ctx: TracePointContext) -> u32 {
-    match try_kms_flip_request(
+    try_kms_flip_request(
         ctx,
         unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_REQUEST_CRTC_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_REQUEST_PIPE_OFFSET) },
-    ) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    )
 }
 
 #[tracepoint]
 /// Tracepoint entry for amdgpu flip done.
 /// Completes or emits AMDGPU page-flip timing.
 pub fn amdgpu_flip_done(ctx: TracePointContext) -> u32 {
-    match try_kms_flip_done(
+    try_kms_flip_done(
         ctx,
         (KMS_FLIP_PROVIDER_AMDGPU << 16) | KMS_FLIP_EVENT_PAGEFLIP_DONE,
         kms_offset_pair(
             unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_CRTC_OFFSET) },
             unsafe { core::ptr::read_volatile(&raw const AMDGPU_FLIP_DONE_PIPE_OFFSET) },
         ),
-    ) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    )
 }
 
 #[tracepoint]
 /// Tracepoint entry for amdgpu vblank events.
 /// Emits AMDGPU vblank timing when sequence fields are available.
 pub fn amdgpu_vblank_event(ctx: TracePointContext) -> u32 {
-    match try_kms_flip_done(
+    try_kms_flip_done(
         ctx,
         (KMS_FLIP_PROVIDER_AMDGPU << 16) | KMS_FLIP_EVENT_VBLANK,
         kms_offset_pair(
             unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_CRTC_OFFSET) },
             unsafe { core::ptr::read_volatile(&raw const AMDGPU_VBLANK_PIPE_OFFSET) },
         ),
-    ) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    )
 }
 
-fn try_kms_flip_request(
-    ctx: TracePointContext,
-    crtc_offset: u32,
-    pipe_offset: u32,
-) -> Result<u32, u32> {
-    let Some(key) = kms_flip_key(&ctx, crtc_offset, pipe_offset) else {
-        return Ok(0);
+#[inline(always)]
+fn try_kms_flip_request(ctx: TracePointContext, crtc_offset: u32, pipe_offset: u32) -> u32 {
+    let mut key = KmsFlipKey {
+        card_minor: 0,
+        crtc_id: 0,
+        pipe: 0,
     };
+    if !fill_kms_flip_key(&mut key, &ctx, crtc_offset, pipe_offset) {
+        return 0;
+    }
 
     let now = unsafe { bpf_ktime_get_ns() };
     let _ = KMS_FLIP_STARTS.insert(key, now, 0);
 
-    Ok(0)
+    0
 }
 
+#[inline(always)]
 fn try_kms_flip_done(
     ctx: TracePointContext,
     provider_and_event_kind: u32,
     offset_pair: u64,
-) -> Result<u32, u32> {
+) -> u32 {
     let provider = provider_and_event_kind >> 16;
     let completion_event_kind = provider_and_event_kind & 0xffff;
     let crtc_offset = (offset_pair >> 32) as u32;
     let pipe_offset = offset_pair as u32;
     let now = unsafe { bpf_ktime_get_ns() };
-    let Some(key) = kms_flip_key(&ctx, crtc_offset, pipe_offset) else {
-        return Ok(0);
+
+    let mut key = KmsFlipKey {
+        card_minor: 0,
+        crtc_id: 0,
+        pipe: 0,
     };
+    if !fill_kms_flip_key(&mut key, &ctx, crtc_offset, pipe_offset) {
+        return 0;
+    }
 
-    let start_ns = unsafe { KMS_FLIP_STARTS.get(key).copied() };
+    let mut start_ns = 0;
+    let has_start_ns = match unsafe { KMS_FLIP_STARTS.get(key) } {
+        Some(value) => {
+            start_ns = *value;
+            true
+        }
+        None => false,
+    };
     let _ = KMS_FLIP_STARTS.remove(key);
+
     let (sequence_offset, sequence_size) = kms_sequence_offsets(provider, completion_event_kind);
-    let sequence = read_sequence_field(&ctx, sequence_offset, sequence_size);
+    let mut sequence = 0;
+    let has_sequence = read_sequence_field(&ctx, sequence_offset, sequence_size, &mut sequence);
 
-    emit_kms_flip_event(&key, provider_and_event_kind, sequence, start_ns, now);
+    emit_kms_flip_event(
+        &key,
+        provider_and_event_kind,
+        has_sequence,
+        sequence,
+        has_start_ns,
+        start_ns,
+        now,
+    );
 
-    Ok(0)
+    0
 }
 
 fn kms_offset_pair(crtc_offset: u32, pipe_offset: u32) -> u64 {
@@ -1342,19 +1250,26 @@ fn kms_sequence_offsets(provider: u32, completion_event_kind: u32) -> (u32, u32)
     }
 }
 
-fn kms_flip_key(ctx: &TracePointContext, crtc_offset: u32, pipe_offset: u32) -> Option<KmsFlipKey> {
-    let crtc_id = read_optional_u32(ctx, crtc_offset).unwrap_or(0);
-    let pipe = read_optional_u32(ctx, pipe_offset).unwrap_or(0);
+#[inline(always)]
+fn fill_kms_flip_key(
+    key: &mut KmsFlipKey,
+    ctx: &TracePointContext,
+    crtc_offset: u32,
+    pipe_offset: u32,
+) -> bool {
+    let mut crtc_id = 0;
+    let mut pipe = 0;
+    let _ = read_optional_u32(ctx, crtc_offset, &mut crtc_id);
+    let _ = read_optional_u32(ctx, pipe_offset, &mut pipe);
 
     if crtc_id == 0 && pipe == 0 {
-        None
-    } else {
-        Some(KmsFlipKey {
-            card_minor: 0,
-            crtc_id,
-            pipe,
-        })
+        return false;
     }
+
+    key.card_minor = 0;
+    key.crtc_id = crtc_id;
+    key.pipe = pipe;
+    true
 }
 
 // -----------------------------------------------------------------------------
@@ -1373,21 +1288,28 @@ struct FenceIdentity {
 /// Tracepoint entry for DRM fence wait start.
 /// Stores fence wait start identity and task metadata.
 pub fn drm_fence_wait_start(ctx: TracePointContext) -> u32 {
-    match try_drm_fence_wait_start(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_drm_fence_wait_start(ctx)
 }
 
-fn try_drm_fence_wait_start(ctx: TracePointContext) -> Result<u32, u32> {
-    let Some(identity) = fence_identity(
+#[inline(always)]
+fn try_drm_fence_wait_start(ctx: TracePointContext) -> u32 {
+    let mut identity = FenceIdentity {
+        key: FenceKey {
+            context: 0,
+            seqno: 0,
+        },
+        flags: 0,
+        timeline_hash: 0,
+    };
+    if !fill_fence_identity(
+        &mut identity,
         &ctx,
         unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_START_CONTEXT_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_START_SEQNO_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_START_TIMELINE_OFFSET) },
-    ) else {
-        return Ok(0);
-    };
+    ) {
+        return 0;
+    }
 
     let pid_tgid = bpf_get_current_pid_tgid();
     let start = FenceWaitStart {
@@ -1399,28 +1321,35 @@ fn try_drm_fence_wait_start(ctx: TracePointContext) -> Result<u32, u32> {
     };
     let _ = FENCE_WAIT_STARTS.insert(identity.key, start, 0);
 
-    Ok(0)
+    0
 }
 
 #[tracepoint]
 /// Tracepoint entry for DRM fence wait done.
 /// Emits fence wait intervals and importer/exporter correlation when available.
 pub fn drm_fence_wait_done(ctx: TracePointContext) -> u32 {
-    match try_drm_fence_wait_done(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_drm_fence_wait_done(ctx)
 }
 
-fn try_drm_fence_wait_done(ctx: TracePointContext) -> Result<u32, u32> {
-    let Some(identity) = fence_identity(
+#[inline(always)]
+fn try_drm_fence_wait_done(ctx: TracePointContext) -> u32 {
+    let mut identity = FenceIdentity {
+        key: FenceKey {
+            context: 0,
+            seqno: 0,
+        },
+        flags: 0,
+        timeline_hash: 0,
+    };
+    if !fill_fence_identity(
+        &mut identity,
         &ctx,
         unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_DONE_CONTEXT_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_DONE_SEQNO_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_WAIT_DONE_TIMELINE_OFFSET) },
-    ) else {
-        return Ok(0);
-    };
+    ) {
+        return 0;
+    }
 
     let now = unsafe { bpf_ktime_get_ns() };
     let start = unsafe { FENCE_WAIT_STARTS.get(identity.key).copied() };
@@ -1430,7 +1359,7 @@ fn try_drm_fence_wait_done(ctx: TracePointContext) -> Result<u32, u32> {
 
     let Some(mut entry) = EVENTS.reserve::<DrmFenceEvent>(0) else {
         increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return Ok(0);
+        return 0;
     };
     let event = entry.as_mut_ptr();
 
@@ -1511,28 +1440,35 @@ fn try_drm_fence_wait_done(ctx: TracePointContext) -> Result<u32, u32> {
     }
 
     entry.submit(0);
-    Ok(0)
+    0
 }
 
 #[tracepoint]
 /// Tracepoint entry for DRM fence signal.
 /// Emits exporter-side fence signals and caches signal timestamps for waits.
 pub fn drm_fence_signal(ctx: TracePointContext) -> u32 {
-    match try_drm_fence_signal(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
+    try_drm_fence_signal(ctx)
 }
 
-fn try_drm_fence_signal(ctx: TracePointContext) -> Result<u32, u32> {
-    let Some(identity) = fence_identity(
+#[inline(always)]
+fn try_drm_fence_signal(ctx: TracePointContext) -> u32 {
+    let mut identity = FenceIdentity {
+        key: FenceKey {
+            context: 0,
+            seqno: 0,
+        },
+        flags: 0,
+        timeline_hash: 0,
+    };
+    if !fill_fence_identity(
+        &mut identity,
         &ctx,
         unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_SIGNAL_CONTEXT_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_SIGNAL_SEQNO_OFFSET) },
         unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_SIGNAL_TIMELINE_OFFSET) },
-    ) else {
-        return Ok(0);
-    };
+    ) {
+        return 0;
+    }
 
     let now = unsafe { bpf_ktime_get_ns() };
     let provider = unsafe { core::ptr::read_volatile(&raw const DRM_FENCE_SIGNAL_PROVIDER) };
@@ -1549,7 +1485,7 @@ fn try_drm_fence_signal(ctx: TracePointContext) -> Result<u32, u32> {
 
     let Some(mut entry) = EVENTS.reserve::<DrmFenceEvent>(0) else {
         increment_drop_counter(DROP_RINGBUF_RESERVE_FAILED);
-        return Ok(0);
+        return 0;
     };
     let event = entry.as_mut_ptr();
     unsafe {
@@ -1573,56 +1509,64 @@ fn try_drm_fence_signal(ctx: TracePointContext) -> Result<u32, u32> {
     }
     entry.submit(0);
 
-    Ok(0)
+    0
 }
 
-fn fence_identity(
+#[inline(always)]
+fn fill_fence_identity(
+    identity: &mut FenceIdentity,
     ctx: &TracePointContext,
     context_offset: u32,
     seqno_offset: u32,
     timeline_offset: u32,
-) -> Option<FenceIdentity> {
-    let context = read_optional_u64(ctx, context_offset);
-    let seqno = read_optional_u64(ctx, seqno_offset);
-    let timeline_hash = read_optional_u64(ctx, timeline_offset).unwrap_or(0);
-    let key_context = context.or((timeline_hash != 0).then_some(timeline_hash))?;
-    let key_seqno = seqno?;
+) -> bool {
+    let mut context = 0;
+    let has_context = read_optional_u64(ctx, context_offset, &mut context);
+
+    let mut seqno = 0;
+    if !read_optional_u64(ctx, seqno_offset, &mut seqno) {
+        return false;
+    }
+
+    let mut timeline_hash = 0;
+    let has_timeline =
+        read_optional_u64(ctx, timeline_offset, &mut timeline_hash) && timeline_hash != 0;
+
+    let key_context = if has_context {
+        context
+    } else if has_timeline {
+        timeline_hash
+    } else {
+        return false;
+    };
 
     let mut flags = DRM_FENCE_HAS_SEQNO;
-    if context.is_some() {
+    if has_context {
         flags |= DRM_FENCE_HAS_CONTEXT;
     }
-    if timeline_hash != 0 {
+    if has_timeline {
         flags |= DRM_FENCE_HAS_TIMELINE;
     }
 
-    Some(FenceIdentity {
-        key: FenceKey {
-            context: key_context,
-            seqno: key_seqno,
-        },
-        flags,
-        timeline_hash,
-    })
-}
-
-fn read_optional_u64(ctx: &TracePointContext, offset: u32) -> Option<u64> {
-    if offset == 0 {
-        None
-    } else {
-        unsafe { ctx.read_at::<u64>(offset as usize).ok() }
-    }
+    identity.key.context = key_context;
+    identity.key.seqno = seqno;
+    identity.flags = flags;
+    identity.timeline_hash = if has_timeline { timeline_hash } else { 0 };
+    true
 }
 
 // -----------------------------------------------------------------------------
 // KMS flip event emission
 // -----------------------------------------------------------------------------
 
+#[inline(always)]
 fn emit_kms_flip_event(
     key: &KmsFlipKey,
     provider_and_event_kind: u32,
-    sequence: Option<u64>,
-    start_ns: Option<u64>,
+    has_sequence: bool,
+    sequence: u64,
+    has_start_ns: bool,
+    start_ns: u64,
     done_ns: u64,
 ) {
     let Some(mut entry) = EVENTS.reserve::<KmsFlipEvent>(0) else {
@@ -1631,18 +1575,20 @@ fn emit_kms_flip_event(
     };
 
     let event = entry.as_mut_ptr();
-    let duration_ns = start_ns
-        .map(|start| done_ns.saturating_sub(start))
-        .unwrap_or(0);
+    let duration_ns = if has_start_ns {
+        done_ns.saturating_sub(start_ns)
+    } else {
+        0
+    };
 
     let mut flags = KMS_FLIP_HAS_DONE_NS;
     if key.crtc_id != 0 {
         flags |= KMS_FLIP_HAS_CRTC;
     }
-    if start_ns.is_some() {
+    if has_start_ns {
         flags |= KMS_FLIP_HAS_REQUEST_NS | KMS_FLIP_HAS_DURATION_NS;
     }
-    if sequence.is_some() {
+    if has_sequence {
         flags |= KMS_FLIP_HAS_SEQUENCE;
     }
 
@@ -1650,7 +1596,7 @@ fn emit_kms_flip_event(
         (*event).kind = EVENT_KMS_FLIP;
         let provider = provider_and_event_kind >> 16;
         let completion_event_kind = provider_and_event_kind & 0xffff;
-        (*event).event_kind = if start_ns.is_some() {
+        (*event).event_kind = if has_start_ns {
             KMS_FLIP_EVENT_INTERVAL
         } else {
             completion_event_kind
@@ -1664,40 +1610,14 @@ fn emit_kms_flip_event(
         (*event).card_minor = key.card_minor;
         (*event).crtc_id = key.crtc_id;
         (*event).pipe = key.pipe;
-        (*event).sequence = sequence.unwrap_or(0);
-        (*event).request_ns = start_ns.unwrap_or(0);
+        (*event).sequence = if has_sequence { sequence } else { 0 };
+        (*event).request_ns = if has_start_ns { start_ns } else { 0 };
         (*event).done_ns = done_ns;
         (*event).duration_ns = duration_ns;
         (*event).timestamp_ns = done_ns;
     }
 
     entry.submit(0);
-}
-
-// -----------------------------------------------------------------------------
-// Tracepoint field readers
-// -----------------------------------------------------------------------------
-
-fn read_optional_u32(ctx: &TracePointContext, offset: u32) -> Option<u32> {
-    if offset == 0 {
-        None
-    } else {
-        unsafe { ctx.read_at::<u32>(offset as usize).ok() }
-    }
-}
-
-fn read_sequence_field(ctx: &TracePointContext, offset: u32, size: u32) -> Option<u64> {
-    if offset == 0 {
-        None
-    } else if size >= 8 {
-        unsafe { ctx.read_at::<u64>(offset as usize).ok() }
-    } else {
-        unsafe {
-            ctx.read_at::<u32>(offset as usize)
-                .ok()
-                .map(|value| value as u64)
-        }
-    }
 }
 
 // -----------------------------------------------------------------------------

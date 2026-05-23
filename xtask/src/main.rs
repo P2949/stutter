@@ -28,6 +28,16 @@ enum XtaskCommand {
     #[command(about = "Run non-root smoke workflow scripts")]
     Smoke,
     #[command(
+        name = "preflight",
+        about = "Check local toolchain prerequisites before building or running stutter"
+    )]
+    Preflight,
+    #[command(
+        name = "validate",
+        about = "Run the complete non-root validation gate, including an explicit eBPF build"
+    )]
+    Validate,
+    #[command(
         name = "dependency-hygiene",
         about = "Run dependency advisory, license, source, and duplicate dependency checks"
     )]
@@ -95,6 +105,58 @@ const CI_COMMANDS: &[CommandSpec] = &[
         program: "cargo",
         args: &["build"],
     },
+    CommandSpec {
+        program: "cargo",
+        args: &["clippy", "--all-targets", "--", "-D", "warnings"],
+    },
+    CommandSpec {
+        program: "cargo",
+        args: &["test"],
+    },
+    CommandSpec {
+        program: "bash",
+        args: &["scripts/smoke/offline_recommendation.sh"],
+    },
+    CommandSpec {
+        program: "bash",
+        args: &["scripts/smoke/advisor_offline.sh"],
+    },
+    CommandSpec {
+        program: "cargo",
+        args: &["test", "-p", "stutter", "architecture_tests"],
+    },
+];
+
+const EBPF_BUILD_COMMAND: CommandSpec = CommandSpec {
+    program: "rustup",
+    args: &[
+        "run",
+        "nightly",
+        "cargo",
+        "build",
+        "-p",
+        "stutter-ebpf",
+        "-Z",
+        "build-std=core",
+        "--target",
+        "bpfel-unknown-none",
+    ],
+};
+
+const VALIDATION_COMMANDS: &[CommandSpec] = &[
+    CommandSpec {
+        program: "cargo",
+        args: &["fmt", "--check"],
+    },
+    CommandSpec {
+        program: "cargo",
+        args: &["run", "-p", "xtask", "--", "no-allow-attrs"],
+    },
+    CommandSpec {
+        program: "cargo",
+        args: &["build"],
+    },
+    EBPF_BUILD_COMMAND,
     CommandSpec {
         program: "cargo",
         args: &["clippy", "--all-targets", "--", "-D", "warnings"],
@@ -286,6 +348,11 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             run_cargo(&root, &["clippy", "--all-targets", "--", "-D", "warnings"])
         }
         XtaskCommand::Smoke => run_command_specs(&root, SMOKE_COMMANDS),
+        XtaskCommand::Preflight => run_preflight(),
+        XtaskCommand::Validate => {
+            run_preflight()?;
+            run_command_specs(&root, VALIDATION_COMMANDS)
+        }
         XtaskCommand::DependencyHygiene => run_dependency_hygiene(&root),
         XtaskCommand::SchemaCheck => run_workflow(&root, SCHEMA_CHECK_WORKFLOW),
         XtaskCommand::NoAllowAttrs => run_no_allow_attrs(&root),
@@ -305,6 +372,80 @@ fn run(command: XtaskCommand) -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+fn run_preflight() -> anyhow::Result<()> {
+    check_program_on_path(
+        "cargo",
+        "install Rust with rustup, then run this command from the repository root",
+    )?;
+    check_program_on_path(
+        "rustup",
+        "install Rust through rustup so the repository-pinned nightly toolchain can be used",
+    )?;
+    if env::var_os("STUTTER_USE_PREBUILT_BPF").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        check_prebuilt_bpf_object()?;
+    } else {
+        check_program_on_path(
+            "bpf-linker",
+            "install it with `cargo install bpf-linker`, or build stutter with STUTTER_USE_PREBUILT_BPF=1 and STUTTER_BPF_OBJECT=/path/to/stutter",
+        )?;
+    }
+
+    let toolchain = rustup_toolchain();
+    let output = ProcessCommand::new("rustup")
+        .args(["run", toolchain.as_str(), "rustc", "--version"])
+        .output()
+        .with_context(|| format!("failed to query rustup toolchain `{toolchain}`"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "rustup toolchain `{}` is not usable: {}. Install it with `rustup toolchain install {}` and include rust-src/rustfmt/clippy components.",
+            toolchain,
+            stderr.trim(),
+            toolchain
+        );
+    }
+
+    let version = String::from_utf8_lossy(&output.stdout);
+    println!("toolchain `{toolchain}` OK: {}", version.trim());
+    println!(
+        "preflight OK: build as your normal user, then run the built binary with sudo/doas when eBPF loading needs privileges"
+    );
+    Ok(())
+}
+
+fn check_prebuilt_bpf_object() -> anyhow::Result<()> {
+    let object = env::var_os("STUTTER_BPF_OBJECT")
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("STUTTER_USE_PREBUILT_BPF=1 requires STUTTER_BPF_OBJECT"))?;
+
+    if !object.is_file() {
+        bail!(
+            "STUTTER_BPF_OBJECT must point at an existing BPF object file: {}",
+            object.display()
+        );
+    }
+
+    println!("prebuilt BPF object OK: {}", object.display());
+    Ok(())
+}
+
+fn check_program_on_path(program: &str, hint: &str) -> anyhow::Result<PathBuf> {
+    if let Some(path) = executable_on_path(program) {
+        println!("{program} OK: {}", path.display());
+        return Ok(path);
+    }
+
+    bail!("required program `{program}` was not found on PATH; {hint}")
+}
+
+fn executable_on_path(program: &str) -> Option<PathBuf> {
+    let paths = env::var_os("PATH")?;
+    env::split_paths(&paths)
+        .map(|dir| dir.join(program))
+        .find(|path| path.is_file())
 }
 
 fn run_no_allow_attrs(root: &Path) -> anyhow::Result<()> {
@@ -603,8 +744,8 @@ mod tests {
         DEPENDENCY_HYGIENE_WORKFLOW, DUPLICATE_DEPENDENCY_COMMAND, FIXTURE_CHECK_COMMANDS,
         FIXTURE_CHECK_WORKFLOW, FIXTURE_UPDATE_COMMANDS, FIXTURE_UPDATE_WORKFLOW,
         REPORT_GOLDEN_UPDATE_COMMANDS, REPORT_GOLDEN_UPDATE_WORKFLOW, SCHEMA_CHECK_COMMANDS,
-        SCHEMA_CHECK_WORKFLOW, SMOKE_COMMANDS, duplicate_package_names, format_command,
-        scan_allow_attribute_file,
+        SCHEMA_CHECK_WORKFLOW, SMOKE_COMMANDS, VALIDATION_COMMANDS, duplicate_package_names,
+        format_command, scan_allow_attribute_file,
     };
 
     #[test]
@@ -628,9 +769,11 @@ mod tests {
                 "generate-man",
                 "no-allow-attrs",
                 "package",
+                "preflight",
                 "report-golden-update",
                 "schema-check",
                 "smoke",
+                "validate",
             ]
         );
     }
@@ -643,6 +786,24 @@ mod tests {
                 "cargo fmt --check",
                 "cargo run -p xtask -- no-allow-attrs",
                 "cargo build",
+                "cargo clippy --all-targets -- -D warnings",
+                "cargo test",
+                "bash scripts/smoke/offline_recommendation.sh",
+                "bash scripts/smoke/advisor_offline.sh",
+                "cargo test -p stutter architecture_tests",
+            ]
+        );
+    }
+
+    #[test]
+    fn validate_command_runs_explicit_ebpf_build_before_lints_and_tests() {
+        assert_eq!(
+            command_texts(VALIDATION_COMMANDS),
+            vec![
+                "cargo fmt --check",
+                "cargo run -p xtask -- no-allow-attrs",
+                "cargo build",
+                "rustup run nightly cargo build -p stutter-ebpf -Z build-std=core --target bpfel-unknown-none",
                 "cargo clippy --all-targets -- -D warnings",
                 "cargo test",
                 "bash scripts/smoke/offline_recommendation.sh",
