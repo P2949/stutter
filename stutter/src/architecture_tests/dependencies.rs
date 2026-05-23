@@ -293,7 +293,6 @@ const ARCHITECTURE_DEPENDENCY_MATRIX: &[DependencyMatrixEntry] = &[
             "foreground",
             "hwmon",
             "irq_inspect",
-            "kernel_event",
             "mangohud",
             "perf_counters",
             "process_tree",
