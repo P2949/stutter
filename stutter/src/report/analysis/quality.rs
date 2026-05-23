@@ -36,12 +36,9 @@ pub(crate) fn block_io_correlation_confidence(session: &SessionFile) -> &str {
 }
 
 pub(crate) fn block_io_correlation_warning(session: &SessionFile) -> Option<String> {
-    match block_io_correlation_basis(session) {
-        "dev+sector" => crate::ebpf_loader::BlockIoCorrelationBasis::DevSector
-            .warning()
-            .map(str::to_owned),
-        _ => None,
-    }
+    crate::ebpf_loader::BlockIoCorrelationBasis::from_str(block_io_correlation_basis(session))
+        .warning()
+        .map(str::to_owned)
 }
 
 pub(crate) fn data_quality_summary(
@@ -130,6 +127,20 @@ pub(crate) fn data_quality_summary(
             ));
         }
 
+        if drop_counters.wakeup_data_replaced_entries > 0 {
+            reasons.push(format!(
+                "wakeup timestamp records were replaced before sched_switch consumed them: {} runnable-latency samples may have been coalesced or overwritten during wakeup bursts",
+                drop_counters.wakeup_data_replaced_entries
+            ));
+        }
+
+        if drop_counters.wakeup_data_consumed_read_failed > 0 {
+            reasons.push(format!(
+                "wakeup timestamp records were consumed but sched_switch tracepoint reads failed: {} runnable-latency samples were dropped after wakeup consume",
+                drop_counters.wakeup_data_consumed_read_failed
+            ));
+        }
+
         if drop_counters.ringbuf_reserve_failed > 0 {
             reasons.push(format!(
                 "ring buffer reserve failures detected: {} eBPF events were dropped before userspace",
@@ -157,6 +168,28 @@ pub(crate) fn data_quality_summary(
                 drop_counters.block_fallback_key_collisions
             ));
         }
+
+        if drop_counters.cpu_accounting_untracked > 0 {
+            reasons.push(format!(
+                "CPU accounting skipped {} events on CPU ids outside the tracked eBPF accounting range; runnable-depth and pending-wakeup diagnostics may be incomplete on very large systems",
+                drop_counters.cpu_accounting_untracked
+            ));
+        }
+    }
+
+    if session.core.native_cgroup_filter.enabled && !session.core.native_cgroup_filter.verified {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        reasons.push(
+            session
+                .core
+                .native_cgroup_filter
+                .warning
+                .clone()
+                .unwrap_or_else(|| {
+                    "native cgroup filtering is enabled but not runtime-verified; PID expansion remains the authoritative scheduler-wakeup targeting path"
+                        .to_owned()
+                }),
+        );
     }
 
     let mut percentile_scope_counts = BTreeMap::new();
@@ -179,13 +212,24 @@ pub(crate) fn data_quality_summary(
     let block_io_correlation_basis = block_io_correlation_basis(session).to_owned();
     let block_io_correlation_confidence = block_io_correlation_confidence(session).to_owned();
     let block_io_correlation_warning = block_io_correlation_warning(session);
-    if session.core.block_io_event_count > 0 && block_io_correlation_basis == "dev+sector" {
-        level = downgrade_quality(level, DataQualityLevel::Medium);
-        if let Some(warning) = &block_io_correlation_warning {
-            reasons.push(warning.clone());
-        } else {
-            reasons.push("block I/O correlation is approximate dev+sector matching".to_owned());
+    match block_io_correlation_basis.as_str() {
+        "dev+sector" if session.core.block_io_event_count > 0 => {
+            level = downgrade_quality(level, DataQualityLevel::Medium);
+            if let Some(warning) = &block_io_correlation_warning {
+                reasons.push(warning.clone());
+            } else {
+                reasons.push("block I/O correlation is approximate dev+sector matching".to_owned());
+            }
         }
+        "unavailable" if session.config.block_io => {
+            level = downgrade_quality(level, DataQualityLevel::Medium);
+            if let Some(warning) = &block_io_correlation_warning {
+                reasons.push(warning.clone());
+            } else {
+                reasons.push("block I/O correlation is unavailable".to_owned());
+            }
+        }
+        _ => {}
     }
 
     let frame_timestamp_alignment = if session.core.frame_event_count == 0 {

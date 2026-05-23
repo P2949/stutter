@@ -62,6 +62,7 @@ pub struct FinalizeRecordingInput<'a> {
     pub frame_events: &'a [FrameEvent],
     pub block_io_correlation_basis: String,
     pub block_io_correlation_confidence: String,
+    pub native_cgroup_filter: crate::ebpf_loader::NativeCgroupFilterStatus,
     pub drop_counters: crate::ebpf_loader::DropCountersSnapshot,
     pub cpu_perf_status: Option<CpuPerfStatus>,
     pub focus_mode: Option<String>,
@@ -80,17 +81,14 @@ pub fn prepare_recording(config: &MonitorConfig) -> anyhow::Result<Option<Record
     let started_at = SystemTime::now();
     let run_dir = resolve_run_dir(recording, started_at, env::var_os("HOME"));
     let retention_policy = RecordingRetentionPolicy::from_recording_config(recording);
-
     if recording.output_dir.is_none()
         && let Some(run_root) = run_dir.parent()
     {
         apply_recording_retention(run_root, &retention_policy, None, started_at)?;
     }
-
     if let Some(min_free_bytes) = retention_policy.min_free_bytes {
         ensure_min_free_space_for_path(&run_dir, min_free_bytes)?;
     }
-
     if let Err(err) = ensure_empty_dir(&run_dir) {
         return Err(err.context("record write failed"));
     }
@@ -171,6 +169,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         frame_events,
         block_io_correlation_basis,
         block_io_correlation_confidence,
+        native_cgroup_filter,
         drop_counters,
         cpu_perf_status,
         focus_mode,
@@ -403,6 +402,7 @@ pub fn finalize_recording(input: FinalizeRecordingInput<'_>) -> anyhow::Result<(
         first_event_stream_write_error: recorder.counters.first_event_stream_write_error.clone(),
         block_io_correlation_basis: block_io_correlation_basis.clone(),
         block_io_correlation_confidence: block_io_correlation_confidence.clone(),
+        native_cgroup_filter: native_cgroup_filter.clone(),
         drop_counters: drop_counters.clone(),
         cpu_perf_sample_count: cpu_perf_status
             .as_ref()

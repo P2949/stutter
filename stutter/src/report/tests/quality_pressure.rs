@@ -222,6 +222,99 @@ fn data_quality_reports_block_fallback_key_collisions_specifically() {
 }
 
 #[test]
+fn data_quality_warns_on_replaced_wakeup_entries() {
+    let mut session = minimal_session_for_report_test();
+    session.core.drop_counters.wakeup_data_replaced_entries = 2;
+
+    let summary =
+        data_quality_summary(&session, &crate::session_io::RunValidationReport::default());
+
+    assert_eq!(summary.level, DataQualityLevel::Medium);
+    assert!(summary.reasons.iter().any(|reason| {
+        reason.contains("wakeup timestamp records were replaced") && reason.contains("2")
+    }));
+    assert!(
+        !summary
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("no data-quality problems"))
+    );
+}
+
+#[test]
+fn data_quality_warns_on_consumed_wakeup_read_failures() {
+    let mut session = minimal_session_for_report_test();
+    session.core.drop_counters.wakeup_data_consumed_read_failed = 3;
+
+    let summary =
+        data_quality_summary(&session, &crate::session_io::RunValidationReport::default());
+
+    assert_eq!(summary.level, DataQualityLevel::Medium);
+    assert!(summary.reasons.iter().any(|reason| {
+        reason.contains("sched_switch tracepoint reads failed") && reason.contains("3")
+    }));
+}
+
+#[test]
+fn data_quality_warns_on_untracked_cpu_accounting() {
+    let mut session = minimal_session_for_report_test();
+    session.core.drop_counters.cpu_accounting_untracked = 4;
+
+    let summary =
+        data_quality_summary(&session, &crate::session_io::RunValidationReport::default());
+
+    assert_eq!(summary.level, DataQualityLevel::Medium);
+    assert!(summary.reasons.iter().any(|reason| {
+        reason.contains("CPU accounting skipped 4 events") && reason.contains("runnable-depth")
+    }));
+}
+
+#[test]
+fn data_quality_warns_on_unavailable_requested_block_io_correlation() {
+    let mut session = minimal_session_for_report_test();
+    session.config.block_io = true;
+    session.core.block_io_correlation_basis = "unavailable".to_owned();
+    session.core.block_io_correlation_confidence = "none".to_owned();
+
+    let summary =
+        data_quality_summary(&session, &crate::session_io::RunValidationReport::default());
+
+    assert_eq!(summary.level, DataQualityLevel::Medium);
+    assert_eq!(summary.block_io_correlation_basis, "unavailable");
+    assert_eq!(summary.block_io_correlation_confidence, "none");
+    assert!(
+        summary
+            .block_io_correlation_warning
+            .as_deref()
+            .is_some_and(|warning| warning.contains("unavailable"))
+    );
+    assert!(
+        summary
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("Block I/O correlation is unavailable"))
+    );
+}
+
+#[test]
+fn data_quality_warns_on_unverified_native_cgroup_filter() {
+    let mut session = minimal_session_for_report_test();
+    session.core.native_cgroup_filter =
+        crate::ebpf_loader::NativeCgroupFilterStatus::unverified_directory_inode(
+            "/sys/fs/cgroup/game.slice".to_owned(),
+            42,
+        );
+
+    let summary =
+        data_quality_summary(&session, &crate::session_io::RunValidationReport::default());
+
+    assert_eq!(summary.level, DataQualityLevel::Medium);
+    assert!(summary.reasons.iter().any(|reason| {
+        reason.contains("native cgroup filtering") && reason.contains("not runtime-verified")
+    }));
+}
+
+#[test]
 fn data_quality_warns_on_missing_optional_artifacts() {
     let session = minimal_session_for_report_test();
     let validation = crate::session_io::RunValidationReport {

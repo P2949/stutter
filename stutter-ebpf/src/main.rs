@@ -16,13 +16,14 @@ use stutter_common::{
     DRM_FENCE_HAS_DURATION, DRM_FENCE_HAS_PID, DRM_FENCE_HAS_SEQNO, DRM_FENCE_HAS_TIMELINE,
     DRM_FENCE_IS_EXPORTER_SIDE, DRM_FENCE_IS_IMPORTER_SIDE, DROP_COUNTERS_MAX,
     DROP_CPU_ACCOUNTING_UNTRACKED, DROP_IRQ_START_TIMES_INSERT_FAILED, DROP_RINGBUF_RESERVE_FAILED,
-    DROP_WAKEUP_DATA_INSERT_FAILED, DROP_WAKEUP_DATA_REPLACED_ENTRY, DROP_WAKEUP_DATA_STALE_ENTRY,
-    DrmFenceEvent, EVENT_CPU_FREQ, EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_KMS_FLIP,
-    EVENT_MIGRATION, EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent,
-    KMS_FLIP_EVENT_INTERVAL, KMS_FLIP_EVENT_PAGEFLIP_DONE, KMS_FLIP_EVENT_VBLANK,
-    KMS_FLIP_HAS_CRTC, KMS_FLIP_HAS_DONE_NS, KMS_FLIP_HAS_DURATION_NS, KMS_FLIP_HAS_REQUEST_NS,
-    KMS_FLIP_HAS_SEQUENCE, KMS_FLIP_PROVIDER_AMDGPU, KMS_FLIP_PROVIDER_DRM, KMS_FLIP_PROVIDER_I915,
-    KmsFlipEvent, MigrationEvent, SchedulerEvent, StatWaitEvent,
+    DROP_WAKEUP_DATA_CONSUMED_READ_FAILED, DROP_WAKEUP_DATA_INSERT_FAILED,
+    DROP_WAKEUP_DATA_REPLACED_ENTRY, DROP_WAKEUP_DATA_STALE_ENTRY, DrmFenceEvent, EVENT_CPU_FREQ,
+    EVENT_DRM_FENCE, EVENT_EXEC, EVENT_IRQ_LATENCY, EVENT_KMS_FLIP, EVENT_MIGRATION,
+    EVENT_RUNNABLE_LATENCY, EVENT_STAT_WAIT, ExecEvent, IrqEvent, KMS_FLIP_EVENT_INTERVAL,
+    KMS_FLIP_EVENT_PAGEFLIP_DONE, KMS_FLIP_EVENT_VBLANK, KMS_FLIP_HAS_CRTC, KMS_FLIP_HAS_DONE_NS,
+    KMS_FLIP_HAS_DURATION_NS, KMS_FLIP_HAS_REQUEST_NS, KMS_FLIP_HAS_SEQUENCE,
+    KMS_FLIP_PROVIDER_AMDGPU, KMS_FLIP_PROVIDER_DRM, KMS_FLIP_PROVIDER_I915, KmsFlipEvent,
+    MigrationEvent, SchedulerEvent, StatWaitEvent,
 };
 
 // Layout:
@@ -575,14 +576,26 @@ fn try_sched_switch(ctx: TracePointContext) -> u32 {
         return 0;
     }
 
+    // Consume the pending wakeup before the slower tracepoint reads so a later
+    // wakeup for the same TID cannot be removed by this sched_switch instance.
+    // If the tracepoint reads fail after consume, report that explicitly rather
+    // than leaving a stale wakeup record in WAKEUP_DATA.
+    let _ = WAKEUP_DATA.remove(pid);
+
     // Read the previous task context only after the cheap relevance filters pass.
     // Offsets validated in userspace preflight assume prev_pid at 24 and prev_state at 32.
     let mut prev_pid_raw: i32 = 0;
     if !read_i32(&ctx, 24, &mut prev_pid_raw) {
+        increment_drop_counter(DROP_WAKEUP_DATA_CONSUMED_READ_FAILED);
+        decrement_target_pending(wakeup_data.target_cpu);
+        remove_runnable_task_if_present(pid);
         return 1;
     }
     let mut prev_state: i64 = 0;
     if !read_i64(&ctx, 32, &mut prev_state) {
+        increment_drop_counter(DROP_WAKEUP_DATA_CONSUMED_READ_FAILED);
+        decrement_target_pending(wakeup_data.target_cpu);
+        remove_runnable_task_if_present(pid);
         return 1;
     }
     let switch_prev_pid = if prev_pid_raw > 0 {
@@ -590,8 +603,6 @@ fn try_sched_switch(ctx: TracePointContext) -> u32 {
     } else {
         0
     };
-
-    let _ = WAKEUP_DATA.remove(pid);
 
     let wakeup_ns = wakeup_data.ts;
     let waker_tid = wakeup_data.waker_tid;

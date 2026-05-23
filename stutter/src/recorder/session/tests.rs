@@ -176,6 +176,7 @@ fn finalize_recording_persists_full_final_foreground_identity() {
             crate::ebpf_loader::BlockIoCorrelationBasis::RequestPointer
                 .confidence()
                 .to_owned(),
+        native_cgroup_filter: crate::ebpf_loader::NativeCgroupFilterStatus::default(),
         drop_counters: crate::ebpf_loader::DropCountersSnapshot::default(),
         cpu_perf_status: None,
         focus_mode: None,

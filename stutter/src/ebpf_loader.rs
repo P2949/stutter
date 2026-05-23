@@ -18,7 +18,7 @@ pub(crate) use crate::ebpf::tracepoints::drm_fence::{
 pub use crate::ebpf::{
     load::load_and_attach,
     maps::ebpf_map_sizing_report,
-    model::{BlockIoCorrelationBasis, DropCountersSnapshot, LoadedEbpf},
+    model::{BlockIoCorrelationBasis, DropCountersSnapshot, LoadedEbpf, NativeCgroupFilterStatus},
     preflight::{TracepointAvailability, tracepoint_preflight},
 };
 #[cfg(test)]

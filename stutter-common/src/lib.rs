@@ -70,9 +70,11 @@ pub const DROP_WAKEUP_DATA_STALE_ENTRY: u32 = 4;
 pub const DROP_BLOCK_FALLBACK_KEY_COLLISION: u32 = 5;
 /// A wakeup record for a target TID was replaced before sched_switch consumed it.
 pub const DROP_WAKEUP_DATA_REPLACED_ENTRY: u32 = 6;
+/// A wakeup record was consumed, but sched_switch field reads failed before emit.
+pub const DROP_WAKEUP_DATA_CONSUMED_READ_FAILED: u32 = 7;
 /// Runnable-depth or pending-wakeup CPU accounting skipped an out-of-range CPU id.
-pub const DROP_CPU_ACCOUNTING_UNTRACKED: u32 = 7;
-pub const DROP_COUNTERS_MAX: u32 = 8;
+pub const DROP_CPU_ACCOUNTING_UNTRACKED: u32 = 8;
+pub const DROP_COUNTERS_MAX: u32 = 9;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]

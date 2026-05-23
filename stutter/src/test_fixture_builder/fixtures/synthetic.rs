@@ -227,6 +227,7 @@ pub(in crate::test_fixture_builder) fn truncated_drop_counters_fixture()
         wakeup_data_insert_failed: 2,
         wakeup_data_stale_entries: 0,
         wakeup_data_replaced_entries: 0,
+        wakeup_data_consumed_read_failed: 0,
         ringbuf_reserve_failed: 1,
         irq_start_times_insert_failed: 0,
         block_start_insert_failed: 0,

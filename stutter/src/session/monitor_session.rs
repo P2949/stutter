@@ -84,6 +84,7 @@ impl MonitorSession {
             probe_plan.loaded,
             probe_plan.block_io_correlation_basis,
             probe_plan.block_io_correlation_confidence,
+            probe_plan.native_cgroup_filter,
             sampler_runtime.cpu_perf_sampler,
             sampler_runtime.runtime_slice_sampler,
         );
@@ -104,7 +105,6 @@ impl MonitorSession {
             alert_runtime.sender,
             event_runtime_config.output,
         );
-
         let runtime = MonitorRuntime::from_config_parts(
             probes,
             outputs,
@@ -113,7 +113,6 @@ impl MonitorSession {
             MonitorEventBus::new(event_tx),
             event_runtime_config,
         );
-
         Ok(Self {
             config: Arc::new(config),
             runtime,
@@ -1494,6 +1493,7 @@ impl MonitorSession {
                     .probes
                     .block_io_correlation_confidence
                     .clone(),
+                native_cgroup_filter: self.runtime.probes.native_cgroup_filter.clone(),
                 focus_mode: if self.config.focus.auto_focus {
                     Some("auto".to_owned())
                 } else if self.config.has_explicit_target() {

@@ -84,6 +84,7 @@ fn report_reads_recorded_session_and_spike_events() {
         frame_events: &[],
         block_io_correlation_basis: "dev+sector".to_owned(),
         block_io_correlation_confidence: "medium".to_owned(),
+        native_cgroup_filter: crate::ebpf_loader::NativeCgroupFilterStatus::default(),
         drop_counters: DropCountersSnapshot::default(),
         cpu_perf_status: None,
         focus_mode: None,
@@ -188,6 +189,7 @@ fn report_cluster_output_caps_inline_points() {
         frame_events: &[],
         block_io_correlation_basis: "dev+sector".to_owned(),
         block_io_correlation_confidence: "medium".to_owned(),
+        native_cgroup_filter: crate::ebpf_loader::NativeCgroupFilterStatus::default(),
         drop_counters: DropCountersSnapshot::default(),
         cpu_perf_status: None,
         focus_mode: None,
@@ -333,11 +335,30 @@ fn text_report_shows_block_fallback_collision_warning_even_without_io_events() {
 }
 
 #[test]
+fn text_report_shows_unavailable_block_io_warning_when_requested() {
+    let mut session = minimal_session_for_report();
+    session.config.block_io = true;
+    session.core.block_io_event_count = 0;
+    session.core.block_io_correlation_basis = "unavailable".to_owned();
+    session.core.block_io_correlation_confidence = "none".to_owned();
+
+    let output =
+        render_report_for_test(&session, &crate::session_io::RunArtifacts::default(), 5, 10);
+
+    assert!(output.contains("io_events: 0 (unavailable correlated (confidence: none))"));
+    assert!(output.contains("block i/o correlation warning"));
+    assert!(output.contains("Block I/O correlation is unavailable"));
+}
+
+#[test]
 fn report_template_surfaces_block_fallback_key_collision_count() {
     let template = include_str!("../report_template.html");
 
     assert!(template.contains("blockFallbackKeyCollisions"));
     assert!(template.contains("Block I/O fallback collisions"));
+    assert!(template.contains("Wakeup timestamp replaced entries"));
+    assert!(template.contains("Wakeup consumed read failures"));
+    assert!(template.contains("CPU accounting untracked"));
     assert!(template.contains("ambiguous fallback-mode samples were dropped"));
     assert!(template.contains("Block I/O latency coverage may be incomplete"));
 }
@@ -356,6 +377,7 @@ fn report_template_shows_block_io_event_count_near_correlation_metadata() {
 
     assert!(template.contains("Block I/O Events"));
     assert!(template.contains("session.block_io_event_count"));
+    assert!(template.contains("blockIoBasis === 'unavailable'"));
 }
 
 #[test]
