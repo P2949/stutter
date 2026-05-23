@@ -65,11 +65,6 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
         reason: "existing metrics model and tests pending future split; PSI delta and fallback-collision counter fields are staged here",
     },
     OversizedRustFileAllowance {
-        path: "src/config/effective.rs",
-        max_lines: 1_348,
-        reason: "existing effective config resolution implementation pending future split; prime display-path, display topology, DMABUF, and GPU-engine provenance are staged here",
-    },
-    OversizedRustFileAllowance {
         path: "src/recorder/session.rs",
         max_lines: 1_011,
         reason: "existing recorder session writer implementation pending future split; display metadata capture is staged here",

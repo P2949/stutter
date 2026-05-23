@@ -148,6 +148,20 @@ fn no_duplicated_diagnostic_score_total_names_exist_in_source_tree() {
 }
 
 #[test]
+fn fake_daemon_interval_uses_raw_score_total_name() {
+    let source = include_str!("../autotune/simulation.rs");
+
+    assert!(
+        source.contains("diagnostic_raw_score_total: u64"),
+        "FakeDaemonStep::Interval should use the explicit raw-score field name"
+    );
+    assert!(
+        !source.contains("diagnostic_score_total: u64"),
+        "FakeDaemonStep::Interval must not reintroduce the ambiguous diagnostic_score_total field name"
+    );
+}
+
+#[test]
 fn daemon_decision_state_uses_current_raw_score_total_name() {
     let source = include_str!("../daemon/state.rs");
 
