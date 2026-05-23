@@ -25,6 +25,7 @@ mod validation;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use fs_io::resolve_cgroup_fs_path as cgroup_fs_path;
 use fs_io::*;
 use model::CgroupTargetSnapshot;
 pub use model::{CgroupPlacementAction, CgroupPlacementPolicy, CgroupPlacementTarget};
@@ -267,9 +268,13 @@ impl CgroupPlacementAction {
                 }
             }
 
-            let original_abs = self
-                .cgroup_root
-                .join(strip_cgroup_leading_slash(&record.original_cgroup));
+            let original_abs = cgroup_fs_path(&self.cgroup_root, &record.original_cgroup)
+                .with_context(|| {
+                    format!(
+                        "failed to resolve original cgroup path {}",
+                        record.original_cgroup.display()
+                    )
+                })?;
             let procs = original_abs.join("cgroup.procs");
 
             if let Err(err) = write_trimmed(&procs, &tid.to_string()) {

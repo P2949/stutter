@@ -69,6 +69,26 @@ pub(super) fn normalize_cgroup_path(path: &Path) -> anyhow::Result<PathBuf> {
     Ok(normalized)
 }
 
+pub(crate) fn resolve_cgroup_fs_path(
+    cgroup_root: &Path,
+    cgroup_path: &Path,
+) -> anyhow::Result<PathBuf> {
+    if cgroup_path.starts_with(cgroup_root) {
+        let cgroup_relative = cgroup_path.strip_prefix(cgroup_root).with_context(|| {
+            format!(
+                "failed to strip cgroup root {} from {}",
+                cgroup_root.display(),
+                cgroup_path.display()
+            )
+        })?;
+        let normalized = normalize_cgroup_path(cgroup_relative)?;
+        return Ok(cgroup_root.join(strip_cgroup_leading_slash(&normalized)));
+    }
+
+    let normalized = normalize_cgroup_path(cgroup_path)?;
+    Ok(cgroup_root.join(strip_cgroup_leading_slash(&normalized)))
+}
+
 pub(super) fn strip_cgroup_leading_slash(path: &Path) -> &Path {
     path.strip_prefix("/").unwrap_or(path)
 }

@@ -8,7 +8,9 @@ use super::{
     manual_command::*,
     types::*,
 };
-use crate::actions::*;
+use crate::actions::{self, *};
+
+const CGROUP_ROOT: &str = "/sys/fs/cgroup";
 
 pub(super) const IOPRIO_WHO_PROCESS: libc::c_int = 1;
 pub(super) const SCHED_FLAG_KEEP_POLICY: u64 = 0x08;
@@ -353,16 +355,30 @@ pub(super) fn restore_cgroup_token(
 pub(super) fn restore_cgroup_records(
     records: &[CgroupRestoreRecord],
 ) -> anyhow::Result<RollbackRestoreSummary> {
+    restore_cgroup_records_at(Path::new(CGROUP_ROOT), records)
+}
+
+pub(super) fn restore_cgroup_records_at(
+    cgroup_root: &Path,
+    records: &[CgroupRestoreRecord],
+) -> anyhow::Result<RollbackRestoreSummary> {
     let mut restored = 0usize;
 
     for record in records {
         let tid = record.tid();
-        let cgroup_procs = record.original_cgroup.join("cgroup.procs");
+        let original_cgroup = actions::cgroup::cgroup_fs_path(cgroup_root, &record.original_cgroup)
+            .with_context(|| {
+                format!(
+                    "failed to resolve original cgroup path {}",
+                    record.original_cgroup.display()
+                )
+            })?;
+        let cgroup_procs = original_cgroup.join("cgroup.procs");
         write_sysfs_value(&cgroup_procs, &tid.to_string()).with_context(|| {
             format!(
                 "failed to restore pid={} to cgroup {}",
                 tid,
-                record.original_cgroup.display()
+                original_cgroup.display()
             )
         })?;
         restored += 1;
@@ -374,27 +390,37 @@ pub(super) fn restore_cgroup_records(
 pub(super) fn restore_cgroup_cpuset_record(
     record: &CgroupCpusetRestoreRecord,
 ) -> anyhow::Result<usize> {
+    restore_cgroup_cpuset_record_at(Path::new(CGROUP_ROOT), record)
+}
+
+pub(super) fn restore_cgroup_cpuset_record_at(
+    cgroup_root: &Path,
+    record: &CgroupCpusetRestoreRecord,
+) -> anyhow::Result<usize> {
+    let cgroup_path = actions::cgroup::cgroup_fs_path(cgroup_root, &record.cgroup_path)
+        .with_context(|| {
+            format!(
+                "failed to resolve cgroup cpuset restore path {}",
+                record.cgroup_path.display()
+            )
+        })?;
     let mut restored = 0usize;
     if let Some(original) = &record.original_cpuset_cpus {
-        write_sysfs_value(&record.cgroup_path.join("cpuset.cpus"), original).with_context(
-            || {
-                format!(
-                    "failed to restore {}",
-                    record.cgroup_path.join("cpuset.cpus").display()
-                )
-            },
-        )?;
+        write_sysfs_value(&cgroup_path.join("cpuset.cpus"), original).with_context(|| {
+            format!(
+                "failed to restore {}",
+                cgroup_path.join("cpuset.cpus").display()
+            )
+        })?;
         restored += 1;
     }
     if let Some(original) = &record.original_cpuset_mems {
-        write_sysfs_value(&record.cgroup_path.join("cpuset.mems"), original).with_context(
-            || {
-                format!(
-                    "failed to restore {}",
-                    record.cgroup_path.join("cpuset.mems").display()
-                )
-            },
-        )?;
+        write_sysfs_value(&cgroup_path.join("cpuset.mems"), original).with_context(|| {
+            format!(
+                "failed to restore {}",
+                cgroup_path.join("cpuset.mems").display()
+            )
+        })?;
         restored += 1;
     }
     Ok(restored)

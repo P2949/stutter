@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, path::PathBuf};
 
 use super::{super::executors::*, support::*};
 use crate::actions::*;
@@ -109,6 +109,58 @@ fn restore_rollback_token_supports_all_sysfs_record_collections() {
     assert_eq!(fs::read_to_string(vm_path).unwrap(), "vm-original");
     assert_eq!(fs::read_to_string(gpu_path).unwrap(), "gpu-original");
 
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn direct_cgroup_restore_resolves_namespace_absolute_paths_under_root() {
+    let dir = temp_dir("direct-cgroup-records");
+    let cgroup_root = dir.join("cgroup");
+    let old_cgroup = cgroup_root.join("old.slice");
+    fs::create_dir_all(&old_cgroup).unwrap();
+    fs::write(old_cgroup.join("cgroup.procs"), "").unwrap();
+
+    let records = vec![CgroupRestoreRecord::new(
+        TaskRestoreIdentity::observed(42, None, Some("game-thread".to_owned()), None, None),
+        PathBuf::from("/old.slice"),
+    )];
+
+    let summary = restore_cgroup_records_at(&cgroup_root, &records).unwrap();
+
+    assert_eq!(summary.restored_items, 1);
+    assert_eq!(
+        fs::read_to_string(old_cgroup.join("cgroup.procs")).unwrap(),
+        "42"
+    );
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn direct_cgroup_cpuset_restore_resolves_namespace_absolute_paths_under_root() {
+    let dir = temp_dir("direct-cgroup-cpuset");
+    let cgroup_root = dir.join("cgroup");
+    let target_cgroup = cgroup_root.join("stutter/game.slice");
+    fs::create_dir_all(&target_cgroup).unwrap();
+    fs::write(target_cgroup.join("cpuset.cpus"), "2-3").unwrap();
+    fs::write(target_cgroup.join("cpuset.mems"), "1").unwrap();
+
+    let record = CgroupCpusetRestoreRecord {
+        cgroup_path: PathBuf::from("/stutter/game.slice"),
+        original_cpuset_cpus: Some("0-7".to_owned()),
+        original_cpuset_mems: Some("0".to_owned()),
+    };
+
+    let restored = restore_cgroup_cpuset_record_at(&cgroup_root, &record).unwrap();
+
+    assert_eq!(restored, 2);
+    assert_eq!(
+        fs::read_to_string(target_cgroup.join("cpuset.cpus")).unwrap(),
+        "0-7"
+    );
+    assert_eq!(
+        fs::read_to_string(target_cgroup.join("cpuset.mems")).unwrap(),
+        "0"
+    );
     fs::remove_dir_all(dir).ok();
 }
 

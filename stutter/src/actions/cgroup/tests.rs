@@ -1,6 +1,6 @@
 use std::{
     fs, io,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -682,6 +682,52 @@ fn cgroup_restore_token_reports_affected_tasks_and_no_restore_path() {
 
     assert_eq!(token.affected_tasks(), 2);
     assert!(token.restore_path().is_none());
+}
+
+#[test]
+fn rollback_token_handler_restores_namespace_absolute_cgroup_path_under_root() {
+    let proc_root = temp_dir("proc-token-rollback-namespace-absolute");
+    let cgroup_root = temp_dir("cgroup-token-rollback-namespace-absolute");
+    write_fake_task(&proc_root, 42, "game-thread", 12345, "/stutter/game.slice");
+    write_fake_cgroup(&cgroup_root, "/old.slice");
+
+    let token = RollbackToken::CgroupRestore {
+        records: vec![CgroupRestoreRecord::new(
+            crate::actions::TaskRestoreIdentity::observed(
+                42,
+                None,
+                Some("game-thread".to_owned()),
+                Some(12345),
+                None,
+            ),
+            PathBuf::from("/old.slice"),
+        )],
+        cpuset: None,
+    };
+
+    let result = CgroupRollbackHandler
+        .restore_token_at(&proc_root, &cgroup_root, &token)
+        .unwrap();
+
+    assert_eq!(result.restored, 1);
+    assert_eq!(
+        read_trimmed(&cgroup_root.join("old.slice/cgroup.procs")).unwrap(),
+        "42"
+    );
+    fs::remove_dir_all(proc_root).ok();
+    fs::remove_dir_all(cgroup_root).ok();
+}
+
+#[test]
+fn cgroup_fs_path_rejects_parent_traversal_in_token_paths() {
+    let cgroup_root = temp_dir("cgroup-token-traversal");
+
+    let err = cgroup_fs_path(&cgroup_root, Path::new("/old.slice/../escape.slice"))
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("parent traversal"));
+    fs::remove_dir_all(cgroup_root).ok();
 }
 
 #[test]
