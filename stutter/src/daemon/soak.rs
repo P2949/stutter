@@ -346,7 +346,7 @@ fn fake_step_for_tick(tick: SoakTick) -> FakeDaemonStep {
             diagnostic_score_total,
             samples,
         } => FakeDaemonStep::Interval {
-            diagnostic_score_total,
+            diagnostic_raw_score_total: diagnostic_score_total,
             samples,
         },
         SoakTick::DroppedInterval { dropped_events } => {

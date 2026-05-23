@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     fs, io,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -7,7 +8,15 @@ use std::{
 use anyhow::Context as _;
 
 use super::*;
-use crate::{actions::TaskIdentity, process_tree::TaskClass};
+use crate::{
+    actions::{
+        ActionId, ActionState, ActionWarning, ApplyResult, RollbackToken, SafetyClass,
+        TaskIdentity, TuningAction,
+        runner::{ActionRunPolicy, run_audited_action_with_audit_path},
+    },
+    daemon_policy::{ActionSource, DaemonPolicy},
+    process_tree::TaskClass,
+};
 
 fn target(tid: u32, comm: &str, starttime_ticks: u64) -> TaskIdentity {
     TaskIdentity {
@@ -105,6 +114,56 @@ impl CgroupFileWriter for FailingCgroupWriter {
         }
 
         super::write_trimmed(path, value)
+    }
+}
+
+struct ProcRootCgroupAction<'a> {
+    inner: &'a CgroupPlacementAction,
+    proc_root: &'a Path,
+    rollback_calls: &'a Cell<usize>,
+    fail_on_apply_write: usize,
+}
+
+impl TuningAction for ProcRootCgroupAction<'_> {
+    fn id(&self) -> ActionId {
+        self.inner.id()
+    }
+
+    fn describe(&self) -> String {
+        self.inner.describe()
+    }
+
+    fn safety_class(&self) -> SafetyClass {
+        self.inner.safety_class()
+    }
+
+    fn preflight(&self) -> anyhow::Result<Vec<ActionWarning>> {
+        self.inner
+            .preflight_at(self.proc_root, &CgroupPlacementPolicy::default())
+    }
+
+    fn dry_run(&self) -> anyhow::Result<ActionState> {
+        self.inner
+            .dry_run_at(self.proc_root, &CgroupPlacementPolicy::default())
+    }
+
+    fn apply(&self) -> ApplyResult {
+        let mut writer = FailingCgroupWriter::fail_on_write(self.fail_on_apply_write);
+        self.inner.apply_at_with_writer(
+            self.proc_root,
+            &CgroupPlacementPolicy::default(),
+            &mut writer,
+        )
+    }
+
+    fn verify(&self) -> anyhow::Result<ActionState> {
+        self.inner
+            .verify_at(self.proc_root, &CgroupPlacementPolicy::default())
+    }
+
+    fn rollback(&self, token: &RollbackToken) -> anyhow::Result<()> {
+        self.rollback_calls.set(self.rollback_calls.get() + 1);
+        self.inner.rollback_at(self.proc_root, token)
     }
 }
 
@@ -379,7 +438,7 @@ fn dry_run_counts_pending_move_and_cpuset_changes_without_mutating() {
 }
 
 #[test]
-fn apply_restores_cpuset_cpus_when_cpuset_mems_write_fails() {
+fn apply_returns_unapplied_cpuset_rollback_when_cpuset_mems_write_fails() {
     let proc_root = temp_dir("proc-apply-mems-fail");
     let cgroup_root = temp_dir("cgroup-apply-mems-fail");
     write_fake_cgroup(&cgroup_root, "/old.slice");
@@ -393,16 +452,23 @@ fn apply_restores_cpuset_cpus_when_cpuset_mems_write_fails() {
         .unwrap_err();
 
     assert!(format!("{:#}", err.source).contains("cpuset.mems"));
-    assert!(err.rollback.is_some());
-    assert_eq!(read_trimmed(&target.join("cpuset.cpus")).unwrap(), "0-7");
+    let token = err
+        .rollback
+        .expect("cpuset mutation should return rollback token");
+    assert_eq!(read_trimmed(&target.join("cpuset.cpus")).unwrap(), "2-3");
     assert_eq!(read_trimmed(&target.join("cpuset.mems")).unwrap(), "0");
     assert_eq!(read_trimmed(&target.join("cgroup.procs")).unwrap(), "");
+
+    action.rollback_at(&proc_root, &token).unwrap();
+
+    assert_eq!(read_trimmed(&target.join("cpuset.cpus")).unwrap(), "0-7");
+    assert_eq!(read_trimmed(&target.join("cpuset.mems")).unwrap(), "0");
     fs::remove_dir_all(proc_root).ok();
     fs::remove_dir_all(cgroup_root).ok();
 }
 
 #[test]
-fn apply_restores_moved_tasks_and_cpuset_when_second_task_move_fails() {
+fn apply_returns_unapplied_task_and_cpuset_rollback_when_second_task_move_fails() {
     let proc_root = temp_dir("proc-apply-second-move-fail");
     let cgroup_root = temp_dir("cgroup-apply-second-move-fail");
     write_fake_cgroup(&cgroup_root, "/old-first.slice");
@@ -423,19 +489,81 @@ fn apply_restores_moved_tasks_and_cpuset_when_second_task_move_fails() {
         .unwrap_err();
 
     assert!(format!("{:#}", err.source).contains("failed to move tid=42"));
-    assert!(err.rollback.is_some());
+    let token = err
+        .rollback
+        .expect("partial task move should return rollback token");
+    assert_eq!(read_trimmed(&target.join("cpuset.cpus")).unwrap(), "2-3");
+    assert_eq!(read_trimmed(&target.join("cpuset.mems")).unwrap(), "0");
+    assert_eq!(
+        read_trimmed(&cgroup_root.join("old-first.slice/cgroup.procs")).unwrap(),
+        ""
+    );
+    assert_eq!(
+        read_trimmed(&cgroup_root.join("old-second.slice/cgroup.procs")).unwrap(),
+        ""
+    );
+
+    action.rollback_at(&proc_root, &token).unwrap();
+
     assert_eq!(read_trimmed(&target.join("cpuset.cpus")).unwrap(), "0-7");
     assert_eq!(read_trimmed(&target.join("cpuset.mems")).unwrap(), "0");
     assert_eq!(
         read_trimmed(&cgroup_root.join("old-first.slice/cgroup.procs")).unwrap(),
         "41"
     );
-    assert_eq!(
-        read_trimmed(&cgroup_root.join("old-second.slice/cgroup.procs")).unwrap(),
-        ""
-    );
     fs::remove_dir_all(proc_root).ok();
     fs::remove_dir_all(cgroup_root).ok();
+}
+
+#[test]
+fn audited_runner_rolls_back_cgroup_partial_failure_exactly_once() {
+    let proc_root = temp_dir("proc-runner-partial");
+    let cgroup_root = temp_dir("cgroup-runner-partial");
+    let audit_path = temp_dir("audit-runner-partial").join("audit.jsonl");
+    write_fake_cgroup(&cgroup_root, "/old-first.slice");
+    write_fake_cgroup(&cgroup_root, "/old-second.slice");
+    let target = write_fake_cgroup(&cgroup_root, "/stutter/game.slice");
+    write_fake_task(&proc_root, 41, "first", 12345, "/old-first.slice");
+    write_fake_task(&proc_root, 42, "second", 12345, "/old-second.slice");
+
+    let mut inner = action_for(&cgroup_root, 41);
+    inner.targets = vec![
+        placement_target(41, "first", TaskClass::Game),
+        placement_target(42, "second", TaskClass::Game),
+    ];
+    let rollback_calls = Cell::new(0);
+    let action = ProcRootCgroupAction {
+        inner: &inner,
+        proc_root: &proc_root,
+        rollback_calls: &rollback_calls,
+        fail_on_apply_write: 4,
+    };
+
+    let mut run_policy = ActionRunPolicy::for_action(&action, false, ActionSource::Test);
+    run_policy.policy = DaemonPolicy::apply_medium_risk(ActionSource::Test);
+
+    let result =
+        run_audited_action_with_audit_path("cgroup-runner-test", &action, run_policy, &audit_path);
+
+    assert!(result.is_err());
+    let err = format!("{:#}", result.as_ref().unwrap_err());
+    assert!(
+        err.contains("partial rollback attempted"),
+        "expected audited runner to reach the partial-apply rollback path, got: {err}"
+    );
+    assert_eq!(rollback_calls.get(), 1);
+    assert_eq!(read_trimmed(&target.join("cpuset.cpus")).unwrap(), "0-7");
+    assert_eq!(read_trimmed(&target.join("cpuset.mems")).unwrap(), "0");
+    assert_eq!(
+        read_trimmed(&cgroup_root.join("old-first.slice/cgroup.procs")).unwrap(),
+        "41"
+    );
+
+    fs::remove_dir_all(proc_root).ok();
+    fs::remove_dir_all(cgroup_root).ok();
+    if let Some(audit_dir) = audit_path.parent() {
+        fs::remove_dir_all(audit_dir).ok();
+    }
 }
 
 #[test]

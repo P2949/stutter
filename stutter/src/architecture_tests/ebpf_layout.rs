@@ -30,8 +30,10 @@ fn ebpf_main_keeps_extracted_layout_helpers_out_of_entrypoint_file() {
     let main = ebpf_source("main.rs");
 
     assert!(
-        main.contains("mod trace_offsets;") && main.contains("mod trace_read;"),
-        "stutter-ebpf/src/main.rs must keep tracepoint offset globals and field readers in helper modules",
+        main.contains("mod block_io;")
+            && main.contains("mod trace_offsets;")
+            && main.contains("mod trace_read;"),
+        "stutter-ebpf/src/main.rs must keep block I/O, tracepoint offset globals, and field readers in helper modules",
     );
     assert!(
         !main.contains("static mut BLOCK_RQ_KEY_OFFSET"),
@@ -42,8 +44,12 @@ fn ebpf_main_keeps_extracted_layout_helpers_out_of_entrypoint_file() {
         "tracepoint field readers belong in trace_read.rs, not main.rs",
     );
     assert!(
-        line_count("main.rs") <= 1_650,
-        "stutter-ebpf/src/main.rs grew beyond the post-split ceiling; extract another tracepoint family before adding more logic",
+        line_count("main.rs") <= 1_500,
+        "stutter-ebpf/src/main.rs grew beyond the post-block-I/O-split ceiling; extract another tracepoint family before adding more logic",
+    );
+    assert!(
+        line_count("block_io.rs") <= 200,
+        "block_io.rs should stay a focused block request correlation module",
     );
     assert!(
         line_count("trace_offsets.rs") <= 160,
@@ -57,7 +63,7 @@ fn ebpf_main_keeps_extracted_layout_helpers_out_of_entrypoint_file() {
 
 #[test]
 fn ebpf_helpers_do_not_return_aggregate_shapes() {
-    for relative_path in ["main.rs", "trace_read.rs"] {
+    for relative_path in ["main.rs", "block_io.rs", "trace_read.rs"] {
         let source = ebpf_source(relative_path);
 
         assert!(

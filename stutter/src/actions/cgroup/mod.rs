@@ -362,13 +362,7 @@ impl CgroupPlacementAction {
                     )
                 })
         {
-            return Err(self.partial_apply_error_after_rollback(
-                proc_root,
-                err,
-                Vec::new(),
-                cpuset_changed,
-                &cpuset,
-            ));
+            return Err(self.partial_apply_error(err, Vec::new(), cpuset_changed, &cpuset));
         }
         if self.cpuset_mems.is_some() {
             cpuset_changed = true;
@@ -401,13 +395,7 @@ impl CgroupPlacementAction {
                     )
                 })
             {
-                return Err(self.partial_apply_error_after_rollback(
-                    proc_root,
-                    err,
-                    records,
-                    cpuset_changed,
-                    &cpuset,
-                ));
+                return Err(self.partial_apply_error(err, records, cpuset_changed, &cpuset));
             }
 
             records.push(CgroupRestoreRecord::new(identity, snapshot.original_cgroup));
@@ -419,26 +407,17 @@ impl CgroupPlacementAction {
         })
     }
 
-    fn partial_apply_error_after_rollback(
+    fn partial_apply_error(
         &self,
-        proc_root: &Path,
         source: anyhow::Error,
         records: Vec<CgroupRestoreRecord>,
         cpuset_changed: bool,
         cpuset: &Option<CgroupCpusetRestoreRecord>,
     ) -> PartialApplyError {
-        let rollback = cgroup_partial_token(records, cpuset_changed, cpuset);
-        let source = match rollback.as_ref() {
-            Some(token) => match self.rollback_at(proc_root, token) {
-                Ok(()) => source,
-                Err(rollback_err) => anyhow::anyhow!(
-                    "apply failed: {source:#}; partial cgroup rollback failed: {rollback_err:#}"
-                ),
-            },
-            None => source,
-        };
-
-        PartialApplyError { source, rollback }
+        PartialApplyError {
+            source,
+            rollback: cgroup_partial_token(records, cpuset_changed, cpuset),
+        }
     }
 }
 

@@ -5,9 +5,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-// TODO: DiagnosisCandidate::evidence and LiveDiagnosisEntry::evidence are not yet consumed here.
-// When implementing specific actionable recommendations, read this structured evidence to produce
-// per-IRQ/per-process evidence strings.
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 
@@ -78,10 +75,12 @@ pub fn build_advisor_report_from_analysis(
     analysis: &ReportAnalysisJson,
 ) -> AdvisorReport {
     let causes = causes_from_analysis(analysis);
+    let cause_evidence = cause_evidence_from_analysis(analysis);
     build_advisor_report_from_evidence(AdvisorEvidenceInput {
         run,
         data_quality: analysis.data_quality.level,
         causes: &causes,
+        cause_evidence: &cause_evidence,
         profiles,
         signal_availability: AdvisorSignalAvailability {
             has_hwmon: analysis.session.config.hwmon
@@ -95,6 +94,12 @@ pub fn build_advisor_report_from_analysis(
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AdvisorCauseEvidence {
+    pub cause: StutterCause,
+    pub messages: Vec<String>,
+}
+
 pub(crate) struct AdvisorSignalAvailability {
     pub has_hwmon: bool,
     pub has_irq: bool,
@@ -105,6 +110,7 @@ pub(crate) struct AdvisorEvidenceInput<'a> {
     pub run: &'a Path,
     pub data_quality: DataQualityLevel,
     pub causes: &'a [StutterCause],
+    pub cause_evidence: &'a [AdvisorCauseEvidence],
     pub profiles: Option<&'a Path>,
     pub signal_availability: AdvisorSignalAvailability,
     pub tree_pid: Option<u32>,
@@ -114,6 +120,7 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
     let run = input.run;
     let data_quality = input.data_quality;
     let causes = input.causes;
+    let cause_evidence = input.cause_evidence;
     let profiles = input.profiles;
     let has_hwmon = input.signal_availability.has_hwmon;
     let has_irq = input.signal_availability.has_irq;
@@ -157,9 +164,10 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
     if has_gpu {
         recommendations.push(AdvisorRecommendation {
             title: "Investigate non-CPU bottleneck candidate".to_owned(),
-            rationale:
-                "GPU-bound evidence is a candidate, not proof; CPU affinity may not fix this."
-                    .to_owned(),
+            rationale: rationale_with_evidence(
+                "GPU-bound evidence is a candidate, not proof; CPU affinity may not fix this.",
+                evidence_note_for(cause_evidence, StutterCause::GpuBoundCandidate),
+            ),
             confidence: Confidence::Medium,
             suggested_commands: if has_hwmon {
                 vec!["stutter report --analysis-json <run-dir>".to_owned()]
@@ -175,7 +183,10 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
     if has_irq_candidate {
         recommendations.push(AdvisorRecommendation {
             title: "Confirm IRQ latency candidate".to_owned(),
-            rationale: "IRQ overlap is a candidate signal, not proof; collect explicit IRQ data before changing anything.".to_owned(),
+            rationale: rationale_with_evidence(
+                "IRQ overlap is a candidate signal, not proof; collect explicit IRQ data before changing anything.",
+                evidence_note_for(cause_evidence, StutterCause::IrqDelayCandidate),
+            ),
             confidence: Confidence::Medium,
             suggested_commands: if has_irq {
                 vec!["stutter report --analysis-json <run-dir>".to_owned()]
@@ -190,7 +201,10 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
     if has_block_io_candidate {
         recommendations.push(AdvisorRecommendation {
             title: "Check storage activity candidate".to_owned(),
-            rationale: "Block I/O overlap is a candidate, not proof; storage pressure should be confirmed before CPU tuning.".to_owned(),
+            rationale: rationale_with_evidence(
+                "Block I/O overlap is a candidate, not proof; storage pressure should be confirmed before CPU tuning.",
+                evidence_note_for(cause_evidence, StutterCause::BlockIoCandidate),
+            ),
             confidence: Confidence::Medium,
             suggested_commands: if has_block_io {
                 vec!["stutter report --analysis-json <run-dir>".to_owned()]
@@ -210,7 +224,10 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
             .unwrap_or_else(|| "<PID>".to_owned());
         recommendations.push(AdvisorRecommendation {
             title: "Try profile tuning experiment".to_owned(),
-            rationale: "Scheduler-delay candidates suggest a profile tuning experiment may be useful, but this is not proof of root cause.".to_owned(),
+            rationale: rationale_with_evidence(
+                "Scheduler-delay candidates suggest a profile tuning experiment may be useful, but this is not proof of root cause.",
+                scheduler_evidence_note(cause_evidence),
+            ),
             confidence: Confidence::Medium,
             suggested_commands: vec![format!(
                 "stutter tune --tree-pid {pid_arg} --profiles {profiles_arg} --runs 5 --baseline-profile baseline-online"
@@ -253,6 +270,87 @@ pub(crate) fn build_advisor_report_from_evidence(input: AdvisorEvidenceInput<'_>
         verdict,
         recommendations,
         warnings,
+    }
+}
+
+fn rationale_with_evidence(base: &str, evidence_note: Option<String>) -> String {
+    match evidence_note {
+        Some(note) => format!("{base} Evidence: {note}"),
+        None => base.to_owned(),
+    }
+}
+
+fn scheduler_evidence_note(cause_evidence: &[AdvisorCauseEvidence]) -> Option<String> {
+    evidence_note_for(cause_evidence, StutterCause::GameThreadSchedulerDelay)
+        .or_else(|| evidence_note_for(cause_evidence, StutterCause::CompositorSchedulerDelay))
+}
+
+fn evidence_note_for(
+    cause_evidence: &[AdvisorCauseEvidence],
+    cause: StutterCause,
+) -> Option<String> {
+    cause_evidence
+        .iter()
+        .find(|entry| entry.cause == cause)
+        .and_then(|entry| evidence_note_from_messages(&entry.messages))
+}
+
+fn evidence_note_from_messages(messages: &[String]) -> Option<String> {
+    let selected = messages
+        .iter()
+        .filter(|message| !message.trim().is_empty())
+        .take(2)
+        .cloned()
+        .collect::<Vec<_>>();
+    (!selected.is_empty()).then(|| selected.join("; "))
+}
+
+fn cause_evidence_from_analysis(analysis: &ReportAnalysisJson) -> Vec<AdvisorCauseEvidence> {
+    let mut summaries = Vec::new();
+    for cluster in analysis.cluster_analysis.clusters.iter().take(10) {
+        if let Some(diagnosis) = &cluster.diagnosis {
+            push_diagnosis_evidence(&mut summaries, diagnosis);
+        }
+    }
+    for frame in analysis.frame_diagnoses.iter().take(10) {
+        push_diagnosis_evidence(&mut summaries, &frame.diagnosis);
+    }
+    summaries
+}
+
+fn push_diagnosis_evidence(
+    summaries: &mut Vec<AdvisorCauseEvidence>,
+    diagnosis: &crate::diagnosis::Diagnosis,
+) {
+    for candidate in diagnosis.primary.iter().chain(diagnosis.candidates.iter()) {
+        let messages = candidate
+            .evidence
+            .iter()
+            .map(|evidence| evidence.message.clone())
+            .filter(|message| !message.trim().is_empty())
+            .take(3)
+            .collect::<Vec<_>>();
+        if messages.is_empty() {
+            continue;
+        }
+        if let Some(existing) = summaries
+            .iter_mut()
+            .find(|entry| entry.cause == candidate.cause)
+        {
+            for message in messages {
+                if existing.messages.len() >= 3 {
+                    break;
+                }
+                if !existing.messages.contains(&message) {
+                    existing.messages.push(message);
+                }
+            }
+        } else {
+            summaries.push(AdvisorCauseEvidence {
+                cause: candidate.cause,
+                messages,
+            });
+        }
     }
 }
 
@@ -437,6 +535,7 @@ mod tests {
             run: Path::new("/tmp/run"),
             data_quality: quality,
             causes,
+            cause_evidence: &[],
             profiles: Some(Path::new("profiles.toml")),
             signal_availability: AdvisorSignalAvailability {
                 has_hwmon: false,
@@ -505,6 +604,33 @@ mod tests {
             report.recommendations[0]
                 .safety_note
                 .contains("do not change IRQ affinity yet")
+        );
+    }
+
+    #[test]
+    fn recommendation_rationale_includes_structured_evidence() {
+        let cause_evidence = vec![AdvisorCauseEvidence {
+            cause: StutterCause::IrqDelayCandidate,
+            messages: vec!["IRQ 146 on CPU 2 overlapped with the game thread for 55ms".to_owned()],
+        }];
+        let report = build_advisor_report_from_evidence(AdvisorEvidenceInput {
+            run: Path::new("/tmp/run"),
+            data_quality: DataQualityLevel::High,
+            causes: &[StutterCause::IrqDelayCandidate],
+            cause_evidence: &cause_evidence,
+            profiles: Some(Path::new("profiles.toml")),
+            signal_availability: AdvisorSignalAvailability {
+                has_hwmon: false,
+                has_irq: true,
+                has_block_io: false,
+            },
+            tree_pid: Some(42),
+        });
+
+        assert!(
+            report.recommendations[0]
+                .rationale
+                .contains("IRQ 146 on CPU 2")
         );
     }
 

@@ -79,8 +79,8 @@ use crate::{
         DaemonPolicy,
         policy::DaemonMode,
         privilege::{
-            InProcessPrivilegedActionService, UnixSocketPrivilegedActionService,
-            default_privileged_worker_socket_path,
+            InProcessPrivilegedActionService, PrivilegedActionService,
+            UnixSocketPrivilegedActionService, default_privileged_worker_socket_path,
         },
         state::DaemonState,
     },
@@ -94,6 +94,60 @@ pub const DEFAULT_RUNTIME_WINDOW_SECONDS: u64 = 30;
 pub const DEFAULT_RECENT_DIAGNOSIS_LIMIT: usize = 16;
 
 const DAEMON_EMERGENCY_RESTORE_COMMAND: &str = "stutter daemon emergency-restore";
+
+struct ResolvedPrivilegedActionService {
+    socket_service: Option<UnixSocketPrivilegedActionService>,
+    in_process_service: Option<InProcessPrivilegedActionService>,
+}
+
+impl ResolvedPrivilegedActionService {
+    fn as_service(&self) -> Option<&dyn PrivilegedActionService> {
+        self.socket_service
+            .as_ref()
+            .map(|service| service as &dyn PrivilegedActionService)
+            .or_else(|| {
+                self.in_process_service
+                    .as_ref()
+                    .map(|service| service as &dyn PrivilegedActionService)
+            })
+    }
+}
+
+fn resolve_privileged_action_service(
+    config: &AutotuneRuntimeConfig,
+) -> anyhow::Result<ResolvedPrivilegedActionService> {
+    let use_privileged_service =
+        config.mode() == DaemonMode::ApplyMediumRisk && !config.simulate_action_effects;
+    if !use_privileged_service {
+        return Ok(ResolvedPrivilegedActionService {
+            socket_service: None,
+            in_process_service: None,
+        });
+    }
+
+    if config
+        .daemon_config
+        .autotune
+        .unsafe_in_process_privileged_worker
+    {
+        return Ok(ResolvedPrivilegedActionService {
+            socket_service: None,
+            in_process_service: Some(InProcessPrivilegedActionService::default()),
+        });
+    }
+
+    let socket_path = config
+        .daemon_config
+        .autotune
+        .privileged_worker_socket
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(default_privileged_worker_socket_path)?;
+    Ok(ResolvedPrivilegedActionService {
+        socket_service: Some(UnixSocketPrivilegedActionService::new(socket_path)),
+        in_process_service: None,
+    })
+}
 
 #[derive(Clone, Debug)]
 pub struct OnlineAutotuneController {
@@ -704,42 +758,7 @@ impl AutotuneRuntime {
             anyhow::bail!("dry-run-all-safe mode refused to start a live experiment");
         }
 
-        let use_privileged_service = self.config.mode() == DaemonMode::ApplyMediumRisk
-            && !self.config.simulate_action_effects;
-        let socket_service = if use_privileged_service
-            && !self
-                .config
-                .daemon_config
-                .autotune
-                .unsafe_in_process_privileged_worker
-        {
-            let socket_path = self
-                .config
-                .daemon_config
-                .autotune
-                .privileged_worker_socket
-                .clone()
-                .map(Ok)
-                .unwrap_or_else(default_privileged_worker_socket_path)?;
-            Some(UnixSocketPrivilegedActionService::new(socket_path))
-        } else {
-            None
-        };
-        let in_process_service = (use_privileged_service
-            && self
-                .config
-                .daemon_config
-                .autotune
-                .unsafe_in_process_privileged_worker)
-            .then(InProcessPrivilegedActionService::default);
-        let privileged_action_service = socket_service
-            .as_ref()
-            .map(|service| service as &dyn crate::daemon::privilege::PrivilegedActionService)
-            .or_else(|| {
-                in_process_service.as_ref().map(|service| {
-                    service as &dyn crate::daemon::privilege::PrivilegedActionService
-                })
-            });
+        let privileged_action_service = resolve_privileged_action_service(&self.config)?;
         let input = LiveExperimentManagerInput {
             mode: self.config.mode(),
             daemon_policy: self.config.daemon_policy.clone(),
@@ -751,7 +770,7 @@ impl AutotuneRuntime {
             controller_journal_path: self.config.controller_journal_path.clone(),
             #[cfg(test)]
             exit_rollback_registry: None,
-            privileged_action_service,
+            privileged_action_service: privileged_action_service.as_service(),
         };
 
         let outcome = self.live_experiments.apply_decision_side_effects(
