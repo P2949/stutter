@@ -8,6 +8,7 @@ mod cgroup_imports;
 mod concurrency;
 mod dependencies;
 mod direct_prints;
+mod ebpf_layout;
 mod file_size;
 mod objectives;
 mod public_api;

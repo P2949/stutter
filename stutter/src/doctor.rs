@@ -15,6 +15,10 @@ use crate::{
     probe_registry::PROBE_REGISTRY,
 };
 
+mod ebpf_map_sizing;
+
+use ebpf_map_sizing::ebpf_map_sizing_check;
+
 #[derive(Debug, Clone)]
 pub struct DoctorInput {
     pub json: bool,
@@ -233,48 +237,6 @@ fn read_trimmed(path: &Path) -> Result<Option<String>, String> {
         Ok(value) => Ok(Some(value.trim().to_owned())),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(err.to_string()),
-    }
-}
-
-fn ebpf_map_sizing_check() -> DoctorCheck {
-    let sizing = ebpf_loader::ebpf_map_sizing_report();
-    let mut details = BTreeMap::new();
-    details.insert(
-        "locked_memory_limit_bytes".to_owned(),
-        format_optional_u64(sizing.locked_memory_limit_bytes),
-    );
-    details.insert(
-        "available_memory_bytes".to_owned(),
-        format_optional_u64(sizing.available_memory_bytes),
-    );
-    details.insert(
-        "events_ringbuf_bytes".to_owned(),
-        sizing.events_ringbuf_bytes.to_string(),
-    );
-    details.insert(
-        "target_pids_max".to_owned(),
-        sizing.target_pids_max.to_string(),
-    );
-    details.insert(
-        "wakeup_data_entries".to_owned(),
-        sizing.wakeup_data_entries.to_string(),
-    );
-
-    let status = if sizing.events_ringbuf_bytes <= 64 * 1024 || sizing.wakeup_data_entries <= 4096 {
-        DoctorStatus::Warn
-    } else {
-        DoctorStatus::Pass
-    };
-
-    DoctorCheck {
-        name: "ebpf_map_sizing".to_owned(),
-        status,
-        message: if matches!(status, DoctorStatus::Pass) {
-            "dynamic eBPF map sizing looks adequate".to_owned()
-        } else {
-            "dynamic eBPF map sizing is at the conservative minimum".to_owned()
-        },
-        details,
     }
 }
 
@@ -830,12 +792,6 @@ pub fn check_mangohud_log_path(path: &Path) -> DoctorCheck {
         },
         details,
     }
-}
-
-fn format_optional_u64(value: Option<u64>) -> String {
-    value
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "unlimited_or_unknown".to_owned())
 }
 
 fn format_tracepoint_ref(format: Option<&DrmTracepointFormat>) -> String {
