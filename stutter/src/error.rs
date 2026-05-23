@@ -123,6 +123,10 @@ pub enum TargetError {
         #[source]
         source: anyhow::Error,
     },
+    #[error(
+        "native cgroup filtering is unavailable for {path} (resolved directory inode {cgroup_id}); use cgroup PID expansion until a runtime-verified cgroup-id resolver is implemented"
+    )]
+    NativeCgroupFilterUnsupported { path: PathBuf, cgroup_id: u64 },
     #[error(transparent)]
     Source(#[from] anyhow::Error),
 }
