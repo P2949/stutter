@@ -1,7 +1,6 @@
 use std::{cmp::Ordering, collections::BTreeMap};
 
 mod model;
-
 use model::SCHED_DELAY_SIGNIFICANT_NS;
 pub use model::{
     CandidateRejection, ClusterAnchor, ClusterAnchorKind, Confidence, Diagnosis,

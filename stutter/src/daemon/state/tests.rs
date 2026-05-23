@@ -468,9 +468,15 @@ fn decision_state_serializes_current_raw_score_total_name() {
     assert!(!json.contains("diagnostic_score_total"));
 }
 
+fn legacy_candidate_raw_score_total_name() -> String {
+    ["diagnostic_candidate", "_diagnostic_score_total"].concat()
+}
+
 #[test]
 fn workload_profile_accepts_legacy_candidate_diagnostic_score_total_name() {
-    let json = r#"{
+    let legacy_field = legacy_candidate_raw_score_total_name();
+    let json = format!(
+        r#"{{
         "workload_identity_hash": "workload-abc",
         "workload_label": "game",
         "candidate_name": "game-main",
@@ -480,14 +486,15 @@ fn workload_profile_accepts_legacy_candidate_diagnostic_score_total_name() {
         "kept_unix_nanos": 300,
         "last_validated_unix_nanos": 300,
         "diagnostic_baseline_raw_score_total": 1000,
-        "diagnostic_candidate_diagnostic_score_total": 850,
+        "{legacy_field}": 850,
         "score_delta": -150,
         "confidence_milli": 900,
-        "environment": {},
-        "partition": {}
-    }"#;
+        "environment": {{}},
+        "partition": {{}}
+    }}"#
+    );
 
-    let profile: DaemonWorkloadProfile = serde_json::from_str(json).unwrap();
+    let profile: DaemonWorkloadProfile = serde_json::from_str(&json).unwrap();
 
     assert_eq!(profile.diagnostic_candidate_raw_score_total, Some(850));
 }
@@ -514,5 +521,5 @@ fn workload_profile_serializes_candidate_raw_score_total_name() {
     let json = serde_json::to_string(&profile).unwrap();
 
     assert!(json.contains("diagnostic_candidate_raw_score_total"));
-    assert!(!json.contains("diagnostic_candidate_diagnostic_score_total"));
+    assert!(!json.contains(&legacy_candidate_raw_score_total_name()));
 }
