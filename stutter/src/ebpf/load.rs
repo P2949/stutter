@@ -549,16 +549,15 @@ pub fn load_and_attach(
                 map: "TARGET_CGROUP_IDS",
                 source: anyhow::anyhow!("map not found"),
             })?;
-        let mut map =
+        let map =
             AyaHashMap::<_, u64, u8>::try_from(map_data).map_err(|source| EbpfError::MapInit {
                 map: "TARGET_CGROUP_IDS",
                 source: source.into(),
             })?;
-        map.insert(cgroup_id, 1, 0)
-            .map_err(|source| EbpfError::MapInit {
-                map: "TARGET_CGROUP_IDS",
-                source: source.into(),
-            })?;
+        // Keep the map FD alive, but do not insert the best-effort id. Until a
+        // runtime verifier proves this directory inode matches
+        // bpf_get_current_cgroup_id(), native cgroup matching must remain
+        // inactive and PID expansion remains authoritative.
         native_cgroup_filter = NativeCgroupFilterStatus::unverified_directory_inode(
             cgroup_path.display().to_string(),
             cgroup_id,
@@ -569,7 +568,7 @@ pub fn load_and_attach(
                 message: warning.clone(),
             });
             log::warn!(
-                "native_cgroup_filter_unverified cgroup_path={} cgroup_id={} message=\"{}\"",
+                "native_cgroup_filter_not_activated cgroup_path={} cgroup_id={} message=\"{}\"",
                 cgroup_path.display(),
                 cgroup_id,
                 warning,

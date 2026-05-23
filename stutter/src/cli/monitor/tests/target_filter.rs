@@ -299,6 +299,65 @@ fn cli_summary_overrides_config_file_summary() {
 }
 
 #[test]
+fn live_diagnosis_cluster_window_accepts_config_and_cli_override() {
+    let args = MonitorArgs {
+        watch_poll_ms: 2000,
+        cpu_perf_max_tasks: 128,
+        ..MonitorArgs::default()
+    };
+    let file_config = crate::config_file::UserConfigFile {
+        live_diagnosis_cluster_window_ms: Some(7),
+        ..Default::default()
+    };
+
+    let config =
+        monitor_config_from_monitor_args_with_file(args, Some(file_config), RecordingMode::Monitor)
+            .unwrap();
+
+    assert_eq!(config.diagnosis.live_cluster_window_ms, 7);
+
+    let args = MonitorArgs {
+        live_diagnosis_cluster_window_ms: Some(11),
+        watch_poll_ms: 2000,
+        cpu_perf_max_tasks: 128,
+        ..MonitorArgs::default()
+    };
+    let file_config = crate::config_file::UserConfigFile {
+        live_diagnosis_cluster_window_ms: Some(7),
+        ..Default::default()
+    };
+
+    let config = monitor_config_from_monitor_args_with_file_and_presence(
+        args,
+        Some(file_config),
+        RecordingMode::Monitor,
+        MonitorArgPresence {
+            live_diagnosis_cluster_window_ms: true,
+            ..MonitorArgPresence::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(config.diagnosis.live_cluster_window_ms, 11);
+}
+
+#[test]
+fn rejects_zero_live_diagnosis_cluster_window() {
+    let err = parse_monitor_config_for_phase15([
+        "stutter",
+        "monitor",
+        "--live-diagnosis-cluster-window-ms",
+        "0",
+    ])
+    .unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("--live-diagnosis-cluster-window-ms must be greater than zero")
+    );
+}
+
+#[test]
 fn include_comm_from_config_used_when_cli_omitted() {
     let args = MonitorArgs {
         watch_poll_ms: 2000,

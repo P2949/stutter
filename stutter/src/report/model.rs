@@ -266,6 +266,7 @@ pub struct DataQualitySummary {
     pub missing_optional_files: Vec<String>,
     pub validation_errors: Vec<String>,
     pub validation_warnings: Vec<String>,
+    pub probe_activation_warnings: Vec<String>,
     pub schema_version: u32,
     pub expected_schema_version: u32,
     pub event_stream_write_errors: u64,

@@ -31,8 +31,8 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     &[OversizedRustFileAllowance] = &[
     OversizedRustFileAllowance {
         path: "src/cli/monitor.rs",
-        max_lines: 1_287,
-        reason: "temporary extraction stage: owns monitor CLI args/defaults/merge/validation logic; DMABUF and GPU-engine flags are staged here until cli/monitor/args.rs exists",
+        max_lines: 1_308,
+        reason: "temporary extraction stage: owns monitor CLI args/defaults/merge/validation logic; DMABUF, GPU-engine, and live-diagnosis tuning flags are staged here until cli/monitor/args.rs exists",
     },
     OversizedRustFileAllowance {
         path: "src/session/monitor_session.rs",
@@ -61,7 +61,7 @@ pub(in crate::architecture_tests) const OVERSIZED_RUST_FILE_ALLOWLIST:
     },
     OversizedRustFileAllowance {
         path: "src/recorder/session.rs",
-        max_lines: 1_011,
+        max_lines: 1_010,
         reason: "existing recorder session writer implementation pending future split; display metadata capture is staged here",
     },
     OversizedRustFileAllowance {

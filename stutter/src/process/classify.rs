@@ -3,6 +3,8 @@
 //! Owns built-in task classification and process-name predicate helpers. Does not own procfs
 //! reading, target expansion, snapshots, tree rendering, or community-rule database loading.
 
+use std::borrow::Cow;
+
 use super::model::TaskClass;
 
 /// Classification priority (highest to lowest):
@@ -26,18 +28,18 @@ pub fn classify_task_with_context(
     cgroup_path: &str,
     sched_policy: Option<u32>,
 ) -> TaskClass {
-    let lower_comm = comm.to_ascii_lowercase();
-    let lower_process_comm = process_comm.to_ascii_lowercase();
-    let lower_cmdline = cmdline.to_ascii_lowercase();
-    let lower_exe_path = exe_path.to_ascii_lowercase();
-    let lower_cgroup_path = cgroup_path.to_ascii_lowercase();
+    let lower_comm = lower_ascii_field(comm);
+    let lower_process_comm = lower_ascii_field(process_comm);
+    let lower_cmdline = lower_ascii_field(cmdline);
+    let lower_exe_path = lower_ascii_field(exe_path);
+    let lower_cgroup_path = lower_ascii_field(cgroup_path);
 
     let lower_fields = [
-        lower_comm.as_str(),
-        lower_process_comm.as_str(),
-        lower_cmdline.as_str(),
-        lower_exe_path.as_str(),
-        lower_cgroup_path.as_str(),
+        lower_comm.as_ref(),
+        lower_process_comm.as_ref(),
+        lower_cmdline.as_ref(),
+        lower_exe_path.as_ref(),
+        lower_cgroup_path.as_ref(),
     ];
 
     // 1. Critical System Threads (Kernel, Input, IRQ)
@@ -251,6 +253,14 @@ fn field_contains(fields: &[&str], needle: &str) -> bool {
 
 fn contains_any_field(fields: &[&str], needles: &[&str]) -> bool {
     needles.iter().any(|needle| field_contains(fields, needle))
+}
+
+fn lower_ascii_field(value: &str) -> Cow<'_, str> {
+    if value.is_empty() {
+        Cow::Borrowed("")
+    } else {
+        Cow::Owned(value.to_ascii_lowercase())
+    }
 }
 
 fn is_bracketed_kernel_comm(comm: &str) -> bool {

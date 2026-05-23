@@ -51,6 +51,8 @@ pub fn write_minimal_recording_fixture(dir: &Path) {
         retain_intervals: None,
         max_tasks: 1024,
         spike_threshold_ns: 1_000_000,
+        live_diagnosis_cluster_window_ms:
+            crate::config::model::DEFAULT_LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS,
         alert_threshold_ns: None,
         alert_webhook_url: None,
         follow_exec: true,
@@ -925,6 +927,8 @@ fn mk_dummy_config() -> RecordedConfig {
         retain_intervals: None,
         max_tasks: 1024,
         spike_threshold_ns: 1_000_000,
+        live_diagnosis_cluster_window_ms:
+            crate::config::model::DEFAULT_LIVE_DIAGNOSIS_CLUSTER_WINDOW_MS,
         alert_threshold_ns: None,
         alert_webhook_url: None,
         follow_exec: true,

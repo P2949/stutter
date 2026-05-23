@@ -158,7 +158,7 @@ fn sched_switch_reads_previous_task_context_after_relevance_filters() {
     let end = source[start..].find("fn try_sched_migrate_task").unwrap() + start;
     let body = &source[start..end];
 
-    let wakeup_data = body.find("let wakeup_data = match").unwrap();
+    let wakeup_data = body.find("wakeup_data::take_wakeup_data(pid").unwrap();
     let target_filter = body.find("if !is_target_pid(pid)").unwrap();
     let prev_pid = body.find("let mut prev_pid_raw").unwrap();
     let prev_state = body.find("let mut prev_state").unwrap();

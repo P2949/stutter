@@ -99,6 +99,7 @@ fn recording_serializes_sorted_tasks_schema_histogram_spikes_and_drop_counters()
         block_io_correlation_basis: "dev+sector".to_owned(),
         block_io_correlation_confidence: "medium".to_owned(),
         native_cgroup_filter: crate::ebpf_loader::NativeCgroupFilterStatus::default(),
+        probe_activation_warnings: Vec::new(),
         drop_counters,
         cpu_perf_status: None,
         focus_mode: None,

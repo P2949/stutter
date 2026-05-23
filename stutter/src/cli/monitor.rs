@@ -25,6 +25,9 @@ pub(super) struct MonitorArgs {
     #[arg(long = "spike-us", value_name = "US")]
     pub(super) spike_threshold_us: Option<u64>,
 
+    #[arg(long = "live-diagnosis-cluster-window-ms", value_name = "MS")]
+    pub(super) live_diagnosis_cluster_window_ms: Option<u64>,
+
     #[arg(long = "alert-threshold-ms", value_name = "MS")]
     pub(super) alert_threshold_ms: Option<u64>,
 
@@ -395,6 +398,7 @@ pub(super) struct MonitorArgPresence {
     pub(super) follow_exec: bool,
     pub(super) cpu_perf_max_tasks: bool,
     pub(super) runtime_slices_max_tasks: bool,
+    pub(super) live_diagnosis_cluster_window_ms: bool,
     pub(super) otel_service_name: bool,
     pub(super) focus_source: bool,
     pub(super) foreground_source: bool,
@@ -420,6 +424,10 @@ impl MonitorArgPresence {
             follow_exec: command_line(matches, "follow_exec"),
             cpu_perf_max_tasks: command_line(matches, "cpu_perf_max_tasks"),
             runtime_slices_max_tasks: command_line(matches, "runtime_slices_max_tasks"),
+            live_diagnosis_cluster_window_ms: command_line(
+                matches,
+                "live_diagnosis_cluster_window_ms",
+            ),
             otel_service_name: command_line(matches, "otel_service_name"),
             focus_source: command_line(matches, "focus_source"),
             foreground_source: command_line(matches, "foreground_source"),
@@ -461,6 +469,10 @@ impl MonitorArgs {
             spike_threshold_ns: self
                 .spike_threshold_us
                 .map(|value| value.saturating_mul(1_000)),
+            live_diagnosis_cluster_window_ms: presence
+                .live_diagnosis_cluster_window_ms
+                .then_some(self.live_diagnosis_cluster_window_ms)
+                .flatten(),
             alert_threshold_ns: self
                 .alert_threshold_ms
                 .map(|value| Some(value.saturating_mul(1_000_000))),
@@ -631,6 +643,7 @@ impl Default for MonitorArgs {
             summary_period_ms: None,
             epoch_period_ms: None,
             spike_threshold_us: None,
+            live_diagnosis_cluster_window_ms: None,
             alert_threshold_ms: None,
             alert_webhook_url: None,
             verbose: false,
@@ -871,6 +884,11 @@ pub(super) fn monitor_config_from_monitor_args_with_file_and_presence(
         .or(file_config.spike_us)
         .unwrap_or(1_000);
     let max_tasks = args.max_tasks.or(file_config.max_tasks).unwrap_or(1024);
+    if !cli_presence.live_diagnosis_cluster_window_ms
+        && let Some(window_ms) = file_config.live_diagnosis_cluster_window_ms
+    {
+        args.live_diagnosis_cluster_window_ms = Some(window_ms);
+    }
 
     if !args.include_comm.is_empty() {
         // use CLI
@@ -1018,6 +1036,9 @@ pub(super) fn monitor_config_from_monitor_args_with_file_and_presence(
 
     if spike_threshold_us == 0 {
         anyhow::bail!("--spike-us must be greater than zero");
+    }
+    if matches!(args.live_diagnosis_cluster_window_ms, Some(0)) {
+        anyhow::bail!("--live-diagnosis-cluster-window-ms must be greater than zero");
     }
     if matches!(args.alert_threshold_ms, Some(0)) {
         anyhow::bail!("--alert-threshold-ms must be greater than zero");

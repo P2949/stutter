@@ -10,6 +10,26 @@ use crate::{
     process_tree::TaskClass,
 };
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecordedProbeActivationWarning {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub message: String,
+}
+
+impl From<&crate::probe_activation::ProbeActivationWarning> for RecordedProbeActivationWarning {
+    fn from(warning: &crate::probe_activation::ProbeActivationWarning) -> Self {
+        Self {
+            key: warning.key.map(|key| {
+                crate::probe_registry::probe_spec(key)
+                    .catalog_key
+                    .to_owned()
+            }),
+            message: warning.message.clone(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct SessionMetadataCore {
     pub schema_version: u32,
@@ -117,6 +137,8 @@ pub struct SessionMetadataCore {
     pub block_io_correlation_confidence: String,
     #[serde(default, skip_serializing_if = "NativeCgroupFilterStatus::is_disabled")]
     pub native_cgroup_filter: NativeCgroupFilterStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probe_activation_warnings: Vec<RecordedProbeActivationWarning>,
     #[serde(default)]
     pub drop_counters: DropCountersSnapshot,
     #[serde(default)]
@@ -229,6 +251,8 @@ pub struct RecordedConfig {
     #[serde(default = "default_recorded_max_tasks")]
     pub max_tasks: usize,
     pub spike_threshold_ns: u64,
+    #[serde(default)]
+    pub live_diagnosis_cluster_window_ms: u64,
     #[serde(default)]
     pub alert_threshold_ns: Option<u64>,
     #[serde(default)]
@@ -733,6 +757,19 @@ mod tests {
         assert_eq!(core.final_foreground_confidence, None);
         assert_eq!(core.final_foreground_stale_ms, None);
         assert_eq!(core.final_foreground_reason, None);
+    }
+
+    #[test]
+    fn recorded_probe_activation_warning_uses_stable_catalog_key() {
+        let warning = crate::probe_activation::ProbeActivationWarning {
+            key: Some(crate::probe_registry::ProbeKey::Faults),
+            message: "minor_fault failed".to_owned(),
+        };
+
+        let recorded = RecordedProbeActivationWarning::from(&warning);
+
+        assert_eq!(recorded.key.as_deref(), Some("faults"));
+        assert_eq!(recorded.message, "minor_fault failed");
     }
 
     #[test]

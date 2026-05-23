@@ -31,7 +31,11 @@ pub struct LoadedEbpf {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NativeCgroupFilterStatus {
+    /// The user requested native cgroup filtering for this run.
     pub enabled: bool,
+    /// The eBPF cgroup-id filter was actually populated and active.
+    #[serde(default)]
+    pub active: bool,
     #[serde(default)]
     pub resolver: Option<String>,
     #[serde(default)]
@@ -51,6 +55,7 @@ impl NativeCgroupFilterStatus {
 
     pub fn is_disabled(&self) -> bool {
         !self.enabled
+            && !self.active
             && self.resolver.is_none()
             && self.cgroup_path.is_none()
             && self.cgroup_id.is_none()
@@ -61,14 +66,27 @@ impl NativeCgroupFilterStatus {
     pub fn unverified_directory_inode(cgroup_path: String, cgroup_id: u64) -> Self {
         Self {
             enabled: true,
+            active: false,
             resolver: Some("directory_inode".to_owned()),
             cgroup_path: Some(cgroup_path),
             cgroup_id: Some(cgroup_id),
             verified: false,
             warning: Some(
-                "native cgroup filtering uses best-effort directory-inode resolution and is not runtime-verified; PID expansion remains the authoritative scheduler-wakeup targeting path"
+                "native cgroup filtering was requested but not activated because directory-inode cgroup id resolution is not runtime-verified; PID expansion remains the authoritative scheduler-wakeup targeting path"
                     .to_owned(),
             ),
+        }
+    }
+
+    pub fn verified_directory_inode(cgroup_path: String, cgroup_id: u64) -> Self {
+        Self {
+            enabled: true,
+            active: true,
+            resolver: Some("directory_inode".to_owned()),
+            cgroup_path: Some(cgroup_path),
+            cgroup_id: Some(cgroup_id),
+            verified: true,
+            warning: None,
         }
     }
 }
@@ -243,6 +261,37 @@ mod tests {
             BlockIoCorrelationBasis::from_str("unavailable"),
             BlockIoCorrelationBasis::Disabled
         );
+    }
+
+    #[test]
+    fn unverified_native_cgroup_filter_is_requested_but_not_active() {
+        let status = NativeCgroupFilterStatus::unverified_directory_inode(
+            "/sys/fs/cgroup/game.slice".to_owned(),
+            42,
+        );
+
+        assert!(status.enabled);
+        assert!(!status.active);
+        assert!(!status.verified);
+        assert!(
+            status
+                .warning
+                .as_deref()
+                .is_some_and(|warning| warning.contains("not activated"))
+        );
+    }
+
+    #[test]
+    fn verified_native_cgroup_filter_is_active_without_warning() {
+        let status = NativeCgroupFilterStatus::verified_directory_inode(
+            "/sys/fs/cgroup/game.slice".to_owned(),
+            42,
+        );
+
+        assert!(status.enabled);
+        assert!(status.active);
+        assert!(status.verified);
+        assert_eq!(status.warning, None);
     }
 }
 

@@ -64,8 +64,9 @@ pub use session::{
 #[cfg(test)]
 pub use session_files::DisplayPathMetadata;
 pub use session_files::{
-    MetadataFile, RecordedConfig, RecordedCpuSnapshot, RecordedLatency, RecordedSpike,
-    RecordedTime, SessionFile, SessionMetadataCore, SessionSpike, SessionTask, WakerEntry,
+    MetadataFile, RecordedConfig, RecordedCpuSnapshot, RecordedLatency,
+    RecordedProbeActivationWarning, RecordedSpike, RecordedTime, SessionFile, SessionMetadataCore,
+    SessionSpike, SessionTask, WakerEntry,
 };
 // Re-export from spike_buffer.rs - these were pub in the original recorder.rs
 pub use spike_buffer::{MAX_SPIKE_EVENTS, SpikeEventBuffer, SpikePushResult};

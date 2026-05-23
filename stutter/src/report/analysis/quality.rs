@@ -177,6 +177,18 @@ pub(crate) fn data_quality_summary(
         }
     }
 
+    if !session.core.probe_activation_warnings.is_empty() {
+        level = downgrade_quality(level, DataQualityLevel::Medium);
+        for warning in &session.core.probe_activation_warnings {
+            let label = warning
+                .key
+                .as_deref()
+                .map(|key| format!("probe {key}"))
+                .unwrap_or_else(|| "probe".to_owned());
+            reasons.push(format!("{label} activation warning: {}", warning.message));
+        }
+    }
+
     if session.core.native_cgroup_filter.enabled && !session.core.native_cgroup_filter.verified {
         level = downgrade_quality(level, DataQualityLevel::Medium);
         reasons.push(
@@ -283,6 +295,12 @@ pub(crate) fn data_quality_summary(
         missing_optional_files: validation.missing_optional_files.clone(),
         validation_errors: validation.errors.clone(),
         validation_warnings: validation.warnings.clone(),
+        probe_activation_warnings: session
+            .core
+            .probe_activation_warnings
+            .iter()
+            .map(|warning| warning.message.clone())
+            .collect(),
         schema_version: session.core.schema_version,
         expected_schema_version: SESSION_SCHEMA_VERSION,
         event_stream_write_errors: session.core.event_stream_write_errors,

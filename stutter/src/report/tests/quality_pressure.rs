@@ -297,6 +297,30 @@ fn data_quality_warns_on_unavailable_requested_block_io_correlation() {
 }
 
 #[test]
+fn data_quality_warns_on_probe_activation_warnings() {
+    let mut session = minimal_session_for_report_test();
+    session
+        .core
+        .probe_activation_warnings
+        .push(crate::recorder::RecordedProbeActivationWarning {
+            key: Some("faults".to_owned()),
+            message: "optional probe faults program minor_fault failed to attach".to_owned(),
+        });
+
+    let summary =
+        data_quality_summary(&session, &crate::session_io::RunValidationReport::default());
+
+    assert_eq!(summary.level, DataQualityLevel::Medium);
+    assert_eq!(
+        summary.probe_activation_warnings,
+        vec!["optional probe faults program minor_fault failed to attach".to_owned()]
+    );
+    assert!(summary.reasons.iter().any(|reason| {
+        reason.contains("probe faults activation warning") && reason.contains("minor_fault")
+    }));
+}
+
+#[test]
 fn data_quality_warns_on_unverified_native_cgroup_filter() {
     let mut session = minimal_session_for_report_test();
     session.core.native_cgroup_filter =

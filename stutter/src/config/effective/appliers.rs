@@ -6,17 +6,18 @@
 use crate::config::{
     layer::MonitorConfigLayer,
     model::{
-        AlertConfig, CpuPerfConfig, DisplayPathConfig, DmaBufConfig, DrmFenceConfig,
-        EbpfSizingConfig, FocusConfig, HwmonConfig, KmsTimingConfig, MangoHudConfig, MonitorConfig,
-        OutputConfig, ProbeConfig, RecordingConfig, RemoteConfig, RuntimeSlicesConfig,
-        SafetyConfig, StreamConfig, TargetConfig, TimingConfig, UiConfig, WatchConfig,
-        WaylandPresentationConfig,
+        AlertConfig, CpuPerfConfig, DiagnosisConfig, DisplayPathConfig, DmaBufConfig,
+        DrmFenceConfig, EbpfSizingConfig, FocusConfig, HwmonConfig, KmsTimingConfig,
+        MangoHudConfig, MonitorConfig, OutputConfig, ProbeConfig, RecordingConfig, RemoteConfig,
+        RuntimeSlicesConfig, SafetyConfig, StreamConfig, TargetConfig, TimingConfig, UiConfig,
+        WatchConfig, WaylandPresentationConfig,
     },
 };
 
 pub(super) fn apply_config_layer(config: &mut MonitorConfig, layer: &MonitorConfigLayer) {
     apply_target_layer(&mut config.target, layer);
     apply_timing_layer(&mut config.timing, layer);
+    apply_diagnosis_layer(&mut config.diagnosis, layer);
     apply_probe_layer(&mut config.probes, layer);
     apply_recording_layer(&mut config.recording, layer);
     apply_output_layer(&mut config.outputs, layer);
@@ -84,6 +85,12 @@ fn apply_timing_layer(config: &mut TimingConfig, layer: &MonitorConfigLayer) {
     }
     if let Some(value) = layer.spike_threshold_ns {
         config.spike_threshold_ns = value;
+    }
+}
+
+fn apply_diagnosis_layer(config: &mut DiagnosisConfig, layer: &MonitorConfigLayer) {
+    if let Some(value) = layer.live_diagnosis_cluster_window_ms {
+        config.live_cluster_window_ms = value;
     }
 }
 

@@ -20,6 +20,7 @@ pub struct UserConfigFile {
     pub summary_period_ms: Option<u64>,
     pub spike_us: Option<u64>,
     pub spike_threshold_ns: Option<u64>,
+    pub live_diagnosis_cluster_window_ms: Option<u64>,
 
     pub hwmon: Option<bool>,
     pub cpu_freq: Option<bool>,
