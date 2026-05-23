@@ -50,7 +50,10 @@ pub struct ObservationSummary {
     pub scored_task_count: usize,
     pub interval_count: usize,
     pub scored_samples: u64,
-    pub diagnostic_score_total: u64,
+    /// Raw diagnostic score total. Kept explicit so status/history JSON is not confused
+    /// with normalized comparison metrics.
+    #[serde(alias = "diagnostic_score_total")]
+    pub diagnostic_raw_score_total: u64,
     pub over_1ms: u64,
     pub over_2ms: u64,
     pub over_5ms: u64,
@@ -246,7 +249,7 @@ pub fn observation_summary_from_window_score(
         scored_task_count: score.scored_task_count,
         interval_count: score.interval_count,
         scored_samples: score.scored_samples,
-        diagnostic_score_total: score.score.total,
+        diagnostic_raw_score_total: score.score.total,
         over_1ms: score.score.over_1ms,
         over_2ms: score.score.over_2ms,
         over_5ms: score.score.over_5ms,
@@ -328,12 +331,16 @@ mod tests {
 
         let summary = observation_summary_from_window_score(true, 31, 0, "High", &score);
 
+        let json = serde_json::to_string(&summary).unwrap();
+        assert!(json.contains("\"diagnostic_raw_score_total\":143"));
+        assert!(!json.contains("\"diagnostic_score_total\""));
+
         assert!(summary.target_present);
         assert_eq!(summary.active_target_count, 31);
         assert_eq!(summary.scored_task_count, 2);
         assert_eq!(summary.interval_count, 10);
         assert_eq!(summary.scored_samples, 100);
-        assert_eq!(summary.diagnostic_score_total, 143);
+        assert_eq!(summary.diagnostic_raw_score_total, 143);
         assert_eq!(summary.over_1ms, 3);
         assert_eq!(summary.over_2ms, 2);
         assert_eq!(summary.over_5ms, 1);
@@ -341,6 +348,29 @@ mod tests {
         assert_eq!(summary.frame_max_ms, 20.0);
         assert_eq!(summary.drop_counter_total, 0);
         assert_eq!(summary.data_quality, "High");
+    }
+
+    #[test]
+    fn observation_summary_accepts_legacy_diagnostic_score_total_name() {
+        let json = r#"{
+            "target_present": true,
+            "active_target_count": 31,
+            "scored_task_count": 2,
+            "interval_count": 10,
+            "scored_samples": 100,
+            "diagnostic_score_total": 143,
+            "over_1ms": 3,
+            "over_2ms": 2,
+            "over_5ms": 1,
+            "frame_p99_ms": 12.0,
+            "frame_max_ms": 20.0,
+            "drop_counter_total": 0,
+            "data_quality": "High"
+        }"#;
+
+        let parsed: ObservationSummary = serde_json::from_str(json).unwrap();
+
+        assert_eq!(parsed.diagnostic_raw_score_total, 143);
     }
 
     #[test]

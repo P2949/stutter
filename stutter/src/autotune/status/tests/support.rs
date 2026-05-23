@@ -32,7 +32,7 @@ pub(super) fn observation() -> ObservationSummary {
         scored_task_count: 2,
         interval_count: 10,
         scored_samples: 100,
-        diagnostic_score_total: 818,
+        diagnostic_raw_score_total: 818,
         over_1ms: 0,
         over_2ms: 0,
         over_5ms: 0,

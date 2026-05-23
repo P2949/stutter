@@ -246,8 +246,8 @@ fn latest_candidate_score(events: &[AutotuneHistoryEvent]) -> Option<u64> {
             return Some(score.score.total);
         }
 
-        if event.observation_summary.diagnostic_score_total > 0 {
-            return Some(event.observation_summary.diagnostic_score_total);
+        if event.observation_summary.diagnostic_raw_score_total > 0 {
+            return Some(event.observation_summary.diagnostic_raw_score_total);
         }
     }
 
@@ -382,7 +382,7 @@ mod tests {
             scored_task_count: 2,
             interval_count: 10,
             scored_samples: 100,
-            diagnostic_score_total: total,
+            diagnostic_raw_score_total: total,
             over_1ms: 0,
             over_2ms: 0,
             over_5ms: 0,

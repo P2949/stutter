@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{
     decision_view::{data_quality_label, decision_label},
@@ -22,7 +22,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AutotuneDecisionStreamEntry {
     pub unix_nanos: u128,
     pub phase: String,
@@ -41,14 +41,17 @@ pub struct AutotuneDecisionStreamEntry {
     pub planner: Option<PlannerSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dry_run_plan_files: Vec<AutotuneDryRunPlanFileSummary>,
-    pub diagnostic_score_total: u64,
+    /// Raw diagnostic score total emitted by the live stream.
+    /// The alias keeps legacy stream/log consumers deserializable in tests and API clients.
+    #[serde(alias = "diagnostic_score_total")]
+    pub diagnostic_raw_score_total: u64,
     pub data_quality: String,
     pub data_quality_reason_codes: Vec<String>,
     pub decision: String,
     pub reason: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AutotuneDryRunPlanFileSummary {
     pub candidate_name: String,
     pub action_kind: String,
@@ -113,7 +116,7 @@ impl AutotuneRuntime {
                 .and_then(top_denied_reason_for_plan),
             planner: self.last_plan_result.as_ref().map(PlanResult::summary),
             dry_run_plan_files: self.last_dry_run_plan_files.clone(),
-            diagnostic_score_total: observation.score.total,
+            diagnostic_raw_score_total: observation.score.total,
             data_quality: data_quality_label(&observation.data_quality),
             data_quality_reason_codes: observation.data_quality.reason_code_strings(),
             decision: decision_label(decision),
@@ -140,5 +143,74 @@ impl AutotuneRuntime {
         file.write_all(b"\n")?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stream_entry() -> AutotuneDecisionStreamEntry {
+        AutotuneDecisionStreamEntry {
+            unix_nanos: 123456,
+            phase: "Observing".to_owned(),
+            mode: "Observe".to_owned(),
+            focus_kind: Some("Game".to_owned()),
+            focus_confidence: 0.9,
+            target_root_pid: Some(1234),
+            active_target_count: 2,
+            situation: "GameCpuSchedulerPressure".to_owned(),
+            situation_confidence: 0.8,
+            situation_evidence: Vec::new(),
+            situation_blockers: Vec::new(),
+            protected_tasks_count: 0,
+            candidate_count: 0,
+            top_denied_reason: None,
+            planner: None,
+            dry_run_plan_files: Vec::new(),
+            diagnostic_raw_score_total: 143,
+            data_quality: "High".to_owned(),
+            data_quality_reason_codes: Vec::new(),
+            decision: "observed".to_owned(),
+            reason: "test entry".to_owned(),
+        }
+    }
+
+    #[test]
+    fn stream_entry_serializes_raw_score_total_name() {
+        let json = serde_json::to_string(&stream_entry()).unwrap();
+
+        assert!(json.contains("\"diagnostic_raw_score_total\":143"));
+        assert!(!json.contains("diagnostic_score_total"));
+    }
+
+    #[test]
+    fn stream_entry_accepts_legacy_diagnostic_score_total_name() {
+        let json = r#"{
+            "unix_nanos":123456,
+            "phase":"Observing",
+            "mode":"Observe",
+            "focus_kind":"Game",
+            "focus_confidence":0.9,
+            "target_root_pid":1234,
+            "active_target_count":2,
+            "situation":"GameCpuSchedulerPressure",
+            "situation_confidence":0.8,
+            "situation_evidence":[],
+            "situation_blockers":[],
+            "protected_tasks_count":0,
+            "candidate_count":0,
+            "top_denied_reason":null,
+            "planner":null,
+            "diagnostic_score_total":143,
+            "data_quality":"High",
+            "data_quality_reason_codes":[],
+            "decision":"observed",
+            "reason":"legacy field name"
+        }"#;
+
+        let parsed: AutotuneDecisionStreamEntry = serde_json::from_str(json).unwrap();
+
+        assert_eq!(parsed.diagnostic_raw_score_total, 143);
     }
 }
