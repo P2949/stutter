@@ -3,8 +3,6 @@
 //! Owns built-in task classification and process-name predicate helpers. Does not own procfs
 //! reading, target expansion, snapshots, tree rendering, or community-rule database loading.
 
-use std::borrow::Cow;
-
 use super::model::TaskClass;
 
 /// Classification priority (highest to lowest):
@@ -28,36 +26,30 @@ pub fn classify_task_with_context(
     cgroup_path: &str,
     sched_policy: Option<u32>,
 ) -> TaskClass {
-    let lower_comm = lower_ascii_field(comm);
-    let lower_process_comm = lower_ascii_field(process_comm);
-    let lower_cmdline = lower_ascii_field(cmdline);
-    let lower_exe_path = lower_ascii_field(exe_path);
-    let lower_cgroup_path = lower_ascii_field(cgroup_path);
-
-    let lower_fields = [
-        lower_comm.as_ref(),
-        lower_process_comm.as_ref(),
-        lower_cmdline.as_ref(),
-        lower_exe_path.as_ref(),
-        lower_cgroup_path.as_ref(),
-    ];
+    let fields = AsciiFields {
+        comm,
+        process_comm,
+        cmdline,
+        exe_path,
+        cgroup_path,
+    };
 
     // 1. Critical System Threads (Kernel, Input, IRQ)
-    if is_bracketed_kernel_comm(&lower_comm) {
+    if is_bracketed_kernel_comm(fields.comm) {
         return TaskClass::KernelThread;
     }
-    if is_input_thread(&lower_comm, &lower_fields) {
+    if is_input_thread(fields.comm, &fields) {
         return TaskClass::Input;
     }
-    if is_irq_thread(&lower_comm, &lower_fields) {
+    if is_irq_thread(fields.comm, &fields) {
         return TaskClass::IrqThread;
     }
 
     // 2. Audio (Realtime)
-    if is_audio_realtime_comm(&lower_comm)
-        || is_audio_realtime_comm(&lower_process_comm)
+    if is_audio_realtime_comm(fields.comm)
+        || is_audio_realtime_comm(fields.process_comm)
         || contains_any_field(
-            &lower_fields,
+            &fields,
             &[
                 "pipewire",
                 "wireplumber",
@@ -66,20 +58,24 @@ pub fn classify_task_with_context(
                 "easyeffects",
             ],
         )
-        || (matches!(sched_policy, Some(1 | 2 | 6)) && is_audio_looking_process(&lower_fields))
+        || (matches!(sched_policy, Some(1 | 2 | 6)) && is_audio_looking_process(&fields))
     {
         return TaskClass::AudioRealtime;
     }
 
     // 3. Infrastructure (Compositors, WineServer, Steam Services)
-    if lower_comm == "gamescope" || lower_process_comm == "gamescope" {
+    if eq_ignore_ascii(fields.comm, "gamescope")
+        || eq_ignore_ascii(fields.process_comm, "gamescope")
+    {
         return TaskClass::GameScope;
     }
-    if lower_comm == "wineserver" || lower_process_comm == "wineserver" {
+    if eq_ignore_ascii(fields.comm, "wineserver")
+        || eq_ignore_ascii(fields.process_comm, "wineserver")
+    {
         return TaskClass::WineServer;
     }
-    if contains_any(
-        &lower_comm,
+    if contains_any_ignore_ascii(
+        fields.comm,
         &[
             "sway",
             "kwin",
@@ -91,39 +87,39 @@ pub fn classify_task_with_context(
     ) {
         return TaskClass::Compositor;
     }
-    if lower_comm == "steam"
-        || lower_process_comm == "steam"
-        || lower_comm == "steamwebhelper"
-        || lower_process_comm == "steamwebhelper"
+    if eq_ignore_ascii(fields.comm, "steam")
+        || eq_ignore_ascii(fields.process_comm, "steam")
+        || eq_ignore_ascii(fields.comm, "steamwebhelper")
+        || eq_ignore_ascii(fields.process_comm, "steamwebhelper")
     {
         return TaskClass::Service;
     }
 
     // 4. Specialized Threads in Game/Browser (Must come before generic process match)
-    let is_game = is_game_exe(&lower_exe_path)
-        || is_game_comm(&lower_process_comm)
-        || is_game_cgroup(&lower_cgroup_path);
+    let is_game = is_game_exe(fields.exe_path)
+        || is_game_comm(fields.process_comm)
+        || is_game_cgroup(fields.cgroup_path);
 
     if is_game {
-        if is_game_render_comm(&lower_comm) {
+        if is_game_render_comm(fields.comm) {
             return TaskClass::GameRenderThread;
         }
-        if lower_comm.contains("worker")
-            || lower_comm.contains("task")
-            || lower_comm.contains("job")
+        if contains_ignore_ascii(fields.comm, "worker")
+            || contains_ignore_ascii(fields.comm, "task")
+            || contains_ignore_ascii(fields.comm, "job")
         {
             return TaskClass::GameWorkerThread;
         }
     }
 
-    if is_browser_process(&lower_comm, &lower_process_comm, &lower_fields) {
-        if contains_any_field(&lower_fields, &["gpu process", "--type=gpu-process"])
-            || lower_comm.contains("gpu process")
+    if is_browser_process(fields.comm, fields.process_comm, &fields) {
+        if contains_any_field(&fields, &["gpu process", "--type=gpu-process"])
+            || contains_ignore_ascii(fields.comm, "gpu process")
         {
             return TaskClass::BrowserGpu;
         }
         if contains_any_field(
-            &lower_fields,
+            &fields,
             &[
                 "utility process",
                 "--type=utility",
@@ -134,7 +130,7 @@ pub fn classify_task_with_context(
             return TaskClass::BrowserNetwork;
         }
         if contains_any_field(
-            &lower_fields,
+            &fields,
             &[
                 "web content",
                 "isolated web co",
@@ -146,7 +142,7 @@ pub fn classify_task_with_context(
             return TaskClass::BrowserRenderer;
         }
         if contains_any_field(
-            &lower_fields,
+            &fields,
             &[
                 "--background",
                 "background",
@@ -161,33 +157,33 @@ pub fn classify_task_with_context(
     }
 
     // 5. Development & System Work
-    if is_indexer_comm(&lower_comm) {
+    if is_indexer_comm(fields.comm) {
         return TaskClass::Indexer;
     }
-    if is_compiler_comm(&lower_comm) {
+    if is_compiler_comm(fields.comm) {
         return TaskClass::Compiler;
     }
-    if is_linker_comm(&lower_comm) {
+    if is_linker_comm(fields.comm) {
         return TaskClass::Linker;
     }
-    if is_package_manager_comm(&lower_comm) || lower_cmdline.contains(" emerge ") {
+    if is_package_manager_comm(fields.comm) || contains_ignore_ascii(fields.cmdline, " emerge ") {
         return TaskClass::PackageManager;
     }
-    if is_build_job_comm(&lower_comm) {
+    if is_build_job_comm(fields.comm) {
         return TaskClass::BuildJob;
     }
 
     // 6. Daemons & Services
-    if is_storage_daemon_comm(&lower_comm) {
+    if is_storage_daemon_comm(fields.comm) {
         return TaskClass::StorageDaemon;
     }
-    if is_network_daemon_comm(&lower_comm) {
+    if is_network_daemon_comm(fields.comm) {
         return TaskClass::NetworkDaemon;
     }
 
     // 7. Community app-name hints, then generic process fallbacks.
     #[cfg(test)]
-    if !is_service_looking_process(&lower_process_comm, &lower_cgroup_path)
+    if !is_service_looking_process(fields.process_comm, fields.cgroup_path)
         && let Some(hit) = crate::community_rules::classify_process_identity(
             &crate::community_rules::CommunityProcessIdentity {
                 thread_comm: comm,
@@ -204,88 +200,142 @@ pub fn classify_task_with_context(
     if is_game {
         return TaskClass::Game;
     }
-    if is_steam_runtime_comm(&lower_process_comm) || lower_exe_path.contains("pressure-vessel") {
+    if is_steam_runtime_comm(fields.process_comm)
+        || contains_ignore_ascii(fields.exe_path, "pressure-vessel")
+    {
         return TaskClass::SteamRuntime;
     }
-    if is_launcher_comm(&lower_comm) || is_launcher_comm(&lower_process_comm) {
+    if is_launcher_comm(fields.comm) || is_launcher_comm(fields.process_comm) {
         return TaskClass::Launcher;
     }
-    if is_service_looking_process(&lower_process_comm, &lower_cgroup_path)
-        || lower_process_comm.contains("helper")
+    if is_service_looking_process(fields.process_comm, fields.cgroup_path)
+        || contains_ignore_ascii(fields.process_comm, "helper")
     {
         return TaskClass::Service;
     }
 
     // 8. Other App Categories
-    if is_editor_comm(&lower_comm) {
+    if is_editor_comm(fields.comm) {
         return TaskClass::Editor;
     }
-    if is_terminal_comm(&lower_comm) {
+    if is_terminal_comm(fields.comm) {
         return TaskClass::Terminal;
     }
-    if is_shell_comm(&lower_comm) {
+    if is_shell_comm(fields.comm) {
         return TaskClass::Shell;
     }
-    if is_media_comm(&lower_comm) {
+    if is_media_comm(fields.comm) {
         return TaskClass::Media;
     }
-    if is_recorder_comm(&lower_comm) {
+    if is_recorder_comm(fields.comm) {
         return TaskClass::Recorder;
     }
-    if is_vm_comm(&lower_comm) {
+    if is_vm_comm(fields.comm) {
         return TaskClass::VirtualMachine;
     }
 
-    if lower_exe_path.ends_with(".exe") {
+    if ends_with_ignore_ascii(fields.exe_path, ".exe") {
         return TaskClass::GameHelper;
     }
 
     TaskClass::Unknown
 }
 
-fn contains_any(haystack: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| haystack.contains(needle))
+#[derive(Clone, Copy)]
+struct AsciiFields<'a> {
+    comm: &'a str,
+    process_comm: &'a str,
+    cmdline: &'a str,
+    exe_path: &'a str,
+    cgroup_path: &'a str,
 }
 
-fn field_contains(fields: &[&str], needle: &str) -> bool {
-    fields.iter().any(|field| field.contains(needle))
+impl AsciiFields<'_> {
+    fn contains_any(self, needle: &str) -> bool {
+        contains_ignore_ascii(self.comm, needle)
+            || contains_ignore_ascii(self.process_comm, needle)
+            || contains_ignore_ascii(self.cmdline, needle)
+            || contains_ignore_ascii(self.exe_path, needle)
+            || contains_ignore_ascii(self.cgroup_path, needle)
+    }
 }
 
-fn contains_any_field(fields: &[&str], needles: &[&str]) -> bool {
+fn eq_ignore_ascii(value: &str, expected: &str) -> bool {
+    value.eq_ignore_ascii_case(expected)
+}
+
+fn contains_any_ignore_ascii(haystack: &str, needles: &[&str]) -> bool {
+    needles
+        .iter()
+        .any(|needle| contains_ignore_ascii(haystack, needle))
+}
+
+fn field_contains(fields: &AsciiFields<'_>, needle: &str) -> bool {
+    fields.contains_any(needle)
+}
+
+fn contains_any_field(fields: &AsciiFields<'_>, needles: &[&str]) -> bool {
     needles.iter().any(|needle| field_contains(fields, needle))
 }
 
-fn lower_ascii_field(value: &str) -> Cow<'_, str> {
-    if value.is_empty() {
-        Cow::Borrowed("")
-    } else {
-        Cow::Owned(value.to_ascii_lowercase())
+fn contains_ignore_ascii(haystack: &str, needle: &str) -> bool {
+    let needle = needle.as_bytes();
+    if needle.is_empty() {
+        return true;
     }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| eq_ignore_ascii_bytes(window, needle))
+}
+
+fn ends_with_ignore_ascii(value: &str, suffix: &str) -> bool {
+    let value = value.as_bytes();
+    let suffix = suffix.as_bytes();
+    if suffix.len() > value.len() {
+        return false;
+    }
+
+    eq_ignore_ascii_bytes(&value[value.len() - suffix.len()..], suffix)
+}
+
+fn eq_ignore_ascii_bytes(left: &[u8], right: &[u8]) -> bool {
+    left.eq_ignore_ascii_case(right)
 }
 
 fn is_bracketed_kernel_comm(comm: &str) -> bool {
     comm.starts_with('[') && comm.ends_with(']')
 }
 
-fn is_irq_thread(comm: &str, fields: &[&str]) -> bool {
-    comm.starts_with("irq/")
-        || comm.starts_with("irq-")
+fn is_irq_thread(comm: &str, fields: &AsciiFields<'_>) -> bool {
+    starts_with_ignore_ascii(comm, "irq/")
+        || starts_with_ignore_ascii(comm, "irq-")
         || field_contains(fields, " irq/")
         || field_contains(fields, " irq-")
 }
 
-fn is_input_thread(comm: &str, fields: &[&str]) -> bool {
-    comm.contains("input") || field_contains(fields, "libinput")
+fn is_input_thread(comm: &str, fields: &AsciiFields<'_>) -> bool {
+    contains_ignore_ascii(comm, "input") || field_contains(fields, "libinput")
 }
 
 fn is_audio_realtime_comm(comm: &str) -> bool {
-    matches!(
+    eq_any_ignore_ascii(
         comm,
-        "pipewire" | "wireplumber" | "pulseaudio" | "jackd" | "easyeffects"
+        &[
+            "pipewire",
+            "wireplumber",
+            "pulseaudio",
+            "jackd",
+            "easyeffects",
+        ],
     )
 }
 
-fn is_audio_looking_process(fields: &[&str]) -> bool {
+fn is_audio_looking_process(fields: &AsciiFields<'_>) -> bool {
     contains_any_field(
         fields,
         &[
@@ -301,56 +351,56 @@ fn is_audio_looking_process(fields: &[&str]) -> bool {
 }
 
 fn is_game_render_comm(comm: &str) -> bool {
-    contains_any(comm, &["render", "rhi", "dxvk", "vulkan", "gpu"])
+    contains_any_ignore_ascii(comm, &["render", "rhi", "dxvk", "vulkan", "gpu"])
 }
 
 fn is_game_exe(exe_path: &str) -> bool {
-    exe_path.contains("steamapps/common")
-        || exe_path.contains("/games/")
-        || exe_path.contains("pressure-vessel")
+    contains_ignore_ascii(exe_path, "steamapps/common")
+        || contains_ignore_ascii(exe_path, "/games/")
+        || contains_ignore_ascii(exe_path, "pressure-vessel")
 }
 
 fn is_game_comm(comm: &str) -> bool {
-    contains_any(comm, &["steam", "proton", "wine"])
+    contains_any_ignore_ascii(comm, &["steam", "proton", "wine"])
 }
 
 fn is_game_cgroup(cgroup: &str) -> bool {
-    cgroup.contains("steam") || cgroup.contains("games")
+    contains_ignore_ascii(cgroup, "steam") || contains_ignore_ascii(cgroup, "games")
 }
 
-fn is_browser_process(comm: &str, process_comm: &str, fields: &[&str]) -> bool {
+fn is_browser_process(comm: &str, process_comm: &str, fields: &AsciiFields<'_>) -> bool {
     let names = ["firefox", "chrome", "chromium", "brave", "browser"];
-    contains_any(comm, &names)
-        || contains_any(process_comm, &names)
+    contains_any_ignore_ascii(comm, &names)
+        || contains_any_ignore_ascii(process_comm, &names)
         || contains_any_field(fields, &["--type=renderer", "--type=gpu-process"])
 }
 
 fn is_compiler_comm(comm: &str) -> bool {
-    contains_any(comm, &["rustc", "gcc", "g++", "clang", "cc1", "cc1plus"])
+    contains_any_ignore_ascii(comm, &["rustc", "gcc", "g++", "clang", "cc1", "cc1plus"])
 }
 
 fn is_linker_comm(comm: &str) -> bool {
-    matches!(comm, "ld" | "ld.lld" | "ld.gold" | "mold" | "gold" | "lld")
+    eq_any_ignore_ascii(comm, &["ld", "ld.lld", "ld.gold", "mold", "gold", "lld"])
 }
 
 fn is_indexer_comm(comm: &str) -> bool {
-    contains_any(comm, &["clangd", "rust-analyzer", "ccls", "indexer"])
+    contains_any_ignore_ascii(comm, &["clangd", "rust-analyzer", "ccls", "indexer"])
 }
 
 fn is_package_manager_comm(comm: &str) -> bool {
-    contains_any(comm, &["emerge", "portage", "pacman", "apt", "dnf"])
+    contains_any_ignore_ascii(comm, &["emerge", "portage", "pacman", "apt", "dnf"])
 }
 
 fn is_build_job_comm(comm: &str) -> bool {
-    contains_any(comm, &["cargo", "make", "ninja", "cmake", "meson"])
+    contains_any_ignore_ascii(comm, &["cargo", "make", "ninja", "cmake", "meson"])
 }
 
 fn is_storage_daemon_comm(comm: &str) -> bool {
-    contains_any(comm, &["udisks", "jbd2", "btrfs", "zfs", "io_uring"])
+    contains_any_ignore_ascii(comm, &["udisks", "jbd2", "btrfs", "zfs", "io_uring"])
 }
 
 fn is_network_daemon_comm(comm: &str) -> bool {
-    contains_any(
+    contains_any_ignore_ascii(
         comm,
         &[
             "networkmanager",
@@ -362,29 +412,29 @@ fn is_network_daemon_comm(comm: &str) -> bool {
 }
 
 fn is_steam_runtime_comm(comm: &str) -> bool {
-    contains_any(comm, &["pressure-vessel", "bwrap"])
+    contains_any_ignore_ascii(comm, &["pressure-vessel", "bwrap"])
 }
 
 fn is_launcher_comm(comm: &str) -> bool {
-    contains_any(
+    contains_any_ignore_ascii(
         comm,
         &["epicgames", "origin", "uplay", "battle.net", "lutris"],
     )
 }
 
 fn is_service_looking_process(comm: &str, cgroup: &str) -> bool {
-    comm == "systemd"
-        || cgroup.contains(".service")
-        || cgroup.contains("/system.slice/")
-        || comm.ends_with("d")
+    eq_ignore_ascii(comm, "systemd")
+        || contains_ignore_ascii(cgroup, ".service")
+        || contains_ignore_ascii(cgroup, "/system.slice/")
+        || ends_with_ignore_ascii(comm, "d")
 }
 
 fn is_editor_comm(comm: &str) -> bool {
-    contains_any(comm, &["code", "vscodium", "kate", "nvim", "vim", "emacs"])
+    contains_any_ignore_ascii(comm, &["code", "vscodium", "kate", "nvim", "vim", "emacs"])
 }
 
 fn is_terminal_comm(comm: &str) -> bool {
-    contains_any(
+    contains_any_ignore_ascii(
         comm,
         &[
             "alacritty",
@@ -398,19 +448,35 @@ fn is_terminal_comm(comm: &str) -> bool {
 }
 
 fn is_shell_comm(comm: &str) -> bool {
-    matches!(comm, "bash" | "zsh" | "fish" | "sh")
+    eq_any_ignore_ascii(comm, &["bash", "zsh", "fish", "sh"])
 }
 
 fn is_media_comm(comm: &str) -> bool {
-    contains_any(comm, &["vlc", "mpv", "spotify"])
+    contains_any_ignore_ascii(comm, &["vlc", "mpv", "spotify"])
 }
 
 fn is_recorder_comm(comm: &str) -> bool {
-    contains_any(comm, &["obs", "gpu-screen-recorder", "recorder"])
+    contains_any_ignore_ascii(comm, &["obs", "gpu-screen-recorder", "recorder"])
 }
 
 fn is_vm_comm(comm: &str) -> bool {
-    contains_any(comm, &["qemu", "virt", "virtualbox", "vmware"])
+    contains_any_ignore_ascii(comm, &["qemu", "virt", "virtualbox", "vmware"])
+}
+
+fn starts_with_ignore_ascii(value: &str, prefix: &str) -> bool {
+    let value = value.as_bytes();
+    let prefix = prefix.as_bytes();
+    if prefix.len() > value.len() {
+        return false;
+    }
+
+    eq_ignore_ascii_bytes(&value[..prefix.len()], prefix)
+}
+
+fn eq_any_ignore_ascii(value: &str, expected: &[&str]) -> bool {
+    expected
+        .iter()
+        .any(|expected| eq_ignore_ascii(value, expected))
 }
 
 pub(crate) fn contains_likely_game_cmdline(cmdline: &str) -> bool {

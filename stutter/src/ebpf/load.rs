@@ -68,7 +68,8 @@ pub fn load_and_attach(
     let mut loader = EbpfLoader::new();
     loader
         .map_max_entries("EVENTS", map_sizing.events_ringbuf_bytes)
-        .map_max_entries("WAKEUP_DATA", map_sizing.wakeup_data_entries);
+        .map_max_entries("WAKEUP_DATA", map_sizing.wakeup_data_entries)
+        .map_max_entries("WAKEUP_CONSUMED", map_sizing.wakeup_data_entries);
 
     if let Some(ref offset) = tracepoints.block_rq_key_offset {
         loader.override_global("BLOCK_RQ_KEY_OFFSET", offset, true);
